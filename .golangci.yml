@@ -17,12 +17,43 @@ linters:
     - unparam
     - wastedassign
   settings:
+    errcheck:
+      exclude-functions:
+        # Best-effort writes to the HTTP client; the upstream Caddy plugin
+        # ignores these results too, and there is no useful recovery.
+        - (net/http.ResponseWriter).Write
+        - fmt.Fprintf
     exhaustive:
       default-signifies-exhaustive: true
     revive:
       rules:
         - name: exported
           disabled: false
+  exclusions:
+    rules:
+      # Tests: deferred Close() results are noise (failures surface through
+      # assertions) and httptest requests don't need contexts.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - noctx
+      # Files ported line-for-line from the upstream Caddy plugin (see the
+      # provenance headers). Upstream diffability wins over stylistic
+      # rewrites here.
+      - path: (^|/)(handler|handler_sse)\.go$
+        linters:
+          - gocritic
+          - unparam
+          - wastedassign
+      - path: store/memory_store\.go$
+        linters:
+          - gocritic
+      # store/store.go is a frozen parity file; upstream documents the
+      # ProducerResult constants with trailing comments only.
+      - path: store/store\.go$
+        linters:
+          - revive
+        text: ProducerResult
 
 formatters:
   enable:
