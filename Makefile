@@ -30,7 +30,7 @@ test-unit:
 
 # Integration tests hit a live Redis (REDIS_URL) and are skipped under -short.
 test-integration: redis-up
-	$(GO) test -race -count=1 -run Integration ./...
+	$(GO) test -race -count=1 ./store/redis/
 
 conformance:
 	./scripts/conformance.sh
