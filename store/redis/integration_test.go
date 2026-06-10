@@ -2,6 +2,7 @@ package redis
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -20,14 +21,14 @@ import (
 
 var (
 	testClient   *goredis.Client
-	testStore    *RedisStore
+	testStore    *Store
 	setupOnce    sync.Once
 	setupErr     error
 	pathCounter  atomic.Int64
 	testRunStamp = time.Now().UnixNano()
 )
 
-func newTestStore(t *testing.T) *RedisStore {
+func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping Redis integration test in -short mode")
@@ -65,7 +66,7 @@ func testPath(name string) string {
 	return fmt.Sprintf("/t%d/%d/%s", testRunStamp, pathCounter.Add(1), name)
 }
 
-func mustCreate(t *testing.T, s *RedisStore, path string, opts store.CreateOptions) *store.StreamMetadata {
+func mustCreate(t *testing.T, s *Store, path string, opts store.CreateOptions) *store.StreamMetadata {
 	t.Helper()
 	meta, created, err := s.Create(path, opts)
 	if err != nil {
@@ -77,7 +78,7 @@ func mustCreate(t *testing.T, s *RedisStore, path string, opts store.CreateOptio
 	return meta
 }
 
-func mustAppend(t *testing.T, s *RedisStore, path string, data []byte, opts store.AppendOptions) store.AppendResult {
+func mustAppend(t *testing.T, s *Store, path string, data []byte, opts store.AppendOptions) store.AppendResult {
 	t.Helper()
 	res, err := s.Append(path, data, opts)
 	if err != nil {
@@ -108,7 +109,7 @@ func TestIntegrationCreateGetHas(t *testing.T) {
 	if s.Has(path + "-nope") {
 		t.Error("Has on missing path should be false")
 	}
-	if _, err := s.Get(path + "-nope"); err != store.ErrStreamNotFound {
+	if _, err := s.Get(path + "-nope"); !errors.Is(err, store.ErrStreamNotFound) {
 		t.Errorf("Get missing: %v", err)
 	}
 }
@@ -131,14 +132,14 @@ func TestIntegrationCreateIdempotency(t *testing.T) {
 	}
 
 	// Different config: mismatch.
-	if _, _, err := s.Create(path, store.CreateOptions{ContentType: "text/plain", TTLSeconds: &ttl}); err != store.ErrConfigMismatch {
+	if _, _, err := s.Create(path, store.CreateOptions{ContentType: "text/plain", TTLSeconds: &ttl}); !errors.Is(err, store.ErrConfigMismatch) {
 		t.Errorf("config mismatch: %v", err)
 	}
 	ttl2 := int64(60)
-	if _, _, err := s.Create(path, store.CreateOptions{ContentType: "application/json", TTLSeconds: &ttl2}); err != store.ErrConfigMismatch {
+	if _, _, err := s.Create(path, store.CreateOptions{ContentType: "application/json", TTLSeconds: &ttl2}); !errors.Is(err, store.ErrConfigMismatch) {
 		t.Errorf("ttl mismatch: %v", err)
 	}
-	if _, _, err := s.Create(path, store.CreateOptions{ContentType: "application/json"}); err != store.ErrConfigMismatch {
+	if _, _, err := s.Create(path, store.CreateOptions{ContentType: "application/json"}); !errors.Is(err, store.ErrConfigMismatch) {
 		t.Errorf("ttl-nil mismatch: %v", err)
 	}
 
@@ -158,7 +159,7 @@ func TestIntegrationCreateClosedStatusMatching(t *testing.T) {
 	}
 
 	// Closed-status must participate in config matching.
-	if _, _, err := s.Create(path, store.CreateOptions{ContentType: "text/plain"}); err != store.ErrConfigMismatch {
+	if _, _, err := s.Create(path, store.CreateOptions{ContentType: "text/plain"}); !errors.Is(err, store.ErrConfigMismatch) {
 		t.Errorf("open-vs-closed mismatch: %v", err)
 	}
 	if _, created, err := s.Create(path, store.CreateOptions{ContentType: "text/plain", Closed: true}); err != nil || created {
@@ -166,7 +167,7 @@ func TestIntegrationCreateClosedStatusMatching(t *testing.T) {
 	}
 
 	// Appends to a closed-created stream fail.
-	if _, err := s.Append(path, []byte("x"), store.AppendOptions{}); err != store.ErrStreamClosed {
+	if _, err := s.Append(path, []byte("x"), store.AppendOptions{}); !errors.Is(err, store.ErrStreamClosed) {
 		t.Errorf("append to closed: %v", err)
 	}
 }
@@ -254,10 +255,10 @@ func TestIntegrationJSONModeFlattening(t *testing.T) {
 	}
 
 	// Errors: invalid JSON, empty array on append.
-	if _, err := s.Append(path, []byte("{oops"), store.AppendOptions{}); err != store.ErrInvalidJSON {
+	if _, err := s.Append(path, []byte("{oops"), store.AppendOptions{}); !errors.Is(err, store.ErrInvalidJSON) {
 		t.Errorf("invalid json: %v", err)
 	}
-	if _, err := s.Append(path, []byte("[]"), store.AppendOptions{}); err != store.ErrEmptyJSONArray {
+	if _, err := s.Append(path, []byte("[]"), store.AppendOptions{}); !errors.Is(err, store.ErrEmptyJSONArray) {
 		t.Errorf("empty array: %v", err)
 	}
 
@@ -273,7 +274,7 @@ func TestIntegrationEmptyBodyGuard(t *testing.T) {
 	s := newTestStore(t)
 	path := testPath("emptybody")
 	mustCreate(t, s, path, store.CreateOptions{})
-	if _, err := s.Append(path, nil, store.AppendOptions{}); err != store.ErrEmptyBody {
+	if _, err := s.Append(path, nil, store.AppendOptions{}); !errors.Is(err, store.ErrEmptyBody) {
 		t.Errorf("empty body: %v", err)
 	}
 	// Empty body with Close is allowed (close-only append).
@@ -290,11 +291,11 @@ func TestIntegrationStreamSeqLexRegression(t *testing.T) {
 
 	mustAppend(t, s, path, []byte("a"), store.AppendOptions{Seq: "2"})
 	// "10" < "2" bytewise: REJECTED even though numerically larger.
-	if _, err := s.Append(path, []byte("b"), store.AppendOptions{Seq: "10"}); err != store.ErrSequenceConflict {
+	if _, err := s.Append(path, []byte("b"), store.AppendOptions{Seq: "10"}); !errors.Is(err, store.ErrSequenceConflict) {
 		t.Errorf(`seq "10" after "2": %v`, err)
 	}
 	// Same seq again: rejected.
-	if _, err := s.Append(path, []byte("b"), store.AppendOptions{Seq: "2"}); err != store.ErrSequenceConflict {
+	if _, err := s.Append(path, []byte("b"), store.AppendOptions{Seq: "2"}); !errors.Is(err, store.ErrSequenceConflict) {
 		t.Errorf(`duplicate seq: %v`, err)
 	}
 
@@ -342,7 +343,7 @@ func TestIntegrationClosurePaths(t *testing.T) {
 
 	// Append to closed carries the final offset.
 	ar2, err := s.Append(path2, []byte("more"), store.AppendOptions{})
-	if err != store.ErrStreamClosed {
+	if !errors.Is(err, store.ErrStreamClosed) {
 		t.Fatalf("append to closed: %v", err)
 	}
 	if !ar2.Offset.Equal(ar.Offset) || !ar2.StreamClosed {
@@ -350,7 +351,7 @@ func TestIntegrationClosurePaths(t *testing.T) {
 	}
 
 	// CloseStream on missing stream.
-	if _, err := s.CloseStream(testPath("nope")); err != store.ErrStreamNotFound {
+	if _, err := s.CloseStream(testPath("nope")); !errors.Is(err, store.ErrStreamNotFound) {
 		t.Errorf("close missing: %v", err)
 	}
 }
@@ -376,7 +377,7 @@ func TestIntegrationClosedByProducerDedup(t *testing.T) {
 
 	// Different tuple: ErrStreamClosed with final offset.
 	cres, err = s.CloseStreamWithProducer(path, store.CloseProducerOptions{ProducerId: "p2", ProducerEpoch: 1, ProducerSeq: 0})
-	if err != store.ErrStreamClosed || !cres.AlreadyClosed || !cres.StreamClosed {
+	if !errors.Is(err, store.ErrStreamClosed) || !cres.AlreadyClosed || !cres.StreamClosed {
 		t.Fatalf("other-producer close: %+v err=%v", cres, err)
 	}
 
@@ -400,7 +401,7 @@ func TestIntegrationDeleteAndRecreate(t *testing.T) {
 	if s.Has(path) {
 		t.Error("Has after delete")
 	}
-	if err := s.Delete(path); err != store.ErrStreamNotFound {
+	if err := s.Delete(path); !errors.Is(err, store.ErrStreamNotFound) {
 		t.Errorf("double delete: %v", err)
 	}
 
@@ -424,7 +425,7 @@ func TestIntegrationProducerSequencing(t *testing.T) {
 	}
 
 	// Partial headers.
-	if _, err := s.Append(path, []byte("x"), store.AppendOptions{ProducerId: "p"}); err != store.ErrPartialProducer {
+	if _, err := s.Append(path, []byte("x"), store.AppendOptions{ProducerId: "p"}); !errors.Is(err, store.ErrPartialProducer) {
 		t.Errorf("partial producer: %v", err)
 	}
 	_ = pe
@@ -432,7 +433,7 @@ func TestIntegrationProducerSequencing(t *testing.T) {
 
 	// First contact must be seq 0.
 	r, err := s.Append(path, []byte("x"), popts(5, 3))
-	if err != store.ErrProducerSeqGap || r.ExpectedSeq != 0 || r.ReceivedSeq != 3 {
+	if !errors.Is(err, store.ErrProducerSeqGap) || r.ExpectedSeq != 0 || r.ReceivedSeq != 3 {
 		t.Fatalf("first-contact gap: %+v err=%v", r, err)
 	}
 	// First contact seq 0 accepted with any epoch.
@@ -456,16 +457,16 @@ func TestIntegrationProducerSequencing(t *testing.T) {
 	}
 	// Gap.
 	r, err = s.Append(path, []byte("c"), popts(5, 5))
-	if err != store.ErrProducerSeqGap || r.ExpectedSeq != 2 || r.ReceivedSeq != 5 {
+	if !errors.Is(err, store.ErrProducerSeqGap) || r.ExpectedSeq != 2 || r.ReceivedSeq != 5 {
 		t.Fatalf("gap: %+v err=%v", r, err)
 	}
 	// Stale epoch.
 	r, err = s.Append(path, []byte("c"), popts(4, 0))
-	if err != store.ErrStaleEpoch || r.CurrentEpoch != 5 {
+	if !errors.Is(err, store.ErrStaleEpoch) || r.CurrentEpoch != 5 {
 		t.Fatalf("stale epoch: %+v err=%v", r, err)
 	}
 	// New epoch must start at 0.
-	if _, err := s.Append(path, []byte("c"), popts(6, 2)); err != store.ErrInvalidEpochSeq {
+	if _, err := s.Append(path, []byte("c"), popts(6, 2)); !errors.Is(err, store.ErrInvalidEpochSeq) {
 		t.Fatalf("epoch bump seq!=0: %v", err)
 	}
 	// Epoch bump at seq 0.

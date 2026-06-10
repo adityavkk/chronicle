@@ -20,41 +20,41 @@ import (
 // correctness.
 const maxAppendRetries = 64
 
-// Options configures a RedisStore.
+// Options configures a Store.
 type Options struct {
 	// Logger receives operational warnings (e.g. eviction policy). Defaults
 	// to slog.Default().
 	Logger *slog.Logger
 }
 
-// RedisStore implements store.Store on Redis 8 using the ZSET-lex frame
+// Store implements store.Store on Redis 8 using the ZSET-lex frame
 // model (docs/PLAN.md §4). All mutations run as per-stream-atomic Lua
 // scripts; live tailing uses pub/sub with a re-read and a defensive poll.
 //
 // Durability note: Redis replication is asynchronous — an acknowledged
 // append can be lost on failover. See docs/PLAN.md §4.7.
-type RedisStore struct {
+type Store struct {
 	client redis.UniversalClient
 	log    *slog.Logger
 }
 
-var _ store.Store = (*RedisStore)(nil)
+var _ store.Store = (*Store)(nil)
 
 // New wraps a go-redis client as a store.Store. The store takes ownership
 // of the client: Close() closes it. On connect it best-effort checks that
 // maxmemory-policy is noeviction (anything else can silently truncate
 // streams) and warns through the logger if not.
-func New(client redis.UniversalClient, opts Options) *RedisStore {
+func New(client redis.UniversalClient, opts Options) *Store {
 	log := opts.Logger
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &RedisStore{client: client, log: log}
+	s := &Store{client: client, log: log}
 	s.warnEvictionPolicy()
 	return s
 }
 
-func (s *RedisStore) warnEvictionPolicy() {
+func (s *Store) warnEvictionPolicy() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	res, err := s.client.ConfigGet(ctx, "maxmemory-policy").Result()
@@ -116,7 +116,7 @@ func buildFrames(ct string, base store.Offset, data []byte, allowEmpty bool) ([]
 
 // fetchMeta loads stream metadata without producers and without touching
 // the sliding TTL. Returns (nil, nil) when the stream does not exist.
-func (s *RedisStore) fetchMeta(ctx context.Context, path string) (*store.StreamMetadata, error) {
+func (s *Store) fetchMeta(ctx context.Context, path string) (*store.StreamMetadata, error) {
 	fields, err := s.client.HGetAll(ctx, metaKey(path)).Result()
 	if err != nil {
 		return nil, err
@@ -126,7 +126,7 @@ func (s *RedisStore) fetchMeta(ctx context.Context, path string) (*store.StreamM
 
 // Get returns metadata for a stream. It does NOT refresh the sliding TTL
 // (only Read and Append count as access).
-func (s *RedisStore) Get(path string) (*store.StreamMetadata, error) {
+func (s *Store) Get(path string) (*store.StreamMetadata, error) {
 	ctx := context.Background()
 	pipe := s.client.Pipeline()
 	metaCmd := pipe.HGetAll(ctx, metaKey(path))
@@ -155,14 +155,14 @@ func (s *RedisStore) Get(path string) (*store.StreamMetadata, error) {
 
 // Has reports stream existence; soft-deleted and expired streams are
 // invisible. No TTL touch.
-func (s *RedisStore) Has(path string) bool {
+func (s *Store) Has(path string) bool {
 	m, err := s.fetchMeta(context.Background(), path)
 	return err == nil && m != nil && !m.SoftDeleted && !m.IsExpired()
 }
 
 // GetCurrentOffset returns the tail offset. Mirroring MemoryStore, it does
 // not check expiry or soft-deletion and does not touch the TTL.
-func (s *RedisStore) GetCurrentOffset(path string) (store.Offset, error) {
+func (s *Store) GetCurrentOffset(path string) (store.Offset, error) {
 	tail, err := s.client.HGet(context.Background(), metaKey(path), fTail).Result()
 	if errors.Is(err, redis.Nil) {
 		return store.Offset{}, store.ErrStreamNotFound
@@ -178,7 +178,7 @@ func (s *RedisStore) GetCurrentOffset(path string) (store.Offset, error) {
 // between the source refcount increment and the fork-key creation a crash
 // leaks one refcount (reaped only by delete-cascade arithmetic), and a
 // concurrent identical create is resolved by rolling our reference back.
-func (s *RedisStore) Create(path string, opts store.CreateOptions) (*store.StreamMetadata, bool, error) {
+func (s *Store) Create(path string, opts store.CreateOptions) (*store.StreamMetadata, bool, error) {
 	ctx := context.Background()
 
 	// Existence pre-check (also re-checked atomically inside create.lua).
@@ -289,8 +289,12 @@ func (s *RedisStore) Create(path string, opts store.CreateOptions) (*store.Strea
 	}
 
 	rollbackRef := func() {
-		if isFork {
-			s.releaseRef(ctx, opts.ForkedFrom, path)
+		if !isFork {
+			return
+		}
+		if err := s.releaseRef(ctx, opts.ForkedFrom, path); err != nil {
+			s.log.Warn("fork create rollback: failed to release source reference",
+				"source", opts.ForkedFrom, "fork", path, "error", err)
 		}
 	}
 
@@ -344,7 +348,7 @@ func (s *RedisStore) Create(path string, opts store.CreateOptions) (*store.Strea
 
 // createArgs assembles the create.lua argument list: probe args for
 // config matching, then the meta field pairs, then initial frames.
-func (s *RedisStore) createArgs(meta *store.StreamMetadata, opts store.CreateOptions, frames []any) []any {
+func (s *Store) createArgs(meta *store.StreamMetadata, opts store.CreateOptions, frames []any) []any {
 	probeTTL := ""
 	if opts.TTLSeconds != nil {
 		probeTTL = strconv.FormatInt(*opts.TTLSeconds, 10)
@@ -379,7 +383,7 @@ func (s *RedisStore) createArgs(meta *store.StreamMetadata, opts store.CreateOpt
 	return args
 }
 
-func (s *RedisStore) decodeMatched(path string, rest []any) (*store.StreamMetadata, bool, error) {
+func (s *Store) decodeMatched(path string, rest []any) (*store.StreamMetadata, bool, error) {
 	if len(rest) < 2 {
 		return nil, false, fmt.Errorf("create.lua: malformed MATCHED reply")
 	}
@@ -429,7 +433,7 @@ func resolveForkExpiry(opts store.CreateOptions, src *store.StreamMetadata) (*in
 // sources resolve the sub-offset to the n-th flattened message boundary
 // after the fork point; binary sources return the byte prefix of the first
 // message after it, which becomes the fork's first own frame.
-func (s *RedisStore) resolveForkSubOffset(ctx context.Context, srcPath string, srcMeta *store.StreamMetadata, forkOffset store.Offset, subOffset uint64) (store.Offset, []byte, error) {
+func (s *Store) resolveForkSubOffset(ctx context.Context, srcPath string, srcMeta *store.StreamMetadata, forkOffset store.Offset, subOffset uint64) (store.Offset, []byte, error) {
 	msgs, err := s.readForkChain(ctx, srcPath, srcMeta, forkOffset)
 	if err != nil {
 		return store.Offset{}, nil, err
@@ -455,7 +459,7 @@ func (s *RedisStore) resolveForkSubOffset(ctx context.Context, srcPath string, s
 // Append adds data to a stream. All validation and the write happen in one
 // atomic Lua script; frames are pre-encoded against a tail snapshot and the
 // script returns RETRY when the tail moved.
-func (s *RedisStore) Append(path string, data []byte, opts store.AppendOptions) (store.AppendResult, error) {
+func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (store.AppendResult, error) {
 	if opts.HasProducerHeaders() && !opts.HasAllProducerHeaders() {
 		return store.AppendResult{}, store.ErrPartialProducer
 	}
@@ -537,7 +541,7 @@ func (s *RedisStore) Append(path string, data []byte, opts store.AppendOptions) 
 }
 
 // mapAppendReply translates a script reply into (AppendResult, sentinel).
-func (s *RedisStore) mapAppendReply(r *scriptReply) (store.AppendResult, error) {
+func (s *Store) mapAppendReply(r *scriptReply) (store.AppendResult, error) {
 	tail := store.Offset{}
 	if r.Tail != "" {
 		var err error
@@ -576,7 +580,7 @@ func (s *RedisStore) mapAppendReply(r *scriptReply) (store.AppendResult, error) 
 
 // Read returns messages with end offset > offset, stitching fork chains.
 // It refreshes the sliding TTL (Read counts as access).
-func (s *RedisStore) Read(path string, offset store.Offset) ([]store.Message, bool, error) {
+func (s *Store) Read(path string, offset store.Offset) ([]store.Message, bool, error) {
 	ctx := context.Background()
 	raw, err := readScript.Run(ctx, s.client, keysFor(path), nowNsArg(), lexLowerBound(offset)).Result()
 	if err != nil {
@@ -621,7 +625,7 @@ func (s *RedisStore) Read(path string, offset store.Offset) ([]store.Message, bo
 			return nil, false, err
 		}
 		if len(inherited) > 0 {
-			messages = append(inherited, own...)
+			messages = concatMessages(inherited, own)
 		}
 	}
 
@@ -652,7 +656,7 @@ func decodeFrames(members []string) ([]store.Message, error) {
 // readInherited reads the inherited range of a fork (offset < ForkOffset)
 // from its source chain, capped at the fork point so post-fork source
 // appends stay invisible.
-func (s *RedisStore) readInherited(ctx context.Context, forkMeta *store.StreamMetadata, offset store.Offset) ([]store.Message, error) {
+func (s *Store) readInherited(ctx context.Context, forkMeta *store.StreamMetadata, offset store.Offset) ([]store.Message, error) {
 	srcMeta, err := s.fetchMeta(ctx, forkMeta.ForkedFrom)
 	if err != nil {
 		return nil, err
@@ -678,14 +682,7 @@ func (s *RedisStore) readInherited(ctx context.Context, forkMeta *store.StreamMe
 // this stream's fork point. It deliberately ignores SoftDeleted and expiry
 // on sources (forks must read through soft-deleted parents) and never
 // touches their TTLs.
-func (s *RedisStore) readForkChain(ctx context.Context, path string, meta *store.StreamMetadata, offset store.Offset) ([]store.Message, error) {
-	var inherited []store.Message
-	if meta.ForkedFrom != "" && offset.LessThan(meta.ForkOffset) {
-		var err error
-		if inherited, err = s.readInherited(ctx, meta, offset); err != nil {
-			return nil, err
-		}
-	}
+func (s *Store) readForkChain(ctx context.Context, path string, meta *store.StreamMetadata, offset store.Offset) ([]store.Message, error) {
 	members, err := s.client.ZRangeByLex(ctx, msgKey(path), &redis.ZRangeBy{
 		Min: lexLowerBound(offset),
 		Max: "+",
@@ -697,17 +694,30 @@ func (s *RedisStore) readForkChain(ctx context.Context, path string, meta *store
 	if err != nil {
 		return nil, err
 	}
+	if meta.ForkedFrom == "" || !offset.LessThan(meta.ForkOffset) {
+		return own, nil
+	}
+	inherited, err := s.readInherited(ctx, meta, offset)
+	if err != nil {
+		return nil, err
+	}
 	if len(inherited) == 0 {
 		return own, nil
 	}
-	return append(inherited, own...), nil
+	return concatMessages(inherited, own), nil
+}
+
+func concatMessages(a, b []store.Message) []store.Message {
+	out := make([]store.Message, 0, len(a)+len(b))
+	out = append(out, a...)
+	return append(out, b...)
 }
 
 // Delete removes a stream: soft-delete when forks reference it, hard
 // delete with cascading GC up the fork chain otherwise. The cascade spans
 // cluster slots and is not atomic (documented window: a crash mid-cascade
 // leaves the parent's refcount high until another delete re-walks it).
-func (s *RedisStore) Delete(path string) error {
+func (s *Store) Delete(path string) error {
 	ctx := context.Background()
 	status, rest, err := s.runStatusScript(ctx, deleteScript, keysFor(path), notifyChannel(path))
 	if err != nil {
@@ -736,7 +746,7 @@ func (s *RedisStore) Delete(path string) error {
 
 // releaseRef decrements the fork refcount on parent (for child), cascading
 // hard-deletes up the chain while soft-deleted parents hit refcount zero.
-func (s *RedisStore) releaseRef(ctx context.Context, parent, child string) error {
+func (s *Store) releaseRef(ctx context.Context, parent, child string) error {
 	for parent != "" {
 		status, rest, err := s.runStatusScript(ctx, decrRefScript, keysFor(parent),
 			nowNsArg(), notifyChannel(parent), child)
@@ -763,7 +773,7 @@ func (s *RedisStore) releaseRef(ctx context.Context, parent, child string) error
 
 // CloseStream closes a stream without appending. Idempotent; does not set
 // ClosedBy and does not refresh the sliding TTL (mirrors MemoryStore).
-func (s *RedisStore) CloseStream(path string) (*store.CloseResult, error) {
+func (s *Store) CloseStream(path string) (*store.CloseResult, error) {
 	r, err := s.runCloseScript(context.Background(), path, "0", "", "0", "0")
 	if err != nil {
 		return nil, err
@@ -784,7 +794,7 @@ func (s *RedisStore) CloseStream(path string) (*store.CloseResult, error) {
 
 // CloseStreamWithProducer closes a stream using producer headers for
 // idempotent sequencing (closedBy tuple dedup).
-func (s *RedisStore) CloseStreamWithProducer(path string, opts store.CloseProducerOptions) (*store.CloseProducerResult, error) {
+func (s *Store) CloseStreamWithProducer(path string, opts store.CloseProducerOptions) (*store.CloseProducerResult, error) {
 	r, err := s.runCloseScript(context.Background(), path, "1", opts.ProducerId,
 		strconv.FormatInt(opts.ProducerEpoch, 10), strconv.FormatInt(opts.ProducerSeq, 10))
 	if err != nil {
@@ -823,7 +833,7 @@ func (s *RedisStore) CloseStreamWithProducer(path string, opts store.CloseProduc
 	}
 }
 
-func (s *RedisStore) runCloseScript(ctx context.Context, path, hasProd, pid, epoch, seq string) (*scriptReply, error) {
+func (s *Store) runCloseScript(ctx context.Context, path, hasProd, pid, epoch, seq string) (*scriptReply, error) {
 	raw, err := closeScript.Run(ctx, s.client, keysFor(path),
 		nowNsArg(), notifyChannel(path), hasProd, pid, epoch, seq).Result()
 	if err != nil {
@@ -832,7 +842,7 @@ func (s *RedisStore) runCloseScript(ctx context.Context, path, hasProd, pid, epo
 	return decodeScriptReply(raw)
 }
 
-func (s *RedisStore) runStatusScript(ctx context.Context, script *redis.Script, keys []string, args ...any) (string, []any, error) {
+func (s *Store) runStatusScript(ctx context.Context, script *redis.Script, keys []string, args ...any) (string, []any, error) {
 	raw, err := script.Run(ctx, s.client, keys, args...).Result()
 	if err != nil {
 		return "", nil, err
@@ -843,7 +853,7 @@ func (s *RedisStore) runStatusScript(ctx context.Context, script *redis.Script, 
 // FormatResponse formats messages per the stream's content type (JSON array
 // wrapper vs raw concatenation). Not part of store.Store, but the handler
 // relies on it for drop-in parity with the Caddy stores.
-func (s *RedisStore) FormatResponse(path string, messages []store.Message) ([]byte, error) {
+func (s *Store) FormatResponse(path string, messages []store.Message) ([]byte, error) {
 	ct, err := s.client.HGet(context.Background(), metaKey(path), fCT).Result()
 	if errors.Is(err, redis.Nil) {
 		return nil, store.ErrStreamNotFound
@@ -862,6 +872,6 @@ func (s *RedisStore) FormatResponse(path string, messages []store.Message) ([]by
 }
 
 // Close releases the store's resources, closing the underlying client.
-func (s *RedisStore) Close() error {
+func (s *Store) Close() error {
 	return s.client.Close()
 }

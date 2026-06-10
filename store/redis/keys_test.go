@@ -85,11 +85,11 @@ func TestDecodeFrameMalformed(t *testing.T) {
 func TestLexLowerBound(t *testing.T) {
 	bound := lexLowerBound(off(10))
 	wantExcluded := []string{
-		encodeFrame(off(10), []byte{}),               // same offset, empty payload
-		encodeFrame(off(10), []byte{0x00}),           // same offset, low byte
-		encodeFrame(off(10), []byte{0xff, 0xff}),     // same offset, high bytes
-		encodeFrame(off(10), []byte("zzzz")),         // same offset, text
-		encodeFrame(off(9), []byte{0xff}),            // lower offset
+		encodeFrame(off(10), []byte{}),                      // same offset, empty payload
+		encodeFrame(off(10), []byte{0x00}),                  // same offset, low byte
+		encodeFrame(off(10), []byte{0xff, 0xff}),            // same offset, high bytes
+		encodeFrame(off(10), []byte("zzzz")),                // same offset, text
+		encodeFrame(off(9), []byte{0xff}),                   // lower offset
 		encodeFrame(off(0), bytes.Repeat([]byte{0xff}, 40)), // much lower offset, 0xff payload
 	}
 	wantIncluded := []string{
@@ -105,7 +105,7 @@ func TestLexLowerBound(t *testing.T) {
 		}
 	}
 	for _, m := range wantIncluded {
-		if !(m > boundStr) {
+		if m <= boundStr {
 			t.Errorf("member %q should be INCLUDED by bound %q", m, boundStr)
 		}
 	}
@@ -124,7 +124,7 @@ func TestLexUpperBoundInclusive(t *testing.T) {
 		encodeFrame(off(11), []byte{0x00}),
 	}
 	for _, m := range wantIncluded {
-		if !(m <= boundStr) {
+		if m > boundStr {
 			t.Errorf("member %q should be INCLUDED by upper bound %q", m, boundStr)
 		}
 	}

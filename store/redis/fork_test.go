@@ -3,7 +3,9 @@ package redis
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
@@ -12,7 +14,7 @@ func TestIntegrationForkBasics(t *testing.T) {
 	s := newTestStore(t)
 	src := testPath("fork-src")
 	mustCreate(t, s, src, store.CreateOptions{})
-	mustAppend(t, s, src, []byte("hello"), store.AppendOptions{}) // tail 5
+	mustAppend(t, s, src, []byte("hello"), store.AppendOptions{})                // tail 5
 	tail := mustAppend(t, s, src, []byte("world"), store.AppendOptions{}).Offset // tail 10
 
 	// Fork at source tail (nil ForkOffset).
@@ -67,23 +69,23 @@ func TestIntegrationForkBasics(t *testing.T) {
 		t.Errorf("fork idempotent recreate: created=%v err=%v", created, err)
 	}
 	off3 := store.Offset{ByteOffset: 3}
-	if _, _, err := s.Create(fork2, store.CreateOptions{ForkedFrom: src, ForkOffset: &off3}); err != store.ErrConfigMismatch {
+	if _, _, err := s.Create(fork2, store.CreateOptions{ForkedFrom: src, ForkOffset: &off3}); !errors.Is(err, store.ErrConfigMismatch) {
 		t.Errorf("fork offset mismatch: %v", err)
 	}
 
 	// Fork offset beyond source tail.
 	off999 := store.Offset{ByteOffset: 999}
-	if _, _, err := s.Create(testPath("fork-bad"), store.CreateOptions{ForkedFrom: src, ForkOffset: &off999}); err != store.ErrInvalidForkOffset {
+	if _, _, err := s.Create(testPath("fork-bad"), store.CreateOptions{ForkedFrom: src, ForkOffset: &off999}); !errors.Is(err, store.ErrInvalidForkOffset) {
 		t.Errorf("fork beyond tail: %v", err)
 	}
 
 	// Fork of missing source.
-	if _, _, err := s.Create(testPath("fork-bad2"), store.CreateOptions{ForkedFrom: testPath("nope")}); err != store.ErrStreamNotFound {
+	if _, _, err := s.Create(testPath("fork-bad2"), store.CreateOptions{ForkedFrom: testPath("nope")}); !errors.Is(err, store.ErrStreamNotFound) {
 		t.Errorf("fork of missing source: %v", err)
 	}
 
 	// Content-type mismatch rejected before taking a reference.
-	if _, _, err := s.Create(testPath("fork-bad3"), store.CreateOptions{ForkedFrom: src, ContentType: "application/json"}); err != store.ErrContentTypeMismatch {
+	if _, _, err := s.Create(testPath("fork-bad3"), store.CreateOptions{ForkedFrom: src, ContentType: "application/json"}); !errors.Is(err, store.ErrContentTypeMismatch) {
 		t.Errorf("fork ct mismatch: %v", err)
 	}
 	if srcMeta, _ := s.Get(src); srcMeta.RefCount != 2 {
@@ -120,13 +122,13 @@ func TestIntegrationForkSubOffsets(t *testing.T) {
 	if _, created, err := s.Create(fork, store.CreateOptions{ContentType: "application/json", ForkedFrom: src, ForkOffset: &zero, ForkSubOffset: &sub2}); err != nil || created {
 		t.Errorf("JSON sub-offset idempotent recreate: created=%v err=%v", created, err)
 	}
-	if _, _, err := s.Create(fork, store.CreateOptions{ForkedFrom: src, ForkOffset: &zero, ForkSubOffset: &sub2}); err != store.ErrConfigMismatch {
+	if _, _, err := s.Create(fork, store.CreateOptions{ForkedFrom: src, ForkOffset: &zero, ForkSubOffset: &sub2}); !errors.Is(err, store.ErrConfigMismatch) {
 		t.Errorf("empty-CT recreate of JSON fork should mismatch (upstream parity): %v", err)
 	}
 
 	// Overshoot.
 	sub9 := uint64(9)
-	if _, _, err := s.Create(testPath("subj-bad"), store.CreateOptions{ForkedFrom: src, ForkOffset: &zero, ForkSubOffset: &sub9}); err != store.ErrInvalidForkSubOffset {
+	if _, _, err := s.Create(testPath("subj-bad"), store.CreateOptions{ForkedFrom: src, ForkOffset: &zero, ForkSubOffset: &sub9}); !errors.Is(err, store.ErrInvalidForkSubOffset) {
 		t.Errorf("JSON sub-offset overshoot: %v", err)
 	}
 
@@ -134,7 +136,7 @@ func TestIntegrationForkSubOffsets(t *testing.T) {
 	// materialized as the fork's first own frame.
 	bsrc := testPath("subb-src")
 	mustCreate(t, s, bsrc, store.CreateOptions{})
-	mustAppend(t, s, bsrc, []byte("hello"), store.AppendOptions{})                  // 0..5
+	mustAppend(t, s, bsrc, []byte("hello"), store.AppendOptions{})                    // 0..5
 	mustAppend(t, s, bsrc, []byte{0x00, 0xff, 'w', 0x00, 'r'}, store.AppendOptions{}) // 5..10
 
 	bfork := testPath("subb-fork")
@@ -157,7 +159,7 @@ func TestIntegrationForkSubOffsets(t *testing.T) {
 
 	// Prefix longer than the following message.
 	sub99 := uint64(99)
-	if _, _, err := s.Create(testPath("subb-bad"), store.CreateOptions{ForkedFrom: bsrc, ForkOffset: &off5, ForkSubOffset: &sub99}); err != store.ErrInvalidForkSubOffset {
+	if _, _, err := s.Create(testPath("subb-bad"), store.CreateOptions{ForkedFrom: bsrc, ForkOffset: &off5, ForkSubOffset: &sub99}); !errors.Is(err, store.ErrInvalidForkSubOffset) {
 		t.Errorf("binary sub-offset overshoot: %v", err)
 	}
 }
@@ -180,22 +182,22 @@ func TestIntegrationForkSoftDeleteAndCascade(t *testing.T) {
 	if err := s.Delete(a); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Get(a); err != store.ErrStreamSoftDeleted {
+	if _, err := s.Get(a); !errors.Is(err, store.ErrStreamSoftDeleted) {
 		t.Errorf("Get soft-deleted: %v", err)
 	}
 	if s.Has(a) {
 		t.Error("Has soft-deleted")
 	}
-	if _, _, err := s.Read(a, store.ZeroOffset); err != store.ErrStreamNotFound {
+	if _, _, err := s.Read(a, store.ZeroOffset); !errors.Is(err, store.ErrStreamNotFound) {
 		t.Errorf("Read soft-deleted: %v", err)
 	}
-	if _, err := s.Append(a, []byte("x"), store.AppendOptions{}); err != store.ErrStreamSoftDeleted {
+	if _, err := s.Append(a, []byte("x"), store.AppendOptions{}); !errors.Is(err, store.ErrStreamSoftDeleted) {
 		t.Errorf("Append soft-deleted: %v", err)
 	}
-	if err := s.Delete(a); err != store.ErrStreamSoftDeleted {
+	if err := s.Delete(a); !errors.Is(err, store.ErrStreamSoftDeleted) {
 		t.Errorf("Delete soft-deleted: %v", err)
 	}
-	if _, _, err := s.Create(a, store.CreateOptions{}); err != store.ErrStreamExists {
+	if _, _, err := s.Create(a, store.CreateOptions{}); !errors.Is(err, store.ErrStreamExists) {
 		t.Errorf("Create over soft-deleted: %v", err)
 	}
 
@@ -259,8 +261,50 @@ func TestIntegrationForkRefCountLifecycle(t *testing.T) {
 	if err := s.Delete(src); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Get(src); err != store.ErrStreamNotFound {
+	if _, err := s.Get(src); !errors.Is(err, store.ErrStreamNotFound) {
 		t.Errorf("source after hard delete: %v", err)
+	}
+}
+
+// TestIntegrationExpiredSourceWithForksFlipsSoftDeleted: lazy expiry on a
+// stream with refCount > 0 must soft-delete it (fork readers keep working)
+// instead of reaping the data.
+func TestIntegrationExpiredSourceWithForksFlipsSoftDeleted(t *testing.T) {
+	s := newTestStore(t)
+	src := testPath("expflip-src")
+	ttl := int64(1)
+	mustCreate(t, s, src, store.CreateOptions{TTLSeconds: &ttl})
+	mustAppend(t, s, src, []byte("keepme"), store.AppendOptions{})
+
+	fork := testPath("expflip-fork")
+	noTTL := int64(3600)
+	mustCreate(t, s, fork, store.CreateOptions{ForkedFrom: src, TTLSeconds: &noTTL})
+
+	time.Sleep(1200 * time.Millisecond)
+
+	// Access discovers expiry: NOTFOUND, and the source flips to soft-deleted.
+	if _, _, err := s.Read(src, store.ZeroOffset); !errors.Is(err, store.ErrStreamNotFound) {
+		t.Fatalf("Read expired source: %v", err)
+	}
+	if _, err := s.Get(src); !errors.Is(err, store.ErrStreamSoftDeleted) {
+		t.Fatalf("expired source with forks should be soft-deleted: %v", err)
+	}
+	if _, _, err := s.Create(src, store.CreateOptions{}); !errors.Is(err, store.ErrStreamExists) {
+		t.Errorf("Create over expired-flipped source: %v", err)
+	}
+
+	// The fork still reads the inherited data.
+	msgs, _, err := s.Read(fork, store.ZeroOffset)
+	if err != nil || len(msgs) != 1 || string(msgs[0].Data) != "keepme" {
+		t.Fatalf("fork read through expired source: %v err=%v", msgs, err)
+	}
+
+	// Deleting the fork cascades the soft-deleted source away.
+	if err := s.Delete(fork); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := testClient.Exists(context.Background(), metaKey(src), msgKey(src)).Result(); n != 0 {
+		t.Error("source keys should be gone after cascade")
 	}
 }
 

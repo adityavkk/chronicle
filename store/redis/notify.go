@@ -19,7 +19,7 @@ const defensivePollInterval = time.Second
 // stream's notify channel, then re-read BEFORE waiting (an append between
 // the first read and the subscribe must not be missed), then loop on
 // notification / defensive poll / timeout.
-func (s *RedisStore) WaitForMessages(ctx context.Context, path string, offset store.Offset, timeout time.Duration) ([]store.Message, bool, bool, error) {
+func (s *Store) WaitForMessages(ctx context.Context, path string, offset store.Offset, timeout time.Duration) ([]store.Message, bool, bool, error) {
 	// Fast path: stream closed and caller at tail.
 	meta, err := s.fetchMeta(ctx, path)
 	if err != nil {
@@ -46,7 +46,7 @@ func (s *RedisStore) WaitForMessages(ctx context.Context, path string, offset st
 	}
 
 	pubsub := s.client.Subscribe(ctx, notifyChannel(path))
-	defer pubsub.Close()
+	defer func() { _ = pubsub.Close() }()
 	if _, err := pubsub.Receive(ctx); err != nil { // confirm subscription
 		return nil, false, false, err
 	}
@@ -91,7 +91,7 @@ func (s *RedisStore) WaitForMessages(ctx context.Context, path string, offset st
 // arrived, the stream closed at the caller's tail, or reading failed (e.g.
 // the stream was deleted mid-wait). A spurious wakeup with nothing new
 // keeps waiting (done=false).
-func (s *RedisStore) recheck(path string, offset store.Offset) (msgs []store.Message, closed, done bool, err error) {
+func (s *Store) recheck(path string, offset store.Offset) (msgs []store.Message, closed, done bool, err error) {
 	msgs, _, err = s.Read(path, offset)
 	if err != nil {
 		return nil, false, true, err

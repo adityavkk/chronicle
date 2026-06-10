@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -110,7 +111,7 @@ func TestIntegrationWaitContextCancel(t *testing.T) {
 		cancel()
 	}()
 	_, timedOut, closed, err := s.WaitForMessages(ctx, path, store.ZeroOffset, 5*time.Second)
-	if err != context.Canceled || timedOut || closed {
+	if !errors.Is(err, context.Canceled) || timedOut || closed {
 		t.Fatalf("cancel: timedOut=%v closed=%v err=%v", timedOut, closed, err)
 	}
 }
@@ -118,7 +119,7 @@ func TestIntegrationWaitContextCancel(t *testing.T) {
 func TestIntegrationWaitMissingStream(t *testing.T) {
 	s := newTestStore(t)
 	_, _, _, err := s.WaitForMessages(context.Background(), testPath("wait-missing"), store.ZeroOffset, time.Second)
-	if err != store.ErrStreamNotFound {
+	if !errors.Is(err, store.ErrStreamNotFound) {
 		t.Fatalf("missing stream: %v", err)
 	}
 }

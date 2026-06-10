@@ -10,7 +10,7 @@ import (
 )
 
 // TestDifferentialProducerTable runs the exact validation table from
-// store/producer_test.go (PROTOCOL.md §5.2.1) through RedisStore.Append
+// store/producer_test.go (PROTOCOL.md §5.2.1) through Store.Append
 // against live Redis and asserts the Lua mirror produces identical
 // (result, error) to the pure-Go oracle store.ValidateProducer.
 func TestDifferentialProducerTable(t *testing.T) {
@@ -143,13 +143,13 @@ func TestIntegrationTTLSliding(t *testing.T) {
 	if s.Has(path) {
 		t.Error("Has after TTL expiry")
 	}
-	if _, err := s.Get(path); err != store.ErrStreamNotFound {
+	if _, err := s.Get(path); !errors.Is(err, store.ErrStreamNotFound) {
 		t.Errorf("Get after expiry: %v", err)
 	}
-	if _, _, err := s.Read(path, store.ZeroOffset); err != store.ErrStreamNotFound {
+	if _, _, err := s.Read(path, store.ZeroOffset); !errors.Is(err, store.ErrStreamNotFound) {
 		t.Errorf("Read after expiry: %v", err)
 	}
-	if _, err := s.Append(path, []byte("z"), store.AppendOptions{}); err != store.ErrStreamNotFound {
+	if _, err := s.Append(path, []byte("z"), store.AppendOptions{}); !errors.Is(err, store.ErrStreamNotFound) {
 		t.Errorf("Append after expiry: %v", err)
 	}
 
@@ -191,7 +191,7 @@ func TestIntegrationExpiresAtAbsolute(t *testing.T) {
 	if s.Has(path) {
 		t.Error("Has after ExpiresAt")
 	}
-	if _, err := s.Get(path); err != store.ErrStreamNotFound {
+	if _, err := s.Get(path); !errors.Is(err, store.ErrStreamNotFound) {
 		t.Errorf("Get after ExpiresAt: %v", err)
 	}
 

@@ -22,13 +22,13 @@ const (
 	fExpAt       = "expAtNs"     // absolute expiry, UnixNano (absent if nil)
 	fCreatedAt   = "createdAtNs" // UnixNano
 	fAccessedAt  = "accessedAtNs"
-	fForkedFrom  = "forkedFrom"  // source path (absent if not a fork)
-	fForkOff     = "forkOff"     // resolved fork offset string
-	fForkOffReq  = "forkOffReq"  // user-supplied fork offset string (absent if nil)
-	fForkSubOff  = "forkSubOff"  // raw user-supplied sub-offset (absent if 0)
-	fRefCount    = "refCount"    // number of forks referencing this stream
-	fSoftDel     = "softDel"     // "1" when soft-deleted
-	fClosedById  = "cbId"        // closedBy tuple; presence keyed on cbEpoch
+	fForkedFrom  = "forkedFrom" // source path (absent if not a fork)
+	fForkOff     = "forkOff"    // resolved fork offset string
+	fForkOffReq  = "forkOffReq" // user-supplied fork offset string (absent if nil)
+	fForkSubOff  = "forkSubOff" // raw user-supplied sub-offset (absent if 0)
+	fRefCount    = "refCount"   // number of forks referencing this stream
+	fSoftDel     = "softDel"    // "1" when soft-deleted
+	fClosedById  = "cbId"       // closedBy tuple; presence keyed on cbEpoch
 	fClosedByEp  = "cbEpoch"
 	fClosedBySeq = "cbSeq"
 )
