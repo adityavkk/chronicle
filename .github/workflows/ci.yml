@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - uses: golangci/golangci-lint-action@v8
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - run: go test -race -count=1 ./...
+
+  conformance:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build and start chronicle
+        run: |
+          go build -o bin/chronicle ./cmd/chronicle
+          CHRONICLE_LISTEN=":4437" \
+          CHRONICLE_REDIS_URL="redis://localhost:6379/15" \
+          CHRONICLE_LONG_POLL_TIMEOUT="500ms" \
+            ./bin/chronicle &
+          for i in $(seq 1 50); do
+            curl -sf -X PUT http://localhost:4437/v1/stream/__health__ && break
+            sleep 0.2
+          done
+          curl -sf -X DELETE http://localhost:4437/v1/stream/__health__ || true
+      - name: Run conformance suite
+        run: |
+          npm --prefix test/conformance install --no-audit --no-fund
+          npx --prefix test/conformance server-conformance-tests --run http://localhost:4437

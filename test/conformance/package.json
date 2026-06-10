@@ -1,0 +1,12 @@
+{
+  "name": "chronicle-conformance",
+  "private": true,
+  "description": "Pins the Durable Streams server conformance suite chronicle is tested against.",
+  "type": "module",
+  "scripts": {
+    "conformance": "server-conformance-tests --run $CONFORMANCE_URL"
+  },
+  "devDependencies": {
+    "@durable-streams/server-conformance-tests": "0.3.5"
+  }
+}

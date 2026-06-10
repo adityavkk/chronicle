@@ -32,6 +32,16 @@ test-unit:
 test-integration: redis-up
 	$(GO) test -race -count=1 -run Integration ./...
 
+conformance:
+	./scripts/conformance.sh
+
+# Filtered conformance run, e.g.: make conformance-filter FILTER="Idempotent Producer"
+conformance-filter:
+	./scripts/conformance.sh -t "$(FILTER)"
+
+redis-flush:
+	docker compose exec -T redis redis-cli -n 15 flushdb
+
 lint:
 	golangci-lint run ./...
 
