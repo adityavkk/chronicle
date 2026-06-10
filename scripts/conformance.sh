@@ -48,12 +48,8 @@ echo "==> installing conformance suite"
 npm --prefix test/conformance install --no-audit --no-fund --silent
 
 echo "==> running conformance suite against ${BASE_URL}"
-if [ "$#" -gt 0 ]; then
-  # Forward filters straight to vitest against the pinned runner.
-  CONFORMANCE_TEST_URL="${BASE_URL}" \
-    npx --prefix test/conformance vitest run \
-    test/conformance/node_modules/@durable-streams/server-conformance-tests/dist/test-runner.js \
-    --no-coverage --passWithNoTests=false "$@"
-else
-  npx --prefix test/conformance server-conformance-tests --run "${BASE_URL}"
-fi
+# The published CLI points vitest at a file inside node_modules, which
+# vitest's default exclude swallows; conformance.test.ts registers the suite
+# programmatically instead. Extra args (e.g. -t "SSE") forward to vitest.
+(cd test/conformance && CONFORMANCE_TEST_URL="${BASE_URL}" \
+  npx vitest run --no-coverage --reporter=default "$@")

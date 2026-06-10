@@ -67,4 +67,5 @@ jobs:
       - name: Run conformance suite
         run: |
           npm --prefix test/conformance install --no-audit --no-fund
-          npx --prefix test/conformance server-conformance-tests --run http://localhost:4437
+          cd test/conformance && CONFORMANCE_TEST_URL=http://localhost:4437 \
+            npx vitest run --no-coverage --reporter=default
