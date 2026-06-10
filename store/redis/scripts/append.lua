@@ -3,16 +3,20 @@
 -- ("<offset>|<data>") computed by Go against ARGV[10] (expected tail); if
 -- the tail moved concurrently the script returns RETRY and Go re-frames.
 --
+-- valOnly ('1') runs the validation chain only and replies VALONLY instead
+-- of writing: Go uses it when JSON-mode parsing fails, so closed/producer/
+-- seq errors keep spec precedence over ErrInvalidJSON (upstream parses JSON
+-- after validation).
+--
 -- KEYS: 1=meta 2=msg 3=prod 4=forks
 -- ARGV: 1=nowNs 2=notifyChannel 3=reqCT(normalized media type, ''=skip)
 --       4=streamSeq(''=none) 5=close('1'/'0') 6=hasProducer('1'/'0')
 --       7=producerId 8=producerEpoch 9=producerSeq
---       10=expectedTail 11=newTail 12..=frames
+--       10=expectedTail 11=newTail 12=valOnly('1'/'0') 13..=frames
 --
--- Reply: {status, tail, producerResult, currentEpoch, expectedSeq,
---         receivedSeq, lastSeq, closed} — all strings; status is one of
--- OK|RETRY|NOTFOUND|SOFTDEL|CLOSED|CTMISMATCH|SEQCONFLICT|STALE_EPOCH|
--- EPOCH_SEQ|SEQ_GAP.
+-- Reply: make_reply (see common.lua); status one of OK|VALONLY|RETRY|
+-- NOTFOUND|SOFTDEL|CLOSED|CTMISMATCH|SEQCONFLICT|STALE_EPOCH|EPOCH_SEQ|
+-- SEQ_GAP.
 
 local now = tonumber(ARGV[1])
 local channel = ARGV[2]
@@ -25,26 +29,22 @@ local p_epoch = tonumber(ARGV[8])
 local p_seq = tonumber(ARGV[9])
 local expected_tail = ARGV[10]
 local new_tail = ARGV[11]
-
-local function reply(status, tail, presult, cur_epoch, exp_seq, rcv_seq, last_seq, closed)
-  return { status, tail or '', presult or '0', cur_epoch or '0',
-    exp_seq or '0', rcv_seq or '0', last_seq or '0', closed or '0' }
-end
+local val_only = ARGV[12] == '1'
 
 -- 1. Existence.
 local m = meta_map(KEYS[1])
-if m == nil then return reply('NOTFOUND') end
+if m == nil then return make_reply('NOTFOUND') end
 
 -- 2. Soft-deleted (before expiry, mirroring MemoryStore order).
-if m.softDel == '1' then return reply('SOFTDEL') end
+if m.softDel == '1' then return make_reply('SOFTDEL') end
 
 -- 3. Lazy expiry.
 if is_expired(m, now) then
   expire_cleanup(m)
-  return reply('NOTFOUND')
+  return make_reply('NOTFOUND')
 end
 
--- 4. Sliding-TTL touch (happens before the closed check upstream, so even
+-- 4. Sliding-TTL touch (upstream touches before the closed check, so even
 -- rejected appends refresh the window).
 m.accessedAtNs = string.format('%.0f', now)
 redis.call('HSET', KEYS[1], 'accessedAtNs', m.accessedAtNs)
@@ -55,49 +55,56 @@ refresh_backstop(m, now)
 if m.closed == '1' then
   if has_producer and m.cbEpoch ~= nil
     and m.cbId == producer_id and m.cbEpoch == ARGV[8] and m.cbSeq == ARGV[9] then
-    return reply('OK', m.tail, '2', nil, nil, nil, ARGV[9], '1')
+    return make_reply('OK', m.tail, '2', nil, nil, nil, ARGV[9], '1')
   end
-  return reply('CLOSED', m.tail, nil, nil, nil, nil, nil, '1')
+  return make_reply('CLOSED', m.tail, nil, nil, nil, nil, nil, '1')
 end
 
 -- 6. Content-type match (skipped when the request carries none).
 if req_ct ~= '' and norm_ct(m.ct) ~= req_ct then
-  return reply('CTMISMATCH', m.tail)
+  return make_reply('CTMISMATCH', m.tail)
 end
 
 -- 7. Producer validation — BEFORE Stream-Seq so retries dedupe even when
 -- Stream-Seq would conflict. Duplicates return with NO write.
-local p_outcome, p_d1, p_d2
 if has_producer then
   local state = redis.call('HGET', KEYS[3], producer_id)
-  p_outcome, p_d1, p_d2 = validate_producer(state, p_epoch, p_seq)
-  if p_outcome == 'DUP' then
-    return reply('OK', m.tail, '2', nil, nil, nil, p_d1, m.closed == '1' and '1' or '0')
-  elseif p_outcome == 'STALE_EPOCH' then
-    return reply('STALE_EPOCH', m.tail, nil, p_d1)
-  elseif p_outcome == 'EPOCH_SEQ' then
-    return reply('EPOCH_SEQ', m.tail)
-  elseif p_outcome == 'SEQ_GAP' then
-    return reply('SEQ_GAP', m.tail, nil, nil, p_d1, p_d2)
+  local outcome, d1, d2 = validate_producer(state, p_epoch, p_seq)
+  if outcome == 'DUP' then
+    return make_reply('OK', m.tail, '2', nil, nil, nil, d1, '0')
+  elseif outcome == 'STALE_EPOCH' then
+    return make_reply('STALE_EPOCH', m.tail, nil, d1)
+  elseif outcome == 'EPOCH_SEQ' then
+    return make_reply('EPOCH_SEQ', m.tail)
+  elseif outcome == 'SEQ_GAP' then
+    return make_reply('SEQ_GAP', m.tail, nil, nil, d1, d2)
   end
 end
 
 -- 8. Stream-Seq bytewise-lex regression check (C locale => memcmp order).
 if stream_seq ~= '' and m.lastSeq ~= nil and m.lastSeq ~= '' and stream_seq <= m.lastSeq then
-  return reply('SEQCONFLICT', m.tail)
+  return make_reply('SEQCONFLICT', m.tail)
 end
 
--- 9. Optimistic frame check: Go framed against expected_tail.
-if m.tail ~= expected_tail then return reply('RETRY') end
+-- 9. Validation-only mode stops here (all checks passed, nothing written).
+if val_only then return make_reply('VALONLY', m.tail) end
 
--- 10. Write frames and commit metadata.
-if #ARGV >= 12 then
-  local zargs = { 'ZADD', KEYS[2] }
-  for i = 12, #ARGV do
-    zargs[#zargs + 1] = '0'
-    zargs[#zargs + 1] = ARGV[i]
+-- 10. Optimistic frame check: Go framed against expected_tail.
+if m.tail ~= expected_tail then return make_reply('RETRY') end
+
+-- 11. Write frames (chunked: unpack is C-stack bounded) and commit metadata.
+if #ARGV >= 13 then
+  local i = 13
+  while i <= #ARGV do
+    local stop = math.min(i + 999, #ARGV)
+    local zargs = { 'ZADD', KEYS[2] }
+    for j = i, stop do
+      zargs[#zargs + 1] = '0'
+      zargs[#zargs + 1] = ARGV[j]
+    end
+    redis.call(unpack(zargs))
+    i = stop + 1
   end
-  redis.call(unpack(zargs))
   redis.call('HSET', KEYS[1], 'tail', new_tail)
 end
 
@@ -131,5 +138,5 @@ end
 
 redis.call('PUBLISH', channel, closing and 'c' or 'a')
 
-return reply('OK', new_tail, has_producer and '1' or '0',
+return make_reply('OK', new_tail, has_producer and '1' or '0',
   nil, nil, nil, result_last_seq, closing and '1' or '0')

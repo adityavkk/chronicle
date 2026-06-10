@@ -69,6 +69,15 @@ local function norm_ct(ct)
   return string.lower(string.match(ct, '^[^;]*'))
 end
 
+-- make_reply builds the fixed-shape 9-element reply used by the mutation
+-- scripts: {status, tail, producerResult, currentEpoch, expectedSeq,
+-- receivedSeq, lastSeq, closed, alreadyClosed} — all strings so int64
+-- fidelity survives the Lua double round-trip.
+local function make_reply(status, tail, presult, cur_epoch, exp_seq, rcv_seq, last_seq, closed, already)
+  return { status, tail or '', presult or '0', cur_epoch or '0',
+    exp_seq or '0', rcv_seq or '0', last_seq or '0', closed or '0', already or '0' }
+end
+
 -- validate_producer mirrors store.ValidateProducer exactly. state_str is the
 -- prod HASH value ("epoch:lastSeq:lastUpdated") or false/nil on first
 -- contact. Returns (outcome, detail1, detail2):
