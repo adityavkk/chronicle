@@ -270,28 +270,314 @@ pipelined) in the rare cold-cache case.
 
 ## 3. Live tailing — waking up long-pollers
 
-TODO
+`WaitForMessages` maps to a **publish-on-append + waiter loop**:
+
+1. The append/close script ends with `PUBLISH ds:{path}:notify
+   "<newTailOffset>|<closed>"` (`SPUBLISH` in cluster mode — classic `PUBLISH`
+   broadcasts to every cluster node; sharded pub/sub (Redis 7+) routes by the
+   channel's slot, which the `{path}` hash tag co-locates with the data).
+2. chronicle runs **one shared pub/sub connection** (per shard) with an
+   in-process waiter registry: `path -> set of waiting goroutines`. A waiter
+   registers, then the connection `(S)SUBSCRIBE`s to that stream's channel if
+   not already subscribed; last waiter out unsubscribes.
+3. **The missed-wakeup race** — data can land between the caller's initial read
+   (which found nothing) and the subscription becoming active; the publish for
+   it is gone forever (pub/sub has no replay). Mandatory ordering:
+   *subscribe first, then re-check the tail, then wait.* Concretely:
+   register waiter → await subscription confirmation → `GetCurrentOffset` (or a
+   direct read from the caller's offset) → if data exists, return immediately;
+   else block on {notification, timeout, ctx}. On notification, parse the
+   payload: if `closed`, return `streamClosed`; if offset ≤ caller's offset
+   (stale/duplicate wakeup), keep waiting; else re-read.
+4. **Bounded poll fallback:** even a correctly-ordered subscriber can lose
+   messages — pub/sub is fire-and-forget; a failover drops the subscription, and
+   `client-output-buffer-limit pubsub` (default 32mb/8mb/60s) makes the server
+   *disconnect* slow subscribers. So every waiter also wakes on a poll tick
+   (default 5 s, configurable) and re-checks the tail, and any pub/sub
+   reconnect triggers an immediate re-check broadcast to all registered waiters.
+   Worst-case added latency after a lost wakeup is one poll interval; the
+   common-case latency is one publish hop (~sub-ms).
+
+**Alternatives considered:**
+
+- *Pure polling* — correct and simple, but it's a hard latency/load tradeoff:
+  1 s polls × 10k waiters = 10k reads/s of mostly-empty tails. Kept only as the
+  fallback tick.
+- *Keyspace notifications* — require `notify-keyspace-events` via `CONFIG SET`,
+  which managed Redis routinely denies (and Walmart-managed Redis offers no
+  CONFIG, §5); events carry no payload (just "key was touched"), and they're
+  still fire-and-forget pub/sub underneath. Strictly worse than publishing our
+  own message with the new tail in it.
+- *`XREAD BLOCK`* — only meaningful for Model B; holds a blocked connection per
+  call and multiplexes poorly compared to one subscription connection serving
+  every waiter.
+
+**Recommendation:** pub/sub publish-on-append with tail-in-payload + subscribe →
+re-check → wait ordering + bounded poll fallback + re-check on reconnect.
 
 ## 4. Idempotency records — producer state
 
-TODO
+Producer state lives in a **dedicated HASH per stream**, `ds:{path}:prod`,
+field = `producerId`, value = `"<epoch>:<lastSeq>:<lastUpdatedMs>"` (compact,
+splittable in Lua with `string.match`, no cjson cost). A separate hash (rather
+than fields inside `:meta`) keeps meta listpack-small, lets the whole producer
+map age out independently, and gives **HEXPIRE (Redis ≥ 7.4, native in 8.x)**
+a clean target: each accepted producer write re-arms a per-field TTL (the
+idempotency window, default 24 h), so dead producers garbage-collect themselves
+without touching live ones.
+
+Two HEXPIRE caveats to encode in tests (08 §Redis):
+- `HSET` on an existing field **discards that field's TTL** — harmless here
+  because the script re-arms `HEXPIRE` immediately after every `HSET` of the
+  field, in the same atomic script.
+- On pre-7.4 Redis (if chronicle ever runs there), fall back to lazy pruning:
+  `lastUpdatedMs` is already in the value; the script treats an over-age record
+  as absent, and `ds_delete`/a maintenance sweep HDELs stale fields.
+
+**Validation is inside the same Lua script as the append** — this is the entire
+point. The fencing decision and the byte write must be one atomic step or two
+racing producers can both pass validation. `ds_append`'s producer block (Lua
+pseudocode):
+
+```lua
+-- ARGV: pid, epoch, seq  (all empty => no producer headers)
+local cur = redis.call('HGET', prodKey, pid)
+if cur then curEpoch, curSeq = cur:match('^(%-?%d+):(%-?%d+):') end
+if cur and epoch < curEpoch then return {'ERR_STALE_EPOCH', curEpoch} end
+if (not cur or epoch > curEpoch) and seq ~= 0 then return {'ERR_EPOCH_SEQ'} end
+if cur and epoch == curEpoch then
+  if seq <= curSeq then return {'DUPLICATE', curSeq, tail} end  -- no write, 204
+  if seq > curSeq + 1 then return {'ERR_SEQ_GAP', curSeq + 1, seq} end
+end
+-- accepted: perform append, then:
+redis.call('HSET', prodKey, pid, epoch .. ':' .. seq .. ':' .. nowMs)
+redis.call('HEXPIRE', prodKey, windowSec, 'FIELDS', 1, pid)
+```
+
+Notes:
+- `ErrPartialProducer` (some-but-not-all headers) is validated in Go before any
+  Redis call — it needs no state.
+- Duplicates return the *current tail* so the handler can respond 204 with the
+  right offset, and `lastSeq` for the response headers (03 §1.2
+  `AppendResult`).
+- `CloseStreamWithProducer` runs the same fencing in `ds_close`; on success it
+  stores `closedBy = pid:epoch:seq` in meta so a retried close is recognized as
+  a duplicate even after the producer field expires.
+- Everything is keyed under `{path}` — producer state replicates and fails over
+  *with* the data it fences, which is what makes the failover story in §6
+  coherent (state and data regress together, never independently).
 
 ## 5. Designing for Walmart-managed Redis
 
-TODO
+Assume the least-privileged managed profile and degrade gracefully; everything
+below is a startup-probe + config-flag, not a hard dependency.
+
+| Constraint | Design response |
+|---|---|
+| **Cluster mode possible** | `{path}` hash tags on every key and channel from day one (zero cost on standalone). All scripts single-slot with fully declared `KEYS`. Sharded pub/sub (`SSUBSCRIBE`/`SPUBLISH`) when cluster is detected, classic otherwise. Cross-slot fork bookkeeping decomposed (§8). Slot migrations surface as `MOVED`/`ASK` — the client retries; atomicity is preserved because a stream never spans slots. |
+| **No `CONFIG`** | Never rely on `CONFIG SET` (rules out keyspace notifications, raising `proto-max-bulk-len`, changing `maxmemory-policy`). At startup, *attempt* `CONFIG GET maxmemory-policy appendonly proto-max-bulk-len`; if denied, log that guarantees are operator-asserted and continue. `noeviction` becomes a **documented deployment requirement** enforced by runtime integrity checks (chunk `STRLEN` validation) that turn silent eviction into loud corruption errors. |
+| **Restricted Lua?** | `EVAL`/`EVALSHA`/`SCRIPT LOAD` are the most widely permitted programmability surface; **Redis Functions (`FUNCTION LOAD`) are avoided entirely** — more often ACL-blocked, and effects replication gives plain scripts the same replication safety. Scripts: no globals, no `redis.breakpoint`, all keys declared, **`nowMs` passed as ARGV** (one clock — the Go process — for all TTL/expiry math; no `TIME` dependency). Script cache is volatile (flushed on restart/failover) → go-redis `Script.Run`'s automatic NOSCRIPT fallback. If even EVAL is denied, the model has **no non-Lua fallback for writes** — `MULTI/EXEC` cannot do conditional validation; this is a stated platform requirement, verified by a startup self-test that EVALs a trivial script. |
+| **Lowered `proto-max-bulk-len`** | Chunk size `S` (default 1 MiB) and `max_append_size` are configuration, with the constraint `S ≤ limit` and `max_append_size ≤ limit` (the whole append body travels as one ARGV). Reads are assembled in Go from ≤ `S`-sized GETRANGE replies, never as one giant Lua reply. A startup probe appends/reads a `S`-sized value to a scratch key to verify the effective limit. |
+| **ACL-restricted commands** | No `KEYS`, no `DEBUG`, no `FLUSH*`. `SCAN` used only by the optional orphan-sweeper (per-node in cluster). `WAIT` treated as optional (§6) and feature-flagged. |
+| **Connection limits / TLS** | One pooled client for request traffic + one dedicated pub/sub connection per shard; pool sizing config. TLS + AUTH assumed. |
+
+Degradation summary: on the most restricted plausible deployment (cluster, no
+CONFIG, EVAL allowed, low bulk limit), chronicle runs at full fidelity with
+smaller chunks and operator-asserted `noeviction`/AOF. The only true hard
+requirements are **EVAL and pub/sub**.
 
 ## 6. Failure analysis — what chronicle can honestly claim
 
-TODO
+**Partial failure on append: impossible at the data level.** A Lua script
+executes atomically — the server is blocked for its duration and either all of
+its effects happen or none are visible. There is no state where chunk bytes
+exist but the tail wasn't advanced, or producer state advanced without bytes.
+The multi-key layout *can* be partially destroyed from outside (eviction,
+manual DEL, chunk TTL firing before meta) — mitigated by `noeviction`, the
+meta-expires-first TTL slack ordering, and read-time `STRLEN` integrity checks
+that return a corruption sentinel instead of fabricating data.
+
+**Connection loss mid-EVAL: ambiguous outcome, by design recoverable.** Once
+Redis starts a script it runs to completion regardless of client disconnect —
+so the append may or may not have happened from chronicle's point of view.
+- *With producer headers:* the retry is safe — if the script ran, the retry hits
+  the duplicate branch and returns 204 with the recorded offset. This is exactly
+  what the protocol's idempotent-producer mechanism exists for.
+- *Without producer headers:* a retry may double-append. chronicle should
+  surface the ambiguous error to the caller rather than auto-retrying writes.
+  **Claim: exactly-once append only with producer headers; at-least-once
+  otherwise.** Same as the protocol intends.
+
+**Replica failover loses acked writes — the headline caveat.** Redis
+replication is asynchronous: a master can ack an append (even an AOF-fsynced
+one) and die before the replica receives it; after promotion those bytes are
+gone. Consequences and mitigations:
+- A client may hold an offset **greater than the new tail**. Reads at
+  `offset > tail` must be detected (cheap: compare against meta tail) and
+  treated as a distinguishable error, not an empty long-poll — otherwise the
+  reader silently waits until *different* bytes occupy "its" offsets and it
+  reads a frankenstream. This check is mandatory in `Read`/`WaitForMessages`.
+- Producer state and data live in the same slot and regress *together*, so a
+  surviving producer recovers coherently: its next append sees the regressed
+  `lastSeq`, gets a gap/duplicate verdict consistent with the regressed data,
+  and (for a well-behaved client re-sending from its unacked queue) re-appends
+  the lost suffix.
+- **`WAIT numreplicas timeout`** after each append narrows the window:
+  it blocks until the write reaches N replicas' buffers. It is *not* a
+  durability guarantee (no rollback on failure — the write stays locally,
+  un-replicated; replica receipt ≠ replica fsync) and costs ~RTT per append.
+  Offer as opt-in (`wait_replicas`, `wait_timeout_ms`) for streams that prefer
+  latency-for-safety; note `WAIT` may itself be ACL-blocked (§5).
+- Honest durability statement for the README: *appends are as durable as the
+  underlying Redis deployment — AOF `everysec` bounds loss to ~1 s on
+  single-node crash; async replication means failover can drop a recently-acked
+  suffix; chronicle detects and reports the resulting offset regressions rather
+  than hiding them.* chronicle is a protocol-faithful store over Redis's
+  guarantees; it cannot exceed them.
+
+**Pub/sub message loss** (failover, slow-subscriber disconnect): liveness-only
+impact, bounded by the poll fallback tick (§3); never a correctness issue since
+notifications carry no unique data.
+
+**Cluster resharding mid-operation:** scripts target one slot; the client
+follows `MOVED`/redirects and re-runs. A re-run append is covered by the same
+ambiguity analysis as connection loss (idempotent with producers).
+
+**Process crash in two-phase fork creation** (cross-slot, §8): can leak a
+source `RefCount` increment with no fork meta. Self-healing via the
+`ds:{src}:forks` registry — `ds_release`/the sweeper reconciles registry
+entries whose fork meta is absent.
 
 ## 7. Go client choice — go-redis/v9 vs rueidis
 
-TODO
+Both live under the `redis` GitHub org and are actively maintained (08 §Go
+client). What this workload actually exercises: `EVALSHA` on the hot write
+path, long-lived pub/sub with reconnect handling, pipelined `GETRANGE` reads,
+cluster routing, RESP3.
+
+| Axis | go-redis/v9 | rueidis |
+|---|---|---|
+| Lua scripts | `redis.Script` — SHA caching + automatic NOSCRIPT→LOAD→retry | `rueidis.NewLuaScript` — equivalent, fine |
+| Pub/sub ergonomics | `PubSub` type: channel-based API, **automatic reconnect + resubscribe**, `SSubscribe` for sharded | `Dedicate()`/`Receive()` loops; reconnect/resubscribe is hand-rolled by the app |
+| Cluster | mature `ClusterClient`, script routed by first key, MOVED/ASK handled | mature, same coverage |
+| RESP3 | supported (default protocol 3) | RESP3-first by design |
+| Raw throughput | per-conn round trips; explicit pipelining | auto-pipelining — significantly higher ops/s in benchmarks; latency tradeoffs at low concurrency (rueidis#609/#626) |
+| Ecosystem / familiarity | canonical client, broadest adoption, otel hooks, most examples | smaller; API less conventional (command builder) |
+
+**Recommendation: `github.com/redis/go-redis/v9`.**
+
+Reasoning: chronicle's correctness-critical component is the **waiter loop**,
+and go-redis's `PubSub` gives exactly the lifecycle the §3 design needs
+(auto-reconnect with resubscribe, a hook point for the "re-check on reconnect"
+broadcast) out of the box, where rueidis requires hand-rolling the most
+bug-prone part. The hot path is one `EVALSHA` per append whose cost is
+dominated by Redis-side byte copying, not client CPU — rueidis's
+auto-pipelining advantage targets a bottleneck this workload doesn't have at
+expected scale. Read paths use explicit pipelines, which go-redis expresses
+fine. `Script.Run`'s NOSCRIPT fallback directly covers the volatile-script-cache
+failure mode (§5). And ubiquity matters in a Walmart codebase: more reviewers,
+more internal precedent, otel integration. If profiling ever shows
+client-side ceilings, the store interface contains the blast radius of a
+rueidis migration.
 
 ## 8. Recommended key schema and Lua script catalog
 
-TODO
+### 8.1 Key schema
+
+`path` below is the stream path verbatim (e.g. `/v1/stream/orders/123`),
+embedded in `{…}` so every key and the channel hash to the same cluster slot.
+
+| Key / channel | Type | Contents | TTL |
+|---|---|---|---|
+| `ds:{<path>}:meta` | HASH | `ctype`, `tail` (ByteOffset, uint64 decimal), `readSeq` (always `0` in v1), `msgCount`, `chunkSize`, `lastSeqHdr` (Stream-Seq), `ttlSec`, `expiresAtMs`, `createdAtMs`, `lastAccessedAtMs`, `closed` (0/1), `closedBy` (`pid:epoch:seq`), `forkedFrom`, `forkOffset`, `forkOffsetReq`, `forkSubOffset`, `refCount`, `softDeleted` | backstop = remaining + slack |
+| `ds:{<path>}:c:<n>` | STRING | data bytes `[n·S, (n+1)·S)`; `n` decimal from 0; `S` frozen per-stream in meta at create | backstop, slack > meta's |
+| `ds:{<path>}:idx` | STRING | JSON streams only; record `i` = bytes `[16i, 16i+16)` = `%016d` start ByteOffset of message `i` | backstop, slack > meta's |
+| `ds:{<path>}:prod` | HASH | `producerId -> "epoch:lastSeq:lastUpdatedMs"` | per-field HEXPIRE (idempotency window) |
+| `ds:{<path>}:forks` | SET | child fork paths (refcount reconciliation registry) | none while refCount > 0 |
+| `ds:{<path>}:notify` | pub/sub channel | payload `"<readSeq>_<byteOffset>|<closed01>"`; `SPUBLISH` in cluster | n/a |
+
+### 8.2 Lua script catalog
+
+Shared preamble for every script: load meta; if absent → `{'NOTFOUND'}`; else
+evaluate lazy expiry against `ARGV nowMs` (`expiresAtMs`, or
+`lastAccessedAtMs + ttlSec`); if expired → delete all declared stream keys,
+return `{'NOTFOUND'}`. All scripts return a flat array whose first element is a
+status token that Go maps 1:1 onto the sentinel errors (03 §1.1). `nowMs`
+always comes from Go (single clock; no `TIME` in scripts).
+
+| Script | KEYS | ARGV | Returns |
+|---|---|---|---|
+| `ds_create` | `meta, prod, idx, c:0` | `nowMs, ctype, ttlSec?, expiresAtMs?, closed01, forkedFrom?, forkOffset?, forkOffsetReq?, forkSubOffset?, chunkSize, initialData?, initialMsgStarts?` (CSV) | `{'CREATED', tailOffset}` \| `{'EXISTS', <full meta field/value list>}` — config comparison (`ConfigMatches`, media-type normalization) happens in Go against the returned meta; the script only guarantees atomic create-if-absent |
+| `ds_append` | `meta, prod, idx, c:<n>, c:<n+1>, …, c:<n+k>` (candidate chunks computed in Go from a cached tail) | `nowMs, data, msgStarts` (CSV, relative; empty for raw)`, ctypeHdr?, seqHdr?, close01, pid?, epoch?, seq?, prodWindowSec, backstopSec` | `{'OK', readSeq, byteOffset, producerResult, lastSeq, closed01}` \| `{'RETRY', actualTail}` (tail moved past candidate chunk keys — Go recomputes keys and re-EVALs; converges because the same script is the only tail-mover) \| `{'ERR_CLOSED'}` \| `{'ERR_CTYPE'}` \| `{'ERR_SEQ_CONFLICT', lastSeqHdr}` \| `{'ERR_STALE_EPOCH', curEpoch}` \| `{'ERR_EPOCH_SEQ'}` \| `{'ERR_SEQ_GAP', expected, received}` \| `{'DUPLICATE', lastSeq, tailOffset, closed01}` \| `{'NOTFOUND'}`; ends with `(S)PUBLISH` on success/close |
+| `ds_close` | `meta, prod` | `nowMs, pid?, epoch?, seq?, prodWindowSec` | `{'OK', tailOffset, alreadyClosed01, producerResult, …}` — close-only; producer branch consults/updates `closedBy` for idempotent duplicate detection; publishes `closed=1` |
+| `ds_touch` | `meta, prod, idx, c:0…c:<n>` | `nowMs, backstopSec` | `{'OK'}` — throttled lastAccessedAt update + backstop TTL refresh (called by read path at most ~1/min/stream); chunk keys enumerated from Go's view of meta, RETRY-on-growth like `ds_append` |
+| `ds_delete` | `meta, prod, idx, forks, c:0…c:<n>` | `nowMs` | `{'OK', refCount, softDeleted01, forkedFrom}` — if `refCount > 0`: set `softDeleted=1`, keep keys; else `DEL` all and return `forkedFrom` so Go can call `ds_release` on the source's slot |
+| `ds_fork` (phase 1, runs on **source** slot) | `srcMeta, srcForks` | `nowMs, forkPath, forkOffset?` | `{'OK', resolvedForkOffset, srcTail, srcCtype}` \| `{'ERR_FORK_OFFSET'}` — validates offset ≤ source tail, `INCR refCount`, `SADD` registry; phase 2 = `ds_create` on the fork's slot with fork fields; crash between phases is reconciled from the registry |
+| `ds_release` (runs on **source** slot) | `srcMeta, srcForks, srcProd, srcIdx, srcC:0…` | `nowMs, forkPath` | `{'OK', refCount}` — `SREM` + `DECR refCount`; if `refCount == 0 && softDeleted` → physical delete (cascading release if the source is itself a fork is driven from Go, slot by slot) |
+
+Read paths (`Get`, `Has`, `Read`, `GetCurrentOffset`, the re-check in
+`WaitForMessages`) are plain pipelined commands, not scripts: `HGETALL meta`
+(+ Go-side `IsExpired` check; expired → fire `ds_delete` and report not-found)
+→ for reads, `GETRANGE idx` slice (JSON) + `GETRANGE c:<n>…` data slices,
+bounded by the response budget, with `STRLEN` integrity validation. Fork reads
+below `forkOffset` re-enter the read path against `forkedFrom`'s keys
+(different slot; plain reads need no cross-slot atomicity — each stream's own
+meta/tail snapshot bounds its segment).
+
+### 8.3 Worked example — `ds_append` chunk math
+
+Stream tail = 2,621,440 (2.5 MiB), `S` = 1 MiB, payload = 1.5 MiB, raw mode.
+Go passes `KEYS = meta, prod, idx, c:2, c:3, c:4`. Script: verifies
+`tail/S = 2` is within passed chunk keys; `APPEND c:2` the first 0.5 MiB
+(filling it to exactly `S`), `APPEND c:3` the remaining 1 MiB (`c:4` was passed
+defensively but ends up untouched); new tail = 4,194,304; `HSET meta tail … lastAccessedAtMs …`; backstop `EXPIRE`s;
+`SPUBLISH ds:{path}:notify "0000000000000000_0000000004194304|0"`; returns
+`{'OK', 0, 4194304, …}`. A concurrent append that raced ahead would have made
+`tail/S = 5` ≥ the passed key range → `{'RETRY', newTail}` with no writes.
 
 ## 9. Decision log
 
-TODO
+1. **Data model: hybrid (Model D)** — meta HASH + fixed-size chunk STRINGs +
+   fixed-width message-index STRING (JSON only) + producer HASH + pub/sub
+   channel. Chunked STRING is the only model giving true byte-ranged,
+   budget-bounded reads under `proto-max-bulk-len`.
+2. **Chunk size `S` = 1 MiB default, configurable, frozen per stream at create**
+   (stored in meta) — small enough for lowered bulk limits, large enough that
+   per-key overhead is noise.
+3. **All mutations via single Lua `EVALSHA` scripts; no MULTI/EXEC, no Redis
+   Functions** — MULTI can't branch on validation; Functions are less portable
+   on managed platforms with zero benefit under effects replication.
+4. **All keys + channel share the `{path}` hash tag** — single-slot streams make
+   scripts cluster-legal and failover-coherent; the only cross-slot flows are
+   fork create/release, decomposed with a registry-based reconciliation.
+5. **Cluster declared-keys problem solved with candidate-chunk-keys + RETRY** —
+   Go passes chunk keys computed from a cached tail; the script verifies and
+   returns `RETRY` with the actual tail if stale.
+6. **JSON message index = 16-digit ASCII start-offsets in an APPEND-grown
+   STRING** — mirrors the `%016d` offset wire format, GETRANGE-sliceable,
+   no binary packing in Lua 5.1, 16 bytes/message.
+7. **Live tail = publish-on-append (tail offset + closed flag in payload),
+   sharded pub/sub in cluster, one shared subscriber connection + waiter
+   registry, subscribe → re-check → wait ordering, bounded poll fallback
+   (5 s) + re-check on reconnect.** Keyspace notifications rejected (need
+   CONFIG, no payload); pure polling rejected (latency/load).
+8. **Producer state in a dedicated `:prod` HASH with per-field HEXPIRE
+   (re-armed every write because HSET discards field TTLs), validated inside
+   the same script as the append**; `closedBy` in meta makes producer-close
+   idempotent beyond the field's lifetime.
+9. **TTL = lazy authoritative expiry on access (Caddy-compatible sliding
+   semantics) + backstop key TTLs with meta-expires-first slack ordering**;
+   `lastAccessedAt` writes throttled on reads.
+10. **`noeviction` is a deployment requirement, not an assumption** — verified
+    when CONFIG is permitted, otherwise enforced by read-time STRLEN integrity
+    checks that convert silent eviction into explicit corruption errors.
+11. **Honest guarantees:** exactly-once appends only with producer headers
+    (retry-after-ambiguity hits the duplicate branch); async replication means
+    failover can drop acked suffixes — chronicle detects `offset > tail` and
+    reports regression instead of serving a frankenstream; optional `WAIT`
+    narrows but does not close the window.
+12. **Client: `go-redis/v9`** — PubSub auto-reconnect/resubscribe covers the
+    most bug-prone component, `Script.Run` handles the volatile script cache,
+    canonical adoption; rueidis's auto-pipelining targets a bottleneck this
+    workload doesn't have, and the store interface contains any future
+    migration.

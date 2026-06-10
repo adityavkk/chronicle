@@ -225,10 +225,25 @@ white-box/deployment concern per IMPLEMENTATION_TESTING.md.
 
 ### 4.8 Go Redis client
 
-**rueidis vs go-redis/v9** — final call deferred to research doc 05's
-recommendation; requirements either way: `EVALSHA` script helper with NOSCRIPT
-fallback, robust pub/sub resubscription, cluster support, context-first API.
-(§9 decision log records the outcome.)
+**go-redis/v9** (research doc 05 §7's recommendation, adopted). The workload is
+EVALSHA-dominated, so rueidis's auto-pipelining edge is irrelevant here, while
+go-redis's `PubSub` auto-reconnect/resubscribe directly de-risks the waiter
+loop — the most bug-prone component — and `Script.Run` transparently handles
+NOSCRIPT reloads against managed Redis's volatile script cache.
+
+### 4.9 Relationship to research doc 05's chunked-STRING design
+
+Doc 05 specifies a more industrial data plane: fixed-size chunk STRINGs +
+APPEND/GETRANGE + a fixed-width message-index string, giving byte-ranged,
+response-budget-bounded reads for multi-GB streams under lowered
+`proto-max-bulk-len`. v1 deliberately ships the simpler ZSET-lex model (§4.2):
+it reproduces the reference memory store's message-list contract almost 1:1
+(lowest conformance risk), uses a fixed key set per Lua script (no cluster
+declared-keys RETRY protocol), and makes fork sub-offset resolution trivial.
+Doc 05 is the blueprint for the scale-up backend if byte-bounded reads or
+per-stream sizes beyond node comfort become requirements; everything else in
+doc 05 (pub/sub wake protocol, HEXPIRE producer records, lazy TTL + backstop
+key TTLs, noeviction posture, honest durability guarantees) is adopted as-is.
 
 ## 5. Conformance strategy
 
@@ -290,9 +305,9 @@ lands as a PR-sized commit series on `main` (single-author repo; worktrees via
 | # | Decision | Why (short) | Revisit if |
 | --- | --- | --- | --- |
 | 1 | Defer subscriptions/webhooks group | only optional group; CLI can't enable; Caddy gate skips it | product need or suite makes it mandatory |
-| 2 | ZSET-lex frame model (d) | one structure, one command per op, boundaries preserved | multi-GB streams per key become real |
+| 2 | ZSET-lex frame model (d) over doc 05's chunked STRINGs | one structure, one command per op, boundaries preserved, fixed key set per script | multi-GB streams or lowered proto-max-bulk-len become real (then: doc 05 §8 design) |
 | 3 | Lua scripts over MULTI/WATCH | linearizable single-RTT mutations, per-stream serialization for free | managed Redis bans EVALSHA |
 | 4 | Pub/sub + re-check + slow poll | config-free, prompt wakeups, race-safe | none expected |
 | 5 | Lazy expiry + key-TTL GC backstop | exact sliding-window semantics + no leak | active reaper needed for fork GC at scale |
-| 6 | Client lib: see doc 05 | — | — |
+| 6 | go-redis/v9 over rueidis | PubSub auto-resubscribe de-risks waiters; Script.Run handles NOSCRIPT; EVALSHA workload doesn't need auto-pipelining | pub/sub fan-out becomes hot |
 | 7 | Stdlib `net/http` (Go 1.22+ mux), no framework | zero deps on the hot path, Caddy parity is at handler level not router level | — |

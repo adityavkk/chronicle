@@ -852,12 +852,294 @@ Servers **MAY** implement TTL-based cleanup of producer state:
   - Otherwise → `409 Conflict` with `Stream-Closed: true`.
 - Forks never inherit producer state (§4.2; see [Section 10.5](#105-producer-state-and-fork-boundaries-42)).
 
-<!-- SECTION-12 -->
+## 12. Reserved subscription APIs and delivery (§6, §7)
 
-<!-- SECTION-13 -->
+Subscriptions are durable cursors that wake workers when linked streams have pending events. They are part of the spec but separable from the core stream operations; chronicle can stage them after core protocol support. Captured here for completeness.
 
-<!-- SECTION-14 -->
+### 12.1 Reserved prefix and addressing (§6, §6.1)
 
-<!-- SECTION-15 -->
+- Control APIs live under the reserved prefix: `{stream-url}/__ds/subscriptions/:id`.
+- Servers **MUST** route the `__ds` prefix **before** normal stream operations; application stream paths whose first stream-root-relative segment is `__ds` are reserved for Durable Streams control APIs.
+- Stream paths in subscription request/response bodies are **stream-root-relative** (e.g., `events/abc`, `wake/pool`).
+- Subscription `id` is client-provided, unique within the `__ds` namespace. One cursor per subscription stream. Each stream link has: `path`, `link_type` (`glob` from `pattern`, `explicit` from `streams[]`), `acked_offset` (last processed offset, **inclusive**).
+- If a stream is linked both explicitly and by glob, `explicit` takes precedence in serialized responses; removing the explicit link does not remove a still-matching glob link.
 
-<!-- SECTION-16 -->
+### 12.2 Create or re-confirm — `PUT /__ds/subscriptions/:id` (§6.2)
+
+Body fields: `type` (required: `webhook` | `pull-wake`), `pattern` (glob over stream-root-relative paths; `*` matches one segment, `**` matches zero or more), `streams` (explicit paths, additive to `pattern`), `webhook.url` (required for webhook type), `wake_stream` (required for pull-wake type), `lease_ttl_ms` (1 s – 10 min; default 30 s), `description`. At least one of `pattern` or `streams` **MUST** be present.
+
+Responses: `201` created; `200` re-confirmed with identical configuration; `409` same ID, different configuration. Servers **MUST** hash the normalized configuration (type, pattern, normalized streams[], delivery config, lease_ttl_ms, description) and compare hashes for idempotent re-confirmation.
+
+- Webhook deliveries are signed with an **asymmetric** key; responses **MUST NOT** include shared webhook signing secrets.
+- Webhook URL validation (also §12.8): production URLs **MUST** use `https://`; development **MAY** use `http://localhost` / `http://127.0.0.x`; RFC 1918, link-local, loopback, and other local targets **MUST** be rejected outside the localhost exception.
+- On creation with a `pattern`, the server **MUST** eagerly backfill matching existing streams **at their current tail offset** (no historical replay by default). Streams discovered later via a matching append are linked **before** that append for wake purposes.
+
+### 12.3 Read / delete / membership (§6.3, §6.4)
+
+- `GET /__ds/subscriptions/:id` → JSON document with `id`, `subscription_id`, `type`, `pattern`, `streams[]` (path, link_type, acked_offset), `webhook` (may include `signing` metadata: `alg`, `kid`, `jwks_url`), `wake_stream`, `lease_ttl_ms`, `created_at`, `status` (`active` | `failed` while webhook retry is scheduled), `description`. Receivers **MUST** use the `kid` from each webhook signature header when selecting a verification key.
+- `DELETE /__ds/subscriptions/:id` → tombstones the subscription, `204 No Content`. In-flight callback/ack/release requests for a deleted subscription **MUST** fail and **MUST NOT** advance cursors.
+- `POST /__ds/subscriptions/:id/streams` with `{ "streams": [...] }` → `204`; links added at current tail offset; adding an already-linked stream is idempotent.
+- `DELETE /__ds/subscriptions/:id/streams/:path` (`:path` URL-encoded, may contain slashes) → `204`; deleting an absent explicit link is idempotent; removes only the explicit link (glob link remains).
+
+### 12.4 JWKS discovery (§6.5)
+
+- Servers supporting webhook subscriptions **MUST** expose signing public keys as a JWKS at `GET {stream-url}/__ds/jwks.json` → `200`, `Content-Type: application/jwk-set+json`, `Cache-Control: public, max-age=300` (example shows Ed25519 OKP keys).
+- Lives under `__ds` (not `/.well-known/`) because servers can be embedded under arbitrary sub-roots. Receivers **SHOULD** rely on the `jwks_url` from subscription metadata.
+- Each JWK `kid` **MUST** be stable for the key's lifetime and **MUST** be unique within the set; **SHOULD** be derived from key material (e.g., JWK thumbprint). Private keys **MUST** stay secret, **SHOULD** persist across restarts in production. During rotation, old public keys **MUST** stay published until all deliveries that could have been signed with them are outside the accepted replay window.
+
+### 12.5 Delivery model (§7)
+
+- A subscription is **idle** when no lease is held and no wake is in flight. Pending work = any linked stream's tail offset > its `acked_offset`. Pending work creates a new wake generation unless a wake is in flight or a lease is held.
+- Every wake has a unique `wake_id` and a monotonically increasing `generation` scoped to the subscription. Acks are **last-processed inclusive**: acking offset `N` means the next read starts after `N`.
+
+**Webhook delivery (§7.1):**
+
+- `POST {webhook.url}` with JSON body (`subscription_id`, `wake_id`, `generation`, `streams[]` with `acked_offset`/`tail_offset`/`has_pending`, `callback_url`, `callback_token`) and header `Webhook-Signature: t=<timestamp>,kid=<key-id>,ed25519=<base64url-signature>`.
+- Signature: Ed25519 over `<timestamp>.<raw_body>` (`t` = decimal Unix timestamp; raw body = exact request bytes; signature unpadded base64url). Receivers **SHOULD** verify against the raw body and reject timestamps outside a small replay window (e.g., five minutes).
+- Synchronous completion: handler returns `{ "done": true }` → server **MUST** auto-ack the tail offsets from that wake snapshot and release the lease; if newer events arrived after the snapshot, the subscription **MUST** be woken again with a new `wake_id` and `generation`.
+- Asynchronous completion: handler calls `POST /__ds/subscriptions/:id/callback` with `Authorization: Bearer <callback_token>` and body `{ wake_id, generation, acks: [{stream, offset}], done }`. Success → `{ "ok": true, "next_wake": false }`. Stale `wake_id`/`generation` → **MUST** return `409` with `{ "error": { "code": "FENCED" } }`.
+- Callback tokens are scoped to subscription + generation (not service JWTs).
+- Retries: exponential backoff **1 s → 60 s with 20% jitter**; retry metadata including `next_attempt_at` **MUST** be persisted across (Durable Object) eviction so a freshly-loaded instance honors the prior schedule.
+
+**Pull-wake (§7.2):**
+
+- The subscription writes wake events (`{type:"wake", subscription_id, stream, generation, ts}`) to its configured `wake_stream` — an ordinary durable stream that **MUST** be created explicitly by the application.
+- Workers race to claim: `POST /__ds/subscriptions/:id/claim` with `Authorization: Bearer <service-jwt>` and `{ "worker": <name> }`. Success → `{ wake_id, generation, token, streams[], lease_ttl_ms }`. Lease held elsewhere → `409` with `{ "error": { "code": "ALREADY_CLAIMED", "current_holder", "generation" } }`.
+- Ack: `POST /__ds/subscriptions/:id/ack` with claim token; doubles as **heartbeat** — without `done: true` it extends the lease; with `done: true` it applies acks, releases the lease, returns `{ "ok": true, "next_wake": true|false }`.
+- Release without acking: `POST /__ds/subscriptions/:id/release` with `{ wake_id, generation }` → `204`. If pending work remains after release, the server **MUST** write another wake event. Stale release/ack → **MUST** return `409 FENCED`.
+
+**Generation fencing and leases (§7.3):**
+
+- Servers **MUST** reject a callback, ack, or release unless **all** match current state: (1) bearer token valid for the subscription; (2) token generation matches current generation; (3) request `generation` matches current generation; (4) request `wake_id` matches the current wake.
+- `lease_ttl_ms` bounds worker liveness: webhook leases start when a wake is issued, extended by valid callbacks; pull-wake leases start on successful claim, extended by valid non-`done` acks. On lease expiry the server **MUST** clear the holder and wake token, and **MUST** schedule another wake if pending work remains.
+
+## 13. Security considerations (§12)
+
+- **Authentication/authorization (§12.1):** explicitly out of scope. Clients **SHOULD** implement standard HTTP auth primitives (Basic [RFC7617], Bearer [RFC6750], Digest [RFC7616]). Implementations **MUST** provide appropriate access controls preventing unauthorized stream creation/modification/deletion, by any mechanism (including auth extensions per §11.2).
+- **Multi-tenant safety (§12.2):** if stream URLs are guessable, servers **MUST** enforce access controls even when using shared caches. Servers **SHOULD** validate and sanitize stream URLs against path traversal and enforce URL component limits.
+- **Untrusted content (§12.3):** clients **MUST** treat stream contents as untrusted input and **MUST NOT** evaluate or execute stream data without validation (log-injection concern).
+- **Content-type validation (§12.4):** servers **MUST** validate appended content types against the stream's declared type (type-confusion prevention).
+- **Rate limiting (§12.5):** servers **SHOULD** rate-limit; `429 Too Many Requests` signals exhaustion.
+- **Sequence validation (§12.6):** servers **MUST** reject `Stream-Seq` regressions to maintain stream integrity.
+- **Browser security headers (§12.7):** see [Section 9](#9-browser-security-headers-and-cors).
+- **Webhook SSRF prevention (§12.8):** **MUST** require HTTPS for production webhook URLs (HTTP **MAY** be allowed for localhost in dev); **SHOULD** block RFC 1918, link-local, loopback; **SHOULD** block cloud metadata endpoints (e.g., `169.254.169.254`); **MAY** allowlist domains.
+- **Callback token security (§12.9):** callback/claim tokens **MUST** be passed via the `Authorization` header (avoids logging exposure); **SHOULD** be signed (e.g., HMAC JWTs) carrying subscription identity, generation, expiry; signatures **MUST** be validated on every callback, ack, and release.
+- **Webhook signature security (§12.10):** receivers **SHOULD** verify signatures before processing, select keys by `kid` from the JWKS, reject timestamps outside the replay window; shared endpoints **SHOULD** also check the expected server key set and `subscription_id`.
+- **TLS (§12.11):** all protocol operations **MUST** be over HTTPS (TLS) in production.
+
+## 14. IANA: default port and header registry
+
+### 14.1 Default port (§13.1)
+
+- Standalone Durable Streams servers default to **4437/tcp** (4437/udp reserved for future use; chosen from IANA unassigned range 4434–4440).
+- Standalone implementations **SHOULD** default to 4437 when no port is configured; when embedded in an existing web server/framework, **SHOULD** use the host server's port instead.
+
+### 14.2 Registered HTTP headers (§13.2)
+
+| Header | Description (spec wording) |
+| --- | --- |
+| `Stream-TTL` | Sliding time-to-live window for streams (seconds); resets on read or write |
+| `Stream-Expires-At` | Absolute expiry time for streams (RFC 3339 timestamp) |
+| `Stream-Seq` | Writer sequence number for coordination (opaque string) |
+| `Stream-Cursor` | Cursor for CDN collapsing (opaque string) |
+| `Stream-Next-Offset` | Next offset for subsequent reads (opaque string) |
+| `Stream-Up-To-Date` | Indicates up-to-date response (presence header) |
+| `Stream-Closed` | Indicates stream is closed / end-of-stream (presence header, value `true`) |
+| `Stream-Forked-From` | Source stream path for forked streams, used on `PUT` requests (opaque string) |
+| `Stream-Fork-Offset` | Divergence point offset for forked streams, used on `PUT` requests (opaque string) |
+| `Stream-Fork-Sub-Offset` | Sub-position refinement past `Stream-Fork-Offset`, used on `PUT` (non-negative integer; bytes for non-JSON, message count for JSON) |
+| `Webhook-Signature` | Ed25519 signature for webhook notification verification (§7.1) |
+
+Producer headers (`Producer-Id`, `Producer-Epoch`, `Producer-Seq`, `Producer-Expected-Seq`, `Producer-Received-Seq`) and `stream-sse-data-encoding` are defined in the spec body (§5.2.1, §5.8) but are not in the §13.2 registration table.
+
+## 15. Spec cross-reference errata
+
+Stale internal references in PROTOCOL.md (the content is unambiguous; only the pointers are wrong). Useful when reading the spec side-by-side:
+
+| Location | Says | Should be |
+| --- | --- | --- |
+| §4.2 fork sub-offset, JSON semantics | "flattened messages (Section 7.1)" | §9.1.2 (Array Flattening) — §7.1 is Webhook Delivery |
+| §4.2 fork sub-offset, addressing dimension | "see Section 6" | §8 (Offsets) — §6 is Reserved Subscription APIs |
+| §5.6 response headers, `Cache-Control` | "see Section 9" | §10 (Caching and Collapsing) — §9 is Content Types |
+| Task brief (not spec) | "spec section 10.7" for CORS/browser security | §12.7 (Browser Security Headers); the spec has no §10.7 and defines no CORS (`Access-Control-*`) requirements |
+
+## 16. Consolidated MUST/SHOULD/MAY table
+
+Server-side requirements unless marked **(client)**. Force is the spec's exact RFC 2119 keyword.
+
+### Core model, creation, deletion
+
+| # | Force | Requirement | Spec |
+| --- | --- | --- | --- |
+| 1 | MUST | Treat `Stream-Closed` request header as present only when value is exactly `true` (case-insensitive); treat other values as absent | §4.1 |
+| 2 | SHOULD NOT | Return errors for non-`true` `Stream-Closed` values (ignore instead) | §4.1 |
+| 3 | MAY | Implement retention policies dropping data older than a given age | §4 |
+| 4 | SHOULD NOT | Create a new stream at the URL of a deleted stream | §4 |
+| 5 | MAY | Implement read and write paths independently | §3 |
+| 6 | MUST | PUT on existing stream: `200 OK` if config (content type, TTL/expiry, closure status) matches, `409 Conflict` if not | §5.1 |
+| 7 | MUST | Compare request `Stream-Closed` against the stream's closure status for idempotent PUT matching | §5.1 |
+| 8 | MAY | Default content type to `application/octet-stream` when omitted on PUT | §5.1 |
+| 9 | MUST | Enforce `Stream-TTL` syntax: non-negative decimal integer, no leading zeros/plus/decimal point/scientific notation | §5.1 |
+| 10 | SHOULD | Reject PUT with both `Stream-TTL` and `Stream-Expires-At` with `400` (MAY define documented precedence instead — then MUST document) | §5.1 |
+| 11 | SHOULD | Include `Location: {stream-url}` on `201 Created` | §5.1 |
+| 12 | MUST | Soft-delete (not remove) a stream with reference count > 0 on DELETE | §5.4 |
+| 13 | MUST | Return `410 Gone` for DELETE (and GET/HEAD/POST) on a soft-deleted stream | §5.4, §4.2 |
+| 14 | MAY | Perform soft-delete cleanup / cascade GC asynchronously | §4.2, §5.4 |
+| 15 | SHOULD NOT | **(client)** Assume source returns `404` immediately after deleting its last fork | §4.2 |
+| 16 | SHOULD | Return `405` or `501` for unsupported POST (append/close) or DELETE | §5.2, §5.4 |
+
+### Append path
+
+| # | Force | Requirement | Spec |
+| --- | --- | --- | --- |
+| 17 | MUST | Reject body-bearing POST whose valid `Content-Type` mismatches the stream's type with `409 Conflict` | §5.2, §12.4 |
+| 18 | MUST NOT | Reject empty-body POST based on `Content-Type` (MAY ignore it entirely) | §5.2 |
+| 19 | SHOULD | Support HTTP/1.1 chunked encoding and HTTP/2 streaming for appends | §5.2 |
+| 20 | MUST | Compare `Stream-Seq` byte-wise lexicographically; reject ≤ last sequence with `409`; require strictly increasing | §5.2, §12.6 |
+| 21 | MUST | Document the `Stream-Seq` scope enforced (per writer identity or per stream) | §5.2 |
+| 22 | MUST | Reject empty-body POST without `Stream-Closed: true` with `400 Bad Request` | §5.2 |
+| 23 | SHOULD | Return `204` + `Stream-Closed: true` for close-only POST on an already-closed stream (idempotent) | §5.2, §5.3 |
+| 24 | MUST | Return `409` + `Stream-Closed: true` for append-and-close (body, no producer headers) on a closed stream | §5.2 |
+| 25 | MUST | On 409-because-closed: include `Stream-Closed: true` and `Stream-Next-Offset` (final offset) | §5.2 |
+| 26 | SHOULD | Keep 409 bodies empty or standardized; **(client)** SHOULD NOT parse body for rejection reason | §5.2 |
+| 27 | SHOULD | Check conflicts in order: closed → content-type mismatch → sequence regression | §5.2 |
+
+### Idempotent producers (OPTIONAL feature — every MUST)
+
+| # | Force | Requirement | Spec |
+| --- | --- | --- | --- |
+| 28 | MUST | Require all three producer headers together; partial set → `400 Bad Request` | §5.2.1 |
+| 29 | MUST | `Producer-Id` non-empty string; empty → `400` | §5.2.1 |
+| 30 | MUST | `Producer-Epoch` and `Producer-Seq`: non-negative integers ≤ 2^53−1 | §5.2.1 |
+| 31 | MUST | epoch < state.epoch → `403 Forbidden` with `Producer-Epoch: <current epoch>` (zombie fencing) | §5.2.1 |
+| 32 | MUST | epoch > state.epoch with seq ≠ 0 → `400 Bad Request` (new epoch must start at seq=0) | §5.2.1 |
+| 33 | MUST | epoch > state.epoch with seq = 0 → accept, update state, `200 OK` | §5.2.1 |
+| 34 | MUST | Same epoch, seq ≤ lastSeq → `204 No Content` (duplicate, no re-append) | §5.2.1 |
+| 35 | MUST | Same epoch, seq = lastSeq+1 → accept, `200 OK` | §5.2.1 |
+| 36 | MUST | Same epoch, seq > lastSeq+1 → `409` with `Producer-Expected-Seq` and `Producer-Received-Seq` | §5.2.1 |
+| 37 | MUST | Echo `Producer-Epoch` and return highest-accepted `Producer-Seq` on success (200/204) | §5.2.1 |
+| 38 | MUST | Serialize validation + append per `(stream, producerId)` pair | §5.2.1 |
+| 39 | SHOULD | Commit producer state + append atomically (persistent storage); document atomicity guarantees | §5.2.1 |
+| 40 | MAY | TTL-based producer-state cleanup (7-day recommendation for in-memory) | §5.2.1 |
+| 41 | SHOULD | Duplicate close (same `(producerId, epoch, seq)` that closed the stream) → `204` + `Stream-Closed: true` | §5.2.1 |
+| 42 | MUST NOT | Forks inherit producer state or `Stream-Seq` state; producers MUST re-bootstrap on the fork | §4.2 |
+
+### Reads, closure, EOF
+
+| # | Force | Requirement | Spec |
+| --- | --- | --- | --- |
+| 43 | SHOULD | Catch-up at tail, no data: `200 OK`, empty body, `Stream-Next-Offset` = requested offset | §5.6 |
+| 44 | MUST | Add `Stream-Closed: true` to the at-tail empty response when the stream is closed (canonical EOF) | §5.6 |
+| 45 | MUST | Set `Stream-Up-To-Date: true` when the response contains all currently-available data | §5.6 |
+| 46 | SHOULD NOT | Set `Stream-Up-To-Date` on partial responses (chunk-size limited) | §5.6 |
+| 47 | MUST | Set `Stream-Closed: true` when stream is closed and client reached the final offset at generation time | §5.6 |
+| 48 | SHOULD NOT | Set `Stream-Closed` on partial data from a closed stream | §5.6 |
+| 49 | SHOULD | **(client)** Use `HEAD` to learn closure status before reaching the tail | §5.6 |
+| 50 | MUST | **(client)** Use returned `Stream-Next-Offset` for subsequent reads; SHOULD persist offsets locally | §8 |
+| 51 | MUST | Long-poll: require `offset`; `204 No Content` on timeout with `Stream-Next-Offset` + `Stream-Up-To-Date: true` | §5.7 |
+| 52 | MUST | Long-poll 200/204: include `Stream-Cursor` when stream open (MAY omit when closed) | §5.7 |
+| 53 | MUST | **(client)** Tolerate missing `Stream-Cursor`/`streamCursor` when `Stream-Closed`/`streamClosed` present | §5.6–5.8 |
+| 54 | MUST NOT / MUST | Long-poll on closed stream at tail: not wait; immediately `204` + `Stream-Closed: true` + `Stream-Up-To-Date: true` | §5.7 |
+| 55 | MAY | Accept a `timeout` query parameter for long-poll (future extension) | §5.7 |
+| 56 | MUST / MUST NOT | Fork long-poll: serve inherited-range data immediately; source appends after fork creation never unblock fork waiters | §5.7 |
+
+### SSE mode
+
+| # | Force | Requirement | Spec |
+| --- | --- | --- | --- |
+| 57 | MUST | Use `Content-Type: text/event-stream` on SSE responses | §5.8 |
+| 58 | MUST | Base64-encode data events and send `stream-sse-data-encoding: base64` for content types other than `text/*` / `application/json`; **(client)** MUST check the header and decode | §5.8 |
+| 59 | MUST | **(client)** Concatenate `data:` lines and strip `\n`/`\r` before base64-decoding; text must be valid base64, length multiple of 4 (or empty); 0-byte payload = empty string | §5.8 |
+| 60 | MUST | Emit a `control` event after every `data` event, containing `streamNextOffset` | §5.8 |
+| 61 | MUST | Include `streamCursor` in control events while open (MAY omit when `streamClosed: true`) | §5.8 |
+| 62 | MUST | Include `upToDate: true` when caught up (MAY omit when `streamClosed: true`, which implies it) | §5.8 |
+| 63 | MUST | Include `streamClosed: true` in the final control event when closed and all data sent; then close the connection | §5.8 |
+| 64 | MUST | Closed stream + offset at tail on connect: immediately emit control `{streamClosed: true, upToDate: true}` and close | §5.8 |
+| 65 | MUST NOT | **(client)** Reconnect after `streamClosed: true`; otherwise MUST reconnect with last `streamNextOffset` | §5.8 |
+| 66 | SHOULD | Close SSE connections roughly every ~60 s (CDN collapsing) | §5.8, §10.2 |
+
+### Offsets
+
+| # | Force | Requirement | Spec |
+| --- | --- | --- | --- |
+| 67 | MUST NOT | **(client)** Interpret, construct, or modify offsets | §8 |
+| 68 | MUST | Mint strictly-increasing, unique, lexicographically sortable offsets; no duplicate/non-monotonic schemes (e.g., raw timestamps) | §8 |
+| 69 | MUST NOT | Offsets contain `,` `&` `=` `?` `/`; SHOULD be URL-safe and under 256 chars; **(client)** MUST URL-encode in query params | §8 |
+| 70 | MUST | Recognize `-1` as stream beginning (≡ omitted offset) | §8 |
+| 71 | MUST | `offset=now` catch-up: `200` empty body (`[]` for JSON), `Stream-Next-Offset` = tail, `Stream-Up-To-Date: true`, no data; SHOULD `Cache-Control: no-store` | §8 |
+| 72 | MUST | `offset=now` long-poll: wait immediately (no initial empty response); `Stream-Next-Offset` = tail | §8 |
+| 73 | MUST | `offset=now` SSE: start at tail; first control event carries tail offset (+ `upToDate: true` if no data) | §8 |
+| 74 | MUST | `offset=now` on closed stream (any mode): return immediately with `Stream-Closed: true`, `Stream-Up-To-Date: true`, final offset | §8 |
+| 75 | MUST NOT | Generate `-1` or `now` as real offsets | §8 |
+
+### JSON mode
+
+| # | Force | Requirement | Spec |
+| --- | --- | --- | --- |
+| 76 | MUST | Preserve message boundaries; GET returns a JSON array of messages in range | §9.1.1, §9.1.5 |
+| 77 | MUST | Flatten exactly one array level on POST (each element = one message) | §9.1.2 |
+| 78 | MUST | Reject POST `[]` with `400`; accept PUT `[]` (empty stream) | §9.1.3 |
+| 79 | MUST | Validate appended JSON; invalid → `400` with error message | §9.1.4 |
+| 80 | MUST | GET responses: `Content-Type: application/json`; empty range → `[]` | §9.1.5 |
+| 81 | MUST | Fork-boundary-spanning JSON reads return one single JSON array | §9.1 |
+
+### Caching, cursors, collapsing
+
+| # | Force | Requirement | Spec |
+| --- | --- | --- | --- |
+| 82 | SHOULD | Catch-up/long-poll: `Cache-Control: public, max-age=60, stale-while-revalidate=300` (shared) or `private, ...` (user-specific) | §10.1 |
+| 83 | SHOULD | HEAD responses effectively non-cacheable (`no-store` recommended; `private, max-age=0, must-revalidate` allowed) | §5.5 |
+| 84 | MUST | Generate `ETag` for GET responses except `offset=now`; format `{internal_stream_id}:{start_offset}:{end_offset}` | §10.1, §5.6 |
+| 85 | MUST | Matching `If-None-Match` → `304 Not Modified`, no body | §10.1 |
+| 86 | MUST | ETag varies with closure status (changes on close without new data); SHOULD encode closure marker (e.g., `:c`) | §10.1 |
+| 87 | SHOULD | **(client)** Order query params lexicographically by key | §10.1 |
+| 88 | MUST | Generate cursors on all live-mode responses (long-poll header, SSE control field) | §10.1 |
+| 89 | MUST | Cursor monotonicity: client cursor ≥ current interval → return strictly greater cursor (jitter 1–3600 s); never go backwards | §10.1 |
+| 90 | MUST | **(client)** Echo received cursor as `cursor` query param on subsequent requests | §10.1 |
+| 91 | SHOULD NOT | CDNs/proxies cache long-poll `204` responses (200s cacheable keyed by offset+cursor+auth) | §10.1 |
+
+### Forks
+
+| # | Force | Requirement | Spec |
+| --- | --- | --- | --- |
+| 92 | MUST | Fork `Content-Type` (if provided) match the source's; else `409` (omitted → inherit) | §4.2 |
+| 93 | MUST | `400` when `Stream-Fork-Offset` exceeds source tail, is malformed, or sub-offset is malformed/negative/overshoots the next data boundary | §4.2, §5.1 |
+| 94 | MUST | `404` when fork source path does not exist; `409` when target path in use with different config or source soft-deleted | §4.2 |
+| 95 | MUST | Idempotent fork PUT: matching config (incl. `Stream-Forked-From`, `Stream-Fork-Offset`) → `200`; differing → `409` | §4.2 |
+| 96 | MAY | Fork closed streams (fork starts open) | §4.2 |
+| 97 | MUST | `Stream-Fork-Offset` be a server-returned offset; servers NOT REQUIRED to validate storage alignment (MAY reject with `400`) | §8 |
+| 98 | MUST | Apply fork TTL/expiry inheritance table (incl. inheriting source TTL/Expires-At when fork requests none) | §4.2 |
+
+### Extensibility & security
+
+| # | Force | Requirement | Spec |
+| --- | --- | --- | --- |
+| 99 | MUST NOT | Extensions break base protocol semantics; base operations MUST work without extension support | §11.1 |
+| 100 | SHOULD | Extensions be additive/pure-superset, optional, version-independent | §11, §11.1 |
+| 101 | MUST | Provide access controls against unauthorized create/modify/delete (mechanism free) | §12.1 |
+| 102 | MUST | Enforce access controls when URLs are guessable, even with shared caches; SHOULD sanitize URLs (path traversal, length) | §12.2 |
+| 103 | MUST | **(client)** Treat stream contents as untrusted; never evaluate/execute without validation | §12.3 |
+| 104 | SHOULD | Rate-limit (signal via `429`) | §12.5 |
+| 105 | SHOULD | Send `X-Content-Type-Options: nosniff` on all responses; `Cross-Origin-Resource-Policy` on stream responses; `Cache-Control: no-store` on HEAD/sensitive responses; MAY send `Content-Disposition: attachment` for octet-stream | §12.7 |
+| 106 | MUST | HTTPS (TLS) for all operations in production | §12.11 |
+| 107 | SHOULD | Standalone servers default to port 4437/tcp; embedded deployments use the host server's port | §13.1 |
+
+### Subscriptions (§6–§7, if implemented)
+
+| # | Force | Requirement | Spec |
+| --- | --- | --- | --- |
+| 108 | MUST | Route reserved `__ds` prefix before normal stream operations | §6 |
+| 109 | MUST | Require at least one of `pattern`/`streams`; hash normalized config for idempotent re-confirmation (201/200/409) | §6.2 |
+| 110 | MUST | Validate webhook URLs: HTTPS in production (localhost HTTP for dev); reject RFC 1918/link-local/loopback; never return shared signing secrets | §6.2, §12.8 |
+| 111 | MUST | Eagerly backfill pattern-matching existing streams at their current tail offset | §6.2 |
+| 112 | MUST | Fail in-flight callback/ack/release for deleted subscriptions without advancing cursors | §6.3 |
+| 113 | MUST | Expose webhook signing keys as JWKS at `__ds/jwks.json`; stable unique `kid`s; publish old keys through the replay window | §6.5 |
+| 114 | MUST | Auto-ack snapshot tails on webhook `{done: true}`; re-wake with new `wake_id`/`generation` if newer events exist | §7.1 |
+| 115 | MUST | Return `409 {"error":{"code":"FENCED"}}` for stale `wake_id`/`generation`; reject unless token valid + token generation + request generation + `wake_id` all match | §7.1, §7.3 |
+| 116 | MUST | Persist webhook retry metadata (incl. `next_attempt_at`) across eviction; backoff 1–60 s with 20% jitter | §7.1 |
+| 117 | MUST | On lease expiry: clear holder and wake token; schedule another wake if pending work remains; write another wake event after release with pending work | §7.2, §7.3 |
+| 118 | MUST | Pass callback/claim tokens via `Authorization` header; validate token signatures on every callback/ack/release | §12.9 |
+
+---
+
+*End of requirements catalog. Generated from PROTOCOL.md (1563 lines) in full; no external sources used.*
