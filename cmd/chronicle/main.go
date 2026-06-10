@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -14,24 +13,29 @@ import (
 	"syscall"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
+
 	chronicle "gecgithub01.walmart.com/auk000v/chronicle"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
+	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
 )
 
-// newRedisStore is the Redis backend seam: the store/redis package (on the
-// feat/redis-store branch) replaces this nil with its constructor when it
-// lands. Until then --store redis reports itself unavailable.
-var newRedisStore func(redisURL string) (store.Store, error)
-
-func newStore(cfg chronicle.Config) (store.Store, error) {
+func newStore(cfg chronicle.Config, logger *slog.Logger) (store.Store, error) {
 	switch cfg.StoreBackend {
 	case "memory":
 		return store.NewMemoryStore(), nil
 	case "redis":
-		if newRedisStore == nil {
-			return nil, errors.New("redis backend not built in this branch; use --store memory (or CHRONICLE_STORE=memory)")
+		opt, err := goredis.ParseURL(cfg.RedisURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid redis URL: %w", err)
 		}
-		return newRedisStore(cfg.RedisURL)
+		client := goredis.NewClient(opt)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := client.Ping(ctx).Err(); err != nil {
+			return nil, fmt.Errorf("redis unreachable at %s: %w", cfg.RedisURL, err)
+		}
+		return redisstore.New(client, redisstore.Options{Logger: logger}), nil
 	default:
 		return nil, fmt.Errorf("unknown store backend %q (want %q or %q)", cfg.StoreBackend, "redis", "memory")
 	}
@@ -66,7 +70,7 @@ func run() error {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	st, err := newStore(cfg)
+	st, err := newStore(cfg, logger)
 	if err != nil {
 		return err
 	}
