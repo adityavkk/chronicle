@@ -1,0 +1,10 @@
+---
+// The MDX lives in _overview.mdx (underscore = not routed) and is wrapped
+// here, so the layout receives frontmatter explicitly instead of relying on
+// MDX `layout` frontmatter resolution.
+import Doc from "../layouts/Doc.astro";
+import Overview, { frontmatter } from "./_overview.mdx";
+---
+<Doc frontmatter={frontmatter}>
+  <Overview />
+</Doc>

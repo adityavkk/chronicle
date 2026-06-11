@@ -1,0 +1,112 @@
+---
+interface Props {
+  eyebrow?: string;
+  meta?: string;
+  /** Headline. Use <em>...</em> for serif-italic accent. */
+  title: string;
+  /** Optional standfirst paragraph (HTML allowed). */
+  deck?: string;
+  byline?: Array<{ label: string; value: string; href?: string }>;
+}
+const { eyebrow, meta, title, deck, byline = [] } = Astro.props;
+---
+
+<header class="hero">
+  {eyebrow && (
+    <div class="eyebrow">
+      <span class="dot"></span>
+      <span set:html={eyebrow}></span>
+      {meta && <span class="meta">— {meta}</span>}
+    </div>
+  )}
+  <h1 class="title" set:html={title}></h1>
+  {deck && <p class="deck" set:html={deck}></p>}
+  {byline.length > 0 && (
+    <div class="byline">
+      {byline.map((b, i) => (
+        <>
+          {i > 0 && <span class="sep">/</span>}
+          <span>
+            <strong>{b.label}</strong> &nbsp;
+            {b.href ? <a href={b.href}>{b.value}</a> : b.value}
+          </span>
+        </>
+      ))}
+    </div>
+  )}
+  <slot />
+</header>
+
+<style lang="scss">
+  .hero { padding-bottom: 56px; border-bottom: 1px solid var(--rule); }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--accent);
+    margin-bottom: 28px;
+    opacity: 0; transform: translateY(8px);
+    animation: rise 0.7s 0.05s ease-out forwards;
+  }
+  .eyebrow .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(168, 67, 42, 0.16);
+  }
+  .eyebrow .meta { color: var(--ink-mute); letter-spacing: 0.12em; }
+
+  .title {
+    font-weight: 300;
+    font-size: clamp(44px, 6vw, 78px);
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    margin: 0 0 24px;
+    color: var(--ink);
+    opacity: 0; transform: translateY(14px);
+    animation: rise 0.9s 0.15s cubic-bezier(.2,.7,.2,1) forwards;
+  }
+  .title :global(em) {
+    font-style: italic;
+    font-family: var(--serif-italic);
+    font-weight: 400;
+    color: var(--accent);
+  }
+
+  .deck {
+    font-size: clamp(18px, 1.6vw, 22px);
+    line-height: 1.45;
+    color: var(--ink-mute);
+    max-width: 760px;
+    font-weight: 400;
+    margin: 0 0 36px;
+    opacity: 0; transform: translateY(10px);
+    animation: rise 0.8s 0.3s ease-out forwards;
+  }
+  .deck :global(strong) { color: var(--ink); font-weight: 700; }
+  .deck :global(code) {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--tint);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--accent-deep);
+  }
+
+  .byline {
+    display: flex; gap: 28px; flex-wrap: wrap;
+    font-family: var(--mono);
+    font-size: 12px; letter-spacing: 0.06em;
+    color: var(--ink-mute);
+    padding-top: 18px;
+    border-top: 1px solid var(--rule);
+    opacity: 0;
+    animation: rise 0.8s 0.45s ease-out forwards;
+  }
+  .byline :global(strong) { color: var(--ink); font-weight: 600; letter-spacing: 0.04em; }
+  .byline a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--rule); }
+  .byline a:hover { border-bottom-color: var(--accent); }
+  .byline .sep { color: var(--rule); }
+</style>
