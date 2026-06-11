@@ -23,10 +23,11 @@ import Table from "../components/Table.astro";
 
 <Tldr>
   <ul>
-    <li><strong>The protocol is plain HTTP.</strong> A stream is a URL: <code>PUT</code> creates it, <code>POST</code> appends, <code>GET</code> reads from any offset, and long-poll or SSE gives you a live tail. Any HTTP client is a Durable Streams client.</li>
-    <li><strong>Redis is the only dependency.</strong> Stream data, producer state, and reader wakeups all live in Redis 8. If you already operate managed Redis, durable streams cost you no new infrastructure.</li>
-    <li><strong>Every mutation is one Lua script.</strong> Validation, write, tail update, and notification execute atomically and serialized per stream — no partial appends, no lost wakeups.</li>
+    <li><strong>The protocol is plain HTTP.</strong> A stream is a URL: <code>PUT</code> creates it, <code>POST</code> appends, <code>GET</code> reads from any offset; long-poll and SSE serve live tails.</li>
+    <li><strong>Redis is the only dependency.</strong> Chronicle is one Go binary; stream data, producer state, and reader wakeups live in Redis 8.</li>
+    <li><strong>Every mutation is one Lua script.</strong> Validation, write, tail update, and notification execute atomically, serialized per stream: no partial appends, no lost wakeups.</li>
     <li><strong>It tracks the reference implementation.</strong> The store contract and handler mirror the upstream Caddy plugin, and ~330 official conformance tests gate every change.</li>
+    <li><strong>Load-tested head-to-head with that reference.</strong> One writer per stream sustains 1,500 appends/s error-free; concurrent writers on one stream collapse near 1,000/s. Both results are in the benchmark report.</li>
   </ul>
 </Tldr>
 
@@ -35,15 +36,11 @@ import Table from "../components/Table.astro";
 
   A durable stream is an append-only sequence of bytes that lives at a URL.
   The [Durable Streams protocol](https://github.com/durable-streams/durable-streams)
-  maps its whole lifecycle onto HTTP verbs: `PUT` creates a stream, `POST`
-  appends a batch, `GET` reads from an offset, `DELETE` removes it. Every
-  response carries a `Stream-Next-Offset` header; pass it back as `?offset=`
-  and you resume exactly where you left off. That one header is the entire
-  consumer-side bookkeeping model — no consumer groups, no client state beyond
-  a string you can store anywhere.
-
-  Durable Streams does not compete with Kafka. It competes with the queue you
-  built out of a database table, a poll loop, and an offset column.
+  maps its lifecycle onto HTTP verbs: `PUT` creates a stream, `POST` appends
+  a batch, `GET` reads from an offset, `DELETE` removes it. Every response
+  carries a `Stream-Next-Offset` header; pass it back as `?offset=` to
+  resume where you left off. Resuming requires no consumer groups and no
+  server-side cursor state — the client stores one string.
 
   ```bash title="The protocol in five requests"
   # Create a stream
@@ -65,35 +62,34 @@ import Table from "../components/Table.astro";
 
   Reads are pull-based, in three modes. A catch-up read returns everything
   from a given offset. A long-poll read (`live=long-poll`) holds the request
-  open until data arrives or a timeout returns `204` — 30 seconds by default.
-  An SSE read (`live=sse`) keeps a tail open continuously, with the server
-  cycling connections every 60 seconds so CDNs can collapse concurrent tails.
+  open until data arrives or a timeout returns `204` — 30 seconds by
+  default. An SSE read (`live=sse`) keeps a tail open continuously; the
+  server cycles connections every 60 seconds so CDNs can collapse
+  concurrent tails.
 
-  Beyond reads and writes, the protocol covers explicit closure (an EOF every
-  reader observes), TTL expiry, stream forking, and Kafka-style idempotent
-  producers: a producer attaches an id, epoch, and sequence number to each
-  append, and retries deduplicate exactly instead of double-writing. Chronicle
-  implements all of it, and any of the official client libraries (TypeScript,
-  Python, Go, Rust) work against Chronicle's base URL — see the
-  [protocol spec](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md)
-  for the full surface.
+  The protocol also covers explicit closure (an EOF every reader observes),
+  TTL expiry, stream forking, and idempotent producers: a producer attaches
+  an id, epoch, and sequence number to each append, and retries deduplicate
+  instead of double-writing. Chronicle implements the full surface,[^spec]
+  and the official client libraries (TypeScript, Python, Go, Rust) work
+  against its base URL.
 </section>
 
 <section class="block" id="design">
   <SectionHead num="02" label="Design" title="Pure core, <em>imperative edge</em>" />
 
   Everything decidable without I/O lives in the `protocol/` package as plain
-  functions over immutable inputs: header and TTL-grammar parsing, offset and
-  cursor math, SSE event framing, and the producer-validation state machine —
-  spec section 5.2.1 transcribed into one pure function that maps a producer's
-  state and an incoming epoch/sequence pair to `Accept`, `Duplicate`,
-  `StaleEpoch`, `SeqGap`, or `InvalidEpochSeq`. These functions are tested
-  without mocks, and the Lua script that enforces producer rules inside Redis
-  mirrors the state machine, with the pure function as its test oracle.
+  functions over immutable inputs: header and TTL-grammar parsing, offset
+  and cursor math, SSE event framing, and the producer-validation state
+  machine — spec section 5.2.1 transcribed into one pure function that maps
+  a producer's state and an incoming epoch/sequence pair to `Accept`,
+  `Duplicate`, `StaleEpoch`, `SeqGap`, or `InvalidEpochSeq`. These functions
+  are tested without mocks, and the Lua script that enforces producer rules
+  inside Redis mirrors the state machine, with the pure function as its test
+  oracle.
 
-  The edges stay thin. The HTTP handler parses requests, calls the store, and
-  writes responses; the Redis store executes scripts. Both layers decide
-  nothing the core could decide.
+  The HTTP handler parses requests, calls the store, and writes responses;
+  the Redis store executes scripts. Decisions stay in the core.
 
   ```text title="Layout"
   protocol/      pure protocol logic: headers, parsing, cursors, producer rules
@@ -105,19 +101,18 @@ import Table from "../components/Table.astro";
 
   ### Parity with the <em>reference implementation</em>
 
-  Chronicle deliberately mirrors the protocol's reference
-  [Caddy plugin](https://github.com/durable-streams/durable-streams/tree/main/packages/caddy-plugin):
-  the `store.Store` interface, type names, error variables, handler structure,
-  and behavioral details are kept in lockstep, pinned to a recorded upstream
-  commit. Where the Caddy plugin persists to memory or files, Chronicle
-  persists to Redis. The payoff is maintenance: when upstream changes, porting
-  is a file diff against a parity table, not a re-derivation of behavior. The
-  cost is design freedom — Chronicle inherits upstream's shapes even where a
+  Chronicle mirrors the protocol's reference Caddy plugin:[^caddy] the
+  `store.Store` interface, type names, error variables, handler structure,
+  and behavioral details are kept in lockstep, pinned to a recorded
+  upstream commit. Where the Caddy plugin persists to memory or files,
+  Chronicle persists to Redis. The payoff is maintenance: when upstream
+  changes, porting is a file diff against a parity table. The cost is
+  design freedom: Chronicle inherits upstream's shapes even where a
   from-scratch Go server might choose differently.
 </section>
 
 <section class="block" id="storage">
-  <SectionHead num="03" label="Storage" title="What a stream becomes <em>in Redis</em>" />
+  <SectionHead num="03" label="Storage" title="The Redis <em>data model</em>" />
 
   Each stream at path `p` maps to three Redis keys and one pub/sub channel:
 
@@ -130,34 +125,35 @@ import Table from "../components/Table.astro";
     | `ds:notify:{p}` | pub/sub | wakes long-poll/SSE waiters on append, close, and delete |
   </Table>
 
-  Every mutation runs as a single Lua script via `EVALSHA`: validation
-  (closure, content type, `Stream-Seq` ordering, producer epoch and sequence),
-  the write, the tail update, and the waiter notification happen atomically
-  and serialized per stream. A reader that long-polls subscribes to the
-  notify channel and then re-checks the stream, so an append that lands
-  between the check and the subscribe is never missed.
+  Every mutation runs as a single Lua script via `EVALSHA`; Redis executes
+  scripts atomically,[^eval] so validation (closure, content type,
+  `Stream-Seq` ordering, producer epoch and sequence), the write, the tail
+  update, and the waiter notification land together or not at all,
+  serialized per stream. A reader that long-polls subscribes to the notify
+  channel and then re-checks the stream, so an append that lands between
+  the check and the subscribe is never missed.
 
-  This model puts requirements on the Redis deployment:
+  The model puts requirements on the Redis deployment:
 
   - **Redis ≥ 7.4, 8.x recommended.** Chronicle uses `EVALSHA` scripts,
-    pub/sub, and hash-field TTLs (`HEXPIRE`).
+    pub/sub, and hash-field TTLs (`HEXPIRE`).[^hexpire]
   - **`maxmemory-policy noeviction`.** Any eviction policy can silently
-    truncate streams. Chronicle warns at startup if it can read the config
-    and the policy differs.
+    truncate streams.[^evict] Chronicle warns at startup if it can read the
+    config and the policy differs.
   - **Cluster mode works, with one caveat.** All keys for a stream share a
     `{path}` hash tag, so they occupy a single slot and scripts stay
     cluster-legal. Fork lifecycle operations span two streams and are
     non-atomic across slots.
 
   <Callout icon="alert" label="Durability">
-    Chronicle inherits Redis's durability model, no more. Replication is
-    asynchronous, so an acknowledged append can be lost on failover. Within a
-    healthy primary, appends are atomic and producer idempotency is exact.
+    Redis replication is asynchronous: an acknowledged append can be lost
+    on failover.[^repl] Within a healthy primary, appends are atomic and
+    producer idempotency is exact.
   </Callout>
 </section>
 
 <section class="block" id="running">
-  <SectionHead num="04" label="Running it" title="From zero to <em>a live tail</em>" />
+  <SectionHead num="04" label="Quickstart" title="Run it <em>locally</em>" />
 
   Requirements: Go ≥ 1.26 and Docker (for Redis).
 
@@ -166,8 +162,8 @@ import Table from "../components/Table.astro";
   make run           # build + start chronicle on :4437
   ```
 
-  Port 4437 is the protocol's IANA-selected default. Configuration comes from
-  flags or environment variables; flags take precedence.
+  Port 4437 is the protocol's IANA-selected default. Configuration comes
+  from flags or environment variables; flags take precedence.
 
   <Table>
     | Flag | Env | Default | Meaning |
@@ -181,28 +177,99 @@ import Table from "../components/Table.astro";
   </Table>
 </section>
 
-<section class="block" id="conformance">
-  <SectionHead num="05" label="Conformance" title="~330 tests, <em>one known gap</em>" />
+<section class="block" id="performance">
+  <SectionHead num="05" label="Performance" title="Throughput, latency, <em>two bottlenecks</em>" />
 
-  Chronicle is tested against the official
-  [`@durable-streams/server-conformance-tests`](https://www.npmjs.com/package/@durable-streams/server-conformance-tests)
-  suite: ~330 black-box protocol tests covering idempotent producers, stream
-  closure, forks, JSON mode, SSE, and property-based fuzzing, run against a
-  live Redis.
+  Chronicle is load-tested with `dsload`, a declarative load generator for
+  Durable Streams servers that lives on the repo's `loadgen` branch.[^rig]
+  Scenarios are YAML: stream counts, writer rates, payload sizes, and
+  reader populations (SSE and long-poll). Writers are open-loop — they send
+  on a fixed schedule and never wait for responses, so a stalling server
+  cannot hide its own latency from the measurements. Every message embeds
+  its send timestamp; tailers record write-to-receipt delivery latency per
+  message into HDR histograms.
+
+  The 2026-06-10 run[^report] compares Chronicle against the reference
+  Caddy plugin (memory and file stores) under identical scenarios: one
+  Apple Silicon host (14 cores, 48 GiB), loopback HTTP, Redis 8 in Docker
+  with `appendfsync everysec`, 60–120 s measured windows, one run per
+  cell. Conclusions rest on order-of-magnitude separations, not
+  single-digit percentages.
+
+  <Table>
+    | Scenario | Offered | Chronicle measured |
+    | --- | --- | --- |
+    | `fanout` — 1 stream, 400 SSE + 100 long-poll readers | 10 appends/s, 5,000 deliveries/s | full rate, zero errors; SSE delivery p50 386 ms, p99 1.2 s |
+    | `producer-sessions` — 50 streams, one idempotent producer each | 1,500 appends/s | 1,486/s, zero errors; delivery p50 33 ms, p99 1.0 s |
+    | `append-steady` — 20 streams, open-loop writers | 1,000 appends/s | 503/s achieved; 4,521 HTTP 500s; append p99 9.3 s |
+    | `append-sweep` — 16 streams, ramping writers | 200→2,000/s | tracks the ramp to ~1,000/s, then goodput falls to zero within ~20 s |
+    | `sessions-light` — 10 streams, unsaturated | 20 appends/s | append p50 8.4 ms, p90 287 ms, p99 534 ms |
+  </Table>
+
+  The two negative results have named mechanisms.
+
+  ### Append collapse under <em>concurrent writers</em>
+
+  `store/redis` retries a contended append optimistically, up to 64 times
+  with no backoff. With several appends in flight against one stream the
+  retries collide, and past ~1,000/s aggregate every request burns all 64
+  attempts and fails: goodput drops to zero and stays there while load
+  continues. The producer-sessions row is the counterpoint — with one
+  in-flight append per stream, Chronicle sustains 1,500/s across 50
+  streams error-free. The collapse is specific to concurrent appends on a
+  single stream.
+
+  ### A latency floor in <em>the wakeup path</em>
+
+  Delivery p90 sits near 300 ms even at 20 msg/s with nothing saturated.
+  The SSE loop waits in 100 ms quanta, and each iteration opens a fresh
+  Redis pub/sub subscription — a dedicated connection per `Subscribe`. The
+  benchmark Redis logged 96,564 connections received and 65,852 SUBSCRIBE
+  calls over the suite. The Caddy memory store served the same fanout
+  scenario at delivery p50 9.4 ms, so the gap is Chronicle's wakeup
+  architecture, not Redis round-trip time. The report sketches fixes for
+  both findings: jittered backoff or per-stream single-flight on the write
+  path; a persistent per-stream pub/sub hub on the wakeup path.
+
+  <Callout icon="alert" label="Caveats">
+    Single host, loopback HTTP: no network jitter, no TLS. Redis ran behind
+    Docker Desktop, which adds roughly 0.4 ms median per round trip. One
+    run per scenario cell. The report lists the full threats to validity.
+  </Callout>
+</section>
+
+<section class="block" id="conformance">
+  <SectionHead num="06" label="Conformance" title="~330 tests, <em>one known gap</em>" />
+
+  Chronicle is tested against the official conformance suite:[^conf] ~330
+  black-box protocol tests covering idempotent producers, stream closure,
+  forks, JSON mode, SSE, and property-based fuzzing, run against a live
+  Redis.
 
   ```bash
   make conformance                              # full suite vs live Redis
   make conformance-filter FILTER="Idempotent"   # one group while iterating
   ```
 
-  One suite group is not implemented: the optional reserved subscriptions API
-  (`__ds` webhooks and pull-wake). This matches the posture of the reference
-  Caddy plugin's own conformance gate.
+  One suite group is not implemented: the optional reserved subscriptions
+  API (`__ds` webhooks and pull-wake). This matches the posture of the
+  reference Caddy plugin's own conformance gate.
 
   ### Further <em>reading</em>
 
   - [README](https://github.com/adityavkk/chronicle#readme) — quickstart, configuration, development workflow
   - [docs/PLAN.md](https://github.com/adityavkk/chronicle/blob/main/docs/PLAN.md) — the architecture and its decision log
   - [docs/spec/PROTOCOL.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md) — the vendored protocol spec
+  - [Benchmark report](https://github.com/adityavkk/chronicle/blob/loadgen/docs/benchmarks/2026-06-10/REPORT.md) — methodology, full result tables, threats to validity
   - [durable-streams/durable-streams](https://github.com/durable-streams/durable-streams) — the upstream protocol, reference implementation, and client libraries
 </section>
+
+[^spec]: Durable Streams protocol specification, vendored at [docs/spec/PROTOCOL.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md).
+[^caddy]: The reference implementation: [durable-streams/packages/caddy-plugin](https://github.com/durable-streams/durable-streams/tree/main/packages/caddy-plugin).
+[^eval]: Redis docs, [EVAL](https://redis.io/docs/latest/commands/eval/) — "Redis guarantees the script's atomic execution."
+[^hexpire]: Redis docs, [HEXPIRE](https://redis.io/docs/latest/commands/hexpire/) — per-field hash TTLs, new in Redis 7.4.
+[^evict]: Redis docs, [key eviction](https://redis.io/docs/latest/develop/reference/eviction/) — `maxmemory-policy` behavior.
+[^repl]: Redis docs, [replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/) — "Redis uses by default asynchronous replication."
+[^rig]: The `dsload` generator: [loadgen/ on the loadgen branch](https://github.com/adityavkk/chronicle/tree/loadgen/loadgen).
+[^report]: [Benchmark report, 2026-06-10](https://github.com/adityavkk/chronicle/blob/loadgen/docs/benchmarks/2026-06-10/REPORT.md) — methodology, per-scenario tables, and threats to validity.
+[^conf]: [`@durable-streams/server-conformance-tests`](https://www.npmjs.com/package/@durable-streams/server-conformance-tests) on npm.
