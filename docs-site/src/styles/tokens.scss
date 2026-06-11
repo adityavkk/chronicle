@@ -1,0 +1,43 @@
+// =====================================================================
+// CHRONICLE DOCS TOKENS
+// Canonical design vars. Do not override per-component; extend via :root.
+// =====================================================================
+
+:root {
+  // -- Color palette (warm editorial: paper, ink, one accent) --------
+  --accent:        #A8432A;   // links, rails, micro-labels, hover
+  --accent-deep:   #7A2E1C;   // inline code text, hover deepen
+  --accent-tint:   #F5E7E0;   // pale accent fill (chips, soft highlights)
+  --ink:           #1F1D1A;   // body text, headings
+  --ink-mute:      #6B675E;   // secondary text, decks, captions
+  --muted:         #8A857A;   // lightest text step -- locators, fine print
+  --paper:         #FAF8F4;   // page ground -- NEVER stark white
+  --paper-warm:    #F3EFE7;   // terminal frames, recessed fills
+  --card:          #FFFEFB;   // raised surface (never stark #fff)
+  --tint:          #F1ECE1;   // alt table rows, inline-code ground
+  --rule:          #E2DCCF;   // hairlines
+  --rule-soft:     #ECE7DB;
+
+  // -- Elevation (warm-ink shadows) -----------------------------------
+  --shadow-sm: 0 1px 2px rgba(31, 29, 26, 0.06), 0 2px 6px rgba(31, 29, 26, 0.04);
+  --shadow-md: 0 4px 18px rgba(31, 29, 26, 0.08), 0 1px 3px rgba(31, 29, 26, 0.05);
+
+  // -- Typography -----------------------------------------------------
+  --sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --serif-italic: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+
+  // -- Layout ---------------------------------------------------------
+  --shell-max: 1180px;
+  --rail-indent: 168px;
+  --prose-max: 880px;
+
+  // -- Prose measure ----------------------------------------------------
+  // Text-line ceiling: caps the visible measure to ~66-70ch. Applied ONLY
+  // to text selectors via max-width: min(--prose-max, --prose-measure).
+  // NEVER redefine --prose-max -- tables, code, and figures keep 880px.
+  --prose-measure: 68ch;
+
+  // -- Shape ------------------------------------------------------------
+  --radius: 12px;
+}

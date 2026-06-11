@@ -1,0 +1,51 @@
+---
+// Single source of truth for every page's <head>: charset/viewport/title,
+// description, canonical, Open Graph / Twitter unfurl, favicon, theme-color.
+interface Props {
+  /** Raw title; may contain <em>. HTML is stripped for <title> and meta. */
+  title: string;
+  /** One-line summary for description + unfurl. HTML is stripped. */
+  description?: string;
+}
+const { title, description } = Astro.props;
+
+// Titles and decks carry inline <em>/<strong> for on-page accents; meta
+// values must be plain text, so strip every tag before they reach <title>,
+// description, and the OG/Twitter fields.
+const strip = (s: string) => s.replace(/<[^>]+>/g, "");
+const plainTitle = strip(title);
+const plainDesc = description ? strip(description) : undefined;
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+// Canonical and og:url derive from Astro.site + the current pathname, so they
+// resolve to the correct absolute URL under the deployed base path — and
+// follow automatically if the site is ever rehosted via SITE/BASE env vars.
+const canonical = Astro.site
+  ? new URL(Astro.url.pathname, Astro.site).href
+  : Astro.url.pathname;
+
+const SITE_NAME = "Chronicle";
+---
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{plainTitle}</title>
+{plainDesc && <meta name="description" content={plainDesc} />}
+<link rel="canonical" href={canonical} />
+
+<link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
+{/* Literal #A8432A — <meta content> cannot read the --accent custom property,
+    so this is the sanctioned place for the literal hex (it equals --accent in
+    tokens.scss) so mobile browser chrome matches the accent. */}
+<meta name="theme-color" content="#A8432A" />
+
+{/* Open Graph */}
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content={SITE_NAME} />
+<meta property="og:title" content={plainTitle} />
+{plainDesc && <meta property="og:description" content={plainDesc} />}
+<meta property="og:url" content={canonical} />
+
+{/* Twitter */}
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content={plainTitle} />
+{plainDesc && <meta name="twitter:description" content={plainDesc} />}

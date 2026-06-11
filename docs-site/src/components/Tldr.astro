@@ -1,0 +1,21 @@
+---
+// The opening TL;DR block. Same DOM everywhere, emitted from one place;
+// styles live in base.scss (.tldr).
+//
+// USAGE (MDX):
+//   <Tldr>
+//     <ul>
+//       <li><strong>The claim.</strong> Supporting line.</li>
+//     </ul>
+//   </Tldr>
+interface Props {
+  /** Mono label above the rule, default "TL;DR" */
+  label?: string;
+}
+const { label = "TL;DR" } = Astro.props;
+---
+
+<div class="tldr">
+  <div class="tldr-label">{label}</div>
+  <slot />
+</div>

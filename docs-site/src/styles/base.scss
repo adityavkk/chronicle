@@ -1,0 +1,200 @@
+@use "./tokens.scss";
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+// Global keyboard focus ring — accent, keyboard-only (mouse clicks unaffected)
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+body {
+  margin: 0;
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 16.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+// Subtle paper grain overlay
+body::before {
+  content: "";
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    radial-gradient(rgba(31, 29, 26, 0.02) 1px, transparent 1px),
+    radial-gradient(rgba(31, 29, 26, 0.013) 1px, transparent 1px);
+  background-size: 3px 3px, 7px 7px;
+  background-position: 0 0, 1px 2px;
+  mix-blend-mode: multiply;
+}
+
+// Shell
+.shell {
+  position: relative; z-index: 1;
+  max-width: var(--shell-max);
+  margin: 0 auto;
+  padding: 64px 56px 120px;
+}
+
+// Section base
+section.block {
+  padding: 80px 0 24px;
+  scroll-margin-top: 40px;
+  & + & { border-top: 1px solid var(--rule); }
+}
+
+// MDX-rendered structural elements live inside .doc-body, either as direct
+// children or one level down inside a <section class="block">. Text blocks
+// get the rail indent + ch-capped measure; tables, code, and figures keep
+// --prose-max.
+.doc-body > p,
+.doc-body > ul,
+.doc-body > ol,
+.doc-body section.block > p,
+.doc-body section.block > ul,
+.doc-body section.block > ol {
+  max-width: min(var(--prose-max), var(--prose-measure));
+  // Four-value shorthand: the rail indent must live in the SAME declaration
+  // as the vertical margins — a later `margin: 0 0 18px` shorthand would
+  // silently reset margin-left back to 0.
+  margin: 0 0 18px var(--rail-indent);
+}
+.doc-body > ul, .doc-body > ol,
+.doc-body section.block > ul, .doc-body section.block > ol {
+  padding-left: 22px;
+}
+// Long identifiers wrap once the measure narrows; scoped to code only
+.doc-body code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  background: var(--tint);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--accent-deep);
+  overflow-wrap: anywhere;
+}
+.doc-body a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.doc-body strong { color: var(--ink); font-weight: 700; }
+.doc-body em { font-style: italic; }
+
+// In-prose h3: a real typographic step — a --rule hairline above, and a
+// serif-italic accent lead where the MDX h3 carries an <em>.
+.doc-body h3 {
+  max-width: min(var(--prose-max), var(--prose-measure));
+  margin: 34px 0 12px var(--rail-indent);
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--ink);
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  text-wrap: balance;
+}
+.doc-body h3 em {
+  font-family: var(--serif-italic);
+  color: var(--accent);
+  font-style: italic;
+}
+
+// Fenced code blocks rendered by astro-expressive-code. The package owns
+// the inner chrome (copy button, frames, themes); we only constrain the
+// outer container width + align it with the prose rail.
+.doc-body .expressive-code,
+.expressive-code {
+  max-width: var(--prose-max);
+  margin: 18px 0 28px var(--rail-indent);
+}
+@media (max-width: 840px) {
+  .doc-body .expressive-code,
+  .expressive-code {
+    margin-left: 0;
+  }
+}
+
+// TL;DR block
+.tldr {
+  margin-top: 56px;
+  display: grid;
+  grid-template-columns: 1fr 2.4fr;
+  gap: 48px;
+  align-items: start;
+}
+.tldr-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+  padding-top: 8px;
+  border-top: 2px solid var(--accent);
+  width: 120px;
+}
+.tldr ul {
+  margin: 0; padding: 0; list-style: none;
+  display: grid; gap: 22px;
+  counter-reset: tldr;
+}
+.tldr li {
+  position: relative;
+  padding-left: 36px;
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+.tldr li::before {
+  content: counter(tldr, decimal-leading-zero);
+  counter-increment: tldr;
+  position: absolute; left: 0; top: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+}
+.tldr li strong { color: var(--ink); font-weight: 700; }
+.tldr li em { font-family: var(--serif-italic); color: var(--accent); font-style: italic; }
+.tldr li code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: var(--tint);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--accent-deep);
+}
+@media (max-width: 840px) {
+  .tldr { grid-template-columns: 1fr; gap: 14px; }
+}
+
+@keyframes rise { to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; }
+}
+
+// Responsive
+@media (max-width: 840px) {
+  .shell { padding: 40px 24px 80px; }
+  .doc-body > p,
+  .doc-body > ul,
+  .doc-body > ol,
+  .doc-body section.block > p,
+  .doc-body section.block > ul,
+  .doc-body section.block > ol,
+  .doc-body h3 { margin-left: 0; }
+}
+
+// Print
+@media print {
+  body { background: white; }
+  body::before { display: none; }
+  .shell { max-width: none; padding: 24px; }
+  section.block { break-inside: avoid; }
+}

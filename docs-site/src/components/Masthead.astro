@@ -1,0 +1,63 @@
+---
+// Site masthead: identity mark on the left, source link on the right. The
+// docs are a single page, so the mark links home (useful on deep anchors)
+// and the right slot points at the repository.
+import Glyph from "./Glyph.astro";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const home = `${base}/`;
+const REPO = "https://github.com/adityavkk/chronicle";
+---
+<nav class="masthead" aria-label="Site">
+  <a class="mark" href={home} aria-label="Chronicle documentation — home">
+    <Glyph />
+    <span>CHRONICLE &middot; DOCS</span>
+  </a>
+  <a class="src" href={REPO}>
+    <span>GitHub</span>
+    <span class="arrow" aria-hidden="true">&nearr;</span>
+  </a>
+</nav>
+
+<style lang="scss">
+  // Aligns to the shell measure (--shell-max) with the shell's own 56px inline
+  // padding (base.scss .shell), so the bar sits over the content column, not
+  // the raw page edge. Static (not sticky): robust against the body grain
+  // layer and print, with no z-index/backdrop to reason about.
+  .masthead {
+    max-width: var(--shell-max);
+    margin: 0 auto;
+    padding: 20px 56px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .masthead a { text-decoration: none; }
+
+  .mark {
+    display: inline-flex; align-items: center; gap: 10px;
+    color: var(--accent);
+    letter-spacing: 0.06em;
+    transition: color 0.2s ease;
+  }
+  .mark:hover { color: var(--ink); }
+
+  .src {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--accent);
+    transition: color 0.2s ease;
+  }
+  .src .arrow { transition: transform 0.2s ease; }
+  .src:hover { color: var(--ink); }
+  .src:hover .arrow { transform: translate(2px, -2px); }
+
+  // Match the shell's responsive inline padding (base.scss @media 840px),
+  // so the bar tracks the content column at every width.
+  @media (max-width: 840px) { .masthead { padding: 16px 24px 0; } }
+  @media print { .masthead { display: none; } }
+</style>

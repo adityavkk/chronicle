@@ -1,0 +1,26 @@
+---
+// The Chronicle mark: three stacked bars, the last one short — an append-only
+// log with its write frontier. Used by the masthead and footer identity marks;
+// public/favicon.svg mirrors the same geometry (keep them in sync by hand).
+interface Props {
+  /** Pixel size of the square glyph. Default 14, matching the masthead mark. */
+  size?: number;
+}
+const { size = 14 } = Astro.props;
+---
+<svg
+  class="glyph"
+  width={size}
+  height={size}
+  viewBox="0 0 16 16"
+  aria-hidden="true"
+  focusable="false"
+>
+  <rect x="1" y="2" width="14" height="2.8" rx="1.4" />
+  <rect x="1" y="6.6" width="14" height="2.8" rx="1.4" />
+  <rect x="1" y="11.2" width="9" height="2.8" rx="1.4" />
+</svg>
+
+<style>
+  .glyph { display: inline-block; fill: var(--accent); flex: 0 0 auto; }
+</style>

@@ -3,6 +3,8 @@
 A [Durable Streams](https://github.com/durable-streams/durable-streams) protocol
 server backed by **Redis 8**, written in Go.
 
+**Docs:** [adityavkk.github.io/chronicle](https://adityavkk.github.io/chronicle/)
+
 Durable Streams gives you URL-addressable, append-only byte streams over plain
 HTTP: create a stream with `PUT`, append with `POST`, read with `GET` — including
 catch-up reads from any offset, long-polling, and SSE live tailing — with
