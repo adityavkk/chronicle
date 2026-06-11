@@ -29,7 +29,7 @@ export default defineConfig({
         codePaddingBlock: "16px",
         codePaddingInline: "20px",
         frames: {
-          shadowColor: "rgba(31, 29, 26, 0.08)",
+          shadowColor: "rgba(16, 15, 15, 0.08)",
           editorTabBarBackground: "var(--paper-warm)",
           editorActiveTabBackground: "var(--paper)",
           editorActiveTabForeground: "var(--ink)",

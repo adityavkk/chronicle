@@ -30,8 +30,8 @@ body::before {
   content: "";
   position: fixed; inset: 0; pointer-events: none; z-index: 0;
   background-image:
-    radial-gradient(rgba(31, 29, 26, 0.02) 1px, transparent 1px),
-    radial-gradient(rgba(31, 29, 26, 0.013) 1px, transparent 1px);
+    radial-gradient(rgba(16, 15, 15, 0.02) 1px, transparent 1px),
+    radial-gradient(rgba(16, 15, 15, 0.013) 1px, transparent 1px);
   background-size: 3px 3px, 7px 7px;
   background-position: 0 0, 1px 2px;
   mix-blend-mode: multiply;
@@ -197,4 +197,112 @@ section.block {
   body::before { display: none; }
   .shell { max-width: none; padding: 24px; }
   section.block { break-inside: avoid; }
+}
+
+// ── Footnotes / primary-source references (GFM) ──────────────────────────
+// remark-gfm emits <section class="footnotes" data-footnotes> with an
+// <ol> of definitions + backrefs, and inline <sup><a data-footnote-ref>>.
+// Styled here as a "References" block at the foot of the page.
+.doc-body .footnotes {
+  margin: 72px 0 0 var(--rail-indent);
+  max-width: var(--prose-max);
+  padding-top: 28px;
+  border-top: 1px solid var(--rule);
+  font-size: 13px;
+  color: var(--ink-mute);
+}
+.doc-body .footnotes > h2 {
+  // replace the screen-reader "Footnotes" heading with a micro-label
+  font-size: 0;
+  line-height: 0;
+  margin: 0 0 18px;
+}
+.doc-body .footnotes > h2::before {
+  content: "References — primary sources";
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+  padding-top: 8px;
+  border-top: 2px solid var(--accent);
+}
+.doc-body .footnotes ol {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  counter-reset: fn;
+}
+.doc-body .footnotes li {
+  counter-increment: fn;
+  position: relative;
+  padding: 9px 0 9px 42px;
+  border-top: 1px solid var(--rule);
+  line-height: 1.5;
+}
+.doc-body .footnotes li:first-child { border-top: none; }
+.doc-body .footnotes li::before {
+  content: counter(fn);
+  position: absolute;
+  left: 0;
+  top: 9px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.doc-body .footnotes li p { margin: 0; }
+.doc-body .footnotes li:target { background: var(--accent-tint); }
+.doc-body .footnotes a {
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-word;
+}
+.doc-body .footnotes a:hover { text-decoration: underline; }
+.doc-body .footnotes a[data-footnote-backref] {
+  margin-left: 6px;
+  text-decoration: none;
+  font-size: 0.9em;
+}
+
+// inline citation markers — superscript accent, bracketed, no underline
+.doc-body sup:has(a[data-footnote-ref]) { line-height: 0; }
+.doc-body a[data-footnote-ref] {
+  font-family: var(--mono);
+  font-size: 0.62em;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 0 1px;
+  white-space: nowrap;
+}
+.doc-body a[data-footnote-ref]::before { content: "["; }
+.doc-body a[data-footnote-ref]::after { content: "]"; }
+.doc-body a[data-footnote-ref]:hover,
+.doc-body a[data-footnote-ref].is-hot { color: #fff; background: var(--accent); border-radius: 2px; }
+
+// Collapse adjacent citation clusters so [5][6] reads as one chip [5·6].
+// remark-gfm emits each ref as a separate <sup><a data-footnote-ref>>. When
+// two such sups are adjacent, drop the inner closing bracket of the earlier
+// ref and the inner opening bracket of the later one, joining them with a
+// middot. A 3+ run keeps only the outermost [ ] and middots between.
+.doc-body sup:has(a[data-footnote-ref]) + sup:has(a[data-footnote-ref]) a[data-footnote-ref]::before {
+  content: "·";
+}
+.doc-body sup:has(a[data-footnote-ref]):has(+ sup:has(a[data-footnote-ref])) a[data-footnote-ref]::after {
+  content: "";
+}
+
+@media (max-width: 840px) {
+  .doc-body .footnotes { margin-left: 0; }
+}
+
+// While the footnote rail is live (≥1440px AND FootnoteRail.astro has
+// cloned the citations into it — that's what html.fn-rail-live asserts),
+// the foot References block would duplicate every note, so it stands down.
+// Narrow viewports, print, and no-JS readers keep it: the rail is a
+// progressive layer over the canonical copy, never a replacement.
+@media screen and (min-width: 1440px) {
+  html.fn-rail-live .doc-body .footnotes { display: none; }
 }

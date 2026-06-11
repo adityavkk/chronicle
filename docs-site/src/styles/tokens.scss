@@ -1,26 +1,29 @@
 // =====================================================================
 // CHRONICLE DOCS TOKENS
 // Canonical design vars. Do not override per-component; extend via :root.
+//
+// Palette: Flexoki (https://stephango.com/flexoki) — paper, black ink,
+// the warm base-gray scale, and cyan-600 as the single accent.
 // =====================================================================
 
 :root {
-  // -- Color palette (warm editorial: paper, ink, one accent) --------
-  --accent:        #A8432A;   // links, rails, micro-labels, hover
-  --accent-deep:   #7A2E1C;   // inline code text, hover deepen
-  --accent-tint:   #F5E7E0;   // pale accent fill (chips, soft highlights)
-  --ink:           #1F1D1A;   // body text, headings
-  --ink-mute:      #6B675E;   // secondary text, decks, captions
-  --muted:         #8A857A;   // lightest text step -- locators, fine print
-  --paper:         #FAF8F4;   // page ground -- NEVER stark white
-  --paper-warm:    #F3EFE7;   // terminal frames, recessed fills
-  --card:          #FFFEFB;   // raised surface (never stark #fff)
-  --tint:          #F1ECE1;   // alt table rows, inline-code ground
-  --rule:          #E2DCCF;   // hairlines
-  --rule-soft:     #ECE7DB;
+  // -- Color palette ----------------------------------------------------
+  --accent:        #24837B;   // links, rails, micro-labels (Flexoki cyan-600)
+  --accent-deep:   #143F3C;   // inline code text (Flexoki cyan-850)
+  --accent-tint:   #E8F1EF;   // pale accent fill (callouts, soft highlights)
+  --ink:           #100F0F;   // body text, headings (Flexoki black)
+  --ink-mute:      #6F6E69;   // secondary text, decks, captions (base-600)
+  --muted:         #878580;   // lightest text step -- locators (base-500)
+  --paper:         #FFFCF0;   // page ground (Flexoki paper) -- NEVER stark white
+  --paper-warm:    #F2F0E5;   // terminal frames, recessed fills (base-50)
+  --card:          #FFFEF9;   // raised surface (never stark #fff)
+  --tint:          #F2F0E5;   // alt table rows, inline-code ground (base-50)
+  --rule:          #DAD8CE;   // hairlines (base-150)
+  --rule-soft:     #E6E4D9;   // (base-100)
 
-  // -- Elevation (warm-ink shadows) -----------------------------------
-  --shadow-sm: 0 1px 2px rgba(31, 29, 26, 0.06), 0 2px 6px rgba(31, 29, 26, 0.04);
-  --shadow-md: 0 4px 18px rgba(31, 29, 26, 0.08), 0 1px 3px rgba(31, 29, 26, 0.05);
+  // -- Elevation (ink shadows) -------------------------------------------
+  --shadow-sm: 0 1px 2px rgba(16, 15, 15, 0.06), 0 2px 6px rgba(16, 15, 15, 0.04);
+  --shadow-md: 0 4px 18px rgba(16, 15, 15, 0.08), 0 1px 3px rgba(16, 15, 15, 0.05);
 
   // -- Typography -----------------------------------------------------
   --sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
@@ -40,4 +43,13 @@
 
   // -- Shape ------------------------------------------------------------
   --radius: 12px;
+
+  // -- Footnote rail ----------------------------------------------------
+  // Width of the right-hand citation rail (FootnoteRail.astro). The rail
+  // mounts at ≥1440px viewports — media queries can't read vars, so the
+  // breakpoint is hardcoded in FootnoteRail.astro, Doc.astro, and
+  // base.scss; grep "1440px" when retuning. The shell grows to exactly
+  // 1180 + 44 (gap) + 184 = 1408px, so the content column keeps its
+  // narrow-viewport width to the pixel and prose never reflows.
+  --fn-rail: 184px;
 }
