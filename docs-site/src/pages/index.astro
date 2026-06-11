@@ -2,9 +2,13 @@
 // The MDX lives in _overview.mdx (underscore = not routed) and is wrapped
 // here, so the layout receives frontmatter explicitly instead of relying on
 // MDX `layout` frontmatter resolution.
+import type { ComponentProps } from "astro/types";
 import Doc from "../layouts/Doc.astro";
 import Overview, { frontmatter } from "./_overview.mdx";
+
+// MDX exports frontmatter as Record<string, any>; assert the layout's shape.
+const fm = frontmatter as ComponentProps<typeof Doc>["frontmatter"];
 ---
-<Doc frontmatter={frontmatter}>
+<Doc frontmatter={fm}>
   <Overview />
 </Doc>

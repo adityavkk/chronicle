@@ -20,6 +20,8 @@ import Tldr from "../components/Tldr.astro";
 import SectionHead from "../components/SectionHead.astro";
 import Callout from "../components/Callout.astro";
 import Table from "../components/Table.astro";
+import StreamPlayground from "../components/StreamPlayground.astro";
+import OpMap from "../components/OpMap.astro";
 
 <Tldr>
   <ul>
@@ -66,6 +68,10 @@ import Table from "../components/Table.astro";
   default. An SSE read (`live=sse`) keeps a tail open continuously; the
   server cycles connections every 60 seconds so CDNs can collapse
   concurrent tails.
+
+  The same five requests, live:
+
+  <StreamPlayground />
 
   The protocol also covers explicit closure (an EOF every reader observes),
   TTL expiry, stream forking, and idempotent producers: a producer attaches
@@ -132,6 +138,8 @@ import Table from "../components/Table.astro";
   serialized per stream. A reader that long-polls subscribes to the notify
   channel and then re-checks the stream, so an append that lands between
   the check and the subscribe is never missed.
+
+  <OpMap />
 
   The model puts requirements on the Redis deployment:
 
