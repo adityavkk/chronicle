@@ -1,0 +1,552 @@
+---
+// StreamPlayground.astro — the BESPOKE ISLAND for driving a durable stream.
+//
+// A faithful miniature of chronicle's data path: each button issues the
+// protocol operation against an in-memory model that mirrors store/redis —
+// same keys (meta hash, msg zset, prod hash, notify channel), same Lua-script
+// command sequences (traced below the panels), same status codes the handler
+// returns (404 missing, 409 closed, 204 append, 201 create). Offsets use the
+// real "%016d_%016d" ReadSeq_ByteOffset format, displayed with the zero-pad
+// elided.
+//
+// Server-rendered default state is a coherent post-seed snapshot (create +
+// two appends). The script replays the SAME seed on load, so the first
+// paint() reproduces this markup — no hydration flash, meaningful with JS off.
+//
+// All logic lives in the client script (vanilla TS). <Demo> supplies chrome.
+import Demo from "./Demo.astro";
+---
+
+<Demo
+  label="Drive a durable stream"
+  caption="Every button is one HTTP request. The left panel is the stream as a reader sees it; the right panel is what Redis holds; the trace is the exact command sequence the Lua script runs — one script per mutation, so the write, the tail bump, and the wakeup PUBLISH land atomically. Arm the long-poll reader, then append: the PUBLISH on the notify channel is what wakes it."
+>
+  <div class="pg" data-playground>
+    <div class="pg-actions">
+      <button type="button" data-act="create">PUT create</button>
+      <button type="button" data-act="append">POST append</button>
+      <button type="button" data-act="read">GET read</button>
+      <button type="button" data-act="poll">GET long-poll</button>
+      <button type="button" data-act="close">POST close</button>
+      <button type="button" data-act="delete">DELETE</button>
+      <button type="button" data-act="reset" class="ghost">Reset</button>
+    </div>
+
+    <div class="pg-resp" data-resp data-status="APPEND">
+      <span class="pg-code">204</span><span class="pg-status">No Content</span><span class="pg-reply">appended 1 message</span><span class="pg-off mono">Stream-Next-Offset: …0002_…0029</span>
+    </div>
+    <div class="pg-resp is-reader" data-reader-resp hidden></div>
+
+    <div class="pg-grid">
+      <div class="pg-card">
+        <span class="pg-card-label">The stream — <code>/v1/stream/demo</code></span>
+        <ol class="pg-log" data-log>
+          <li class="pg-frame is-read"><span class="mono pg-frame-off">…0001_…0013</span><span class="pg-frame-body">&#123;"tok":"The"&#125;</span></li>
+          <li class="pg-frame"><span class="mono pg-frame-off">…0002_…0029</span><span class="pg-frame-body">&#123;"tok":"answer"&#125;</span></li>
+        </ol>
+        <div class="pg-cursor mono" data-cursor>reader cursor: …0001_…0013 · 1 unread</div>
+      </div>
+
+      <div class="pg-card">
+        <span class="pg-card-label">Redis — <code>ds:&#123;/v1/stream/demo&#125;:*</code></span>
+        <div class="pg-redis" data-redis>
+          <div class="pg-key"><span class="pg-key-name mono">:meta</span><span class="pg-key-type">hash</span>
+            <div class="pg-key-body mono">ct=application/json · tail=…0002_…0029 · closed=0</div>
+          </div>
+          <div class="pg-key"><span class="pg-key-name mono">:msg</span><span class="pg-key-type">zset</span>
+            <div class="pg-key-body mono">…0001_…0013|&#123;"tok":"The"&#125; · …0002_…0029|&#123;"tok":"answer"&#125;</div>
+          </div>
+          <div class="pg-key"><span class="pg-key-name mono">:prod</span><span class="pg-key-type">hash</span>
+            <div class="pg-key-body mono is-empty">(no producers)</div>
+          </div>
+          <div class="pg-key is-notify" data-notify><span class="pg-key-name mono">ds:notify:&#123;…&#125;</span><span class="pg-key-type">pub/sub</span>
+            <div class="pg-key-body mono" data-notify-body>last: PUBLISH 'a' · no waiters</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pg-trace" data-trace>
+      <span class="pg-chip is-script">EVALSHA append.lua</span><span class="pg-chip">HGETALL :meta</span><span class="pg-chip">HSET :meta accessedAtNs</span><span class="pg-chip">ZADD :msg</span><span class="pg-chip">HSET :meta tail</span><span class="pg-chip is-pub">PUBLISH 'a'</span>
+    </div>
+  </div>
+</Demo>
+
+<script>
+  // ── A miniature of store/redis: same keys, same script sequences ──────
+  type Status =
+    | "CREATED" | "OK" | "APPEND" | "READ" | "WAIT" | "CLOSED"
+    | "DELETED" | "MISSING" | "CONFLICT" | "NOTE";
+  type Res = { code: number; status: Status; reply: string; off?: string; trace?: string[] };
+
+  const TOKENS = ['{"tok":"The"}', '{"tok":"answer"}', '{"tok":"is"}', '{"tok":"42"}', '{"tok":"."}'];
+
+  function wire(root: HTMLElement) {
+    // The stream model — mirrors the meta/msg keys exactly.
+    let exists = false;
+    let closed = false;
+    let frames: { off: string; body: string }[] = [];
+    let readSeq = 0, byteOff = 0;
+    let cursor = ""; // reader offset: "" = start (offset=-1)
+    let waiting = false; // an armed long-poll reader
+    let nextTok = 0;
+    let lastPub: string | null = null;
+
+    const offset = () =>
+      `${String(readSeq).padStart(16, "0")}_${String(byteOff).padStart(16, "0")}`;
+    // Elide the zero-pad for display; the title attr keeps the full form.
+    const short = (off: string) => (off ? `…${off.slice(12, 16)}_…${off.slice(29, 33)}` : "—");
+
+    // ── UI refs ──────────────────────────────────────────────────────────
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const respEl = $<HTMLElement>("[data-resp]");
+    const readerEl = $<HTMLElement>("[data-reader-resp]");
+    const logEl = $<HTMLOListElement>("[data-log]");
+    const cursorEl = $<HTMLElement>("[data-cursor]");
+    const redisEl = $<HTMLElement>("[data-redis]");
+    const notifyBodyEl = $<HTMLElement>("[data-notify-body]");
+    const traceEl = $<HTMLElement>("[data-trace]");
+
+    function publish(kind: "a" | "c" | "d") {
+      lastPub = kind;
+      const card = root.querySelector<HTMLElement>("[data-notify]");
+      if (card) {
+        card.classList.remove("is-pulse");
+        void card.offsetWidth;
+        card.classList.add("is-pulse");
+      }
+      if (waiting) wake(kind);
+    }
+
+    // The armed long-poll reader observes the publish, re-checks, responds.
+    function wake(kind: "a" | "c" | "d") {
+      waiting = false;
+      let html: string;
+      if (kind === "a") {
+        const unread = frames.filter((f) => f.off > cursor);
+        cursor = frames.length ? frames[frames.length - 1].off : cursor;
+        html =
+          `<span class="pg-code">200</span><span class="pg-status">OK</span>` +
+          `<span class="pg-reply">⚡ woke on PUBLISH 'a' — re-check returned ${unread.length} message${unread.length === 1 ? "" : "s"}</span>` +
+          `<span class="pg-off mono">Stream-Next-Offset: ${short(cursor)}</span>`;
+      } else if (kind === "c") {
+        html =
+          `<span class="pg-code">204</span><span class="pg-status">No Content</span>` +
+          `<span class="pg-reply">⚡ woke on PUBLISH 'c' — stream closed (EOF)</span>` +
+          `<span class="pg-off mono">Stream-Closed: true</span>`;
+      } else {
+        html =
+          `<span class="pg-code">410</span><span class="pg-status">Gone</span>` +
+          `<span class="pg-reply">⚡ woke on PUBLISH 'd' — stream deleted</span>`;
+      }
+      readerEl.hidden = false;
+      readerEl.innerHTML = `<span class="pg-reader-tag">long-poll reader</span>` + html;
+    }
+
+    const STATUS_TEXT: Record<number, string> = {
+      200: "OK", 201: "Created", 204: "No Content",
+      404: "Not Found", 409: "Conflict", 410: "Gone",
+    };
+
+    function paint(res?: Res) {
+      if (res) {
+        respEl.dataset.status = res.status;
+        respEl.innerHTML =
+          (res.code ? `<span class="pg-code">${res.code}</span><span class="pg-status">${STATUS_TEXT[res.code] ?? ""}</span>` : "") +
+          `<span class="pg-reply">${res.reply}</span>` +
+          (res.off ? `<span class="pg-off mono">${res.off}</span>` : "");
+        traceEl.innerHTML = (res.trace ?? [])
+          .map((c) => {
+            const cls = c.startsWith("EVALSHA") || c.startsWith("EVAL ")
+              ? "pg-chip is-script"
+              : c.startsWith("PUBLISH") ? "pg-chip is-pub"
+              : c.startsWith("SUBSCRIBE") ? "pg-chip is-sub"
+              : "pg-chip";
+            return `<span class="${cls}">${c}</span>`;
+          })
+          .join("");
+      }
+
+      // Stream panel
+      if (!exists) {
+        logEl.innerHTML = `<li class="pg-frame is-void"><span class="pg-frame-body">no stream at /v1/stream/demo — PUT to create</span></li>`;
+        cursorEl.textContent = "";
+      } else {
+        const rows = frames.map((f) => {
+          const read = f.off <= cursor && cursor !== "";
+          return `<li class="pg-frame${read ? " is-read" : ""}"><span class="mono pg-frame-off" title="${f.off}">${short(f.off)}</span><span class="pg-frame-body">${f.body}</span></li>`;
+        });
+        if (frames.length === 0)
+          rows.push(`<li class="pg-frame is-void"><span class="pg-frame-body">(empty — tail at ${short(offset())})</span></li>`);
+        if (closed)
+          rows.push(`<li class="pg-frame is-eof"><span class="pg-frame-body">— closed: EOF for every reader —</span></li>`);
+        logEl.innerHTML = rows.join("");
+        const unread = frames.filter((f) => cursor === "" || f.off > cursor).length;
+        cursorEl.textContent = `reader cursor: ${cursor ? short(cursor) : "start"} · ${unread} unread`;
+      }
+
+      // Redis panel
+      if (!exists) {
+        redisEl.querySelectorAll<HTMLElement>(".pg-key:not(.is-notify) .pg-key-body").forEach((el) => {
+          el.classList.add("is-empty");
+          el.textContent = "(nil)";
+        });
+      } else {
+        const bodies = redisEl.querySelectorAll<HTMLElement>(".pg-key:not(.is-notify) .pg-key-body");
+        bodies[0].classList.remove("is-empty");
+        bodies[0].textContent = `ct=application/json · tail=${short(offset())} · closed=${closed ? 1 : 0}`;
+        if (frames.length) {
+          bodies[1].classList.remove("is-empty");
+          bodies[1].textContent = frames.map((f) => `${short(f.off)}|${f.body}`).join(" · ");
+        } else {
+          bodies[1].classList.add("is-empty");
+          bodies[1].textContent = "(empty zset)";
+        }
+        bodies[2].classList.add("is-empty");
+        bodies[2].textContent = "(no producers)";
+      }
+      notifyBodyEl.textContent =
+        `${lastPub ? `last: PUBLISH '${lastPub}'` : "no publishes yet"} · ${waiting ? "1 long-poll waiter ⏳" : "no waiters"}`;
+    }
+
+    const actions: Record<string, () => Res | undefined> = {
+      create() {
+        if (exists)
+          return { code: 200, status: "OK", reply: "stream exists with matching config — idempotent", off: `Stream-Next-Offset: ${short(offset())}`,
+            trace: ["EVALSHA create.lua", "HGETALL :meta", "(config match → no-op)"] };
+        exists = true; closed = false; frames = []; readSeq = 0; byteOff = 0; cursor = ""; nextTok = 0;
+        return { code: 201, status: "CREATED", reply: "stream created", off: `Stream-Next-Offset: ${short(offset())}`,
+          trace: ["EVALSHA create.lua", "HGETALL :meta", "DEL :meta :msg :prod :forks", "HSET :meta ct tail createdAtNs", "PEXPIRE backstop"] };
+      },
+      append() {
+        if (!exists)
+          return { code: 404, status: "MISSING", reply: "no stream at /v1/stream/demo",
+            trace: ["EVALSHA append.lua", "HGETALL :meta", "(nil → error NOTFOUND)"] };
+        if (closed)
+          return { code: 409, status: "CONFLICT", reply: "stream is closed",
+            trace: ["EVALSHA append.lua", "HGETALL :meta", "(closed=1 → error CLOSED)"] };
+        const body = TOKENS[nextTok++ % TOKENS.length];
+        readSeq += 1; byteOff += body.length;
+        const off = offset();
+        frames.push({ off, body });
+        const res: Res = { code: 204, status: "APPEND", reply: "appended 1 message", off: `Stream-Next-Offset: ${short(off)}`,
+          trace: ["EVALSHA append.lua", "HGETALL :meta", "HSET :meta accessedAtNs", "ZADD :msg", "HSET :meta tail", "PUBLISH 'a'"] };
+        publish("a");
+        return res;
+      },
+      read() {
+        if (!exists)
+          return { code: 404, status: "MISSING", reply: "no stream at /v1/stream/demo",
+            trace: ["EVAL read.lua", "HGETALL :meta", "(nil → 404)"] };
+        const unread = frames.filter((f) => cursor === "" || f.off > cursor);
+        const trace = ["EVAL read.lua", "HGETALL :meta", "HSET :meta accessedAtNs", `ZRANGEBYLEX :msg "(${cursor ? short(cursor) : "-"}…" "+"`];
+        if (unread.length === 0)
+          return { code: closed ? 204 : 204, status: "READ",
+            reply: `up to date — nothing after the cursor${closed ? "; stream closed" : ""}`,
+            off: `Stream-Up-To-Date: true${closed ? " · Stream-Closed: true" : ""}`, trace };
+        cursor = frames[frames.length - 1].off;
+        return { code: 200, status: "READ", reply: `returned ${unread.length} message${unread.length === 1 ? "" : "s"} from the cursor`,
+          off: `Stream-Next-Offset: ${short(cursor)}`, trace };
+      },
+      poll() {
+        if (!exists)
+          return { code: 404, status: "MISSING", reply: "no stream at /v1/stream/demo",
+            trace: ["EVAL read.lua", "HGETALL :meta", "(nil → 404)"] };
+        const unread = frames.filter((f) => cursor === "" || f.off > cursor);
+        if (unread.length > 0) return actions.read();
+        if (closed)
+          return { code: 204, status: "CLOSED", reply: "at tail of a closed stream — immediate EOF",
+            off: "Stream-Closed: true", trace: ["EVAL read.lua", "(at tail, closed → 204)"] };
+        if (waiting) {
+          waiting = false;
+          return { code: 204, status: "WAIT", reply: "30 s elapsed with no data — long-poll timeout",
+            off: "Stream-Up-To-Date: true", trace: ["(timeout)", "UNSUBSCRIBE"] };
+        }
+        waiting = true;
+        readerEl.hidden = true;
+        return { code: 0, status: "WAIT",
+          reply: "reader armed: nothing at the offset, so it SUBSCRIBEs and re-checks. Append (or close) to wake it; long-poll again to simulate the 30 s timeout.",
+          trace: ["EVAL read.lua", "(empty)", "SUBSCRIBE ds:notify:{…}", "EVAL read.lua (re-check)", "(wait…)"] };
+      },
+      close() {
+        if (!exists)
+          return { code: 404, status: "MISSING", reply: "no stream at /v1/stream/demo",
+            trace: ["EVALSHA close.lua", "HGETALL :meta", "(nil → 404)"] };
+        if (closed)
+          return { code: 204, status: "CLOSED", reply: "already closed — idempotent",
+            off: "Stream-Closed: true", trace: ["EVALSHA close.lua", "HGETALL :meta", "(closed=1 → no-op)"] };
+        closed = true;
+        const res: Res = { code: 204, status: "CLOSED", reply: "closed — every reader observes EOF",
+          off: `Stream-Closed: true · Stream-Next-Offset: ${short(offset())}`,
+          trace: ["EVALSHA close.lua", "HGETALL :meta", "HSET :meta closed 1", "PUBLISH 'c'"] };
+        publish("c");
+        return res;
+      },
+      delete() {
+        if (!exists)
+          return { code: 404, status: "MISSING", reply: "no stream at /v1/stream/demo",
+            trace: ["EVALSHA delete.lua", "HGETALL :meta", "(nil → 404)"] };
+        const res: Res = { code: 204, status: "DELETED", reply: "deleted — keys removed in one script",
+          trace: ["EVALSHA delete.lua", "HGETALL :meta", "(refCount=0)", "DEL :meta :msg :prod :forks", "PUBLISH 'd'"] };
+        publish("d");
+        exists = false; closed = false; frames = []; readSeq = 0; byteOff = 0; cursor = "";
+        return res;
+      },
+      reset() {
+        exists = false; closed = false; frames = []; readSeq = 0; byteOff = 0;
+        cursor = ""; waiting = false; nextTok = 0; lastPub = null;
+        readerEl.hidden = true;
+        seed();
+        return undefined;
+      },
+    };
+
+    root.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const res = actions[btn.dataset.act!]?.();
+        if (res) paint(res);
+        else paint();
+      });
+    });
+
+    // Reproduce the server-rendered default state: create + two appends, then
+    // one GET that consumed the first message (cursor sits between the two).
+    function seed() {
+      actions.create();
+      actions.append();
+      const cursorAfterFirst = frames[0]?.off ?? "";
+      const last = actions.append();
+      cursor = cursorAfterFirst;
+      paint(last);
+    }
+    seed();
+  }
+
+  document.querySelectorAll<HTMLElement>("[data-playground]").forEach((el) => wire(el));
+</script>
+
+<style lang="scss">
+  .pg-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    button {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      padding: 8px 13px;
+      border-radius: 7px;
+      border: 1px solid var(--accent);
+      background: var(--card);
+      color: var(--accent);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      &:hover { background: var(--accent); color: #fff; }
+      &.ghost {
+        border-color: var(--rule);
+        color: var(--muted);
+        margin-left: auto;
+        &:hover { background: var(--muted); color: #fff; }
+      }
+    }
+  }
+
+  // ── HTTP verdict boxes (dynamically rebuilt → global selectors) ───────
+  .pg-resp {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px;
+    min-height: 24px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border-left: 3px solid var(--rule);
+    background: var(--paper);
+    font-size: 13.5px;
+    &[data-status="CREATED"], &[data-status="APPEND"], &[data-status="READ"], &[data-status="OK"] { border-left-color: var(--ok); }
+    &[data-status="WAIT"] { border-left-color: var(--accent); }
+    &[data-status="CLOSED"], &[data-status="DELETED"] { border-left-color: var(--ink-mute); }
+    &[data-status="CONFLICT"] { border-left-color: var(--warn); }
+    &[data-status="MISSING"] { border-left-color: var(--bad); }
+    &.is-reader { margin-top: 8px; border-left-color: var(--accent); background: var(--accent-tint); }
+    &[hidden] { display: none; }
+  }
+  .pg-resp :global(.pg-code) {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 13px;
+    padding: 2px 7px;
+    border-radius: 5px;
+    color: #fff;
+    background: var(--muted);
+  }
+  .pg-resp[data-status="CREATED"] :global(.pg-code),
+  .pg-resp[data-status="APPEND"] :global(.pg-code),
+  .pg-resp[data-status="OK"] :global(.pg-code),
+  .pg-resp[data-status="READ"] :global(.pg-code) { background: var(--ok); }
+  .pg-resp[data-status="CONFLICT"] :global(.pg-code) { background: var(--warn); }
+  .pg-resp[data-status="MISSING"] :global(.pg-code) { background: var(--bad); }
+  .pg-resp.is-reader :global(.pg-code) { background: var(--accent); }
+  .pg-resp :global(.pg-status) {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .pg-resp :global(.pg-reply) { color: var(--ink); flex: 1 1 220px; }
+  .pg-resp :global(.pg-off) { font-size: 11px; color: var(--accent-deep); }
+  .pg-resp :global(.pg-reader-tag) {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
+
+  // ── Stream + Redis panels ──────────────────────────────────────────────
+  .pg-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 14px;
+    @media (max-width: 700px) { grid-template-columns: 1fr; }
+  }
+  .pg-card {
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 14px 16px;
+    background: var(--paper);
+    min-width: 0;
+  }
+  .pg-card-label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+    :global(code) { background: none; padding: 0; color: var(--accent-deep); text-transform: none; letter-spacing: 0; }
+  }
+
+  .pg-log {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 3px;
+    max-height: 190px;
+    overflow-y: auto;
+  }
+  .pg-log :global(.pg-frame) {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    padding: 5px 10px;
+    border-radius: 6px;
+    background: var(--card);
+    border: 1px solid var(--rule-soft);
+  }
+  .pg-log :global(.pg-frame.is-read) { opacity: 0.55; }
+  .pg-log :global(.pg-frame.is-void) { border-style: dashed; color: var(--muted); font-size: 12.5px; background: none; }
+  .pg-log :global(.pg-frame.is-eof) {
+    justify-content: center;
+    border: none;
+    background: none;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .pg-log :global(.pg-frame-off) { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+  .pg-log :global(.pg-frame-body) { font-family: var(--mono); color: var(--ink); font-size: 12px; overflow-wrap: anywhere; }
+  .pg-cursor {
+    margin-top: 10px;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    border-top: 1px dashed var(--rule);
+    padding-top: 8px;
+    min-height: 14px;
+  }
+
+  .pg-redis { display: grid; gap: 8px; }
+  .pg-key {
+    border: 1px solid var(--rule-soft);
+    border-radius: 7px;
+    padding: 8px 10px;
+    background: var(--card);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 10px;
+  }
+  .pg-key-name { font-size: 11.5px; color: var(--accent-deep); font-weight: 600; }
+  .pg-key-type {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    align-self: center;
+  }
+  .pg-key-body {
+    grid-column: 1 / -1;
+    font-size: 10.5px;
+    color: var(--ink-mute);
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+    &.is-empty, :global(&.is-empty) { color: var(--muted); font-style: italic; }
+  }
+  .pg-key.is-notify { border-color: var(--accent); }
+  .pg-key.is-notify.is-pulse { animation: pg-pulse 0.8s ease-out; }
+  @keyframes pg-pulse {
+    0% { background: var(--accent-tint); box-shadow: 0 0 0 0 rgba(36, 131, 123, 0.35); }
+    100% { background: var(--card); box-shadow: 0 0 0 12px rgba(36, 131, 123, 0); }
+  }
+
+  // ── Command trace ──────────────────────────────────────────────────────
+  .pg-trace {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--rule);
+    min-height: 24px;
+  }
+  .pg-trace :global(.pg-chip) {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 5px;
+    background: var(--tint);
+    color: var(--ink-mute);
+    border: 1px solid var(--rule-soft);
+    white-space: nowrap;
+  }
+  .pg-trace :global(.pg-chip:not(:last-child))::after { content: ""; }
+  .pg-trace :global(.pg-chip.is-script) {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  .pg-trace :global(.pg-chip.is-pub) {
+    border-color: var(--accent);
+    color: var(--accent-deep);
+    background: var(--accent-tint);
+    font-weight: 600;
+  }
+  .pg-trace :global(.pg-chip.is-sub) {
+    border-color: var(--accent);
+    color: var(--accent-deep);
+    background: none;
+  }
+</style>
