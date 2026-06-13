@@ -1,0 +1,107 @@
+---
+// Complexity.astro — a compact time/space cost block for one endpoint, with
+// a one-paragraph justification tied to the Redis data structure. Static, no
+// client JS; same figure rail as RedisTrace and Diagram.
+interface Props {
+  /** Big-O time, e.g. "O(log N + M)". Plain text. */
+  time: string;
+  /** Big-O space, e.g. "O(M)". Plain text. */
+  space: string;
+  /** Why — one sentence grounded in the structure. Inline HTML allowed. */
+  why: string;
+  /** Mono micro-label. Default "Complexity". */
+  label?: string;
+}
+const { time, space, why, label = "Complexity" } = Astro.props;
+---
+
+<div class="cx">
+  <div class="cx-head">
+    <span class="cx-label mono">{label}</span>
+    <span class="cx-badges">
+      <span class="cx-badge">
+        <span class="cx-k mono">time</span><span class="cx-v mono">{time}</span>
+      </span>
+      <span class="cx-badge">
+        <span class="cx-k mono">space</span><span class="cx-v mono">{space}</span>
+      </span>
+    </span>
+  </div>
+  <p class="cx-why" set:html={why} />
+</div>
+
+<style lang="scss">
+  .cx {
+    margin: 24px 0 0 var(--rail-indent);
+    max-width: var(--prose-max);
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .cx-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+    padding: 12px 20px;
+    background: var(--accent-tint);
+    border-bottom: 1px solid var(--rule);
+  }
+  .cx-label {
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .cx-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .cx-badge {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 7px;
+    background: var(--card);
+    border: 1px solid rgba(36, 131, 123, 0.3);
+    border-radius: 6px;
+    padding: 3px 9px;
+  }
+  .cx-k {
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .cx-v {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--accent-deep);
+  }
+  .cx-why {
+    margin: 0;
+    padding: 14px 20px 16px;
+    font-size: 14.5px;
+    line-height: 1.55;
+    color: var(--ink);
+    :global(strong) { color: var(--ink); font-weight: 700; }
+    :global(em) { font-family: var(--serif-italic); font-style: italic; color: var(--accent-deep); }
+    :global(code) {
+      font-family: var(--mono);
+      font-size: 0.86em;
+      background: var(--tint);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--accent-deep);
+      overflow-wrap: anywhere;
+    }
+  }
+  @media (max-width: 840px) {
+    .cx { margin-left: 0; max-width: none; }
+    .cx-badges { margin-left: 0; width: 100%; }
+  }
+</style>

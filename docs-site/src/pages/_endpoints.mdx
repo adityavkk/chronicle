@@ -19,6 +19,7 @@ import Callout from "../components/Callout.astro";
 import Table from "../components/Table.astro";
 import Diagram from "../components/Diagram.astro";
 import RedisTrace from "../components/RedisTrace.astro";
+import Complexity from "../components/Complexity.astro";
 
 <Tldr>
   <ul>
@@ -107,11 +108,40 @@ import RedisTrace from "../components/RedisTrace.astro";
   round-trip.[^reply] The sections show the `status` that matters and skip
   the rest.
 
-  <Callout icon="info" label="Out of scope">
-    Chronicle does not implement the protocol's optional reserved
-    subscriptions API (`__ds` webhooks and pull-wake) — the same posture as
-    the reference Caddy plugin's conformance gate. This page covers the
-    operations Chronicle serves.
+  ### What the operations <em>cost</em>
+
+  The cost of every endpoint falls out of the Redis structure it touches.
+  Three structures carry the work:
+
+  - **The `:msg` sorted set** is the only one whose size grows without bound.
+    Every frame is a member `"<offset>|<bytes>"` at score `0`; equal scores
+    make Redis order members lexicographically, and the fixed-width offset
+    prefix makes that order the stream order. Past Redis's listpack threshold
+    the set is a skiplist, so an insert is `O(log N)` and a lexicographic
+    range is `O(log N + M)`.[^zset]
+  - **The `:meta` and `:prod` hashes** are bounded-field hash tables — every
+    field read or write is `O(1)`.
+  - **The `:forks` set** is `O(1)` to add or remove, and the **notify**
+    channel is `O(S)` to publish to `S` subscribers.
+
+  ```text title="Why a read is O(log N + M) and an append is O(log N)"
+  # :msg is a skiplist ordered by member (every score is 0).
+  ZADD :msg 0 "<offset>|<bytes>"      # seek the insert point     O(log N)
+                                      # splice the tower          O(1)   => O(log N)
+  ZRANGEBYLEX :msg "(<off>\xff" "+"   # descend to the cursor     O(log N)
+                                      # walk the M frames past it  O(M)  => O(log N + M)
+  ```
+
+  Throughout: **N** = frames already in the stream, **M** = frames the call
+  touches (returns or frees), **k** = messages in one batch, **b** = bytes in
+  that batch, **S** = subscribers on the stream's channel, **P** = producers
+  tracked, **d** = fork-chain depth.
+
+  <Callout icon="arrow" label="Subscriptions">
+    This page covers the stream operations: five verbs, one Lua script each.
+    The protocol's reserved subscription API (`__ds` webhook and pull-wake
+    delivery) is implemented too, on a separate plane with its own durability
+    story, on [its own page](../subscriptions).
   </Callout>
 </section>
 
@@ -161,6 +191,12 @@ import RedisTrace from "../components/RedisTrace.astro";
     caption="Every command runs inside one EVALSHA, so a concurrent reader can never observe a half-built stream — meta without frames, or frames without a tail."
   />
 
+  <Complexity
+    time="O(1) empty · O(k log k) with a k-message body"
+    space="O(1) · O(b) for a b-byte body"
+    why="An empty create is a handful of O(1) hash writes plus a constant set of TTL commands. A create with a body inserts each of the k initial messages into a <em>fresh</em> <code>:msg</code> skiplist — k × O(log k) — and stores the b payload bytes. The existence pre-check reads only the bounded meta hash, so it stays O(1)."
+  />
+
   ### Forking: <em>two streams, two slots</em>
 
   A `PUT` carrying `Stream-Forked-From` creates a fork: a new stream that
@@ -196,6 +232,21 @@ import RedisTrace from "../components/RedisTrace.astro";
     ]}
     caption="Then create.lua runs as in §01, except the child's meta records forkedFrom and the resolved forkOff."
   />
+
+  <Complexity
+    label="Complexity — the payoff of forking"
+    time="O(1)"
+    space="O(1) — no data copied"
+    why="Forking copies nothing, however long the source. <code>incr_ref</code> bumps a refcount, registers the child, and persists the source keys; <code>create</code> writes the fork's own meta — all O(1). The inherited prefix stays in the source's skiplist and is range-scanned in place on a read. A <code>Stream-Fork-Sub-Offset</code> adds one O(log N + M) read of the source to resolve the boundary byte."
+  />
+
+  ```text title="A fork is O(1) — the source skiplist is shared, not copied"
+  source.refCount += 1               # HINCRBY :meta   O(1)
+  source.forks.add(fork_path)        # SADD :forks     O(1)
+  fork.meta = { forkedFrom, forkOff } # HSET :meta     O(1)
+  # a read on the fork below forkOff range-scans source:msg in place,
+  # capped at forkOff — the inherited frames are never duplicated.
+  ```
 
   <Callout icon="alert" label="Non-atomic across the pair">
     Because the two scripts span two slots, a crash between `incr_ref.lua`
@@ -253,6 +304,20 @@ import RedisTrace from "../components/RedisTrace.astro";
       { cmd: "PUBLISH", key: "ds:notify:{p}", does: "Send <code>a</code> (or <code>c</code> when the append also closes), waking every long-poll and SSE waiter on the stream.", loc: "append.lua:139" },
     ]}
   />
+
+  <Complexity
+    time="O(k log N)"
+    space="O(b)"
+    why="Each of the k messages in the batch is one skiplist insert into a <code>:msg</code> of current size N — O(log N) apiece. The tail update, the producer fence (<code>HGET</code>/<code>HSET</code> on <code>:prod</code>), and the wakeup are O(1); the publish is O(S) in subscribers. Space grows by the b appended bytes. The optimistic retry loop multiplies the <em>number</em> of attempts under contention, not the cost of one."
+  />
+
+  ```text title="Appending a k-message batch — k skiplist inserts"
+  for msg in batch:                        # k messages
+      member = f"{end_off:016}_..|{msg}"
+      ZADD :msg 0 member                   # O(log N) each  => O(k log N)
+  HSET :meta tail <new>                     # O(1)
+  PUBLISH ds:notify:{p} a                   # O(S)
+  ```
 
   ### With an <em>idempotent producer</em>
 
@@ -349,6 +414,12 @@ import RedisTrace from "../components/RedisTrace.astro";
     ]}
     caption="A producer close adds two writes before the publish: HSET :prod to advance the producer fence, and the cbId/cbEpoch/cbSeq fields on :meta so a duplicate close request can be recognized."
   />
+
+  <Complexity
+    time="O(1)"
+    space="O(1)"
+    why="Close flips one hash field (<code>HSET closed 1</code>) and publishes a wakeup: O(1), plus O(S) to notify the S parked readers. No frames are read or written, and the tail does not move."
+  />
 </section>
 
 <section class="block" id="get-catchup">
@@ -394,6 +465,21 @@ import RedisTrace from "../components/RedisTrace.astro";
     ]}
     caption="A fork read adds a second ZRANGEBYLEX, in Go, against the source's :msg in its own slot, capped at the fork offset — so the inherited prefix is stitched ahead of the fork's own frames, and post-fork source appends stay invisible."
   />
+
+  <Complexity
+    time="O(log N + M)"
+    space="O(M) — the frames returned"
+    why="<code>ZRANGEBYLEX</code> descends the skiplist to the cursor in O(log N), then walks the M frames at or past it; the two bounded <code>HGETALL</code>s on meta are O(1). A fork read repeats the seek-and-walk on each source up the chain — O(d · (log N + M)) for chain depth d — and the server caps M at a chunk limit, so one response stays bounded."
+  />
+
+  ```text title="The read is a skiplist seek, then a linear walk"
+  node = skiplist.seek_gt(":msg", "(<offset>\xff")   # O(log N)
+  out = []
+  while node and len(out) < CHUNK_LIMIT:             # walk forward
+      out.append(node.member)                        # O(M)
+      node = node.forward[0]                          # bottom-level next
+  # N = frames in the stream, M = frames returned (<= chunk limit)
+  ```
 
   <Callout icon="info" label="Why the bound looks strange">
     The lower bound `"(<offset>\xff"` is exclusive and ends in the byte
@@ -454,6 +540,12 @@ import RedisTrace from "../components/RedisTrace.astro";
     detects this case and returns empty immediately instead of
     subscribing.[^forkwait]
   </Callout>
+
+  <Complexity
+    time="O(log N + M) per read"
+    space="O(M) returned + O(1) subscription"
+    why="Every read is the same skiplist seek-and-walk. The <code>SUBSCRIBE</code> is O(1), and the block costs no compute while idle. One request does the fast-path read, the re-check read, and one read per wakeup — a small constant number of reads, independent of how long it waits."
+  />
 </section>
 
 <section class="block" id="get-sse">
@@ -504,6 +596,12 @@ import RedisTrace from "../components/RedisTrace.astro";
     handler picks the encoding from the stream's media type at connect
     time.[^binary]
   </Callout>
+
+  <Complexity
+    time="O(log N + Mᵢ) per iteration · O(I·log N + T) per connection"
+    space="O(Mᵢ) per batch"
+    why="Each loop iteration re-reads from the current offset for its Mᵢ new frames. Over a connection of I iterations delivering T total frames, the seeks sum to O(I log N) and the walks to O(T). The fresh <code>SUBSCRIBE</code> per 100 ms quantum is connection churn, not asymptotic compute (overview §05)."
+  />
 </section>
 
 <section class="block" id="head">
@@ -541,6 +639,12 @@ import RedisTrace from "../components/RedisTrace.astro";
       { cmd: "HGETALL", key: "ds:{p}:prod", does: "Fetched in the same pipeline round trip. HEAD returns metadata only, but <code>Get</code>'s contract attaches producer state, so both hashes come back together.", loc: "store.go:133", kind: "read" },
       { cmd: "in Go: classify", does: "Soft-deleted → <strong>410</strong>, expired → <strong>404</strong>. HEAD evaluates expiry but, unlike Read and Append, does <em>not</em> write <code>accessedAtNs</code> — the idle window keeps counting.", loc: "store.go:144", kind: "flow" },
     ]}
+  />
+
+  <Complexity
+    time="O(P)"
+    space="O(1) — no body"
+    why="HEAD reads the bounded meta hash and the producer hash — O(P) for P tracked producers, effectively O(1) — and classifies in Go. No frames are touched, no key is mutated, and no body crosses the wire."
   />
 </section>
 
@@ -600,6 +704,19 @@ import RedisTrace from "../components/RedisTrace.astro";
     refcount one too high until another delete re-walks the chain — a
     documented window, the same trade made by fork creation.[^cascade]
   </Callout>
+
+  <Complexity
+    time="O(M) hard delete · O(1) soft delete"
+    space="frees O(M)"
+    why="A hard delete frees the whole <code>:msg</code> skiplist — O(M) for M frames — plus the bounded hashes; <code>DEL</code> of a collection is linear in its size. A soft delete (forks still reference it) only sets a flag and drops TTLs: O(1). The cascade runs one O(1) <code>decr_ref</code> per ancestor and frees each hard-deleted ancestor's frames, so a chain of depth d costs O(d) scripts plus the frames reclaimed."
+  />
+
+  ```text title="DEL frees every frame node — O(M)"
+  DEL :msg                   # free all M skiplist nodes       O(M)
+  DEL :meta :prod :forks     # bounded hashes + set            O(1)
+  PUBLISH ds:notify:{p} d    # wake the waiters                O(S)
+  # soft path instead: HSET :meta softDel 1 ; PERSIST x4    => O(1)
+  ```
 </section>
 
 <section class="block" id="further">
@@ -608,7 +725,7 @@ import RedisTrace from "../components/RedisTrace.astro";
   Every command above is taken verbatim from the source; the locators are
   `file:line` into the repository at the time of writing.
 
-  - [Overview](./) — the data model, design, performance, and conformance posture
+  - [Overview](../) — the data model, design, performance, and conformance posture
   - [store/redis/scripts/](https://github.com/adityavkk/chronicle/tree/main/store/redis/scripts) — the eight Lua scripts, one per mutation
   - [docs/spec/PROTOCOL.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md) — the vendored protocol specification
   - [docs/PLAN.md](https://github.com/adityavkk/chronicle/blob/main/docs/PLAN.md) — the Redis data model and its decision log
@@ -617,6 +734,7 @@ import RedisTrace from "../components/RedisTrace.astro";
 [^offset]: Offset format and parsing: [`store/offset.go`](https://github.com/adityavkk/chronicle/blob/main/store/offset.go) — `"%016d_%016d"`, lexicographically sortable, with `-1` → start and `now` → tail.
 [^frame]: Frame encoding: [`store/redis/keys.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go) — `encodeFrame`, the `"<offset>|<data>"` ZSET member at score `0`.
 [^reply]: The fixed nine-field reply and its decoding: [`store/redis/scripts.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/scripts.go), `scriptReply` / `make_reply` in [`common.lua`](https://github.com/adityavkk/chronicle/blob/main/store/redis/scripts/common.lua).
+[^zset]: Redis sorted-set complexity: [`ZADD`](https://redis.io/docs/latest/commands/zadd/) is `O(log(N))` per member; [`ZRANGEBYLEX`](https://redis.io/docs/latest/commands/zrangebylex/) is `O(log(N) + M)`. `ZRANGEBYLEX` is only well-defined when every member shares one score — here all scores are `0`. Small sets use a listpack (`zset-max-listpack-entries`, default 128) and convert to the skiplist past it.
 [^create]: Create semantics and idempotent-match rules: PROTOCOL.md §5.1.
 [^fork]: Stream forking, fork offsets, and the soft-delete lifecycle: PROTOCOL.md §4.2.
 [^append]: Append, JSON flattening, and `Stream-Seq`: PROTOCOL.md §5.2; JSON processing in [`store/json.go`](https://github.com/adityavkk/chronicle/blob/main/store/json.go).
