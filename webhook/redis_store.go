@@ -159,6 +159,33 @@ func (s *RedisStore) StreamSubscribers(path string) ([]string, error) {
 	return s.client.SMembers(s.ctx(), streamSubsKey(path)).Result()
 }
 
+// ReconcileIndexes rebuilds the per-stream fan-out index from the canonical
+// links. The index (streamSubsKey) drives the low-latency OnStreamAppend trigger
+// and is maintained from Go after the Lua link write, so a crash between them can
+// drop an index entry while the canonical link survives — degrading that stream
+// to sweep latency until repaired. This re-adds any missing SADD; it never
+// invents membership (it only mirrors links). Stale-entry cleanup is deferred:
+// re-adding the missing entry is the correctness-critical part.
+func (s *RedisStore) ReconcileIndexes() error {
+	ctx := s.ctx()
+	ids, err := s.client.SMembers(ctx, subsKey).Result()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		paths, err := s.client.HKeys(ctx, linksKey(id)).Result()
+		if err != nil {
+			return err
+		}
+		for _, path := range paths {
+			if err := s.client.SAdd(ctx, streamSubsKey(path), id).Err(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (s *RedisStore) indexStream(path, id string) error {
 	return s.client.SAdd(s.ctx(), streamSubsKey(path), id).Err()
 }

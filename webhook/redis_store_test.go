@@ -267,3 +267,44 @@ func TestClaimUnexpiredLeaseStillBusy(t *testing.T) {
 		t.Fatalf("unexpired lease should be BUSY held by worker-A, got %+v", b)
 	}
 }
+
+// TestReconcileRepairsMissingFanoutIndex is the slice-4 repair: a canonical link
+// whose fan-out index entry was dropped by a crash is re-added from the link.
+func TestReconcileRepairsMissingFanoutIndex(t *testing.T) {
+	s, client := newTestStore(t)
+	ctx := context.Background()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now())
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+
+	// Simulate the crash-dropped index: the canonical link survives, the fan-out
+	// SADD did not happen.
+	if err := client.SRem(ctx, streamSubsKey("events/a"), "s1").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if subs, _ := s.StreamSubscribers("events/a"); len(subs) != 0 {
+		t.Fatalf("precondition: fan-out should be empty, got %v", subs)
+	}
+	if err := s.ReconcileIndexes(); err != nil {
+		t.Fatal(err)
+	}
+	if subs, _ := s.StreamSubscribers("events/a"); len(subs) != 1 || subs[0] != "s1" {
+		t.Fatalf("repair should restore the fan-out entry from the canonical link, got %v", subs)
+	}
+}
+
+// TestReconcileIndexDoesNotInventMembership proves the repair only mirrors
+// canonical links and never invents stream membership.
+func TestReconcileIndexDoesNotInventMembership(t *testing.T) {
+	s, _ := newTestStore(t)
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now())
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+	if err := s.ReconcileIndexes(); err != nil {
+		t.Fatal(err)
+	}
+	if subs, _ := s.StreamSubscribers("events/unrelated"); len(subs) != 0 {
+		t.Fatalf("repair must not invent membership for an unlinked stream, got %v", subs)
+	}
+	if subs, _ := s.StreamSubscribers("events/a"); len(subs) != 1 {
+		t.Fatalf("the linked stream should be indexed, got %v", subs)
+	}
+}
