@@ -1,5 +1,15 @@
 # 07 — Subscription, wake & lease durability
 
+> **STATUS (2026-06-13): implemented.** The `__ds` subscription / wake / lease
+> layer designed here is now built in the `webhook/` package on Redis, passes the
+> conformance suite with `subscriptions: true`, and is crash-hardened. The text
+> below is preserved as the original design study; where it says the layer is
+> "not implemented" or that `/v1/stream/__ds/*` returns `501`, read it as
+> historical. The hardening of the four origin-restart windows is specified in
+> [10-subscription-hardening-handoff.md](10-subscription-hardening-handoff.md)
+> and recorded as built in
+> [11-subscription-hardening-implemented.md](11-subscription-hardening-implemented.md).
+
 **Purpose:** design a crash-resilient, Redis-backed `__ds` subscription / wake /
 lease layer for chronicle. The Durable Streams protocol defines subscriptions as
 *durable cursors* and **MUST**s that their state survive a server restart
