@@ -4,9 +4,10 @@
 // (packages/caddy-plugin/handler.go @ 82f9963). Deviations from upstream:
 // ServeHTTP is a stdlib http.Handler (no caddyhttp `next` middleware
 // argument), logging is log/slog instead of zap, and the parsing/cursor
-// helpers live in the pure protocol package. The webhook subscription hooks
-// are omitted (subscriptions are deferred); ServeHTTP marks where they
-// re-enter.
+// helpers live in the pure protocol package. The reserved __ds subscription
+// routes and the stream lifecycle hooks dispatch through the optional
+// Subscriptions/SubHooks fields (PROTOCOL §6), implemented by the webhook
+// package.
 package chronicle
 
 import (
@@ -37,6 +38,32 @@ type Handler struct {
 
 	// Logger receives debug/error logs; nil falls back to slog.Default().
 	Logger *slog.Logger
+
+	// Subscriptions, when set, handles the reserved __ds subscription routes
+	// before normal stream handling (PROTOCOL §6). Nil disables the layer.
+	Subscriptions SubscriptionRouter
+
+	// SubHooks, when set, receives stream lifecycle events so the subscription
+	// layer can wake subscribers after a durable write. Nil disables the hooks.
+	SubHooks SubscriptionHooks
+}
+
+func (h *Handler) onStreamCreated(path string) {
+	if h.SubHooks != nil {
+		h.SubHooks.OnStreamCreated(path)
+	}
+}
+
+func (h *Handler) onStreamAppend(path string) {
+	if h.SubHooks != nil {
+		h.SubHooks.OnStreamAppend(path)
+	}
+}
+
+func (h *Handler) onStreamDeleted(path string) {
+	if h.SubHooks != nil {
+		h.SubHooks.OnStreamDeleted(path)
+	}
 }
 
 func (h *Handler) logger() *slog.Logger {
@@ -64,9 +91,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The Caddy plugin checks webhook subscription routes here, before normal
-	// stream handling. Chronicle defers subscriptions; a future route hook
-	// slots in at this point.
+	// Reserved __ds subscription routes are handled before normal stream
+	// handling, mirroring the Caddy plugin (PROTOCOL §6).
+	if h.Subscriptions != nil && h.Subscriptions.HandleRequest(w, r) {
+		return
+	}
 
 	// Extract stream path from URL
 	streamPath := r.URL.Path
@@ -216,6 +245,15 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 		w.WriteHeader(http.StatusConflict)
 		w.Write([]byte("stream was deleted but still has active forks — path cannot be reused until all forks are removed"))
 		return nil
+	}
+
+	// Notify the subscription layer of a new stream (and its initial append, if
+	// any) so matching subscriptions are linked and woken.
+	if wasCreated {
+		h.onStreamCreated(path)
+		if len(initialData) > 0 {
+			h.onStreamAppend(path)
+		}
 	}
 
 	// Set response headers
@@ -718,6 +756,10 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 		return err
 	}
 
+	// Wake subscribers off the durable append (best-effort; the recovery sweep
+	// is the backstop if this is lost to a crash).
+	h.onStreamAppend(path)
+
 	w.Header().Set(protocol.HeaderStreamNextOffset, result.Offset.String())
 
 	// Include Stream-Closed header if stream was closed
@@ -761,6 +803,7 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request, path stri
 		return err
 	}
 
+	h.onStreamDeleted(path)
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

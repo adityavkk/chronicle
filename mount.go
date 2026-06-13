@@ -13,8 +13,9 @@ import (
 // boundary between wire paths and store paths:
 //
 //   - requests outside root get a 404;
-//   - the reserved "__ds" first segment (the protocol's subscription APIs,
-//     deferred in chronicle) gets a 501;
+//   - the reserved "__ds" first segment (the protocol's subscription APIs) is
+//     passed through to the handler, which routes it to the webhook layer when
+//     subscriptions are enabled (else it 404s as a reserved path);
 //   - the root prefix is stripped before dispatch, so stream paths reaching
 //     the store are root-relative with a leading slash ("/v1/stream/foo" →
 //     "/foo"); the Stream-Forked-From request header is translated the same
@@ -40,11 +41,6 @@ func Mount(root string, stream http.Handler) (http.Handler, error) {
 			return
 		}
 		rel := strings.TrimPrefix(r.URL.Path, prefix) // keeps the leading "/"
-
-		if rel == "/__ds" || strings.HasPrefix(rel, "/__ds/") {
-			http.Error(w, "subscription APIs are not implemented", http.StatusNotImplemented)
-			return
-		}
 
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = rel
