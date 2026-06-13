@@ -116,7 +116,12 @@ This includes the reserved subscriptions API (`__ds` webhooks + pull-wake): the
 suite runs with `subscriptions: true` (`test/conformance/conformance.test.ts`)
 and chronicle enables subscriptions by default. The subscription engine lives in
 `subscriptions.go` + the `webhook/` package (signed webhook delivery, pull-wake
-claim/ack/release, generation fencing, leases, JWKS).
+claim/ack/release, generation fencing, leases, JWKS). It is crash-hardened
+against the four origin-restart windows — stranded pull-wakes, expired-lease
+fence reuse, missed glob links, and a dropped fan-out index — as designed in
+[docs/research/10-subscription-hardening-handoff.md](docs/research/10-subscription-hardening-handoff.md)
+and recorded as built in
+[docs/research/11-subscription-hardening-implemented.md](docs/research/11-subscription-hardening-implemented.md).
 
 ## Integrations
 

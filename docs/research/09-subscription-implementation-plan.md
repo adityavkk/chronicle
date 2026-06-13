@@ -1,5 +1,14 @@
 # 09 — Subscription layer implementation plan
 
+> **STATUS (2026-06-13): implemented.** This plan is done. The `__ds` layer ships
+> in the `webhook/` package on Redis and passes conformance with
+> `subscriptions: true`; the "in progress" note below is historical. The layer is
+> additionally crash-hardened against four origin-restart windows — see
+> [10-subscription-hardening-handoff.md](10-subscription-hardening-handoff.md) for
+> the design and
+> [11-subscription-hardening-implemented.md](11-subscription-hardening-implemented.md)
+> for what was actually built (including the one deviation from doc 10).
+
 **Purpose:** turn the design in [07](07-subscription-wake-lease-durability.md) into
 a concrete, conformance-passing, crash-resilient `__ds` subscription layer for
 chronicle. This doc records the decisions that [07](07-subscription-wake-lease-durability.md)
