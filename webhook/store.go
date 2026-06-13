@@ -39,6 +39,11 @@ type Store interface {
 	// StreamSubscribers returns the subscription ids linked to a stream.
 	StreamSubscribers(path string) ([]string, error)
 
+	// ReconcileIndexes rebuilds the per-stream fan-out index from the canonical
+	// links, re-adding any membership a crash dropped between the link write and
+	// the index update. It only mirrors links and never invents membership.
+	ReconcileIndexes() error
+
 	// ArmWake issues a new wake generation if the subscription is idle; armLease
 	// arms the lease at issue (webhook) versus deferring it to claim (pull-wake).
 	ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error)

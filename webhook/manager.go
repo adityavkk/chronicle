@@ -656,6 +656,9 @@ func (m *Manager) reconcileLoop() {
 }
 
 func (m *Manager) reconcileOnce() {
+	if err := m.store.ReconcileIndexes(); err != nil {
+		m.log.Warn("webhook: reconcile fan-out indexes", "error", err)
+	}
 	m.reconcilePatternLinks(time.Now())
 }
 
