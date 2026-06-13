@@ -21,7 +21,7 @@ port the behavioral change to the file on the right.
 | `handler.go` cursor functions | `protocol/cursor.go` | Pure ports (clock as argument) |
 | `module.go` (Caddyfile config) | `config.go` + `cmd/chronicle/main.go` | Same knobs and defaults (`long_poll_timeout` 30s, `sse_reconnect_interval` 60s); `data_dir`/`max_file_handles` → Redis options |
 | `cmd/caddy/main.go` (dev mode) | `cmd/chronicle/main.go` | Equivalent standalone server |
-| `webhook/` | — | Not ported (optional subscriptions group; see PLAN.md §1.2) |
+| `webhook/` | `webhook/` | **Re-implementation on Redis** of the reserved `__ds` subscription APIs. The pinned Caddy checkout predates PROTOCOL §6–7 (it is consumer-centric, query-param, webhook-only, `epoch`); chronicle targets the protocol and the `0.3.5` conformance suite both implementations converge on. Keeps Caddy's engine structure (`Subscription`, `Manager`, `Routes`, the idle/waking/live state machine, the lifecycle method names); the wire and records use the protocol nouns. See docs/research/07 and 09. |
 | `test/conformance.test.ts` | `test/conformance/conformance.test.ts` + `scripts/conformance.sh` | Same harness shape: 500 ms long-poll timeout, health-stream readiness probe |
 
 ## Update procedure
@@ -48,3 +48,10 @@ port the behavioral change to the file on the right.
   hard-deleted on `Create` (protects fork readers; documented in the redis
   store tests).
 - Logging is `log/slog`, not zap.
+- `webhook/`: the subscription fencing counter is named `generation` (the
+  PROTOCOL §7 wire noun), not the Caddy package's `epoch`. The whole control
+  plane is persisted to Redis under one `{__ds}` hash tag rather than held in an
+  in-memory map, which is the durability gap chronicle exists to close (the
+  Caddy engine loses every cursor/lease/generation on restart). Wake fan-out is
+  not folded into `append.lua` (it would cross hash-tag slots); the append-time
+  hook is best-effort and the recovery sweep is the durability backstop.
