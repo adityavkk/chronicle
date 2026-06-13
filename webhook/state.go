@@ -126,7 +126,7 @@ func ClaimDecision(cur Subscription, now time.Time) (code, holder string) {
 // is fenced out (its old-generation token can no longer ack). Mirror of
 // claim.lua; change the two together.
 func ClaimRotatesFence(phase Phase, wakeID string) bool {
-	return !(phase == PhaseWaking && wakeID != "")
+	return phase != PhaseWaking || wakeID == ""
 }
 
 // MergeAcks applies acks to links, advancing each matching link's cursor

@@ -323,7 +323,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
 	if err != nil {
 		return
 	}
-	req, err := http.NewRequest(http.MethodPost, sub.Config.WebhookURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, sub.Config.WebhookURL, bytes.NewReader(body))
 	if err != nil {
 		m.recordFailure(id)
 		return
@@ -336,7 +336,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
 		m.recordFailure(id)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		m.recordFailure(id)
 		return
@@ -589,7 +589,7 @@ func (m *Manager) backfill(id string, cfg Config) {
 // OnStreamCreated, so its data should wake) or at the current tail when it
 // predates the subscription (a missed pre-existing backfill, no replay). This is
 // O(pattern subs × streams); it runs on the slow reconcile loop, not the 2s sweep.
-func (m *Manager) reconcilePatternLinks(now time.Time) {
+func (m *Manager) reconcilePatternLinks() {
 	if m.lister == nil {
 		return
 	}
@@ -659,7 +659,7 @@ func (m *Manager) reconcileOnce() {
 	if err := m.store.ReconcileIndexes(); err != nil {
 		m.log.Warn("webhook: reconcile fan-out indexes", "error", err)
 	}
-	m.reconcilePatternLinks(time.Now())
+	m.reconcilePatternLinks()
 }
 
 // RunReconcile runs one reconciliation pass immediately (startup and tests).

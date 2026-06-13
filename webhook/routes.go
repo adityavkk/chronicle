@@ -121,6 +121,8 @@ func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string
 		return
 	case CreateCreated:
 		rt.mgr.backfill(id, cfg)
+	case CreateMatched:
+		// idempotent re-confirm of an identical config; nothing to backfill.
 	}
 	sub, ok, err := rt.mgr.store.Get(id)
 	if err != nil || !ok {

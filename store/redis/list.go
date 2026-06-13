@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -62,7 +63,7 @@ func (s *Store) ListStreamMeta(ctx context.Context) ([]StreamMeta, error) {
 	for i, c := range cands {
 		cmds[i] = pipe.HMGet(ctx, c.key, fTail, fCreatedAt, fSoftDel)
 	}
-	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 		return nil, err
 	}
 	out := make([]StreamMeta, 0, len(cands))
