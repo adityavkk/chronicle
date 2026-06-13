@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 
@@ -11,6 +12,10 @@ import (
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
+
+// storePath maps a stream-root-relative subscription path ("events/abc") to the
+// store's leading-slash key ("/events/abc"). The inverse of subStreamPath.
+func storePath(p string) string { return "/" + strings.TrimPrefix(p, "/") }
 
 // SubscriptionRouter handles reserved __ds requests, returning true when it has
 // claimed the request. *webhook.Routes satisfies it.
@@ -43,7 +48,7 @@ type streamAdapter struct {
 }
 
 func (a streamAdapter) TailOffset(path string) (string, bool) {
-	off, err := a.st.GetCurrentOffset(path)
+	off, err := a.st.GetCurrentOffset(storePath(path))
 	if err != nil {
 		return "", false
 	}
@@ -53,7 +58,7 @@ func (a streamAdapter) TailOffset(path string) (string, bool) {
 func (a streamAdapter) BeginningOffset() string { return store.ZeroOffset.String() }
 
 func (a streamAdapter) AppendWakeEvent(wakeStream string, data []byte) error {
-	_, err := a.st.Append(wakeStream, data, store.AppendOptions{ContentType: "application/json"})
+	_, err := a.st.Append(storePath(wakeStream), data, store.AppendOptions{ContentType: "application/json"})
 	return err
 }
 
@@ -64,7 +69,15 @@ type redisLister struct {
 }
 
 func (l redisLister) ListStreamPaths() ([]string, error) {
-	return l.rs.ListStreamPaths(context.Background())
+	paths, err := l.rs.ListStreamPaths(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	// Store keys carry a leading slash; the subscription layer is slash-free.
+	for i := range paths {
+		paths[i] = strings.TrimPrefix(paths[i], "/")
+	}
+	return paths, nil
 }
 
 // NewSubscriptions builds the Redis-backed __ds subscription stack: the HTTP

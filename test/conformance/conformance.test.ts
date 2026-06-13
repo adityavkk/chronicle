@@ -9,4 +9,6 @@ import { runConformanceTests } from "@durable-streams/server-conformance-tests"
 
 const baseUrl = process.env.CONFORMANCE_TEST_URL ?? "http://localhost:4437"
 
-runConformanceTests({ baseUrl })
+// Chronicle implements the reserved __ds subscription APIs (PROTOCOL §6–7), so
+// the subscription conformance block is enabled.
+runConformanceTests({ baseUrl, subscriptions: true })
