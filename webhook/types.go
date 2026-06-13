@@ -38,13 +38,14 @@ const (
 type Phase string
 
 const (
-	// PhaseIdle: no wake in flight and no lease held; eligible to wake.
+	// PhaseIdle is the rest state: no wake in flight and no lease held; eligible
+	// to wake.
 	PhaseIdle Phase = "idle"
-	// PhaseWaking: a wake has been issued (webhook POSTed or wake event
-	// written) but not yet claimed or completed.
+	// PhaseWaking is the state after a wake has been issued (webhook POSTed or
+	// wake event written) but before it is claimed or completed.
 	PhaseWaking Phase = "waking"
-	// PhaseLive: a worker holds the lease (webhook callback received without
-	// done, or pull-wake claimed); extended by heartbeats.
+	// PhaseLive is the state while a worker holds the lease (webhook callback
+	// received without done, or pull-wake claimed); extended by heartbeats.
 	PhaseLive Phase = "live"
 )
 
@@ -53,9 +54,9 @@ const (
 type LinkType string
 
 const (
-	// LinkGlob: matched by the subscription's pattern.
+	// LinkGlob marks a stream matched by the subscription's pattern.
 	LinkGlob LinkType = "glob"
-	// LinkExplicit: added via streams[] or the /streams endpoint.
+	// LinkExplicit marks a stream added via streams[] or the /streams endpoint.
 	LinkExplicit LinkType = "explicit"
 )
 
@@ -64,7 +65,9 @@ const (
 type Status string
 
 const (
+	// StatusActive is the serialized status while delivery operates normally.
 	StatusActive Status = "active"
+	// StatusFailed is the serialized status while a webhook retry is scheduled.
 	StatusFailed Status = "failed"
 )
 

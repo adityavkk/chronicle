@@ -92,6 +92,7 @@ type Store interface {
 // CreateStatus is the outcome of CreateOrConfirm.
 type CreateStatus int
 
+// Create outcomes, mapped to HTTP status by the routes layer.
 const (
 	CreateCreated  CreateStatus = iota // 201
 	CreateMatched                      // 200 idempotent

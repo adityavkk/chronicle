@@ -62,12 +62,13 @@ func (s *RedisStore) evalStrings(script *redis.Script, keys []string, args ...an
 // explicit links at their current tails.
 func (s *RedisStore) CreateOrConfirm(id string, cfg Config, links []StreamLink, now time.Time) (CreateStatus, error) {
 	cfg = NormalizeConfig(cfg)
-	args := []any{
+	args := make([]any, 0, 10+3*len(links))
+	args = append(args,
 		id, ConfigHash(cfg), nsArg(now),
 		string(cfg.Type), cfg.Pattern, cfg.WebhookURL, cfg.WakeStream,
 		strconv.FormatInt(cfg.LeaseTTLMs, 10), cfg.Description,
 		strconv.Itoa(len(links)),
-	}
+	)
 	for _, l := range links {
 		args = append(args, l.Path, string(l.LinkType), l.AckedOffset)
 	}
@@ -155,6 +156,7 @@ func (s *RedisStore) Unlink(id, path string, stillGlob bool) error {
 	return nil
 }
 
+// StreamSubscribers returns the subscription ids linked to a stream.
 func (s *RedisStore) StreamSubscribers(path string) ([]string, error) {
 	return s.client.SMembers(s.ctx(), streamSubsKey(path)).Result()
 }
@@ -246,10 +248,11 @@ func (s *RedisStore) Ack(id string, reqGeneration int64, reqWakeID string, token
 	if done {
 		doneArg = "1"
 	}
-	args := []any{
+	args := make([]any, 0, 8+2*len(acks))
+	args = append(args,
 		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10),
 		doneArg, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), strconv.Itoa(len(acks)),
-	}
+	)
 	for _, a := range acks {
 		args = append(args, a.Stream, a.Offset)
 	}
@@ -279,10 +282,14 @@ func (s *RedisStore) ExpireLease(id string, now time.Time) (string, error) {
 	return reply[0], nil
 }
 
+// DueLeases takes due lease-schedule members by re-scoring them forward, so a
+// dropped worker's subscription recurs (docs/research/07 §6.1).
 func (s *RedisStore) DueLeases(now time.Time, limit int, visibility time.Duration) ([]string, error) {
 	return s.due(leaseZKey, now, limit, visibility)
 }
 
+// DueRetries takes due retry-schedule members by re-scoring them forward, the
+// same re-score-never-ZREM machinery as DueLeases (docs/research/07 §6.1).
 func (s *RedisStore) DueRetries(now time.Time, limit int, visibility time.Duration) ([]string, error) {
 	return s.due(retryZKey, now, limit, visibility)
 }
@@ -292,6 +299,8 @@ func (s *RedisStore) due(zkey string, now time.Time, limit int, visibility time.
 		nsArg(now), strconv.Itoa(limit), strconv.FormatInt(int64(visibility), 10))
 }
 
+// ScheduleRetry records a webhook failure and persists next_attempt; returns the
+// new retry count.
 func (s *RedisStore) ScheduleRetry(id string, now, nextAttempt time.Time) (int, error) {
 	reply, err := s.evalStrings(scheduleRetryScript, []string{subKey(id), retryZKey},
 		id, nsArg(now), nsArg(nextAttempt))
@@ -305,6 +314,7 @@ func (s *RedisStore) ScheduleRetry(id string, now, nextAttempt time.Time) (int, 
 	return n, nil
 }
 
+// RecordSuccess clears webhook failure bookkeeping after an accepted delivery.
 func (s *RedisStore) RecordSuccess(id string) error {
 	_, err := s.evalStrings(recordSuccessScript, []string{subKey(id), retryZKey}, id)
 	return err

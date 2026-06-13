@@ -56,9 +56,9 @@ type SigningView struct {
 	JWKSURL string `json:"jwks_url"`
 }
 
-// WebhookView is the webhook object in a subscription response. It never
+// HookView is the webhook object in a subscription response. It never
 // includes a shared secret (PROTOCOL §6.2: deliveries are asymmetrically signed).
-type WebhookView struct {
+type HookView struct {
 	URL     string       `json:"url"`
 	Signing *SigningView `json:"signing,omitempty"`
 }
@@ -77,7 +77,7 @@ type SubscriptionView struct {
 	Type           DispatchType     `json:"type"`
 	Pattern        string           `json:"pattern,omitempty"`
 	Streams        []StreamLinkView `json:"streams"`
-	Webhook        *WebhookView     `json:"webhook,omitempty"`
+	Webhook        *HookView        `json:"webhook,omitempty"`
 	WakeStream     *string          `json:"wake_stream"`
 	LeaseTTLMs     int64            `json:"lease_ttl_ms"`
 	CreatedAt      string           `json:"created_at"`
@@ -100,7 +100,7 @@ func BuildSubscriptionView(sub Subscription, signing *SigningView) SubscriptionV
 		Description:    sub.Config.Description,
 	}
 	if sub.Config.Type == DispatchWebhook {
-		v.Webhook = &WebhookView{URL: sub.Config.WebhookURL, Signing: signing}
+		v.Webhook = &HookView{URL: sub.Config.WebhookURL, Signing: signing}
 	}
 	if sub.Config.WakeStream != "" {
 		ws := sub.Config.WakeStream
@@ -112,7 +112,7 @@ func BuildSubscriptionView(sub Subscription, signing *SigningView) SubscriptionV
 func linkViews(links []StreamLink) []StreamLinkView {
 	out := make([]StreamLinkView, 0, len(links))
 	for _, l := range links {
-		out = append(out, StreamLinkView{Path: l.Path, LinkType: l.LinkType, AckedOffset: l.AckedOffset})
+		out = append(out, StreamLinkView(l))
 	}
 	return out
 }

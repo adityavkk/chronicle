@@ -32,11 +32,23 @@ linters:
   exclusions:
     rules:
       # Tests: deferred Close() results are noise (failures surface through
-      # assertions) and httptest requests don't need contexts.
+      # assertions), httptest requests don't need contexts, and fixed test
+      # fixtures legitimately pass the same constant to a helper.
       - path: _test\.go
         linters:
           - errcheck
           - noctx
+          - unparam
+      # jepsen/ is a local consistency-checker harness, not shipped product
+      # code. It runs scenarios against a live server and reads the results;
+      # best-effort cleanup and scenario plumbing don't earn production lint.
+      - path: (^|/)jepsen/
+        linters:
+          - errcheck
+          - noctx
+          - gocritic
+          - unparam
+          - unused
       # Files ported line-for-line from the upstream Caddy plugin (see the
       # provenance headers). Upstream diffability wins over stylistic
       # rewrites here.
