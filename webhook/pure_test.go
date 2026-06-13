@@ -191,6 +191,23 @@ func TestClaimDecision(t *testing.T) {
 	}
 }
 
+func TestClaimRotatesFence(t *testing.T) {
+	// The wake is reused only for the normal first claim of an issued pull-wake
+	// event (waking with a wake set); everything else rotates the fence.
+	if ClaimRotatesFence(PhaseWaking, "w_x") {
+		t.Error("waking first-claim should reuse the in-flight wake, not rotate")
+	}
+	if !ClaimRotatesFence(PhaseIdle, "") {
+		t.Error("idle claim should rotate (mint a fresh fence)")
+	}
+	if !ClaimRotatesFence(PhaseLive, "w_x") {
+		t.Error("expired-lease takeover (phase live past the BUSY guard) must rotate")
+	}
+	if !ClaimRotatesFence(PhaseWaking, "") {
+		t.Error("waking with a cleared wake should rotate")
+	}
+}
+
 func TestMergeAcksForwardOnly(t *testing.T) {
 	links := []StreamLink{{Path: "a", AckedOffset: "0000000000000001_0000000000000010"}}
 	// Backward ack ignored.

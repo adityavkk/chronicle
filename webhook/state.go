@@ -109,12 +109,24 @@ func FenceDecision(cur Subscription, reqGeneration int64, reqWakeID string, toke
 // ClaimDecision is the pure mirror of claim.lua's conflict check: a pull-wake
 // claim is rejected with ALREADY_CLAIMED while another worker holds an unexpired
 // lease (PROTOCOL §7.2). It returns ("", "") when the claim may proceed, or the
-// error code and current holder when it is busy.
+// error code and current holder when it is busy. On a grantable claim, see
+// ClaimRotatesFence for whether the generation is rotated.
 func ClaimDecision(cur Subscription, now time.Time) (code, holder string) {
 	if cur.Phase == PhaseLive && cur.Holder && !LeaseExpired(cur.LeaseUntilNs, now) {
 		return ErrCodeAlreadyClaimed, cur.HolderWorker
 	}
 	return "", ""
+}
+
+// ClaimRotatesFence reports whether a grantable claim mints a fresh
+// generation/wake_id rather than reusing the in-flight one. The wake is reused
+// only for the normal first claim of an already-issued pull-wake event (phase
+// waking with a wake set); every other grantable case — idle, a cleared wake,
+// or taking over an EXPIRED live lease — rotates the fence so the deposed holder
+// is fenced out (its old-generation token can no longer ack). Mirror of
+// claim.lua; change the two together.
+func ClaimRotatesFence(phase Phase, wakeID string) bool {
+	return !(phase == PhaseWaking && wakeID != "")
 }
 
 // MergeAcks applies acks to links, advancing each matching link's cursor
