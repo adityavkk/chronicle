@@ -1,0 +1,31 @@
+-- common.lua — shared prelude for the __ds subscription scripts.
+--
+-- Every subscription-control key shares the {__ds} hash tag, so all of these
+-- scripts touch a single slot and are cluster-safe. The per-stream fan-out
+-- index (ds:{__ds}:stream:<path>) is maintained from Go as a best-effort index
+-- reconciled by the recovery sweep, so it is never touched here.
+
+-- offset_greater reports a > b for opaque, fixed-width, lexicographically
+-- sortable offsets (PROTOCOL §8), treating the "-1"/"" beginning sentinel as
+-- less than any real offset. Redis Lua compares strings bytewise (C locale),
+-- which equals stream order for zero-padded offsets. Mirrors state.go.
+local function offset_greater(a, b)
+  if a == b then return false end
+  if b == '-1' or b == '' then return a ~= '-1' and a ~= '' end
+  if a == '-1' or a == '' then return false end
+  return a > b
+end
+
+-- split_link splits a links-hash value "<link_type>:<offset>" on the first
+-- colon (link_type has no colon; an offset may). Returns link_type, offset.
+local function split_link(v)
+  local sep = string.find(v, ':', 1, true)
+  return string.sub(v, 1, sep - 1), string.sub(v, sep + 1)
+end
+
+-- fenced reports whether a callback/ack/release is stale and must be rejected
+-- (PROTOCOL §7.3): token generation, request generation, and request wake_id
+-- must all match current subscription state. Mirrors FenceDecision in state.go.
+local function fenced(cur_gen, cur_wake, req_gen, req_wake, token_gen)
+  return token_gen ~= cur_gen or req_gen ~= cur_gen or req_wake == '' or req_wake ~= cur_wake
+end
