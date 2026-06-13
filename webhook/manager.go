@@ -252,11 +252,11 @@ func (m *Manager) issueWake(sub Subscription, triggerStream string) {
 	case DispatchWebhook:
 		go m.deliverWebhook(sub.ID, res.Generation, res.WakeID)
 	case DispatchPullWake:
-		m.writeWakeEvent(sub, triggerStream, res.Generation)
+		m.writeWakeEvent(sub, triggerStream, res.Generation, res.WakeID)
 	}
 }
 
-func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generation int64) {
+func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generation int64, wakeID string) {
 	if triggerStream == "" && len(sub.Links) > 0 {
 		triggerStream = sub.Links[0].Path
 	}
@@ -265,7 +265,14 @@ func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generat
 		return
 	}
 	if err := m.streams.AppendWakeEvent(sub.Config.WakeStream, data); err != nil {
+		// Leave wake_event_sent_ns at 0 so the recovery sweep re-emits.
 		m.log.Warn("webhook: write wake event", "sub", sub.ID, "wake_stream", sub.Config.WakeStream, "error", err)
+		return
+	}
+	// Record the durable emit, fenced on (generation, wake), so the sweep does
+	// not re-emit a wake that was already delivered.
+	if err := m.store.RecordWakeEventSent(sub.ID, generation, wakeID, time.Now()); err != nil {
+		m.log.Warn("webhook: record wake event sent", "sub", sub.ID, "error", err)
 	}
 }
 
@@ -487,6 +494,15 @@ func (m *Manager) sweepOnce() {
 	for _, id := range ids {
 		sub, ok, err := m.store.Get(id)
 		if err != nil || !ok {
+			continue
+		}
+		// Recover a pull-wake stranded by a crash between arming the wake and
+		// appending its wake event: the event was never durably emitted (its
+		// sent flag is still 0), so nothing in the schedule will deliver it and a
+		// later append only coalesces against the phantom waking state. Re-emit
+		// it; duplicate wake events are claim-fence-safe.
+		if sub.Config.Type == DispatchPullWake && sub.Phase == PhaseWaking && sub.WakeEventSentNs == 0 {
+			m.writeWakeEvent(sub, "", sub.Generation, sub.WakeID)
 			continue
 		}
 		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {

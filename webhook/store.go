@@ -69,6 +69,11 @@ type Store interface {
 	// RecordSuccess clears webhook failure bookkeeping after an accepted delivery.
 	RecordSuccess(id string) error
 
+	// RecordWakeEventSent stamps that the current pull-wake event was durably
+	// appended to the wake stream, fenced on (generation, wakeID). A no-op when
+	// the wake has been superseded.
+	RecordWakeEventSent(id string, generation int64, wakeID string, now time.Time) error
+
 	// LoadSigningKey adopts or installs the persisted active webhook signing key.
 	LoadSigningKey(now time.Time) (SigningKey, error)
 

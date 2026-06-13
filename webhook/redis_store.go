@@ -283,6 +283,14 @@ func (s *RedisStore) RecordSuccess(id string) error {
 	return err
 }
 
+// RecordWakeEventSent marks the current pull-wake event as durably emitted,
+// fenced on (generation, wakeID) so a stamp from a superseded wake is ignored.
+func (s *RedisStore) RecordWakeEventSent(id string, generation int64, wakeID string, now time.Time) error {
+	_, err := s.evalStrings(recordWakeSentScript, []string{subKey(id)},
+		nsArg(now), strconv.FormatInt(generation, 10), wakeID)
+	return err
+}
+
 // LoadSigningKey adopts the persisted active key or installs a freshly-generated
 // candidate, atomically (get_or_create_key). The kid is therefore stable across
 // restarts (PROTOCOL §6.5).
@@ -393,18 +401,19 @@ func subscriptionFromHash(id string, f map[string]string, linkFields map[string]
 			LeaseTTLMs:  atoi("lease_ttl_ms"),
 			Description: f["description"],
 		},
-		CfgHash:       f["cfg_hash"],
-		CreatedAt:     time.Unix(0, createdNs),
-		Status:        Status(f["status"]),
-		Phase:         Phase(f["phase"]),
-		Generation:    atoi("generation"),
-		WakeID:        f["wake_id"],
-		Holder:        f["holder"] == "1",
-		HolderWorker:  f["holder_worker"],
-		LeaseUntilNs:  atoi("lease_until_ns"),
-		RetryCount:    int(atoi("retry_count")),
-		FirstFailNs:   atoi("first_fail_ns"),
-		NextAttemptNs: atoi("next_attempt_ns"),
+		CfgHash:         f["cfg_hash"],
+		CreatedAt:       time.Unix(0, createdNs),
+		Status:          Status(f["status"]),
+		Phase:           Phase(f["phase"]),
+		Generation:      atoi("generation"),
+		WakeID:          f["wake_id"],
+		Holder:          f["holder"] == "1",
+		HolderWorker:    f["holder_worker"],
+		LeaseUntilNs:    atoi("lease_until_ns"),
+		RetryCount:      int(atoi("retry_count")),
+		FirstFailNs:     atoi("first_fail_ns"),
+		NextAttemptNs:   atoi("next_attempt_ns"),
+		WakeEventSentNs: atoi("wake_event_sent_ns"),
 	}
 	sub.Links = linksFromHash(linkFields)
 	// Rebuild the normalized explicit stream list so the config round-trips for

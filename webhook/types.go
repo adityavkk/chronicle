@@ -123,6 +123,12 @@ type Subscription struct {
 	FirstFailNs   int64
 	NextAttemptNs int64
 
+	// WakeEventSentNs marks when the current pull-wake's event was durably
+	// appended to the wake stream; 0 while waking means it has not been emitted
+	// yet (or its emit was not recorded), so the recovery sweep re-emits it.
+	// Closes the crash window between arming a pull-wake and writing its event.
+	WakeEventSentNs int64
+
 	// Links is hydrated from the per-subscription links HASH; nil until loaded.
 	Links []StreamLink
 }
