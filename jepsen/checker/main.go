@@ -12,6 +12,14 @@
 // reported but are not failures (the generation fence makes them safe).
 //
 // This is the empirical counterpart to docs/research/07's crash-window analysis.
+//
+// Beyond the original baseline/origin-restart/redis-restart scenarios, four
+// scenarios exercise the crash windows closed by the subscription-hardening
+// slices (docs/research/10): pull-wake-arm-crash (slice 1, durable pull-wake
+// recovery), expired-lease-takeover (slice 2, fence rotation on lease takeover),
+// glob-create-crash (slice 3, glob-link reconciliation), and index-repair
+// (slice 4, fan-out index repair). Each asserts the property the matching slice
+// promises — see the per-scenario comments and docs/jepsen/results.md.
 package main
 
 import (
@@ -51,7 +59,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.Parse()
 
@@ -67,20 +75,43 @@ func main() {
 
 func run(c config, r *receiver) error {
 	ctx := fmt.Sprintf("k3d-%s", c.cluster)
-	subID := fmt.Sprintf("jepsen-sub-%d", time.Now().UnixNano())
-	webhookURL := fmt.Sprintf("http://%s:%d/webhook", c.recvHost, c.recvPort)
 
 	fmt.Printf("== scenario %q: %d streams x %d msgs ==\n", c.scenario, c.streams, c.msgs)
 	if err := waitReady(c.base, 60*time.Second); err != nil {
 		return fmt.Errorf("chronicle not ready: %w", err)
 	}
 
+	// expired-lease-takeover asserts a fence-rotation property over the pull-wake
+	// claim/ack API rather than the webhook delivery property the other scenarios
+	// share, so it runs its own end-to-end flow (no webhook receiver, no
+	// cursor-reaches-tail verify).
+	if c.scenario == "expired-lease-takeover" {
+		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		return runExpiredLeaseTakeover(c, nem)
+	}
+
+	// pull-wake-arm-crash drives a pull-wake subscription drained by a worker
+	// loop, not the webhook receiver, so it too runs its own flow.
+	if c.scenario == "pull-wake-arm-crash" {
+		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		return runPullWakeArmCrash(c, nem)
+	}
+
+	subID := fmt.Sprintf("jepsen-sub-%d", time.Now().UnixNano())
+	webhookURL := fmt.Sprintf("http://%s:%d/webhook", c.recvHost, c.recvPort)
+
+	// Most scenarios drive a glob (events/*) webhook subscription. glob-create-crash
+	// is the exception: it creates the subscription FIRST and then creates matching
+	// streams under a crash, so the reconcile loop (not create-time backfill) is
+	// what has to link them.
+	pattern := "events/*"
+
 	// 1. Create the webhook subscription. The receiver returns {done:true}, so
 	//    the server auto-acks each wake's snapshot.
-	if err := createSubscription(c.base, subID, webhookURL); err != nil {
+	if err := createSubscription(c.base, subID, webhookURL, pattern); err != nil {
 		return err
 	}
-	fmt.Printf("created subscription %s -> %s\n", subID, webhookURL)
+	fmt.Printf("created subscription %s -> %s (pattern %q)\n", subID, webhookURL, pattern)
 
 	// 2. Run the nemesis concurrently with the workload.
 	nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
@@ -93,6 +124,34 @@ func run(c config, r *receiver) error {
 	expected := map[string]string{} // stream -> final tail offset
 	for i := 0; i < c.streams; i++ {
 		stream := fmt.Sprintf("events/e-%d", i)
+
+		// glob-create-crash: kill all origins the instant the stream's first
+		// message creates it, approximating a crash before the best-effort
+		// OnStreamCreated hook / create-time backfill links the new stream. The
+		// canonical link is then never written by create-time paths, so the only
+		// way the stream gets linked is the slow reconcile loop re-matching the
+		// glob. We create the stream alone, crash, then append the rest after the
+		// origin returns so the to-deliver work straddles the missed link.
+		if c.scenario == "glob-create-crash" {
+			tail, err := createStream(c.base, stream)
+			if err != nil {
+				close(stopNemesis)
+				wg.Wait()
+				return fmt.Errorf("workload create %s: %w", stream, err)
+			}
+			nem.killAllOrigins()
+			if err := waitReady(c.base, 90*time.Second); err != nil {
+				close(stopNemesis)
+				wg.Wait()
+				return fmt.Errorf("chronicle did not recover mid-workload: %w", err)
+			}
+			if t2, err := appendRest(c.base, stream, 1, c.msgs); err == nil && t2 != "" {
+				tail = t2
+			}
+			expected[stream] = tail
+			continue
+		}
+
 		tail, err := appendStream(c.base, stream, c.msgs)
 		if err != nil {
 			close(stopNemesis)
@@ -100,27 +159,241 @@ func run(c config, r *receiver) error {
 			return fmt.Errorf("workload %s: %w", stream, err)
 		}
 		expected[stream] = tail
+
+		// index-repair: after each stream is created and linked, delete its
+		// fan-out index entry (ds:{__ds}:stream:<path>) out from under the
+		// running webhook workload. The canonical link survives, so the property
+		// is that ReconcileIndexes rebuilds the SADD from links and the later
+		// appends still wake — the stream reaches tail rather than being stranded
+		// at sweep latency forever.
+		if c.scenario == "index-repair" {
+			nem.deleteStreamIndex(stream)
+		}
 	}
 	fmt.Printf("workload done: appended %d messages\n", c.streams*c.msgs)
 
-	// 4. The decisive fault: kill ALL origins after the last append, so the
-	//    final wake can only come from the recovery sweep on a restarted origin.
-	if c.scenario == "origin-restart" {
+	// 4. The decisive fault, per scenario.
+	switch c.scenario {
+	case "origin-restart":
+		// Kill ALL origins after the last append, so the final wake can only come
+		// from the recovery sweep on a restarted origin.
 		nem.killAllOrigins()
 		fmt.Println("nemesis: killed all origins after final append")
+	case "index-repair":
+		// Delete every stream's index entry once more after the final append, then
+		// append one more message per stream so the wake for it depends on the
+		// repaired index (OnStreamAppend reads ds:{__ds}:stream:<path>).
+		for i := 0; i < c.streams; i++ {
+			stream := fmt.Sprintf("events/e-%d", i)
+			nem.deleteStreamIndex(stream)
+		}
+		for i := 0; i < c.streams; i++ {
+			stream := fmt.Sprintf("events/e-%d", i)
+			tail, err := appendOne(c.base, stream, c.msgs)
+			if err == nil && tail != "" {
+				expected[stream] = tail
+			}
+		}
+		fmt.Println("nemesis: dropped fan-out index entries; appended past the gap")
 	}
 	close(stopNemesis)
 	wg.Wait()
 
-	// 5. Let the origin come back and the recovery sweep run.
+	// 5. Let the origin come back and the recovery sweep / reconcile loop run.
 	if err := waitReady(c.base, 90*time.Second); err != nil {
 		return fmt.Errorf("chronicle did not recover: %w", err)
 	}
-	fmt.Printf("settling %s for the recovery sweep...\n", c.settle)
+	fmt.Printf("settling %s for the recovery sweep / reconcile loop...\n", c.settle)
 	sleep(c.settle)
 
 	// 6. Verify durability: every stream's cursor advanced to its tail.
 	return verify(c, subID, expected, r, nem)
+}
+
+// runExpiredLeaseTakeover exercises slice 2 (fence rotation on expired-lease
+// takeover, commit 457bd69). Worker A claims a pull-wake subscription and stalls
+// past lease_ttl_ms; worker B then claims (taking over the expired lease) and
+// acks; worker A's later ack with its now-stale (generation, wake_id) token MUST
+// return 409 FENCED because B's takeover minted a fresh generation. Before the
+// slice, B reused A's generation and both tokens stayed valid (split-brain).
+//
+// This is a deterministic property over the claim/ack HTTP API: no pod kill is
+// required to reproduce it, so the nemesis is idle here. We DELETE the
+// subscription on exit to keep the keyspace clean between scenarios.
+func runExpiredLeaseTakeover(c config, nem *nemesis) error {
+	subID := fmt.Sprintf("jepsen-pull-%d", time.Now().UnixNano())
+	const leaseTTLMs = 1500
+
+	// A short-lived stream + a pull-wake subscription with a wake_stream, plus
+	// one appended message so a claim has pending work to snapshot.
+	stream := "events/lease-0"
+	if _, err := appendStream(c.base, stream, 4); err != nil {
+		return fmt.Errorf("seed stream: %w", err)
+	}
+	if err := createPullWakeSubscription(c.base, subID, "events/*", "events/wake-0", leaseTTLMs); err != nil {
+		return err
+	}
+	defer deleteSubscription(c.base, subID)
+	fmt.Printf("created pull-wake subscription %s (lease_ttl_ms=%d)\n", subID, leaseTTLMs)
+
+	// Worker A claims and then deliberately stalls past the lease.
+	a, err := claim(c.base, subID, "worker-A")
+	if err != nil {
+		return fmt.Errorf("worker A claim: %w", err)
+	}
+	fmt.Printf("worker A claimed: generation=%d wake_id=%s\n", a.Generation, short(a.WakeID))
+	stall := time.Duration(leaseTTLMs)*time.Millisecond + 1*time.Second
+	fmt.Printf("worker A stalling %s past the lease...\n", stall)
+	sleep(stall)
+
+	// Worker B takes over the expired lease. With slice 2 this mints a FRESH
+	// generation (and wake_id), rotating the fence.
+	b, err := claim(c.base, subID, "worker-B")
+	if err != nil {
+		return fmt.Errorf("worker B claim (takeover): %w", err)
+	}
+	fmt.Printf("worker B claimed (takeover): generation=%d wake_id=%s\n", b.Generation, short(b.WakeID))
+	if b.Generation == a.Generation {
+		return fmt.Errorf("fence did NOT rotate on lease takeover: worker B reused generation %d (split-brain — slice 2 regression)", a.Generation)
+	}
+
+	// Worker B acks under the new fence; this must succeed.
+	status, _, err := ackPullWake(c.base, subID, b.Token, b.WakeID, b.Generation)
+	if err != nil {
+		return fmt.Errorf("worker B ack: %w", err)
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("worker B ack returned %d, want 200 (the live holder must ack)", status)
+	}
+	fmt.Println("worker B ack: 200 OK")
+
+	// The decisive assertion: worker A's late ack with its stale token is FENCED.
+	status, code, err := ackPullWake(c.base, subID, a.Token, a.WakeID, a.Generation)
+	if err != nil {
+		return fmt.Errorf("worker A late ack: %w", err)
+	}
+	fmt.Println("---- result ----")
+	fmt.Printf("scenario:          %s\n", c.scenario)
+	fmt.Printf("A generation:      %d\n", a.Generation)
+	fmt.Printf("B generation:      %d (rotated)\n", b.Generation)
+	fmt.Printf("A late-ack status: %d %s\n", status, code)
+	if status != http.StatusConflict || code != "FENCED" {
+		return fmt.Errorf("worker A's late ack returned %d %q, want 409 FENCED — the deposed worker was NOT fenced (slice 2 regression)", status, code)
+	}
+	fmt.Println("PASS: the deposed worker's late ack was fenced (409 FENCED); the fence rotated on lease takeover")
+	return nil
+}
+
+// runPullWakeArmCrash exercises slice 1 (durable pull-wake recovery, commit
+// 19c3af8). A pull-wake arm writes the durable waking phase and the wake event
+// in two non-atomic steps; a crash in between leaves the subscription armed
+// (phase=waking, wake_event_sent_ns=0) with no event, permanently stranded
+// before the slice. The sweep now re-emits any pull-wake stuck in waking with
+// sent_ns==0.
+//
+// APPROXIMATION: precisely timing a kill "after arm, before wake-event emit"
+// from outside the process is not feasible from this host driver — the window is
+// a few microseconds inside issueWake. We approximate it by appending under
+// aggressive origin churn (kill every ~2 s, plus a kill-all after the final
+// append) so that some appends' wake-event emits are lost to a crash, and assert
+// the strictly stronger end-to-end property the slice guarantees: a worker
+// draining the wake stream eventually sees every stream reach its tail. If the
+// arm/emit window were NOT recovered, at least one stream would stay stuck in
+// waking with no event and its cursor would never advance — which this catches.
+// A future, more surgical version could pause an origin via a fault-injection
+// hook between arm_wake.lua and record_wake_sent.lua; that needs a server-side
+// seam this harness does not have.
+func runPullWakeArmCrash(c config, nem *nemesis) error {
+	subID := fmt.Sprintf("jepsen-pull-%d", time.Now().UnixNano())
+	const leaseTTLMs = 2000
+	wakeStream := "events/__wake__"
+
+	if err := createPullWakeSubscription(c.base, subID, "events/*", wakeStream, leaseTTLMs); err != nil {
+		return err
+	}
+	defer deleteSubscription(c.base, subID)
+	fmt.Printf("created pull-wake subscription %s -> wake_stream %s\n", subID, wakeStream)
+
+	// A worker loop continuously claims, acks every pending offset, and releases —
+	// draining each stream's cursor toward its tail. It runs until stopWorker.
+	stopWorker := make(chan struct{})
+	var wwg sync.WaitGroup
+	wwg.Add(1)
+	go func() { defer wwg.Done(); drainWorker(c.base, subID, wakeStream, stopWorker) }()
+
+	// Nemesis: light churn during the workload to lose some arm-time emits.
+	nem.scenario = "pull-wake-arm-crash"
+	stopNemesis := make(chan struct{})
+	var nwg sync.WaitGroup
+	nwg.Add(1)
+	go func() { defer nwg.Done(); nem.run(stopNemesis) }()
+
+	expected := map[string]string{}
+	for i := 0; i < c.streams; i++ {
+		stream := fmt.Sprintf("events/e-%d", i)
+		tail, err := appendStream(c.base, stream, c.msgs)
+		if err != nil {
+			close(stopNemesis)
+			nwg.Wait()
+			close(stopWorker)
+			wwg.Wait()
+			return fmt.Errorf("workload %s: %w", stream, err)
+		}
+		expected[stream] = tail
+	}
+	fmt.Printf("workload done: appended %d messages\n", c.streams*c.msgs)
+
+	// Decisive: kill all origins after the final append so any arm-without-emit
+	// can only be recovered by the sweep on a restarted origin.
+	nem.killAllOrigins()
+	fmt.Println("nemesis: killed all origins after final append")
+	close(stopNemesis)
+	nwg.Wait()
+
+	if err := waitReady(c.base, 90*time.Second); err != nil {
+		close(stopWorker)
+		wwg.Wait()
+		return fmt.Errorf("chronicle did not recover: %w", err)
+	}
+	fmt.Printf("settling %s for the recovery sweep (re-emits stranded wakes)...\n", c.settle)
+	sleep(c.settle)
+	close(stopWorker)
+	wwg.Wait()
+
+	// Verify: every stream's cursor advanced to its tail despite lost arm-time
+	// emits. The worker has drained whatever the sweep re-emitted.
+	view, err := getSubscription(c.base, subID)
+	if err != nil {
+		return err
+	}
+	acked := map[string]string{}
+	for _, s := range view.Streams {
+		acked[s.Path] = s.AckedOffset
+	}
+	var lagging []string
+	streams := make([]string, 0, len(expected))
+	for s := range expected {
+		streams = append(streams, s)
+	}
+	sort.Strings(streams)
+	for _, s := range streams {
+		if acked[s] != expected[s] {
+			lagging = append(lagging, fmt.Sprintf("%s acked=%s want=%s", s, short(acked[s]), short(expected[s])))
+		}
+	}
+	fmt.Println("---- result ----")
+	fmt.Printf("scenario:          %s\n", c.scenario)
+	fmt.Printf("nemesis actions:   %d (%s)\n", len(nem.log), join(nem.log))
+	fmt.Printf("messages appended: %d\n", c.streams*c.msgs)
+	fmt.Printf("streams at tail:   %d/%d\n", c.streams-len(lagging), c.streams)
+	if len(lagging) > 0 {
+		for _, l := range lagging {
+			fmt.Printf("  LAGGING %s\n", l)
+		}
+		return fmt.Errorf("%d/%d streams never reached their tail — a pull-wake arm was stranded and the sweep did not re-emit it", len(lagging), c.streams)
+	}
+	fmt.Println("PASS: every pull-wake reached its tail; arm-without-emit windows were recovered by the sweep")
+	return nil
 }
 
 func verify(c config, subID string, expected map[string]string, r *receiver, nem *nemesis) error {
@@ -165,10 +438,10 @@ func verify(c config, subID string, expected map[string]string, r *receiver, nem
 
 // ---- chronicle HTTP client ----
 
-func createSubscription(base, id, webhookURL string) error {
+func createSubscription(base, id, webhookURL, pattern string) error {
 	body, _ := json.Marshal(map[string]any{
 		"type":         "webhook",
-		"pattern":      "events/*",
+		"pattern":      pattern,
 		"webhook":      map[string]string{"url": webhookURL},
 		"lease_ttl_ms": 2000,
 		"description":  "jepsen durability probe",
@@ -189,9 +462,158 @@ func createSubscription(base, id, webhookURL string) error {
 	})
 }
 
+// createPullWakeSubscription creates a pull-wake subscription with a wake_stream.
+// Wakes are written as events to wake_stream for workers to claim (PROTOCOL §7.2),
+// rather than pushed to a webhook.
+func createPullWakeSubscription(base, id, pattern, wakeStream string, leaseTTLMs int64) error {
+	body, _ := json.Marshal(map[string]any{
+		"type":         "pull-wake",
+		"pattern":      pattern,
+		"wake_stream":  wakeStream,
+		"lease_ttl_ms": leaseTTLMs,
+		"description":  "jepsen pull-wake probe",
+	})
+	url := fmt.Sprintf("%s/v1/stream/__ds/subscriptions/%s", base, id)
+	return retry(20, 500*time.Millisecond, func() error {
+		req, _ := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 201 && resp.StatusCode != 200 {
+			b, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("create pull-wake subscription status %d: %s", resp.StatusCode, b)
+		}
+		return nil
+	})
+}
+
+func deleteSubscription(base, id string) {
+	url := fmt.Sprintf("%s/v1/stream/__ds/subscriptions/%s", base, id)
+	req, _ := http.NewRequest(http.MethodDelete, url, nil)
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		resp.Body.Close()
+	}
+}
+
+// claimResult is the decoded subset of a successful claim we need to drive an ack.
+type claimResult struct {
+	WakeID     string            `json:"wake_id"`
+	Generation int64             `json:"generation"`
+	Token      string            `json:"token"`
+	Streams    []claimStreamSnap `json:"streams"`
+}
+
+type claimStreamSnap struct {
+	Path       string `json:"path"`
+	TailOffset string `json:"tail_offset"`
+	HasPending bool   `json:"has_pending"`
+}
+
+// claim POSTs a pull-wake claim for worker. On a successful 200 it returns the
+// minted (wake_id, generation, token) and the snapshot. A 409 ALREADY_CLAIMED
+// (the lease is held and unexpired) is surfaced as an error so callers can retry.
+func claim(base, id, worker string) (claimResult, error) {
+	var out claimResult
+	body, _ := json.Marshal(ClaimBody{Worker: worker})
+	url := fmt.Sprintf("%s/v1/stream/__ds/subscriptions/%s/claim", base, id)
+	err := retry(40, 500*time.Millisecond, func() error {
+		req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return json.NewDecoder(resp.Body).Decode(&out)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("claim status %d: %s", resp.StatusCode, b)
+	})
+	return out, err
+}
+
+// ackPullWake POSTs a pull-wake ack with done=true under the holder's token and
+// fence. It returns the HTTP status and (on a 4xx error envelope) the error code,
+// without retrying — the caller asserts on the exact status. status 200 means the
+// ack landed; 409 with code "FENCED" means the fence rotated under this token.
+func ackPullWake(base, id, token, wakeID string, generation int64) (status int, code string, err error) {
+	done := true
+	body, _ := json.Marshal(CallbackBody{WakeID: wakeID, Generation: generation, Done: &done})
+	url := fmt.Sprintf("%s/v1/stream/__ds/subscriptions/%s/ack", base, id)
+	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	status = resp.StatusCode
+	if status >= 400 {
+		var env errEnvelope
+		if json.NewDecoder(resp.Body).Decode(&env) == nil {
+			code = env.Error.Code
+		}
+	}
+	return status, code, nil
+}
+
+// drainWorker continuously claims, acks every pending stream up to its tail with
+// done=true, and lets the next claim proceed — draining all pull-wakes toward
+// their tails. It runs until stop is closed. Errors (no pending work, transient
+// origin churn) are expected and simply retried after a short pause.
+func drainWorker(base, id, wakeStream string, stop <-chan struct{}) {
+	worker := fmt.Sprintf("drain-%d", time.Now().UnixNano())
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		res, err := claim(base, id, worker)
+		if err != nil || res.Token == "" {
+			// No pending work or origin churn: back off briefly and retry.
+			sleep(200 * time.Millisecond)
+			continue
+		}
+		ackPullWake(base, id, res.Token, res.WakeID, res.Generation)
+	}
+}
+
+// ClaimBody and CallbackBody mirror the request wire shapes (webhook/wire.go
+// ClaimRequest / CallbackRequest) so the harness stays self-contained.
+type ClaimBody struct {
+	Worker string `json:"worker"`
+}
+
+type CallbackBody struct {
+	WakeID     string `json:"wake_id"`
+	Generation int64  `json:"generation"`
+	Done       *bool  `json:"done"`
+}
+
+type errEnvelope struct {
+	Error struct {
+		Code string `json:"code"`
+	} `json:"error"`
+}
+
 // appendStream creates a stream with its first message then appends the rest,
 // returning the final tail offset. Each request retries through origin churn.
 func appendStream(base, stream string, msgs int) (string, error) {
+	if _, err := createStream(base, stream); err != nil {
+		return "", err
+	}
+	return appendRest(base, stream, 1, msgs)
+}
+
+// createStream PUTs the first message ({"n":0}), creating the stream, and returns
+// its tail. Retries through origin churn.
+func createStream(base, stream string) (string, error) {
 	var tail string
 	createURL := fmt.Sprintf("%s/v1/stream/%s", base, stream)
 	err := retry(160, 500*time.Millisecond, func() error {
@@ -209,13 +631,18 @@ func appendStream(base, stream string, msgs int) (string, error) {
 		tail = resp.Header.Get("Stream-Next-Offset")
 		return nil
 	})
-	if err != nil {
-		return "", err
-	}
-	for n := 1; n < msgs; n++ {
+	return tail, err
+}
+
+// appendRest POSTs messages [from, msgs) to an existing stream, returning the
+// final tail. Retries through origin churn.
+func appendRest(base, stream string, from, msgs int) (string, error) {
+	var tail string
+	appendURL := fmt.Sprintf("%s/v1/stream/%s", base, stream)
+	for n := from; n < msgs; n++ {
 		payload := []byte(fmt.Sprintf(`{"n":%d}`, n))
 		err := retry(160, 500*time.Millisecond, func() error {
-			req, _ := http.NewRequest(http.MethodPost, createURL, bytes.NewReader(payload))
+			req, _ := http.NewRequest(http.MethodPost, appendURL, bytes.NewReader(payload))
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
@@ -235,6 +662,12 @@ func appendStream(base, stream string, msgs int) (string, error) {
 		}
 	}
 	return tail, nil
+}
+
+// appendOne POSTs a single message numbered seq to an existing stream, returning
+// the new tail. Used by index-repair to push work past a dropped index entry.
+func appendOne(base, stream string, seq int) (string, error) {
+	return appendRest(base, stream, seq, seq+1)
 }
 
 type subscriptionView struct {
@@ -357,9 +790,25 @@ func (n *nemesis) record(action string) {
 
 func (n *nemesis) run(stop <-chan struct{}) {
 	switch n.scenario {
-	case "origin-restart":
+	case "origin-restart", "index-repair":
 		// Continuously churn one origin so appends and wakes race pod loss.
+		// index-repair runs the same origin churn while it also drops fan-out
+		// index entries from the workload goroutine.
 		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				n.killOneOrigin()
+			}
+		}
+	case "glob-create-crash", "pull-wake-arm-crash":
+		// These scenarios drive their own decisive crashes inline (right after a
+		// stream create / a wake arm) from the workload goroutine, so the
+		// background nemesis only adds light churn to widen the race window.
+		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -402,6 +851,24 @@ func (n *nemesis) killAllOrigins() {
 func (n *nemesis) killRedis() {
 	n.kubectl("delete", "pods", "-l", "app=redis", "--grace-period=0", "--force")
 	n.record("kill-redis")
+}
+
+// deleteStreamIndex removes one stream's fan-out index SET
+// (ds:{__ds}:stream:<path>) directly in Redis, simulating a crash between the
+// canonical Lua link write and the Go-side SADD that maintains the index. The
+// link survives; only the index entry is dropped. ReconcileIndexes must rebuild
+// it from the canonical links. The deployment uses Redis DB 0 (deploy.yaml
+// REDIS_URL .../0); run.sh flushes the same DB between scenarios.
+func (n *nemesis) deleteStreamIndex(path string) {
+	key := fmt.Sprintf("ds:{__ds}:stream:%s", path)
+	n.redisCLI("del", key)
+	n.record("drop-stream-index")
+}
+
+// redisCLI runs redis-cli inside the redis pod against DB 0 (the deployment DB).
+func (n *nemesis) redisCLI(args ...string) ([]byte, error) {
+	full := append([]string{"exec", "deploy/redis", "--", "redis-cli", "-n", "0"}, args...)
+	return n.kubectl(full...)
 }
 
 func (n *nemesis) kubectl(args ...string) ([]byte, error) {
