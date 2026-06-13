@@ -55,6 +55,10 @@ type ManagerOptions struct {
 	Logger        *slog.Logger
 	WorkerTick    time.Duration
 	SweepInterval time.Duration
+	// AllowPrivateWebhookTargets relaxes SSRF validation to accept any http(s)
+	// webhook URL (e.g. cluster-internal receivers on RFC1918 addresses). Off by
+	// default; the operator opts in for trusted networks.
+	AllowPrivateWebhookTargets bool
 }
 
 // Manager orchestrates the subscription control plane: stream hooks, webhook
@@ -74,6 +78,7 @@ type Manager struct {
 	log           *slog.Logger
 	workerTick    time.Duration
 	sweepInterval time.Duration
+	allowPrivate  bool
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -103,6 +108,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		log:           opts.Logger,
 		workerTick:    opts.WorkerTick,
 		sweepInterval: opts.SweepInterval,
+		allowPrivate:  opts.AllowPrivateWebhookTargets,
 		stop:          make(chan struct{}),
 	}
 	if m.client == nil {
@@ -542,7 +548,7 @@ func (m *Manager) backfill(id string, cfg Config) {
 // validateWebhookURL applies the SSRF rules and returns the rejection reason, or
 // "" when the URL is acceptable.
 func (m *Manager) validateWebhookURL(rawURL string) string {
-	if ok, reason := ClassifyWebhookURL(rawURL, m.resolver); !ok {
+	if ok, reason := ClassifyWebhookURL(rawURL, m.resolver, m.allowPrivate); !ok {
 		return reason
 	}
 	return ""
