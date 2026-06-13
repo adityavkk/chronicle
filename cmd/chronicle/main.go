@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,24 +21,28 @@ import (
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
 )
 
-func newStore(cfg chronicle.Config, logger *slog.Logger) (store.Store, error) {
+// newStore builds the stream store. For the redis backend it also returns the
+// concrete Redis store and the shared client so the subscription layer can run
+// on the same Redis; both are nil for the memory backend.
+func newStore(cfg chronicle.Config, logger *slog.Logger) (store.Store, *redisstore.Store, goredis.UniversalClient, error) {
 	switch cfg.StoreBackend {
 	case "memory":
-		return store.NewMemoryStore(), nil
+		return store.NewMemoryStore(), nil, nil, nil
 	case "redis":
 		opt, err := goredis.ParseURL(cfg.RedisURL)
 		if err != nil {
-			return nil, fmt.Errorf("invalid redis URL: %w", err)
+			return nil, nil, nil, fmt.Errorf("invalid redis URL: %w", err)
 		}
 		client := goredis.NewClient(opt)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := client.Ping(ctx).Err(); err != nil {
-			return nil, fmt.Errorf("redis unreachable at %s: %w", cfg.RedisURL, err)
+			return nil, nil, nil, fmt.Errorf("redis unreachable at %s: %w", cfg.RedisURL, err)
 		}
-		return redisstore.New(client, redisstore.Options{Logger: logger}), nil
+		rs := redisstore.New(client, redisstore.Options{Logger: logger})
+		return rs, rs, client, nil
 	default:
-		return nil, fmt.Errorf("unknown store backend %q (want %q or %q)", cfg.StoreBackend, "redis", "memory")
+		return nil, nil, nil, fmt.Errorf("unknown store backend %q (want %q or %q)", cfg.StoreBackend, "redis", "memory")
 	}
 }
 
@@ -61,6 +66,8 @@ func run() error {
 	flag.StringVar(&cfg.StoreBackend, "store", cfg.StoreBackend, `storage backend: "redis" or "memory"`)
 	flag.DurationVar(&cfg.LongPollTimeout, "long-poll-timeout", cfg.LongPollTimeout, "server-side long-poll timeout")
 	flag.DurationVar(&cfg.SSEReconnectInterval, "sse-reconnect-interval", cfg.SSEReconnectInterval, "SSE connection reconnect interval")
+	flag.StringVar(&cfg.PublicBaseURL, "public-url", cfg.PublicBaseURL, "externally reachable origin for webhook callback/JWKS URLs")
+	flag.BoolVar(&cfg.Subscriptions, "subscriptions", cfg.Subscriptions, "enable the reserved __ds subscription APIs (redis backend only)")
 	flag.StringVar(&logLevel, "log-level", logLevel, "log level: debug, info, warn or error")
 	flag.Parse()
 
@@ -70,7 +77,7 @@ func run() error {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	st, err := newStore(cfg, logger)
+	st, rs, client, err := newStore(cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -82,6 +89,26 @@ func run() error {
 		SSEReconnectInterval: cfg.SSEReconnectInterval,
 		Logger:               logger,
 	}
+
+	subscriptionsEnabled := false
+	if cfg.Subscriptions {
+		if client == nil {
+			return fmt.Errorf("subscriptions require the redis backend")
+		}
+		streamRootURL := strings.TrimSuffix(cfg.PublicBaseURL, "/") + cfg.StreamRoot
+		router, service, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, logger)
+		if err != nil {
+			return fmt.Errorf("subscriptions: %w", err)
+		}
+		handler.Subscriptions = router
+		handler.SubHooks = service
+		service.RunSweep() // re-fire anything owed before serving (closes the restart gap)
+		service.Start()
+		defer service.Stop()
+		subscriptionsEnabled = true
+		logger.Info("subscriptions enabled", "stream_root_url", streamRootURL)
+	}
+
 	mux, err := chronicle.Mount(cfg.StreamRoot, handler)
 	if err != nil {
 		return err
@@ -106,6 +133,7 @@ func run() error {
 		"addr", cfg.Listen,
 		"root", cfg.StreamRoot,
 		"store", cfg.StoreBackend,
+		"subscriptions", subscriptionsEnabled,
 		"long_poll_timeout", cfg.LongPollTimeout,
 		"sse_reconnect_interval", cfg.SSEReconnectInterval)
 

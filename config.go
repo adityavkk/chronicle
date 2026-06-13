@@ -13,6 +13,8 @@ const (
 	EnvStore                = "CHRONICLE_STORE"
 	EnvLongPollTimeout      = "CHRONICLE_LONG_POLL_TIMEOUT"
 	EnvSSEReconnectInterval = "CHRONICLE_SSE_RECONNECT_INTERVAL"
+	EnvPublicURL            = "CHRONICLE_PUBLIC_URL"
+	EnvSubscriptions        = "CHRONICLE_SUBSCRIPTIONS"
 )
 
 // Config holds the chronicle server configuration. LongPollTimeout and
@@ -41,6 +43,16 @@ type Config struct {
 	// SSEReconnectInterval is how often SSE connections are closed to allow
 	// CDN request collapsing. Caddy default: 60s.
 	SSEReconnectInterval time.Duration
+
+	// PublicBaseURL is the externally reachable origin (scheme + host[:port])
+	// the server is served behind. It is combined with StreamRoot to build the
+	// absolute callback_url and jwks_url in webhook notifications and
+	// subscription responses, which a webhook receiver must be able to reach.
+	PublicBaseURL string
+
+	// Subscriptions enables the reserved __ds subscription APIs. Requires the
+	// redis backend (the subscription layer is Redis-backed).
+	Subscriptions bool
 }
 
 // DefaultConfig returns the defaults: port 4437 (the IANA-assigned Durable
@@ -54,6 +66,8 @@ func DefaultConfig() Config {
 		StoreBackend:         "redis",
 		LongPollTimeout:      30 * time.Second,
 		SSEReconnectInterval: 60 * time.Second,
+		PublicBaseURL:        "http://localhost:4437",
+		Subscriptions:        true,
 	}
 }
 
@@ -82,6 +96,12 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvSSEReconnectInterval, err)
 		}
 		c.SSEReconnectInterval = d
+	}
+	if v, ok := lookup(EnvPublicURL); ok {
+		c.PublicBaseURL = v
+	}
+	if v, ok := lookup(EnvSubscriptions); ok {
+		c.Subscriptions = v == "1" || v == "true"
 	}
 	return nil
 }
