@@ -66,6 +66,9 @@ Flags take precedence over environment variables; both over defaults.
 | `--stream-root` | `CHRONICLE_STREAM_ROOT` | `/v1/stream/` | URL prefix streams live under |
 | `--long-poll-timeout` | `CHRONICLE_LONG_POLL_TIMEOUT` | `30s` | How long `live=long-poll` waits before `204` |
 | `--sse-reconnect-interval` | `CHRONICLE_SSE_RECONNECT_INTERVAL` | `60s` | SSE connection cycling (enables CDN collapsing) |
+| `--subscriptions` | `CHRONICLE_SUBSCRIPTIONS` | `true` | Enable the reserved `__ds` subscription APIs (requires the redis backend) |
+| `--public-url` | `CHRONICLE_PUBLIC_URL` | _(listen addr)_ | Externally reachable origin used in webhook `callback_url` / `jwks_url` |
+| `--webhook-allow-private` | `CHRONICLE_WEBHOOK_ALLOW_PRIVATE` | `false` | Allow webhook delivery to private/loopback addresses (trusted networks / local dev) |
 
 ### Redis requirements
 
@@ -109,9 +112,18 @@ make conformance                                   # full suite vs live Redis
 make conformance-filter FILTER="Idempotent"        # one group while iterating
 ```
 
-The only suite group chronicle does not yet implement is the optional reserved
-subscriptions API (`__ds` webhooks/pull-wake) — the same posture as the
-reference Caddy plugin's own conformance gate.
+This includes the reserved subscriptions API (`__ds` webhooks + pull-wake): the
+suite runs with `subscriptions: true` (`test/conformance/conformance.test.ts`)
+and chronicle enables subscriptions by default. The subscription engine lives in
+`subscriptions.go` + the `webhook/` package (signed webhook delivery, pull-wake
+claim/ack/release, generation fencing, leases, JWKS).
+
+## Integrations
+
+- **ElectricSQL Agents** — chronicle works as a drop-in Durable Streams backend
+  for ElectricSQL's agents runtime (`@electric-ax/agents-*`). See
+  [docs/ELECTRIC-AGENTS.md](docs/ELECTRIC-AGENTS.md) for a tested, copy-paste
+  runbook (and the gotchas that aren't obvious).
 
 ## Development
 
