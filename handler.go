@@ -48,21 +48,27 @@ type Handler struct {
 	SubHooks SubscriptionHooks
 }
 
+// subStreamPath maps a store path ("/events/abc") to the stream-root-relative
+// path the subscription layer and protocol wire use ("events/abc"): the store
+// keys paths with a leading slash (Mount keeps it when stripping the root), but
+// PROTOCOL §6 paths have no leading slash.
+func subStreamPath(path string) string { return strings.TrimPrefix(path, "/") }
+
 func (h *Handler) onStreamCreated(path string) {
 	if h.SubHooks != nil {
-		h.SubHooks.OnStreamCreated(path)
+		h.SubHooks.OnStreamCreated(subStreamPath(path))
 	}
 }
 
 func (h *Handler) onStreamAppend(path string) {
 	if h.SubHooks != nil {
-		h.SubHooks.OnStreamAppend(path)
+		h.SubHooks.OnStreamAppend(subStreamPath(path))
 	}
 }
 
 func (h *Handler) onStreamDeleted(path string) {
 	if h.SubHooks != nil {
-		h.SubHooks.OnStreamDeleted(path)
+		h.SubHooks.OnStreamDeleted(subStreamPath(path))
 	}
 }
 
