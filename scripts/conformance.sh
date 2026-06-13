@@ -7,18 +7,37 @@
 #
 # Mirrors the Caddy plugin's test harness: short long-poll timeout, readiness
 # probe via PUT+DELETE on a health stream, suite paths under /v1/stream/.
+#
+# Environment overrides (ergonomics ported from codex-subscription, docs/research/10):
+#   CHRONICLE_PORT             chronicle listen port              (default 4437)
+#   CHRONICLE_REDIS_URL        redis URL chronicle dials          (default redis://localhost:6379/<db>)
+#   CHRONICLE_REDIS_DB         redis DB index to use + flush      (default 15)
+#   CHRONICLE_SKIP_REDIS_START set to skip `docker compose up redis`
+#                              (use when Redis already runs, e.g. an external/shared instance)
+#   CHRONICLE_REDIS_CONTAINER  container name for the flushdb exec
+#                              (default: the compose `redis` service)
+# Defaults preserve the original behavior exactly when these are unset.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PORT="${CHRONICLE_PORT:-4437}"
 BASE_URL="http://localhost:${PORT}"
-REDIS_URL="${CHRONICLE_REDIS_URL:-redis://localhost:6379/15}"
+REDIS_DB="${CHRONICLE_REDIS_DB:-15}"
+REDIS_URL="${CHRONICLE_REDIS_URL:-redis://localhost:6379/${REDIS_DB}}"
 
-echo "==> starting redis"
-docker compose up -d --wait redis
+if [ -n "${CHRONICLE_SKIP_REDIS_START:-}" ]; then
+  echo "==> skipping redis start (CHRONICLE_SKIP_REDIS_START set)"
+else
+  echo "==> starting redis"
+  docker compose up -d --wait redis
+fi
 
-echo "==> flushing conformance db"
-docker compose exec -T redis redis-cli -n 15 flushdb >/dev/null
+echo "==> flushing conformance db ${REDIS_DB}"
+if [ -n "${CHRONICLE_REDIS_CONTAINER:-}" ]; then
+  docker exec -i "${CHRONICLE_REDIS_CONTAINER}" redis-cli -n "${REDIS_DB}" flushdb >/dev/null
+else
+  docker compose exec -T redis redis-cli -n "${REDIS_DB}" flushdb >/dev/null
+fi
 
 echo "==> building chronicle"
 go build -o bin/chronicle ./cmd/chronicle
