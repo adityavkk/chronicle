@@ -1,0 +1,20 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant O1 as Origin A
+    participant R as Redis
+    participant O2 as Origin B
+    participant Recv as Receiver
+    C->>O1: POST /events/abc + body
+    O1->>R: EVALSHA append.lua — durable append
+    O1-->>C: 204 · the byte is committed
+    Note over O1: crash before OnStreamAppend fires the wake
+    Note over R: cursor < tail · no wake armed · wake lost
+    loop recovery sweep · every 2s on every origin
+        O2->>R: SMEMBERS ds:{__ds}:subs · HasPendingWork per sub
+        Note over O2: cursor < tail → a wake is owed
+        O2->>R: EVALSHA arm_wake.lua — generation++ · re-fire
+        O2->>Recv: POST webhook · delivered after Origin A is gone
+        Recv-->>O2: 200 {done:true}
+        O2->>R: EVALSHA ack.lua — cursor → tail
+    end

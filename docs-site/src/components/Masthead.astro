@@ -1,12 +1,14 @@
 ---
 // Site masthead: identity mark on the left, page links in the middle, source
 // link on the right. The mark links home (useful on deep anchors); the page
-// links move between the overview and the endpoint reference.
+// links move between the overview, the endpoint reference, and the
+// subscriptions reference.
 import Glyph from "./Glyph.astro";
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const home = `${base}/`;
 const endpoints = `${base}/endpoints`;
+const subscriptions = `${base}/subscriptions`;
 const REPO = "https://github.com/adityavkk/chronicle";
 
 // Active page from the current path, normalized against the deployed base.
@@ -14,7 +16,8 @@ const rel = import.meta.env.BASE_URL
   ? Astro.url.pathname.replace(base, "").replace(/\/$/, "")
   : Astro.url.pathname.replace(/\/$/, "");
 const onEndpoints = rel === "/endpoints";
-const onHome = !onEndpoints;
+const onSubscriptions = rel === "/subscriptions";
+const onHome = rel === "" || rel === "/";
 ---
 <nav class="masthead" aria-label="Site">
   <a class="mark" href={home} aria-label="Chronicle documentation — home">
@@ -24,6 +27,7 @@ const onHome = !onEndpoints;
   <div class="links">
     <a href={home} class:list={["link", { active: onHome }]} aria-current={onHome ? "page" : undefined}>Overview</a>
     <a href={endpoints} class:list={["link", { active: onEndpoints }]} aria-current={onEndpoints ? "page" : undefined}>Endpoints</a>
+    <a href={subscriptions} class:list={["link", { active: onSubscriptions }]} aria-current={onSubscriptions ? "page" : undefined}>Subscriptions</a>
   </div>
   <a class="src" href={REPO}>
     <span>GitHub</span>
