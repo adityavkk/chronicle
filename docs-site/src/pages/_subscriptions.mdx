@@ -493,8 +493,43 @@ import Complexity from "../components/Complexity.astro";
   </Callout>
 </section>
 
+<section class="block" id="hardening">
+  <SectionHead num="08" label="Hardening" title="Crash windows, <em>closed</em>" />
+
+  Every durable write here is followed by a non-atomic step in Go — arm then
+  emit, link then index, commit then hook. A crash in that gap is the recurring
+  shape of a subscription bug. Four such windows are closed, each behind one idea:
+  the durable record is the source of truth, and a background pass re-derives
+  whatever the crash dropped. None changes the at-least-once guarantee or the
+  fence.
+
+  <Table wide>
+    | Window | Symptom after a crash | Fix |
+    | --- | --- | --- |
+    | **Expired-lease takeover** | a second worker claimed a lease whose deadline had passed and *reused* the old `generation`/`wake_id`, so the deposed worker could still ack — two holders of one fence | the claim now rotates the fence (mints a fresh `generation` and `wake_id`) on takeover, so the deposed worker's late ack is `FENCED` |
+    | **Pull-wake arm-then-emit** | a pull-wake armed (`phase=waking`) but crashed before writing its wake event stayed stranded forever — the sweep only re-woke idle subs and a later append coalesced | `arm_wake` marks the wake unsent; the recovery sweep re-emits any pull-wake still `waking` and unsent. Duplicate wake events are fence-safe |
+    | **Missed glob link** | a stream created during an outage never ran `OnStreamCreated`, so a matching pattern subscription never linked it — and it does not self-heal | a separate slow reconcile loop lists streams and re-links missing glob matches — at the beginning offset if the stream is newer than the subscription, the tail if older |
+    | **Dropped fan-out index** | the canonical link survived but its fan-out index entry did not, so appends fell back to sweep latency | the reconcile loop rebuilds the index from the canonical links; it mirrors links and never invents membership |
+  </Table>
+
+  Only the first touched correctness: reusing a fence across a lease takeover let
+  two workers act on one wake. Forward-only acks kept that from corrupting a
+  cursor, but the rotation restores the single-holder invariant the fence exists
+  to provide. The other three are liveness — a stranded wake, a missing link, a
+  slow trigger — recovered by the durable record plus a sweep.
+
+  <Callout icon="info" label="Sweep, not outbox">
+    The pull-wake recovery re-emits from the existing recovery sweep rather than a
+    dedicated delivery outbox with its own schedule queue and worker. The sweep is
+    already the recovery path for every other stuck wake, so a one-field "was this
+    emitted?" marker folds the pull-wake case into the scan the sweep already runs
+    — same at-least-once guarantee, far less machinery. The cost is recovery at
+    sweep latency, the right trade for a post-crash event.
+  </Callout>
+</section>
+
 <section class="block" id="further">
-  <SectionHead num="08" label="Further reading" title="Where this <em>comes from</em>" />
+  <SectionHead num="09" label="Further reading" title="Where this <em>comes from</em>" />
 
   The endpoints, lifecycle, and Redis keyspace above are taken from the
   implementation; the locators are `file:line` into the repository at the time of
@@ -504,6 +539,7 @@ import Complexity from "../components/Complexity.astro";
   - [Endpoints &amp; Redis](../endpoints) — every stream endpoint walked one at a time, down to the Redis command
   - [webhook/](https://github.com/adityavkk/chronicle/tree/main/webhook) — the subscription layer: pure core, Redis store, Lua scripts, manager, and routes
   - [docs/research/07](https://github.com/adityavkk/chronicle/blob/main/docs/research/07-subscription-wake-lease-durability.md) — the design study: the crash-window analysis and the recovery sweep
+  - [docs/research/11](https://github.com/adityavkk/chronicle/blob/main/docs/research/11-subscription-hardening-implemented.md) — the crash-window hardening, as built
   - [docs/jepsen/results.md](https://github.com/adityavkk/chronicle/blob/main/docs/jepsen/results.md) — the fault-injection harness and the full results
 
 </section>
