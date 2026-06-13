@@ -1,9 +1,15 @@
 -- claim.lua — pull-wake claim with a compare-and-set lease (PROTOCOL §7.2). A
 -- claim is rejected while another worker holds an unexpired lease. On grant the
--- lease is armed; if no wake is currently in flight (idle, or wake already
--- cleared) a fresh generation/wake_id is minted so the worker has a valid fence,
--- otherwise the in-flight wake is reused so two workers racing one wake event
--- collide rather than both "succeeding".
+-- lease is armed, and the fence is rotated UNLESS this is the normal first claim
+-- of an already-issued pull-wake event. Concretely:
+--   * phase == 'waking' with a wake set: reuse the in-flight generation/wake_id,
+--     so two workers racing the same wake event collide on one fence instead of
+--     both "succeeding".
+--   * every other grantable case — idle, a cleared wake, or TAKING OVER an
+--     expired live lease — mints a fresh generation + wake_id. Rotating on
+--     expired-lease takeover fences out the deposed holder: its still-unexpired
+--     token carries the old generation, so a late ack from it returns FENCED and
+--     cannot disturb the new holder's lease (the single-holder invariant).
 -- KEYS: 1=sub 2=lease_zset
 -- ARGV: 1=id 2=worker 3=now_ns 4=lease_ttl_ms 5=new_wake_id
 -- Reply: {status, generation, wake_id, holder} ; CLAIMED | BUSY | NOSUB
@@ -20,7 +26,9 @@ if phase == 'live' and holder == '1' and lease_until > now then
 end
 local gen = redis.call('HGET', sub, 'generation')
 local wake = redis.call('HGET', sub, 'wake_id')
-if phase == 'idle' or wake == '' then
+-- Reaching here with phase == 'live' means the lease is expired (the BUSY guard
+-- above already returned for an unexpired live lease), so that case rotates too.
+if not (phase == 'waking' and wake ~= '') then
   gen = tostring(redis.call('HINCRBY', sub, 'generation', 1))
   wake = ARGV[5]
   redis.call('HSET', sub, 'wake_id', wake)

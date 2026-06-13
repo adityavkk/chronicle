@@ -208,3 +208,62 @@ func TestStoreSigningKeyPersistence(t *testing.T) {
 		t.Fatalf("kid not stable across restart: %q vs %q", k1.Kid, k2.Kid)
 	}
 }
+
+func pullWakeCfg() Config {
+	return Config{Type: DispatchPullWake, Pattern: "events/*", WakeStream: "wake/pool", LeaseTTLMs: 1000}
+}
+
+// TestClaimExpiredLeaseRotatesFence is the slice-2 hardening: when a claim takes
+// over a lease whose deadline has passed (before the lease worker expires it),
+// the fence must rotate so the deposed worker's still-unexpired token can no
+// longer ack — otherwise two workers hold the same (generation, wake_id) and the
+// single-holder invariant is broken.
+func TestClaimExpiredLeaseRotatesFence(t *testing.T) {
+	s, _ := newTestStore(t)
+	base := time.Now()
+	_, _ = s.CreateOrConfirm("s1", pullWakeCfg(), nil, base)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+
+	// Worker A claims an idle subscription: mints generation 1, wake w_a.
+	a, err := s.Claim("s1", "worker-A", "w_a", base, 1000)
+	if err != nil || !a.Claimed {
+		t.Fatalf("claim A = %+v err=%v", a, err)
+	}
+	// Worker B claims after A's lease deadline has passed: takeover rotates.
+	after := base.Add(2 * time.Second)
+	b, err := s.Claim("s1", "worker-B", "w_b", after, 1000)
+	if err != nil || !b.Claimed {
+		t.Fatalf("claim B = %+v err=%v", b, err)
+	}
+	if b.Generation == a.Generation || b.WakeID == a.WakeID {
+		t.Fatalf("expired-lease takeover must rotate the fence: A=(gen %d,%s) B=(gen %d,%s)",
+			a.Generation, a.WakeID, b.Generation, b.WakeID)
+	}
+	// The deposed worker A can no longer ack — its old generation/wake is fenced.
+	if st, _ := s.Ack("s1", a.Generation, a.WakeID, a.Generation, true, nil, after, 1000); st != "FENCED" {
+		t.Fatalf("deposed worker A ack should FENCE, got %q", st)
+	}
+	// The current holder B acks successfully.
+	if st, _ := s.Ack("s1", b.Generation, b.WakeID, b.Generation, true, nil, after, 1000); st != "OK" {
+		t.Fatalf("current holder B ack should be OK, got %q", st)
+	}
+}
+
+// TestClaimUnexpiredLeaseStillBusy confirms the rotation change did not regress
+// the BUSY path: a claim against an unexpired live lease is still rejected.
+func TestClaimUnexpiredLeaseStillBusy(t *testing.T) {
+	s, _ := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+
+	a, _ := s.Claim("s1", "worker-A", "w_a", now, 1000)
+	if !a.Claimed {
+		t.Fatal("worker A should claim the idle subscription")
+	}
+	// B claims while A's lease is still live.
+	b, _ := s.Claim("s1", "worker-B", "w_b", now, 1000)
+	if !b.Busy || b.Holder != "worker-A" {
+		t.Fatalf("unexpired lease should be BUSY held by worker-A, got %+v", b)
+	}
+}
