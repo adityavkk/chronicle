@@ -63,21 +63,26 @@ func (a streamAdapter) AppendWakeEvent(wakeStream string, data []byte) error {
 }
 
 // redisLister adapts the Redis stream store to webhook.StreamLister for pattern
-// backfill.
+// backfill and recovery reconciliation.
 type redisLister struct {
 	rs *redisstore.Store
 }
 
-func (l redisLister) ListStreamPaths() ([]string, error) {
-	paths, err := l.rs.ListStreamPaths(context.Background())
+func (l redisLister) ListStreams() ([]webhook.StreamMeta, error) {
+	metas, err := l.rs.ListStreamMeta(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	// Store keys carry a leading slash; the subscription layer is slash-free.
-	for i := range paths {
-		paths[i] = strings.TrimPrefix(paths[i], "/")
+	out := make([]webhook.StreamMeta, len(metas))
+	for i, m := range metas {
+		// Store keys carry a leading slash; the subscription layer is slash-free.
+		out[i] = webhook.StreamMeta{
+			Path:        strings.TrimPrefix(m.Path, "/"),
+			Tail:        m.Tail,
+			CreatedAtNs: m.CreatedAtNs,
+		}
 	}
-	return paths, nil
+	return out, nil
 }
 
 // NewSubscriptions builds the Redis-backed __ds subscription stack: the HTTP
