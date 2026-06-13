@@ -15,6 +15,7 @@ const (
 	EnvSSEReconnectInterval = "CHRONICLE_SSE_RECONNECT_INTERVAL"
 	EnvPublicURL            = "CHRONICLE_PUBLIC_URL"
 	EnvSubscriptions        = "CHRONICLE_SUBSCRIPTIONS"
+	EnvWebhookAllowPrivate  = "CHRONICLE_WEBHOOK_ALLOW_PRIVATE"
 )
 
 // Config holds the chronicle server configuration. LongPollTimeout and
@@ -53,6 +54,11 @@ type Config struct {
 	// Subscriptions enables the reserved __ds subscription APIs. Requires the
 	// redis backend (the subscription layer is Redis-backed).
 	Subscriptions bool
+
+	// WebhookAllowPrivate relaxes webhook-URL SSRF validation to accept any
+	// http(s) target, including RFC1918 cluster-internal receivers. Off by
+	// default; enable only on a trusted network.
+	WebhookAllowPrivate bool
 }
 
 // DefaultConfig returns the defaults: port 4437 (the IANA-assigned Durable
@@ -102,6 +108,9 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvSubscriptions); ok {
 		c.Subscriptions = v == "1" || v == "true"
+	}
+	if v, ok := lookup(EnvWebhookAllowPrivate); ok {
+		c.WebhookAllowPrivate = v == "1" || v == "true"
 	}
 	return nil
 }

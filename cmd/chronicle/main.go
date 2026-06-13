@@ -68,6 +68,7 @@ func run() error {
 	flag.DurationVar(&cfg.SSEReconnectInterval, "sse-reconnect-interval", cfg.SSEReconnectInterval, "SSE connection reconnect interval")
 	flag.StringVar(&cfg.PublicBaseURL, "public-url", cfg.PublicBaseURL, "externally reachable origin for webhook callback/JWKS URLs")
 	flag.BoolVar(&cfg.Subscriptions, "subscriptions", cfg.Subscriptions, "enable the reserved __ds subscription APIs (redis backend only)")
+	flag.BoolVar(&cfg.WebhookAllowPrivate, "webhook-allow-private", cfg.WebhookAllowPrivate, "accept webhook URLs on private/RFC1918 addresses (trusted networks only)")
 	flag.StringVar(&logLevel, "log-level", logLevel, "log level: debug, info, warn or error")
 	flag.Parse()
 
@@ -96,7 +97,7 @@ func run() error {
 			return fmt.Errorf("subscriptions require the redis backend")
 		}
 		streamRootURL := strings.TrimSuffix(cfg.PublicBaseURL, "/") + cfg.StreamRoot
-		router, service, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, logger)
+		router, service, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, logger)
 		if err != nil {
 			return fmt.Errorf("subscriptions: %w", err)
 		}

@@ -98,10 +98,17 @@ func TestClassifyWebhookURL(t *testing.T) {
 		{"bad scheme rejected", "ftp://example.com/h", false},
 	}
 	for _, c := range cases {
-		got, _ := ClassifyWebhookURL(c.url, noResolve)
+		got, _ := ClassifyWebhookURL(c.url, noResolve, false)
 		if got != c.want {
 			t.Errorf("%s: ClassifyWebhookURL(%q)=%v want %v", c.name, c.url, got, c.want)
 		}
+	}
+	// Trusted-network mode accepts private and plain-http targets.
+	if ok, _ := ClassifyWebhookURL("http://10.0.0.1/hook", noResolve, true); !ok {
+		t.Error("allowPrivate should accept an RFC1918 http target")
+	}
+	if ok, _ := ClassifyWebhookURL("ftp://10.0.0.1/hook", noResolve, true); ok {
+		t.Error("allowPrivate must still reject a non-http(s) scheme")
 	}
 }
 

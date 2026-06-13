@@ -86,10 +86,11 @@ func (l redisLister) ListStreamPaths() ([]string, error) {
 // protocol is served under (scheme+host+root, trailing slash), used to build
 // callback and JWKS URLs. rs may be nil to disable pattern backfill of existing
 // streams (new streams are still linked as they are created).
-func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs *redisstore.Store, streamRootURL string, logger *slog.Logger) (SubscriptionRouter, SubscriptionService, error) {
+func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs *redisstore.Store, streamRootURL string, allowPrivateWebhooks bool, logger *slog.Logger) (SubscriptionRouter, SubscriptionService, error) {
 	opts := webhook.ManagerOptions{
-		StreamRootURL: streamRootURL,
-		Logger:        logger,
+		StreamRootURL:              streamRootURL,
+		Logger:                     logger,
+		AllowPrivateWebhookTargets: allowPrivateWebhooks,
 	}
 	if rs != nil {
 		opts.Lister = redisLister{rs: rs}

@@ -21,9 +21,11 @@ type IPResolver func(host string) ([]net.IP, error)
 //     endpoint), unique-local, or unspecified target is rejected;
 //   - a non-loopback http target is rejected — production webhooks require https.
 //
-// resolve is only called for non-IP-literal hosts; IP-literal hosts (the
-// conformance cases) need no DNS.
-func ClassifyWebhookURL(rawURL string, resolve IPResolver) (ok bool, reason string) {
+// allowPrivate is the trusted-network escape hatch: when set, any http(s) host
+// is accepted, so in-cluster webhook receivers on RFC1918 ClusterIPs work. It
+// defaults off, preserving the strict rules above (and the conformance reject
+// of http://10.0.0.1). resolve is only called for non-IP-literal hosts.
+func ClassifyWebhookURL(rawURL string, resolve IPResolver, allowPrivate bool) (ok bool, reason string) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false, "webhook url is not a valid URL"
@@ -41,6 +43,12 @@ func ClassifyWebhookURL(rawURL string, resolve IPResolver) (ok bool, reason stri
 	// allowed over either scheme. Checked by name first so DNS rebinding of
 	// "localhost" to a public address cannot smuggle past the exception.
 	if isLoopbackHost(host) {
+		return true, ""
+	}
+
+	// Trusted-network mode: accept any http(s) target (e.g. cluster-internal
+	// receivers). The operator opts in explicitly.
+	if allowPrivate {
 		return true, ""
 	}
 
