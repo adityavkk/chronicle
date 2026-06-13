@@ -1,0 +1,16 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Handler
+    participant S as Store
+    participant Src as Source keys
+    participant Fk as Fork keys
+    C->>H: PUT /branch + Stream-Forked-From
+    H->>S: Store.Create(fork opts)
+    S->>Src: HGETALL source:meta — validate · store.go:220
+    S->>Src: EVALSHA incr_ref.lua · store.go:273
+    Note over Src: HINCRBY refCount +1 · SADD :forks · PERSIST ×4
+    Src-->>S: reply OK, refCount
+    S->>Fk: EVALSHA create.lua — meta has forkedFrom + forkOff · store.go:319
+    Fk-->>S: reply CREATED
+    H-->>C: 201 · Stream-Next-Offset = forkOff

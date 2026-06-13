@@ -1,0 +1,16 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Handler
+    participant S as Store
+    participant St as Stream keys
+    participant P as Parent keys
+    C->>H: DELETE /branch
+    H->>S: Store.Delete(path) · handler.go:753
+    S->>St: EVALSHA delete.lua · store.go:722
+    Note over St: HGETALL → DEL all keys → PUBLISH d
+    St-->>S: reply DELETED, forkedFrom
+    S->>P: EVALSHA decr_ref.lua (parent) · store.go:751
+    Note over P: HINCRBY refCount -1 · SREM :forks
+    P-->>S: reply OK — or CASCADE, grandparent
+    H-->>C: 204 No Content

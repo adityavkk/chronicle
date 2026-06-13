@@ -1,0 +1,12 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Handler
+    participant S as Store
+    participant R as Redis
+    C->>H: POST + Stream-Closed true (empty body)
+    H->>S: Store.CloseStream(path) · handler.go:636
+    S->>R: EVALSHA close.lua · store.go:837
+    Note over R: HGETALL → HSET closed 1 → PUBLISH c
+    R-->>S: reply OK, tail, alreadyClosed
+    H-->>C: 204 · Stream-Closed true · Stream-Next-Offset unchanged
