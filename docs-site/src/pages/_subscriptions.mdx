@@ -20,6 +20,7 @@ import Callout from "../components/Callout.astro";
 import Table from "../components/Table.astro";
 import Diagram from "../components/Diagram.astro";
 import RedisTrace from "../components/RedisTrace.astro";
+import Complexity from "../components/Complexity.astro";
 
 <Tldr>
   <ul>
@@ -146,6 +147,12 @@ import RedisTrace from "../components/RedisTrace.astro";
     ]}
     caption="One EVALSHA on the {__ds} slot. The whole control plane shares that one hash tag, so every wake/lease/generation transition is a single-slot atomic script — cluster-safe by construction."
   />
+
+  <Complexity
+    time="O(log L) per wake · O(F log L) to fan one append out"
+    space="O(1)"
+    why="Arming a wake is three O(1) hash writes plus one O(log L) insert into the due-scored lease ZSET (L scheduled subscriptions). An append fans out to the F subscriptions in the stream's <code>stream:&lt;path&gt;</code> set, arming each — but the idle-phase check coalesces a burst into one wake per subscription until it is acked, so steady-state work is one arm per subscription, not one per append."
+  />
 </section>
 
 <section class="block" id="fence">
@@ -210,6 +217,12 @@ import RedisTrace from "../components/RedisTrace.astro";
       { cmd: "ZADD", key: "ds:{__ds}:sched:lease", when: "heartbeat", does: "An ack <em>without</em> <code>done</code> is a heartbeat: extend the lease and stay <code>live</code>. The ack endpoint doubles as the keepalive.", loc: "ack.lua:42", kind: "ttl" },
     ]}
   />
+
+  <Complexity
+    time="O(A + log L)"
+    space="O(1)"
+    why="The fence is two O(1) hash reads and an equality test. Advancing the cursor is one forward-only <code>HSET</code> per acked path — A of them — and finishing or extending the lease is a single O(log L) <code>ZREM</code>/<code>ZADD</code> on the schedule. No structure is scanned, and a fenced replay loses at the O(1) check before any write runs."
+  />
 </section>
 
 <section class="block" id="pull-wake">
@@ -259,6 +272,12 @@ import RedisTrace from "../components/RedisTrace.astro";
       { cmd: "ZADD", key: "ds:{__ds}:sched:lease", does: "Acquire: set <code>holder</code>, <code>holder_worker</code>, <code>phase = live</code>, and arm the lease. Single-threaded Redis makes this the CAS — exactly one claim wins.", loc: "claim.lua:30", kind: "ttl" },
     ]}
   />
+
+  <Complexity
+    time="O(log L)"
+    space="O(1)"
+    why="A claim is a compare-and-set: O(1) hash reads of the lease state, then — if not busy — an O(1) generation bump and one O(log L) <code>ZADD</code> to arm the lease. Single-threaded Redis serializes the script, so exactly one of N racing workers wins; the losers read <code>live</code> and return <strong>409 ALREADY_CLAIMED</strong> in O(1), no schedule touch."
+  />
 </section>
 
 <section class="block" id="durability">
@@ -281,6 +300,50 @@ import RedisTrace from "../components/RedisTrace.astro";
     | `ds:{__ds}:sched:retry` | sorted set | `sub → next_attempt_ns` — the webhook backoff schedule |
     | `ds:{__ds}:jwks` | hash | Ed25519 signing keys, so the `kid` is stable across restarts |
   </Table>
+
+  ### What the control plane <em>costs</em>
+
+  The control plane is deliberately *low-cardinality* — a coordinator's worth
+  of state, not a log's — which is what makes centralizing it under one slot
+  affordable. The structures and their costs:
+
+  - **The `sub:<id>` and `:links` hashes** are `O(1)` per field; reading a
+    subscription's full cursor set is `O(P)` for its P linked streams.
+  - **The `subs` and `stream:<path>` sets** are `O(1)` to add or remove.
+    `SMEMBERS` is `O(K)` over all K subscriptions, or `O(F)` over the F
+    subscriptions one stream wakes.
+  - **The `sched:lease` and `sched:retry` sorted sets** are the timers: an arm
+    or release is one `ZADD`/`ZREM`, `O(log L)` for L scheduled entries; a
+    sweep of what is due is `ZRANGEBYSCORE`, `O(log L + D)` for D due.[^cost]
+
+  So every per-request operation is `O(1)` hash work plus at most one
+  `O(log L)` schedule touch. The one `O(K)` operation is the periodic sweep —
+  and K is the *subscription* count, not the message count. That is the whole
+  reason the control plane is kept separate from the high-cardinality
+  per-stream log: a coordinator's tables stay small even when the log does not.
+
+  ```text title="The schedule is a due-scored ZSET — a timer you can crash with"
+  ZADD :sched:lease (now + ttl) sub           # arm a lease        O(log L)
+  due = ZRANGEBYSCORE :sched:lease -inf now    # what is overdue?   O(log L + D)
+  for sub in due:
+      ZADD :sched:lease (now + visibility) sub  # re-score forward   O(log L)
+  # claim-by-re-score, never ZREM: a worker that dies leaves the item to
+  # fall due again. L = scheduled subscriptions, D = due this tick.
+  ```
+
+  ```text title="Wake fan-out is a SET read; the sweep is the one O(K) walk"
+  SMEMBERS :stream:<path>             # the F subs this append wakes   O(F)
+  for sub in those: arm_wake(sub)     # each O(log L)                  => O(F log L)
+
+  for id in SMEMBERS :subs:           # every subscription, each tick  O(K)
+      expire_lease(id); if behind: arm_wake(id)   # each O(log L)
+  # => O(K log L) per sweep — linear in subscription count, not log size.
+  ```
+
+  Throughout: **K** = subscriptions, **P** = streams linked to one
+  subscription, **F** = subscriptions a stream wakes, **L** = entries in a
+  schedule ZSET, **D** = entries due in a tick, **A** = streams acked in one
+  request.
 
   Persisting the cursor is necessary but **not sufficient**. Wake creation is
   purely event-driven: a wake is minted only by a new append or by an in-flight
@@ -311,6 +374,13 @@ import RedisTrace from "../components/RedisTrace.astro";
     ]}
   />
 
+  <Complexity
+    label="Complexity — the sweep is the one linear walk"
+    time="O(K · (P + log L)) per tick"
+    space="O(K) ids + O(P) per subscription"
+    why="The sweep is the only O(K) operation in the system: it <code>SMEMBERS</code> all K subscriptions and, for each, loads its state and cursors (O(P) for P links), expires a stale lease (O(log L)), compares each cursor against its stream's tail, and re-arms if behind. It runs every couple of seconds, so the design keeps K — subscriptions, not messages — low by construction; the per-stream log's cardinality never enters here."
+  />
+
   The lease and retry schedules are due-scored ZSETs, claimed by a script that
   **re-scores** due members forward rather than removing them — so a worker that
   dies after taking a due item leaves it to fall due again and be reclaimed. That
@@ -324,6 +394,12 @@ import RedisTrace from "../components/RedisTrace.astro";
       { cmd: "ZRANGEBYSCORE", key: "ds:{__ds}:sched:lease 0 now", does: "Take the members whose deadline has passed — leases to expire, or retries to re-deliver.", loc: "claim_due.lua:10", kind: "read" },
       { cmd: "ZADD", key: "ds:{__ds}:sched:lease now+visibility", does: "<strong>Re-score forward, never ZREM.</strong> If this origin dies mid-handling, the item simply falls due again on another origin. Visibility is set from <code>lease_ttl × 2</code> so a slow-but-alive delivery is not reclaimed and double-fired.", loc: "claim_due.lua:13", kind: "write" },
     ]}
+  />
+
+  <Complexity
+    time="O(log L + D log L)"
+    space="O(D)"
+    why="The due query is one <code>ZRANGEBYSCORE</code> — O(log L) to locate the boundary, O(D) to collect the D overdue members — and re-scoring each forward is an O(log L) <code>ZADD</code>. Nothing is removed, so a claimer that dies costs only a re-fire next tick. D is bounded by a per-tick limit, so one claim stays cheap even when many entries fall due at once."
   />
 
   <Callout icon="alert" label="Durability honesty">
@@ -356,6 +432,24 @@ import RedisTrace from "../components/RedisTrace.astro";
     | `POST` | `__ds/subscriptions/:id/ack` | pull-wake ack / heartbeat | `200` | `409 FENCED` · `401 TOKEN_INVALID` |
     | `POST` | `__ds/subscriptions/:id/release` | pull-wake release | `204` | `409 FENCED` · `401 TOKEN_INVALID` |
     | `GET` | `__ds/jwks.json` | webhook signing keys | `200` | — |
+  </Table>
+
+  Every route's cost falls out of the same structures: `O(1)` hash work, an
+  `O(log L)` schedule touch where a lease moves, and a per-request fan-out only
+  where a request names many paths.
+
+  <Table wide>
+    | Method · Path | Time | Space | Dominated by |
+    | --- | --- | --- | --- |
+    | `PUT …/:id` (create) | `O(n)` | `O(n)` | n initial-link `HSET`s; a glob also backfills matching streams |
+    | `GET …/:id` | `O(P)` | `O(P)` | `HGETALL :links` — P cursors |
+    | `DELETE …/:id` | `O(P + log L)` | frees `O(P)` | `DEL :links` + two schedule `ZREM`s + P fan-out `SREM`s |
+    | `POST …/:id/streams` | `O(j)` | `O(j)` | one `HSET` per j added paths |
+    | `DELETE …/streams/:path` | `O(1)` | `O(1)` | one `HSET`/`HDEL` |
+    | `POST …/callback` · `…/ack` | `O(A + log L)` | `O(1)` | A cursor `HSET`s + one lease `ZADD`/`ZREM` |
+    | `POST …/claim` | `O(log L)` | `O(1)` | the lease `ZADD` (the CAS) |
+    | `POST …/release` | `O(log L)` | `O(1)` | two schedule `ZREM`s |
+    | `GET …/jwks.json` | `O(1)` | `O(1)` | bounded `HGETALL :jwks` |
   </Table>
 
   The `ack` and `callback` endpoints are the same handler — both fence on
@@ -423,3 +517,5 @@ import RedisTrace from "../components/RedisTrace.astro";
 [^fence]: A Redis TTL lease alone cannot fence a stalled worker (the Kleppmann result); correctness comes from the monotonic `generation`, not from lease mutual exclusion. The lease only bounds redelivery latency.
 
 [^jepsen]: The fault-injection harness and its results: [`docs/jepsen/results.md`](https://github.com/adityavkk/chronicle/blob/main/docs/jepsen/results.md) and [`jepsen/`](https://github.com/adityavkk/chronicle/tree/main/jepsen).
+
+[^cost]: Redis structure complexity: `HSET`/`HGET`/`SADD`/`SREM` are `O(1)`; `HGETALL`/`SMEMBERS` are `O(N)` in the collection size; [`ZADD`](https://redis.io/docs/latest/commands/zadd/)/`ZREM` are `O(log N)`; [`ZRANGEBYSCORE`](https://redis.io/docs/latest/commands/zrangebyscore/) is `O(log N + M)`. The schedule ZSETs hold roughly one entry per active subscription, so L is bounded by the subscription count, not the message rate.
