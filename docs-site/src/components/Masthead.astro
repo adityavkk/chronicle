@@ -1,18 +1,30 @@
 ---
-// Site masthead: identity mark on the left, source link on the right. The
-// docs are a single page, so the mark links home (useful on deep anchors)
-// and the right slot points at the repository.
+// Site masthead: identity mark on the left, page links in the middle, source
+// link on the right. The mark links home (useful on deep anchors); the page
+// links move between the overview and the endpoint reference.
 import Glyph from "./Glyph.astro";
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const home = `${base}/`;
+const endpoints = `${base}/endpoints`;
 const REPO = "https://github.com/adityavkk/chronicle";
+
+// Active page from the current path, normalized against the deployed base.
+const rel = import.meta.env.BASE_URL
+  ? Astro.url.pathname.replace(base, "").replace(/\/$/, "")
+  : Astro.url.pathname.replace(/\/$/, "");
+const onEndpoints = rel === "/endpoints";
+const onHome = !onEndpoints;
 ---
 <nav class="masthead" aria-label="Site">
   <a class="mark" href={home} aria-label="Chronicle documentation — home">
     <Glyph />
     <span>CHRONICLE &middot; DOCS</span>
   </a>
+  <div class="links">
+    <a href={home} class:list={["link", { active: onHome }]} aria-current={onHome ? "page" : undefined}>Overview</a>
+    <a href={endpoints} class:list={["link", { active: onEndpoints }]} aria-current={onEndpoints ? "page" : undefined}>Endpoints</a>
+  </div>
   <a class="src" href={REPO}>
     <span>GitHub</span>
     <span class="arrow" aria-hidden="true">&nearr;</span>
@@ -47,6 +59,28 @@ const REPO = "https://github.com/adityavkk/chronicle";
   }
   .mark:hover { color: var(--ink); }
 
+  .links {
+    display: inline-flex;
+    align-items: center;
+    gap: 22px;
+  }
+  .links .link {
+    position: relative;
+    color: var(--ink-mute);
+    letter-spacing: 0.1em;
+    padding-bottom: 2px;
+    transition: color 0.2s ease;
+  }
+  .links .link:hover { color: var(--ink); }
+  .links .link.active { color: var(--accent); }
+  .links .link.active::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: -3px;
+    height: 1.5px;
+    background: var(--accent);
+  }
+
   .src {
     display: inline-flex; align-items: center; gap: 8px;
     color: var(--accent);
@@ -57,7 +91,11 @@ const REPO = "https://github.com/adityavkk/chronicle";
   .src:hover .arrow { transform: translate(2px, -2px); }
 
   // Match the shell's responsive inline padding (base.scss @media 840px),
-  // so the bar tracks the content column at every width.
-  @media (max-width: 840px) { .masthead { padding: 16px 24px 0; } }
+  // so the bar tracks the content column at every width. The middle links
+  // wrap under the mark on the narrowest screens.
+  @media (max-width: 840px) {
+    .masthead { padding: 16px 24px 0; flex-wrap: wrap; gap: 10px 16px; }
+    .links { order: 3; width: 100%; gap: 18px; }
+  }
   @media print { .masthead { display: none; } }
 </style>
