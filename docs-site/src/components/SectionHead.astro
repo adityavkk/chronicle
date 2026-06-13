@@ -1,0 +1,64 @@
+---
+interface Props {
+  /** e.g. "01" or "02" */
+  num: string;
+  /** Short label, e.g. "Protocol", "Storage" */
+  label: string;
+  /** Headline. Use <em>...</em> for serif-italic accent. */
+  title: string;
+  /** Optional id for in-page anchor */
+  id?: string;
+}
+const { num, label, title, id } = Astro.props;
+---
+
+<div class="section-head" id={id}>
+  <div class="section-num">§ {num} / {label}</div>
+  <h2 set:html={title}></h2>
+</div>
+
+<style lang="scss">
+  .section-head {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 48px;
+    align-items: baseline;
+    margin-bottom: 36px;
+  }
+  .section-num {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    padding-top: 14px;
+    border-top: 2px solid var(--accent);
+  }
+  h2 {
+    font-size: clamp(28px, 3.4vw, 42px);
+    font-weight: 400;
+    line-height: 1.08;
+    letter-spacing: -0.018em;
+    margin: 0;
+    color: var(--ink);
+    text-wrap: balance;
+  }
+  h2 :global(em) {
+    font-family: var(--serif-italic);
+    font-style: italic;
+    font-weight: 400;
+    color: var(--accent);
+  }
+  h2 :global(code) {
+    font-family: var(--mono);
+    font-size: 0.78em;
+    color: var(--accent-deep);
+    background: var(--tint);
+    padding: 2px 10px;
+    border-radius: 6px;
+  }
+  @media (max-width: 840px) {
+    .section-head { grid-template-columns: 1fr; gap: 14px; }
+  }
+</style>

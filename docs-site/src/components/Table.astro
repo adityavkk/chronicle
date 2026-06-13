@@ -1,0 +1,62 @@
+---
+/**
+ * Wraps a slot (typically an MDX-rendered <table>) in the doc table styling.
+ * Use as: <Table>...markdown table...</Table>
+ */
+interface Props {
+  /** If true, table spans the full shell width (no rail indent + prose cap) */
+  wide?: boolean;
+}
+const { wide = false } = Astro.props;
+---
+
+<div class:list={["table-wrap", { wide }]}><slot /></div>
+
+<style lang="scss">
+  .table-wrap {
+    margin: 16px 0 28px var(--rail-indent);
+    max-width: var(--prose-max);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--rule);
+    &.wide { max-width: none; margin-left: 0; }
+  }
+  .table-wrap :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14.5px;
+    background: var(--card);
+    margin: 0;
+  }
+  .table-wrap :global(thead th) {
+    background: var(--ink);
+    color: var(--paper);
+    text-align: left;
+    font-weight: 600;
+    padding: 14px 16px;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .table-wrap :global(tbody td) {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    color: var(--ink);
+    vertical-align: top;
+    line-height: 1.5;
+  }
+  .table-wrap :global(tbody tr:last-child td) { border-bottom: none; }
+  .table-wrap :global(tbody tr:nth-child(even) td) { background: var(--tint); }
+  .table-wrap :global(td strong) { color: var(--ink); font-weight: 700; }
+  .table-wrap :global(td code), .table-wrap :global(th code) {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--accent-deep);
+    background: transparent;
+    padding: 0;
+  }
+  @media (max-width: 840px) {
+    .table-wrap { margin-left: 0; }
+  }
+</style>

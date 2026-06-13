@@ -1,0 +1,85 @@
+---
+// Demo.astro — content-agnostic chrome for an interactive figure.
+//
+// This is the SHELL half of the shell + bespoke-island pattern: it owns the
+// panel, the mono header label, and the styling for control rows and the
+// readout area. It holds NO logic. A co-located island composes <Demo> in
+// its markup and owns a small vanilla-TS <script> that wires the controls
+// to the readout.
+interface Props {
+  /** Mono micro-label in the header, e.g. "Append, atomically". */
+  label?: string;
+  /** Optional caption line below the panel. Plain text. */
+  caption?: string;
+}
+const { label, caption } = Astro.props;
+---
+
+<figure class="demo">
+  {label && <div class="demo-label">{label}</div>}
+  <div class="demo-body"><slot /></div>
+  {
+    (caption || Astro.slots.has("caption")) && (
+      <figcaption class="demo-caption">
+        <slot name="caption">{caption}</slot>
+      </figcaption>
+    )
+  }
+</figure>
+
+<style lang="scss">
+  .demo {
+    margin: 32px 0 0 var(--rail-indent);
+    max-width: var(--prose-max);
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .demo-label {
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .demo-body {
+    padding: 24px;
+  }
+  .demo-caption {
+    padding: 14px 24px 18px;
+    border-top: 1px solid var(--rule);
+    background: var(--paper);
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--muted);
+    :global(strong) { color: var(--ink); font-weight: 600; }
+    :global(code) {
+      font-family: var(--mono);
+      font-size: 0.92em;
+      background: var(--tint);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--accent-deep);
+    }
+  }
+
+  // ── Readout (top hairline) ───────────────────────────────────────────
+  .demo-body :global(.readout) {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--ink);
+    :global(strong) { color: var(--ink); font-weight: 700; }
+    :global(.mono) { font-family: var(--mono); }
+  }
+
+  @media (max-width: 840px) {
+    .demo { margin-left: 0; max-width: none; }
+  }
+</style>

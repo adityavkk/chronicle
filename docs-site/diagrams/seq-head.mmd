@@ -1,0 +1,13 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Handler
+    participant S as Store
+    participant R as Redis
+    C->>H: HEAD /chat
+    H->>S: Store.Get(path) · handler.go:257
+    S->>R: HGETALL :meta (pipeline) · store.go:132
+    S->>R: HGETALL :prod (pipeline) · store.go:133
+    Note over S: check softDel / expiry in Go — no write
+    S-->>H: meta
+    H-->>C: 200 · Stream-Next-Offset · Stream-TTL · Cache-Control no-store

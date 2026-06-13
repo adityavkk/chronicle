@@ -1,0 +1,15 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Handler
+    participant S as Store
+    participant R as Redis
+    C->>H: GET /chat?offset=-1
+    H->>S: Store.Get — existence · handler.go:291
+    S->>R: HGETALL :meta + :prod (pipeline)
+    H->>S: Store.Read(path, offset) · handler.go:388
+    S->>R: EVALSHA read.lua · store.go:585
+    Note over R: HGETALL → HSET accessedAt → ZRANGEBYLEX
+    R-->>S: reply OK, meta, members
+    Note over S: decode frames · stitch source if fork
+    H-->>C: 200 · body · Stream-Next-Offset · ETag

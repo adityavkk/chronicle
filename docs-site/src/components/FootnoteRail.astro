@@ -1,0 +1,232 @@
+---
+// FootnoteRail.astro — GFM footnotes doubled as margin citations.
+//
+// remark-gfm renders footnotes as a References section at the foot of the
+// page. That stays — it is the canonical copy for narrow viewports, print,
+// and no-JS readers. But on screens wide enough to afford it (≥1440px,
+// where the shell grows by one rail column and the content column keeps
+// exactly its narrow-viewport width), this component clones each citation
+// into a right-hand rail and pins it level with its first inline [n] mark,
+// so the reader never pays the jump-and-return round trip that foot-of-page
+// references force.
+//
+// Placement is Tufte float discipline, computed: a note sits at
+// max(its mark's y, previous note's bottom + gap) — notes stack and can
+// never overlap, however dense the citations get. The rest of the script
+// is hover/focus pairing (a mark lights its note; a note lights every
+// mark it backs) and a click handler that flashes the margin note while
+// the foot section is hidden.
+---
+
+<aside class="fn-rail" aria-label="Citations"></aside>
+
+<script>
+  // Must agree with the 1440px media queries here, in Doc.astro, and in
+  // base.scss — grep "1440px" when retuning the breakpoint.
+  const WIDE = window.matchMedia("(min-width: 1440px)");
+  const STACK_GAP = 14;
+
+  interface Note {
+    el: HTMLElement;
+    marks: HTMLAnchorElement[];
+  }
+
+  const rail = document.querySelector<HTMLElement>(".fn-rail");
+  const body = document.querySelector<HTMLElement>(".doc-body");
+  const foot = body?.querySelector<HTMLElement>("section[data-footnotes]");
+  if (rail && body && foot) wire(rail, body, foot);
+
+  function wire(rail: HTMLElement, body: HTMLElement, foot: HTMLElement) {
+    // Notes keyed by foot-section li id, in reading order of each
+    // citation's FIRST mark — the same order remark-gfm numbers the foot
+    // list in, so data-n always matches the inline [n].
+    const notes = new Map<string, Note>();
+    for (const mark of body.querySelectorAll<HTMLAnchorElement>("a[data-footnote-ref]")) {
+      const id = decodeURIComponent(new URL(mark.href).hash.slice(1));
+      const known = notes.get(id);
+      if (known) {
+        known.marks.push(mark);
+        continue;
+      }
+      const def = document.getElementById(id);
+      if (!def || !foot.contains(def)) continue;
+      notes.set(id, { el: buildNote(def, notes.size + 1), marks: [mark] });
+    }
+    if (notes.size === 0) return;
+
+    for (const note of notes.values()) {
+      rail.append(note.el);
+      pair(note);
+    }
+    // Flips the foot References section off at wide widths (base.scss) —
+    // set only once the rail actually holds the citations.
+    document.documentElement.classList.add("fn-rail-live");
+
+    let raf = 0;
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(place);
+    };
+    function place() {
+      if (!WIDE.matches) return;
+      const railTop = rail.getBoundingClientRect().top;
+      let floor = 0;
+      for (const { el, marks } of notes.values()) {
+        const mark = marks[0];
+        if (!mark) continue;
+        const top = Math.max(mark.getBoundingClientRect().top - railTop, floor);
+        el.style.top = `${Math.round(top)}px`;
+        floor = top + el.offsetHeight + STACK_GAP;
+      }
+      rail.style.minHeight = `${Math.ceil(floor)}px`;
+      rail.classList.add("is-placed");
+    }
+
+    schedule();
+    WIDE.addEventListener("change", schedule);
+    window.addEventListener("resize", schedule);
+    document.fonts.ready.then(schedule);
+    // Anything that changes prose height (images, fonts, opened details)
+    // moves the anchors — remeasure. Observing body (not rail) avoids a
+    // feedback loop with the minHeight write above.
+    new ResizeObserver(schedule).observe(body);
+  }
+
+  /** Clone a foot-section <li> into a rail note: same content, no ids
+   *  (they would duplicate the originals), no backref arrow (the note
+   *  already pairs with its marks). */
+  function buildNote(def: HTMLElement, n: number): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "fn-note";
+    el.dataset.n = String(n);
+    const copy = def.cloneNode(true) as HTMLElement;
+    for (const node of copy.querySelectorAll("[id]")) node.removeAttribute("id");
+    for (const node of copy.querySelectorAll("[data-footnote-backref]")) node.remove();
+    el.append(...copy.childNodes);
+    return el;
+  }
+
+  function pair(note: Note) {
+    const light = (on: boolean) => {
+      note.el.classList.toggle("is-hot", on);
+      for (const mark of note.marks) mark.classList.toggle("is-hot", on);
+    };
+    note.el.addEventListener("mouseenter", () => light(true));
+    note.el.addEventListener("mouseleave", () => light(false));
+    for (const mark of note.marks) {
+      mark.addEventListener("mouseenter", () => light(true));
+      mark.addEventListener("mouseleave", () => light(false));
+      mark.addEventListener("focus", () => light(true));
+      mark.addEventListener("blur", () => light(false));
+      mark.addEventListener("click", (e) => {
+        // While the rail is live the foot section is display:none, so the
+        // default jump would land nowhere — flash the margin note instead.
+        if (!WIDE.matches) return;
+        e.preventDefault();
+        note.el.scrollIntoView({ block: "nearest" });
+        note.el.classList.remove("is-flash");
+        void note.el.offsetWidth; // restart the animation
+        note.el.classList.add("is-flash");
+      });
+    }
+  }
+</script>
+
+<style lang="scss">
+  // Hidden until the layout reserves the rail column (html.fn-rail-on, set
+  // at render time by Doc.astro when the page has footnotes) AND the
+  // viewport affords it. Same 1440px as the script's matchMedia.
+  .fn-rail {
+    position: relative;
+    display: none;
+  }
+  @media screen and (min-width: 1440px) {
+    :global(html.fn-rail-on) .fn-rail {
+      display: block;
+    }
+  }
+  @media print {
+    .fn-rail {
+      display: none;
+    }
+  }
+
+  // Notes are measured before they are shown — opacity rides .is-placed so
+  // the first paint never shows a note at an unmeasured position.
+  .fn-rail :global(.fn-note) {
+    position: absolute;
+    left: 0;
+    right: 0;
+    padding-left: 22px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--ink-mute);
+    overflow-wrap: break-word;
+    opacity: 0;
+    transition:
+      opacity 0.25s ease-out,
+      color 0.25s;
+  }
+  .fn-rail.is-placed :global(.fn-note) {
+    opacity: 1;
+  }
+  .fn-rail :global(.fn-note)::before {
+    content: attr(data-n);
+    position: absolute;
+    left: 0;
+    top: 3px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--accent);
+    padding: 0 3px;
+    border-radius: 2px;
+    transition:
+      background 0.25s,
+      color 0.25s;
+  }
+  .fn-rail :global(.fn-note p) {
+    margin: 0;
+  }
+  .fn-rail :global(.fn-note a) {
+    color: var(--accent);
+    text-decoration: none;
+    word-break: break-word;
+  }
+  .fn-rail :global(.fn-note a:hover) {
+    text-decoration: underline;
+  }
+  .fn-rail :global(.fn-note code) {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent-deep);
+    background: none;
+    padding: 0;
+  }
+  .fn-rail :global(.fn-note strong) {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .fn-rail :global(.fn-note em) {
+    font-family: var(--serif-italic);
+    font-style: italic;
+  }
+
+  // Pairing highlight (mirrors the inline mark's .is-hot in base.scss)
+  // and the click flash.
+  .fn-rail :global(.fn-note.is-hot) {
+    color: var(--ink);
+  }
+  .fn-rail :global(.fn-note.is-hot)::before {
+    background: var(--accent);
+    color: #fff;
+  }
+  @keyframes fn-flash {
+    from {
+      background: var(--accent-tint);
+    }
+  }
+  .fn-rail :global(.fn-note.is-flash) {
+    animation: fn-flash 1.4s ease-out;
+  }
+</style>

@@ -1,0 +1,14 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Handler
+    participant S as Store
+    participant R as Redis
+    C->>H: GET ?offset=now and live=sse
+    H-->>C: 200 · Content-Type text/event-stream
+    H->>S: Store.Read(path, offset) · handler_sse.go:64
+    S->>R: EVALSHA read.lua
+    H-->>C: event data + event control
+    H->>S: WaitForMessages(ctx, 100ms) · handler_sse.go:187
+    Note over H: loop — re-read, emit, wait
+    H-->>C: control streamClosed true → close

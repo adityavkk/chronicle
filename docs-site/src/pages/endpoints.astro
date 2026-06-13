@@ -1,0 +1,13 @@
+---
+// The MDX lives in _endpoints.mdx (underscore = not routed) and is wrapped
+// here, so the layout receives frontmatter explicitly — same pattern as
+// index.astro wrapping _overview.mdx.
+import type { ComponentProps } from "astro/types";
+import Doc from "../layouts/Doc.astro";
+import Endpoints, { frontmatter } from "./_endpoints.mdx";
+
+const fm = frontmatter as ComponentProps<typeof Doc>["frontmatter"];
+---
+<Doc frontmatter={fm}>
+  <Endpoints />
+</Doc>

@@ -1,0 +1,379 @@
+---
+// OpMap.astro — every protocol operation, mapped to its Redis commands.
+//
+// Data-driven: OPS below is rendered to static markup at build time (all ten
+// panels in the DOM), and the client script only toggles which panel shows.
+// With JS off, every panel renders stacked in order — nothing is lost.
+// The command sequences mirror store/redis verbatim (scripts.go, notify.go);
+// when the store changes, update OPS to match.
+import Demo from "./Demo.astro";
+
+type Step = { c: string; k?: string; n?: string };
+type Op = {
+  id: string;
+  tab: string;
+  script: string;
+  req: string[];
+  resp: string[];
+  steps: Step[];
+};
+
+const OPS: Op[] = [
+  {
+    id: "create",
+    tab: "PUT create",
+    script: "create.lua — one atomic script",
+    req: ["PUT /v1/stream/chat HTTP/1.1", "Content-Type: application/json", "Stream-TTL: 3600            (optional)"],
+    resp: ["201 Created", "Location: /v1/stream/chat", "Stream-Next-Offset: …0000_…0000"],
+    steps: [
+      { c: "HGETALL", k: ":meta", n: "exists already? config match → 200, mismatch → 409" },
+      { c: "DEL", k: "all keys", n: "defensive cleanup of any expired remains" },
+      { c: "HSET", k: ":meta", n: "ct · tail = 0_0 · createdAtNs · ttl" },
+      { c: "ZADD", k: ":msg", n: "only if the PUT carried initial frames" },
+      { c: "PUBLISH 'a'", k: "notify", n: "only if frames were written" },
+      { c: "PEXPIRE", k: "all keys", n: "TTL backstop: ttl + 60 s grace" },
+    ],
+  },
+  {
+    id: "append",
+    tab: "POST append",
+    script: "append.lua — one atomic script",
+    req: ["POST /v1/stream/chat HTTP/1.1", "Content-Type: application/json", "", '[{"tok":"The"},{"tok":"answer"}]'],
+    resp: ["204 No Content", "Stream-Next-Offset: …0002_…0029"],
+    steps: [
+      { c: "HGETALL", k: ":meta", n: "missing → 404 · closed → 409 · content-type mismatch → 409" },
+      { c: "HSET", k: ":meta", n: "accessedAtNs — the sliding-TTL touch" },
+      { c: "ZADD", k: ":msg", n: "members \"<endOffset>|<bytes>\", score 0 — ordered lexicographically" },
+      { c: "HSET", k: ":meta", n: "tail ← the new end offset" },
+      { c: "PUBLISH 'a'", k: "notify", n: "wakes every long-poll and SSE waiter" },
+      { c: "PEXPIRE", k: "all keys", n: "refresh the TTL backstop" },
+    ],
+  },
+  {
+    id: "producer",
+    tab: "+ producer",
+    script: "append.lua — the producer branch of the same script",
+    req: ["POST /v1/stream/chat HTTP/1.1", "Content-Type: application/json", "Producer-Id: writer-1", "Producer-Epoch: 0", "Producer-Seq: 7"],
+    resp: ["204  accept — and on duplicate, no write", "403  stale epoch: a zombie is fenced", "409  seq gap + Producer-Expected-Seq"],
+    steps: [
+      { c: "HGET", k: ":prod", n: "writer-1 → \"epoch:lastSeq:updated\"" },
+      { c: "validate", n: "seq ≤ lastSeq → duplicate, no write · epoch < stored → 403 · seq > lastSeq + 1 → 409" },
+      { c: "ZADD · HSET", k: ":msg :meta", n: "the frame writes happen only on accept" },
+      { c: "HSET", k: ":prod", n: "writer-1 ← \"epoch:seq:now\" — the fence advances" },
+      { c: "PUBLISH 'a'", k: "notify" },
+    ],
+  },
+  {
+    id: "read",
+    tab: "GET read",
+    script: "read.lua",
+    req: ["GET /v1/stream/chat?offset=-1 HTTP/1.1"],
+    resp: ["200 OK", "Stream-Next-Offset: …0002_…0029", 'ETag: "…0002_…0029"', "Cache-Control: public, max-age=60   (behind the tail)"],
+    steps: [
+      { c: "HGETALL", k: ":meta", n: "missing → 404 · expired → cleanup, then 404" },
+      { c: "HSET", k: ":meta", n: "accessedAtNs touch" },
+      { c: "ZRANGEBYLEX", k: ":msg", n: "\"(<offset>\\xff\" → \"+\" — every frame past the cursor" },
+      { c: "(fork chain)", k: ":msg", n: "offsets below a fork point read the source stream, capped at forkOff" },
+    ],
+  },
+  {
+    id: "poll",
+    tab: "long-poll",
+    script: "read.lua + a subscribe loop (Go, not Lua)",
+    req: ["GET /v1/stream/chat?offset=now&live=long-poll HTTP/1.1"],
+    resp: ["200 OK             data arrived", "204 No Content     30 s timeout · Stream-Up-To-Date: true"],
+    steps: [
+      { c: "EVAL read.lua", n: "fast path — data already there responds 200 immediately" },
+      { c: "SUBSCRIBE", k: "notify", n: "subscribe, then re-check: closes the check-then-wait race" },
+      { c: "EVAL read.lua", n: "the re-check after subscribing" },
+      { c: "(wait)", n: "wake on 'a' / 'c' / 'd', a 1 s defensive poll, or the timeout" },
+      { c: "EVAL read.lua", n: "woke → read what landed, respond" },
+      { c: "UNSUBSCRIBE", k: "notify" },
+    ],
+  },
+  {
+    id: "sse",
+    tab: "SSE",
+    script: "read.lua in a loop (Go, not Lua)",
+    req: ["GET /v1/stream/chat?offset=now&live=sse HTTP/1.1"],
+    resp: ["200 OK", "Content-Type: text/event-stream", "", "event: data       one per message", "event: control    streamNextOffset cursor"],
+    steps: [
+      { c: "EVAL read.lua", n: "emit pending frames as event: data" },
+      { c: "SUBSCRIBE", k: "notify", n: "waits in 100 ms quanta, a fresh subscription per wait — § 05's latency floor" },
+      { c: "(loop)", n: "every 60 s the server cycles the connection so CDNs can collapse concurrent tails" },
+    ],
+  },
+  {
+    id: "close",
+    tab: "POST close",
+    script: "close.lua — one atomic script",
+    req: ["POST /v1/stream/chat HTTP/1.1", "Stream-Closed: true", "(empty body)"],
+    resp: ["204 No Content", "Stream-Closed: true", "Stream-Next-Offset: …0002_…0029"],
+    steps: [
+      { c: "HGETALL", k: ":meta", n: "missing → 404" },
+      { c: "HSET", k: ":meta", n: "closed ← 1 — appends now return 409" },
+      { c: "PUBLISH 'c'", k: "notify", n: "every waiter wakes and observes EOF" },
+    ],
+  },
+  {
+    id: "delete",
+    tab: "DELETE",
+    script: "delete.lua — one atomic script",
+    req: ["DELETE /v1/stream/chat HTTP/1.1"],
+    resp: ["204 No Content"],
+    steps: [
+      { c: "HGETALL", k: ":meta", n: "live forks (refCount > 0)? → soft-delete instead" },
+      { c: "DEL", k: "all keys", n: "hard delete when nothing references the stream" },
+      { c: "PUBLISH 'd'", k: "notify", n: "waiters wake to a deleted stream" },
+      { c: "HSET softDel · PERSIST", k: ":meta", n: "the soft path — forks keep reading the inherited prefix" },
+    ],
+  },
+  {
+    id: "fork",
+    tab: "PUT fork",
+    script: "incr_ref.lua + create.lua — two scripts, two streams, two slots: not atomic across the pair",
+    req: ["PUT /v1/stream/branch HTTP/1.1", "Stream-Forked-From: /v1/stream/chat", "Stream-Fork-Offset: …0001_…0013"],
+    resp: ["201 Created", "Stream-Next-Offset: …0001_…0013"],
+    steps: [
+      { c: "HINCRBY", k: ":meta", n: "source refCount +1 — keeps the parent alive" },
+      { c: "SADD", k: ":forks", n: "register the child on the source" },
+      { c: "PERSIST", k: "all keys", n: "a referenced source stops expiring" },
+      { c: "EVALSHA create.lua", n: "the child's meta carries forkedFrom + forkOff" },
+      { c: "(reads)", k: ":msg", n: "below the fork point, ZRANGEBYLEX the source's zset, capped at forkOff" },
+    ],
+  },
+  {
+    id: "ttl",
+    tab: "TTL expiry",
+    script: "common.lua — runs inside every script; no request of its own",
+    req: ["(no request — expiry is evaluated lazily)"],
+    resp: ["an expired stream answers 404,", "exactly as if it had been deleted"],
+    steps: [
+      { c: "is_expired(meta)", n: "expAtNs passed, or accessedAtNs + ttl passed" },
+      { c: "DEL / soft-delete", k: "all keys", n: "cleanup on the first touch after expiry" },
+      { c: "PEXPIRE", k: "all keys", n: "backstop = ttl + 60 s grace, for streams nobody ever touches again" },
+      { c: "HSET", k: ":meta", n: "reads and appends slide accessedAtNs; close deliberately does not" },
+    ],
+  },
+];
+---
+
+<Demo
+  label="Every operation, mapped to Redis"
+  caption="Each tab is one protocol operation: the HTTP exchange on the left, the Redis command sequence on the right — in script order, with the key each command touches. Mutations are single Lua scripts, so a sequence either lands whole or not at all; the one exception is fork, which spans two streams and is documented as non-atomic across them."
+>
+  <div class="opmap" data-opmap>
+    <div class="opmap-tabs" role="tablist">
+      {OPS.map((op, i) => (
+        <button type="button" role="tab" data-tab={op.id} aria-selected={i === 0 ? "true" : "false"} class={i === 0 ? "is-active" : ""}>{op.tab}</button>
+      ))}
+    </div>
+
+    {OPS.map((op, i) => (
+      <section class={`op-panel${i === 0 ? " is-active" : ""}`} data-op={op.id}>
+        <h4 class="op-title mono">{op.tab}</h4>
+        <div class="op-cols">
+          <div class="op-http">
+            <div class="op-block">
+              <span class="op-block-label">request</span>
+              <pre class="mono">{op.req.join("\n")}</pre>
+            </div>
+            <div class="op-block is-resp">
+              <span class="op-block-label">response</span>
+              <pre class="mono">{op.resp.join("\n")}</pre>
+            </div>
+          </div>
+          <div class="op-redis">
+            <span class="op-script mono">{op.script}</span>
+            <ol class="op-steps">
+              {op.steps.map((s, j) => (
+                <li class="op-step" style={`--i:${j}`}>
+                  <span class={`op-cmd mono${s.c.startsWith("PUBLISH") ? " is-pub" : ""}${s.c.startsWith("(") || s.c === "validate" || s.c.startsWith("is_expired") ? " is-flow" : ""}`}>{s.c}</span>
+                  {s.k && <span class="op-key mono">{s.k}</span>}
+                  {s.n && <span class="op-note">{s.n}</span>}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      </section>
+    ))}
+  </div>
+</Demo>
+
+<script>
+  // Tabs only: all panels are server-rendered; JS hides the inactive ones
+  // (data-ready gates the hiding, so no-JS readers see all ten stacked).
+  document.querySelectorAll<HTMLElement>("[data-opmap]").forEach((root) => {
+    root.dataset.ready = "1";
+    const tabs = [...root.querySelectorAll<HTMLButtonElement>("[data-tab]")];
+    const panels = [...root.querySelectorAll<HTMLElement>(".op-panel")];
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        tabs.forEach((t) => {
+          const on = t === tab;
+          t.classList.toggle("is-active", on);
+          t.setAttribute("aria-selected", String(on));
+        });
+        panels.forEach((p) => {
+          const on = p.dataset.op === tab.dataset.tab;
+          p.classList.toggle("is-active", on);
+          // Replay the step cascade on every activation.
+          p.classList.remove("is-anim");
+          if (on) {
+            void p.offsetWidth;
+            p.classList.add("is-anim");
+          }
+        });
+      });
+    });
+  });
+</script>
+
+<style lang="scss">
+  .opmap-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    button {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: 0.04em;
+      padding: 6px 11px;
+      border-radius: 6px;
+      border: 1px solid var(--rule);
+      background: var(--card);
+      color: var(--ink-mute);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      &:hover { border-color: var(--accent); color: var(--accent); }
+      &.is-active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+    }
+  }
+
+  // All panels render; JS (data-ready) hides the inactive ones.
+  .op-panel {
+    margin-top: 18px;
+    border-top: 1px solid var(--rule);
+    padding-top: 16px;
+  }
+  [data-ready] .op-panel { display: none; }
+  [data-ready] .op-panel.is-active { display: block; }
+  [data-ready] .op-title { display: none; }
+  .op-title {
+    margin: 0 0 10px;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .op-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: 16px;
+    @media (max-width: 700px) { grid-template-columns: 1fr; }
+  }
+
+  .op-block {
+    border: 1px solid var(--rule-soft);
+    border-radius: 8px;
+    background: var(--paper);
+    padding: 10px 12px;
+    & + & { margin-top: 10px; }
+    &.is-resp { border-left: 3px solid var(--ok); }
+    pre {
+      margin: 6px 0 0;
+      font-size: 11px;
+      line-height: 1.6;
+      color: var(--ink);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+  }
+  .op-block-label {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .op-script {
+    display: block;
+    font-size: 10.5px;
+    color: var(--accent-deep);
+    background: var(--accent-tint);
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin-bottom: 10px;
+  }
+  .op-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: op;
+  }
+  .op-step {
+    counter-increment: op;
+    position: relative;
+    padding: 7px 0 7px 30px;
+    border-top: 1px solid var(--rule-soft);
+    font-size: 12.5px;
+    line-height: 1.5;
+    &:first-child { border-top: none; }
+    &::before {
+      content: counter(op);
+      position: absolute;
+      left: 0;
+      top: 8px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid var(--rule);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 9.5px;
+      display: grid;
+      place-items: center;
+      background: var(--card);
+    }
+  }
+  // Step cascade on tab activation; reduced-motion readers get it instantly.
+  .op-panel.is-anim .op-step {
+    opacity: 0;
+    transform: translateY(6px);
+    animation: rise 0.4s ease-out forwards;
+    animation-delay: calc(var(--i) * 70ms);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .op-panel.is-anim .op-step { animation: none; opacity: 1; transform: none; }
+  }
+
+  .op-cmd {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--ink);
+    &.is-pub { color: var(--accent-deep); }
+    &.is-flow { font-weight: 400; color: var(--ink-mute); font-style: italic; }
+  }
+  .op-key {
+    font-size: 10px;
+    color: var(--accent-deep);
+    background: var(--accent-tint);
+    border-radius: 4px;
+    padding: 1px 6px;
+    margin-left: 6px;
+    white-space: nowrap;
+  }
+  .op-note {
+    display: block;
+    color: var(--ink-mute);
+    font-size: 11.5px;
+  }
+</style>

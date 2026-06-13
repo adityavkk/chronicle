@@ -1,0 +1,60 @@
+// =====================================================================
+// CHRONICLE DOCS TOKENS
+// Canonical design vars. Do not override per-component; extend via :root.
+//
+// Palette: Flexoki (https://stephango.com/flexoki) — paper, black ink,
+// the warm base-gray scale, and cyan-600 as the single accent.
+// =====================================================================
+
+:root {
+  // -- Color palette ----------------------------------------------------
+  --accent:        #24837B;   // links, rails, micro-labels (Flexoki cyan-600)
+  --accent-deep:   #143F3C;   // inline code text (Flexoki cyan-850)
+  --accent-tint:   #E8F1EF;   // pale accent fill (callouts, soft highlights)
+  --ink:           #100F0F;   // body text, headings (Flexoki black)
+  --ink-mute:      #6F6E69;   // secondary text, decks, captions (base-600)
+  --muted:         #878580;   // lightest text step -- locators (base-500)
+  --paper:         #FFFCF0;   // page ground (Flexoki paper) -- NEVER stark white
+  --paper-warm:    #F2F0E5;   // terminal frames, recessed fills (base-50)
+  --card:          #FFFEF9;   // raised surface (never stark #fff)
+  --tint:          #F2F0E5;   // alt table rows, inline-code ground (base-50)
+  --rule:          #DAD8CE;   // hairlines (base-150)
+  --rule-soft:     #E6E4D9;   // (base-100)
+
+  // -- Semantic status (Flexoki 600s) -----------------------------------
+  --ok:            #66800B;   // success verdicts (green-600)
+  --warn:          #AD8301;   // conflict / retry verdicts (yellow-600)
+  --bad:           #AF3029;   // rejection verdicts (red-600)
+
+  // -- Elevation (ink shadows) -------------------------------------------
+  --shadow-sm: 0 1px 2px rgba(16, 15, 15, 0.06), 0 2px 6px rgba(16, 15, 15, 0.04);
+  --shadow-md: 0 4px 18px rgba(16, 15, 15, 0.08), 0 1px 3px rgba(16, 15, 15, 0.05);
+
+  // -- Typography -----------------------------------------------------
+  --sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --serif-italic: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+
+  // -- Layout ---------------------------------------------------------
+  --shell-max: 1180px;
+  --rail-indent: 168px;
+  --prose-max: 880px;
+
+  // -- Prose measure ----------------------------------------------------
+  // Text-line ceiling: caps the visible measure to ~66-70ch. Applied ONLY
+  // to text selectors via max-width: min(--prose-max, --prose-measure).
+  // NEVER redefine --prose-max -- tables, code, and figures keep 880px.
+  --prose-measure: 68ch;
+
+  // -- Shape ------------------------------------------------------------
+  --radius: 12px;
+
+  // -- Footnote rail ----------------------------------------------------
+  // Width of the right-hand citation rail (FootnoteRail.astro). The rail
+  // mounts at ≥1440px viewports — media queries can't read vars, so the
+  // breakpoint is hardcoded in FootnoteRail.astro, Doc.astro, and
+  // base.scss; grep "1440px" when retuning. The shell grows to exactly
+  // 1180 + 44 (gap) + 184 = 1408px, so the content column keeps its
+  // narrow-viewport width to the pixel and prose never reflows.
+  --fn-rail: 184px;
+}
