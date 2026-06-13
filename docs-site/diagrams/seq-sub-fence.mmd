@@ -1,0 +1,15 @@
+sequenceDiagram
+    autonumber
+    participant Wk as Worker
+    participant H as Handler
+    participant R as Redis
+    Wk->>H: POST .../callback {wake_id w_a, generation 7, done:true}
+    H->>R: EVALSHA ack.lua — fence check
+    Note over R: token gen 7 == cur · wake w_a == cur · pass
+    R-->>H: OK · cursor advanced · wake_id cleared
+    H-->>Wk: 200 {ok:true, next_wake:false}
+    Wk->>H: POST .../callback {wake_id w_a, generation 7} — replay
+    H->>R: EVALSHA ack.lua — fence check
+    Note over R: cur wake_id now empty · w_a is stale
+    R-->>H: FENCED
+    H-->>Wk: 409 {error code FENCED}

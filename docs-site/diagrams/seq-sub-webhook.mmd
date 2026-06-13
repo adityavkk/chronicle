@@ -1,0 +1,18 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Handler
+    participant M as Manager
+    participant R as Redis
+    participant Recv as Receiver
+    C->>H: POST /events/abc + body
+    H->>R: EVALSHA append.lua — durable append · handler.go
+    H-->>C: 204 · Stream-Next-Offset
+    H->>M: OnStreamAppend(events/abc) · handler.go
+    M->>R: SMEMBERS ds:{__ds}:stream:abc — fan-out
+    M->>R: EVALSHA arm_wake.lua — generation++, ZADD lease · manager.go
+    Note over M: idle → waking · mint wake_id
+    M->>Recv: POST webhook · Webhook-Signature t,kid,ed25519
+    Recv-->>M: 200 {done:true}
+    M->>R: EVALSHA ack.lua — fence · ack tail · release · manager.go
+    Note over R: cursor → tail · waking → idle
