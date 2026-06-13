@@ -103,6 +103,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The __ds namespace is reserved. With the subscription layer disabled
+	// these paths are unimplemented rather than application streams, so they
+	// must not reach the store (PROTOCOL §6).
+	if p := r.URL.Path; p == "/__ds" || strings.HasPrefix(p, "/__ds/") {
+		http.Error(w, "subscription APIs are not implemented", http.StatusNotImplemented)
+		return
+	}
+
 	// Extract stream path from URL
 	streamPath := r.URL.Path
 

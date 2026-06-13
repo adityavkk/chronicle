@@ -1248,7 +1248,8 @@ func TestMount(t *testing.T) {
 	}
 	assertSecurityHeaders(t, rec)
 
-	// The reserved __ds namespace is not implemented yet
+	// The reserved __ds namespace returns 501 when the subscription layer is
+	// not wired into the handler (this test handler has none).
 	rec = do(mux, http.MethodGet, "/v1/stream/__ds/subscriptions/abc", nil, nil)
 	if rec.Code != http.StatusNotImplemented {
 		t.Errorf("__ds: status = %d, want 501", rec.Code)
