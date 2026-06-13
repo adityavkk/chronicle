@@ -17,7 +17,7 @@ import Tldr from "../components/Tldr.astro";
 import SectionHead from "../components/SectionHead.astro";
 import Callout from "../components/Callout.astro";
 import Table from "../components/Table.astro";
-import SeqDiagram from "../components/SeqDiagram.astro";
+import Diagram from "../components/Diagram.astro";
 import RedisTrace from "../components/RedisTrace.astro";
 
 <Tldr>
@@ -141,19 +141,9 @@ import RedisTrace from "../components/RedisTrace.astro";
   before any fork validation or body parsing, mirroring the reference
   implementation's precedence.
 
-  <SeqDiagram
+  <Diagram
+    name="seq-create"
     label="PUT — create"
-    actors={["Client", "Handler", "Store", "Redis"]}
-    steps={[
-      { from: 0, to: 1, label: "PUT /v1/stream/chat" },
-      { from: 1, to: 2, label: "Store.Create(path, opts)", loc: "handler.go:188" },
-      { from: 2, to: 3, label: "HGETALL :meta — pre-check", loc: "store.go:187" },
-      { from: 2, to: 3, label: "EVALSHA create.lua", kind: "eval", loc: "store.go:319" },
-      { on: 3, label: "runs atomically: HGETALL → DEL → HSET → PEXPIRE" },
-      { from: 3, to: 2, label: "{ CREATED }", kind: "reply" },
-      { from: 2, to: 1, label: "meta, wasCreated = true", kind: "reply" },
-      { from: 1, to: 0, label: "201 · Location · Stream-Next-Offset 0_0", kind: "reply" },
-    ]}
     caption="The pre-check (step 3) and the script's own existence check (inside step 4) are the same logic run twice: once to honor upstream's error precedence, once atomically."
   />
 
@@ -189,20 +179,9 @@ import RedisTrace from "../components/RedisTrace.astro";
   Stream-Next-Offset: 0000000000000000_0000000000000013
   ```
 
-  <SeqDiagram
+  <Diagram
+    name="seq-fork"
     label="PUT — fork"
-    actors={["Client", "Handler", "Store", "Source keys", "Fork keys"]}
-    steps={[
-      { from: 0, to: 1, label: "PUT /branch + Stream-Forked-From" },
-      { from: 1, to: 2, label: "Store.Create(fork opts)", loc: "handler.go:188" },
-      { from: 2, to: 3, label: "HGETALL source:meta — validate", loc: "store.go:220" },
-      { from: 2, to: 3, label: "EVALSHA incr_ref.lua", kind: "eval", loc: "store.go:273" },
-      { on: 3, label: "HINCRBY refCount +1 · SADD :forks · PERSIST ×4" },
-      { from: 3, to: 2, label: "{ OK, refCount }", kind: "reply" },
-      { from: 2, to: 4, label: "EVALSHA create.lua — meta has forkedFrom + forkOff", kind: "eval", loc: "store.go:319" },
-      { from: 4, to: 2, label: "{ CREATED }", kind: "reply" },
-      { from: 1, to: 0, label: "201 · Stream-Next-Offset = forkOff", kind: "reply" },
-    ]}
     caption="Reads on the fork below forkOff are stitched from the source in Go (a ZRANGEBYLEX against the source's :msg in its own slot, capped at the fork point); the fork's own appends extend it past forkOff."
   />
 
@@ -253,19 +232,9 @@ import RedisTrace from "../components/RedisTrace.astro";
   the stored frames are `0_13|{"tok":"The"}` and `0_29|{"tok":"answer"}`,
   and the tail advances to `0_29`.
 
-  <SeqDiagram
+  <Diagram
+    name="seq-append"
     label="POST — append"
-    actors={["Client", "Handler", "Store", "Redis"]}
-    steps={[
-      { from: 0, to: 1, label: "POST /chat + body" },
-      { from: 1, to: 2, label: "Store.Append(path, data, opts)", loc: "handler.go:677" },
-      { from: 2, to: 3, label: "HMGET :meta tail ct — snapshot", loc: "store.go:486" },
-      { on: 2, label: "frame bytes against the snapshot tail", kind: "wait", loc: "store.go:505" },
-      { from: 2, to: 3, label: "EVALSHA append.lua", kind: "eval", loc: "store.go:519" },
-      { on: 3, label: "validate → ZADD → HSET tail → PUBLISH" },
-      { from: 3, to: 2, label: "{ OK, newTail } — or { RETRY }", kind: "reply" },
-      { from: 1, to: 0, label: "204 · Stream-Next-Offset 0_29", kind: "reply" },
-    ]}
     caption="On RETRY the store loops back to the HMGET snapshot and re-frames against the new tail. The loop is contention back-off; the script itself is always atomic."
   />
 
@@ -362,17 +331,9 @@ import RedisTrace from "../components/RedisTrace.astro";
   Stream-Next-Offset: 0000000000000000_0000000000000029
   ```
 
-  <SeqDiagram
+  <Diagram
+    name="seq-close"
     label="POST — close"
-    actors={["Client", "Handler", "Store", "Redis"]}
-    steps={[
-      { from: 0, to: 1, label: "POST + Stream-Closed: true (empty body)" },
-      { from: 1, to: 2, label: "Store.CloseStream(path)", loc: "handler.go:636" },
-      { from: 2, to: 3, label: "EVALSHA close.lua", kind: "eval", loc: "store.go:837" },
-      { on: 3, label: "HGETALL → HSET closed 1 → PUBLISH c" },
-      { from: 3, to: 2, label: "{ OK, tail, alreadyClosed }", kind: "reply" },
-      { from: 1, to: 0, label: "204 · Stream-Closed: true · Stream-Next-Offset (unchanged)", kind: "reply" },
-    ]}
     caption="The tail does not move — close appends nothing. A close with producer headers takes the CloseStreamWithProducer path, which records the closing tuple for dedup."
   />
 
@@ -413,20 +374,9 @@ import RedisTrace from "../components/RedisTrace.astro";
   [{"tok":"The"},{"tok":"answer"}]
   ```
 
-  <SeqDiagram
+  <Diagram
+    name="seq-read"
     label="GET — catch-up read"
-    actors={["Client", "Handler", "Store", "Redis"]}
-    steps={[
-      { from: 0, to: 1, label: "GET /chat?offset=-1" },
-      { from: 1, to: 2, label: "Store.Get — existence", loc: "handler.go:291" },
-      { from: 2, to: 3, label: "HGETALL :meta + :prod (pipeline)", kind: "reply" },
-      { from: 1, to: 2, label: "Store.Read(path, offset)", loc: "handler.go:388" },
-      { from: 2, to: 3, label: "EVALSHA read.lua", kind: "eval", loc: "store.go:585" },
-      { on: 3, label: "HGETALL → HSET accessedAt → ZRANGEBYLEX" },
-      { from: 3, to: 2, label: "{ OK, meta, members }", kind: "reply" },
-      { on: 2, label: "decode frames; stitch source if fork & offset < forkOff", kind: "wait", loc: "store.go:622" },
-      { from: 1, to: 0, label: "200 · body · Stream-Next-Offset · ETag", kind: "reply" },
-    ]}
     caption="ETag is the next offset, so a conditional re-read at the same position answers 304. A read behind the tail is cacheable for 60 s; a read at the tail is not."
   />
 
@@ -478,21 +428,9 @@ import RedisTrace from "../components/RedisTrace.astro";
   Stream-Cursor: 7f3a…
   ```
 
-  <SeqDiagram
+  <Diagram
+    name="seq-longpoll"
     label="GET — long-poll"
-    actors={["Client", "Handler", "Store", "Redis", "notify ch"]}
-    steps={[
-      { from: 0, to: 1, label: "GET ?offset=now&live=long-poll" },
-      { from: 1, to: 2, label: "WaitForMessages(ctx, path, offset, 30s)", loc: "handler.go:425" },
-      { from: 2, to: 3, label: "EVAL read.lua — fast path", kind: "eval", loc: "notify.go:33" },
-      { from: 3, to: 2, label: "(empty — nothing past the tail)", kind: "reply" },
-      { from: 2, to: 4, label: "SUBSCRIBE ds:notify:{p}", loc: "notify.go:48" },
-      { from: 2, to: 3, label: "EVAL read.lua — re-check after subscribe", kind: "eval", loc: "notify.go:57" },
-      { on: 2, label: "block: wake on a/c/d · 1 s poll · 30 s timeout", kind: "wait", loc: "notify.go:66" },
-      { from: 4, to: 2, label: "message 'a' — a concurrent append published it", kind: "pub" },
-      { from: 2, to: 3, label: "EVAL read.lua — read what landed", kind: "eval", loc: "notify.go:95" },
-      { from: 1, to: 0, label: "200 · data  —  or 204 · Up-To-Date on timeout", kind: "reply" },
-    ]}
     caption="The waiter never publishes; the wake is some other request's PUBLISH inside append.lua or close.lua. A 1-second defensive poll recovers any wakeup dropped by pub/sub's fire-and-forget delivery."
   />
 
@@ -541,19 +479,9 @@ import RedisTrace from "../components/RedisTrace.astro";
   data: {"streamNextOffset":"0000000000000000_0000000000000033","streamCursor":"7f3a…"}
   ```
 
-  <SeqDiagram
+  <Diagram
+    name="seq-sse"
     label="GET — SSE"
-    actors={["Client", "Handler", "Store", "Redis"]}
-    steps={[
-      { from: 0, to: 1, label: "GET ?offset=now&live=sse" },
-      { from: 1, to: 0, label: "200 · Content-Type: text/event-stream", kind: "reply" },
-      { from: 1, to: 2, label: "Store.Read(path, offset)", loc: "handler_sse.go:64" },
-      { from: 2, to: 3, label: "EVALSHA read.lua", kind: "eval" },
-      { from: 1, to: 0, label: "event: data + event: control", kind: "reply" },
-      { from: 1, to: 2, label: "WaitForMessages(ctx, 100ms)", kind: "wait", loc: "handler_sse.go:187" },
-      { on: 1, label: "loop — re-read, emit, wait", kind: "wait" },
-      { from: 1, to: 0, label: "control { streamClosed: true } → close", kind: "reply", loc: "handler_sse.go:104" },
-    ]}
     caption="The data event carries the bytes; the control event after it carries the next offset and a cursor. A closed stream gets a final control with streamClosed:true, then the connection ends — clients must not reconnect."
   />
 
@@ -599,18 +527,9 @@ import RedisTrace from "../components/RedisTrace.astro";
   Cache-Control: no-store
   ```
 
-  <SeqDiagram
+  <Diagram
+    name="seq-head"
     label="HEAD — metadata"
-    actors={["Client", "Handler", "Store", "Redis"]}
-    steps={[
-      { from: 0, to: 1, label: "HEAD /chat" },
-      { from: 1, to: 2, label: "Store.Get(path)", loc: "handler.go:257" },
-      { from: 2, to: 3, label: "HGETALL :meta (pipeline)", loc: "store.go:132" },
-      { from: 2, to: 3, label: "HGETALL :prod (pipeline)", loc: "store.go:133" },
-      { on: 2, label: "check softDel / expiry in Go — no write", kind: "wait", loc: "store.go:144" },
-      { from: 2, to: 1, label: "meta", kind: "reply" },
-      { from: 1, to: 0, label: "200 · Stream-Next-Offset · Stream-TTL · Cache-Control: no-store", kind: "reply" },
-    ]}
     caption="Two reads in one round trip, no key mutated. Cache-Control: no-store keeps a stale tail offset or closed flag from ever being cached."
   />
 
@@ -642,20 +561,9 @@ import RedisTrace from "../components/RedisTrace.astro";
   HTTP/1.1 204 No Content
   ```
 
-  <SeqDiagram
+  <Diagram
+    name="seq-delete"
     label="DELETE — with fork cascade"
-    actors={["Client", "Handler", "Store", "Stream keys", "Parent keys"]}
-    steps={[
-      { from: 0, to: 1, label: "DELETE /branch" },
-      { from: 1, to: 2, label: "Store.Delete(path)", loc: "handler.go:753" },
-      { from: 2, to: 3, label: "EVALSHA delete.lua", kind: "eval", loc: "store.go:722" },
-      { on: 3, label: "HGETALL → DEL all keys → PUBLISH d" },
-      { from: 3, to: 2, label: "{ DELETED, forkedFrom }", kind: "reply" },
-      { from: 2, to: 4, label: "EVALSHA decr_ref.lua (parent)", kind: "eval", loc: "store.go:751" },
-      { on: 4, label: "HINCRBY refCount -1 · SREM :forks" },
-      { from: 4, to: 2, label: "{ OK }  —  or { CASCADE, grandparent }", kind: "reply" },
-      { from: 1, to: 0, label: "204 No Content", kind: "reply" },
-    ]}
     caption="If the parent was soft-deleted and its refcount just hit zero, decr_ref.lua hard-deletes it and returns CASCADE with the grandparent's path, and Go walks one step further up."
   />
 
