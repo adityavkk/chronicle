@@ -29,18 +29,29 @@ type Streams interface {
 	AppendWakeEvent(wakeStream string, data []byte) error
 }
 
-// StreamLister optionally enumerates existing stream paths so a new pattern
-// subscription can backfill matching streams (PROTOCOL §6.2). It is optional:
-// without it, new streams are still linked as they are created.
+// StreamMeta is a stream's path, current tail, and creation time — the inputs the
+// pattern reconciler needs to recover a missed glob link at the right offset.
+type StreamMeta struct {
+	Path        string
+	Tail        string
+	CreatedAtNs int64
+}
+
+// StreamLister optionally enumerates live streams so a new pattern subscription
+// can backfill matching streams and the recovery reconciler can re-link streams
+// whose OnStreamCreated hook (or initial backfill) was lost to a crash
+// (PROTOCOL §6.2). It is optional: without it, new streams are still linked as
+// they are created.
 type StreamLister interface {
-	ListStreamPaths() ([]string, error)
+	ListStreams() ([]StreamMeta, error)
 }
 
 const (
-	webhookDeliveryTimeout = 30 * time.Second
-	defaultWorkerTick      = 250 * time.Millisecond
-	defaultSweepInterval   = 2 * time.Second
-	dueClaimLimit          = 256
+	webhookDeliveryTimeout   = 30 * time.Second
+	defaultWorkerTick        = 250 * time.Millisecond
+	defaultSweepInterval     = 2 * time.Second
+	defaultReconcileInterval = 30 * time.Second
+	dueClaimLimit            = 256
 )
 
 // ManagerOptions configures a Manager. Zero values fall back to sensible
@@ -55,6 +66,10 @@ type ManagerOptions struct {
 	Logger        *slog.Logger
 	WorkerTick    time.Duration
 	SweepInterval time.Duration
+	// ReconcileInterval is how often the slow reconciliation loop runs (pattern
+	// link recovery + fan-out index repair). Default 30s — it is O(streams), so
+	// it is deliberately decoupled from the fast 2s sweep.
+	ReconcileInterval time.Duration
 	// AllowPrivateWebhookTargets relaxes SSRF validation to accept any http(s)
 	// webhook URL (e.g. cluster-internal receivers on RFC1918 addresses). Off by
 	// default; the operator opts in for trusted networks.
@@ -67,18 +82,19 @@ type ManagerOptions struct {
 // (docs/research/07 §8). It is the imperative shell over the pure core and the
 // durable Store.
 type Manager struct {
-	store         Store
-	streams       Streams
-	lister        StreamLister
-	streamRootURL string
-	client        *http.Client
-	resolver      IPResolver
-	signing       SigningKey
-	tokenKey      []byte
-	log           *slog.Logger
-	workerTick    time.Duration
-	sweepInterval time.Duration
-	allowPrivate  bool
+	store             Store
+	streams           Streams
+	lister            StreamLister
+	streamRootURL     string
+	client            *http.Client
+	resolver          IPResolver
+	signing           SigningKey
+	tokenKey          []byte
+	log               *slog.Logger
+	workerTick        time.Duration
+	sweepInterval     time.Duration
+	reconcileInterval time.Duration
+	allowPrivate      bool
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -97,19 +113,20 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		return nil, err
 	}
 	m := &Manager{
-		store:         store,
-		streams:       streams,
-		lister:        opts.Lister,
-		streamRootURL: opts.StreamRootURL,
-		client:        opts.HTTPClient,
-		resolver:      opts.Resolver,
-		signing:       signing,
-		tokenKey:      tokenKey,
-		log:           opts.Logger,
-		workerTick:    opts.WorkerTick,
-		sweepInterval: opts.SweepInterval,
-		allowPrivate:  opts.AllowPrivateWebhookTargets,
-		stop:          make(chan struct{}),
+		store:             store,
+		streams:           streams,
+		lister:            opts.Lister,
+		streamRootURL:     opts.StreamRootURL,
+		client:            opts.HTTPClient,
+		resolver:          opts.Resolver,
+		signing:           signing,
+		tokenKey:          tokenKey,
+		log:               opts.Logger,
+		workerTick:        opts.WorkerTick,
+		sweepInterval:     opts.SweepInterval,
+		reconcileInterval: opts.ReconcileInterval,
+		allowPrivate:      opts.AllowPrivateWebhookTargets,
+		stop:              make(chan struct{}),
 	}
 	if m.client == nil {
 		m.client = &http.Client{Timeout: webhookDeliveryTimeout}
@@ -125,6 +142,9 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 	}
 	if m.sweepInterval == 0 {
 		m.sweepInterval = defaultSweepInterval
+	}
+	if m.reconcileInterval == 0 {
+		m.reconcileInterval = defaultReconcileInterval
 	}
 	return m, nil
 }
@@ -402,10 +422,11 @@ func jitterFraction() float64 {
 
 // Start launches the lease worker, retry worker, and recovery sweep.
 func (m *Manager) Start() {
-	m.wg.Add(3)
+	m.wg.Add(4)
 	go m.leaseWorker()
 	go m.retryWorker()
 	go m.recoverySweeper()
+	go m.reconcileLoop()
 }
 
 // Stop signals the background loops and waits for them to drain.
@@ -537,29 +558,109 @@ func (m *Manager) seedLinks(cfg Config) []StreamLink {
 }
 
 // backfill eagerly links existing streams matching a new subscription's pattern
-// at their current tail (PROTOCOL §6.2). Best-effort: it needs a StreamLister.
+// at their current tail (PROTOCOL §6.2): no replay of history at create time.
+// Best-effort — it needs a StreamLister, and the reconcile loop recovers any link
+// a crash in this path drops.
 func (m *Manager) backfill(id string, cfg Config) {
 	if m.lister == nil || cfg.Pattern == "" {
 		return
 	}
-	paths, err := m.lister.ListStreamPaths()
+	streams, err := m.lister.ListStreams()
 	if err != nil {
 		m.log.Warn("webhook: backfill list", "sub", id, "error", err)
 		return
 	}
-	for _, path := range paths {
-		if !GlobMatch(cfg.Pattern, path) {
+	for _, st := range streams {
+		if !GlobMatch(cfg.Pattern, st.Path) {
 			continue
 		}
-		tail, ok := m.tailOf(path)
-		if !ok {
-			continue
-		}
-		if err := m.store.Link(id, path, LinkGlob, tail); err != nil {
-			m.log.Warn("webhook: backfill link", "sub", id, "path", path, "error", err)
+		if err := m.store.Link(id, st.Path, LinkGlob, st.Tail); err != nil {
+			m.log.Warn("webhook: backfill link", "sub", id, "path", st.Path, "error", err)
 		}
 	}
 }
+
+// reconcilePatternLinks recovers glob links missed when OnStreamCreated or the
+// initial backfill was lost to a crash. A missed glob link does not self-heal: a
+// later append to an unlinked stream has no subscriber in the fan-out to wake,
+// and the sweep only re-evaluates existing links. So it lists streams once and,
+// for each pattern subscription, links any matching stream it is missing — at the
+// beginning offset when the stream was created after the subscription (a missed
+// OnStreamCreated, so its data should wake) or at the current tail when it
+// predates the subscription (a missed pre-existing backfill, no replay). This is
+// O(pattern subs × streams); it runs on the slow reconcile loop, not the 2s sweep.
+func (m *Manager) reconcilePatternLinks(now time.Time) {
+	if m.lister == nil {
+		return
+	}
+	ids, err := m.store.List()
+	if err != nil {
+		return
+	}
+	streams, err := m.lister.ListStreams()
+	if err != nil || len(streams) == 0 {
+		return
+	}
+	begin := m.streams.BeginningOffset()
+	for _, id := range ids {
+		sub, ok, err := m.store.Get(id)
+		if err != nil || !ok || sub.Config.Pattern == "" {
+			continue
+		}
+		linked := make(map[string]struct{}, len(sub.Links))
+		for _, l := range sub.Links {
+			linked[l.Path] = struct{}{}
+		}
+		subCreatedNs := sub.CreatedAt.UnixNano()
+		relinked := false
+		for _, st := range streams {
+			if _, ok := linked[st.Path]; ok {
+				continue
+			}
+			if !GlobMatch(sub.Config.Pattern, st.Path) {
+				continue
+			}
+			offset := st.Tail
+			if st.CreatedAtNs > subCreatedNs {
+				offset = begin // created during the outage: deliver from the start
+			}
+			if err := m.store.Link(id, st.Path, LinkGlob, offset); err != nil {
+				m.log.Warn("webhook: reconcile link", "sub", id, "path", st.Path, "error", err)
+				continue
+			}
+			relinked = true
+		}
+		if relinked {
+			m.maybeWake(id, "")
+		}
+	}
+}
+
+// reconcileLoop runs the slow reconciliation backstop (pattern link recovery and,
+// from slice 4, fan-out index repair): once at start, then on the reconcile
+// interval. It is deliberately separate from the fast 2s sweep because it scans
+// the whole stream keyspace.
+func (m *Manager) reconcileLoop() {
+	defer m.wg.Done()
+	ticker := time.NewTicker(m.reconcileInterval)
+	defer ticker.Stop()
+	m.reconcileOnce()
+	for {
+		select {
+		case <-m.stop:
+			return
+		case <-ticker.C:
+			m.reconcileOnce()
+		}
+	}
+}
+
+func (m *Manager) reconcileOnce() {
+	m.reconcilePatternLinks(time.Now())
+}
+
+// RunReconcile runs one reconciliation pass immediately (startup and tests).
+func (m *Manager) RunReconcile() { m.reconcileOnce() }
 
 // validateWebhookURL applies the SSRF rules and returns the rejection reason, or
 // "" when the URL is acceptable.

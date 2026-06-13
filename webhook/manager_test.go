@@ -115,3 +115,59 @@ func TestSweepReemitsStrandedPullWake(t *testing.T) {
 		t.Fatalf("second sweep must not re-emit, got %d -> %d", before, fs.count())
 	}
 }
+
+// fakeLister is an in-memory StreamLister for reconcile tests.
+type fakeLister struct{ streams []StreamMeta }
+
+func (f *fakeLister) ListStreams() ([]StreamMeta, error) { return f.streams, nil }
+
+// TestReconcileBackfillsPatternLinkForStreamCreatedDuringOutage is the slice-3
+// recovery: a stream created (with data) during an outage, whose OnStreamCreated
+// hook was lost, is re-linked by the reconcile loop at the beginning offset so
+// its data wakes the subscription.
+func TestReconcileBackfillsPatternLinkForStreamCreatedDuringOutage(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now) // pattern events/*
+
+	// A matching stream created AFTER the subscription, with data, never linked.
+	stream := StreamMeta{Path: "events/late", Tail: "0000000000000001_0000000000000010", CreatedAtNs: now.Add(time.Second).UnixNano()}
+	fs := &fakeStreams{tails: map[string]string{stream.Path: stream.Tail}}
+	mgr, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/", Lister: &fakeLister{streams: []StreamMeta{stream}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sub, _, _ := store.Get("s1"); len(sub.Links) != 0 {
+		t.Fatalf("expected no links before reconcile, got %+v", sub.Links)
+	}
+	mgr.RunReconcile()
+	sub, _, _ := store.Get("s1")
+	if len(sub.Links) != 1 || sub.Links[0].Path != "events/late" {
+		t.Fatalf("reconcile should link the missed stream, got %+v", sub.Links)
+	}
+	// Created after the subscription → linked at the beginning so its data wakes.
+	if sub.Links[0].AckedOffset != fs.BeginningOffset() {
+		t.Fatalf("stream created during outage should link at beginning, got %q", sub.Links[0].AckedOffset)
+	}
+}
+
+// TestReconcileBackfillsPreexistingStreamAtTail is the slice-3 no-replay case: a
+// stream that predates the subscription, missed by the create-time backfill, is
+// linked at its current tail so no history is replayed.
+func TestReconcileBackfillsPreexistingStreamAtTail(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+	stream := StreamMeta{Path: "events/old", Tail: "0000000000000001_0000000000000099", CreatedAtNs: now.Add(-time.Hour).UnixNano()}
+	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now) // created after the stream
+	fs := &fakeStreams{tails: map[string]string{stream.Path: stream.Tail}}
+	mgr, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/", Lister: &fakeLister{streams: []StreamMeta{stream}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.RunReconcile()
+	sub, _, _ := store.Get("s1")
+	if len(sub.Links) != 1 || sub.Links[0].AckedOffset != stream.Tail {
+		t.Fatalf("pre-existing stream should link at tail (no replay), got %+v", sub.Links)
+	}
+}
