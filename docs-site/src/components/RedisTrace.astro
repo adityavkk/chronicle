@@ -1,0 +1,226 @@
+---
+// RedisTrace.astro — the Redis command sequence inside one operation, in
+// execution order, each command paired with what Redis does and a source
+// locator. Data-driven and static (no client JS): the figure prints whole and
+// degrades to a plain ordered list.
+//
+// `script` names the Lua body (or "—" for the Go-only paths: HEAD's pipeline,
+// the long-poll subscribe loop). Each step carries the Redis verb, the key it
+// touches, a sentence on the effect, an optional `loc` (file:line into the
+// chronicle source), and a `when` tag for conditional steps.
+
+type Kind = "read" | "write" | "pub" | "flow" | "ttl";
+interface Step {
+  /** Redis verb, e.g. "HGETALL", or a flow marker like "validate". */
+  cmd: string;
+  /** Key(s) touched. Omitted for pure-flow steps. */
+  key?: string;
+  /** What Redis does, one sentence. Inline HTML allowed. */
+  does: string;
+  /** Source locator, e.g. "create.lua:40". */
+  loc?: string;
+  /** Conditional tag, e.g. "only with a body". Rendered as a chip. */
+  when?: string;
+  /** read · write · pub · flow · ttl — colors the verb. Default inferred. */
+  kind?: Kind;
+}
+interface Props {
+  /** The Lua script (or "—" for Go-orchestrated paths). */
+  script: string;
+  /** Source path shown beside the script name. */
+  source?: string;
+  /** Mono micro-label in the header. Default "Inside Redis, step by step". */
+  label?: string;
+  steps: Step[];
+  /** Optional caption below the list. */
+  caption?: string;
+}
+const {
+  script,
+  source,
+  label = "Inside Redis, step by step",
+  steps,
+  caption,
+} = Astro.props;
+
+const WRITE = new Set(["HSET", "ZADD", "DEL", "HINCRBY", "SADD", "SREM", "PERSIST", "PEXPIRE", "HEXPIRE"]);
+const READ = new Set(["HGETALL", "HGET", "HMGET", "ZRANGEBYLEX", "EXISTS"]);
+function kindOf(s: Step): Kind {
+  if (s.kind) return s.kind;
+  const verb = s.cmd.split(" ")[0].toUpperCase();
+  if (verb.startsWith("PUBLISH")) return "pub";
+  if (verb === "PEXPIRE" || verb === "PERSIST" || verb === "HEXPIRE") return "ttl";
+  if (WRITE.has(verb)) return "write";
+  if (READ.has(verb)) return "read";
+  return "flow";
+}
+---
+
+<figure class="rtrace">
+  <div class="rtrace-head">
+    <span class="rtrace-label mono">{label}</span>
+    <span class="rtrace-script mono">
+      {script}{source && <em class="rtrace-src"> · {source}</em>}
+    </span>
+  </div>
+  <ol class="rtrace-steps">
+    {steps.map((s) => {
+      const k = kindOf(s);
+      return (
+        <li class="rtrace-step">
+          <span class={`rtrace-cmd mono k-${k}`}>{s.cmd}</span>
+          {s.key && <span class="rtrace-key mono">{s.key}</span>}
+          {s.when && <span class="rtrace-when mono">{s.when}</span>}
+          {s.loc && <span class="rtrace-loc mono">{s.loc}</span>}
+          <span class="rtrace-does" set:html={s.does} />
+        </li>
+      );
+    })}
+  </ol>
+  {caption && <figcaption class="rtrace-caption" set:html={caption} />}
+</figure>
+
+<style lang="scss">
+  .rtrace {
+    margin: 24px 0 0 var(--rail-indent);
+    max-width: var(--prose-max);
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .rtrace-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 16px;
+    padding: 13px 22px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper);
+  }
+  .rtrace-label {
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .rtrace-script {
+    font-size: 11px;
+    color: var(--accent-deep);
+    background: var(--accent-tint);
+    border-radius: 6px;
+    padding: 4px 9px;
+  }
+  .rtrace-src { font-style: normal; color: var(--ink-mute); }
+
+  .rtrace-steps {
+    list-style: none;
+    margin: 0;
+    padding: 6px 22px 10px;
+    counter-reset: rt;
+  }
+  .rtrace-step {
+    counter-increment: rt;
+    position: relative;
+    padding: 13px 0 13px 34px;
+    border-top: 1px solid var(--rule-soft);
+    font-size: 14px;
+    line-height: 1.5;
+    &:first-child { border-top: none; }
+    &::before {
+      content: counter(rt);
+      position: absolute;
+      left: 0;
+      top: 13px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 1px solid var(--rule);
+      background: var(--card);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      display: grid;
+      place-items: center;
+    }
+  }
+  .rtrace-cmd {
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--ink);
+    margin-right: 9px;
+    white-space: nowrap;
+    &.k-write { color: var(--accent-deep); }
+    &.k-read { color: var(--ink); }
+    &.k-pub { color: var(--warn); }
+    &.k-ttl { color: var(--accent); }
+    &.k-flow { color: var(--ink-mute); font-weight: 400; font-style: italic; }
+  }
+  .rtrace-key {
+    font-size: 11px;
+    color: var(--accent-deep);
+    background: var(--accent-tint);
+    border-radius: 4px;
+    padding: 1px 7px;
+    margin-right: 7px;
+    white-space: nowrap;
+  }
+  .rtrace-when {
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--warn);
+    background: rgba(173, 131, 1, 0.1);
+    border-radius: 4px;
+    padding: 1px 7px;
+    margin-right: 7px;
+    white-space: nowrap;
+  }
+  .rtrace-loc {
+    float: right;
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-left: 12px;
+  }
+  .rtrace-does {
+    display: block;
+    margin-top: 5px;
+    color: var(--ink-mute);
+    :global(strong) { color: var(--ink); font-weight: 600; }
+    :global(em) { font-family: var(--serif-italic); font-style: italic; color: var(--accent-deep); }
+    :global(code) {
+      font-family: var(--mono);
+      font-size: 0.86em;
+      background: var(--tint);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--accent-deep);
+      overflow-wrap: anywhere;
+    }
+  }
+  .rtrace-caption {
+    padding: 13px 22px 17px;
+    border-top: 1px solid var(--rule);
+    background: var(--paper);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--muted);
+    :global(strong) { color: var(--ink); font-weight: 600; }
+    :global(code) {
+      font-family: var(--mono);
+      font-size: 0.92em;
+      background: var(--tint);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--accent-deep);
+    }
+  }
+
+  @media (max-width: 840px) {
+    .rtrace { margin-left: 0; max-width: none; }
+    .rtrace-loc { float: none; display: block; margin: 4px 0 0; }
+  }
+</style>
