@@ -31,7 +31,40 @@ Reproduce: `jepsen/up.sh && jepsen/run.sh` (`jepsen/down.sh` to tear down).
 | `origin-restart` | kill one origin every 3 s during the append storm, then kill **all** origins after the final append | **window 6/7 — the sharp edge:** cursor/lease/wake live in the origin's in-memory map; an origin death loses them, and wake creation is event-driven with no scanner | 12/12 streams at tail after both origins were replaced by fresh pods (in-memory state gone); 895 wakes for 960 msgs; dup ×1.00 |
 | `redis-restart` | delete the Redis pod mid-workload; it is recreated and replays its PVC-backed AOF | the durable substrate itself — does the log **and** the subscription control plane survive a storage-tier restart | 16/16 streams at tail after Redis was recreated mid-storm; appends rode the outage via client retry; 1681 wakes for 1920 msgs; dup ×1.00 |
 
-All three pass: every durably-appended message reached its cursor.
+The three original scenarios all pass: every durably-appended message reached its
+cursor.
+
+## Hardening scenario matrix (one per slice — added, not yet run)
+
+These four scenarios exercise the crash windows closed by the subscription-hardening
+slices (docs/research/10). They are implemented in `jepsen/checker` but have **not
+been run** on a cluster yet, so the table records the asserted property and the
+expected outcome only — no result numbers are invented. Run them with
+`jepsen/run.sh <scenario>`.
+
+| Scenario | Slice | Fault | Asserts | Expected | Status |
+| --- | --- | --- | --- | --- | --- |
+| `pull-wake-arm-crash` | 1 (durable pull-wake recovery, 19c3af8) | pull-wake sub drained by a worker loop; kill origins aggressively, then kill **all** after the final append | every stream's cursor reaches tail; the sweep re-emits any wake stranded between arm and event-emit | all streams at tail; no pull-wake left in `waking` with `sent_ns==0` | **not yet run** |
+| `expired-lease-takeover` | 2 (fence rotation, 457bd69) | worker A claims and stalls past `lease_ttl_ms`; worker B claims (takeover) and acks | A's later ack returns **409 FENCED**; B's generation is fresh (rotated) | `409 FENCED` for A, `200` for B, `B.generation != A.generation` | **not yet run** |
+| `glob-create-crash` | 3 (glob-link reconciliation, 5f70a1c) | create matching streams while killing all origins the instant each is created (before `OnStreamCreated`/backfill) | the slow reconcile loop re-matches the glob and every stream reaches tail | all streams at tail after the reconcile interval | **not yet run** |
+| `index-repair` | 4 (fan-out index repair, 909915f) | `redis-cli del` selected `ds:{__ds}:stream:<path>` fan-out SETs during a webhook workload, then append past the gap | `ReconcileIndexes` rebuilds the index from canonical links and later appends still wake | all streams at tail after the reconcile interval | **not yet run** |
+
+### Honesty notes on the hardening scenarios
+
+- **`pull-wake-arm-crash` is an approximation.** The exact "after arm, before wake-event
+  emit" window is a few microseconds inside `issueWake`; it cannot be hit precisely from
+  an out-of-process host driver. The harness instead kills origins aggressively (and all of
+  them after the final append) and asserts the strictly stronger end-to-end property — a
+  worker draining the wake stream eventually sees every stream reach its tail. If the
+  arm/emit window were *not* recovered, at least one stream would stay in `waking` with no
+  event and never advance, which this catches. A surgical version would need a server-side
+  fault-injection seam between `arm_wake.lua` and `record_wake_sent.lua` that this harness
+  does not have (left as a TODO in the checker).
+- **`expired-lease-takeover` is deterministic** — it is a property of the claim/ack API and
+  needs no pod kill, so the nemesis is idle for it.
+- **`index-repair` is latency-only.** It is the lowest-severity slice (the stream self-heals
+  via the sweep; only delivery latency degrades), so the asserted property is end-to-end
+  delivery, not a sub-sweep timing bound.
 
 ## Why each result holds
 
