@@ -37,6 +37,7 @@ var (
 	claimDueScript       = loadScript("claim_due.lua")
 	scheduleRetryScript  = loadScript("schedule_retry.lua")
 	recordSuccessScript  = loadScript("record_success.lua")
+	recordWakeSentScript = loadScript("record_wake_sent.lua")
 	deleteSubScript      = loadScript("delete_sub.lua")
 	getOrCreateKeyScript = loadScript("get_or_create_key.lua")
 )
