@@ -74,11 +74,12 @@ import OpMap from "../components/OpMap.astro";
   <StreamPlayground />
 
   The protocol also covers explicit closure (an EOF every reader observes),
-  TTL expiry, stream forking, and idempotent producers: a producer attaches
-  an id, epoch, and sequence number to each append, and retries deduplicate
-  instead of double-writing. Chronicle implements the full surface,[^spec]
-  and the official client libraries (TypeScript, Python, Go, Rust) work
-  against its base URL.
+  TTL expiry, stream forking, idempotent producers (a producer attaches an
+  id, epoch, and sequence number to each append, and retries deduplicate
+  instead of double-writing), and the reserved [subscriptions API](./subscriptions):
+  durable cursors that wake workers by webhook or pull-wake. Chronicle
+  implements the full surface,[^spec] and the official client libraries
+  (TypeScript, Python, Go, Rust) work against its base URL.
 </section>
 
 <section class="block" id="design">
@@ -247,25 +248,28 @@ import OpMap from "../components/OpMap.astro";
 </section>
 
 <section class="block" id="conformance">
-  <SectionHead num="06" label="Conformance" title="~330 tests, <em>one known gap</em>" />
+  <SectionHead num="06" label="Conformance" title="~330 tests, <em>plus the reserved APIs</em>" />
 
   Chronicle is tested against the official conformance suite:[^conf] ~330
   black-box protocol tests covering idempotent producers, stream closure,
-  forks, JSON mode, SSE, and property-based fuzzing, run against a live
-  Redis.
+  forks, JSON mode, SSE, and property-based fuzzing, plus the reserved
+  subscription group, all run against a live Redis.
 
   ```bash
   make conformance                              # full suite vs live Redis
   make conformance-filter FILTER="Idempotent"   # one group while iterating
   ```
 
-  One suite group is not implemented: the optional reserved subscriptions
-  API (`__ds` webhooks and pull-wake). This matches the posture of the
-  reference Caddy plugin's own conformance gate.
+  The optional reserved subscriptions API (`__ds` webhook and pull-wake
+  delivery) is implemented and passes its conformance group too, backed by
+  Redis and a recovery sweep so cursors and leases survive a restart. See
+  [Subscriptions](./subscriptions) for the design and the fault-injection
+  results.
 
   ### Further <em>reading</em>
 
   - [Endpoints &amp; Redis](./endpoints) — every endpoint walked one at a time: request, sequence diagram, and the exact Redis commands each Lua script runs
+  - [Subscriptions](./subscriptions) — the reserved `__ds` API: webhook and pull-wake delivery, generation fencing, and the recovery sweep that survives a restart
   - [README](https://github.com/adityavkk/chronicle#readme) — quickstart, configuration, development workflow
   - [docs/PLAN.md](https://github.com/adityavkk/chronicle/blob/main/docs/PLAN.md) — the architecture and its decision log
   - [docs/spec/PROTOCOL.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md) — the vendored protocol spec

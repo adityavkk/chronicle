@@ -1,0 +1,19 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant Wk as Worker
+    participant H as Handler
+    participant M as Manager
+    participant R as Redis
+    C->>H: POST /events/abc + body
+    H->>M: OnStreamAppend · arm_wake (no lease yet)
+    M->>R: append {type:wake} to wake_stream · manager.go
+    Wk->>H: GET /wake/pool — poll the wake stream
+    H-->>Wk: wake event · subscription_id, generation
+    Wk->>H: POST /__ds/subscriptions/sub-1/claim {worker}
+    H->>R: EVALSHA claim.lua — CAS · ZADD lease · routes.go
+    R-->>H: CLAIMED · generation, wake_id, token, streams
+    H-->>Wk: 200 · claim snapshot + lease_ttl_ms
+    Wk->>H: POST .../ack {wake_id, generation, acks, done:true}
+    H->>R: EVALSHA ack.lua — fence · ack · release
+    H-->>Wk: 200 {ok:true, next_wake:false}
