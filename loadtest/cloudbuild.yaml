@@ -1,0 +1,22 @@
+# Build the chronicle + loadgen linux/amd64 images in Cloud Build — not QEMU on
+# an arm Mac, which is slow and flaky. BuildKit is forced on (the classic Cloud
+# Build docker builder has it off, which breaks `RUN --mount=type=cache`).
+#
+#   gcloud builds submit --config loadtest/cloudbuild.yaml \
+#     --substitutions=_REG=us-central1-docker.pkg.dev/PROJECT/chronicle,_TAG=v1 .
+#
+# The Compute Engine default service account that Cloud Build runs as needs:
+#   roles/cloudbuild.builds.builder, artifactregistry.writer,
+#   storage.objectAdmin, logging.logWriter  (see loadtest/AGENTS.md).
+steps:
+  - name: gcr.io/cloud-builders/docker
+    env: ['DOCKER_BUILDKIT=1']
+    args: ['build', '-t', '${_REG}/chronicle:${_TAG}', '-f', 'Dockerfile', '.']
+  - name: gcr.io/cloud-builders/docker
+    env: ['DOCKER_BUILDKIT=1']
+    args: ['build', '-t', '${_REG}/chronicle-loadgen:${_TAG}', '-f', 'loadgen/Dockerfile', 'loadgen']
+images:
+  - '${_REG}/chronicle:${_TAG}'
+  - '${_REG}/chronicle-loadgen:${_TAG}'
+options:
+  machineType: 'E2_HIGHCPU_8'

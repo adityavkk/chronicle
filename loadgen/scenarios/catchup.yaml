@@ -1,0 +1,26 @@
+# Catch-up reads: the page-refresh / new-viewer path. Streams are
+# prefilled with 5,000 × 256 B messages (~1.25 MiB of payload each);
+# readers issue offset=-1 full-stream GETs at 40/s. Measures
+# time-to-first-byte and full-read throughput for replay, with no
+# concurrent writes (pure read path).
+name: catchup
+description: >
+  Cold replay: 32 prefilled streams (5,000 × 256 B each), full-stream
+  catch-up reads at 40/s, no writers or tailers.
+
+duration: 60s
+warmup: 5s
+
+streams:
+  count: 32
+  prefix: bench/replay
+  prefill:
+    messages: 5000
+    message_bytes: 256
+    batch_size: 250
+
+catchup:
+  rate: 40/s
+
+limits:
+  request_timeout: 15s
