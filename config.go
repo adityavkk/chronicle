@@ -20,6 +20,7 @@ const (
 	EnvSweepInterval        = "CHRONICLE_SWEEP_INTERVAL"
 	EnvReconcileInterval    = "CHRONICLE_RECONCILE_INTERVAL"
 	EnvSweepBatch           = "CHRONICLE_SWEEP_BATCH"
+	EnvMetricsListen        = "CHRONICLE_METRICS_LISTEN"
 )
 
 // Config holds the chronicle server configuration. LongPollTimeout and
@@ -79,6 +80,11 @@ type Config struct {
 	// cap, the default). A positive cap bounds per-tick cost on a very large
 	// keyspace at the price of up to ceil(K/SweepBatch) ticks of recovery latency.
 	SweepBatch int
+
+	// MetricsListen is the address for the observability server (/metrics,
+	// /healthz, /readyz). Empty (the default) disables it; a load-test or
+	// production deployment sets e.g. ":9090".
+	MetricsListen string
 }
 
 // DefaultConfig returns the defaults: port 4437 (the IANA-assigned Durable
@@ -154,6 +160,9 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvSweepBatch, err)
 		}
 		c.SweepBatch = n
+	}
+	if v, ok := lookup(EnvMetricsListen); ok {
+		c.MetricsListen = v
 	}
 	return nil
 }
