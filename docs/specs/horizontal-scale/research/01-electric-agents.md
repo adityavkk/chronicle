@@ -9,6 +9,15 @@ closed-source streams store fronted by a Cloudflare CDN**. Durable Objects appea
 only as a *sync target* and as a *contrast* in Electric's marketing — not as the
 runtime.
 
+> **Refinement (see [06](06-adversarial-review.md)).** A deeper pass found this doc
+> conflates *three* layers. (1) The streams-protocol *wake* is an **in-memory waiter
+> map** even in the OSS *FileStore* — data persistence ≠ subscription persistence. (2)
+> The *hosted* store's wake internals are **undisclosed** (the 1M-conns figure is CDN
+> *request-collapsing*, not sockets held) — do not claim it uses Postgres claim-rows.
+> (3) The **agents control plane** (`packages/agents-server`, migration
+> `0005_pull_wake_control_plane.sql`) is the Postgres claim-row layer, and it carries
+> the one transferable pattern.
+
 ## Two layers
 
 Electric separates **transport** (the streams) from **control** (the entities).

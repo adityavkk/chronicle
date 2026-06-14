@@ -1,5 +1,13 @@
 # 04 — Horizontal-scaling options for chronicle
 
+> **Superseded.** This first pass is kept for history. An adversarial review
+> ([06](06-adversarial-review.md)) found three load-bearing errors here — O1 conflates
+> fence *safety* with *liveness*, O2 breaks the multi-key atomic Lua and leaves the
+> schedule ZSET as the surviving ceiling, and O3 *relocates* rather than removes the
+> dual-write. The corrected, hardened proposal is
+> [05-proposed-architecture.md](05-proposed-architecture.md). Read that for the design;
+> read 06 for what changed and why.
+
 Design synthesis from the prior art ([01](01-electric-agents.md)–[03](03-prior-art-redis-and-beyond.md))
 applied to chronicle's code. This is input to a design doc, not a decision. It assumes
 the constraint: **no AWS, managed Redis 8, cloud-agnostic.**

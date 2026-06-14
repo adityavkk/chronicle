@@ -51,8 +51,14 @@ The work-vs-state distinction from issue #2 holds and sharpens:
    RPO). Active-active (Redis Enterprise CRDT) only if you need local writes in every
    region and can accept strong-*eventual* semantics.
 
-The full proposal, grounded in chronicle's code, is in
-[04-options-for-chronicle.md](04-options-for-chronicle.md).
+The hardened proposal — two options with full keyspace, DR, and tunable-consistency
+detail — is in [05-proposed-architecture.md](05-proposed-architecture.md); the
+adversarial review that produced it is [06](06-adversarial-review.md). The corrected
+framing: the fence is *safety, not liveness*; "tunable consistency" on Redis is a
+*durability + freshness* knob, not a CAP knob; and both options share a foundation —
+slot-home whole subscriptions, per-shard schedules, a per-subscription due-set — with
+the real fork (stay one binary vs split the control plane) coming only after the
+measurements.
 
 ## Documents
 
@@ -61,7 +67,9 @@ The full proposal, grounded in chronicle's code, is in
 | [01-electric-agents.md](01-electric-agents.md) | What Electric Agents actually does (the DO hypothesis, busted) |
 | [02-cloudflare-durable-objects.md](02-cloudflare-durable-objects.md) | The DO model as a scaling primitive — and the lock-in catch |
 | [03-prior-art-redis-and-beyond.md](03-prior-art-redis-and-beyond.md) | Redis Cluster, Kafka, NATS, Pulsar, Orleans, Akka, outbox/CDC, DR |
-| [04-options-for-chronicle.md](04-options-for-chronicle.md) | Proposed options for chronicle, with tradeoffs and a recommendation |
+| [04-options-for-chronicle.md](04-options-for-chronicle.md) | First-pass options (superseded by 05; see 06 for the corrections) |
+| [05-proposed-architecture.md](05-proposed-architecture.md) | ⭐ Two hardened options — slot-homed evolve-in-place vs owner-replica split — scale, DR, tunable consistency |
+| [06-adversarial-review.md](06-adversarial-review.md) | Adversarial review of 01–04 + the corrections folded into 05 |
 
 ## On verification
 
