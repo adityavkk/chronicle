@@ -412,8 +412,74 @@ import Complexity from "../components/Complexity.astro";
   </Callout>
 </section>
 
+<section class="block" id="use-cases">
+  <SectionHead num="06" label="End to end" title="Two flows, <em>start to finish</em>" />
+
+  The machinery above composes into the two shapes you actually deploy: a
+  **push** to a service that owns an endpoint, and a **pull** by a pool that
+  drains at its own pace. Both run on the same cursor, generation, lease, and
+  fence — only the carrier and the moment the lease arms differ.
+
+  ### A webhook receipt service <em>(push)</em>
+
+  A notification service has one job: email a receipt when an order is paid or
+  shipped. It registers a single webhook subscription with `pattern:
+  "orders/**"` and its receiver URL — every order stream it will ever care
+  about, including ones created later, is matched at its tail. From then on it
+  is passive; the server initiates.
+
+  When the order service appends `paid` to `orders/A1234`, that append earns
+  its `204` at the durable write, and everything else happens off that clock.
+  The server bumps the generation, arms the lease, signs the wake snapshot, and
+  POSTs it. The receiver verifies the Ed25519 signature against the cached
+  JWKS, sends the email, and returns `{done:true}` — which auto-acks the tail
+  and releases the lease in the same round trip. One signed POST: no callback,
+  no polling.
+
+  The load-bearing part is the unhappy path. A `503` schedules a retry with
+  jittered backoff (1 s to 60 s), and the schedule is *persisted*, so the
+  receipt is still sent after the receiver — or the accepting origin —
+  recovers. Delivery is at-least-once: if a `200` is lost and the wake is
+  retried, the receiver can run twice. The fence keeps the *cursor* correct; a
+  receiver that dedupes on `wake_id` keeps the *email* exactly-once.
+
+  <Diagram
+    name="seq-uc-webhook"
+    label="Webhook — order receipts, with a retry"
+    caption="The 204 (step 4) is earned at the durable append; the signed wake rides a different clock. A {done:true} receiver collapses delivery to one POST; a 503 falls into the persisted backoff schedule and is re-fired after recovery."
+  />
+
+  ### An indexer worker pool <em>(pull)</em>
+
+  A search index must track a firehose of `events/*` streams, and the work is
+  embarrassingly parallel — so instead of one endpoint, a pool of identical
+  stateless workers drains it. The pool registers one `pull-wake` subscription
+  with `pattern: "events/*"` and a `wake_stream` the workers tail.
+
+  A burst of appends coalesces into a single wake event the server writes to
+  that stream; every idle worker sees it and races to `claim`. The claim is a
+  compare-and-set on the lease — single-threaded Redis lets exactly one worker
+  win, and the rest get `409 ALREADY_CLAIMED` and go back to tailing. The
+  winner reads the pending events up to the snapshot's tails, updates the
+  index, and acks `{done:true}`. On a long batch it heartbeats — an ack
+  *without* `done` extends the lease and keeps the claim.
+
+  Elasticity is the point. Add pods and they just start tailing. Kill a pod
+  mid-batch and its lease expires; the recovery sweep re-arms the wake, and a
+  surviving worker claims the *same* snapshot and finishes it. The re-claim
+  reprocessing the same events is safe as long as the index write is idempotent
+  (an upsert keyed by event offset). No leader, no rebalancing protocol — the
+  lease ZSET and the fence are the whole coordination layer.
+
+  <Diagram
+    name="seq-uc-pullwake"
+    label="Pull-wake — an elastic indexer pool"
+    caption="Two workers race one wake event; the lease CAS picks one and fences the other. When the winner dies mid-batch, the sweep re-arms and a survivor reclaims the same snapshot — at-least-once, made safe by an idempotent index write."
+  />
+</section>
+
 <section class="block" id="surface">
-  <SectionHead num="06" label="Surface" title="Every reserved <em>__ds</em> route" />
+  <SectionHead num="07" label="Surface" title="Every reserved <em>__ds</em> route" />
 
   The router reserves the whole `__ds` prefix ahead of stream handling and 404s
   unknown reserved paths rather than treating them as application streams. Errors
@@ -460,7 +526,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="tested">
-  <SectionHead num="07" label="Tested" title="Killed mid-flight, <em>still delivered</em>" />
+  <SectionHead num="08" label="Tested" title="Killed mid-flight, <em>still delivered</em>" />
 
   The durability claim is checked empirically, not just argued.[^jepsen] A
   Jepsen-style harness runs Chronicle (two origins) and Redis (AOF on a
@@ -494,7 +560,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="hardening">
-  <SectionHead num="08" label="Hardening" title="Crash windows, <em>closed</em>" />
+  <SectionHead num="09" label="Hardening" title="Crash windows, <em>closed</em>" />
 
   Every durable write here is followed by a non-atomic step in Go — arm then
   emit, link then index, commit then hook. A crash in that gap is the recurring
@@ -529,7 +595,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="further">
-  <SectionHead num="09" label="Further reading" title="Where this <em>comes from</em>" />
+  <SectionHead num="10" label="Further reading" title="Where this <em>comes from</em>" />
 
   The endpoints, lifecycle, and Redis keyspace above are taken from the
   implementation; the locators are `file:line` into the repository at the time of

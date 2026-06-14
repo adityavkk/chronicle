@@ -1,0 +1,20 @@
+sequenceDiagram
+    autonumber
+    participant O as Order service
+    participant S as Chronicle
+    participant W as Notify worker
+    W->>S: PUT __ds/subscriptions/receipts (webhook, pattern orders/**)
+    S-->>W: 201 Created — signing kid ds_abc123
+    O->>S: POST orders/A1234 "paid"
+    S-->>O: 204 — durably appended
+    Note over S: append matches · bump generation · arm lease
+    S->>W: POST /hooks — signed wake (orders/A1234 behind)
+    Note over W: verify Ed25519 sig · send the receipt email
+    W-->>S: 200 done:true
+    Note over S: auto-ack · cursor advances · back to idle
+    O->>S: POST orders/A1234 "shipped"
+    S->>W: POST /hooks — signed wake
+    W-->>S: 503 — receiver down
+    Note over S: schedule retry · backoff 1s to 60s · persisted
+    S->>W: POST /hooks — retry after backoff
+    W-->>S: 200 done:true
