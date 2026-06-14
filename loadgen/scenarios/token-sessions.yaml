@@ -1,0 +1,33 @@
+# AI token-streaming sessions — the protocol's headline use case
+# (resumable LLM response streaming, à la the Durable Streams proxy and
+# AI SDK transports).
+#
+# Realism anchors:
+# - LLM responses stream at roughly 20–60 tokens/s; 30 msg/s models a
+#   fast production model emitting per-token events.
+# - 120-byte JSON messages approximate an AI SDK text-delta event
+#   (token text + envelope).
+# - 2 live readers per session: the originating tab plus one
+#   follower/shared view (multi-tab, multi-device patterns).
+# - 50 concurrent sessions ≈ a mid-size app's active chat load on one
+#   origin: 1,500 appends/s, 3,000 deliveries/s.
+name: token-sessions
+description: >
+  50 concurrent AI sessions: one writer per stream at 30 msg/s (120 B
+  JSON token events), two SSE tailers per stream following live.
+
+duration: 60s
+warmup: 5s
+
+streams:
+  count: 50
+  prefix: bench/sess
+
+writers:
+  per_stream: 1
+  rate: 30/s
+  message_bytes: 120
+
+tailers:
+  sse_per_stream: 2
+  connect_ramp: 3s

@@ -1,0 +1,30 @@
+# Single-stream fan-out — the "share link" / broadcast pattern, and the
+# shape ElectricSQL's benchmarks emphasize: one writer, many live
+# readers on the same stream. Stresses the server's waiter wakeup path
+# (in-process condvars for Caddy, Redis pub/sub for Chronicle) and
+# per-connection delivery cost.
+#
+# 10 msg/s of 256 B updates models a live dashboard / collaborative
+# document; 400 SSE + 100 long-poll followers on one origin without a
+# CDN in front (worst case for the origin).
+name: fanout
+description: >
+  One stream, one writer at 10 msg/s (256 B), 400 SSE + 100 long-poll
+  tailers all following the same stream.
+
+duration: 60s
+warmup: 5s
+
+streams:
+  count: 1
+  prefix: bench/fanout
+
+writers:
+  per_stream: 1
+  rate: 10/s
+  message_bytes: 256
+
+tailers:
+  sse_per_stream: 400
+  long_poll_per_stream: 100
+  connect_ramp: 5s
