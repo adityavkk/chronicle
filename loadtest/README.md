@@ -40,49 +40,39 @@ go run ./cmd/sweepscale -base-url http://localhost:4437 \
   -subscriptions 5000 -links-per-sub 5 -warmup 5s -measure 20s -slo-p99-ms 1500
 ```
 
-## Cloud run (GKE + managed Redis 8)
+## Cloud run (GKE + managed Redis), one command
 
-Prereqs: `gcloud` (authenticated — run `! gcloud auth login` in your shell),
-`kubectl`, an Artifact Registry repo, and `terraform` (or provision via `gcloud`).
-**Read `AGENTS.md` first** — pre-flight quota checks, the Cloud Build SA roles,
-and the Connect-Gateway kubectl fix each save a failed cluster create.
+`ltctl.sh` does the whole thing — enable APIs, Cloud Build the amd64 images,
+provision the cluster + managed Redis, render the spec with the live Redis URL,
+deploy, run the SLO-gated job, print the report. Prereqs: `gcloud`
+(authenticated — `! gcloud auth login`), `kubectl`, `go`. **Skim `AGENTS.md`** for
+the pre-flight quota checks and the corp-net Connect-Gateway fix.
 
 ```sh
-# 1. Build + push amd64 images in Cloud Build — NOT local `docker build`, which
-#    emulates amd64 via QEMU on an arm Mac (slow, flaky). cloudbuild.yaml builds
-#    both images; the Compute Engine default SA needs the roles in AGENTS.md.
-gcloud builds submit --config loadtest/cloudbuild.yaml \
-  --substitutions=_REG=$REG,_TAG=$TAG .
+cd loadtest
 
-# 2. Point the spec at those images, then render.
-$EDITOR loadtest/spec/sweep-10k.yaml          # set sut.image + loadgen_image
-( cd loadgen && go run ./cmd/render -spec ../loadtest/spec/sweep-10k.yaml -out ../loadtest/out )
-
-# 3. Provision the cluster + managed Redis. Set project_id in the tfvars first.
-cp loadtest/out/terraform.auto.tfvars loadtest/terraform/
-$EDITOR loadtest/terraform/terraform.auto.tfvars   # project_id, and redis_version = your managed Redis 8
-( cd loadtest/terraform && terraform init && terraform apply )
-
-# 4. Wire the SUT to Redis, re-render, and point kubectl at the cluster.
-#    Put `terraform output redis_url` into the spec's sut.redis_url, then:
-( cd loadgen && go run ./cmd/render -spec ../loadtest/spec/sweep-10k.yaml -out ../loadtest/out )
-eval "$( cd loadtest/terraform && terraform output -raw kubeconfig_command )"
-# If kubectl times out (dial tcp <ip>:443) on a corp network, register the
-# cluster with the GKE Fleet and route via Connect Gateway (see AGENTS.md):
-#   gcloud container fleet memberships get-credentials <cluster> --project $PROJECT
-
-# 5. Deploy the SUT and run the SLO-gated experiment.
-kubectl apply -f loadtest/out/sut.yaml
-kubectl -n chronicle-loadtest rollout status deploy/chronicle
-kubectl apply -f loadtest/out/job.yaml
-kubectl -n chronicle-loadtest wait --for=condition=complete --timeout=15m job -l app=sweepscale
-kubectl -n chronicle-loadtest logs -l app=sweepscale --tail=-1   # the JSON report
-
-# 6. Tear it all down.
-( cd loadtest/terraform && terraform destroy )
+make all SPEC=spec/sweep-10k.yaml   # provision → run → ALWAYS tear down
 ```
 
-A non-zero Job exit means an SLO breach (sweep p99 over budget, or seed errors).
+`all` tears down on success, failure, **or Ctrl-C** (a trap), so the meter is
+never left running by accident. Edit the spec (K, P, replicas, SLO) and re-run;
+override the target with env vars (`LT_PROJECT`, `LT_ZONE`, `LT_MACHINE`, …).
+
+Granular, when iterating (the cluster + Redis stay up between `run`s):
+
+```sh
+make up                          # provision once (idempotent)
+make run SPEC=spec/sweep-50k.yaml   # render + deploy + run + report
+make run SPEC=spec/sweep-10k.yaml   # ... again, no re-provision
+make down                        # delete cluster + Redis (keeps AR images)
+```
+
+A non-zero Job exit (and `make run` exit) means an SLO breach (sweep p99 over
+budget, or seed errors). For a worked run and its numbers see `RESULTS-gke.md`.
+
+The Terraform under `terraform/` is the equivalent IaC for those who prefer it
+(`terraform apply` the cluster + Memorystore, then `make run`); `ltctl.sh` uses
+`gcloud` directly so no Terraform install is needed.
 
 ## Finding the fault lines
 

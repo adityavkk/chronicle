@@ -18,6 +18,11 @@ import (
 func main() {
 	specPath := flag.String("spec", "", "path to the experiment spec YAML (required)")
 	outDir := flag.String("out", "", "output directory; empty prints to stdout")
+	// Overrides for values that come from provisioning, not the spec author, so
+	// the orchestrator (ltctl) can inject them without hand-editing the spec.
+	redisURL := flag.String("redis-url", "", "override sut.redis_url (e.g. the provisioned Memorystore URL)")
+	image := flag.String("image", "", "override sut.image")
+	loadgenImage := flag.String("loadgen-image", "", "override loadgen_image")
 	flag.Parse()
 
 	if *specPath == "" {
@@ -30,6 +35,15 @@ func main() {
 	spec, err := experiment.Load(data)
 	if err != nil {
 		die(err)
+	}
+	if *redisURL != "" {
+		spec.SUT.RedisURL = *redisURL
+	}
+	if *image != "" {
+		spec.SUT.Image = *image
+	}
+	if *loadgenImage != "" {
+		spec.LoadgenImage = *loadgenImage
 	}
 	r, err := spec.Render()
 	if err != nil {
