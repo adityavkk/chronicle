@@ -1,0 +1,17 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Handler
+    participant S as redis.Store
+    participant L as append.lua
+    C->>H: POST /events/x + batch
+    Note over H: handleAppend · parse producer headers, read body · handler.go:582
+    H->>S: Store.Append(path, data, opts) · store/redis/store.go:462
+    Note over S: HMGET tail+ct snapshot · frame batch · build ZADD args
+    S->>L: EVALSHA append.lua · store.go:519
+    Note over L: validate chain · ZADD frames · HSET tail · PUBLISH · append.lua:35
+    L-->>S: OK newTail — or RETRY
+    Note over S: RETRY re-snapshots the tail · up to 64 attempts
+    S-->>H: AppendResult offset
+    Note over H: onStreamAppend hook wakes subscribers · handler.go:775
+    H-->>C: 204 · Stream-Next-Offset 0_29

@@ -40,7 +40,9 @@ CSS
 } > chronicle.css
 
 shopt -s nullglob
-for mmd in seq-*.mmd; do
+# seq-*  → sequence diagrams (endpoint, subscription, tracer flows)
+# wiki-* → wiki flowcharts (the architecture map); same theme, classDef roles.
+for mmd in seq-*.mmd wiki-*.mmd; do
   name="${mmd%.mmd}"
   echo "→ $name"
   npx --yes -p @mermaid-js/mermaid-cli mmdc \

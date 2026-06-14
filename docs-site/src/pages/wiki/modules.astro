@@ -1,0 +1,11 @@
+---
+// /wiki/modules — the package-by-package walkthrough. Content in _modules.mdx.
+import type { ComponentProps } from "astro/types";
+import Wiki from "../../layouts/Wiki.astro";
+import Modules, { frontmatter } from "./_modules.mdx";
+
+const fm = frontmatter as ComponentProps<typeof Wiki>["frontmatter"];
+---
+<Wiki frontmatter={fm}>
+  <Modules />
+</Wiki>
