@@ -113,6 +113,31 @@ func (c *Client) Create(ctx context.Context, name, contentType string) (Response
 	return c.do(req, false)
 }
 
+// SubURL returns the absolute URL for a reserved __ds subscription path.
+func (c *Client) SubURL(id string) string {
+	return c.baseURL + c.root + "__ds/subscriptions/" + id
+}
+
+// CreateSubscription issues PUT to create or re-confirm a subscription. body is
+// the JSON config: {type, pattern|streams, webhook|wake_stream, lease_ttl_ms}.
+func (c *Client) CreateSubscription(ctx context.Context, id string, body []byte) (Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.SubURL(id), bytes.NewReader(body))
+	if err != nil {
+		return Response{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.do(req, true)
+}
+
+// DeleteSubscription tombstones a subscription (idempotent).
+func (c *Client) DeleteSubscription(ctx context.Context, id string) (Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.SubURL(id), nil)
+	if err != nil {
+		return Response{}, err
+	}
+	return c.do(req, false)
+}
+
 // Delete issues DELETE for a stream.
 func (c *Client) Delete(ctx context.Context, name string) (Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.StreamURL(name), nil)
