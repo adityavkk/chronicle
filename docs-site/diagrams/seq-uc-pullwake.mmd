@@ -1,0 +1,24 @@
+sequenceDiagram
+    autonumber
+    participant P as Producers
+    participant S as Chronicle
+    participant W1 as Worker-1
+    participant W2 as Worker-2
+    W1->>S: PUT __ds/subscriptions/indexer (pull-wake, pattern events/*, wake_stream wake/idx)
+    P->>S: POST events/clicks (a burst of appends)
+    Note over S: appends coalesce · arm wake · append type:wake to wake/idx
+    S-->>W1: wake event (both workers tail wake/idx)
+    S-->>W2: wake event
+    W1->>S: POST claim worker:w1
+    W2->>S: POST claim worker:w2
+    S-->>W1: 200 — token + snapshot (events/clicks behind)
+    S-->>W2: 409 ALREADY_CLAIMED — holder w1
+    Note over W1: read pending events · update the search index
+    W1->>S: POST ack done:true
+    Note over S: cursor advances · back to idle
+    Note over W1: later — Worker-1 crashes mid-batch
+    Note over S: sweep · lease expired · re-arm · new wake event
+    S-->>W2: wake event
+    W2->>S: POST claim worker:w2
+    S-->>W2: 200 — token + snapshot (re-delivered, at-least-once)
+    W2->>S: POST ack done:true
