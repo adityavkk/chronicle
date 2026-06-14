@@ -1,0 +1,61 @@
+# Rendered by `render` from the experiment spec — edit the spec, not this file.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{.SUT.Namespace}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chronicle
+  namespace: {{.SUT.Namespace}}
+spec:
+  replicas: {{.SUT.Replicas}}
+  selector:
+    matchLabels: { app: chronicle }
+  template:
+    metadata:
+      labels: { app: chronicle }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      nodeSelector: { role: sut }
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: chronicle
+          image: {{.SUT.Image}}
+          args: ["--listen", ":4437", "--metrics-listen", ":9090"]
+          env:
+            - { name: CHRONICLE_REDIS_URL, value: "{{.SUT.RedisURL}}" }
+            - { name: CHRONICLE_SUBSCRIPTIONS, value: "true" }
+            - { name: CHRONICLE_WEBHOOK_ALLOW_PRIVATE, value: "true" }
+            - { name: CHRONICLE_PUBLIC_URL, value: "http://chronicle.{{.SUT.Namespace}}:4437" }
+            - { name: CHRONICLE_SWEEP_INTERVAL, value: "{{.SUT.SweepInterval}}" }
+            - { name: CHRONICLE_SWEEP_BATCH, value: "{{.SUT.SweepBatch}}" }
+            - { name: CHRONICLE_LOG_LEVEL, value: "info" }
+          ports:
+            - { containerPort: 4437, name: http }
+            - { containerPort: 9090, name: metrics }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 9090 }
+            periodSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: 9090 }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "{{.SUT.CPU}}", memory: "{{.SUT.Memory}}" }
+            limits: { cpu: "{{.SUT.CPU}}", memory: "{{.SUT.Memory}}" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chronicle
+  namespace: {{.SUT.Namespace}}
+spec:
+  selector: { app: chronicle }
+  ports:
+    - { name: http, port: 4437, targetPort: 4437 }
+    - { name: metrics, port: 9090, targetPort: 9090 }

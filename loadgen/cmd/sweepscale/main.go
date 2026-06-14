@@ -22,7 +22,9 @@ import (
 	"gecgithub01.walmart.com/auk000v/chronicle/loadgen/sweep"
 )
 
-func main() {
+func main() { os.Exit(run()) }
+
+func run() int {
 	scenario := flag.String("scenario", "", "path to a sweep-scale scenario YAML")
 	baseURL := flag.String("base-url", "http://localhost:4437", "chronicle base URL")
 	root := flag.String("root", "/v1/stream/", "stream root path")
@@ -33,16 +35,18 @@ func main() {
 	dispatch := flag.String("dispatch", "", "override: pull-wake or webhook")
 	warmup := flag.Duration("warmup", 0, "override: settle time after seeding")
 	measure := flag.Duration("measure", 0, "override: metric sampling window")
+	sloP99 := flag.Float64("slo-p99-ms", 0, "fail (exit 1) if sweep tick p99 exceeds this; 0 disables")
+	maxSeedErrs := flag.Int("max-seed-errors", -1, "fail (exit 1) if seed errors exceed this; -1 disables")
 	flag.Parse()
 
 	spec := sweep.Spec{}
 	if *scenario != "" {
 		data, err := os.ReadFile(*scenario)
 		if err != nil {
-			die(err)
+			return fail(err)
 		}
 		if spec, err = sweep.Decode(data); err != nil {
-			die(err)
+			return fail(err)
 		}
 	}
 	if *subs > 0 {
@@ -55,14 +59,14 @@ func main() {
 		spec.Dispatch = *dispatch
 	}
 	if *warmup > 0 {
-		spec.Warmup = *warmup
+		spec.Warmup = sweep.Dur(*warmup)
 	}
 	if *measure > 0 {
-		spec.Measure = *measure
+		spec.Measure = sweep.Dur(*measure)
 	}
 	spec, err := spec.Prepared()
 	if err != nil {
-		die(err)
+		return fail(err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -72,13 +76,13 @@ func main() {
 		spec.Subscriptions, spec.LinksPerSub, spec.Dispatch, *baseURL)
 	rep, err := sweep.Run(ctx, *baseURL, *root, *metricsURL, spec)
 	if err != nil {
-		die(err)
+		return fail(err)
 	}
 
 	b, _ := json.MarshalIndent(rep, "", "  ")
 	if *out != "" {
 		if err := os.WriteFile(*out, b, 0o644); err != nil {
-			die(err)
+			return fail(err)
 		}
 	} else {
 		fmt.Println(string(b))
@@ -90,9 +94,24 @@ func main() {
 	if rep.SeedErrors > 0 {
 		fmt.Fprintf(os.Stderr, "warning: %d seed errors\n", rep.SeedErrors)
 	}
+
+	// SLO gate: a non-zero exit makes this usable as an on-demand pass/fail check.
+	failed := false
+	if *sloP99 > 0 && rep.SweepP99Ms > *sloP99 {
+		fmt.Fprintf(os.Stderr, "SLO FAIL: sweep tick p99 %.1fms > %.1fms\n", rep.SweepP99Ms, *sloP99)
+		failed = true
+	}
+	if *maxSeedErrs >= 0 && rep.SeedErrors > *maxSeedErrs {
+		fmt.Fprintf(os.Stderr, "SLO FAIL: seed errors %d > %d\n", rep.SeedErrors, *maxSeedErrs)
+		failed = true
+	}
+	if failed {
+		return 1
+	}
+	return 0
 }
 
-func die(err error) {
+func fail(err error) int {
 	fmt.Fprintln(os.Stderr, "sweepscale:", err)
-	os.Exit(1)
+	return 1
 }

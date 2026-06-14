@@ -1,0 +1,11 @@
+# Rendered by `render` from the experiment spec. Set project_id (and region, if
+# not us-central1) before `terraform apply`.
+project_id = "REPLACE_WITH_GCP_PROJECT_ID"
+
+cluster_name   = "{{.SUT.Namespace}}"
+sut_node_count = {{.SUT.Replicas}}
+
+# provision_redis = true stands up a fresh Memorystore instance; copy its
+# redis_url output back into the spec's sut.redis_url. Set false and point
+# sut.redis_url at production's managed Redis 8 to measure against the real one.
+provision_redis = true
