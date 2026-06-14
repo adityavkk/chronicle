@@ -353,7 +353,7 @@ import Complexity from "../components/Complexity.astro";
   **recovery sweep** on boot and on an interval: it walks every subscription,
   expires stale leases, and for any idle subscription with pending work, re-issues
   the wake the crash dropped. The append-time hook is the fast path; the sweep is
-  the backstop.
+  the backstop (§10 covers how its per-tick reads are batched to scale).
 
   <Diagram
     name="seq-sub-sweep"
@@ -594,8 +594,98 @@ import Complexity from "../components/Complexity.astro";
   </Callout>
 </section>
 
+<section class="block" id="scaling">
+  <SectionHead num="10" label="Scaling" title="The sweep reads in <em>one batch</em>" />
+
+  The recovery sweep is the durability backstop (§05): every couple of seconds it
+  re-derives pending work for *every* subscription by reading its durable cursor
+  and the tail of each linked stream. That read pattern is where the poll meets
+  its ceiling — and where a small change moves the ceiling by two orders of
+  magnitude.
+
+  The naive sweep issued those reads one Redis round trip at a time: one
+  `HGETALL` per subscription, then one `HGET` per linked stream, inside the loop.
+  With `K` subscriptions and `P` links each, that is `1 + K + K·P` *sequential*
+  round trips. Round-trip latency dominates, so a tick costs about
+  `K·(1 + P) × RTT` — and at a real ~0.5 ms RTT, a single tick stops fitting the
+  2 s sweep interval at only a few thousand subscriptions.
+
+  The fix keeps the same decision and changes only how the reads are issued:
+  pipeline them. The subscription reads go out in chunked batches, every linked
+  tail is read in one batched pass, and the pending-work test runs in memory
+  against the pre-fetched tails.
+
+  <Table wide>
+    | Per sweep tick | Naive (per-link) | Batched (pipelined) |
+    | --- | --- | --- |
+    | Subscription reads | `K` round trips | `⌈K / 512⌉` round trips |
+    | Tail reads | `K·P` round trips | `⌈U / 512⌉` round trips |
+    | Total round trips | `1 + K + K·P` | `≈ 1 + K/512 + U/512` |
+    | Wall-time | `≈ K·(1 + P) × RTT`, RTT-bound | a few batches, throughput-bound |
+    | Pending test | `P` reads per sub | in memory, short-circuits |
+  </Table>
+
+  Throughout: `K` = subscriptions, `P` = links per subscription, `U` = unique
+  linked streams across the swept set, `512` = the pipeline chunk size.
+
+  ```text title="sweepOnce — batched reads, then an in-memory decision"
+  sweepOnce():
+    ids   = SMEMBERS subs                 # 1 round trip
+    subs  = GetMany(ids)                  # ⌈K/512⌉ pipelined round trips
+    paths = distinct paths over subs.links
+    tails = TailOffsets(paths)            # ⌈U/512⌉ pipelined round trips
+    for sub in subs:                      # no Redis in this loop
+        if pull_wake(sub) and stranded(sub): reemit(sub); continue
+        if lease_expired(sub):               expire(sub)
+        if idle(sub) and pending(sub.links, tails): issueWake(sub)
+
+  pending(links, tails):                  # short-circuits on the first hit
+    for l in links:
+        if tails[l.path] > l.acked_offset: return true
+    return false
+  ```
+
+  <Callout icon="info" label="Same decision, fewer trips">
+    The batched sweep issues the *same* wakes as the per-link one — same
+    idle-and-pending test, same stranded-pull-wake re-emit, same lease expiry.
+    Only the read schedule changed: a handful of pipelined batches instead of one
+    round trip per subscription and per link. Reading every tail once up front is
+    also marginally more snapshot-consistent than reading them mid-loop; the fence
+    and the next tick cover any tail that moves in between.
+  </Callout>
+
+  ### What it buys, <em>measured</em>
+
+  A `BenchmarkSweepOnce` seeds `K` idle subscriptions with `P` links each against
+  a local Redis and times one sweep. The per-link baseline blows the 2 s budget
+  by a thousand subscriptions; the batched sweep stays in the low milliseconds.
+
+  <Table>
+    | Subscriptions × links | Per-link sweep | Batched sweep | Speed-up |
+    | --- | --- | --- | --- |
+    | 1,000 × 1 | 1.09 s | 12.5 ms | ~87× |
+    | 1,000 × 5 | 3.16 s | 29.7 ms | ~107× |
+    | 10,000 × 1 | 11.3 s | 122 ms | ~93× |
+    | 5,000 × 5 | 48.4 s | 137 ms | ~354× |
+  </Table>
+
+  A worked tick at 10,000 subscriptions × 5 links: the per-link sweep is
+  `1 + 10,000 + 50,000 ≈ 60,001` sequential round trips — about 30 s at 0.5 ms
+  each, fifteen ticks deep before the next one would start. The batched sweep is
+  `1 + ⌈10,000/512⌉ + ⌈50,000/512⌉ = 119` round trips, a few milliseconds of
+  round-trip latency plus Redis execution. Same answer; the difference is whether
+  recovery keeps up.
+
+  <Complexity
+    label="Complexity — round trips, not big-O, are the lever"
+    time="O(K + U) work · ⌈K/512⌉ + ⌈U/512⌉ round trips per tick"
+    space="O(K + U) for the swept ids and the tail map"
+    why="The big-O work is unchanged — the sweep still touches every subscription and every distinct linked tail. What changed is the round-trip count: pipelining collapses 1 + K + K·P sequential trips into a chunked handful, so a tick is bounded by Redis throughput, not by K times round-trip latency. An optional per-tick cap (-sweep-batch) additionally bounds the work itself for very large keyspaces, rolling a cursor across ticks so every subscription is still covered."
+  />
+</section>
+
 <section class="block" id="open">
-  <SectionHead num="10" label="Open questions" title="What the dual write leaves <em>open</em>" />
+  <SectionHead num="11" label="Open questions" title="What the dual write leaves <em>open</em>" />
 
   Everything above rests on one move: the wake carries no authority. The durable
   cursor and the stream tail are the truth; the wake is a derived signal a
@@ -622,19 +712,14 @@ import Complexity from "../components/Complexity.astro";
     fast path should reach across origins rather than leaving the sweep to bridge
     them.
 
-  - **The backstop is a poll, and a poll has a ceiling — now a higher one.** The
-    sweep re-derives owed work by reading every subscription's cursor and every
-    linked stream's tail. One round trip at a time, that blew the 2 s tick at a
-    few thousand subscriptions: measured against local Redis, 1.09 s for 1k
-    subscriptions and 48 s for 5k × 5 links. Batching the reads into pipelined
-    round trips cut those same ticks to 12.5 ms and 137 ms (~90–350× faster), so
-    one replica's sweep now holds well past 10k subscriptions. Two edges stay
-    open: the sweep still runs redundantly on every replica (`O(N·K)` against the
-    shared `{__ds}` slot), and it is still `O(K)` per tick. Past what batching
-    buys, the fixes are sharding the sweep across replicas (the fence already
-    makes mis-sharding harmless) or an event-driven backstop (the doc-10 outbox)
-    that touches only subscriptions with owed work instead of scanning all K. A
-    per-tick cap (`-sweep-batch`) bounds tick cost meanwhile.
+  - **The poll still has a ceiling, just a higher one.** Batching the sweep's
+    reads (§10) moved the cliff from a few thousand subscriptions to well past 10k
+    on one replica, but two edges stay open. The sweep still runs redundantly on
+    every replica (`O(N·K)` against the shared `{__ds}` slot), and it is still
+    `O(K)` work per tick. Past what batching buys, the fixes are sharding the
+    sweep across replicas (the fence already makes mis-sharding harmless) or an
+    event-driven backstop (the doc-10 outbox) that touches only subscriptions with
+    owed work instead of scanning all K.
 
   None of these is a correctness gap: the fence and the forward-only cursor hold
   no matter which wake is lost or doubled. They are the standing costs of
@@ -643,7 +728,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="further">
-  <SectionHead num="11" label="Further reading" title="Where this <em>comes from</em>" />
+  <SectionHead num="12" label="Further reading" title="Where this <em>comes from</em>" />
 
   The endpoints, lifecycle, and Redis keyspace above are taken from the
   implementation; the locators are `file:line` into the repository at the time of
