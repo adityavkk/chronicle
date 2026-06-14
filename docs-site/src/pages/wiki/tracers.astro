@@ -1,0 +1,11 @@
+---
+// /wiki/tracers — request flows traced through the call stack. Content in _tracers.mdx.
+import type { ComponentProps } from "astro/types";
+import Wiki from "../../layouts/Wiki.astro";
+import Tracers, { frontmatter } from "./_tracers.mdx";
+
+const fm = frontmatter as ComponentProps<typeof Wiki>["frontmatter"];
+---
+<Wiki frontmatter={fm}>
+  <Tracers />
+</Wiki>

@@ -1,0 +1,140 @@
+---
+// Wiki.astro — layout for the Code Wiki: the site masthead, a sticky left
+// navigation rail (WikiNav), and the content column. Unlike Doc.astro it has
+// no right-hand footnote rail; references render as a "References" block at the
+// foot (base.scss styles the GFM footnotes). The content column zeroes
+// --rail-indent — the left nav is the page's left structure, so the prose,
+// figures, and code align flush to the column edge.
+import "../styles/base.scss";
+import "@fontsource-variable/inter";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+import "@fontsource/jetbrains-mono/600.css";
+import "@fontsource/jetbrains-mono/700.css";
+import Head from "../components/Head.astro";
+import Masthead from "../components/Masthead.astro";
+import Hero from "../components/Hero.astro";
+import Glyph from "../components/Glyph.astro";
+import WikiNav from "../components/WikiNav.astro";
+
+interface Props {
+  frontmatter: {
+    title: string;
+    summary?: string;
+    eyebrow?: string;
+    meta?: string;
+    deck?: string;
+    byline?: Array<{ label: string; value: string; href?: string }>;
+  };
+}
+const { frontmatter: f } = Astro.props;
+const metaDesc = f.summary ?? f.deck;
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const home = `${base}/`;
+const REPO = "https://github.com/adityavkk/chronicle";
+
+const bodyHtml = await Astro.slots.render("default");
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <Head title={f.title} description={metaDesc} />
+  </head>
+  <body>
+    <Masthead />
+    <div class="wiki-shell">
+      <WikiNav />
+      <main class="wiki-main">
+        <Hero
+          eyebrow={f.eyebrow}
+          meta={f.meta}
+          title={f.title}
+          deck={f.deck}
+          byline={f.byline}
+        />
+
+        <div class="doc-body" set:html={bodyHtml} />
+
+        <footer class="foot">
+          <a class="mark" href={home} aria-label="Chronicle documentation — home">
+            <Glyph />
+            <span>CHRONICLE &middot; DURABLE STREAMS SERVER</span>
+          </a>
+          <div>
+            <a href={REPO}>Source</a>
+            {" · "}
+            <a href={`${REPO}/blob/main/LICENSE`}>License</a>
+          </div>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>
+
+<style lang="scss">
+  .wiki-shell {
+    position: relative;
+    z-index: 1;
+    max-width: var(--shell-max);
+    margin: 0 auto;
+    padding: 40px 56px 120px;
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    gap: 52px;
+    align-items: start;
+  }
+
+  // The content column is its own left structure now — drop the prose rail so
+  // paragraphs, figures, and code sit flush against the column, next to the nav.
+  .wiki-main {
+    min-width: 0;
+    --rail-indent: 0px;
+  }
+
+  // SectionHead's two-column [label | title] layout would re-introduce a left
+  // rail; inside the wiki it stacks (label above title), flush-left.
+  .wiki-main :global(.section-head) {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  // The hero's bottom rule is enough; trim its excess base padding in this denser layout.
+  .wiki-main :global(.hero) { padding-bottom: 40px; }
+
+  footer.foot {
+    margin-top: 80px;
+    padding: 36px 0 0;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-mute);
+    letter-spacing: 0.06em;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  footer.foot a {
+    color: var(--accent);
+    text-decoration: none;
+    transition: color 0.25s;
+  }
+  footer.foot a:hover { color: var(--ink); }
+  .mark { display: inline-flex; align-items: center; gap: 10px; }
+
+  @media (max-width: 1040px) {
+    .wiki-shell {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+  }
+  @media (max-width: 840px) {
+    .wiki-shell { padding: 28px 24px 80px; }
+  }
+  @media print {
+    footer.foot { display: none; }
+    .wiki-shell { display: block; }
+    :global(.wiki-nav) { display: none; }
+  }
+</style>

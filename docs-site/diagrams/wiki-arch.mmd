@@ -1,0 +1,35 @@
+flowchart TB
+    Client(["HTTP client<br/>curl · client libs"]):::client
+
+    subgraph edge["imperative shell"]
+      Handler["Handler.ServeHTTP<br/>handler.go · route by method"]:::hero
+    end
+
+    Core["protocol/<br/>pure functions<br/>headers · cursors · producer rules"]:::core
+    Store{{"store.Store<br/>interface"}}:::iface
+    Mem["memory_store<br/>dev · tests"]:::alt
+    Redis["store/redis<br/>EVALSHA + Lua scripts"]:::compute
+    RDB[("Redis 8<br/>streams · producers · pub/sub")]:::db
+    Subs["webhook manager<br/>subscriptions · __ds"]:::control
+    Out(["webhook receiver<br/>· pull-wake worker"]):::client
+
+    Client -->|"request"| Handler
+    Handler -->|"parse + decide"| Core
+    Handler -->|"Create / Append / Read / Close / Delete"| Store
+    Store --> Redis
+    Store -.->|"alt backend"| Mem
+    Redis -->|"EVALSHA · SUBSCRIBE"| RDB
+    Handler -.->|"OnStreamAppend hook"| Subs
+    Subs -->|"cursors · leases"| RDB
+    Subs -.->|"signed wake / event"| Out
+
+    classDef client fill:#F2F0E5,stroke:#6F6E69,color:#100F0F;
+    classDef hero fill:#E8F1EF,stroke:#24837B,color:#143F3C,font-weight:700;
+    classDef core fill:#FFFEF9,stroke:#24837B,color:#143F3C;
+    classDef iface fill:#FFFEF9,stroke:#24837B,color:#100F0F,font-weight:600;
+    classDef compute fill:#F2F0E5,stroke:#DAD8CE,color:#100F0F;
+    classDef db fill:#E8F1EF,stroke:#24837B,color:#143F3C;
+    classDef alt fill:#FFFCF0,stroke:#C9C7BC,color:#6F6E69,stroke-dasharray:5 4;
+    classDef control fill:#FFFCF0,stroke:#24837B,color:#143F3C,stroke-dasharray:5 4;
+
+    style edge fill:#FFFCF0,stroke:#DAD8CE,color:#6F6E69;

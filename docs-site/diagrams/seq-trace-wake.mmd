@@ -1,0 +1,25 @@
+sequenceDiagram
+    autonumber
+    participant W as Writer
+    participant H as Handler
+    participant M as webhook Manager
+    participant R as Redis __ds
+    participant K as Worker
+    W->>H: POST append — durable write
+    Note over H: onStreamAppend hook · handler.go:63
+    H->>M: OnStreamAppend(path) · manager.go:214
+    M->>R: StreamSubscribers(path) fan-out · redis_store.go:160
+    R-->>M: subscription ids with pending work
+    Note over M: issueWake · ArmWake increments generation · manager.go:256
+    M->>R: ArmWake · gen++ · phase waking · arm_wake.lua
+    alt webhook delivery
+        M->>K: signed POST — Ed25519, SSRF-guarded · manager.go:303
+        K-->>M: 200 done:true
+        M->>R: Ack · fence on generation + wake_id · advance cursor
+    else pull-wake delivery
+        M->>R: append wake event to wake stream · manager.go:287
+        K->>M: claim — lease compare-and-set · claim.lua
+        M-->>K: 200 · token + snapshot
+        K->>M: ack done:true
+    end
+    Note over M,R: recoverySweeper re-arms stranded wakes every 2s · manager.go:495
