@@ -72,8 +72,10 @@ Flags take precedence over environment variables; both over defaults.
 
 ### Redis requirements
 
-- Redis ≥ 7.4 (8.x recommended); chronicle uses `EVALSHA` Lua scripts, pub/sub,
-  and hash-field TTLs (`HEXPIRE`).
+- Redis 6.0+ — chronicle uses `EVALSHA` Lua scripts, pub/sub, ZSET-lex, and
+  key-level `PEXPIRE`/`PERSIST` (no hash-field TTLs / `HEXPIRE`). Managed Redis
+  8.x is the recommended and standard target; the load-test rig validated on
+  Memorystore Redis 7.2 ([loadtest/RESULTS-gke.md](loadtest/RESULTS-gke.md)).
 - `maxmemory-policy noeviction` — any eviction policy can silently truncate
   streams. Chronicle warns at startup if it can read the config and it differs.
 - Cluster mode: all keys for a stream share a `{path}` hash tag (single slot),
