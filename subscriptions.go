@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -12,6 +13,14 @@ import (
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
+
+// SubscriptionTuning configures the subscription background loops. Zero values
+// fall back to the Manager's defaults (2s sweep, 30s reconcile, no sweep cap).
+type SubscriptionTuning struct {
+	SweepInterval     time.Duration
+	ReconcileInterval time.Duration
+	SweepBatch        int
+}
 
 // storePath maps a stream-root-relative subscription path ("events/abc") to the
 // store's leading-slash key ("/events/abc"). The inverse of subStreamPath.
@@ -42,9 +51,12 @@ type SubscriptionService interface {
 }
 
 // streamAdapter adapts the durable stream store to webhook.Streams: the seam the
-// subscription Manager uses to read tails and append pull-wake events.
+// subscription Manager uses to read tails and append pull-wake events. rs is
+// optional: when set it enables a pipelined batch tail read for the recovery
+// sweep; when nil, TailOffsets falls back to per-path reads.
 type streamAdapter struct {
 	st store.Store
+	rs *redisstore.Store
 }
 
 func (a streamAdapter) TailOffset(path string) (string, bool) {
@@ -53,6 +65,34 @@ func (a streamAdapter) TailOffset(path string) (string, bool) {
 		return "", false
 	}
 	return off.String(), true
+}
+
+// TailOffsets reads many stream tails at once: one pipelined batch when the Redis
+// store is available, else a per-path fallback. Paths absent from the result do
+// not exist. The sweep reads every linked tail per tick, so the batch keeps that
+// from being a round trip per link.
+func (a streamAdapter) TailOffsets(paths []string) map[string]string {
+	if a.rs != nil {
+		keyed := make([]string, len(paths))
+		for i, p := range paths {
+			keyed[i] = storePath(p)
+		}
+		if offs, err := a.rs.GetCurrentOffsets(context.Background(), keyed); err == nil {
+			out := make(map[string]string, len(offs))
+			for sp, off := range offs {
+				out[strings.TrimPrefix(sp, "/")] = off.String()
+			}
+			return out
+		}
+		// fall through to per-path on error
+	}
+	out := make(map[string]string, len(paths))
+	for _, p := range paths {
+		if tail, ok := a.TailOffset(p); ok {
+			out[p] = tail
+		}
+	}
+	return out
 }
 
 func (a streamAdapter) BeginningOffset() string { return store.ZeroOffset.String() }
@@ -91,16 +131,19 @@ func (l redisLister) ListStreams() ([]webhook.StreamMeta, error) {
 // protocol is served under (scheme+host+root, trailing slash), used to build
 // callback and JWKS URLs. rs may be nil to disable pattern backfill of existing
 // streams (new streams are still linked as they are created).
-func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs *redisstore.Store, streamRootURL string, allowPrivateWebhooks bool, logger *slog.Logger) (SubscriptionRouter, SubscriptionService, error) {
+func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs *redisstore.Store, streamRootURL string, allowPrivateWebhooks bool, tuning SubscriptionTuning, logger *slog.Logger) (SubscriptionRouter, SubscriptionService, error) {
 	opts := webhook.ManagerOptions{
 		StreamRootURL:              streamRootURL,
 		Logger:                     logger,
 		AllowPrivateWebhookTargets: allowPrivateWebhooks,
+		SweepInterval:              tuning.SweepInterval,
+		ReconcileInterval:          tuning.ReconcileInterval,
+		SweepBatch:                 tuning.SweepBatch,
 	}
 	if rs != nil {
 		opts.Lister = redisLister{rs: rs}
 	}
-	mgr, err := webhook.NewManager(webhook.NewRedisStore(client), streamAdapter{st: streamStore}, opts)
+	mgr, err := webhook.NewManager(webhook.NewRedisStore(client), streamAdapter{st: streamStore, rs: rs}, opts)
 	if err != nil {
 		return nil, nil, err
 	}

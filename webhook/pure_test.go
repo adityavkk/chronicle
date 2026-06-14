@@ -6,6 +6,30 @@ import (
 	"time"
 )
 
+func TestHasPendingWorkFrom(t *testing.T) {
+	begin := "0000000000000000_0000000000000000"
+	ahead := "0000000000000001_0000000000000000"
+	links := []StreamLink{
+		{Path: "a", AckedOffset: begin},
+		{Path: "b", AckedOffset: ahead},
+		{Path: "c", AckedOffset: begin},
+	}
+	if HasPendingWorkFrom(links, map[string]string{}) {
+		t.Fatal("empty tail map must be not-pending (missing streams omitted)")
+	}
+	if HasPendingWorkFrom(links, map[string]string{"b": ahead}) {
+		t.Fatal("tail == acked is not pending")
+	}
+	if !HasPendingWorkFrom(links, map[string]string{"a": ahead}) {
+		t.Fatal("tail > acked must be pending")
+	}
+	// A path present but not beyond its cursor, alongside a missing one: still not
+	// pending — must match the per-link Snapshot decision.
+	if HasPendingWorkFrom(links, map[string]string{"c": begin}) {
+		t.Fatal("tail == acked with a missing sibling is not pending")
+	}
+}
+
 func TestGlobMatch(t *testing.T) {
 	cases := []struct {
 		pattern, path string
