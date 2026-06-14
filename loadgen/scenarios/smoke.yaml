@@ -1,0 +1,26 @@
+# Quick validation run: exercises every workload type in 10 seconds.
+# Not a benchmark — use it to verify a target speaks the protocol and
+# that dsload records every signal.
+name: smoke
+description: >
+  Smoke test: 4 streams, writers at 20 msg/s, SSE + long-poll tailers,
+  light catch-up reads.
+
+duration: 10s
+warmup: 2s
+
+streams:
+  count: 4
+  prefix: bench/smoke
+
+writers:
+  per_stream: 1
+  rate: 20/s
+  message_bytes: 120
+
+tailers:
+  sse_per_stream: 1
+  long_poll_per_stream: 1
+
+catchup:
+  rate: 2/s

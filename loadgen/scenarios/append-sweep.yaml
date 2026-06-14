@@ -1,0 +1,26 @@
+# Append-rate sweep: open-loop ramp from 200/s to 2,000/s aggregate to
+# find the write-path knee. Per-writer rates ramp 12.5/s → 125/s across
+# 16 streams; the per-second series in results.json shows exactly where
+# (if anywhere) latency departs from flat.
+#
+# 256 B messages: a tool-call / progress event, bigger than a token,
+# smaller than a document patch. No readers — isolates the write path.
+name: append-sweep
+description: >
+  Write-path sweep: 16 streams, aggregate append rate ramping 200/s →
+  2,000/s over the run, 256 B JSON messages, no readers.
+
+duration: 120s
+warmup: 5s
+
+streams:
+  count: 16
+  prefix: bench/sweep
+
+writers:
+  per_stream: 1
+  rate: 12.5/s..125/s
+  message_bytes: 256
+
+limits:
+  max_in_flight_appends: 2048
