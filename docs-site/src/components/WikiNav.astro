@@ -1,0 +1,205 @@
+---
+// WikiNav.astro — the Code Wiki's left rail. Lists every wiki page; under the
+// active page it expands the in-page sections and a scroll-spy marks the one
+// in view. Data comes from src/wiki/nav.ts so the rail and the pages can never
+// drift. Sticky on wide viewports; a horizontal strip on narrow ones.
+import { WIKI_NAV } from "../wiki/nav";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const wikiBase = `${base}/wiki`;
+const href = (slug: string) => (slug ? `${wikiBase}/${slug}` : wikiBase);
+
+// Active slug from the current path, normalized against the deployed base.
+const rel = (import.meta.env.BASE_URL
+  ? Astro.url.pathname.replace(base, "")
+  : Astro.url.pathname
+).replace(/\/$/, "");
+const activeSlug = rel.replace(/^\/wiki\/?/, ""); // "" | "modules" | "tracers"
+---
+
+<nav class="wiki-nav" aria-label="Code wiki">
+  <div class="wn-eyebrow mono"><span class="dot"></span>Code Wiki</div>
+  <ul class="wn-list">
+    {
+      WIKI_NAV.map((pg) => {
+        const isActive = pg.slug === activeSlug;
+        return (
+          <li class:list={["wn-page", { active: isActive }]}>
+            <a
+              class="wn-page-link"
+              href={href(pg.slug)}
+              aria-current={isActive ? "page" : undefined}
+            >
+              <span class="wn-page-title">{pg.title}</span>
+              <span class="wn-page-blurb">{pg.blurb}</span>
+            </a>
+            {isActive && pg.sections.length > 0 && (
+              <ul class="wn-sections">
+                {pg.sections.map((s) => (
+                  <li>
+                    <a class="wn-sec mono" href={`#${s.id}`} data-spy={s.id}>
+                      {s.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        );
+      })
+    }
+  </ul>
+</nav>
+
+<script>
+  // Scroll-spy: mark the section currently in the upper band of the viewport.
+  // Observes only the active page's section elements (the rail only renders
+  // sub-links for the active page), so there is exactly one observer set.
+  const links = Array.from(
+    document.querySelectorAll<HTMLAnchorElement>(".wn-sec[data-spy]"),
+  );
+  if (links.length) {
+    const byId = new Map(links.map((l) => [l.dataset.spy!, l]));
+    const targets = links
+      .map((l) => document.getElementById(l.dataset.spy!))
+      .filter((el): el is HTMLElement => !!el);
+
+    let current: HTMLAnchorElement | null = null;
+    const setCurrent = (id: string | undefined) => {
+      const link = id ? byId.get(id) : null;
+      if (link === current) return;
+      current?.classList.remove("current");
+      link?.classList.add("current");
+      current = link ?? null;
+    };
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        // Pick the topmost intersecting section as the active one.
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible.length) setCurrent(visible[0].target.id);
+      },
+      // Activate a section once its heading crosses ~12% from the top.
+      { rootMargin: "-12% 0px -78% 0px", threshold: 0 },
+    );
+    targets.forEach((t) => io.observe(t));
+  }
+</script>
+
+<style lang="scss">
+  .wiki-nav {
+    position: sticky;
+    top: 28px;
+    align-self: start;
+    max-height: calc(100vh - 56px);
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+  .wn-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 22px;
+  }
+  .wn-eyebrow .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(36, 131, 123, 0.16);
+  }
+
+  .wn-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 4px;
+  }
+  .wn-page-link {
+    display: block;
+    padding: 9px 12px;
+    border-radius: 8px;
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    transition:
+      background 0.18s ease,
+      border-color 0.18s ease;
+  }
+  .wn-page-title {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -0.005em;
+  }
+  .wn-page-blurb {
+    display: block;
+    margin-top: 1px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .wn-page-link:hover { background: var(--tint); }
+  .wn-page.active > .wn-page-link {
+    background: var(--accent-tint);
+    border-left-color: var(--accent);
+  }
+  .wn-page.active .wn-page-title { color: var(--accent-deep); }
+
+  .wn-sections {
+    list-style: none;
+    margin: 4px 0 8px;
+    padding: 0 0 0 14px;
+    display: grid;
+    gap: 1px;
+    border-left: 1px solid var(--rule);
+    margin-left: 13px;
+  }
+  .wn-sec {
+    display: block;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    letter-spacing: 0.01em;
+    color: var(--ink-mute);
+    text-decoration: none;
+    transition: color 0.18s ease, background 0.18s ease;
+  }
+  .wn-sec:hover { color: var(--ink); background: var(--tint); }
+  .wn-sec.current {
+    color: var(--accent);
+    background: var(--accent-tint);
+    font-weight: 600;
+  }
+
+  // Narrow: the rail becomes a horizontal scroller above the content; the
+  // section sub-links collapse (the page is short enough to scroll directly).
+  @media (max-width: 1040px) {
+    .wiki-nav {
+      position: static;
+      max-height: none;
+      overflow: visible;
+      padding: 0 0 8px;
+      margin-bottom: 8px;
+      border-bottom: 1px solid var(--rule);
+    }
+    .wn-list {
+      grid-auto-flow: column;
+      grid-auto-columns: max-content;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+    .wn-sections { display: none; }
+    .wn-page-link { border-left: none; border-bottom: 2px solid transparent; }
+    .wn-page.active > .wn-page-link { border-left: none; border-bottom-color: var(--accent); }
+  }
+</style>

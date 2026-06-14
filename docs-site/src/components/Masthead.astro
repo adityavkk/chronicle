@@ -9,6 +9,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const home = `${base}/`;
 const endpoints = `${base}/endpoints`;
 const subscriptions = `${base}/subscriptions`;
+const wiki = `${base}/wiki`;
 const REPO = "https://github.com/adityavkk/chronicle";
 
 // Active page from the current path, normalized against the deployed base.
@@ -17,6 +18,7 @@ const rel = import.meta.env.BASE_URL
   : Astro.url.pathname.replace(/\/$/, "");
 const onEndpoints = rel === "/endpoints";
 const onSubscriptions = rel === "/subscriptions";
+const onWiki = rel === "/wiki" || rel.startsWith("/wiki/");
 const onHome = rel === "" || rel === "/";
 ---
 <nav class="masthead" aria-label="Site">
@@ -28,6 +30,7 @@ const onHome = rel === "" || rel === "/";
     <a href={home} class:list={["link", { active: onHome }]} aria-current={onHome ? "page" : undefined}>Overview</a>
     <a href={endpoints} class:list={["link", { active: onEndpoints }]} aria-current={onEndpoints ? "page" : undefined}>Endpoints</a>
     <a href={subscriptions} class:list={["link", { active: onSubscriptions }]} aria-current={onSubscriptions ? "page" : undefined}>Subscriptions</a>
+    <a href={wiki} class:list={["link", { active: onWiki }]} aria-current={onWiki ? "page" : undefined}>Wiki</a>
   </div>
   <a class="src" href={REPO}>
     <span>GitHub</span>

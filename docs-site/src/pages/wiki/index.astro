@@ -1,0 +1,13 @@
+---
+// /wiki — the Code Wiki overview. Content lives in _overview.mdx (underscore =
+// not routed); this wrapper hands its frontmatter to the Wiki layout, same
+// pattern as the other pages.
+import type { ComponentProps } from "astro/types";
+import Wiki from "../../layouts/Wiki.astro";
+import Overview, { frontmatter } from "./_overview.mdx";
+
+const fm = frontmatter as ComponentProps<typeof Wiki>["frontmatter"];
+---
+<Wiki frontmatter={fm}>
+  <Overview />
+</Wiki>

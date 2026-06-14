@@ -1,0 +1,17 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Handler
+    participant S as redis.Store
+    participant P as Other writer
+    C->>H: GET /events/x?offset=now&live=long-poll
+    Note over H: handleRead · parse offset + cursor · handler.go:355
+    H->>S: Store.Read → read.lua ZRANGEBYLEX · store/redis/store.go:583
+    S-->>H: empty — caller is at the tail
+    Note over H: at tail → WaitForMessages · handler.go:477
+    H->>S: WaitForMessages · SUBSCRIBE ds:notify · notify.go:48
+    Note over S: re-read once to close the missed-wakeup race
+    P->>S: POST append → append.lua PUBLISH 'a'
+    S-->>H: wake · re-read returns the new frames
+    H-->>C: 200 · frames + Stream-Next-Offset
+    Note over H: no append before timeout → 204 No Content
