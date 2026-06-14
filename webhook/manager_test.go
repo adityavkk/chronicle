@@ -195,6 +195,60 @@ func TestSweepWindowCapCoversAll(t *testing.T) {
 	}
 }
 
+// fakeMetrics records what the Manager observes, so a test can assert the
+// instrumentation seam is actually wired through the sweep.
+type fakeMetrics struct {
+	mu        sync.Mutex
+	sweeps    int
+	lastSubs  int
+	lastTails int
+	lastWakes int
+}
+
+func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sweeps++
+	f.lastSubs, f.lastTails, f.lastWakes = subs, tails, wakes
+}
+func (f *fakeMetrics) WakeDelivery(time.Duration, string) {}
+func (f *fakeMetrics) WakeEvent(time.Duration, string)    {}
+func (f *fakeMetrics) WorkerTick(string, int)             {}
+
+// TestSweepRecordsMetrics verifies the sweep reports its per-tick cost to the
+// Metrics seam: one tick recorded, carrying the subscription/tail counts and the
+// wakes it issued.
+func TestSweepRecordsMetrics(t *testing.T) {
+	store, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	fm := &fakeMetrics{}
+	mgr, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/", Metrics: fm})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	begin := "0000000000000000_0000000000000000"
+	if _, err := store.CreateOrConfirm("s1", pullWakeCfg(), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Link("s1", "events/1", LinkGlob, begin)
+	fs.mu.Lock()
+	fs.tails["events/1"] = "0000000000000001_0000000000000000"
+	fs.mu.Unlock()
+
+	mgr.RunSweep()
+
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	if fm.sweeps != 1 {
+		t.Fatalf("expected exactly one sweep tick recorded, got %d", fm.sweeps)
+	}
+	if fm.lastSubs < 1 || fm.lastTails < 1 || fm.lastWakes < 1 {
+		t.Fatalf("sweep metrics should reflect the pending sub: subs=%d tails=%d wakes=%d",
+			fm.lastSubs, fm.lastTails, fm.lastWakes)
+	}
+}
+
 // fakeLister is an in-memory StreamLister for reconcile tests.
 type fakeLister struct{ streams []StreamMeta }
 

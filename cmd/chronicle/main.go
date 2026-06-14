@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -17,8 +18,10 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	chronicle "gecgithub01.walmart.com/auk000v/chronicle"
+	"gecgithub01.walmart.com/auk000v/chronicle/metrics"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
+	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
 // newStore builds the stream store. For the redis backend it also returns the
@@ -72,6 +75,7 @@ func run() error {
 	flag.DurationVar(&cfg.SweepInterval, "sweep-interval", cfg.SweepInterval, "recovery sweep interval (subscriptions)")
 	flag.DurationVar(&cfg.ReconcileInterval, "reconcile-interval", cfg.ReconcileInterval, "slow reconcile loop interval (subscriptions)")
 	flag.IntVar(&cfg.SweepBatch, "sweep-batch", cfg.SweepBatch, "max subscriptions evaluated per sweep tick, 0 = no cap (subscriptions)")
+	flag.StringVar(&cfg.MetricsListen, "metrics-listen", cfg.MetricsListen, "address for /metrics + /healthz + /readyz, e.g. :9090 (empty disables)")
 	flag.StringVar(&logLevel, "log-level", logLevel, "log level: debug, info, warn or error")
 	flag.Parse()
 
@@ -94,6 +98,35 @@ func run() error {
 		Logger:               logger,
 	}
 
+	// Observability surface (/metrics, /healthz, /readyz). Created independently
+	// of subscriptions so Go/process/health metrics are exposed either way; the
+	// recorder is handed to the subscription Manager when subscriptions are on.
+	var subMetrics webhook.Metrics
+	var metricsSrv *http.Server
+	if cfg.MetricsListen != "" {
+		prom := metrics.New()
+		subMetrics = prom
+		ready := func() error { return nil }
+		if client != nil {
+			ready = func() error {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				return client.Ping(ctx).Err()
+			}
+		}
+		metricsSrv = &http.Server{
+			Addr:              cfg.MetricsListen,
+			Handler:           prom.Mux(ready),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		go func() {
+			if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("metrics server", "error", err)
+			}
+		}()
+		logger.Info("metrics enabled", "addr", cfg.MetricsListen)
+	}
+
 	subscriptionsEnabled := false
 	if cfg.Subscriptions {
 		if client == nil {
@@ -104,6 +137,7 @@ func run() error {
 			SweepInterval:     cfg.SweepInterval,
 			ReconcileInterval: cfg.ReconcileInterval,
 			SweepBatch:        cfg.SweepBatch,
+			Metrics:           subMetrics,
 		}
 		router, service, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)
 		if err != nil {
@@ -155,6 +189,9 @@ func run() error {
 	logger.Info("shutting down, draining connections")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if metricsSrv != nil {
+		_ = metricsSrv.Shutdown(shutdownCtx)
+	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		// Open-ended SSE connections can outlive the drain window; cut them.
 		logger.Warn("graceful shutdown incomplete, forcing close", "error", err)

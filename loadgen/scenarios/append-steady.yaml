@@ -1,0 +1,23 @@
+# Steady-state write path: a fixed 1,000 appends/s aggregate across 20
+# streams — comfortably inside both servers' envelope on local hardware
+# so the latency table reads as "cost per append under sustained load",
+# not as a saturation artifact.
+name: append-steady
+description: >
+  Steady write path: 20 streams, 50 appends/s per stream (1,000/s
+  aggregate), 256 B JSON messages, no readers.
+
+duration: 60s
+warmup: 5s
+
+streams:
+  count: 20
+  prefix: bench/steady
+
+writers:
+  per_stream: 1
+  rate: 50/s
+  message_bytes: 256
+
+limits:
+  max_in_flight_appends: 2048
