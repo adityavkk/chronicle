@@ -70,6 +70,7 @@ measurements.
 | [04-options-for-chronicle.md](04-options-for-chronicle.md) | First-pass options (superseded by 05; see 06 for the corrections) |
 | [05-proposed-architecture.md](05-proposed-architecture.md) | ⭐ Two hardened options — slot-homed evolve-in-place vs owner-replica split — scale, DR, tunable consistency |
 | [06-adversarial-review.md](06-adversarial-review.md) | Adversarial review of 01–04 + the corrections folded into 05 |
+| [07-jepsen-style-verification.md](07-jepsen-style-verification.md) | Jepsen-style safety + liveness test plan for 05, in Go (porcupine + the existing `jepsen/` harness) |
 
 ## On verification
 
