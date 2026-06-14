@@ -1,11 +1,13 @@
-# Managed Redis 8 (Memorystore), provisioned only when provision_redis = true.
-# The SUT's control plane lives in one {__ds} hash-tag slot, so a single managed
-# instance is the realistic target. maxmemory-policy MUST be noeviction —
-# anything else can silently truncate the durable log and chronicle warns on it.
+# Managed Redis (Memorystore for Redis), provisioned only when provision_redis =
+# true. chronicle needs only Redis 6.0+, so REDIS_7_2 works; to match production's
+# managed Redis 8 (Memorystore for Valkey 8.0) set provision_redis = false and
+# point sut.redis_url at it. The control plane lives in one {__ds} hash-tag slot,
+# so a single managed instance is the realistic target.
 #
-# Note: appendfsync/AOF durability on Memorystore is set by the chosen
-# persistence config of the managed offering, not a free-form arg as in the
-# jepsen in-cluster Redis. Match production's durability tier here.
+# maxmemory-policy MUST be noeviction — chronicle warns at boot otherwise, and
+# any eviction policy silently truncates the durable log. AOF/persistence
+# durability is set by the managed tier (match production's), not a free-form arg
+# as in the jepsen in-cluster Redis.
 resource "google_redis_instance" "this" {
   count = var.provision_redis ? 1 : 0
 

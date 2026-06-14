@@ -22,6 +22,9 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       nodeSelector: { role: sut }
+      # Don't inject CHRONICLE_*_PORT env from the Service named "chronicle" —
+      # connectivity is via DNS, and it keeps Service env out of the pod.
+      enableServiceLinks: false
       terminationGracePeriodSeconds: 5
       containers:
         - name: chronicle
