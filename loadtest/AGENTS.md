@@ -1,5 +1,8 @@
 # Implementer notes — running chronicle subscription load tests on GKE
 
+For the repo-wide map (codebase layout, other runbooks, the open work) see the
+root [`AGENTS.md`](../AGENTS.md). This file is the rig specifically.
+
 Read this before you touch the rig. It is the distilled "don't repeat my
 mistakes" for running it on GKE, adapted from the Electric Agents rig. For *what*
 the rig is, see `README.md`; for the design, the spec format, and source-verified
