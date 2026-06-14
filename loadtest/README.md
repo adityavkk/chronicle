@@ -43,13 +43,16 @@ go run ./cmd/sweepscale -base-url http://localhost:4437 \
 ## Cloud run (GKE + managed Redis 8)
 
 Prereqs: `gcloud` (authenticated — run `! gcloud auth login` in your shell),
-`terraform`, `kubectl`, `docker`, and an Artifact Registry repo.
+`kubectl`, an Artifact Registry repo, and `terraform` (or provision via `gcloud`).
+**Read `AGENTS.md` first** — pre-flight quota checks, the Cloud Build SA roles,
+and the Connect-Gateway kubectl fix each save a failed cluster create.
 
 ```sh
-# 1. Build + push images (chronicle from the repo root, loadgen from loadgen/).
-docker build -t $REG/chronicle:$TAG .
-docker build -t $REG/chronicle-loadgen:$TAG -f loadgen/Dockerfile loadgen
-docker push $REG/chronicle:$TAG && docker push $REG/chronicle-loadgen:$TAG
+# 1. Build + push amd64 images in Cloud Build — NOT local `docker build`, which
+#    emulates amd64 via QEMU on an arm Mac (slow, flaky). cloudbuild.yaml builds
+#    both images; the Compute Engine default SA needs the roles in AGENTS.md.
+gcloud builds submit --config loadtest/cloudbuild.yaml \
+  --substitutions=_REG=$REG,_TAG=$TAG .
 
 # 2. Point the spec at those images, then render.
 $EDITOR loadtest/spec/sweep-10k.yaml          # set sut.image + loadgen_image
@@ -64,6 +67,9 @@ $EDITOR loadtest/terraform/terraform.auto.tfvars   # project_id, and redis_versi
 #    Put `terraform output redis_url` into the spec's sut.redis_url, then:
 ( cd loadgen && go run ./cmd/render -spec ../loadtest/spec/sweep-10k.yaml -out ../loadtest/out )
 eval "$( cd loadtest/terraform && terraform output -raw kubeconfig_command )"
+# If kubectl times out (dial tcp <ip>:443) on a corp network, register the
+# cluster with the GKE Fleet and route via Connect Gateway (see AGENTS.md):
+#   gcloud container fleet memberships get-credentials <cluster> --project $PROJECT
 
 # 5. Deploy the SUT and run the SLO-gated experiment.
 kubectl apply -f loadtest/out/sut.yaml
