@@ -630,7 +630,7 @@ import Complexity from "../components/Complexity.astro";
     round trips cut those same ticks to 12.5 ms and 137 ms (~90–350× faster), so
     one replica's sweep now holds well past 10k subscriptions. Two edges stay
     open: the sweep still runs redundantly on every replica (`O(N·K)` against the
-    shared `{"{__ds}"}` slot), and it is still `O(K)` per tick. Past what batching
+    shared `{__ds}` slot), and it is still `O(K)` per tick. Past what batching
     buys, the fixes are sharding the sweep across replicas (the fence already
     makes mis-sharding harmless) or an event-driven backstop (the doc-10 outbox)
     that touches only subscriptions with owed work instead of scanning all K. A
