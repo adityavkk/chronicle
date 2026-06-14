@@ -132,6 +132,12 @@ and recorded as built in
 
 ## Development
 
+New here? **[AGENTS.md](AGENTS.md)** is the implementer's map — codebase layout,
+the cheat sheets (design docs, jepsen, the load-test rig), and the open scaling
+work. The GKE load-test rig and its "don't repeat my mistakes" notes live under
+[loadtest/](loadtest/) ([rig README](loadtest/README.md),
+[implementer notes](loadtest/AGENTS.md), [results](loadtest/RESULTS-gke.md)).
+
 ```bash
 make test         # unit + integration tests (-race); integration needs redis
 make test-unit    # pure-core tests only (no redis, runs in <1s)
@@ -146,7 +152,11 @@ protocol/      pure protocol logic: headers, parsing, cursors, producer rules
 store/         the storage contract (mirrors the Caddy plugin's store package)
 store/redis/   the Redis backend: Lua scripts, frames, pub/sub waiters
 handler.go     HTTP layer (mirrors the Caddy plugin's handler)
+webhook/       the __ds subscription engine: webhook + pull-wake, fencing, sweep
+metrics/       Prometheus /metrics + /healthz + /readyz (-metrics-listen)
 cmd/chronicle/ the server binary
+loadtest/      GKE + managed-Redis load-test rig (see loadtest/AGENTS.md)
+loadgen/       the load generator (dsload + the sweep-scale driver)
 ```
 
 The `store/` and handler layers intentionally track
