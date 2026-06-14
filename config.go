@@ -2,6 +2,7 @@ package chronicle
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -16,6 +17,9 @@ const (
 	EnvPublicURL            = "CHRONICLE_PUBLIC_URL"
 	EnvSubscriptions        = "CHRONICLE_SUBSCRIPTIONS"
 	EnvWebhookAllowPrivate  = "CHRONICLE_WEBHOOK_ALLOW_PRIVATE"
+	EnvSweepInterval        = "CHRONICLE_SWEEP_INTERVAL"
+	EnvReconcileInterval    = "CHRONICLE_RECONCILE_INTERVAL"
+	EnvSweepBatch           = "CHRONICLE_SWEEP_BATCH"
 )
 
 // Config holds the chronicle server configuration. LongPollTimeout and
@@ -59,6 +63,22 @@ type Config struct {
 	// http(s) target, including RFC1918 cluster-internal receivers. Off by
 	// default; enable only on a trusted network.
 	WebhookAllowPrivate bool
+
+	// SweepInterval is how often the recovery sweep re-evaluates every
+	// subscription against its durable cursor (default 2s). The sweep is the
+	// backstop for a wake lost to a crash; lengthen it to trade recovery latency
+	// for less steady-state Redis load on a large subscription keyspace.
+	SweepInterval time.Duration
+
+	// ReconcileInterval is how often the slow reconcile loop runs (missed glob
+	// links + fan-out index repair; default 30s). It scans the stream keyspace,
+	// so it is deliberately slower than the sweep.
+	ReconcileInterval time.Duration
+
+	// SweepBatch caps how many subscriptions one sweep tick evaluates (0 = no
+	// cap, the default). A positive cap bounds per-tick cost on a very large
+	// keyspace at the price of up to ceil(K/SweepBatch) ticks of recovery latency.
+	SweepBatch int
 }
 
 // DefaultConfig returns the defaults: port 4437 (the IANA-assigned Durable
@@ -74,6 +94,8 @@ func DefaultConfig() Config {
 		SSEReconnectInterval: 60 * time.Second,
 		PublicBaseURL:        "http://localhost:4437",
 		Subscriptions:        true,
+		SweepInterval:        2 * time.Second,
+		ReconcileInterval:    30 * time.Second,
 	}
 }
 
@@ -111,6 +133,27 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvWebhookAllowPrivate); ok {
 		c.WebhookAllowPrivate = v == "1" || v == "true"
+	}
+	if v, ok := lookup(EnvSweepInterval); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvSweepInterval, err)
+		}
+		c.SweepInterval = d
+	}
+	if v, ok := lookup(EnvReconcileInterval); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvReconcileInterval, err)
+		}
+		c.ReconcileInterval = d
+	}
+	if v, ok := lookup(EnvSweepBatch); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvSweepBatch, err)
+		}
+		c.SweepBatch = n
 	}
 	return nil
 }

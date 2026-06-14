@@ -173,6 +173,43 @@ func (s *Store) GetCurrentOffset(path string) (store.Offset, error) {
 	return store.ParseOffset(tail)
 }
 
+// GetCurrentOffsets returns the tail offset for each given path that exists, in
+// pipelined batches. Missing streams (and unparseable tails) are omitted, so the
+// caller cannot tell "missing" from "errored" — the batched form of
+// GetCurrentOffset for read-many callers like the subscription recovery sweep.
+// Like GetCurrentOffset it ignores expiry and soft-deletion and touches no TTLs.
+func (s *Store) GetCurrentOffsets(ctx context.Context, paths []string) (map[string]store.Offset, error) {
+	const chunk = 512
+	out := make(map[string]store.Offset, len(paths))
+	for start := 0; start < len(paths); start += chunk {
+		end := start + chunk
+		if end > len(paths) {
+			end = len(paths)
+		}
+		batch := paths[start:end]
+		pipe := s.client.Pipeline()
+		cmds := make([]*redis.StringCmd, len(batch))
+		for i, p := range batch {
+			cmds[i] = pipe.HGet(ctx, metaKey(p), fTail)
+		}
+		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+			return nil, err
+		}
+		for i, p := range batch {
+			tail, err := cmds[i].Result()
+			if err != nil {
+				continue // redis.Nil (missing) or a read error: omit
+			}
+			off, err := store.ParseOffset(tail)
+			if err != nil {
+				continue
+			}
+			out[p] = off
+		}
+	}
+	return out, nil
+}
+
 // Create creates a stream (idempotent PUT). Fork creation is orchestrated
 // across two cluster slots (source and fork) and is therefore NOT atomic:
 // between the source refcount increment and the fork-key creation a crash

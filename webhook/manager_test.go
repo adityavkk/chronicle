@@ -21,6 +21,18 @@ func (f *fakeStreams) TailOffset(path string) (string, bool) {
 	return v, ok
 }
 
+func (f *fakeStreams) TailOffsets(paths []string) map[string]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]string, len(paths))
+	for _, p := range paths {
+		if v, ok := f.tails[p]; ok {
+			out[p] = v
+		}
+	}
+	return out
+}
+
 func (f *fakeStreams) BeginningOffset() string { return "0000000000000000_0000000000000000" }
 
 func (f *fakeStreams) AppendWakeEvent(wakeStream string, data []byte) error {
@@ -113,6 +125,73 @@ func TestSweepReemitsStrandedPullWake(t *testing.T) {
 	mgr.RunSweep()
 	if fs.count() != before {
 		t.Fatalf("second sweep must not re-emit, got %d -> %d", before, fs.count())
+	}
+}
+
+// TestSweepBatchedWakesOnlyPendingSubs verifies the batched sweep (GetMany +
+// TailOffsets + HasPendingWorkFrom) wakes exactly the idle subscriptions whose
+// linked tail is beyond the cursor, and leaves not-pending and missing-stream
+// subscriptions idle — the same decision the per-link sweep made.
+func TestSweepBatchedWakesOnlyPendingSubs(t *testing.T) {
+	mgr, store, fs := newTestManager(t)
+	now := time.Now()
+	begin := "0000000000000000_0000000000000000"
+	for _, id := range []string{"s1", "s2", "s3"} {
+		if _, err := store.CreateOrConfirm(id, pullWakeCfg(), nil, now); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	_ = store.Link("s1", "events/1", LinkGlob, begin)
+	_ = store.Link("s2", "events/2", LinkGlob, begin)
+	_ = store.Link("s3", "events/3", LinkGlob, begin)
+
+	// s1 pending (tail > acked); s2 not pending (tail == acked); s3 stream missing.
+	fs.mu.Lock()
+	fs.tails["events/1"] = "0000000000000001_0000000000000000"
+	fs.tails["events/2"] = begin
+	fs.mu.Unlock()
+
+	mgr.RunSweep()
+
+	if got := fs.count(); got != 1 {
+		t.Fatalf("expected exactly one wake event (s1), got %d", got)
+	}
+	if sub, _, _ := store.Get("s1"); sub.Phase != PhaseWaking {
+		t.Fatalf("s1 (pending) should be waking after the sweep, got %q", sub.Phase)
+	}
+	for _, id := range []string{"s2", "s3"} {
+		if sub, _, _ := store.Get(id); sub.Phase != PhaseIdle {
+			t.Fatalf("%s (not pending) should stay idle, got %q", id, sub.Phase)
+		}
+	}
+}
+
+// TestSweepWindowCapCoversAll verifies the optional per-tick cap rolls a cursor
+// across ticks so every subscription is eventually covered, and that the default
+// (no cap) returns every id.
+func TestSweepWindowCapCoversAll(t *testing.T) {
+	ids := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}
+
+	if got := (&Manager{}).sweepWindow(append([]string{}, ids...)); len(got) != len(ids) {
+		t.Fatalf("sweepBatch=0 must return all %d ids, got %d", len(ids), len(got))
+	}
+
+	m := &Manager{sweepBatch: 3}
+	seen := map[string]bool{}
+	work := append([]string{}, ids...)
+	for tick := 0; tick < 4; tick++ { // ceil(10/3) = 4 ticks cover all
+		win := m.sweepWindow(work)
+		if len(win) > 3 {
+			t.Fatalf("tick %d window %v exceeds cap 3", tick, win)
+		}
+		for _, id := range win {
+			seen[id] = true
+		}
+	}
+	for _, id := range ids {
+		if !seen[id] {
+			t.Fatalf("id %q never swept across the rolling window", id)
+		}
 	}
 }
 

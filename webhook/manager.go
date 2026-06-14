@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
@@ -22,6 +23,12 @@ import (
 type Streams interface {
 	// TailOffset returns a stream's current tail and whether it exists.
 	TailOffset(path string) (string, bool)
+	// TailOffsets returns the current tail for each given path that exists, in as
+	// few round trips as the implementation can manage. The recovery sweep reads
+	// every linked stream's tail per tick, so a per-path round trip does not
+	// scale; this is the batched form. A path whose stream does not exist is
+	// omitted from the map (the batched form of TailOffset's not-ok result).
+	TailOffsets(paths []string) map[string]string
 	// BeginningOffset is the canonical "start of stream" cursor (store.ZeroOffset);
 	// a stream linked here has no pending work until its first append.
 	BeginningOffset() string
@@ -70,6 +77,11 @@ type ManagerOptions struct {
 	// link recovery + fan-out index repair). Default 30s — it is O(streams), so
 	// it is deliberately decoupled from the fast 2s sweep.
 	ReconcileInterval time.Duration
+	// SweepBatch caps how many subscriptions one sweep tick evaluates, the rest
+	// rolling to following ticks. 0 (the default) means no cap — every tick
+	// sweeps all subscriptions. A positive cap bounds per-tick cost on a large
+	// keyspace at the price of up to ceil(K/SweepBatch) ticks of recovery latency.
+	SweepBatch int
 	// AllowPrivateWebhookTargets relaxes SSRF validation to accept any http(s)
 	// webhook URL (e.g. cluster-internal receivers on RFC1918 addresses). Off by
 	// default; the operator opts in for trusted networks.
@@ -94,6 +106,8 @@ type Manager struct {
 	workerTick        time.Duration
 	sweepInterval     time.Duration
 	reconcileInterval time.Duration
+	sweepBatch        int
+	sweepCursor       int // rolling start index when sweepBatch caps a tick
 	allowPrivate      bool
 
 	stop chan struct{}
@@ -125,6 +139,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		workerTick:        opts.WorkerTick,
 		sweepInterval:     opts.SweepInterval,
 		reconcileInterval: opts.ReconcileInterval,
+		sweepBatch:        opts.SweepBatch,
 		allowPrivate:      opts.AllowPrivateWebhookTargets,
 		stop:              make(chan struct{}),
 	}
@@ -508,15 +523,23 @@ func (m *Manager) recoverySweeper() {
 
 func (m *Manager) sweepOnce() {
 	ids, err := m.store.List()
+	if err != nil || len(ids) == 0 {
+		return
+	}
+	ids = m.sweepWindow(ids)
+	now := time.Now()
+	// Batch the per-tick reads. The sweep is O(subscriptions x links) and the
+	// naive form was one round trip per subscription (Get) plus one per link
+	// (tail) — the poll backstop's scaling ceiling. GetMany pipelines the
+	// subscription reads; TailOffsets pipelines every linked tail into one batch.
+	subs, err := m.store.GetMany(ids)
 	if err != nil {
 		return
 	}
-	now := time.Now()
-	for _, id := range ids {
-		sub, ok, err := m.store.Get(id)
-		if err != nil || !ok {
-			continue
-		}
+	// Collect tails across all subs (not just idle ones) so a subscription that
+	// lease expiry flips to idle below still has its tails in the batch.
+	tails := m.streams.TailOffsets(distinctLinkPaths(subs))
+	for _, sub := range subs {
 		// Recover a pull-wake stranded by a crash between arming the wake and
 		// appending its wake event: the event was never durably emitted (its
 		// sent flag is still 0), so nothing in the schedule will deliver it and a
@@ -527,14 +550,59 @@ func (m *Manager) sweepOnce() {
 			continue
 		}
 		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
-			if status, err := m.store.ExpireLease(id, now); err == nil && status == "EXPIRED" {
+			if status, err := m.store.ExpireLease(sub.ID, now); err == nil && status == "EXPIRED" {
 				sub.Phase = PhaseIdle
 			}
 		}
-		if sub.Phase == PhaseIdle && HasPendingWork(sub.Links, m.tailOf) {
+		if sub.Phase == PhaseIdle && HasPendingWorkFrom(sub.Links, tails) {
 			m.issueWake(sub, "")
 		}
 	}
+}
+
+// sweepWindow optionally bounds a sweep tick to sweepBatch subscriptions,
+// advancing a rolling cursor so every id is covered over successive ticks. With
+// sweepBatch <= 0 (the default) it returns every id and the sweep is unbounded.
+// Ids are sorted when a cap is active so the rolling window is stable across the
+// unordered SMEMBERS result. Recovery latency for any one subscription becomes up
+// to ceil(K/sweepBatch) ticks, traded for a bounded per-tick cost.
+func (m *Manager) sweepWindow(ids []string) []string {
+	if m.sweepBatch <= 0 || len(ids) <= m.sweepBatch {
+		m.sweepCursor = 0
+		return ids
+	}
+	sort.Strings(ids)
+	start := m.sweepCursor
+	if start >= len(ids) {
+		start = 0
+	}
+	end := start + m.sweepBatch
+	if end <= len(ids) {
+		m.sweepCursor = end % len(ids)
+		return ids[start:end]
+	}
+	window := make([]string, 0, m.sweepBatch)
+	window = append(window, ids[start:]...)
+	window = append(window, ids[:end-len(ids)]...)
+	m.sweepCursor = end - len(ids)
+	return window
+}
+
+// distinctLinkPaths is the deduplicated set of stream paths linked by any of subs
+// — the input to one batched tail read for the whole sweep.
+func distinctLinkPaths(subs []Subscription) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(subs))
+	for _, sub := range subs {
+		for _, l := range sub.Links {
+			if _, ok := seen[l.Path]; ok {
+				continue
+			}
+			seen[l.Path] = struct{}{}
+			out = append(out, l.Path)
+		}
+	}
+	return out
 }
 
 // RunSweep runs one recovery sweep immediately (used at startup and in tests).

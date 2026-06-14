@@ -46,6 +46,25 @@ func HasPendingWork(links []StreamLink, tailOf TailFunc) bool {
 	return pending
 }
 
+// HasPendingWorkFrom is the batched-read form of HasPendingWork: it checks links
+// against a pre-fetched map of stream tails rather than a per-link TailFunc, so
+// the recovery sweep can read every linked tail in one batch instead of one
+// round trip per link. A path absent from tails is treated as a missing stream
+// (no pending work), matching TailFunc's not-ok case. Short-circuits on the
+// first pending link.
+func HasPendingWorkFrom(links []StreamLink, tails map[string]string) bool {
+	for _, l := range links {
+		tail, ok := tails[l.Path]
+		if !ok {
+			continue
+		}
+		if offsetGreater(tail, l.AckedOffset) {
+			return true
+		}
+	}
+	return false
+}
+
 // offsetGreater reports a > b for opaque, lexicographically-sortable offsets,
 // treating the protocol's "-1" beginning sentinel as less than any real offset.
 func offsetGreater(a, b string) bool {

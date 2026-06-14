@@ -69,6 +69,9 @@ func run() error {
 	flag.StringVar(&cfg.PublicBaseURL, "public-url", cfg.PublicBaseURL, "externally reachable origin for webhook callback/JWKS URLs")
 	flag.BoolVar(&cfg.Subscriptions, "subscriptions", cfg.Subscriptions, "enable the reserved __ds subscription APIs (redis backend only)")
 	flag.BoolVar(&cfg.WebhookAllowPrivate, "webhook-allow-private", cfg.WebhookAllowPrivate, "accept webhook URLs on private/RFC1918 addresses (trusted networks only)")
+	flag.DurationVar(&cfg.SweepInterval, "sweep-interval", cfg.SweepInterval, "recovery sweep interval (subscriptions)")
+	flag.DurationVar(&cfg.ReconcileInterval, "reconcile-interval", cfg.ReconcileInterval, "slow reconcile loop interval (subscriptions)")
+	flag.IntVar(&cfg.SweepBatch, "sweep-batch", cfg.SweepBatch, "max subscriptions evaluated per sweep tick, 0 = no cap (subscriptions)")
 	flag.StringVar(&logLevel, "log-level", logLevel, "log level: debug, info, warn or error")
 	flag.Parse()
 
@@ -97,7 +100,12 @@ func run() error {
 			return fmt.Errorf("subscriptions require the redis backend")
 		}
 		streamRootURL := strings.TrimSuffix(cfg.PublicBaseURL, "/") + cfg.StreamRoot
-		router, service, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, logger)
+		tuning := chronicle.SubscriptionTuning{
+			SweepInterval:     cfg.SweepInterval,
+			ReconcileInterval: cfg.ReconcileInterval,
+			SweepBatch:        cfg.SweepBatch,
+		}
+		router, service, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)
 		if err != nil {
 			return fmt.Errorf("subscriptions: %w", err)
 		}

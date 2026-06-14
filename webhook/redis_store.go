@@ -108,6 +108,39 @@ func (s *RedisStore) Get(id string) (Subscription, bool, error) {
 	return subscriptionFromHash(id, fields, linkCmd.Val()), true, nil
 }
 
+// GetMany hydrates many subscriptions in one pipelined batch, chunked to bound
+// the pipeline size. Missing subscriptions are skipped. It turns the recovery
+// sweep's per-subscription Get round trips into a handful of batched ones.
+func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
+	const chunk = 512
+	out := make([]Subscription, 0, len(ids))
+	for start := 0; start < len(ids); start += chunk {
+		end := start + chunk
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		pipe := s.client.Pipeline()
+		subCmds := make([]*redis.MapStringStringCmd, len(batch))
+		linkCmds := make([]*redis.MapStringStringCmd, len(batch))
+		for i, id := range batch {
+			subCmds[i] = pipe.HGetAll(s.ctx(), subKey(id))
+			linkCmds[i] = pipe.HGetAll(s.ctx(), linksKey(id))
+		}
+		if _, err := pipe.Exec(s.ctx()); err != nil {
+			return nil, err
+		}
+		for i, id := range batch {
+			fields := subCmds[i].Val()
+			if len(fields) == 0 {
+				continue
+			}
+			out = append(out, subscriptionFromHash(id, fields, linkCmds[i].Val()))
+		}
+	}
+	return out, nil
+}
+
 // Delete removes the subscription and de-indexes its streams. Links are read
 // first so the fan-out entries can be cleaned up.
 func (s *RedisStore) Delete(id string) error {
