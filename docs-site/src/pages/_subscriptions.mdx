@@ -594,8 +594,49 @@ import Complexity from "../components/Complexity.astro";
   </Callout>
 </section>
 
+<section class="block" id="open">
+  <SectionHead num="10" label="Open questions" title="What the dual write leaves <em>open</em>" />
+
+  Everything above rests on one move: the wake carries no authority. The durable
+  cursor and the stream tail are the truth; the wake is a derived signal a
+  background pass can recompute. That is what makes the append-then-notify *dual
+  write* safe to lose — drop the second write and the sweep re-derives the same
+  answer from durable state. It also draws the design's open edges, and all of
+  them are about the latency and cost of that recompute, never its correctness.
+
+  - **No recovery faster than the sweep.** A wake lost to a crash is re-derived
+    at the next sweep tick (~2 s); a glob link missed during an outage waits for
+    the next reconcile (~30 s). Recovery is a post-crash event, so that latency is
+    the right cost to pay — but a loss-sensitive pull-wake workload has no
+    sub-sweep path today. The named upgrade is the delivery [outbox sketched in
+    `docs/research/10`](https://github.com/adityavkk/chronicle/blob/main/docs/research/10-subscription-hardening-handoff.md):
+    a due-scored wake schedule that fires before the next tick, at the cost of a
+    third schedule ZSET and a fourth worker loop.
+
+  - **The fast path is in-process, not cross-origin.** The append-time hook
+    (`OnStreamAppend`) is a synchronous Go call on the origin that handled the
+    append — not the `ds:notify` pub/sub the direct-consumer long-poll rides. So
+    an append on origin A wakes A's subscribers at append latency, while a
+    subscriber a peer origin would serve waits for that peer's sweep. Redis holds
+    the durable state, so any origin *can* act; the open question is whether the
+    fast path should reach across origins rather than leaving the sweep to bridge
+    them.
+
+  - **The backstop is a poll, and a poll has a ceiling.** The sweep is `O(K)`
+    every couple of seconds (K subscriptions) and the reconcile is
+    `O(pattern-subs × streams)` every 30 s. Both are bounded to coordinator
+    cardinality by design, but a large enough K or stream count turns the
+    reconverge into a keyspace-sized scan on a fixed clock. An event-driven or
+    sharded backstop is the scaling question the current poll defers.
+
+  None of these is a correctness gap: the fence and the forward-only cursor hold
+  no matter which wake is lost or doubled. They are the standing costs of
+  preferring a best-effort hint plus a poll over a durable delivery queue — each
+  with a named upgrade if a workload ever forces the trade.
+</section>
+
 <section class="block" id="further">
-  <SectionHead num="10" label="Further reading" title="Where this <em>comes from</em>" />
+  <SectionHead num="11" label="Further reading" title="Where this <em>comes from</em>" />
 
   The endpoints, lifecycle, and Redis keyspace above are taken from the
   implementation; the locators are `file:line` into the repository at the time of
@@ -605,6 +646,7 @@ import Complexity from "../components/Complexity.astro";
   - [Endpoints &amp; Redis](../endpoints) — every stream endpoint walked one at a time, down to the Redis command
   - [webhook/](https://github.com/adityavkk/chronicle/tree/main/webhook) — the subscription layer: pure core, Redis store, Lua scripts, manager, and routes
   - [docs/research/07](https://github.com/adityavkk/chronicle/blob/main/docs/research/07-subscription-wake-lease-durability.md) — the design study: the crash-window analysis and the recovery sweep
+  - [docs/research/10](https://github.com/adityavkk/chronicle/blob/main/docs/research/10-subscription-hardening-handoff.md) — the hardening handoff: the four crash windows and the outbox upgrade path
   - [docs/research/11](https://github.com/adityavkk/chronicle/blob/main/docs/research/11-subscription-hardening-implemented.md) — the crash-window hardening, as built
   - [docs/jepsen/results.md](https://github.com/adityavkk/chronicle/blob/main/docs/jepsen/results.md) — the fault-injection harness and the full results
 
