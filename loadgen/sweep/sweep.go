@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,16 +23,56 @@ import (
 	"gecgithub01.walmart.com/auk000v/chronicle/loadgen/dsclient"
 )
 
+// Dur is a time.Duration that (un)marshals as a Go duration string ("30s") in
+// both YAML and JSON, so scenario files and reports read naturally.
+type Dur time.Duration
+
+// D returns the underlying time.Duration.
+func (d Dur) D() time.Duration { return time.Duration(d) }
+
+// String renders the duration (e.g. "30s").
+func (d Dur) String() string { return time.Duration(d).String() }
+
+// UnmarshalYAML parses a duration string.
+func (d *Dur) UnmarshalYAML(value *yaml.Node) error {
+	var s string
+	if err := value.Decode(&s); err != nil {
+		return err
+	}
+	p, err := time.ParseDuration(s)
+	if err != nil {
+		return err
+	}
+	*d = Dur(p)
+	return nil
+}
+
+// MarshalYAML renders the duration as a string.
+func (d Dur) MarshalYAML() (any, error) { return d.String(), nil }
+
+// UnmarshalJSON parses a quoted duration string.
+func (d *Dur) UnmarshalJSON(b []byte) error {
+	p, err := time.ParseDuration(strings.Trim(string(b), `"`))
+	if err != nil {
+		return err
+	}
+	*d = Dur(p)
+	return nil
+}
+
+// MarshalJSON renders the duration as a quoted string.
+func (d Dur) MarshalJSON() ([]byte, error) { return []byte(`"` + d.String() + `"`), nil }
+
 // Spec is a declarative sweep-scale experiment.
 type Spec struct {
-	Name            string        `yaml:"name" json:"name"`
-	Subscriptions   int           `yaml:"subscriptions" json:"subscriptions"` // K
-	LinksPerSub     int           `yaml:"links_per_sub" json:"links_per_sub"` // P
-	Dispatch        string        `yaml:"dispatch" json:"dispatch"`           // "pull-wake" (default) or "webhook"
-	WebhookURL      string        `yaml:"webhook_url" json:"webhook_url"`     // required for dispatch=webhook
-	SeedConcurrency int           `yaml:"seed_concurrency" json:"seed_concurrency"`
-	Warmup          time.Duration `yaml:"warmup" json:"warmup"`   // settle time after seeding
-	Measure         time.Duration `yaml:"measure" json:"measure"` // metric sampling window
+	Name            string `yaml:"name" json:"name"`
+	Subscriptions   int    `yaml:"subscriptions" json:"subscriptions"` // K
+	LinksPerSub     int    `yaml:"links_per_sub" json:"links_per_sub"` // P
+	Dispatch        string `yaml:"dispatch" json:"dispatch"`           // "pull-wake" (default) or "webhook"
+	WebhookURL      string `yaml:"webhook_url" json:"webhook_url"`     // required for dispatch=webhook
+	SeedConcurrency int    `yaml:"seed_concurrency" json:"seed_concurrency"`
+	Warmup          Dur    `yaml:"warmup" json:"warmup"`   // settle time after seeding
+	Measure         Dur    `yaml:"measure" json:"measure"` // metric sampling window
 }
 
 // Decode parses a YAML spec without applying defaults (so CLI flags can override
@@ -56,10 +97,10 @@ func (s Spec) Prepared() (Spec, error) {
 		s.SeedConcurrency = 64
 	}
 	if s.Warmup == 0 {
-		s.Warmup = 5 * time.Second
+		s.Warmup = Dur(5 * time.Second)
 	}
 	if s.Measure == 0 {
-		s.Measure = 30 * time.Second
+		s.Measure = Dur(30 * time.Second)
 	}
 	if s.Subscriptions <= 0 {
 		return Spec{}, fmt.Errorf("subscriptions must be > 0")
@@ -104,7 +145,7 @@ func Run(ctx context.Context, baseURL, root, metricsURL string, spec Spec) (Repo
 		return Report{}, err
 	}
 
-	if !sleepCtx(ctx, spec.Warmup) {
+	if !sleepCtx(ctx, spec.Warmup.D()) {
 		return Report{}, ctx.Err()
 	}
 
@@ -117,7 +158,7 @@ func Run(ctx context.Context, baseURL, root, metricsURL string, spec Spec) (Repo
 	if err != nil {
 		return Report{}, fmt.Errorf("scrape before: %w", err)
 	}
-	if !sleepCtx(ctx, spec.Measure) {
+	if !sleepCtx(ctx, spec.Measure.D()) {
 		return Report{}, ctx.Err()
 	}
 	after, err := scrape(ctx, hc, metricsURL, names...)
@@ -134,7 +175,7 @@ func Run(ctx context.Context, baseURL, root, metricsURL string, spec Spec) (Repo
 		Seeded:        seeded,
 		SeedErrors:    seedErrs,
 		SeedSeconds:   seedDur.Seconds(),
-		WindowSeconds: spec.Measure.Seconds(),
+		WindowSeconds: spec.Measure.D().Seconds(),
 		SweepTicks:    tick.count,
 		SweepMeanMs:   tick.mean() * 1000,
 		SweepP50Ms:    tick.quantile(0.5) * 1000,

@@ -1,0 +1,31 @@
+# One sweep-scale experiment: how a single recovery-sweep tick scales at K=10k.
+# Render it (`render -spec ...`), apply the Terraform + SUT manifest, then run the
+# Job; the SLO gate fails the run if the sweep tick p99 breaches the budget.
+#
+# Sweep K across runs to plot the curve: re-render with a different
+# workload.subscriptions (or pass -subscriptions to sweepscale directly).
+name: sweep-10k
+
+# Images: build chronicle from the repo-root Dockerfile, loadgen from
+# loadgen/Dockerfile, push both to your registry, and set the tags here.
+loadgen_image: REGISTRY/chronicle-loadgen:TAG
+
+sut:
+  image: REGISTRY/chronicle:TAG
+  replicas: 1 # 1 = crisp per-tick histogram (every replica sweeps all K identically)
+  sweep_interval: 2s
+  sweep_batch: 0 # 0 = no per-tick cap
+  redis_url: "" # fill from `terraform output redis_url`, or production's managed Redis 8
+  cpu: "2"
+  memory: 2Gi
+
+workload:
+  subscriptions: 10000 # K
+  links_per_sub: 5 # P — distinct tails read per subscription per tick
+  dispatch: pull-wake
+  warmup: 30s
+  measure: 120s
+
+slo:
+  sweep_p99_ms: 1500 # must beat the 2s sweep interval with headroom
+  max_seed_errors: 0
