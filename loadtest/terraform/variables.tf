@@ -74,9 +74,12 @@ variable "redis_version" {
   type    = string
   default = "REDIS_7_2"
   description = <<-EOT
-    Memorystore engine version. Set this to your standardized managed Redis 8
-    offering. REDIS_7_2 is only a safe default where a Redis 8 tier is not yet
-    GA in the target region; chronicle requires Redis >= 7 for the {__ds}
-    hash-tag keyspace and is validated on Redis 8.
+    Memorystore for Redis engine version for the provisioned instance. chronicle
+    only needs Redis 6.0+ (ZSET-lex + HASH + pub/sub + PEXPIRE; no HEXPIRE or
+    stream commands), so REDIS_7_2 — the latest Memorystore-for-Redis tier — is
+    fully sufficient and is what this rig provisions. To measure against the
+    managed Redis 8 offering production standardizes on (Memorystore for Valkey
+    8.0, a separate product), set provision_redis = false and point
+    sut.redis_url at that instance instead.
   EOT
 }
