@@ -1,0 +1,30 @@
+# Mixed durable-session workload: the closest single scenario to a real
+# deployment. Every stream is a session with a writer producing events
+# at a modest rate, one SSE and one long-poll follower, plus a steady
+# trickle of catch-up reads (page refreshes / new viewers joining and
+# replaying history that grows over the run).
+name: mixed
+description: >
+  100 sessions: writer at 5 msg/s per stream (500/s aggregate, 200 B
+  events), 1 SSE + 1 long-poll tailer per stream, catch-up reads at
+  10/s against random streams.
+
+duration: 60s
+warmup: 5s
+
+streams:
+  count: 100
+  prefix: bench/mixed
+
+writers:
+  per_stream: 1
+  rate: 5/s
+  message_bytes: 200
+
+tailers:
+  sse_per_stream: 1
+  long_poll_per_stream: 1
+  connect_ramp: 4s
+
+catchup:
+  rate: 10/s

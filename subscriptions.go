@@ -20,6 +20,9 @@ type SubscriptionTuning struct {
 	SweepInterval     time.Duration
 	ReconcileInterval time.Duration
 	SweepBatch        int
+	// Metrics, if set, receives sweep/delivery/worker observations from the
+	// Manager. Nil leaves the Manager on its no-op recorder.
+	Metrics webhook.Metrics
 }
 
 // storePath maps a stream-root-relative subscription path ("events/abc") to the
@@ -139,6 +142,7 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		SweepInterval:              tuning.SweepInterval,
 		ReconcileInterval:          tuning.ReconcileInterval,
 		SweepBatch:                 tuning.SweepBatch,
+		Metrics:                    tuning.Metrics,
 	}
 	if rs != nil {
 		opts.Lister = redisLister{rs: rs}

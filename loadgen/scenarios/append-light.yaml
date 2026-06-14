@@ -1,0 +1,20 @@
+# Durable write path at a rate every disk-backed store can sustain:
+# 40 appends/s aggregate (~50% of the Caddy file store's measured
+# fsync-bound ceiling on macOS). No readers — isolates the cost of a
+# durable append.
+name: append-light
+description: >
+  Durable write path: 10 streams, 4 appends/s per stream (40/s
+  aggregate), 256 B JSON messages, no readers.
+
+duration: 60s
+warmup: 5s
+
+streams:
+  count: 10
+  prefix: bench/wlight
+
+writers:
+  per_stream: 1
+  rate: 4/s
+  message_bytes: 256

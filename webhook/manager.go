@@ -86,6 +86,9 @@ type ManagerOptions struct {
 	// webhook URL (e.g. cluster-internal receivers on RFC1918 addresses). Off by
 	// default; the operator opts in for trusted networks.
 	AllowPrivateWebhookTargets bool
+	// Metrics receives sweep/delivery/worker observations. Nil defaults to a
+	// no-op recorder, so instrumentation is opt-in.
+	Metrics Metrics
 }
 
 // Manager orchestrates the subscription control plane: stream hooks, webhook
@@ -109,6 +112,7 @@ type Manager struct {
 	sweepBatch        int
 	sweepCursor       int // rolling start index when sweepBatch caps a tick
 	allowPrivate      bool
+	metrics           Metrics
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -141,7 +145,11 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		reconcileInterval: opts.ReconcileInterval,
 		sweepBatch:        opts.SweepBatch,
 		allowPrivate:      opts.AllowPrivateWebhookTargets,
+		metrics:           opts.Metrics,
 		stop:              make(chan struct{}),
+	}
+	if m.metrics == nil {
+		m.metrics = NopMetrics{}
 	}
 	if m.client == nil {
 		m.client = &http.Client{Timeout: webhookDeliveryTimeout}
@@ -299,11 +307,14 @@ func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generat
 	if err != nil {
 		return
 	}
+	appendStart := time.Now()
 	if err := m.streams.AppendWakeEvent(sub.Config.WakeStream, data); err != nil {
+		m.metrics.WakeEvent(time.Since(appendStart), "error")
 		// Leave wake_event_sent_ns at 0 so the recovery sweep re-emits.
 		m.log.Warn("webhook: write wake event", "sub", sub.ID, "wake_stream", sub.Config.WakeStream, "error", err)
 		return
 	}
+	m.metrics.WakeEvent(time.Since(appendStart), "ok")
 	// Record the durable emit, fenced on (generation, wake), so the sweep does
 	// not re-emit a wake that was already delivered.
 	if err := m.store.RecordWakeEventSent(sub.ID, generation, wakeID, time.Now()); err != nil {
@@ -346,16 +357,20 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Webhook-Signature", SignWebhookPayload(m.signing, body, time.Now()))
 
+	postStart := time.Now()
 	resp, err := m.client.Do(req)
 	if err != nil {
+		m.metrics.WakeDelivery(time.Since(postStart), "error")
 		m.recordFailure(id)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		m.metrics.WakeDelivery(time.Since(postStart), "failed")
 		m.recordFailure(id)
 		return
 	}
+	m.metrics.WakeDelivery(time.Since(postStart), "ok")
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	var parsed struct {
@@ -467,6 +482,9 @@ func (m *Manager) leaseWorker() {
 			if err != nil {
 				continue
 			}
+			if len(ids) > 0 {
+				m.metrics.WorkerTick("lease", len(ids))
+			}
 			for _, id := range ids {
 				status, err := m.store.ExpireLease(id, now)
 				if err == nil && status == "EXPIRED" {
@@ -491,6 +509,9 @@ func (m *Manager) retryWorker() {
 			ids, err := m.store.DueRetries(now, dueClaimLimit, m.workerTick*2)
 			if err != nil {
 				continue
+			}
+			if len(ids) > 0 {
+				m.metrics.WorkerTick("retry", len(ids))
 			}
 			for _, id := range ids {
 				sub, ok, err := m.store.Get(id)
@@ -522,6 +543,7 @@ func (m *Manager) recoverySweeper() {
 }
 
 func (m *Manager) sweepOnce() {
+	start := time.Now()
 	ids, err := m.store.List()
 	if err != nil || len(ids) == 0 {
 		return
@@ -538,7 +560,9 @@ func (m *Manager) sweepOnce() {
 	}
 	// Collect tails across all subs (not just idle ones) so a subscription that
 	// lease expiry flips to idle below still has its tails in the batch.
-	tails := m.streams.TailOffsets(distinctLinkPaths(subs))
+	paths := distinctLinkPaths(subs)
+	tails := m.streams.TailOffsets(paths)
+	wakes := 0
 	for _, sub := range subs {
 		// Recover a pull-wake stranded by a crash between arming the wake and
 		// appending its wake event: the event was never durably emitted (its
@@ -547,6 +571,7 @@ func (m *Manager) sweepOnce() {
 		// it; duplicate wake events are claim-fence-safe.
 		if sub.Config.Type == DispatchPullWake && sub.Phase == PhaseWaking && sub.WakeEventSentNs == 0 {
 			m.writeWakeEvent(sub, "", sub.Generation, sub.WakeID)
+			wakes++
 			continue
 		}
 		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
@@ -556,8 +581,10 @@ func (m *Manager) sweepOnce() {
 		}
 		if sub.Phase == PhaseIdle && HasPendingWorkFrom(sub.Links, tails) {
 			m.issueWake(sub, "")
+			wakes++
 		}
 	}
+	m.metrics.SweepTick(time.Since(start), len(subs), len(paths), wakes)
 }
 
 // sweepWindow optionally bounds a sweep tick to sweepBatch subscriptions,
