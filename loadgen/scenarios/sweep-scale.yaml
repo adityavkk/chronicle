@@ -1,0 +1,16 @@
+# Sweep-scale: how one recovery-sweep tick scales with the subscription
+# keyspace. Seeds K subscriptions (each with P explicit links), lets the sweep
+# settle, then samples chronicle_sweep_tick_seconds over the measure window.
+#
+# Sweep K with the -subscriptions flag:
+#   for k in 1000 5000 10000 50000; do
+#     sweepscale -scenario scenarios/sweep-scale.yaml -subscriptions $k \
+#       -out results/sweep-$k.json
+#   done
+name: sweep-scale
+subscriptions: 10000      # K — override per run with -subscriptions
+links_per_sub: 1          # P — distinct tails read per subscription per tick
+dispatch: pull-wake       # no webhook receiver needed; the sweep still reads tails
+seed_concurrency: 128
+warmup: 8s                # let the sweep settle on the new keyspace
+measure: 30s              # sample window for the sweep-tick histogram
