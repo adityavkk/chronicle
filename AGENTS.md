@@ -78,9 +78,6 @@ Redis 7.2). The project standardizes on the managed Redis 8 offering; target it
 for production-representative numbers. `maxmemory-policy noeviction` is the hard
 requirement — any eviction silently truncates streams (chronicle warns at boot).
 
-> `README.md` currently states chronicle uses `HEXPIRE` and needs Redis ≥ 7.4.
-> The code uses no `HEXPIRE`; reconcile that line.
-
 ## Hard rules
 
 - **No AI co-author trailers** in commit messages.
