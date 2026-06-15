@@ -19,12 +19,14 @@ jepsen/up.sh                       # create the k3d cluster + deploy chronicle �
 jepsen/run.sh                      # run baseline, origin-restart, redis-restart
 jepsen/run.sh origin-restart       # or a single scenario
 jepsen/run.sh expired-lease-takeover glob-create-crash  # the hardening scenarios
+jepsen/run.sh single-holder-linz cursor-monotonic       # the safety scenarios (07)
 jepsen/down.sh                     # tear down the cluster
 ```
 
 The hardening scenarios (`pull-wake-arm-crash`, `expired-lease-takeover`,
-`glob-create-crash`, `index-repair`) are not in the default `run.sh` set yet;
-pass them by name.
+`glob-create-crash`, `index-repair`) and the safety scenarios
+(`single-holder-linz`, `cursor-monotonic`) are not in the default `run.sh` set
+yet; pass them by name.
 
 `up.sh` maps `localhost:4438` to the chronicle NodePort through the k3d
 loadbalancer, so the host driver keeps reaching chronicle while individual pods
@@ -76,9 +78,57 @@ A non-zero exit means a stream never reached its tail — a wake was lost and no
 recovered — or, for `expired-lease-takeover`, that the deposed worker was not
 fenced.
 
+## Safety scenarios: linearizability checking (research/07)
+
+The durability scenarios above check only the *final* state. The two safety
+scenarios check a property over the whole concurrent **history**, with
+[`porcupine`](https://github.com/anishathalye/porcupine) (the Go-native Knossos)
+as the linearizability checker. They implement T1 and T2 of the
+[verification plan](../docs/specs/horizontal-scale/research/07-jepsen-style-verification.md).
+The code is split **pure core / imperative shell**: the models and checkers are
+deterministic, I/O-free, and unit-tested without a cluster (`go test ./jepsen/checker/`);
+the scenario drivers and the recorder are the shell.
+
+- **`single-holder-linz` (T1, single-holder lease).** `N` workers (`-workers`,
+  default 4) contend on one pull-wake subscription's lease for `-workload-ms`
+  (default 8000), with an in-process **gcPause** nemesis: a worker that has
+  claimed stalls past `lease_ttl_ms` before acking, so a peer takes over
+  (rotating the fence) and the stalled worker's ack races in stale — Kleppmann's
+  deposed-but-resumed process. Every claim/ack is recorded into a
+  `porcupine.Operation` history and checked against the pure **lease-fence model**
+  (`model_fence.go`). The insight: a *wake* is not a linearizable read/write, but
+  the `(generation, wake_id)` fence is — the single-holder guarantee is "every
+  grant to a new holder rotates the generation strictly upward, and every accepted
+  ack carries the current fence." A violation (a non-rotating takeover, or an OK on
+  a stale token) has no valid linearization; `porcupine.VisualizePath` writes the
+  counterexample to `linz-counterexample.html`. Generalizes the hand-built
+  `expired-lease-takeover` to a model-checked concurrent history.
+- **`cursor-monotonic` (T2, cursor monotonicity).** Drives the webhook delivery
+  workload under origin churn (sweep + retry worker both re-fire) while a poller
+  samples each subscription cursor on a ticker, then checks the samples with the
+  pure forward-only checker (`check_cursor.go`): an acked offset never regresses
+  and never phantom-advances.
+
+**Modeling note (a real subtlety).** The fence model is *time-free*: lease expiry
+governs only grant-vs-BUSY (an observed output), not the safety algebra. One
+consequence — `expire_lease.lua` clears an expired lease's `wake_id` **without**
+rotating the generation, a server-side event with no client op. So the model can
+believe a token is current after the server has already fenced it, which is why a
+`FENCED` is treated as an unconditional legal no-op (it grants nothing and mutates
+nothing, so it can never be half of a two-holder violation; the OK branch is the
+sole safety gate). A `porcupine.Unknown` result (linearizability is NP-hard) means
+the history was too concurrent to decide in the timeout — reduce `-workers` or
+`-workload-ms`; the scenario fails closed.
+
 ## Files
 
 - `deploy/deploy.yaml` — Namespace, Redis (AOF on a PVC), chronicle ×2, Services.
 - `Dockerfile` — wraps the host-built `bin/chronicle-linux`.
-- `checker/main.go` — receiver + workload + nemesis + checker.
+- `checker/main.go` — receiver + workload + nemesis + durability checker.
+- `checker/model_fence.go` — pure porcupine lease-fence model (T1).
+- `checker/check_cursor.go` — pure cursor-monotonicity checker (T2).
+- `checker/history.go` — the recorder seam (driver-host monotonic clock).
+- `checker/scenario_lease.go` — `single-holder-linz` driver + gcPause nemesis.
+- `checker/scenario_cursor.go` — `cursor-monotonic` driver + cursor poller.
+- `checker/*_test.go` — unit tests for the pure models/checkers (no cluster).
 - `up.sh` / `run.sh` / `down.sh` — lifecycle.
