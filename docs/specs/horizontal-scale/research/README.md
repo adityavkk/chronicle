@@ -51,14 +51,15 @@ The work-vs-state distinction from issue #2 holds and sharpens:
    RPO). Active-active (Redis Enterprise CRDT) only if you need local writes in every
    region and can accept strong-*eventual* semantics.
 
-The hardened proposal — two options with full keyspace, DR, and tunable-consistency
-detail — is in [05-proposed-architecture.md](05-proposed-architecture.md); the
+The hardened proposal and implementer handoff is
+[05-proposed-architecture.md](05-proposed-architecture.md); start there. The
 adversarial review that produced it is [06](06-adversarial-review.md). The corrected
 framing: the fence is *safety, not liveness*; "tunable consistency" on Redis is a
-*durability + freshness* knob, not a CAP knob; and both options share a foundation —
-slot-home whole subscriptions, per-shard schedules, a per-subscription due-set — with
-the real fork (stay one binary vs split the control plane) coming only after the
-measurements.
+*durability + freshness* knob, not a CAP knob; and the standing decision is **Option A**
+(one binary, slot-home whole subscriptions, per-shard schedules, a per-subscription
+due-set, work-sharded leased ownership) — splitting into the Option B coordinator tier
+only if the measurements force it, not as an open post-measurement choice. 05 carries the
+full build spec for Option A.
 
 ## Documents
 
@@ -68,7 +69,7 @@ measurements.
 | [02-cloudflare-durable-objects.md](02-cloudflare-durable-objects.md) | The DO model as a scaling primitive — and the lock-in catch |
 | [03-prior-art-redis-and-beyond.md](03-prior-art-redis-and-beyond.md) | Redis Cluster, Kafka, NATS, Pulsar, Orleans, Akka, outbox/CDC, DR |
 | [04-options-for-chronicle.md](04-options-for-chronicle.md) | First-pass options (superseded by 05; see 06 for the corrections) |
-| [05-proposed-architecture.md](05-proposed-architecture.md) | ⭐ Two hardened options — slot-homed evolve-in-place vs owner-replica split — scale, DR, tunable consistency |
+| [05-proposed-architecture.md](05-proposed-architecture.md) | ⭐ The decision (Option A) + the full build spec — slot addressing, the new Lua scripts, membership/HRW, due-set, loop change-map, config, metrics; Option B kept as the deferred fallback |
 | [06-adversarial-review.md](06-adversarial-review.md) | Adversarial review of 01–04 + the corrections folded into 05 |
 | [07-jepsen-style-verification.md](07-jepsen-style-verification.md) | Jepsen-style safety + liveness test plan for 05, in Go (porcupine + the existing `jepsen/` harness) |
 
@@ -76,6 +77,8 @@ measurements.
 
 The external-system findings (01–03) are sourced to vendor docs, engineering blogs,
 and — for Electric — the actual `electric-sql/electric` repo schema. Each doc marks
-what is **confirmed** vs **inferred**. The chronicle-specific proposal (04) is design
-synthesis from this prior art applied to chronicle's code, **not** anyone's published
-guidance — it is a starting point for a design doc, not a decision.
+what is **confirmed** vs **inferred**. The chronicle-specific proposal — first drafted in
+04, superseded by the hardened [05](05-proposed-architecture.md) — is design synthesis from
+this prior art applied to chronicle's code, **not** anyone's published guidance. The
+direction (Option A) is now a decision; the *unmeasured numbers* it rests on are not — see
+05's gating experiments.
