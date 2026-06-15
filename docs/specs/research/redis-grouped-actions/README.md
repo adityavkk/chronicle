@@ -12,7 +12,8 @@ prior art, and issues a recommendation.
 
 > Tracked in **[issue #4](https://github.com/adityavkk/chronicle/issues/4)**
 > (branch `research/redis-grouped-actions`, spun out of the `horizontal-scale`
-> work).
+> work). **Decision recorded in
+> [ADR-0001](../../../adr/0001-lua-scripts-for-atomic-grouped-redis-operations.md).**
 
 ## Headline: the Lua approach is best practice — keep it, and fix one wart
 
