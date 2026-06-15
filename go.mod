@@ -3,6 +3,7 @@ module gecgithub01.walmart.com/auk000v/chronicle
 go 1.26.2
 
 require (
+	github.com/anishathalye/porcupine v1.2.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.20.0
 )
