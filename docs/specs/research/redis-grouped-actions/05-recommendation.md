@@ -8,6 +8,12 @@ This is a *hybrid* answer in the precise sense that the migrate-to-Functions
 advocate is genuinely right about one thing — the prelude-duplication is a real
 wart — and wrong that Functions are the right way to fix it for chronicle.
 
+> **Recorded as
+> [ADR-0001](../../../adr/0001-lua-scripts-for-atomic-grouped-redis-operations.md).**
+> No code change is *required* by this decision; the only required follow-up is the
+> documentation corrections below. The build-time include, `NewScriptServerSHA`,
+> and pipeline guard are optional, behavior-preserving hygiene.
+
 ## Why (the short version)
 
 The decision separates cleanly into "what chronicle's correctness rests on" vs
