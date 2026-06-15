@@ -48,6 +48,7 @@ type config struct {
 	scenario   string
 	settle     time.Duration
 	workloadMs int
+	workers    int
 }
 
 func main() {
@@ -59,8 +60,10 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
+	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
+	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
 	flag.Parse()
 
 	r := newReceiver()
@@ -75,6 +78,21 @@ func main() {
 
 func run(c config, r *receiver) error {
 	ctx := fmt.Sprintf("k3d-%s", c.cluster)
+
+	// single-holder-linz is a pure fence-contention linearizability test over the
+	// claim/ack API: N workers + an in-process GC-pause nemesis, checked with
+	// porcupine. It needs neither the webhook receiver nor the kubectl nemesis, so
+	// it runs its own self-contained flow (scenario_lease.go).
+	if c.scenario == "single-holder-linz" {
+		return runSingleHolderLinz(c)
+	}
+
+	// cursor-monotonic drives the webhook delivery workload under origin churn
+	// while sampling cursors, then checks forward-only advance with the pure
+	// CheckCursorMonotonic (T2, scenario_cursor.go). It reuses the receiver.
+	if c.scenario == "cursor-monotonic" {
+		return runCursorMonotonic(c, r)
+	}
 
 	fmt.Printf("== scenario %q: %d streams x %d msgs ==\n", c.scenario, c.streams, c.msgs)
 	if err := waitReady(c.base, 60*time.Second); err != nil {
