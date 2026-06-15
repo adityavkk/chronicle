@@ -10,8 +10,9 @@ folder evaluates the current approach against Functions and every realistic
 alternative, grounded in primary Redis docs, cloud-provider docs, and production
 prior art, and issues a recommendation.
 
-> Tracked in **issue #ISSUE_NUMBER** (branch `research/redis-grouped-actions`,
-> spun out of the `horizontal-scale` work).
+> Tracked in **[issue #4](https://github.com/adityavkk/chronicle/issues/4)**
+> (branch `research/redis-grouped-actions`, spun out of the `horizontal-scale`
+> work).
 
 ## Headline: the Lua approach is best practice — keep it, and fix one wart
 
