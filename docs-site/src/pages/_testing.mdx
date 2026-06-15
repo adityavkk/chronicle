@@ -1,0 +1,745 @@
+---
+title: "Tests are the <em>contract</em>"
+summary: "Chronicle splits every component into a pure deterministic core and an imperative I/O shell, tests each at the cheapest faithful level, and uses porcupine linearizability plus k3d fault injection to pin the single-holder fence and forward-only cursor that the durability claim rests on."
+eyebrow: "Reference"
+meta: "Testing & verification"
+deck: "Every component is a <strong>pure deterministic core</strong> behind an <strong>imperative I/O shell</strong>, and each is tested at the cheapest faithful level: table-driven unit tests on the cores, real-Redis integration on the shells, and <code>porcupine</code> linearizability over histories recorded on a live <code>k3d</code> cluster under fault injection. The producer state machine, the fence, and the cursor are each pinned from more than one side."
+byline:
+  - label: "Suites"
+    value: "unit · integration · jepsen · conformance"
+  - label: "Checker"
+    value: "porcupine"
+  - label: "Source"
+    value: "jepsen/ · webhook/ · store/"
+    href: "https://github.com/adityavkk/chronicle/tree/main"
+---
+
+import Tldr from "../components/Tldr.astro";
+import SectionHead from "../components/SectionHead.astro";
+import Callout from "../components/Callout.astro";
+import Table from "../components/Table.astro";
+import Complexity from "../components/Complexity.astro";
+
+<Tldr>
+  <ul>
+    <li><strong>Pure core, imperative shell, tested at the cheapest faithful level.</strong> Deterministic cores — <code>ValidateProducer</code>, the offset/frame codecs, the webhook fence/claim/ack mirrors, the porcupine fence model, the cursor checker — are unit-tested with hand-built tables and no infrastructure. The I/O shell is covered by integration tests against a real Redis.</li>
+    <li><strong>Differential parity is the defining technique.</strong> One §5.2.1 producer table is the oracle; the Redis Lua append path is asserted byte-identical to pure-Go <code>ValidateProducer</code> per row — including the persisted state and write-iff-accepted. The same rule lands from both backends.</li>
+    <li><strong>The fence is the load-bearing invariant, model-checked.</strong> A pure sequential <code>porcupine</code> model of one subscription's <code>(gen, wake, phase)</code> register encodes <code>claim.lua</code> and <code>ack.lua</code>; an <code>OK</code> ack under a stale token is the two-holder violation, surfaced as an HTML counterexample. Eighteen pure-core unit tests — thirteen on the fence model, five on the cursor checker — pin them from hand-built histories, no cluster.</li>
+    <li><strong>Jepsen kills pods and Redis on a live cluster.</strong> A <code>kubectl</code>/<code>redis-cli</code> nemesis crashes origins and Redis mid-flight on <code>k3d</code>; final-state checks assert every subscription cursor reaches its stream tail within a settle window, and a deposed worker's late ack is <code>FENCED</code>.</li>
+    <li><strong>Real-Redis-or-skip, isolated DBs, no miniredis.</strong> Store, webhook, and bench each ping a dedicated DB (15 / 14 / 13), <code>FlushDB</code> once, and skip under <code>-short</code> or when Redis is unreachable — so <code>go test ./...</code> stays green serverless while still exercising the embedded Lua and round-trip cost.</li>
+    <li><strong>The wire surface is pinned externally.</strong> ~330 black-box conformance tests (vitest + fast-check property fuzzing) hold Chronicle to the Durable Streams spec; a batched-sweep microbenchmark and an on-demand GKE rig validate scale at K=10,000 subscriptions.</li>
+    <li><strong>Honest about what is not tested.</strong> The few-microsecond arm/emit window is only approximated; there is no real Redis failover substrate; Lua/Go parity is asserted by convention, not enforced; and store and HTTP layers are example-based tables with no fuzz, property, or linearizability harness.</li>
+  </ul>
+</Tldr>
+
+<section class="block" id="philosophy">
+  <SectionHead num="01" label="Philosophy" title="A pure core behind an <em>imperative shell</em>" />
+
+  Chronicle splits every component into a pure deterministic core and an
+  imperative I/O shell, then tests each at the cheapest level that is still
+  faithful.[^split] The core is a function over values — `ValidateProducer`, the
+  offset and frame codecs, the webhook `FenceDecision`/`ClaimDecision`/`MergeAcks`
+  mirrors, the porcupine fence model, the cursor checker. It has no Redis, no
+  clock, no cluster, so it is unit-tested with table-driven hand-built inputs and
+  runs in milliseconds. The shell is where the bytes actually move — the Lua
+  scripts, the pub/sub wakeups, the durable hashes and lease ZSETs — and it is
+  covered by integration tests against a real Redis on an isolated database.
+
+  Above the single process, properties that only emerge across processes — the
+  single-holder invariant, cursor monotonicity, end-to-end delivery under crashes
+  — get fault injection on a live `k3d` cluster, with `porcupine` model-checking
+  the recorded histories. The HTTP surface runs against an in-memory store via
+  `httptest`. And the protocol is pinned from outside the tree by a vendored
+  black-box conformance suite.
+
+  <Table>
+    | Layer | What runs | Faults | Infra |
+    | --- | --- | --- | --- |
+    | **Pure core** | unit tables, porcupine model, cursor checker | none — deterministic | none |
+    | **I/O shell** | store / webhook integration, the Lua | timing, durability across a fresh store | real Redis (db 15 / 14) |
+    | **HTTP surface** | `handler_test.go` via `httptest` | concurrency via goroutine + sleep | in-memory store |
+    | **Cross-process** | jepsen scenarios, porcupine histories | pod kill, Redis kill, gcPause | live `k3d` cluster |
+    | **Wire contract** | conformance (vitest + fast-check) | property fuzzing | black-box vs a live server |
+  </Table>
+
+  The shape of the pyramid is deliberate. The bulk of the assertions live in the
+  cheap, deterministic cores; the expensive cluster tests carry only the
+  properties that genuinely require concurrency and crashes. A single rule is
+  often pinned more than once — `ValidateProducer` from both backends, the fence
+  from Go and Lua and the checker — so a regression has to defeat two independent
+  assertions to slip through.
+
+  <Callout icon="info" label="Why the split pays off here">
+    The most safety-critical logic in Chronicle — the producer fence, the
+    subscription generation fence, the forward-only cursor — is exactly the logic
+    that is hardest to test against a live system, because the interesting cases
+    are rare races. Lifting that logic into a pure core lets the rare case become
+    a hand-built table row: a stale bearer token where <code>reqGen</code> matches
+    but <code>tokenGen</code> is stale, a post-expiry <code>FENCED</code> that
+    must still linearize. The live drivers cannot reliably reach those states; the
+    unit tests reach them by construction.
+  </Callout>
+</section>
+
+<section class="block" id="store">
+  <SectionHead num="02" label="Store" title="The durable log, <em>two backends</em>" />
+
+  The store layer is the append-only durable streams log behind one `Store`
+  interface, with two backends: an in-process `MemoryStore` in pure Go, and a
+  Redis-backed store built on ZSET frames, hash-tagged keys, and Lua. The pure
+  half (`store/*`, the offset and producer codecs) needs no Redis; the Redis half
+  (`store/redis/*` integration, fork, notify, differential) needs a real server,
+  gated by `-short` and `FlushDB`-once.[^realredis] The keys and metadata tests
+  are pure encoding and run anywhere.
+
+  <Table wide>
+    | Test group | Verifies | Code ref |
+    | --- | --- | --- |
+    | Store contract: create / idempotency / append-read / delete | `Create` is idempotent on matching config and `ErrConfigMismatch` otherwise; append returns a monotonic offset; read-from-tail is empty + up-to-date; delete+recreate is fresh | [^contract] |
+    | Opaque lexicographic offset | two zero-padded 16-digit fields joined by `_`, so bytewise string order equals semantic order; parse rejects URL-hostile chars; round-trips | [^offset] |
+    | Producer fencing state machine (pure oracle) | PROTOCOL §5.2.1: first contact is seq 0; stale epoch is `ErrStaleEpoch`; an epoch bump must restart at seq 0; duplicate returns the highest accepted seq | [^producer] |
+    | **DIFFERENTIAL** parity: Redis Lua vs pure-Go oracle | the Lua append path is byte-identical to `ValidateProducer` per row, plus the persisted hash matches and a write lands iff the row is accepted | [^differential] |
+    | Forks / branching | stitched reads, JSON vs binary sub-offsets, `RefCount`, soft-delete-through, and a hard cascade that wipes every Redis key | [^fork] |
+    | TTL & expiry | sliding window renewed by Read/Append but not Get; absolute `ExpiresAt`; fork TTL inheritance; expired-source-with-forks flips to soft-deleted | [^ttl] |
+    | Redis keyspace & hash-tag co-location | the `meta`/`msg`/`prod`/`forks` keys per stream share one hash tag for one cluster slot; user braces escaped injectively | [^keys] |
+    | Frame encoding & lex bounds | an `offset` then `|` then raw bytes, stored in a ZSET at score 0; round-trips adversarial bytes; sorting frames equals sorting by offset | [^frame] |
+    | Notify / long-poll & SSE wakeups | `WaitForMessages` wakes in under a second via pub/sub, returns immediately on present data, times out at tail, wakes on close, honors cancellation | [^notify] |
+    | Stream closure & seq dedup | `CloseStream` idempotent with a stable `FinalOffset`; append-to-closed is `ErrStreamClosed`; seq dedup is bytewise lex (`"10"` after `"2"` is rejected) | [^closure] |
+    | Redis metadata round-trip | `StreamMetadata` ↔ hash fields losslessly, nanosecond `ExpiresAt` fidelity; minimal meta leaves optional fields absent | [^meta] |
+  </Table>
+
+  The foundation under the whole ZSET model is one property: bytewise frame order
+  must equal stream offset order, whatever the payload bytes are. The frame and
+  offset tests pin it with a sort over adversarial payloads — `0x00`, `0xff`, and
+  the `|` separator itself — rather than trusting well-behaved input.
+
+  ```go title="store/redis/keys_test.go — bytewise order is stream order"
+  // a shuffled frame list, payloads chosen to be hostile to string sorting
+  frames := []string{
+      encodeFrame(off(5),   bytes.Repeat([]byte{0xff}, 10)),
+      encodeFrame(off(100), []byte{0x00}),
+      encodeFrame(off(7),   []byte("|||")),
+      encodeFrame(off(50),  []byte{}),
+  }
+  sort.Strings(frames)                 // pure lexicographic sort
+  got := decodeOffsets(frames)
+  // => 5, 7, 50, 100  — offset order, independent of payload bytes
+  ```
+
+  The single most load-bearing store test is the differential one. The pure-Go
+  `ValidateProducer` table is the oracle; the Redis Lua append path is asserted to
+  produce a byte-identical decision for every row of the §5.2.1 table — and not
+  only the return value, but the persisted producer hash and the fact that a write
+  lands on the data plane *iff* the row is accepted.
+
+  ```go title="store/redis/differential_test.go — Lua subject vs Go oracle, per row"
+  for _, row := range producerTable {            // the same 10 rows as producer_test
+      wantRes, wantState, wantErr := store.ValidateProducer(row.state, row.epoch, row.seq, now)
+      hset(prodKey(p), "p", encode(row.state))   // seed the Redis producer state
+      gotRes, gotErr := s.Append(p, payload, prodOpts(row))  // the Lua subject
+      assert(gotRes == wantRes && errors.Is(gotErr, wantErr))
+      assert(decodeProducer(hget(prodKey(p))) == wantState)  // persisted state matches
+      assert(getCurrentOffset(p).advanced == (row.result == Accepted)) // write iff accepted
+  }
+  ```
+
+  <Callout icon="alert" label="What the store layer does not test">
+    Despite the repository name, there is no linearizability, Jepsen-style, or
+    <code>go test fuzz</code> coverage in the store layer; offset and frame
+    coverage is example-based tables, not generative. There is no concurrent
+    multi-writer race or <code>-race</code>-specific store test here. And
+    memory-vs-Redis parity is <em>structural</em> — both back the same
+    <code>Store</code> interface and share the producer table — not a single
+    harness; most contract cases are duplicated per-backend, so a divergence
+    relies on hand-kept mirroring.
+  </Callout>
+</section>
+
+<section class="block" id="http">
+  <SectionHead num="03" label="HTTP" title="The protocol surface, <em>in memory</em>" />
+
+  The HTTP layer (`handler_test.go`, 57 functions) and the pure protocol helpers
+  (`protocol/protocol_test.go`) cover the stream wire surface: PUT create/fork,
+  HEAD, POST append/close, idempotent producers, DELETE/soft-delete, GET catch-up
+  and conditional reads, JSON-mode flattening, long-poll, SSE framing, CORS and
+  security headers, `Mount` prefix translation, and the TTL/sub-offset/cursor
+  codecs. Every handler test runs against an in-memory `store.NewMemoryStore`
+  through a shared `do()` helper that returns a `*httptest.ResponseRecorder` — no
+  real Redis, no miniredis, no mocks in this layer.[^httpharness]
+
+  <Table wide>
+    | Test group | Verifies | Code ref |
+    | --- | --- | --- |
+    | Create / fork (PUT) | `201` + `Location` + `Stream-Next-Offset`, idempotent `200` on identical config, `409` on conflict, fork-header validation | [^http-create] |
+    | HEAD metadata | `200` with `Content-Type`, tail offset, `Cache-Control:no-store`, TTL/Expires-At round-trip, `Stream-Closed` reflection | [^http-head] |
+    | Append (POST) basics & validation | `204` + advanced offset; `400`/`409`/`404` on empty body, missing/mismatched CT, missing stream; closed → `409` with the frozen offset | [^http-append] |
+    | Idempotent producers | fresh `200`, duplicate `204` echoing the highest accepted seq (and writing nothing), stale epoch `403`, gap `409` with expected/received headers | [^http-producer] |
+    | Close semantics | close-only POST skips CT validation, idempotent `204` + final offset; producer-tuple close is replay-safe, foreign producer `409` | [^http-close] |
+    | Delete & soft-delete | `204` then `404`; deleting a forked source soft-deletes it (`410`/`409` per verb) while the fork still reads through | [^http-delete] |
+    | Read catch-up & conditional | concatenated bytes + `ETag`, `?offset=` suffix, `If-None-Match` → `304` on tail / `200` on stale | [^http-read] |
+    | `offset=now` (tail) reads | skips history: empty body (or `"[]"`), tail offset, no `ETag`, `Cache-Control:no-store` | [^http-now] |
+    | JSON mode flattening | `[1,2,3]` advances offsets by element byte length; GET re-wraps; suffix re-wraps the remainder; empty-array append `400` | [^http-json] |
+    | Long-poll (`live=long-poll`) | immediate data `200`, timeout `204` + cursor, a concurrent append wakes before timeout, close-during-wait `204`, strictly advancing cursor | [^http-lp] |
+    | SSE framing (`live=sse`) | `text/event-stream`, `data:`/`control` events, base64 for binary, CRLF split safely, a final append delivered *before* `streamClosed` | [^http-sse] |
+    | Dispatch, CORS & security headers | OPTIONS `204`, unknown verb `405`, CORS + expose-headers + `nosniff` on every response | [^http-cors] |
+    | `Mount` prefix translation | path outside the root `404`, `__ds` namespace `501` stub, wire→store key translation, root-string validation | [^http-mount] |
+    | Protocol grammar & cursor codec | strict `ParseTTL`/`ParseSubOffset` grammar, `IsValidIntegerString`, monotonic `GenerateResponseCursor` | [^http-proto] |
+  </Table>
+
+  Concurrency is exercised with a goroutine that appends after a sleep while the
+  main goroutine blocks. The one place a recorder is not enough is streaming
+  *order*: the SSE drain test spins a real `httptest.NewServer` and asserts the
+  final append is emitted on the wire before the close control.
+
+  ```go title="handler_test.go — SSE must drain the last append before it closes"
+  srv := httptest.NewServer(h)              // a real server, not a recorder
+  body := httpGet(srv.URL + "/test?offset=-1&live=sse")
+  // a final append + close arrived during the stream:
+  assert strings.Index(body, "data:final") < strings.Index(body, "streamClosed")
+  // the byte is delivered first; the close control is strictly after it
+  ```
+
+  <Callout icon="alert" label="Gaps in the HTTP layer">
+    Error envelopes are plain-text <code>http.Error</code> bodies, not a JSON
+    problem shape; tests assert status codes and diagnostic headers but never the
+    body text, so wording can drift untested. Glob/wildcard matching is not tested
+    here (it lives in the webhook package), and <code>__ds</code> subscriptions
+    only hit a <code>501</code> stub. There is no fuzz, property, or
+    linearizability test in this area — negative-input coverage is hand-enumerated
+    table slices, so an untried malformed input may slip through.
+  </Callout>
+</section>
+
+<section class="block" id="subscriptions">
+  <SectionHead num="04" label="Subscriptions" title="The control plane, <em>three tiers</em>" />
+
+  The `__ds` subscription layer turns stream activity into webhook deliveries and
+  pull-wakes. Its tests come in three tiers. First, pure unit tests on
+  injected-seam functions — the fence/claim/ack mirrors of the Lua, the
+  pending-work core, config hashing, glob, retry backoff, and the SSRF URL
+  classifier — table-driven and deterministic by passing `now` and the jitter
+  fraction explicitly. Second, real-Redis integration tests (db 14, `FlushDB` at
+  setup, `t.Skip` under `-short`) that drive the embedded Lua scripts and prove
+  durability across a *fresh store over the same Redis*. Third, Manager tests with
+  in-memory fakes (`fakeStreams`, `fakeLister`, `fakeMetrics`) over a real store.
+
+  <Table wide>
+    | Test group | Verifies | Code ref |
+    | --- | --- | --- |
+    | Pure fence/claim/ack mirrors of the Lua | `FenceDecision`/`ClaimDecision`/`MergeAcks` encode the exact fence and forward-only-ack rules as the authoritative Lua, asserted without Redis | [^sub-mirror] |
+    | Pending-work / offset-compare core | `tail > acked` over opaque offsets with the `-1`/`""` beginning sentinel; missing streams are not-pending — the same decision the batched sweep and per-link snapshot make | [^sub-pending] |
+    | Config hashing, validation, glob, retry backoff | order/dup-independent length-prefixed `ConfigHash`; `*`=one segment vs `**`=zero-or-more; `RetryDelay` 1s→60s cap with ≤20% injected jitter | [^sub-config] |
+    | SSRF webhook-URL classifier | loopback over http allowed, RFC1918/`169.254` rejected, public http rejected (https required); `allowPrivate` escape hatch still rejects non-http | [^sub-ssrf] |
+    | Recovery sweep: stranded pull-wake re-emit | a pull-wake armed but never written is re-emitted by `RunSweep`; a healthy second sweep does not duplicate it | [^sub-sweep1] |
+    | Batched sweep selection + metrics seam | wakes exactly the idle subs whose linked tail is beyond the cursor; the per-tick cap rolls a cursor over all ids; reports to the `Metrics` seam | [^sub-sweep2] |
+    | Reconcile: pattern-link backfill | a stream created *after* the sub links at the beginning offset (replay its data); a stream predating the sub links at its tail (no replay) | [^sub-reconcile] |
+    | Lua via store: create/link/arm + restart durability | `create_sub.lua` Created/Matched/Conflict; explicit link upgrades a glob link preserving the cursor; `arm_wake` coalesces to BUSY; state survives a fresh store | [^sub-lua1] |
+    | Lua via store: claim CAS, fence, forward-only ack | `claim.lua` grants worker-1 then fences worker-2; `ack.lua` fences a stale-gen ack, applies a forward-only advance, fences a replay | [^sub-lua2] |
+    | Lease lifecycle: expiry, re-score, takeover fence rotation | `expire_lease.lua` ACTIVE/EXPIRED; `DueLeases` re-scores forward not removes; a takeover rotates the fence so the deposed worker can no longer ack | [^sub-lease] |
+    | Fan-out index reconcile + signing-key persistence | `ReconcileIndexes` repairs a dropped fan-out SET entry from the canonical link; `LoadSigningKey` persists a stable Ed25519 `kid` | [^sub-index] |
+    | Webhook signing, tokens, wake-id format | the `t=,kid=,ed25519=` header with a `ds_`-thumbprint kid verifies against the reconstructed JWK; HMAC tokens reject wrong-sub/tamper/wrong-key/expired | [^sub-crypto] |
+  </Table>
+
+  The defining technique in this layer is differential parity by convention. Each
+  pure mirror in `state.go` carries a doc comment naming the Lua file it must move
+  with, and the tests pin both sides to identical decisions. The fence rule —
+  rejected unless the token generation, the request generation, and the request
+  wake all equal current state — is written once in Lua and mirrored once in Go.
+
+  ```go title="webhook/pure_test.go — the Go mirror of common.lua fenced()"
+  // mirror of: fenced() = tok ~= cur or req ~= cur or wake == '' or wake ~= cur
+  d := FenceDecision(sub{gen: 7, wake: "w_abc"}, reqGen, reqWake, tokGen)
+  // all three equal current      -> ""            (accepted)
+  // any stale gen / empty wake    -> ErrCodeFenced (rejected)
+  ```
+
+  The crypto tests reconstruct the verifier the way the conformance receiver does
+  — re-deriving the `ed25519.PublicKey` from the JWK and verifying over the
+  `timestamp.body` string — so the producer and consumer are proven to agree on
+  the same wire contract the external suite checks.
+
+  <Callout icon="alert" label="Where the convention can drift">
+    Parity here is asserted by convention, not enforced: no test
+    <code>EVAL</code>s the Lua and runs the Go mirror on identical inputs to
+    assert byte-equal output, so the two sides can silently diverge. True
+    concurrency is simulated sequentially — two-worker races are reproduced by
+    advancing a clock, not by running in parallel; only the jepsen
+    single-holder-linz driver runs genuinely concurrent claims and acks. And the
+    SSRF resolve path is only exercised with IP literals, so DNS-rebinding and
+    multi-IP hosts are not table-covered.
+  </Callout>
+</section>
+
+<section class="block" id="jepsen">
+  <SectionHead num="05" label="Jepsen" title="Killed mid-flight, <em>and linearized</em>" />
+
+  The Jepsen suite (`jepsen/checker/`) is a Go generator + nemesis + checker triad
+  over a live `k3d` cluster, and it has two distinct halves. The first is
+  final-state durability: kill pods and Redis, let the faults settle, and assert
+  every cursor reached its tail — or a deposed worker is `FENCED`. The second is a
+  per-history safety suite — porcupine linearizability for the single-holder
+  invariant (T1), a non-decreasing checker for cursor monotonicity (T2) — split
+  pure-core / imperative-shell, with the pure cores unit-tested on hand-built
+  histories and no cluster.[^jepsen-split]
+
+  <Table wide>
+    | Test group | Verifies | Code ref |
+    | --- | --- | --- |
+    | Durability final-state (baseline / origin-restart / redis-restart) | after faults settle, every glob webhook cursor reached its stream tail; duplicates reported (at-least-once) but fence-safe, not failures | [^jep-durability] |
+    | Crash-window hardening (arm-crash / glob-create-crash / index-repair) | each hardening slice's property: the sweep re-emits arm-without-emit wakes, the reconcile loop links a stream created under a crash, `ReconcileIndexes` rebuilds a dropped SADD | [^jep-hardening] |
+    | Expired-lease-takeover (deterministic) | worker B's takeover rotates the fence to a fresh generation, so A's late ack returns `409 FENCED` — the single-holder property, hand-built | [^jep-takeover] |
+    | **T1** single-holder-linz — live porcupine driver | N workers claim/ack under a gcPause nemesis; each outcome is bracketed into a `porcupine.Operation` and `CheckOperationsVerbose` runs the model | [^jep-t1live] |
+    | **T1** lease-fence model — the pure oracle | the sequential model of one sub's `(gen, wake, phase)` register; an `OK` ack under a stale token is the two-holder violation | [^jep-t1model] |
+    | **T1** model unit tests — legal + violation witnesses | the oracle accepts every legal interleaving and rejects exactly the single-holder violations, from hand-built porcupine histories | [^jep-t1unit] |
+    | **T2** cursor-monotonic — live sampling driver | under origin churn, a poller samples each cursor every 150ms; the pure checker reports any backward step after settle | [^jep-t2live] |
+    | **T2** cursor-monotonic pure checker + unit tests | per `(sub, path)` the acked offset never decreases; a dip-and-recover reports exactly once; the `-1` sentinel orders below any real offset | [^jep-t2unit] |
+  </Table>
+
+  ### The porcupine model — T1 and T2
+
+  The fence is the load-bearing safety property: at no instant may two workers
+  hold a token that `ack.lua` will accept for one subscription. T1 checks this with
+  `porcupine` (anishathalye/porcupine). The model is a pure, I/O-free sequential
+  oracle over one subscription's fence register `(gen, wake, phase)`, partitioned
+  by subscription so the NP-hard linearizability search stays per-key. `stepArm`
+  requires the generation to strictly increase from idle; `stepClaim` coalesces
+  (reuse the exact `gen`/`wake`) only from `phase=waking` with a wake set, else
+  rotates strictly upward; and `stepAckOrRelease` computes the fence exactly as the
+  Lua does.
+
+  ```go title="model_fence.go — the fence step, the load-bearing safety gate"
+  func stepAckOrRelease(s fenceState, in fenceInput, out fenceOutput) (bool, fenceState) {
+      fenced := in.tokenGen != s.gen || in.reqGen != s.gen ||
+                in.reqWake == "" || in.reqWake != s.wake
+      if out.status == statusOK && fenced {
+          // two holders' tokens were both honored — no valid linearization.
+          return false, s
+      }
+      // ... apply a legal OK forward; BUSY / NOSUB / FENCED are no-ops
+  }
+  ```
+
+  Two design choices in the model are worth naming, because an adversarial review
+  found a false-`Illegal` without them. Time is deliberately *absent*: `BUSY`,
+  `NOSUB`, and crucially `FENCED` are unconditional legal no-ops. A `FENCED` grants
+  nothing, so it cannot be half of a violation, and modeling it as an unconditional
+  no-op absorbs `expire_lease.lua` clearing `wake_id` without rotating `gen` — an
+  invisible server event the history cannot see. The other choice is that
+  generations start at 1 in the unit tests, to mirror `create_sub.lua`'s `gen=0`
+  plus the first `HINCRBY`.
+
+  The pure model is exercised two ways. The live driver runs N real workers against
+  a real subscription, with an in-process `gcPause` nemesis that stalls roughly
+  every third grant past `lease_ttl_ms` so a peer takes over and the stalled ack
+  races in stale; the recorder brackets each outcome — recording `BUSY`/`FENCED`
+  verbatim, not as errors — using the host monotonic clock so `[Call, Return]`
+  stays sound under clock skew.
+
+  ```text title="scenario_lease.go — the live T1 driver, in shape"
+  N workers, until deadline:
+    claim  -> record(opClaim)
+    if grants % 3 == 0 { sleep(lease_ttl + 250ms) }   # gcPause: stall past the lease
+    ack    -> record(opAck)                            # the stalled one races in stale
+
+  result, info := porcupine.CheckOperationsVerbose(leaseModel(), history, 20s)
+  switch result {
+    Ok:      pass
+    Illegal: VisualizePath(info, "linz-counterexample.html")  # two-holder witness
+    Unknown: too concurrent to decide  -> accepted T1 limit (gap #1)
+  }
+  ```
+
+  The 13 model unit tests pin clauses the live driver cannot reliably reach — a
+  stale bearer token where `reqGen == current` but `tokenGen` is stale, the
+  post-expiry `FENCED` that must linearize — and run with `CheckOperations` (no
+  timeout, so a definitive `Ok`/`Illegal`), no cluster, no Redis.
+
+  ```text title="model_fence_test.go — a stale ack accepted is Illegal"
+  h := history{
+    claim(A) -> CLAIMED(gen=1, wA),
+    claim(B) -> CLAIMED(gen=2, wB),     # B rotated the fence to 2
+    ack(A, gen=1, wA, done) -> OK,      # A's token is stale; an OK here is two-holder
+  }
+  checkLinearizable(t, h, /*want*/ false)   # no valid linearization exists
+  ```
+
+  ### A takeover history, drawn out
+
+  The single-holder violation T1 exists to catch is the lease takeover that fails
+  to rotate the fence. The diagram below contrasts the broken pre-slice behavior
+  (B reuses A's generation, both tokens stay valid — a split brain) with the
+  current behavior (B rotates, A is fenced).
+
+  ```text title="Expired-lease takeover — the fence must rotate"
+  time ─────────────────────────────────────────────────────────────────▶
+
+  worker A   claim ─────[ holds lease, gen=1, wake=wA ]───X stalled past TTL
+                                                          │
+                                    lease expires ........│
+                                                          ▼
+  worker B                              claim (takeover) ─[ gen=?, wake=wB ]── ack ─▶ OK
+                                                          │
+  worker A (resumes) ............................. ack(gen=1, wA) ─▶ ???
+
+   ┌─ BROKEN (pre-slice): B reuses gen=1, wake=wA ───────────────────────────┐
+   │   A's ack(gen=1, wA)  matches current  ->  OK   ← two holders, split brain│
+   └──────────────────────────────────────────────────────────────────────────┘
+
+   ┌─ FIXED: B rotates to gen=2, wake=wB ────────────────────────────────────┐
+   │   A's ack(gen=1, wA)  tokenGen 1 != cur 2  ->  409 FENCED  ← single holder │
+   └──────────────────────────────────────────────────────────────────────────┘
+  ```
+
+  T2 is simpler by construction. A single backward step in a cursor is a finite
+  counterexample, so it needs no linearization search — it is a direct
+  non-decreasing checker over the sampled stream. `CheckCursorMonotonic` keeps a
+  per-`(sub, path)` high-water mark; a sample below the mark is one violation but
+  keeps the existing mark, so a dip-and-recover reports exactly once rather than
+  cascading. Its `offsetGreater` mirrors `common.lua` and the webhook a third time
+  — the triple-mirror pattern — with `-1`/`""` as the beginning sentinel.
+
+  ```text title="check_cursor.go — a dip-and-recover is one report, not a cascade"
+  samples for one (sub, path):  20 ─▶ 5 ─▶ 21
+                                │     │     │
+  high-water:                   20    20    20→21
+  violation:                          ✗ (5 < 20)
+                                            (21 ≥ 20: not re-flagged)
+  => exactly 1 violation, not 2
+  ```
+
+  <Callout icon="alert" label="What Jepsen does not yet cover">
+    <strong>The arm-crash is an approximation.</strong> The few-microsecond
+    arm/emit window cannot be hit from an external host driver; it is approximated
+    with coarse pod-kill plus churn, and the code itself notes a surgical kill
+    needs a server-side <code>gofail</code> seam this harness lacks.
+    <strong>There is no real failover substrate.</strong> <code>killRedis</code>
+    deletes the one Redis pod and relies on PVC-backed AOF replay; there is no
+    replica, sentinel, or cluster failover, so split-brain and replication-lag
+    durability are untested. Acceptance gates T3/T5 and liveness L2/L4/L5 are
+    unimplemented until proposed sharding lands, and a porcupine
+    <code>Unknown</code> on an over-concurrent history is an accepted T1 limit.
+  </Callout>
+</section>
+
+<section class="block" id="load">
+  <SectionHead num="06" label="Load" title="Sweep scale, <em>measured</em>" />
+
+  The performance and conformance tier covers four things: the batched
+  recovery-sweep microbenchmark, the load generator's own unit suite, the Durable
+  Streams protocol conformance suite, and the on-demand GKE sweep-scale rig. The
+  benchmark is the only Go benchmark in the repository (`grep 'func Benchmark'` is
+  one hit); the load generator is conventional table-driven and golden-substring
+  unit tests; conformance is a vendored npm suite; the cloud rig is SLO-gated and
+  on-demand, not in CI.
+
+  <Table wide>
+    | Test group | Verifies | Code ref |
+    | --- | --- | --- |
+    | Batched recovery-sweep microbenchmark | wall-time of one `Manager.RunSweep` tick as subscriptions K and links-per-sub P grow, isolating the Redis round-trip read cost | [^load-bench] |
+    | Pace schedules (load shaping) | constant and linear-ramp arrival: `At(n)`, monotonicity, and that the ramp's closed form inverts its own cumulative-hits integral | [^load-pace] |
+    | Payload build/parse & framing | generated payloads hit an exact byte size, round-trip seq+sentNano, and batch builders split back to N elements/frames | [^load-payload] |
+    | SSE wire parser | the client-side parser joins multi-line `data:` into one JSON array, decodes control events, replays the PROTOCOL transcript | [^load-ssewire] |
+    | Stats collector & HDR quantiles | recording is gated by the warmup window, recorders merge across goroutines, HDR quantiles accurate to ~0.1%, out-of-range samples clamp | [^load-stats] |
+    | Sweep spec defaults & Prometheus scraping | `Spec.Prepared` defaults and rejects bad dispatch; the `/metrics` scraper sorts buckets ascending by `le` with `+Inf` last | [^load-sweep] |
+    | Scenario YAML parse & validation | defaults and derived fan-out, rate-string grammar (`30/s`, ramps `a..b`), and a 9-case table of validation errors | [^load-scenario] |
+    | Experiment spec → K8s/TF render | the GKE spec renders the SUT Deployment, the loadgen Job, and Terraform tfvars; missing `sut.image` is rejected | [^load-experiment] |
+    | Report Markdown rendering | every section from a synthetic `run.Result`: latency tables, counter rollups with derived throughput, resource peaks, notes | [^load-report] |
+    | Durable Streams protocol conformance suite | ~330 black-box protocol tests (vitest + fast-check) pinning create/append/read, idempotent producers, closure, forks, JSON/SSE, `__ds` | [^load-conformance] |
+    | GKE sweep-scale rig (driver + IaC) | the on-demand driver: seed K subs, settle, scrape `chronicle_sweep_*`, SLO-gate with a non-zero exit on p99/seed-error breach | [^load-gke] |
+  </Table>
+
+  The benchmark isolates exactly the cost that scaling the sweep is about: the
+  Redis round-trip read cost, with no wakes firing. `benchRedis` pings an isolated
+  DB (db 13) and `b.Skipf`s if it is down, so `go test ./...` stays green
+  serverless; it seeds K idle subscriptions each linked to P *non-existent* streams
+  (a tail `HGET` costs the same round trip whether the stream exists), asserts the
+  seeded subs are `PhaseIdle` so the pending-work read path is actually exercised,
+  and then loops `RunSweep` over a K/P case matrix.
+
+  ```go title="sweep_bench_test.go — the benchmark in shape"
+  if !benchRedis(b) { b.Skipf("redis db 13 unreachable") }   // green serverless
+  seedIdleSubs(K, P)                  // P dead links each: same RT as live ones
+  for _, sub := range subs {
+      require(sub.Phase == PhaseIdle)  // else the read path measures nothing
+  }
+  b.ResetTimer()
+  for i := 0; i < b.N; i++ {
+      mgr.RunSweep()                   // one tick: GetMany + TailOffsets, no wakes
+  }
+  // cases: K1000_P1, K1000_P5, K5000_P5, K10000_P1
+  ```
+
+  <Complexity
+    time="O(K + U) work · ⌈K/512⌉ + ⌈U/512⌉ round trips per tick"
+    space="O(K + U) for the swept ids and the tail map"
+    why="The benchmark measures the batched <code>sweepOnce</code>: the big-O work is unchanged — it touches every subscription and every distinct linked tail (U of them) — but pipelining collapses the naive <code>1 + K + K·P</code> sequential round trips into a chunked handful, so a tick is bounded by Redis throughput, not by K times round-trip latency. The first real GKE run reports a sweep tick mean of <strong>316ms</strong> / p99 <strong>509ms</strong> at K=10,000, well under the 2s interval; the local microbench is ~122ms at the same scale."
+  />
+
+  The batching win is asserted structurally rather than as a fixed number:
+  `sweepOnce` uses `GetMany` plus `TailOffsets` (pipelined), replacing one round
+  trip per subscription and one per link — at K=10,000 that is roughly 40 pipelined
+  round trips against about 20,000 sequential ones in the old form. The conformance
+  suite is property-based (fast-check) plus example-based vitest, vendored as the
+  pinned npm `@durable-streams/server-conformance-tests@0.3.5` and run black-box
+  against a live server; the Go unit tests guard the wire contract it depends on
+  (the signature regex, JWK reconstruction, reject codes).
+
+  <Callout icon="alert" label="Honest scale caveats">
+    The <code>87×–354×</code> headline (1.09s→12.5ms at K=1,000×1; 48.4s→137ms at
+    K=5,000×5) is the before/after of the batching, recorded in the subscriptions
+    brief — the benchmark file asserts the win structurally, not as a literal
+    number. The absolute figures are the cloud tick mean 316ms / p99 509ms and the
+    local microbench ~122ms at K=10,000. The conformance <code>node_modules</code> is not installed
+    in this checkout (only <code>package.json</code> + lock), so the ~330-test count
+    comes from the pinned 0.3.5 package and CI must <code>npm ci</code> to run it.
+    The cloud rig validates absolute scale, not every commit — for per-change
+    regression the README recommends <code>benchstat</code> against a main baseline.
+  </Callout>
+</section>
+
+<section class="block" id="findings">
+  <SectionHead num="07" label="Findings" title="What the suite <em>does and does not</em> prove" />
+
+  The single sentence that captures the suite: **a pure deterministic core behind
+  an imperative I/O shell, each tested at the cheapest faithful level, with the
+  emergent cross-process properties model-checked under fault injection.** What
+  follows is the honest ledger — what that buys, where it stops, and the
+  techniques that do the work.
+
+  ### Strengths
+
+  - **Differential memory/Lua-vs-oracle parity.** One §5.2.1 producer table is the
+    oracle; the Redis Lua append path is asserted byte-identical to pure-Go
+    `ValidateProducer` per row, including the persisted state and write-iff-accepted.[^f-diff]
+  - **Pure-core/imperative-shell discipline.** `model_fence.go` and
+    `check_cursor.go` are I/O-free oracles unit-tested with hand-built porcupine
+    histories (18 jepsen unit tests, no cluster); the `scenario_*.go` files are the
+    live drivers.[^f-split]
+  - **Porcupine linearizability gate on the lease fence.** A sequential
+    single-holder model encodes the claim/ack Lua; an `OK` ack under a stale token
+    is the two-holder violation, surfaced with `VisualizePath` counterexamples.[^f-porcupine]
+  - **Bidirectional Lua/Go lockstep mirrors.** `common.lua` `fenced()` and
+    `state.go` `FenceDecision` each cite the other; the cursor checker re-mirrors
+    `offsetGreater` a third time, so the same rule is pinned from three sides.[^f-mirror]
+  - **Property-style lex invariant over adversarial bytes.** Frame/offset tests
+    sort `0x00`/`0xff`/`|` payloads and assert bytewise order equals stream order —
+    the foundation of the ZSET log model.[^f-lex]
+  - **Real-Redis-or-skip with isolated DBs.** Each tier pings a dedicated DB (15
+    store, 14 webhook, 13 bench) and skips under `-short` or when unreachable,
+    keeping `go test ./...` green serverless while still exercising real Lua and
+    round-trip cost.[^f-redis]
+  - **Determinism via injected seams.** `TailFunc`, `IPResolver`, explicit `now`
+    clocks, and an explicit jitter fraction make fence/claim/retry/SSRF
+    reproducible; `fakeStreams`/`fakeLister`/`fakeMetrics` isolate Manager
+    orchestration over a real store.[^f-seams]
+  - **Conformance plus timing-bound concurrency assertions.** ~330 black-box
+    conformance tests pin the wire spec; the store notify tests assert an elapsed
+    time under one second proves pub/sub and under 200ms proves the fast path — not
+    just the outcome, the mechanism.[^f-timing]
+
+  ### Gaps
+
+  <Table wide>
+    | Gap | Severity | Why it matters |
+    | --- | --- | --- |
+    | Jepsen arm-crash is an approximation | **high** | the few-microsecond arm/emit window can't be hit from an external host; coarse pod-kill + churn stands in, and the code says a surgical kill needs a `gofail` seam this harness lacks[^g-arm] |
+    | Single-node Redis, no real failover | **high** | `killRedis` deletes the one pod and relies on AOF replay; no replica/sentinel/cluster substrate, so split-brain and replication-lag durability are untested[^g-failover] |
+    | Lua/Go parity asserted by convention | medium | no test `EVAL`s the Lua and runs the Go mirror on identical inputs for byte-equal output; parity rests on mirrored assertions plus doc comments[^g-parity] |
+    | No fuzz/property/linearizability in store or HTTP | medium | despite the repo name, store and handler layers are example-based tables only — no `go test fuzz`, no property harness, no `-race` multi-writer store test[^g-fuzz] |
+    | True concurrency simulated sequentially | medium | webhook two-worker races are reproduced by advancing a clock, not running in parallel; only the jepsen single-holder-linz driver runs genuinely concurrent[^g-concurrency] |
+    | Acceptance/liveness gates unimplemented | low | jepsen T3/T5 and L2/L4/L5 are red until proposed sharding lands; porcupine `Unknown` on over-concurrent histories is an accepted T1 limit[^g-gates] |
+    | Memory-vs-Redis parity is structural | low | both back the same `Store` interface but most contract cases are duplicated per-backend, not run through one shared harness, so divergences rely on hand-kept mirroring[^g-parity-store] |
+    | Thin packages; conformance not installed | low | `metrics` has only 2 tests; conformance `node_modules` isn't vendored in-tree, so the ~330 count needs `npm ci` in CI[^g-thin] |
+  </Table>
+
+  ### Techniques
+
+  <Table wide>
+    | Technique | What it does | Code ref |
+    | --- | --- | --- |
+    | Differential / oracle parity | the pure-Go `ValidateProducer` table is the single source of truth; the Lua append path is asserted byte-identical row-by-row, incl. persisted state and write-iff-accepted | [^t-diff] |
+    | Porcupine linearizability | a pure sequential fence `Model` (partition-by-sub) checks recorded concurrent claim/ack histories for single-holder; `Illegal` emits an HTML counterexample | [^t-porcupine] |
+    | Lua/Go pure-mirror lockstep | `common.lua` `fenced()` and `state.go` `FenceDecision` cite each other; `check_cursor` re-mirrors `offsetGreater` a third time — pinned from Go, Lua, and the checker | [^t-mirror] |
+    | Fault injection on k3d | a `kubectl`/`redis-cli` nemesis (`killOneOrigin`, `killAllOrigins`, `killRedis`, `deleteStreamIndex`) drives crash scenarios; final-state checks assert every cursor reaches tail within `-settle` | [^t-fault] |
+    | In-process gcPause nemesis | stalls a claimed token past `lease_ttl_ms` so a peer takes over and the stale ack races in; highest-ROI T1 fault, needs no infra, host monotonic clock keeps `[Call, Return]` sound | [^t-gcpause] |
+    | Property-style lex invariant | frame/offset tests sort adversarial `0x00`/`0xff`/`|` payloads and assert bytewise order equals stream offset order — the ZSET log model's foundation | [^t-lex] |
+    | Real-Redis-or-skip, isolated DBs | store/webhook/bench each ping a dedicated DB (15/14/13), `FlushDB` once, and skip under `-short` or when unreachable; no miniredis anywhere | [^t-redis] |
+    | Golden-substring + closed-form invariants | loadgen renders Markdown/K8s/TF artifacts checked by substring; pace tests invert the linear-ramp cumulative-hits integral; HDR quantiles checked to ~0.1% | [^t-golden] |
+  </Table>
+
+  The through-line is that the most safety-critical rules — the producer fence,
+  the subscription fence, the forward-only cursor, the lex order under the log —
+  are each pinned from more than one independent angle. A regression that wants to
+  ship has to defeat the pure oracle, its mirror, and where it matters a recorded
+  concurrent history all at once. What it does *not* yet have is a real failover
+  substrate or a surgical crash seam, and it leans on convention where it could
+  enforce equivalence. Those are the named next steps, not silent omissions.
+</section>
+
+[^split]: The pure-core/imperative-shell split, stated for the fence model: [`jepsen/checker/model_fence.go:9`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_fence.go) — `model_fence.go` and `check_cursor.go` are I/O-free oracles; the `scenario_*.go` files are the live drivers.
+
+[^realredis]: No miniredis: all `store/redis` integration/fork/notify/differential tests need a real Redis (go-redis v9, db 15), skipped under `-short`, `FlushDB` once via `setupOnce`: [`store/redis/integration_test.go:31`](https://github.com/adityavkk/chronicle/blob/main/store/redis/integration_test.go). The keys/meta tests are pure encoding, no Redis.
+
+[^contract]: Store contract — create/idempotency/append-read/delete: [`store/memory_store_test.go:15`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go) (pure Go) and [`store/redis/integration_test.go:90`](https://github.com/adityavkk/chronicle/blob/main/store/redis/integration_test.go) (real Redis). Config matching is case-insensitive on content-type and includes TTL and Closed status.
+
+[^offset]: Opaque lexicographic offset — format/parse/compare/order: [`store/offset_test.go:138`](https://github.com/adityavkk/chronicle/blob/main/store/offset_test.go); `TestOffsetLexicographicOrder` asserts both that `Compare(a,b)` is negative and that `a.String()` sorts before `b.String()` for every adjacent pair. The format is `"%016d_%016d"` in [`store/offset.go:23`](https://github.com/adityavkk/chronicle/blob/main/store/offset.go).
+
+[^producer]: Producer fencing state machine (the pure oracle): [`store/producer_test.go:11`](https://github.com/adityavkk/chronicle/blob/main/store/producer_test.go) — one big `TestValidateProducer` table over PROTOCOL §5.2.1, the same table reused by the Redis differential test.
+
+[^differential]: DIFFERENTIAL parity — Redis Lua mirror vs the pure-Go oracle: [`store/redis/differential_test.go:16`](https://github.com/adityavkk/chronicle/blob/main/store/redis/differential_test.go). For each §5.2.1 row, `oracle = ValidateProducer(...)`, seed `prodKey`, `s.Append` against live Redis, then compare result/error, persisted state, and `GetCurrentOffset` advanced-iff-accepted.
+
+[^fork]: Forks / branching — stitched reads, sub-offsets, refcount, soft-delete cascade: [`store/redis/fork_test.go:13`](https://github.com/adityavkk/chronicle/blob/main/store/redis/fork_test.go) (real Redis) and [`store/memory_store_test.go:579`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go) (MemoryStore). Asserts `testClient.Exists(...)==0` after a hard cascade.
+
+[^ttl]: TTL & expiry — sliding window, absolute, fork inheritance: [`store/redis/differential_test.go:120`](https://github.com/adityavkk/chronicle/blob/main/store/redis/differential_test.go) (real Redis) and [`store/memory_store_test.go:647`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go) (`IsExpired` and per-op expiry). Read/Append renew; Get does not.
+
+[^keys]: Redis keyspace, hash-tag co-location & escaping: [`store/redis/keys_test.go:14`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys_test.go); `TestEscapePathHashTagSafety` counts braces and asserts injective escaping. Schema in [`store/redis/keys.go:36`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go).
+
+[^frame]: Frame encoding & lex bounds (the ZSET model invariant): [`store/redis/keys_test.go:140`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys_test.go) — `TestFrameLexOrderEqualsStreamOrder` sorts a shuffled adversarial frame list; `lexLowerBound` is exclusive, defined in [`store/redis/keys.go:66`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go).
+
+[^notify]: Notify / long-poll & SSE wakeups (`WaitForMessages`): [`store/redis/notify_test.go:12`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify_test.go) (real Redis pub/sub) and [`store/memory_store_test.go:233`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go). Timing bounds: under one second proves pub/sub, under 200ms proves the fast path ([`store/redis/notify_test.go:31`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify_test.go)).
+
+[^closure]: Stream closure & seq dedup (offset-byte append guard): [`store/redis/integration_test.go:287`](https://github.com/adityavkk/chronicle/blob/main/store/redis/integration_test.go) and [`store/memory_store_test.go:349`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go). Seq dedup is bytewise lex: `"10"` after `"2"` is `ErrSequenceConflict`.
+
+[^meta]: Redis metadata serialization round-trip: [`store/redis/meta_test.go:11`](https://github.com/adityavkk/chronicle/blob/main/store/redis/meta_test.go) — `metaToFields`→`metaFromFields` with `reflect.DeepEqual` and `ExpiresAt.Equal` for nanosecond fidelity; `decodeProducerState("a:b:c")` errors.
+
+[^httpharness]: All 57 handler tests run against `store.NewMemoryStore` via `httptest` recorders and a shared `do()` helper — no real Redis, no miniredis, no mocks: [`handler_test.go:19`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-create]: Create / fork (PUT) — 201→200→409 sequence and fork-header validation: [`handler_test.go:76`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-head]: HEAD metadata — tail offset, `Cache-Control:no-store`, TTL/Expires-At round-trip, `Stream-Closed`: [`handler_test.go:240`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-append]: Append (POST) basics & validation — `204` + advanced offset, the `400`/`409`/`404` matrix, closed → `409` with the frozen offset: [`handler_test.go:307`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-producer]: Idempotent producers — `TestAppendProducerFlow` (200→204 dup writes nothing) and `TestAppendInvalidProducerIntegers`: [`handler_test.go:389`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-close]: Close semantics — close-only POST, producer-tuple close replay-safe, foreign producer `409`: [`handler_test.go:524`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-delete]: Delete & soft-delete — `204`→`404`, and the `410`/`409`-per-verb tombstone matrix while a fork reads through: [`handler_test.go:613`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-read]: Read catch-up & conditional — concatenated bytes + `ETag`, `?offset=` suffix, `If-None-Match` 304/200: [`handler_test.go:668`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-now]: `offset=now` (tail) reads — empty body (or `"[]"`), tail offset, no `ETag`, `Cache-Control:no-store`: [`handler_test.go:737`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-json]: JSON mode flattening — offsets advance by element byte length, GET/suffix re-wrap, empty-array append `400`: [`handler_test.go:826`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-lp]: Long-poll (`live=long-poll`) — `TestLongPollReceivesAppend` wakes a concurrent append in under two seconds, and `TestLongPollEchoedCursorAdvances`: [`handler_test.go:875`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-sse]: SSE framing (`live=sse`) — headers, `data:`/`control` events, base64 binary, CRLF safety, and `TestSSEDrainsFinalAppendBeforeClose` over a real `httptest.NewServer`: [`handler_test.go:1008`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go), with [`handler_sse.go`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go).
+
+[^http-cors]: Dispatch, CORS & security headers — `assertSecurityHeaders` and `TestCORSHeadersOnAllResponses`: [`handler_test.go:64`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go) and [`handler_test.go:1186`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+
+[^http-mount]: `Mount` prefix translation — wire→store key translation, `__ds` 501 stub, root-string validation: [`handler_test.go:1237`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go), with [`mount.go`](https://github.com/adityavkk/chronicle/blob/main/mount.go).
+
+[^http-proto]: Protocol grammar & cursor codec — `ParseTTL`/`ParseSubOffset` grammar and `TestCursorMonotonicProgression`: [`protocol/protocol_test.go:8`](https://github.com/adityavkk/chronicle/blob/main/protocol/protocol_test.go).
+
+[^jepsen-split]: Two distinct check styles: final-state durability (cursor reaches tail / deposed worker FENCED) for the nemesis scenarios at [`jepsen/checker/main.go:417`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go), versus per-history linearizability (porcupine) for T1 and a non-decreasing checker for T2.
+
+[^jep-durability]: Durability final-state scenarios (baseline / origin-restart / redis-restart): [`jepsen/checker/main.go:194`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go); `verify()` compares each stream's `acked_offset` to the recorded tail and computes a duplicate factor. `killRedis` only tests AOF replay ([`jepsen/checker/main.go:864`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go)).
+
+[^jep-hardening]: Subscription-hardening crash-window scenarios (pull-wake-arm-crash / glob-create-crash / index-repair): [`jepsen/checker/main.go:324`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go); each asserts the property a hardening slice promises, all verifying cursor==tail.
+
+[^jep-takeover]: Expired-lease-takeover (deterministic fence-rotation): [`jepsen/checker/main.go:241`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go) — A claims and stalls past `lease_ttl_ms`, B takes over with `b.Generation != a.Generation`, B acks `200`, A's late ack must be exactly `409 FENCED`.
+
+[^jep-t1live]: T1 single-holder-linz live porcupine driver: [`jepsen/checker/scenario_lease.go:31`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/scenario_lease.go); `CheckOperationsVerbose(leaseModel(), history, 20s)` at [`jepsen/checker/scenario_lease.go:72`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/scenario_lease.go), `Illegal` emits `linz-counterexample.html`. The recorder uses the host monotonic clock ([`jepsen/checker/history.go:33`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/history.go)).
+
+[^jep-t1model]: T1 lease-fence model — the pure porcupine oracle: [`jepsen/checker/model_fence.go:205`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_fence.go) is the `fenced` clause; `partitionBySub` keeps the search per-key at [`jepsen/checker/model_fence.go:243`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_fence.go). Time is deliberately absent so `FENCED` is an unconditional no-op ([`jepsen/checker/model_fence.go:224`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_fence.go)).
+
+[^jep-t1unit]: T1 model unit tests — legal interleavings + violation witnesses: [`jepsen/checker/model_fence_test.go:47`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_fence_test.go); a `checkLinearizable(want bool)` helper runs hand-built histories through `CheckOperations` (no timeout). Generations start at 1 to mirror `create_sub.lua`.
+
+[^jep-t2live]: T2 cursor-monotonic live sampling driver: [`jepsen/checker/scenario_cursor.go:21`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/scenario_cursor.go) — a poller samples each `acked_offset` every 150ms under origin churn; after settle `CheckCursorMonotonic` reports any regression ([`jepsen/checker/scenario_cursor.go:75`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/scenario_cursor.go)).
+
+[^jep-t2unit]: T2 cursor-monotonic pure checker + unit tests: [`jepsen/checker/check_cursor.go:49`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/check_cursor.go) keeps a per-`(sub,path)` high-water map; `offsetGreater` mirrors `common.lua` a third time at [`jepsen/checker/check_cursor.go:74`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/check_cursor.go). Tests at [`jepsen/checker/check_cursor_test.go:42`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/check_cursor_test.go).
+
+[^load-bench]: Batched recovery-sweep microbenchmark: [`sweep_bench_test.go:45`](https://github.com/adityavkk/chronicle/blob/main/sweep_bench_test.go); `benchRedis` pings db 13 and `Skipf`s ([`sweep_bench_test.go:19`](https://github.com/adityavkk/chronicle/blob/main/sweep_bench_test.go)). Loops `Manager.RunSweep` ([`webhook/manager.go:553`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go)) over a K/P matrix.
+
+[^load-pace]: Pace schedules — `TestLinearRampInvertsCumulativeHits` recomputes the cumulative-hits integral and asserts it equals n: [`loadgen/pace/pace_test.go:31`](https://github.com/adityavkk/chronicle/blob/main/loadgen/pace/pace_test.go).
+
+[^load-payload]: Payload build/parse & framing — exact byte size, seq+sentNano round-trip, batch split to N: [`loadgen/payload/payload_test.go:8`](https://github.com/adityavkk/chronicle/blob/main/loadgen/payload/payload_test.go).
+
+[^load-ssewire]: SSE wire parser — `TestProtocolExample` replays the PROTOCOL transcript to two events: [`loadgen/ssewire/ssewire_test.go:20`](https://github.com/adityavkk/chronicle/blob/main/loadgen/ssewire/ssewire_test.go).
+
+[^load-stats]: Stats collector & HDR quantiles — gated recording, cross-goroutine merge, ~0.1% quantile tolerance, out-of-range clamp: [`loadgen/stats/stats_test.go:8`](https://github.com/adityavkk/chronicle/blob/main/loadgen/stats/stats_test.go).
+
+[^load-sweep]: Sweep spec defaults & Prometheus scraping — `TestSpecPrepared` and a `httptest` `/metrics` fake asserting buckets sorted with `+Inf` last: [`loadgen/sweep/sweep_test.go:11`](https://github.com/adityavkk/chronicle/blob/main/loadgen/sweep/sweep_test.go), parser at [`loadgen/sweep/prom.go:75`](https://github.com/adityavkk/chronicle/blob/main/loadgen/sweep/prom.go).
+
+[^load-scenario]: Scenario YAML parse & validation — defaults, rate-string grammar, a 9-case error table: [`loadgen/scenario/scenario_test.go:27`](https://github.com/adityavkk/chronicle/blob/main/loadgen/scenario/scenario_test.go).
+
+[^load-experiment]: Experiment spec → K8s/TF render — golden-substring assertions over the SUT manifest, Job manifest, and tfvars; missing `sut.image` rejected: [`loadgen/experiment/experiment_test.go:8`](https://github.com/adityavkk/chronicle/blob/main/loadgen/experiment/experiment_test.go).
+
+[^load-report]: Report Markdown rendering — every section from a synthetic `run.Result`, including the computed RSS/CPU row: [`loadgen/report/report_test.go:13`](https://github.com/adityavkk/chronicle/blob/main/loadgen/report/report_test.go).
+
+[^load-conformance]: Durable Streams protocol conformance suite — `runConformanceTests` is called with `baseUrl` and `subscriptions:true` over the vendored `@durable-streams/server-conformance-tests@0.3.5` (vitest + fast-check): [`test/conformance/conformance.test.ts:14`](https://github.com/adityavkk/chronicle/blob/main/test/conformance/conformance.test.ts), pinned in [`test/conformance/package.json:11`](https://github.com/adityavkk/chronicle/blob/main/test/conformance/package.json).
+
+[^load-gke]: GKE sweep-scale rig (driver + IaC) — `sweepscale` seeds, settles, scrapes `chronicle_sweep_*`, and exits 1 on a p99/seed-error breach: [`loadgen/cmd/sweepscale/main.go:98`](https://github.com/adityavkk/chronicle/blob/main/loadgen/cmd/sweepscale/main.go); the first real run (K=10k, tick mean 316ms / p99 509ms) is [`loadtest/RESULTS-gke.md:32`](https://github.com/adityavkk/chronicle/blob/main/loadtest/RESULTS-gke.md).
+
+[^sub-mirror]: Pure fence/claim/ack mirrors of the Lua: [`webhook/pure_test.go:182`](https://github.com/adityavkk/chronicle/blob/main/webhook/pure_test.go) — `FenceDecision`/`ClaimDecision`/`MergeAcks`; the mirror's doc comment in [`webhook/state.go:119`](https://github.com/adityavkk/chronicle/blob/main/webhook/state.go) names the Lua it must move with, matching `fenced()` at [`webhook/scripts/common.lua:29`](https://github.com/adityavkk/chronicle/blob/main/webhook/scripts/common.lua).
+
+[^sub-pending]: Pending-work / offset-compare core: [`webhook/pure_test.go:9`](https://github.com/adityavkk/chronicle/blob/main/webhook/pure_test.go); `Snapshot` uses an injected `TailFunc` and `HasPendingWorkFrom` a pre-fetched tail map ([`webhook/state.go:55`](https://github.com/adityavkk/chronicle/blob/main/webhook/state.go)). `-1`/`""` orders below any real offset.
+
+[^sub-config]: Config hashing, validation, glob, retry backoff: [`webhook/pure_test.go:33`](https://github.com/adityavkk/chronicle/blob/main/webhook/pure_test.go); `RetryDelay` takes an explicit jitter fraction (0 and 0.999999) so no randomness leaks ([`webhook/state.go:86`](https://github.com/adityavkk/chronicle/blob/main/webhook/state.go)).
+
+[^sub-ssrf]: SSRF webhook-URL classifier — `ClassifyWebhookURL` with an injected `IPResolver`: [`webhook/pure_test.go:109`](https://github.com/adityavkk/chronicle/blob/main/webhook/pure_test.go); localhost matched by name first ([`webhook/ssrf.go:28`](https://github.com/adityavkk/chronicle/blob/main/webhook/ssrf.go)).
+
+[^sub-sweep1]: Recovery sweep — stranded pull-wake re-emit: [`webhook/manager_test.go:64`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager_test.go); `newTestManager` wires a real `RedisStore` to a `fakeStreams` counting `AppendWakeEvent` ([`webhook/manager_test.go:11`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager_test.go)). `RecordWakeEventSent` at [`webhook/manager.go:636`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go).
+
+[^sub-sweep2]: Batched sweep selection + metrics seam: [`webhook/manager_test.go:135`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager_test.go); `sweepWindow` tested directly at [`webhook/manager_test.go:172`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager_test.go); `fakeMetrics` asserts one `SweepTick`. Selection logic at [`webhook/manager.go:557`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go).
+
+[^sub-reconcile]: Reconcile — pattern-link backfill: [`webhook/manager_test.go:261`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager_test.go); a `fakeLister` supplies `CreatedAtNs` relative to the sub's create time; the during-outage stream links at `BeginningOffset`, the pre-existing one at its tail. `RunReconcile` at [`webhook/manager.go:687`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go).
+
+[^sub-lua1]: Lua via store — create/link/arm + restart durability: [`webhook/redis_store_test.go:48`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store_test.go); a second `NewRedisStore` over the same client reads `phase=waking/gen=1/wake=w_first` and `ZCard(leaseZKey)==1`, proving in-memory state is irrelevant. `claim.lua` at [`webhook/scripts/claim.lua:36`](https://github.com/adityavkk/chronicle/blob/main/webhook/scripts/claim.lua).
+
+[^sub-lua2]: Lua via store — claim CAS, fence, forward-only ack: [`webhook/redis_store_test.go:123`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store_test.go); exercises the `fenced()` prelude shared by ack/release ([`webhook/scripts/ack.lua:16`](https://github.com/adityavkk/chronicle/blob/main/webhook/scripts/ack.lua), [`webhook/scripts/common.lua:29`](https://github.com/adityavkk/chronicle/blob/main/webhook/scripts/common.lua)).
+
+[^sub-lease]: Lease lifecycle — expiry, re-score, takeover fence rotation: [`webhook/redis_store_test.go:159`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store_test.go); `DueLeases` re-scores rather than removes ([`webhook/redis_store_test.go:221`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store_test.go)); `Claim A` then `Claim B` after the deadline asserts `B.gen != A.gen` and A's later ack is `FENCED` ([`webhook/scripts/claim.lua:31`](https://github.com/adityavkk/chronicle/blob/main/webhook/scripts/claim.lua)).
+
+[^sub-index]: Fan-out index reconcile + signing-key persistence: [`webhook/redis_store_test.go:273`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store_test.go); `ReconcileIndexes` repairs a `SRem`'d entry from the canonical link and invents nothing; `LoadSigningKey` twice across two stores asserts an equal `Kid` ([`webhook/redis_store.go:367`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store.go)).
+
+[^sub-crypto]: Webhook signing, tokens, wake-id format: [`webhook/crypto_test.go:17`](https://github.com/adityavkk/chronicle/blob/main/webhook/crypto_test.go); re-derives `ed25519.PublicKey` from `JWK().X` and `ed25519.Verify`s over the `timestamp.body` string, matching the conformance receiver; `ValidateToken` rejects each failure mode with deterministic clocks ([`webhook/crypto.go:96`](https://github.com/adityavkk/chronicle/blob/main/webhook/crypto.go)).
+
+[^f-diff]: Differential parity: [`store/redis/differential_test.go:16`](https://github.com/adityavkk/chronicle/blob/main/store/redis/differential_test.go).
+
+[^f-split]: Pure-core/imperative-shell discipline: [`jepsen/checker/model_fence.go:141`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_fence.go).
+
+[^f-porcupine]: Porcupine linearizability gate on the lease fence: [`jepsen/checker/model_fence.go:205`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_fence.go).
+
+[^f-mirror]: Bidirectional Lua/Go lockstep mirrors: [`webhook/scripts/common.lua:29`](https://github.com/adityavkk/chronicle/blob/main/webhook/scripts/common.lua).
+
+[^f-lex]: Property-style lex invariant over adversarial bytes: [`store/redis/keys_test.go:140`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys_test.go).
+
+[^f-redis]: Real-Redis-or-skip with isolated DBs: [`store/redis/integration_test.go:33`](https://github.com/adityavkk/chronicle/blob/main/store/redis/integration_test.go).
+
+[^f-seams]: Determinism via injected seams: [`webhook/manager_test.go:11`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager_test.go).
+
+[^f-timing]: Conformance + timing-bound concurrency assertions: [`store/redis/notify_test.go:31`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify_test.go).
+
+[^g-arm]: Jepsen arm-crash is an approximation; the code notes a surgical kill needs a `gofail` seam this harness lacks: [`jepsen/checker/main.go:305`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go).
+
+[^g-failover]: Single-node Redis, no real failover — `killRedis` relies on PVC-backed AOF replay: [`jepsen/checker/main.go:869`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go).
+
+[^g-parity]: Lua/Go parity asserted by convention, not enforced — no test `EVAL`s the Lua against the Go mirror for byte-equal output: [`webhook/scripts/common.lua:29`](https://github.com/adityavkk/chronicle/blob/main/webhook/scripts/common.lua).
+
+[^g-fuzz]: No fuzz/property/linearizability in the store or HTTP layers: [`store/redis/differential_test.go:1`](https://github.com/adityavkk/chronicle/blob/main/store/redis/differential_test.go).
+
+[^g-concurrency]: True concurrency simulated sequentially in the webhook layer (clock advance, not parallel): [`webhook/redis_store_test.go:221`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store_test.go).
+
+[^g-gates]: Acceptance/liveness gates (T3/T5, L2/L4/L5) unimplemented; over-concurrent porcupine `Unknown` is an accepted T1 limit: [`docs/specs/horizontal-scale/research/07-jepsen-style-verification.md:170`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/07-jepsen-style-verification.md).
+
+[^g-parity-store]: Memory-vs-Redis parity is structural, not a shared harness — most contract cases are duplicated per-backend: [`store/store.go:98`](https://github.com/adityavkk/chronicle/blob/main/store/store.go).
+
+[^g-thin]: Thin packages — `metrics` has only 2 tests (mux endpoints, readyz) and conformance `node_modules` isn't vendored: [`metrics/metrics_test.go:12`](https://github.com/adityavkk/chronicle/blob/main/metrics/metrics_test.go).
+
+[^t-diff]: Differential / oracle parity: [`store/redis/differential_test.go:16`](https://github.com/adityavkk/chronicle/blob/main/store/redis/differential_test.go).
+
+[^t-porcupine]: Porcupine linearizability: [`jepsen/checker/model_fence.go:141`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_fence.go).
+
+[^t-mirror]: Lua/Go pure-mirror lockstep, with the cursor checker as the third mirror: [`jepsen/checker/check_cursor.go:74`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/check_cursor.go).
+
+[^t-fault]: Fault injection on k3d — the `kubectl`/`redis-cli` nemesis: [`jepsen/checker/main.go:864`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go).
+
+[^t-gcpause]: In-process gcPause nemesis: [`jepsen/checker/scenario_lease.go:120`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/scenario_lease.go).
+
+[^t-lex]: Property-style lex invariant: [`store/redis/keys_test.go:140`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys_test.go).
+
+[^t-redis]: Real-Redis-or-skip, isolated DBs: [`store/redis/integration_test.go:33`](https://github.com/adityavkk/chronicle/blob/main/store/redis/integration_test.go).
+
+[^t-golden]: Golden-substring + closed-form invariants: [`loadgen/pace/pace_test.go:31`](https://github.com/adityavkk/chronicle/blob/main/loadgen/pace/pace_test.go).
