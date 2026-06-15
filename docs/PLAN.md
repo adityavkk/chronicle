@@ -174,9 +174,13 @@ serialization under contention; Lua gives single-round-trip linearizable
 mutations. Cost: logic duplicated between Go (pure-core oracle, used in tests)
 and Lua (execution) — mitigated by table-driven tests asserting the two agree,
 and by keeping Lua scripts small and heavily commented. Redis Functions were
-considered (nicer packaging) but `FUNCTION LOAD` is more often restricted on
-managed Redis than `EVALSHA`/`SCRIPT LOAD`; chronicle uses classic scripts with
-automatic NOSCRIPT reload.
+considered (nicer packaging) and re-evaluated once managed enterprise Redis 8 was
+available, but rejected: they give no correctness benefit over effects-replicated
+scripts, are blocked on AWS ElastiCache Serverless / MemoryDB Multi-Region (where
+`EVALSHA` works), and regress failover ergonomics under go-redis (no `FCall`
+auto-reload). chronicle uses classic scripts with go-redis's automatic
+NOSCRIPT→full-source-EVAL reload. See
+[ADR-0001](adr/0001-lua-scripts-for-atomic-grouped-redis-operations.md).
 
 ### 4.5 Live tailing: pub/sub with a re-check, plus poll fallback
 

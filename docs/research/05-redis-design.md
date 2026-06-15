@@ -217,11 +217,14 @@ pipelined) in the rare cold-cache case.
   expiry-check → validation → producer fencing → chunk `APPEND`s → `idx`
   `APPEND` → meta `HSET` → `HEXPIRE` → `(S)PUBLISH`, executed atomically.
   `MULTI/EXEC` is rejected (cannot branch on validation); Redis Functions are
-  rejected for portability (§5) — `FUNCTION LOAD` is admin-flavored and blocked
-  on more managed platforms than `EVALSHA`/`SCRIPT LOAD`, and effects-based
-  replication makes plain scripts equally safe. go-redis's `Script` helper does
-  the `NOSCRIPT → SCRIPT LOAD → retry` dance automatically (the script cache is
-  not persistent and is flushed on restart/failover).
+  rejected — see [ADR-0001](../adr/0001-lua-scripts-for-atomic-grouped-redis-operations.md):
+  they give no correctness or replication benefit over effects-replicated scripts,
+  regress failover ergonomics under go-redis (no `FCall` auto-reload), and are
+  blocked on AWS ElastiCache Serverless / MemoryDB Multi-Region while `EVAL` runs
+  everywhere. go-redis's `Script` helper does the
+  `NOSCRIPT → full-source EVAL → retry` dance automatically — it re-runs the full
+  source via `EVAL`, which re-caches it (*not* `SCRIPT LOAD`); the script cache is
+  not persistent and is flushed on restart/failover.
 - **Byte-offset read mapping:** identical to Model A (arithmetic + pipelined
   `GETRANGE`), plus one `GETRANGE` on `idx` for JSON streams. Reads run as plain
   pipelined commands from Go, *not* in Lua — Lua replies are also bounded by
@@ -376,7 +379,7 @@ below is a startup-probe + config-flag, not a hard dependency.
 |---|---|
 | **Cluster mode possible** | `{path}` hash tags on every key and channel from day one (zero cost on standalone). All scripts single-slot with fully declared `KEYS`. Sharded pub/sub (`SSUBSCRIBE`/`SPUBLISH`) when cluster is detected, classic otherwise. Cross-slot fork bookkeeping decomposed (§8). Slot migrations surface as `MOVED`/`ASK` — the client retries; atomicity is preserved because a stream never spans slots. |
 | **No `CONFIG`** | Never rely on `CONFIG SET` (rules out keyspace notifications, raising `proto-max-bulk-len`, changing `maxmemory-policy`). At startup, *attempt* `CONFIG GET maxmemory-policy appendonly proto-max-bulk-len`; if denied, log that guarantees are operator-asserted and continue. `noeviction` becomes a **documented deployment requirement** enforced by runtime integrity checks (chunk `STRLEN` validation) that turn silent eviction into loud corruption errors. |
-| **Restricted Lua?** | `EVAL`/`EVALSHA`/`SCRIPT LOAD` are the most widely permitted programmability surface; **Redis Functions (`FUNCTION LOAD`) are avoided entirely** — more often ACL-blocked, and effects replication gives plain scripts the same replication safety. Scripts: no globals, no `redis.breakpoint`, all keys declared, **`nowMs` passed as ARGV** (one clock — the Go process — for all TTL/expiry math; no `TIME` dependency). Script cache is volatile (flushed on restart/failover) → go-redis `Script.Run`'s automatic NOSCRIPT fallback. If even EVAL is denied, the model has **no non-Lua fallback for writes** — `MULTI/EXEC` cannot do conditional validation; this is a stated platform requirement, verified by a startup self-test that EVALs a trivial script. |
+| **Restricted Lua?** | `EVAL`/`EVALSHA`/`SCRIPT LOAD` are the most widely permitted programmability surface; **Redis Functions (`FUNCTION LOAD`) are not used** — not because they are unavailable (they are supported on the operator's managed enterprise Redis) but because they are blocked on ElastiCache Serverless / MemoryDB Multi-Region while `EVAL` is universal, and give no correctness gain (effects replication makes plain scripts equally safe). See [ADR-0001](../adr/0001-lua-scripts-for-atomic-grouped-redis-operations.md). Scripts: no globals, no `redis.breakpoint`, all keys declared, **`nowNs` passed as ARGV** (one clock — the Go process — for all TTL/expiry math; this gives single-clock consistency between Go's framing and Lua's TTL math — *not* a replication-determinism requirement, since under effects replication `TIME` is legal). Script cache is volatile (flushed on restart/failover) → go-redis `Script.Run`'s automatic NOSCRIPT→full-source-EVAL fallback. If even EVAL is denied, the model has **no non-Lua fallback for writes** — `MULTI/EXEC` cannot do conditional validation; this is a stated platform requirement, verified by a startup self-test that EVALs a trivial script. |
 | **Lowered `proto-max-bulk-len`** | Chunk size `S` (default 1 MiB) and `max_append_size` are configuration, with the constraint `S ≤ limit` and `max_append_size ≤ limit` (the whole append body travels as one ARGV). Reads are assembled in Go from ≤ `S`-sized GETRANGE replies, never as one giant Lua reply. A startup probe appends/reads a `S`-sized value to a scratch key to verify the effective limit. |
 | **ACL-restricted commands** | No `KEYS`, no `DEBUG`, no `FLUSH*`. `SCAN` used only by the optional orphan-sweeper (per-node in cluster). `WAIT` treated as optional (§6) and feature-flagged. |
 | **Connection limits / TLS** | One pooled client for request traffic + one dedicated pub/sub connection per shard; pool sizing config. TLS + AUTH assumed. |
@@ -457,7 +460,7 @@ cluster routing, RESP3.
 
 | Axis | go-redis/v9 | rueidis |
 |---|---|---|
-| Lua scripts | `redis.Script` — SHA caching + automatic NOSCRIPT→LOAD→retry | `rueidis.NewLuaScript` — equivalent, fine |
+| Lua scripts | `redis.Script` — SHA caching + automatic NOSCRIPT→EVAL→retry (re-runs full source via `EVAL`, which re-caches; *not* `SCRIPT LOAD`) | `rueidis.NewLuaScript` — equivalent, fine |
 | Pub/sub ergonomics | `PubSub` type: channel-based API, **automatic reconnect + resubscribe**, `SSubscribe` for sharded | `Dedicate()`/`Receive()` loops; reconnect/resubscribe is hand-rolled by the app |
 | Cluster | mature `ClusterClient`, script routed by first key, MOVED/ASK handled | mature, same coverage |
 | RESP3 | supported (default protocol 3) | RESP3-first by design |
@@ -497,6 +500,13 @@ embedded in `{…}` so every key and the channel hash to the same cluster slot.
 | `ds:{<path>}:notify` | pub/sub channel | payload `"<readSeq>_<byteOffset>|<closed01>"`; `SPUBLISH` in cluster | n/a |
 
 ### 8.2 Lua script catalog
+
+> **Correction (ADR-0001).** This catalog is a design-time spec and names the
+> clock parameter `nowMs` throughout; the **implemented** scripts pass and compute
+> in **nanoseconds** (`nowNs` / `UnixNano`, see `store/redis/scripts/common.lua`).
+> Read every `nowMs`/`*Ms` below as the nanosecond equivalent. The clock is passed
+> from Go for single-clock consistency (not replication determinism). See
+> [ADR-0001](../adr/0001-lua-scripts-for-atomic-grouped-redis-operations.md).
 
 Shared preamble for every script: load meta; if absent → `{'NOTFOUND'}`; else
 evaluate lazy expiry against `ARGV nowMs` (`expiresAtMs`, or
