@@ -1,0 +1,16 @@
+sequenceDiagram
+    autonumber
+    participant Cli as Client
+    participant OA as Origin A · handles the append
+    participant R as Redis · slot {__ds:h}
+    participant OB as Origin B · owns slot h
+    participant Recv as Receiver
+    Cli->>OA: POST events/abc + body
+    OA->>R: append.lua — durable write to events/abc
+    OA-->>Cli: 204 · the byte is committed
+    Note over OA,R: OnStreamAppend: S parallel SMEMBERS over occupied slots → sub-1 lives in slot h
+    OA->>R: arm_wake.lua on {__ds:h} — generation++ · ZADD {__ds:h}:due now
+    OA->>Recv: POST signed wake — fast path, the appending origin delivers
+    Recv-->>OA: 200 {done:true}
+    OA->>R: ack.lua on {__ds:h} — cursor → tail · ZREM {__ds:h}:due
+    Note over OB: Origin B owns slot h — its due-worker finds the due-set empty, nothing owed, no redundant delivery
