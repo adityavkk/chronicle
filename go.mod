@@ -3,12 +3,12 @@ module gecgithub01.walmart.com/auk000v/chronicle
 go 1.26.2
 
 require (
+	github.com/anishathalye/porcupine v1.2.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.20.0
 )
 
 require (
-	github.com/anishathalye/porcupine v1.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/kr/text v0.2.0 // indirect

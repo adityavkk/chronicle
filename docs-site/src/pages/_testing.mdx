@@ -411,7 +411,8 @@ import Complexity from "../components/Complexity.astro";
     <strong>The arm-crash is an approximation.</strong> The few-microsecond
     arm/emit window cannot be hit from an external host driver; it is approximated
     with coarse pod-kill plus churn, and the code itself notes a surgical kill
-    needs a server-side <code>gofail</code> seam this harness lacks.
+    needs a server-side fault-injection seam this harness lacks (research doc 07
+    proposes <code>gofail</code>).
     <strong>There is no real failover substrate.</strong> <code>killRedis</code>
     deletes the one Redis pod and relies on PVC-backed AOF replay; there is no
     replica, sentinel, or cluster failover, so split-brain and replication-lag
@@ -542,7 +543,7 @@ import Complexity from "../components/Complexity.astro";
   <Table wide>
     | Gap | Severity | Why it matters |
     | --- | --- | --- |
-    | Jepsen arm-crash is an approximation | **high** | the few-microsecond arm/emit window can't be hit from an external host; coarse pod-kill + churn stands in, and the code says a surgical kill needs a `gofail` seam this harness lacks[^g-arm] |
+    | Jepsen arm-crash is an approximation | **high** | the few-microsecond arm/emit window can't be hit from an external host; coarse pod-kill + churn stands in, and the code says a surgical kill needs a server-side seam this harness lacks (07 proposes `gofail`)[^g-arm] |
     | Single-node Redis, no real failover | **high** | `killRedis` deletes the one pod and relies on AOF replay; no replica/sentinel/cluster substrate, so split-brain and replication-lag durability are untested[^g-failover] |
     | Lua/Go parity asserted by convention | medium | no test `EVAL`s the Lua and runs the Go mirror on identical inputs for byte-equal output; parity rests on mirrored assertions plus doc comments[^g-parity] |
     | No fuzz/property/linearizability in store or HTTP | medium | despite the repo name, store and handler layers are example-based tables only — no `go test fuzz`, no property harness, no `-race` multi-writer store test[^g-fuzz] |
@@ -582,7 +583,7 @@ import Complexity from "../components/Complexity.astro";
 
 [^contract]: Store contract — create/idempotency/append-read/delete: [`store/memory_store_test.go:15`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go) (pure Go) and [`store/redis/integration_test.go:90`](https://github.com/adityavkk/chronicle/blob/main/store/redis/integration_test.go) (real Redis). Config matching is case-insensitive on content-type and includes TTL and Closed status.
 
-[^offset]: Opaque lexicographic offset — format/parse/compare/order: [`store/offset_test.go:138`](https://github.com/adityavkk/chronicle/blob/main/store/offset_test.go); `TestOffsetLexicographicOrder` asserts both that `Compare(a,b)` is negative and that `a.String()` sorts before `b.String()` for every adjacent pair. The format is `"%016d_%016d"` in [`store/offset.go:23`](https://github.com/adityavkk/chronicle/blob/main/store/offset.go).
+[^offset]: Opaque lexicographic offset — format/parse/compare/order: [`store/offset_test.go:186`](https://github.com/adityavkk/chronicle/blob/main/store/offset_test.go); `TestOffsetLexicographicOrder` asserts both that `Compare(a,b)` is negative and that `a.String()` sorts before `b.String()` for every adjacent pair. The format is `"%016d_%016d"` in [`store/offset.go:23`](https://github.com/adityavkk/chronicle/blob/main/store/offset.go).
 
 [^producer]: Producer fencing state machine (the pure oracle): [`store/producer_test.go:11`](https://github.com/adityavkk/chronicle/blob/main/store/producer_test.go) — one big `TestValidateProducer` table over PROTOCOL §5.2.1, the same table reused by the Redis differential test.
 
@@ -622,7 +623,7 @@ import Complexity from "../components/Complexity.astro";
 
 [^http-json]: JSON mode flattening — offsets advance by element byte length, GET/suffix re-wrap, empty-array append `400`: [`handler_test.go:826`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
 
-[^http-lp]: Long-poll (`live=long-poll`) — `TestLongPollReceivesAppend` wakes a concurrent append in under two seconds, and `TestLongPollEchoedCursorAdvances`: [`handler_test.go:875`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
+[^http-lp]: Long-poll (`live=long-poll`) — `TestLongPollReceivesAppend` wakes a concurrent append in under two seconds, and `TestLongPollEchoedCursorAdvances`: [`handler_test.go:910`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
 
 [^http-sse]: SSE framing (`live=sse`) — headers, `data:`/`control` events, base64 binary, CRLF safety, and `TestSSEDrainsFinalAppendBeforeClose` over a real `httptest.NewServer`: [`handler_test.go:1008`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go), with [`handler_sse.go`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go).
 
@@ -634,7 +635,7 @@ import Complexity from "../components/Complexity.astro";
 
 [^jepsen-split]: Two distinct check styles: final-state durability (cursor reaches tail / deposed worker FENCED) for the nemesis scenarios at [`jepsen/checker/main.go:417`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go), versus per-history linearizability (porcupine) for T1 and a non-decreasing checker for T2.
 
-[^jep-durability]: Durability final-state scenarios (baseline / origin-restart / redis-restart): [`jepsen/checker/main.go:194`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go); `verify()` compares each stream's `acked_offset` to the recorded tail and computes a duplicate factor. `killRedis` only tests AOF replay ([`jepsen/checker/main.go:864`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go)).
+[^jep-durability]: Durability final-state scenarios (baseline / origin-restart / redis-restart): [`jepsen/checker/main.go:194`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go); `verify()` compares each stream's `acked_offset` to the recorded tail and computes a duplicate factor. `killRedis` only tests AOF replay ([`jepsen/checker/main.go:869`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go)).
 
 [^jep-hardening]: Subscription-hardening crash-window scenarios (pull-wake-arm-crash / glob-create-crash / index-repair): [`jepsen/checker/main.go:324`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go); each asserts the property a hardening slice promises, all verifying cursor==tail.
 
@@ -668,7 +669,7 @@ import Complexity from "../components/Complexity.astro";
 
 [^load-report]: Report Markdown rendering — every section from a synthetic `run.Result`, including the computed RSS/CPU row: [`loadgen/report/report_test.go:13`](https://github.com/adityavkk/chronicle/blob/main/loadgen/report/report_test.go).
 
-[^load-conformance]: Durable Streams protocol conformance suite — `runConformanceTests` is called with `baseUrl` and `subscriptions:true` over the vendored `@durable-streams/server-conformance-tests@0.3.5` (vitest + fast-check): [`test/conformance/conformance.test.ts:14`](https://github.com/adityavkk/chronicle/blob/main/test/conformance/conformance.test.ts), pinned in [`test/conformance/package.json:11`](https://github.com/adityavkk/chronicle/blob/main/test/conformance/package.json).
+[^load-conformance]: Durable Streams protocol conformance suite — `runConformanceTests` is called with `baseUrl` and `subscriptions:true` over the vendored `@durable-streams/server-conformance-tests@0.3.5` (vitest + fast-check): [`test/conformance/conformance.test.ts:14`](https://github.com/adityavkk/chronicle/blob/main/test/conformance/conformance.test.ts), pinned in [`test/conformance/package.json:10`](https://github.com/adityavkk/chronicle/blob/main/test/conformance/package.json).
 
 [^load-gke]: GKE sweep-scale rig (driver + IaC) — `sweepscale` seeds, settles, scrapes `chronicle_sweep_*`, and exits 1 on a p99/seed-error breach: [`loadgen/cmd/sweepscale/main.go:98`](https://github.com/adityavkk/chronicle/blob/main/loadgen/cmd/sweepscale/main.go); the first real run (K=10k, tick mean 316ms / p99 509ms) is [`loadtest/RESULTS-gke.md:32`](https://github.com/adityavkk/chronicle/blob/main/loadtest/RESULTS-gke.md).
 
@@ -712,7 +713,7 @@ import Complexity from "../components/Complexity.astro";
 
 [^f-timing]: Conformance + timing-bound concurrency assertions: [`store/redis/notify_test.go:31`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify_test.go).
 
-[^g-arm]: Jepsen arm-crash is an approximation; the code notes a surgical kill needs a `gofail` seam this harness lacks: [`jepsen/checker/main.go:305`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go).
+[^g-arm]: Jepsen arm-crash is an approximation; the code notes a surgical kill needs a server-side fault-injection seam this harness lacks ([`jepsen/checker/main.go:305`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go)). `gofail` (etcd's failpoint library) is the proposed seam, named in [research doc 07](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/07-jepsen-style-verification.md), not in the harness today.
 
 [^g-failover]: Single-node Redis, no real failover — `killRedis` relies on PVC-backed AOF replay: [`jepsen/checker/main.go:869`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go).
 
