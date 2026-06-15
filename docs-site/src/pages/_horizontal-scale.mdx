@@ -28,7 +28,7 @@ import Complexity from "../components/Complexity.astro";
   fence below are built and tested; **slot-homing, the due-set, and leased slot
   ownership are proposed** — Option A from the [horizontal-scale
   research](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md).
-  The load-bearing numbers are not yet measured; §09 says which, and why they
+  The load-bearing numbers are not yet measured; §10 says which, and why they
   gate the build.
 </Callout>
 
@@ -84,8 +84,86 @@ import Complexity from "../components/Complexity.astro";
   design that addresses both while keeping the single binary.
 </section>
 
+<section class="block" id="eventflow">
+  <SectionHead num="02" label="Event flow" title="The happy path is <em>already event-driven</em>" />
+
+  Before sharding anything, be precise about what the sweep is *for* — because it
+  is easy to read §01 and conclude that wakes are delivered by the sweep, in
+  ~2-second bursts. They are not. On the happy path a webhook fires the instant a
+  matching append lands; the sweep delivers nothing.
+
+  An append is atomic with its wake signal. `append.lua` writes the durable frame,
+  advances the tail, and `PUBLISH`es the stream's notify channel in one
+  single-slot script, so the byte and the signal commit together or not at all.
+
+  ```lua title="store/redis/scripts/append.lua — the frame and its wake signal commit together"
+  redis.call('ZADD', KEYS[2], '0', frame)        -- the message, in the stream's ZSET
+  redis.call('HSET', KEYS[1], 'tail', new_tail)  -- the new tail offset
+  -- … then, in the same atomic script, signal waiters:
+  redis.call('PUBLISH', channel, closing and 'c' or 'a')  -- ds:notify:<path>
+  ```
+
+  That `PUBLISH` wakes long-poll and SSE readers. Subscriptions wake through a
+  parallel, synchronous hook: after a successful append the HTTP handler calls
+  `OnStreamAppend`, which reads the stream's subscribers from the fan-out index and
+  arms-and-delivers each idle one immediately. No poll, no timer — the wake rides
+  the same request that committed the append.
+
+  ```go title="webhook/manager.go:237 — the append-time hook, in-process on the appending origin"
+  func (m *Manager) OnStreamAppend(path string) {
+      ids, _ := m.store.StreamSubscribers(path) // the fan-out index for this stream
+      for _, id := range ids {
+          m.maybeWake(id, path) // idle with pending work? arm the wake, deliver now
+      }
+  }
+  ```
+
+  **A durable outbox already ships — for pull-wake.** A webhook is delivered
+  in-process and forgotten; a pull-wake is delivered through a durable record. The
+  server appends a `{"type":"wake"}` event to the subscription's `wake_stream` (an
+  ordinary durable stream), and a pool of workers tails it and claims. That wake
+  event *is* a transactional outbox: a durable entry that says "this subscription
+  owes a wake," written on the append, drained by whichever worker reads next, and
+  marked sent so it is not re-emitted.
+
+  ```go title="webhook/manager.go:302 — pull-wake writes the durable wake event, then marks it sent"
+  if err := m.streams.AppendWakeEvent(sub.Config.WakeStream, data); err != nil {
+      // Leave wake_event_sent_ns at 0 so the recovery sweep re-emits it.
+      return
+  }
+  // Record the durable emit, fenced on (generation, wake_id), so the sweep
+  // does not re-emit a wake that was already delivered.
+  m.store.RecordWakeEventSent(sub.ID, generation, wakeID, time.Now())
+  ```
+
+  <Diagram
+    name="seq-hs-eventflow"
+    label="The event-driven happy path (pull-wake)"
+    caption="The append commits the frame and the wake signal in one atomic script. The append-time hook writes a durable wake event to the wake_stream — the outbox — and a worker drains it. The recovery sweep fires nothing on this path; it exists only to re-emit a wake a crash left unsent."
+  />
+
+  So where does the ~2s sweep come in? **Only on failure.** The webhook hook runs
+  on the appending origin alone, in process. If that origin crashes between the
+  durable append and the delivery, the wake is lost and nothing else knows it was
+  owed, so the sweep re-derives it from the durable cursor. In steady state, with
+  no crashes, the sweep walks the subscriptions, finds every cursor already at its
+  tail, and fires nothing — but it still pays `O(K)` every tick to *ask*, on every
+  replica. That redundant question, not the wakes, is the `O(N·K)` cost §01 named,
+  and removing it is what Move 2's due-set is for.
+
+  <Callout icon="info" label="Sweep, not outbox — for the webhook path, for now">
+    The webhook path has no durable outbox today: its recovery is the sweep, a
+    deliberate trade of one re-derivation pass for a dedicated delivery queue and
+    worker — the cost is recovery at sweep latency for a post-crash event. The
+    pull-wake `wake_stream` above is the durable-outbox shape already in the
+    codebase, and the [due-set](#move2) (§05) is what carries that shape onto the
+    work-sharded webhook path, so the periodic sweep can stop being the only thing
+    that finds owed work and shrink toward a pure crash backstop.
+  </Callout>
+</section>
+
 <section class="block" id="shape">
-  <SectionHead num="02" label="The shape" title="Partition, own, <em>no coordinator</em>" />
+  <SectionHead num="03" label="The shape" title="Partition, own, <em>no coordinator</em>" />
 
   Redis Cluster, Kafka, NATS JetStream, Pulsar, and Orleans all reach horizontal
   scale the same way: **partition the keyspace, give each partition exactly one
@@ -120,12 +198,12 @@ import Complexity from "../components/Complexity.astro";
 
   The thread that runs through all three moves, and the reason the design is safe
   to build incrementally: **none of the moves is a correctness dependency.** Each
-  is an optimization layered over the existing, still-correct full sweep. §06 is
+  is an optimization layered over the existing, still-correct full sweep. §07 is
   where that claim is paid for; the three moves come first.
 </section>
 
 <section class="block" id="move1">
-  <SectionHead num="03" label="Move 1" title="Slot-home <em>whole</em> subscriptions" />
+  <SectionHead num="04" label="Move 1" title="Slot-home <em>whole</em> subscriptions" />
 
   The single `{__ds}` tag becomes `S` tags of the form `{__ds:h}`, with `h =
   fnv32a(id) % S`. Every key one subscription touches — its config hash, its
@@ -153,7 +231,7 @@ import Complexity from "../components/Complexity.astro";
   count. It is chosen once and never changed in place: because `h` is `hash(id) %
   S`, a different `S` re-tags every key, so changing it is a dual-write migration,
   not a config edit. 256 comfortably exceeds any realistic replica count and is
-  the upper bound the fan-out experiment in §09 measures.
+  the upper bound the fan-out experiment in §10 measures.
 
   <Table>
     | Key | Type | Holds |
@@ -175,7 +253,7 @@ import Complexity from "../components/Complexity.astro";
   Issued as one pipeline, that is `S` reads grouped by the nodes they land on —
   about one round trip per node, not `S` serial trips, but a real and measurable
   regression. The mitigation is a per-stream "occupied-slots" bitmap so an append
-  probes only the slots that actually hold a subscriber; §09 measures the cost
+  probes only the slots that actually hold a subscriber; §10 measures the cost
   with and without it.
 
   <Complexity
@@ -187,7 +265,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="move2">
-  <SectionHead num="04" label="Move 2" title="A due-set <em>instead of a scan</em>" />
+  <SectionHead num="05" label="Move 2" title="A due-set <em>instead of a scan</em>" />
 
   Move 1 shards the schedules but does not change how owed work is found: the
   sweep still walks all K. Move 2 removes the scan from the hot path by adding a
@@ -230,8 +308,8 @@ import Complexity from "../components/Complexity.astro";
   due-set adds a `ZADD` on arm and a `ZREM` on ack to the hot path. That is write
   amplification on append and ack, paid for a recovery-latency win: an owed wake
   fires at the next due-worker tick instead of waiting for the next full sweep.
-  §09 measures the amplification. And the full sweep does not go away — it demotes
-  to a backstop, for the reason §06 makes precise.
+  §10 measures the amplification. And the full sweep does not go away — it demotes
+  to a backstop, for the reason §07 makes precise.
 
   <Complexity
     label="Complexity — Move 2"
@@ -242,7 +320,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="move3">
-  <SectionHead num="05" label="Move 3" title="Lease <em>one owner</em> per slot" />
+  <SectionHead num="06" label="Move 3" title="Lease <em>one owner</em> per slot" />
 
   Moves 1 and 2 shard the state and give each slot its own outbox, but every
   replica would still run a due-worker over every slot — the `O(N·K)` redundancy,
@@ -332,7 +410,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="liveness">
-  <SectionHead num="06" label="Liveness" title="Why the sweep <em>can't be deleted</em>" />
+  <SectionHead num="07" label="Liveness" title="Why the sweep <em>can't be deleted</em>" />
 
   Move 3 introduces a window the earlier moves did not have: during a rebalance,
   a slot can briefly be owned by *nobody* — the old owner has stopped, the new
@@ -383,7 +461,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="e2e">
-  <SectionHead num="07" label="End to end" title="One append, <em>all the way through</em>" />
+  <SectionHead num="08" label="End to end" title="One append, <em>all the way through</em>" />
 
   Put the three moves together and follow a single append across a three-replica
   cluster. A webhook subscription `sub-1` matches `events/*`; its keys home in
@@ -442,7 +520,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="code">
-  <SectionHead num="08" label="In the code" title="What actually <em>changes</em>" />
+  <SectionHead num="09" label="In the code" title="What actually <em>changes</em>" />
 
   The design maps onto specific changes in `webhook/`. None of the per-request
   scripts changes shape; the background loops gain a slot dimension, and two new
@@ -482,7 +560,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="measure">
-  <SectionHead num="09" label="Measure first" title="The numbers that <em>gate the build</em>" />
+  <SectionHead num="10" label="Measure first" title="The numbers that <em>gate the build</em>" />
 
   This design rests on numbers that are not yet measured. The honest order is to
   measure them before building, because two of them can fail the premise. The
@@ -517,7 +595,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="optionb">
-  <SectionHead num="10" label="The fork" title="Why not <em>split the binary</em>" />
+  <SectionHead num="11" label="The fork" title="Why not <em>split the binary</em>" />
 
   Option A keeps one binary. The alternative, Option B, splits serving from the
   control plane into two tiers and makes each subscription an actor owned by a
@@ -538,7 +616,7 @@ import Complexity from "../components/Complexity.astro";
 </section>
 
 <section class="block" id="further">
-  <SectionHead num="11" label="Further reading" title="Where this <em>comes from</em>" />
+  <SectionHead num="12" label="Further reading" title="Where this <em>comes from</em>" />
 
   This page is the readable form of the horizontal-scale research. The research
   docs carry the full keyspace, the adversarial review that hardened the design,
