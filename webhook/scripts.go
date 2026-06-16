@@ -13,6 +13,11 @@ var scriptFS embed.FS
 // loadScript builds a redis.Script from the shared common.lua prelude plus the
 // named script body, mirroring store/redis/scripts.go. Script.Run handles
 // NOSCRIPT reloads transparently so EVALSHA survives a flushed script cache.
+//
+// Always invoke these via Script.Run/RunRO: the NOSCRIPT->EVAL self-heal does
+// NOT fire inside a pipeline/MULTI (go-redis #3228), so a bare EVALSHA there can
+// fail NOSCRIPT after a cache flush/failover. A forbidigo rule (.golangci.yml)
+// forbids bare EVAL/EVALSHA; SCRIPT LOAD + a justified //nolint if ever batching.
 func loadScript(name string) *redis.Script {
 	prelude, err := scriptFS.ReadFile("scripts/common.lua")
 	if err != nil {
