@@ -38,10 +38,17 @@ corollaries matter most for chronicle:
 
 ## What it means for chronicle
 
-The work-vs-state distinction from issue #2 holds and sharpens:
+The work-vs-state distinction from issue #2 holds and sharpens — and a **later load test added
+a third axis** (the Electric agents runtime against chronicle@main collapsed at 12 replicas on
+per-type claim contention, ≤12% CPU on every tier; see
+[05](05-proposed-architecture.md#a-third-axis-per-type-claim-contention-from-the-load-test)):
 
+0. **Refine claim *granularity*.** The runtime registers one subscription per entity *type*
+   (`<typeName>-handler`), so all of a type's entities and replicas share **one** single-holder
+   lease. Neither sharding work nor state relieves it (one hot subId stays one slot, one lease).
+   This was the *actual* collapse — sequence it **first**. Fix: per-entity / per-shard-of-type leases.
 1. **Shard the sweep *work*** across replicas (consistent-hash by subscription id) →
-   `O(K)` regardless of N. Cheap, fence-safe.
+   `O(K)` regardless of N. Cheap, fence-safe. *(Hardens the recovery sweep — not the hot-path contention above.)*
 2. **Shard the `{__ds}` *state*** across hash-tag slots → distributes capacity.
 3. **Per-subscription timers / an outbox** instead of the `O(K)` sweep → removes the
    scan entirely; the sweep becomes a reconciler.

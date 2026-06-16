@@ -31,6 +31,8 @@ The work-vs-state framing from issue #2: **sharding the work** (H1) stops adding
 from hurting; **sharding the state** (H2) adds capacity; you need both for the control
 plane to scale, and replicas alone do neither.
 
+> **Added after the load test** (see [05](05-proposed-architecture.md#a-third-axis-per-type-claim-contention-from-the-load-test)). This is two axes; there is a **third — claim granularity.** The Electric runtime registers one subscription per entity *type* (`<typeName>-handler`), so all of a type's entities and every replica hosting them contend for **one** single-holder lease. That is neither sweep work (H1) nor keyspace capacity (H2), and *neither* H1 nor H2 relieves it (a single hot subId stays one slot, one lease). It was the failure that actually collapsed the rig at 12 replicas, so the granularity fix sequences *before* O1 below.
+
 ## The options
 
 ### O1 — Shard the sweep *work* across replicas (the cheap first step)
@@ -132,7 +134,7 @@ linearizable; it only narrows the loss window (see [03](03-prior-art-redis-and-b
 1. **Load-test the ceilings** (the rig does this): ramp K → 100k for the per-tick cliff;
    ramp N replicas and read managed-Redis CPU to quantify `O(N·K)`; push the `{__ds}` slot
    to saturation; measure recovery latency under failover.
-2. **O1 — shard the sweep work.** Cheap, fence-safe; stops scale-out from degrading.
+2. **O1 — shard the sweep work.** Cheap, fence-safe; stops scale-out from degrading. *(Re-sequenced by the load test: O1 hardens the recovery sweep, but the 12-replica collapse was hot-path claim contention on a per-type lease, not the sweep — characterize and fix [claim granularity](05-proposed-architecture.md#a-third-axis-per-type-claim-contention-from-the-load-test) first.)*
 3. **O3 — outbox / per-subscription due-set.** Removes the `O(K)` scan; the lever for
    large K and sub-sweep latency.
 4. **O2 — shard the `{__ds}` state.** The capacity lever; only when the single slot

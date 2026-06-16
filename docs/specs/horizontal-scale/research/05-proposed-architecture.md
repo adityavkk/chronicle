@@ -38,6 +38,7 @@ Minimum supporting material:
 Implementation order (this is the same sequence as Option A's **Migration** slices below,
 with the verification baseline and DR called out):
 
+0. **Characterize the [per-type claim-contention axis](#a-third-axis-per-type-claim-contention-from-the-load-test) first** (experiment 6 below). It is the failure that collapsed the system at 12 replicas, and neither slot-homing nor the coordinator split addresses it. The slices below harden the sweep/keyspace axes that were *already clean* at 6 replicas — do them, but not before understanding the claim-granularity fix.
 1. Run the gating measurements in ["Measure before building"](#measure-before-building-the-gating-experiments).
 2. Build the no-rebuild safety baseline from [07](07-jepsen-style-verification.md):
    start with T1 (single-holder lease), T2 (cursor monotonicity), and L3 (lease-tail-drop
@@ -81,6 +82,62 @@ The review forced three precision fixes that every design below respects:
    Build the knob on durability + read-freshness, and never put a correctness-critical
    single-holder lease on a CRDB LWW register (it silently drops a concurrent writer).
 
+## A third axis: per-type claim contention (from the load test)
+
+The three corrections above came from the *review*. A subsequent GKE load test — the
+Electric agents runtime driven against chronicle@main as its Durable-Streams backend, ramping
+the agents-server replicas that are the system under test — forced a fourth, and it **reorders
+the priorities below**. At **6 replicas the wake path was clean** (~566–630 wakes/s, `FENCED`→0
+at steady state); at **12 it collapsed** — the load generators' warmup fence-stormed (489–735
+`FENCED` *per pod*, only ~40% of entities ever woke) while **every tier sat ≤12% CPU**
+(chronicle 4%, Redis 4%, Postgres 12%). Giving chronicle 2.5× the CPU made it *worse*. So the
+binding constraint at that scale is **neither the `O(N·K)` sweep nor `{__ds}` keyspace
+capacity** — it is lock contention on a single subscription's lease. (Full results live in the
+Electric rig: `electric/loadtest/docs/RESULTS-scale12.md` and `RESULTS-chronicle-main.md`.)
+
+**The contention unit is one subscription per entity *type*.** The Electric runtime registers
+`subscriptionId = "<typeName>-handler"` — one subscription shared by *all* entities of a type
+(agents-server `entity-manager.ts:685`). chronicle holds exactly **one** single-holder lease +
+generation per subscription (`ds:{__ds}:sub:<id>`). So every entity of a type *and* every
+replica hosting one contends for that one lease. The runaway is the claim path itself: a
+competitor on a *live* lease gets `409 ALREADY_CLAIMED` (`claim.lua` BUSY, no generation bump);
+when the holder's heartbeat lands late — because the single `{__ds}` slot's ~12 control-plane
+ops/wake are queued — the 30 s `lease_ttl_ms` lapses, a competitor *takes over* (`HINCRBY
+generation`), and the deposed holder's in-flight done/heartbeat is `FENCED`; the loser retries,
+adding ops, lengthening the queue. More replicas ⇒ more contenders per type-lease ⇒ a
+thundering herd on one lock. (Source-traced both sides; the exact per-wake interleaving at 12
+replicas is inferred from the proven halves plus the collapse counts.)
+
+**Neither Option A nor Option B fixes this as written.** `h = fnv32a(subId) % S` slot-homes
+*different* subscription ids across slots; a single hot `<type>-handler` is still one subId ⇒
+one slot ⇒ one lease, for any `S`. And Option A's claim/ack hot path is **load-balanced across
+replicas** (["Any Chronicle replica can handle a … claim/ack request"](#option-a--slot-homed-evolve-in-place)),
+so all of a type's claimants still serialize on that one lease. Option B's coordinator-owns-a-sub
+model narrows *who* drives a sub but leaves it one lease per type. Slot-homing and coordinator
+ownership shard **ownership and keyspace**; they do not refine **claim granularity**, which is
+what collapsed.
+
+**The fix is a third axis: make claim granularity match dispatch granularity.** Let one logical
+type map to *many* leases — per-entity, or per-shard-of-type subscriptions
+(`"<typeName>-handler:<g>"`, `g = hash(entityId) % G`) — so concurrent claimants on different
+entities do not serialize through one lease. This is partly a **client** decision (the agents
+runtime choosing a finer `subscriptionId`) and partly a **chronicle capability** (letting one
+subscription's linked streams be claimed by *multiple concurrent holders* over disjoint stream
+subsets). It is **cross-repo** and is the load-bearing design neither this doc nor 04's O1–O5
+yet covers. Because the collapse was hot-path, **this axis sequences before** the sweep
+work-sharding and the state shard below: those harden axes that were *already clean* at 6
+replicas (whose ceiling was wake **round-trip latency** — which Option B's cross-instance fast
+wake targets directly, a reason to revisit its deferred priority).
+
+**Golden signals to instrument and gate on** (none exist today): `ALREADY_CLAIMED`/BUSY rate
+(the *earliest* indicator — contenders bouncing off live leases), `FENCED` rate (the tipping
+point — leases lapsing into takeover), lease-lapse rate, wake p99/p50, and per-busy-agent
+throughput = `1 / round-trip-latency`. On timers: the runtime heartbeats every **10 s** against
+a **30 s** `lease_ttl_ms` with a **10 s** `idleTimeout` hold; `idleTimeout` only suppresses
+*one* claimant's self-release churn — it does nothing about cross-replica contention. The new
+slot-ownership TTLs (`slotLeaseTTL`/`memberLeaseTTL` = 9 s) added below are a *different* lease
+layer; **none of them touch the per-subscription `lease_ttl_ms` whose lapse drives the storm.**
+
 ## The shared foundation (build this first)
 
 Independent of which option you pick, the same substrate is step one — and it is the
@@ -118,10 +175,12 @@ adds a cross-instance fast wake.
 
 ## Option A — Slot-homed, evolve in place
 
-**Bet:** the single-binary design is fine; the problem is purely the single slot and
-the redundant scan, and both are fixed by sharding state into `{__ds:h}` slots and
-sharding sweep *work* across replicas — with a leased-membership protocol supplying the
-liveness the fence lacks.
+**Bet:** the single-binary design is fine *for the sweep and keyspace axes* — those are the
+single slot and the redundant scan, fixed by sharding state into `{__ds:h}` slots and sharding
+sweep *work* across replicas, with a leased-membership protocol supplying the liveness the fence
+lacks. **Caveat (load test):** this bet does **not** cover the
+[per-type claim-contention axis](#a-third-axis-per-type-claim-contention-from-the-load-test) —
+slot-homing gives it zero relief — so Option A is necessary but not sufficient by itself.
 
 **Keyspace** (additive to today):
 
@@ -464,6 +523,7 @@ for the new mechanisms. Add (with `NopMetrics` no-ops):
 | `SlotOwnership(event string, slot int)` | `claim_shard` / reconcile | gate #4 (churn, double-grant) |
 | `CoverageGap(dur)` | `sweepOnce`, when it wakes a sub whose slot was unowned at append | gate #4 (coverage-gap latency) |
 | `OwnerFenced(scope string)` | `check_owner` / inlined checks | gate #4/#5 (fence firing) |
+| `ClaimContention(status, subId string)` | `claim.lua` / `ack.lua` call sites (per subscription) | gate #6 — the per-type contention SLIs: `ALREADY_CLAIMED`/BUSY rate, `FENCED` rate, lease-lapse rate |
 
 ---
 
@@ -545,7 +605,10 @@ Active-Active — design for that floor.
 **Build Option A.** Slot-home whole subscriptions, per-slot schedules, the per-entity
 due-set, and work-sharded leased ownership — the [build spec](#option-a--build-spec-everything-an-implementer-needs)
 is the contract. That addresses both the `O(N·K)` scan and the single-slot capacity
-ceiling while staying in one binary, which already held at K=10k.
+ceiling while staying in one binary, which already held at K=10k. **But it does not address
+the [per-type claim-contention axis](#a-third-axis-per-type-claim-contention-from-the-load-test)** — the failure that actually collapsed the system at 12 replicas. Pair Option A with a
+claim-granularity fix (finer per-shard-of-type leases, partly client-side); sequence that
+*first*, since the sweep/keyspace work hardens a path that was already clean at 6 replicas.
 
 The A-vs-B fork is **not** an open decision you make after the measurements — A is chosen.
 The measurements decide only the *later, optional* question of whether the split to Option
@@ -569,6 +632,8 @@ tooling, so they are sequenced against the build, not all "run first":
 4. **Membership churn window** *(after step 3: leased ownership; needs a chaos step + ≥2 replicas)* — pod-kill a slot owner; measure the coverage-gap latency (the detectable case recovers at the new owner's `claim_shard` + eager reconcile, so **≤ membership-lease TTL + RTT**, not a sweep tick) and confirm zero lost wakes / zero double-grants. This is [07](07-jepsen-style-verification.md)'s L2/L4 as a rig run.
 5. **Failover fence drill** *(after step 4; needs `STANDARD_HA` Redis + fault-injection + a webhook receiver)* — drop the lease-ZSET tail mid-lease; confirm only the cursor-reading reconciler (the failover-aware eager reconcile) recovers a stranded webhook sub, and a deposed ack returns `FENCED` (HTTP 409, not silent success). This is [07](07-jepsen-style-verification.md)'s L3, and the basic-tier Redis `ltctl` provisions has no failover — provision `STANDARD_HA`.
 
-**Experiment 1 gates the premise; 2 gates the rebuild (slot-homing viability); 3 sizes the
+6. **Per-type claim-contention collapse** *(runnable now on the Electric agents rig — the experiment that actually reproduced the failure)* — ramp agents-server replicas 6→12+ against a **single hot per-type subscription** and read `ALREADY_CLAIMED`/`FENCED`/lease-lapse rates, wake p99/p50, and per-busy-agent throughput (`1/round-trip-latency`). **Falsifies any CPU-scaling pass criterion** — the empirical collapse sat at ≤12% CPU on every tier. Pass: BUSY/FENCED rates stay bounded and per-busy-agent throughput does not fall off as replicas rise; FAIL is the observed fence storm. This is the gate the claim-granularity fix must move, and it maps to [07](07-jepsen-style-verification.md)'s contention tier.
+
+**Experiment 6 reproduces the actual 12-replica collapse (claim contention) and should be characterized first; experiment 1 gates the premise (sweep); 2 gates the rebuild (slot-homing viability); 3 sizes the
 due-set step; 4–5 prove the liveness and DR claims this doc rests on** (and share their
 tooling with 07's L-series).

@@ -67,6 +67,31 @@ is bounded by the reconciler, not unbounded), and "the sweep is demoted, not del
 rests on L3 (only the cursor-reading reconciler recovers a stranded webhook wake). These
 are the measure-before-build experiments #4 and #5 from [05], as executable assertions.
 
+## Contention suite — saturation under load, no fault (the load-test gap)
+
+Safety and liveness above both test *correctness under faults*. The GKE load test exposed a
+**third failure class this plan does not cover: a throughput collapse under claimant
+concurrency with no fault at all.** At 12 agents-server replicas the wake path fence-stormed
+(489–735 `FENCED` per pod, ~40% of entities woke) while every tier sat ≤12% CPU, because all
+of a type's entities and replicas contend for one per-type subscription lease
+([05](05-proposed-architecture.md#a-third-axis-per-type-claim-contention-from-the-load-test)).
+This is neither a safety invariant (no two holders — **T1 still passes**) nor a liveness bound
+(nothing was faulted, nothing healed) — it is a **saturation** property: under rising
+contention the `BUSY`/`FENCED`/lease-lapse *rates* must stay bounded and per-claimant
+throughput must not fall off. So the nemesis is **claimant count**, not fault injection, and
+the checker is a **rate/threshold** assertion, not a model checker.
+
+| # | Property | Bound | Nemesis | Checker |
+|---|---|---|---|---|
+| **C1** | Bounded claim contention | as claimants on one `subId` rise 6→12→24, `FENCED`/wake stays ≈0 and BUSY rate stays bounded (no runaway), and a lease never lapses while its holder is heartbeating | **claimant fan-in** — N concurrent workers claiming/acking **one** per-type subscription with realistic timers (heartbeat 10 s, `lease_ttl_ms` 30 s, `idleTimeout` 10 s); **no fault** | Rate checker over recorded statuses: `FENCED`/op and `ALREADY_CLAIMED`/op vs N; FAIL when either climbs super-linearly or a lease lapses under an active heartbeat |
+| **C2** | No throughput collapse | per-busy-worker throughput (`= 1/round-trip-latency`) does not fall off and wake p99/p50 stays bounded as claimants rise | the same fan-in ramp, plus a single-`{__ds}`-slot variant (~12 control-plane ops/wake on one master) to confirm the queue — not CPU — is the limit | Throughput-vs-N curve + p99/p50; **FAIL on a knee where adding claimants stops adding throughput while CPU stays idle** — the empirical 6-clean / 12-collapse signature, encoded as the regression baseline |
+| **C3** | Granularity fix moves the knee | sharding the per-type subscription into `G` per-shard leases pushes the collapse out ~`G×` in claimant count | run C1/C2 against `<type>-handler` (G=1) vs `<type>-handler:<g>` (G>1) | Differential: the C2 knee moves out ~`G×`; `BUSY`/`FENCED` at fixed N drop ~`G×`. **Acceptance gate for the claim-granularity fix** |
+
+**C1/C2 are runnable today and reproduce the actual collapse** (they need no rebuild — the
+per-type subscription already exists); **C3 is the acceptance gate** for the granularity fix.
+This is [05](05-proposed-architecture.md)'s gating experiment 6 as executable assertions, and
+the contention SLIs map to the new `ClaimContention` metric.
+
 ## The Go harness — build on `jepsen/`
 
 Reuse the existing harness wholesale (the k3d lifecycle `up.sh`/`run.sh`, the nemesis
@@ -105,12 +130,19 @@ root `go.mod` (`jepsen/checker` inherits it). Then:
   **L2, L4, L5**. They can't run until that code exists — so they *are* the executable
   contract each migration step must satisfy. Write them as the spec, red until the step
   lands.
+- **The contention suite runs today and reproduces the collapse:** **C1, C2** drive claimant
+  fan-in at 12+ against the existing per-type subscription — the executable form of the
+  empirical 6-clean / 12-collapse result, runnable now with no rebuild. **C3** is the
+  acceptance gate for the claim-granularity fix (per-shard-of-type leases).
 
 ## Honest gaps
 
 1. **Linearizability is NP-hard.** `porcupine` blows up on highly-concurrent histories —
    `Partition` strictly per sub/shard and keep per-worker op counts modest (3–5 workers,
-   tens of ops). A deep failover history can still time out (`Unknown`, not `Illegal`).
+   tens of ops). A deep failover history can still time out (`Unknown`, not `Illegal`). The
+   3–5-worker cap is a *safety-checker* limit only: the **contention suite (C1–C3)**
+   deliberately uses rate/threshold checkers, not `porcupine`, so it runs at the **12+ real
+   claimants** needed to reproduce the collapse.
 2. **No in-process failpoint seam.** The harness drives from outside, so it can't kill
    "exactly between `arm_wake.lua` and `record_wake_sent.lua`" or between the shard CAS
    and the first due-tick. Adopt **`gofail`** (etcd's failpoint library) for surgical
@@ -137,7 +169,9 @@ fence holds the single-holder invariant under concurrency and the Kleppmann
 deposed-but-resumed case, with no rebuild, generalizing `runExpiredLeaseTakeover` from
 one sequence to a model-checked history. Then **T2** (cursor) and **L3** (lease-tail-drop
 recovery) — also runnable today. The proposed-mechanism tests (T3/T5, L2/L4/L5) become
-the **acceptance gates** wired into the migration so each step ships green or not at all.
+the **acceptance gates** wired into the migration so each step ships green or not at all. In
+parallel, build **C1/C2 (claim-contention)** — they run today and reproduce the actual
+12-replica collapse, which none of T1–L5 do.
 
 ## Sources
 
