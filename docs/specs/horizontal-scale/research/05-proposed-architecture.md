@@ -64,12 +64,15 @@ The review forced three precision fixes that every design below respects:
    simply not swept until ownership re-converges. So any work-sharding scheme must
    supply liveness *separately*, as an optimization over a still-correct full-sweep
    baseline — never as a correctness dependency.
-2. **The sweep can never be fully retired.** Only the sweep re-derives owed work from
-   *durable cursors* (links vs stream tail). After a failover that loses a webhook
-   subscription's lease-ZSET tail but keeps its `sub` hash, the lease worker can't
-   recover it (its `ZADD` is gone) — only the cursor-reading reconciler can. So "remove
-   the `O(K)` scan" is true for the *hot path*, false for the *DR backstop*: the sweep
-   is demoted to a rare reconciler, not deleted.
+2. **A cursor reconcile is irreducible — but a *perpetual* one is not.** Only re-deriving
+   owed work from *durable cursors* (links vs stream tail) recovers a wake whose schedule
+   entry a failover dropped while keeping the `sub` hash — the lease worker can't, because
+   its `ZADD` is gone. But that argues for a cursor reconcile *triggered* by the recovery
+   events (boot, epoch bump, new-owner CAS, reconnect, append error) plus a coarse periodic
+   floor for the one undetectable case — an owed-mark lost on a slot that is unowned and
+   quiet, where the cross-slot append/arm gap means no atomic owed-mark was ever written. It
+   does **not** justify a perpetual 2s scan. So "remove the `O(K)` scan" is true for the
+   *hot path*; the reconcile is demoted to event-triggered plus a rare floor, not deleted.
 3. **"Tunable consistency" on Redis is a durability + freshness knob, not a CAP knob.**
    Redis is AP. `WAIT`/`WAITAOF` buy replica-acked / fsync durability — *not*
    linearizability (Redis docs say so explicitly). The genuinely strong guarantee is
@@ -193,11 +196,12 @@ subscription slot `h`. The Redis Cluster client follows `MOVED`/`ASK` redirects;
 Chronicle ownership protocol uses the `ds:{ownership}:...` keys above.
 
 **Liveness (the review's #1 fix).** Slot ownership is an *optimization over a correct
-baseline*: the coarse full-sweep still covers every sub regardless of ownership, so an
-unowned slot during a rebalance is swept (slower, `O(K)`) until ownership
-re-converges — a crash-lost wake waits at most one **sweep** interval (~2s; the sweep
-runs at `sweepInterval`, not the 30s index reconcile — see ["Recovery bound"](#recovery-bound--pinned-resolves-07-honest-gap-4)),
-never indefinitely. Split-brain on a slot (two owners) is *safe* (double-wake coalesces).
+baseline*: a still-correct cursor reconcile covers every sub regardless of ownership. A
+rebalance coverage gap closes when the new owner claims the slot and reconciles it (an
+*event*, not a tick); the residual periodic floor covers only the one eventless case, in the
+seconds-to-minutes band — see ["Recovery"](#recovery-triggered-not-perpetual-refines-07-honest-gap-4).
+A crash-lost wake is recovered at its trigger, or at worst within the floor interval, never
+indefinitely. Split-brain on a slot (two owners) is *safe* (double-wake coalesces).
 
 **Regional DR.** Active-passive: one home region per slot, async cross-region replica.
 Not CRDB (an LWW string fence silently drops a writer). `WAIT 1`/`WAITAOF 1 1` on the
@@ -376,15 +380,37 @@ external webhook POST, where atomicity across the network is impossible anyway a
 held slot-leases. `sweepOnce` deliberately covers unowned slots — that is the liveness
 backstop, and it resolves [07](07-jepsen-style-verification.md)'s honest-gap #4.
 
-### Recovery bound — pinned (resolves 07 honest-gap #4)
+### Recovery: triggered, not perpetual (refines 07 honest-gap #4)
 
-The coarse full sweep keeps the existing **`sweepInterval` (2s)** cadence and covers **all
-`S` slots**; only the `O(streams)` pattern-link/index reconcile stays at 30s (it is the
-"~30s reconciler" referenced in the shared-foundation section — it reconciles the fan-out
-index, not owed wakes). So an unowned slot's coverage gap is **≤ one sweep interval (~2s)**,
-not one reconcile interval. The `sweepOnce` pass is `O(owed)` per tick (it already pipelines
-`GetMany` + `TailOffsets`), so covering all `S` slots is cheap. 07's L2/L3 therefore assert
-`deliver − append ≤ sweepInterval + RTT`.
+Recovery is not one job on one timer. It is a bundle of cases that split by whether anything
+*observable* signals them:
+
+- **Event-triggered — every detectable case, no timer.** Run a cursor reconcile at the
+  moment a recovery-relevant event fires: process boot, a failover / `owner_epoch` bump, a
+  new-owner `claim_shard` CAS, a Redis reconnect, or an `OnStreamAppend` / delivery error.
+  The [failover-aware eager reconcile](#failover-aware-eager-reconcile-makes-07-l3-pass) *is*
+  one of these — promote it to the **primary** recovery path. A rebalance coverage gap closes
+  when the new owner CASes the slot and reconciles it, not on a clock tick.
+- **A coarse periodic floor — one undetectable case only.** Exactly one case has no trigger:
+  an owed-mark dropped on a slot that is unowned (mid-rebalance) *and* quiet (no later
+  append), where neither a crash, an ownership change, nor a future append exists to react
+  to, because the cross-slot append/arm gap means no durable owed-mark was written atomically
+  with the append. Only a periodic cursor re-derivation finds it. The conjunction is rare and
+  not latency-sensitive, so the floor runs in the **seconds-to-minutes** band — align it with
+  the existing 30s index reconcile — *not* at 2s.
+
+`sweepInterval` was 2s because the sweep was the catch-all for every case, including the
+latency-sensitive ones. Once those are event-triggered, **2s is a tunable latency floor for
+one narrow case, not a correctness requirement** — nothing in the cursor-durability argument
+demands it. 07's L2 asserts the detectable churn case recovers at the takeover trigger
+(`deliver − append ≤ membership-lease TTL + RTT`); the floor bounds only the eventless case.
+
+This matches the field: event-driven hot paths with periodic scans reserved for rare safety
+nets (Orleans' minutes-scale reminder refresh, Cloudflare DO per-object alarms, Kafka offset
+resume, Electric's recovery-only reconcile). Chronicle still needs *a* cursor backstop those
+log-native systems avoid — its Redis substrate (AP, cross-slot, no per-entity durable alarm)
+cannot co-locate a durable owed-mark atomically with the append — but that justifies a coarse
+floor, not a 2s primary guarantee.
 
 ### Failover-aware eager reconcile (makes 07 L3 pass)
 
@@ -540,7 +566,7 @@ tooling, so they are sequenced against the build, not all "run first":
 1. **`O(N·K)` redundancy** *(runnable now, + a Redis-CPU reader)* — ramp replicas 1→4 at K=10k, read managed-Redis CPU. Confirms the scan multiplies (the whole premise). Pass: CPU scales with N at fixed K.
 2. **`OnStreamAppend` fan-out regression** *(after step 5: the `S`-slot shard)* — append→wake p99 with 1 vs `S` parallel `SMEMBERS` at S=2/4/8/256 on a real cluster. *The* number that decides whether slot-homing is viable. Pass: p99 regression within budget; with the occupied-slots bitmap it tracks occupied-slots-per-stream, not `S`.
 3. **Due-set write amplification** *(after step 4: the due-set)* — the added `ZADD`/`ZREM` QPS on append/ack vs the recovery-latency win (uses the new `DueSetMutation` metric). Sizes the cost of the due-set step; informs, does not gate.
-4. **Membership churn window** *(after step 3: leased ownership; needs a chaos step + ≥2 replicas)* — pod-kill a slot owner; measure the coverage-gap latency (must be **≤ one sweep interval, ~2s**) and confirm zero lost wakes / zero double-grants. This is [07](07-jepsen-style-verification.md)'s L2/L4 as a rig run.
+4. **Membership churn window** *(after step 3: leased ownership; needs a chaos step + ≥2 replicas)* — pod-kill a slot owner; measure the coverage-gap latency (the detectable case recovers at the new owner's `claim_shard` + eager reconcile, so **≤ membership-lease TTL + RTT**, not a sweep tick) and confirm zero lost wakes / zero double-grants. This is [07](07-jepsen-style-verification.md)'s L2/L4 as a rig run.
 5. **Failover fence drill** *(after step 4; needs `STANDARD_HA` Redis + fault-injection + a webhook receiver)* — drop the lease-ZSET tail mid-lease; confirm only the cursor-reading reconciler (the failover-aware eager reconcile) recovers a stranded webhook sub, and a deposed ack returns `FENCED` (HTTP 409, not silent success). This is [07](07-jepsen-style-verification.md)'s L3, and the basic-tier Redis `ltctl` provisions has no failover — provision `STANDARD_HA`.
 
 **Experiment 1 gates the premise; 2 gates the rebuild (slot-homing viability); 3 sizes the

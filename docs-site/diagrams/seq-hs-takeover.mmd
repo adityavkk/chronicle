@@ -13,9 +13,8 @@ sequenceDiagram
     Recv-->>OB: 200 {done:true}
     OB->>R: ack.lua — cursor → tail · ZREM {__ds:h}:due
     Note over OB,R: now Origin B crashes too — member lease + slot:h lease expire (~9s TTL)
-    loop full sweep · every ~2s · covers ALL S slots, owned or not
-        OC->>R: re-derive owed work for slot h from durable cursors → arm_wake (fence-safe)
-    end
-    OC->>R: HRW reassigns slot h to Origin C · claim_shard.lua — CAS, owner_epoch++ (fences B)
-    Note over OC: Origin C now owns slot h and resumes its due/lease/retry workers
+    OC->>R: HRW points slot h at Origin C · claim_shard.lua — CAS, owner_epoch++ (fences B)
+    OC->>R: eager reconcile at takeover — re-derive owed work for slot h from durable cursors → arm_wake (fence-safe)
+    Note over OC: recovery rides the takeover event, not a timer
     Note over OB,OC: a late wake from a resumed zombie B → check_owner FENCED
+    Note over R: a coarse periodic floor (seconds-to-minutes) backstops only the eventless unowned-and-quiet case

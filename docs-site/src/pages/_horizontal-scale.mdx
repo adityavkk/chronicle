@@ -427,21 +427,27 @@ import Complexity from "../components/Complexity.astro";
   supply liveness separately, and it does so by leaning on a mechanism that was
   never sharded: the full sweep.
 
-  **The full sweep stays, covering every slot.** It keeps its ~2s cadence and
-  walks all `S` slots, owned or not, re-deriving owed work from the durable
-  cursors and re-firing anything behind. It carries no owner guard, because it
-  issues only fence-safe wakes — if it races a real owner's wake, both bump the
-  generation, one supersedes, and the stale one is fenced. So an unowned slot is
-  covered by the sweep within one sweep interval (~2s), and a split-brain slot
-  with two owners is safe because the double wake coalesces. The work-sharded
-  due-worker is the fast path; the sweep is the floor under it.
+  **A cursor reconcile stays — but triggered, not perpetual.** The reconcile
+  re-derives owed work from the durable cursors and re-fires anything behind,
+  carrying no owner guard because it issues only fence-safe wakes (race a real
+  owner's wake and both bump the generation, one supersedes, the stale one is
+  fenced). The question is *when* it runs. Most recovery cases announce
+  themselves, and for those it runs at the event, not on a clock: a rebalance
+  coverage gap closes when the new owner claims the slot and reconciles it; a
+  failover, a reconnect, a boot, an append error each trigger their own reconcile.
+  A split-brain slot with two owners is safe regardless — the double wake
+  coalesces.
 
-  <Callout icon="info" label="One sweep interval, not one reconcile interval">
-    The coverage gap is bounded by the ~2s sweep, not the ~30s reconcile loop.
-    The sweep — `O(owed)` per tick after its reads are batched — covers all S
-    slots cheaply; only the `O(streams)` fan-out-index reconcile stays at 30s. So
-    a wake stranded by a rebalance waits at most ~2s, the bound the fault-injection
-    tests assert against.[^bound]
+  <Callout icon="info" label="The 2s timer is a floor, not a guarantee">
+    Exactly one case has no trigger: an owed-mark dropped on a slot that is
+    unowned (mid-rebalance) *and* quiet (no later append), eventless because the
+    cross-slot gap means no durable owed-mark was written atomically with the
+    append. Only a periodic cursor re-derivation finds it. Because that
+    conjunction is rare and not latency-sensitive, the periodic floor belongs in
+    the seconds-to-minutes band — alongside the 30s index reconcile — *not* at 2s.
+    The 2s `sweepInterval` was a catch-all cadence; once the detectable cases are
+    event-triggered, it is a tunable latency floor for one narrow case, never a
+    correctness requirement.[^bound]
   </Callout>
 
   There is a second reason the sweep cannot be deleted, and it is about
@@ -504,19 +510,19 @@ import Complexity from "../components/Complexity.astro";
 
   <Diagram
     name="seq-hs-takeover"
-    label="Recovery — owner death and the coverage floor"
-    caption="Origin A dies mid-delivery and Origin B's due-worker covers it. Then B dies too: its slot lease expires, the full sweep re-derives owed work for slot h from the durable cursors within ~2s, and Origin C claims the slot — owner_epoch bumps, fencing a resumed zombie B. Two layers cover the gap: the sweep for liveness, the epoch fence for safety."
+    label="Recovery — owner death, takeover, and the floor"
+    caption="Origin A dies mid-delivery and Origin B's due-worker covers it. Then B dies too: rendezvous hashing points slot h at Origin C, which claim_shards it — the CAS bumps owner_epoch (fencing a resumed zombie B), and the new owner runs an eager reconcile that re-derives slot h's owed work from the durable cursors. The takeover event, not a timer, closes the gap; the periodic floor only backstops the one eventless case."
   />
 
-  Now kill Origin B too. Its member lease and its `slot:h` lease expire after
-  their TTL (~9s). Two things converge to recover slot `h`. The **full sweep**,
-  running on Origins A-replacement and C every ~2s over all slots, re-derives
-  `sub-1`'s owed wake from its durable cursor and re-fires it — so delivery does
-  not wait for ownership to settle. Meanwhile rendezvous hashing now points slot
-  `h` at Origin C, which `claim_shard`s it; the CAS bumps `owner_epoch`, so if the
-  old owner B ever resumes from a pause and tries to write, `check_owner` returns
-  `FENCED`. Liveness is covered by the sweep; safety is covered by the epoch
-  fence. Neither depends on the other.
+  Now kill Origin B too. Its member lease and its `slot:h` lease expire after their
+  TTL (~9s), and rendezvous hashing points slot `h` at Origin C. C `claim_shard`s
+  the slot: the CAS bumps `owner_epoch` — so if the old owner B ever resumes from a
+  pause and tries to write, `check_owner` returns `FENCED` — and the new owner
+  immediately runs an **eager reconcile** that re-derives `sub-1`'s owed wake from
+  its durable cursor and re-fires it. Recovery rides the *takeover event*, not a
+  timer. The periodic floor (seconds-to-minutes) exists only for the eventless case
+  where no crash, ownership change, or later append signals the debt. Liveness is
+  covered by the reconcile, safety by the epoch fence. Neither depends on the other.
 </section>
 
 <section class="block" id="code">
@@ -573,7 +579,7 @@ import Complexity from "../components/Complexity.astro";
     | 1 | Ramp replicas 1→4 at K=10k, read managed-Redis CPU | the premise — does the sweep multiply? | now, plus a CPU reader |
     | 2 | append→wake p99 at 1 vs S parallel `SMEMBERS`, S=2/4/8/256 | **whether slot-homing is viable at all** | after the slot shard |
     | 3 | due-set `ZADD`/`ZREM` QPS on append/ack | the cost of Move 2 | after the due-set |
-    | 4 | kill a slot owner; coverage-gap latency, lost/double wakes | the liveness claim (≤ ~2s) | after leased ownership |
+    | 4 | kill a slot owner; coverage-gap latency, lost/double wakes | the liveness claim (recovers at the takeover trigger, ≤ TTL + RTT) | after leased ownership |
     | 5 | drop a lease-ZSET tail mid-lease; only the reconciler recovers it | the durability claim | after the fence, on HA Redis |
   </Table>
 
@@ -641,7 +647,7 @@ import Complexity from "../components/Complexity.astro";
 
 [^kleppmann]: A Redis TTL lease alone cannot fence a stalled process (Kleppmann's fencing-token result); correctness comes from the monotonic `owner_epoch` enforced by compare-and-set and reject-if-stale, exactly as the per-subscription `(generation, wake_id)` fence works today. [`research/06`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/06-adversarial-review.md) §"Tunable consistency, corrected".
 
-[^bound]: The recovery bound is settled in [`research/05`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#recovery-bound--pinned-resolves-07-honest-gap-4) and asserted by tests L2/L3 in [`research/07`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/07-jepsen-style-verification.md): the full sweep covers unowned slots at its ~2s cadence, so the coverage gap is one sweep interval.
+[^bound]: The recovery model is in [`research/05`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#recovery-triggered-not-perpetual-refines-07-honest-gap-4) and asserted by tests L2/L3 in [`research/07`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/07-jepsen-style-verification.md): the detectable cases recover at their trigger (the new owner's `claim_shard` + eager reconcile), and a coarse periodic floor — seconds-to-minutes, not 2s — bounds only the eventless unowned-and-quiet case.
 
 [^gke]: The gating experiments and what the load-test rig measures today are in [`research/05`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#measure-before-building-the-gating-experiments) and [`loadtest/RESULTS-gke.md`](https://github.com/adityavkk/chronicle/blob/main/loadtest/RESULTS-gke.md).
 
