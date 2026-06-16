@@ -47,6 +47,15 @@ unless `leaseExpiresAt` is explicitly passed), and releases via
 writes — the same shape as chronicle's `generation`/`wake_id` fence, but keyed
 per-entity rather than per-`{__ds}`-slot.
 
+> **Granularity caveat (load test).** Per-*entity* claim rows are the right granularity and
+> are *why* this pattern doesn't self-contend. But the agents *runtime* against chronicle does
+> **not** inherit it: it registers one subscription per entity *type*
+> (`subscriptionId = "<typeName>-handler"`), so all of a type's entities and every replica share
+> **one** chronicle lease — coarser than Electric's own per-entity reference, and the unit that
+> collapsed under contention at 12 replicas
+> ([05](05-proposed-architecture.md#a-third-axis-per-type-claim-contention-from-the-load-test)).
+> The lesson: chronicle's claim granularity must match this per-entity reference.
+
 **Storage plane** — the hosted "Electric Streams" is a *closed-source* managed
 implementation of the open Durable Streams protocol (URL-addressable append-only byte
 sequences; PUT/POST/GET; opaque, lexicographically-sortable offset tokens;

@@ -94,7 +94,8 @@ requirement — any eviction silently truncates streams (chronicle warns at boot
   same table through both and asserts they agree. A differential failure means the
   two drifted — fix the logic, never silence one side. Invoke scripts only via
   `Script.Run`/`RunRO` (a `forbidigo` rule blocks bare `EVAL`/`EVALSHA`).
-- **No AI co-author trailers** in commit messages.
+- **No AI co-author trailers** in commit messages — this overrides any global or
+  tool default that injects a `Co-Authored-By: …` line. Strip it if one appears.
 - `golangci-lint` must pass — CI gates on lint, test, and conformance.
 - Subscriptions require the redis backend; the `{__ds}` control plane lives in a
   single hash-tag slot (cluster-safe by construction).
