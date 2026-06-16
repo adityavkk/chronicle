@@ -7,6 +7,7 @@ linters:
     - copyloopvar
     - errorlint
     - exhaustive
+    - forbidigo
     - gocritic
     - misspell
     - nilerr
@@ -25,6 +26,16 @@ linters:
         - fmt.Fprintf
     exhaustive:
       default-signifies-exhaustive: true
+    forbidigo:
+      # Always run Lua via *redis.Script (Run/RunRO). A bare EVAL/EVALSHA inside a
+      # pipeline/MULTI loses the NOSCRIPT->EVAL self-heal (go-redis #3228), so it
+      # can fail NOSCRIPT after a managed-Redis cache flush/failover. chronicle has
+      # zero such calls today; this keeps it that way. If batching a script is ever
+      # genuinely needed, SCRIPT LOAD it first and take an explicit, justified
+      # //nolint:forbidigo at the call site.
+      forbid:
+        - pattern: \.Eval(Sha)?(RO)?\b
+          msg: use *redis.Script.Run/RunRO, not a bare EVAL/EVALSHA; the NOSCRIPT->EVAL self-heal does not fire inside a pipeline/MULTI (go-redis #3228). If batching is truly needed, SCRIPT LOAD first and add a justified //nolint:forbidigo.
     revive:
       rules:
         - name: exported
