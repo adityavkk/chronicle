@@ -20,8 +20,13 @@ the cheat sheets, and how to pick up the open work. For *using* chronicle see
 ## Cheat sheets & runbooks — start here
 
 - **`docs/PLAN.md`** — architecture and its tradeoffs.
+- **`docs/adr/`** — accepted architecture decisions (start: ADR-0001, Lua scripts
+  vs Redis Functions). Check here before re-opening a settled choice; record
+  significant decisions as a new ADR.
 - **`docs/research/`** — design studies; `07` / `09` / `10` / `11` are the
   subscription wake / lease / hardening series.
+- **`docs/specs/research/`** — deeper design / triage studies (e.g.
+  `redis-grouped-actions/`), alongside `docs/research/`.
 - **`docs/spec/PROTOCOL.md`** — the wire contract. `docs/spec/README.md` pins the
   upstream Caddy commit to diff against.
 - **`jepsen/README.md`** — the fault-injection durability harness (k3d).
@@ -80,6 +85,15 @@ requirement — any eviction silently truncates streams (chronicle warns at boot
 
 ## Hard rules
 
+- **Lua mirrors Go — edit both sides together.** Each `store/redis/scripts/*.lua`
+  validation helper reimplements a pure-Go function so it can run *atomically on
+  the Redis server*: `validate_producer`↔`store.ValidateProducer`,
+  `is_expired`↔`IsExpired`, `config_matches`↔`ConfigMatches`,
+  `norm_ct`↔`ContentTypeMatches`. The Go side is the oracle (it also *is* the
+  in-process `MemoryStore` backend); `store/redis/differential_test.go` runs the
+  same table through both and asserts they agree. A differential failure means the
+  two drifted — fix the logic, never silence one side. Invoke scripts only via
+  `Script.Run`/`RunRO` (a `forbidigo` rule blocks bare `EVAL`/`EVALSHA`).
 - **No AI co-author trailers** in commit messages.
 - `golangci-lint` must pass — CI gates on lint, test, and conformance.
 - Subscriptions require the redis backend; the `{__ds}` control plane lives in a
