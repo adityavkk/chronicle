@@ -13,7 +13,7 @@ gone.
 
 ## 0. Mission & invariants
 
-- **Goal:** ship #10–#16 onto `horizontal-scale`, each as **one reviewed, validated, merged
+- **Goal:** ship #10–#16 onto `main`, each as **one reviewed, validated, merged
   PR**, with the issue closed and its worktree + branch removed.
 - **Order:** **Phase 1 (#10 → #11)** — the per-type claim-contention collapse — is the
   priority. **Phase 2 (#12 → #16)** is deferred Option-A hardening of the axes that were
@@ -84,7 +84,7 @@ Non-negotiable. The adversarial reviewer **rejects** a PR that misses any of the
   order**: those slices all edit overlapping files (`manager.go` loops, `keys.go`, the Lua
   scripts, the `Metrics` interface), so concurrent spine work merge-conflicts pathologically.
 - **Parallelism rule:** the orchestrator dispatches two branches concurrently **only when their
-  file sets are disjoint** — compute it from `git diff --name-only horizontal-scale...<branch>`
+  file sets are disjoint** — compute it from `git diff --name-only main...<branch>`
   of every open branch before launching the next. #11's only overlap with the spine is
   `claim.lua` / `ack.lua` (#12's due `ZREM`, #14's TOCTOU check) — coordinate those edits and
   rebase before merge.
@@ -93,13 +93,13 @@ Non-negotiable. The adversarial reviewer **rejects** a PR that misses any of the
 
 ## 3. Worktree & git protocol (`wt`)
 
-One worktree per issue, off `horizontal-scale`, so parallel agents never share a checkout.
+One worktree per issue, off `main`, so parallel agents never share a checkout.
 
 **Create** (off the integration branch, *not* `main`):
 ```sh
-wt switch -c hs/<n>-<slug> -b horizontal-scale
-#   e.g. wt switch -c hs/10-harness    -b horizontal-scale
-#        wt switch -c hs/11-claim-gran -b horizontal-scale
+wt switch -c hs/<n>-<slug> -b main
+#   e.g. wt switch -c hs/10-harness    -b main
+#        wt switch -c hs/11-claim-gran -b main
 ```
 The slice agent works **only** inside its worktree (`{{ worktree_path }}` ≈ `~/dev/chronicle.hs-<n>-<slug>`). Hooks (`wt hook`) run lint/build/test gates on create and pre-merge — wire the V&V there so the gate cannot be skipped.
 
@@ -107,21 +107,21 @@ The slice agent works **only** inside its worktree (`{{ worktree_path }}` ≈ `~
 - Conventional-commit messages, present tense, scoped (`feat(webhook): …`, `test(jepsen): …`,
   `perf(loadtest): …`). **Small, logically-atomic commits** — pure core + its tests, then the
   shell, then wiring — not one mega-commit.
-- **Rebase** onto the latest `horizontal-scale` before opening the PR and again before merge;
+- **Rebase** onto the latest `main` before opening the PR and again before merge;
   never merge the integration branch *into* the feature branch.
 - End every commit with the `Co-Authored-By:` trailer.
 - No force-push to shared branches; `--force-with-lease` only on your own feature branch.
 
-**PR:** one per issue, `gh pr create --base horizontal-scale`, title = the issue title, body
+**PR:** one per issue, `gh pr create --base main`, title = the issue title, body
 `Closes #<n>`, lists what changed, and **pastes the V&V evidence** (which T/L/C scenarios went
 red→green, the gate number + measured value, the baseline still green).
 
 **Merge & cleanup** (only after *both* gates pass):
 ```sh
-wt merge horizontal-scale -y      # squash + rebase + fast-forward target + remove the worktree
+gh pr merge <pr> --squash --delete-branch    # PR-native merge into main; keeps the PR as the review record
 gh issue comment <n> --body "Merged in <sha>. <T/L/C green> · <gate value> · baseline green."
 gh issue close <n>
-wt remove hs/<n>-<slug> -y        # belt-and-suspenders; branch auto-deletes once merged
+wt remove hs/<n>-<slug> -y                   # remove the worktree (the branch was deleted by --delete-branch)
 ```
 
 ---
@@ -147,7 +147,7 @@ success **only** when the issue is merged + closed + cleaned up:
    the PR.
 6. **Address every comment** — fix, or a reasoned rebuttal — re-run the affected V&V layers, and
    re-request review until sign-off.
-7. **Merge** (`wt merge`), **comment the issue** with the SHA + V&V summary, **close** it,
+7. **Merge** the PR (`gh pr merge --squash --delete-branch`), **comment the issue** with the SHA + V&V summary, **close** it,
    **clean up** the worktree + branch.
 8. **Report** to the orchestrator: merged SHA, gates green, anything deferred or escalated.
 
@@ -210,7 +210,7 @@ blockers remaining**.
 
 ## 8. Definition of done
 
-- **Per issue:** merged to `horizontal-scale`; its T/L/C + gate green; the K=10k baseline green;
+- **Per issue:** merged to `main`; its T/L/C + gate green; the K=10k baseline green;
   PR adversarially reviewed and signed off; issue commented with evidence and **closed**;
   worktree + branch removed.
 - **Epic #9:** **Phase 1 ships the claim-contention fix** (C3 green — the knee moves ~`G×`);
