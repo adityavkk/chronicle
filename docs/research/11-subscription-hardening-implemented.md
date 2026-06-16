@@ -100,6 +100,15 @@ post-crash recovery event, not a hot path, so sweep latency is the right cost to
 pay. If a future workload needs sub-sweep recovery latency for wakes, the outbox
 in doc 10 §slice-1 is the upgrade path.
 
+One consequence to name plainly: this "flag + sweep" choice is what makes the
+*periodic* sweep the recovery path for stranded wakes, so the perpetual scan reads
+as fundamental when it is not. The horizontal-scale
+[doc 05](../specs/horizontal-scale/research/05-proposed-architecture.md) Move 2
+due-set is the event-driven replacement — an owed-mark written atomically with the
+arm and drained by a worker — after which the periodic component shrinks to a
+coarse floor for the one undetectable case (an owed-mark lost on an unowned, quiet
+slot) rather than the primary backstop.
+
 ## Slice 3 — glob-link reconciliation
 
 **Commit `5f70a1c`** (`fix(webhook): reconcile glob links missed by a crashed OnStreamCreated`).

@@ -1,0 +1,17 @@
+sequenceDiagram
+    autonumber
+    participant Cli as Client
+    participant O as Origin · append handler
+    participant R as Redis · stream slot
+    participant WS as wake_stream · durable
+    participant W as Worker pool
+    Cli->>O: POST /events/abc + body
+    O->>R: append.lua — ZADD frame · HSET tail · PUBLISH ds:notify (one atomic script)
+    O-->>Cli: 204 · the byte is committed
+    Note over O: OnStreamAppend fires in-process on this origin — event-driven, no timer
+    O->>R: StreamSubscribers — read the fan-out index for this path
+    O->>WS: AppendWakeEvent — a durable {type wake} event, the outbox record
+    O->>R: RecordWakeEventSent — mark wake_event_sent_ns, fenced
+    W->>WS: tail the wake_stream and claim the wake
+    W->>R: ack.lua — cursor advances to tail
+    Note over R: the recovery sweep fires nothing here — it re-emits only a wake a crash left unsent
