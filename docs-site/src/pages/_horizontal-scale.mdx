@@ -37,6 +37,7 @@ import Complexity from "../components/Complexity.astro";
     <li><strong>The control plane is pinned to one Redis slot.</strong> Every subscription key shares the fixed <code>{"{__ds}"}</code> hash tag, so all of it lands on one cluster slot. State capacity stops scaling there, no matter how many replicas serve traffic.</li>
     <li><strong>Delivery is event-driven; the sweep only backstops crashes.</strong> A webhook fires the instant a matching append lands (in-process, at append latency) — not on a timer. The ~2s recovery sweep delivers nothing in steady state; it exists to re-derive a wake a crash dropped. But it runs on every replica over every subscription, so its redundant <code>O(N·K)</code> "ask" — not the wakes — is the cost. Adding replicas multiplies that ask; it does not divide it.</li>
     <li><strong>Option A keeps one binary and shards two things.</strong> Slot-home each subscription's keys under <code>{"{__ds:h}"}</code> with <code>h = hash(id) % S</code> (state), and shard the background work by a leased per-slot owner (work). Capacity scales with S; total sweep work drops to <code>O(owed)</code>.</li>
+    <li><strong>A load test found a third axis Option A doesn't touch.</strong> The agents runtime registers one subscription per entity <em>type</em>, so all of a type's entities and every replica contend for <em>one</em> single-holder lease. At 12 replicas that fence-stormed while every tier sat at ≤12% CPU — a contention collapse, not a capacity or sweep limit. Slot-homing distributes <em>different</em> subscriptions; it never splits a hot one's lease. The fix is finer claim granularity, and it sequences first.</li>
     <li><strong>The fence is safety, not liveness.</strong> The generation fence makes a duplicate wake harmless; it does nothing for a <em>coverage gap</em> when a slot is briefly owned by nobody. So the full sweep stays — demoted to a backstop that covers every slot, never deleted.</li>
     <li><strong>Don't split the binary yet.</strong> Splitting serving from the control plane is Option B, deferred until measurements force it. The one binary held at K=10k; the fork is a later question, not a starting one.</li>
   </ul>
@@ -53,7 +54,8 @@ import Complexity from "../components/Complexity.astro";
   against the per-stream log, which is already sharded across the cluster by each
   stream's own hash tag.
 
-  The control plane does not scale the same way, for two separate reasons.
+  The control plane does not scale the same way, for three separate reasons — two
+  structural, and a third a later load test forced.
 
   First, **all of it lives in one slot.** Every subscription key — the config
   hash, the cursor hash, the lease and retry schedules, the fan-out index —
@@ -77,11 +79,34 @@ import Complexity from "../components/Complexity.astro";
     caption="Three replicas, each sweeping all K subscriptions every ~2s against the single {__ds} slot. The reads are redundant — every replica re-derives the same owed work — and they all converge on one node. Scaling out the fleet scales the load on that one slot up, not down."
   />
 
+  Third, **a single hot subscription serializes on one lease.** This one a later
+  load test forced — the Electric agents runtime driven against chronicle as its
+  Durable-Streams backend. The runtime registers one subscription per entity
+  *type* (`"<type>-handler"`), so every entity of that type, on every replica,
+  shares **one** single-holder lease. At 6 replicas the wake path was clean; at 12
+  it **collapsed** into a fence storm — claims taken over from late heartbeats,
+  in-flight acks rejected `FENCED` — while every tier sat at ≤12% CPU. Nothing was
+  saturated; it was lock contention on one lease, and 2.5× the CPU made it worse.
+
+  <Callout icon="alert" label="Slot-homing does not fix this">
+    `h = hash(id) % S` distributes *different* subscriptions across slots — but a
+    single hot `"<type>-handler"` is still one id, one slot, one lease, for any S.
+    Moves 1–3 below shard **keyspace and ownership**; they do not refine **claim
+    granularity**, which is what collapsed. The fix is a finer claim unit
+    (per-entity or per-shard-of-type leases), and because the collapse was on the
+    hot path it sequences *before* the sweep and state shards — see the
+    [third-axis section](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#a-third-axis-per-type-claim-contention-from-the-load-test)
+    of the research.
+  </Callout>
+
   Batching the sweep's reads pushed this cliff out — pipelining the per-tick
   reads moved it from a few thousand subscriptions to past 10k on one
-  replica[^batch] — but it moved the cliff, it did not remove it. The two limits
-  above are structural: one slot for state, `O(N·K)` for work. Option A is the
-  design that addresses both while keeping the single binary.
+  replica[^batch] — but it moved the cliff, it did not remove it. The first two
+  limits are structural: one slot for state, `O(N·K)` for work — and Option A
+  addresses both while keeping the single binary. The **third — per-type claim
+  contention — is the one Option A does *not* fix**, and it is what actually
+  collapsed the system under load; it needs a finer claim granularity, sequenced
+  before the rest.
 </section>
 
 <section class="block" id="eventflow">
@@ -569,9 +594,11 @@ import Complexity from "../components/Complexity.astro";
   <SectionHead num="10" label="Measure first" title="The numbers that <em>gate the build</em>" />
 
   This design rests on numbers that are not yet measured. The honest order is to
-  measure them before building, because two of them can fail the premise. The
-  load-test rig runs the first today; the rest need the foundation in place or new
-  tooling, so they are sequenced against the build, not all run up front.[^gke]
+  measure them before building, because some of them can fail the premise. The
+  load-test rig runs experiment 1 today; **experiment 6 already ran — it reproduced
+  the collapse this page's third ceiling describes** (per-type claim contention), so
+  characterize it first. The rest need the foundation in place or new tooling, so
+  they are sequenced against the build, not all run up front.[^gke]
 
   <Table wide>
     | # | Experiment | Gates | Runnable |
@@ -581,6 +608,7 @@ import Complexity from "../components/Complexity.astro";
     | 3 | due-set `ZADD`/`ZREM` QPS on append/ack | the cost of Move 2 | after the due-set |
     | 4 | kill a slot owner; coverage-gap latency, lost/double wakes | the liveness claim (recovers at the takeover trigger, ≤ TTL + RTT) | after leased ownership |
     | 5 | drop a lease-ZSET tail mid-lease; only the reconciler recovers it | the durability claim | after the fence, on HA Redis |
+    | 6 | ramp agents-server replicas 6→12+ against **one hot per-type subscription**; read `ALREADY_CLAIMED`/`FENCED`/lease-lapse rates and per-busy-agent throughput | **the actual collapse** — claim contention, not sweep or capacity | now, on the Electric rig — reproduces the 12-replica fence storm |
   </Table>
 
   Experiment 2 is the one that can sink the design. Slot-homing trades a single
