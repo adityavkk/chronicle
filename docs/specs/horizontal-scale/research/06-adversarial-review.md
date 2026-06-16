@@ -6,10 +6,15 @@ overstated, and the deeper Electric finding. The corrections here are folded int
 
 ## Critique of the chronicle options (04)
 
-The structural diagnosis holds — single `{__ds}` slot, `O(N·K)` sweep, lease/retry
-de-duped by `claim_due.lua` but the sweep not, the fence as the correctness
-mechanism (all verified against `keys.go`, `manager.go`, `webhook/scripts/*.lua`).
-But three options leaned on claims that don't survive scrutiny:
+The structural diagnosis holds *as far as it goes* — single `{__ds}` slot, `O(N·K)` sweep,
+lease/retry de-duped by `claim_due.lua` but the sweep not, the fence as the correctness
+mechanism (all verified against `keys.go`, `manager.go`, `webhook/scripts/*.lua`). **But a
+later load test found it incomplete:** it omits a third axis — **per-type claim contention**
+(one subscription per entity *type*, one single-holder lease contended by every entity and
+every replica hosting it), which is what actually collapsed the system at 12 replicas (≤12% CPU
+on every tier; sharding work *or* state does not relieve it). See
+[05](05-proposed-architecture.md#a-third-axis-per-type-claim-contention-from-the-load-test).
+Three of 04's options also leaned on claims that don't survive scrutiny:
 
 **O1 — fence-safety was conflated with liveness.** "The fence already makes
 mis-sharding harmless" is true only for *safety*: a double-sweep gets `BUSY` at
