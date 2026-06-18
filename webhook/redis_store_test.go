@@ -193,6 +193,142 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	}
 }
 
+// dueCard reads the due-set outbox cardinality — the count of subscriptions
+// currently owed a wake. It must track owed and return to 0 at quiescence.
+func dueCard(t *testing.T, client goredis.UniversalClient) int64 {
+	t.Helper()
+	n, err := client.ZCard(context.Background(), dueZKey).Result()
+	if err != nil {
+		t.Fatalf("zcard due: %v", err)
+	}
+	return n
+}
+
+// TestDueSetArmOutboxesAndAckClears is the core Move-2 round trip: arm_wake's
+// ARMED branch outboxes the wake into the due-set, a coalescing re-arm (BUSY) does
+// not add a second mark, and ack(done=1) clears it.
+func TestDueSetArmOutboxesAndAckClears(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+
+	res, err := s.ArmWake("s1", now, 1000, true, "w_a")
+	if err != nil || !res.Armed {
+		t.Fatalf("arm = %+v err=%v", res, err)
+	}
+	if n := dueCard(t, client); n != 1 {
+		t.Fatalf("ARMED branch must ZADD the due mark, got card %d", n)
+	}
+	// Coalesce: a BUSY re-arm must not touch the due-set (no second mark).
+	if busy, _ := s.ArmWake("s1", now, 1000, true, "w_b"); !busy.Busy {
+		t.Fatalf("second arm should be BUSY, got %+v", busy)
+	}
+	if n := dueCard(t, client); n != 1 {
+		t.Fatalf("BUSY (coalesced) re-arm must not add a due mark, got card %d", n)
+	}
+	// ack(done=1) clears the mark alongside the lease/retry ZREMs.
+	if st, _ := s.Ack("s1", res.Generation, res.WakeID, res.Generation, true, nil, now, 1000); st != "OK" {
+		t.Fatalf("ack(done) = %q, want OK", st)
+	}
+	if n := dueCard(t, client); n != 0 {
+		t.Fatalf("ack(done=1) must ZREM the due mark, got card %d", n)
+	}
+}
+
+// TestDueSetAckHeartbeatLeavesMark proves a heartbeat ack (done=0) keeps the wake
+// owed — only a done-ack clears the due mark.
+func TestDueSetAckHeartbeatLeavesMark(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+	res, _ := s.ArmWake("s1", now, 1000, true, "w_a")
+
+	if st, _ := s.Ack("s1", res.Generation, res.WakeID, res.Generation, false, nil, now, 1000); st != "OK" {
+		t.Fatalf("heartbeat ack = %q, want OK", st)
+	}
+	if n := dueCard(t, client); n != 1 {
+		t.Fatalf("heartbeat (done=0) must NOT clear the due mark, got card %d", n)
+	}
+}
+
+// TestDueSetExpireLeaseReOwes proves expire_lease's EXPIRED branch re-owes the
+// wake at a fresh now_ns (a re-armed-after-lapse sub re-ZADDs at the new time).
+func TestDueSetExpireLeaseReOwes(t *testing.T) {
+	s, client := newTestStore(t)
+	base := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, base)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+	_, _ = s.ArmWake("s1", base, 1000, true, "w_a")
+
+	armScore, err := client.ZScore(context.Background(), dueZKey, "s1").Result()
+	if err != nil {
+		t.Fatalf("zscore after arm: %v", err)
+	}
+	// After the deadline: EXPIRED re-owes at the new now_ns.
+	after := base.Add(2 * time.Second)
+	if st, _ := s.ExpireLease("s1", after); st != "EXPIRED" {
+		t.Fatalf("expired lease = %q, want EXPIRED", st)
+	}
+	if n := dueCard(t, client); n != 1 {
+		t.Fatalf("EXPIRED branch must re-owe the due mark, got card %d", n)
+	}
+	reScore, _ := client.ZScore(context.Background(), dueZKey, "s1").Result()
+	if reScore <= armScore {
+		t.Fatalf("re-owe must ZADD at the new now_ns: arm=%v re-owe=%v", armScore, reScore)
+	}
+}
+
+// TestDueSetReleaseClearsPhantom is the GAP3 regression: release idles the sub
+// exactly like ack(done), so it MUST clear the due mark — a voluntarily-released
+// sub leaves no phantom mark the dueWorker would re-fire forever.
+func TestDueSetReleaseClearsPhantom(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+	res, _ := s.ArmWake("s1", now, 1000, true, "w_a")
+	if n := dueCard(t, client); n != 1 {
+		t.Fatalf("precondition: arm should outbox one due mark, got %d", n)
+	}
+	if st, _ := s.Release("s1", res.Generation, res.WakeID, res.Generation); st != "OK" {
+		t.Fatalf("release = %q, want OK", st)
+	}
+	if n := dueCard(t, client); n != 0 {
+		t.Fatalf("GAP3: release must clear the due mark, got phantom card %d", n)
+	}
+}
+
+// TestDueSetClaimDueReScoresForward mirrors the lease/retry re-score contract for
+// the due path: ClaimDue re-scores members forward (never ZREM), so the due-set is
+// at-least-once and a claimed mark is not immediately due again.
+func TestDueSetClaimDueReScoresForward(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+	_, _ = s.ArmWake("s1", now, 1000, true, "w_a")
+
+	due, err := s.ClaimDue(now.Add(time.Millisecond), 16, 30*time.Second)
+	if err != nil || len(due) != 1 || due[0] != "s1" {
+		t.Fatalf("ClaimDue = %v err=%v, want [s1]", due, err)
+	}
+	if n := dueCard(t, client); n != 1 {
+		t.Fatalf("claimed mark must remain (re-scored, not removed), got card %d", n)
+	}
+	if again, _ := s.ClaimDue(now.Add(time.Millisecond), 16, 30*time.Second); len(again) != 0 {
+		t.Fatalf("re-scored mark must not be due again immediately, got %v", again)
+	}
+	// ClearDue removes it (the dueWorker's reconcile of a no-longer-owed mark).
+	if err := s.ClearDue("s1"); err != nil {
+		t.Fatalf("ClearDue: %v", err)
+	}
+	if n := dueCard(t, client); n != 0 {
+		t.Fatalf("ClearDue must remove the mark, got card %d", n)
+	}
+}
+
 func TestStoreSigningKeyPersistence(t *testing.T) {
 	s, client := newTestStore(t)
 	k1, err := s.LoadSigningKey(time.Now())
