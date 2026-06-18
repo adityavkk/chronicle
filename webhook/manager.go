@@ -504,7 +504,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, sub.Config.WebhookURL, bytes.NewReader(body))
 	if err != nil {
-		m.recordFailure(id)
+		m.recordFailure(id, owner...)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -514,13 +514,13 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	resp, err := m.client.Do(req)
 	if err != nil {
 		m.metrics.WakeDelivery(time.Since(postStart), "error")
-		m.recordFailure(id)
+		m.recordFailure(id, owner...)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		m.metrics.WakeDelivery(time.Since(postStart), "failed")
-		m.recordFailure(id)
+		m.recordFailure(id, owner...)
 		return
 	}
 	m.metrics.WakeDelivery(time.Since(postStart), "ok")
@@ -534,7 +534,12 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	_ = m.store.RecordSuccess(id)
 	if parsed.Done != nil && *parsed.Done {
 		acks := acksFromSnapshot(snapshot)
-		status, err := m.ack(id, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs)
+		// The auto-ack(done) is a schedule/due-mutating write, so it carries the
+		// retry worker's owner scope: a deposed owner's done-ack (it released/ZREMed
+		// a slot it no longer owns) is FENCED inline, atomically with the write — the
+		// same TOCTOU resolution the expire path uses. The append-path caller passes
+		// no scope, so its auto-ack stays unfenced (the (gen,wake_id) fence guards it).
+		status, err := m.ack(id, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs, owner...)
 		if err != nil {
 			m.log.Warn("webhook: auto-ack done", "sub", id, "error", err)
 			return
@@ -545,7 +550,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	}
 }
 
-func (m *Manager) recordFailure(id string) {
+func (m *Manager) recordFailure(id string, owner ...OwnerScope) {
 	sub, ok, err := m.store.Get(id)
 	if err != nil || !ok {
 		return
@@ -556,7 +561,11 @@ func (m *Manager) recordFailure(id string) {
 		return
 	}
 	next := time.Now().Add(RetryDelay(sub.RetryCount+1, jitterFraction()))
-	if _, err := m.store.ScheduleRetry(id, time.Now(), next); err != nil {
+	// The retry worker drives this for a slot it owns, so it carries the owner
+	// scope: schedule_retry inlines the owner-epoch fence and a deposed owner
+	// schedules nothing (no phantom retry on a slot it lost) — closing the retry
+	// path's TOCTOU. The append-path caller passes no scope (unfenced).
+	if _, err := m.store.ScheduleRetry(id, time.Now(), next, owner...); err != nil {
 		m.log.Warn("webhook: schedule retry", "sub", id, "error", err)
 	}
 }
@@ -620,9 +629,11 @@ func (m *Manager) armWake(id string, now time.Time, leaseTTLMs int64, armLease b
 }
 
 // ack fences and acks (ack): the done branch ZREMs the due mark; a heartbeat
-// (done=false) does not, so only a done-ack records the mutation.
-func (m *Manager) ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
-	status, err := m.store.Ack(id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs)
+// (done=false) does not, so only a done-ack records the mutation. An optional
+// OwnerScope makes ack inline the owner-epoch fence (issue #14) for the
+// owner-driven retry-worker auto-ack; the store records the inline fence on FENCED.
+func (m *Manager) ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, owner ...OwnerScope) (string, error) {
+	status, err := m.store.Ack(id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs, owner...)
 	if err == nil && done && status == "OK" {
 		m.metrics.DueSetMutation("ack")
 	}
@@ -642,17 +653,14 @@ func (m *Manager) release(id string, reqGeneration int64, reqWakeID string, toke
 // expireLease clears an expired lease (expire_lease): the EXPIRED branch re-owes
 // (ZADDs) the due mark so the dueWorker re-fires it. An optional OwnerScope makes
 // the script inline the owner-epoch fence (issue #14); a FENCED result is a
-// deposed owner's expiry suppressed atomically, recorded as an inline fence.
+// deposed owner's expiry suppressed atomically. The inline fence is recorded by
+// the store (the single place the Lua reply is observed), so every owner-scoped
+// script records OwnerFenced("inline") uniformly — not just the ones with a
+// manager wrapper.
 func (m *Manager) expireLease(id string, now time.Time, owner ...OwnerScope) (string, error) {
 	status, err := m.store.ExpireLease(id, now, owner...)
-	if err != nil {
-		return status, err
-	}
-	switch status {
-	case "EXPIRED":
+	if err == nil && status == "EXPIRED" {
 		m.metrics.DueSetMutation("expire")
-	case "FENCED":
-		m.metrics.OwnerFenced("inline")
 	}
 	return status, err
 }
