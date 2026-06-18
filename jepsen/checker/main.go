@@ -585,9 +585,9 @@ func claim(base, id, worker string) (claimResult, error) {
 // fence. It returns the HTTP status and (on a 4xx error envelope) the error code,
 // without retrying — the caller asserts on the exact status. status 200 means the
 // ack landed; 409 with code "FENCED" means the fence rotated under this token.
-func ackPullWake(base, id, token, wakeID string, generation int64) (status int, code string, err error) {
+func ackPullWake(base, id, token, wakeID string, generation int64, acks ...ackBody) (status int, code string, err error) {
 	done := true
-	body, _ := json.Marshal(CallbackBody{WakeID: wakeID, Generation: generation, Done: &done})
+	body, _ := json.Marshal(CallbackBody{WakeID: wakeID, Generation: generation, Acks: acks, Done: &done})
 	url := fmt.Sprintf("%s/v1/stream/__ds/subscriptions/%s/ack", base, id)
 	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -625,7 +625,7 @@ func drainWorker(base, id, wakeStream string, stop <-chan struct{}) {
 			sleep(200 * time.Millisecond)
 			continue
 		}
-		ackPullWake(base, id, res.Token, res.WakeID, res.Generation)
+		ackPullWake(base, id, res.Token, res.WakeID, res.Generation, acksFromClaimSnapshot(res.Streams)...)
 	}
 }
 
@@ -636,9 +636,25 @@ type ClaimBody struct {
 }
 
 type CallbackBody struct {
-	WakeID     string `json:"wake_id"`
-	Generation int64  `json:"generation"`
-	Done       *bool  `json:"done"`
+	WakeID     string    `json:"wake_id"`
+	Generation int64     `json:"generation"`
+	Acks       []ackBody `json:"acks,omitempty"`
+	Done       *bool     `json:"done"`
+}
+
+type ackBody struct {
+	Stream string `json:"stream"`
+	Offset string `json:"offset"`
+}
+
+func acksFromClaimSnapshot(streams []claimStreamSnap) []ackBody {
+	acks := make([]ackBody, 0, len(streams))
+	for _, s := range streams {
+		if s.HasPending {
+			acks = append(acks, ackBody{Stream: s.Path, Offset: s.TailOffset})
+		}
+	}
+	return acks
 }
 
 type errEnvelope struct {

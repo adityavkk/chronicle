@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -82,49 +84,186 @@ func runLeaseTailDropRecovery(c config, nem *nemesis) error {
 	if err := waitReady(c.base, 60*time.Second); err != nil {
 		return fmt.Errorf("chronicle not ready: %w", err)
 	}
-	subID := fmt.Sprintf("jepsen-taildrop-%d", time.Now().UnixNano())
+	stamp := time.Now().UnixNano()
+	subID := fmt.Sprintf("jepsen-taildrop-%d", stamp)
+	pattern := fmt.Sprintf("events/taildrop-%d/*", stamp)
+	stream := fmt.Sprintf("events/taildrop-%d/data", stamp)
+	wakeStream := fmt.Sprintf("__jepsen_wake__/taildrop-%d", stamp)
 	const leaseTTLMs = int64(1000)
-	if _, err := appendStream(c.base, "events/taildrop-0", 2); err != nil {
-		return fmt.Errorf("seed stream: %w", err)
-	}
-	if err := createPullWakeSubscription(c.base, subID, "events/*", "events/taildrop-wake", leaseTTLMs); err != nil {
+	if err := createPullWakeSubscription(c.base, subID, pattern, wakeStream, leaseTTLMs); err != nil {
 		return err
 	}
 	defer deleteSubscription(c.base, subID)
+	tail, err := appendStream(c.base, stream, 3)
+	if err != nil {
+		return fmt.Errorf("seed stream: %w", err)
+	}
 
 	a, err := claim(c.base, subID, "worker-A")
 	if err != nil {
 		return fmt.Errorf("worker A claim: %w", err)
 	}
+	if !claimSnapshotCovers(a.Streams, stream, tail) {
+		return fmt.Errorf("worker A setup claim did not include seeded stream at tail: stream=%s tail=%s snapshot=%+v", stream, short(tail), a.Streams)
+	}
 	if err := nem.dropLeaseTail(subID); err != nil {
 		return err
 	}
+	if present, err := leaseScheduleMemberPresent(nem, subID); err != nil {
+		return fmt.Errorf("check dropped lease tail: %w", err)
+	} else if present {
+		return fmt.Errorf("dropLeaseTail did not remove %s from the lease schedule", subID)
+	}
 	wait := gcPauseDuration(leaseTTLMs) + c.sweep + c.settle
-	fmt.Printf("dropped lease tail for %s; waiting %s for expiry + recovery sweep\n", subID, wait)
-	sleep(wait)
+	fmt.Printf("dropped lease tail for %s; waiting up to %s for sweep to re-arm from cursor/tail state\n", subID, wait)
+	recovered, elapsed, err := waitRecoveredPullWake(nem, subID, a.Generation, wait)
+	if err != nil {
+		return err
+	}
 
 	b, err := claim(c.base, subID, "worker-B")
 	if err != nil {
-		return fmt.Errorf("worker B claim after tail drop: %w", err)
+		return fmt.Errorf("worker B claim after sweep re-arm: %w", err)
+	}
+	if b.Generation != recovered.Generation || b.WakeID != recovered.WakeID {
+		return fmt.Errorf("worker B did not claim the sweep-recovered wake: recovered=(gen %d,%s) B=(gen %d,%s)",
+			recovered.Generation, short(recovered.WakeID), b.Generation, short(b.WakeID))
 	}
 	status, code, err := ackPullWake(c.base, subID, a.Token, a.WakeID, a.Generation)
 	if err != nil {
 		return fmt.Errorf("worker A stale ack after tail drop: %w", err)
 	}
-	fmt.Println("---- result ----")
-	fmt.Printf("scenario:          %s\n", c.scenario)
-	fmt.Printf("nemesis actions:   %d (%s)\n", len(nem.log), join(nem.log))
-	fmt.Printf("A generation:      %d\n", a.Generation)
-	fmt.Printf("B generation:      %d\n", b.Generation)
-	fmt.Printf("A late-ack status: %d %s\n", status, code)
-	if b.Generation <= a.Generation {
-		return fmt.Errorf("post-tail-drop claim did not rotate generation: A=%d B=%d", a.Generation, b.Generation)
-	}
 	if status != http.StatusConflict || code != statusFenced {
 		return fmt.Errorf("deposed worker ack returned %d %q, want 409 FENCED", status, code)
 	}
-	fmt.Println("PASS: lease-tail ZSET entry was dropped, a later holder recovered a rotated fence, and the deposed ack was fenced")
+	acks := acksFromClaimSnapshot(b.Streams)
+	if !ackSetCovers(acks, stream, tail) {
+		return fmt.Errorf("worker B claim did not expose pending seeded tail: stream=%s tail=%s snapshot=%+v", stream, short(tail), b.Streams)
+	}
+	bStatus, bCode, err := ackPullWake(c.base, subID, b.Token, b.WakeID, b.Generation, acks...)
+	if err != nil {
+		return fmt.Errorf("worker B ack recovered wake: %w", err)
+	}
+	if bStatus != http.StatusOK {
+		return fmt.Errorf("worker B ack returned %d %q, want 200", bStatus, bCode)
+	}
+	view, err := getSubscription(c.base, subID)
+	if err != nil {
+		return err
+	}
+	acked := ackedOffset(view, stream)
+	fmt.Println("---- result ----")
+	fmt.Printf("scenario:          %s\n", c.scenario)
+	fmt.Printf("nemesis actions:   %d (%s)\n", len(nem.log), join(nem.log))
+	fmt.Printf("stream tail:       %s\n", short(tail))
+	fmt.Printf("sweep re-armed in: %s\n", elapsed)
+	fmt.Printf("A generation:      %d\n", a.Generation)
+	fmt.Printf("recovered gen:     %d\n", recovered.Generation)
+	fmt.Printf("B generation:      %d (claimed recovered wake)\n", b.Generation)
+	fmt.Printf("A late-ack status: %d %s\n", status, code)
+	fmt.Printf("acked offset:      %s\n", short(acked))
+	if acked != tail {
+		return fmt.Errorf("cursor did not reach seeded tail after recovered wake: acked=%s want=%s", short(acked), short(tail))
+	}
+	fmt.Println("PASS: dropped lease-tail stranded a live pull-wake, the sweep re-armed it from cursor/tail state, B claimed that recovered wake, cursor reached tail, and A's deposed ack was fenced")
 	return nil
+}
+
+type pullWakeRuntime struct {
+	Phase      string
+	Generation int64
+	WakeID     string
+}
+
+func waitRecoveredPullWake(nem *nemesis, id string, afterGeneration int64, timeout time.Duration) (pullWakeRuntime, time.Duration, error) {
+	start := time.Now()
+	deadline := start.Add(timeout)
+	var last pullWakeRuntime
+	for time.Now().Before(deadline) {
+		rt, err := pullWakeRuntimeState(nem, id)
+		if err != nil {
+			return pullWakeRuntime{}, 0, err
+		}
+		last = rt
+		if rt.Phase == "waking" && rt.Generation > afterGeneration && rt.WakeID != "" {
+			return rt, time.Since(start), nil
+		}
+		sleep(200 * time.Millisecond)
+	}
+	return pullWakeRuntime{}, time.Since(start), fmt.Errorf("sweep did not re-arm %s after lease-tail drop within %s; last phase=%q generation=%d wake=%s",
+		id, timeout, last.Phase, last.Generation, short(last.WakeID))
+}
+
+func pullWakeRuntimeState(nem *nemesis, id string) (pullWakeRuntime, error) {
+	phase, err := subscriptionField(nem, id, "phase")
+	if err != nil {
+		return pullWakeRuntime{}, err
+	}
+	genRaw, err := subscriptionField(nem, id, "generation")
+	if err != nil {
+		return pullWakeRuntime{}, err
+	}
+	wakeID, err := subscriptionField(nem, id, "wake_id")
+	if err != nil {
+		return pullWakeRuntime{}, err
+	}
+	gen, err := strconv.ParseInt(genRaw, 10, 64)
+	if err != nil {
+		return pullWakeRuntime{}, fmt.Errorf("parse generation %q: %w", genRaw, err)
+	}
+	return pullWakeRuntime{Phase: phase, Generation: gen, WakeID: wakeID}, nil
+}
+
+func subscriptionField(nem *nemesis, id, field string) (string, error) {
+	out, err := nem.redisCLI(subscriptionFieldCommand(id, field)...)
+	if err != nil {
+		return "", fmt.Errorf("hget subscription %s field %s: %w", id, field, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func subscriptionFieldCommand(id, field string) []string {
+	return []string{"--raw", "hget", "ds:{__ds}:sub:" + id, field}
+}
+
+func leaseScheduleMemberPresent(nem *nemesis, id string) (bool, error) {
+	out, err := nem.redisCLI(leaseScheduleScoreCommand(id)...)
+	if err != nil {
+		return false, err
+	}
+	score := strings.TrimSpace(string(out))
+	return score != "" && score != "(nil)", nil
+}
+
+func leaseScheduleScoreCommand(id string) []string {
+	return []string{"--raw", "zscore", "ds:{__ds}:sched:lease", id}
+}
+
+func claimSnapshotCovers(streams []claimStreamSnap, stream, tail string) bool {
+	for _, s := range streams {
+		if s.Path == stream && s.TailOffset == tail && s.HasPending {
+			return true
+		}
+	}
+	return false
+}
+
+func ackSetCovers(acks []ackBody, stream, tail string) bool {
+	for _, ack := range acks {
+		if ack.Stream == stream && ack.Offset == tail {
+			return true
+		}
+	}
+	return false
+}
+
+func ackedOffset(view subscriptionView, stream string) string {
+	for _, s := range view.Streams {
+		if s.Path == stream {
+			return s.AckedOffset
+		}
+	}
+	return ""
 }
 
 func runOwnershipExclusivity(c config) error {

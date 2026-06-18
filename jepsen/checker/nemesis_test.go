@@ -65,3 +65,23 @@ func TestDropLeaseTailCommandOnlyZREMsLeaseSchedule(t *testing.T) {
 		t.Fatalf("dropLeaseTailCommand = %#v, want %#v", got, want)
 	}
 }
+
+func TestLeaseTailDropRecoveryProbeCommands(t *testing.T) {
+	if got, want := leaseScheduleScoreCommand("sub-1"), []string{"--raw", "zscore", "ds:{__ds}:sched:lease", "sub-1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("leaseScheduleScoreCommand = %#v, want %#v", got, want)
+	}
+	if got, want := subscriptionFieldCommand("sub-1", "phase"), []string{"--raw", "hget", "ds:{__ds}:sub:sub-1", "phase"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("subscriptionFieldCommand = %#v, want %#v", got, want)
+	}
+}
+
+func TestAcksFromClaimSnapshotOnlyPendingTails(t *testing.T) {
+	got := acksFromClaimSnapshot([]claimStreamSnap{
+		{Path: "events/a", TailOffset: "0000000000000001_0000000000000005", HasPending: true},
+		{Path: "events/b", TailOffset: "0000000000000001_0000000000000007", HasPending: false},
+	})
+	want := []ackBody{{Stream: "events/a", Offset: "0000000000000001_0000000000000005"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("acksFromClaimSnapshot = %#v, want %#v", got, want)
+	}
+}

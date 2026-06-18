@@ -60,20 +60,35 @@ Observed results:
 | `cursor-monotonic` | T2 cursor monotonicity | **PASS**. The normal baseline had no regression. A short-window rerun produced 46 `kill-origin` actions, 1500 cursor samples across 8 streams, and no cursor regression. |
 | `stale-gen-noop` | T4 no stale-generation effect | **PASS**. Stale ack returned `409 FENCED`; before/after subscription snapshots were byte-identical (`393` bytes). Three stress iterations also passed. |
 | `at-least-once` | L1 at-least-once delivery | **PASS**. 320 messages appended, 306 wakes delivered, duplicate factor 1.00, 8/8 streams at tail. |
-| `lease-tail-drop-recovery` | L3 lease-tail-drop recovery | **PASS** for the default sweep-bound variant. The nemesis performed one `drop-lease-tail` (`ZREM ds:{__ds}:sched:lease <sub>`); the later holder got generation 2 and the deposed ack returned `409 FENCED`. |
+| `lease-tail-drop-recovery` | L3 lease-tail-drop recovery | **SUPERSEDED / PENDING CORRECTED LIVE RERUN**. The 2026-06-18 run only proved that a later direct `Claim` could rotate the fence after `drop-lease-tail`; it did **not** prove the recovery sweep re-armed stranded work from cursor/tail state. The checker now waits for Redis to show `phase=waking` with a newer generation before any post-drop claim, then requires worker B to claim that recovered wake, ack the pending tail, and leave worker A fenced. No corrected live result is recorded here yet. |
 | `ownership-exclusivity` | T3 proposed shard ownership | **SCAFFOLDED / BLOCKED**. Dry-run wiring succeeds. Live check is blocked until `claim_shard.lua`, `check_owner.lua`, and `ds:{ownership}:slot:<h>` exist. |
 | `slot-isolation` | T5 proposed slot homing | **SCAFFOLDED / BLOCKED**. Dry-run wiring succeeds. Live check is blocked until S-slot `{__ds:h}` key homing exists. |
 | `contention-contract` | C1/C2/C3 contention suite | **SCAFFOLDED / BLOCKED**. Pure rate-contract checker is unit-tested; live C1/C2/C3 require the claimant fan-in measurement rig and, for C3, the claim-granularity fix. |
 
-Honest L3 gap: `lease-tail-drop-recovery -sweep=0` intentionally fails on
-today's binary with:
+Honest L3 gap: the corrected default `lease-tail-drop-recovery` driver must be
+rerun before L3 is reported green. The stricter `lease-tail-drop-recovery
+-sweep=0` variant still intentionally fails on today's binary with:
 
 ```text
 FAIL: lease-tail-drop-recovery with -sweep=0 is blocked on today's SUT: the deployed binary exposes the recovery sweep, not a separately disableable floor/eager-reconcile path
 ```
 
-One stress-loop Redis flush hit a transient `kubectl` TLS handshake timeout, then
-the scenario itself ran and passed. No checker failure was observed.
+Corrected live rerun attempt on 2026-06-18:
+
+- `jepsen/up.sh` built the Linux binary and Docker image, then created the
+  `chronicle-jepsen` k3d cluster.
+- The Kubernetes API timed out while applying or waiting on `jepsen/deploy/deploy.yaml`.
+- A later `kubectl --context k3d-chronicle-jepsen get nodes` returned
+  `NotReady` for `k3d-chronicle-jepsen-server-0`.
+- Follow-up pod and node inspection hit TLS handshake and request timeouts, so the
+  corrected live L3 scenario was not run.
+- `jepsen/down.sh` deleted the unhealthy cluster. No corrected L3 pass or failure
+  should be inferred from this attempt.
+
+In the original 2026-06-18 harness run, one stress-loop Redis flush hit a
+transient `kubectl` TLS handshake timeout. The scenario itself then ran and
+passed. That note does not apply to the corrected L3 driver, which still needs a
+live rerun.
 
 ## Scenario matrix
 

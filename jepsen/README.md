@@ -118,10 +118,13 @@ the scenario drivers and the recorder are the shell.
   replays the deposed worker's stale ack, and checks the response status plus a
   byte-identical durable subscription snapshot with `check_stale_generation.go`.
 - **`lease-tail-drop-recovery` (L3, lease-tail-drop recovery).** ZREMs exactly
-  `ds:{__ds}:sched:lease` for the live subscription, waits past the explicit
-  `-sweep`/`-settle` bounds, then asserts a later holder gets a rotated fence and
-  the deposed ack is `FENCED`. The exact `-sweep=0` proof is blocked on today's
-  binary because the recovery sweep is not separately disableable from a future
+  `ds:{__ds}:sched:lease` for a live pull-wake subscription whose cursor lags a
+  seeded stream tail, then does **not** call `claim` again until Redis shows the
+  recovery sweep has re-armed the subscription as `phase=waking` with a newer
+  generation. Only then does worker B claim that recovered wake, ack the pending
+  tail, and verify the cursor reaches the tail. Worker A's deposed ack must still
+  return `FENCED`. The exact `-sweep=0` proof is blocked on today's binary
+  because the recovery sweep is not separately disableable from a future
   floor/eager-reconcile path.
 
 The enriched nemesis surface includes randomized action windows
