@@ -247,3 +247,87 @@ where every ramp's throughput collapses (an env artifact, not the SUT). The
 numbers above are from a probe-gated clean window; under load the same command
 reports i/o timeouts — rerun until a clean window (the 6-clean/12-collapse shape
 and the G× knee movement are stable across clean windows).
+
+## Work-sharded leased slot ownership (issue #14)
+
+Move 3 adds `claim_shard.lua` / `check_owner.lua`, the `ds:{ownership}` keyspace,
+the membership/HRW/slot-reconcile protocol, and the TOCTOU inline owner-epoch
+check. The owner-epoch fence is layered **above** the `(gen,wake_id)` fence, never
+replacing it — work-sharding is an optimization over the still-correct full-sweep
+baseline. This slot-ownership axis is orthogonal to #11's per-`(subId,g)` claim
+granularity.
+
+### T3 — ownership exclusivity (the acceptance gate) — PASS
+
+T3 is now a **live** local-Redis driver (`scenario_ownership.go`), promoted from
+the gated cluster scaffold. N concurrent claimants (each a distinct replica id)
+race `claim_shard` / `check_owner` over a shared set of `ds:{ownership}` slots,
+with an in-process `gcPause` nemesis forcing intra-slot takeovers; the recorded
+history is checked against the porcupine `shardModel` CAS-register, partitioned per
+slot, **Unknown = FAIL**.
+
+Reproduce: `go run ./jepsen/checker -scenario ownership-exclusivity -redis-url redis://localhost:6379/14`
+
+| run | slots | claimants | operations | partitions | result |
+|---|---|---|---|---|---|
+| T3 | 4 | 4 | 165 | 4 | **PASS — linearizable** |
+
+**T3: PASS.** `claim_shard` is a real single-holder CAS — `owner_epoch` is bumped
+on every transfer (minted to 1 on the first claim) and kept on a same-owner renew,
+so no transfer reuses an epoch and no deposed owner is ever told by `check_owner`
+that it still owns a slot. The gate has teeth: injecting the silently-dropping-LWW
+bug (reuse the epoch on transfer instead of `HINCRBY`) turns the same run
+**Illegal** with a `porcupine.VisualizePath` counterexample — the exact failure
+mode 06 correction #3 warns against. The bump-on-transfer-only / deposed-resumed
+fencing is also pinned deterministically by the webhook golden tests
+(`TestClaimShardDeposedResumedIsFenced`, `TestClaimShardGoldenTable`).
+
+### T1 / T2 / T4 / L1 regression bar — still GREEN under the owner-epoch fence
+
+The owner-epoch fence layers above the `(gen,wake_id)` fence, so the existing
+safety/liveness suite must stay green. Re-run against a local chronicle (the
+binary against the same Redis, no k3d — the webhook scenarios that need delivery
+use `-recv-host localhost` so the standalone receiver is reachable; the k3d
+default `host.k3d.internal` is unreachable off-cluster):
+
+| # | scenario | result | evidence |
+|---|---|---|---|
+| **T1** | `single-holder-linz` | **PASS** | 253 ops (14 granted), linearizable under concurrency + gcPause |
+| **T2** | `cursor-monotonic` | **PASS** | 99 wakes (dup 1.80), 222 cursor samples, forward-only |
+| **T4** | `stale-gen-noop` | **PASS** | stale-gen ack → 409 FENCED, advanced no cursor; same ack OK under the current gen |
+| **L1** | `at-least-once` | **PASS** | 60 appended, 46 wakes, 3/3 streams reached tail, dup 1.00 |
+| T1/(subId,g) | `shard-linz` | **PASS** | 28 ops / 4 `(subId,g)` partitions, linearizable |
+
+Reproduce (chronicle on `:4438` against the same Redis):
+`single-holder-linz` and `stale-gen-noop` need no receiver;
+`cursor-monotonic` / `at-least-once` add `-recv-host localhost`.
+
+### L2 / L4 / gate #4 — environment-scoped (need >=2 replicas + chaos)
+
+L2 (bounded recovery under churn), L4 (eventual ownership re-convergence), and
+doc-05 gate #4 (the membership churn window) require **>=2 replicas + a kill-slot-
+owner / scale-flap chaos step** and (for gate #4) a real multi-node managed-Redis
+run. The shared colima VM is co-tenanted with another orchestrator's `k3d-bakeoff`
+cluster and could not host a clean multi-replica k3d run without contending that
+tenant, so these are recorded honestly as env-scoped rather than executed here:
+
+- **L2 / L4** — k3d, `chronicle ×2`, continuous `killSlotOwner` (read
+  `ds:{ownership}:slot:<h>`, kill that pod) on a randomized 2–8 s window, then
+  quiesce. The `killSlotOwner` / ownership-timeline-sampler nemesis primitives ship
+  in `jepsen/checker/nemesis.go`; the live drivers wire onto the same `shardModel`
+  + sampler the T3 gate already exercises. Reproduce (orchestrator-run k3d):
+  `jepsen/up.sh && go run ./jepsen/checker -scenario ownership-exclusivity -base http://localhost:4438`
+  with the cluster scaled `2→1→3→2` via the chaos step. The detectable churn case
+  recovers at the new owner's `claim_shard` + eager reconcile (a **trigger**) —
+  proven in-process by `TestManagerSlotReconcileClaimsOwnsAndFires` (a new-owner CAS
+  fires `reconcile(scopeNewOwnerCAS)`) and `TestSlotReclaimedAfterMemberAndLeaseExpire`
+  (a dead member ages out and its slot is taken over with an epoch bump).
+- **gate #4** — `loadtest/spec/sweep-10k-churn.yaml` (replicas≥2) + `ltctl gate4`
+  (deploy → run the sweepscale job → pod-kill the slot owner mid-window → scrape
+  `chronicle_coverage_gap_seconds` / `chronicle_slot_ownership_events_total` /
+  `chronicle_owner_fenced_total`). Pass: the coverage gap recovers within
+  membership-lease TTL + RTT (~9 s, NOT a sweep tick), **zero lost wakes, zero
+  double-grants**, total work O(total owed) regardless of N (the inverse of gate
+  #1), and the K=10k sweep p99 stays under the 1500 ms SLO (RESULTS-gke.md floor
+  509 ms). The orchestrator owns the cloud; do **not** run GKE from the worktree.
+  Reproduce: `cd loadtest && ./ltctl.sh up && ./ltctl.sh gate4 spec/sweep-10k-churn.yaml` (then `./ltctl.sh down`).
