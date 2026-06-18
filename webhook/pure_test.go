@@ -289,6 +289,39 @@ func TestDecideDue(t *testing.T) {
 	}
 }
 
+func TestDecideLeaseReconcile(t *testing.T) {
+	cases := []struct {
+		name         string
+		phase        Phase
+		leaseUntilNs int64
+		inLeaseZSet  bool
+		want         LeaseReconcile
+	}{
+		// The L3 fault: a live/waking sub with a lease deadline dropped from the
+		// lease ZSET — the lease worker is blind to it, so re-derive the tail.
+		{"live, lease set, absent from zset -> stranded", PhaseLive, 1234, false, LeaseStranded},
+		{"waking, lease set, absent from zset -> stranded", PhaseWaking, 1234, false, LeaseStranded},
+		// Still present in the zset: the lease worker can already see it.
+		{"live, lease set, present in zset -> intact", PhaseLive, 1234, true, LeaseIntact},
+		{"waking, lease set, present in zset -> intact", PhaseWaking, 1234, true, LeaseIntact},
+		// Idle holds no lease, so it is never stranded here (the due-set, not the
+		// lease schedule, recovers an idle sub — DecideDue).
+		{"idle never strands on the lease schedule", PhaseIdle, 0, false, LeaseIntact},
+		{"idle with a stale deadline but no lease still intact", PhaseIdle, 1234, false, LeaseIntact},
+		// A live/waking sub with no lease deadline (lease_until_ns==0) is a pull-wake
+		// awaiting claim, not a held lease — nothing to restore to the lease ZSET.
+		{"waking pull-wake with no lease deadline -> intact", PhaseWaking, 0, false, LeaseIntact},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DecideLeaseReconcile(tc.phase, tc.leaseUntilNs, tc.inLeaseZSet); got != tc.want {
+				t.Errorf("DecideLeaseReconcile(%q,%d,%v) = %v, want %v",
+					tc.phase, tc.leaseUntilNs, tc.inLeaseZSet, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMergeAcksForwardOnly(t *testing.T) {
 	links := []StreamLink{{Path: "a", AckedOffset: "0000000000000001_0000000000000010"}}
 	// Backward ack ignored.
