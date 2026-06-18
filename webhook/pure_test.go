@@ -198,6 +198,154 @@ func TestFenceDecision(t *testing.T) {
 	}
 }
 
+func TestClaimShardDomain(t *testing.T) {
+	shard, err := NewClaimShard(15)
+	if err != nil {
+		t.Fatalf("valid shard rejected: %v", err)
+	}
+	if shard.Int() != 15 || shard.String() != "15" {
+		t.Fatalf("shard rendering = %d/%q, want 15/15", shard.Int(), shard.String())
+	}
+	for _, n := range []int{-1, ClaimShardCount} {
+		if _, err := NewClaimShard(n); err == nil {
+			t.Fatalf("invalid shard %d should be rejected", n)
+		}
+	}
+}
+
+func TestLeaseRefMemberRoundTrip(t *testing.T) {
+	zero := NewLeaseRef("sub-plain", DefaultClaimShard)
+	if zero.Member() != "sub-plain" {
+		t.Fatalf("shard zero must keep the legacy ZSET member, got %q", zero.Member())
+	}
+	parsedZero, err := ParseLeaseMember(zero.Member())
+	if err != nil || parsedZero != zero {
+		t.Fatalf("parse legacy member = %+v err=%v, want %+v", parsedZero, err, zero)
+	}
+
+	shard, _ := NewClaimShard(7)
+	ref := NewLeaseRef("sub:with:separators", shard)
+	parsed, err := ParseLeaseMember(ref.Member())
+	if err != nil {
+		t.Fatalf("parse sharded member: %v", err)
+	}
+	if parsed != ref {
+		t.Fatalf("round trip = %+v, want %+v", parsed, ref)
+	}
+	if _, err := ParseLeaseMember("@shard:not-a-number:abc"); err == nil {
+		t.Fatal("malformed sharded member should fail")
+	}
+}
+
+func TestFenceLeaseDecisionIsPerShard(t *testing.T) {
+	shardA := ClaimLeaseState{Generation: 1, WakeID: "w_a"}
+	shardB := ClaimLeaseState{Generation: 1, WakeID: "w_b"}
+	if FenceLeaseDecision(shardA, 1, "w_a", 1) != "" {
+		t.Fatal("matching shard A fence should pass")
+	}
+	if FenceLeaseDecision(shardB, 1, "w_a", 1) != ErrCodeFenced {
+		t.Fatal("token and request for shard A must not pass shard B's wake fence")
+	}
+}
+
+func TestClaimShardFiltersPartitionStreams(t *testing.T) {
+	snap := []StreamSnapshot{
+		{Path: "events/entity-a"},
+		{Path: "events/entity-b"},
+		{Path: "events/entity-c"},
+		{Path: "events/entity-d"},
+	}
+	seen := map[string]bool{}
+	for n := 0; n < ClaimShardCount; n++ {
+		shard, _ := NewClaimShard(n)
+		for _, s := range FilterSnapshotForClaimShard(snap, shard) {
+			if StreamClaimShard(s.Path) != shard {
+				t.Fatalf("stream %s returned for wrong shard %d", s.Path, shard.Int())
+			}
+			if seen[s.Path] {
+				t.Fatalf("stream %s appeared in more than one shard", s.Path)
+			}
+			seen[s.Path] = true
+		}
+	}
+	if len(seen) != len(snap) {
+		t.Fatalf("partition covered %d streams, want %d", len(seen), len(snap))
+	}
+}
+
+func TestFilterAcksForClaimShardDropsForeignStreams(t *testing.T) {
+	owned := "events/owned"
+	shard := StreamClaimShard(owned)
+	foreign := "events/foreign"
+	for StreamClaimShard(foreign) == shard {
+		foreign += "x"
+	}
+	acks := []Ack{{Stream: owned, Offset: "2"}, {Stream: foreign, Offset: "9"}}
+	got := FilterAcksForClaimShard(acks, shard)
+	if len(got) != 1 || got[0].Stream != owned {
+		t.Fatalf("filtered acks = %+v, want only %s", got, owned)
+	}
+}
+
+func TestParseRequestClaimShardFencesExplicitShardTokenWithoutRequestShard(t *testing.T) {
+	tv := TokenValidation{Valid: true, Generation: 1, Shard: DefaultClaimShard, Sharded: true}
+	_, fenced, err := parseRequestClaimShard(nil, tv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fenced {
+		t.Fatal("explicit shard token must require a shard on ack/release")
+	}
+}
+
+func TestParseRequestClaimShardAllowsLegacyToken(t *testing.T) {
+	tv := TokenValidation{Valid: true, Generation: 1, Shard: DefaultClaimShard}
+	selection, fenced, err := parseRequestClaimShard(nil, tv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Shard != DefaultClaimShard || selection.Sharded() || fenced {
+		t.Fatalf("legacy token parse = shard %d sharded=%v fenced=%v", selection.Shard.Int(), selection.Sharded(), fenced)
+	}
+}
+
+func TestParseRequestClaimShardAllowsExplicitShardZeroToken(t *testing.T) {
+	requestShard := 0
+	tv := TokenValidation{Valid: true, Generation: 1, Shard: DefaultClaimShard, Sharded: true}
+	selection, fenced, err := parseRequestClaimShard(&requestShard, tv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Shard != DefaultClaimShard || !selection.Sharded() || fenced {
+		t.Fatalf("explicit shard-zero parse = shard %d sharded=%v fenced=%v", selection.Shard.Int(), selection.Sharded(), fenced)
+	}
+}
+
+func TestParseRequestClaimShardFencesLegacyTokenWithExplicitShard(t *testing.T) {
+	requestShard := 0
+	tv := TokenValidation{Valid: true, Generation: 1, Shard: DefaultClaimShard}
+	_, fenced, err := parseRequestClaimShard(&requestShard, tv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fenced {
+		t.Fatal("legacy token must not become explicit shard zero by adding request shard")
+	}
+}
+
+func TestParseRequestClaimShardFencesShardMismatch(t *testing.T) {
+	tokenShard, _ := NewClaimShard(3)
+	requestShard := 4
+	tv := TokenValidation{Valid: true, Generation: 1, Shard: tokenShard, Sharded: true}
+	_, fenced, err := parseRequestClaimShard(&requestShard, tv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fenced {
+		t.Fatal("mismatched request shard must be fenced")
+	}
+}
+
 func TestClaimDecision(t *testing.T) {
 	now := time.Unix(1000, 0)
 	held := Subscription{Phase: PhaseLive, Holder: true, HolderWorker: "worker-1", LeaseUntilNs: now.Add(time.Second).UnixNano()}

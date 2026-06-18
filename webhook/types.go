@@ -170,6 +170,7 @@ const (
 	ErrCodeWebhookURLRejected = "WEBHOOK_URL_REJECTED"
 	ErrCodeInvalidRequest     = "INVALID_REQUEST"
 	ErrCodeConfigConflict     = "CONFIG_CONFLICT"
+	ErrCodeClaimModeConflict  = "CLAIM_MODE_CONFLICT"
 	ErrCodeNotFound           = "NOT_FOUND"
 	ErrCodeTokenInvalid       = "TOKEN_INVALID"
 )

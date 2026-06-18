@@ -90,7 +90,8 @@ the checker is a **rate/threshold** assertion, not a model checker.
 **C1/C2 are runnable today and reproduce the actual collapse** (they need no rebuild — the
 per-type subscription already exists); **C3 is the acceptance gate** for the granularity fix.
 This is [05](05-proposed-architecture.md)'s gating experiment 6 as executable assertions, and
-the contention SLIs map to the new `ClaimContention` metric.
+the contention SLIs map to the new `ClaimContention` metric. The per-shard-of-type design
+that turns C3 green is recorded in [08-claim-granularity.md](08-claim-granularity.md).
 
 ## The Go harness — build on `jepsen/`
 

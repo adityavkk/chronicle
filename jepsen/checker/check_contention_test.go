@@ -34,3 +34,15 @@ func TestCheckContentionC3_RequiresGranularityScaledKnee(t *testing.T) {
 		t.Fatalf("expected insufficient-knee-shift violation, got %v", got)
 	}
 }
+
+func TestCheckContentionC3FixedN_RequiresBusyRateDrop(t *testing.T) {
+	base := contentionPoint{Claimants: 24, Ops: 1000, Busy: 800}
+	sharded := contentionPoint{Claimants: 24, Ops: 1000, Busy: 40}
+	if got := CheckContentionC3FixedN(base, sharded, 16, 1.25); len(got) != 0 {
+		t.Fatalf("expected fixed-N busy drop to pass, got %v", got)
+	}
+	bad := contentionPoint{Claimants: 24, Ops: 1000, Busy: 500}
+	if got := CheckContentionC3FixedN(base, bad, 16, 1.25); len(got) != 1 {
+		t.Fatalf("expected insufficient fixed-N busy drop violation, got %v", got)
+	}
+}

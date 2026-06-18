@@ -132,6 +132,7 @@ type WakeNotification struct {
 type CallbackRequest struct {
 	WakeID     string `json:"wake_id"`
 	Generation int64  `json:"generation"`
+	Shard      *int   `json:"shard,omitempty"`
 	Acks       []Ack  `json:"acks"`
 	Done       *bool  `json:"done"`
 }
@@ -145,12 +146,14 @@ type AckResponse struct {
 // ClaimRequest is the pull-wake claim body (PROTOCOL §7.2).
 type ClaimRequest struct {
 	Worker string `json:"worker"`
+	Shard  *int   `json:"shard,omitempty"`
 }
 
 // ClaimResponse is a successful pull-wake claim (PROTOCOL §7.2).
 type ClaimResponse struct {
 	WakeID     string           `json:"wake_id"`
 	Generation int64            `json:"generation"`
+	Shard      *int             `json:"shard,omitempty"`
 	Token      string           `json:"token"`
 	Streams    []StreamSnapshot `json:"streams"`
 	LeaseTTLMs int64            `json:"lease_ttl_ms"`
@@ -160,6 +163,7 @@ type ClaimResponse struct {
 type ReleaseRequest struct {
 	WakeID     string `json:"wake_id"`
 	Generation int64  `json:"generation"`
+	Shard      *int   `json:"shard,omitempty"`
 }
 
 // WakeEvent is the event a pull-wake subscription writes to its wake_stream

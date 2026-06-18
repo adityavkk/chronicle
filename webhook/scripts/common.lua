@@ -29,3 +29,18 @@ end
 local function fenced(cur_gen, cur_wake, req_gen, req_wake, token_gen)
   return token_gen ~= cur_gen or req_gen ~= cur_gen or req_wake == '' or req_wake ~= cur_wake
 end
+
+-- shard_field returns the subscription HASH field for one claim shard. Shard 0
+-- uses the legacy unqualified field names so existing state remains readable.
+local function shard_field(base, shard)
+  if shard == '0' then return base end
+  return base .. ':' .. shard
+end
+
+-- claim_mode_conflict reports whether the request tries to mix the original
+-- unsharded pull-claim contract with the explicit-shard extension. The first
+-- claim fixes claim_mode; ack/release fence on a later mismatch.
+local function claim_mode_conflict(sub, mode)
+  local cur = redis.call('HGET', sub, 'claim_mode') or ''
+  return cur ~= '' and cur ~= mode, cur
+end

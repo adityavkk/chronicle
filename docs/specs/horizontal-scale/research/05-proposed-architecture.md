@@ -124,7 +124,8 @@ entities do not serialize through one lease. This is partly a **client** decisio
 runtime choosing a finer `subscriptionId`) and partly a **chronicle capability** (letting one
 subscription's linked streams be claimed by *multiple concurrent holders* over disjoint stream
 subsets). It is **cross-repo** and is the load-bearing design neither this doc nor 04's O1–O5
-yet covers. Because the collapse was hot-path, **this axis sequences before** the sweep
+yet covers. The concrete #11 design is recorded in
+[08-claim-granularity.md](08-claim-granularity.md). Because the collapse was hot-path, **this axis sequences before** the sweep
 work-sharding and the state shard below: those harden axes that were *already clean* at 6
 replicas (whose ceiling was wake **round-trip latency** — which Option B's cross-instance fast
 wake targets directly, a reason to revisit its deferred priority).

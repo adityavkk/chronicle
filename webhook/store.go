@@ -53,23 +53,24 @@ type Store interface {
 	// arms the lease at issue (webhook) versus deferring it to claim (pull-wake).
 	ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error)
 
-	// Claim is the pull-wake compare-and-set claim (PROTOCOL §7.2).
-	Claim(id, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error)
+	// Claim is the pull-wake compare-and-set claim for one claim shard
+	// (PROTOCOL §7.2 plus Chronicle's shard extension).
+	Claim(id string, mode ClaimMode, shard ClaimShard, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error)
 
 	// Ack fences then applies acks forward-only; done releases the lease, else it
 	// extends the lease as a heartbeat (PROTOCOL §7.1, §7.2).
-	Ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error)
+	Ack(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error)
 
 	// Release fences then releases the lease without acking (PROTOCOL §7.2).
-	Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error)
+	Release(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error)
 
 	// ExpireLease clears an expired lease, returning the subscription to idle.
-	ExpireLease(id string, now time.Time) (string, error)
+	ExpireLease(ref LeaseRef, now time.Time) (string, error)
 
 	// DueLeases / DueRetries take due schedule members by re-scoring them forward
 	// to a visibility window (never removing them), so a crashed worker's item
 	// recurs (docs/research/07 §6.1).
-	DueLeases(now time.Time, limit int, visibility time.Duration) ([]string, error)
+	DueLeases(now time.Time, limit int, visibility time.Duration) ([]LeaseRef, error)
 	DueRetries(now time.Time, limit int, visibility time.Duration) ([]string, error)
 
 	// ScheduleRetry records a webhook failure and persists next_attempt; returns
@@ -115,10 +116,13 @@ type ArmResult struct {
 
 // ClaimResult is the outcome of Claim.
 type ClaimResult struct {
-	Claimed    bool
-	Busy       bool // another worker holds an unexpired lease
-	NoSub      bool
-	Generation int64
-	WakeID     string
-	Holder     string
+	Claimed      bool
+	Busy         bool // another worker holds an unexpired lease
+	NoSub        bool
+	ModeConflict bool // request tried to mix legacy and explicit-shard claims
+	Mode         ClaimMode
+	Generation   int64
+	WakeID       string
+	Holder       string
+	LeaseLapsed  bool
 }

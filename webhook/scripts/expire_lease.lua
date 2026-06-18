@@ -4,18 +4,24 @@
 -- lease (lease_until_ns=0) is left untouched — its wake event is already in the
 -- wake stream for workers to claim.
 -- KEYS: 1=sub 2=lease_zset
--- ARGV: 1=id 2=now_ns
+-- ARGV: 1=id 2=now_ns 3=shard 4=lease_member
 -- Reply: {status} ; EXPIRED | ACTIVE | NOSUB
 local sub = KEYS[1]
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
 end
-local lease_until = tonumber(redis.call('HGET', sub, 'lease_until_ns')) or 0
-local phase = redis.call('HGET', sub, 'phase')
+local shard = ARGV[3]
+local phase_field = shard_field('phase', shard)
+local wake_field = shard_field('wake_id', shard)
+local holder_field = shard_field('holder', shard)
+local holder_worker_field = shard_field('holder_worker', shard)
+local lease_until_field = shard_field('lease_until_ns', shard)
+local lease_until = tonumber(redis.call('HGET', sub, lease_until_field)) or 0
+local phase = redis.call('HGET', sub, phase_field) or 'idle'
 if (phase == 'live' or phase == 'waking') and lease_until > 0 and lease_until <= tonumber(ARGV[2]) then
-  redis.call('HSET', sub, 'phase', 'idle', 'holder', '0', 'holder_worker', '',
-    'wake_id', '', 'lease_until_ns', '0')
-  redis.call('ZREM', KEYS[2], ARGV[1])
+  redis.call('HSET', sub, phase_field, 'idle', holder_field, '0', holder_worker_field, '',
+    wake_field, '', lease_until_field, '0')
+  redis.call('ZREM', KEYS[2], ARGV[4])
   return { 'EXPIRED' }
 end
 return { 'ACTIVE' }

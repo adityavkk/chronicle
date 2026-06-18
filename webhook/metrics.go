@@ -37,6 +37,9 @@ type Metrics interface {
 	CoverageGap(dur time.Duration)
 	// OwnerFenced records a proposed owner-epoch fence firing.
 	OwnerFenced(scope string)
+	// ClaimContention records claim/ack outcomes that diagnose per-subscription
+	// lease contention: claimed, busy, fenced, lease_lapse, and related statuses.
+	ClaimContention(status, subID string)
 }
 
 // NopMetrics is the no-op Metrics used when none is configured. The Manager
@@ -72,3 +75,6 @@ func (NopMetrics) CoverageGap(time.Duration) {}
 
 // OwnerFenced implements Metrics.
 func (NopMetrics) OwnerFenced(string) {}
+
+// ClaimContention implements Metrics.
+func (NopMetrics) ClaimContention(string, string) {}

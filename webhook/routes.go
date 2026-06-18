@@ -100,12 +100,12 @@ func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string
 	}
 	cfg, reason := ParseCreateConfig(body)
 	if reason != "" {
-		writeErrMsg(w, http.StatusBadRequest, ErrCodeInvalidRequest, reason)
+		writeErrMsg(w, ErrCodeInvalidRequest, reason)
 		return
 	}
 	if cfg.Type == DispatchWebhook {
 		if reason := rt.mgr.validateWebhookURL(cfg.WebhookURL); reason != "" {
-			writeErrMsg(w, http.StatusBadRequest, ErrCodeWebhookURLRejected, reason)
+			writeErrMsg(w, ErrCodeWebhookURLRejected, reason)
 			return
 		}
 	}
@@ -216,7 +216,17 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 		writeErr(w, http.StatusBadRequest, ErrCodeInvalidRequest)
 		return
 	}
-	fenced, gone, nextWake, err := rt.mgr.applyAck(id, req, tv.Generation)
+	selection, fencedShard, err := parseRequestClaimShard(req.Shard, tv)
+	if err != nil {
+		writeErrMsg(w, ErrCodeInvalidRequest, err.Error())
+		return
+	}
+	if fencedShard {
+		rt.mgr.metrics.ClaimContention("fenced", id)
+		writeErr(w, http.StatusConflict, ErrCodeFenced)
+		return
+	}
+	fenced, gone, nextWake, err := rt.mgr.applyAck(id, selection, req, tv.Generation)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -234,6 +244,11 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		writeErr(w, http.StatusBadRequest, ErrCodeInvalidRequest)
 		return
 	}
+	selection, err := parseOptionalClaimShard(req.Shard)
+	if err != nil {
+		writeErrMsg(w, ErrCodeInvalidRequest, err.Error())
+		return
+	}
 	sub, ok, err := rt.mgr.store.Get(id)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -248,23 +263,43 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	res, err := rt.mgr.store.Claim(id, req.Worker, wakeID, time.Now(), sub.Config.LeaseTTLMs)
+	res, err := rt.mgr.store.Claim(id, selection.Mode, selection.Shard, req.Worker, wakeID, time.Now(), sub.Config.LeaseTTLMs)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	switch {
 	case res.Busy:
+		rt.mgr.metrics.ClaimContention("busy", id)
 		writeJSON(w, http.StatusConflict, ErrorBody{Error: ErrorDetail{
 			Code: ErrCodeAlreadyClaimed, CurrentHolder: res.Holder, Generation: res.Generation,
 		}})
 	case res.NoSub:
+		rt.mgr.metrics.ClaimContention("nosub", id)
 		writeErr(w, http.StatusNotFound, ErrCodeNotFound)
+	case res.ModeConflict:
+		rt.mgr.metrics.ClaimContention("mode_conflict", id)
+		writeJSON(w, http.StatusConflict, ErrorBody{Error: ErrorDetail{
+			Code: ErrCodeClaimModeConflict, Message: "subscription already uses " + res.Mode.String() + " claim mode",
+		}})
 	case res.Claimed:
+		rt.mgr.metrics.ClaimContention("claimed", id)
+		if res.LeaseLapsed {
+			rt.mgr.metrics.ClaimContention("lease_lapse", id)
+		}
 		// Re-read links for a fresh snapshot (tails may have advanced).
 		fresh, _, _ := rt.mgr.store.Get(id)
 		snap, _ := Snapshot(fresh.Links, rt.mgr.tailOf)
+		var shardView *int
+		if selection.Sharded() {
+			snap = FilterSnapshotForClaimShard(snap, selection.Shard)
+			v := selection.Shard.Int()
+			shardView = &v
+		}
 		token, err := GenerateToken(rt.mgr.tokenKey, id, res.Generation, time.Now(), rt.mgr.tokenTTL(sub), randReader)
+		if selection.Sharded() {
+			token, err = GenerateTokenForShard(rt.mgr.tokenKey, id, selection.Shard, res.Generation, time.Now(), rt.mgr.tokenTTL(sub), randReader)
+		}
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -272,6 +307,7 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		writeJSON(w, http.StatusOK, ClaimResponse{
 			WakeID:     res.WakeID,
 			Generation: res.Generation,
+			Shard:      shardView,
 			Token:      token,
 			Streams:    snap,
 			LeaseTTLMs: sub.Config.LeaseTTLMs,
@@ -295,7 +331,17 @@ func (rt *Routes) handleRelease(w http.ResponseWriter, r *http.Request, id strin
 		writeErr(w, http.StatusBadRequest, ErrCodeInvalidRequest)
 		return
 	}
-	fenced, gone, err := rt.mgr.applyRelease(id, req, tv.Generation)
+	selection, fencedShard, err := parseRequestClaimShard(req.Shard, tv)
+	if err != nil {
+		writeErrMsg(w, ErrCodeInvalidRequest, err.Error())
+		return
+	}
+	if fencedShard {
+		rt.mgr.metrics.ClaimContention("fenced", id)
+		writeErr(w, http.StatusConflict, ErrCodeFenced)
+		return
+	}
+	fenced, gone, err := rt.mgr.applyRelease(id, selection, req, tv.Generation)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -347,6 +393,24 @@ func writeErr(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, errBody(code))
 }
 
-func writeErrMsg(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, ErrorBody{Error: ErrorDetail{Code: code, Message: msg}})
+func writeErrMsg(w http.ResponseWriter, code, msg string) {
+	writeJSON(w, http.StatusBadRequest, ErrorBody{Error: ErrorDetail{Code: code, Message: msg}})
+}
+
+func parseOptionalClaimShard(raw *int) (ClaimShardSelection, error) {
+	return NewClaimShardSelection(raw)
+}
+
+func parseRequestClaimShard(raw *int, tv TokenValidation) (selection ClaimShardSelection, fenced bool, err error) {
+	selection, err = parseOptionalClaimShard(raw)
+	if err != nil {
+		return ClaimShardSelection{}, false, err
+	}
+	if selection.Sharded() != tv.Sharded {
+		return selection, true, nil
+	}
+	if selection.Shard != tv.Shard {
+		return selection, true, nil
+	}
+	return selection, false, nil
 }

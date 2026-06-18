@@ -129,21 +129,21 @@ func TestStoreClaimCASAckFence(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", cfg, nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	c1, err := s.Claim("s1", "worker-1", "w_a", now, 1000)
+	c1, err := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-1", "w_a", now, 1000)
 	if err != nil || !c1.Claimed {
 		t.Fatalf("claim1 = %+v err=%v", c1, err)
 	}
 	// Second worker is fenced out while the lease is held.
-	if c2, _ := s.Claim("s1", "worker-2", "w_b", now, 1000); !c2.Busy || c2.Holder != "worker-1" {
+	if c2, _ := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-2", "w_b", now, 1000); !c2.Busy || c2.Holder != "worker-1" {
 		t.Fatalf("claim2 should be BUSY held by worker-1, got %+v", c2)
 	}
 	// Stale-generation ack is fenced.
-	if st, _ := s.Ack("s1", c1.Generation+9, c1.WakeID, c1.Generation+9, true, nil, now, 1000); st != "FENCED" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, c1.Generation+9, c1.WakeID, c1.Generation+9, true, nil, now, 1000); st != "FENCED" {
 		t.Fatalf("stale ack should FENCE, got %q", st)
 	}
 	// Correct ack advances the cursor forward-only and releases.
 	acks := []Ack{{Stream: "events/a", Offset: "0000000000000001_0000000000000050"}}
-	if st, _ := s.Ack("s1", c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000); st != "OK" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000); st != "OK" {
 		t.Fatalf("valid ack = %q, want OK", st)
 	}
 	sub, _, _ := s.Get("s1")
@@ -151,8 +151,40 @@ func TestStoreClaimCASAckFence(t *testing.T) {
 		t.Fatalf("ack(done) must release and advance cursor: %+v", sub)
 	}
 	// A replayed ack on the now-cleared wake is fenced (cursor not advanced twice).
-	if st, _ := s.Ack("s1", c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000); st != "FENCED" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000); st != "FENCED" {
 		t.Fatalf("replayed ack should FENCE, got %q", st)
+	}
+}
+
+func TestStoreClaimModeRejectsMixedLegacyAndShardedClaims(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("legacy-first", pullWakeCfg(), nil, now)
+	legacy, err := s.Claim("legacy-first", ClaimModeLegacy, DefaultClaimShard, "worker-legacy", "w_legacy", now, 1000)
+	if err != nil || !legacy.Claimed {
+		t.Fatalf("legacy claim = %+v err=%v", legacy, err)
+	}
+	shard, _ := NewClaimShard(4)
+	if got, _ := s.Claim("legacy-first", ClaimModeSharded, shard, "worker-sharded", "w_sharded", now, 1000); !got.ModeConflict || got.Mode != ClaimModeLegacy {
+		t.Fatalf("sharded claim should conflict with legacy mode, got %+v", got)
+	}
+	if st, _ := s.Ack("legacy-first", ClaimModeSharded, DefaultClaimShard, legacy.Generation, legacy.WakeID, legacy.Generation, true, nil, now, 1000); st != "FENCED" {
+		t.Fatalf("mixed-mode ack should FENCE, got %q", st)
+	}
+	if mode, _ := client.HGet(context.Background(), subKey("legacy-first"), "claim_mode").Result(); mode != ClaimModeLegacy.String() {
+		t.Fatalf("claim_mode = %q, want legacy", mode)
+	}
+
+	_, _ = s.CreateOrConfirm("sharded-first", pullWakeCfg(), nil, now)
+	first, err := s.Claim("sharded-first", ClaimModeSharded, shard, "worker-sharded", "w_sharded", now, 1000)
+	if err != nil || !first.Claimed {
+		t.Fatalf("sharded claim = %+v err=%v", first, err)
+	}
+	if got, _ := s.Claim("sharded-first", ClaimModeLegacy, DefaultClaimShard, "worker-legacy", "w_legacy", now, 1000); !got.ModeConflict || got.Mode != ClaimModeSharded {
+		t.Fatalf("legacy claim should conflict with sharded mode, got %+v", got)
+	}
+	if st, _ := s.Ack("sharded-first", ClaimModeLegacy, shard, first.Generation, first.WakeID, first.Generation, true, nil, now, 1000); st != "FENCED" {
+		t.Fatalf("legacy ack against sharded mode should FENCE, got %q", st)
 	}
 }
 
@@ -164,12 +196,12 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	_, _ = s.ArmWake("s1", base, 1000, true, "w_a")
 
 	// Before the deadline: not expired.
-	if st, _ := s.ExpireLease("s1", base); st != "ACTIVE" {
+	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), base); st != "ACTIVE" {
 		t.Fatalf("lease not yet due should be ACTIVE, got %q", st)
 	}
 	// After the deadline: expired, back to idle.
 	after := base.Add(2 * time.Second)
-	if st, _ := s.ExpireLease("s1", after); st != "EXPIRED" {
+	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), after); st != "EXPIRED" {
 		t.Fatalf("expired lease should be EXPIRED, got %q", st)
 	}
 	sub, _, _ := s.Get("s1")
@@ -181,7 +213,7 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	// crashed worker's item must recur.
 	_, _ = s.ArmWake("s1", after, 1000, true, "w_b")
 	due, err := s.DueLeases(after.Add(2*time.Second), 16, 30*time.Second)
-	if err != nil || len(due) != 1 || due[0] != "s1" {
+	if err != nil || len(due) != 1 || due[0] != NewLeaseRef("s1", DefaultClaimShard) {
 		t.Fatalf("due = %v err=%v, want [s1]", due, err)
 	}
 	if n, _ := client.ZCard(context.Background(), leaseZKey).Result(); n != 1 {
@@ -225,13 +257,13 @@ func TestClaimExpiredLeaseRotatesFence(t *testing.T) {
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
 	// Worker A claims an idle subscription: mints generation 1, wake w_a.
-	a, err := s.Claim("s1", "worker-A", "w_a", base, 1000)
+	a, err := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-A", "w_a", base, 1000)
 	if err != nil || !a.Claimed {
 		t.Fatalf("claim A = %+v err=%v", a, err)
 	}
 	// Worker B claims after A's lease deadline has passed: takeover rotates.
 	after := base.Add(2 * time.Second)
-	b, err := s.Claim("s1", "worker-B", "w_b", after, 1000)
+	b, err := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-B", "w_b", after, 1000)
 	if err != nil || !b.Claimed {
 		t.Fatalf("claim B = %+v err=%v", b, err)
 	}
@@ -240,11 +272,11 @@ func TestClaimExpiredLeaseRotatesFence(t *testing.T) {
 			a.Generation, a.WakeID, b.Generation, b.WakeID)
 	}
 	// The deposed worker A can no longer ack — its old generation/wake is fenced.
-	if st, _ := s.Ack("s1", a.Generation, a.WakeID, a.Generation, true, nil, after, 1000); st != "FENCED" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, a.Generation, a.WakeID, a.Generation, true, nil, after, 1000); st != "FENCED" {
 		t.Fatalf("deposed worker A ack should FENCE, got %q", st)
 	}
 	// The current holder B acks successfully.
-	if st, _ := s.Ack("s1", b.Generation, b.WakeID, b.Generation, true, nil, after, 1000); st != "OK" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, b.Generation, b.WakeID, b.Generation, true, nil, after, 1000); st != "OK" {
 		t.Fatalf("current holder B ack should be OK, got %q", st)
 	}
 }
@@ -257,14 +289,47 @@ func TestClaimUnexpiredLeaseStillBusy(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	a, _ := s.Claim("s1", "worker-A", "w_a", now, 1000)
+	a, _ := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-A", "w_a", now, 1000)
 	if !a.Claimed {
 		t.Fatal("worker A should claim the idle subscription")
 	}
 	// B claims while A's lease is still live.
-	b, _ := s.Claim("s1", "worker-B", "w_b", now, 1000)
+	b, _ := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-B", "w_b", now, 1000)
 	if !b.Busy || b.Holder != "worker-A" {
 		t.Fatalf("unexpired lease should be BUSY held by worker-A, got %+v", b)
+	}
+}
+
+func TestClaimShardGranularityAllowsDisjointClaimsAndFences(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+	shardA, _ := NewClaimShard(3)
+	shardB, _ := NewClaimShard(7)
+
+	a, err := s.Claim("s1", ClaimModeSharded, shardA, "worker-A", "w_a", now, 1000)
+	if err != nil || !a.Claimed {
+		t.Fatalf("shard A claim = %+v err=%v", a, err)
+	}
+	b, err := s.Claim("s1", ClaimModeSharded, shardB, "worker-B", "w_b", now, 1000)
+	if err != nil || !b.Claimed {
+		t.Fatalf("shard B claim = %+v err=%v", b, err)
+	}
+	if again, _ := s.Claim("s1", ClaimModeSharded, shardA, "worker-C", "w_c", now, 1000); !again.Busy || again.Holder != "worker-A" {
+		t.Fatalf("same shard should still be single-holder, got %+v", again)
+	}
+	if st, _ := s.Ack("s1", ClaimModeSharded, shardB, a.Generation, a.WakeID, a.Generation, true, nil, now, 1000); st != "FENCED" {
+		t.Fatalf("shard A fence must not ack shard B, got %q", st)
+	}
+	if st, _ := s.Ack("s1", ClaimModeSharded, shardA, a.Generation, a.WakeID, a.Generation, true, nil, now, 1000); st != "OK" {
+		t.Fatalf("current shard A holder should ack, got %q", st)
+	}
+	if st, _ := s.Ack("s1", ClaimModeSharded, shardB, b.Generation, b.WakeID, b.Generation, true, nil, now, 1000); st != "OK" {
+		t.Fatalf("current shard B holder should ack, got %q", st)
+	}
+	if n, _ := client.ZCard(context.Background(), leaseZKey).Result(); n != 0 {
+		t.Fatalf("all sharded lease members should be removed after done acks, got %d", n)
 	}
 }
 

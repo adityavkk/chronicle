@@ -284,10 +284,10 @@ func runSlotIsolation(c config) error {
 
 func runContentionContract(c config) error {
 	if c.nemDryRun {
-		fmt.Println("DRY RUN: contention-contract pure checker is installed; live C1/C2 fan-in measurements are owned by the Electric/load rig")
+		fmt.Println("DRY RUN: contention-contract pure checker and live local fan-in driver are installed")
 		return nil
 	}
-	return fmt.Errorf("contention-contract is a measurement scaffold: provide real claimant fan-in results from the #11/Electric rig before marking C1/C2/C3 green")
+	return runLiveContentionContract(c)
 }
 
 func getSubscriptionRaw(base, id string) ([]byte, error) {

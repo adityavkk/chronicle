@@ -157,6 +157,16 @@ func (s *RedisStore) Delete(id string) error {
 			return err
 		}
 	}
+	shardedMembers := make([]any, 0, ClaimShardCount-1)
+	for n := 1; n < ClaimShardCount; n++ {
+		shard, _ := NewClaimShard(n)
+		shardedMembers = append(shardedMembers, NewLeaseRef(id, shard).Member())
+	}
+	if len(shardedMembers) > 0 {
+		if err := s.client.ZRem(s.ctx(), leaseZKey, shardedMembers...).Err(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -255,36 +265,41 @@ func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLeas
 }
 
 // Claim runs the pull-wake CAS claim.
-func (s *RedisStore) Claim(id, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+func (s *RedisStore) Claim(id string, mode ClaimMode, shard ClaimShard, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+	ref := NewLeaseRef(id, shard)
 	reply, err := s.evalStrings(claimScript, []string{subKey(id), leaseZKey},
-		id, worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID)
+		id, worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID, shard.String(), ref.Member(), mode.String())
 	if err != nil {
 		return ClaimResult{}, err
 	}
 	switch reply[0] {
 	case "CLAIMED":
 		gen, _ := strconv.ParseInt(reply[1], 10, 64)
-		return ClaimResult{Claimed: true, Generation: gen, WakeID: reply[2], Holder: reply[3]}, nil
+		return ClaimResult{Claimed: true, Generation: gen, WakeID: reply[2], Holder: reply[3], LeaseLapsed: len(reply) > 4 && reply[4] == "1"}, nil
 	case "BUSY":
 		gen, _ := strconv.ParseInt(reply[1], 10, 64)
 		return ClaimResult{Busy: true, Generation: gen, Holder: reply[3]}, nil
 	case "NOSUB":
 		return ClaimResult{NoSub: true}, nil
+	case "MODE_CONFLICT":
+		return ClaimResult{ModeConflict: true, Mode: ClaimMode(reply[1])}, nil
 	default:
 		return ClaimResult{}, fmt.Errorf("claim: unexpected status %q", reply[0])
 	}
 }
 
 // Ack fences, applies acks, and releases or heartbeats.
-func (s *RedisStore) Ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+func (s *RedisStore) Ack(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
 	doneArg := "0"
 	if done {
 		doneArg = "1"
 	}
-	args := make([]any, 0, 8+2*len(acks))
+	ref := NewLeaseRef(id, shard)
+	args := make([]any, 0, 10+2*len(acks))
 	args = append(args,
 		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10),
 		doneArg, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), strconv.Itoa(len(acks)),
+		shard.String(), ref.Member(), mode.String(),
 	)
 	for _, a := range acks {
 		args = append(args, a.Stream, a.Offset)
@@ -297,9 +312,10 @@ func (s *RedisStore) Ack(id string, reqGeneration int64, reqWakeID string, token
 }
 
 // Release fences then releases the lease.
-func (s *RedisStore) Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error) {
+func (s *RedisStore) Release(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error) {
+	ref := NewLeaseRef(id, shard)
 	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey, retryZKey},
-		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10))
+		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10), shard.String(), ref.Member(), mode.String())
 	if err != nil {
 		return "", err
 	}
@@ -307,8 +323,9 @@ func (s *RedisStore) Release(id string, reqGeneration int64, reqWakeID string, t
 }
 
 // ExpireLease clears an expired lease.
-func (s *RedisStore) ExpireLease(id string, now time.Time) (string, error) {
-	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(id), leaseZKey}, id, nsArg(now))
+func (s *RedisStore) ExpireLease(ref LeaseRef, now time.Time) (string, error) {
+	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(ref.SubID), leaseZKey},
+		ref.SubID, nsArg(now), ref.Shard.String(), ref.Member())
 	if err != nil {
 		return "", err
 	}
@@ -317,8 +334,20 @@ func (s *RedisStore) ExpireLease(id string, now time.Time) (string, error) {
 
 // DueLeases takes due lease-schedule members by re-scoring them forward, so a
 // dropped worker's subscription recurs (docs/research/07 §6.1).
-func (s *RedisStore) DueLeases(now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	return s.due(leaseZKey, now, limit, visibility)
+func (s *RedisStore) DueLeases(now time.Time, limit int, visibility time.Duration) ([]LeaseRef, error) {
+	members, err := s.due(leaseZKey, now, limit, visibility)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]LeaseRef, 0, len(members))
+	for _, member := range members {
+		ref, err := ParseLeaseMember(member)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ref)
+	}
+	return out, nil
 }
 
 // DueRetries takes due retry-schedule members by re-scoring them forward, the

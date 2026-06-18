@@ -105,6 +105,7 @@ func SignWebhookPayload(key SigningKey, body []byte, now time.Time) string {
 type tokenPayload struct {
 	Sub        string `json:"sub"`
 	Generation int64  `json:"gen"`
+	Shard      *int   `json:"shard,omitempty"`
 	Exp        int64  `json:"exp"`
 	Jti        string `json:"jti"`
 }
@@ -112,6 +113,18 @@ type tokenPayload struct {
 // GenerateToken mints an HMAC-signed callback or claim token bound to a
 // subscription and generation, expiring at now+ttl.
 func GenerateToken(tokenKey []byte, subID string, generation int64, now time.Time, ttl time.Duration, rand io.Reader) (string, error) {
+	return generateToken(tokenKey, subID, nil, generation, now, ttl, rand)
+}
+
+// GenerateTokenForShard mints an HMAC token bound to one subscription claim
+// shard. Shard 0 is encoded explicitly so explicit sharded clients cannot
+// accidentally fall back to the legacy unsharded ack path.
+func GenerateTokenForShard(tokenKey []byte, subID string, shard ClaimShard, generation int64, now time.Time, ttl time.Duration, rand io.Reader) (string, error) {
+	shardN := shard.Int()
+	return generateToken(tokenKey, subID, &shardN, generation, now, ttl, rand)
+}
+
+func generateToken(tokenKey []byte, subID string, shard *int, generation int64, now time.Time, ttl time.Duration, rand io.Reader) (string, error) {
 	jti := make([]byte, 8)
 	if _, err := io.ReadFull(rand, jti); err != nil {
 		return "", fmt.Errorf("token jti: %w", err)
@@ -119,6 +132,7 @@ func GenerateToken(tokenKey []byte, subID string, generation int64, now time.Tim
 	payload := tokenPayload{
 		Sub:        subID,
 		Generation: generation,
+		Shard:      shard,
 		Exp:        now.Add(ttl).Unix(),
 		Jti:        hex.EncodeToString(jti),
 	}
@@ -135,6 +149,8 @@ type TokenValidation struct {
 	Valid      bool
 	Expired    bool
 	Generation int64
+	Shard      ClaimShard
+	Sharded    bool
 }
 
 // ValidateToken verifies an HMAC token for a subscription. It checks the
@@ -156,10 +172,20 @@ func ValidateToken(tokenKey []byte, token, subID string, now time.Time) TokenVal
 	if err := json.Unmarshal(raw, &p); err != nil || p.Sub != subID {
 		return TokenValidation{}
 	}
-	if now.Unix() > p.Exp {
-		return TokenValidation{Expired: true, Generation: p.Generation}
+	shard := DefaultClaimShard
+	sharded := false
+	if p.Shard != nil {
+		parsed, err := NewClaimShard(*p.Shard)
+		if err != nil {
+			return TokenValidation{}
+		}
+		shard = parsed
+		sharded = true
 	}
-	return TokenValidation{Valid: true, Generation: p.Generation}
+	if now.Unix() > p.Exp {
+		return TokenValidation{Expired: true, Generation: p.Generation, Shard: shard, Sharded: sharded}
+	}
+	return TokenValidation{Valid: true, Generation: p.Generation, Shard: shard, Sharded: sharded}
 }
 
 func hmacSig(key []byte, body string) string {

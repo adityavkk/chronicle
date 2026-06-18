@@ -63,7 +63,7 @@ func TestTokenRoundTrip(t *testing.T) {
 	}
 
 	v := ValidateToken(tokenKey, tok, "sub-1", now)
-	if !v.Valid || v.Generation != 7 {
+	if !v.Valid || v.Generation != 7 || v.Shard != DefaultClaimShard || v.Sharded {
 		t.Fatalf("valid token rejected: %+v", v)
 	}
 	// Wrong subscription.
@@ -83,6 +83,39 @@ func TestTokenRoundTrip(t *testing.T) {
 	exp := ValidateToken(tokenKey, tok, "sub-1", now.Add(2*time.Hour))
 	if exp.Valid || !exp.Expired {
 		t.Fatalf("expired token should report expired: %+v", exp)
+	}
+}
+
+func TestTokenBindsClaimShard(t *testing.T) {
+	tokenKey := make([]byte, 32)
+	if _, err := rand.Read(tokenKey); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1000, 0)
+	shard, _ := NewClaimShard(9)
+	tok, err := GenerateTokenForShard(tokenKey, "sub-1", shard, 7, now, time.Hour, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := ValidateToken(tokenKey, tok, "sub-1", now)
+	if !v.Valid || v.Generation != 7 || v.Shard != shard || !v.Sharded {
+		t.Fatalf("sharded token rejected: %+v", v)
+	}
+}
+
+func TestTokenDistinguishesExplicitShardZeroFromLegacy(t *testing.T) {
+	tokenKey := make([]byte, 32)
+	if _, err := rand.Read(tokenKey); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1000, 0)
+	tok, err := GenerateTokenForShard(tokenKey, "sub-1", DefaultClaimShard, 7, now, time.Hour, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := ValidateToken(tokenKey, tok, "sub-1", now)
+	if !v.Valid || v.Generation != 7 || v.Shard != DefaultClaimShard || !v.Sharded {
+		t.Fatalf("explicit shard-zero token rejected: %+v", v)
 	}
 }
 

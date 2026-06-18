@@ -22,23 +22,24 @@ import (
 // duration and the K and U (subscriptions, unique tails) that drive it, plus
 // wake-delivery latency and per-worker backlog.
 type Prometheus struct {
-	reg          *prometheus.Registry
-	sweepSeconds prometheus.Histogram
-	sweepSubs    prometheus.Histogram
-	sweepTails   prometheus.Histogram
-	sweepWakes   prometheus.Counter
-	delivery     *prometheus.HistogramVec
-	wakeEvent    *prometheus.HistogramVec
-	workerDue    *prometheus.HistogramVec
-	fanOut       prometheus.Histogram
-	fanOutSlots  prometheus.Histogram
-	fanOutSubs   prometheus.Histogram
-	dueMutations *prometheus.CounterVec
-	dueWorker    prometheus.Histogram
-	dueFired     prometheus.Histogram
-	slotEvents   *prometheus.CounterVec
-	coverageGap  prometheus.Histogram
-	ownerFenced  *prometheus.CounterVec
+	reg             *prometheus.Registry
+	sweepSeconds    prometheus.Histogram
+	sweepSubs       prometheus.Histogram
+	sweepTails      prometheus.Histogram
+	sweepWakes      prometheus.Counter
+	delivery        *prometheus.HistogramVec
+	wakeEvent       *prometheus.HistogramVec
+	workerDue       *prometheus.HistogramVec
+	fanOut          prometheus.Histogram
+	fanOutSlots     prometheus.Histogram
+	fanOutSubs      prometheus.Histogram
+	dueMutations    *prometheus.CounterVec
+	dueWorker       prometheus.Histogram
+	dueFired        prometheus.Histogram
+	slotEvents      *prometheus.CounterVec
+	coverageGap     prometheus.Histogram
+	ownerFenced     *prometheus.CounterVec
+	claimContention *prometheus.CounterVec
 }
 
 var _ webhook.Metrics = (*Prometheus)(nil)
@@ -130,13 +131,17 @@ func New() *Prometheus {
 			Name: "chronicle_owner_fenced_total",
 			Help: "Proposed owner-epoch fence firings.",
 		}, []string{"scope"}),
+		claimContention: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_claim_contention_total",
+			Help: "Claim and ack outcomes for per-subscription lease contention.",
+		}, []string{"status", "sub_id"}),
 	}
 	reg.MustRegister(
 		p.sweepSeconds, p.sweepSubs, p.sweepTails, p.sweepWakes,
 		p.delivery, p.wakeEvent, p.workerDue,
 		p.fanOut, p.fanOutSlots, p.fanOutSubs,
 		p.dueMutations, p.dueWorker, p.dueFired,
-		p.slotEvents, p.coverageGap, p.ownerFenced,
+		p.slotEvents, p.coverageGap, p.ownerFenced, p.claimContention,
 	)
 	return p
 }
@@ -195,6 +200,11 @@ func (p *Prometheus) CoverageGap(dur time.Duration) {
 // OwnerFenced implements webhook.Metrics.
 func (p *Prometheus) OwnerFenced(scope string) {
 	p.ownerFenced.WithLabelValues(scope).Inc()
+}
+
+// ClaimContention implements webhook.Metrics.
+func (p *Prometheus) ClaimContention(status, subID string) {
+	p.claimContention.WithLabelValues(status, subID).Inc()
 }
 
 // Mux returns the observability HTTP surface: /metrics (Prometheus exposition),

@@ -5,19 +5,31 @@
 -- cannot advance a cursor.
 -- KEYS: 1=sub 2=links 3=lease_zset 4=retry_zset
 -- ARGV: 1=id 2=req_gen 3=req_wake 4=token_gen 5=done('0'/'1') 6=now_ns
---       7=lease_ttl_ms 8=num_acks then (path, offset)*
+--       7=lease_ttl_ms 8=num_acks 9=shard 10=lease_member
+--       11=claim_mode('legacy'|'sharded') then (path, offset)*
 -- Reply: {status} ; OK | FENCED | NOSUB
 local sub = KEYS[1]
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
 end
-local gen = redis.call('HGET', sub, 'generation')
-local wake = redis.call('HGET', sub, 'wake_id')
+local conflict = claim_mode_conflict(sub, ARGV[11])
+if conflict then
+  return { 'FENCED' }
+end
+local shard = ARGV[9]
+local phase_field = shard_field('phase', shard)
+local gen_field = shard_field('generation', shard)
+local wake_field = shard_field('wake_id', shard)
+local holder_field = shard_field('holder', shard)
+local holder_worker_field = shard_field('holder_worker', shard)
+local lease_until_field = shard_field('lease_until_ns', shard)
+local gen = redis.call('HGET', sub, gen_field) or '0'
+local wake = redis.call('HGET', sub, wake_field) or ''
 if fenced(gen, wake, ARGV[2], ARGV[3], ARGV[4]) then
   return { 'FENCED' }
 end
 local n = tonumber(ARGV[8])
-local i = 9
+local i = 12
 for _ = 1, n do
   local path = ARGV[i]
   local off = ARGV[i + 1]
@@ -31,14 +43,17 @@ for _ = 1, n do
   i = i + 2
 end
 if ARGV[5] == '1' then
-  redis.call('HSET', sub, 'phase', 'idle', 'holder', '0', 'holder_worker', '',
-    'wake_id', '', 'lease_until_ns', '0', 'status', 'active',
-    'retry_count', '0', 'first_fail_ns', '0', 'next_attempt_ns', '0')
-  redis.call('ZREM', KEYS[3], ARGV[1])
-  redis.call('ZREM', KEYS[4], ARGV[1])
+  redis.call('HSET', sub, phase_field, 'idle', holder_field, '0', holder_worker_field, '',
+    wake_field, '', lease_until_field, '0')
+  redis.call('ZREM', KEYS[3], ARGV[10])
+  if shard == '0' then
+    redis.call('HSET', sub, 'status', 'active',
+      'retry_count', '0', 'first_fail_ns', '0', 'next_attempt_ns', '0')
+    redis.call('ZREM', KEYS[4], ARGV[1])
+  end
 else
   local until_ns = tonumber(ARGV[6]) + tonumber(ARGV[7]) * 1000000
-  redis.call('HSET', sub, 'lease_until_ns', tostring(until_ns), 'phase', 'live')
-  redis.call('ZADD', KEYS[3], until_ns, ARGV[1])
+  redis.call('HSET', sub, lease_until_field, tostring(until_ns), phase_field, 'live')
+  redis.call('ZADD', KEYS[3], until_ns, ARGV[10])
 end
 return { 'OK' }

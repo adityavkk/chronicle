@@ -166,6 +166,44 @@ func TestSweepBatchedWakesOnlyPendingSubs(t *testing.T) {
 	}
 }
 
+func TestExpiredNonzeroClaimShardRewakesPendingStreams(t *testing.T) {
+	mgr, store, fs := newTestManager(t)
+	now := time.Now()
+	begin := "0000000000000000_0000000000000000"
+	path := "events/nonzero"
+	for StreamClaimShard(path) == DefaultClaimShard {
+		path += "x"
+	}
+	shard := StreamClaimShard(path)
+	if _, err := store.CreateOrConfirm("s1", pullWakeCfg(), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Link("s1", path, LinkGlob, begin); err != nil {
+		t.Fatal(err)
+	}
+	fs.mu.Lock()
+	fs.tails[path] = "0000000000000001_0000000000000000"
+	fs.mu.Unlock()
+
+	claimed, err := store.Claim("s1", ClaimModeSharded, shard, "worker-shard", "w_shard", now, 1000)
+	if err != nil || !claimed.Claimed {
+		t.Fatalf("claim shard %d = %+v err=%v", shard.Int(), claimed, err)
+	}
+	if status, err := store.ExpireLease(NewLeaseRef("s1", shard), now.Add(2*time.Second)); err != nil || status != "EXPIRED" {
+		t.Fatalf("expire shard %d = %q err=%v", shard.Int(), status, err)
+	}
+
+	if !mgr.rewakeIfPending("s1") {
+		t.Fatal("expired nonzero shard with pending work should re-wake")
+	}
+	if got := fs.count(); got != 1 {
+		t.Fatalf("expected one re-wake event, got %d", got)
+	}
+	if sub, _, _ := store.Get("s1"); sub.Phase != PhaseWaking {
+		t.Fatalf("re-wake should arm the default wake state, got %q", sub.Phase)
+	}
+}
+
 // TestSweepWindowCapCoversAll verifies the optional per-tick cap rolls a cursor
 // across ticks so every subscription is eventually covered, and that the default
 // (no cap) returns every id.
@@ -220,6 +258,7 @@ func (f *fakeMetrics) DueWorkerTick(time.Duration, int)   {}
 func (f *fakeMetrics) SlotOwnership(string, int)          {}
 func (f *fakeMetrics) CoverageGap(time.Duration)          {}
 func (f *fakeMetrics) OwnerFenced(string)                 {}
+func (f *fakeMetrics) ClaimContention(string, string)     {}
 
 // TestSweepRecordsMetrics verifies the sweep reports its per-tick cost to the
 // Metrics seam: one tick recorded, carrying the subscription/tail counts and the

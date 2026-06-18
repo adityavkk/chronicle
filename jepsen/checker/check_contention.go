@@ -94,3 +94,32 @@ func CheckContentionC3(baseKneeClaimants, shardedKneeClaimants, granularity int,
 	}
 	return nil
 }
+
+func CheckContentionC3FixedN(base, sharded contentionPoint, granularity int, maxBusyRatio float64) []contentionViolation {
+	if base.Ops <= 0 || sharded.Ops <= 0 || granularity <= 0 {
+		return []contentionViolation{{Property: "C3", At: sharded.Claimants, Reason: "ops and granularity must be > 0"}}
+	}
+	baseBusy := float64(base.Busy) / float64(base.Ops)
+	shardedBusy := float64(sharded.Busy) / float64(sharded.Ops)
+	if baseBusy == 0 {
+		if shardedBusy > 0 {
+			return []contentionViolation{{
+				Property: "C3", At: sharded.Claimants,
+				Reason: fmt.Sprintf("baseline BUSY/op is 0 but sharded BUSY/op is %.4f", shardedBusy),
+			}}
+		}
+		return nil
+	}
+	contendedFraction := 0.0
+	if sharded.Claimants > 1 && sharded.Claimants > granularity {
+		contendedFraction = float64(sharded.Claimants-granularity) / float64(sharded.Claimants-1)
+	}
+	limit := baseBusy * contendedFraction * maxBusyRatio
+	if shardedBusy > limit {
+		return []contentionViolation{{
+			Property: "C3", At: sharded.Claimants,
+			Reason: fmt.Sprintf("sharded BUSY/op %.4f exceeds %.4f from baseline %.4f and G=%d", shardedBusy, limit, baseBusy, granularity),
+		}}
+	}
+	return nil
+}

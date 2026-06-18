@@ -381,7 +381,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
 	_ = m.store.RecordSuccess(id)
 	if parsed.Done != nil && *parsed.Done {
 		acks := acksFromSnapshot(snapshot)
-		status, err := m.store.Ack(id, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs)
+		status, err := m.store.Ack(id, ClaimModeLegacy, DefaultClaimShard, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs)
 		if err != nil {
 			m.log.Warn("webhook: auto-ack done", "sub", id, "error", err)
 			return
@@ -478,17 +478,18 @@ func (m *Manager) leaseWorker() {
 			return
 		case <-ticker.C:
 			now := time.Now()
-			ids, err := m.store.DueLeases(now, dueClaimLimit, m.workerTick*2)
+			refs, err := m.store.DueLeases(now, dueClaimLimit, m.workerTick*2)
 			if err != nil {
 				continue
 			}
-			if len(ids) > 0 {
-				m.metrics.WorkerTick("lease", len(ids))
+			if len(refs) > 0 {
+				m.metrics.WorkerTick("lease", len(refs))
 			}
-			for _, id := range ids {
-				status, err := m.store.ExpireLease(id, now)
+			for _, ref := range refs {
+				status, err := m.store.ExpireLease(ref, now)
 				if err == nil && status == "EXPIRED" {
-					m.rewakeIfPending(id)
+					m.metrics.ClaimContention("lease_lapse", ref.SubID)
+					m.rewakeIfPending(ref.SubID)
 				}
 			}
 		}
@@ -575,7 +576,8 @@ func (m *Manager) sweepOnce() {
 			continue
 		}
 		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
-			if status, err := m.store.ExpireLease(sub.ID, now); err == nil && status == "EXPIRED" {
+			if status, err := m.store.ExpireLease(NewLeaseRef(sub.ID, DefaultClaimShard), now); err == nil && status == "EXPIRED" {
+				m.metrics.ClaimContention("lease_lapse", sub.ID)
 				sub.Phase = PhaseIdle
 			}
 		}
@@ -772,7 +774,7 @@ func (m *Manager) validateWebhookURL(rawURL string) string {
 // applyAck fences and applies an ack/callback, returning the HTTP-facing outcome:
 // fenced (409 FENCED), or ok with the next_wake flag. The done case releases the
 // lease and re-wakes if pending; the heartbeat case extends the lease.
-func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64) (fenced, gone bool, nextWake bool, err error) {
+func (m *Manager) applyAck(id string, selection ClaimShardSelection, req CallbackRequest, tokenGeneration int64) (fenced, gone bool, nextWake bool, err error) {
 	sub, ok, gerr := m.store.Get(id)
 	if gerr != nil {
 		return false, false, false, gerr
@@ -781,16 +783,23 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 		return false, true, false, nil
 	}
 	done := req.Done != nil && *req.Done
-	status, aerr := m.store.Ack(id, req.Generation, req.WakeID, tokenGeneration, done, req.Acks, time.Now(), sub.Config.LeaseTTLMs)
+	acks := req.Acks
+	if selection.Sharded() {
+		acks = FilterAcksForClaimShard(acks, selection.Shard)
+	}
+	status, aerr := m.store.Ack(id, selection.Mode, selection.Shard, req.Generation, req.WakeID, tokenGeneration, done, acks, time.Now(), sub.Config.LeaseTTLMs)
 	if aerr != nil {
 		return false, false, false, aerr
 	}
 	switch status {
 	case "FENCED":
+		m.metrics.ClaimContention("fenced", id)
 		return true, false, false, nil
 	case "NOSUB":
+		m.metrics.ClaimContention("nosub", id)
 		return false, true, false, nil
 	}
+	m.metrics.ClaimContention("ack_ok", id)
 	if done {
 		nextWake = m.rewakeIfPending(id)
 	}
@@ -798,17 +807,20 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 }
 
 // applyRelease fences and releases the lease, re-waking if pending (PROTOCOL §7.2).
-func (m *Manager) applyRelease(id string, req ReleaseRequest, tokenGeneration int64) (fenced, gone bool, err error) {
-	status, rerr := m.store.Release(id, req.Generation, req.WakeID, tokenGeneration)
+func (m *Manager) applyRelease(id string, selection ClaimShardSelection, req ReleaseRequest, tokenGeneration int64) (fenced, gone bool, err error) {
+	status, rerr := m.store.Release(id, selection.Mode, selection.Shard, req.Generation, req.WakeID, tokenGeneration)
 	if rerr != nil {
 		return false, false, rerr
 	}
 	switch status {
 	case "FENCED":
+		m.metrics.ClaimContention("fenced", id)
 		return true, false, nil
 	case "NOSUB":
+		m.metrics.ClaimContention("nosub", id)
 		return false, true, nil
 	}
+	m.metrics.ClaimContention("release_ok", id)
 	m.rewakeIfPending(id)
 	return false, false, nil
 }

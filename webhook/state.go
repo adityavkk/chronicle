@@ -110,13 +110,12 @@ func LeaseExpired(leaseUntilNs int64, now time.Time) bool {
 	return leaseUntilNs != 0 && now.UnixNano() >= leaseUntilNs
 }
 
-// FenceDecision is the pure mirror of fence.lua: it returns "" when a callback,
-// ack, or release may proceed, or an error code (ErrCodeFenced) when the request
-// is stale. A request is fenced unless the token generation, request generation,
-// and request wake_id all match current subscription state (PROTOCOL §7.3). The
-// authoritative, atomic check runs in Lua; this exists for unit tests and must
-// be changed together with fence.lua.
-func FenceDecision(cur Subscription, reqGeneration int64, reqWakeID string, tokenGeneration int64) string {
+// FenceLeaseDecision is the shard-neutral pure mirror of fence.lua: it returns
+// "" when a callback, ack, or release may proceed for one claim shard, or an
+// error code (ErrCodeFenced) when the request is stale. A request is fenced
+// unless the token generation, request generation, and request wake_id all match
+// the current shard state (PROTOCOL §7.3).
+func FenceLeaseDecision(cur ClaimLeaseState, reqGeneration int64, reqWakeID string, tokenGeneration int64) string {
 	if tokenGeneration != cur.Generation ||
 		reqGeneration != cur.Generation ||
 		reqWakeID == "" || reqWakeID != cur.WakeID {
@@ -125,16 +124,27 @@ func FenceDecision(cur Subscription, reqGeneration int64, reqWakeID string, toke
 	return ""
 }
 
-// ClaimDecision is the pure mirror of claim.lua's conflict check: a pull-wake
-// claim is rejected with ALREADY_CLAIMED while another worker holds an unexpired
-// lease (PROTOCOL §7.2). It returns ("", "") when the claim may proceed, or the
-// error code and current holder when it is busy. On a grantable claim, see
-// ClaimRotatesFence for whether the generation is rotated.
-func ClaimDecision(cur Subscription, now time.Time) (code, holder string) {
+// FenceDecision adapts the legacy subscription-level fields to
+// FenceLeaseDecision.
+func FenceDecision(cur Subscription, reqGeneration int64, reqWakeID string, tokenGeneration int64) string {
+	return FenceLeaseDecision(ClaimLeaseFromSubscription(cur), reqGeneration, reqWakeID, tokenGeneration)
+}
+
+// ClaimLeaseDecision is the shard-neutral pure mirror of claim.lua's conflict
+// check: a pull-wake claim is rejected with ALREADY_CLAIMED while another worker
+// holds an unexpired lease (PROTOCOL §7.2). It returns ("", "") when the claim
+// may proceed, or the error code and current holder when it is busy.
+func ClaimLeaseDecision(cur ClaimLeaseState, now time.Time) (code, holder string) {
 	if cur.Phase == PhaseLive && cur.Holder && !LeaseExpired(cur.LeaseUntilNs, now) {
 		return ErrCodeAlreadyClaimed, cur.HolderWorker
 	}
 	return "", ""
+}
+
+// ClaimDecision adapts the legacy subscription-level fields to
+// ClaimLeaseDecision.
+func ClaimDecision(cur Subscription, now time.Time) (code, holder string) {
+	return ClaimLeaseDecision(ClaimLeaseFromSubscription(cur), now)
 }
 
 // ClaimRotatesFence reports whether a grantable claim mints a fresh

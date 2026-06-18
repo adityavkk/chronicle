@@ -39,22 +39,26 @@ import (
 )
 
 type config struct {
-	base       string
-	recvHost   string
-	recvPort   int
-	cluster    string
-	namespace  string
-	streams    int
-	msgs       int
-	scenario   string
-	settle     time.Duration
-	sweep      time.Duration
-	floor      time.Duration
-	nemMin     time.Duration
-	nemMax     time.Duration
-	nemDryRun  bool
-	workloadMs int
-	workers    int
+	base                 string
+	recvHost             string
+	recvPort             int
+	cluster              string
+	namespace            string
+	streams              int
+	msgs                 int
+	scenario             string
+	settle               time.Duration
+	sweep                time.Duration
+	floor                time.Duration
+	nemMin               time.Duration
+	nemMax               time.Duration
+	nemDryRun            bool
+	workloadMs           int
+	workers              int
+	contentionClaimants  string
+	claimShards          int
+	contentionHold       time.Duration
+	contentionLeaseTTLMs int64
 }
 
 func main() {
@@ -75,6 +79,10 @@ func main() {
 	flag.BoolVar(&c.nemDryRun, "nemesis-dry-run", false, "log unsupported external nemesis primitives instead of failing")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
+	flag.StringVar(&c.contentionClaimants, "contention-claimants", "6,12,24", "comma-separated claimant counts for contention-contract")
+	flag.IntVar(&c.claimShards, "claim-shards", 1, "claim shards to exercise for contention-contract; values >1 also run a G=1 baseline")
+	flag.DurationVar(&c.contentionHold, "contention-hold", 20*time.Millisecond, "time a successful contention worker holds the lease before acking")
+	flag.Int64Var(&c.contentionLeaseTTLMs, "contention-lease-ttl-ms", 30000, "lease_ttl_ms for contention-contract subscriptions")
 	flag.Parse()
 
 	r := newReceiver()
@@ -547,6 +555,7 @@ func deleteSubscription(base, id string) {
 type claimResult struct {
 	WakeID     string            `json:"wake_id"`
 	Generation int64             `json:"generation"`
+	Shard      *int              `json:"shard,omitempty"`
 	Token      string            `json:"token"`
 	Streams    []claimStreamSnap `json:"streams"`
 }
@@ -561,8 +570,12 @@ type claimStreamSnap struct {
 // minted (wake_id, generation, token) and the snapshot. A 409 ALREADY_CLAIMED
 // (the lease is held and unexpired) is surfaced as an error so callers can retry.
 func claim(base, id, worker string) (claimResult, error) {
+	return claimForShard(base, id, worker, nil)
+}
+
+func claimForShard(base, id, worker string, shard *int) (claimResult, error) {
 	var out claimResult
-	body, _ := json.Marshal(ClaimBody{Worker: worker})
+	body, _ := json.Marshal(ClaimBody{Worker: worker, Shard: shard})
 	url := fmt.Sprintf("%s/v1/stream/__ds/subscriptions/%s/claim", base, id)
 	err := retry(40, 500*time.Millisecond, func() error {
 		req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
@@ -581,13 +594,39 @@ func claim(base, id, worker string) (claimResult, error) {
 	return out, err
 }
 
+func claimOnceHTTP(base, id, worker string, shard *int) (status int, code string, out claimResult, err error) {
+	body, _ := json.Marshal(ClaimBody{Worker: worker, Shard: shard})
+	url := fmt.Sprintf("%s/v1/stream/__ds/subscriptions/%s/claim", base, id)
+	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, "", claimResult{}, err
+	}
+	defer resp.Body.Close()
+	status = resp.StatusCode
+	if status == http.StatusOK {
+		err = json.NewDecoder(resp.Body).Decode(&out)
+		return status, "", out, err
+	}
+	var env errEnvelope
+	if json.NewDecoder(resp.Body).Decode(&env) == nil {
+		code = env.Error.Code
+	}
+	return status, code, claimResult{}, nil
+}
+
 // ackPullWake POSTs a pull-wake ack with done=true under the holder's token and
 // fence. It returns the HTTP status and (on a 4xx error envelope) the error code,
 // without retrying — the caller asserts on the exact status. status 200 means the
 // ack landed; 409 with code "FENCED" means the fence rotated under this token.
 func ackPullWake(base, id, token, wakeID string, generation int64, acks ...ackBody) (status int, code string, err error) {
+	return ackPullWakeShard(base, id, token, wakeID, generation, nil, acks...)
+}
+
+func ackPullWakeShard(base, id, token, wakeID string, generation int64, shard *int, acks ...ackBody) (status int, code string, err error) {
 	done := true
-	body, _ := json.Marshal(CallbackBody{WakeID: wakeID, Generation: generation, Acks: acks, Done: &done})
+	body, _ := json.Marshal(CallbackBody{WakeID: wakeID, Generation: generation, Shard: shard, Acks: acks, Done: &done})
 	url := fmt.Sprintf("%s/v1/stream/__ds/subscriptions/%s/ack", base, id)
 	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -633,11 +672,13 @@ func drainWorker(base, id, wakeStream string, stop <-chan struct{}) {
 // ClaimRequest / CallbackRequest) so the harness stays self-contained.
 type ClaimBody struct {
 	Worker string `json:"worker"`
+	Shard  *int   `json:"shard,omitempty"`
 }
 
 type CallbackBody struct {
 	WakeID     string    `json:"wake_id"`
 	Generation int64     `json:"generation"`
+	Shard      *int      `json:"shard,omitempty"`
 	Acks       []ackBody `json:"acks,omitempty"`
 	Done       *bool     `json:"done"`
 }

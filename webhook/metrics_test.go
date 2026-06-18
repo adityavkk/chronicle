@@ -17,4 +17,5 @@ func TestNopMetricsImplementsExpandedInterface(t *testing.T) {
 	m.SlotOwnership("claimed", 7)
 	m.CoverageGap(time.Millisecond)
 	m.OwnerFenced("due")
+	m.ClaimContention("busy", "sub-1")
 }

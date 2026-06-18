@@ -79,6 +79,7 @@ full build spec for Option A.
 | [05-proposed-architecture.md](05-proposed-architecture.md) | ⭐ The decision (Option A) + the full build spec — slot addressing, the new Lua scripts, membership/HRW, due-set, loop change-map, config, metrics; Option B kept as the deferred fallback |
 | [06-adversarial-review.md](06-adversarial-review.md) | Adversarial review of 01–04 + the corrections folded into 05 |
 | [07-jepsen-style-verification.md](07-jepsen-style-verification.md) | Jepsen-style safety + liveness test plan for 05, in Go (porcupine + the existing `jepsen/` harness) |
+| [08-claim-granularity.md](08-claim-granularity.md) | The #11 per-shard-of-type claim design: G=16, keyspace, shard fence, HTTP extension, Electric client contract, migration, and risks |
 
 ## On verification
 
