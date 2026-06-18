@@ -252,7 +252,7 @@ func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLeas
 	if armLease {
 		arm = "1"
 	}
-	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey},
+	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey, dueZKey},
 		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID)
 	if err != nil {
 		return ArmResult{}, err
@@ -340,7 +340,7 @@ func (s *RedisStore) AckShard(id string, g int, reqGeneration int64, reqWakeID s
 	for _, a := range acks {
 		args = append(args, a.Stream, a.Offset)
 	}
-	reply, err := s.evalStrings(ackScript, []string{subShardKey(id, g), linksKey(id), leaseZKey, retryZKey}, args...)
+	reply, err := s.evalStrings(ackScript, []string{subShardKey(id, g), linksKey(id), leaseZKey, retryZKey, dueZKey}, args...)
 	if err != nil {
 		return "", err
 	}
@@ -350,7 +350,7 @@ func (s *RedisStore) AckShard(id string, g int, reqGeneration int64, reqWakeID s
 
 // Release fences then releases the lease.
 func (s *RedisStore) Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error) {
-	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey, retryZKey},
+	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey, retryZKey, dueZKey},
 		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10))
 	if err != nil {
 		return "", err
@@ -378,7 +378,7 @@ func contentionStatusOf(reply string) string {
 
 // ExpireLease clears an expired lease.
 func (s *RedisStore) ExpireLease(id string, now time.Time) (string, error) {
-	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(id), leaseZKey}, id, nsArg(now))
+	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(id), leaseZKey, dueZKey}, id, nsArg(now))
 	if err != nil {
 		return "", err
 	}
@@ -400,6 +400,25 @@ func (s *RedisStore) DueRetries(now time.Time, limit int, visibility time.Durati
 func (s *RedisStore) due(zkey string, now time.Time, limit int, visibility time.Duration) ([]string, error) {
 	return s.evalStrings(claimDueScript, []string{zkey},
 		nsArg(now), strconv.Itoa(limit), strconv.FormatInt(int64(visibility), 10))
+}
+
+// ClaimDue takes due members of the "needs a wake" due-set by re-scoring them
+// forward — the same unchanged claim_due.lua / re-score-never-ZREM machinery as
+// DueLeases/DueRetries (docs/research/07 §6.1), so the due-set is at-least-once by
+// construction. The dueWorker drains it in O(owed) and reconciles each id via
+// DecideDue; a mark only leaves the set on a done-ack/release ZREM or a dueWorker
+// ClearDue, never here.
+func (s *RedisStore) ClaimDue(now time.Time, limit int, visibility time.Duration) ([]string, error) {
+	return s.due(dueZKey, now, limit, visibility)
+}
+
+// ClearDue removes a subscription's due-set wake mark. It is a single-key ZREM
+// (always slot-safe), called by the dueWorker to reconcile away a mark that is no
+// longer owed — the subscription is gone, or idle with its cursor caught up.
+// Without it a caught-up mark would churn forever, since claim_due re-scores and
+// never removes and expire_lease re-owes unconditionally.
+func (s *RedisStore) ClearDue(id string) error {
+	return s.client.ZRem(s.ctx(), dueZKey, id).Err()
 }
 
 // ScheduleRetry records a webhook failure and persists next_attempt; returns the

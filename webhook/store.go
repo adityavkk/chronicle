@@ -72,6 +72,16 @@ type Store interface {
 	DueLeases(now time.Time, limit int, visibility time.Duration) ([]string, error)
 	DueRetries(now time.Time, limit int, visibility time.Duration) ([]string, error)
 
+	// ClaimDue takes due members of the "needs a wake" due-set outbox, re-scoring
+	// them forward like DueLeases/DueRetries (Move 2). The dueWorker drains it in
+	// O(owed) instead of re-evaluating every subscription.
+	ClaimDue(now time.Time, limit int, visibility time.Duration) ([]string, error)
+
+	// ClearDue removes a subscription's due-set mark when it is no longer owed (the
+	// dueWorker's reconcile). claim_due never removes, so this is how a caught-up or
+	// deleted subscription leaves the due-set and its cardinality returns to ~0.
+	ClearDue(id string) error
+
 	// ScheduleRetry records a webhook failure and persists next_attempt; returns
 	// the new retry count.
 	ScheduleRetry(id string, now, nextAttempt time.Time) (int, error)
