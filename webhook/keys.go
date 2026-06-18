@@ -12,12 +12,19 @@ const (
 	dsTag     = "{__ds}"
 	keyPrefix = "ds:" + dsTag
 
-	subsKey      = keyPrefix + ":subs"        // SET of subscription ids
-	leaseZKey    = keyPrefix + ":sched:lease" // ZSET id -> lease_expiry_ns
-	retryZKey    = keyPrefix + ":sched:retry" // ZSET id -> next_attempt_ns
-	jwksKey      = keyPrefix + ":jwks"        // HASH kid -> key material
-	activeKidKey = keyPrefix + ":active_kid"  // STRING current signing kid
-	tokenKeyKey  = keyPrefix + ":tokenkey"    // STRING HMAC token key
+	subsKey   = keyPrefix + ":subs"        // SET of subscription ids
+	leaseZKey = keyPrefix + ":sched:lease" // ZSET id -> lease_expiry_ns
+	retryZKey = keyPrefix + ":sched:retry" // ZSET id -> next_attempt_ns
+	// dueZKey is the "needs a wake" outbox ZSET: id -> now_ns at arm/append time
+	// (NOT a deadline — the lease ZSET carries in-flight visibility). arm_wake
+	// ZADDs it, ack(done)/release ZREM it, expire_lease re-owes it, and dueWorker
+	// drains it in O(owed). It shares the single {__ds} slot like its leaseZKey /
+	// retryZKey siblings; #15 slot-homes the whole schedule set, re-tagging this to
+	// a per-slot dueKey(h) in the same one change.
+	dueZKey      = keyPrefix + ":due"        // ZSET id -> now_ns ("needs a wake" outbox)
+	jwksKey      = keyPrefix + ":jwks"       // HASH kid -> key material
+	activeKidKey = keyPrefix + ":active_kid" // STRING current signing kid
+	tokenKeyKey  = keyPrefix + ":tokenkey"   // STRING HMAC token key
 )
 
 // subKey is the HASH holding a subscription's config and runtime state.

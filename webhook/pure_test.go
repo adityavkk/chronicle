@@ -2,9 +2,40 @@ package webhook
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
+
+// TestControlPlaneKeysSingleSlot asserts every subscription-control key — the new
+// due-set ZSET included — carries the {__ds} hash tag, so all the multi-key Lua
+// scripts (arm_wake, ack, expire_lease, release) touch one Redis cluster slot and
+// never CROSSSLOT. This is the byte-for-byte single-slot precondition for Move 2;
+// #15 re-tags the family to per-slot {__ds:h} together.
+func TestControlPlaneKeysSingleSlot(t *testing.T) {
+	const id = "sub-with-{braces}-and-:colons"
+	keys := map[string]string{
+		"subKey":       subKey(id),
+		"linksKey":     linksKey(id),
+		"streamSubs":   streamSubsKey("events/a"),
+		"subsKey":      subsKey,
+		"leaseZKey":    leaseZKey,
+		"retryZKey":    retryZKey,
+		"dueZKey":      dueZKey,
+		"jwksKey":      jwksKey,
+		"activeKidKey": activeKidKey,
+		"tokenKeyKey":  tokenKeyKey,
+	}
+	for name, k := range keys {
+		// The hash tag must be the FIRST {...} pair, and it must be {__ds}: a sub id
+		// carrying its own braces cannot escape the tag.
+		open := strings.IndexByte(k, '{')
+		close := strings.IndexByte(k, '}')
+		if open < 0 || close < open || k[open:close+1] != dsTag {
+			t.Errorf("%s = %q: first hash tag is not %s", name, k, dsTag)
+		}
+	}
+}
 
 func TestHasPendingWorkFrom(t *testing.T) {
 	begin := "0000000000000000_0000000000000000"
@@ -229,6 +260,32 @@ func TestClaimRotatesFence(t *testing.T) {
 	}
 	if !ClaimRotatesFence(PhaseWaking, "") {
 		t.Error("waking with a cleared wake should rotate")
+	}
+}
+
+func TestDecideDue(t *testing.T) {
+	cases := []struct {
+		name       string
+		exists     bool
+		phase      Phase
+		hasPending bool
+		want       DueAction
+	}{
+		{"gone subscription clears the phantom mark", false, PhaseIdle, false, DueClear},
+		{"idle with pending work fires a wake", true, PhaseIdle, true, DueFire},
+		{"idle with cursor caught up clears the mark", true, PhaseIdle, false, DueClear},
+		{"waking coalesces (wake already in flight)", true, PhaseWaking, true, DueSkip},
+		{"live coalesces even with pending work", true, PhaseLive, true, DueSkip},
+		// A non-idle subscription always skips: the mark is owned by the in-flight
+		// wake and clears on its done-ack/release, never by the dueWorker.
+		{"waking with no pending still skips", true, PhaseWaking, false, DueSkip},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DecideDue(tc.exists, tc.phase, tc.hasPending); got != tc.want {
+				t.Errorf("DecideDue(%v,%q,%v) = %v, want %v", tc.exists, tc.phase, tc.hasPending, got, tc.want)
+			}
+		})
 	}
 }
 

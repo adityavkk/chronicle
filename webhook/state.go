@@ -148,6 +148,47 @@ func ClaimRotatesFence(phase Phase, wakeID string) bool {
 	return phase != PhaseWaking || wakeID == ""
 }
 
+// DueAction is the pure decision for one due-set entry the dueWorker drains. The
+// due-set (ds:{__ds}:due) is a "needs a wake" outbox, not a deadline queue: a
+// mark means "this subscription may be owed a wake". A sum type, not a bool pair,
+// so every drained mark resolves to exactly one of three reconciliations.
+type DueAction int
+
+const (
+	// DueClear removes a stale mark: the subscription is gone, or it is idle with
+	// its cursor caught up to every linked tail, so no wake is owed.
+	DueClear DueAction = iota
+	// DueFire issues a wake: the subscription is idle with pending work.
+	DueFire
+	// DueSkip leaves the mark untouched: a wake is already in flight (the
+	// subscription is waking/live), so a re-fire would only coalesce (arm_wake
+	// returns BUSY). The mark clears on the eventual done-ack or release.
+	DueSkip
+)
+
+// DecideDue reconciles a due-set mark against a subscription's live phase and
+// pending-work state (PROTOCOL §7). It is the pure core of the dueWorker's drain.
+//
+// Clearing a no-longer-owed mark is load-bearing, not housekeeping: claim_due
+// re-scores due members forward and never ZREMs them (at-least-once by
+// construction), and expire_lease re-owes unconditionally because the single-slot
+// script cannot read a stream's tail to test pending work. So the dueWorker is
+// the one place a mark is reconciled against pending state — without DueClear a
+// caught-up or deleted subscription's mark would churn the due-set forever and
+// its cardinality would never return to ~0 at quiescence.
+func DecideDue(exists bool, phase Phase, hasPending bool) DueAction {
+	if !exists {
+		return DueClear
+	}
+	if phase != PhaseIdle {
+		return DueSkip
+	}
+	if !hasPending {
+		return DueClear
+	}
+	return DueFire
+}
+
 // MergeAcks applies acks to links, advancing each matching link's cursor
 // forward-only (an ack that would move a cursor backward is ignored; offsets are
 // last-processed-inclusive, PROTOCOL §7). Returns the updated links. Pure: the
