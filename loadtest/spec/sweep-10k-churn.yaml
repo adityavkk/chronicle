@@ -1,0 +1,55 @@
+# Gate #4 (the membership churn window) — the INVERSE of gate #1. Run the SUT at
+# replicas>=2 with work-sharded leased slot ownership (issue #14) and pod-kill the
+# slot owner mid-measure, then read the coverage-gap latency and confirm the
+# work-sharding held: total background work is O(total owed) regardless of N (NOT
+# the O(N*K) redundancy gate #1 measures with the sweep), the coverage gap recovers
+# within membership-lease TTL + RTT (NOT a sweep tick), with ZERO lost wakes and
+# ZERO double-grants.
+#
+# Why replicas>=2: a single replica trivially owns every slot, so there is no
+# rebalance and no coverage gap to measure. Two replicas share the slot set by HRW;
+# killing the owner of a slot forces a takeover (a new-owner claim_shard CAS, an
+# owner_epoch bump) and an eager reconcile — the event whose latency this gate
+# measures.
+#
+# The ownership timers are the chronicle defaults (memberLeaseTTL=slotLeaseTTL=9s,
+# heartbeatInterval=slotReconcileInterval=3s); the coverage-gap bound is therefore
+# ~9s + RTT, far under the 30s recovery floor. The K=10k sweep p99 SLO still holds
+# as the regression floor (RESULTS-gke.md: 509 ms).
+#
+# Run it (the orchestrator owns the cloud; do NOT run GKE from the worktree):
+#   cd loadtest && ./ltctl.sh up && ./ltctl.sh gate4 spec/sweep-10k-churn.yaml
+# gate4 deploys at replicas>=2, launches the sweepscale job, force-deletes the slot
+# owner mid-window (the coarse pod-kill nemesis, cmd_chaos), and scrapes the
+# coverage-gap / slot-ownership / owner-fenced metrics from a surviving pod. The
+# exact reading guide and pass criteria are in RESULTS-gke.md "Gate #4".
+name: sweep-10k-churn
+
+loadgen_image: REGISTRY/chronicle-loadgen:TAG
+
+sut:
+  image: REGISTRY/chronicle:TAG
+  replicas: 2 # >=2 so HRW shards the slots and a pod-kill forces a real takeover
+  sweep_interval: 30s # the coarse recovery FLOOR (#13); the eager reconcile, not this, closes the gap
+  sweep_batch: 0
+  redis_url: "" # fill from `terraform output redis_url`, or production's managed Redis 8
+  cpu: "2"
+  memory: 2Gi
+
+workload:
+  subscriptions: 10000 # K
+  links_per_sub: 5 # P
+  dispatch: pull-wake
+  warmup: 30s
+  measure: 120s # long enough to pod-kill the slot owner mid-window and observe recovery
+
+slo:
+  sweep_p99_ms: 1500 # the K=10k regression floor still holds (RESULTS-gke.md 509 ms)
+  max_seed_errors: 0
+  # Gate-#4 pass criteria (read from chronicle /metrics after the chaos step):
+  #   - coverage gap recovers within membership-lease TTL + RTT (~9s), NOT a sweep tick
+  #     (chronicle_coverage_gap_seconds p99 <= ~9s + RTT)
+  #   - ZERO lost wakes (every appended message eventually delivered; loadgen tail check)
+  #   - ZERO double-grants (chronicle_slot_ownership_events_total never shows two live
+  #     owners for one slot; the timeline sampler / L4 confirms exactly-one-owner)
+  #   - chronicle_owner_fenced_total rises at the takeover (the deposed owner is fenced)

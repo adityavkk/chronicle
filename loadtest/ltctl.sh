@@ -140,6 +140,59 @@ cmd_gate1() {
   log "gate #1 done — CPU-vs-N curve in gate1-results.tsv (expect Redis CPU to rise ~N× at fixed K)"
 }
 
+# cmd_gate4 is experiment 4 (the membership churn window) — the INVERSE of gate #1
+# (issue #14, 07 L2/L4). It deploys the churn spec at replicas>=2 (HRW shards the
+# slots), launches the sweepscale job, force-deletes the slot owner mid-window (the
+# coarse pod-kill nemesis), and scrapes the coverage-gap / slot-ownership /
+# owner-fenced metrics from a surviving pod. Pass: the coverage gap recovers within
+# membership-lease TTL + RTT (NOT a sweep tick), ZERO lost wakes, ZERO double-grants,
+# and total work stays O(total owed) regardless of N. Assumes `up` already ran.
+cmd_gate4() {
+  local spec="${1:-spec/sweep-10k-churn.yaml}"
+  local spec_abs out redis_host owner pod
+  spec_abs="$(cd "$(dirname "$spec")" && pwd)/$(basename "$spec")"
+  redis_host="$("${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" --format='value(host)')"
+  out="$(mktemp -d)"
+
+  log "gate #4: render $spec at replicas>=2 (HRW slot-sharding)"
+  ( cd "$REPO_ROOT/loadgen" && go run ./cmd/render -spec "$spec_abs" -out "$out" \
+      -redis-url "redis://${redis_host}:6379/0" \
+      -image "$REG/chronicle:$LT_TAG" -loadgen-image "$REG/chronicle-loadgen:$LT_TAG" )
+  kubectl apply -f "$out/sut.yaml"
+  kubectl -n "$NS" rollout status deploy/chronicle --timeout=180s
+
+  log "gate #4: launch sweepscale job, then pod-kill the slot owner mid-window"
+  kubectl -n "$NS" delete job -l app=sweepscale --ignore-not-found >/dev/null
+  kubectl apply -f "$out/job.yaml"
+  # Let the workload warm up and ownership settle, then kill the OWNER of slot 0
+  # specifically (the killSlotOwner nemesis: read owner_id, map to its pod, kill it),
+  # forcing a takeover (a new-owner claim_shard CAS + eager reconcile).
+  sleep 45
+  owner="$(kubectl -n "$NS" exec deploy/chronicle -- sh -c "redis-cli -u redis://${redis_host}:6379/0 hget 'ds:{ownership}:slot:0' owner_id" 2>/dev/null | tr -d '\r')"
+  pod="${owner%-*}" # replica_id is "<podName>-<32hex nonce>"
+  if [ -n "$pod" ] && kubectl -n "$NS" get pod "$pod" >/dev/null 2>&1; then
+    log "gate #4: slot-0 owner is $owner; force-deleting its pod $pod"
+    kubectl -n "$NS" delete pod "$pod" --grace-period=0 --force
+  else
+    log "gate #4: could not resolve the slot-0 owner pod ($owner); falling back to the coarse pod-kill"
+    cmd_chaos
+  fi
+
+  kubectl -n "$NS" wait --for=condition=complete --timeout=600s job -l app=sweepscale 2>/dev/null ||
+    kubectl -n "$NS" wait --for=condition=failed --timeout=5s job -l app=sweepscale 2>/dev/null || true
+
+  log "gate #4: sweepscale report"
+  kubectl -n "$NS" logs -l app=sweepscale --tail=-1
+  log "gate #4: ownership metrics from a surviving pod (coverage gap, double-grants, fences)"
+  # The gate-#4 signals: coverage_gap p99 (<= membership-lease TTL + RTT), the
+  # slot-ownership event mix (claimed on the takeover, never two live owners), and
+  # the owner-fenced count (the deposed owner suppressed). Lost wakes are 0 iff the
+  # sweepscale tail check passed above.
+  kubectl -n "$NS" exec deploy/chronicle -- sh -c 'wget -qO- http://localhost:9090/metrics' 2>/dev/null |
+    grep -E 'chronicle_coverage_gap_seconds|chronicle_slot_ownership_events_total|chronicle_owner_fenced_total' || true
+  log "gate #4 done — coverage gap should recover within membership-lease TTL + RTT (NOT a sweep tick); zero lost wakes; zero double-grants"
+}
+
 _torn=0
 cmd_down() {
   [ "$_torn" = 1 ] && return 0
@@ -165,8 +218,9 @@ case "${1:-}" in
   up) shift; cmd_up "$@" ;;
   run) shift; cmd_run "$@" ;;
   gate1) shift; cmd_gate1 "$@" ;;
+  gate4) shift; cmd_gate4 "$@" ;;
   chaos) shift; cmd_chaos "$@" ;;
   down) shift; cmd_down "$@" ;;
   all) shift; cmd_all "$@" ;;
-  *) echo "usage: $0 {up | run <spec> | gate1 [spec] | chaos | down | all <spec>}" >&2; exit 2 ;;
+  *) echo "usage: $0 {up | run <spec> | gate1 [spec] | gate4 [spec] | chaos | down | all <spec>}" >&2; exit 2 ;;
 esac
