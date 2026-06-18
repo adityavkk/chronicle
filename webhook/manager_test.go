@@ -209,6 +209,9 @@ type fakeMetrics struct {
 	dueMuts     map[string]int // DueSetMutation ops by op (arm|ack|expire|release)
 	dueTicks    int
 	dueFiredSum int
+	slotOwn     map[string]int // SlotOwnership events (claimed|renewed|busy), #14
+	ownerFenced map[string]int // OwnerFenced scopes (inline|check_owner), #14
+	coverageGap int            // CoverageGap samples, #14
 }
 
 func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
@@ -241,10 +244,42 @@ func (f *fakeMetrics) DueWorkerTick(_ time.Duration, fired int) {
 	f.dueFiredSum += fired
 }
 
-func (f *fakeMetrics) SlotOwnership(string, int)      {}
-func (f *fakeMetrics) CoverageGap(time.Duration)      {}
-func (f *fakeMetrics) OwnerFenced(string)             {}
+// SlotOwnership / CoverageGap / OwnerFenced are wired by Move 3 (#14); record them
+// so the ownership tests can assert the events actually fire at the call sites.
+func (f *fakeMetrics) SlotOwnership(event string, _ int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.slotOwn == nil {
+		f.slotOwn = map[string]int{}
+	}
+	f.slotOwn[event]++
+}
+func (f *fakeMetrics) CoverageGap(time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.coverageGap++
+}
+func (f *fakeMetrics) OwnerFenced(scope string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ownerFenced == nil {
+		f.ownerFenced = map[string]int{}
+	}
+	f.ownerFenced[scope]++
+}
 func (f *fakeMetrics) ClaimContention(string, string) {}
+
+func (f *fakeMetrics) slotOwnership(event string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.slotOwn[event]
+}
+
+func (f *fakeMetrics) ownerFences(scope string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ownerFenced[scope]
+}
 
 func (f *fakeMetrics) dueMutation(op string) int {
 	f.mu.Lock()
@@ -546,9 +581,10 @@ func TestRecoveryFloorIsCoarse(t *testing.T) {
 }
 
 // TestReconcileScopeRouting asserts every recovery event routes through the single
-// reconcile seam to a full cursor reconcile (sweepOnce), and the stubbed #14
-// owner-epoch / new-owner-CAS scopes route correctly while taking no action — so
-// #14 fills in a named branch rather than refactoring the seam.
+// reconcile seam to a full cursor reconcile (sweepOnce). #14 fills in the
+// owner-epoch-bump / new-owner-CAS scopes #13 stubbed: they now run the eager
+// reconcile at the takeover trigger (the freshly-claimed slot's owed work), so
+// every scope in the taxonomy drives a sweep — a plug-in, not a refactor.
 func TestReconcileScopeRouting(t *testing.T) {
 	mgr, store, _, fm, _ := newDueManager(t)
 	if _, err := store.CreateOrConfirm("s1", pullWakeCfg(), nil, time.Now()); err != nil {
@@ -562,12 +598,14 @@ func TestReconcileScopeRouting(t *testing.T) {
 	if got := fm.sweepCount(); got != len(detectable) {
 		t.Fatalf("each detectable event must run exactly one sweep: got %d for %d events", got, len(detectable))
 	}
-	// The #14 stubs route correctly but perform no recovery action (no sweep).
+	// #14: the owner-epoch-bump / new-owner-CAS scopes now drive the eager reconcile
+	// (one sweep each), closing the rebalance coverage gap at the takeover trigger
+	// rather than waiting for a floor tick.
 	before := fm.sweepCount()
 	mgr.reconcile(scopeEpochBump)
 	mgr.reconcile(scopeNewOwnerCAS)
-	if got := fm.sweepCount(); got != before {
-		t.Fatalf("the stubbed epoch-bump/new-owner-CAS scopes must be no-ops, got %d sweeps (was %d)", got, before)
+	if got := fm.sweepCount(); got != before+2 {
+		t.Fatalf("epoch-bump/new-owner-CAS must each run the eager reconcile: got %d sweeps (was %d)", got, before)
 	}
 }
 
