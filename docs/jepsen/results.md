@@ -237,7 +237,9 @@ per-`(subId,g)` fence never spuriously fired). **T1 holds per `(subId,g)`** —
 proven directly by the fence-isolation + multi-holder integration tests
 (`webhook/shard_integration_test.go`: a shard-g token is FENCED against g', OK
 against g; shards held concurrently with single-holder WITHIN each), and by the
-`shard-linz` porcupine scenario when a quiet Redis window is available.
+`shard-linz` porcupine scenario — 363 ops across 4 `(subId,g)` partitions,
+linearizable against the unchanged `leaseModel` under concurrency + GC-pause
+takeovers (`go run ./jepsen/checker -scenario shard-linz -G 4 -workers 6 -lease-ttl-ms 1000 -workload-ms 6000`).
 
 **Environment note.** These runs need a quiet local Redis; the shared colima VM
 (co-tenant k3d cluster) intermittently drove Redis op latency into the seconds,
