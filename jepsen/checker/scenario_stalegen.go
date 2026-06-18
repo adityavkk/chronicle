@@ -38,14 +38,18 @@ func runStaleGenNoop(c config) error {
 	const leaseTTLMs = 1500
 	stream := "events/t4-0"
 
-	tail, err := appendStream(c.base, stream, 6)
-	if err != nil {
-		return fmt.Errorf("seed stream: %w", err)
-	}
+	// Create the subscription FIRST, then append — so the glob links the stream at
+	// the beginning (acked < tail, real pending work the control ack can advance).
+	// Appending before creating would backfill the link at the current tail, leaving
+	// nothing to advance and making the test vacuous.
 	if err := createPullWakeSubscription(c.base, subID, "events/*", "events/t4-wake", leaseTTLMs); err != nil {
 		return err
 	}
 	defer deleteSubscription(c.base, subID)
+	tail, err := appendStream(c.base, stream, 6)
+	if err != nil {
+		return fmt.Errorf("seed stream: %w", err)
+	}
 	fmt.Printf("created pull-wake subscription %s (lease_ttl_ms=%d), tail=%s\n", subID, leaseTTLMs, short(tail))
 
 	// Worker A claims, then GC-pauses past the lease so B can take over.
