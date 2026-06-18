@@ -113,8 +113,27 @@ func (s *RedisStore) CreateOrConfirm(id string, cfg Config, links []StreamLink, 
 	}
 }
 
-// Get hydrates a subscription and its links.
+// Get hydrates a subscription and its links from the slot-homed tag. On a miss it
+// lazily migrates a legacy ({__ds}) copy into the slot-homed keyspace and re-reads
+// (shadow-write + lazy per-sub migration, 05 §Migration) — so a pre-slot-homing sub
+// is migrated on its first access, before any slot-homed arm/ack would see it absent.
 func (s *RedisStore) Get(id string) (Subscription, bool, error) {
+	sub, ok, err := s.getSlotHomed(id)
+	if err != nil || ok {
+		return sub, ok, err
+	}
+	migrated, merr := s.migrateSub(id)
+	if merr != nil {
+		return Subscription{}, false, merr
+	}
+	if !migrated {
+		return Subscription{}, false, nil
+	}
+	return s.getSlotHomed(id)
+}
+
+// getSlotHomed reads a subscription only from its slot-homed keyspace (no migration).
+func (s *RedisStore) getSlotHomed(id string) (Subscription, bool, error) {
 	pipe := s.client.Pipeline()
 	subCmd := pipe.HGetAll(s.ctx(), subKey(id))
 	linkCmd := pipe.HGetAll(s.ctx(), linksKey(id))
@@ -153,6 +172,11 @@ func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 		for i, id := range batch {
 			fields := subCmds[i].Val()
 			if len(fields) == 0 {
+				// A slot-homed miss: lazily migrate a legacy copy and re-read it. Rare
+				// (only during the migration window); the common batch is all hits.
+				if sub, ok, err := s.Get(id); err == nil && ok {
+					out = append(out, sub)
+				}
 				continue
 			}
 			out = append(out, subscriptionFromHash(id, fields, linkCmds[i].Val()))
@@ -194,12 +218,29 @@ func (s *RedisStore) List() ([]string, error) {
 	for h := 0; h < subSlots; h++ {
 		cmds[h] = pipe.SMembers(ctx, subsKey(h))
 	}
+	// Also union the legacy id-set so the sweep enumerates pre-slot-homing subs that
+	// have not been touched (and thus not yet lazily migrated) since deploy — a Get on
+	// each migrates it. Deduped against the slot-homed sets (a half-migrated sub can
+	// appear in both for one tick).
+	legacyCmd := pipe.SMembers(ctx, subsKeyLegacy)
 	if _, err := pipe.Exec(ctx); err != nil {
 		return nil, err
 	}
+	seen := make(map[string]struct{})
 	out := make([]string, 0)
 	for _, c := range cmds {
-		out = append(out, c.Val()...)
+		for _, id := range c.Val() {
+			if _, dup := seen[id]; !dup {
+				seen[id] = struct{}{}
+				out = append(out, id)
+			}
+		}
+	}
+	for _, id := range legacyCmd.Val() {
+		if _, dup := seen[id]; !dup {
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
 	}
 	return out, nil
 }

@@ -523,3 +523,102 @@ func TestReconcileIndexDoesNotInventMembership(t *testing.T) {
 		t.Fatalf("the linked stream should be indexed, got %v", subs)
 	}
 }
+
+// TestLazyMigrationServesFromNewTag is the Move-1 migration contract (05 §Migration
+// step 3): a subscription seeded under the LEGACY {__ds} keyspace (simulating
+// pre-slot-homing data) is lazily migrated to its slot-homed {__ds:h} keyspace on
+// first access, served from the new tag, and the legacy copy is flipped away — its
+// schedule entries, id-set membership, and fan-out re-homed under the new tag.
+func TestLazyMigrationServesFromNewTag(t *testing.T) {
+	s, client := newTestStore(t)
+	ctx := context.Background()
+	const id = "legacy-sub-007"
+	h := slotOf(id)
+	now := time.Now()
+	leaseScore := float64(now.Add(time.Second).UnixNano())
+	dueScore := float64(now.UnixNano())
+
+	// Seed the sub ONLY under the legacy {__ds} tag — a waking webhook sub with a
+	// link, a lease-schedule entry, a due-mark, and a legacy fan-out entry.
+	if err := client.HSet(ctx, subKeyLegacy(id), map[string]any{
+		"id": id, "type": string(DispatchWebhook), "pattern": "events/*",
+		"webhook_url": "https://w.example/h", "lease_ttl_ms": "1000",
+		"status": "active", "phase": "waking", "generation": "1", "wake_id": "w_a",
+		"holder": "0", "lease_until_ns": "0", "created_ns": nsArg(now),
+	}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.HSet(ctx, linksKeyLegacy(id), "events/a", "glob:0000000000000000_0000000000000000").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SAdd(ctx, subsKeyLegacy, id).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ZAdd(ctx, leaseZKeyLegacy, goredis.Z{Score: leaseScore, Member: id}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ZAdd(ctx, dueZKeyLegacy, goredis.Z{Score: dueScore, Member: id}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SAdd(ctx, streamSubsKeyLegacy("events/a"), id).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Precondition: nothing under the slot-homed tag yet.
+	if n, _ := client.Exists(ctx, subKey(id)).Result(); n != 0 {
+		t.Fatalf("precondition: slot-homed sub must not exist before migration")
+	}
+
+	// First access migrates and serves from the new tag.
+	sub, ok, err := s.Get(id)
+	if err != nil || !ok {
+		t.Fatalf("Get after seeding legacy = ok %v err %v, want a migrated hit", ok, err)
+	}
+	if sub.Config.WebhookURL != "https://w.example/h" || sub.Phase != PhaseWaking || sub.Generation != 1 {
+		t.Fatalf("migrated sub hydrated wrong: %+v", sub)
+	}
+	if len(sub.Links) != 1 || sub.Links[0].Path != "events/a" {
+		t.Fatalf("migrated links lost: %+v", sub.Links)
+	}
+
+	// Flipped: the slot-homed copy exists, the legacy copy is gone.
+	if n, _ := client.Exists(ctx, subKey(id)).Result(); n != 1 {
+		t.Fatalf("migrated sub must exist under the slot-homed tag")
+	}
+	if n, _ := client.Exists(ctx, subKeyLegacy(id)).Result(); n != 0 {
+		t.Fatalf("legacy sub copy must be flipped away after migration")
+	}
+
+	// Schedule entries re-homed to slot h, legacy entries dropped.
+	if _, err := client.ZScore(ctx, leaseZKey(h), id).Result(); err != nil {
+		t.Fatalf("lease schedule entry must be re-homed to slot %d: %v", h, err)
+	}
+	if _, err := client.ZScore(ctx, dueZKey(h), id).Result(); err != nil {
+		t.Fatalf("due mark must be re-homed to slot %d: %v", h, err)
+	}
+	if _, err := client.ZScore(ctx, leaseZKeyLegacy, id).Result(); err != goredis.Nil {
+		t.Fatalf("legacy lease entry must be dropped, got %v", err)
+	}
+
+	// Found by List() (id-set re-homed) and reachable by the slot-homed fan-out.
+	ids, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(ids, id) {
+		t.Fatalf("List() must return the migrated sub, got %v", ids)
+	}
+	subs, _, err := s.StreamSubscribers("events/a")
+	if err != nil || len(subs) != 1 || subs[0] != id {
+		t.Fatalf("StreamSubscribers after migration = %v err %v, want [%s]", subs, err, id)
+	}
+}
+
+func contains(xs []string, x string) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
