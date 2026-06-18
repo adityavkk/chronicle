@@ -138,6 +138,9 @@ func run() error {
 			ReconcileInterval: cfg.ReconcileInterval,
 			SweepBatch:        cfg.SweepBatch,
 			Metrics:           subMetrics,
+			Consistency:       cfg.Consistency,
+			WaitReplicas:      cfg.WaitReplicas,
+			WaitTimeoutMs:     cfg.WaitTimeoutMs,
 		}
 		router, service, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)
 		if err != nil {
