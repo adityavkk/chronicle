@@ -68,19 +68,20 @@ func TestManagerSlotReconcileClaimsOwnsAndFires(t *testing.T) {
 	fm := &fakeMetrics{}
 	m := newOwnershipManager(t, s, "rA", fm)
 
-	// Seed our membership, then reconcile: at S=1 rA targets the single slot and
-	// claim_shard CLAIMS it (first claim is a transfer/epoch bump).
+	// Seed our membership, then reconcile: at S=subSlots a SOLE replica is the HRW
+	// target of every slot and claim_shard CLAIMS each (the first claim of each is a
+	// transfer/epoch bump). So rA ends up owning all S slots.
 	if err := s.Heartbeat("rA", time.Now(), m.memberLeaseTTL); err != nil {
 		t.Fatal(err)
 	}
 	m.RunSlotReconcile()
 
 	if !m.ownsAnySlot() {
-		t.Fatal("rA should own the single slot after reconcile")
+		t.Fatal("rA should own slots after reconcile")
 	}
 	owned := m.ownedSlots()
-	if len(owned) != 1 || owned[0].Index() != 0 {
-		t.Fatalf("ownedSlots = %v, want [slot 0]", owned)
+	if len(owned) != subSlots {
+		t.Fatalf("a sole replica should own all %d slots, got %d", subSlots, len(owned))
 	}
 	if fm.slotOwnership("claimed") < 1 {
 		t.Fatalf("SlotOwnership(claimed) not recorded: %v", fm.slotOwn)
@@ -108,10 +109,11 @@ func TestManagerSlotReconcileClaimsOwnsAndFires(t *testing.T) {
 	}
 }
 
-// Work-sharding: with two replicas sharing one Redis, exactly ONE owns the single
-// slot (the HRW winner); the other gets BUSY and runs no background work — total
-// work is O(total owed) regardless of N.
-func TestManagerWorkShardingExactlyOneOwner(t *testing.T) {
+// Work-sharding: with two replicas sharing one Redis, HRW PARTITIONS the S slots
+// between them — every slot owned by exactly one replica (no gap, no split-brain),
+// and both carry a non-trivial share — so total background work is O(total owed)
+// regardless of N (each replica runs the workers only for its owned slots).
+func TestManagerWorkShardingPartitionsSlots(t *testing.T) {
 	s, _ := newTestStore(t)
 	mA := newOwnershipManager(t, s, "rA", &fakeMetrics{})
 	mB := newOwnershipManager(t, s, "rB", &fakeMetrics{})
@@ -126,8 +128,25 @@ func TestManagerWorkShardingExactlyOneOwner(t *testing.T) {
 	mA.RunSlotReconcile()
 	mB.RunSlotReconcile()
 
-	if mA.ownsAnySlot() == mB.ownsAnySlot() {
-		t.Fatalf("exactly one replica must own the slot: A=%v B=%v", mA.ownsAnySlot(), mB.ownsAnySlot())
+	ownedA := mA.ownedSlots()
+	ownedB := mB.ownedSlots()
+	owners := make(map[int]int, subSlots)
+	for _, h := range ownedA {
+		owners[h.Index()]++
+	}
+	for _, h := range ownedB {
+		owners[h.Index()]++
+	}
+	if len(owners) != subSlots {
+		t.Fatalf("the two replicas must cover all %d slots, covered %d", subSlots, len(owners))
+	}
+	for h, n := range owners {
+		if n != 1 {
+			t.Fatalf("slot %d owned by %d replicas, want exactly one (no split-brain)", h, n)
+		}
+	}
+	if len(ownedA) == 0 || len(ownedB) == 0 {
+		t.Fatalf("work must be shared across replicas: A owns %d, B owns %d", len(ownedA), len(ownedB))
 	}
 }
 
@@ -146,16 +165,18 @@ func TestManagerDeposedOwnerExpireFencedInline(t *testing.T) {
 	if err := s.Heartbeat("rA", time.Now(), m.memberLeaseTTL); err != nil {
 		t.Fatal(err)
 	}
-	m.RunSlotReconcile() // rA owns slot 0 at epoch 1
-	scope, ok := m.singleOwnerScope()
+	m.RunSlotReconcile() // rA owns all slots at epoch 1
+	// s1's slot is the one whose owner scope its lease worker presents.
+	sh, _ := NewSlotID(slotOf("s1"))
+	scope, ok := m.ownerScope(sh)
 	if !ok {
-		t.Fatal("rA should hold a slot")
+		t.Fatal("rA should hold s1's slot")
 	}
 
-	// A foreign replica takes over the slot after rA's slot lease expires, bumping
+	// A foreign replica takes over THAT slot after rA's slot lease expires, bumping
 	// the epoch — rA's `scope` is now stale (deposed-but-resumed).
 	future := time.Now().Add(m.slotLeaseTTL + time.Second)
-	tk, err := s.ClaimSlot(slotKey(0), "intruder", future, m.slotLeaseTTL)
+	tk, err := s.ClaimSlot(slotKey(sh.Index()), "intruder", future, m.slotLeaseTTL)
 	if err != nil || !tk.Transferred() {
 		t.Fatalf("takeover = %+v err=%v, want a transfer", tk, err)
 	}
@@ -189,10 +210,11 @@ func TestManagerRetryPathFencedInline(t *testing.T) {
 	if err := s.Heartbeat("rA", time.Now(), m.memberLeaseTTL); err != nil {
 		t.Fatal(err)
 	}
-	m.RunSlotReconcile() // rA owns slot 0 at epoch 1
-	scope, ok := m.singleOwnerScope()
+	m.RunSlotReconcile() // rA owns all slots at epoch 1
+	sh, _ := NewSlotID(slotOf("s1"))
+	scope, ok := m.ownerScope(sh)
 	if !ok {
-		t.Fatal("rA should hold a slot")
+		t.Fatal("rA should hold s1's slot")
 	}
 	now := time.Now()
 	arm, err := s.ArmWake("s1", now, 60000, true, "wk-1") // valid gen/wake for the ack test
@@ -209,7 +231,7 @@ func TestManagerRetryPathFencedInline(t *testing.T) {
 
 	// A foreign replica takes the slot over after the lease expires — rA's `scope`
 	// is now stale (deposed-but-resumed).
-	tk, err := s.ClaimSlot(slotKey(0), "intruder", now.Add(m.slotLeaseTTL+time.Second), m.slotLeaseTTL)
+	tk, err := s.ClaimSlot(slotKey(sh.Index()), "intruder", now.Add(m.slotLeaseTTL+time.Second), m.slotLeaseTTL)
 	if err != nil || !tk.Transferred() {
 		t.Fatalf("takeover = %+v err=%v, want a transfer", tk, err)
 	}

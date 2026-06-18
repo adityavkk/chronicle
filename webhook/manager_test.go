@@ -355,7 +355,7 @@ func TestDueWorkerFiresOwedSubscription(t *testing.T) {
 	fs.tails["events/a"] = "0000000000000001_0000000000000000" // pending work
 	fs.mu.Unlock()
 	// A re-owed mark on an idle sub (as expire_lease would leave it).
-	if err := client.ZAdd(context.Background(), dueZKey, goredis.Z{Score: float64(now.UnixNano()), Member: "s1"}).Err(); err != nil {
+	if err := client.ZAdd(context.Background(), dueZKey(slotOf("s1")), goredis.Z{Score: float64(now.UnixNano()), Member: "s1"}).Err(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -385,7 +385,7 @@ func TestDueWorkerClearsStaleMark(t *testing.T) {
 	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
 	_ = store.Link("s1", "events/a", LinkGlob, begin)
 	// No tail set => cursor caught up => not pending.
-	if err := client.ZAdd(context.Background(), dueZKey, goredis.Z{Score: float64(now.UnixNano()), Member: "s1"}).Err(); err != nil {
+	if err := client.ZAdd(context.Background(), dueZKey(slotOf("s1")), goredis.Z{Score: float64(now.UnixNano()), Member: "s1"}).Err(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -691,17 +691,17 @@ func TestLeaseTailDropRecoveredByEagerReconcile(t *testing.T) {
 	}
 
 	// The L3 fault: drop the lease AND due tail, sub hash intact (phase live).
-	if err := client.ZRem(context.Background(), leaseZKey, "s1").Err(); err != nil {
+	if err := client.ZRem(context.Background(), leaseZKey(slotOf("s1")), "s1").Err(); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.ZRem(context.Background(), dueZKey, "s1").Err(); err != nil {
+	if err := client.ZRem(context.Background(), dueZKey(slotOf("s1")), "s1").Err(); err != nil {
 		t.Fatal(err)
 	}
 
 	// The lease worker is now blind: even well past the deadline it sees nothing,
 	// because the schedule entry — not the durable cursor — is what it reads.
 	future := now.Add(2 * time.Second) // past the 1s lease
-	if due, _ := store.DueLeases(future, dueClaimLimit, time.Second); len(due) != 0 {
+	if due, _ := store.DueLeases(slotOf("s1"), future, dueClaimLimit, time.Second); len(due) != 0 {
 		t.Fatalf("the lease worker must be blind to the dropped tail, got due=%v", due)
 	}
 
@@ -712,7 +712,7 @@ func TestLeaseTailDropRecoveredByEagerReconcile(t *testing.T) {
 	// The eager reconcile re-derived the lease entry from the durable hash, so the
 	// fast lease worker now sees the lapse — the cursor-reading reconciler doing
 	// exactly what the lease worker could not.
-	due, _ := store.DueLeases(future, dueClaimLimit, time.Second)
+	due, _ := store.DueLeases(slotOf("s1"), future, dueClaimLimit, time.Second)
 	if len(due) != 1 || due[0] != "s1" {
 		t.Fatalf("the eager reconcile must restore the lease entry so the worker sees it, got due=%v", due)
 	}
@@ -725,7 +725,7 @@ func TestLeaseTailDropRecoveredByEagerReconcile(t *testing.T) {
 	if st, _ := mgr.expireLease("s1", future); st != "EXPIRED" {
 		t.Fatalf("the restored lapsed lease must expire to idle, got %q", st)
 	}
-	claimed, _ := store.ClaimDue(future, dueClaimLimit, time.Second)
+	claimed, _ := store.ClaimDue(slotOf("s1"), future, dueClaimLimit, time.Second)
 	fired := 0
 	for _, id := range claimed {
 		if mgr.fireDue(id) {

@@ -35,14 +35,15 @@ import (
 // (gen,wake_id) fence remains the safety boundary that makes any leaked duplicate
 // harmless, so work-sharding is an optimization over a still-correct full sweep.
 
-// ownershipSlots (S) is the number of virtual ownership slots. It is 1 for #14:
-// subscription STATE is not slot-homed yet (the S-slot {__ds:h} tagging is #15),
-// so OwnedSlots() runs the degenerate single-slot case — one ownership slot gates
-// ALL background work and exactly one replica owns it at a time. That degenerate
-// case is precisely what delivers O(total owed): the slot owner runs the workers,
-// every other replica idles. #15 raises this to 256 (h = fnv32a(subId) % S) once
-// state is slot-homed; the HRW math below is already general over slot indices.
-const ownershipSlots = 1
+// ownershipSlots (S) is the number of virtual ownership slots — the SAME S the
+// keyspace is slot-homed into (subSlots in keys.go): ownership slot h owns the
+// {__ds:h} keyspace shard, so a replica that holds slot h runs the lease/retry/due
+// workers over ds:{__ds:h}:sched:* exactly. #14 ran the degenerate single-slot case
+// (one ownership slot gated ALL background work); #15 raises it to subSlots so
+// ownedSlots() iterates the real S slots and the per-slot schedules shard with the
+// subs. The HRW math below was already general over slot indices, so this is the
+// one-line lift — adding/removing a replica still reassigns only ~1/N of slots.
+const ownershipSlots = subSlots
 
 // SlotID is a validated virtual ownership slot index in [0, S). It is a distinct
 // type (not a bare int) so a slot can only be obtained through a constructor that

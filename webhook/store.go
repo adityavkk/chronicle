@@ -41,8 +41,12 @@ type Store interface {
 	// link (cursor preserved), else removed and de-indexed.
 	Unlink(id, path string, stillGlob bool) error
 
-	// StreamSubscribers returns the subscription ids linked to a stream.
-	StreamSubscribers(path string) ([]string, error)
+	// StreamSubscribers returns the subscriber ids linked to a stream by
+	// scatter-gathering across the per-slot fan-out shards named in the stream's
+	// occupied-slots bitmap, and reports slotsProbed — how many slots it probed —
+	// for the FanOut gate-#2 metric (#15). The bitmap collapses the probe set from S
+	// to occupied-slots-per-stream.
+	StreamSubscribers(path string) (ids []string, slotsProbed int, err error)
 
 	// ReconcileIndexes rebuilds the per-stream fan-out index from the canonical
 	// links, re-adding any membership a crash dropped between the link write and
@@ -85,16 +89,17 @@ type Store interface {
 	// leaked back for claim_due to churn). Returns RESTORED, INTACT, or NOSUB.
 	RestoreLease(id string, owed bool, now time.Time) (string, error)
 
-	// DueLeases / DueRetries take due schedule members by re-scoring them forward
-	// to a visibility window (never removing them), so a crashed worker's item
-	// recurs (docs/research/07 §6.1).
-	DueLeases(now time.Time, limit int, visibility time.Duration) ([]string, error)
-	DueRetries(now time.Time, limit int, visibility time.Duration) ([]string, error)
+	// DueLeases / DueRetries take due schedule members from SLOT h by re-scoring them
+	// forward to a visibility window (never removing them), so a crashed worker's item
+	// recurs (docs/research/07 §6.1). Under slot-homing the schedule shards with the
+	// subs, so the worker iterates its owned slots and drains each per-slot ZSET (#15).
+	DueLeases(h int, now time.Time, limit int, visibility time.Duration) ([]string, error)
+	DueRetries(h int, now time.Time, limit int, visibility time.Duration) ([]string, error)
 
-	// ClaimDue takes due members of the "needs a wake" due-set outbox, re-scoring
-	// them forward like DueLeases/DueRetries (Move 2). The dueWorker drains it in
-	// O(owed) instead of re-evaluating every subscription.
-	ClaimDue(now time.Time, limit int, visibility time.Duration) ([]string, error)
+	// ClaimDue takes due members of slot h's "needs a wake" due-set outbox, re-scoring
+	// them forward like DueLeases/DueRetries (Move 2). The dueWorker drains each owned
+	// slot's outbox in O(owed) instead of re-evaluating every subscription.
+	ClaimDue(h int, now time.Time, limit int, visibility time.Duration) ([]string, error)
 
 	// ClearDue removes a subscription's due-set mark when it is no longer owed (the
 	// dueWorker's reconcile). claim_due never removes, so this is how a caught-up or
