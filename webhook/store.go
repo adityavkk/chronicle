@@ -66,6 +66,21 @@ type Store interface {
 	// ExpireLease clears an expired lease, returning the subscription to idle.
 	ExpireLease(id string, now time.Time) (string, error)
 
+	// LeasedIDs returns the members currently in the lease schedule ZSET — the set
+	// the lease worker can see. The failover-aware eager reconcile diffs the durable
+	// subscription set against this to find a live/waking sub whose lease tail a
+	// failover dropped (absent here, but live/waking in its hash).
+	LeasedIDs() ([]string, error)
+
+	// RestoreLease re-derives a stranded subscription's dropped schedule entries
+	// from its durable sub hash (issue #13): it re-ZADDs the lease entry at the
+	// hash's lease_until_ns while the sub is still live/waking, and re-owes the due
+	// mark when owed (pending work, which the caller computes — the single-slot
+	// script cannot read a stream tail). Conditioned on the live/waking phase so a
+	// sub a concurrent release/ack idled is left untouched (no stale schedule entry
+	// leaked back for claim_due to churn). Returns RESTORED, INTACT, or NOSUB.
+	RestoreLease(id string, owed bool, now time.Time) (string, error)
+
 	// DueLeases / DueRetries take due schedule members by re-scoring them forward
 	// to a visibility window (never removing them), so a crashed worker's item
 	// recurs (docs/research/07 §6.1).

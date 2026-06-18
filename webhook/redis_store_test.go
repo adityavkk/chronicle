@@ -204,6 +204,78 @@ func dueCard(t *testing.T, client goredis.UniversalClient) int64 {
 	return n
 }
 
+// TestRestoreLeaseReDerivesDroppedTail is the issue-#13 store contract for the
+// failover-aware eager reconcile: a live/waking sub whose lease (and due) tail a
+// failover dropped is re-derived from the durable sub hash. The re-ZADD restores
+// the exact lease_until_ns the hash carries (so the lease worker sees the same
+// lapse), re-owes the due mark only when owed, and is conditioned on the live/
+// waking phase so an idled sub is left untouched (no stale schedule entry leaked).
+func TestRestoreLeaseReDerivesDroppedTail(t *testing.T) {
+	s, client := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+
+	// Arm a webhook wake: phase=waking, lease ZADDed, due ZADDed (the arm outbox).
+	res, err := s.ArmWake("s1", now, 1000, true, "w_a")
+	if err != nil || !res.Armed {
+		t.Fatalf("arm = %+v err=%v", res, err)
+	}
+	// The deadline the durable hash carries — what restore_lease.lua re-derives.
+	sub, _, _ := s.Get("s1")
+	if sub.LeaseUntilNs == 0 {
+		t.Fatalf("armed webhook lease should parse a non-zero lease_until_ns, got %d", sub.LeaseUntilNs)
+	}
+
+	// The L3 fault: drop the lease AND due tail, leaving the sub hash intact.
+	if err := client.ZRem(ctx, leaseZKey, "s1").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ZRem(ctx, dueZKey, "s1").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if ids, _ := s.LeasedIDs(); len(ids) != 0 {
+		t.Fatalf("lease tail should be dropped, LeasedIDs=%v", ids)
+	}
+
+	// Restore: owed (the sub has pending work) re-ZADDs both entries, re-derived
+	// from the durable hash's lease_until_ns.
+	if st, err := s.RestoreLease("s1", true, now); err != nil || st != "RESTORED" {
+		t.Fatalf("RestoreLease = %q err=%v, want RESTORED", st, err)
+	}
+	got, err := client.ZScore(ctx, leaseZKey, "s1").Result()
+	if err != nil {
+		t.Fatalf("lease entry should be restored: %v", err)
+	}
+	// Re-derived from the hash, so it matches the parsed deadline (within the float
+	// rounding the Lua double already carried, far under a lease's ms granularity).
+	if delta := got - float64(sub.LeaseUntilNs); delta > 1e6 || delta < -1e6 {
+		t.Fatalf("restored lease score %v should match the hash deadline %d (delta %v ns)", got, sub.LeaseUntilNs, delta)
+	}
+	if n := dueCard(t, client); n != 1 {
+		t.Fatalf("owed restore should re-owe the due mark, got card %d", n)
+	}
+	if ids, _ := s.LeasedIDs(); len(ids) != 1 || ids[0] != "s1" {
+		t.Fatalf("LeasedIDs should now see the restored sub, got %v", ids)
+	}
+
+	// An idle sub is never stranded: RestoreLease must leave the schedule untouched
+	// (else a stale entry would churn the lease ZSET forever via claim_due).
+	if st, _ := s.Release("s1", res.Generation, res.WakeID, res.Generation); st != "OK" {
+		t.Fatalf("release to idle = %q, want OK", st)
+	}
+	if ids, _ := s.LeasedIDs(); len(ids) != 0 {
+		t.Fatalf("release should drop the lease entry, got %v", ids)
+	}
+	if st, err := s.RestoreLease("s1", true, now); err != nil || st != "INTACT" {
+		t.Fatalf("RestoreLease on an idle sub = %q err=%v, want INTACT (no stale entry)", st, err)
+	}
+	if ids, _ := s.LeasedIDs(); len(ids) != 0 {
+		t.Fatalf("RestoreLease must not leak a lease entry for an idle sub, got %v", ids)
+	}
+}
+
 // TestDueSetArmOutboxesAndAckClears is the core Move-2 round trip: arm_wake's
 // ARMED branch outboxes the wake into the due-set, a coalescing re-arm (BUSY) does
 // not add a second mark, and ack(done=1) clears it.
