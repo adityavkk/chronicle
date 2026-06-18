@@ -71,10 +71,13 @@ type Config struct {
 	// default; enable only on a trusted network.
 	WebhookAllowPrivate bool
 
-	// SweepInterval is how often the recovery sweep re-evaluates every
-	// subscription against its durable cursor (default 2s). The sweep is the
-	// backstop for a wake lost to a crash; lengthen it to trade recovery latency
-	// for less steady-state Redis load on a large subscription keyspace.
+	// SweepInterval is the coarse recovery FLOOR — how often the full cursor
+	// reconcile runs on a timer with no triggering event (issue #13; default 30s).
+	// It is NOT the old 2s fast sweep: the latency-sensitive recovery cases are now
+	// event-triggered (boot, a Redis reconnect, an append/delivery error and, from
+	// #14, an owner-epoch bump each fire a reconcile at the moment they happen), so
+	// the timer only bounds the one eventless case (an owed mark on an unowned,
+	// quiet slot). Steady-state delivery latency is unchanged by the longer floor.
 	SweepInterval time.Duration
 
 	// ReconcileInterval is how often the slow reconcile loop runs (missed glob
@@ -123,7 +126,7 @@ func DefaultConfig() Config {
 		SSEReconnectInterval: 60 * time.Second,
 		PublicBaseURL:        "http://localhost:4437",
 		Subscriptions:        true,
-		SweepInterval:        2 * time.Second,
+		SweepInterval:        30 * time.Second, // coarse recovery floor (issue #13); recovery is event-triggered, not a 2s sweep
 		ReconcileInterval:    30 * time.Second,
 		Consistency:          webhook.TierA, // no WAIT by default — best latency, at-least-once
 		WaitReplicas:         1,             // the realistic Redis Software HA ceiling (06:70), used only by Tier B
