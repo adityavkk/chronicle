@@ -43,6 +43,18 @@ type SubscriptionTuning struct {
 	HeartbeatInterval     time.Duration
 	SlotLeaseTTL          time.Duration
 	SlotReconcileInterval time.Duration
+
+	// ---- tunable consistency (issue #16) ----
+	// Consistency is the durability tier applied to the fence-minting writes
+	// (arm_wake/claim generation HINCRBY). TierA (the zero value) issues no WAIT —
+	// today's behavior; TierB issues WAITAOF and checks the returned pair before
+	// dispatch (durability, not linearizability — the fence stays the only
+	// exclusivity guard). WaitReplicas / WaitTimeoutMs parameterize Tier B's barrier
+	// (1 replica on STANDARD_HA, 0 on a single AOF Redis). Per-deployment here; the
+	// tier type is also the vocabulary for the documented per-subscription surface.
+	Consistency   webhook.ConsistencyTier
+	WaitReplicas  int
+	WaitTimeoutMs int
 }
 
 // storePath maps a stream-root-relative subscription path ("events/abc") to the
@@ -73,6 +85,12 @@ type SubscriptionService interface {
 	Start()
 	Stop()
 	RunSweep()
+	// Promote drives the failover-aware eager reconcile a DR promotion requires
+	// (issue #16): on an active-passive failover the DR layer calls this so each
+	// owner re-establishes slot ownership on the promoted primary and re-derives any
+	// schedule tail the async-replication RPO window dropped. *webhook.Manager
+	// satisfies it.
+	Promote()
 }
 
 // streamAdapter adapts the durable stream store to webhook.Streams: the seam the
@@ -174,7 +192,14 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 	if rs != nil {
 		opts.Lister = redisLister{rs: rs}
 	}
-	mgr, err := webhook.NewManager(webhook.NewRedisStore(client).WithMetrics(tuning.Metrics), streamAdapter{st: streamStore, rs: rs}, opts)
+	// Tier B (issue #16) arms the WAITAOF durability barrier on the fence-minting
+	// writes; TierA/C leave the store on the no-WAIT default. WithConsistency is a
+	// no-op for the zero (TierA) value, so a deployment that never sets the tier is
+	// byte-for-byte unchanged.
+	store := webhook.NewRedisStore(client).
+		WithConsistency(tuning.Consistency, tuning.WaitReplicas, tuning.WaitTimeoutMs).
+		WithMetrics(tuning.Metrics)
+	mgr, err := webhook.NewManager(store, streamAdapter{st: streamStore, rs: rs}, opts)
 	if err != nil {
 		return nil, nil, err
 	}
