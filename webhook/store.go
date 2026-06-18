@@ -51,20 +51,24 @@ type Store interface {
 
 	// ArmWake issues a new wake generation if the subscription is idle; armLease
 	// arms the lease at issue (webhook) versus deferring it to claim (pull-wake).
-	ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error)
+	// An optional OwnerScope makes arm_wake inline the owner-epoch fence (#14).
+	ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, owner ...OwnerScope) (ArmResult, error)
 
 	// Claim is the pull-wake compare-and-set claim (PROTOCOL §7.2).
 	Claim(id, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error)
 
 	// Ack fences then applies acks forward-only; done releases the lease, else it
-	// extends the lease as a heartbeat (PROTOCOL §7.1, §7.2).
-	Ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error)
+	// extends the lease as a heartbeat (PROTOCOL §7.1, §7.2). An optional OwnerScope
+	// makes ack inline the owner-epoch fence (#14).
+	Ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, owner ...OwnerScope) (string, error)
 
-	// Release fences then releases the lease without acking (PROTOCOL §7.2).
-	Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error)
+	// Release fences then releases the lease without acking (PROTOCOL §7.2). An
+	// optional OwnerScope makes release inline the owner-epoch fence (GAP3, #14).
+	Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, owner ...OwnerScope) (string, error)
 
-	// ExpireLease clears an expired lease, returning the subscription to idle.
-	ExpireLease(id string, now time.Time) (string, error)
+	// ExpireLease clears an expired lease, returning the subscription to idle. An
+	// optional OwnerScope makes expire_lease inline the owner-epoch fence (#14).
+	ExpireLease(id string, now time.Time, owner ...OwnerScope) (string, error)
 
 	// LeasedIDs returns the members currently in the lease schedule ZSET — the set
 	// the lease worker can see. The failover-aware eager reconcile diffs the durable
@@ -98,8 +102,9 @@ type Store interface {
 	ClearDue(id string) error
 
 	// ScheduleRetry records a webhook failure and persists next_attempt; returns
-	// the new retry count.
-	ScheduleRetry(id string, now, nextAttempt time.Time) (int, error)
+	// the new retry count. An optional OwnerScope makes schedule_retry inline the
+	// owner-epoch fence (#14); a FENCED (deposed) caller schedules nothing (count 0).
+	ScheduleRetry(id string, now, nextAttempt time.Time, owner ...OwnerScope) (int, error)
 
 	// RecordSuccess clears webhook failure bookkeeping after an accepted delivery.
 	RecordSuccess(id string) error
@@ -164,6 +169,7 @@ type ArmResult struct {
 	Armed      bool // a new wake was issued
 	Busy       bool // a wake was already in flight or a lease was held
 	NoSub      bool // the subscription no longer exists
+	Fenced     bool // an owner-scoped caller was deposed (the inlined owner-epoch fence, #14)
 	Generation int64
 	WakeID     string
 }
