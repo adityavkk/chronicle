@@ -71,6 +71,7 @@ type config struct {
 	// adds the G=1-vs-G differential.
 	redisURL   string
 	gShards    int
+	slots      int // ownership-exclusivity (T3): number of ds:{ownership} slots contended
 	leaseTTLMs int
 	holdMs     int
 	thinkMs    int
@@ -109,6 +110,7 @@ func main() {
 	flag.StringVar(&c.ramp, "ramp", "6,12,24", "contention: comma-separated claimant ramp")
 	flag.BoolVar(&c.c3, "c3", false, "contention: also run the G=1 baseline and assert C3 (the knee moves ~Gx; gate #6)")
 	flag.BoolVar(&c.sharded, "sharded", false, "contention/shard-linz: use the chronicle per-(subId,g) capability (ClaimShard) rather than client-side G subscriptions")
+	flag.IntVar(&c.slots, "slots", 4, "ownership-exclusivity (T3): number of ds:{ownership} slots concurrent claimants contend over")
 	flag.Parse()
 
 	r := newReceiver()
@@ -164,14 +166,17 @@ func run(c config, r *receiver) error {
 		return runLeaseTailDrop(c, nem)
 	}
 
-	// ownership-exclusivity (T3) and slot-isolation (T5) are acceptance-gate
-	// scaffolds for mechanisms that do not exist on today's code (#14 / #15); they
-	// reach the cluster, exercise the matching nemesis seam, and report GATED
-	// (scenario_gated.go).
+	// ownership-exclusivity (T3) is now LIVE (#14 landed claim_shard.lua /
+	// check_owner.lua / ds:{ownership}). Like shard-linz it drives the real CAS
+	// against Redis directly with concurrent claimants + a gcPause nemesis, records
+	// the history, and checks it against the porcupine shardModel — no cluster
+	// (scenario_ownership.go). It is THE acceptance gate proving claim_shard is a
+	// real single-holder CAS, not a silently-dropping LWW.
 	if c.scenario == "ownership-exclusivity" {
-		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
-		return runOwnershipExclusivity(c, nem)
+		return runOwnershipExclusivity(c)
 	}
+	// slot-isolation (T5) is still an acceptance-gate scaffold for the S-slot
+	// {__ds:h} state shard that lands in #15 (scenario_gated.go).
 	if c.scenario == "slot-isolation" {
 		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
 		return runSlotIsolation(c, nem)
