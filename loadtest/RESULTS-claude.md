@@ -56,7 +56,14 @@ execute the moment a permitted GCP path is available.
 - **T1/T2/T4/L1 stay GREEN** under the owner-epoch fence layered ABOVE (never replacing) the `(gen,wake_id)` fence — that fence is byte-for-byte unchanged. bump-on-transfer-only fences a deposed-then-resumed owner. Build/vet/test-short + full webhook Redis integration GREEN.
 - **Gate #4** (membership churn window: coverage gap ≤ membership-lease TTL + RTT, ZERO lost wakes / ZERO double-grants; total work O(total owed) regardless of N — the inverse of #10's gate #1) and **L2 / L4** need ≥2 replicas + chaos on a clean multi-node rig — **env-scoped** (the local colima VM is co-tenanted with the other orchestrator's k3d cluster, which must not be touched). Rig built: `loadtest/spec/sweep-10k-churn.yaml` (replicas≥2) + `ltctl gate4` (pod-kill the slot owner, scrape coverage-gap/ownership/fence metrics); recorded **PENDING-CLOUD** with the exact reproduce commands.
 
-### #15 — Slot-homed state (Move 1) — PENDING (#14)
+### #15 — Slot-homed state shard (Move 1) (integrated)
+- Slot-home a whole subscription's key set under one `{__ds:h}` tag, `h = fnv32a(subId) % 256` (Go `hash/fnv`, **FNV-1a — not CRC16**; `slotOf` strips the `#11 :g:<n>` suffix so a sub's g-shards home to its slot and a drained shard member resolves back to `subShardKey`). `subKey`/`linksKey` re-tagged; `subsKey`/`leaseZKey`/`retryZKey`/`dueZKey` → `func(h int)`; `streamSubsKey(h,path)` per-slot fan-out shard; the typed `OccupiedSlots` bitmap (`ds:{__ds-occ}:streamslots:<path>`). JWKS/token singletons keep the fixed `{__ds}` tag; `{ownership}` keys unchanged. `ownershipSlots = subSlots` so `ownedSlots()` iterates the real S slots (was the degenerate S=1).
+- **GAP4**: `List()`/`ReconcileIndexes()`/`LeasedIDs()` UNION across the S per-slot sets (pipelined); `StreamSubscribers` scatter-gathers across the occupied-slots bitmap and reports `slotsProbed`; `DueLeases`/`DueRetries`/`ClaimDue` take a slot `h`; the lease/retry/due workers iterate `ownedSlots()` draining per-slot schedules under each slot's owner scope. Every per-sub atomic script stays byte-for-byte single-slot (one `h` per id) — proven single-Redis-cluster-slot by the guard test (CRC16 of the tag).
+- `OnStreamAppend` → `S` parallel pipelined `SMEMBERS` over occupied slots; `FanOut(dur, slotsProbed, subs)` wired and **visible in `/metrics`** (`chronicle_fanout_seconds`, `chronicle_fanout_slots_probed`). Shadow-write + **lazy per-sub migration** (read old `{__ds}` tag, write new `{__ds:h}`, flip) — reversible (S is a const, legacy readers retained, copy-then-flip).
+- **T5 (THE acceptance gate) PASS** — the live `slot-isolation` differential checker (local Redis): 320 subs over 8 streams spanning **204/256** keyspace slots, the S-slot scatter-gather subscriber set **≡ the independent reference ≡ the brute-force all-S union** for every stream, **zero foreign wakes**, held under concurrent ownership-slot churn (the two axes are isolated); every sub whole-homed in one cluster slot; a mis-tag **DETECTED** (CROSSSLOT). Pure differential unit-tested (`go test ./jepsen/checker -run SlotLeakage`).
+- **T1/T2/T4/L1 stay GREEN** under slot-homing (fence/cursor slot-homed but byte-for-byte unchanged), re-run via the **local-binary path** (chronicle on `:4437` + one Redis): `single-holder-linz` (T1) linearizable; `stale-gen-noop` (T4) FENCED no-op; `cursor-monotonic` (T2) forward-only under churn; `baseline`/`at-least-once`/`index-repair` (L1) 6/6 streams at tail. Build/vet/`test -short` + full webhook Redis integration GREEN.
+- **Gate #2** (the deciding fan-out p99) is **PENDING-CLOUD** — loopback erases the max-node-RTT it measures. The implementation is reversible + T5-correct, so it SHIPS with gate #2 recorded PENDING-CLOUD; the production enable/defer decision awaits the cloud p99 (see "Gate #2" below).
+
 ### #16 — DR + capstone — PENDING (#14, #15)
 
 ## Gate ledger (doc-05 gates #1–#6)
@@ -67,8 +74,50 @@ execute the moment a permitted GCP path is available.
 | #1 | #10 | O(N·K) premise (CPU-vs-N at K=10k) | PENDING-CLOUD (VPC-SC) — spec + cmd committed |
 | #3 | #12 | due-set write amplification | PENDING-CLOUD — spec `due-10k.yaml` |
 | #4 | #14 | membership churn window (coverage gap ≤ TTL+RTT, 0 lost / 0 double-grant) | T3 acceptance gate GREEN (local); the churn-window number is PENDING-CLOUD (needs ≥2 replicas + chaos; rig built: sweep-10k-churn.yaml + ltctl gate4) |
-| #2 | #15 | OnStreamAppend fan-out p99 (S=2/4/8/256, real multi-node) | (pending; will be PENDING-CLOUD — loopback erases max-node-RTT) |
+| #2 | #15 | OnStreamAppend fan-out p99 (S=2/4/8/256, real multi-node) | **PENDING-CLOUD** — loopback erases max-node-RTT; spec `fanout-gate2.yaml` + `ltctl gate2` + FanOut metric committed; T5 correctness GREEN locally |
 | #5 | #16 | failover fence drill (STANDARD_HA) | (pending; will be PENDING-CLOUD) |
+
+## Gate #2 — OnStreamAppend fan-out p99 (the deciding number for slot-homing) — PENDING-CLOUD
+
+Pre-slot-homing, `OnStreamAppend` is ONE `SMEMBERS`. Slot-homed it is `S` PARALLEL
+pipelined `SMEMBERS` over the stream's OCCUPIED slots — go-redis groups per cluster
+node, so wall-clock is **~max-node-RTT** (the slots span nodes), the real regression.
+The occupied-slots bitmap mitigation keeps the probe set at occupied-slots-per-stream,
+not `S`.
+
+**Why PENDING-CLOUD:** the number gate #2 decides on is the max-node-RTT — and
+**loopback / single-node Redis ERASES it**. The local run below proves CORRECTNESS
+(T5) and that the FanOut metric is wired and the bitmap holds, but its p99 is a
+loopback figure, not the cluster regression. The implementation is reversible
+(shadow-write + lazy migration; `S` is a compile-time const) and T5-correct, so it
+**SHIPS** with gate #2 recorded PENDING-CLOUD; the production **enable/defer** decision
+(05's recommendation) awaits the cloud p99.
+
+**Local loopback sanity (single `redis:7`, `chronicle -metrics-listen :9099`):** over the
+T1/T2/L1 webhook runs, `chronicle_fanout_seconds` recorded 724 fan-outs, p99 well under
+5 ms; `chronicle_fanout_slots_probed` ≤ 4 for every append (never 256) — the bitmap
+mitigation collapses the probe set to occupied-slots-per-stream as designed. (Loopback,
+so NOT the gate-#2 number.)
+
+**The S=2/4/8/256 sweep + exact command (real multi-node Redis Cluster, ≥2 chronicle replicas):**
+`S = subSlots` is a compile-time const, so each S is a SEPARATE SUT image — build
+chronicle with `const subSlots = <S>` for S ∈ {2,4,8,256}, push four tags, then:
+
+```
+cd loadtest && ./ltctl.sh up
+for S in 2 4 8 256; do LT_TAG="s$S" ./ltctl.sh gate2 spec/fanout-gate2.yaml; done
+```
+
+`gate2` (committed) deploys `spec/fanout-gate2.yaml` at replicas≥2 (so the `{__ds:h}`
+slots genuinely span Redis nodes), drives the wide-stream webhook fan-out workload, and
+scrapes `chronicle_fanout_seconds` (the p99 gate) + `chronicle_fanout_slots_probed` (the
+bitmap effect) into `gate2-<S>-metrics.txt` / `gate2-results.tsv`.
+
+**Pass criteria:** `chronicle_fanout_seconds` p99 within the wake-latency budget at S=256
+(the regression = `fanout_p99(S) − single-SMEMBERS baseline`) — **within budget ⇒ enable
+slot-homing; over budget ⇒ DEFER per 05** and #16 runs its non-T5 suite against the
+single-slot ownership build. `slots_probed` must track occupied-slots-per-stream (not S).
+The K=10k sweep p99 baseline reproduces (< 1500 ms) as the regression floor.
 
 ## K=10k regression floor
 

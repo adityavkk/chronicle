@@ -50,7 +50,7 @@ just without the k3d `kubectl` nemesis. The namespaced k3d cluster
 | **L3** lease-tail-drop recovery | `lease-tail-drop` | **GREEN** (manual ZREM) | the lease ZSET entry `ds:{__ds}:sched:lease` was ZREM'd with the sub hash left `live`; the cursor-reading sweep recovered it (fresh claim rotated gen 1→2, acked to tail) and the deposed ack was `409 FENCED`. The scenario's `dropLeaseTail` issues the ZREM via `kubectl`, so the **scenario** form needs k3d; the property was reproduced directly here |
 | (regression) | `expired-lease-takeover` | **GREEN** | fence rotated gen 1→2 on takeover; deposed ack `409 FENCED` |
 | **T3** ownership exclusivity | `ownership-exclusivity` | **GATED (#14)** | reaches the cluster, `killSlotOwner` cleanly no-ops (no ownership record yet); the porcupine CAS model is unit-tested (`go test ./jepsen/checker/ -run TestShardModel`) |
-| **T5** slot isolation | `slot-isolation` | **GATED (#15)** | reports gated; needs the S-slot `{__ds:h}` tagging |
+| **T5** slot isolation | `slot-isolation` | **GREEN (#15, live)** | differential checker: 320 subs / 8 streams spanning 204/256 slots, scatter-gather ≡ reference ≡ brute-force all-S union, 0 foreign wakes under ownership churn, every sub whole-homed, mis-tag detected (see "Slot-homed state shard (issue #15)") |
 
 **Pure-core unit floor (the real gate): all green** — `go test -short ./...`
 (root + `loadgen`) covers the T1 lease model (13 cases), the T3 ownership-CAS
@@ -63,7 +63,7 @@ builders, and the metrics golden list.
 ```sh
 jepsen/up.sh                                                   # CLUSTER=… to namespace it
 jepsen/run.sh single-holder-linz cursor-monotonic stale-gen-noop lease-tail-drop at-least-once
-jepsen/run.sh ownership-exclusivity slot-isolation             # gated scaffolds (#14/#15)
+jepsen/run.sh ownership-exclusivity slot-isolation             # T3 (#14) + T5 (#15), live local-Redis drivers
 jepsen/down.sh                                                 # ALWAYS tear down
 ```
 
@@ -331,3 +331,64 @@ tenant, so these are recorded honestly as env-scoped rather than executed here:
   #1), and the K=10k sweep p99 stays under the 1500 ms SLO (RESULTS-gke.md floor
   509 ms). The orchestrator owns the cloud; do **not** run GKE from the worktree.
   Reproduce: `cd loadtest && ./ltctl.sh up && ./ltctl.sh gate4 spec/sweep-10k-churn.yaml` (then `./ltctl.sh down`).
+
+## Slot-homed state shard (issue #15)
+
+Slot-home a whole subscription's key set under one `{__ds:h}` tag, `h = fnv32a(subId)
+% 256` (FNV-1a, **not** the Redis CRC16 the client already applies to the tag). The
+lease/retry/due schedule ZSETs shard *with* the subs, so the single global schedule
+ceiling is gone; `OnStreamAppend` becomes `S` parallel pipelined `SMEMBERS` gated by a
+per-stream occupied-slots bitmap. The owner-epoch / `(gen,wake_id)` fences are
+byte-for-byte unchanged — only their keys are re-tagged — so T1/T2/T4/L1 are a pure
+regression bar.
+
+### T5 — no cross-subscriber leakage (the acceptance gate) — PASS
+
+T5 is a **live** local-Redis differential checker (`scenario_slot.go`), promoted from
+the gated scaffold. It creates many subscriptions spread by `fnv32a` across the S
+keyspace slots, each linked to one of a few streams, then — WHILE an ownership-slot
+churn nemesis runs (orthogonal to the `{__ds:h}` keyspace, so it must not perturb the
+result) — asserts for every stream that the implementation's bitmap-gated
+scatter-gather subscriber set EQUALS both the independent reference set the harness
+linked AND a brute-force union over all S per-slot fan-out shards, with zero foreign
+ids; then that every sub is whole-homed in one cluster slot and a mis-tag lands in a
+DIFFERENT slot (CROSSSLOT detected, not silent).
+
+| subs | streams | slots spanned | scatter ≡ reference ≡ brute | foreign wakes | verdict |
+| --- | --- | --- | --- | --- | --- |
+| 320 | 8 | 204 / 256 | yes (every stream, 12 rounds under churn) | 0 | **PASS** |
+
+**T5: PASS.** The S-slot scatter-gather subscriber set equals the unsharded reference;
+no foreign wake; every sub whole-homed in one slot; CROSSSLOT detected. The pure
+differential + the CRC16 single-slot oracle are unit-tested
+(`go test ./jepsen/checker -run 'SlotLeakage|SubKeysOneSlot|ClusterSlot|DsSlotOf'`) and
+the webhook guard test asserts the static precondition
+(`go test ./webhook -run 'SlotHomingGuard|SlotOfIsFNV|DecodeOccupied'`).
+Reproduce: `go run ./jepsen/checker -scenario slot-isolation -redis-url redis://localhost:6379/14`.
+
+### T1 / T2 / T4 / L1 regression bar — still GREEN under slot-homing
+
+Re-run via the local-binary path (chronicle on `:4437` over one Redis) after slot-homing:
+
+| Property | Scenario | Verdict | Evidence |
+| --- | --- | --- | --- |
+| **T1** single-holder lease | `single-holder-linz` | **GREEN** | `linearizable: yes`, 395 ops (375 claims, 20 grants), 4 workers + gcPause |
+| **T2** cursor monotonicity | `cursor-monotonic` | **GREEN** | 1192 cursor samples / 6 streams under origin churn, no regression / no phantom advance |
+| **T4** no stale-gen effect | `stale-gen-noop` | **GREEN** | deposed ack `409 FENCED`, durable cursor byte-identical; current-gen ack advanced it |
+| **L1** at-least-once | `baseline` / `at-least-once` / `index-repair` | **GREEN** | 6/6 streams at tail in all three; `index-repair` (drop-fanout-index + kill-origin) exercises the new per-slot bitmap / `ReconcileIndexes` / scatter-gather end-to-end |
+
+The fence/cursor logic is slot-homed but unchanged, so these hold; the fan-out re-tag +
+occupied-slots bitmap is exercised end-to-end by `index-repair` (the reconcile loop
+re-SADDs the per-slot shard and re-SETBITs the bitmap, and the scatter-gather delivers).
+
+### Gate #2 — fan-out p99 — PENDING-CLOUD
+
+Gate #2 (the append→wake fan-out p99 at S=2/4/8/256) is the number that decides whether
+slot-homing ships or is deferred, and it needs a **real multi-node Redis Cluster** —
+loopback erases the max-node-RTT it measures. Recorded **PENDING-CLOUD**: the spec
+(`loadtest/spec/fanout-gate2.yaml`), the `ltctl gate2` driver, and the `FanOut` metric
+(`chronicle_fanout_seconds` / `chronicle_fanout_slots_probed`, verified live in
+`/metrics`) are committed; see `loadtest/RESULTS-claude.md` "Gate #2" for the reading
+guide, pass criteria, and the exact S-sweep command. Local loopback sanity: 724
+fan-outs recorded, `slots_probed` ≤ 4/append (never 256 — the bitmap mitigation holds),
+p99 < 5 ms (loopback, NOT the gate-#2 number).
