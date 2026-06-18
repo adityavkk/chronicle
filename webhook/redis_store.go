@@ -35,38 +35,45 @@ func (s *RedisStore) ctx() context.Context { return context.Background() }
 
 const slotMigrationCompleteField = "_slot_migration_complete"
 
+const (
+	slotMigrationLockTTL  = time.Minute
+	slotMigrationLockPoll = 10 * time.Millisecond
+)
+
 type subscriptionKeys struct {
-	slot     int
-	sub      string
-	links    string
-	subs     string
-	lease    string
-	retry    string
-	due      string
-	oldSub   string
-	oldLinks string
-	oldSubs  string
-	oldLease string
-	oldRetry string
-	oldDue   string
+	slot          int
+	sub           string
+	links         string
+	subs          string
+	lease         string
+	retry         string
+	due           string
+	migrationLock string
+	oldSub        string
+	oldLinks      string
+	oldSubs       string
+	oldLease      string
+	oldRetry      string
+	oldDue        string
 }
 
 func keysForSubscription(id string) subscriptionKeys {
 	h := subscriptionSlot(id)
 	return subscriptionKeys{
-		slot:     h,
-		sub:      subKeyForSlot(id, h),
-		links:    linksKeyForSlot(id, h),
-		subs:     subsKey(h),
-		lease:    leaseZKey(h),
-		retry:    retryZKey(h),
-		due:      dueSetKey(h),
-		oldSub:   legacySubKey(id),
-		oldLinks: legacyLinksKey(id),
-		oldSubs:  legacySubsKey(),
-		oldLease: legacyLeaseZKey(),
-		oldRetry: legacyRetryZKey(),
-		oldDue:   legacyDueSetKey(),
+		slot:          h,
+		sub:           subKeyForSlot(id, h),
+		links:         linksKeyForSlot(id, h),
+		subs:          subsKey(h),
+		lease:         leaseZKey(h),
+		retry:         retryZKey(h),
+		due:           dueSetKey(h),
+		migrationLock: subKeyForSlot(id, h) + ":migration_lock",
+		oldSub:        legacySubKey(id),
+		oldLinks:      legacyLinksKey(id),
+		oldSubs:       legacySubsKey(),
+		oldLease:      legacyLeaseZKey(),
+		oldRetry:      legacyRetryZKey(),
+		oldDue:        legacyDueSetKey(),
 	}
 }
 
@@ -78,16 +85,16 @@ func scheduleKeysForSlot(slot OwnershipSlot) (lease, retry, due string) {
 // migrateSubscription lazily copies one legacy ds:{__ds} subscription into its
 // new ds:{__ds:h} home before a per-subscription operation runs. It writes the
 // complete new key set first, including schedules and fan-out bitmap entries,
-// then removes the old key set; no Lua script is ever invoked with keys from
-// both homes.
+// then marks the new home complete and removes the old key set; no Lua script is
+// ever invoked with keys from both homes.
 func (s *RedisStore) migrateSubscription(id string) error {
 	k := keysForSubscription(id)
 	ctx := s.ctx()
-	complete, err := s.client.HGet(ctx, k.sub, slotMigrationCompleteField).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
+	complete, err := s.subscriptionMigrationComplete(ctx, k)
+	if err != nil {
 		return err
 	}
-	if complete == "1" {
+	if complete {
 		exists, err := s.client.Exists(ctx, k.oldSub).Result()
 		if err != nil {
 			return err
@@ -114,8 +121,46 @@ func (s *RedisStore) migrateSubscription(id string) error {
 	if err != nil {
 		return err
 	}
-	if complete == "1" {
-		return s.cleanupLegacySubscription(id, mapKeys(links))
+	token, err := s.acquireSubscriptionMigrationLock(ctx, k)
+	if err != nil {
+		return err
+	}
+	err = s.migrateSubscriptionLocked(ctx, id, k, mapKeys(links))
+	releaseErr := s.releaseSubscriptionMigrationLock(ctx, k, token)
+	if err != nil {
+		return err
+	}
+	if releaseErr != nil {
+		return releaseErr
+	}
+	return nil
+}
+
+func (s *RedisStore) migrateSubscriptionLocked(ctx context.Context, id string, k subscriptionKeys, cleanupPaths []string) error {
+	complete, err := s.subscriptionMigrationComplete(ctx, k)
+	if err != nil {
+		return err
+	}
+	if complete {
+		return s.cleanupLegacySubscription(id, cleanupPaths)
+	}
+	fields, err := s.client.HGetAll(ctx, k.oldSub).Result()
+	if err != nil {
+		return err
+	}
+	if len(fields) == 0 {
+		inLegacySet, err := s.client.SIsMember(ctx, k.oldSubs, id).Result()
+		if err != nil {
+			return err
+		}
+		if !inLegacySet {
+			return nil
+		}
+		return s.cleanupLegacySubscription(id, cleanupPaths)
+	}
+	links, err := s.client.HGetAll(ctx, k.oldLinks).Result()
+	if err != nil {
+		return err
 	}
 	pipe := s.client.Pipeline()
 	pipe.HSet(ctx, k.sub, stringMapArgs(fields)...)
@@ -138,6 +183,72 @@ func (s *RedisStore) migrateSubscription(id string) error {
 		return err
 	}
 	return s.cleanupLegacySubscription(id, mapKeys(links))
+}
+
+func (s *RedisStore) subscriptionMigrationComplete(ctx context.Context, k subscriptionKeys) (bool, error) {
+	complete, err := s.client.HGet(ctx, k.sub, slotMigrationCompleteField).Result()
+	if errors.Is(err, redis.Nil) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return complete == "1", nil
+}
+
+func (s *RedisStore) acquireSubscriptionMigrationLock(ctx context.Context, k subscriptionKeys) (string, error) {
+	token, err := migrationLockToken()
+	if err != nil {
+		return "", err
+	}
+	for {
+		ok, err := s.client.SetNX(ctx, k.migrationLock, token, slotMigrationLockTTL).Result()
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return token, nil
+		}
+		timer := time.NewTimer(slotMigrationLockPoll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func migrationLockToken() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b[:]), nil
+}
+
+func (s *RedisStore) releaseSubscriptionMigrationLock(ctx context.Context, k subscriptionKeys, token string) error {
+	err := s.client.Watch(ctx, func(tx *redis.Tx) error {
+		current, err := tx.Get(ctx, k.migrationLock).Result()
+		if errors.Is(err, redis.Nil) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if current != token {
+			return nil
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Del(ctx, k.migrationLock)
+			return nil
+		})
+		return err
+	}, k.migrationLock)
+	if errors.Is(err, redis.TxFailedErr) {
+		return nil
+	}
+	return err
 }
 
 func stringMapArgs(m map[string]string) []any {
@@ -914,7 +1025,7 @@ func (s *RedisStore) ReconcileLeaseSchedule(ref LeaseRef, now time.Time, pending
 // dropped worker's subscription recurs (docs/research/07 §6.1).
 func (s *RedisStore) DueLeases(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]LeaseRef, error) {
 	lease, _, _ := scheduleKeysForSlot(slot)
-	members, err := s.due(lease, slot, now, limit, visibility, fence)
+	members, err := s.due(lease, now, limit, visibility, fence)
 	if err != nil {
 		return nil, err
 	}
@@ -933,17 +1044,17 @@ func (s *RedisStore) DueLeases(slot OwnershipSlot, now time.Time, limit int, vis
 // same re-score-never-ZREM machinery as DueLeases (docs/research/07 §6.1).
 func (s *RedisStore) DueRetries(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error) {
 	_, retry, _ := scheduleKeysForSlot(slot)
-	return s.due(retry, slot, now, limit, visibility, fence)
+	return s.due(retry, now, limit, visibility, fence)
 }
 
 // DueWakes takes owed wake-outbox members by re-scoring them forward, the same
 // at-least-once claim primitive as the lease/retry schedules.
 func (s *RedisStore) DueWakes(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error) {
 	_, _, due := scheduleKeysForSlot(slot)
-	return s.due(due, slot, now, limit, visibility, fence)
+	return s.due(due, now, limit, visibility, fence)
 }
 
-func (s *RedisStore) due(zkey string, slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error) {
+func (s *RedisStore) due(zkey string, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error) {
 	ownerID, ownerEpoch := fenceArgs(fence)
 	members, err := s.evalStrings(claimDueScript, []string{zkey, fenceKey(fence, zkey)},
 		nsArg(now), strconv.Itoa(limit), strconv.FormatInt(int64(visibility), 10), ownerID, ownerEpoch)
@@ -953,7 +1064,6 @@ func (s *RedisStore) due(zkey string, slot OwnershipSlot, now time.Time, limit i
 	if fence.Enabled && len(members) == 1 && members[0] == "FENCED" {
 		return nil, errOwnerFenced
 	}
-	_ = slot // #15 will derive zkey from slot; this slice keeps the single {__ds} key.
 	return members, nil
 }
 

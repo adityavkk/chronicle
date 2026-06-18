@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,12 @@ import (
 // re-scoring due claim.
 
 func newTestStore(t *testing.T) (*RedisStore, goredis.UniversalClient) {
+	t.Helper()
+	client := newTestRedisClient(t, true)
+	return NewRedisStore(client), client
+}
+
+func newTestRedisClient(t *testing.T, flush bool) *goredis.Client {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping Redis integration test in -short mode")
@@ -37,11 +44,142 @@ func newTestStore(t *testing.T) (*RedisStore, goredis.UniversalClient) {
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Skipf("redis unreachable (%s): %v", url, err)
 	}
-	if err := client.FlushDB(ctx).Err(); err != nil {
-		t.Fatalf("flushdb: %v", err)
+	if flush {
+		if err := client.FlushDB(ctx).Err(); err != nil {
+			t.Fatalf("flushdb: %v", err)
+		}
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	return NewRedisStore(client), client
+	return client
+}
+
+func waitForTestSignal(t *testing.T, ch <-chan struct{}, name string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", name)
+	}
+}
+
+func waitForTestErr(t *testing.T, ch <-chan error, name string) error {
+	t.Helper()
+	select {
+	case err := <-ch:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", name)
+		return nil
+	}
+}
+
+type pauseAfterLegacyReadHook struct {
+	key     string
+	paused  chan struct{}
+	resume  chan struct{}
+	pauseMu sync.Once
+}
+
+func (h *pauseAfterLegacyReadHook) DialHook(next goredis.DialHook) goredis.DialHook {
+	return next
+}
+
+func (h *pauseAfterLegacyReadHook) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook {
+	return func(ctx context.Context, cmd goredis.Cmder) error {
+		err := next(ctx, cmd)
+		if err != nil || cmd.Name() != "hgetall" || redisCommandKey(cmd) != h.key {
+			return err
+		}
+		h.pauseMu.Do(func() {
+			close(h.paused)
+			select {
+			case <-h.resume:
+			case <-ctx.Done():
+			}
+		})
+		return err
+	}
+}
+
+func (h *pauseAfterLegacyReadHook) ProcessPipelineHook(next goredis.ProcessPipelineHook) goredis.ProcessPipelineHook {
+	return next
+}
+
+func redisCommandKey(cmd goredis.Cmder) string {
+	args := cmd.Args()
+	if len(args) < 2 {
+		return ""
+	}
+	key, _ := args[1].(string)
+	return key
+}
+
+func TestConcurrentLegacyMigrationCannotReplayStaleHash(t *testing.T) {
+	s, _ := newTestStore(t)
+	const (
+		id    = "legacy-race"
+		path  = "events/legacy-race"
+		begin = "0000000000000000_0000000000000000"
+	)
+	now := time.Now()
+	createLegacySubForTest(t, s, id, pullWakeCfg(), []StreamLink{{Path: path, LinkType: LinkGlob, AckedOffset: begin}}, now)
+
+	pausingClient := newTestRedisClient(t, false)
+	hook := &pauseAfterLegacyReadHook{
+		key:    legacySubKey(id),
+		paused: make(chan struct{}),
+		resume: make(chan struct{}),
+	}
+	var resumeStaleMigrator sync.Once
+	defer resumeStaleMigrator.Do(func() { close(hook.resume) })
+	pausingClient.AddHook(hook)
+	pausingStore := NewRedisStore(pausingClient)
+
+	staleMigratorDone := make(chan error, 1)
+	go func() {
+		_, ok, err := pausingStore.Get(id)
+		if err == nil && !ok {
+			err = errors.New("stale migrator Get returned no subscription")
+		}
+		staleMigratorDone <- err
+	}()
+	waitForTestSignal(t, hook.paused, "stale migrator to read legacy hash")
+
+	if _, ok, err := s.Get(id); err != nil || !ok {
+		t.Fatalf("winning migration = ok %v err %v", ok, err)
+	}
+	armed, err := s.ArmWake(id, now.Add(time.Millisecond), 1000, false, "w_after_migration", NoOwnerFence())
+	if err != nil {
+		t.Fatalf("ArmWake after winning migration: %v", err)
+	}
+	if !armed.Armed {
+		t.Fatalf("ArmWake after winning migration = %+v, want ARMED", armed)
+	}
+	sentAt := now.Add(2 * time.Millisecond)
+	if err := s.RecordWakeEventSent(id, armed.Generation, armed.WakeID, sentAt); err != nil {
+		t.Fatal(err)
+	}
+
+	resumeStaleMigrator.Do(func() { close(hook.resume) })
+	if err := waitForTestErr(t, staleMigratorDone, "stale migrator to finish"); err != nil {
+		t.Fatal(err)
+	}
+	sub, ok, err := s.Get(id)
+	if err != nil || !ok {
+		t.Fatalf("Get after stale migration = ok %v err %v", ok, err)
+	}
+	if sub.Generation != armed.Generation {
+		t.Fatalf("stale migration replayed generation=%d, want %d", sub.Generation, armed.Generation)
+	}
+	if sub.Phase != PhaseWaking {
+		t.Fatalf("stale migration replayed phase=%q, want %q", sub.Phase, PhaseWaking)
+	}
+	if sub.WakeID != armed.WakeID {
+		t.Fatalf("stale migration replayed wake_id=%q, want %q", sub.WakeID, armed.WakeID)
+	}
+	if sub.WakeEventSentNs != sentAt.UnixNano() {
+		t.Fatalf("stale migration replayed wake_event_sent_ns=%d, want %d", sub.WakeEventSentNs, sentAt.UnixNano())
+	}
 }
 
 func webhookCfg(url string) Config {
