@@ -1,7 +1,7 @@
 -- check_owner.lua — verify the caller still owns a slot at the expected epoch.
 -- This is reserved for the external webhook POST gate; schedule/due mutations
 -- inline owner_fenced in their own script.
--- KEYS: 1=slot (ds:{ownership}:slot:<h>)
+-- KEYS: 1=slot (ds:{__ds}:owner:slot:<h> in S=1)
 -- ARGV: 1=replica_id 2=expected_epoch
 -- Reply: {status} ; OWNER | FENCED | UNOWNED
 local owner = redis.call('HGET', KEYS[1], 'owner_id')

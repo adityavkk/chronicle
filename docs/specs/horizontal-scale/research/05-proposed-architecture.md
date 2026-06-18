@@ -193,8 +193,8 @@ ds:{__ds:h}:due                ZSET  id -> earliest_owed_ns   (the outbox; new)
 ds:{__ds:h}:sub:<id>           HASH  config + runtime (gen, wake_id, phase, …)
 ds:{__ds:h}:sub:<id>:links     HASH  path -> "<linktype>:<acked_offset>"
 ds:{__ds:h}:stream:<path>      SET   subscribers of <path> homed in slot h (fan-out shard)
+ds:{__ds:h}:owner:slot:<h>     HASH  owner_id, owner_epoch, lease_expiry_ns
 ds:{ownership}:members         ZSET  replicaId -> lease_expiry_ns
-ds:{ownership}:slot:<h>        HASH  owner_id, owner_epoch, lease_expiry_ns
 ```
 
 **Horizontal scale.** State capacity scales with `S` across all cluster nodes (the
@@ -230,10 +230,11 @@ The app-cluster membership protocol is Redis-backed:
    that moves only the affected slots on join/leave. Do not tie `S` to the current pod
    count; pick many more virtual slots than expected replicas so adding replicas
    reassigns existing slots instead of requiring a key migration.
-4. A would-be owner claims `ds:{ownership}:slot:<h>` with `claim_shard.lua`. The script
-   is a CAS: it succeeds only when the current owner is expired, missing, or already the
-   caller, and it increments `owner_epoch` on every ownership transfer. The slot record
-   stores `owner_id`, `owner_epoch`, and `lease_expiry_ns`.
+4. A would-be owner claims the co-located owner slot record with `claim_shard.lua`
+   (`ds:{__ds}:owner:slot:<h>` in the current S=1 build, `ds:{__ds:h}:owner:slot:<h>`
+   after #15). The script is a CAS: it succeeds only when the current owner is expired,
+   missing, or already the caller, and it increments `owner_epoch` on every ownership
+   transfer. The slot record stores `owner_id`, `owner_epoch`, and `lease_expiry_ns`.
 5. Workers process only slots they currently own. The `(owner_id, owner_epoch)` check is
    an owner-epoch fence layered *above* the per-subscription `(gen, wake_id)` fence — it
    suppresses a deposed owner's wasted work, but the `(gen, wake_id)` fence remains the
@@ -253,7 +254,8 @@ This protocol is separate from Redis Cluster membership. Redis Cluster decides w
 Redis node stores the `ds:{__ds:h}:...` keys and may move hash slots during a managed
 reshard. Chronicle decides which Chronicle process performs the side effects for
 subscription slot `h`. The Redis Cluster client follows `MOVED`/`ASK` redirects; the
-Chronicle ownership protocol uses the `ds:{ownership}:...` keys above.
+Chronicle ownership protocol uses `ds:{ownership}:members` for membership and co-located
+owner slot records for the inline fences above.
 
 **Liveness (the review's #1 fix).** Slot ownership is an *optimization over a correct
 baseline*: a still-correct cursor reconcile covers every sub regardless of ownership. A
@@ -309,16 +311,20 @@ something."
   keys), `arm_wake.lua`, and `claim.lua` stay byte-for-byte single-slot.
   `streamSubsKey(path)` moves under the slot tag too — `ds:{__ds:h}:stream:<path>` —
   matching the keyspace block above.
-- **Ownership keys use their own literal tag** `{ownership}` (cross-slot membership
-  metadata, deliberately not slot-homed).
-- **Add a guard test**: `subKey(id)`, `linksKey(id)`, and the sched/due keys for one id
-  all resolve to one Redis cluster slot (the precondition T5 checks).
+- **Ownership membership uses its own literal tag** `{ownership}`. The per-slot owner
+  fence records are deliberately slot-homed with the schedule/due keys they guard:
+  `ds:{__ds}:owner:slot:<h>` today and `ds:{__ds:h}:owner:slot:<h>` after #15. Keeping
+  them as `ds:{ownership}:slot:<h>` would make every inline owner-fenced script a Redis
+  Cluster `CROSSSLOT`; co-located fences preserve the TOCTOU fix and the single-slot Lua
+  rule.
+- **Add a guard test**: every scripted key set, including owner-fenced calls, resolves
+  to one Redis cluster slot (the precondition T5 checks).
 
 ### The two new Lua scripts
 
 Both follow house style: a `common.lua` prelude (concatenated by `loadScript` in
 `scripts.go`), a `{status, …}` string-array reply decoded by `evalStrings`, single-slot
-under the `{ownership}` tag, and a package var in `scripts.go`
+under the co-located subscription-control tag, and a package var in `scripts.go`
 (`claimShardScript = loadScript("claim_shard.lua")`, `checkOwnerScript = …`).
 
 `claim_shard.lua` — the slot-ownership CAS (07 T3's acceptance gate):
@@ -327,9 +333,9 @@ under the `{ownership}` tag, and a package var in `scripts.go`
 -- claim_shard.lua — CAS takeover of a slot-ownership lease. Grants only when the
 -- current owner is expired, missing, or the caller itself; bumps owner_epoch on
 -- every *transfer* (never on a same-owner renew) so a deposed-but-resumed owner
--- carries a stale epoch and is fenced. The {ownership}-tagged analogue of
+-- carries a stale epoch and is fenced. The co-located owner-slot analogue of
 -- claim.lua's expired-lease takeover.
--- KEYS: 1=slot (ds:{ownership}:slot:<h>)
+-- KEYS: 1=slot (ds:{__ds}:owner:slot:<h> in S=1; ds:{__ds:h}:owner:slot:<h> after #15)
 -- ARGV: 1=replica_id 2=now_ns 3=lease_ttl_ms
 -- Reply: {status, owner_id, owner_epoch, lease_expiry_ns} ; CLAIMED | RENEWED | BUSY
 local slot, me = KEYS[1], ARGV[1]
@@ -359,7 +365,7 @@ return { (owner == me) and 'RENEWED' or 'CLAIMED', me, epoch, tostring(until_ns)
 -- check (see below). This is an owner-epoch fence ABOVE the (gen,wake_id) fence:
 -- it suppresses a deposed owner's wasted work, but the (gen,wake_id) fence stays
 -- the safety boundary that makes any leaked duplicate harmless.
--- KEYS: 1=slot (ds:{ownership}:slot:<h>)
+-- KEYS: 1=slot (ds:{__ds}:owner:slot:<h> in S=1; ds:{__ds:h}:owner:slot:<h> after #15)
 -- ARGV: 1=replica_id 2=expected_epoch
 -- Reply: {status} ; OWNER | FENCED | UNOWNED
 local owner = redis.call('HGET', KEYS[1], 'owner_id')
@@ -373,8 +379,9 @@ return { 'OWNER' }
 **Resolve the TOCTOU explicitly.** A separate `check_owner` round-trip *before* a Go-side
 write does **not** fence a GC pause between the two. So every schedule-/due-mutating
 script (`arm_wake`, `ack`, `expire_lease`, `release`, `schedule_retry`, the due
-`ZADD`/`ZREM`) takes the slot key as an **extra KEY** and inlines the owner+epoch check
-at the top — the check and the write are then one atomic script. Standalone
+`ZADD`/`ZREM`) takes the co-located slot key as an **extra KEY** and inlines the
+owner+epoch check at the top — the check and the write are then one atomic script without
+crossing Redis Cluster slots. Standalone
 `check_owner.lua` is reserved for the external webhook POST, where atomicity across the
 network is impossible anyway and the `(gen,wake_id)` fence on the returned ack is the
 real guard.
@@ -555,7 +562,7 @@ Redis — no second datastore.
 hashing** over the live coordinator set, so adding/removing one instance reassigns only
 ~`1/N` of shards (no rebalancing storm). A Redis directory keyed `dir[shardId]` holds the
 same `{owner_id, owner_epoch, lease_expiry_ns}` HASH record as Option A's
-`ds:{ownership}:slot:<h>` (just at shard rather than slot granularity), claimed by the same
+`ds:{__ds:h}:owner:slot:<h>` (just at shard rather than slot granularity), claimed by the same
 `claim_shard.lua` — a CAS in exactly the shape of `claim.lua`'s expired-lease takeover. An
 **owner-epoch fence** layers above the wake fence: a deposed-but-resumed owner (GC pause /
 partition, the Kleppmann case) finds `dir[shardId].owner_id != me` and self-evicts;

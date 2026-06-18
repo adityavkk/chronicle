@@ -3,6 +3,7 @@ package webhook
 import (
 	"bytes"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -236,6 +237,72 @@ func TestLeaseRefMemberRoundTrip(t *testing.T) {
 	if _, err := ParseLeaseMember("@shard:not-a-number:abc"); err == nil {
 		t.Fatal("malformed sharded member should fail")
 	}
+}
+
+func TestRedisScriptKeySetsUseOneHashTag(t *testing.T) {
+	slot, _ := NewOwnershipSlot(0)
+	id := "sub:{attempted-escape}"
+	ownerSlot := ownershipSlotKey(slot)
+
+	cases := []struct {
+		name string
+		keys []string
+	}{
+		{"create_sub", []string{subKey(id), subsKey, linksKey(id)}},
+		{"link_stream", []string{linksKey(id)}},
+		{"unlink_stream", []string{linksKey(id)}},
+		{"delete_sub", []string{subKey(id), subsKey, linksKey(id), leaseZKey, retryZKey, dueSetKey()}},
+		{"claim_shard", []string{ownerSlot}},
+		{"check_owner", []string{ownerSlot}},
+		{"arm_wake/no_owner", []string{subKey(id), leaseZKey, dueSetKey(), subKey(id)}},
+		{"arm_wake/owner_fenced", []string{subKey(id), leaseZKey, dueSetKey(), ownerSlot}},
+		{"claim", []string{subKey(id), leaseZKey}},
+		{"ack/no_owner", []string{subKey(id), linksKey(id), leaseZKey, retryZKey, dueSetKey(), subKey(id)}},
+		{"ack/owner_fenced", []string{subKey(id), linksKey(id), leaseZKey, retryZKey, dueSetKey(), ownerSlot}},
+		{"release/no_owner", []string{subKey(id), leaseZKey, retryZKey, dueSetKey(), subKey(id)}},
+		{"release/owner_fenced", []string{subKey(id), leaseZKey, retryZKey, dueSetKey(), ownerSlot}},
+		{"expire_lease/no_owner", []string{subKey(id), leaseZKey, dueSetKey(), subKey(id)}},
+		{"expire_lease/owner_fenced", []string{subKey(id), leaseZKey, dueSetKey(), ownerSlot}},
+		{"reconcile_lease/no_owner", []string{subKey(id), leaseZKey, dueSetKey(), subKey(id)}},
+		{"reconcile_lease/owner_fenced", []string{subKey(id), leaseZKey, dueSetKey(), ownerSlot}},
+		{"claim_due/lease/no_owner", []string{leaseZKey, leaseZKey}},
+		{"claim_due/lease/owner_fenced", []string{leaseZKey, ownerSlot}},
+		{"claim_due/retry/no_owner", []string{retryZKey, retryZKey}},
+		{"claim_due/retry/owner_fenced", []string{retryZKey, ownerSlot}},
+		{"claim_due/due/no_owner", []string{dueSetKey(), dueSetKey()}},
+		{"claim_due/due/owner_fenced", []string{dueSetKey(), ownerSlot}},
+		{"schedule_retry/no_owner", []string{subKey(id), retryZKey, subKey(id)}},
+		{"schedule_retry/owner_fenced", []string{subKey(id), retryZKey, ownerSlot}},
+		{"record_success", []string{subKey(id), retryZKey}},
+		{"record_wake_sent", []string{subKey(id)}},
+		{"get_or_create_key", []string{jwksKey, activeKidKey}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if len(tc.keys) == 0 {
+				t.Fatal("script key set is empty")
+			}
+			want := redisHashTag(tc.keys[0])
+			for _, key := range tc.keys[1:] {
+				if got := redisHashTag(key); got != want {
+					t.Fatalf("mixed hash tags: keys=%v first tag=%q key %q tag=%q", tc.keys, want, key, got)
+				}
+			}
+		})
+	}
+}
+
+func redisHashTag(key string) string {
+	start := strings.IndexByte(key, '{')
+	if start < 0 {
+		return key
+	}
+	end := strings.IndexByte(key[start+1:], '}')
+	if end <= 0 {
+		return key
+	}
+	return key[start+1 : start+1+end]
 }
 
 func TestFenceLeaseDecisionIsPerShard(t *testing.T) {

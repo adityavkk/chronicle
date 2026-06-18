@@ -38,7 +38,9 @@ func linksKey(id string) string { return keyPrefix + ":sub:" + id + ":links" }
 func streamSubsKey(path string) string { return keyPrefix + ":stream:" + path }
 
 // ownershipSlotKey is the HASH {owner_id, owner_epoch, lease_expiry_ns} for one
-// background-work ownership slot.
+// background-work ownership slot. It is co-located with the subscription-control
+// keys that inline-check owner epochs; #15 will derive the {__ds:h} tag from
+// slot when the control plane grows beyond the current S=1 keyspace.
 func ownershipSlotKey(slot OwnershipSlot) string {
-	return ownershipKey + ":slot:" + slot.String()
+	return keyPrefix + ":owner:slot:" + slot.String()
 }

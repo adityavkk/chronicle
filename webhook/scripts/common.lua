@@ -1,9 +1,12 @@
 -- common.lua — shared prelude for the __ds subscription scripts.
 --
 -- Every subscription-control key shares the {__ds} hash tag, so all of these
--- scripts touch a single slot and are cluster-safe. The per-stream fan-out
--- index (ds:{__ds}:stream:<path>) is maintained from Go as a best-effort index
--- reconciled by the recovery sweep, so it is never touched here.
+-- scripts touch a single slot and are cluster-safe. Owner slot records checked
+-- inline by these scripts are co-located under that same tag; membership stays
+-- under {ownership} because it is not part of schedule/due mutations. The
+-- per-stream fan-out index (ds:{__ds}:stream:<path>) is maintained from Go as a
+-- best-effort index reconciled by the recovery sweep, so it is never touched
+-- here.
 
 -- offset_greater reports a > b for opaque, fixed-width, lexicographically
 -- sortable offsets (PROTOCOL §8), treating the "-1"/"" beginning sentinel as
