@@ -3,10 +3,17 @@
 -- a re-wake can be issued if pending work remains. Pull-wake "waking" with no
 -- lease (lease_until_ns=0) is left untouched — its wake event is already in the
 -- wake stream for workers to claim.
--- KEYS: 1=sub 2=lease_zset 3=due_zset
--- ARGV: 1=id 2=now_ns
--- Reply: {status} ; EXPIRED | ACTIVE | NOSUB
+-- KEYS: 1=sub 2=lease_zset 3=due_zset 4=slot (ds:{ownership}:slot:<h>)
+-- ARGV: 1=id 2=now_ns 3=replica_id 4=expected_epoch (epoch '' => skip the check)
+-- Reply: {status} ; EXPIRED | ACTIVE | NOSUB | FENCED
 local sub = KEYS[1]
+-- Owner-epoch fence (issue #14, TOCTOU): the lease worker is the primary
+-- owner-scoped caller — a deposed owner expiring/re-owing leases it no longer owns
+-- is suppressed here, atomically with the ZREM/ZADD, so the new owner alone drives
+-- the schedule. epoch '' (no scope) skips the check; the full sweep is the backstop.
+if owner_fenced(KEYS[4], ARGV[3], ARGV[4]) then
+  return { 'FENCED' }
+end
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
 end
