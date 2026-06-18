@@ -54,9 +54,16 @@ type StreamLister interface {
 }
 
 const (
-	webhookDeliveryTimeout   = 30 * time.Second
-	defaultWorkerTick        = 250 * time.Millisecond
-	defaultSweepInterval     = 2 * time.Second
+	webhookDeliveryTimeout = 30 * time.Second
+	defaultWorkerTick      = 250 * time.Millisecond
+	// defaultSweepInterval is the coarse recovery FLOOR, not a fast sweep (issue
+	// #13). Recovery is event-triggered now — boot, a Redis reconnect, an
+	// append/delivery error, and (from #14) an owner-epoch bump each fire a
+	// reconcile at the moment they happen — so the periodic sweep only bounds the
+	// one undetectable case (an owed mark on a slot that is unowned and quiet). That
+	// case is rare and not latency-sensitive, so the floor sits in the
+	// seconds-to-minutes band, aligned with the index reconcile, not at the old 2s.
+	defaultSweepInterval     = 30 * time.Second
 	defaultReconcileInterval = 30 * time.Second
 	dueClaimLimit            = 256
 )
@@ -72,10 +79,20 @@ type ManagerOptions struct {
 	HTTPClient    *http.Client
 	Logger        *slog.Logger
 	WorkerTick    time.Duration
+	// SweepInterval is the coarse recovery FLOOR — how often the full cursor
+	// reconcile runs on a timer with no triggering event (issue #13). It is NOT a
+	// fast 2s sweep: the latency-sensitive cases are event-triggered (boot, a Redis
+	// reconnect, an append/delivery error and, from #14, an owner-epoch bump each
+	// fire reconcile(scope) immediately), so this only bounds the one eventless case
+	// — an owed mark on a slot that is unowned and quiet. Default 30s
+	// (defaultSweepInterval), the seconds-to-minutes band, aligned with
+	// ReconcileInterval. Steady-state delivery latency is unchanged by the raise:
+	// the old 2s sweep fired nothing in steady state (the happy path is the
+	// event-driven OnStreamAppend → wake pipeline).
 	SweepInterval time.Duration
 	// ReconcileInterval is how often the slow reconciliation loop runs (pattern
-	// link recovery + fan-out index repair). Default 30s — it is O(streams), so
-	// it is deliberately decoupled from the fast 2s sweep.
+	// link recovery + fan-out index repair). Default 30s — it is O(streams), so it
+	// runs on its own coarse timer, the same band as the recovery floor.
 	ReconcileInterval time.Duration
 	// SweepBatch caps how many subscriptions one sweep tick evaluates, the rest
 	// rolling to following ticks. 0 (the default) means no cap — every tick
@@ -114,6 +131,12 @@ type Manager struct {
 	allowPrivate      bool
 	metrics           Metrics
 
+	// reconcileC coalesces event-triggered recovery onto the single recovery loop
+	// (issue #13). Depth 1 + non-blocking sends mean concurrent recovery events
+	// collapse to at most one queued reconcile while one runs — duplicate
+	// reconciles are claim-fence-safe, so dropping the surplus is sound.
+	reconcileC chan scope
+
 	stop chan struct{}
 	wg   sync.WaitGroup
 }
@@ -146,6 +169,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		sweepBatch:        opts.SweepBatch,
 		allowPrivate:      opts.AllowPrivateWebhookTargets,
 		metrics:           opts.Metrics,
+		reconcileC:        make(chan scope, 1),
 		stop:              make(chan struct{}),
 	}
 	if m.metrics == nil {
@@ -237,13 +261,24 @@ func (m *Manager) OnStreamCreated(path string) {
 func (m *Manager) OnStreamAppend(path string) {
 	ids, err := m.store.StreamSubscribers(path)
 	if err != nil {
+		// The low-latency wake path failed: this append's subscribers could not be
+		// read, so its wakes are lost. Trigger a recovery reconcile rather than wait
+		// for the coarse floor (doc-05 correction #2, the append-error event).
 		m.log.Warn("webhook: stream subscribers", "path", path, "error", err)
+		m.triggerReconcile(scopeAppendError)
 		return
 	}
 	for _, id := range ids {
 		m.maybeWake(id, path)
 	}
 }
+
+// OnRedisReconnect signals that the Redis connection healed after a drop, so any
+// wake/lease op lost with the broken connection is recovered by an eager reconcile
+// rather than waiting for the coarse floor (doc-05 correction #2, the reconnect
+// event). It is the seam the connection layer wires to the client's reconnect, and
+// the one #16's DR promotion drives from a failover. Coalesced and non-blocking.
+func (m *Manager) OnRedisReconnect() { m.triggerReconcile(scopeReconnect) }
 
 // OnStreamDeleted unlinks a deleted stream from all its subscribers.
 func (m *Manager) OnStreamDeleted(path string) {
@@ -310,8 +345,11 @@ func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generat
 	appendStart := time.Now()
 	if err := m.streams.AppendWakeEvent(sub.Config.WakeStream, data); err != nil {
 		m.metrics.WakeEvent(time.Since(appendStart), "error")
-		// Leave wake_event_sent_ns at 0 so the recovery sweep re-emits.
+		// Leave wake_event_sent_ns at 0 so the recovery sweep re-emits, and trigger
+		// an eager reconcile so it re-emits now rather than on the coarse floor
+		// (doc-05 correction #2, the delivery-path error event).
 		m.log.Warn("webhook: write wake event", "sub", sub.ID, "wake_stream", sub.Config.WakeStream, "error", err)
+		m.triggerReconcile(scopeAppendError)
 		return
 	}
 	m.metrics.WakeEvent(time.Since(appendStart), "ok")
@@ -498,14 +536,18 @@ func (m *Manager) expireLease(id string, now time.Time) (string, error) {
 
 // ---- background loops ----
 
-// Start launches the lease worker, retry worker, due-set worker, recovery sweep,
-// and the slow reconcile loop.
+// Start launches the lease worker, retry worker, due-set worker, the recovery
+// loop (the coarse floor + event-triggered reconciles), and the slow reconcile
+// loop. It first runs the boot reconcile synchronously so anything owed is
+// re-fired before the loops — and before serving — closing the restart gap
+// (doc-05 correction #2, the boot event).
 func (m *Manager) Start() {
+	m.reconcile(scopeBoot)
 	m.wg.Add(5)
 	go m.leaseWorker()
 	go m.retryWorker()
 	go m.dueWorker()
-	go m.recoverySweeper()
+	go m.recoveryLoop()
 	go m.reconcileLoop()
 }
 
@@ -642,11 +684,80 @@ func (m *Manager) retryWorker() {
 	}
 }
 
-// recoverySweeper closes the restart gap (docs/research/07 §8): it re-evaluates
-// every subscription against its durable cursor and re-fires anything owed, even
-// an idle subscription whose append-time wake was lost to a crash. It also
-// expires stale leases as a backstop to the lease worker.
-func (m *Manager) recoverySweeper() {
+// scope is the sealed reason a recovery reconcile fired — the recovery-event
+// taxonomy of doc-05 correction #2. Every recovery event routes through the one
+// reconcile(scope) seam, so #14's owner-epoch-bump / new-owner-CAS trigger plugs
+// into a named case rather than forcing a refactor. It is an unexported int over a
+// fixed set of constants: an out-of-set scope is unrepresentable.
+type scope int
+
+const (
+	scopeBoot        scope = iota // process boot: re-fire anything owed before serving
+	scopeReconnect                // a Redis reconnect: the connection that lost in-flight ops healed
+	scopeAppendError              // an OnStreamAppend / wake-event append failed: the low-latency wake path errored
+	scopeFloor                    // the coarse periodic floor: the one eventless case (an owed mark on an unowned, quiet slot)
+	scopeEpochBump                // STUB for #14: a failover / owner_epoch bump drives a slot reconcile
+	scopeNewOwnerCAS              // STUB for #14: a new-owner claim_shard CAS reconciles its freshly-claimed slot
+)
+
+func (s scope) String() string {
+	switch s {
+	case scopeBoot:
+		return "boot"
+	case scopeReconnect:
+		return "reconnect"
+	case scopeAppendError:
+		return "append-error"
+	case scopeFloor:
+		return "floor"
+	case scopeEpochBump:
+		return "epoch-bump"
+	case scopeNewOwnerCAS:
+		return "new-owner-cas"
+	default:
+		return "unknown"
+	}
+}
+
+// reconcile is the single recovery seam every recovery event routes through
+// (doc-05 correction #2). The detectable events — boot, a Redis reconnect, an
+// append/delivery-path error — and the coarse periodic floor all run the same full
+// cursor reconcile (sweepOnce), which re-derives owed work from the durable cursor
+// and includes the failover-aware reconcileLeases pass. The owner-epoch-bump and
+// new-owner-CAS scopes are stubs for #14: leased ownership does not exist yet, so
+// they route correctly but take no recovery action — #14 fills the branch in, a
+// plug-in, not a refactor.
+func (m *Manager) reconcile(s scope) {
+	switch s {
+	case scopeBoot, scopeReconnect, scopeAppendError, scopeFloor:
+		m.sweepOnce()
+	case scopeEpochBump, scopeNewOwnerCAS:
+		// #14 wires the new owner's slot reconcile here.
+	}
+}
+
+// triggerReconcile routes a recovery event to the single reconcile seam without
+// blocking the caller (OnStreamAppend, a reconnect callback). The send is
+// non-blocking onto the depth-1 reconcileC, so concurrent events coalesce into at
+// most one queued reconcile while one runs: duplicate reconciles are claim-fence-
+// safe, and a storm of append errors cannot pile up a reconcile per error.
+func (m *Manager) triggerReconcile(s scope) {
+	select {
+	case m.reconcileC <- s:
+	default:
+		// a reconcile is already queued; this event coalesces into it.
+	}
+}
+
+// recoveryLoop is the recovery backstop (doc-05 correction #2): the coarse
+// periodic floor plus the event-triggered reconciles coalesced onto reconcileC.
+// The floor runs in the seconds-to-minutes band (sweepInterval, default 30s), NOT
+// the old 2s fast sweep — the latency-sensitive cases are event-triggered now
+// (boot/reconnect/append-error, and from #14 the owner-epoch bump), so the floor
+// bounds only the one eventless case: an owed mark lost on a slot that is unowned
+// and quiet. It replaces recoverySweeper, folding the timer and the event triggers
+// into one loop so sweepOnce stays single-goroutine.
+func (m *Manager) recoveryLoop() {
 	defer m.wg.Done()
 	ticker := time.NewTicker(m.sweepInterval)
 	defer ticker.Stop()
@@ -655,7 +766,9 @@ func (m *Manager) recoverySweeper() {
 		case <-m.stop:
 			return
 		case <-ticker.C:
-			m.sweepOnce()
+			m.reconcile(scopeFloor)
+		case s := <-m.reconcileC:
+			m.reconcile(s)
 		}
 	}
 }
@@ -680,6 +793,12 @@ func (m *Manager) sweepOnce() {
 	// lease expiry flips to idle below still has its tails in the batch.
 	paths := distinctLinkPaths(subs)
 	tails := m.streams.TailOffsets(paths)
+	// The failover-aware eager reconcile runs first: re-derive any stranded lease
+	// tail (a live/waking sub a failover dropped from the lease ZSET) from the
+	// durable hash, so the fast lease worker — not the coarse floor — drives its
+	// expiry. The pull-wake re-emit and idle-rewake passes below are unchanged.
+	leased := m.leasedSet()
+	m.reconcileLeases(subs, tails, leased, now)
 	wakes := 0
 	for _, sub := range subs {
 		// Recover a pull-wake stranded by a crash between arming the wake and
@@ -699,10 +818,66 @@ func (m *Manager) sweepOnce() {
 		}
 		if sub.Phase == PhaseIdle && HasPendingWorkFrom(sub.Links, tails) {
 			m.issueWake(sub, "")
+			// This is a backstop wake the full sweep issued — the append-time wake
+			// was lost. On today's single slot every slot is trivially unowned, so
+			// every sweep-issued wake is a coverage-gap sample; #14 refines this to
+			// deliver−append for subs whose slot was unowned at append. A no-op until
+			// a real recorder + ownership give it meaning (the stub ships from #10).
+			m.metrics.CoverageGap(time.Since(start))
 			wakes++
 		}
 	}
 	m.metrics.SweepTick(time.Since(start), len(subs), len(paths), wakes)
+}
+
+// leasedSet reads the lease-ZSET membership into a set for the failover-aware
+// reconcile to diff against. An error yields a nil set, which reconcileLeases
+// treats as "nothing currently leased" — conservative: it may attempt a restore
+// the script then no-ops (INTACT) for a sub that is in fact present, never the
+// reverse, so a transient read error cannot strand a sub.
+func (m *Manager) leasedSet() map[string]struct{} {
+	ids, err := m.store.LeasedIDs()
+	if err != nil {
+		m.log.Warn("webhook: read lease members for reconcile", "error", err)
+		return nil
+	}
+	set := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		set[id] = struct{}{}
+	}
+	return set
+}
+
+// reconcileLeases is the failover-aware eager reconcile (doc-05 §"failover-aware
+// eager reconcile") — the primary, not periodic, recovery path. sweepOnce's other
+// passes re-wake only idle subs, so a sub stuck live/waking whose lease-ZSET entry
+// a failover dropped (the L3 dropLeaseTail fault) is invisible to the lease worker
+// and, with the floor raised off 2s, would otherwise wait seconds-to-minutes for a
+// floor tick. This diffs the durable sub set against the lease-ZSET membership and,
+// for each sub the pure DecideLeaseReconcile flags as stranded, re-derives its
+// dropped schedule entries from the durable hash (RestoreLease): the lease entry so
+// the fast lease worker drives its expiry, and the due mark when there is pending
+// work so the dueWorker re-fires once idle. Idempotent and fence-safe (a re-ZADD of
+// a present entry rewrites the same score; the restore is conditioned on the hash
+// still being live/waking). Returns the number restored.
+func (m *Manager) reconcileLeases(subs []Subscription, tails map[string]string, leased map[string]struct{}, now time.Time) int {
+	restored := 0
+	for _, sub := range subs {
+		_, inLease := leased[sub.ID]
+		if DecideLeaseReconcile(sub.Phase, sub.LeaseUntilNs, inLease) != LeaseStranded {
+			continue
+		}
+		owed := HasPendingWorkFrom(sub.Links, tails)
+		status, err := m.store.RestoreLease(sub.ID, owed, now)
+		if err != nil {
+			m.log.Warn("webhook: restore stranded lease", "sub", sub.ID, "error", err)
+			continue
+		}
+		if status == "RESTORED" {
+			restored++
+		}
+	}
+	return restored
 }
 
 // sweepWindow optionally bounds a sweep tick to sweepBatch subscriptions,
