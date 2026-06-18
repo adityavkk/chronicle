@@ -13,10 +13,15 @@ const (
 	subsKey      = keyPrefix + ":subs"        // SET of subscription ids
 	leaseZKey    = keyPrefix + ":sched:lease" // ZSET id -> lease_expiry_ns
 	retryZKey    = keyPrefix + ":sched:retry" // ZSET id -> next_attempt_ns
+	dueZKey      = keyPrefix + ":due"         // ZSET id -> owed_at_ns
 	jwksKey      = keyPrefix + ":jwks"        // HASH kid -> key material
 	activeKidKey = keyPrefix + ":active_kid"  // STRING current signing kid
 	tokenKeyKey  = keyPrefix + ":tokenkey"    // STRING HMAC token key
 )
+
+// dueSetKey centralizes the due outbox key derivation so later slot-homing only
+// has one call surface to re-tag.
+func dueSetKey() string { return dueZKey }
 
 // subKey is the HASH holding a subscription's config and runtime state.
 func subKey(id string) string { return keyPrefix + ":sub:" + id }

@@ -259,44 +259,46 @@ func (m *Manager) OnStreamDeleted(path string) {
 // maybeWake issues a wake for one subscription if it is idle and has pending
 // work. triggerStream names the stream that prompted the wake (for pull-wake
 // event payloads).
-func (m *Manager) maybeWake(id, triggerStream string) {
+func (m *Manager) maybeWake(id, triggerStream string) bool {
 	sub, ok, err := m.store.Get(id)
 	if err != nil || !ok {
-		return
+		return false
 	}
 	if sub.Phase != PhaseIdle {
-		return
+		return false
 	}
 	if !HasPendingWork(sub.Links, m.tailOf) {
-		return
+		return false
 	}
-	m.issueWake(sub, triggerStream)
+	return m.issueWake(sub, triggerStream)
 }
 
 // issueWake arms a new wake generation and delivers it (webhook POST or pull-wake
 // event). For webhook the lease is armed at issue; for pull-wake the lease waits
 // for a claim (PROTOCOL §7.3).
-func (m *Manager) issueWake(sub Subscription, triggerStream string) {
+func (m *Manager) issueWake(sub Subscription, triggerStream string) bool {
 	wakeID, err := GenerateWakeID(rand.Reader)
 	if err != nil {
 		m.log.Warn("webhook: generate wake id", "error", err)
-		return
+		return false
 	}
 	armLease := sub.Config.Type == DispatchWebhook
 	res, err := m.store.ArmWake(sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID)
 	if err != nil {
 		m.log.Warn("webhook: arm wake", "sub", sub.ID, "error", err)
-		return
+		return false
 	}
 	if !res.Armed {
-		return // already in flight (coalesced) or gone
+		return false // already in flight (coalesced) or gone
 	}
+	m.recordDueSetMutation(DueSetForArmWake("ARMED"))
 	switch sub.Config.Type {
 	case DispatchWebhook:
 		go m.deliverWebhook(sub.ID, res.Generation, res.WakeID)
 	case DispatchPullWake:
 		m.writeWakeEvent(sub, triggerStream, res.Generation, res.WakeID)
 	}
+	return true
 }
 
 func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generation int64, wakeID string) {
@@ -387,6 +389,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
 			return
 		}
 		if status == "OK" {
+			m.recordDueSetMutation(DueSetForAck(status, true))
 			m.rewakeIfPending(id)
 		}
 	}
@@ -425,8 +428,7 @@ func (m *Manager) rewakeIfPending(id string) bool {
 	if sub.Phase != PhaseIdle || !HasPendingWork(sub.Links, m.tailOf) {
 		return false
 	}
-	m.issueWake(sub, "")
-	return true
+	return m.issueWake(sub, "")
 }
 
 func acksFromSnapshot(snap []StreamSnapshot) []Ack {
@@ -450,9 +452,10 @@ func jitterFraction() float64 {
 
 // ---- background loops ----
 
-// Start launches the lease worker, retry worker, and recovery sweep.
+// Start launches the due worker, lease worker, retry worker, and recovery sweep.
 func (m *Manager) Start() {
-	m.wg.Add(4)
+	m.wg.Add(5)
+	go m.dueWorker()
 	go m.leaseWorker()
 	go m.retryWorker()
 	go m.recoverySweeper()
@@ -465,8 +468,8 @@ func (m *Manager) Stop() {
 	m.wg.Wait()
 }
 
-// leaseWorker expires due leases and re-wakes subscriptions that still have
-// pending work (PROTOCOL §7.3). Due members are re-scored forward, so a crash
+// leaseWorker expires due leases and re-owes subscriptions that still have
+// pending work (PROTOCOL §7.3). Lease members are re-scored forward, so a crash
 // mid-handling leaves the lease to fall due again.
 func (m *Manager) leaseWorker() {
 	defer m.wg.Done()
@@ -486,13 +489,46 @@ func (m *Manager) leaseWorker() {
 				m.metrics.WorkerTick("lease", len(ids))
 			}
 			for _, id := range ids {
-				status, err := m.store.ExpireLease(id, now)
-				if err == nil && status == "EXPIRED" {
-					m.rewakeIfPending(id)
+				pending := m.hasPendingWork(id)
+				status, err := m.store.ExpireLease(id, now, pending)
+				if err == nil {
+					m.recordDueSetMutation(DueSetForExpireLease(status, pending))
 				}
 			}
 		}
 	}
+}
+
+// dueWorker drains the due-set outbox and fires owed subscriptions. Due members
+// are re-scored forward by claim_due.lua, so a worker crash leaves them to recur.
+func (m *Manager) dueWorker() {
+	defer m.wg.Done()
+	ticker := time.NewTicker(m.workerTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stop:
+			return
+		case <-ticker.C:
+			m.dueOnce(time.Now())
+		}
+	}
+}
+
+func (m *Manager) dueOnce(now time.Time) int {
+	start := time.Now()
+	ids, err := m.store.DueWakes(now, dueClaimLimit, m.workerTick*2)
+	if err != nil {
+		return 0
+	}
+	fired := 0
+	for _, id := range ids {
+		if m.maybeWake(id, "") {
+			fired++
+		}
+	}
+	m.metrics.DueWorkerTick(time.Since(start), fired)
+	return fired
 }
 
 // retryWorker re-delivers webhooks whose backoff has elapsed (PROTOCOL §7.1).
@@ -574,14 +610,20 @@ func (m *Manager) sweepOnce() {
 			wakes++
 			continue
 		}
+		pending := HasPendingWorkFrom(sub.Links, tails)
 		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
-			if status, err := m.store.ExpireLease(sub.ID, now); err == nil && status == "EXPIRED" {
+			status, err := m.store.ExpireLease(sub.ID, now, pending)
+			if err == nil {
+				m.recordDueSetMutation(DueSetForExpireLease(status, pending))
+			}
+			if err == nil && status == "EXPIRED" {
 				sub.Phase = PhaseIdle
 			}
 		}
-		if sub.Phase == PhaseIdle && HasPendingWorkFrom(sub.Links, tails) {
-			m.issueWake(sub, "")
-			wakes++
+		if sub.Phase == PhaseIdle && pending {
+			if m.issueWake(sub, "") {
+				wakes++
+			}
 		}
 	}
 	m.metrics.SweepTick(time.Since(start), len(subs), len(paths), wakes)
@@ -634,6 +676,23 @@ func distinctLinkPaths(subs []Subscription) []string {
 
 // RunSweep runs one recovery sweep immediately (used at startup and in tests).
 func (m *Manager) RunSweep() { m.sweepOnce() }
+
+// RunDue runs one due-worker pass immediately (used by tests and local V&V).
+func (m *Manager) RunDue() int { return m.dueOnce(time.Now()) }
+
+func (m *Manager) hasPendingWork(id string) bool {
+	sub, ok, err := m.store.Get(id)
+	if err != nil || !ok {
+		return false
+	}
+	return HasPendingWork(sub.Links, m.tailOf)
+}
+
+func (m *Manager) recordDueSetMutation(dec DueSetMutationDecision) {
+	if dec.Mutates() {
+		m.metrics.DueSetMutation(dec.MetricOp)
+	}
+}
 
 // ---- route-level operations (called by routes.go) ----
 
@@ -785,6 +844,7 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 	if aerr != nil {
 		return false, false, false, aerr
 	}
+	m.recordDueSetMutation(DueSetForAck(status, done))
 	switch status {
 	case "FENCED":
 		return true, false, false, nil
@@ -803,6 +863,7 @@ func (m *Manager) applyRelease(id string, req ReleaseRequest, tokenGeneration in
 	if rerr != nil {
 		return false, false, rerr
 	}
+	m.recordDueSetMutation(DueSetForRelease(status))
 	switch status {
 	case "FENCED":
 		return true, false, nil

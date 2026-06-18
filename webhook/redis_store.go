@@ -63,7 +63,8 @@ func (s *RedisStore) evalStrings(script *redis.Script, keys []string, args ...an
 func (s *RedisStore) CreateOrConfirm(id string, cfg Config, links []StreamLink, now time.Time) (CreateStatus, error) {
 	cfg = NormalizeConfig(cfg)
 	args := make([]any, 0, 10+3*len(links))
-	args = append(args,
+	args = append(
+		args,
 		id, ConfigHash(cfg), nsArg(now),
 		string(cfg.Type), cfg.Pattern, cfg.WebhookURL, cfg.WakeStream,
 		strconv.FormatInt(cfg.LeaseTTLMs, 10), cfg.Description,
@@ -149,7 +150,7 @@ func (s *RedisStore) Delete(id string) error {
 		return err
 	}
 	if _, err := s.evalStrings(deleteSubScript,
-		[]string{subKey(id), subsKey, linksKey(id), leaseZKey, retryZKey}, id); err != nil {
+		[]string{subKey(id), subsKey, linksKey(id), leaseZKey, retryZKey, dueSetKey()}, id); err != nil {
 		return err
 	}
 	for _, path := range links {
@@ -235,7 +236,7 @@ func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLeas
 	if armLease {
 		arm = "1"
 	}
-	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey},
+	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey, dueSetKey()},
 		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID)
 	if err != nil {
 		return ArmResult{}, err
@@ -282,14 +283,15 @@ func (s *RedisStore) Ack(id string, reqGeneration int64, reqWakeID string, token
 		doneArg = "1"
 	}
 	args := make([]any, 0, 8+2*len(acks))
-	args = append(args,
+	args = append(
+		args,
 		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10),
 		doneArg, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), strconv.Itoa(len(acks)),
 	)
 	for _, a := range acks {
 		args = append(args, a.Stream, a.Offset)
 	}
-	reply, err := s.evalStrings(ackScript, []string{subKey(id), linksKey(id), leaseZKey, retryZKey}, args...)
+	reply, err := s.evalStrings(ackScript, []string{subKey(id), linksKey(id), leaseZKey, retryZKey, dueSetKey()}, args...)
 	if err != nil {
 		return "", err
 	}
@@ -298,7 +300,7 @@ func (s *RedisStore) Ack(id string, reqGeneration int64, reqWakeID string, token
 
 // Release fences then releases the lease.
 func (s *RedisStore) Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error) {
-	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey, retryZKey},
+	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey, retryZKey, dueSetKey()},
 		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10))
 	if err != nil {
 		return "", err
@@ -307,8 +309,12 @@ func (s *RedisStore) Release(id string, reqGeneration int64, reqWakeID string, t
 }
 
 // ExpireLease clears an expired lease.
-func (s *RedisStore) ExpireLease(id string, now time.Time) (string, error) {
-	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(id), leaseZKey}, id, nsArg(now))
+func (s *RedisStore) ExpireLease(id string, now time.Time, pending bool) (string, error) {
+	pendingArg := "0"
+	if pending {
+		pendingArg = "1"
+	}
+	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(id), leaseZKey, dueSetKey()}, id, nsArg(now), pendingArg)
 	if err != nil {
 		return "", err
 	}
@@ -325,6 +331,12 @@ func (s *RedisStore) DueLeases(now time.Time, limit int, visibility time.Duratio
 // same re-score-never-ZREM machinery as DueLeases (docs/research/07 §6.1).
 func (s *RedisStore) DueRetries(now time.Time, limit int, visibility time.Duration) ([]string, error) {
 	return s.due(retryZKey, now, limit, visibility)
+}
+
+// DueWakes takes owed wake-outbox members by re-scoring them forward, the same
+// at-least-once claim primitive as the lease/retry schedules.
+func (s *RedisStore) DueWakes(now time.Time, limit int, visibility time.Duration) ([]string, error) {
+	return s.due(dueSetKey(), now, limit, visibility)
 }
 
 func (s *RedisStore) due(zkey string, now time.Time, limit int, visibility time.Duration) ([]string, error) {

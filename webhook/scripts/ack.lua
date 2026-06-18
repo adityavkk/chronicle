@@ -3,7 +3,7 @@
 -- callback and the pull-wake ack (PROTOCOL §7.1, §7.2). The fence — not the
 -- lease — is the correctness mechanism: a stale wake/generation is rejected and
 -- cannot advance a cursor.
--- KEYS: 1=sub 2=links 3=lease_zset 4=retry_zset
+-- KEYS: 1=sub 2=links 3=lease_zset 4=retry_zset 5=due_zset
 -- ARGV: 1=id 2=req_gen 3=req_wake 4=token_gen 5=done('0'/'1') 6=now_ns
 --       7=lease_ttl_ms 8=num_acks then (path, offset)*
 -- Reply: {status} ; OK | FENCED | NOSUB
@@ -36,6 +36,7 @@ if ARGV[5] == '1' then
     'retry_count', '0', 'first_fail_ns', '0', 'next_attempt_ns', '0')
   redis.call('ZREM', KEYS[3], ARGV[1])
   redis.call('ZREM', KEYS[4], ARGV[1])
+  redis.call('ZREM', KEYS[5], ARGV[1])
 else
   local until_ns = tonumber(ARGV[6]) + tonumber(ARGV[7]) * 1000000
   redis.call('HSET', sub, 'lease_until_ns', tostring(until_ns), 'phase', 'live')

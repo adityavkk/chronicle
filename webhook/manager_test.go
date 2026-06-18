@@ -1,9 +1,12 @@
 package webhook
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
+
+	goredis "github.com/redis/go-redis/v9"
 )
 
 // fakeStreams is an in-memory Streams adapter for manager tests: it records the
@@ -203,6 +206,9 @@ type fakeMetrics struct {
 	lastSubs  int
 	lastTails int
 	lastWakes int
+	dueTicks  int
+	dueFired  int
+	dueOps    map[string]int
 }
 
 func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
@@ -215,11 +221,24 @@ func (f *fakeMetrics) WakeDelivery(time.Duration, string) {}
 func (f *fakeMetrics) WakeEvent(time.Duration, string)    {}
 func (f *fakeMetrics) WorkerTick(string, int)             {}
 func (f *fakeMetrics) FanOut(time.Duration, int, int)     {}
-func (f *fakeMetrics) DueSetMutation(string)              {}
-func (f *fakeMetrics) DueWorkerTick(time.Duration, int)   {}
-func (f *fakeMetrics) SlotOwnership(string, int)          {}
-func (f *fakeMetrics) CoverageGap(time.Duration)          {}
-func (f *fakeMetrics) OwnerFenced(string)                 {}
+func (f *fakeMetrics) DueSetMutation(op string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.dueOps == nil {
+		f.dueOps = map[string]int{}
+	}
+	f.dueOps[op]++
+}
+
+func (f *fakeMetrics) DueWorkerTick(_ time.Duration, fired int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dueTicks++
+	f.dueFired = fired
+}
+func (f *fakeMetrics) SlotOwnership(string, int) {}
+func (f *fakeMetrics) CoverageGap(time.Duration) {}
+func (f *fakeMetrics) OwnerFenced(string)        {}
 
 // TestSweepRecordsMetrics verifies the sweep reports its per-tick cost to the
 // Metrics seam: one tick recorded, carrying the subscription/tail counts and the
@@ -252,6 +271,80 @@ func TestSweepRecordsMetrics(t *testing.T) {
 	if fm.lastSubs < 1 || fm.lastTails < 1 || fm.lastWakes < 1 {
 		t.Fatalf("sweep metrics should reflect the pending sub: subs=%d tails=%d wakes=%d",
 			fm.lastSubs, fm.lastTails, fm.lastWakes)
+	}
+}
+
+func TestDueWorkerFiresOwedIdleSubscription(t *testing.T) {
+	store, client := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	fm := &fakeMetrics{}
+	mgr, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/", Metrics: fm})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	begin := "0000000000000000_0000000000000000"
+	if _, err := store.CreateOrConfirm("s1", pullWakeCfg(), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Link("s1", "events/1", LinkGlob, begin)
+	fs.mu.Lock()
+	fs.tails["events/1"] = "0000000000000001_0000000000000000"
+	fs.mu.Unlock()
+	if err := client.ZAdd(context.Background(), dueSetKey(), goredis.Z{
+		Score:  float64(now.Add(-time.Second).UnixNano()),
+		Member: "s1",
+	}).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	if fired := mgr.RunDue(); fired != 1 {
+		t.Fatalf("due worker fired %d wakes, want 1", fired)
+	}
+	if fs.count() != 1 {
+		t.Fatalf("due worker should append one pull-wake event, got %d", fs.count())
+	}
+	if sub, _, _ := store.Get("s1"); sub.Phase != PhaseWaking {
+		t.Fatalf("due worker should arm the owed subscription, got phase %q", sub.Phase)
+	}
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	if fm.dueTicks != 1 || fm.dueFired != 1 || fm.dueOps["arm"] != 1 {
+		t.Fatalf("due metrics not wired: ticks=%d fired=%d ops=%v", fm.dueTicks, fm.dueFired, fm.dueOps)
+	}
+}
+
+func TestDueWorkerCoalescesBusyDueMark(t *testing.T) {
+	store, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	fm := &fakeMetrics{}
+	mgr, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/", Metrics: fm})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := store.CreateOrConfirm("s1", pullWakeCfg(), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Link("s1", "events/1", LinkGlob, "0000000000000000_0000000000000000")
+	fs.mu.Lock()
+	fs.tails["events/1"] = "0000000000000001_0000000000000000"
+	fs.mu.Unlock()
+	if res, err := store.ArmWake("s1", now, 1000, false, "w_a"); err != nil || !res.Armed {
+		t.Fatalf("arm = %+v err=%v", res, err)
+	}
+
+	if fired := mgr.RunDue(); fired != 0 {
+		t.Fatalf("busy due mark should coalesce without firing, got %d", fired)
+	}
+	if fs.count() != 0 {
+		t.Fatalf("busy due mark should not append another wake event, got %d", fs.count())
+	}
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	if fm.dueTicks != 1 || fm.dueFired != 0 {
+		t.Fatalf("due worker metrics should record a zero-fire tick, got ticks=%d fired=%d",
+			fm.dueTicks, fm.dueFired)
 	}
 }
 
