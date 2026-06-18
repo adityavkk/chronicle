@@ -64,7 +64,11 @@ execute the moment a permitted GCP path is available.
 - **T1/T2/T4/L1 stay GREEN** under slot-homing (fence/cursor slot-homed but byte-for-byte unchanged), re-run via the **local-binary path** (chronicle on `:4437` + one Redis): `single-holder-linz` (T1) linearizable; `stale-gen-noop` (T4) FENCED no-op; `cursor-monotonic` (T2) forward-only under churn; `baseline`/`at-least-once`/`index-repair` (L1) 6/6 streams at tail. Build/vet/`test -short` + full webhook Redis integration GREEN.
 - **Gate #2** (the deciding fan-out p99) is **PENDING-CLOUD** — loopback erases the max-node-RTT it measures. The implementation is reversible + T5-correct, so it SHIPS with gate #2 recorded PENDING-CLOUD; the production enable/defer decision awaits the cloud p99 (see "Gate #2" below).
 
-### #16 — DR + capstone — PENDING (#14, #15)
+### #16 — DR + system-level capstone (integrated)
+- **Active-passive DR, the only new mechanism.** (1) Tier B **`WAITAOF`/`WAIT` durability barrier** on the fence-minting writes (`ArmWake` ARMED / `Claim` CLAIMED, after the generation `HINCRBY`), client checks the returned pair via the pure `InterpretWaitAOF`/`InterpretWait` core; a short reply is a surfaced error, never swallowed. (2) **`Manager.Promote()`** re-establishes ownership on the promoted primary + fires the failover-aware eager reconcile (`scopeEpochBump` → `reconcileLeases` re-derives stranded lease/due tails from the durable `sub` hash). (3) The **sealed `ConsistencyTier` A/B/C** config surface (`CHRONICLE_CONSISTENCY_TIER`/`_WAIT_REPLICAS`/`_WAIT_TIMEOUT_MS`, parsed at the env boundary); only Tier B touches the hot path, Tier C is the read-your-writes freshness-token stub. **Correction #3:** `WAIT`/`WAITAOF` are durability, NOT linearizability — the monotonic `(gen,wake_id)` fence stays the only exclusivity guard; no path infers ordering/exclusivity from the count.
+- **T1–T5 GREEN (local-binary path, one AOF Redis).** T1 `single-holder-linz` linearizable (463 ops); T1′ `shard-linz -G 8` linearizable per `(subId,g)`; T2 `cursor-monotonic` forward-only, 49 real deliveries; T3 `ownership-exclusivity` CAS-linearizable (157 ops/4 slots); T4 `stale-gen-noop` deposed ack `409 FENCED`, cursor byte-identical; T5 `slot-isolation` scatter ≡ reference ≡ brute, 0 foreign wakes, CROSSSLOT detected. **Tier B system-level proof:** re-ran T1 with chronicle in Tier B (`WAITAOF 1 0`) — Redis `cmdstat_waitaof: calls=16, rejected=0, failed=0` (barrier genuinely exercised) and T1 stayed `linearizable: yes` (durability did not alter exclusivity).
+- **In-process units GREEN** (`go test ./webhook`): L3 `TestLeaseTailDropRecoveredByEagerReconcile` (cursor-only recovery + deposed FENCED) + `TestPromoteDrivesEagerReconcile` (stranded `waking` sub re-ZADDed at promotion); the arm→emit failpoint `TestFailpointArmedBeforeEmitStrandsThenRecovers` (07 honest-gap #2, dependency-free seam — gofail proper is a documented build-system follow-up); the Tier B durability tests + `TestWaitIsDurabilityNotLinearizability`.
+- **STANDARD_HA substrate authored** (`jepsen/deploy/standard-ha.yaml` + `standard-ha-failover.sh`; `ltctl --redis-tier=STANDARD_HA` + `gate5`; `spec/dispatch-webhook-ha.yaml`). **Gate #5 + L2/L4/L5 + gates #2–#4 at scale + RPO/RTO + K=10k = PENDING-CLOUD** (shared colima co-tenanted with `k3d-bakeoff`; the orchestrator owns the cloud). Full ledger + exact commands in `docs/jepsen/results.md` "DR + the system-level capstone (issue #16)".
 
 ## Gate ledger (doc-05 gates #1–#6)
 
@@ -75,7 +79,7 @@ execute the moment a permitted GCP path is available.
 | #3 | #12 | due-set write amplification | PENDING-CLOUD — spec `due-10k.yaml` |
 | #4 | #14 | membership churn window (coverage gap ≤ TTL+RTT, 0 lost / 0 double-grant) | T3 acceptance gate GREEN (local); the churn-window number is PENDING-CLOUD (needs ≥2 replicas + chaos; rig built: sweep-10k-churn.yaml + ltctl gate4) |
 | #2 | #15 | OnStreamAppend fan-out p99 (S=2/4/8/256, real multi-node) | **PENDING-CLOUD** — loopback erases max-node-RTT; spec `fanout-gate2.yaml` + `ltctl gate2` + FanOut metric committed; T5 correctness GREEN locally |
-| #5 | #16 | failover fence drill (STANDARD_HA) | (pending; will be PENDING-CLOUD) |
+| #5 | #16 | failover fence drill (STANDARD_HA): stranded sub recovered ONLY by the cursor-reading reconciler + deposed ack 409 FENCED | **PENDING-CLOUD** — substrate + drill committed (`jepsen/deploy/standard-ha.yaml` + `standard-ha-failover.sh`; `ltctl gate5` + `spec/dispatch-webhook-ha.yaml`); L3 + promotion proven in-process; gate-#5 fence proof needs a real failover cluster |
 
 ## Gate #2 — OnStreamAppend fan-out p99 (the deciding number for slot-homing) — PENDING-CLOUD
 
@@ -119,8 +123,44 @@ slot-homing; over budget ⇒ DEFER per 05** and #16 runs its non-T5 suite agains
 single-slot ownership build. `slots_probed` must track occupied-slots-per-stream (not S).
 The K=10k sweep p99 baseline reproduces (< 1500 ms) as the regression floor.
 
+## Gate #5 — the DR failover-fence drill (issue #16) — PENDING-CLOUD
+
+The headline DR gate: drop the lease-ZSET tail mid-lease on a **`STANDARD_HA`** Redis,
+then fail over for real, and confirm **only** the cursor-reading failover-aware eager
+reconcile recovers the stranded webhook sub **and** a deposed ack returns **409
+`FENCED`** (not silent success) — 07's L3 at the real-failover level.
+
+**Why PENDING-CLOUD:** a real failover needs a SECOND node promoted while the first is
+gone + a stable endpoint across the promotion (07 honest-gap #3 — the single-Redis
+`deploy.yaml` only replays AOF). The shared colima VM is co-tenanted with the other
+orchestrator's `k3d-bakeoff` cluster, which must not be contended. The L3 property and
+the promotion-driven recovery are proven **in-process** (`go test ./webhook -run
+'LeaseTailDrop|PromoteDrivesEagerReconcile'`); the real-failover run is the orchestrator's.
+
+**Substrate + drill (committed):**
+- `jepsen/deploy/standard-ha.yaml` — primary + AOF replica + a stable `redis` Service
+  the failover repoints by flipping one selector (no chronicle client change; `WAITAOF
+  1 1` has a real replica to ack).
+- `jepsen/deploy/standard-ha-failover.sh` — applies the substrate, runs `lease-tail-drop
+  -floor 0` before AND after a REAL promotion (kill primary → `REPLICAOF NO ONE` → flip
+  the endpoint → roll chronicle's boot reconcile), and **always tears down**.
+- Managed path: `cd loadtest && ./ltctl.sh up --redis-tier=STANDARD_HA && ./ltctl.sh gate5 spec/dispatch-webhook-ha.yaml` (then `./ltctl.sh down`). `gate5` runs the full-system dispatch:webhook load (Tier B, replicas≥2, S=256), triggers Memorystore's managed failover mid-measure, and asserts the SLO + fence + zero-lost/zero-double-grant; self-teardown trap.
+
+**Pass criteria:** stranded sub recovered ONLY by the cursor-reading reconciler; deposed
+ack `409 FENCED` (`chronicle_owner_fenced_total` rises); zero lost wakes; zero
+double-grants; the K=10k sweep p99 holds within the 509 ms floor under combined chaos +
+DR drill.
+
+**RPO / RTO:** `RPO` = async replication lag + AOF fsync (`appendfsync everysec`, ~1 s)
++ link latency (bounded, > 0); Tier B `WAITAOF 1 1` shrinks the acked-write RPO to the
+replica-fsync ack. `RTO` = promotion time (managed failover / `REPLICAOF NO ONE` +
+endpoint repoint + chronicle reconnect/boot reconcile). Both recorded by the drill.
+
 ## K=10k regression floor
 
 `loadtest/RESULTS-gke.md` baseline: sweep p99 **509 ms**, SLO PASS. Reproduction on a real
 cluster is **PENDING-CLOUD**; the requirement (sweep p99 < 1500 ms) is carried as the standing
 floor and the spec (`loadtest/spec/sweep-10k.yaml` + the `-scale` variant) is committed.
+For #16 the floor must hold under the **combined chaos + DR drill**:
+`loadtest/spec/dispatch-webhook-ha.yaml` (S=256, replicas≥2, `STANDARD_HA`, Tier B) is
+the full-system load+chaos+failover run that re-asserts it — `ltctl gate5`.

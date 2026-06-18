@@ -392,3 +392,106 @@ loopback erases the max-node-RTT it measures. Recorded **PENDING-CLOUD**: the sp
 guide, pass criteria, and the exact S-sweep command. Local loopback sanity: 724
 fan-outs recorded, `slots_probed` ≤ 4/append (never 256 — the bitmap mitigation holds),
 p99 < 5 ms (loopback, NOT the gate-#2 number).
+
+## DR + the system-level capstone (issue #16)
+
+The capstone adds **active-passive cross-region DR** as the only new mechanism and
+re-validates the whole epic together. DR is three pieces: (1) a **Tier B `WAITAOF`
+durability barrier** on the fence-minting writes (`arm_wake`/`claim` generation
+`HINCRBY`), with the client checking the returned pair; (2) **`Manager.Promote()`**
+driving the failover-aware eager reconcile on an owner-epoch bump; (3) the
+**`STANDARD_HA`** real-failover substrate. The framing is doc-06 **correction #3**:
+`WAIT`/`WAITAOF` are **durability, not linearizability** — the monotonic
+`(gen,wake_id)` fence stays the only exclusivity guard.
+
+Run via the **local-binary path** (chronicle on `:4438` over one AOF Redis), the same
+path #14/#15 used. The shared colima VM is co-tenanted with another orchestrator's
+`k3d-bakeoff` cluster, so the multi-replica/chaos suites (L2/L4/L5, gates #2–#5) are
+recorded **PENDING-CLOUD** with committed specs + exact commands, not run here.
+
+### T1–T5 — the full safety suite, GREEN (local re-run)
+
+| # | Property | Scenario | Verdict | Evidence |
+| --- | --- | --- | --- | --- |
+| **T1** | single-holder lease | `single-holder-linz` | **GREEN** | `linearizable: yes`; 463 ops (445 claims, 18 grants), 4 workers + gcPause |
+| **T1′** | single-holder per `(subId,g)` | `shard-linz -sharded -G 8` | **GREEN** | `linearizable: yes` across 8 `(subId,g)` partitions |
+| **T2** | cursor monotonicity | `cursor-monotonic` | **GREEN** | 770 cursor samples / 4 streams under origin churn, **49 wakes delivered** (dup 1.00), no regression / no phantom advance |
+| **T3** | ownership exclusivity | `ownership-exclusivity` | **GREEN** | CAS linearizable; 157 ops / 4 slot partitions; epoch bumped on transfer, kept on renew; no deposed owner told it still owns |
+| **T4** | no stale-gen effect | `stale-gen-noop` | **GREEN** | deposed ack `409 FENCED`, durable cursor byte-identical; current-gen ack advanced it |
+| **T5** | no cross-subscriber leakage | `slot-isolation` | **GREEN** | subs=320 / 8 streams / 180–204 of 256 slots; scatter ≡ reference ≡ brute, **0 foreign wakes**, max probed 40; CROSSSLOT detected |
+
+Reproduce (one AOF Redis at `$REDIS_URL`; T1/T2/T4 also need a local chronicle at
+`-base`, started with `CHRONICLE_REDIS_URL=… CHRONICLE_SUBSCRIPTIONS=true`):
+
+```
+REDIS_URL=redis://127.0.0.1:6379/15 go run ./jepsen/checker -scenario ownership-exclusivity -slots 4 -workers 4 -workload-ms 5000
+REDIS_URL=redis://127.0.0.1:6379/15 go run ./jepsen/checker -scenario slot-isolation
+REDIS_URL=redis://127.0.0.1:6379/15 go run ./jepsen/checker -scenario shard-linz -sharded -G 8 -workers 4 -workload-ms 5000
+go run ./jepsen/checker -base http://localhost:4438 -scenario single-holder-linz -workers 4 -workload-ms 6000
+go run ./jepsen/checker -base http://localhost:4438 -scenario stale-gen-noop
+go run ./jepsen/checker -base http://localhost:4438 -recv-host 127.0.0.1 -scenario cursor-monotonic -streams 4 -msgs 20
+```
+
+### Tier B at the system level — `WAITAOF` is durability, NOT exclusivity
+
+Re-ran **T1 with chronicle in Tier B** (`CHRONICLE_CONSISTENCY_TIER=B
+CHRONICLE_WAIT_REPLICAS=0`, i.e. `WAITAOF 1 0` — local AOF fsync, the single-Redis
+rig). The barrier was genuinely exercised — Redis `commandstats` shows
+`cmdstat_waitaof: calls=16, rejected=0, failed=0` — and T1 stayed **`linearizable:
+yes`**. The durability barrier did **not** change the single-holder guarantee: the
+fence held it, exactly as correction #3 requires. This is the executable proof that
+no path infers exclusivity from the `WAIT` count.
+
+### In-process deterministic units (run under `go test`, GREEN)
+
+The cluster-only liveness scenarios have deterministic in-process analogues that need
+no k3d; all pass in the webhook suite (`REDIS_URL=… go test ./webhook -count=1`):
+
+| Property | Test | What it proves |
+| --- | --- | --- |
+| **L3** failover recovery of a stranded wake | `TestLeaseTailDropRecoveredByEagerReconcile` | a dropped lease tail is recovered ONLY by the cursor-reading eager reconcile (the lease worker stays blind); deposed ack `FENCED` |
+| **L3 at DR promotion** | `TestPromoteDrivesEagerReconcile` | `Manager.Promote()` re-ZADDs a `waking` sub with `lease_until_ns>0` dropped from the lease ZSET — the async-replication RPO window — from the durable hash |
+| arm→emit surgical window (07 honest-gap #2) | `TestFailpointArmedBeforeEmitStrandsThenRecovers` | a crash injected at the few-µs arm→emit window strands the wake; the recovery sweep re-emits it |
+| Tier B durability (correction #3) | `TestStoreTierB*` / `TestStoreTierAIssuesNoWait` | `WAITAOF` issued + checked; a short reply is a surfaced error (fence still minted on the primary); Tier A issues no WAIT |
+| WAIT-is-durability-not-linearizability | `TestWaitIsDurabilityNotLinearizability` | the interpreters' only output is a durability verdict; an over-ack is no stronger than the fence |
+
+### PENDING-CLOUD ledger (committed specs + exact commands; not run from the worktree)
+
+The cloud/chaos runs need ≥2 replicas + a real failover substrate the shared colima
+VM cannot host without contending the `k3d-bakeoff` tenant. The orchestrator owns the
+cloud. Every rig tears down on success/failure/Ctrl-C (STOP-THE-METER).
+
+- **Gate #5 — the failover-fence drill (the headline).** Drop the lease-ZSET tail
+  mid-lease on `STANDARD_HA` Redis; assert the stranded webhook sub is recovered
+  **only** by the cursor-reading eager reconcile **and** a deposed ack returns `409
+  FENCED` — 07's L3 at the real-failover level. Substrate: `jepsen/deploy/standard-ha.yaml`
+  (primary + AOF replica + a stable `redis` endpoint the failover repoints by flipping
+  one selector; `WAITAOF 1 1` now has a real replica to ack). Drill:
+  `jepsen/deploy/standard-ha-failover.sh` (applies the substrate, runs `lease-tail-drop
+  -floor 0` before AND after a real promotion, always tears down). Cloud (managed)
+  path: `cd loadtest && ./ltctl.sh up --redis-tier=STANDARD_HA && ./ltctl.sh gate5 spec/dispatch-webhook-ha.yaml` (then `./ltctl.sh down`).
+- **L2 / L4 — multi-replica churn.** `chronicle ×2` + continuous `killSlotOwner` /
+  `kubectl scale 2→1→3→2`, then quiesce. The in-process triggers are proven by
+  `TestPromoteDrivesEagerReconcile` and #14's slot-reconcile tests; the live drivers
+  wire onto the `shardModel` + ownership-timeline sampler in `jepsen/checker/nemesis.go`.
+- **L5 — the combined never-quiescing nemesis (the canonical stress run).**
+  kill-slot-owner + partition+heal + redis-failover + lease-tail-drop, churn period
+  near `R`, over ~5 min; per-sub max inter-delivery gap ≤ `3R` (FAIL only on a sub
+  stalled > `3R` WITH pending work). Run on the `STANDARD_HA` substrate so the
+  `redis-failover` arm is a real promotion. **Local run length: not run** — needs the
+  multi-replica + real-failover cluster the worktree cannot host.
+- **Gates #2–#4 at scale.** Gate #2 (fan-out p99 at S=2/4/8/256, `ltctl gate2`
+  `spec/fanout-gate2.yaml`); gate #3 (due-set write amplification); gate #4 (churn
+  window, zero lost / zero double-grant, `ltctl gate4 spec/sweep-10k-churn.yaml`). The
+  metrics (`chronicle_fanout_*`, `chronicle_coverage_gap_seconds`,
+  `chronicle_slot_ownership_events_total`, `chronicle_owner_fenced_total`) are wired and
+  verified live in `/metrics`; see `loadtest/RESULTS-claude.md`.
+- **RPO / RTO.** `RPO` = async replication lag + AOF fsync (`appendfsync everysec`,
+  ~1 s) + link latency — bounded, > 0; Tier B `WAITAOF 1 1` shrinks the acked-write RPO
+  to the replica-fsync ack. `RTO` = promotion time (the managed failover / `REPLICAOF
+  NO ONE` + endpoint repoint + chronicle reconnect/boot reconcile). Both recorded by
+  `standard-ha-failover.sh` / `ltctl gate5`.
+- **K=10k baseline.** The regression floor (`loadtest/RESULTS-gke.md`: sweep p99 509 ms,
+  SLO PASS) must reproduce under the combined chaos + DR drill —
+  `spec/dispatch-webhook-ha.yaml` (S=256, replicas≥2, `STANDARD_HA`, Tier B) is the
+  full-system load+chaos run; SLO `sweep_p99_ms ≤ 1500`.
