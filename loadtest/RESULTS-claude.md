@@ -50,7 +50,12 @@ execute the moment a permitted GCP path is available.
 - **T1/T2/T4/L1 GREEN**; **L3 sharpened to `-floor=0` + explicit takeover and GREEN** (the eager reconcile at the takeover trigger reaches tail, far under the 30 s server floor → a tick cannot be the recoverer). doc-07 honest-gap #4 resolved. Integrated-branch Redis integration GREEN (real run).
 - Steady-state delivery latency unchanged by the floor raise (the 2 s sweep fired nothing in steady state). No standalone gate.
 
-### #14 — Leased slot ownership (Move 3) — IN PROGRESS
+### #14 — Leased slot ownership (Move 3) (integrated)
+- `claim_shard.lua` CAS over `ds:{ownership}:slot:<h>` + `check_owner.lua` (external POST only); membership heartbeat + HRW (FNV-1a + splitmix64 finalize, ~1/N reassignment) + slot-reconcile loop; workers gated by `ownedSlots() = HRW ∩ held-leases`; `sweepOnce` stays the UNGUARDED backstop. TOCTOU owner-epoch check inlined in arm_wake/ack/expire_lease/schedule_retry/release (gated on a non-empty epoch — the load-balanced external path is unchanged; the owner scope is threaded through the retry path too). New-owner CAS fires #13's `reconcile(scopeNewOwnerCAS)`. ReplicaID + 4 TTLs with invariant tests. Pure FCIS core; distinct `SlotID`/`OwnerEpoch`/`ReplicaID` types (no collision with #11's `ClaimShard`/`ShardKey`).
+- **T3 (THE acceptance gate) PASS** — porcupine `shardModel` CAS-register, partitioned per slot, Unknown=FAIL: linearizable over 165–275 ops / 4 partitions across seeds, **and proven to have teeth** (an injected epoch-reuse/LWW bug flips the same run to *Illegal* with a counterexample, end-to-end).
+- **T1/T2/T4/L1 stay GREEN** under the owner-epoch fence layered ABOVE (never replacing) the `(gen,wake_id)` fence — that fence is byte-for-byte unchanged. bump-on-transfer-only fences a deposed-then-resumed owner. Build/vet/test-short + full webhook Redis integration GREEN.
+- **Gate #4** (membership churn window: coverage gap ≤ membership-lease TTL + RTT, ZERO lost wakes / ZERO double-grants; total work O(total owed) regardless of N — the inverse of #10's gate #1) and **L2 / L4** need ≥2 replicas + chaos on a clean multi-node rig — **env-scoped** (the local colima VM is co-tenanted with the other orchestrator's k3d cluster, which must not be touched). Rig built: `loadtest/spec/sweep-10k-churn.yaml` (replicas≥2) + `ltctl gate4` (pod-kill the slot owner, scrape coverage-gap/ownership/fence metrics); recorded **PENDING-CLOUD** with the exact reproduce commands.
+
 ### #15 — Slot-homed state (Move 1) — PENDING (#14)
 ### #16 — DR + capstone — PENDING (#14, #15)
 
@@ -61,7 +66,7 @@ execute the moment a permitted GCP path is available.
 | #6 | #11 | per-type claim contention — knee moves ~G× | **GREEN** (C3: G=16 knee beyond range; per-worker flat, aggregate scales) |
 | #1 | #10 | O(N·K) premise (CPU-vs-N at K=10k) | PENDING-CLOUD (VPC-SC) — spec + cmd committed |
 | #3 | #12 | due-set write amplification | PENDING-CLOUD — spec `due-10k.yaml` |
-| #4 | #14 | membership churn window (coverage gap ≤ TTL+RTT, 0 lost / 0 double-grant) | (in progress) |
+| #4 | #14 | membership churn window (coverage gap ≤ TTL+RTT, 0 lost / 0 double-grant) | T3 acceptance gate GREEN (local); the churn-window number is PENDING-CLOUD (needs ≥2 replicas + chaos; rig built: sweep-10k-churn.yaml + ltctl gate4) |
 | #2 | #15 | OnStreamAppend fan-out p99 (S=2/4/8/256, real multi-node) | (pending; will be PENDING-CLOUD — loopback erases max-node-RTT) |
 | #5 | #16 | failover fence drill (STANDARD_HA) | (pending; will be PENDING-CLOUD) |
 
