@@ -215,6 +215,15 @@ func (f *fakeMetrics) WakeDelivery(time.Duration, string) {}
 func (f *fakeMetrics) WakeEvent(time.Duration, string)    {}
 func (f *fakeMetrics) WorkerTick(string, int)             {}
 
+// Horizontal-scale signals (GAP2): no-ops here — they are wired nowhere on
+// today's code, so the sweep test asserts nothing about them.
+func (f *fakeMetrics) FanOut(time.Duration, int, int)   {}
+func (f *fakeMetrics) DueSetMutation(string)            {}
+func (f *fakeMetrics) DueWorkerTick(time.Duration, int) {}
+func (f *fakeMetrics) SlotOwnership(string, int)        {}
+func (f *fakeMetrics) CoverageGap(time.Duration)        {}
+func (f *fakeMetrics) OwnerFenced(string)               {}
+
 // TestSweepRecordsMetrics verifies the sweep reports its per-tick cost to the
 // Metrics seam: one tick recorded, carrying the subscription/tail counts and the
 // wakes it issued.
