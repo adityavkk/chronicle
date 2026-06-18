@@ -798,6 +798,11 @@ type nemesis struct {
 	ctx, ns, scenario string
 	mu                sync.Mutex
 	log               []string
+	// runner executes an external command; nil means exec.Command (the default).
+	// Tests inject a recording runner to assert a nemesis issues exactly the
+	// intended command (e.g. dropLeaseTail ZREMs only the schedule entry) without
+	// shelling out to kubectl/redis-cli.
+	runner func(name string, args ...string) ([]byte, error)
 }
 
 func (n *nemesis) record(action string) {
@@ -891,7 +896,17 @@ func (n *nemesis) redisCLI(args ...string) ([]byte, error) {
 
 func (n *nemesis) kubectl(args ...string) ([]byte, error) {
 	full := append([]string{"--context", n.ctx, "-n", n.ns}, args...)
-	return exec.Command("kubectl", full...).CombinedOutput()
+	return n.exec("kubectl", full...)
+}
+
+// exec runs an external command through the injectable runner (exec.Command by
+// default). Every kubectl/redis-cli call routes through here so a test can
+// capture the exact command a nemesis issues.
+func (n *nemesis) exec(name string, args ...string) ([]byte, error) {
+	if n.runner != nil {
+		return n.runner(name, args...)
+	}
+	return exec.Command(name, args...).CombinedOutput()
 }
 
 // ---- small helpers ----
