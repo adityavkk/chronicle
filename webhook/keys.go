@@ -62,3 +62,29 @@ func linksKey(id string) string { return keyPrefix + ":sub:" + id + ":links" }
 // streamSubsKey is the per-stream fan-out SET of subscription ids linked to a
 // stream. Maintained from Go as a best-effort index reconciled by the sweep.
 func streamSubsKey(path string) string { return keyPrefix + ":stream:" + path }
+
+// ---- {ownership} keyspace (issue #14, work-sharded leased slot ownership) ----
+//
+// The membership ZSET and the per-slot ownership records use their OWN literal
+// hash tag {ownership}, deliberately NOT slot-homed: they are cross-slot
+// cluster-membership metadata, separate from the per-subscription {__ds} control
+// plane (05:311). This ownership axis (which REPLICA runs autonomous background
+// work for a slot of the keyspace) is ORTHOGONAL to the per-(subId,g) claim
+// granularity above (#11): different keys, different tag, the owner-epoch fence
+// vs the (gen,wake_id) fence. On a single-node Redis (the deploy/test substrate)
+// one EVAL may touch an {ownership} slot key alongside the {__ds} schedule keys —
+// the TOCTOU inline checks rely on that atomicity; co-locating the two tags for a
+// real Redis Cluster is out of scope here (the state shard is #15, DR is #16).
+const ownershipTag = "{ownership}"
+
+// membersKey is the ZSET of live replica ids -> heartbeat lease-expiry ns: every
+// replica ZADDs itself each heartbeatInterval and evicts entries past their TTL
+// with ZREMRANGEBYSCORE. This Redis ZSET (not Kubernetes) decides which replicas
+// are eligible to own subscription slots.
+const membersKey = "ds:" + ownershipTag + ":members"
+
+// slotKey is the HASH holding ownership slot h's CAS record
+// {owner_id, owner_epoch, lease_expiry_ns}, claimed/renewed by claim_shard.lua
+// and read by check_owner.lua. The literal "ds:{ownership}:slot:<h>" form matches
+// the keyspace block in doc-05 and the jepsen killSlotOwner nemesis.
+func slotKey(h int) string { return "ds:" + ownershipTag + ":slot:" + strconv.Itoa(h) }

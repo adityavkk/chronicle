@@ -473,6 +473,59 @@ func (s *RedisStore) RecordWakeEventSent(id string, generation int64, wakeID str
 	return err
 }
 
+// ---- leased slot ownership (issue #14) ----
+
+// ClaimSlot runs claim_shard.lua, the {ownership}-tagged CAS that grants slot
+// ownership only when the current owner is expired, missing, or the caller, and
+// bumps owner_epoch on transfer only. It is a thin wrapper: the SlotOwnership /
+// OwnerFenced metrics are recorded by the Manager's slot-reconcile loop, which
+// holds the SlotID and the held-lease context. slotLeaseTTL is the ownership
+// lease TTL, a DIFFERENT layer from the per-subscription webhook lease_ttl_ms.
+func (s *RedisStore) ClaimSlot(slotKey, replicaID string, now time.Time, slotLeaseTTL time.Duration) (SlotClaim, error) {
+	reply, err := s.evalStrings(claimShardScript, []string{slotKey},
+		replicaID, nsArg(now), strconv.FormatInt(slotLeaseTTL.Milliseconds(), 10))
+	if err != nil {
+		return SlotClaim{}, err
+	}
+	return parseSlotClaim(reply)
+}
+
+// CheckOwner runs check_owner.lua — the owner-epoch fence for the external
+// webhook POST. expectedEpoch is the epoch the caller believes it holds, in the
+// base-10 form OwnerEpoch.String produces (the same form claim_shard returned).
+func (s *RedisStore) CheckOwner(slotKey, replicaID, expectedEpoch string) (OwnerCheck, error) {
+	reply, err := s.evalStrings(checkOwnerScript, []string{slotKey}, replicaID, expectedEpoch)
+	if err != nil {
+		return OwnerCheckFenced, err
+	}
+	return parseOwnerCheck(reply)
+}
+
+// Heartbeat re-ZADDs this replica into the members ZSET at now+memberLeaseTTL and
+// evicts members past their lease. Both ops are idempotent under single-threaded
+// Redis, so every replica runs them; no leader is needed. The eviction uses an
+// exclusive "(now" upper bound so a member whose lease lands exactly on now is
+// kept (it is not yet expired).
+func (s *RedisStore) Heartbeat(replicaID string, now time.Time, memberLeaseTTL time.Duration) error {
+	ctx := s.ctx()
+	expiry := float64(now.Add(memberLeaseTTL).UnixNano())
+	if err := s.client.ZAdd(ctx, membersKey, redis.Z{Score: expiry, Member: replicaID}).Err(); err != nil {
+		return err
+	}
+	upper := "(" + nsArg(now)
+	return s.client.ZRemRangeByScore(ctx, membersKey, "-inf", upper).Err()
+}
+
+// LiveMembers returns the replica ids whose membership lease has not expired:
+// ZRANGEBYSCORE over (now,+inf], so an entry whose expiry score is strictly
+// greater than now is live. It is the set HRW assigns slots over.
+func (s *RedisStore) LiveMembers(now time.Time) ([]string, error) {
+	return s.client.ZRangeByScore(s.ctx(), membersKey, &redis.ZRangeBy{
+		Min: "(" + nsArg(now),
+		Max: "+inf",
+	}).Result()
+}
+
 // LoadSigningKey adopts the persisted active key or installs a freshly-generated
 // candidate, atomically (get_or_create_key). The kid is therefore stable across
 // restarts (PROTOCOL §6.5).
