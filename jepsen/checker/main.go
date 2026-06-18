@@ -49,6 +49,20 @@ type config struct {
 	settle     time.Duration
 	workloadMs int
 	workers    int
+	// Explicit per-scenario liveness bounds (07 step 6: a liveness verdict is only
+	// meaningful relative to its time bound). sweep is the no-fault L1 bound (one
+	// sweep tick); floor is the coarse periodic reconcile bound for the one
+	// eventless recovery case (07 honest-gap #4). They mirror the server's
+	// defaultSweepInterval / index-reconcile so the harness asserts against the
+	// same numbers the SUT runs.
+	sweep time.Duration
+	floor time.Duration
+	// Optional extra nemeses, off by default (they need privileged/proxy
+	// substrate): a clock skew applied to a chronicle pod, and a toxiproxy admin
+	// URL + the proxy name fronting Redis.
+	clockSkewBy time.Duration
+	toxiproxy   string
+	redisProxy  string
 }
 
 func main() {
@@ -60,10 +74,15 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
+	flag.DurationVar(&c.sweep, "sweep", 2*time.Second, "the L1 no-fault delivery bound (one sweep tick); the server's defaultSweepInterval")
+	flag.DurationVar(&c.floor, "floor", 30*time.Second, "the coarse periodic-reconcile floor for the eventless recovery case (07 honest-gap #4)")
+	flag.DurationVar(&c.clockSkewBy, "clock-skew", 0, "optional: skew a chronicle pod's clock by this much (best-effort; needs a privileged container)")
+	flag.StringVar(&c.toxiproxy, "toxiproxy", "", "optional: toxiproxy admin URL (e.g. http://localhost:8474) to inject Redis partition/latency")
+	flag.StringVar(&c.redisProxy, "redis-proxy", "redis-claude", "the toxiproxy proxy name fronting Redis (used with -toxiproxy)")
 	flag.Parse()
 
 	r := newReceiver()
@@ -92,6 +111,30 @@ func run(c config, r *receiver) error {
 	// CheckCursorMonotonic (T2, scenario_cursor.go). It reuses the receiver.
 	if c.scenario == "cursor-monotonic" {
 		return runCursorMonotonic(c, r)
+	}
+
+	// stale-gen-noop (T4) and lease-tail-drop (L3) are self-contained claim/ack
+	// flows over the pull-wake API — no webhook receiver — so they run their own
+	// flow like expired-lease-takeover does (scenario_stalegen.go / _leasetail.go).
+	if c.scenario == "stale-gen-noop" {
+		return runStaleGenNoop(c)
+	}
+	if c.scenario == "lease-tail-drop" {
+		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		return runLeaseTailDrop(c, nem)
+	}
+
+	// ownership-exclusivity (T3) and slot-isolation (T5) are acceptance-gate
+	// scaffolds for mechanisms that do not exist on today's code (#14 / #15); they
+	// reach the cluster, exercise the matching nemesis seam, and report GATED
+	// (scenario_gated.go).
+	if c.scenario == "ownership-exclusivity" {
+		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		return runOwnershipExclusivity(c, nem)
+	}
+	if c.scenario == "slot-isolation" {
+		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		return runSlotIsolation(c, nem)
 	}
 
 	fmt.Printf("== scenario %q: %d streams x %d msgs ==\n", c.scenario, c.streams, c.msgs)
@@ -424,17 +467,13 @@ func verify(c config, subID string, expected map[string]string, r *receiver, nem
 		acked[s.Path] = s.AckedOffset
 	}
 
-	var lagging []string
-	streams := make([]string, 0, len(expected))
-	for s := range expected {
-		streams = append(streams, s)
+	// L1 per-message delivery check (the pure CheckAtLeastOnce over the keyspace):
+	// every linked stream's appended range must be covered by its final cursor.
+	exp := make([]deliveryExpectation, 0, len(expected))
+	for _, s := range sortedKeys(expected) {
+		exp = append(exp, deliveryExpectation{path: s, tail: expected[s], msgs: c.msgs})
 	}
-	sort.Strings(streams)
-	for _, s := range streams {
-		if acked[s] != expected[s] {
-			lagging = append(lagging, fmt.Sprintf("%s acked=%s want=%s", s, short(acked[s]), short(expected[s])))
-		}
-	}
+	gaps := CheckAtLeastOnce(exp, acked)
 
 	delivered, dupFactor := r.stats()
 	fmt.Println("---- result ----")
@@ -443,14 +482,15 @@ func verify(c config, subID string, expected map[string]string, r *receiver, nem
 	fmt.Printf("messages appended: %d\n", c.streams*c.msgs)
 	fmt.Printf("wakes delivered:   %d\n", delivered)
 	fmt.Printf("duplicate factor:  %.2f (at-least-once; duplicates fenced-safe)\n", dupFactor)
-	fmt.Printf("streams at tail:   %d/%d\n", c.streams-len(lagging), c.streams)
-	if len(lagging) > 0 {
-		for _, l := range lagging {
-			fmt.Printf("  LAGGING %s\n", l)
+	fmt.Printf("L1 delivery bound: <= one sweep tick (%s) no-fault; <= max(sweep,floor)+RTT (%s) after heal\n", c.sweep, maxDur(c.sweep, c.floor))
+	fmt.Printf("streams at tail:   %d/%d\n", c.streams-len(gaps), c.streams)
+	if len(gaps) > 0 {
+		for _, g := range gaps {
+			fmt.Printf("  LAGGING %s\n", g)
 		}
-		return fmt.Errorf("%d/%d streams never reached their tail — a wake was lost and not recovered", len(lagging), c.streams)
+		return fmt.Errorf("L1 violated: %d/%d streams never reached their tail — a wake was lost and not recovered", len(gaps), c.streams)
 	}
-	fmt.Println("PASS: every durably-appended message was delivered and acked despite faults")
+	fmt.Println("PASS: L1 at-least-once — every durably-appended message was delivered and acked despite faults")
 	return nil
 }
 
@@ -851,7 +891,8 @@ func (n *nemesis) run(stop <-chan struct{}) {
 			n.killRedis()
 			<-stop
 		}
-	default: // baseline
+	default: // baseline, at-least-once: no fault — assert steady-state L1 delivery
+		// within one sweep tick (no fault to heal from), the L1 control case.
 		<-stop
 	}
 }
@@ -923,6 +964,25 @@ func retry(attempts int, delay time.Duration, f func() error) error {
 }
 
 func sleep(d time.Duration) { <-time.After(d) }
+
+// sortedKeys returns the map's keys in deterministic order, so a result listing
+// is stable run to run.
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// maxDur returns the larger of two durations.
+func maxDur(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
+}
 
 func short(o string) string {
 	if len(o) > 12 {
