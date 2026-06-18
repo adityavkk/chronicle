@@ -29,6 +29,20 @@ type SubscriptionTuning struct {
 	// Metrics, if set, receives sweep/delivery/worker observations from the
 	// Manager. Nil leaves the Manager on its no-op recorder.
 	Metrics webhook.Metrics
+
+	// ---- leased slot ownership (issue #14) ----
+	// ReplicaID is this process's membership identity; empty makes the Manager
+	// generate it (POD_NAME + a crypto/rand nonce). MemberLeaseTTL /
+	// HeartbeatInterval / SlotLeaseTTL / SlotReconcileInterval are the membership +
+	// slot-ownership timers (a DIFFERENT lease layer from the per-subscription
+	// webhook lease_ttl_ms). Zero values default to 9s/3s/9s/3s; the Manager
+	// enforces heartbeatInterval < memberLeaseTTL/2 and slotReconcileInterval <=
+	// heartbeatInterval, falling back to defaults if violated.
+	ReplicaID             string
+	MemberLeaseTTL        time.Duration
+	HeartbeatInterval     time.Duration
+	SlotLeaseTTL          time.Duration
+	SlotReconcileInterval time.Duration
 }
 
 // storePath maps a stream-root-relative subscription path ("events/abc") to the
@@ -151,6 +165,11 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		ReconcileInterval:          tuning.ReconcileInterval,
 		SweepBatch:                 tuning.SweepBatch,
 		Metrics:                    tuning.Metrics,
+		ReplicaID:                  tuning.ReplicaID,
+		MemberLeaseTTL:             tuning.MemberLeaseTTL,
+		HeartbeatInterval:          tuning.HeartbeatInterval,
+		SlotLeaseTTL:               tuning.SlotLeaseTTL,
+		SlotReconcileInterval:      tuning.SlotReconcileInterval,
 	}
 	if rs != nil {
 		opts.Lister = redisLister{rs: rs}
