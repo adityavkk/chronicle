@@ -42,7 +42,8 @@ func runCursorMonotonic(c config, r *receiver) error {
 
 	// Continuous origin churn: the sweep and the retry worker both re-fire wakes,
 	// the exact condition under which a naive ack could replay an offset backward.
-	nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: "origin-restart"}
+	nem := c.newNemesis(ctx)
+	nem.scenario = "origin-restart"
 	stopNem := make(chan struct{})
 	var nwg sync.WaitGroup
 	nwg.Add(1)

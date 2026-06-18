@@ -28,6 +28,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -47,6 +48,11 @@ type config struct {
 	msgs       int
 	scenario   string
 	settle     time.Duration
+	sweep      time.Duration
+	floor      time.Duration
+	nemMin     time.Duration
+	nemMax     time.Duration
+	nemDryRun  bool
 	workloadMs int
 	workers    int
 }
@@ -60,8 +66,13 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|at-least-once|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop-recovery|ownership-exclusivity|slot-isolation|contention-contract")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
+	flag.DurationVar(&c.sweep, "sweep", 2*time.Second, "expected recovery sweep interval bound for liveness verdicts (0 means disabled, if the SUT supports it)")
+	flag.DurationVar(&c.floor, "floor", 30*time.Second, "expected coarse recovery floor bound for proposed owner/due mechanisms")
+	flag.DurationVar(&c.nemMin, "nemesis-window-min", 2*time.Second, "minimum randomized nemesis action window")
+	flag.DurationVar(&c.nemMax, "nemesis-window-max", 8*time.Second, "maximum randomized nemesis action window")
+	flag.BoolVar(&c.nemDryRun, "nemesis-dry-run", false, "log unsupported external nemesis primitives instead of failing")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
 	flag.Parse()
@@ -93,6 +104,22 @@ func run(c config, r *receiver) error {
 	if c.scenario == "cursor-monotonic" {
 		return runCursorMonotonic(c, r)
 	}
+	if c.scenario == "stale-gen-noop" {
+		return runStaleGenerationNoop(c)
+	}
+	if c.scenario == "lease-tail-drop-recovery" {
+		nem := c.newNemesis(ctx)
+		return runLeaseTailDropRecovery(c, nem)
+	}
+	if c.scenario == "ownership-exclusivity" {
+		return runOwnershipExclusivity(c)
+	}
+	if c.scenario == "slot-isolation" {
+		return runSlotIsolation(c)
+	}
+	if c.scenario == "contention-contract" {
+		return runContentionContract(c)
+	}
 
 	fmt.Printf("== scenario %q: %d streams x %d msgs ==\n", c.scenario, c.streams, c.msgs)
 	if err := waitReady(c.base, 60*time.Second); err != nil {
@@ -104,14 +131,14 @@ func run(c config, r *receiver) error {
 	// share, so it runs its own end-to-end flow (no webhook receiver, no
 	// cursor-reaches-tail verify).
 	if c.scenario == "expired-lease-takeover" {
-		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		nem := c.newNemesis(ctx)
 		return runExpiredLeaseTakeover(c, nem)
 	}
 
 	// pull-wake-arm-crash drives a pull-wake subscription drained by a worker
 	// loop, not the webhook receiver, so it too runs its own flow.
 	if c.scenario == "pull-wake-arm-crash" {
-		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		nem := c.newNemesis(ctx)
 		return runPullWakeArmCrash(c, nem)
 	}
 
@@ -132,7 +159,7 @@ func run(c config, r *receiver) error {
 	fmt.Printf("created subscription %s -> %s (pattern %q)\n", subID, webhookURL, pattern)
 
 	// 2. Run the nemesis concurrently with the workload.
-	nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+	nem := c.newNemesis(ctx)
 	var wg sync.WaitGroup
 	stopNemesis := make(chan struct{})
 	wg.Add(1)
@@ -796,8 +823,21 @@ func (r *receiver) stats() (delivered int, dupFactor float64) {
 
 type nemesis struct {
 	ctx, ns, scenario string
+	minWindow         time.Duration
+	maxWindow         time.Duration
+	dryRun            bool
+	rng               *rand.Rand
 	mu                sync.Mutex
 	log               []string
+}
+
+func (c config) newNemesis(ctx string) *nemesis {
+	minWindow, maxWindow := normalizeNemesisWindow(c.nemMin, c.nemMax)
+	return &nemesis{
+		ctx: ctx, ns: c.namespace, scenario: c.scenario,
+		minWindow: minWindow, maxWindow: maxWindow, dryRun: c.nemDryRun,
+		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
+	}
 }
 
 func (n *nemesis) record(action string) {
@@ -812,30 +852,12 @@ func (n *nemesis) run(stop <-chan struct{}) {
 		// Continuously churn one origin so appends and wakes race pod loss.
 		// index-repair runs the same origin churn while it also drops fan-out
 		// index entries from the workload goroutine.
-		ticker := time.NewTicker(3 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				n.killOneOrigin()
-			}
-		}
+		n.runRandom(stop, func() { n.killOneOrigin() })
 	case "glob-create-crash", "pull-wake-arm-crash":
 		// These scenarios drive their own decisive crashes inline (right after a
 		// stream create / a wake arm) from the workload goroutine, so the
 		// background nemesis only adds light churn to widen the race window.
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				n.killOneOrigin()
-			}
-		}
+		n.runRandom(stop, func() { n.killOneOrigin() })
 	case "redis-restart":
 		// A single Redis restart mid-workload: the PVC-backed AOF must replay
 		// so the log and the subscription control plane survive, and the
@@ -849,6 +871,41 @@ func (n *nemesis) run(stop <-chan struct{}) {
 	default: // baseline
 		<-stop
 	}
+}
+
+func (n *nemesis) runRandom(stop <-chan struct{}, action func()) {
+	for {
+		delay := n.nextWindow()
+		timer := time.NewTimer(delay)
+		select {
+		case <-stop:
+			timer.Stop()
+			return
+		case <-timer.C:
+			action()
+		}
+	}
+}
+
+func (n *nemesis) nextWindow() time.Duration {
+	minWindow, maxWindow := normalizeNemesisWindow(n.minWindow, n.maxWindow)
+	if maxWindow <= minWindow {
+		return minWindow
+	}
+	return minWindow + time.Duration(n.rng.Int63n(int64(maxWindow-minWindow)))
+}
+
+func normalizeNemesisWindow(minWindow, maxWindow time.Duration) (time.Duration, time.Duration) {
+	if minWindow <= 0 {
+		minWindow = 2 * time.Second
+	}
+	if maxWindow <= 0 {
+		maxWindow = minWindow
+	}
+	if maxWindow < minWindow {
+		minWindow, maxWindow = maxWindow, minWindow
+	}
+	return minWindow, maxWindow
 }
 
 func (n *nemesis) killOneOrigin() {
@@ -871,6 +928,30 @@ func (n *nemesis) killRedis() {
 	n.record("kill-redis")
 }
 
+func (n *nemesis) killSlotOwner(slot int) error {
+	if n.dryRun {
+		n.record(fmt.Sprintf("dry-run-kill-slot-owner-%d", slot))
+		return nil
+	}
+	return fmt.Errorf("killSlotOwner requires ds:{ownership}:slot:<h> and pod owner mapping; slot ownership is not implemented in today's k3d deployment")
+}
+
+func (n *nemesis) toxiproxyPartition() error {
+	if n.dryRun {
+		n.record("dry-run-toxiproxy-partition")
+		return nil
+	}
+	return fmt.Errorf("toxiproxy partition requires a toxiproxy sidecar/service; the current k3d deployment wires chronicle directly to Redis")
+}
+
+func (n *nemesis) clockSkew() error {
+	if n.dryRun {
+		n.record("dry-run-clock-skew")
+		return nil
+	}
+	return fmt.Errorf("clock-skew nemesis requires privileged pod time control or a clock seam; recorder timestamps remain pinned to the driver host")
+}
+
 // deleteStreamIndex removes one stream's fan-out index SET
 // (ds:{__ds}:stream:<path>) directly in Redis, simulating a crash between the
 // canonical Lua link write and the Go-side SADD that maintains the index. The
@@ -881,6 +962,21 @@ func (n *nemesis) deleteStreamIndex(path string) {
 	key := fmt.Sprintf("ds:{__ds}:stream:%s", path)
 	n.redisCLI("del", key)
 	n.record("drop-stream-index")
+}
+
+// dropLeaseTail removes only the lease schedule entry, leaving the subscription
+// hash and links intact. This is the L3 fault: a failover dropped a ZSET tail but
+// not the durable sub state the cursor-reading reconciler can re-derive from.
+func (n *nemesis) dropLeaseTail(id string) error {
+	if _, err := n.redisCLI(dropLeaseTailCommand(id)...); err != nil {
+		return fmt.Errorf("dropLeaseTail: %w", err)
+	}
+	n.record("drop-lease-tail")
+	return nil
+}
+
+func dropLeaseTailCommand(id string) []string {
+	return []string{"zrem", "ds:{__ds}:sched:lease", id}
 }
 
 // redisCLI runs redis-cli inside the redis pod against DB 0 (the deployment DB).

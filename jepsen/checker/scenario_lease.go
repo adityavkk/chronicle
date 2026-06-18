@@ -118,7 +118,7 @@ func leaseWorker(base, subID string, id int, leaseTTLMs int64, deadline time.Tim
 		// peer takes over (rotating the fence) and this ack races in with a stale
 		// token.
 		if grants%3 == 0 {
-			sleep(time.Duration(leaseTTLMs)*time.Millisecond + 250*time.Millisecond)
+			sleep(gcPauseDuration(leaseTTLMs))
 		}
 
 		callNs = rec.now()
@@ -131,6 +131,10 @@ func leaseWorker(base, subID string, id int, leaseTTLMs int64, deadline time.Tim
 			reqGen: res.Generation, reqWake: res.WakeID, tokenGen: res.Generation, done: true,
 		}, fenceOutput{status: ackStatusOf(astatus, acode)}, callNs)
 	}
+}
+
+func gcPauseDuration(leaseTTLMs int64) time.Duration {
+	return time.Duration(leaseTTLMs)*time.Millisecond + 250*time.Millisecond
 }
 
 // claimOnce POSTs a single pull-wake claim WITHOUT retrying, returning the raw
