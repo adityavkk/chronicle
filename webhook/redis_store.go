@@ -578,6 +578,16 @@ func unmarshalKeyMaterial(kid, material string) (SigningKey, error) {
 // precision the Lua double already dropped is irrelevant to a lease deadline, and
 // the authoritative views — the lease-ZSET score and expire_lease.lua's tonumber —
 // read the same value, so this only realigns the Go hash view with the schedule.
+//
+// Behavior note (fleet-wide, intentional): before this fix ParseInt rejected the
+// float string and returned 0 for every armed/claimed webhook sub, so the Go-side
+// deadline checks that read LeaseUntilNs — sweepOnce's lease-expiry flip and
+// ClaimDecision's BUSY-vs-rotate deadline (state.go) — were effectively dead
+// no-ops, with lease expiry driven only by the lease worker's Lua tonumber. This
+// realignment activates those Go-side checks to match the Lua's authoritative
+// behavior; the claim-fence outcome is pinned by TestClaimUnexpiredLeaseStillBusy
+// and TestClaimExpiredLeaseRotatesFence, and a re-ZADD only writes schedule
+// entries (never the generation/wake_id fence), so it cannot double-grant.
 func parseLeaseUntilNs(s string) int64 {
 	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
 		return n
