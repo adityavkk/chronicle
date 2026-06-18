@@ -640,22 +640,9 @@ func (m *Manager) sweepOnce() {
 		if sub.Config.Type == DispatchPullWake && sub.Phase == PhaseWaking && sub.WakeEventSentNs == 0 {
 			m.writeWakeEvent(sub, "", sub.Generation, sub.WakeID)
 			wakes++
-			continue
 		}
-		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
-			status, err := m.store.ExpireLease(NewLeaseRef(sub.ID, DefaultClaimShard), now, pending)
-			if err == nil {
-				m.recordDueSetMutation(DueSetForExpireLease(status, pending))
-			}
-			if err == nil && status == "EXPIRED" {
-				m.metrics.ClaimContention("lease_lapse", sub.ID)
-				sub.Phase = PhaseIdle
-			}
-		}
-		if sub.Phase != PhaseIdle {
-			m.reconcileLeaseSchedule(sub, pending, now)
-		}
-		if sub.Phase == PhaseIdle && pending {
+		active := m.sweepClaimLeases(sub, pending, now)
+		if !active && pending {
 			if m.issueWake(sub, "") {
 				if dur, ok := coverageGapForSweepWake(sub, now); ok {
 					m.metrics.CoverageGap(dur)
@@ -680,17 +667,46 @@ func (m *Manager) reconcileLeasesOnce() {
 	now := time.Now()
 	for _, sub := range subs {
 		pending := HasPendingWorkFrom(sub.Links, tails)
-		m.reconcileLeaseSchedule(sub, pending, now)
+		m.reconcileClaimLeaseSchedules(sub, pending, now)
 	}
 }
 
-func (m *Manager) reconcileLeaseSchedule(sub Subscription, pending bool, now time.Time) {
-	decision := decideLeaseReconcile(ClaimLeaseFromSubscription(sub), pending)
+func (m *Manager) sweepClaimLeases(sub Subscription, pending bool, now time.Time) bool {
+	active := false
+	for _, lease := range ClaimLeasesFromSubscription(sub) {
+		state := lease.State
+		if state.Phase != PhaseIdle && LeaseExpired(state.LeaseUntilNs, now) {
+			status, err := m.store.ExpireLease(lease.Ref(sub.ID), now, pending)
+			if err == nil {
+				m.recordDueSetMutation(DueSetForExpireLease(status, pending))
+			}
+			if err == nil && status == "EXPIRED" {
+				m.metrics.ClaimContention("lease_lapse", sub.ID)
+				state.Phase = PhaseIdle
+			}
+		}
+		if state.Phase == PhaseIdle {
+			continue
+		}
+		active = true
+		m.reconcileLeaseSchedule(sub.ID, ClaimShardLeaseState{Shard: lease.Shard, State: state}, pending, now)
+	}
+	return active
+}
+
+func (m *Manager) reconcileClaimLeaseSchedules(sub Subscription, pending bool, now time.Time) {
+	for _, lease := range ClaimLeasesFromSubscription(sub) {
+		m.reconcileLeaseSchedule(sub.ID, lease, pending, now)
+	}
+}
+
+func (m *Manager) reconcileLeaseSchedule(subID string, lease ClaimShardLeaseState, pending bool, now time.Time) {
+	decision := decideLeaseReconcile(lease.State, pending)
 	if !decision.reconcile {
 		return
 	}
-	if _, err := m.store.ReconcileLeaseSchedule(NewLeaseRef(sub.ID, DefaultClaimShard), now, decision.pending); err != nil {
-		m.log.Warn("webhook: reconcile lease schedule", "sub", sub.ID, "error", err)
+	if _, err := m.store.ReconcileLeaseSchedule(lease.Ref(subID), now, decision.pending); err != nil {
+		m.log.Warn("webhook: reconcile lease schedule", "sub", subID, "shard", lease.Shard.Int(), "error", err)
 	}
 }
 

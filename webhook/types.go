@@ -132,6 +132,10 @@ type Subscription struct {
 	// Closes the crash window between arming a pull-wake and writing its event.
 	WakeEventSentNs int64
 
+	// ClaimLeases holds durable non-default claim-shard lease/fence states. The
+	// default shard stays in the legacy fields above for upgrade compatibility.
+	ClaimLeases []ClaimShardLeaseState
+
 	// Links is hydrated from the per-subscription links HASH; nil until loaded.
 	Links []StreamLink
 }

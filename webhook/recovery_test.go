@@ -71,3 +71,36 @@ func TestLeaseReconcileDecision(t *testing.T) {
 		})
 	}
 }
+
+func TestClaimLeasesFromSubscriptionIncludesDefaultAndShards(t *testing.T) {
+	shard, _ := NewClaimShard(5)
+	sub := Subscription{
+		Phase:        PhaseLive,
+		Generation:   7,
+		WakeID:       "w_default",
+		Holder:       true,
+		HolderWorker: "default-worker",
+		LeaseUntilNs: 100,
+		ClaimLeases: []ClaimShardLeaseState{{
+			Shard: shard,
+			State: ClaimLeaseState{
+				Phase:        PhaseWaking,
+				Generation:   11,
+				WakeID:       "w_shard",
+				HolderWorker: "shard-worker",
+				LeaseUntilNs: 200,
+			},
+		}},
+	}
+
+	got := ClaimLeasesFromSubscription(sub)
+	if len(got) != 2 {
+		t.Fatalf("claim lease states = %d, want default plus one shard", len(got))
+	}
+	if got[0].Shard != DefaultClaimShard || got[0].State.Generation != 7 {
+		t.Fatalf("first lease should be legacy shard state, got %+v", got[0])
+	}
+	if got[1].Shard != shard || got[1].State.Generation != 11 {
+		t.Fatalf("second lease should be hydrated shard state, got %+v", got[1])
+	}
+}

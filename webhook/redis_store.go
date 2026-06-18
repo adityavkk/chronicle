@@ -560,6 +560,7 @@ func subscriptionFromHash(id string, f map[string]string, linkFields map[string]
 		NextAttemptNs:   atoi("next_attempt_ns"),
 		WakeEventSentNs: atoi("wake_event_sent_ns"),
 	}
+	sub.ClaimLeases = claimLeasesFromHash(f, atoi)
 	sub.Links = linksFromHash(linkFields)
 	// Rebuild the normalized explicit stream list so the config round-trips for
 	// idempotency checks after a reload.
@@ -570,6 +571,43 @@ func subscriptionFromHash(id string, f map[string]string, linkFields map[string]
 	}
 	sub.Config.Streams = normalizeStreams(sub.Config.Streams)
 	return sub
+}
+
+func claimLeasesFromHash(f map[string]string, atoi func(string) int64) []ClaimShardLeaseState {
+	leases := make([]ClaimShardLeaseState, 0)
+	for n := 1; n < ClaimShardCount; n++ {
+		shard, _ := NewClaimShard(n)
+		state, ok := claimLeaseFromHash(f, shard, atoi)
+		if ok {
+			leases = append(leases, ClaimShardLeaseState{Shard: shard, State: state})
+		}
+	}
+	return leases
+}
+
+func claimLeaseFromHash(f map[string]string, shard ClaimShard, atoi func(string) int64) (ClaimLeaseState, bool) {
+	present := false
+	for _, base := range []string{"phase", "generation", "wake_id", "holder", "holder_worker", "lease_until_ns"} {
+		if _, ok := f[claimShardField(base, shard)]; ok {
+			present = true
+			break
+		}
+	}
+	if !present {
+		return ClaimLeaseState{}, false
+	}
+	phase := Phase(f[claimShardField("phase", shard)])
+	if phase == "" {
+		phase = PhaseIdle
+	}
+	return ClaimLeaseState{
+		Phase:        phase,
+		Generation:   atoi(claimShardField("generation", shard)),
+		WakeID:       f[claimShardField("wake_id", shard)],
+		Holder:       f[claimShardField("holder", shard)] == "1",
+		HolderWorker: f[claimShardField("holder_worker", shard)],
+		LeaseUntilNs: atoi(claimShardField("lease_until_ns", shard)),
+	}, true
 }
 
 func linksFromHash(linkFields map[string]string) []StreamLink {

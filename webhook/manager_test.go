@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -438,7 +439,7 @@ func TestReconcileLeasesRestoresDroppedLeaseAndDueFromDurableState(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mgr.reconcile(recoveryScopeEpochBump)
+	mgr.RunRedisReconnect()
 
 	leaseScore, err := client.ZScore(context.Background(), leaseZKey, id).Result()
 	if err != nil {
@@ -450,6 +451,79 @@ func TestReconcileLeasesRestoresDroppedLeaseAndDueFromDurableState(t *testing.T)
 	members := dueMembers(t, client)
 	if len(members) != 1 || members[0] != id {
 		t.Fatalf("pending durable cursor state should re-derive due entry, got %v", members)
+	}
+}
+
+func TestRedisReconnectRepairsDroppedNonDefaultClaimShardLease(t *testing.T) {
+	store, client := newTestStore(t)
+	now := time.Now()
+	const (
+		id    = "s-sharded"
+		begin = "0000000000000000_0000000000000000"
+		tail  = "0000000000000001_0000000000000000"
+	)
+	path := "events/lease-reconcile-shard"
+	for StreamClaimShard(path) == DefaultClaimShard {
+		path += "x"
+	}
+	shard := StreamClaimShard(path)
+	ref := NewLeaseRef(id, shard)
+
+	if _, err := store.CreateOrConfirm(id, pullWakeCfg(), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Link(id, path, LinkGlob, begin); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.Claim(id, ClaimModeSharded, shard, "worker-shard", "w_sharded", now, 1000)
+	if err != nil || !claimed.Claimed {
+		t.Fatalf("claim shard %d = %+v err=%v", shard.Int(), claimed, err)
+	}
+	durablePhase, err := client.HGet(context.Background(), subKey(id), claimShardField("phase", shard)).Result()
+	if err != nil || Phase(durablePhase) != PhaseLive {
+		t.Fatalf("durable shard phase = %q err=%v, want live", durablePhase, err)
+	}
+	deadlineRaw, err := client.HGet(context.Background(), subKey(id), claimShardField("lease_until_ns", shard)).Result()
+	if err != nil {
+		t.Fatalf("missing durable shard lease deadline: %v", err)
+	}
+	deadline, err := strconv.ParseInt(deadlineRaw, 10, 64)
+	if err != nil || deadline == 0 {
+		t.Fatalf("durable shard lease deadline = %q err=%v", deadlineRaw, err)
+	}
+	if err := client.ZRem(context.Background(), leaseZKey, ref.Member()).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ZRem(context.Background(), dueSetKey(), id).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	fs := &fakeStreams{tails: map[string]string{path: tail}}
+	mgr, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.RunRedisReconnect()
+
+	leaseScore, err := client.ZScore(context.Background(), leaseZKey, ref.Member()).Result()
+	if err != nil {
+		t.Fatalf("missing repaired shard lease member %q: %v", ref.Member(), err)
+	}
+	if math.Abs(leaseScore-float64(deadline)) > float64(time.Millisecond) {
+		t.Fatalf("shard lease schedule score = %.0f, want durable lease_until_ns %d", leaseScore, deadline)
+	}
+	members := dueMembers(t, client)
+	if len(members) != 1 || members[0] != id {
+		t.Fatalf("pending durable cursor state should re-derive due entry, got %v", members)
+	}
+	if fs.count() != 0 {
+		t.Fatalf("live sharded lease should not trigger a duplicate legacy wake, got %d events", fs.count())
+	}
+	if sub, _, _ := store.Get(id); sub.Phase != PhaseIdle {
+		t.Fatalf("live sharded lease should leave legacy shard idle, got %q", sub.Phase)
+	}
+	if _, err := client.ZScore(context.Background(), leaseZKey, id).Result(); !errors.Is(err, goredis.Nil) {
+		t.Fatalf("reconnect should not create legacy shard lease member while non-default shard is live: %v", err)
 	}
 }
 

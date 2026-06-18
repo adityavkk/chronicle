@@ -82,6 +82,32 @@ func TestSubscriptionFromHashParsesScientificLeaseDeadline(t *testing.T) {
 	}
 }
 
+func TestSubscriptionFromHashHydratesNonDefaultClaimShardLease(t *testing.T) {
+	shard, _ := NewClaimShard(9)
+	sub := subscriptionFromHash("s1", map[string]string{
+		"created_ns":                             "1781800000000000000",
+		"type":                                   string(DispatchPullWake),
+		"pattern":                                "events/*",
+		"lease_ttl_ms":                           "1000",
+		"status":                                 string(StatusActive),
+		"phase":                                  string(PhaseIdle),
+		"lease_until_ns":                         "0",
+		claimShardField("phase", shard):          string(PhaseLive),
+		claimShardField("generation", shard):     "3",
+		claimShardField("wake_id", shard):        "w_shard",
+		claimShardField("holder", shard):         "1",
+		claimShardField("holder_worker", shard):  "worker-shard",
+		claimShardField("lease_until_ns", shard): "1781800000000000000",
+	}, nil)
+	if len(sub.ClaimLeases) != 1 {
+		t.Fatalf("hydrated claim leases = %d, want 1", len(sub.ClaimLeases))
+	}
+	got := sub.ClaimLeases[0]
+	if got.Shard != shard || got.State.Phase != PhaseLive || got.State.LeaseUntilNs == 0 {
+		t.Fatalf("hydrated shard lease = %+v", got)
+	}
+}
+
 func TestStoreCreateConfirmConflict(t *testing.T) {
 	s, _ := newTestStore(t)
 	now := time.Now()

@@ -134,6 +134,17 @@ type ClaimLeaseState struct {
 	LeaseUntilNs int64
 }
 
+// ClaimShardLeaseState binds one shard id to its durable fence-bearing state.
+type ClaimShardLeaseState struct {
+	Shard ClaimShard
+	State ClaimLeaseState
+}
+
+// Ref returns the volatile lease schedule member for this durable shard state.
+func (s ClaimShardLeaseState) Ref(subID string) LeaseRef {
+	return NewLeaseRef(subID, s.Shard)
+}
+
 // ClaimLeaseFromSubscription adapts the legacy subscription-level fields to the
 // shard-neutral pure decision helpers.
 func ClaimLeaseFromSubscription(sub Subscription) ClaimLeaseState {
@@ -145,6 +156,26 @@ func ClaimLeaseFromSubscription(sub Subscription) ClaimLeaseState {
 		HolderWorker: sub.HolderWorker,
 		LeaseUntilNs: sub.LeaseUntilNs,
 	}
+}
+
+// ClaimLeasesFromSubscription returns the default shard plus any hydrated
+// non-default shard states. Shard 0 intentionally stays first to preserve legacy
+// behavior when code only needs the subscription-level lease.
+func ClaimLeasesFromSubscription(sub Subscription) []ClaimShardLeaseState {
+	leases := make([]ClaimShardLeaseState, 0, 1+len(sub.ClaimLeases))
+	leases = append(leases, ClaimShardLeaseState{
+		Shard: DefaultClaimShard,
+		State: ClaimLeaseFromSubscription(sub),
+	})
+	leases = append(leases, sub.ClaimLeases...)
+	return leases
+}
+
+func claimShardField(base string, shard ClaimShard) string {
+	if shard == DefaultClaimShard {
+		return base
+	}
+	return base + ":" + shard.String()
 }
 
 // StreamClaimShard maps a stream path to the claim shard Chronicle can enforce.
