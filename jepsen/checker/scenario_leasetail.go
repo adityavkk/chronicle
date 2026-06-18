@@ -11,21 +11,30 @@ import (
 // pull-wake subscription, then ZREMs its lease-schedule entry while leaving the
 // sub hash intact (the dropLeaseTail nemesis — the exact L3 fault: a failover
 // that lost the schedule tail). The lease WORKER can no longer see the lease
-// (its ZADD is gone), so the only thing that can recover the subscription is the
-// recovery sweep, which re-derives owed work from the durable cursor. The test
-// asserts the cursor reaches tail AND the deposed holder's late ack is FENCED.
+// (its ZADD is gone), so the only thing that can recover the subscription is a
+// cursor-reading reconciler, which re-derives owed work from the durable cursor.
+// The test asserts the cursor reaches tail AND the deposed holder's late ack is
+// FENCED.
 //
-// L3 is GREEN on today's code via the full sweep: sweepOnce reads store.List()
-// (the full subscription SET, not the lease ZSET), so it still sees the sub,
-// expires its now-past lease, flips it idle, and re-wakes it from the durable
-// cursor — the cursor-reading reconciler doing exactly what the lease worker
-// cannot. The bound is lease_ttl_ms + sweep_interval + RTT.
+// Two variants, selected by -floor (07 honest-gap #4, resolved by #13):
 //
-// HONEST SCOPE (07 honest-gap #4). The sharper "-sweep=0 / -floor=0 + explicit
-// takeover, proving ONLY the failover-aware eager reconcile recovers it"
-// variant needs the reconcileLeases pass that re-ZADDs from the sub hash — that
-// lands in #13/#14. Here the recoverer is the periodic sweep (still a
-// cursor-reading reconciler); #13 sharpens this to the eager trigger.
+//   - SHARPENED (-floor=0 + explicit takeover): the server runs with its periodic
+//     floor disabled, so a sweep tick can NOT be the recoverer. After the drop we
+//     force an explicit takeover (restart the origins → the boot recovery event),
+//     and the new process's failover-aware eager reconcile (manager.go
+//     reconcileLeases) re-ZADDs the lease entry from the durable sub hash so the
+//     fast lease worker drives expiry. Recovery within lease_ttl_ms + RTT — far
+//     under any periodic floor — proves the EAGER reconcile at the trigger, not a
+//     tick, recovered the stranded live/waking sub (#13's load-bearing claim).
+//
+//   - FLOOR (-floor>0, no takeover): no event fires, so the coarse periodic floor
+//     is the recoverer; the bound is lease_ttl_ms + floor + RTT. This is the
+//     eventless case the floor exists for, tested here without a takeover.
+//
+// Both are GREEN: sweepOnce (whether run on the floor tick or at the boot event)
+// reads store.List() — the full subscription SET, not the lease ZSET — so it sees
+// the sub, and reconcileLeases re-derives its dropped tail. The deposed holder's
+// late ack is FENCED in both, since recovery rotated a fresh generation.
 
 // runLeaseTailDrop drives the L3 fault and asserts recovery + the deposed fence.
 func runLeaseTailDrop(c config, nem *nemesis) error {
@@ -55,7 +64,8 @@ func runLeaseTailDrop(c config, nem *nemesis) error {
 	fmt.Printf("worker A claimed: generation=%d (holds the lease)\n", a.Generation)
 
 	// The L3 fault: drop A's lease-schedule entry, leaving the sub hash intact. The
-	// lease worker is now blind to this lease; only the sweep can recover it.
+	// lease worker is now blind to this lease; only a cursor-reading reconciler can
+	// recover it.
 	nem.dropLeaseTail(subID)
 	fmt.Printf("nemesis: dropped the lease-schedule tail for %s (sub hash intact)\n", subID)
 
@@ -64,15 +74,31 @@ func runLeaseTailDrop(c config, nem *nemesis) error {
 	stopOpt := startOptionalNemeses(c, nem)
 	defer stopOpt()
 
-	// Settle past lease expiry + a sweep tick so the cursor-reading sweep takes
-	// over: expire the now-past lease, flip idle, re-wake from the durable cursor.
-	bound := time.Duration(leaseTTLMs)*time.Millisecond + c.sweep
+	// Two variants (07 honest-gap #4). -floor=0 is the SHARPENED variant: the
+	// server's periodic floor is disabled, so we force an explicit takeover — a
+	// restart, firing the boot recovery event — and the new process's eager
+	// reconcile (reconcileLeases) re-derives the dropped tail. Recovery within
+	// lease + RTT, far under any periodic tick, proves the eager reconcile, not a
+	// sweep, recovered it. -floor>0 is the eventless FLOOR variant: no event fires,
+	// so the coarse periodic floor is the recoverer.
+	sharpened := c.floor == 0
+	var bound time.Duration
+	if sharpened {
+		bound = time.Duration(leaseTTLMs)*time.Millisecond + c.sweep // lease + an RTT/eager margin
+		fmt.Printf("L3 SHARPENED (-floor=0): forcing an explicit takeover so ONLY the eager reconcile can recover...\n")
+		nem.killAllOrigins() // the explicit takeover: restart -> boot reconcile -> reconcileLeases
+		if err := waitReady(c.base, 60*time.Second); err != nil {
+			return fmt.Errorf("origins did not come back after the takeover: %w", err)
+		}
+	} else {
+		bound = time.Duration(leaseTTLMs)*time.Millisecond + c.floor // lease + the coarse floor
+		fmt.Printf("L3 FLOOR (-floor=%s): no takeover; the coarse periodic floor is the recoverer...\n", c.floor)
+	}
 	settle := c.settle
 	if settle < bound+5*time.Second {
 		settle = bound + 5*time.Second
 	}
-	fmt.Printf("L3 recovery bound: lease_ttl(%dms) + sweep(%s) + RTT; settling %s while a drainer acks the re-armed wake...\n",
-		leaseTTLMs, c.sweep, settle)
+	fmt.Printf("L3 recovery bound: %s; settling %s while a drainer acks the re-armed wake...\n", bound, settle)
 
 	// A drainer claims the re-armed wake and acks the pending offsets to tail. It
 	// acks the snapshot's offsets (unlike main.go's drainWorker, which sends none),
@@ -102,10 +128,15 @@ func runLeaseTailDrop(c config, nem *nemesis) error {
 		return fmt.Errorf("worker A late ack: %w", err)
 	}
 
+	recoverer := "the coarse periodic floor"
+	if sharpened {
+		recoverer = "the eager reconcile at the explicit takeover"
+	}
 	fmt.Println("---- result ----")
 	fmt.Printf("scenario:           %s\n", c.scenario)
+	fmt.Printf("variant:            %s\n", map[bool]string{true: "sharpened (-floor=0 + takeover)", false: "floor (eventless)"}[sharpened])
 	fmt.Printf("nemesis actions:    %d (%s)\n", len(nem.log), join(nem.log))
-	fmt.Printf("cursor reached tail:%v (want true — recovered by the sweep, not the lease worker)\n", reached)
+	fmt.Printf("cursor reached tail:%v (want true — recovered by %s, not the lease worker)\n", reached, recoverer)
 	fmt.Printf("A late-ack status:  %d %s (want 409 FENCED)\n", aStatus, aCode)
 
 	if !reached {
@@ -114,7 +145,7 @@ func runLeaseTailDrop(c config, nem *nemesis) error {
 	if aStatus != http.StatusConflict || aCode != "FENCED" {
 		return fmt.Errorf("L3 violated: the deposed worker A's late ack returned %d %q, want 409 FENCED", aStatus, aCode)
 	}
-	fmt.Println("PASS: L3 — the lease-tail-drop was recovered by the cursor-reading sweep (the lease worker was blind to it) and the deposed ack was fenced")
+	fmt.Printf("PASS: L3 — the lease-tail-drop was recovered by %s (the lease worker was blind to it) and the deposed ack was fenced\n", recoverer)
 	return nil
 }
 
