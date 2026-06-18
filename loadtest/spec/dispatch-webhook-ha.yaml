@@ -1,0 +1,70 @@
+# Gate #5 / the full-system capstone load+chaos run (issue #16). The whole epic
+# under one roof: dispatch:webhook (real append->delivery latency, RESULTS-gke.md
+# "Next"), S=256 slot-homed state (#15), replicas>=2 work-sharded leased ownership
+# (#14), the per-entity due-set (#12), event-triggered recovery (#13) — all on a
+# STANDARD_HA Redis (real WAIT/WAITAOF failover, #16) with Tier B durable wakes,
+# under chaos (pod-kill) PLUS the DR failover drill. SLO-gated: the K=10k sweep p99
+# must hold within the RESULTS-gke.md 509 ms regression floor under the combined
+# chaos + DR drill.
+#
+# Why a separate spec from sweep-10k.yaml:
+#   - dispatch: webhook adds the receiver + the append->POST->ack path (not just the
+#     sweep tick), so the run exercises delivery, not only recovery scanning.
+#   - consistency: B + wait_replicas: 1 turns on the WAITAOF 1 1 barrier on the
+#     fence-minting writes — only meaningful with a real replica, i.e. STANDARD_HA.
+#   - replicas: 2 so HRW shards the slots and a pod-kill / failover forces a real
+#     takeover (a new-owner claim_shard CAS, an owner_epoch bump, an eager reconcile).
+#
+# Run it (PENDING-CLOUD — the orchestrator owns the cloud; do NOT run GKE from the
+# worktree). The STANDARD_HA Redis is Memorystore STANDARD_HA tier (replica +
+# managed failover + a stable endpoint), NOT the basic tier (no failover):
+#   cd loadtest && ./ltctl.sh up --redis-tier=STANDARD_HA \
+#                && ./ltctl.sh gate5 spec/dispatch-webhook-ha.yaml
+# gate5 deploys at replicas>=2 with Tier B, launches the webhook workload, runs the
+# chaos pod-kill, then triggers the managed failover and asserts: (a) the K=10k
+# sweep p99 stays under the 509 ms floor; (b) the stranded webhook sub is recovered
+# ONLY by the cursor-reading eager reconcile; (c) a deposed ack returns 409 FENCED;
+# (d) zero lost wakes, zero double-grants. ltctl ALWAYS tears down (trap on
+# EXIT/INT/TERM) — STOP THE METER.
+name: dispatch-webhook-ha
+
+loadgen_image: REGISTRY/chronicle-loadgen:TAG
+
+sut:
+  image: REGISTRY/chronicle:TAG
+  replicas: 2 # >=2 so HRW shards slots and a pod-kill/failover forces a real takeover
+  sweep_interval: 30s # the coarse recovery FLOOR (#13); the eager reconcile, not this, closes the gap
+  sweep_batch: 0
+  redis_url: "" # fill from the Memorystore STANDARD_HA `terraform output redis_url`
+  cpu: "2"
+  memory: 2Gi
+  # Tier B (issue #16): WAITAOF 1 1 on the fence-minting writes. numreplicas=1 is the
+  # realistic Redis Software HA ceiling (06:70) and needs the STANDARD_HA replica; a
+  # short reply is surfaced as an error, never swallowed, never read as exclusivity.
+  consistency: "B"
+  wait_replicas: 1
+  wait_timeout_ms: 1000
+
+workload:
+  subscriptions: 10000 # K — the regression-floor scale
+  links_per_sub: 5 # P
+  dispatch: webhook # the receiver + append->POST->ack path (not just the sweep tick)
+  webhook_url: "http://loadgen-receiver.chronicle-loadtest:8099/webhook"
+  warmup: 30s
+  measure: 180s # long enough to pod-kill mid-window AND run the DR failover drill
+
+slo:
+  sweep_p99_ms: 1500 # the K=10k regression floor still holds (RESULTS-gke.md 509 ms)
+  max_seed_errors: 0
+  # Gate-#5 pass criteria (read from chronicle /metrics + the loadgen tail check
+  # after the chaos + failover steps):
+  #   - sweep p99 within the 509 ms floor under combined chaos + DR drill
+  #   - the stranded webhook sub recovered ONLY by the cursor-reading eager reconcile
+  #     (not a floor tick): recovery latency << 30s floor
+  #   - a deposed ack returns 409 FENCED (chronicle_owner_fenced_total rises; NOT a
+  #     silent success)
+  #   - ZERO lost wakes (every appended message delivered; loadgen tail check)
+  #   - ZERO double-grants (chronicle_slot_ownership_events_total never shows two live
+  #     owners for one slot)
+  #   - RPO = async lag + AOF fsync (~1s) + link latency; RTO = promotion time — both
+  #     recorded from the failover step.
