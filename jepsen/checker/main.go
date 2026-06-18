@@ -78,6 +78,7 @@ type config struct {
 	roundMs    int
 	ramp       string
 	c3         bool
+	sharded    bool
 }
 
 func main() {
@@ -89,7 +90,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation|contention")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
@@ -107,6 +108,7 @@ func main() {
 	flag.IntVar(&c.roundMs, "round-ms", 3000, "contention: wall-clock per claimant rung")
 	flag.StringVar(&c.ramp, "ramp", "6,12,24", "contention: comma-separated claimant ramp")
 	flag.BoolVar(&c.c3, "c3", false, "contention: also run the G=1 baseline and assert C3 (the knee moves ~Gx; gate #6)")
+	flag.BoolVar(&c.sharded, "sharded", false, "contention/shard-linz: use the chronicle per-(subId,g) capability (ClaimShard) rather than client-side G subscriptions")
 	flag.Parse()
 
 	r := newReceiver()
@@ -135,6 +137,13 @@ func run(c config, r *receiver) error {
 	// it runs its own self-contained flow (scenario_contention.go).
 	if c.scenario == "contention" {
 		return runContention(c)
+	}
+
+	// shard-linz (T1 per (subId,g)) drives the chronicle per-shard capability with
+	// contending workers + a gcPause nemesis and checks the porcupine leaseModel
+	// partitioned per (subId,g) — no cluster (scenario_shard.go).
+	if c.scenario == "shard-linz" {
+		return runShardLinz(c)
 	}
 
 	// cursor-monotonic drives the webhook delivery workload under origin churn

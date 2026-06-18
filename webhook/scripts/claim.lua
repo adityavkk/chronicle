@@ -10,11 +10,20 @@
 --     expired-lease takeover fences out the deposed holder: its still-unexpired
 --     token carries the old generation, so a late ack from it returns FENCED and
 --     cannot disturb the new holder's lease (the single-holder invariant).
--- KEYS: 1=sub 2=lease_zset
--- ARGV: 1=id 2=worker 3=now_ns 4=lease_ttl_ms 5=new_wake_id
+--
+-- Claim granularity (the third axis, design 08): a claim NAMES a shard. The fence
+-- lives in the per-(subId,g) shardstate hash (KEYS[2]); NOSUB is decided by the
+-- subscription's CONFIG hash (KEYS[1]) existing, so a fresh never-claimed g>0
+-- shard is grantable (its fence starts idle, minted here) rather than NOSUB. The
+-- lease member (ARGV[1]) is the per-shard schedule member. At G=1 / shard 0,
+-- KEYS[1]==KEYS[2]==sub hash and ARGV[1]==id, so this is byte-for-byte the
+-- single-holder claim — the split is purely additive (08 §4).
+-- KEYS: 1=sub(config) 2=shardstate 3=lease_zset
+-- ARGV: 1=member 2=worker 3=now_ns 4=lease_ttl_ms 5=new_wake_id
 -- Reply: {status, generation, wake_id, holder} ; CLAIMED | BUSY | NOSUB
-local sub = KEYS[1]
-if redis.call('EXISTS', sub) == 0 then
+local cfg = KEYS[1]
+local sub = KEYS[2]
+if redis.call('EXISTS', cfg) == 0 then
   return { 'NOSUB' }
 end
 local phase = redis.call('HGET', sub, 'phase')
@@ -35,5 +44,5 @@ if not (phase == 'waking' and wake ~= '') then
 end
 local until_ns = now + tonumber(ARGV[4]) * 1000000
 redis.call('HSET', sub, 'phase', 'live', 'holder', '1', 'holder_worker', ARGV[2], 'lease_until_ns', tostring(until_ns))
-redis.call('ZADD', KEYS[2], until_ns, ARGV[1])
+redis.call('ZADD', KEYS[3], until_ns, ARGV[1])
 return { 'CLAIMED', gen, wake, ARGV[2] }

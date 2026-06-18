@@ -3,8 +3,18 @@
 -- callback and the pull-wake ack (PROTOCOL §7.1, §7.2). The fence — not the
 -- lease — is the correctness mechanism: a stale wake/generation is rejected and
 -- cannot advance a cursor.
--- KEYS: 1=sub 2=links 3=lease_zset 4=retry_zset
--- ARGV: 1=id 2=req_gen 3=req_wake 4=token_gen 5=done('0'/'1') 6=now_ns
+--
+-- Claim granularity (the third axis, design 08): KEYS[1] is the per-(subId,g)
+-- SHARDSTATE hash whose (generation, wake_id) fence this ack checks and whose
+-- idle/lease fields the done/heartbeat branches write; ARGV[1] is the per-shard
+-- schedule MEMBER for the lease/retry ZREM/ZADD. The cursor hash (KEYS[2]) is
+-- shared across a subscription's shards — cursors are forward-only watermarks, so
+-- an ack only ever advances the streams it names, fenced by its own shard's
+-- register. At G=1 / shard 0, KEYS[1]==sub hash and ARGV[1]==id (today). NOTE for
+-- #12: the due-set ZREM in the done branch must use this same ARGV[1] member, so
+-- a per-shard due mark is cleared by its own shard's ack.
+-- KEYS: 1=shardstate 2=links 3=lease_zset 4=retry_zset
+-- ARGV: 1=member 2=req_gen 3=req_wake 4=token_gen 5=done('0'/'1') 6=now_ns
 --       7=lease_ttl_ms 8=num_acks then (path, offset)*
 -- Reply: {status} ; OK | FENCED | NOSUB
 local sub = KEYS[1]

@@ -271,10 +271,20 @@ func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLeas
 	}
 }
 
-// Claim runs the pull-wake CAS claim.
+// Claim runs the pull-wake CAS claim on the subscription's single per-type lease
+// (shard 0) — today's behavior, kept on the Store interface unchanged.
 func (s *RedisStore) Claim(id, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
-	reply, err := s.evalStrings(claimScript, []string{subKey(id), leaseZKey},
-		id, worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID)
+	return s.ClaimShard(id, 0, worker, wakeID, now, leaseTTLMs)
+}
+
+// ClaimShard runs the CAS claim against shard g of the subscription's claim space
+// (claim granularity, design 08 §4): the single-holder fence is per (id, g), so
+// concurrent claimants on different shards do not serialize. NOSUB keys off the
+// subscription config; the per-shard fence (KEYS[2]) is minted on first claim. g
+// == 0 is the bare per-type lease (== Claim), byte-for-byte today.
+func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+	reply, err := s.evalStrings(claimScript, []string{subKey(id), subShardKey(id, g), leaseZKey},
+		shardMember(id, g), worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID)
 	if err != nil {
 		return ClaimResult{}, err
 	}
@@ -306,21 +316,31 @@ func (s *RedisStore) recordContention(status, id string) {
 	s.metrics.ClaimContention(status, id)
 }
 
-// Ack fences, applies acks, and releases or heartbeats.
+// Ack fences, applies acks, and releases or heartbeats on the subscription's
+// single per-type lease (shard 0) — today's behavior, on the Store interface.
 func (s *RedisStore) Ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+	return s.AckShard(id, 0, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs)
+}
+
+// AckShard fences, applies acks, and releases or heartbeats against shard g's
+// per-(id,g) fence (claim granularity, design 08 §4). A token minted for shard g
+// is FENCED against any other shard, so a holder of g cannot release or take over
+// g'. The cursor hash is shared, so the named offsets advance forward-only as
+// usual. g == 0 is the bare per-type lease (== Ack), byte-for-byte today.
+func (s *RedisStore) AckShard(id string, g int, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
 	doneArg := "0"
 	if done {
 		doneArg = "1"
 	}
 	args := make([]any, 0, 8+2*len(acks))
 	args = append(args,
-		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10),
+		shardMember(id, g), strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10),
 		doneArg, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), strconv.Itoa(len(acks)),
 	)
 	for _, a := range acks {
 		args = append(args, a.Stream, a.Offset)
 	}
-	reply, err := s.evalStrings(ackScript, []string{subKey(id), linksKey(id), leaseZKey, retryZKey}, args...)
+	reply, err := s.evalStrings(ackScript, []string{subShardKey(id, g), linksKey(id), leaseZKey, retryZKey}, args...)
 	if err != nil {
 		return "", err
 	}

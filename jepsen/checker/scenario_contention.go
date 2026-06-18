@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"hash/fnv"
-	"os"
 	"sort"
 	"sync"
 	"time"
@@ -328,21 +327,14 @@ var contentionLimitsDefault = contentionLimits{MaxFencedRate: 0.05, MaxBusyRate:
 
 // runContention drives the claimant-fan-in ramp and reports C1/C2 (and, with
 // -c3, the C3 differential / gate #6). It needs only a Redis URL — no cluster.
+// -sharded selects the chronicle per-(subId,g) capability (one subscription) over
+// client-side G-subscription sharding; C3 runs G=1 vs G on the same topology.
 func runContention(c config) error {
-	url := c.redisURL
-	if url == "" {
-		url = os.Getenv("REDIS_URL")
-	}
-	if url == "" {
-		return fmt.Errorf("contention scenario needs -redis-url or REDIS_URL (e.g. redis://localhost:6379/14)")
-	}
-	opt, err := redis.ParseURL(url)
+	store, client, err := contentionStore(c)
 	if err != nil {
-		return fmt.Errorf("parse redis url %q: %w", url, err)
+		return err
 	}
-	client := redis.NewClient(opt)
 	defer client.Close()
-	store := webhook.NewRedisStore(client).WithMetrics(webhook.NopMetrics{})
 
 	p := contentionParams{
 		ttlMs:    int64(c.leaseTTLMs),
@@ -353,11 +345,15 @@ func runContention(c config) error {
 		ramp:     parseRamp(c.ramp),
 	}
 
+	topology := "sub-per-shard (client-side)"
+	if c.sharded {
+		topology = "sharded-sub (chronicle per-(subId,g) capability)"
+	}
 	typ := fmt.Sprintf("agent-handler-%d", time.Now().UnixNano())
-	fmt.Printf("== contention: type=%s ramp=%v G=%d hold=%s think=%s lease_ttl=%dms round=%s ==\n",
-		typ, p.ramp, c.gShards, p.hold, p.think, p.ttlMs, p.roundDur)
+	fmt.Printf("== contention: type=%s ramp=%v G=%d topology=%s hold=%s think=%s lease_ttl=%dms round=%s ==\n",
+		typ, p.ramp, c.gShards, topology, p.hold, p.think, p.ttlMs, p.roundDur)
 
-	roundsG, err := runRamp(store, typ+"-G", c.gShards, p)
+	roundsG, err := runRamp(store, client, typ+"-G", c.gShards, p, c.sharded)
 	if err != nil {
 		return err
 	}
@@ -374,7 +370,7 @@ func runContention(c config) error {
 	}
 
 	// C3: the same ramp at G=1 (the hot per-type lease) as the baseline to move.
-	rounds1, err := runRamp(store, typ+"-base", 1, p)
+	rounds1, err := runRamp(store, client, typ+"-base", 1, p, c.sharded)
 	if err != nil {
 		return err
 	}
@@ -385,9 +381,15 @@ func runContention(c config) error {
 }
 
 // runRamp creates a fresh claimer at granularity g and drives every rung, tearing
-// the shard-leases down afterward so a rerun starts clean.
-func runRamp(store *webhook.RedisStore, typ string, g int, p contentionParams) ([]contentionRound, error) {
-	claimer := newRedisShardClaimer(store, typ, g, p.ttlMs)
+// the shard-leases down afterward so a rerun starts clean. sharded picks the
+// chronicle per-(subId,g) capability over client-side G subscriptions.
+func runRamp(store *webhook.RedisStore, client redis.UniversalClient, typ string, g int, p contentionParams, sharded bool) ([]contentionRound, error) {
+	var claimer shardClaimer
+	if sharded {
+		claimer = newShardedSubClaimer(store, client, typ, g, p.ttlMs)
+	} else {
+		claimer = newRedisShardClaimer(store, typ, g, p.ttlMs)
+	}
 	if err := claimer.setup(); err != nil {
 		return nil, err
 	}
