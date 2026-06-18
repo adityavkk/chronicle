@@ -1,7 +1,5 @@
 package webhook
 
-import "time"
-
 type recoveryScope uint8
 
 const (
@@ -44,8 +42,8 @@ func planRecovery(scope recoveryScope) recoveryPlan {
 	case recoveryScopeBoot, recoveryScopeReconnect, recoveryScopeAppendError, recoveryScopeFloor:
 		return recoveryPlan{sweep: true}
 	case recoveryScopeEpochBump, recoveryScopeNewOwnerCAS:
-		// #14 will provide the ownership event sources and slot scope. Until then,
-		// the seam's eager body is the ownership-neutral lease schedule reconcile.
+		// Ownership transfer events eagerly repair volatile lease/due schedules;
+		// the coarse floor remains the all-slot cursor backstop.
 		return recoveryPlan{leases: true}
 	default:
 		return recoveryPlan{}
@@ -65,11 +63,4 @@ func decideLeaseReconcile(cur ClaimLeaseState, pending bool) leaseReconcileDecis
 		return leaseReconcileDecision{}
 	}
 	return leaseReconcileDecision{reconcile: true, pending: pending}
-}
-
-func coverageGapForSweepWake(Subscription, time.Time) (time.Duration, bool) {
-	// #14 adds real slot ownership and append-time ownership observations. Until
-	// then there is no truthful way to distinguish an unowned-slot coverage gap
-	// from an ordinary sweep wake, so this metric wiring is intentionally inert.
-	return 0, false
 }

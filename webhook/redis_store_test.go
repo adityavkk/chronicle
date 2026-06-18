@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -61,6 +62,18 @@ func dueScore(t *testing.T, client goredis.UniversalClient, id string) float64 {
 		t.Fatal(err)
 	}
 	return score
+}
+
+func claimOwnershipForTest(t *testing.T, s *RedisStore, slot OwnershipSlot, replica ReplicaID, now time.Time) SlotLease {
+	t.Helper()
+	res, err := s.ClaimSlot(slot, replica, now, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Granted() {
+		t.Fatalf("claim slot %d by %s = %+v, want grant", slot.Int(), replica, res)
+	}
+	return res.Lease
 }
 
 func TestSubscriptionFromHashParsesScientificLeaseDeadline(t *testing.T) {
@@ -126,6 +139,135 @@ func TestStoreCreateConfirmConflict(t *testing.T) {
 	}
 }
 
+func TestClaimShardScriptGoldenSemantics(t *testing.T) {
+	s, _ := newTestStore(t)
+	slot, _ := NewOwnershipSlot(0)
+	base := time.Now()
+
+	first, err := s.ClaimSlot(slot, ReplicaID("replica-a"), base, time.Second)
+	if err != nil || first.Status != SlotClaimed || first.Lease.Epoch != 1 {
+		t.Fatalf("first claim = %+v err=%v, want CLAIMED epoch 1", first, err)
+	}
+	renewed, err := s.ClaimSlot(slot, ReplicaID("replica-a"), base.Add(100*time.Millisecond), time.Second)
+	if err != nil || renewed.Status != SlotRenewed || renewed.Lease.Epoch != first.Lease.Epoch {
+		t.Fatalf("renew = %+v err=%v, want RENEWED epoch unchanged", renewed, err)
+	}
+	busy, err := s.ClaimSlot(slot, ReplicaID("replica-b"), base.Add(200*time.Millisecond), time.Second)
+	if err != nil || busy.Status != SlotBusy || busy.Lease.Owner != ReplicaID("replica-a") || busy.Lease.Epoch != first.Lease.Epoch {
+		t.Fatalf("foreign live claim = %+v err=%v, want BUSY owner replica-a epoch 1", busy, err)
+	}
+	transferred, err := s.ClaimSlot(slot, ReplicaID("replica-b"), base.Add(2*time.Second), time.Second)
+	if err != nil || transferred.Status != SlotClaimed || transferred.Lease.Epoch != first.Lease.Epoch+1 {
+		t.Fatalf("expired transfer = %+v err=%v, want CLAIMED epoch bump", transferred, err)
+	}
+	resumed, err := s.CheckOwner(first.Lease.Fence())
+	if err != nil || resumed != CheckOwnerFenced {
+		t.Fatalf("deposed resumed owner check = %q err=%v, want FENCED", resumed, err)
+	}
+}
+
+func TestCheckOwnerScriptGoldenSemantics(t *testing.T) {
+	s, _ := newTestStore(t)
+	slot, _ := NewOwnershipSlot(0)
+	status, err := s.CheckOwner(OwnershipFence{Enabled: true, Slot: slot, Owner: ReplicaID("missing"), Epoch: 1})
+	if err != nil || status != CheckOwnerUnowned {
+		t.Fatalf("missing owner = %q err=%v, want UNOWNED", status, err)
+	}
+
+	lease := claimOwnershipForTest(t, s, slot, ReplicaID("replica-a"), time.Now())
+	status, err = s.CheckOwner(lease.Fence())
+	if err != nil || status != CheckOwnerOwner {
+		t.Fatalf("current owner = %q err=%v, want OWNER", status, err)
+	}
+	status, err = s.CheckOwner(OwnershipFence{Enabled: true, Slot: slot, Owner: ReplicaID("replica-b"), Epoch: lease.Epoch})
+	if err != nil || status != CheckOwnerFenced {
+		t.Fatalf("wrong owner = %q err=%v, want FENCED", status, err)
+	}
+	status, err = s.CheckOwner(OwnershipFence{Enabled: true, Slot: slot, Owner: lease.Owner, Epoch: lease.Epoch + 1})
+	if err != nil || status != CheckOwnerFenced {
+		t.Fatalf("wrong epoch = %q err=%v, want FENCED", status, err)
+	}
+}
+
+func TestMembershipHeartbeatRemovesExpiredMembers(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	if err := client.ZAdd(
+		context.Background(), membersKey,
+		goredis.Z{Score: float64(now.Add(-time.Second).UnixNano()), Member: "replica-dead"},
+		goredis.Z{Score: float64(now.Add(time.Second).UnixNano()), Member: "replica-live"},
+	).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.HeartbeatMember(ReplicaID("replica-self"), now, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	members, err := s.LiveMembers(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[ReplicaID]bool{}
+	for _, member := range members {
+		got[member] = true
+	}
+	if got[ReplicaID("replica-dead")] || !got[ReplicaID("replica-live")] || !got[ReplicaID("replica-self")] {
+		t.Fatalf("live members after heartbeat = %v", members)
+	}
+}
+
+func TestOwnerEpochFencesScheduleMutatingScriptsInline(t *testing.T) {
+	s, client := newTestStore(t)
+	slot, _ := NewOwnershipSlot(0)
+	now := time.Now()
+	stale := claimOwnershipForTest(t, s, slot, ReplicaID("replica-a"), now)
+	current := claimOwnershipForTest(t, s, slot, ReplicaID("replica-b"), now.Add(2*time.Second))
+	if current.Epoch <= stale.Epoch {
+		t.Fatalf("precondition: transfer should bump epoch, stale=%d current=%d", stale.Epoch, current.Epoch)
+	}
+	staleFence := stale.Fence()
+
+	if _, err := s.CreateOrConfirm("arm-stale", webhookCfg("https://w.example/h"), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	armed, err := s.ArmWake("arm-stale", now, 1000, true, "w_stale", staleFence)
+	if err != nil || !armed.Fenced {
+		t.Fatalf("stale ArmWake = %+v err=%v, want FENCED", armed, err)
+	}
+	if sub, _, _ := s.Get("arm-stale"); sub.Phase != PhaseIdle {
+		t.Fatalf("fenced ArmWake must not mutate phase, got %q", sub.Phase)
+	}
+
+	if _, err := s.CreateOrConfirm("ack-stale", webhookCfg("https://w.example/h"), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	goodArm, _ := s.ArmWake("ack-stale", now, 1000, true, "w_good", NoOwnerFence())
+	if st, _ := s.Ack("ack-stale", ClaimModeLegacy, DefaultClaimShard, goodArm.Generation, goodArm.WakeID, goodArm.Generation, true, nil, now, 1000, staleFence); st != "FENCED" {
+		t.Fatalf("stale Ack = %q, want FENCED", st)
+	}
+	if sub, _, _ := s.Get("ack-stale"); sub.Phase != PhaseWaking {
+		t.Fatalf("fenced Ack must not release, got %q", sub.Phase)
+	}
+
+	if st, _ := s.ExpireLease(NewLeaseRef("ack-stale", DefaultClaimShard), now.Add(2*time.Second), true, staleFence); st != "FENCED" {
+		t.Fatalf("stale ExpireLease = %q, want FENCED", st)
+	}
+	if _, err := s.ScheduleRetry("ack-stale", now, now.Add(time.Second), staleFence); !errors.Is(err, errOwnerFenced) {
+		t.Fatalf("stale ScheduleRetry err=%v, want errOwnerFenced", err)
+	}
+	if retry, _ := client.ZCard(context.Background(), retryZKey).Result(); retry != 0 {
+		t.Fatalf("fenced ScheduleRetry must not add retry member, got %d", retry)
+	}
+	if st, _ := s.Release("ack-stale", ClaimModeLegacy, DefaultClaimShard, goodArm.Generation, goodArm.WakeID, goodArm.Generation, staleFence); st != "FENCED" {
+		t.Fatalf("stale Release = %q, want FENCED", st)
+	}
+	if _, err := s.ReconcileLeaseSchedule(NewLeaseRef("ack-stale", DefaultClaimShard), now, true, staleFence); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DueWakes(slot, now.Add(2*time.Second), 1, time.Second, staleFence); !errors.Is(err, errOwnerFenced) {
+		t.Fatalf("stale DueWakes err=%v, want errOwnerFenced", err)
+	}
+}
+
 func TestStoreLinkPrecedenceAndGet(t *testing.T) {
 	s, _ := newTestStore(t)
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now())
@@ -155,7 +297,7 @@ func TestStoreArmWakeSurvivesRestart(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	res, err := s.ArmWake("s1", now, 1000, true, "w_first")
+	res, err := s.ArmWake("s1", now, 1000, true, "w_first", NoOwnerFence())
 	if err != nil || !res.Armed || res.Generation != 1 || res.WakeID != "w_first" {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
@@ -164,7 +306,7 @@ func TestStoreArmWakeSurvivesRestart(t *testing.T) {
 	}
 	firstDueScore := dueScore(t, client, "s1")
 	// Coalesce: a second arm while in flight is BUSY, not a new generation.
-	if busy, _ := s.ArmWake("s1", now, 1000, true, "w_second"); !busy.Busy || busy.Generation != 1 {
+	if busy, _ := s.ArmWake("s1", now, 1000, true, "w_second", NoOwnerFence()); !busy.Busy || busy.Generation != 1 {
 		t.Fatalf("second arm should be BUSY at gen 1, got %+v", busy)
 	}
 	if got := dueScore(t, client, "s1"); got != firstDueScore {
@@ -208,12 +350,12 @@ func TestStoreClaimCASAckFence(t *testing.T) {
 		t.Fatalf("claim2 should be BUSY held by worker-1, got %+v", c2)
 	}
 	// Stale-generation ack is fenced.
-	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, c1.Generation+9, c1.WakeID, c1.Generation+9, true, nil, now, 1000); st != "FENCED" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, c1.Generation+9, c1.WakeID, c1.Generation+9, true, nil, now, 1000, NoOwnerFence()); st != "FENCED" {
 		t.Fatalf("stale ack should FENCE, got %q", st)
 	}
 	// Correct ack advances the cursor forward-only and releases.
 	acks := []Ack{{Stream: "events/a", Offset: "0000000000000001_0000000000000050"}}
-	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000); st != "OK" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000, NoOwnerFence()); st != "OK" {
 		t.Fatalf("valid ack = %q, want OK", st)
 	}
 	sub, _, _ := s.Get("s1")
@@ -221,7 +363,7 @@ func TestStoreClaimCASAckFence(t *testing.T) {
 		t.Fatalf("ack(done) must release and advance cursor: %+v", sub)
 	}
 	// A replayed ack on the now-cleared wake is fenced (cursor not advanced twice).
-	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000); st != "FENCED" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000, NoOwnerFence()); st != "FENCED" {
 		t.Fatalf("replayed ack should FENCE, got %q", st)
 	}
 }
@@ -246,7 +388,7 @@ func TestStoreClaimModeRejectsMixedLegacyAndShardedClaims(t *testing.T) {
 	if got, _ := s.Claim("legacy-first", ClaimModeSharded, shard, "worker-sharded", "w_sharded", now, 1000); !got.ModeConflict || got.Mode != ClaimModeLegacy {
 		t.Fatalf("sharded claim should conflict with legacy mode, got %+v", got)
 	}
-	if st, _ := s.Ack("legacy-first", ClaimModeSharded, DefaultClaimShard, legacy.Generation, legacy.WakeID, legacy.Generation, true, nil, now, 1000); st != "FENCED" {
+	if st, _ := s.Ack("legacy-first", ClaimModeSharded, DefaultClaimShard, legacy.Generation, legacy.WakeID, legacy.Generation, true, nil, now, 1000, NoOwnerFence()); st != "FENCED" {
 		t.Fatalf("mixed-mode ack should FENCE, got %q", st)
 	}
 	if exists, _ := client.HExists(context.Background(), subKey("legacy-first"), "claim_mode").Result(); exists {
@@ -264,7 +406,7 @@ func TestStoreClaimModeRejectsMixedLegacyAndShardedClaims(t *testing.T) {
 	if got, _ := s.Claim("sharded-first", ClaimModeLegacy, DefaultClaimShard, "worker-legacy", "w_legacy", now, 1000); !got.ModeConflict || got.Mode != ClaimModeSharded {
 		t.Fatalf("legacy claim should conflict with sharded mode, got %+v", got)
 	}
-	if st, _ := s.Ack("sharded-first", ClaimModeLegacy, shard, first.Generation, first.WakeID, first.Generation, true, nil, now, 1000); st != "FENCED" {
+	if st, _ := s.Ack("sharded-first", ClaimModeLegacy, shard, first.Generation, first.WakeID, first.Generation, true, nil, now, 1000, NoOwnerFence()); st != "FENCED" {
 		t.Fatalf("legacy ack against sharded mode should FENCE, got %q", st)
 	}
 }
@@ -275,20 +417,20 @@ func TestStoreAckDoneClearsDueSetHeartbeatDoesNot(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	armed, err := s.ArmWake("s1", now, 1000, true, "w_a")
+	armed, err := s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence())
 	if err != nil || !armed.Armed {
 		t.Fatalf("arm = %+v err=%v", armed, err)
 	}
 	if members := dueMembers(t, client); len(members) != 1 {
 		t.Fatalf("precondition: due set should contain s1, got %v", members)
 	}
-	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation, false, nil, now, 1000); st != "OK" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation, false, nil, now, 1000, NoOwnerFence()); st != "OK" {
 		t.Fatalf("heartbeat ack = %q, want OK", st)
 	}
 	if members := dueMembers(t, client); len(members) != 1 || members[0] != "s1" {
 		t.Fatalf("heartbeat ack must leave due member in place, got %v", members)
 	}
-	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation, true, nil, now, 1000); st != "OK" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation, true, nil, now, 1000, NoOwnerFence()); st != "OK" {
 		t.Fatalf("done ack = %q, want OK", st)
 	}
 	if members := dueMembers(t, client); len(members) != 0 {
@@ -301,15 +443,15 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	base := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, base)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
-	_, _ = s.ArmWake("s1", base, 1000, true, "w_a")
+	_, _ = s.ArmWake("s1", base, 1000, true, "w_a", NoOwnerFence())
 
 	// Before the deadline: not expired.
-	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), base, true); st != "ACTIVE" {
+	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), base, true, NoOwnerFence()); st != "ACTIVE" {
 		t.Fatalf("lease not yet due should be ACTIVE, got %q", st)
 	}
 	// After the deadline: expired, back to idle.
 	after := base.Add(2 * time.Second)
-	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), after, true); st != "EXPIRED" {
+	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), after, true, NoOwnerFence()); st != "EXPIRED" {
 		t.Fatalf("expired lease should be EXPIRED, got %q", st)
 	}
 	sub, _, _ := s.Get("s1")
@@ -322,8 +464,8 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 
 	// Due claim re-scores forward, it does not remove (research 07 §6.1): a
 	// crashed worker's item must recur.
-	_, _ = s.ArmWake("s1", after, 1000, true, "w_b")
-	due, err := s.DueLeases(after.Add(2*time.Second), 16, 30*time.Second)
+	_, _ = s.ArmWake("s1", after, 1000, true, "w_b", NoOwnerFence())
+	due, err := s.DueLeases(subscriptionOwnershipSlot("s1"), after.Add(2*time.Second), 16, 30*time.Second, NoOwnerFence())
 	if err != nil || len(due) != 1 || due[0] != NewLeaseRef("s1", DefaultClaimShard) {
 		t.Fatalf("due = %v err=%v, want [s1]", due, err)
 	}
@@ -331,7 +473,7 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 		t.Fatalf("claimed member must remain in the ZSET (re-scored, not removed), got %d", n)
 	}
 	// Immediately re-claiming finds nothing — it was re-scored into the future.
-	if again, _ := s.DueLeases(after.Add(2*time.Second), 16, 30*time.Second); len(again) != 0 {
+	if again, _ := s.DueLeases(subscriptionOwnershipSlot("s1"), after.Add(2*time.Second), 16, 30*time.Second, NoOwnerFence()); len(again) != 0 {
 		t.Fatalf("re-scored member must not be due again immediately, got %v", again)
 	}
 }
@@ -340,11 +482,11 @@ func TestStoreExpireLeaseClearsDueSetWhenNoPending(t *testing.T) {
 	s, client := newTestStore(t)
 	base := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, base)
-	_, _ = s.ArmWake("s1", base, 1000, true, "w_a")
+	_, _ = s.ArmWake("s1", base, 1000, true, "w_a", NoOwnerFence())
 	if members := dueMembers(t, client); len(members) != 1 {
 		t.Fatalf("precondition: arm should add due member, got %v", members)
 	}
-	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), base.Add(2*time.Second), false); st != "EXPIRED" {
+	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), base.Add(2*time.Second), false, NoOwnerFence()); st != "EXPIRED" {
 		t.Fatalf("expired lease should be EXPIRED, got %q", st)
 	}
 	if members := dueMembers(t, client); len(members) != 0 {
@@ -356,11 +498,11 @@ func TestStoreReleaseClearsDueSet(t *testing.T) {
 	s, client := newTestStore(t)
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
-	armed, _ := s.ArmWake("s1", now, 1000, true, "w_a")
+	armed, _ := s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence())
 	if members := dueMembers(t, client); len(members) != 1 {
 		t.Fatalf("precondition: arm should add due member, got %v", members)
 	}
-	if st, _ := s.Release("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation); st != "OK" {
+	if st, _ := s.Release("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation, NoOwnerFence()); st != "OK" {
 		t.Fatalf("release = %q, want OK", st)
 	}
 	if members := dueMembers(t, client); len(members) != 0 {
@@ -374,16 +516,16 @@ func TestStoreStaleAckAfterReleaseDoesNotClearNewDue(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	first, _ := s.ArmWake("s1", now, 1000, true, "w_a")
-	if st, _ := s.Release("s1", ClaimModeLegacy, DefaultClaimShard, first.Generation, first.WakeID, first.Generation); st != "OK" {
+	first, _ := s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence())
+	if st, _ := s.Release("s1", ClaimModeLegacy, DefaultClaimShard, first.Generation, first.WakeID, first.Generation, NoOwnerFence()); st != "OK" {
 		t.Fatalf("release first wake = %q, want OK", st)
 	}
-	second, _ := s.ArmWake("s1", now.Add(time.Millisecond), 1000, true, "w_b")
+	second, _ := s.ArmWake("s1", now.Add(time.Millisecond), 1000, true, "w_b", NoOwnerFence())
 	if !second.Armed || second.Generation == first.Generation {
 		t.Fatalf("second arm should mint a newer generation, got %+v after %+v", second, first)
 	}
 	acks := []Ack{{Stream: "events/a", Offset: "0000000000000001_0000000000000050"}}
-	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, first.Generation, first.WakeID, first.Generation, true, acks, now, 1000); st != "FENCED" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, first.Generation, first.WakeID, first.Generation, true, acks, now, 1000, NoOwnerFence()); st != "FENCED" {
 		t.Fatalf("stale ack after release/re-arm should FENCE, got %q", st)
 	}
 	if members := dueMembers(t, client); len(members) != 1 || members[0] != "s1" {
@@ -399,7 +541,7 @@ func TestStoreDeleteClearsDueSet(t *testing.T) {
 	s, client := newTestStore(t)
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
-	_, _ = s.ArmWake("s1", now, 1000, true, "w_a")
+	_, _ = s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence())
 	if members := dueMembers(t, client); len(members) != 1 {
 		t.Fatalf("precondition: arm should add due member, got %v", members)
 	}
@@ -458,11 +600,11 @@ func TestClaimExpiredLeaseRotatesFence(t *testing.T) {
 			a.Generation, a.WakeID, b.Generation, b.WakeID)
 	}
 	// The deposed worker A can no longer ack — its old generation/wake is fenced.
-	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, a.Generation, a.WakeID, a.Generation, true, nil, after, 1000); st != "FENCED" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, a.Generation, a.WakeID, a.Generation, true, nil, after, 1000, NoOwnerFence()); st != "FENCED" {
 		t.Fatalf("deposed worker A ack should FENCE, got %q", st)
 	}
 	// The current holder B acks successfully.
-	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, b.Generation, b.WakeID, b.Generation, true, nil, after, 1000); st != "OK" {
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, b.Generation, b.WakeID, b.Generation, true, nil, after, 1000, NoOwnerFence()); st != "OK" {
 		t.Fatalf("current holder B ack should be OK, got %q", st)
 	}
 }
@@ -505,13 +647,13 @@ func TestClaimShardGranularityAllowsDisjointClaimsAndFences(t *testing.T) {
 	if again, _ := s.Claim("s1", ClaimModeSharded, shardA, "worker-C", "w_c", now, 1000); !again.Busy || again.Holder != "worker-A" {
 		t.Fatalf("same shard should still be single-holder, got %+v", again)
 	}
-	if st, _ := s.Ack("s1", ClaimModeSharded, shardB, a.Generation, a.WakeID, a.Generation, true, nil, now, 1000); st != "FENCED" {
+	if st, _ := s.Ack("s1", ClaimModeSharded, shardB, a.Generation, a.WakeID, a.Generation, true, nil, now, 1000, NoOwnerFence()); st != "FENCED" {
 		t.Fatalf("shard A fence must not ack shard B, got %q", st)
 	}
-	if st, _ := s.Ack("s1", ClaimModeSharded, shardA, a.Generation, a.WakeID, a.Generation, true, nil, now, 1000); st != "OK" {
+	if st, _ := s.Ack("s1", ClaimModeSharded, shardA, a.Generation, a.WakeID, a.Generation, true, nil, now, 1000, NoOwnerFence()); st != "OK" {
 		t.Fatalf("current shard A holder should ack, got %q", st)
 	}
-	if st, _ := s.Ack("s1", ClaimModeSharded, shardB, b.Generation, b.WakeID, b.Generation, true, nil, now, 1000); st != "OK" {
+	if st, _ := s.Ack("s1", ClaimModeSharded, shardB, b.Generation, b.WakeID, b.Generation, true, nil, now, 1000, NoOwnerFence()); st != "OK" {
 		t.Fatalf("current shard B holder should ack, got %q", st)
 	}
 	if n, _ := client.ZCard(context.Background(), leaseZKey).Result(); n != 0 {

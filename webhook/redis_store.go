@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -22,6 +23,8 @@ type RedisStore struct {
 
 var _ Store = (*RedisStore)(nil)
 
+var errOwnerFenced = errors.New("owner epoch fenced")
+
 // NewRedisStore wraps a go-redis client as a subscription Store.
 func NewRedisStore(client redis.UniversalClient) *RedisStore {
 	return &RedisStore{client: client}
@@ -30,6 +33,19 @@ func NewRedisStore(client redis.UniversalClient) *RedisStore {
 func (s *RedisStore) ctx() context.Context { return context.Background() }
 
 func nsArg(t time.Time) string { return strconv.FormatInt(t.UnixNano(), 10) }
+
+func msArg(d time.Duration) string { return strconv.FormatInt(d.Milliseconds(), 10) }
+
+func fenceKey(fence OwnershipFence, fallback string) string {
+	if fence.Enabled {
+		return ownershipSlotKey(fence.Slot)
+	}
+	return fallback
+}
+
+func fenceArgs(fence OwnershipFence) (string, string) {
+	return fence.args()
+}
 
 // evalStrings runs a script and decodes its reply as a slice of strings, the
 // fixed reply shape of every subscription script.
@@ -232,6 +248,85 @@ func (s *RedisStore) ReconcileIndexes() error {
 	return nil
 }
 
+// HeartbeatMember renews membership and removes expired members.
+func (s *RedisStore) HeartbeatMember(replica ReplicaID, now time.Time, ttl time.Duration) error {
+	ctx := s.ctx()
+	pipe := s.client.Pipeline()
+	expiry := now.Add(ttl).UnixNano()
+	pipe.ZAdd(ctx, membersKey, redis.Z{Score: float64(expiry), Member: replica.String()})
+	pipe.ZRemRangeByScore(ctx, membersKey, "-inf", nsArg(now))
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// LiveMembers returns unexpired members from the ownership membership set.
+func (s *RedisStore) LiveMembers(now time.Time) ([]ReplicaID, error) {
+	raw, err := s.client.ZRangeByScore(s.ctx(), membersKey, &redis.ZRangeBy{
+		Min: "(" + nsArg(now),
+		Max: "+inf",
+	}).Result()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReplicaID, 0, len(raw))
+	for _, v := range raw {
+		id, err := NewReplicaID(v)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// ClaimSlot CASes one ownership slot lease.
+func (s *RedisStore) ClaimSlot(slot OwnershipSlot, replica ReplicaID, now time.Time, ttl time.Duration) (SlotClaimResult, error) {
+	reply, err := s.evalStrings(claimShardScript, []string{ownershipSlotKey(slot)}, replica.String(), nsArg(now), msArg(ttl))
+	if err != nil {
+		return SlotClaimResult{}, err
+	}
+	if len(reply) < 4 {
+		return SlotClaimResult{}, fmt.Errorf("claim_shard: short reply %v", reply)
+	}
+	owner, err := NewReplicaID(reply[1])
+	if err != nil {
+		return SlotClaimResult{}, err
+	}
+	exp, _ := strconv.ParseInt(reply[3], 10, 64)
+	result := SlotClaimResult{
+		Status: SlotClaimStatus(reply[0]),
+		Lease: SlotLease{
+			Slot:          slot,
+			Owner:         owner,
+			Epoch:         parseOwnerEpoch(reply[2]),
+			LeaseExpiryNs: exp,
+		},
+	}
+	switch result.Status {
+	case SlotClaimed, SlotRenewed, SlotBusy:
+		return result, nil
+	default:
+		return SlotClaimResult{}, fmt.Errorf("claim_shard: unexpected status %q", reply[0])
+	}
+}
+
+// CheckOwner verifies the owner epoch for an external side-effect gate.
+func (s *RedisStore) CheckOwner(fence OwnershipFence) (CheckOwnerStatus, error) {
+	if !fence.Enabled {
+		return CheckOwnerOwner, nil
+	}
+	reply, err := s.evalStrings(checkOwnerScript, []string{ownershipSlotKey(fence.Slot)}, fence.Owner.String(), fence.Epoch.String())
+	if err != nil {
+		return "", err
+	}
+	switch CheckOwnerStatus(reply[0]) {
+	case CheckOwnerOwner, CheckOwnerFenced, CheckOwnerUnowned:
+		return CheckOwnerStatus(reply[0]), nil
+	default:
+		return "", fmt.Errorf("check_owner: unexpected status %q", reply[0])
+	}
+}
+
 func (s *RedisStore) indexStream(path, id string) error {
 	return s.client.SAdd(s.ctx(), streamSubsKey(path), id).Err()
 }
@@ -241,13 +336,14 @@ func (s *RedisStore) deindexStream(path, id string) error {
 }
 
 // ArmWake issues a wake if idle.
-func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error) {
+func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, fence OwnershipFence) (ArmResult, error) {
 	arm := "0"
 	if armLease {
 		arm = "1"
 	}
-	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey, dueSetKey()},
-		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID)
+	ownerID, ownerEpoch := fenceArgs(fence)
+	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey, dueSetKey(), fenceKey(fence, subKey(id))},
+		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID, ownerID, ownerEpoch)
 	if err != nil {
 		return ArmResult{}, err
 	}
@@ -260,6 +356,8 @@ func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLeas
 		return ArmResult{Busy: true, Generation: gen, WakeID: reply[2]}, nil
 	case "NOSUB":
 		return ArmResult{NoSub: true}, nil
+	case "FENCED":
+		return ArmResult{Fenced: true}, nil
 	default:
 		return ArmResult{}, fmt.Errorf("arm_wake: unexpected status %q", reply[0])
 	}
@@ -290,22 +388,25 @@ func (s *RedisStore) Claim(id string, mode ClaimMode, shard ClaimShard, worker, 
 }
 
 // Ack fences, applies acks, and releases or heartbeats.
-func (s *RedisStore) Ack(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+func (s *RedisStore) Ack(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, fence OwnershipFence) (string, error) {
 	doneArg := "0"
 	if done {
 		doneArg = "1"
 	}
 	ref := NewLeaseRef(id, shard)
-	args := make([]any, 0, 11+2*len(acks))
-	args = append(args,
+	ownerID, ownerEpoch := fenceArgs(fence)
+	args := make([]any, 0, 13+2*len(acks))
+	args = append(
+		args,
 		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10),
 		doneArg, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), strconv.Itoa(len(acks)),
-		shard.String(), ref.Member(), mode.String(),
+		shard.String(), ref.Member(), mode.String(), ownerID, ownerEpoch,
 	)
 	for _, a := range acks {
 		args = append(args, a.Stream, a.Offset)
 	}
-	reply, err := s.evalStrings(ackScript, []string{subKey(id), linksKey(id), leaseZKey, retryZKey, dueSetKey()}, args...)
+	reply, err := s.evalStrings(ackScript,
+		[]string{subKey(id), linksKey(id), leaseZKey, retryZKey, dueSetKey(), fenceKey(fence, subKey(id))}, args...)
 	if err != nil {
 		return "", err
 	}
@@ -313,10 +414,11 @@ func (s *RedisStore) Ack(id string, mode ClaimMode, shard ClaimShard, reqGenerat
 }
 
 // Release fences then releases the lease.
-func (s *RedisStore) Release(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error) {
+func (s *RedisStore) Release(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64, fence OwnershipFence) (string, error) {
 	ref := NewLeaseRef(id, shard)
-	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey, retryZKey, dueSetKey()},
-		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10), shard.String(), ref.Member(), mode.String())
+	ownerID, ownerEpoch := fenceArgs(fence)
+	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey, retryZKey, dueSetKey(), fenceKey(fence, subKey(id))},
+		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10), shard.String(), ref.Member(), mode.String(), ownerID, ownerEpoch)
 	if err != nil {
 		return "", err
 	}
@@ -324,13 +426,14 @@ func (s *RedisStore) Release(id string, mode ClaimMode, shard ClaimShard, reqGen
 }
 
 // ExpireLease clears an expired lease.
-func (s *RedisStore) ExpireLease(ref LeaseRef, now time.Time, pending bool) (string, error) {
+func (s *RedisStore) ExpireLease(ref LeaseRef, now time.Time, pending bool, fence OwnershipFence) (string, error) {
 	pendingArg := "0"
 	if pending {
 		pendingArg = "1"
 	}
-	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(ref.SubID), leaseZKey, dueSetKey()},
-		ref.SubID, nsArg(now), ref.Shard.String(), ref.Member(), pendingArg)
+	ownerID, ownerEpoch := fenceArgs(fence)
+	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(ref.SubID), leaseZKey, dueSetKey(), fenceKey(fence, subKey(ref.SubID))},
+		ref.SubID, nsArg(now), ref.Shard.String(), ref.Member(), pendingArg, ownerID, ownerEpoch)
 	if err != nil {
 		return "", err
 	}
@@ -338,13 +441,14 @@ func (s *RedisStore) ExpireLease(ref LeaseRef, now time.Time, pending bool) (str
 }
 
 // ReconcileLeaseSchedule re-adds schedule entries implied by durable sub state.
-func (s *RedisStore) ReconcileLeaseSchedule(ref LeaseRef, now time.Time, pending bool) (LeaseReconcileResult, error) {
+func (s *RedisStore) ReconcileLeaseSchedule(ref LeaseRef, now time.Time, pending bool, fence OwnershipFence) (LeaseReconcileResult, error) {
 	pendingArg := "0"
 	if pending {
 		pendingArg = "1"
 	}
-	reply, err := s.evalStrings(reconcileLeaseScript, []string{subKey(ref.SubID), leaseZKey, dueSetKey()},
-		ref.SubID, nsArg(now), ref.Shard.String(), ref.Member(), pendingArg)
+	ownerID, ownerEpoch := fenceArgs(fence)
+	reply, err := s.evalStrings(reconcileLeaseScript, []string{subKey(ref.SubID), leaseZKey, dueSetKey(), fenceKey(fence, subKey(ref.SubID))},
+		ref.SubID, nsArg(now), ref.Shard.String(), ref.Member(), pendingArg, ownerID, ownerEpoch)
 	if err != nil {
 		return LeaseReconcileResult{}, err
 	}
@@ -355,7 +459,7 @@ func (s *RedisStore) ReconcileLeaseSchedule(ref LeaseRef, now time.Time, pending
 			LeaseRepaired: len(reply) > 1 && reply[1] == "1",
 			DueOp:         reply[2],
 		}, nil
-	case "SKIPPED", "NOSUB":
+	case "SKIPPED", "NOSUB", "FENCED":
 		return LeaseReconcileResult{}, nil
 	default:
 		return LeaseReconcileResult{}, fmt.Errorf("reconcile_lease: unexpected status %q", reply[0])
@@ -364,8 +468,8 @@ func (s *RedisStore) ReconcileLeaseSchedule(ref LeaseRef, now time.Time, pending
 
 // DueLeases takes due lease-schedule members by re-scoring them forward, so a
 // dropped worker's subscription recurs (docs/research/07 §6.1).
-func (s *RedisStore) DueLeases(now time.Time, limit int, visibility time.Duration) ([]LeaseRef, error) {
-	members, err := s.due(leaseZKey, now, limit, visibility)
+func (s *RedisStore) DueLeases(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]LeaseRef, error) {
+	members, err := s.due(leaseZKey, slot, now, limit, visibility, fence)
 	if err != nil {
 		return nil, err
 	}
@@ -382,28 +486,41 @@ func (s *RedisStore) DueLeases(now time.Time, limit int, visibility time.Duratio
 
 // DueRetries takes due retry-schedule members by re-scoring them forward, the
 // same re-score-never-ZREM machinery as DueLeases (docs/research/07 §6.1).
-func (s *RedisStore) DueRetries(now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	return s.due(retryZKey, now, limit, visibility)
+func (s *RedisStore) DueRetries(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error) {
+	return s.due(retryZKey, slot, now, limit, visibility, fence)
 }
 
 // DueWakes takes owed wake-outbox members by re-scoring them forward, the same
 // at-least-once claim primitive as the lease/retry schedules.
-func (s *RedisStore) DueWakes(now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	return s.due(dueSetKey(), now, limit, visibility)
+func (s *RedisStore) DueWakes(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error) {
+	return s.due(dueSetKey(), slot, now, limit, visibility, fence)
 }
 
-func (s *RedisStore) due(zkey string, now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	return s.evalStrings(claimDueScript, []string{zkey},
-		nsArg(now), strconv.Itoa(limit), strconv.FormatInt(int64(visibility), 10))
+func (s *RedisStore) due(zkey string, slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error) {
+	ownerID, ownerEpoch := fenceArgs(fence)
+	members, err := s.evalStrings(claimDueScript, []string{zkey, fenceKey(fence, zkey)},
+		nsArg(now), strconv.Itoa(limit), strconv.FormatInt(int64(visibility), 10), ownerID, ownerEpoch)
+	if err != nil {
+		return nil, err
+	}
+	if fence.Enabled && len(members) == 1 && members[0] == "FENCED" {
+		return nil, errOwnerFenced
+	}
+	_ = slot // #15 will derive zkey from slot; this slice keeps the single {__ds} key.
+	return members, nil
 }
 
 // ScheduleRetry records a webhook failure and persists next_attempt; returns the
 // new retry count.
-func (s *RedisStore) ScheduleRetry(id string, now, nextAttempt time.Time) (int, error) {
-	reply, err := s.evalStrings(scheduleRetryScript, []string{subKey(id), retryZKey},
-		id, nsArg(now), nsArg(nextAttempt))
+func (s *RedisStore) ScheduleRetry(id string, now, nextAttempt time.Time, fence OwnershipFence) (int, error) {
+	ownerID, ownerEpoch := fenceArgs(fence)
+	reply, err := s.evalStrings(scheduleRetryScript, []string{subKey(id), retryZKey, fenceKey(fence, subKey(id))},
+		id, nsArg(now), nsArg(nextAttempt), ownerID, ownerEpoch)
 	if err != nil {
 		return 0, err
+	}
+	if reply[0] == "FENCED" {
+		return 0, errOwnerFenced
 	}
 	if reply[0] == "NOSUB" {
 		return 0, nil

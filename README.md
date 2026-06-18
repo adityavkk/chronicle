@@ -69,6 +69,11 @@ Flags take precedence over environment variables; both over defaults.
 | `--subscriptions` | `CHRONICLE_SUBSCRIPTIONS` | `true` | Enable the reserved `__ds` subscription APIs (requires the redis backend) |
 | `--public-url` | `CHRONICLE_PUBLIC_URL` | _(listen addr)_ | Externally reachable origin used in webhook `callback_url` / `jwks_url` |
 | `--webhook-allow-private` | `CHRONICLE_WEBHOOK_ALLOW_PRIVATE` | `false` | Allow webhook delivery to private/loopback addresses (trusted networks / local dev) |
+| `--replica-id` | `CHRONICLE_REPLICA_ID` | `POD_NAME` + nonce | Subscription ownership replica id |
+| `--member-lease-ttl` | `CHRONICLE_MEMBER_LEASE_TTL` | `9s` | Redis membership lease TTL |
+| `--heartbeat-interval` | `CHRONICLE_HEARTBEAT_INTERVAL` | `3s` | Redis membership heartbeat interval |
+| `--slot-lease-ttl` | `CHRONICLE_SLOT_LEASE_TTL` | `9s` | Slot ownership lease TTL |
+| `--slot-reconcile-interval` | `CHRONICLE_SLOT_RECONCILE_INTERVAL` | `3s` | HRW slot reconcile interval |
 
 ### Redis requirements
 

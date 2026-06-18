@@ -49,9 +49,23 @@ type Store interface {
 	// the index update. It only mirrors links and never invents membership.
 	ReconcileIndexes() error
 
+	// HeartbeatMember renews this process's membership lease and removes expired
+	// members from the Redis membership set.
+	HeartbeatMember(replica ReplicaID, now time.Time, ttl time.Duration) error
+
+	// LiveMembers returns unexpired replica ids from the Redis membership set.
+	LiveMembers(now time.Time) ([]ReplicaID, error)
+
+	// ClaimSlot CASes one ownership slot lease.
+	ClaimSlot(slot OwnershipSlot, replica ReplicaID, now time.Time, ttl time.Duration) (SlotClaimResult, error)
+
+	// CheckOwner verifies an external side-effect gate against the slot owner
+	// record. Schedule/due writes use inline script checks instead.
+	CheckOwner(fence OwnershipFence) (CheckOwnerStatus, error)
+
 	// ArmWake issues a new wake generation if the subscription is idle; armLease
 	// arms the lease at issue (webhook) versus deferring it to claim (pull-wake).
-	ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error)
+	ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, fence OwnershipFence) (ArmResult, error)
 
 	// Claim is the pull-wake compare-and-set claim for one claim shard
 	// (PROTOCOL §7.2 plus Chronicle's shard extension).
@@ -59,32 +73,32 @@ type Store interface {
 
 	// Ack fences then applies acks forward-only; done releases the lease, else it
 	// extends the lease as a heartbeat (PROTOCOL §7.1, §7.2).
-	Ack(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error)
+	Ack(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, fence OwnershipFence) (string, error)
 
 	// Release fences then releases the lease without acking (PROTOCOL §7.2).
-	Release(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error)
+	Release(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64, fence OwnershipFence) (string, error)
 
 	// ExpireLease clears an expired shard lease, returning that claim shard to
 	// idle. pending records that the caller saw durable pending work and lets the
 	// script atomically re-owe the subscription in the due set.
-	ExpireLease(ref LeaseRef, now time.Time, pending bool) (string, error)
+	ExpireLease(ref LeaseRef, now time.Time, pending bool, fence OwnershipFence) (string, error)
 
 	// ReconcileLeaseSchedule mirrors a live/waking durable lease back into the
 	// volatile schedules after failover drops a ZSET tail. It never changes the
 	// subscription HASH fence or phase; pending re-derives due-set membership from
 	// durable cursor state.
-	ReconcileLeaseSchedule(ref LeaseRef, now time.Time, pending bool) (LeaseReconcileResult, error)
+	ReconcileLeaseSchedule(ref LeaseRef, now time.Time, pending bool, fence OwnershipFence) (LeaseReconcileResult, error)
 
 	// DueLeases / DueRetries / DueWakes take due schedule members by re-scoring
 	// them forward to a visibility window (never removing them), so a crashed
 	// worker's item recurs (docs/research/07 §6.1).
-	DueLeases(now time.Time, limit int, visibility time.Duration) ([]LeaseRef, error)
-	DueRetries(now time.Time, limit int, visibility time.Duration) ([]string, error)
-	DueWakes(now time.Time, limit int, visibility time.Duration) ([]string, error)
+	DueLeases(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]LeaseRef, error)
+	DueRetries(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error)
+	DueWakes(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error)
 
 	// ScheduleRetry records a webhook failure and persists next_attempt; returns
 	// the new retry count.
-	ScheduleRetry(id string, now, nextAttempt time.Time) (int, error)
+	ScheduleRetry(id string, now, nextAttempt time.Time, fence OwnershipFence) (int, error)
 
 	// RecordSuccess clears webhook failure bookkeeping after an accepted delivery.
 	RecordSuccess(id string) error
@@ -119,6 +133,7 @@ type ArmResult struct {
 	Armed      bool // a new wake was issued
 	Busy       bool // a wake was already in flight or a lease was held
 	NoSub      bool // the subscription no longer exists
+	Fenced     bool // the owner-epoch fence rejected this schedule mutation
 	Generation int64
 	WakeID     string
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
@@ -84,7 +86,7 @@ func TestRecordWakeEventSentFences(t *testing.T) {
 	s, _ := newTestStore(t)
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
-	res, err := s.ArmWake("s1", now, 1000, false, "w_a")
+	res, err := s.ArmWake("s1", now, 1000, false, "w_a", NoOwnerFence())
 	if err != nil || !res.Armed {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
@@ -119,7 +121,7 @@ func TestSweepReemitsStrandedPullWake(t *testing.T) {
 
 	// Simulate "arm, then crash before the wake-stream append": ArmWake sets
 	// phase=waking and wake_event_sent_ns=0, but no event is written.
-	res, err := store.ArmWake("s1", now, 1000, false, "w_a")
+	res, err := store.ArmWake("s1", now, 1000, false, "w_a", NoOwnerFence())
 	if err != nil || !res.Armed {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
@@ -208,7 +210,7 @@ func TestExpiredNonzeroClaimShardRewakesPendingStreams(t *testing.T) {
 	if err != nil || !claimed.Claimed {
 		t.Fatalf("claim shard %d = %+v err=%v", shard.Int(), claimed, err)
 	}
-	if status, err := store.ExpireLease(NewLeaseRef("s1", shard), now.Add(2*time.Second), true); err != nil || status != "EXPIRED" {
+	if status, err := store.ExpireLease(NewLeaseRef("s1", shard), now.Add(2*time.Second), true, NoOwnerFence()); err != nil || status != "EXPIRED" {
 		t.Fatalf("expire shard %d = %q err=%v", shard.Int(), status, err)
 	}
 
@@ -263,6 +265,8 @@ type fakeMetrics struct {
 	dueTicks  int
 	dueFired  int
 	dueOps    map[string]int
+	slotOps   map[string]int
+	fenced    map[string]int
 }
 
 func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
@@ -290,9 +294,24 @@ func (f *fakeMetrics) DueWorkerTick(_ time.Duration, fired int) {
 	f.dueTicks++
 	f.dueFired = fired
 }
-func (f *fakeMetrics) SlotOwnership(string, int)      {}
-func (f *fakeMetrics) CoverageGap(time.Duration)      {}
-func (f *fakeMetrics) OwnerFenced(string)             {}
+
+func (f *fakeMetrics) SlotOwnership(event string, _ int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.slotOps == nil {
+		f.slotOps = map[string]int{}
+	}
+	f.slotOps[event]++
+}
+func (f *fakeMetrics) CoverageGap(time.Duration) {}
+func (f *fakeMetrics) OwnerFenced(scope string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fenced == nil {
+		f.fenced = map[string]int{}
+	}
+	f.fenced[scope]++
+}
 func (f *fakeMetrics) ClaimContention(string, string) {}
 
 // TestSweepRecordsMetrics verifies the sweep reports its per-tick cost to the
@@ -367,6 +386,160 @@ func TestRecoveryScopesRunExactlyOneSweepPath(t *testing.T) {
 	defer fm.mu.Unlock()
 	if fm.sweeps != 4 {
 		t.Fatalf("ownership stub scopes should not run the full sweep before #14, got %d sweeps", fm.sweeps)
+	}
+}
+
+func TestSlotReconcileOwnsHRWTargetAndHeldLease(t *testing.T) {
+	store, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	fm := &fakeMetrics{}
+	mgr, err := NewManager(store, fs, ManagerOptions{
+		StreamRootURL:         "http://x/v1/stream/",
+		ReplicaID:             "replica-a",
+		MemberLeaseTTL:        900 * time.Millisecond,
+		HeartbeatInterval:     300 * time.Millisecond,
+		SlotLeaseTTL:          900 * time.Millisecond,
+		SlotReconcileInterval: 300 * time.Millisecond,
+		Metrics:               fm,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := store.HeartbeatMember(ReplicaID("replica-a"), now, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	mgr.slotReconcileOnce(now)
+	owned := mgr.ownedSlots(now)
+	if len(owned) != 1 || owned[0].Owner != ReplicaID("replica-a") || owned[0].Epoch != 1 {
+		t.Fatalf("owned slots = %+v, want one held lease by replica-a epoch 1", owned)
+	}
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	if fm.slotOps[string(SlotClaimed)] != 1 {
+		t.Fatalf("slot ownership metrics = %v, want CLAIMED=1", fm.slotOps)
+	}
+}
+
+func TestDeadMemberAgesOutAndSlotReclaimsAfterLeaseExpiry(t *testing.T) {
+	store, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	slot, _ := NewOwnershipSlot(0)
+	base := time.Now()
+	_ = store.HeartbeatMember(ReplicaID("replica-a"), base, 500*time.Millisecond)
+	_ = store.HeartbeatMember(ReplicaID("replica-b"), base, 500*time.Millisecond)
+	owner, ok := HRWOwner([]ReplicaID{"replica-a", "replica-b"}, slot)
+	if !ok {
+		t.Fatal("expected HRW owner")
+	}
+	survivor := ReplicaID("replica-a")
+	if owner == survivor {
+		survivor = "replica-b"
+	}
+	dead := owner
+	if _, err := store.ClaimSlot(slot, dead, base, 500*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateOrConfirm("reconcile-on-claim", pullWakeCfg(), nil, base); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.Claim("reconcile-on-claim", ClaimModeLegacy, DefaultClaimShard, "worker", "w_reconcile", base, 1000)
+	if err != nil || !claimed.Claimed {
+		t.Fatalf("precondition claim = %+v err=%v", claimed, err)
+	}
+	if err := store.client.ZRem(context.Background(), leaseZKey, "reconcile-on-claim").Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr, err := NewManager(store, fs, ManagerOptions{
+		StreamRootURL:         "http://x/v1/stream/",
+		ReplicaID:             survivor.String(),
+		MemberLeaseTTL:        900 * time.Millisecond,
+		HeartbeatInterval:     300 * time.Millisecond,
+		SlotLeaseTTL:          900 * time.Millisecond,
+		SlotReconcileInterval: 300 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := base.Add(time.Second)
+	if err := store.HeartbeatMember(survivor, after, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	mgr.slotReconcileOnce(after)
+	owned := mgr.ownedSlots(after)
+	if len(owned) != 1 || owned[0].Owner != survivor || owned[0].Epoch != 2 {
+		t.Fatalf("reclaimed owned slots = %+v, want survivor %s epoch 2", owned, survivor)
+	}
+	if _, err := store.client.ZScore(context.Background(), leaseZKey, "reconcile-on-claim").Result(); err != nil {
+		t.Fatalf("epoch-bump reconcile did not repair dropped lease schedule: %v", err)
+	}
+}
+
+func TestManagerStartStopOwnershipLoopsDrain(t *testing.T) {
+	store, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	mgr, err := NewManager(store, fs, ManagerOptions{
+		StreamRootURL:         "http://x/v1/stream/",
+		ReplicaID:             "replica-start-stop",
+		MemberLeaseTTL:        200 * time.Millisecond,
+		HeartbeatInterval:     50 * time.Millisecond,
+		SlotLeaseTTL:          200 * time.Millisecond,
+		SlotReconcileInterval: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.Start()
+	time.Sleep(120 * time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		mgr.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not drain manager goroutines")
+	}
+}
+
+func TestDeliverWebhookChecksOwnerBeforePost(t *testing.T) {
+	store, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	fm := &fakeMetrics{}
+	posts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		posts++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	mgr, err := NewManager(store, fs, ManagerOptions{
+		StreamRootURL: "http://x/v1/stream/",
+		ReplicaID:     "replica-a",
+		Metrics:       fm,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	slot, _ := NewOwnershipSlot(0)
+	stale := claimOwnershipForTest(t, store, slot, ReplicaID("replica-a"), now)
+	_ = claimOwnershipForTest(t, store, slot, ReplicaID("replica-b"), now.Add(2*time.Second))
+	if _, err := store.CreateOrConfirm("webhook-stale", webhookCfg(server.URL), nil, now); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr.deliverWebhook("webhook-stale", 1, "w_stale", stale.Fence())
+
+	if posts != 0 {
+		t.Fatalf("stale owner must not POST webhook, got %d posts", posts)
+	}
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	if fm.fenced["deliver_webhook"] != 1 {
+		t.Fatalf("owner fence metrics = %v, want deliver_webhook=1", fm.fenced)
 	}
 }
 
@@ -583,7 +756,7 @@ func TestDueWorkerCoalescesBusyDueMark(t *testing.T) {
 	fs.mu.Lock()
 	fs.tails["events/1"] = "0000000000000001_0000000000000000"
 	fs.mu.Unlock()
-	if res, err := store.ArmWake("s1", now, 1000, false, "w_a"); err != nil || !res.Armed {
+	if res, err := store.ArmWake("s1", now, 1000, false, "w_a", NoOwnerFence()); err != nil || !res.Armed {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
 

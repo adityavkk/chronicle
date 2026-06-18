@@ -18,3 +18,38 @@ func TestDefaultConfigSweepIntervalIsCoarseFloor(t *testing.T) {
 			got, DefaultConfig().ReconcileInterval)
 	}
 }
+
+func TestDefaultConfigOwnershipTiming(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.MemberLeaseTTL != 9*time.Second ||
+		cfg.HeartbeatInterval != 3*time.Second ||
+		cfg.SlotLeaseTTL != 9*time.Second ||
+		cfg.SlotReconcileInterval != 3*time.Second {
+		t.Fatalf("ownership defaults = member %s heartbeat %s slot %s reconcile %s",
+			cfg.MemberLeaseTTL, cfg.HeartbeatInterval, cfg.SlotLeaseTTL, cfg.SlotReconcileInterval)
+	}
+}
+
+func TestConfigLoadEnvOwnership(t *testing.T) {
+	cfg := DefaultConfig()
+	values := map[string]string{
+		EnvReplicaID:         "replica-test",
+		EnvMemberLeaseTTL:    "11s",
+		EnvHeartbeatInterval: "4s",
+		EnvSlotLeaseTTL:      "12s",
+		EnvSlotReconcile:     "2s",
+	}
+	if err := cfg.LoadEnv(func(k string) (string, bool) {
+		v, ok := values[k]
+		return v, ok
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReplicaID != "replica-test" ||
+		cfg.MemberLeaseTTL != 11*time.Second ||
+		cfg.HeartbeatInterval != 4*time.Second ||
+		cfg.SlotLeaseTTL != 12*time.Second ||
+		cfg.SlotReconcileInterval != 2*time.Second {
+		t.Fatalf("loaded ownership env = %+v", cfg)
+	}
+}

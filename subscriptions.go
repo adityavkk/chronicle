@@ -17,9 +17,14 @@ import (
 // SubscriptionTuning configures the subscription background loops. Zero values
 // fall back to the Manager's defaults (30s floor, 30s reconcile, no sweep cap).
 type SubscriptionTuning struct {
-	SweepInterval     time.Duration
-	ReconcileInterval time.Duration
-	SweepBatch        int
+	SweepInterval         time.Duration
+	ReconcileInterval     time.Duration
+	SweepBatch            int
+	ReplicaID             string
+	MemberLeaseTTL        time.Duration
+	HeartbeatInterval     time.Duration
+	SlotLeaseTTL          time.Duration
+	SlotReconcileInterval time.Duration
 	// Metrics, if set, receives sweep/delivery/worker observations from the
 	// Manager. Nil leaves the Manager on its no-op recorder.
 	Metrics webhook.Metrics
@@ -143,6 +148,11 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		SweepInterval:              tuning.SweepInterval,
 		ReconcileInterval:          tuning.ReconcileInterval,
 		SweepBatch:                 tuning.SweepBatch,
+		ReplicaID:                  tuning.ReplicaID,
+		MemberLeaseTTL:             tuning.MemberLeaseTTL,
+		HeartbeatInterval:          tuning.HeartbeatInterval,
+		SlotLeaseTTL:               tuning.SlotLeaseTTL,
+		SlotReconcileInterval:      tuning.SlotReconcileInterval,
 		Metrics:                    tuning.Metrics,
 	}
 	if rs != nil {

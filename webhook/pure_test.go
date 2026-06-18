@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"bytes"
 	"net"
 	"testing"
 	"time"
@@ -270,6 +271,88 @@ func TestClaimShardFiltersPartitionStreams(t *testing.T) {
 	}
 	if len(seen) != len(snap) {
 		t.Fatalf("partition covered %d streams, want %d", len(seen), len(snap))
+	}
+}
+
+func TestReplicaIDDefaultUsesPodNameAndNonce(t *testing.T) {
+	got, err := GenerateReplicaID(func(key string) (string, bool) {
+		if key == "POD_NAME" {
+			return "pod-a", true
+		}
+		return "", false
+	}, bytes.NewReader(bytes.Repeat([]byte{0xab}, 16)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "pod-a-abababababababababababababababab" {
+		t.Fatalf("replica id = %q", got)
+	}
+	if _, err := NewReplicaID(""); err == nil {
+		t.Fatal("empty replica id should be rejected")
+	}
+}
+
+func TestHRWOwnerArgmaxAndTieBreak(t *testing.T) {
+	members := []ReplicaID{"replica-a", "replica-b", "replica-c"}
+	slot, _ := NewOwnershipSlot(17)
+	want := members[0]
+	wantScore := hrwScore(want, slot)
+	for _, member := range members[1:] {
+		score := hrwScore(member, slot)
+		if score > wantScore || (score == wantScore && member.String() > want.String()) {
+			want, wantScore = member, score
+		}
+	}
+	got, ok := HRWOwner(members, slot)
+	if !ok || got != want {
+		t.Fatalf("HRWOwner = %q/%v, want %q/true", got, ok, want)
+	}
+
+	tieA, _ := NewReplicaID("same")
+	tieB, _ := NewReplicaID("same")
+	got, ok = HRWOwner([]ReplicaID{tieA, tieB}, slot)
+	if !ok || got != tieB {
+		t.Fatalf("identical-score tie should choose greatest replica id, got %q", got)
+	}
+}
+
+func TestHRWAddingReplicaMovesRoughlyOneShare(t *testing.T) {
+	slots := ownershipSlots(65536)
+	beforeMembers := []ReplicaID{
+		"pod-a-00112233445566778899aabbccddeeff",
+		"pod-b-ffeeddccbbaa99887766554433221100",
+		"pod-c-0123456789abcdef0123456789abcdef",
+	}
+	afterMembers := append(append([]ReplicaID{}, beforeMembers...), ReplicaID("pod-d-fedcba9876543210fedcba9876543210"))
+	moved := 0
+	for _, slot := range slots {
+		before, _ := HRWOwner(beforeMembers, slot)
+		after, _ := HRWOwner(afterMembers, slot)
+		if before != after {
+			moved++
+		}
+	}
+	ratio := float64(moved) / float64(len(slots))
+	if ratio < 0.18 || ratio > 0.32 {
+		t.Fatalf("adding one of four replicas moved %.3f of slots, want roughly 0.25", ratio)
+	}
+}
+
+func TestOwnershipTimingInvariants(t *testing.T) {
+	if err := validateOwnershipTiming(9*time.Second, 3*time.Second, 9*time.Second, 3*time.Second); err != nil {
+		t.Fatalf("defaults rejected: %v", err)
+	}
+	if err := validateOwnershipTiming(9*time.Second, 5*time.Second, 9*time.Second, 3*time.Second); err == nil {
+		t.Fatal("heartbeat interval >= memberLeaseTTL/2 should be rejected")
+	}
+	if err := validateOwnershipTiming(9*time.Second, 3*time.Second, 9*time.Second, 4*time.Second); err == nil {
+		t.Fatal("slot reconcile interval > heartbeat interval should be rejected")
+	}
+}
+
+func TestOwnershipSlotRejectsOverflow(t *testing.T) {
+	if _, err := NewOwnershipSlot(1 << 16); err == nil {
+		t.Fatal("expected ownership slot overflow to be rejected")
 	}
 }
 

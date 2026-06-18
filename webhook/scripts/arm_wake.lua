@@ -3,12 +3,16 @@
 -- lease is held). Coalescing falls out of the phase check. For webhook delivery
 -- the lease is armed here (arm_lease='1'); for pull-wake it is not (the lease
 -- starts at claim, PROTOCOL §7.3).
--- KEYS: 1=sub 2=lease_zset 3=due_zset
+-- KEYS: 1=sub 2=lease_zset 3=due_zset 4=ownership_slot
 -- ARGV: 1=id 2=now_ns 3=lease_ttl_ms 4=arm_lease('0'/'1') 5=new_wake_id
--- Reply: {status, generation, wake_id} ; ARMED | BUSY | NOSUB
+--       6=owner_id 7=owner_epoch
+-- Reply: {status, generation, wake_id} ; ARMED | BUSY | FENCED | NOSUB
 local sub = KEYS[1]
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
+end
+if owner_fenced(KEYS[4], ARGV[6], ARGV[7]) then
+  return { 'FENCED' }
 end
 if redis.call('HGET', sub, 'phase') ~= 'idle' then
   return { 'BUSY', redis.call('HGET', sub, 'generation'), redis.call('HGET', sub, 'wake_id') }

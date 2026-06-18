@@ -57,3 +57,14 @@ local function claim_mode_conflict(sub, mode)
   if cur == '' and legacy_base_used(sub) then cur = 'legacy' end
   return cur ~= '' and cur ~= mode, cur
 end
+
+-- owner_fenced reports whether an owner-epoch guarded schedule/due mutation
+-- should be rejected. Empty owner_id means the caller is an explicit no-owner
+-- path (route callback or full-sweep backstop) and bypasses this optimization
+-- fence; non-empty callers must match the slot ownership record exactly.
+local function owner_fenced(slot, owner_id, owner_epoch)
+  if owner_id == '' then return false end
+  local owner = redis.call('HGET', slot, 'owner_id')
+  if owner == false then return true end
+  return owner ~= owner_id or redis.call('HGET', slot, 'owner_epoch') ~= owner_epoch
+end

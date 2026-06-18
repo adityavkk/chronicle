@@ -7,13 +7,16 @@ package webhook
 // tag is the first {...} pair, which is always {__ds}). The high-cardinality
 // per-stream log data stays sharded under each stream's own {<path>} tag.
 const (
-	dsTag     = "{__ds}"
-	keyPrefix = "ds:" + dsTag
+	dsTag        = "{__ds}"
+	keyPrefix    = "ds:" + dsTag
+	ownershipTag = "{ownership}"
+	ownershipKey = "ds:" + ownershipTag
 
 	subsKey      = keyPrefix + ":subs"        // SET of subscription ids
 	leaseZKey    = keyPrefix + ":sched:lease" // ZSET id -> lease_expiry_ns
 	retryZKey    = keyPrefix + ":sched:retry" // ZSET id -> next_attempt_ns
 	dueZKey      = keyPrefix + ":due"         // ZSET id -> owed_at_ns
+	membersKey   = ownershipKey + ":members"  // ZSET replica_id -> lease_expiry_ns
 	jwksKey      = keyPrefix + ":jwks"        // HASH kid -> key material
 	activeKidKey = keyPrefix + ":active_kid"  // STRING current signing kid
 	tokenKeyKey  = keyPrefix + ":tokenkey"    // STRING HMAC token key
@@ -33,3 +36,9 @@ func linksKey(id string) string { return keyPrefix + ":sub:" + id + ":links" }
 // streamSubsKey is the per-stream fan-out SET of subscription ids linked to a
 // stream. Maintained from Go as a best-effort index reconciled by the sweep.
 func streamSubsKey(path string) string { return keyPrefix + ":stream:" + path }
+
+// ownershipSlotKey is the HASH {owner_id, owner_epoch, lease_expiry_ns} for one
+// background-work ownership slot.
+func ownershipSlotKey(slot OwnershipSlot) string {
+	return ownershipKey + ":slot:" + slot.String()
+}

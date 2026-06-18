@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"math/big"
@@ -85,6 +86,18 @@ type ManagerOptions struct {
 	// sweeps all subscriptions. A positive cap bounds per-tick cost on a large
 	// keyspace at the price of up to ceil(K/SweepBatch) ticks of recovery latency.
 	SweepBatch int
+	// ReplicaID names this process incarnation in the Redis membership set. Empty
+	// defaults to POD_NAME plus a random nonce.
+	ReplicaID string
+	// MemberLeaseTTL is how long a missed heartbeat remains live.
+	MemberLeaseTTL time.Duration
+	// HeartbeatInterval is how often this replica renews membership.
+	HeartbeatInterval time.Duration
+	// SlotLeaseTTL is the lease TTL written by claim_shard.lua.
+	SlotLeaseTTL time.Duration
+	// SlotReconcileInterval is how often HRW assignment is recomputed and slot
+	// leases are claimed or renewed.
+	SlotReconcileInterval time.Duration
 	// AllowPrivateWebhookTargets relaxes SSRF validation to accept any http(s)
 	// webhook URL (e.g. cluster-internal receivers on RFC1918 addresses). Off by
 	// default; the operator opts in for trusted networks.
@@ -114,6 +127,11 @@ type Manager struct {
 	reconcileInterval time.Duration
 	sweepBatch        int
 	sweepCursor       int // rolling start index when sweepBatch caps a tick
+	replicaID         ReplicaID
+	memberLeaseTTL    time.Duration
+	heartbeatInterval time.Duration
+	slotLeaseTTL      time.Duration
+	slotReconcile     time.Duration
 	allowPrivate      bool
 	metrics           Metrics
 
@@ -121,6 +139,9 @@ type Manager struct {
 	wg   sync.WaitGroup
 
 	reconcileMu sync.Mutex
+	ownershipMu sync.RWMutex
+	heldSlots   map[OwnershipSlot]SlotLease
+	targetSlots map[OwnershipSlot]bool
 }
 
 // NewManager builds a Manager and loads (or installs) the persisted signing and
@@ -132,6 +153,13 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		return nil, err
 	}
 	tokenKey, err := store.LoadTokenKey()
+	if err != nil {
+		return nil, err
+	}
+	replicaID, err := NewReplicaID(opts.ReplicaID)
+	if opts.ReplicaID == "" {
+		replicaID, err = defaultReplicaID()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -149,9 +177,16 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		sweepInterval:     opts.SweepInterval,
 		reconcileInterval: opts.ReconcileInterval,
 		sweepBatch:        opts.SweepBatch,
+		replicaID:         replicaID,
+		memberLeaseTTL:    opts.MemberLeaseTTL,
+		heartbeatInterval: opts.HeartbeatInterval,
+		slotLeaseTTL:      opts.SlotLeaseTTL,
+		slotReconcile:     opts.SlotReconcileInterval,
 		allowPrivate:      opts.AllowPrivateWebhookTargets,
 		metrics:           opts.Metrics,
 		stop:              make(chan struct{}),
+		heldSlots:         make(map[OwnershipSlot]SlotLease),
+		targetSlots:       make(map[OwnershipSlot]bool),
 	}
 	if m.metrics == nil {
 		m.metrics = NopMetrics{}
@@ -173,6 +208,21 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 	}
 	if m.reconcileInterval == 0 {
 		m.reconcileInterval = defaultReconcileInterval
+	}
+	if m.memberLeaseTTL == 0 {
+		m.memberLeaseTTL = defaultMemberLeaseTTL
+	}
+	if m.heartbeatInterval == 0 {
+		m.heartbeatInterval = defaultHeartbeatInterval
+	}
+	if m.slotLeaseTTL == 0 {
+		m.slotLeaseTTL = defaultSlotLeaseTTL
+	}
+	if m.slotReconcile == 0 {
+		m.slotReconcile = defaultSlotReconcileInterval
+	}
+	if err := validateOwnershipTiming(m.memberLeaseTTL, m.heartbeatInterval, m.slotLeaseTTL, m.slotReconcile); err != nil {
+		return nil, err
 	}
 	return m, nil
 }
@@ -240,7 +290,9 @@ func (m *Manager) OnStreamCreated(path string) {
 // (PROTOCOL §7). It is the best-effort low-latency path; recovery reconcile is
 // the durability backstop if this is lost to a crash (docs/research/09 §2).
 func (m *Manager) OnStreamAppend(path string) {
+	start := time.Now()
 	ids, err := m.store.StreamSubscribers(path)
+	m.metrics.FanOut(time.Since(start), 1, len(ids))
 	if err != nil {
 		m.log.Warn("webhook: stream subscribers", "path", path, "error", err)
 		m.reconcile(recoveryScopeAppendError)
@@ -265,7 +317,11 @@ func (m *Manager) OnStreamDeleted(path string) {
 // maybeWake issues a wake for one subscription if it is idle and has pending
 // work. triggerStream names the stream that prompted the wake (for pull-wake
 // event payloads).
-func (m *Manager) maybeWake(id, triggerStream string) bool {
+func (m *Manager) maybeWake(id, triggerStream string) {
+	m.maybeWakeWithFence(id, triggerStream, NoOwnerFence())
+}
+
+func (m *Manager) maybeWakeWithFence(id, triggerStream string, fence OwnershipFence) bool {
 	sub, ok, err := m.store.Get(id)
 	if err != nil || !ok {
 		return false
@@ -276,23 +332,27 @@ func (m *Manager) maybeWake(id, triggerStream string) bool {
 	if !HasPendingWork(sub.Links, m.tailOf) {
 		return false
 	}
-	return m.issueWake(sub, triggerStream)
+	return m.issueWake(sub, triggerStream, fence)
 }
 
 // issueWake arms a new wake generation and delivers it (webhook POST or pull-wake
 // event). For webhook the lease is armed at issue; for pull-wake the lease waits
 // for a claim (PROTOCOL §7.3).
-func (m *Manager) issueWake(sub Subscription, triggerStream string) bool {
+func (m *Manager) issueWake(sub Subscription, triggerStream string, fence OwnershipFence) bool {
 	wakeID, err := GenerateWakeID(rand.Reader)
 	if err != nil {
 		m.log.Warn("webhook: generate wake id", "error", err)
 		return false
 	}
 	armLease := sub.Config.Type == DispatchWebhook
-	res, err := m.store.ArmWake(sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID)
+	res, err := m.store.ArmWake(sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID, fence)
 	if err != nil {
 		m.log.Warn("webhook: arm wake", "sub", sub.ID, "error", err)
 		m.reconcile(recoveryScopeAppendError)
+		return false
+	}
+	if res.Fenced {
+		m.metrics.OwnerFenced("arm_wake")
 		return false
 	}
 	if !res.Armed {
@@ -301,7 +361,7 @@ func (m *Manager) issueWake(sub Subscription, triggerStream string) bool {
 	m.recordDueSetMutation(DueSetForArmWake("ARMED"))
 	switch sub.Config.Type {
 	case DispatchWebhook:
-		go m.deliverWebhook(sub.ID, res.Generation, res.WakeID)
+		go m.deliverWebhook(sub.ID, res.Generation, res.WakeID, fence)
 	case DispatchPullWake:
 		m.writeWakeEvent(sub, triggerStream, res.Generation, res.WakeID)
 	}
@@ -337,10 +397,21 @@ func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generat
 // a 2xx {done:true} auto-acks the snapshot and releases; any other 2xx clears
 // the failure state and leaves the wake in flight for an async callback; a
 // non-2xx or transport error schedules a retry (PROTOCOL §7.1).
-func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
+func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, fence OwnershipFence) {
 	sub, ok, err := m.store.Get(id)
 	if err != nil || !ok {
 		return
+	}
+	if fence.Enabled {
+		status, err := m.store.CheckOwner(fence)
+		if err != nil {
+			m.log.Warn("webhook: check owner before delivery", "sub", id, "error", err)
+			return
+		}
+		if status != CheckOwnerOwner {
+			m.metrics.OwnerFenced("deliver_webhook")
+			return
+		}
 	}
 	snapshot, _ := Snapshot(sub.Links, m.tailOf)
 	token, err := GenerateToken(m.tokenKey, id, generation, time.Now(), m.tokenTTL(sub), rand.Reader)
@@ -362,7 +433,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, sub.Config.WebhookURL, bytes.NewReader(body))
 	if err != nil {
-		m.recordFailure(id)
+		m.recordFailure(id, fence)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -372,13 +443,13 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
 	resp, err := m.client.Do(req)
 	if err != nil {
 		m.metrics.WakeDelivery(time.Since(postStart), "error")
-		m.recordFailure(id)
+		m.recordFailure(id, fence)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		m.metrics.WakeDelivery(time.Since(postStart), "failed")
-		m.recordFailure(id)
+		m.recordFailure(id, fence)
 		return
 	}
 	m.metrics.WakeDelivery(time.Since(postStart), "ok")
@@ -392,10 +463,13 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
 	_ = m.store.RecordSuccess(id)
 	if parsed.Done != nil && *parsed.Done {
 		acks := acksFromSnapshot(snapshot)
-		status, err := m.store.Ack(id, ClaimModeLegacy, DefaultClaimShard, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs)
+		status, err := m.store.Ack(id, ClaimModeLegacy, DefaultClaimShard, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs, fence)
 		if err != nil {
 			m.log.Warn("webhook: auto-ack done", "sub", id, "error", err)
 			return
+		}
+		if status == "FENCED" {
+			m.metrics.OwnerFenced("ack")
 		}
 		if status == "OK" {
 			m.recordDueSetMutation(DueSetForAck(status, true))
@@ -404,7 +478,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
 	}
 }
 
-func (m *Manager) recordFailure(id string) {
+func (m *Manager) recordFailure(id string, fence OwnershipFence) {
 	sub, ok, err := m.store.Get(id)
 	if err != nil || !ok {
 		return
@@ -415,7 +489,9 @@ func (m *Manager) recordFailure(id string) {
 		return
 	}
 	next := time.Now().Add(RetryDelay(sub.RetryCount+1, jitterFraction()))
-	if _, err := m.store.ScheduleRetry(id, time.Now(), next); err != nil {
+	if _, err := m.store.ScheduleRetry(id, time.Now(), next, fence); errors.Is(err, errOwnerFenced) {
+		m.metrics.OwnerFenced("schedule_retry")
+	} else if err != nil {
 		m.log.Warn("webhook: schedule retry", "sub", id, "error", err)
 	}
 	m.reconcile(recoveryScopeAppendError)
@@ -438,7 +514,7 @@ func (m *Manager) rewakeIfPending(id string) bool {
 	if sub.Phase != PhaseIdle || !HasPendingWork(sub.Links, m.tailOf) {
 		return false
 	}
-	return m.issueWake(sub, "")
+	return m.issueWake(sub, "", NoOwnerFence())
 }
 
 func acksFromSnapshot(snap []StreamSnapshot) []Ack {
@@ -462,15 +538,109 @@ func jitterFraction() float64 {
 
 // ---- background loops ----
 
-// Start launches the due worker, lease worker, retry worker, recovery floor, and
-// slow index/pattern reconcile loop.
+// Start launches the ownership heartbeat/reconcile loops, due worker, lease
+// worker, retry worker, recovery floor, and slow index/pattern reconcile loop.
 func (m *Manager) Start() {
-	m.wg.Add(5)
+	m.wg.Add(7)
+	go m.membershipHeartbeatLoop()
+	go m.slotReconcileLoop()
 	go m.dueWorker()
 	go m.leaseWorker()
 	go m.retryWorker()
 	go m.recoveryFloorTicker()
 	go m.reconcileLoop()
+}
+
+func (m *Manager) membershipHeartbeatLoop() {
+	defer m.wg.Done()
+	ticker := time.NewTicker(m.heartbeatInterval)
+	defer ticker.Stop()
+	m.heartbeatMembership(time.Now())
+	for {
+		select {
+		case <-m.stop:
+			return
+		case now := <-ticker.C:
+			m.heartbeatMembership(now)
+		}
+	}
+}
+
+func (m *Manager) heartbeatMembership(now time.Time) {
+	if err := m.store.HeartbeatMember(m.replicaID, now, m.memberLeaseTTL); err != nil {
+		m.log.Warn("webhook: heartbeat membership", "replica_id", m.replicaID.String(), "error", err)
+	}
+}
+
+func (m *Manager) slotReconcileLoop() {
+	defer m.wg.Done()
+	ticker := time.NewTicker(m.slotReconcile)
+	defer ticker.Stop()
+	m.slotReconcileOnce(time.Now())
+	for {
+		select {
+		case <-m.stop:
+			return
+		case now := <-ticker.C:
+			m.slotReconcileOnce(now)
+		}
+	}
+}
+
+func (m *Manager) slotReconcileOnce(now time.Time) {
+	members, err := m.store.LiveMembers(now)
+	if err != nil {
+		m.log.Warn("webhook: list ownership members", "error", err)
+		return
+	}
+	targeted := HRWTargetSlots(members, m.replicaID, ownershipSlots(OwnershipSlotCount))
+	targetSet := make(map[OwnershipSlot]bool, len(targeted))
+	for _, slot := range targeted {
+		targetSet[slot] = true
+		res, err := m.store.ClaimSlot(slot, m.replicaID, now, m.slotLeaseTTL)
+		if err != nil {
+			m.log.Warn("webhook: claim ownership slot", "slot", slot.Int(), "error", err)
+			continue
+		}
+		m.metrics.SlotOwnership(string(res.Status), slot.Int())
+		if res.Granted() {
+			m.ownershipMu.Lock()
+			m.heldSlots[slot] = res.Lease
+			m.ownershipMu.Unlock()
+			if res.Status == SlotClaimed {
+				if res.Lease.Epoch > 1 {
+					m.reconcile(recoveryScopeEpochBump)
+				}
+				m.reconcile(recoveryScopeNewOwnerCAS)
+			}
+		} else if res.Status == SlotBusy {
+			m.ownershipMu.Lock()
+			delete(m.heldSlots, slot)
+			m.ownershipMu.Unlock()
+		}
+	}
+	m.ownershipMu.Lock()
+	for slot := range m.heldSlots {
+		if !targetSet[slot] {
+			delete(m.heldSlots, slot)
+			m.metrics.SlotOwnership("RELEASED", slot.Int())
+		}
+	}
+	m.targetSlots = targetSet
+	m.ownershipMu.Unlock()
+}
+
+func (m *Manager) ownedSlots(now time.Time) []SlotLease {
+	m.ownershipMu.RLock()
+	defer m.ownershipMu.RUnlock()
+	out := make([]SlotLease, 0, len(m.heldSlots))
+	for slot, lease := range m.heldSlots {
+		if m.targetSlots[slot] && lease.Active(now) {
+			out = append(out, lease)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
+	return out
 }
 
 // Stop signals the background loops and waits for them to drain.
@@ -492,21 +662,30 @@ func (m *Manager) leaseWorker() {
 			return
 		case <-ticker.C:
 			now := time.Now()
-			refs, err := m.store.DueLeases(now, dueClaimLimit, m.workerTick*2)
-			if err != nil {
-				continue
-			}
-			if len(refs) > 0 {
-				m.metrics.WorkerTick("lease", len(refs))
-			}
-			for _, ref := range refs {
-				pending := m.hasPendingWork(ref.SubID)
-				status, err := m.store.ExpireLease(ref, now, pending)
-				if err == nil {
-					m.recordDueSetMutation(DueSetForExpireLease(status, pending))
+			for _, owner := range m.ownedSlots(now) {
+				refs, err := m.store.DueLeases(owner.Slot, now, dueClaimLimit, m.workerTick*2, owner.Fence())
+				if errors.Is(err, errOwnerFenced) {
+					m.metrics.OwnerFenced("due_lease")
+					continue
 				}
-				if err == nil && status == "EXPIRED" {
-					m.metrics.ClaimContention("lease_lapse", ref.SubID)
+				if err != nil {
+					continue
+				}
+				if len(refs) > 0 {
+					m.metrics.WorkerTick("lease", len(refs))
+				}
+				for _, ref := range refs {
+					pending := m.hasPendingWork(ref.SubID)
+					status, err := m.store.ExpireLease(ref, now, pending, owner.Fence())
+					if err == nil {
+						m.recordDueSetMutation(DueSetForExpireLease(status, pending))
+					}
+					if err == nil && status == "FENCED" {
+						m.metrics.OwnerFenced("expire_lease")
+					}
+					if err == nil && status == "EXPIRED" {
+						m.metrics.ClaimContention("lease_lapse", ref.SubID)
+					}
 				}
 			}
 		}
@@ -524,20 +703,32 @@ func (m *Manager) dueWorker() {
 		case <-m.stop:
 			return
 		case <-ticker.C:
-			m.dueOnce(time.Now())
+			m.dueOwnedOnce(time.Now())
 		}
 	}
 }
 
-func (m *Manager) dueOnce(now time.Time) int {
+func (m *Manager) dueOwnedOnce(now time.Time) int {
+	fired := 0
+	for _, owner := range m.ownedSlots(now) {
+		fired += m.dueOnceForFence(now, owner.Slot, owner.Fence())
+	}
+	return fired
+}
+
+func (m *Manager) dueOnceForFence(now time.Time, slot OwnershipSlot, fence OwnershipFence) int {
 	start := time.Now()
-	ids, err := m.store.DueWakes(now, dueClaimLimit, m.workerTick*2)
+	ids, err := m.store.DueWakes(slot, now, dueClaimLimit, m.workerTick*2, fence)
+	if errors.Is(err, errOwnerFenced) {
+		m.metrics.OwnerFenced("due_wake")
+		return 0
+	}
 	if err != nil {
 		return 0
 	}
 	fired := 0
 	for _, id := range ids {
-		if m.maybeWake(id, "") {
+		if m.maybeWakeWithFence(id, "", fence) {
 			fired++
 		}
 	}
@@ -556,19 +747,25 @@ func (m *Manager) retryWorker() {
 			return
 		case <-ticker.C:
 			now := time.Now()
-			ids, err := m.store.DueRetries(now, dueClaimLimit, m.workerTick*2)
-			if err != nil {
-				continue
-			}
-			if len(ids) > 0 {
-				m.metrics.WorkerTick("retry", len(ids))
-			}
-			for _, id := range ids {
-				sub, ok, err := m.store.Get(id)
-				if err != nil || !ok || sub.Phase != PhaseWaking {
+			for _, owner := range m.ownedSlots(now) {
+				ids, err := m.store.DueRetries(owner.Slot, now, dueClaimLimit, m.workerTick*2, owner.Fence())
+				if errors.Is(err, errOwnerFenced) {
+					m.metrics.OwnerFenced("due_retry")
 					continue
 				}
-				m.deliverWebhook(id, sub.Generation, sub.WakeID)
+				if err != nil {
+					continue
+				}
+				if len(ids) > 0 {
+					m.metrics.WorkerTick("retry", len(ids))
+				}
+				for _, id := range ids {
+					sub, ok, err := m.store.Get(id)
+					if err != nil || !ok || sub.Phase != PhaseWaking {
+						continue
+					}
+					m.deliverWebhook(id, sub.Generation, sub.WakeID, owner.Fence())
+				}
 			}
 		}
 	}
@@ -643,15 +840,30 @@ func (m *Manager) sweepOnce() {
 		}
 		active := m.sweepClaimLeases(sub, pending, now)
 		if !active && pending {
-			if m.issueWake(sub, "") {
-				if dur, ok := coverageGapForSweepWake(sub, now); ok {
-					m.metrics.CoverageGap(dur)
+			if m.issueWake(sub, "", NoOwnerFence()) {
+				if m.coverageGapForSweepWake(sub, now) {
+					m.metrics.CoverageGap(0)
 				}
 				wakes++
 			}
 		}
 	}
 	m.metrics.SweepTick(time.Since(start), len(subs), len(paths), wakes)
+}
+
+func (m *Manager) coverageGapForSweepWake(sub Subscription, now time.Time) bool {
+	slot := subscriptionOwnershipSlot(sub.ID)
+	m.ownershipMu.RLock()
+	lease, held := m.heldSlots[slot]
+	targeted := m.targetSlots[slot]
+	m.ownershipMu.RUnlock()
+	if held && targeted && lease.Active(now) {
+		return false
+	}
+	// This slice has no append-time durable gap marker yet, so the metric is a
+	// countable observation at recovery time. #15's slot-homed due state can
+	// replace this with an exact append-to-recovery duration.
+	return true
 }
 
 func (m *Manager) reconcileLeasesOnce() {
@@ -676,7 +888,7 @@ func (m *Manager) sweepClaimLeases(sub Subscription, pending bool, now time.Time
 	for _, lease := range ClaimLeasesFromSubscription(sub) {
 		state := lease.State
 		if state.Phase != PhaseIdle && LeaseExpired(state.LeaseUntilNs, now) {
-			status, err := m.store.ExpireLease(lease.Ref(sub.ID), now, pending)
+			status, err := m.store.ExpireLease(lease.Ref(sub.ID), now, pending, NoOwnerFence())
 			if err == nil {
 				m.recordDueSetMutation(DueSetForExpireLease(status, pending))
 			}
@@ -705,7 +917,7 @@ func (m *Manager) reconcileLeaseSchedule(subID string, lease ClaimShardLeaseStat
 	if !decision.reconcile {
 		return
 	}
-	if _, err := m.store.ReconcileLeaseSchedule(lease.Ref(subID), now, decision.pending); err != nil {
+	if _, err := m.store.ReconcileLeaseSchedule(lease.Ref(subID), now, decision.pending, NoOwnerFence()); err != nil {
 		m.log.Warn("webhook: reconcile lease schedule", "sub", subID, "shard", lease.Shard.Int(), "error", err)
 	}
 }
@@ -763,7 +975,9 @@ func (m *Manager) RunSweep() { m.reconcile(recoveryScopeBoot) }
 func (m *Manager) RunRedisReconnect() { m.reconcile(recoveryScopeReconnect) }
 
 // RunDue runs one due-worker pass immediately (used by tests and local V&V).
-func (m *Manager) RunDue() int { return m.dueOnce(time.Now()) }
+func (m *Manager) RunDue() int {
+	return m.dueOnceForFence(time.Now(), subscriptionOwnershipSlot(""), NoOwnerFence())
+}
 
 func (m *Manager) hasPendingWork(id string) bool {
 	sub, ok, err := m.store.Get(id)
@@ -930,7 +1144,7 @@ func (m *Manager) applyAck(id string, selection ClaimShardSelection, req Callbac
 	if selection.Sharded() {
 		acks = FilterAcksForClaimShard(acks, selection.Shard)
 	}
-	status, aerr := m.store.Ack(id, selection.Mode, selection.Shard, req.Generation, req.WakeID, tokenGeneration, done, acks, time.Now(), sub.Config.LeaseTTLMs)
+	status, aerr := m.store.Ack(id, selection.Mode, selection.Shard, req.Generation, req.WakeID, tokenGeneration, done, acks, time.Now(), sub.Config.LeaseTTLMs, NoOwnerFence())
 	if aerr != nil {
 		return false, false, false, aerr
 	}
@@ -952,7 +1166,7 @@ func (m *Manager) applyAck(id string, selection ClaimShardSelection, req Callbac
 
 // applyRelease fences and releases the lease, re-waking if pending (PROTOCOL §7.2).
 func (m *Manager) applyRelease(id string, selection ClaimShardSelection, req ReleaseRequest, tokenGeneration int64) (fenced, gone bool, err error) {
-	status, rerr := m.store.Release(id, selection.Mode, selection.Shard, req.Generation, req.WakeID, tokenGeneration)
+	status, rerr := m.store.Release(id, selection.Mode, selection.Shard, req.Generation, req.WakeID, tokenGeneration, NoOwnerFence())
 	if rerr != nil {
 		return false, false, rerr
 	}

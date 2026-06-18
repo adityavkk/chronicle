@@ -102,6 +102,10 @@ spec:
               value: "2s"
             - name: CHRONICLE_LOG_LEVEL
               value: "info"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
             - containerPort: 4437
           readinessProbe:

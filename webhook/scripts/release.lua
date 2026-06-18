@@ -1,12 +1,15 @@
 -- release.lua — voluntary lease release without acking (PROTOCOL §7.2). Fenced
 -- like ack. The caller re-issues a wake afterward if pending work remains.
--- KEYS: 1=sub 2=lease_zset 3=retry_zset 4=due_zset
+-- KEYS: 1=sub 2=lease_zset 3=retry_zset 4=due_zset 5=ownership_slot
 -- ARGV: 1=id 2=req_gen 3=req_wake 4=token_gen 5=shard 6=lease_member
---       7=claim_mode('legacy'|'sharded')
+--       7=claim_mode('legacy'|'sharded') 8=owner_id 9=owner_epoch
 -- Reply: {status} ; OK | FENCED | NOSUB
 local sub = KEYS[1]
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
+end
+if owner_fenced(KEYS[5], ARGV[8], ARGV[9]) then
+  return { 'FENCED' }
 end
 local conflict = claim_mode_conflict(sub, ARGV[7])
 if conflict then

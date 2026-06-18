@@ -34,6 +34,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -903,6 +904,12 @@ func (n *nemesis) record(action string) {
 	n.mu.Unlock()
 }
 
+func (n *nemesis) actions() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string{}, n.log...)
+}
+
 func (n *nemesis) run(stop <-chan struct{}) {
 	switch n.scenario {
 	case "origin-restart", "index-repair":
@@ -990,7 +997,28 @@ func (n *nemesis) killSlotOwner(slot int) error {
 		n.record(fmt.Sprintf("dry-run-kill-slot-owner-%d", slot))
 		return nil
 	}
-	return fmt.Errorf("killSlotOwner requires ds:{ownership}:slot:<h> and pod owner mapping; slot ownership is not implemented in today's k3d deployment")
+	out, err := n.redisCLI("hget", fmt.Sprintf("ds:{ownership}:slot:%d", slot), "owner_id")
+	if err != nil {
+		return fmt.Errorf("read slot owner: %w", err)
+	}
+	owner := strings.TrimSpace(string(out))
+	if owner == "" {
+		return fmt.Errorf("slot %d has no owner_id", slot)
+	}
+	podsRaw, err := n.kubectl("get", "pods", "-l", "app=chronicle", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
+	if err != nil {
+		return fmt.Errorf("list chronicle pods: %w", err)
+	}
+	for _, pod := range strings.Fields(string(podsRaw)) {
+		if strings.HasPrefix(owner, pod+"-") {
+			if _, err := n.kubectl("delete", "pod", pod, "--grace-period=0", "--force"); err != nil {
+				return fmt.Errorf("kill slot owner pod %s: %w", pod, err)
+			}
+			n.record(fmt.Sprintf("kill-slot-owner-%d:%s", slot, pod))
+			return nil
+		}
+	}
+	return fmt.Errorf("owner_id %q did not match live chronicle pods %q", owner, strings.TrimSpace(string(podsRaw)))
 }
 
 func (n *nemesis) toxiproxyPartition() error {

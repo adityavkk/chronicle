@@ -20,6 +20,11 @@ const (
 	EnvSweepInterval        = "CHRONICLE_SWEEP_INTERVAL"
 	EnvReconcileInterval    = "CHRONICLE_RECONCILE_INTERVAL"
 	EnvSweepBatch           = "CHRONICLE_SWEEP_BATCH"
+	EnvReplicaID            = "CHRONICLE_REPLICA_ID"
+	EnvMemberLeaseTTL       = "CHRONICLE_MEMBER_LEASE_TTL"
+	EnvHeartbeatInterval    = "CHRONICLE_HEARTBEAT_INTERVAL"
+	EnvSlotLeaseTTL         = "CHRONICLE_SLOT_LEASE_TTL"
+	EnvSlotReconcile        = "CHRONICLE_SLOT_RECONCILE_INTERVAL"
 	EnvMetricsListen        = "CHRONICLE_METRICS_LISTEN"
 )
 
@@ -81,6 +86,18 @@ type Config struct {
 	// keyspace at the price of up to ceil(K/SweepBatch) ticks of recovery latency.
 	SweepBatch int
 
+	// ReplicaID optionally fixes the process incarnation id used for
+	// Redis-backed ownership. Empty defaults to POD_NAME plus a random nonce.
+	ReplicaID string
+
+	// MemberLeaseTTL, HeartbeatInterval, SlotLeaseTTL, and SlotReconcileInterval
+	// tune Redis membership and slot ownership. Zero values fall back to the
+	// Manager defaults: 9s, 3s, 9s, and 3s.
+	MemberLeaseTTL        time.Duration
+	HeartbeatInterval     time.Duration
+	SlotLeaseTTL          time.Duration
+	SlotReconcileInterval time.Duration
+
 	// MetricsListen is the address for the observability server (/metrics,
 	// /healthz, /readyz). Empty (the default) disables it; a load-test or
 	// production deployment sets e.g. ":9090".
@@ -92,16 +109,20 @@ type Config struct {
 // Provision defaults for the shared knobs.
 func DefaultConfig() Config {
 	return Config{
-		Listen:               ":4437",
-		StreamRoot:           "/v1/stream/",
-		RedisURL:             "redis://localhost:6379",
-		StoreBackend:         "redis",
-		LongPollTimeout:      30 * time.Second,
-		SSEReconnectInterval: 60 * time.Second,
-		PublicBaseURL:        "http://localhost:4437",
-		Subscriptions:        true,
-		SweepInterval:        30 * time.Second,
-		ReconcileInterval:    30 * time.Second,
+		Listen:                ":4437",
+		StreamRoot:            "/v1/stream/",
+		RedisURL:              "redis://localhost:6379",
+		StoreBackend:          "redis",
+		LongPollTimeout:       30 * time.Second,
+		SSEReconnectInterval:  60 * time.Second,
+		PublicBaseURL:         "http://localhost:4437",
+		Subscriptions:         true,
+		SweepInterval:         30 * time.Second,
+		ReconcileInterval:     30 * time.Second,
+		MemberLeaseTTL:        9 * time.Second,
+		HeartbeatInterval:     3 * time.Second,
+		SlotLeaseTTL:          9 * time.Second,
+		SlotReconcileInterval: 3 * time.Second,
 	}
 }
 
@@ -160,6 +181,37 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvSweepBatch, err)
 		}
 		c.SweepBatch = n
+	}
+	if v, ok := lookup(EnvReplicaID); ok {
+		c.ReplicaID = v
+	}
+	if v, ok := lookup(EnvMemberLeaseTTL); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvMemberLeaseTTL, err)
+		}
+		c.MemberLeaseTTL = d
+	}
+	if v, ok := lookup(EnvHeartbeatInterval); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvHeartbeatInterval, err)
+		}
+		c.HeartbeatInterval = d
+	}
+	if v, ok := lookup(EnvSlotLeaseTTL); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvSlotLeaseTTL, err)
+		}
+		c.SlotLeaseTTL = d
+	}
+	if v, ok := lookup(EnvSlotReconcile); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvSlotReconcile, err)
+		}
+		c.SlotReconcileInterval = d
 	}
 	if v, ok := lookup(EnvMetricsListen); ok {
 		c.MetricsListen = v

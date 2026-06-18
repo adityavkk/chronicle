@@ -31,7 +31,6 @@ func TestNormalizeNemesisWindow(t *testing.T) {
 func TestUnsupportedNemesisPrimitivesFailClearly(t *testing.T) {
 	n := &nemesis{}
 	for name, fn := range map[string]func() error{
-		"killSlotOwner":      func() error { return n.killSlotOwner(3) },
 		"toxiproxyPartition": n.toxiproxyPartition,
 		"clockSkew":          n.clockSkew,
 	} {

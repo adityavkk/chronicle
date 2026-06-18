@@ -268,11 +268,94 @@ func ackedOffset(view subscriptionView, stream string) string {
 }
 
 func runOwnershipExclusivity(c config) error {
+	ctx := "k3d-" + c.cluster
 	if c.nemDryRun {
-		fmt.Println("DRY RUN: ownership-exclusivity scaffold is installed; live check waits for claim_shard.lua/check_owner.lua and ds:{ownership}:slot:<h>")
+		nem := c.newNemesis(ctx)
+		_ = nem.killSlotOwner(0)
+		fmt.Println("DRY RUN: ownership-exclusivity live checker is installed")
 		return nil
 	}
-	return fmt.Errorf("ownership-exclusivity is a proposed-mechanism scaffold: claim_shard.lua/check_owner.lua and ds:{ownership}:slot:<h> do not exist in today's SUT")
+	if err := waitReady(c.base, 60*time.Second); err != nil {
+		return fmt.Errorf("chronicle not ready: %w", err)
+	}
+	nem := c.newNemesis(ctx)
+	before, err := waitOwnershipSlot(nem, 0, 20*time.Second)
+	if err != nil {
+		return err
+	}
+	if before.Owner == "" || before.Epoch <= 0 {
+		return fmt.Errorf("ownership slot has no live owner: %+v", before)
+	}
+	if err := nem.killSlotOwner(0); err != nil {
+		return err
+	}
+	after, err := waitOwnershipTransfer(nem, 0, before, 20*time.Second)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("scenario:          ownership-exclusivity\n")
+	fmt.Printf("slot:              0\n")
+	fmt.Printf("before_owner:      %s\n", before.Owner)
+	fmt.Printf("before_epoch:      %d\n", before.Epoch)
+	fmt.Printf("after_owner:       %s\n", after.Owner)
+	fmt.Printf("after_epoch:       %d\n", after.Epoch)
+	fmt.Printf("nemesis_actions:   %s\n", strings.Join(nem.actions(), ","))
+	fmt.Printf("result:            PASS\n")
+	return nil
+}
+
+type ownershipSlotView struct {
+	Owner    string
+	Epoch    int64
+	ExpiryNs int64
+}
+
+func waitOwnershipSlot(nem *nemesis, slot int, timeout time.Duration) (ownershipSlotView, error) {
+	deadline := time.Now().Add(timeout)
+	var last ownershipSlotView
+	for time.Now().Before(deadline) {
+		view, err := readOwnershipSlot(nem, slot)
+		if err == nil && view.Owner != "" && view.Epoch > 0 && view.ExpiryNs > time.Now().UnixNano() {
+			return view, nil
+		}
+		last = view
+		sleep(250 * time.Millisecond)
+	}
+	return ownershipSlotView{}, fmt.Errorf("ownership slot %d did not become live before timeout; last=%+v", slot, last)
+}
+
+func waitOwnershipTransfer(nem *nemesis, slot int, before ownershipSlotView, timeout time.Duration) (ownershipSlotView, error) {
+	deadline := time.Now().Add(timeout)
+	var last ownershipSlotView
+	for time.Now().Before(deadline) {
+		view, err := readOwnershipSlot(nem, slot)
+		if err == nil &&
+			view.Owner != "" &&
+			view.Owner != before.Owner &&
+			view.Epoch > before.Epoch &&
+			view.ExpiryNs > time.Now().UnixNano() {
+			return view, nil
+		}
+		last = view
+		sleep(250 * time.Millisecond)
+	}
+	return ownershipSlotView{}, fmt.Errorf("ownership slot %d did not transfer before timeout; before=%+v last=%+v", slot, before, last)
+}
+
+func readOwnershipSlot(nem *nemesis, slot int) (ownershipSlotView, error) {
+	key := fmt.Sprintf("ds:{ownership}:slot:%d", slot)
+	out, err := nem.redisCLI("hgetall", key)
+	if err != nil {
+		return ownershipSlotView{}, err
+	}
+	fields := strings.Fields(string(out))
+	values := map[string]string{}
+	for i := 0; i+1 < len(fields); i += 2 {
+		values[fields[i]] = fields[i+1]
+	}
+	epoch, _ := strconv.ParseInt(values["owner_epoch"], 10, 64)
+	expiry, _ := strconv.ParseInt(values["lease_expiry_ns"], 10, 64)
+	return ownershipSlotView{Owner: values["owner_id"], Epoch: epoch, ExpiryNs: expiry}, nil
 }
 
 func runSlotIsolation(c config) error {

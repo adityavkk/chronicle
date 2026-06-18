@@ -2,12 +2,16 @@
 -- subscription HASH after a failover drops a lease or due ZSET tail. It does
 -- not change the durable lease/fence state; it only mirrors it back into the
 -- schedules the workers consume.
--- KEYS: 1=sub 2=lease_zset 3=due_zset
--- ARGV: 1=id 2=now_ns 3=shard 4=lease_member 5=pending('0'/'1')
--- Reply: {status, lease_repaired('0'|'1'), due_op('add'|'remove'|'none')} ; RECONCILED | SKIPPED | NOSUB
+-- KEYS: 1=sub 2=lease_zset 3=due_zset 4=ownership_slot
+-- ARGV: 1=id 2=now_ns 3=shard 4=lease_member 5=pending('0'|'1')
+--       6=owner_id 7=owner_epoch
+-- Reply: {status, lease_repaired('0'|'1'), due_op('add'|'remove'|'none')} ; RECONCILED | SKIPPED | FENCED | NOSUB
 local sub = KEYS[1]
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB', '0', 'none' }
+end
+if owner_fenced(KEYS[4], ARGV[6], ARGV[7]) then
+  return { 'FENCED', '0', 'none' }
 end
 local shard = ARGV[3]
 local phase_field = shard_field('phase', shard)

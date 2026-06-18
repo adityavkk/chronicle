@@ -102,6 +102,11 @@ func run() error {
 	flag.DurationVar(&cfg.SweepInterval, "sweep-interval", cfg.SweepInterval, "coarse recovery floor interval (subscriptions)")
 	flag.DurationVar(&cfg.ReconcileInterval, "reconcile-interval", cfg.ReconcileInterval, "slow reconcile loop interval (subscriptions)")
 	flag.IntVar(&cfg.SweepBatch, "sweep-batch", cfg.SweepBatch, "max subscriptions evaluated per sweep tick, 0 = no cap (subscriptions)")
+	flag.StringVar(&cfg.ReplicaID, "replica-id", cfg.ReplicaID, "replica id for subscription ownership (default POD_NAME plus nonce)")
+	flag.DurationVar(&cfg.MemberLeaseTTL, "member-lease-ttl", cfg.MemberLeaseTTL, "membership lease TTL (subscriptions)")
+	flag.DurationVar(&cfg.HeartbeatInterval, "heartbeat-interval", cfg.HeartbeatInterval, "membership heartbeat interval (subscriptions)")
+	flag.DurationVar(&cfg.SlotLeaseTTL, "slot-lease-ttl", cfg.SlotLeaseTTL, "slot ownership lease TTL (subscriptions)")
+	flag.DurationVar(&cfg.SlotReconcileInterval, "slot-reconcile-interval", cfg.SlotReconcileInterval, "slot ownership reconcile interval (subscriptions)")
 	flag.StringVar(&cfg.MetricsListen, "metrics-listen", cfg.MetricsListen, "address for /metrics + /healthz + /readyz, e.g. :9090 (empty disables)")
 	flag.StringVar(&logLevel, "log-level", logLevel, "log level: debug, info, warn or error")
 	flag.Parse()
@@ -162,10 +167,15 @@ func run() error {
 		}
 		streamRootURL := strings.TrimSuffix(cfg.PublicBaseURL, "/") + cfg.StreamRoot
 		tuning := chronicle.SubscriptionTuning{
-			SweepInterval:     cfg.SweepInterval,
-			ReconcileInterval: cfg.ReconcileInterval,
-			SweepBatch:        cfg.SweepBatch,
-			Metrics:           subMetrics,
+			SweepInterval:         cfg.SweepInterval,
+			ReconcileInterval:     cfg.ReconcileInterval,
+			SweepBatch:            cfg.SweepBatch,
+			ReplicaID:             cfg.ReplicaID,
+			MemberLeaseTTL:        cfg.MemberLeaseTTL,
+			HeartbeatInterval:     cfg.HeartbeatInterval,
+			SlotLeaseTTL:          cfg.SlotLeaseTTL,
+			SlotReconcileInterval: cfg.SlotReconcileInterval,
+			Metrics:               subMetrics,
 		}
 		router, service, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)
 		if err != nil {

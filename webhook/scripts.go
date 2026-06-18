@@ -36,6 +36,8 @@ var (
 	unlinkStreamScript   = loadScript("unlink_stream.lua")
 	armWakeScript        = loadScript("arm_wake.lua")
 	claimScript          = loadScript("claim.lua")
+	claimShardScript     = loadScript("claim_shard.lua")
+	checkOwnerScript     = loadScript("check_owner.lua")
 	ackScript            = loadScript("ack.lua")
 	releaseScript        = loadScript("release.lua")
 	expireLeaseScript    = loadScript("expire_lease.lua")

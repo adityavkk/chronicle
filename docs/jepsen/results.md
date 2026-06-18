@@ -61,7 +61,7 @@ Observed results:
 | `stale-gen-noop` | T4 no stale-generation effect | **PASS**. Stale ack returned `409 FENCED`; before/after subscription snapshots were byte-identical (`393` bytes). Three stress iterations also passed. |
 | `at-least-once` | L1 at-least-once delivery | **PASS**. 320 messages appended, 306 wakes delivered, duplicate factor 1.00, 8/8 streams at tail. |
 | `lease-tail-drop-recovery` | L3 lease-tail-drop recovery | **SUPERSEDED / PENDING CORRECTED LIVE RERUN**. The 2026-06-18 run only proved that a later direct `Claim` could rotate the fence after `drop-lease-tail`; it did **not** prove the reconnect-triggered eager reconcile re-armed stranded work from cursor/tail state. The checker now restarts Redis as the explicit trigger, waits for Redis to show `phase=waking` with a newer generation before any post-drop claim, then requires worker B to claim that recovered wake, ack the pending tail, and leave worker A fenced. No corrected live result is recorded here yet. |
-| `ownership-exclusivity` | T3 proposed shard ownership | **SCAFFOLDED / BLOCKED**. Dry-run wiring succeeds. Live check is blocked until `claim_shard.lua`, `check_owner.lua`, and `ds:{ownership}:slot:<h>` exist. |
+| `ownership-exclusivity` | T3 proposed shard ownership | **LOCAL CAS PASS / LIVE PENDING**. `claim_shard.lua`, `check_owner.lua`, and `ds:{ownership}:slot:<h>` now have Redis-backed golden tests. The k3d porcupine/nemesis scenario still needs a live rerun. |
 | `slot-isolation` | T5 proposed slot homing | **SCAFFOLDED / BLOCKED**. Dry-run wiring succeeds. Live check is blocked until S-slot `{__ds:h}` key homing exists. |
 | `contention-contract` | C1/C2/C3 contention suite | **SCAFFOLDED / BLOCKED**. Pure rate-contract checker is unit-tested; live C1/C2/C3 require the claimant fan-in measurement rig and, for C3, the claim-granularity fix. |
 
@@ -69,6 +69,48 @@ Honest L3 gap: the corrected default `lease-tail-drop-recovery` driver must be
 rerun before L3 is reported green. The stricter disabled-timer variant is now
 `lease-tail-drop-recovery -floor=0`; it relies on the explicit Redis reconnect
 trigger, while the eventless coarse-floor case is tested separately.
+
+## #14 local ownership evidence — 2026-06-18
+
+Commands run from `/Users/auk000v/orca/workspaces/chronicle/hs-14-ownership`:
+
+```sh
+go test -count=1 -short ./...
+go test -count=1 ./webhook
+```
+
+Observed local results:
+
+| Gate | Evidence | Result |
+| --- | --- | --- |
+| `claim_shard.lua` CAS table | `TestClaimShardScriptGoldenSemantics` covers first `CLAIMED` (`owner_epoch=1`), same-owner `RENEWED` without epoch bump, foreign live `BUSY`, transfer-only epoch bump, and the deposed owner becoming `FENCED` through `check_owner.lua`. | **PASS** |
+| `check_owner.lua` table | `TestCheckOwnerScriptGoldenSemantics` covers `UNOWNED`, `OWNER`, wrong-owner `FENCED`, and wrong-epoch `FENCED`. | **PASS** |
+| Membership + HRW + reclaim | `TestMembershipHeartbeatRemovesExpiredMembers`, `TestSlotReconcileOwnsHRWTargetAndHeldLease`, and `TestDeadMemberAgesOutAndSlotReclaimsAfterLeaseExpiry` cover `ZADD` heartbeat, `ZREMRANGEBYSCORE` dead-member cleanup, HRW-targeted ownership, dead-owner reclaim, epoch bump, and the #13 reconcile seam repairing a dropped lease schedule on takeover. | **PASS** |
+| Inline TOCTOU fences | `TestOwnerEpochFencesScheduleMutatingScriptsInline` covers stale owner epochs on `arm_wake.lua`, `ack.lua`, `expire_lease.lua`, `schedule_retry.lua`, `release.lua`, `reconcile_lease.lua`, and due-claim re-score (`claim_due.lua`). | **PASS** |
+| Webhook side-effect gate | `TestDeliverWebhookChecksOwnerBeforePost` proves a stale owner epoch is checked with `check_owner.lua` before the external POST and records `OwnerFenced("deliver_webhook")`. | **PASS** |
+| Pure ownership core | Short tests cover typed replica IDs, deterministic HRW argmax, approximate `1/N` movement on replica join over nonce-like replica IDs, and config invariants (`heartbeatInterval < memberLeaseTTL/2`, `slotReconcileInterval <= heartbeatInterval`). | **PASS** |
+
+Not yet run in this worker: live k3d T3/L2/L4 ownership scenarios, the full
+T1/T2/T4/L1/L3 regression suite, hard membership-churn/gcPause stress, and the
+GKE replicas>=2 pod-kill coverage-gap load gate. Those require a healthy k3d or
+GKE fault-injection environment and should not be inferred from the local Redis
+evidence above.
+
+Local k3d attempt on 2026-06-18:
+
+- Command: `CLUSTER=chronicle-jepsen-codex jepsen/up.sh`.
+- The script built the Linux binary and Docker image, created k3d containers, and
+  then hung in `k3d cluster create chronicle-jepsen-codex --servers 1 -p
+  4438:30437@loadbalancer --wait` after logging `Starting node
+  'k3d-chronicle-jepsen-codex-server-0'`.
+- `k3d cluster list` showed `chronicle-jepsen-codex 1/1`, but
+  `kubectl --context k3d-chronicle-jepsen-codex get nodes --request-timeout=10s`
+  failed with `context was not found for specified context:
+  k3d-chronicle-jepsen-codex`.
+- Cleanup command: `CLUSTER=chronicle-jepsen-codex jepsen/down.sh`. It deleted the
+  cluster, network, and attached volume. Follow-up `docker ps --filter
+  name=chronicle-jepsen-codex` and `k3d cluster list | rg
+  chronicle-jepsen-codex` returned no resources.
 
 Corrected live rerun attempt on 2026-06-18:
 
