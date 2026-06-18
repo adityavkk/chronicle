@@ -175,11 +175,15 @@ func run(c config, r *receiver) error {
 	if c.scenario == "ownership-exclusivity" {
 		return runOwnershipExclusivity(c)
 	}
-	// slot-isolation (T5) is still an acceptance-gate scaffold for the S-slot
-	// {__ds:h} state shard that lands in #15 (scenario_gated.go).
+	// slot-isolation (T5) is now LIVE (#15 landed the S-slot {__ds:h} state shard).
+	// Like ownership-exclusivity / shard-linz it drives webhook.RedisStore directly
+	// against Redis — no cluster: the differential checker (the S-slot scatter-gather
+	// subscriber set EQUALS the unsharded reference, no foreign wake, every sub
+	// whole-homed in one slot) is a correctness property loopback proves
+	// (scenario_slot.go). The gate-#2 fan-out p99 is the only T5-adjacent claim that
+	// needs a real multi-node cluster (loadtest gate #2, PENDING-CLOUD).
 	if c.scenario == "slot-isolation" {
-		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
-		return runSlotIsolation(c, nem)
+		return runSlotIsolation(c)
 	}
 
 	fmt.Printf("== scenario %q: %d streams x %d msgs ==\n", c.scenario, c.streams, c.msgs)
