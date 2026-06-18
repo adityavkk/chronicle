@@ -58,6 +58,21 @@ type Metrics interface {
 	// (the external webhook POST) or "inline" (a schedule/due write). Feeds gate
 	// #4/#5 (fence firing). Wired at check_owner / the inlined checks in #14.
 	OwnerFenced(scope string)
+
+	// ClaimContention records one claim/ack/release outcome on a subscription's
+	// lease, the golden signal for the per-type claim-contention axis (the third
+	// axis, 05 §"A third axis: per-type claim contention"; gate #6). status is the
+	// op outcome, drawn from a fixed vocabulary so the gate can compute the
+	// contention SLIs as rates over it:
+	//   - claim site (claim.lua): "claimed" | "already_claimed" | "nosub"
+	//   - ack/release site (ack.lua/release.lua): "ok" | "fenced" | "nosub"
+	// The earliest collapse indicator is "already_claimed"/op (contenders bouncing
+	// off a live lease); the tipping point is "fenced"/op (leases lapsing into
+	// takeover, the fence storm). subID identifies the contended subscription for
+	// call-site tracing; the recorder aggregates by status only (subID is
+	// type-cardinality), the same discipline SlotOwnership uses for its slot arg.
+	// Wired at the RedisStore claim/ack/release call sites in #11.
+	ClaimContention(status, subID string)
 }
 
 // NopMetrics is the no-op Metrics used when none is configured. The Manager
@@ -93,3 +108,6 @@ func (NopMetrics) CoverageGap(time.Duration) {}
 
 // OwnerFenced implements Metrics.
 func (NopMetrics) OwnerFenced(string) {}
+
+// ClaimContention implements Metrics.
+func (NopMetrics) ClaimContention(string, string) {}

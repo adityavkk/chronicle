@@ -18,13 +18,30 @@ import (
 // store (chronicle uses one Redis), and does not own it: Close is a no-op.
 type RedisStore struct {
 	client redis.UniversalClient
+	// metrics records claim/ack lease outcomes at the call sites (gate #6, the
+	// per-type claim-contention SLIs). Defaults to NopMetrics so the store stays
+	// usable without instrumentation; the binary wires the Prometheus recorder via
+	// WithMetrics. It lives on the store, not the Manager, because the contention
+	// fan-in driver and any direct claim/ack caller record the same signal.
+	metrics Metrics
 }
 
 var _ Store = (*RedisStore)(nil)
 
 // NewRedisStore wraps a go-redis client as a subscription Store.
 func NewRedisStore(client redis.UniversalClient) *RedisStore {
-	return &RedisStore{client: client}
+	return &RedisStore{client: client, metrics: NopMetrics{}}
+}
+
+// WithMetrics sets the contention recorder and returns the store for chaining. A
+// nil Metrics is treated as NopMetrics so the store is never left recording to a
+// nil interface.
+func (s *RedisStore) WithMetrics(m Metrics) *RedisStore {
+	if m == nil {
+		m = NopMetrics{}
+	}
+	s.metrics = m
+	return s
 }
 
 func (s *RedisStore) ctx() context.Context { return context.Background() }
@@ -263,16 +280,30 @@ func (s *RedisStore) Claim(id, worker, wakeID string, now time.Time, leaseTTLMs 
 	}
 	switch reply[0] {
 	case "CLAIMED":
+		s.recordContention("claimed", id)
 		gen, _ := strconv.ParseInt(reply[1], 10, 64)
 		return ClaimResult{Claimed: true, Generation: gen, WakeID: reply[2], Holder: reply[3]}, nil
 	case "BUSY":
+		s.recordContention("already_claimed", id)
 		gen, _ := strconv.ParseInt(reply[1], 10, 64)
 		return ClaimResult{Busy: true, Generation: gen, Holder: reply[3]}, nil
 	case "NOSUB":
+		s.recordContention("nosub", id)
 		return ClaimResult{NoSub: true}, nil
 	default:
 		return ClaimResult{}, fmt.Errorf("claim: unexpected status %q", reply[0])
 	}
+}
+
+// recordContention reports a claim/ack/release lease outcome to the contention
+// recorder (gate #6). status uses the fixed vocabulary documented on
+// Metrics.ClaimContention; a nil recorder (a store built without NewRedisStore)
+// is tolerated as a no-op.
+func (s *RedisStore) recordContention(status, id string) {
+	if s.metrics == nil {
+		return
+	}
+	s.metrics.ClaimContention(status, id)
 }
 
 // Ack fences, applies acks, and releases or heartbeats.
@@ -293,6 +324,7 @@ func (s *RedisStore) Ack(id string, reqGeneration int64, reqWakeID string, token
 	if err != nil {
 		return "", err
 	}
+	s.recordContention(contentionStatusOf(reply[0]), id)
 	return reply[0], nil
 }
 
@@ -303,7 +335,25 @@ func (s *RedisStore) Release(id string, reqGeneration int64, reqWakeID string, t
 	if err != nil {
 		return "", err
 	}
+	s.recordContention(contentionStatusOf(reply[0]), id)
 	return reply[0], nil
+}
+
+// contentionStatusOf maps an ack.lua/release.lua reply status to the
+// ClaimContention vocabulary (OK -> "ok", FENCED -> "fenced", NOSUB -> "nosub").
+// An unrecognized status is lowercased and recorded verbatim so a new reply can
+// never be silently dropped from the gate-#6 rates.
+func contentionStatusOf(reply string) string {
+	switch reply {
+	case "OK":
+		return "ok"
+	case "FENCED":
+		return "fenced"
+	case "NOSUB":
+		return "nosub"
+	default:
+		return strings.ToLower(reply)
+	}
 }
 
 // ExpireLease clears an expired lease.

@@ -147,7 +147,7 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 	if rs != nil {
 		opts.Lister = redisLister{rs: rs}
 	}
-	mgr, err := webhook.NewManager(webhook.NewRedisStore(client), streamAdapter{st: streamStore, rs: rs}, opts)
+	mgr, err := webhook.NewManager(webhook.NewRedisStore(client).WithMetrics(tuning.Metrics), streamAdapter{st: streamStore, rs: rs}, opts)
 	if err != nil {
 		return nil, nil, err
 	}

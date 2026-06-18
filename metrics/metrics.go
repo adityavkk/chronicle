@@ -43,6 +43,7 @@ type Prometheus struct {
 	slotOwnership     *prometheus.CounterVec
 	coverageGap       prometheus.Histogram
 	ownerFenced       *prometheus.CounterVec
+	claimContention   *prometheus.CounterVec
 }
 
 var _ webhook.Metrics = (*Prometheus)(nil)
@@ -134,12 +135,16 @@ func New() *Prometheus {
 			Name: "chronicle_owner_fenced_total",
 			Help: "Owner-epoch fence firings by scope (check_owner|inline) — gate #4/#5.",
 		}, []string{"scope"}),
+		claimContention: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_claim_contention_total",
+			Help: "Claim/ack lease outcomes by status (claimed|already_claimed|fenced|ok|nosub) — gate #6 per-type claim contention. already_claimed/op is the earliest collapse signal; fenced/op the tipping point.",
+		}, []string{"status"}),
 	}
 	reg.MustRegister(p.sweepSeconds, p.sweepSubs, p.sweepTails, p.sweepWakes, p.delivery, p.wakeEvent, p.workerDue)
 	reg.MustRegister(
 		p.fanoutSeconds, p.fanoutSlotsProbed, p.fanoutSubs,
 		p.dueSetMutations, p.dueWorkerSeconds, p.dueWorkerFired,
-		p.slotOwnership, p.coverageGap, p.ownerFenced,
+		p.slotOwnership, p.coverageGap, p.ownerFenced, p.claimContention,
 	)
 	return p
 }
@@ -201,6 +206,15 @@ func (p *Prometheus) CoverageGap(dur time.Duration) {
 // OwnerFenced implements webhook.Metrics.
 func (p *Prometheus) OwnerFenced(scope string) {
 	p.ownerFenced.WithLabelValues(scope).Inc()
+}
+
+// ClaimContention implements webhook.Metrics. Like SlotOwnership's slot arg, the
+// subID is part of the call-site seam (logged for tracing) but the recorder
+// aggregates by status only: a per-subID label would be type-cardinality and the
+// gate-#6 signal is the status rate (already_claimed/op, fenced/op), not the
+// per-subscription breakdown.
+func (p *Prometheus) ClaimContention(status, _ string) {
+	p.claimContention.WithLabelValues(status).Inc()
 }
 
 // Mux returns the observability HTTP surface: /metrics (Prometheus exposition),
