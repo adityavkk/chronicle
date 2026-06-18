@@ -196,8 +196,23 @@ REDIS_URL=redis://localhost:6380/14 go run ./jepsen/checker \
 `ClaimShard`/`AckShard`) rather than client-side `G` subscriptions; C3 then
 compares G=1 vs G=16 on the *same* server-side mechanism.
 
-**C3 result (server-side per-`(subId,g)`, G=16):** _(filled by the build run — §see
-the run output appended below / docs/jepsen/results.md)_
+**C3 result — server-side per-`(subId,g)`, G=16 — PASS (gate #6 holds):**
+
+| topology | N | busy/op | fenced/op | thru/worker | aggregate | p99 ms |
+|---|---|---------|-----------|-------------|-----------|--------|
+| **G=16** sharded-sub | 6  | 0.00 | 0.00 | 26.3 | 158 | 32 |
+| **G=16** sharded-sub | 12 | 0.13 | 0.00 | 28.0 | 336 | 27 |
+| **G=16** sharded-sub | 24 | 0.12 | 0.00 | 27.1 | 650 | 53 |
+| **G=1** baseline | 6  | 0.80 | 0.00 | 18.7 | 112 | 109 |
+| **G=1** baseline | 12 | 0.94 | 0.00 | 10.3 | 123 | 309 |
+| **G=1** baseline | 24 | 0.97 | 0.00 | 4.3  | 104 | 866 |
+
+On the **chronicle per-`(subId,g)` capability** (not client-side sharding), G=16
+holds per-worker throughput flat (~27) and scales aggregate 158→336→650 with N,
+while G=1 collapses per-worker 18.7→10.3→4.3 with aggregate pinned ~110. The
+`CheckGranularityMovesKnee` differential is clean: the knee that collapsed G=1 at
+N=12 moved beyond the entire G=16 ramp — **gate #6 holds**. (`fenced/op` is 0 at
+every rung, so the single-holder fence per `(subId,g)` never spuriously fired.)
 
 **T1 per `(subId, g)`** — `TestShardSingleHolderLinz` drives contending workers
 across `G` shards via `ClaimShard`/`AckShard`, records each op into a porcupine

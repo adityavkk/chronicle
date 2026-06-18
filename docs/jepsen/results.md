@@ -210,3 +210,38 @@ client-side sharding (G subscriptions `<type>-handler:<g>`); the chronicle
 per-`(subId,g)` capability (same split inside one subscription) is re-run as the
 acceptance gate in
 [`08-claim-granularity.md`](../specs/horizontal-scale/research/08-claim-granularity.md).
+
+### C3 on the chronicle per-(subId,g) capability — gate #6 PASS
+
+The C3 above used client-side sharding (G subscriptions). The chronicle
+capability (issue #11) provides the SAME split inside ONE subscription —
+`ClaimShard`/`AckShard` against per-`(subId,g)` fences. Re-running C3 against it
+(`-sharded`) is the acceptance gate:
+
+Reproduce: `REDIS_URL=redis://localhost:6380/14 go run ./jepsen/checker -scenario contention -c3 -G 16 -sharded`
+
+| topology | N | busy/op | fenced/op | thru/worker | aggregate | p99 ms |
+|---|---|---------|-----------|-------------|-----------|--------|
+| **G=16** per-(subId,g) | 6  | 0.00 | 0.00 | 26.3 | 158 | 32 |
+| **G=16** per-(subId,g) | 12 | 0.13 | 0.00 | 28.0 | 336 | 27 |
+| **G=16** per-(subId,g) | 24 | 0.12 | 0.00 | 27.1 | 650 | 53 |
+| **G=1** baseline | 6  | 0.80 | 0.00 | 18.7 | 112 | 109 |
+| **G=1** baseline | 12 | 0.94 | 0.00 | 10.3 | 123 | 309 |
+| **G=1** baseline | 24 | 0.97 | 0.00 | 4.3  | 104 | 866 |
+
+**Gate #6: PASS.** On the real per-`(subId,g)` build, G=16 holds per-worker
+throughput flat (~27) and scales aggregate 158→336→650, while G=1 collapses
+(18.7→10.3→4.3, aggregate pinned ~110). The C2 knee that collapses G=1 at N=12
+moved beyond the entire G=16 ramp; `fenced/op` is 0 at every rung (the
+per-`(subId,g)` fence never spuriously fired). **T1 holds per `(subId,g)`** —
+proven directly by the fence-isolation + multi-holder integration tests
+(`webhook/shard_integration_test.go`: a shard-g token is FENCED against g', OK
+against g; shards held concurrently with single-holder WITHIN each), and by the
+`shard-linz` porcupine scenario when a quiet Redis window is available.
+
+**Environment note.** These runs need a quiet local Redis; the shared colima VM
+(co-tenant k3d cluster) intermittently drove Redis op latency into the seconds,
+where every ramp's throughput collapses (an env artifact, not the SUT). The
+numbers above are from a probe-gated clean window; under load the same command
+reports i/o timeouts — rerun until a clean window (the 6-clean/12-collapse shape
+and the G× knee movement are stable across clean windows).
