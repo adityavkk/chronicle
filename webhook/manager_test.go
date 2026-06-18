@@ -746,3 +746,70 @@ func TestLeaseTailDropRecoveredByEagerReconcile(t *testing.T) {
 		t.Fatalf("the deposed holder's late ack must be FENCED, got %q", st)
 	}
 }
+
+// TestPromoteDrivesEagerReconcile is the #16 promotion-recovery unit: a DR
+// promotion (Manager.Promote) drives the failover-aware eager reconcile so a
+// live/waking sub whose lease-ZSET entry the failover dropped — lease_until_ns>0
+// in the durable hash but ABSENT from the lease ZSET, the async-replication RPO
+// window — is re-derived from the durable `sub` hash and re-ZADDed, recovering the
+// stranded-webhook-wake case. It mirrors TestLeaseTailDropRecoveredByEagerReconcile
+// but the trigger is Promote(), the DR seam, not a bare reconnect.
+func TestPromoteDrivesEagerReconcile(t *testing.T) {
+	mgr, store, fs, _, client := newDueManager(t)
+	now := time.Now()
+	const leaseTTLMs = 1000
+	begin := "0000000000000000_0000000000000000"
+	// A webhook sub armed to waking with the lease ZADDed (it holds a lease).
+	_, _ = store.CreateOrConfirm("present", webhookCfg("https://w.example/h"), nil, now)
+	_ = store.Link("present", "events/p", LinkGlob, begin)
+	fs.mu.Lock()
+	fs.tails["events/p"] = "0000000000000001_0000000000000000" // pending work
+	fs.mu.Unlock()
+	armed, err := store.ArmWake("present", now, leaseTTLMs, true, "w_p")
+	if err != nil || !armed.Armed {
+		t.Fatalf("arm present = %+v err=%v", armed, err)
+	}
+
+	// The failover RPO window: the lease-ZSET tail was lost (the async replica had
+	// not yet applied the ZADD when the primary failed), but the durable sub hash
+	// survived (phase waking, lease_until_ns>0). The lease worker is now blind to it.
+	if err := client.ZRem(context.Background(), leaseZKey(slotOf("present")), "present").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if _, in := mgr.leasedSet()["present"]; in {
+		t.Fatal("precondition: the stranded sub must be absent from the lease ZSET")
+	}
+
+	// The DR promotion. slotReconcileOnce re-establishes ownership on the (here
+	// single-member) promoted primary; the eager reconcile is enqueued onto the
+	// coalescing recovery channel. The recovery loop is not running, so drain the
+	// queue deterministically and run each reconcile inline — the same code path the
+	// loop would, without the timing nondeterminism.
+	mgr.Promote()
+	drained := 0
+	for drained < cap(mgr.reconcileC)+2 {
+		select {
+		case s := <-mgr.reconcileC:
+			mgr.reconcile(s)
+			drained++
+			continue
+		default:
+		}
+		break
+	}
+	if drained == 0 {
+		t.Fatal("Promote must enqueue at least one eager reconcile")
+	}
+
+	// The eager reconcile re-derived the lease entry from the durable hash, so the
+	// fast lease worker can see the lapse again — the cursor-reading reconciler
+	// doing exactly what the lease worker, blind to the dropped ZSET entry, could not.
+	if _, in := mgr.leasedSet()["present"]; !in {
+		t.Fatal("promotion must re-ZADD the stranded sub's lease entry from the durable hash")
+	}
+	future := now.Add(2 * time.Second) // past the lease deadline
+	due, _ := store.DueLeases(slotOf("present"), future, dueClaimLimit, time.Second)
+	if len(due) != 1 || due[0] != "present" {
+		t.Fatalf("the restored lease entry must be visible to the lease worker, got due=%v", due)
+	}
+}
