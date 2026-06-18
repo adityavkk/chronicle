@@ -10,25 +10,28 @@
 # accident. Every step is idempotent: a re-run reuses what already exists.
 #
 # Config via env (defaults shown): LT_PROJECT LT_ZONE=us-central1-a
-# LT_REGION=us-central1 LT_CLUSTER=chronicle-loadtest LT_AR_REPO=chronicle
+# LT_REGION=us-central1 LT_CLUSTER=chronicle-loadtest-codex LT_AR_REPO=chronicle-codex
 # LT_TAG=v1 LT_MACHINE=e2-standard-2 LT_DISK_GB=50 LT_REDIS_SIZE_GB=1
-# LT_REDIS_VERSION=redis_7_2
+# LT_REDIS_VERSION=redis_7_2 LT_CHAOS=none
 set -euo pipefail
 
 : "${LT_PROJECT:=$(gcloud config get-value project 2>/dev/null)}"
 : "${LT_ZONE:=us-central1-a}"
 : "${LT_REGION:=us-central1}"
-: "${LT_CLUSTER:=chronicle-loadtest}"
-: "${LT_AR_REPO:=chronicle}"
+: "${LT_CLUSTER:=chronicle-loadtest-codex}"
+: "${LT_AR_REPO:=chronicle-codex}"
 : "${LT_TAG:=v1}"
 : "${LT_MACHINE:=e2-standard-2}"
 : "${LT_DISK_GB:=50}"
 : "${LT_REDIS_SIZE_GB:=1}"
 : "${LT_REDIS_VERSION:=redis_7_2}"
+: "${LT_CHAOS:=none}"
+: "${LT_CHAOS_PERIOD:=15s}"
 
-NS=chronicle-loadtest
+NS=chronicle-loadtest-codex
 REG="${LT_REGION}-docker.pkg.dev/${LT_PROJECT}/${LT_AR_REPO}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+: "${LT_REPORT_DIR:=$REPO_ROOT/loadtest/out/reports}"
 G=(gcloud --project "$LT_PROJECT" --quiet)
 
 log() { printf '\n\033[1;36m▸ %s\033[0m\n' "$*" >&2; }
@@ -67,13 +70,17 @@ cmd_up() {
 }
 
 cmd_run() {
-  local spec="${1:?usage: ltctl run <spec.yaml>}"
-  local spec_abs out redis_host
-  spec_abs="$(cd "$(dirname "$spec")" && pwd)/$(basename "$spec")"
-  redis_host="$("${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" --format='value(host)')"
-  out="$(mktemp -d)"
+	local spec="${1:?usage: ltctl run <spec.yaml>}"
+	local spec_abs out redis_host start_ts end_ts report_base job_log cpu_json
+	spec_abs="$(cd "$(dirname "$spec")" && pwd)/$(basename "$spec")"
+	redis_host="$("${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" --format='value(host)')"
+	out="$(mktemp -d)"
+	mkdir -p "$LT_REPORT_DIR"
+	report_base="$LT_REPORT_DIR/$(basename "${spec%.yaml}")-$(date -u +%Y%m%dT%H%M%SZ)"
+	job_log="${report_base}-sweepscale.log"
+	cpu_json="${report_base}-redis-cpu.json"
 
-  log "render $spec (redis=$redis_host, images=$REG/*:$LT_TAG)"
+	log "render $spec (redis=$redis_host, images=$REG/*:$LT_TAG)"
   ( cd "$REPO_ROOT/loadgen" && go run ./cmd/render -spec "$spec_abs" -out "$out" \
       -redis-url "redis://${redis_host}:6379/0" \
       -image "$REG/chronicle:$LT_TAG" -loadgen-image "$REG/chronicle-loadgen:$LT_TAG" )
@@ -82,26 +89,77 @@ cmd_run() {
   kubectl apply -f "$out/sut.yaml"
   kubectl -n "$NS" rollout status deploy/chronicle --timeout=180s
 
-  log "run sweepscale job"
-  kubectl -n "$NS" delete job -l app=sweepscale --ignore-not-found >/dev/null
-  kubectl apply -f "$out/job.yaml"
-  kubectl -n "$NS" wait --for=condition=complete --timeout=600s job -l app=sweepscale 2>/dev/null ||
-    kubectl -n "$NS" wait --for=condition=failed --timeout=5s job -l app=sweepscale 2>/dev/null || true
+	log "run sweepscale job"
+	kubectl -n "$NS" delete job -l app=sweepscale --ignore-not-found >/dev/null
+	start_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+	kubectl apply -f "$out/job.yaml"
+	start_chaos
+	kubectl -n "$NS" wait --for=condition=complete --timeout=600s job -l app=sweepscale 2>/dev/null ||
+	kubectl -n "$NS" wait --for=condition=failed --timeout=5s job -l app=sweepscale 2>/dev/null || true
+	stop_chaos
+	end_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  log "report"
-  kubectl -n "$NS" logs -l app=sweepscale --tail=-1
-  if [ "$(kubectl -n "$NS" get job -l app=sweepscale -o jsonpath='{.items[0].status.succeeded}')" = "1" ]; then
-    log "SLO PASS"
+	log "report"
+	kubectl -n "$NS" logs -l app=sweepscale --tail=-1 | tee "$job_log"
+	print_redis_cpu "$start_ts" "$end_ts" "$cpu_json" || true
+	log "reports written: $job_log $cpu_json"
+	if [ "$(kubectl -n "$NS" get job -l app=sweepscale -o jsonpath='{.items[0].status.succeeded}')" = "1" ]; then
+	log "SLO PASS"
   else
     log "SLO FAIL (sweep p99 over budget, or error)"; return 1
-  fi
+	fi
+}
+
+CHAOS_PID=""
+start_chaos() {
+	if [ "$LT_CHAOS" != "pod-kill" ]; then
+		return 0
+	fi
+	(
+		while true; do
+			sleep "$LT_CHAOS_PERIOD"
+			pod="$(kubectl -n "$NS" get pods -l app=chronicle -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+			if [ -n "$pod" ]; then
+				kubectl -n "$NS" delete pod "$pod" --grace-period=0 --force >/dev/null 2>&1 || true
+				printf 'chaos: killed chronicle pod %s\n' "$pod" >&2
+			fi
+		done
+	) &
+	CHAOS_PID=$!
+}
+
+stop_chaos() {
+	if [ -n "$CHAOS_PID" ]; then
+		kill "$CHAOS_PID" >/dev/null 2>&1 || true
+		wait "$CHAOS_PID" >/dev/null 2>&1 || true
+		CHAOS_PID=""
+	fi
+}
+
+print_redis_cpu() {
+	local start_ts="${1:?}" end_ts="${2:?}" out="${3:?}"
+	local raw
+	raw="$(mktemp)"
+	if ! "${G[@]}" monitoring time-series list \
+		--filter="metric.type=\"redis.googleapis.com/stats/cpu_utilization\" AND resource.labels.instance_id=\"${LT_CLUSTER}-redis\"" \
+		--interval-start-time="$start_ts" \
+		--interval-end-time="$end_ts" \
+		--format=json >"$raw"; then
+		printf '{"error":"gcloud monitoring time-series list failed"}\n' | tee "$out"
+		return 1
+	fi
+	if ! ( cd "$REPO_ROOT" && go run ./loadtest/cmd/rediscpu <"$raw" ) | tee "$out"; then
+		printf '{"error":"rediscpu parser failed"}\n' >"$out"
+		return 1
+	fi
 }
 
 _torn=0
 cmd_down() {
-  [ "$_torn" = 1 ] && return 0
-  _torn=1
-  log "teardown (deleting cluster + Redis; keeping Artifact Registry images)"
+	[ "$_torn" = 1 ] && return 0
+	_torn=1
+	stop_chaos
+	log "teardown (deleting cluster + Redis; keeping Artifact Registry images)"
   "${G[@]}" container clusters delete "$LT_CLUSTER" --zone "$LT_ZONE" 2>/dev/null &
   local c=$!
   "${G[@]}" redis instances delete "${LT_CLUSTER}-redis" --region "$LT_REGION" 2>/dev/null &

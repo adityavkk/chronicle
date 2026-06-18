@@ -69,10 +69,10 @@ func Load(data []byte) (Spec, error) {
 
 func (s *Spec) applyDefaults() {
 	if s.Name == "" {
-		s.Name = "chronicle-loadtest"
+		s.Name = "chronicle-loadtest-codex"
 	}
 	if s.SUT.Namespace == "" {
-		s.SUT.Namespace = "chronicle-loadtest"
+		s.SUT.Namespace = "chronicle-loadtest-codex"
 	}
 	if s.SUT.Replicas <= 0 {
 		s.SUT.Replicas = 1

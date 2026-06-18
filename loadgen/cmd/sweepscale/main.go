@@ -94,6 +94,9 @@ func run() int {
 	if rep.SeedErrors > 0 {
 		fmt.Fprintf(os.Stderr, "warning: %d seed errors\n", rep.SeedErrors)
 	}
+	if len(rep.ProposedMetricActivity) > 0 {
+		fmt.Fprintf(os.Stderr, "proposed metric activity: %v\n", rep.ProposedMetricActivity)
+	}
 
 	// SLO gate: a non-zero exit makes this usable as an on-demand pass/fail check.
 	failed := false

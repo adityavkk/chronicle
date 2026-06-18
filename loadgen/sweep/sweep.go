@@ -119,17 +119,18 @@ func (s Spec) Prepared() (Spec, error) {
 
 // Report is the result of one experiment.
 type Report struct {
-	Spec          Spec    `json:"spec"`
-	Seeded        int     `json:"seeded"`
-	SeedErrors    int     `json:"seed_errors"`
-	SeedSeconds   float64 `json:"seed_seconds"`
-	WindowSeconds float64 `json:"window_seconds"`
-	SweepTicks    float64 `json:"sweep_ticks"` // ticks observed during the window
-	SweepMeanMs   float64 `json:"sweep_mean_ms"`
-	SweepP50Ms    float64 `json:"sweep_p50_ms"`
-	SweepP99Ms    float64 `json:"sweep_p99_ms"`
-	MeanSubs      float64 `json:"mean_subs_evaluated"`
-	MeanTails     float64 `json:"mean_tails_batched"`
+	Spec                   Spec               `json:"spec"`
+	Seeded                 int                `json:"seeded"`
+	SeedErrors             int                `json:"seed_errors"`
+	SeedSeconds            float64            `json:"seed_seconds"`
+	WindowSeconds          float64            `json:"window_seconds"`
+	SweepTicks             float64            `json:"sweep_ticks"` // ticks observed during the window
+	SweepMeanMs            float64            `json:"sweep_mean_ms"`
+	SweepP50Ms             float64            `json:"sweep_p50_ms"`
+	SweepP99Ms             float64            `json:"sweep_p99_ms"`
+	MeanSubs               float64            `json:"mean_subs_evaluated"`
+	MeanTails              float64            `json:"mean_tails_batched"`
+	ProposedMetricActivity map[string]float64 `json:"proposed_metric_activity"`
 }
 
 // Run executes the experiment against a chronicle base URL, scraping metricsURL.
@@ -165,24 +166,38 @@ func Run(ctx context.Context, baseURL, root, metricsURL string, spec Spec) (Repo
 	if err != nil {
 		return Report{}, fmt.Errorf("scrape after: %w", err)
 	}
+	activity, err := scrapeMetricActivity(ctx, hc, metricsURL, proposedMetricNames...)
+	if err != nil {
+		return Report{}, fmt.Errorf("scrape proposed metrics: %w", err)
+	}
 
 	tick := after[names[0]].sub(before[names[0]])
 	subs := after[names[1]].sub(before[names[1]])
 	tails := after[names[2]].sub(before[names[2]])
 
 	return Report{
-		Spec:          spec,
-		Seeded:        seeded,
-		SeedErrors:    seedErrs,
-		SeedSeconds:   seedDur.Seconds(),
-		WindowSeconds: spec.Measure.D().Seconds(),
-		SweepTicks:    tick.count,
-		SweepMeanMs:   tick.mean() * 1000,
-		SweepP50Ms:    tick.quantile(0.5) * 1000,
-		SweepP99Ms:    tick.quantile(0.99) * 1000,
-		MeanSubs:      subs.mean(),
-		MeanTails:     tails.mean(),
+		Spec:                   spec,
+		Seeded:                 seeded,
+		SeedErrors:             seedErrs,
+		SeedSeconds:            seedDur.Seconds(),
+		WindowSeconds:          spec.Measure.D().Seconds(),
+		SweepTicks:             tick.count,
+		SweepMeanMs:            tick.mean() * 1000,
+		SweepP50Ms:             tick.quantile(0.5) * 1000,
+		SweepP99Ms:             tick.quantile(0.99) * 1000,
+		MeanSubs:               subs.mean(),
+		MeanTails:              tails.mean(),
+		ProposedMetricActivity: activity,
 	}, nil
+}
+
+var proposedMetricNames = []string{
+	"chronicle_fanout_seconds",
+	"chronicle_due_set_mutations_total",
+	"chronicle_due_worker_tick_seconds",
+	"chronicle_slot_ownership_events_total",
+	"chronicle_coverage_gap_seconds",
+	"chronicle_owner_fenced_total",
 }
 
 // seedSubscriptions creates K subscriptions with a bounded worker pool.

@@ -147,6 +147,65 @@ func scrape(ctx context.Context, hc *http.Client, metricsURL string, names ...st
 	return out, nil
 }
 
+// scrapeMetricActivity returns one activity value per requested metric family:
+// histogram count for histograms, and summed sample values for counters/gauges
+// across all label sets. Missing metrics are returned as zero so today's code can
+// report placeholders for proposed mechanisms without pretending they fired.
+func scrapeMetricActivity(ctx context.Context, hc *http.Client, metricsURL string, names ...string) (map[string]float64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close() //nolint:errcheck // read side
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("metrics: status %d", resp.StatusCode)
+	}
+	want := make(map[string]bool, len(names))
+	out := make(map[string]float64, len(names))
+	for _, n := range names {
+		want[n] = true
+		out[n] = 0
+	}
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		val, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+		if err != nil {
+			continue
+		}
+		series := fields[0]
+		if brace := strings.IndexByte(series, '{'); brace >= 0 {
+			series = series[:brace]
+		}
+		if strings.HasSuffix(series, "_count") {
+			base := strings.TrimSuffix(series, "_count")
+			if want[base] {
+				out[base] += val
+			}
+			continue
+		}
+		if want[series] {
+			out[series] += val
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func leFromLabels(labels string) float64 {
 	i := strings.Index(labels, `le="`)
 	if i < 0 {

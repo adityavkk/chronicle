@@ -10,7 +10,7 @@ variable "region" {
 
 variable "cluster_name" {
   type    = string
-  default = "chronicle-loadtest"
+  default = "chronicle-loadtest-codex"
 }
 
 variable "network" {

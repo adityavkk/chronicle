@@ -1,0 +1,24 @@
+# Gate #1: O(N*K) redundancy endpoint, K=10k at four SUT replicas.
+name: gate1-replicas-4-codex
+loadgen_image: REGISTRY/chronicle-loadgen:TAG
+
+sut:
+  image: REGISTRY/chronicle:TAG
+  replicas: 4
+  namespace: chronicle-loadtest-codex
+  sweep_interval: 2s
+  sweep_batch: 0
+  redis_url: ""
+  cpu: "2"
+  memory: 2Gi
+
+workload:
+  subscriptions: 10000
+  links_per_sub: 5
+  dispatch: pull-wake
+  warmup: 30s
+  measure: 120s
+
+slo:
+  sweep_p99_ms: 1500
+  max_seed_errors: 0

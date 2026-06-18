@@ -69,3 +69,36 @@ other_metric 99
 		t.Fatalf("buckets not sorted: %+v", h.buckets)
 	}
 }
+
+func TestScrapeMetricActivity(t *testing.T) {
+	body := `# TYPE chronicle_fanout_seconds histogram
+chronicle_fanout_seconds_bucket{le="0.01"} 1
+chronicle_fanout_seconds_bucket{le="+Inf"} 2
+chronicle_fanout_seconds_sum 0.03
+chronicle_fanout_seconds_count 2
+chronicle_due_set_mutations_total{op="arm"} 3
+chronicle_due_set_mutations_total{op="ack"} 4
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	got, err := scrapeMetricActivity(context.Background(), srv.Client(), srv.URL,
+		"chronicle_fanout_seconds",
+		"chronicle_due_set_mutations_total",
+		"chronicle_owner_fenced_total",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["chronicle_fanout_seconds"] != 2 {
+		t.Fatalf("fanout activity = %v, want histogram count 2", got["chronicle_fanout_seconds"])
+	}
+	if got["chronicle_due_set_mutations_total"] != 7 {
+		t.Fatalf("due mutation activity = %v, want sum 7", got["chronicle_due_set_mutations_total"])
+	}
+	if got["chronicle_owner_fenced_total"] != 0 {
+		t.Fatalf("missing metric activity = %v, want 0", got["chronicle_owner_fenced_total"])
+	}
+}
