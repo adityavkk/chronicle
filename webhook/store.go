@@ -109,6 +109,36 @@ type Store interface {
 	// the wake has been superseded.
 	RecordWakeEventSent(id string, generation int64, wakeID string, now time.Time) error
 
+	// ---- leased slot ownership (issue #14) ----
+	//
+	// These shard autonomous BACKGROUND work across replicas by a leased slot, so
+	// total work is O(total owed) regardless of N. The owner-epoch fence they
+	// implement is layered ABOVE the per-subscription (gen,wake_id) fence, never
+	// replacing it. This axis is orthogonal to #11's per-(subId,g) claim
+	// granularity.
+
+	// ClaimSlot runs the {ownership}-tagged CAS (claim_shard.lua) against the slot
+	// HASH at slotKey: it grants the lease only when the current owner is expired,
+	// missing, or the caller, bumping owner_epoch on transfer only. The returned
+	// SlotClaim is a sealed sum (CLAIMED|RENEWED|BUSY), never a bool, so a
+	// silently-dropping LWW is unrepresentable (T3's contract).
+	ClaimSlot(slotKey, replicaID string, now time.Time, slotLeaseTTL time.Duration) (SlotClaim, error)
+
+	// CheckOwner runs check_owner.lua: the owner-epoch fence for the EXTERNAL
+	// webhook POST, where an atomic inline check is impossible. Returns the sealed
+	// OwnerCheck (OWNER|FENCED|UNOWNED). Schedule/due writes inline the same check
+	// rather than calling this (the TOCTOU resolution).
+	CheckOwner(slotKey, replicaID, expectedEpoch string) (OwnerCheck, error)
+
+	// Heartbeat re-ZADDs this replica into the members ZSET at now+memberLeaseTTL
+	// and evicts members whose lease has expired (ZREMRANGEBYSCORE -inf (now).
+	// Idempotent under single-threaded Redis; every replica runs it.
+	Heartbeat(replicaID string, now time.Time, memberLeaseTTL time.Duration) error
+
+	// LiveMembers returns the replica ids whose membership lease has not expired
+	// (ZRANGEBYSCORE members (now +inf) — the live set HRW assigns slots over.
+	LiveMembers(now time.Time) ([]string, error)
+
 	// LoadSigningKey adopts or installs the persisted active webhook signing key.
 	LoadSigningKey(now time.Time) (SigningKey, error)
 
