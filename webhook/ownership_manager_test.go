@@ -12,7 +12,15 @@ import (
 
 func newOwnershipManager(t *testing.T, s *RedisStore, replica string, fm *fakeMetrics) *Manager {
 	t.Helper()
-	opts := ManagerOptions{StreamRootURL: "http://x/v1/stream/", ReplicaID: replica, Metrics: fm}
+	var metrics Metrics
+	if fm != nil {
+		// The inline owner-epoch fence is recorded store-side (the single place the
+		// Lua reply is observed), so wire the store to the same recorder the manager
+		// uses — exactly as the binary does (NewRedisStore(...).WithMetrics(...)).
+		s.WithMetrics(fm)
+		metrics = fm
+	}
+	opts := ManagerOptions{StreamRootURL: "http://x/v1/stream/", ReplicaID: replica, Metrics: metrics}
 	m, err := NewManager(s, &fakeStreams{tails: map[string]string{}}, opts)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -163,6 +171,73 @@ func TestManagerDeposedOwnerExpireFencedInline(t *testing.T) {
 	}
 	if fm.ownerFences("inline") < 1 {
 		t.Fatalf("OwnerFenced(inline) not recorded: %v", fm.ownerFenced)
+	}
+}
+
+// The RETRY path threads the owner scope so its inline owner-epoch fence is
+// exercised in production (not dead code): recordFailure -> ScheduleRetry and the
+// retry-worker auto-ack(done) both FENCE a deposed owner inline. rA owns slot 0
+// (epoch 1); a foreign replica takes it over (epoch 2); rA's now-stale scope must
+// fence both writes — atomically, above the still-valid (gen,wake_id) fence.
+func TestManagerRetryPathFencedInline(t *testing.T) {
+	s, _ := newTestStore(t)
+	fm := &fakeMetrics{}
+	m := newOwnershipManager(t, s, "rA", fm)
+	if _, err := s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Heartbeat("rA", time.Now(), m.memberLeaseTTL); err != nil {
+		t.Fatal(err)
+	}
+	m.RunSlotReconcile() // rA owns slot 0 at epoch 1
+	scope, ok := m.singleOwnerScope()
+	if !ok {
+		t.Fatal("rA should hold a slot")
+	}
+	now := time.Now()
+	arm, err := s.ArmWake("s1", now, 60000, true, "wk-1") // valid gen/wake for the ack test
+	if err != nil || !arm.Armed {
+		t.Fatalf("arm = %+v err=%v", arm, err)
+	}
+
+	// Control: an UNSCOPED recordFailure (the append path) schedules a retry — the
+	// sub is schedulable, so a later non-advance is the fence, not a no-op.
+	m.recordFailure("s1")
+	if sub, _, _ := s.Get("s1"); sub.RetryCount != 1 {
+		t.Fatalf("unscoped recordFailure should schedule a retry (count=1), got %d", sub.RetryCount)
+	}
+
+	// A foreign replica takes the slot over after the lease expires — rA's `scope`
+	// is now stale (deposed-but-resumed).
+	tk, err := s.ClaimSlot(slotKey(0), "intruder", now.Add(m.slotLeaseTTL+time.Second), m.slotLeaseTTL)
+	if err != nil || !tk.Transferred() {
+		t.Fatalf("takeover = %+v err=%v, want a transfer", tk, err)
+	}
+
+	// recordFailure with the deposed scope: schedule_retry is FENCED inline, so the
+	// retry count does NOT advance and an inline fence is recorded.
+	before := fm.ownerFences("inline")
+	m.recordFailure("s1", scope)
+	if sub, _, _ := s.Get("s1"); sub.RetryCount != 1 {
+		t.Fatalf("deposed recordFailure must schedule nothing (count stays 1), got %d", sub.RetryCount)
+	}
+	if fm.ownerFences("inline") <= before {
+		t.Fatalf("recordFailure->schedule_retry inline fence not recorded (was %d, now %d)", before, fm.ownerFences("inline"))
+	}
+
+	// The retry-worker auto-ack(done) with the deposed scope: VALID gen/wake (so the
+	// (gen,wake_id) fence would pass), yet FENCED — proving the owner-epoch fence is
+	// exercised on the retry-path ack, above the gen fence.
+	before = fm.ownerFences("inline")
+	status, err := m.ack("s1", arm.Generation, arm.WakeID, arm.Generation, true, nil, time.Now(), 60000, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != "FENCED" {
+		t.Fatalf("deposed retry-path ack(done) with valid gen = %q, want FENCED (inline owner fence)", status)
+	}
+	if fm.ownerFences("inline") <= before {
+		t.Fatalf("retry-path ack(done) inline fence not recorded (was %d, now %d)", before, fm.ownerFences("inline"))
 	}
 }
 
