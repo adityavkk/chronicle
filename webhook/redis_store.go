@@ -385,6 +385,29 @@ func (s *RedisStore) ExpireLease(id string, now time.Time) (string, error) {
 	return reply[0], nil
 }
 
+// LeasedIDs returns the members of the lease schedule ZSET (the failover-aware
+// reconcile's view of what the lease worker can see). It is a single-key ZRANGE
+// over the in-flight set, which is O(in-flight), not O(subscriptions).
+func (s *RedisStore) LeasedIDs() ([]string, error) {
+	return s.client.ZRange(s.ctx(), leaseZKey, 0, -1).Result()
+}
+
+// RestoreLease runs restore_lease.lua to re-derive a stranded subscription's
+// dropped schedule entries from its durable sub hash (the L3 dropLeaseTail
+// recovery). The script re-reads phase and lease_until_ns from the hash, so the
+// restore is atomic with respect to a concurrent release/ack that idled the sub.
+func (s *RedisStore) RestoreLease(id string, owed bool, now time.Time) (string, error) {
+	owedArg := "0"
+	if owed {
+		owedArg = "1"
+	}
+	reply, err := s.evalStrings(restoreLeaseScript, []string{subKey(id), leaseZKey, dueZKey}, id, nsArg(now), owedArg)
+	if err != nil {
+		return "", err
+	}
+	return reply[0], nil
+}
+
 // DueLeases takes due lease-schedule members by re-scoring them forward, so a
 // dropped worker's subscription recurs (docs/research/07 §6.1).
 func (s *RedisStore) DueLeases(now time.Time, limit int, visibility time.Duration) ([]string, error) {
@@ -546,6 +569,25 @@ func unmarshalKeyMaterial(kid, material string) (SigningKey, error) {
 	}, nil
 }
 
+// parseLeaseUntilNs reads the lease deadline from the sub hash. arm_wake/claim/ack
+// compute lease_until_ns as now_ns + ttl in Lua, where every number is an IEEE
+// double, and persist it via tostring — which renders a ~1.8e18 ns value in
+// %.14g scientific notation ("1.78e+18"), not a base-10 integer. strconv.ParseInt
+// rejects that, so the failover-aware reconcile (issue #13), which keys off
+// lease_until_ns > 0, must parse tolerantly through a float. The sub-microsecond
+// precision the Lua double already dropped is irrelevant to a lease deadline, and
+// the authoritative views — the lease-ZSET score and expire_lease.lua's tonumber —
+// read the same value, so this only realigns the Go hash view with the schedule.
+func parseLeaseUntilNs(s string) int64 {
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return n
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return int64(f)
+	}
+	return 0
+}
+
 // subscriptionFromHash decodes the sub HASH and links HASH into a Subscription.
 func subscriptionFromHash(id string, f map[string]string, linkFields map[string]string) Subscription {
 	atoi := func(k string) int64 { n, _ := strconv.ParseInt(f[k], 10, 64); return n }
@@ -568,7 +610,7 @@ func subscriptionFromHash(id string, f map[string]string, linkFields map[string]
 		WakeID:          f["wake_id"],
 		Holder:          f["holder"] == "1",
 		HolderWorker:    f["holder_worker"],
-		LeaseUntilNs:    atoi("lease_until_ns"),
+		LeaseUntilNs:    parseLeaseUntilNs(f["lease_until_ns"]),
 		RetryCount:      int(atoi("retry_count")),
 		FirstFailNs:     atoi("first_fail_ns"),
 		NextAttemptNs:   atoi("next_attempt_ns"),
