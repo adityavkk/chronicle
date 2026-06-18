@@ -25,6 +25,10 @@ set -euo pipefail
 : "${LT_DISK_GB:=50}"
 : "${LT_REDIS_SIZE_GB:=1}"
 : "${LT_REDIS_VERSION:=redis_7_2}"
+# LT_REDIS_TIER selects the Memorystore tier: "basic" (no failover — gates #1–#4) or
+# "standard" / "STANDARD_HA" (a replica + managed failover + a stable endpoint —
+# gate #5, issue #16). `up --redis-tier=STANDARD_HA` overrides this.
+: "${LT_REDIS_TIER:=basic}"
 
 NS=chronicle-loadtest
 REG="${LT_REGION}-docker.pkg.dev/${LT_PROJECT}/${LT_AR_REPO}"
@@ -34,6 +38,18 @@ G=(gcloud --project "$LT_PROJECT" --quiet)
 log() { printf '\n\033[1;36m▸ %s\033[0m\n' "$*" >&2; }
 
 cmd_up() {
+  # Optional --redis-tier=basic|standard|STANDARD_HA (STANDARD_HA => standard, the
+  # gate-#5 real-failover tier).
+  for a in "$@"; do
+    case "$a" in
+      --redis-tier=*) LT_REDIS_TIER="${a#*=}" ;;
+    esac
+  done
+  case "$LT_REDIS_TIER" in
+    STANDARD_HA|standard) LT_REDIS_TIER=standard ;;
+    basic) LT_REDIS_TIER=basic ;;
+    *) echo "LT_REDIS_TIER must be basic or standard/STANDARD_HA" >&2; exit 2 ;;
+  esac
   log "APIs"
   "${G[@]}" services enable container.googleapis.com redis.googleapis.com \
     artifactregistry.googleapis.com cloudbuild.googleapis.com
@@ -46,10 +62,13 @@ cmd_up() {
   ( cd "$REPO_ROOT" && "${G[@]}" builds submit --config loadtest/cloudbuild.yaml \
       --substitutions=_REG="$REG",_TAG="$LT_TAG" . )
 
-  log "Memorystore Redis (basic ${LT_REDIS_SIZE_GB}G, noeviction)"
+  log "Memorystore Redis (${LT_REDIS_TIER} ${LT_REDIS_SIZE_GB}G, noeviction)"
+  # standard tier => a managed failover replica + a stable endpoint (gate #5 needs a
+  # real failover, not the basic tier's AOF replay). The Tier B WAITAOF 1 1 barrier
+  # has a replica to ack only on the standard tier.
   "${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" >/dev/null 2>&1 ||
     "${G[@]}" redis instances create "${LT_CLUSTER}-redis" --size "$LT_REDIS_SIZE_GB" --region "$LT_REGION" \
-      --tier basic --redis-version "$LT_REDIS_VERSION" --redis-config maxmemory-policy=noeviction
+      --tier "$LT_REDIS_TIER" --redis-version "$LT_REDIS_VERSION" --redis-config maxmemory-policy=noeviction
 
   log "GKE cluster + node pools (sut, loadgen)"
   "${G[@]}" container clusters describe "$LT_CLUSTER" --zone "$LT_ZONE" >/dev/null 2>&1 ||
@@ -235,6 +254,67 @@ cmd_gate4() {
   log "gate #4 done — coverage gap should recover within membership-lease TTL + RTT (NOT a sweep tick); zero lost wakes; zero double-grants"
 }
 
+# cmd_gate5 — the failover-fence drill under load (issue #16, the headline). Runs
+# the full-system dispatch:webhook load (Tier B, replicas>=2, S=256) on a
+# STANDARD_HA Memorystore, then triggers a REAL managed failover mid-measure and
+# asserts: the K=10k sweep p99 holds within the 509 ms floor; the stranded webhook
+# sub is recovered by the cursor-reading eager reconcile; a deposed ack returns 409
+# FENCED (chronicle_owner_fenced_total rises, not a silent success); zero lost wakes;
+# zero double-grants. RPO = async lag + AOF fsync (~1s) + link latency; RTO =
+# promotion time. The deposed-FENCED + cursor-only-recovery proof at the in-cluster
+# checker level is jepsen/deploy/standard-ha-failover.sh (the L3 lease-tail-drop run
+# across a real promotion); this gate adds the under-load SLO + the managed failover.
+#
+# STOP-THE-METER: gate5 sets its own teardown trap so a standalone run never strands
+# the (expensive, replica-backed) STANDARD_HA instance.
+cmd_gate5() {
+  trap cmd_down EXIT INT TERM
+  local spec="${1:-spec/dispatch-webhook-ha.yaml}"
+  local spec_abs out redis_host tier
+  spec_abs="$(cd "$(dirname "$spec")" && pwd)/$(basename "$spec")"
+  tier="$("${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" --format='value(tier)' 2>/dev/null)"
+  if [ "$tier" != "STANDARD_HA" ]; then
+    log "gate #5 needs the STANDARD_HA tier (have '$tier'); run: ./ltctl.sh up --redis-tier=STANDARD_HA"
+    return 2
+  fi
+  redis_host="$("${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" --format='value(host)')"
+  out="$(mktemp -d)"
+
+  log "gate #5: render $spec (Tier B, replicas>=2) against STANDARD_HA redis=$redis_host"
+  ( cd "$REPO_ROOT/loadgen" && go run ./cmd/render -spec "$spec_abs" -out "$out" \
+      -redis-url "redis://${redis_host}:6379/0" \
+      -image "$REG/chronicle:$LT_TAG" -loadgen-image "$REG/chronicle-loadgen:$LT_TAG" )
+  kubectl apply -f "$out/sut.yaml"
+  kubectl -n "$NS" rollout status deploy/chronicle --timeout=180s
+
+  log "gate #5: launch the webhook workload"
+  kubectl -n "$NS" delete job -l app=sweepscale --ignore-not-found >/dev/null
+  kubectl apply -f "$out/job.yaml"
+  sleep 45 # warm up + settle ownership
+
+  log "gate #5: coarse pod-kill chaos, then the REAL managed failover"
+  cmd_chaos
+  # Trigger Memorystore's managed failover: the replica is promoted and the endpoint
+  # is repointed for us, so chronicle's plain redis URL survives. This is the real
+  # failover the basic tier (AOF replay) cannot do (07 honest-gap #3).
+  "${G[@]}" redis instances failover "${LT_CLUSTER}-redis" --region "$LT_REGION" --data-protection-mode=limited-data-loss
+  # Roll chronicle so each pod reconnects to the promoted primary and runs the boot
+  # reconcile (the same eager reconcile Manager.Promote drives), recovering any sub
+  # stranded in the async-replication RPO window.
+  kubectl -n "$NS" rollout restart deploy/chronicle
+  kubectl -n "$NS" rollout status deploy/chronicle --timeout=180s
+
+  kubectl -n "$NS" wait --for=condition=complete --timeout=600s job -l app=sweepscale 2>/dev/null ||
+    kubectl -n "$NS" wait --for=condition=failed --timeout=5s job -l app=sweepscale 2>/dev/null || true
+
+  log "gate #5: sweepscale report (SLO gate)"
+  kubectl -n "$NS" logs -l app=sweepscale --tail=-1
+  log "gate #5: fence + ownership + coverage-gap metrics from a surviving pod"
+  kubectl -n "$NS" exec deploy/chronicle -- sh -c 'wget -qO- http://localhost:9090/metrics' 2>/dev/null |
+    grep -E 'chronicle_coverage_gap_seconds|chronicle_slot_ownership_events_total|chronicle_owner_fenced_total' || true
+  log "gate #5 done — see jepsen/deploy/standard-ha-failover.sh for the deposed-FENCED + cursor-only-recovery proof"
+}
+
 _torn=0
 cmd_down() {
   [ "$_torn" = 1 ] && return 0
@@ -262,8 +342,9 @@ case "${1:-}" in
   gate1) shift; cmd_gate1 "$@" ;;
   gate2) shift; cmd_gate2 "$@" ;;
   gate4) shift; cmd_gate4 "$@" ;;
+  gate5) shift; cmd_gate5 "$@" ;;
   chaos) shift; cmd_chaos "$@" ;;
   down) shift; cmd_down "$@" ;;
   all) shift; cmd_all "$@" ;;
-  *) echo "usage: $0 {up | run <spec> | gate1 [spec] | gate2 [spec] | gate4 [spec] | chaos | down | all <spec>}" >&2; exit 2 ;;
+  *) echo "usage: $0 {up [--redis-tier=basic|STANDARD_HA] | run <spec> | gate1 [spec] | gate2 [spec] | gate4 [spec] | gate5 [spec] | chaos | down | all <spec>}" >&2; exit 2 ;;
 esac

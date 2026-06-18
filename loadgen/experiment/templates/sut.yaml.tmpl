@@ -37,6 +37,10 @@ spec:
             - { name: CHRONICLE_PUBLIC_URL, value: "http://chronicle.{{.SUT.Namespace}}:4437" }
             - { name: CHRONICLE_SWEEP_INTERVAL, value: "{{.SUT.SweepInterval}}" }
             - { name: CHRONICLE_SWEEP_BATCH, value: "{{.SUT.SweepBatch}}" }
+            # Tunable consistency (issue #16): empty tier => Tier A (no WAIT).
+            - { name: CHRONICLE_CONSISTENCY_TIER, value: "{{.SUT.Consistency}}" }
+            - { name: CHRONICLE_WAIT_REPLICAS, value: "{{.SUT.WaitReplicas}}" }
+            - { name: CHRONICLE_WAIT_TIMEOUT_MS, value: "{{.SUT.WaitTimeoutMs}}" }
             - { name: CHRONICLE_LOG_LEVEL, value: "info" }
           ports:
             - { containerPort: 4437, name: http }
