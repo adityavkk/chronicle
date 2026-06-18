@@ -111,23 +111,45 @@ func CheckBoundedContention(rounds []contentionRound, lim contentionLimits) []co
 	return violations
 }
 
+// c2KneeTolerance is how far per-busy-worker throughput may dip between adjacent
+// claimant rungs before it counts as a collapse knee. A healthy system keeps
+// per-worker throughput roughly flat as claimants rise (small declines from
+// coordination overhead are fine); a fence storm makes it fall off a cliff. 0.25
+// means a >25% per-worker drop from one rung to the next is the knee.
+const c2KneeTolerance = 0.25
+
+// collapsed reports whether per-busy-worker throughput fell materially (more than
+// c2KneeTolerance) from prev to cur — the C2 knee, where adding claimants stops
+// adding throughput PER WORKER. This is deliberately per-worker, not aggregate
+// (07 C2): a fence storm can drop per-worker throughput 100 -> 55 while AGGREGATE
+// throughput still RISES 600 -> 660 as claimants double, so an aggregate check
+// would miss exactly the 6-clean / 12-collapse signature C2 exists to catch.
+func collapsed(prev, cur contentionRound) bool {
+	if prev.throughputPerWorker <= 0 {
+		return false
+	}
+	return cur.throughputPerWorker < prev.throughputPerWorker*(1-c2KneeTolerance)
+}
+
 // CheckNoThroughputCollapse asserts C2: per-busy-worker throughput does not fall
-// off as claimants rise — concretely, the subscription's aggregate throughput
-// keeps increasing with N. The knee (the empirical 6-clean / 12-collapse) is the
-// first round where adding claimants stops adding throughput: aggregate
-// throughput drops versus the previous (lower-N) round. The rounds are sorted by
-// claimant count first. An empty result means no knee was observed in the
-// measured range.
+// off as claimants rise. The knee (the empirical 6-clean / 12-collapse) is the
+// first round where per-worker throughput collapses versus the previous (lower-N)
+// round by more than c2KneeTolerance — even if aggregate throughput is still
+// rising. The rounds are sorted by claimant count first. An empty result means no
+// knee was observed in the measured range.
 func CheckNoThroughputCollapse(rounds []contentionRound) []contentionViolation {
 	sorted := sortedByClaimants(rounds)
 	var violations []contentionViolation
 	for i := 1; i < len(sorted); i++ {
 		prev, cur := sorted[i-1], sorted[i]
-		if cur.aggregateThroughput() < prev.aggregateThroughput() {
+		if collapsed(prev, cur) {
 			violations = append(violations, contentionViolation{
 				property: "C2", claimants: cur.claimants,
-				reason: fmt.Sprintf("aggregate throughput fell %.1f -> %.1f as claimants rose %d -> %d (the collapse knee)",
-					prev.aggregateThroughput(), cur.aggregateThroughput(), prev.claimants, cur.claimants),
+				reason: fmt.Sprintf("per-worker throughput fell %.1f -> %.1f (%.0f%%) as claimants rose %d -> %d (aggregate %.1f -> %.1f) — the collapse knee",
+					prev.throughputPerWorker, cur.throughputPerWorker,
+					100*(1-cur.throughputPerWorker/prev.throughputPerWorker),
+					prev.claimants, cur.claimants,
+					prev.aggregateThroughput(), cur.aggregateThroughput()),
 			})
 		}
 	}
@@ -168,12 +190,13 @@ func CheckGranularityMovesKnee(g1, gG []contentionRound, G int, tolerance float6
 }
 
 // findKnee returns the claimant count of the first throughput-collapse knee in a
-// ramp (the first round whose aggregate throughput is below its predecessor's),
-// and whether one was found.
+// ramp (the first round whose per-worker throughput collapsed versus its
+// predecessor — the same per-worker criterion C2 uses, so C3's differential
+// compares like for like), and whether one was found.
 func findKnee(rounds []contentionRound) (claimants int, found bool) {
 	sorted := sortedByClaimants(rounds)
 	for i := 1; i < len(sorted); i++ {
-		if sorted[i].aggregateThroughput() < sorted[i-1].aggregateThroughput() {
+		if collapsed(sorted[i-1], sorted[i]) {
 			return sorted[i].claimants, true
 		}
 	}

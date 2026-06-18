@@ -56,8 +56,7 @@ func TestNoThroughputCollapse_CleanRampPasses(t *testing.T) {
 }
 
 func TestNoThroughputCollapse_KneeFails(t *testing.T) {
-	// aggregate throughput: 6*100=600, 12*45=540 — the knee, throughput fell as
-	// claimants rose.
+	// per-worker throughput collapses 100 -> 45 as claimants rise 6 -> 12 — the knee.
 	ramp := []contentionRound{
 		{claimants: 6, throughputPerWorker: 100},
 		{claimants: 12, throughputPerWorker: 45},
@@ -65,6 +64,28 @@ func TestNoThroughputCollapse_KneeFails(t *testing.T) {
 	v := CheckNoThroughputCollapse(ramp)
 	if len(v) != 1 || v[0].claimants != 12 {
 		t.Fatalf("expected one C2 knee at N=12, got %v", v)
+	}
+}
+
+// The regression witness for the review fix: the empirical fence-storm signature
+// is a PER-WORKER collapse (100 -> 55) as claimants double (6 -> 12) while
+// AGGREGATE throughput still RISES (600 -> 660). C2 must flag it — an aggregate
+// check would pass exactly the 6-clean/12-collapse the contention suite exists to
+// catch (and that #11 gates on).
+func TestNoThroughputCollapse_PerWorkerKneeWithRisingAggregate(t *testing.T) {
+	ramp := []contentionRound{
+		{claimants: 6, throughputPerWorker: 100}, // aggregate 600
+		{claimants: 12, throughputPerWorker: 55}, // aggregate 660 — rises, yet per-worker collapsed
+	}
+	// Guard the premise: the aggregate really does rise, so this is the case an
+	// aggregate-based check would wrongly pass.
+	if ramp[1].aggregateThroughput() <= ramp[0].aggregateThroughput() {
+		t.Fatalf("setup error: aggregate did not rise (%.0f -> %.0f)",
+			ramp[0].aggregateThroughput(), ramp[1].aggregateThroughput())
+	}
+	v := CheckNoThroughputCollapse(ramp)
+	if len(v) != 1 || v[0].claimants != 12 {
+		t.Fatalf("expected one C2 knee at N=12 (per-worker collapse despite rising aggregate), got %v", v)
 	}
 }
 
