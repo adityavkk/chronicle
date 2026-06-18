@@ -25,8 +25,8 @@ const (
 	EnvMetricsListen        = "CHRONICLE_METRICS_LISTEN"
 	// Tunable-consistency surface (issue #16, doc 05 "Tunable consistency").
 	EnvConsistencyTier = "CHRONICLE_CONSISTENCY_TIER" // A (default) | B | C
-	EnvWaitReplicas    = "CHRONICLE_WAIT_REPLICAS"     // Tier B WAITAOF numreplicas (1 on STANDARD_HA, 0 on a single Redis)
-	EnvWaitTimeoutMs   = "CHRONICLE_WAIT_TIMEOUT_MS"   // Tier B WAIT/WAITAOF server-side block bound
+	EnvWaitReplicas    = "CHRONICLE_WAIT_REPLICAS"    // Tier B WAITAOF numreplicas (1 on STANDARD_HA, 0 on a single Redis)
+	EnvWaitTimeoutMs   = "CHRONICLE_WAIT_TIMEOUT_MS"  // Tier B WAIT/WAITAOF server-side block bound
 )
 
 // Config holds the chronicle server configuration. LongPollTimeout and

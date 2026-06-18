@@ -149,7 +149,8 @@ func (e *DurabilityShortError) Error() string {
 	}
 	return fmt.Sprintf(
 		"webhook: %s durability short: local %d/%d, replicas %d/%d (write reached primary, durability unproven — fence still governs exclusivity)",
-		cmd, e.GotLocal, e.WantLocal, e.GotReplicas, e.WantReplicas)
+		cmd, e.GotLocal, e.WantLocal, e.GotReplicas, e.WantReplicas,
+	)
 }
 
 // InterpretWaitAOF reduces a WAITAOF reply (the [numlocal, numreplicas] pair) to a
