@@ -140,6 +140,48 @@ cmd_gate1() {
   log "gate #1 done — CPU-vs-N curve in gate1-results.tsv (expect Redis CPU to rise ~N× at fixed K)"
 }
 
+# cmd_gate2 is experiment 2 (THE DECIDING NUMBER for slot-homing, issue #15): the
+# OnStreamAppend fan-out p99 regression under the S-slot {__ds:h} shard. It deploys
+# the wide-stream webhook fan-out spec at replicas>=2 (so the {__ds:h} slots span
+# Redis Cluster nodes — the max-node-RTT this gate measures; loopback erases it),
+# drives the workload, and scrapes chronicle_fanout_seconds (the p99 gate) +
+# chronicle_fanout_slots_probed (the bitmap effect) from a surviving pod. Because
+# S=subSlots is a COMPILE-TIME const, the 2/4/8/256 sweep is one SUT IMAGE PER S:
+# build chronicle with `const subSlots=<S>`, push as LT_TAG=s<S>, and run gate2 per
+# tag — the per-S fan-out p99 lands in gate2-results.tsv. Assumes `up` already ran.
+cmd_gate2() {
+  local spec="${1:-spec/fanout-gate2.yaml}"
+  local spec_abs out redis_host p99 probed sweepp99
+  spec_abs="$(cd "$(dirname "$spec")" && pwd)/$(basename "$spec")"
+  redis_host="$("${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" --format='value(host)')"
+  out="$(mktemp -d)"
+
+  log "gate #2: render $spec at replicas>=2 (the {__ds:h} slots must span Redis nodes), S build = ${LT_TAG}"
+  ( cd "$REPO_ROOT/loadgen" && go run ./cmd/render -spec "$spec_abs" -out "$out" \
+      -redis-url "redis://${redis_host}:6379/0" \
+      -image "$REG/chronicle:$LT_TAG" -loadgen-image "$REG/chronicle-loadgen:$LT_TAG" )
+  kubectl apply -f "$out/sut.yaml"
+  kubectl -n "$NS" rollout status deploy/chronicle --timeout=180s
+
+  log "gate #2: launch the wide-stream webhook fan-out workload"
+  kubectl -n "$NS" delete job -l app=sweepscale --ignore-not-found >/dev/null
+  kubectl apply -f "$out/job.yaml"
+  kubectl -n "$NS" wait --for=condition=complete --timeout=600s job -l app=sweepscale 2>/dev/null ||
+    kubectl -n "$NS" wait --for=condition=failed --timeout=5s job -l app=sweepscale 2>/dev/null || true
+  sweepp99="$(kubectl -n "$NS" logs -l app=sweepscale --tail=-1 | grep -o '"sweep_p99_ms":[ ]*[0-9.]*' | head -1 | grep -o '[0-9.]*$')"
+
+  log "gate #2: fan-out p99 + slots-probed from a surviving pod (the deciding number)"
+  # chronicle_fanout_seconds is the append→wake fan-out p99 (the regression gate #2
+  # decides on); chronicle_fanout_slots_probed must track occupied-slots-per-stream,
+  # NOT S, proving the occupied-slots bitmap mitigation holds at S=256.
+  kubectl -n "$NS" exec deploy/chronicle -- sh -c 'wget -qO- http://localhost:9090/metrics' 2>/dev/null |
+    grep -E 'chronicle_fanout_seconds|chronicle_fanout_slots_probed' | tee "gate2-${LT_TAG}-metrics.txt" || true
+  p99="$(awk -F'[{} ]+' '/chronicle_fanout_seconds_bucket/{print}' "gate2-${LT_TAG}-metrics.txt" 2>/dev/null | tail -1)"
+  printf 'S_build\tsweep_p99_ms\tfanout_p99_note\n' >> gate2-results.tsv 2>/dev/null || true
+  printf '%s\t%s\t%s\n' "${LT_TAG}" "${sweepp99:-?}" "see gate2-${LT_TAG}-metrics.txt (chronicle_fanout_seconds histogram)" | tee -a gate2-results.tsv
+  log "gate #2 done for ${LT_TAG} — fan-out p99 in gate2-${LT_TAG}-metrics.txt; repeat per S (2/4/8/256). WITHIN budget => ship slot-homing; OVER => defer per 05."
+}
+
 # cmd_gate4 is experiment 4 (the membership churn window) — the INVERSE of gate #1
 # (issue #14, 07 L2/L4). It deploys the churn spec at replicas>=2 (HRW shards the
 # slots), launches the sweepscale job, force-deletes the slot owner mid-window (the
@@ -218,9 +260,10 @@ case "${1:-}" in
   up) shift; cmd_up "$@" ;;
   run) shift; cmd_run "$@" ;;
   gate1) shift; cmd_gate1 "$@" ;;
+  gate2) shift; cmd_gate2 "$@" ;;
   gate4) shift; cmd_gate4 "$@" ;;
   chaos) shift; cmd_chaos "$@" ;;
   down) shift; cmd_down "$@" ;;
   all) shift; cmd_all "$@" ;;
-  *) echo "usage: $0 {up | run <spec> | gate1 [spec] | gate4 [spec] | chaos | down | all <spec>}" >&2; exit 2 ;;
+  *) echo "usage: $0 {up | run <spec> | gate1 [spec] | gate2 [spec] | gate4 [spec] | chaos | down | all <spec>}" >&2; exit 2 ;;
 esac
