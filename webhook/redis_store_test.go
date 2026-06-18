@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -30,7 +32,7 @@ func newTestStore(t *testing.T) (*RedisStore, goredis.UniversalClient) {
 		t.Fatalf("parse REDIS_URL: %v", err)
 	}
 	client := goredis.NewClient(opts)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Skipf("redis unreachable (%s): %v", url, err)
@@ -46,9 +48,21 @@ func webhookCfg(url string) Config {
 	return Config{Type: DispatchWebhook, Pattern: "events/*", WebhookURL: url, LeaseTTLMs: 1000}
 }
 
-func dueMembers(t *testing.T, client goredis.UniversalClient) []string {
+func testLeaseZKey(id string) string {
+	return leaseZKey(subscriptionSlot(id))
+}
+
+func testRetryZKey(id string) string {
+	return retryZKey(subscriptionSlot(id))
+}
+
+func testDueSetKey(id string) string {
+	return dueSetKey(subscriptionSlot(id))
+}
+
+func dueMembers(t *testing.T, client goredis.UniversalClient, id string) []string {
 	t.Helper()
-	members, err := client.ZRange(context.Background(), dueSetKey(), 0, -1).Result()
+	members, err := client.ZRange(context.Background(), testDueSetKey(id), 0, -1).Result()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +71,7 @@ func dueMembers(t *testing.T, client goredis.UniversalClient) []string {
 
 func dueScore(t *testing.T, client goredis.UniversalClient, id string) float64 {
 	t.Helper()
-	score, err := client.ZScore(context.Background(), dueSetKey(), id).Result()
+	score, err := client.ZScore(context.Background(), testDueSetKey(id), id).Result()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,18 +231,21 @@ func TestMembershipHeartbeatRemovesExpiredMembers(t *testing.T) {
 
 func TestOwnerEpochFencesScheduleMutatingScriptsInline(t *testing.T) {
 	s, client := newTestStore(t)
-	slot, _ := NewOwnershipSlot(0)
 	now := time.Now()
-	stale := claimOwnershipForTest(t, s, slot, ReplicaID("replica-a"), now)
-	current := claimOwnershipForTest(t, s, slot, ReplicaID("replica-b"), now.Add(2*time.Second))
-	if current.Epoch <= stale.Epoch {
-		t.Fatalf("precondition: transfer should bump epoch, stale=%d current=%d", stale.Epoch, current.Epoch)
+	staleFenceForID := func(id string) OwnershipFence {
+		slot := subscriptionOwnershipSlot(id)
+		stale := claimOwnershipForTest(t, s, slot, ReplicaID("replica-a"), now)
+		current := claimOwnershipForTest(t, s, slot, ReplicaID("replica-b"), now.Add(2*time.Second))
+		if current.Epoch <= stale.Epoch {
+			t.Fatalf("precondition: transfer should bump epoch, stale=%d current=%d", stale.Epoch, current.Epoch)
+		}
+		return stale.Fence()
 	}
-	staleFence := stale.Fence()
 
 	if _, err := s.CreateOrConfirm("arm-stale", webhookCfg("https://w.example/h"), nil, now); err != nil {
 		t.Fatal(err)
 	}
+	staleFence := staleFenceForID("arm-stale")
 	armed, err := s.ArmWake("arm-stale", now, 1000, true, "w_stale", staleFence)
 	if err != nil || !armed.Fenced {
 		t.Fatalf("stale ArmWake = %+v err=%v, want FENCED", armed, err)
@@ -240,6 +257,7 @@ func TestOwnerEpochFencesScheduleMutatingScriptsInline(t *testing.T) {
 	if _, err := s.CreateOrConfirm("ack-stale", webhookCfg("https://w.example/h"), nil, now); err != nil {
 		t.Fatal(err)
 	}
+	staleFence = staleFenceForID("ack-stale")
 	goodArm, _ := s.ArmWake("ack-stale", now, 1000, true, "w_good", NoOwnerFence())
 	if st, _ := s.Ack("ack-stale", ClaimModeLegacy, DefaultClaimShard, goodArm.Generation, goodArm.WakeID, goodArm.Generation, true, nil, now, 1000, staleFence); st != "FENCED" {
 		t.Fatalf("stale Ack = %q, want FENCED", st)
@@ -254,7 +272,7 @@ func TestOwnerEpochFencesScheduleMutatingScriptsInline(t *testing.T) {
 	if _, err := s.ScheduleRetry("ack-stale", now, now.Add(time.Second), staleFence); !errors.Is(err, errOwnerFenced) {
 		t.Fatalf("stale ScheduleRetry err=%v, want errOwnerFenced", err)
 	}
-	if retry, _ := client.ZCard(context.Background(), retryZKey).Result(); retry != 0 {
+	if retry, _ := client.ZCard(context.Background(), testRetryZKey("ack-stale")).Result(); retry != 0 {
 		t.Fatalf("fenced ScheduleRetry must not add retry member, got %d", retry)
 	}
 	if st, _ := s.Release("ack-stale", ClaimModeLegacy, DefaultClaimShard, goodArm.Generation, goodArm.WakeID, goodArm.Generation, staleFence); st != "FENCED" {
@@ -263,7 +281,7 @@ func TestOwnerEpochFencesScheduleMutatingScriptsInline(t *testing.T) {
 	if _, err := s.ReconcileLeaseSchedule(NewLeaseRef("ack-stale", DefaultClaimShard), now, true, staleFence); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DueWakes(slot, now.Add(2*time.Second), 1, time.Second, staleFence); !errors.Is(err, errOwnerFenced) {
+	if _, err := s.DueWakes(subscriptionOwnershipSlot("ack-stale"), now.Add(2*time.Second), 1, time.Second, staleFence); !errors.Is(err, errOwnerFenced) {
 		t.Fatalf("stale DueWakes err=%v, want errOwnerFenced", err)
 	}
 }
@@ -301,7 +319,7 @@ func TestStoreArmWakeSurvivesRestart(t *testing.T) {
 	if err != nil || !res.Armed || res.Generation != 1 || res.WakeID != "w_first" {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
-	if members := dueMembers(t, client); len(members) != 1 || members[0] != "s1" {
+	if members := dueMembers(t, client, "s1"); len(members) != 1 || members[0] != "s1" {
 		t.Fatalf("arm should add one due-set member, got %v", members)
 	}
 	firstDueScore := dueScore(t, client, "s1")
@@ -327,7 +345,7 @@ func TestStoreArmWakeSurvivesRestart(t *testing.T) {
 		t.Fatalf("durable cursor lost across restart: %+v", sub.Links)
 	}
 	// The lease deadline is a durable ZSET score, not a goroutine.
-	if n, _ := client.ZCard(context.Background(), leaseZKey).Result(); n != 1 {
+	if n, _ := client.ZCard(context.Background(), testLeaseZKey("s1")).Result(); n != 1 {
 		t.Fatalf("lease ZSET should hold one durable deadline, got %d", n)
 	}
 }
@@ -421,19 +439,19 @@ func TestStoreAckDoneClearsDueSetHeartbeatDoesNot(t *testing.T) {
 	if err != nil || !armed.Armed {
 		t.Fatalf("arm = %+v err=%v", armed, err)
 	}
-	if members := dueMembers(t, client); len(members) != 1 {
+	if members := dueMembers(t, client, "s1"); len(members) != 1 {
 		t.Fatalf("precondition: due set should contain s1, got %v", members)
 	}
 	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation, false, nil, now, 1000, NoOwnerFence()); st != "OK" {
 		t.Fatalf("heartbeat ack = %q, want OK", st)
 	}
-	if members := dueMembers(t, client); len(members) != 1 || members[0] != "s1" {
+	if members := dueMembers(t, client, "s1"); len(members) != 1 || members[0] != "s1" {
 		t.Fatalf("heartbeat ack must leave due member in place, got %v", members)
 	}
 	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation, true, nil, now, 1000, NoOwnerFence()); st != "OK" {
 		t.Fatalf("done ack = %q, want OK", st)
 	}
-	if members := dueMembers(t, client); len(members) != 0 {
+	if members := dueMembers(t, client, "s1"); len(members) != 0 {
 		t.Fatalf("done ack must clear due member, got %v", members)
 	}
 }
@@ -458,7 +476,7 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	if sub.Phase != PhaseIdle || sub.Holder {
 		t.Fatalf("expiry must clear holder and idle the subscription: %+v", sub)
 	}
-	if members := dueMembers(t, client); len(members) != 1 || members[0] != "s1" {
+	if members := dueMembers(t, client, "s1"); len(members) != 1 || members[0] != "s1" {
 		t.Fatalf("pending expiry should re-owe s1 in due set, got %v", members)
 	}
 
@@ -469,7 +487,7 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	if err != nil || len(due) != 1 || due[0] != NewLeaseRef("s1", DefaultClaimShard) {
 		t.Fatalf("due = %v err=%v, want [s1]", due, err)
 	}
-	if n, _ := client.ZCard(context.Background(), leaseZKey).Result(); n != 1 {
+	if n, _ := client.ZCard(context.Background(), testLeaseZKey("s1")).Result(); n != 1 {
 		t.Fatalf("claimed member must remain in the ZSET (re-scored, not removed), got %d", n)
 	}
 	// Immediately re-claiming finds nothing — it was re-scored into the future.
@@ -483,13 +501,13 @@ func TestStoreExpireLeaseClearsDueSetWhenNoPending(t *testing.T) {
 	base := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, base)
 	_, _ = s.ArmWake("s1", base, 1000, true, "w_a", NoOwnerFence())
-	if members := dueMembers(t, client); len(members) != 1 {
+	if members := dueMembers(t, client, "s1"); len(members) != 1 {
 		t.Fatalf("precondition: arm should add due member, got %v", members)
 	}
 	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), base.Add(2*time.Second), false, NoOwnerFence()); st != "EXPIRED" {
 		t.Fatalf("expired lease should be EXPIRED, got %q", st)
 	}
-	if members := dueMembers(t, client); len(members) != 0 {
+	if members := dueMembers(t, client, "s1"); len(members) != 0 {
 		t.Fatalf("non-pending expiry should clear stale due member, got %v", members)
 	}
 }
@@ -499,13 +517,13 @@ func TestStoreReleaseClearsDueSet(t *testing.T) {
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	armed, _ := s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence())
-	if members := dueMembers(t, client); len(members) != 1 {
+	if members := dueMembers(t, client, "s1"); len(members) != 1 {
 		t.Fatalf("precondition: arm should add due member, got %v", members)
 	}
 	if st, _ := s.Release("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation, NoOwnerFence()); st != "OK" {
 		t.Fatalf("release = %q, want OK", st)
 	}
-	if members := dueMembers(t, client); len(members) != 0 {
+	if members := dueMembers(t, client, "s1"); len(members) != 0 {
 		t.Fatalf("release must clear due member, got %v", members)
 	}
 }
@@ -528,7 +546,7 @@ func TestStoreStaleAckAfterReleaseDoesNotClearNewDue(t *testing.T) {
 	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, first.Generation, first.WakeID, first.Generation, true, acks, now, 1000, NoOwnerFence()); st != "FENCED" {
 		t.Fatalf("stale ack after release/re-arm should FENCE, got %q", st)
 	}
-	if members := dueMembers(t, client); len(members) != 1 || members[0] != "s1" {
+	if members := dueMembers(t, client, "s1"); len(members) != 1 || members[0] != "s1" {
 		t.Fatalf("stale ack must not clear newer due member, got %v", members)
 	}
 	sub, _, _ := s.Get("s1")
@@ -542,13 +560,13 @@ func TestStoreDeleteClearsDueSet(t *testing.T) {
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_, _ = s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence())
-	if members := dueMembers(t, client); len(members) != 1 {
+	if members := dueMembers(t, client, "s1"); len(members) != 1 {
 		t.Fatalf("precondition: arm should add due member, got %v", members)
 	}
 	if err := s.Delete("s1"); err != nil {
 		t.Fatal(err)
 	}
-	if members := dueMembers(t, client); len(members) != 0 {
+	if members := dueMembers(t, client, "s1"); len(members) != 0 {
 		t.Fatalf("delete must clear due member, got %v", members)
 	}
 }
@@ -656,7 +674,7 @@ func TestClaimShardGranularityAllowsDisjointClaimsAndFences(t *testing.T) {
 	if st, _ := s.Ack("s1", ClaimModeSharded, shardB, b.Generation, b.WakeID, b.Generation, true, nil, now, 1000, NoOwnerFence()); st != "OK" {
 		t.Fatalf("current shard B holder should ack, got %q", st)
 	}
-	if n, _ := client.ZCard(context.Background(), leaseZKey).Result(); n != 0 {
+	if n, _ := client.ZCard(context.Background(), testLeaseZKey("s1")).Result(); n != 0 {
 		t.Fatalf("all sharded lease members should be removed after done acks, got %d", n)
 	}
 }
@@ -671,16 +689,16 @@ func TestReconcileRepairsMissingFanoutIndex(t *testing.T) {
 
 	// Simulate the crash-dropped index: the canonical link survives, the fan-out
 	// SADD did not happen.
-	if err := client.SRem(ctx, streamSubsKey("events/a"), "s1").Err(); err != nil {
+	if err := client.SRem(ctx, streamSubsKey(subscriptionSlot("s1"), "events/a"), "s1").Err(); err != nil {
 		t.Fatal(err)
 	}
-	if subs, _ := s.StreamSubscribers("events/a"); len(subs) != 0 {
+	if subs, _, _ := s.StreamSubscribers("events/a"); len(subs) != 0 {
 		t.Fatalf("precondition: fan-out should be empty, got %v", subs)
 	}
 	if err := s.ReconcileIndexes(); err != nil {
 		t.Fatal(err)
 	}
-	if subs, _ := s.StreamSubscribers("events/a"); len(subs) != 1 || subs[0] != "s1" {
+	if subs, _, _ := s.StreamSubscribers("events/a"); len(subs) != 1 || subs[0] != "s1" {
 		t.Fatalf("repair should restore the fan-out entry from the canonical link, got %v", subs)
 	}
 }
@@ -694,10 +712,202 @@ func TestReconcileIndexDoesNotInventMembership(t *testing.T) {
 	if err := s.ReconcileIndexes(); err != nil {
 		t.Fatal(err)
 	}
-	if subs, _ := s.StreamSubscribers("events/unrelated"); len(subs) != 0 {
+	if subs, _, _ := s.StreamSubscribers("events/unrelated"); len(subs) != 0 {
 		t.Fatalf("repair must not invent membership for an unlinked stream, got %v", subs)
 	}
-	if subs, _ := s.StreamSubscribers("events/a"); len(subs) != 1 {
+	if subs, _, _ := s.StreamSubscribers("events/a"); len(subs) != 1 {
 		t.Fatalf("the linked stream should be indexed, got %v", subs)
+	}
+}
+
+func TestOccupiedSlotsBitmapSetAndNeverCleared(t *testing.T) {
+	s, client := newTestStore(t)
+	ctx := context.Background()
+	const (
+		id   = "s1"
+		path = "events/occupied"
+	)
+	if _, err := s.CreateOrConfirm(id, webhookCfg("https://w.example/h"), nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Link(id, path, LinkGlob, "0000000000000000_0000000000000000"); err != nil {
+		t.Fatal(err)
+	}
+	h := subscriptionSlot(id)
+	if bit, err := client.GetBit(ctx, occupiedStreamSlotsKey(path), int64(h)).Result(); err != nil || bit != 1 {
+		t.Fatalf("occupied bit h=%d = %d err=%v, want 1", h, bit, err)
+	}
+	if err := s.Unlink(id, path, false); err != nil {
+		t.Fatal(err)
+	}
+	if bit, err := client.GetBit(ctx, occupiedStreamSlotsKey(path), int64(h)).Result(); err != nil || bit != 1 {
+		t.Fatalf("deindex must not clear occupied bit h=%d, got %d err=%v", h, bit, err)
+	}
+	subs, slots, err := s.StreamSubscribers(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subs) != 0 || slots != 1 {
+		t.Fatalf("stale occupied bit should probe one empty slot, got subs=%v slots=%d", subs, slots)
+	}
+}
+
+func TestHighSlotSubscriptionFoundByScatterGatherPaths(t *testing.T) {
+	store, client := newTestStore(t)
+	ctx := context.Background()
+	const (
+		id    = "sub-0" // FNV-1a % 256 == 200.
+		path  = "events/high-slot"
+		begin = "0000000000000000_0000000000000000"
+		tail  = "0000000000000001_0000000000000000"
+	)
+	if got := subscriptionSlot(id); got != 200 {
+		t.Fatalf("test fixture %q homed to slot %d, want 200", id, got)
+	}
+	if _, err := store.CreateOrConfirm(id, pullWakeCfg(), nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Link(id, path, LinkGlob, begin); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(ids, id) {
+		t.Fatalf("List missed high-slot sub %q in %v", id, ids)
+	}
+	subs, err := store.GetMany([]string{id})
+	if err != nil || len(subs) != 1 || subs[0].ID != id {
+		t.Fatalf("GetMany high-slot = %+v err=%v", subs, err)
+	}
+	if err := client.SRem(ctx, streamSubsKey(subscriptionSlot(id), path), id).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReconcileIndexes(); err != nil {
+		t.Fatal(err)
+	}
+	indexed, slots, err := store.StreamSubscribers(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(indexed) != 1 || indexed[0] != id || slots != 1 {
+		t.Fatalf("reconciled high-slot fan-out = %v slots=%d", indexed, slots)
+	}
+
+	fs := &fakeStreams{tails: map[string]string{path: tail}}
+	fm := &fakeMetrics{}
+	mgr, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/", Metrics: fm})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.OnStreamAppend(path)
+	if fs.count() != 1 {
+		t.Fatalf("OnStreamAppend should reach high-slot subscriber, wake events=%d", fs.count())
+	}
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	if fm.fanOuts != 1 || fm.fanSlots != 1 || fm.fanSubs != 1 {
+		t.Fatalf("FanOut metrics = out=%d slots=%d subs=%d, want 1/1/1", fm.fanOuts, fm.fanSlots, fm.fanSubs)
+	}
+}
+
+func TestLegacySubscriptionMigratesLazilyToSlotHome(t *testing.T) {
+	s, client := newTestStore(t)
+	ctx := context.Background()
+	const (
+		id    = "legacy-sub"
+		path  = "events/legacy"
+		begin = "0000000000000000_0000000000000000"
+	)
+	now := time.Now()
+	createLegacySubForTest(t, s, id, pullWakeCfg(), []StreamLink{{Path: path, LinkType: LinkGlob, AckedOffset: begin}}, now)
+	if err := client.ZAdd(ctx, legacyDueSetKey(), goredis.Z{Score: float64(now.UnixNano()), Member: id}).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	sub, ok, err := s.Get(id)
+	if err != nil || !ok {
+		t.Fatalf("Get legacy after lazy migration = ok %v err %v", ok, err)
+	}
+	if sub.ID != id || len(sub.Links) != 1 || sub.Links[0].Path != path {
+		t.Fatalf("migrated sub = %+v", sub)
+	}
+	h := subscriptionSlot(id)
+	if exists, _ := client.Exists(ctx, legacySubKey(id), legacyLinksKey(id)).Result(); exists != 0 {
+		t.Fatalf("legacy keys should be removed after migration, exists=%d", exists)
+	}
+	if exists, _ := client.Exists(ctx, subKey(id), linksKey(id)).Result(); exists != 2 {
+		t.Fatalf("new slot keys should exist after migration, exists=%d", exists)
+	}
+	if _, err := client.ZScore(ctx, dueSetKey(h), id).Result(); err != nil {
+		t.Fatalf("due member was not migrated to slot %d: %v", h, err)
+	}
+	if err := validateSingleHashTag([]string{subKey(id), linksKey(id), subsKey(h), leaseZKey(h), retryZKey(h), dueSetKey(h), ownershipSlotKey(subscriptionOwnershipSlot(id))}); err != nil {
+		t.Fatalf("migrated key set split across slots: %v", err)
+	}
+	indexed, slots, err := s.StreamSubscribers(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(indexed) != 1 || indexed[0] != id || slots != 1 {
+		t.Fatalf("migrated stream index = %v slots=%d", indexed, slots)
+	}
+}
+
+func TestCompletedMigrationCleansLegacyResidueWithoutOverwritingNewState(t *testing.T) {
+	s, client := newTestStore(t)
+	ctx := context.Background()
+	const (
+		id    = "legacy-residue"
+		path  = "events/legacy-residue"
+		begin = "0000000000000000_0000000000000000"
+	)
+	now := time.Now()
+	createLegacySubForTest(t, s, id, pullWakeCfg(), []StreamLink{{Path: path, LinkType: LinkGlob, AckedOffset: begin}}, now)
+	if _, ok, err := s.Get(id); err != nil || !ok {
+		t.Fatalf("initial migration = ok %v err %v", ok, err)
+	}
+	if err := client.HSet(ctx, subKey(id), "generation", "7").Err(); err != nil {
+		t.Fatal(err)
+	}
+	createLegacySubForTest(t, s, id, pullWakeCfg(), []StreamLink{{Path: path, LinkType: LinkGlob, AckedOffset: begin}}, now)
+
+	sub, ok, err := s.Get(id)
+	if err != nil || !ok {
+		t.Fatalf("residue cleanup migration = ok %v err %v", ok, err)
+	}
+	if sub.Generation != 7 {
+		t.Fatalf("completed migration overwrote new state from stale legacy hash: generation=%d", sub.Generation)
+	}
+	if exists, _ := client.Exists(ctx, legacySubKey(id), legacyLinksKey(id)).Result(); exists != 0 {
+		t.Fatalf("legacy residue should be removed, exists=%d", exists)
+	}
+	if member, err := client.SIsMember(ctx, legacyStreamSubsKey(path), id).Result(); err != nil || member {
+		t.Fatalf("legacy stream index residue member=%v err=%v, want false", member, err)
+	}
+}
+
+func createLegacySubForTest(t *testing.T, s *RedisStore, id string, cfg Config, links []StreamLink, now time.Time) {
+	t.Helper()
+	cfg = NormalizeConfig(cfg)
+	args := make([]any, 0, 10+3*len(links))
+	args = append(
+		args,
+		id, ConfigHash(cfg), nsArg(now),
+		string(cfg.Type), cfg.Pattern, cfg.WebhookURL, cfg.WakeStream,
+		strconv.FormatInt(cfg.LeaseTTLMs, 10), cfg.Description,
+		strconv.Itoa(len(links)),
+	)
+	for _, l := range links {
+		args = append(args, l.Path, string(l.LinkType), l.AckedOffset)
+	}
+	if _, err := s.evalStrings(createSubScript, []string{legacySubKey(id), legacySubsKey(), legacyLinksKey(id)}, args...); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range links {
+		if err := s.client.SAdd(context.Background(), legacyStreamSubsKey(l.Path), id).Err(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

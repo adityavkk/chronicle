@@ -14,10 +14,9 @@ import (
 )
 
 const (
-	// OwnershipSlotCount is deliberately degenerate until #15 homes state into
-	// multiple {__ds:h} slots. The HRW core accepts any slot set, so raising this
-	// is a keyspace migration decision rather than a manager rewrite.
-	OwnershipSlotCount = 1
+	// OwnershipSlotCount matches the immutable subscription state shard count.
+	// Each ownership record is co-located with the subscription slot it fences.
+	OwnershipSlotCount = subSlots
 
 	defaultMemberLeaseTTL        = 9 * time.Second
 	defaultHeartbeatInterval     = 3 * time.Second
@@ -85,9 +84,9 @@ func ownershipSlots(n int) []OwnershipSlot {
 	return out
 }
 
-func subscriptionOwnershipSlot(string) OwnershipSlot {
-	// State remains in the single {__ds} slot until #15.
-	return 0
+func subscriptionOwnershipSlot(id string) OwnershipSlot {
+	slot, _ := NewOwnershipSlot(subscriptionSlot(id))
+	return slot
 }
 
 // OwnerEpoch is the monotonic fence layered above (generation,wake_id).
@@ -167,6 +166,12 @@ const (
 type SlotClaimResult struct {
 	Status SlotClaimStatus
 	Lease  SlotLease
+}
+
+type slotClaimAttempt struct {
+	Slot   OwnershipSlot
+	Result SlotClaimResult
+	Err    error
 }
 
 // Granted reports whether the claim result authorizes this replica to run work.

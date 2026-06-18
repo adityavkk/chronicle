@@ -41,8 +41,9 @@ type Store interface {
 	// link (cursor preserved), else removed and de-indexed.
 	Unlink(id, path string, stillGlob bool) error
 
-	// StreamSubscribers returns the subscription ids linked to a stream.
-	StreamSubscribers(path string) ([]string, error)
+	// StreamSubscribers returns the subscription ids linked to a stream and how
+	// many occupied slot shards were probed.
+	StreamSubscribers(path string) ([]string, int, error)
 
 	// ReconcileIndexes rebuilds the per-stream fan-out index from the canonical
 	// links, re-adding any membership a crash dropped between the link write and

@@ -267,6 +267,9 @@ type fakeMetrics struct {
 	dueOps    map[string]int
 	slotOps   map[string]int
 	fenced    map[string]int
+	fanOuts   int
+	fanSlots  int
+	fanSubs   int
 }
 
 func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
@@ -278,7 +281,14 @@ func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
 func (f *fakeMetrics) WakeDelivery(time.Duration, string) {}
 func (f *fakeMetrics) WakeEvent(time.Duration, string)    {}
 func (f *fakeMetrics) WorkerTick(string, int)             {}
-func (f *fakeMetrics) FanOut(time.Duration, int, int)     {}
+func (f *fakeMetrics) FanOut(_ time.Duration, slotsProbed, subs int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fanOuts++
+	f.fanSlots = slotsProbed
+	f.fanSubs = subs
+}
+
 func (f *fakeMetrics) DueSetMutation(op string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -406,13 +416,20 @@ func TestSlotReconcileOwnsHRWTargetAndHeldLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
+	if _, err := store.CreateOrConfirm("ownership-active-sub", pullWakeCfg(), nil, now); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.HeartbeatMember(ReplicaID("replica-a"), now, time.Second); err != nil {
 		t.Fatal(err)
 	}
 	mgr.slotReconcileOnce(now)
 	owned := mgr.ownedSlots(now)
-	if len(owned) != 1 || owned[0].Owner != ReplicaID("replica-a") || owned[0].Epoch != 1 {
-		t.Fatalf("owned slots = %+v, want one held lease by replica-a epoch 1", owned)
+	wantSlot := subscriptionOwnershipSlot("ownership-active-sub")
+	if len(owned) != 1 {
+		t.Fatalf("owned slots = %d, want 1", len(owned))
+	}
+	if owned[0].Slot != wantSlot || owned[0].Owner != ReplicaID("replica-a") || owned[0].Epoch != 1 {
+		t.Fatalf("owned lease = %+v, want slot %d replica-a epoch 1", owned[0], wantSlot.Int())
 	}
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
@@ -424,7 +441,7 @@ func TestSlotReconcileOwnsHRWTargetAndHeldLease(t *testing.T) {
 func TestDeadMemberAgesOutAndSlotReclaimsAfterLeaseExpiry(t *testing.T) {
 	store, _ := newTestStore(t)
 	fs := &fakeStreams{tails: map[string]string{}}
-	slot, _ := NewOwnershipSlot(0)
+	slot := subscriptionOwnershipSlot("reconcile-on-claim")
 	base := time.Now()
 	_ = store.HeartbeatMember(ReplicaID("replica-a"), base, 500*time.Millisecond)
 	_ = store.HeartbeatMember(ReplicaID("replica-b"), base, 500*time.Millisecond)
@@ -447,7 +464,7 @@ func TestDeadMemberAgesOutAndSlotReclaimsAfterLeaseExpiry(t *testing.T) {
 	if err != nil || !claimed.Claimed {
 		t.Fatalf("precondition claim = %+v err=%v", claimed, err)
 	}
-	if err := store.client.ZRem(context.Background(), leaseZKey, "reconcile-on-claim").Err(); err != nil {
+	if err := store.client.ZRem(context.Background(), testLeaseZKey("reconcile-on-claim"), "reconcile-on-claim").Err(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -468,10 +485,19 @@ func TestDeadMemberAgesOutAndSlotReclaimsAfterLeaseExpiry(t *testing.T) {
 	}
 	mgr.slotReconcileOnce(after)
 	owned := mgr.ownedSlots(after)
-	if len(owned) != 1 || owned[0].Owner != survivor || owned[0].Epoch != 2 {
-		t.Fatalf("reclaimed owned slots = %+v, want survivor %s epoch 2", owned, survivor)
+	var found bool
+	for _, lease := range owned {
+		if lease.Slot == slot {
+			found = true
+			if lease.Owner != survivor || lease.Epoch != 2 {
+				t.Fatalf("reclaimed slot lease = %+v, want survivor %s epoch 2", lease, survivor)
+			}
+		}
 	}
-	if _, err := store.client.ZScore(context.Background(), leaseZKey, "reconcile-on-claim").Result(); err != nil {
+	if !found {
+		t.Fatalf("reclaimed owned slots missing slot %d: %+v", slot.Int(), owned)
+	}
+	if _, err := store.client.ZScore(context.Background(), testLeaseZKey("reconcile-on-claim"), "reconcile-on-claim").Result(); err != nil {
 		t.Fatalf("epoch-bump reconcile did not repair dropped lease schedule: %v", err)
 	}
 }
@@ -524,7 +550,7 @@ func TestDeliverWebhookChecksOwnerBeforePost(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	slot, _ := NewOwnershipSlot(0)
+	slot := subscriptionOwnershipSlot("webhook-stale")
 	stale := claimOwnershipForTest(t, store, slot, ReplicaID("replica-a"), now)
 	_ = claimOwnershipForTest(t, store, slot, ReplicaID("replica-b"), now.Add(2*time.Second))
 	if _, err := store.CreateOrConfirm("webhook-stale", webhookCfg(server.URL), nil, now); err != nil {
@@ -545,8 +571,8 @@ func TestDeliverWebhookChecksOwnerBeforePost(t *testing.T) {
 
 type streamSubscribersErrorStore struct{ *RedisStore }
 
-func (s streamSubscribersErrorStore) StreamSubscribers(string) ([]string, error) {
-	return nil, errors.New("stream subscriber index unavailable")
+func (s streamSubscribersErrorStore) StreamSubscribers(string) ([]string, int, error) {
+	return nil, 0, errors.New("stream subscriber index unavailable")
 }
 
 func TestOnStreamAppendErrorTriggersOneReconcile(t *testing.T) {
@@ -600,10 +626,10 @@ func TestReconcileLeasesRestoresDroppedLeaseAndDueFromDurableState(t *testing.T)
 	if sub.Phase != PhaseLive || sub.LeaseUntilNs == 0 {
 		t.Fatalf("precondition: expected live lease in durable hash, got %+v", sub)
 	}
-	if err := client.ZRem(context.Background(), leaseZKey, id).Err(); err != nil {
+	if err := client.ZRem(context.Background(), testLeaseZKey(id), id).Err(); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.ZRem(context.Background(), dueSetKey(), id).Err(); err != nil {
+	if err := client.ZRem(context.Background(), testDueSetKey(id), id).Err(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -614,14 +640,14 @@ func TestReconcileLeasesRestoresDroppedLeaseAndDueFromDurableState(t *testing.T)
 	}
 	mgr.RunRedisReconnect()
 
-	leaseScore, err := client.ZScore(context.Background(), leaseZKey, id).Result()
+	leaseScore, err := client.ZScore(context.Background(), testLeaseZKey(id), id).Result()
 	if err != nil {
 		t.Fatalf("missing repaired lease schedule member: %v", err)
 	}
 	if math.Abs(leaseScore-float64(sub.LeaseUntilNs)) > float64(time.Millisecond) {
 		t.Fatalf("lease schedule score = %.0f, want durable lease_until_ns %d", leaseScore, sub.LeaseUntilNs)
 	}
-	members := dueMembers(t, client)
+	members := dueMembers(t, client, id)
 	if len(members) != 1 || members[0] != id {
 		t.Fatalf("pending durable cursor state should re-derive due entry, got %v", members)
 	}
@@ -664,10 +690,10 @@ func TestRedisReconnectRepairsDroppedNonDefaultClaimShardLease(t *testing.T) {
 	if err != nil || deadline == 0 {
 		t.Fatalf("durable shard lease deadline = %q err=%v", deadlineRaw, err)
 	}
-	if err := client.ZRem(context.Background(), leaseZKey, ref.Member()).Err(); err != nil {
+	if err := client.ZRem(context.Background(), testLeaseZKey(id), ref.Member()).Err(); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.ZRem(context.Background(), dueSetKey(), id).Err(); err != nil {
+	if err := client.ZRem(context.Background(), testDueSetKey(id), id).Err(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -678,14 +704,14 @@ func TestRedisReconnectRepairsDroppedNonDefaultClaimShardLease(t *testing.T) {
 	}
 	mgr.RunRedisReconnect()
 
-	leaseScore, err := client.ZScore(context.Background(), leaseZKey, ref.Member()).Result()
+	leaseScore, err := client.ZScore(context.Background(), testLeaseZKey(id), ref.Member()).Result()
 	if err != nil {
 		t.Fatalf("missing repaired shard lease member %q: %v", ref.Member(), err)
 	}
 	if math.Abs(leaseScore-float64(deadline)) > float64(time.Millisecond) {
 		t.Fatalf("shard lease schedule score = %.0f, want durable lease_until_ns %d", leaseScore, deadline)
 	}
-	members := dueMembers(t, client)
+	members := dueMembers(t, client, id)
 	if len(members) != 1 || members[0] != id {
 		t.Fatalf("pending durable cursor state should re-derive due entry, got %v", members)
 	}
@@ -695,7 +721,7 @@ func TestRedisReconnectRepairsDroppedNonDefaultClaimShardLease(t *testing.T) {
 	if sub, _, _ := store.Get(id); sub.Phase != PhaseIdle {
 		t.Fatalf("live sharded lease should leave legacy shard idle, got %q", sub.Phase)
 	}
-	if _, err := client.ZScore(context.Background(), leaseZKey, id).Result(); !errors.Is(err, goredis.Nil) {
+	if _, err := client.ZScore(context.Background(), testLeaseZKey(id), id).Result(); !errors.Is(err, goredis.Nil) {
 		t.Fatalf("reconnect should not create legacy shard lease member while non-default shard is live: %v", err)
 	}
 }
@@ -717,7 +743,7 @@ func TestDueWorkerFiresOwedIdleSubscription(t *testing.T) {
 	fs.mu.Lock()
 	fs.tails["events/1"] = "0000000000000001_0000000000000000"
 	fs.mu.Unlock()
-	if err := client.ZAdd(context.Background(), dueSetKey(), goredis.Z{
+	if err := client.ZAdd(context.Background(), testDueSetKey("s1"), goredis.Z{
 		Score:  float64(now.Add(-time.Second).UnixNano()),
 		Member: "s1",
 	}).Err(); err != nil {

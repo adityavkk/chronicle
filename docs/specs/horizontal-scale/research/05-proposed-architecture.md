@@ -650,3 +650,29 @@ tooling, so they are sequenced against the build, not all "run first":
 **Experiment 6 reproduces the actual 12-replica collapse (claim contention) and should be characterized first; experiment 1 gates the premise (sweep); 2 gates the rebuild (slot-homing viability); 3 sizes the
 due-set step; 4–5 prove the liveness and DR claims this doc rests on** (and share their
 tooling with 07's L-series).
+
+## Implementation status — #15 local slot-homing slice
+
+As of 2026-06-18 on `adityavkk/hs-15-slot-homing`, the local implementation of Move 1
+has landed behind the fixed `S=256` keyspace:
+
+- subscription state, links, per-slot `subs`, lease/retry/due schedules, stream fan-out
+  sets, and owner slot records are tagged as `ds:{__ds:h}:...`, where
+  `h = fnv32a(subId) % 256`;
+- `List`, `GetMany`, `ReconcileIndexes`, and `StreamSubscribers` scatter/gather across
+  the slot-homed keyspace instead of reading only slot 0;
+- `StreamSubscribers` uses the `ds:{__ds-occ}:streamslots:<path>` occupied bitmap and
+  probes only set bits; index repair sets missing bits and deindex never clears them;
+- old `ds:{__ds}` subscriptions are lazily migrated by copying the whole per-subscription
+  key set to `ds:{__ds:h}` before any Lua mutation uses it, then deleting the old sub/link
+  keys. A new-hash migration-complete marker makes cleanup idempotent, so stale legacy
+  residue is removed without replaying old fields over newer slot-homed state;
+- ownership reconciliation claims only occupied subscription slots, keeping owner records
+  co-located with `ds:{__ds:h}` while avoiding 256 empty-slot claim scripts in idle stacks;
+  and
+- `FanOut(dur, slotsProbed, subs)` is wired on the real `OnStreamAppend` path.
+
+Local Redis/unit evidence is recorded in `docs/jepsen/results.md` under "#15 local
+slot-homing evidence." Gate #2 remains open: this worker did not run the required real
+multi-node Redis Cluster/GKE fan-out p99 sweep at `S=2/4/8/256`, so this document's
+shipping decision is still "measure before merge" rather than "gate green."

@@ -291,8 +291,8 @@ func (m *Manager) OnStreamCreated(path string) {
 // the durability backstop if this is lost to a crash (docs/research/09 §2).
 func (m *Manager) OnStreamAppend(path string) {
 	start := time.Now()
-	ids, err := m.store.StreamSubscribers(path)
-	m.metrics.FanOut(time.Since(start), 1, len(ids))
+	ids, slotsProbed, err := m.store.StreamSubscribers(path)
+	m.metrics.FanOut(time.Since(start), slotsProbed, len(ids))
 	if err != nil {
 		m.log.Warn("webhook: stream subscribers", "path", path, "error", err)
 		m.reconcile(recoveryScopeAppendError)
@@ -305,7 +305,7 @@ func (m *Manager) OnStreamAppend(path string) {
 
 // OnStreamDeleted unlinks a deleted stream from all its subscribers.
 func (m *Manager) OnStreamDeleted(path string) {
-	ids, err := m.store.StreamSubscribers(path)
+	ids, _, err := m.store.StreamSubscribers(path)
 	if err != nil {
 		return
 	}
@@ -588,16 +588,38 @@ func (m *Manager) slotReconcileLoop() {
 }
 
 func (m *Manager) slotReconcileOnce(now time.Time) {
+	targetSlots, err := m.ownershipTargetSlots()
+	if err != nil {
+		m.log.Warn("webhook: list subscription ownership slots", "error", err)
+		return
+	}
+	if len(targetSlots) == 0 {
+		m.clearOwnershipSlots()
+		return
+	}
 	members, err := m.store.LiveMembers(now)
 	if err != nil {
 		m.log.Warn("webhook: list ownership members", "error", err)
 		return
 	}
-	targeted := HRWTargetSlots(members, m.replicaID, ownershipSlots(OwnershipSlotCount))
+	targeted := HRWTargetSlots(members, m.replicaID, targetSlots)
+	attempts, err := m.claimTargetSlots(targeted, now)
+	if err != nil {
+		m.log.Warn("webhook: claim ownership slots", "error", err)
+		return
+	}
 	targetSet := make(map[OwnershipSlot]bool, len(targeted))
-	for _, slot := range targeted {
+	claimedAny := false
+	epochBumped := false
+	for _, attempt := range attempts {
+		select {
+		case <-m.stop:
+			return
+		default:
+		}
+		slot := attempt.Slot
 		targetSet[slot] = true
-		res, err := m.store.ClaimSlot(slot, m.replicaID, now, m.slotLeaseTTL)
+		res, err := attempt.Result, attempt.Err
 		if err != nil {
 			m.log.Warn("webhook: claim ownership slot", "slot", slot.Int(), "error", err)
 			continue
@@ -609,9 +631,9 @@ func (m *Manager) slotReconcileOnce(now time.Time) {
 			m.ownershipMu.Unlock()
 			if res.Status == SlotClaimed {
 				if res.Lease.Epoch > 1 {
-					m.reconcile(recoveryScopeEpochBump)
+					epochBumped = true
 				}
-				m.reconcile(recoveryScopeNewOwnerCAS)
+				claimedAny = true
 			}
 		} else if res.Status == SlotBusy {
 			m.ownershipMu.Lock()
@@ -628,6 +650,60 @@ func (m *Manager) slotReconcileOnce(now time.Time) {
 	}
 	m.targetSlots = targetSet
 	m.ownershipMu.Unlock()
+	if epochBumped {
+		m.reconcile(recoveryScopeEpochBump)
+	} else if claimedAny {
+		m.reconcile(recoveryScopeNewOwnerCAS)
+	}
+}
+
+type subscriptionPresence interface {
+	HasSubscriptions() (bool, error)
+}
+
+type subscriptionSlotLister interface {
+	SubscriptionSlots() ([]OwnershipSlot, error)
+}
+
+type batchSlotClaimer interface {
+	ClaimSlots(slots []OwnershipSlot, replica ReplicaID, now time.Time, ttl time.Duration) ([]slotClaimAttempt, error)
+}
+
+func (m *Manager) ownershipTargetSlots() ([]OwnershipSlot, error) {
+	if lister, ok := m.store.(subscriptionSlotLister); ok {
+		return lister.SubscriptionSlots()
+	}
+	presence, ok := m.store.(subscriptionPresence)
+	if !ok {
+		return ownershipSlots(OwnershipSlotCount), nil
+	}
+	hasSubscriptions, err := presence.HasSubscriptions()
+	if err != nil || !hasSubscriptions {
+		return nil, err
+	}
+	return ownershipSlots(OwnershipSlotCount), nil
+}
+
+func (m *Manager) clearOwnershipSlots() {
+	m.ownershipMu.Lock()
+	defer m.ownershipMu.Unlock()
+	for slot := range m.heldSlots {
+		m.metrics.SlotOwnership("RELEASED", slot.Int())
+		delete(m.heldSlots, slot)
+	}
+	clear(m.targetSlots)
+}
+
+func (m *Manager) claimTargetSlots(slots []OwnershipSlot, now time.Time) ([]slotClaimAttempt, error) {
+	if batch, ok := m.store.(batchSlotClaimer); ok {
+		return batch.ClaimSlots(slots, m.replicaID, now, m.slotLeaseTTL)
+	}
+	out := make([]slotClaimAttempt, 0, len(slots))
+	for _, slot := range slots {
+		result, err := m.store.ClaimSlot(slot, m.replicaID, now, m.slotLeaseTTL)
+		out = append(out, slotClaimAttempt{Slot: slot, Result: result, Err: err})
+	}
+	return out, nil
 }
 
 func (m *Manager) ownedSlots(now time.Time) []SlotLease {
@@ -732,7 +808,9 @@ func (m *Manager) dueOnceForFence(now time.Time, slot OwnershipSlot, fence Owner
 			fired++
 		}
 	}
-	m.metrics.DueWorkerTick(time.Since(start), fired)
+	if len(ids) > 0 {
+		m.metrics.DueWorkerTick(time.Since(start), fired)
+	}
 	return fired
 }
 
@@ -976,7 +1054,12 @@ func (m *Manager) RunRedisReconnect() { m.reconcile(recoveryScopeReconnect) }
 
 // RunDue runs one due-worker pass immediately (used by tests and local V&V).
 func (m *Manager) RunDue() int {
-	return m.dueOnceForFence(time.Now(), subscriptionOwnershipSlot(""), NoOwnerFence())
+	now := time.Now()
+	fired := 0
+	for _, slot := range ownershipSlots(OwnershipSlotCount) {
+		fired += m.dueOnceForFence(now, slot, NoOwnerFence())
+	}
+	return fired
 }
 
 func (m *Manager) hasPendingWork(id string) bool {

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -14,9 +15,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// RedisStore implements Store on Redis 8, persisting the subscription control
-// plane under the {__ds} hash tag. It shares the go-redis client with the stream
-// store (chronicle uses one Redis), and does not own it: Close is a no-op.
+// RedisStore implements Store on Redis 8, persisting each subscription-control
+// shard under its {__ds:h} hash tag. It shares the go-redis client with the
+// stream store (chronicle uses one Redis), and does not own it: Close is a no-op.
 type RedisStore struct {
 	client redis.UniversalClient
 }
@@ -31,6 +32,174 @@ func NewRedisStore(client redis.UniversalClient) *RedisStore {
 }
 
 func (s *RedisStore) ctx() context.Context { return context.Background() }
+
+const slotMigrationCompleteField = "_slot_migration_complete"
+
+type subscriptionKeys struct {
+	slot     int
+	sub      string
+	links    string
+	subs     string
+	lease    string
+	retry    string
+	due      string
+	oldSub   string
+	oldLinks string
+	oldSubs  string
+	oldLease string
+	oldRetry string
+	oldDue   string
+}
+
+func keysForSubscription(id string) subscriptionKeys {
+	h := subscriptionSlot(id)
+	return subscriptionKeys{
+		slot:     h,
+		sub:      subKeyForSlot(id, h),
+		links:    linksKeyForSlot(id, h),
+		subs:     subsKey(h),
+		lease:    leaseZKey(h),
+		retry:    retryZKey(h),
+		due:      dueSetKey(h),
+		oldSub:   legacySubKey(id),
+		oldLinks: legacyLinksKey(id),
+		oldSubs:  legacySubsKey(),
+		oldLease: legacyLeaseZKey(),
+		oldRetry: legacyRetryZKey(),
+		oldDue:   legacyDueSetKey(),
+	}
+}
+
+func scheduleKeysForSlot(slot OwnershipSlot) (lease, retry, due string) {
+	h := slot.Int()
+	return leaseZKey(h), retryZKey(h), dueSetKey(h)
+}
+
+// migrateSubscription lazily copies one legacy ds:{__ds} subscription into its
+// new ds:{__ds:h} home before a per-subscription operation runs. It writes the
+// complete new key set first, including schedules and fan-out bitmap entries,
+// then removes the old key set; no Lua script is ever invoked with keys from
+// both homes.
+func (s *RedisStore) migrateSubscription(id string) error {
+	k := keysForSubscription(id)
+	ctx := s.ctx()
+	complete, err := s.client.HGet(ctx, k.sub, slotMigrationCompleteField).Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return err
+	}
+	if complete == "1" {
+		exists, err := s.client.Exists(ctx, k.oldSub).Result()
+		if err != nil {
+			return err
+		}
+		if exists == 0 {
+			return nil
+		}
+	}
+	fields, err := s.client.HGetAll(ctx, k.oldSub).Result()
+	if err != nil {
+		return err
+	}
+	if len(fields) == 0 {
+		inLegacySet, err := s.client.SIsMember(ctx, k.oldSubs, id).Result()
+		if err != nil {
+			return err
+		}
+		if !inLegacySet {
+			return nil
+		}
+		return s.cleanupLegacySubscription(id, nil)
+	}
+	links, err := s.client.HGetAll(ctx, k.oldLinks).Result()
+	if err != nil {
+		return err
+	}
+	if complete == "1" {
+		return s.cleanupLegacySubscription(id, mapKeys(links))
+	}
+	pipe := s.client.Pipeline()
+	pipe.HSet(ctx, k.sub, stringMapArgs(fields)...)
+	pipe.SAdd(ctx, k.subs, id)
+	if len(links) > 0 {
+		pipe.HSet(ctx, k.links, stringMapArgs(links)...)
+		for path := range links {
+			pipe.SAdd(ctx, streamSubsKey(k.slot, path), id)
+			pipe.SetBit(ctx, occupiedStreamSlotsKey(path), int64(k.slot), 1)
+		}
+	}
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.copyLegacyScheduleMembers(id, k); err != nil {
+		return err
+	}
+	if err := s.client.HSet(ctx, k.sub, slotMigrationCompleteField, "1").Err(); err != nil {
+		return err
+	}
+	return s.cleanupLegacySubscription(id, mapKeys(links))
+}
+
+func stringMapArgs(m map[string]string) []any {
+	args := make([]any, 0, 2*len(m))
+	for k, v := range m {
+		args = append(args, k, v)
+	}
+	return args
+}
+
+func mapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func legacyLeaseMembers(id string) []string {
+	members := make([]string, 0, ClaimShardCount)
+	members = append(members, id)
+	for n := 1; n < ClaimShardCount; n++ {
+		shard, _ := NewClaimShard(n)
+		members = append(members, NewLeaseRef(id, shard).Member())
+	}
+	return members
+}
+
+func (s *RedisStore) copyLegacyScheduleMembers(id string, k subscriptionKeys) error {
+	ctx := s.ctx()
+	for _, member := range legacyLeaseMembers(id) {
+		score, err := s.client.ZScore(ctx, k.oldLease, member).Result()
+		if errors.Is(err, redis.Nil) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := s.client.ZAdd(ctx, k.lease, redis.Z{Score: score, Member: member}).Err(); err != nil {
+			return err
+		}
+	}
+	for _, spec := range []struct {
+		from string
+		to   string
+	}{
+		{k.oldRetry, k.retry},
+		{k.oldDue, k.due},
+	} {
+		score, err := s.client.ZScore(ctx, spec.from, id).Result()
+		if errors.Is(err, redis.Nil) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := s.client.ZAdd(ctx, spec.to, redis.Z{Score: score, Member: id}).Err(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func nsArg(t time.Time) string { return strconv.FormatInt(t.UnixNano(), 10) }
 
@@ -50,10 +219,17 @@ func fenceArgs(fence OwnershipFence) (string, string) {
 // evalStrings runs a script and decodes its reply as a slice of strings, the
 // fixed reply shape of every subscription script.
 func (s *RedisStore) evalStrings(script *redis.Script, keys []string, args ...any) ([]string, error) {
+	if err := validateSingleHashTag(keys); err != nil {
+		return nil, err
+	}
 	raw, err := script.Run(s.ctx(), s.client, keys, args...).Result()
 	if err != nil {
 		return nil, err
 	}
+	return decodeScriptStrings(raw)
+}
+
+func decodeScriptStrings(raw any) ([]string, error) {
 	arr, ok := raw.([]any)
 	if !ok {
 		return nil, fmt.Errorf("webhook: unexpected script reply %T", raw)
@@ -77,6 +253,10 @@ func (s *RedisStore) evalStrings(script *redis.Script, keys []string, args ...an
 // CreateOrConfirm seeds the create_sub script with the config fields and the
 // explicit links at their current tails.
 func (s *RedisStore) CreateOrConfirm(id string, cfg Config, links []StreamLink, now time.Time) (CreateStatus, error) {
+	if err := s.migrateSubscription(id); err != nil {
+		return 0, err
+	}
+	k := keysForSubscription(id)
 	cfg = NormalizeConfig(cfg)
 	args := make([]any, 0, 10+3*len(links))
 	args = append(
@@ -89,12 +269,15 @@ func (s *RedisStore) CreateOrConfirm(id string, cfg Config, links []StreamLink, 
 	for _, l := range links {
 		args = append(args, l.Path, string(l.LinkType), l.AckedOffset)
 	}
-	reply, err := s.evalStrings(createSubScript, []string{subKey(id), subsKey, linksKey(id)}, args...)
+	reply, err := s.evalStrings(createSubScript, []string{k.sub, k.subs, k.links}, args...)
 	if err != nil {
 		return 0, err
 	}
 	switch reply[0] {
 	case "CREATED":
+		if err := s.client.HSet(s.ctx(), k.sub, slotMigrationCompleteField, "1").Err(); err != nil {
+			return 0, err
+		}
 		for _, l := range links {
 			if err := s.indexStream(l.Path, id); err != nil {
 				return 0, err
@@ -102,6 +285,9 @@ func (s *RedisStore) CreateOrConfirm(id string, cfg Config, links []StreamLink, 
 		}
 		return CreateCreated, nil
 	case "MATCHED":
+		if err := s.client.HSet(s.ctx(), k.sub, slotMigrationCompleteField, "1").Err(); err != nil {
+			return 0, err
+		}
 		return CreateMatched, nil
 	case "CONFLICT":
 		return CreateConflict, nil
@@ -112,9 +298,13 @@ func (s *RedisStore) CreateOrConfirm(id string, cfg Config, links []StreamLink, 
 
 // Get hydrates a subscription and its links.
 func (s *RedisStore) Get(id string) (Subscription, bool, error) {
+	if err := s.migrateSubscription(id); err != nil {
+		return Subscription{}, false, err
+	}
+	k := keysForSubscription(id)
 	pipe := s.client.Pipeline()
-	subCmd := pipe.HGetAll(s.ctx(), subKey(id))
-	linkCmd := pipe.HGetAll(s.ctx(), linksKey(id))
+	subCmd := pipe.HGetAll(s.ctx(), k.sub)
+	linkCmd := pipe.HGetAll(s.ctx(), k.links)
 	if _, err := pipe.Exec(s.ctx()); err != nil {
 		return Subscription{}, false, err
 	}
@@ -137,12 +327,18 @@ func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 			end = len(ids)
 		}
 		batch := ids[start:end]
+		for _, id := range batch {
+			if err := s.migrateSubscription(id); err != nil {
+				return nil, err
+			}
+		}
 		pipe := s.client.Pipeline()
 		subCmds := make([]*redis.MapStringStringCmd, len(batch))
 		linkCmds := make([]*redis.MapStringStringCmd, len(batch))
 		for i, id := range batch {
-			subCmds[i] = pipe.HGetAll(s.ctx(), subKey(id))
-			linkCmds[i] = pipe.HGetAll(s.ctx(), linksKey(id))
+			k := keysForSubscription(id)
+			subCmds[i] = pipe.HGetAll(s.ctx(), k.sub)
+			linkCmds[i] = pipe.HGetAll(s.ctx(), k.links)
 		}
 		if _, err := pipe.Exec(s.ctx()); err != nil {
 			return nil, err
@@ -161,12 +357,16 @@ func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 // Delete removes the subscription and de-indexes its streams. Links are read
 // first so the fan-out entries can be cleaned up.
 func (s *RedisStore) Delete(id string) error {
-	links, err := s.client.HKeys(s.ctx(), linksKey(id)).Result()
+	if err := s.migrateSubscription(id); err != nil {
+		return err
+	}
+	k := keysForSubscription(id)
+	links, err := s.client.HKeys(s.ctx(), k.links).Result()
 	if err != nil {
 		return err
 	}
 	if _, err := s.evalStrings(deleteSubScript,
-		[]string{subKey(id), subsKey, linksKey(id), leaseZKey, retryZKey, dueSetKey()}, id); err != nil {
+		[]string{k.sub, k.subs, k.links, k.lease, k.retry, k.due}, id); err != nil {
 		return err
 	}
 	for _, path := range links {
@@ -180,21 +380,106 @@ func (s *RedisStore) Delete(id string) error {
 		shardedMembers = append(shardedMembers, NewLeaseRef(id, shard).Member())
 	}
 	if len(shardedMembers) > 0 {
-		if err := s.client.ZRem(s.ctx(), leaseZKey, shardedMembers...).Err(); err != nil {
+		if err := s.client.ZRem(s.ctx(), k.lease, shardedMembers...).Err(); err != nil {
 			return err
 		}
 	}
+	_ = s.cleanupLegacySubscription(id, links)
 	return nil
 }
 
 // List returns all subscription ids.
 func (s *RedisStore) List() ([]string, error) {
-	return s.client.SMembers(s.ctx(), subsKey).Result()
+	ctx := s.ctx()
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.StringSliceCmd, subSlots)
+	for h := 0; h < subSlots; h++ {
+		cmds[h] = pipe.SMembers(ctx, subsKey(h))
+	}
+	oldCmd := pipe.SMembers(ctx, legacySubsKey())
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	for _, cmd := range cmds {
+		for _, id := range cmd.Val() {
+			seen[id] = struct{}{}
+		}
+	}
+	for _, id := range oldCmd.Val() {
+		if err := s.migrateSubscription(id); err != nil {
+			return nil, err
+		}
+		if err := s.cleanupLegacySubscription(id, nil); err != nil {
+			return nil, err
+		}
+		if exists, err := s.client.Exists(ctx, subKey(id)).Result(); err != nil {
+			return nil, err
+		} else if exists > 0 {
+			seen[id] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+// SubscriptionSlots returns the occupied subscription state slots.
+func (s *RedisStore) SubscriptionSlots() ([]OwnershipSlot, error) {
+	ctx := s.ctx()
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.IntCmd, subSlots)
+	for h := 0; h < subSlots; h++ {
+		cmds[h] = pipe.SCard(ctx, subsKey(h))
+	}
+	oldCmd := pipe.SMembers(ctx, legacySubsKey())
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, err
+	}
+	seen := make(map[int]struct{})
+	for h, cmd := range cmds {
+		if cmd.Val() > 0 {
+			seen[h] = struct{}{}
+		}
+	}
+	for _, id := range oldCmd.Val() {
+		if err := s.migrateSubscription(id); err != nil {
+			return nil, err
+		}
+		if err := s.cleanupLegacySubscription(id, nil); err != nil {
+			return nil, err
+		}
+		if exists, err := s.client.Exists(ctx, subKey(id)).Result(); err != nil {
+			return nil, err
+		} else if exists > 0 {
+			seen[subscriptionSlot(id)] = struct{}{}
+		}
+	}
+	out := make([]OwnershipSlot, 0, len(seen))
+	for h := range seen {
+		slot, _ := NewOwnershipSlot(h)
+		out = append(out, slot)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+// HasSubscriptions reports whether any legacy or slot-homed subscription exists.
+func (s *RedisStore) HasSubscriptions() (bool, error) {
+	slots, err := s.SubscriptionSlots()
+	return len(slots) > 0, err
 }
 
 // Link links a stream and maintains the fan-out index.
 func (s *RedisStore) Link(id, path string, linkType LinkType, offset string) error {
-	if _, err := s.evalStrings(linkStreamScript, []string{linksKey(id)}, path, string(linkType), offset); err != nil {
+	if err := s.migrateSubscription(id); err != nil {
+		return err
+	}
+	k := keysForSubscription(id)
+	if _, err := s.evalStrings(linkStreamScript, []string{k.links}, path, string(linkType), offset); err != nil {
 		return err
 	}
 	return s.indexStream(path, id)
@@ -202,11 +487,15 @@ func (s *RedisStore) Link(id, path string, linkType LinkType, offset string) err
 
 // Unlink removes an explicit link; de-indexes only when the link is gone.
 func (s *RedisStore) Unlink(id, path string, stillGlob bool) error {
+	if err := s.migrateSubscription(id); err != nil {
+		return err
+	}
+	k := keysForSubscription(id)
 	flag := "0"
 	if stillGlob {
 		flag = "1"
 	}
-	reply, err := s.evalStrings(unlinkStreamScript, []string{linksKey(id)}, path, flag)
+	reply, err := s.evalStrings(unlinkStreamScript, []string{k.links}, path, flag)
 	if err != nil {
 		return err
 	}
@@ -216,9 +505,48 @@ func (s *RedisStore) Unlink(id, path string, stillGlob bool) error {
 	return nil
 }
 
-// StreamSubscribers returns the subscription ids linked to a stream.
-func (s *RedisStore) StreamSubscribers(path string) ([]string, error) {
-	return s.client.SMembers(s.ctx(), streamSubsKey(path)).Result()
+// StreamSubscribers returns the subscription ids linked to a stream and how
+// many occupied slot shards were probed.
+func (s *RedisStore) StreamSubscribers(path string) ([]string, int, error) {
+	slots, err := s.occupiedSlots(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	ctx := s.ctx()
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.StringSliceCmd, len(slots))
+	for i, h := range slots {
+		cmds[i] = pipe.SMembers(ctx, streamSubsKey(h, path))
+	}
+	oldCmd := pipe.SMembers(ctx, legacyStreamSubsKey(path))
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, len(slots), err
+	}
+	seen := make(map[string]struct{})
+	for _, cmd := range cmds {
+		for _, id := range cmd.Val() {
+			seen[id] = struct{}{}
+		}
+	}
+	for _, id := range oldCmd.Val() {
+		if err := s.migrateSubscription(id); err != nil {
+			return nil, len(slots), err
+		}
+		if err := s.cleanupLegacySubscription(id, []string{path}); err != nil {
+			return nil, len(slots), err
+		}
+		if exists, err := s.client.Exists(ctx, subKey(id)).Result(); err != nil {
+			return nil, len(slots), err
+		} else if exists > 0 {
+			seen[id] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	slices.Sort(out)
+	return out, len(slots), nil
 }
 
 // ReconcileIndexes rebuilds the per-stream fan-out index from the canonical
@@ -230,17 +558,18 @@ func (s *RedisStore) StreamSubscribers(path string) ([]string, error) {
 // re-adding the missing entry is the correctness-critical part.
 func (s *RedisStore) ReconcileIndexes() error {
 	ctx := s.ctx()
-	ids, err := s.client.SMembers(ctx, subsKey).Result()
+	ids, err := s.List()
 	if err != nil {
 		return err
 	}
 	for _, id := range ids {
-		paths, err := s.client.HKeys(ctx, linksKey(id)).Result()
+		k := keysForSubscription(id)
+		paths, err := s.client.HKeys(ctx, k.links).Result()
 		if err != nil {
 			return err
 		}
 		for _, path := range paths {
-			if err := s.client.SAdd(ctx, streamSubsKey(path), id).Err(); err != nil {
+			if err := s.indexStream(path, id); err != nil {
 				return err
 			}
 		}
@@ -285,6 +614,43 @@ func (s *RedisStore) ClaimSlot(slot OwnershipSlot, replica ReplicaID, now time.T
 	if err != nil {
 		return SlotClaimResult{}, err
 	}
+	return parseSlotClaimResult(slot, reply)
+}
+
+// ClaimSlots pipelines ownership slot CAS attempts for the occupied slots this
+// replica should own.
+func (s *RedisStore) ClaimSlots(slots []OwnershipSlot, replica ReplicaID, now time.Time, ttl time.Duration) ([]slotClaimAttempt, error) {
+	ctx := s.ctx()
+	if err := claimShardScript.Load(ctx, s.client).Err(); err != nil {
+		return nil, err
+	}
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.Cmd, len(slots))
+	for i, slot := range slots {
+		cmds[i] = claimShardScript.Run(ctx, pipe, []string{ownershipSlotKey(slot)}, replica.String(), nsArg(now), msArg(ttl))
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, err
+	}
+	out := make([]slotClaimAttempt, 0, len(slots))
+	for i, cmd := range cmds {
+		raw, err := cmd.Result()
+		if err != nil {
+			out = append(out, slotClaimAttempt{Slot: slots[i], Err: err})
+			continue
+		}
+		reply, err := decodeScriptStrings(raw)
+		if err != nil {
+			out = append(out, slotClaimAttempt{Slot: slots[i], Err: err})
+			continue
+		}
+		result, err := parseSlotClaimResult(slots[i], reply)
+		out = append(out, slotClaimAttempt{Slot: slots[i], Result: result, Err: err})
+	}
+	return out, nil
+}
+
+func parseSlotClaimResult(slot OwnershipSlot, reply []string) (SlotClaimResult, error) {
 	if len(reply) < 4 {
 		return SlotClaimResult{}, fmt.Errorf("claim_shard: short reply %v", reply)
 	}
@@ -328,21 +694,79 @@ func (s *RedisStore) CheckOwner(fence OwnershipFence) (CheckOwnerStatus, error) 
 }
 
 func (s *RedisStore) indexStream(path, id string) error {
-	return s.client.SAdd(s.ctx(), streamSubsKey(path), id).Err()
+	k := keysForSubscription(id)
+	ctx := s.ctx()
+	pipe := s.client.Pipeline()
+	pipe.SAdd(ctx, streamSubsKey(k.slot, path), id)
+	pipe.SetBit(ctx, occupiedStreamSlotsKey(path), int64(k.slot), 1)
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 func (s *RedisStore) deindexStream(path, id string) error {
-	return s.client.SRem(s.ctx(), streamSubsKey(path), id).Err()
+	k := keysForSubscription(id)
+	return s.client.SRem(s.ctx(), streamSubsKey(k.slot, path), id).Err()
+}
+
+func (s *RedisStore) occupiedSlots(path string) ([]int, error) {
+	raw, err := s.client.Get(s.ctx(), occupiedStreamSlotsKey(path)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]int, 0, subSlots)
+	for h := 0; h < subSlots; h++ {
+		byteIdx := h / 8
+		if byteIdx >= len(raw) {
+			break
+		}
+		mask := byte(1 << (7 - uint(h%8)))
+		if raw[byteIdx]&mask != 0 {
+			out = append(out, h)
+		}
+	}
+	return out, nil
+}
+
+func (s *RedisStore) cleanupLegacySubscription(id string, paths []string) error {
+	ctx := s.ctx()
+	k := keysForSubscription(id)
+	pipe := s.client.Pipeline()
+	pipe.Del(ctx, k.oldSub, k.oldLinks)
+	pipe.SRem(ctx, k.oldSubs, id)
+	leaseMembers := stringSliceToAny(legacyLeaseMembers(id))
+	pipe.ZRem(ctx, k.oldLease, leaseMembers...)
+	pipe.ZRem(ctx, k.oldRetry, id)
+	pipe.ZRem(ctx, k.oldDue, id)
+	for _, path := range paths {
+		pipe.SRem(ctx, legacyStreamSubsKey(path), id)
+	}
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+func stringSliceToAny(values []string) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
 }
 
 // ArmWake issues a wake if idle.
 func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, fence OwnershipFence) (ArmResult, error) {
+	if err := s.migrateSubscription(id); err != nil {
+		return ArmResult{}, err
+	}
+	k := keysForSubscription(id)
 	arm := "0"
 	if armLease {
 		arm = "1"
 	}
 	ownerID, ownerEpoch := fenceArgs(fence)
-	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey, dueSetKey(), fenceKey(fence, subKey(id))},
+	reply, err := s.evalStrings(armWakeScript, []string{k.sub, k.lease, k.due, fenceKey(fence, k.sub)},
 		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID, ownerID, ownerEpoch)
 	if err != nil {
 		return ArmResult{}, err
@@ -365,8 +789,12 @@ func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLeas
 
 // Claim runs the pull-wake CAS claim.
 func (s *RedisStore) Claim(id string, mode ClaimMode, shard ClaimShard, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+	if err := s.migrateSubscription(id); err != nil {
+		return ClaimResult{}, err
+	}
+	k := keysForSubscription(id)
 	ref := NewLeaseRef(id, shard)
-	reply, err := s.evalStrings(claimScript, []string{subKey(id), leaseZKey},
+	reply, err := s.evalStrings(claimScript, []string{k.sub, k.lease},
 		id, worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID, shard.String(), ref.Member(), mode.String())
 	if err != nil {
 		return ClaimResult{}, err
@@ -389,6 +817,10 @@ func (s *RedisStore) Claim(id string, mode ClaimMode, shard ClaimShard, worker, 
 
 // Ack fences, applies acks, and releases or heartbeats.
 func (s *RedisStore) Ack(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, fence OwnershipFence) (string, error) {
+	if err := s.migrateSubscription(id); err != nil {
+		return "", err
+	}
+	k := keysForSubscription(id)
 	doneArg := "0"
 	if done {
 		doneArg = "1"
@@ -406,7 +838,7 @@ func (s *RedisStore) Ack(id string, mode ClaimMode, shard ClaimShard, reqGenerat
 		args = append(args, a.Stream, a.Offset)
 	}
 	reply, err := s.evalStrings(ackScript,
-		[]string{subKey(id), linksKey(id), leaseZKey, retryZKey, dueSetKey(), fenceKey(fence, subKey(id))}, args...)
+		[]string{k.sub, k.links, k.lease, k.retry, k.due, fenceKey(fence, k.sub)}, args...)
 	if err != nil {
 		return "", err
 	}
@@ -415,9 +847,13 @@ func (s *RedisStore) Ack(id string, mode ClaimMode, shard ClaimShard, reqGenerat
 
 // Release fences then releases the lease.
 func (s *RedisStore) Release(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64, fence OwnershipFence) (string, error) {
+	if err := s.migrateSubscription(id); err != nil {
+		return "", err
+	}
+	k := keysForSubscription(id)
 	ref := NewLeaseRef(id, shard)
 	ownerID, ownerEpoch := fenceArgs(fence)
-	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey, retryZKey, dueSetKey(), fenceKey(fence, subKey(id))},
+	reply, err := s.evalStrings(releaseScript, []string{k.sub, k.lease, k.retry, k.due, fenceKey(fence, k.sub)},
 		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10), shard.String(), ref.Member(), mode.String(), ownerID, ownerEpoch)
 	if err != nil {
 		return "", err
@@ -427,12 +863,16 @@ func (s *RedisStore) Release(id string, mode ClaimMode, shard ClaimShard, reqGen
 
 // ExpireLease clears an expired lease.
 func (s *RedisStore) ExpireLease(ref LeaseRef, now time.Time, pending bool, fence OwnershipFence) (string, error) {
+	if err := s.migrateSubscription(ref.SubID); err != nil {
+		return "", err
+	}
+	k := keysForSubscription(ref.SubID)
 	pendingArg := "0"
 	if pending {
 		pendingArg = "1"
 	}
 	ownerID, ownerEpoch := fenceArgs(fence)
-	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(ref.SubID), leaseZKey, dueSetKey(), fenceKey(fence, subKey(ref.SubID))},
+	reply, err := s.evalStrings(expireLeaseScript, []string{k.sub, k.lease, k.due, fenceKey(fence, k.sub)},
 		ref.SubID, nsArg(now), ref.Shard.String(), ref.Member(), pendingArg, ownerID, ownerEpoch)
 	if err != nil {
 		return "", err
@@ -442,12 +882,16 @@ func (s *RedisStore) ExpireLease(ref LeaseRef, now time.Time, pending bool, fenc
 
 // ReconcileLeaseSchedule re-adds schedule entries implied by durable sub state.
 func (s *RedisStore) ReconcileLeaseSchedule(ref LeaseRef, now time.Time, pending bool, fence OwnershipFence) (LeaseReconcileResult, error) {
+	if err := s.migrateSubscription(ref.SubID); err != nil {
+		return LeaseReconcileResult{}, err
+	}
+	k := keysForSubscription(ref.SubID)
 	pendingArg := "0"
 	if pending {
 		pendingArg = "1"
 	}
 	ownerID, ownerEpoch := fenceArgs(fence)
-	reply, err := s.evalStrings(reconcileLeaseScript, []string{subKey(ref.SubID), leaseZKey, dueSetKey(), fenceKey(fence, subKey(ref.SubID))},
+	reply, err := s.evalStrings(reconcileLeaseScript, []string{k.sub, k.lease, k.due, fenceKey(fence, k.sub)},
 		ref.SubID, nsArg(now), ref.Shard.String(), ref.Member(), pendingArg, ownerID, ownerEpoch)
 	if err != nil {
 		return LeaseReconcileResult{}, err
@@ -469,7 +913,8 @@ func (s *RedisStore) ReconcileLeaseSchedule(ref LeaseRef, now time.Time, pending
 // DueLeases takes due lease-schedule members by re-scoring them forward, so a
 // dropped worker's subscription recurs (docs/research/07 §6.1).
 func (s *RedisStore) DueLeases(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]LeaseRef, error) {
-	members, err := s.due(leaseZKey, slot, now, limit, visibility, fence)
+	lease, _, _ := scheduleKeysForSlot(slot)
+	members, err := s.due(lease, slot, now, limit, visibility, fence)
 	if err != nil {
 		return nil, err
 	}
@@ -487,13 +932,15 @@ func (s *RedisStore) DueLeases(slot OwnershipSlot, now time.Time, limit int, vis
 // DueRetries takes due retry-schedule members by re-scoring them forward, the
 // same re-score-never-ZREM machinery as DueLeases (docs/research/07 §6.1).
 func (s *RedisStore) DueRetries(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error) {
-	return s.due(retryZKey, slot, now, limit, visibility, fence)
+	_, retry, _ := scheduleKeysForSlot(slot)
+	return s.due(retry, slot, now, limit, visibility, fence)
 }
 
 // DueWakes takes owed wake-outbox members by re-scoring them forward, the same
 // at-least-once claim primitive as the lease/retry schedules.
 func (s *RedisStore) DueWakes(slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error) {
-	return s.due(dueSetKey(), slot, now, limit, visibility, fence)
+	_, _, due := scheduleKeysForSlot(slot)
+	return s.due(due, slot, now, limit, visibility, fence)
 }
 
 func (s *RedisStore) due(zkey string, slot OwnershipSlot, now time.Time, limit int, visibility time.Duration, fence OwnershipFence) ([]string, error) {
@@ -513,8 +960,12 @@ func (s *RedisStore) due(zkey string, slot OwnershipSlot, now time.Time, limit i
 // ScheduleRetry records a webhook failure and persists next_attempt; returns the
 // new retry count.
 func (s *RedisStore) ScheduleRetry(id string, now, nextAttempt time.Time, fence OwnershipFence) (int, error) {
+	if err := s.migrateSubscription(id); err != nil {
+		return 0, err
+	}
+	k := keysForSubscription(id)
 	ownerID, ownerEpoch := fenceArgs(fence)
-	reply, err := s.evalStrings(scheduleRetryScript, []string{subKey(id), retryZKey, fenceKey(fence, subKey(id))},
+	reply, err := s.evalStrings(scheduleRetryScript, []string{k.sub, k.retry, fenceKey(fence, k.sub)},
 		id, nsArg(now), nsArg(nextAttempt), ownerID, ownerEpoch)
 	if err != nil {
 		return 0, err
@@ -531,14 +982,22 @@ func (s *RedisStore) ScheduleRetry(id string, now, nextAttempt time.Time, fence 
 
 // RecordSuccess clears webhook failure bookkeeping after an accepted delivery.
 func (s *RedisStore) RecordSuccess(id string) error {
-	_, err := s.evalStrings(recordSuccessScript, []string{subKey(id), retryZKey}, id)
+	if err := s.migrateSubscription(id); err != nil {
+		return err
+	}
+	k := keysForSubscription(id)
+	_, err := s.evalStrings(recordSuccessScript, []string{k.sub, k.retry}, id)
 	return err
 }
 
 // RecordWakeEventSent marks the current pull-wake event as durably emitted,
 // fenced on (generation, wakeID) so a stamp from a superseded wake is ignored.
 func (s *RedisStore) RecordWakeEventSent(id string, generation int64, wakeID string, now time.Time) error {
-	_, err := s.evalStrings(recordWakeSentScript, []string{subKey(id)},
+	if err := s.migrateSubscription(id); err != nil {
+		return err
+	}
+	k := keysForSubscription(id)
+	_, err := s.evalStrings(recordWakeSentScript, []string{k.sub},
 		nsArg(now), strconv.FormatInt(generation, 10), wakeID)
 	return err
 }

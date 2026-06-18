@@ -3,7 +3,6 @@ package webhook
 import (
 	"bytes"
 	"net"
-	"strings"
 	"testing"
 	"time"
 )
@@ -239,41 +238,60 @@ func TestLeaseRefMemberRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSubscriptionSlotTagUsesStableFNV1aShard(t *testing.T) {
+	if subSlots != 256 {
+		t.Fatalf("subSlots = %d, want immutable 256", subSlots)
+	}
+	if got := slotTag("s1"); got != "{__ds:201}" {
+		t.Fatalf("slotTag(s1) = %q, want FNV-1a slot tag {__ds:201}", got)
+	}
+	if got := slotTag("sub-0"); got != "{__ds:200}" {
+		t.Fatalf("slotTag(sub-0) = %q, want high-slot test fixture {__ds:200}", got)
+	}
+	if got := subKey("s1"); got != "ds:{__ds:201}:sub:s1" {
+		t.Fatalf("subKey(s1) = %q", got)
+	}
+	if got := subscriptionOwnershipSlot("s1").Int(); got != 201 {
+		t.Fatalf("subscriptionOwnershipSlot(s1) = %d, want the subscription slot", got)
+	}
+}
+
 func TestRedisScriptKeySetsUseOneHashTag(t *testing.T) {
-	slot, _ := NewOwnershipSlot(0)
 	id := "sub:{attempted-escape}"
+	h := subscriptionSlot(id)
+	slot, _ := NewOwnershipSlot(h)
 	ownerSlot := ownershipSlotKey(slot)
 
 	cases := []struct {
 		name string
 		keys []string
 	}{
-		{"create_sub", []string{subKey(id), subsKey, linksKey(id)}},
+		{"create_sub", []string{subKey(id), subsKey(h), linksKey(id)}},
 		{"link_stream", []string{linksKey(id)}},
 		{"unlink_stream", []string{linksKey(id)}},
-		{"delete_sub", []string{subKey(id), subsKey, linksKey(id), leaseZKey, retryZKey, dueSetKey()}},
+		{"delete_sub", []string{subKey(id), subsKey(h), linksKey(id), leaseZKey(h), retryZKey(h), dueSetKey(h)}},
 		{"claim_shard", []string{ownerSlot}},
 		{"check_owner", []string{ownerSlot}},
-		{"arm_wake/no_owner", []string{subKey(id), leaseZKey, dueSetKey(), subKey(id)}},
-		{"arm_wake/owner_fenced", []string{subKey(id), leaseZKey, dueSetKey(), ownerSlot}},
-		{"claim", []string{subKey(id), leaseZKey}},
-		{"ack/no_owner", []string{subKey(id), linksKey(id), leaseZKey, retryZKey, dueSetKey(), subKey(id)}},
-		{"ack/owner_fenced", []string{subKey(id), linksKey(id), leaseZKey, retryZKey, dueSetKey(), ownerSlot}},
-		{"release/no_owner", []string{subKey(id), leaseZKey, retryZKey, dueSetKey(), subKey(id)}},
-		{"release/owner_fenced", []string{subKey(id), leaseZKey, retryZKey, dueSetKey(), ownerSlot}},
-		{"expire_lease/no_owner", []string{subKey(id), leaseZKey, dueSetKey(), subKey(id)}},
-		{"expire_lease/owner_fenced", []string{subKey(id), leaseZKey, dueSetKey(), ownerSlot}},
-		{"reconcile_lease/no_owner", []string{subKey(id), leaseZKey, dueSetKey(), subKey(id)}},
-		{"reconcile_lease/owner_fenced", []string{subKey(id), leaseZKey, dueSetKey(), ownerSlot}},
-		{"claim_due/lease/no_owner", []string{leaseZKey, leaseZKey}},
-		{"claim_due/lease/owner_fenced", []string{leaseZKey, ownerSlot}},
-		{"claim_due/retry/no_owner", []string{retryZKey, retryZKey}},
-		{"claim_due/retry/owner_fenced", []string{retryZKey, ownerSlot}},
-		{"claim_due/due/no_owner", []string{dueSetKey(), dueSetKey()}},
-		{"claim_due/due/owner_fenced", []string{dueSetKey(), ownerSlot}},
-		{"schedule_retry/no_owner", []string{subKey(id), retryZKey, subKey(id)}},
-		{"schedule_retry/owner_fenced", []string{subKey(id), retryZKey, ownerSlot}},
-		{"record_success", []string{subKey(id), retryZKey}},
+		{"arm_wake/no_owner", []string{subKey(id), leaseZKey(h), dueSetKey(h), subKey(id)}},
+		{"arm_wake/owner_fenced", []string{subKey(id), leaseZKey(h), dueSetKey(h), ownerSlot}},
+		{"claim", []string{subKey(id), leaseZKey(h)}},
+		{"ack/no_owner", []string{subKey(id), linksKey(id), leaseZKey(h), retryZKey(h), dueSetKey(h), subKey(id)}},
+		{"ack/owner_fenced", []string{subKey(id), linksKey(id), leaseZKey(h), retryZKey(h), dueSetKey(h), ownerSlot}},
+		{"release/no_owner", []string{subKey(id), leaseZKey(h), retryZKey(h), dueSetKey(h), subKey(id)}},
+		{"release/owner_fenced", []string{subKey(id), leaseZKey(h), retryZKey(h), dueSetKey(h), ownerSlot}},
+		{"expire_lease/no_owner", []string{subKey(id), leaseZKey(h), dueSetKey(h), subKey(id)}},
+		{"expire_lease/owner_fenced", []string{subKey(id), leaseZKey(h), dueSetKey(h), ownerSlot}},
+		{"reconcile_lease/no_owner", []string{subKey(id), leaseZKey(h), dueSetKey(h), subKey(id)}},
+		{"reconcile_lease/owner_fenced", []string{subKey(id), leaseZKey(h), dueSetKey(h), ownerSlot}},
+		{"claim_due/lease/no_owner", []string{leaseZKey(h), leaseZKey(h)}},
+		{"claim_due/lease/owner_fenced", []string{leaseZKey(h), ownerSlot}},
+		{"claim_due/retry/no_owner", []string{retryZKey(h), retryZKey(h)}},
+		{"claim_due/retry/owner_fenced", []string{retryZKey(h), ownerSlot}},
+		{"claim_due/due/no_owner", []string{dueSetKey(h), dueSetKey(h)}},
+		{"claim_due/due/owner_fenced", []string{dueSetKey(h), ownerSlot}},
+		{"schedule_retry/no_owner", []string{subKey(id), retryZKey(h), subKey(id)}},
+		{"schedule_retry/owner_fenced", []string{subKey(id), retryZKey(h), ownerSlot}},
+		{"record_success", []string{subKey(id), retryZKey(h)}},
 		{"record_wake_sent", []string{subKey(id)}},
 		{"get_or_create_key", []string{jwksKey, activeKidKey}},
 	}
@@ -293,16 +311,10 @@ func TestRedisScriptKeySetsUseOneHashTag(t *testing.T) {
 	}
 }
 
-func redisHashTag(key string) string {
-	start := strings.IndexByte(key, '{')
-	if start < 0 {
-		return key
+func TestRedisScriptKeySetRejectsMixedHashTags(t *testing.T) {
+	if err := validateSingleHashTag([]string{subKeyForSlot("a", 0), subKeyForSlot("a", 1)}); err == nil {
+		t.Fatal("mixed subscription slots should be rejected before Redis")
 	}
-	end := strings.IndexByte(key[start+1:], '}')
-	if end <= 0 {
-		return key
-	}
-	return key[start+1 : start+1+end]
 }
 
 func TestFenceLeaseDecisionIsPerShard(t *testing.T) {

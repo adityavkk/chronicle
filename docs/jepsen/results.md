@@ -97,6 +97,49 @@ GKE replicas>=2 pod-kill coverage-gap load gate. Those require a healthy k3d or
 GKE fault-injection environment and should not be inferred from the local Redis
 evidence above.
 
+## #15 local slot-homing evidence — 2026-06-18
+
+Commands run from `/Users/auk000v/orca/workspaces/chronicle/hs-15-slot-homing`:
+
+```sh
+go test -count=1 -short ./...
+go test -race -count=1 -short ./...
+go test -p 1 -count=1 ./...
+go test -count=1 ./webhook ./metrics ./jepsen/checker
+CHRONICLE_SKIP_REDIS_START=1 CHRONICLE_REDIS_CONTAINER=chronicle-hs15-redis-codex \
+  make conformance
+git diff --check
+make lint
+```
+
+Observed local results:
+
+| Gate | Evidence | Result |
+| --- | --- | --- |
+| Slot addressing | `TestSubscriptionSlotTagUsesStableFNV1aShard` fixes `subSlots=256`, verifies Go FNV-1a slot tags such as `s1 -> {__ds:201}` and `sub-0 -> {__ds:200}`, and confirms owner slots derive from the same subscription slot. | **PASS** |
+| Redis Cluster script slots | `TestRedisScriptKeySetsUseOneHashTag` covers every Lua `KEYS` set under owner-fenced and no-owner paths after retagging; `TestRedisScriptKeySetRejectsMixedHashTags` proves a mixed keyset is detected before Redis rather than silently accepted. | **PASS** |
+| GAP4 scatter/gather | `TestHighSlotSubscriptionFoundByScatterGatherPaths` creates `sub-0` in slot 200 and verifies `List`, `GetMany`, `ReconcileIndexes`, and `OnStreamAppend` all find it through S-slot union/scatter paths. | **PASS** |
+| Occupied-slots fan-out | `TestOccupiedSlotsBitmapSetAndNeverCleared` verifies `SETBIT h 1` on index, no clear on deindex, and `StreamSubscribers` probing only the stale occupied bit. `TestHighSlotSubscriptionFoundByScatterGatherPaths` also checks `FanOut(slotsProbed=1, subs=1)` on the real `OnStreamAppend` path. | **PASS** |
+| Lazy migration | `TestLegacySubscriptionMigratesLazilyToSlotHome` creates an old `ds:{__ds}` subscription, calls `Get`, and verifies the full sub/link/due/index key set moves to `ds:{__ds:h}` while the old sub/link keys are deleted and the migrated scripted key set remains single-tag. `TestCompletedMigrationCleansLegacyResidueWithoutOverwritingNewState` verifies a completed migration marker cleans stale legacy residue without replaying stale old HASH fields over new state. | **PASS** |
+| Occupied ownership slots | `RedisStore.SubscriptionSlots` reports only slots with subscriptions, so the ownership loop claims occupied state shards instead of renewing 256 empty owner records. `TestSlotReconcileOwnsHRWTargetAndHeldLease` covers the occupied-slot claim path. | **PASS** |
+| Local integration scope | `go test -count=1 ./webhook ./metrics ./jepsen/checker` ran against local Redis and covered migrated subs served from the new tag, high-slot List/GetMany fan-out reachability, metrics, and checker unit regressions. `make conformance` passed 332/332 against a clean `chronicle-hs15-redis-codex` Redis 7 container. | **PASS** |
+
+Blocked gates not run locally:
+
+| Gate | Status |
+| --- | --- |
+| T5 live k3d slot-isolation nemesis | **NOT RUN** in this worker. The local tests cover the static CROSSSLOT guard and scatter-gather equality preconditions, but no live slot-owner-churn nemesis was executed. |
+| T1/T2/T4/L1/L3 live regression suite | **NOT RUN** here beyond `jepsen/checker` unit tests. These need a healthy k3d run. |
+| Stress: sparse-wide streams plus slot-owner churn | **PARTIAL / LOCAL ONLY**. Sparse occupied-bit behavior is covered locally; churn during fan-out was not run. |
+| Load gate #2 | **BLOCKED / DEFERRED TO ORCHESTRATOR GKE RUN**. This worker did not provision a real multi-node Redis Cluster or GKE load rig, so no S=2/4/8/256 fan-out p99 or K=10k sweep-baseline number is recorded here. Slot-homing viability still depends on that real-cluster measurement. |
+
+Resource note: local Redis was started with the repository `make redis-up` target for
+integration tests and torn down with `make redis-down`. The compose resource name did not
+include the requested `-codex` suffix because it is fixed by the repo/worktree compose
+project name. The conformance rerun used a separate `chronicle-hs15-redis-codex`
+container on port 6379, also torn down after the run; no Redis container, network, or
+volume was left running.
+
 Local k3d attempt on 2026-06-18:
 
 - Command: `CLUSTER=chronicle-jepsen-codex jepsen/up.sh`.

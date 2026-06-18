@@ -527,7 +527,13 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 
 	// Determine if we're up to date (at the tail of the stream)
 	// Re-fetch current offset to check if we're at the tail
-	currentMeta, _ := h.Store.Get(path)
+	currentMeta, err := h.Store.Get(path)
+	if err != nil {
+		return err
+	}
+	if currentMeta == nil {
+		return store.ErrStreamNotFound
+	}
 	upToDate := nextOffset.Equal(currentMeta.CurrentOffset)
 
 	// Set response headers
