@@ -12,7 +12,7 @@ execute the moment a permitted GCP path is available.
 
 **All seven sub-issues (#10–#16) are implemented, adversarially reviewed, and integrated**
 into `epic-hscale-claude`, build/vet/`test -short` + the full webhook Redis integration GREEN
-at the tip. **Phase 1 (the actual collapse) is fixed and proven: C3 / doc-05 gate #6 GREEN —
+at the tip (the whole-epic #10–#16 webhook suite passes against a real `redis:7`: `ok webhook`). **Phase 1 (the actual collapse) is fixed and proven: C3 / doc-05 gate #6 GREEN —
 the per-type claim-contention knee moves ~G×.** The full safety suite **T1–T5 is GREEN**,
 liveness **L1/L3 GREEN**, and the contention suite **C1–C3 GREEN** on a real Chronicle + Redis
 stack. The cloud-only gates (#1–#5, the L2/L4/L5 multi-replica/scale runs, the K=10k
