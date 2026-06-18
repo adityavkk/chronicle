@@ -385,6 +385,29 @@ func (m *Manager) OnStreamAppend(path string) {
 // the one #16's DR promotion drives from a failover. Coalesced and non-blocking.
 func (m *Manager) OnRedisReconnect() { m.triggerReconcile(scopeReconnect) }
 
+// Promote drives the failover-aware recovery a DR promotion requires (#16, doc 05
+// "Regional DR"). On an active-passive failover (the managed-Redis floor, 06:130)
+// the standby region's Redis is promoted to primary and this process now talks to
+// it; because replication is async, the promoted primary may be missing the most
+// recent, un-replicated schedule tail — the RPO window. Promote re-establishes
+// ownership on the new primary (slotReconcileOnce re-CASes each targeted slot,
+// bumping owner_epoch on every transfer) and then fires the eager reconcile
+// (scopeEpochBump), which re-derives each owner's stranded lease/due entries from
+// the durable `sub` hash (reconcileLeases) — recovering the stranded-webhook-wake
+// case the failover created.
+//
+// The division of labour is correction #3 made operational: WAIT/WAITAOF (Tier B)
+// bound HOW MUCH tail a failover can lose (the RPO); the monotonic (gen,wake_id)
+// fence + this eager reconcile make whatever IS lost self-healing — neither path
+// infers exclusivity from durability. The eager reconcile is routed through the
+// coalescing reconcileC (not run inline) so sweepOnce stays single-goroutine even
+// when the recovery loop is already running; Promote is therefore idempotent and
+// safe to call on every promotion signal.
+func (m *Manager) Promote() {
+	m.slotReconcileOnce()
+	m.triggerReconcile(scopeEpochBump)
+}
+
 // OnStreamDeleted unlinks a deleted stream from all its subscribers.
 func (m *Manager) OnStreamDeleted(path string) {
 	ids, _, err := m.store.StreamSubscribers(path)
@@ -883,8 +906,8 @@ const (
 	scopeReconnect                // a Redis reconnect: the connection that lost in-flight ops healed
 	scopeAppendError              // an OnStreamAppend / wake-event append failed: the low-latency wake path errored
 	scopeFloor                    // the coarse periodic floor: the one eventless case (an owed mark on an unowned, quiet slot)
-	scopeEpochBump                // STUB for #14: a failover / owner_epoch bump drives a slot reconcile
-	scopeNewOwnerCAS              // STUB for #14: a new-owner claim_shard CAS reconciles its freshly-claimed slot
+	scopeEpochBump                // #16: a DR promotion / owner_epoch bump drives the eager reconcile (Manager.Promote)
+	scopeNewOwnerCAS              // #14: a new-owner claim_shard CAS reconciles its freshly-claimed slot
 )
 
 func (s scope) String() string {
