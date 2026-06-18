@@ -63,6 +63,21 @@ type config struct {
 	clockSkewBy time.Duration
 	toxiproxy   string
 	redisProxy  string
+
+	// Contention suite (C1/C2/C3, gate #6). The driver talks to Redis directly,
+	// not the cluster, so it needs only redisURL. gShards is G (1 = today's hot
+	// per-type lease, the collapse); leaseTTLMs/holdMs/thinkMs/backoffMs are the
+	// scaled timers (see scenario_contention.go); ramp is the claimant ramp; c3
+	// adds the G=1-vs-G differential.
+	redisURL   string
+	gShards    int
+	leaseTTLMs int
+	holdMs     int
+	thinkMs    int
+	backoffMs  int
+	roundMs    int
+	ramp       string
+	c3         bool
 }
 
 func main() {
@@ -74,7 +89,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation|contention")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
@@ -83,6 +98,15 @@ func main() {
 	flag.DurationVar(&c.clockSkewBy, "clock-skew", 0, "optional: skew a chronicle pod's clock by this much (best-effort; needs a privileged container)")
 	flag.StringVar(&c.toxiproxy, "toxiproxy", "", "optional: toxiproxy admin URL (e.g. http://localhost:8474) to inject Redis partition/latency")
 	flag.StringVar(&c.redisProxy, "redis-proxy", "redis-claude", "the toxiproxy proxy name fronting Redis (used with -toxiproxy)")
+	flag.StringVar(&c.redisURL, "redis-url", "", "contention: Redis URL for the fan-in driver (else $REDIS_URL), e.g. redis://localhost:6379/14")
+	flag.IntVar(&c.gShards, "G", 16, "contention: claim granularity G (1 = today's hot per-type lease; >1 = per-shard-of-type leases)")
+	flag.IntVar(&c.leaseTTLMs, "lease-ttl-ms", 30000, "contention: per-subscription lease TTL (30 s, matching the runtime)")
+	flag.IntVar(&c.holdMs, "hold-ms", 5, "contention: lease hold per wake (scaled processing time)")
+	flag.IntVar(&c.thinkMs, "think-ms", 25, "contention: idle between wakes (sets the per-lease claimant capacity ~ (hold+think)/hold)")
+	flag.IntVar(&c.backoffMs, "backoff-ms", 2, "contention: pause after an ALREADY_CLAIMED bounce before retrying")
+	flag.IntVar(&c.roundMs, "round-ms", 3000, "contention: wall-clock per claimant rung")
+	flag.StringVar(&c.ramp, "ramp", "6,12,24", "contention: comma-separated claimant ramp")
+	flag.BoolVar(&c.c3, "c3", false, "contention: also run the G=1 baseline and assert C3 (the knee moves ~Gx; gate #6)")
 	flag.Parse()
 
 	r := newReceiver()
@@ -104,6 +128,13 @@ func run(c config, r *receiver) error {
 	// it runs its own self-contained flow (scenario_lease.go).
 	if c.scenario == "single-holder-linz" {
 		return runSingleHolderLinz(c)
+	}
+
+	// contention (C1/C2/C3, gate #6) is the claimant-fan-in driver. It drives the
+	// real claim.lua/ack.lua against Redis directly — no cluster, no receiver — so
+	// it runs its own self-contained flow (scenario_contention.go).
+	if c.scenario == "contention" {
+		return runContention(c)
 	}
 
 	// cursor-monotonic drives the webhook delivery workload under origin churn
