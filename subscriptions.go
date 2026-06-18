@@ -15,8 +15,14 @@ import (
 )
 
 // SubscriptionTuning configures the subscription background loops. Zero values
-// fall back to the Manager's defaults (2s sweep, 30s reconcile, no sweep cap).
+// fall back to the Manager's defaults (a 30s coarse recovery floor, 30s reconcile,
+// no sweep cap).
 type SubscriptionTuning struct {
+	// SweepInterval is the coarse recovery FLOOR, not a fast sweep (issue #13):
+	// recovery is event-triggered (boot, a Redis reconnect, an append/delivery
+	// error and, from #14, an owner-epoch bump), so this only bounds the one
+	// eventless case. Zero defaults to 30s. Steady-state delivery latency is
+	// unaffected by the value — the happy path is the event-driven wake pipeline.
 	SweepInterval     time.Duration
 	ReconcileInterval time.Duration
 	SweepBatch        int
@@ -44,8 +50,10 @@ type SubscriptionHooks interface {
 }
 
 // SubscriptionService is the runnable subscription manager: the lifecycle hooks
-// plus its background loops (lease worker, retry worker, recovery sweep).
-// *webhook.Manager satisfies it.
+// plus its background loops (lease worker, retry worker, due worker, the recovery
+// loop — a coarse floor plus event-triggered reconciles — and the slow reconcile
+// loop). *webhook.Manager satisfies it; its OnRedisReconnect is the reconnect
+// recovery seam the connection/DR layer drives (issue #13, exercised by #16).
 type SubscriptionService interface {
 	SubscriptionHooks
 	Start()
