@@ -8,7 +8,7 @@
 // after the faults settle, every stream's subscription cursor has advanced to
 // its tail — i.e. every durably-appended message was eventually delivered, even
 // the ones whose append-time wake was lost to a crash and had to be re-fired by
-// the recovery sweep. Delivery is at-least-once, so duplicate deliveries are
+// recovery reconcile. Delivery is at-least-once, so duplicate deliveries are
 // reported but are not failures (the generation fence makes them safe).
 //
 // This is the empirical counterpart to docs/research/07's crash-window analysis.
@@ -71,7 +71,7 @@ func main() {
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
 	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|at-least-once|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop-recovery|ownership-exclusivity|slot-isolation|contention-contract")
-	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
+	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for recovery")
 	flag.DurationVar(&c.sweep, "sweep", 2*time.Second, "expected recovery sweep interval bound for liveness verdicts (0 means disabled, if the SUT supports it)")
 	flag.DurationVar(&c.floor, "floor", 30*time.Second, "expected coarse recovery floor bound for proposed owner/due mechanisms")
 	flag.DurationVar(&c.nemMin, "nemesis-window-min", 2*time.Second, "minimum randomized nemesis action window")
@@ -229,7 +229,7 @@ func run(c config, r *receiver) error {
 	switch c.scenario {
 	case "origin-restart":
 		// Kill ALL origins after the last append, so the final wake can only come
-		// from the recovery sweep on a restarted origin.
+		// from recovery on a restarted origin.
 		nem.killAllOrigins()
 		fmt.Println("nemesis: killed all origins after final append")
 	case "index-repair":
@@ -252,11 +252,11 @@ func run(c config, r *receiver) error {
 	close(stopNemesis)
 	wg.Wait()
 
-	// 5. Let the origin come back and the recovery sweep / reconcile loop run.
+	// 5. Let the origin come back and recovery / reconcile loops run.
 	if err := waitReady(c.base, 90*time.Second); err != nil {
 		return fmt.Errorf("chronicle did not recover: %w", err)
 	}
-	fmt.Printf("settling %s for the recovery sweep / reconcile loop...\n", c.settle)
+	fmt.Printf("settling %s for recovery / reconcile loops...\n", c.settle)
 	sleep(c.settle)
 
 	// 6. Verify durability: every stream's cursor advanced to its tail.

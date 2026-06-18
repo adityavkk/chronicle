@@ -15,7 +15,7 @@ import (
 )
 
 // SubscriptionTuning configures the subscription background loops. Zero values
-// fall back to the Manager's defaults (2s sweep, 30s reconcile, no sweep cap).
+// fall back to the Manager's defaults (30s floor, 30s reconcile, no sweep cap).
 type SubscriptionTuning struct {
 	SweepInterval     time.Duration
 	ReconcileInterval time.Duration
@@ -44,13 +44,14 @@ type SubscriptionHooks interface {
 }
 
 // SubscriptionService is the runnable subscription manager: the lifecycle hooks
-// plus its background loops (lease worker, retry worker, recovery sweep).
+// plus its background loops (lease worker, retry worker, recovery floor).
 // *webhook.Manager satisfies it.
 type SubscriptionService interface {
 	SubscriptionHooks
 	Start()
 	Stop()
 	RunSweep()
+	RunRedisReconnect()
 }
 
 // streamAdapter adapts the durable stream store to webhook.Streams: the seam the
@@ -129,7 +130,7 @@ func (l redisLister) ListStreams() ([]webhook.StreamMeta, error) {
 }
 
 // NewSubscriptions builds the Redis-backed __ds subscription stack: the HTTP
-// router and the Manager whose background loops (lease, retry, recovery sweep)
+// router and the Manager whose background loops (lease, retry, recovery floor)
 // the caller starts with Manager.Start(). streamRootURL is the public URL the
 // protocol is served under (scheme+host+root, trailing slash), used to build
 // callback and JWKS URLs. rs may be nil to disable pattern backfill of existing

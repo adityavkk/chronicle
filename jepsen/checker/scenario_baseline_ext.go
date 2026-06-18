@@ -78,9 +78,6 @@ func runStaleGenerationNoop(c config) error {
 }
 
 func runLeaseTailDropRecovery(c config, nem *nemesis) error {
-	if c.sweep == 0 {
-		return fmt.Errorf("lease-tail-drop-recovery with -sweep=0 is blocked on today's SUT: the deployed binary exposes the recovery sweep, not a separately disableable floor/eager-reconcile path")
-	}
 	if err := waitReady(c.base, 60*time.Second); err != nil {
 		return fmt.Errorf("chronicle not ready: %w", err)
 	}
@@ -114,8 +111,12 @@ func runLeaseTailDropRecovery(c config, nem *nemesis) error {
 	} else if present {
 		return fmt.Errorf("dropLeaseTail did not remove %s from the lease schedule", subID)
 	}
-	wait := gcPauseDuration(leaseTTLMs) + c.sweep + c.settle
-	fmt.Printf("dropped lease tail for %s; waiting up to %s for sweep to re-arm from cursor/tail state\n", subID, wait)
+	nem.killRedis()
+	if err := waitReady(c.base, 60*time.Second); err != nil {
+		return fmt.Errorf("chronicle did not reconnect after Redis restart: %w", err)
+	}
+	wait := gcPauseDuration(leaseTTLMs) + c.floor + c.settle
+	fmt.Printf("dropped lease tail for %s; waiting up to %s for reconnect-triggered eager reconcile to re-arm from cursor/tail state\n", subID, wait)
 	recovered, elapsed, err := waitRecoveredPullWake(nem, subID, a.Generation, wait)
 	if err != nil {
 		return err
@@ -156,7 +157,7 @@ func runLeaseTailDropRecovery(c config, nem *nemesis) error {
 	fmt.Printf("scenario:          %s\n", c.scenario)
 	fmt.Printf("nemesis actions:   %d (%s)\n", len(nem.log), join(nem.log))
 	fmt.Printf("stream tail:       %s\n", short(tail))
-	fmt.Printf("sweep re-armed in: %s\n", elapsed)
+	fmt.Printf("eager re-armed in: %s\n", elapsed)
 	fmt.Printf("A generation:      %d\n", a.Generation)
 	fmt.Printf("recovered gen:     %d\n", recovered.Generation)
 	fmt.Printf("B generation:      %d (claimed recovered wake)\n", b.Generation)
@@ -165,7 +166,7 @@ func runLeaseTailDropRecovery(c config, nem *nemesis) error {
 	if acked != tail {
 		return fmt.Errorf("cursor did not reach seeded tail after recovered wake: acked=%s want=%s", short(acked), short(tail))
 	}
-	fmt.Println("PASS: dropped lease-tail stranded a live pull-wake, the sweep re-armed it from cursor/tail state, B claimed that recovered wake, cursor reached tail, and A's deposed ack was fenced")
+	fmt.Println("PASS: dropped lease-tail stranded a live pull-wake, the reconnect-triggered eager reconcile re-armed it from cursor/tail state, B claimed that recovered wake, cursor reached tail, and A's deposed ack was fenced")
 	return nil
 }
 
@@ -190,7 +191,7 @@ func waitRecoveredPullWake(nem *nemesis, id string, afterGeneration int64, timeo
 		}
 		sleep(200 * time.Millisecond)
 	}
-	return pullWakeRuntime{}, time.Since(start), fmt.Errorf("sweep did not re-arm %s after lease-tail drop within %s; last phase=%q generation=%d wake=%s",
+	return pullWakeRuntime{}, time.Since(start), fmt.Errorf("eager reconcile did not re-arm %s after lease-tail drop within %s; last phase=%q generation=%d wake=%s",
 		id, timeout, last.Phase, last.Generation, short(last.WakeID))
 }
 

@@ -57,7 +57,7 @@ a lock and lost ~18% of acked updates) — modeled directly.
 |---|---|---|---|---|
 | **L1** | At-least-once delivery (sharded + owner-replica) | per-message ≤ one sweep tick under no fault; ≤ `max(sweep,reconcile)+RTT` after the last fault heals | continuous origin churn + kill-all after the final append; redis-restart (AOF replay) | Extend `verify()` to a **per-message** delivery checker over the S-slot keyspace; porcupine monotone-cursor model per stream |
 | **L2** | Bounded recovery under churn (coverage gap) | ≤ **membership-lease TTL + RTT** — the detectable case recovers at the new owner's `claim_shard` + eager reconcile (a *trigger*), not on a sweep tick | continuous **kill-slot-owner** (read `ds:{ownership}:slot:<h>`, kill that pod) on a randomized 2–8 s window | Per-message `deliver−append` ≤ `R+RTT` for any message whose slot was unowned at append; histogram + worst case (the measure-before-build #4 number) |
-| **L3** | Failover recovery of a stranded wake | ≤ `R` from the lease-tail drop to the cursor reaching tail | **drop-the-lease-tail**: `ZREM` the lease/due entry while leaving the `sub` hash intact (simulates a failover that lost the schedule tail) | Assert the cursor reaches tail and only the **cursor-reading reconciler** could have done it (run a `-sweep=0` variant); a deposed ack still returns `FENCED` |
+| **L3** | Failover recovery of a stranded wake | ≤ `R` from the lease-tail drop to the cursor reaching tail | **drop-the-lease-tail**: `ZREM` the lease/due entry while leaving the `sub` hash intact (simulates a failover that lost the schedule tail), then fire an explicit reconnect/takeover trigger | Assert the cursor reaches tail and only the **cursor-reading eager reconciler** could have done it (run a `-floor=0` variant with the explicit trigger); a deposed ack still returns `FENCED`. Test the eventless coarse-floor case separately. |
 | **L4** | Eventual ownership re-convergence | every slot single-owned within **membership-TTL + R** after the last churn, stable thereafter | hard membership churn (`kubectl scale 2→1→3→2` + force-deletes), then quiesce | **Ownership-timeline sampler** polls `members` + every `slot:<h>` ~500 ms; after quiescence assert exactly one unexpired owner per slot, no oscillation; flag 0 owners (gap), >1 effective owners (split-brain), or stale epochs still accepted by `check_owner.lua` |
 | **L5** | No permanent starvation under continuous churn | per-sub max inter-delivery gap ≤ `3R` (statistical, over a ~5 min run) | never-quiescing **combined** nemesis (kill-slot-owner + partition+heal + redis-failover + lease-tail-drop), churn period near `R` to try to trap one sub | Per-sub starvation checker; FAIL only on a sub stalled > `3R` *with pending work* |
 
@@ -157,9 +157,9 @@ root `go.mod` (`jepsen/checker` inherits it). Then:
    reconnect, append error) reconcile at the event, so L2 asserts the churn case recovers at
    the takeover trigger (`deliver − append ≤ membership-lease TTL + RTT`), not on a sweep
    tick. A coarse periodic floor (seconds-to-minutes, not 2 s) bounds only the one eventless
-   case — an owed-mark lost on an unowned, quiet slot. L3's `-sweep=0` variant must therefore
-   become `-floor=0` plus an explicit takeover, and assert the **eager reconcile at the new
-   owner's CAS** reaches tail; the periodic floor is tested separately on the eventless case.
+   case — an owed-mark lost on an unowned, quiet slot. L3's disabled-timer variant is now
+   `-floor=0` plus an explicit reconnect/takeover trigger, asserting the **eager reconcile**
+   reaches tail; the periodic floor is tested separately on the eventless case.
 5. **Clock-skew nemesis blurs real-time edges.** Pin the `porcupine` recorder's clock to
    the *driver host*, never a skewed node, so `[Call,Return]` ordering stays sound.
 

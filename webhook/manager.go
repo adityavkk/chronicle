@@ -56,7 +56,7 @@ type StreamLister interface {
 const (
 	webhookDeliveryTimeout   = 30 * time.Second
 	defaultWorkerTick        = 250 * time.Millisecond
-	defaultSweepInterval     = 2 * time.Second
+	defaultSweepInterval     = 30 * time.Second
 	defaultReconcileInterval = 30 * time.Second
 	dueClaimLimit            = 256
 )
@@ -72,10 +72,13 @@ type ManagerOptions struct {
 	HTTPClient    *http.Client
 	Logger        *slog.Logger
 	WorkerTick    time.Duration
+	// SweepInterval is the coarse recovery floor for eventless gaps. Detectable
+	// recovery events run reconcile immediately; the default 30s floor is kept in
+	// the seconds-to-minutes band and aligned with ReconcileInterval.
 	SweepInterval time.Duration
 	// ReconcileInterval is how often the slow reconciliation loop runs (pattern
 	// link recovery + fan-out index repair). Default 30s — it is O(streams), so
-	// it is deliberately decoupled from the fast 2s sweep.
+	// it is deliberately decoupled from per-append wake delivery.
 	ReconcileInterval time.Duration
 	// SweepBatch caps how many subscriptions one sweep tick evaluates, the rest
 	// rolling to following ticks. 0 (the default) means no cap — every tick
@@ -93,9 +96,9 @@ type ManagerOptions struct {
 
 // Manager orchestrates the subscription control plane: stream hooks, webhook
 // delivery and callbacks, pull-wake claim/ack/release, the lease and retry
-// worker ticks, and the recovery sweep that closes the restart gap
-// (docs/research/07 §8). It is the imperative shell over the pure core and the
-// durable Store.
+// worker ticks, and the event-triggered recovery plus coarse floor that closes
+// the restart gap (docs/research/07 §8). It is the imperative shell over the
+// pure core and the durable Store.
 type Manager struct {
 	store             Store
 	streams           Streams
@@ -116,6 +119,8 @@ type Manager struct {
 
 	stop chan struct{}
 	wg   sync.WaitGroup
+
+	reconcileMu sync.Mutex
 }
 
 // NewManager builds a Manager and loads (or installs) the persisted signing and
@@ -232,12 +237,13 @@ func (m *Manager) OnStreamCreated(path string) {
 }
 
 // OnStreamAppend wakes every idle subscription with pending work on path
-// (PROTOCOL §7). It is the best-effort low-latency path; the recovery sweep is
+// (PROTOCOL §7). It is the best-effort low-latency path; recovery reconcile is
 // the durability backstop if this is lost to a crash (docs/research/09 §2).
 func (m *Manager) OnStreamAppend(path string) {
 	ids, err := m.store.StreamSubscribers(path)
 	if err != nil {
 		m.log.Warn("webhook: stream subscribers", "path", path, "error", err)
+		m.reconcile(recoveryScopeAppendError)
 		return
 	}
 	for _, id := range ids {
@@ -286,6 +292,7 @@ func (m *Manager) issueWake(sub Subscription, triggerStream string) bool {
 	res, err := m.store.ArmWake(sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID)
 	if err != nil {
 		m.log.Warn("webhook: arm wake", "sub", sub.ID, "error", err)
+		m.reconcile(recoveryScopeAppendError)
 		return false
 	}
 	if !res.Armed {
@@ -312,8 +319,9 @@ func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generat
 	appendStart := time.Now()
 	if err := m.streams.AppendWakeEvent(sub.Config.WakeStream, data); err != nil {
 		m.metrics.WakeEvent(time.Since(appendStart), "error")
-		// Leave wake_event_sent_ns at 0 so the recovery sweep re-emits.
+		// Leave wake_event_sent_ns at 0 so recovery reconcile re-emits.
 		m.log.Warn("webhook: write wake event", "sub", sub.ID, "wake_stream", sub.Config.WakeStream, "error", err)
+		m.reconcile(recoveryScopeAppendError)
 		return
 	}
 	m.metrics.WakeEvent(time.Since(appendStart), "ok")
@@ -321,6 +329,7 @@ func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generat
 	// not re-emit a wake that was already delivered.
 	if err := m.store.RecordWakeEventSent(sub.ID, generation, wakeID, time.Now()); err != nil {
 		m.log.Warn("webhook: record wake event sent", "sub", sub.ID, "error", err)
+		m.reconcile(recoveryScopeAppendError)
 	}
 }
 
@@ -409,6 +418,7 @@ func (m *Manager) recordFailure(id string) {
 	if _, err := m.store.ScheduleRetry(id, time.Now(), next); err != nil {
 		m.log.Warn("webhook: schedule retry", "sub", id, "error", err)
 	}
+	m.reconcile(recoveryScopeAppendError)
 }
 
 func (m *Manager) tokenTTL(sub Subscription) time.Duration {
@@ -452,13 +462,14 @@ func jitterFraction() float64 {
 
 // ---- background loops ----
 
-// Start launches the due worker, lease worker, retry worker, and recovery sweep.
+// Start launches the due worker, lease worker, retry worker, recovery floor, and
+// slow index/pattern reconcile loop.
 func (m *Manager) Start() {
 	m.wg.Add(5)
 	go m.dueWorker()
 	go m.leaseWorker()
 	go m.retryWorker()
-	go m.recoverySweeper()
+	go m.recoveryFloorTicker()
 	go m.reconcileLoop()
 }
 
@@ -563,11 +574,10 @@ func (m *Manager) retryWorker() {
 	}
 }
 
-// recoverySweeper closes the restart gap (docs/research/07 §8): it re-evaluates
-// every subscription against its durable cursor and re-fires anything owed, even
-// an idle subscription whose append-time wake was lost to a crash. It also
-// expires stale leases as a backstop to the lease worker.
-func (m *Manager) recoverySweeper() {
+// recoveryFloorTicker runs the coarse periodic recovery floor. Detectable
+// recovery events call reconcile directly; this ticker only bounds the eventless
+// unowned-and-quiet case.
+func (m *Manager) recoveryFloorTicker() {
 	defer m.wg.Done()
 	ticker := time.NewTicker(m.sweepInterval)
 	defer ticker.Stop()
@@ -576,8 +586,26 @@ func (m *Manager) recoverySweeper() {
 		case <-m.stop:
 			return
 		case <-ticker.C:
-			m.sweepOnce()
+			m.reconcile(recoveryScopeFloor)
 		}
+	}
+}
+
+func (m *Manager) reconcile(scope recoveryScope) {
+	plan := planRecovery(scope)
+	if !plan.any() {
+		return
+	}
+	if !m.reconcileMu.TryLock() {
+		return
+	}
+	defer m.reconcileMu.Unlock()
+	if plan.sweep {
+		m.sweepOnce()
+		return
+	}
+	if plan.leases {
+		m.reconcileLeasesOnce()
 	}
 }
 
@@ -603,6 +631,7 @@ func (m *Manager) sweepOnce() {
 	tails := m.streams.TailOffsets(paths)
 	wakes := 0
 	for _, sub := range subs {
+		pending := HasPendingWorkFrom(sub.Links, tails)
 		// Recover a pull-wake stranded by a crash between arming the wake and
 		// appending its wake event: the event was never durably emitted (its
 		// sent flag is still 0), so nothing in the schedule will deliver it and a
@@ -613,7 +642,6 @@ func (m *Manager) sweepOnce() {
 			wakes++
 			continue
 		}
-		pending := HasPendingWorkFrom(sub.Links, tails)
 		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
 			status, err := m.store.ExpireLease(NewLeaseRef(sub.ID, DefaultClaimShard), now, pending)
 			if err == nil {
@@ -624,13 +652,46 @@ func (m *Manager) sweepOnce() {
 				sub.Phase = PhaseIdle
 			}
 		}
+		if sub.Phase != PhaseIdle {
+			m.reconcileLeaseSchedule(sub, pending, now)
+		}
 		if sub.Phase == PhaseIdle && pending {
 			if m.issueWake(sub, "") {
+				if dur, ok := coverageGapForSweepWake(sub, now); ok {
+					m.metrics.CoverageGap(dur)
+				}
 				wakes++
 			}
 		}
 	}
 	m.metrics.SweepTick(time.Since(start), len(subs), len(paths), wakes)
+}
+
+func (m *Manager) reconcileLeasesOnce() {
+	ids, err := m.store.List()
+	if err != nil || len(ids) == 0 {
+		return
+	}
+	subs, err := m.store.GetMany(ids)
+	if err != nil {
+		return
+	}
+	tails := m.streams.TailOffsets(distinctLinkPaths(subs))
+	now := time.Now()
+	for _, sub := range subs {
+		pending := HasPendingWorkFrom(sub.Links, tails)
+		m.reconcileLeaseSchedule(sub, pending, now)
+	}
+}
+
+func (m *Manager) reconcileLeaseSchedule(sub Subscription, pending bool, now time.Time) {
+	decision := decideLeaseReconcile(ClaimLeaseFromSubscription(sub), pending)
+	if !decision.reconcile {
+		return
+	}
+	if _, err := m.store.ReconcileLeaseSchedule(NewLeaseRef(sub.ID, DefaultClaimShard), now, decision.pending); err != nil {
+		m.log.Warn("webhook: reconcile lease schedule", "sub", sub.ID, "error", err)
+	}
 }
 
 // sweepWindow optionally bounds a sweep tick to sweepBatch subscriptions,
@@ -678,8 +739,12 @@ func distinctLinkPaths(subs []Subscription) []string {
 	return out
 }
 
-// RunSweep runs one recovery sweep immediately (used at startup and in tests).
-func (m *Manager) RunSweep() { m.sweepOnce() }
+// RunSweep runs one boot recovery reconcile immediately (used at startup and in
+// tests).
+func (m *Manager) RunSweep() { m.reconcile(recoveryScopeBoot) }
+
+// RunRedisReconnect runs the Redis-reconnect recovery trigger.
+func (m *Manager) RunRedisReconnect() { m.reconcile(recoveryScopeReconnect) }
 
 // RunDue runs one due-worker pass immediately (used by tests and local V&V).
 func (m *Manager) RunDue() int { return m.dueOnce(time.Now()) }
@@ -746,7 +811,8 @@ func (m *Manager) backfill(id string, cfg Config) {
 // beginning offset when the stream was created after the subscription (a missed
 // OnStreamCreated, so its data should wake) or at the current tail when it
 // predates the subscription (a missed pre-existing backfill, no replay). This is
-// O(pattern subs × streams); it runs on the slow reconcile loop, not the 2s sweep.
+// O(pattern subs × streams); it runs on the slow reconcile loop, not per-append
+// wake delivery.
 func (m *Manager) reconcilePatternLinks() {
 	if m.lister == nil {
 		return
@@ -794,9 +860,9 @@ func (m *Manager) reconcilePatternLinks() {
 	}
 }
 
-// reconcileLoop runs the slow reconciliation backstop (pattern link recovery and,
-// from slice 4, fan-out index repair): once at start, then on the reconcile
-// interval. It is deliberately separate from the fast 2s sweep because it scans
+// reconcileLoop runs the slow reconciliation backstop (pattern link recovery and
+// fan-out index repair): once at start, then on the reconcile interval. It is
+// deliberately separate from per-subscription cursor recovery because it scans
 // the whole stream keyspace.
 func (m *Manager) reconcileLoop() {
 	defer m.wg.Done()

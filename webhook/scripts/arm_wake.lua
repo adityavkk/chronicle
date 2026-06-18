@@ -18,8 +18,9 @@ redis.call('HSET', sub, 'wake_id', ARGV[5], 'phase', 'waking', 'holder', '0', 'h
 redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1])
 if ARGV[4] == '1' then
   local until_ns = tonumber(ARGV[2]) + tonumber(ARGV[3]) * 1000000
-  redis.call('HSET', sub, 'lease_until_ns', tostring(until_ns))
-  redis.call('ZADD', KEYS[2], until_ns, ARGV[1])
+  local until_ns_str = string.format('%.0f', until_ns)
+  redis.call('HSET', sub, 'lease_until_ns', until_ns_str)
+  redis.call('ZADD', KEYS[2], until_ns_str, ARGV[1])
 else
   -- pull-wake: mark the wake event as not yet emitted. The lease is not armed
   -- (it starts at claim), so nothing in the schedule recovers a crash between

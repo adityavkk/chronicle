@@ -2,6 +2,8 @@ package webhook
 
 import (
 	"context"
+	"errors"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -60,6 +62,19 @@ func newTestManager(t *testing.T) (*Manager, *RedisStore, *fakeStreams) {
 		t.Fatalf("new manager: %v", err)
 	}
 	return mgr, store, fs
+}
+
+func TestDefaultSweepIntervalIsCoarseFloor(t *testing.T) {
+	if defaultSweepInterval == 2*time.Second {
+		t.Fatal("default sweep interval must not remain the old 2s recovery sweep")
+	}
+	if defaultSweepInterval < 5*time.Second || defaultSweepInterval > 5*time.Minute {
+		t.Fatalf("default sweep interval %s outside seconds-to-minutes floor band", defaultSweepInterval)
+	}
+	if defaultSweepInterval != defaultReconcileInterval {
+		t.Fatalf("default sweep interval = %s, want alignment with reconcile interval %s",
+			defaultSweepInterval, defaultReconcileInterval)
+	}
 }
 
 // TestRecordWakeEventSentFences is the slice-1 store contract: a matching
@@ -310,6 +325,131 @@ func TestSweepRecordsMetrics(t *testing.T) {
 	if fm.lastSubs < 1 || fm.lastTails < 1 || fm.lastWakes < 1 {
 		t.Fatalf("sweep metrics should reflect the pending sub: subs=%d tails=%d wakes=%d",
 			fm.lastSubs, fm.lastTails, fm.lastWakes)
+	}
+}
+
+func TestRecoveryScopesRunExactlyOneSweepPath(t *testing.T) {
+	store, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	fm := &fakeMetrics{}
+	mgr, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/", Metrics: fm})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := store.CreateOrConfirm("s1", pullWakeCfg(), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Link("s1", "events/1", LinkGlob, fs.BeginningOffset()); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, scope := range []recoveryScope{
+		recoveryScopeBoot,
+		recoveryScopeReconnect,
+		recoveryScopeAppendError,
+		recoveryScopeFloor,
+	} {
+		mgr.reconcile(scope)
+		fm.mu.Lock()
+		got := fm.sweeps
+		fm.mu.Unlock()
+		if got != i+1 {
+			t.Fatalf("%s should run exactly one sweep path, got %d total sweeps after %d scopes",
+				scope, got, i+1)
+		}
+	}
+
+	mgr.reconcile(recoveryScopeEpochBump)
+	mgr.reconcile(recoveryScopeNewOwnerCAS)
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	if fm.sweeps != 4 {
+		t.Fatalf("ownership stub scopes should not run the full sweep before #14, got %d sweeps", fm.sweeps)
+	}
+}
+
+type streamSubscribersErrorStore struct{ *RedisStore }
+
+func (s streamSubscribersErrorStore) StreamSubscribers(string) ([]string, error) {
+	return nil, errors.New("stream subscriber index unavailable")
+}
+
+func TestOnStreamAppendErrorTriggersOneReconcile(t *testing.T) {
+	store, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	fm := &fakeMetrics{}
+	mgr, err := NewManager(streamSubscribersErrorStore{store}, fs, ManagerOptions{
+		StreamRootURL: "http://x/v1/stream/",
+		Metrics:       fm,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := store.CreateOrConfirm("s1", pullWakeCfg(), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Link("s1", "events/1", LinkGlob, fs.BeginningOffset()); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr.OnStreamAppend("events/1")
+
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	if fm.sweeps != 1 {
+		t.Fatalf("append-error trigger should run one reconcile sweep, got %d", fm.sweeps)
+	}
+}
+
+func TestReconcileLeasesRestoresDroppedLeaseAndDueFromDurableState(t *testing.T) {
+	store, client := newTestStore(t)
+	now := time.Now()
+	const (
+		id    = "s1"
+		path  = "events/lease-reconcile"
+		begin = "0000000000000000_0000000000000000"
+		tail  = "0000000000000001_0000000000000000"
+	)
+	if _, err := store.CreateOrConfirm(id, pullWakeCfg(), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Link(id, path, LinkGlob, begin); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.Claim(id, ClaimModeLegacy, DefaultClaimShard, "worker-A", "w_a", now, 1000)
+	if err != nil || !claimed.Claimed {
+		t.Fatalf("claim = %+v err=%v", claimed, err)
+	}
+	sub, _, _ := store.Get(id)
+	if sub.Phase != PhaseLive || sub.LeaseUntilNs == 0 {
+		t.Fatalf("precondition: expected live lease in durable hash, got %+v", sub)
+	}
+	if err := client.ZRem(context.Background(), leaseZKey, id).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ZRem(context.Background(), dueSetKey(), id).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	fs := &fakeStreams{tails: map[string]string{path: tail}}
+	mgr, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.reconcile(recoveryScopeEpochBump)
+
+	leaseScore, err := client.ZScore(context.Background(), leaseZKey, id).Result()
+	if err != nil {
+		t.Fatalf("missing repaired lease schedule member: %v", err)
+	}
+	if math.Abs(leaseScore-float64(sub.LeaseUntilNs)) > float64(time.Millisecond) {
+		t.Fatalf("lease schedule score = %.0f, want durable lease_until_ns %d", leaseScore, sub.LeaseUntilNs)
+	}
+	members := dueMembers(t, client)
+	if len(members) != 1 || members[0] != id {
+		t.Fatalf("pending durable cursor state should re-derive due entry, got %v", members)
 	}
 }
 

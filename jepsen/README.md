@@ -52,7 +52,7 @@ die. Override `CLUSTER`, `STREAMS`, `MSGS` via env.
    - `baseline` — none.
    - `origin-restart` — kill one origin every 3 s during the workload, then kill
      **all** origins after the final append (the final wake can then only come
-     from the recovery sweep on a restarted origin).
+     from recovery on a restarted origin).
    - `redis-restart` — delete the Redis pod mid-workload; it recreates and replays
      its PVC-backed AOF.
 
@@ -119,13 +119,13 @@ the scenario drivers and the recorder are the shell.
   byte-identical durable subscription snapshot with `check_stale_generation.go`.
 - **`lease-tail-drop-recovery` (L3, lease-tail-drop recovery).** ZREMs exactly
   `ds:{__ds}:sched:lease` for a live pull-wake subscription whose cursor lags a
-  seeded stream tail, then does **not** call `claim` again until Redis shows the
-  recovery sweep has re-armed the subscription as `phase=waking` with a newer
-  generation. Only then does worker B claim that recovered wake, ack the pending
-  tail, and verify the cursor reaches the tail. Worker A's deposed ack must still
-  return `FENCED`. The exact `-sweep=0` proof is blocked on today's binary
-  because the recovery sweep is not separately disableable from a future
-  floor/eager-reconcile path.
+  seeded stream tail, restarts Redis to force the reconnect trigger, then does
+  **not** call `claim` again until Redis shows the eager reconcile has re-armed
+  the subscription as `phase=waking` with a newer generation. Only then does
+  worker B claim that recovered wake, ack the pending tail, and verify the cursor
+  reaches the tail. Worker A's deposed ack must still return `FENCED`. The sharp
+  disabled-timer variant is `-floor=0`; the eventless coarse-floor case is tested
+  separately from this explicit-trigger path.
 
 The enriched nemesis surface includes randomized action windows
 (`-nemesis-window-min`, `-nemesis-window-max`), in-process `gcPause`,

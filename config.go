@@ -65,15 +65,15 @@ type Config struct {
 	// default; enable only on a trusted network.
 	WebhookAllowPrivate bool
 
-	// SweepInterval is how often the recovery sweep re-evaluates every
-	// subscription against its durable cursor (default 2s). The sweep is the
-	// backstop for a wake lost to a crash; lengthen it to trade recovery latency
-	// for less steady-state Redis load on a large subscription keyspace.
+	// SweepInterval is the coarse recovery floor for eventless gaps (default
+	// 30s). Detectable recovery events reconcile immediately; lengthen the floor
+	// to trade eventless recovery latency for less steady-state Redis load on a
+	// large subscription keyspace.
 	SweepInterval time.Duration
 
 	// ReconcileInterval is how often the slow reconcile loop runs (missed glob
 	// links + fan-out index repair; default 30s). It scans the stream keyspace,
-	// so it is deliberately slower than the sweep.
+	// so it is deliberately separate from per-append wake delivery.
 	ReconcileInterval time.Duration
 
 	// SweepBatch caps how many subscriptions one sweep tick evaluates (0 = no
@@ -100,7 +100,7 @@ func DefaultConfig() Config {
 		SSEReconnectInterval: 60 * time.Second,
 		PublicBaseURL:        "http://localhost:4437",
 		Subscriptions:        true,
-		SweepInterval:        2 * time.Second,
+		SweepInterval:        30 * time.Second,
 		ReconcileInterval:    30 * time.Second,
 	}
 }

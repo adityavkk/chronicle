@@ -69,6 +69,12 @@ type Store interface {
 	// script atomically re-owe the subscription in the due set.
 	ExpireLease(ref LeaseRef, now time.Time, pending bool) (string, error)
 
+	// ReconcileLeaseSchedule mirrors a live/waking durable lease back into the
+	// volatile schedules after failover drops a ZSET tail. It never changes the
+	// subscription HASH fence or phase; pending re-derives due-set membership from
+	// durable cursor state.
+	ReconcileLeaseSchedule(ref LeaseRef, now time.Time, pending bool) (LeaseReconcileResult, error)
+
 	// DueLeases / DueRetries / DueWakes take due schedule members by re-scoring
 	// them forward to a visibility window (never removing them), so a crashed
 	// worker's item recurs (docs/research/07 §6.1).
@@ -128,4 +134,11 @@ type ClaimResult struct {
 	WakeID       string
 	Holder       string
 	LeaseLapsed  bool
+}
+
+// LeaseReconcileResult is the schedule-only outcome of ReconcileLeaseSchedule.
+type LeaseReconcileResult struct {
+	Reconciled    bool
+	LeaseRepaired bool
+	DueOp         string
 }

@@ -337,6 +337,31 @@ func (s *RedisStore) ExpireLease(ref LeaseRef, now time.Time, pending bool) (str
 	return reply[0], nil
 }
 
+// ReconcileLeaseSchedule re-adds schedule entries implied by durable sub state.
+func (s *RedisStore) ReconcileLeaseSchedule(ref LeaseRef, now time.Time, pending bool) (LeaseReconcileResult, error) {
+	pendingArg := "0"
+	if pending {
+		pendingArg = "1"
+	}
+	reply, err := s.evalStrings(reconcileLeaseScript, []string{subKey(ref.SubID), leaseZKey, dueSetKey()},
+		ref.SubID, nsArg(now), ref.Shard.String(), ref.Member(), pendingArg)
+	if err != nil {
+		return LeaseReconcileResult{}, err
+	}
+	switch reply[0] {
+	case "RECONCILED":
+		return LeaseReconcileResult{
+			Reconciled:    true,
+			LeaseRepaired: len(reply) > 1 && reply[1] == "1",
+			DueOp:         reply[2],
+		}, nil
+	case "SKIPPED", "NOSUB":
+		return LeaseReconcileResult{}, nil
+	default:
+		return LeaseReconcileResult{}, fmt.Errorf("reconcile_lease: unexpected status %q", reply[0])
+	}
+}
+
 // DueLeases takes due lease-schedule members by re-scoring them forward, so a
 // dropped worker's subscription recurs (docs/research/07 §6.1).
 func (s *RedisStore) DueLeases(now time.Time, limit int, visibility time.Duration) ([]LeaseRef, error) {
@@ -499,7 +524,17 @@ func unmarshalKeyMaterial(kid, material string) (SigningKey, error) {
 
 // subscriptionFromHash decodes the sub HASH and links HASH into a Subscription.
 func subscriptionFromHash(id string, f map[string]string, linkFields map[string]string) Subscription {
-	atoi := func(k string) int64 { n, _ := strconv.ParseInt(f[k], 10, 64); return n }
+	atoi := func(k string) int64 {
+		n, err := strconv.ParseInt(f[k], 10, 64)
+		if err == nil {
+			return n
+		}
+		fv, err := strconv.ParseFloat(f[k], 64)
+		if err == nil {
+			return int64(fv)
+		}
+		return 0
+	}
 	createdNs := atoi("created_ns")
 	sub := Subscription{
 		ID: id,

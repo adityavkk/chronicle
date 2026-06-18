@@ -2,10 +2,10 @@
 
 **What this checks.** The subscription layer's central claim (docs/research/07) is
 that chronicle closes the restart gap the in-memory reference servers have: the
-durable cursor plus a recovery sweep guarantee that every durably-appended
-message is eventually delivered, even when the origin that accepted the append
-dies before the wake fires. These tests assert that property empirically against
-a real Kubernetes deployment under fault injection.
+durable cursor plus event-triggered recovery and a coarse floor guarantee that
+every durably-appended message is eventually delivered, even when the origin that
+accepted the append dies before the wake fires. These tests assert that property
+empirically against a real Kubernetes deployment under fault injection.
 
 **The property.** After the workload and the faults settle, every linked stream's
 subscription cursor (`acked_offset`) has advanced to that stream's tail — i.e.
@@ -49,7 +49,7 @@ jepsen/bin/jepsen-checker -base http://localhost:4438 -cluster chronicle-jepsen 
 jepsen/bin/jepsen-checker -base http://localhost:4438 -cluster chronicle-jepsen \
   -scenario contention-contract -nemesis-dry-run
 jepsen/bin/jepsen-checker -base http://localhost:4438 -cluster chronicle-jepsen \
-  -scenario lease-tail-drop-recovery -sweep=0
+  -scenario lease-tail-drop-recovery -floor=0
 ```
 
 Observed results:
@@ -60,18 +60,15 @@ Observed results:
 | `cursor-monotonic` | T2 cursor monotonicity | **PASS**. The normal baseline had no regression. A short-window rerun produced 46 `kill-origin` actions, 1500 cursor samples across 8 streams, and no cursor regression. |
 | `stale-gen-noop` | T4 no stale-generation effect | **PASS**. Stale ack returned `409 FENCED`; before/after subscription snapshots were byte-identical (`393` bytes). Three stress iterations also passed. |
 | `at-least-once` | L1 at-least-once delivery | **PASS**. 320 messages appended, 306 wakes delivered, duplicate factor 1.00, 8/8 streams at tail. |
-| `lease-tail-drop-recovery` | L3 lease-tail-drop recovery | **SUPERSEDED / PENDING CORRECTED LIVE RERUN**. The 2026-06-18 run only proved that a later direct `Claim` could rotate the fence after `drop-lease-tail`; it did **not** prove the recovery sweep re-armed stranded work from cursor/tail state. The checker now waits for Redis to show `phase=waking` with a newer generation before any post-drop claim, then requires worker B to claim that recovered wake, ack the pending tail, and leave worker A fenced. No corrected live result is recorded here yet. |
+| `lease-tail-drop-recovery` | L3 lease-tail-drop recovery | **SUPERSEDED / PENDING CORRECTED LIVE RERUN**. The 2026-06-18 run only proved that a later direct `Claim` could rotate the fence after `drop-lease-tail`; it did **not** prove the reconnect-triggered eager reconcile re-armed stranded work from cursor/tail state. The checker now restarts Redis as the explicit trigger, waits for Redis to show `phase=waking` with a newer generation before any post-drop claim, then requires worker B to claim that recovered wake, ack the pending tail, and leave worker A fenced. No corrected live result is recorded here yet. |
 | `ownership-exclusivity` | T3 proposed shard ownership | **SCAFFOLDED / BLOCKED**. Dry-run wiring succeeds. Live check is blocked until `claim_shard.lua`, `check_owner.lua`, and `ds:{ownership}:slot:<h>` exist. |
 | `slot-isolation` | T5 proposed slot homing | **SCAFFOLDED / BLOCKED**. Dry-run wiring succeeds. Live check is blocked until S-slot `{__ds:h}` key homing exists. |
 | `contention-contract` | C1/C2/C3 contention suite | **SCAFFOLDED / BLOCKED**. Pure rate-contract checker is unit-tested; live C1/C2/C3 require the claimant fan-in measurement rig and, for C3, the claim-granularity fix. |
 
 Honest L3 gap: the corrected default `lease-tail-drop-recovery` driver must be
-rerun before L3 is reported green. The stricter `lease-tail-drop-recovery
--sweep=0` variant still intentionally fails on today's binary with:
-
-```text
-FAIL: lease-tail-drop-recovery with -sweep=0 is blocked on today's SUT: the deployed binary exposes the recovery sweep, not a separately disableable floor/eager-reconcile path
-```
+rerun before L3 is reported green. The stricter disabled-timer variant is now
+`lease-tail-drop-recovery -floor=0`; it relies on the explicit Redis reconnect
+trigger, while the eventless coarse-floor case is tested separately.
 
 Corrected live rerun attempt on 2026-06-18:
 
@@ -140,13 +137,13 @@ append destroys every in-memory wake, lease, and generation counter the acceptin
 origins held — exactly the state the Caddy webhook engine keeps only in RAM. An
 in-memory implementation would leave those last messages durable in the log but
 never delivered (no wake survives, and nothing re-scans). Chronicle's cursor is a
-Redis HASH field and the re-evaluation is the recovery sweep that runs on every
-origin at boot and on an interval; the freshly-started origins recompute
-`HasPendingWork` against the durable cursors and re-fire. The 12/12 result is that
-recovery: deliveries observed *after* the accepting origins no longer exist.
+Redis HASH field and boot/reconnect recovery re-evaluates those durable cursors,
+with a coarse floor for the eventless case; the freshly-started origins recompute
+`HasPendingWork` and re-fire. The 12/12 result is that recovery: deliveries
+observed *after* the accepting origins no longer exist.
 
 This is the empirical form of research 07 §6.3 — a durable cursor is necessary but
-not sufficient; the sweep is what asks the question the cursor makes answerable.
+not sufficient; recovery is what asks the question the cursor makes answerable.
 
 **`redis-restart` tests the substrate.** With `appendfsync always` and the AOF on a
 PVC, the recreated Redis replays every acknowledged write, so the streams, the

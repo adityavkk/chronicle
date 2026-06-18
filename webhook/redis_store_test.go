@@ -63,6 +63,25 @@ func dueScore(t *testing.T, client goredis.UniversalClient, id string) float64 {
 	return score
 }
 
+func TestSubscriptionFromHashParsesScientificLeaseDeadline(t *testing.T) {
+	sub := subscriptionFromHash("s1", map[string]string{
+		"created_ns":     "1781800000000000000",
+		"type":           string(DispatchPullWake),
+		"pattern":        "events/*",
+		"lease_ttl_ms":   "1000",
+		"status":         string(StatusActive),
+		"phase":          string(PhaseLive),
+		"generation":     "1",
+		"wake_id":        "w_a",
+		"holder":         "1",
+		"holder_worker":  "worker-A",
+		"lease_until_ns": "1.7818e+18",
+	}, nil)
+	if sub.LeaseUntilNs == 0 {
+		t.Fatal("scientific-notation lease_until_ns should parse for upgrade compatibility")
+	}
+}
+
 func TestStoreCreateConfirmConflict(t *testing.T) {
 	s, _ := newTestStore(t)
 	now := time.Now()

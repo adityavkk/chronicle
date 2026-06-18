@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,10 +25,30 @@ import (
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
+type redisReconnectHook struct {
+	mu sync.RWMutex
+	fn func()
+}
+
+func (h *redisReconnectHook) set(fn func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.fn = fn
+}
+
+func (h *redisReconnectHook) fire() {
+	h.mu.RLock()
+	fn := h.fn
+	h.mu.RUnlock()
+	if fn != nil {
+		go fn()
+	}
+}
+
 // newStore builds the stream store. For the redis backend it also returns the
 // concrete Redis store and the shared client so the subscription layer can run
 // on the same Redis; both are nil for the memory backend.
-func newStore(cfg chronicle.Config, logger *slog.Logger) (store.Store, *redisstore.Store, goredis.UniversalClient, error) {
+func newStore(cfg chronicle.Config, logger *slog.Logger, onRedisConnect func()) (store.Store, *redisstore.Store, goredis.UniversalClient, error) {
 	switch cfg.StoreBackend {
 	case "memory":
 		return store.NewMemoryStore(), nil, nil, nil
@@ -35,6 +56,12 @@ func newStore(cfg chronicle.Config, logger *slog.Logger) (store.Store, *redissto
 		opt, err := goredis.ParseURL(cfg.RedisURL)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("invalid redis URL: %w", err)
+		}
+		if onRedisConnect != nil {
+			opt.OnConnect = func(context.Context, *goredis.Conn) error {
+				onRedisConnect()
+				return nil
+			}
 		}
 		client := goredis.NewClient(opt)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -72,7 +99,7 @@ func run() error {
 	flag.StringVar(&cfg.PublicBaseURL, "public-url", cfg.PublicBaseURL, "externally reachable origin for webhook callback/JWKS URLs")
 	flag.BoolVar(&cfg.Subscriptions, "subscriptions", cfg.Subscriptions, "enable the reserved __ds subscription APIs (redis backend only)")
 	flag.BoolVar(&cfg.WebhookAllowPrivate, "webhook-allow-private", cfg.WebhookAllowPrivate, "accept webhook URLs on private/RFC1918 addresses (trusted networks only)")
-	flag.DurationVar(&cfg.SweepInterval, "sweep-interval", cfg.SweepInterval, "recovery sweep interval (subscriptions)")
+	flag.DurationVar(&cfg.SweepInterval, "sweep-interval", cfg.SweepInterval, "coarse recovery floor interval (subscriptions)")
 	flag.DurationVar(&cfg.ReconcileInterval, "reconcile-interval", cfg.ReconcileInterval, "slow reconcile loop interval (subscriptions)")
 	flag.IntVar(&cfg.SweepBatch, "sweep-batch", cfg.SweepBatch, "max subscriptions evaluated per sweep tick, 0 = no cap (subscriptions)")
 	flag.StringVar(&cfg.MetricsListen, "metrics-listen", cfg.MetricsListen, "address for /metrics + /healthz + /readyz, e.g. :9090 (empty disables)")
@@ -85,7 +112,8 @@ func run() error {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	st, rs, client, err := newStore(cfg, logger)
+	reconnectHook := &redisReconnectHook{}
+	st, rs, client, err := newStore(cfg, logger, reconnectHook.fire)
 	if err != nil {
 		return err
 	}
@@ -143,9 +171,10 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("subscriptions: %w", err)
 		}
+		reconnectHook.set(service.RunRedisReconnect)
 		handler.Subscriptions = router
 		handler.SubHooks = service
-		service.RunSweep() // re-fire anything owed before serving (closes the restart gap)
+		service.RunSweep() // boot reconcile: re-fire anything owed before serving
 		service.Start()
 		defer service.Stop()
 		subscriptionsEnabled = true

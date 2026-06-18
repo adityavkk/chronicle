@@ -54,7 +54,8 @@ if ARGV[5] == '1' then
   redis.call('ZREM', KEYS[5], ARGV[1])
 else
   local until_ns = tonumber(ARGV[6]) + tonumber(ARGV[7]) * 1000000
-  redis.call('HSET', sub, lease_until_field, tostring(until_ns), phase_field, 'live')
-  redis.call('ZADD', KEYS[3], until_ns, ARGV[10])
+  local until_ns_str = string.format('%.0f', until_ns)
+  redis.call('HSET', sub, lease_until_field, until_ns_str, phase_field, 'live')
+  redis.call('ZADD', KEYS[3], until_ns_str, ARGV[10])
 end
 return { 'OK' }

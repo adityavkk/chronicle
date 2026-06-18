@@ -50,6 +50,7 @@ if not (phase == 'waking' and wake ~= '') then
   redis.call('HSET', sub, wake_field, wake)
 end
 local until_ns = now + tonumber(ARGV[4]) * 1000000
-redis.call('HSET', sub, phase_field, 'live', holder_field, '1', holder_worker_field, ARGV[2], lease_until_field, tostring(until_ns))
-redis.call('ZADD', KEYS[2], until_ns, ARGV[7])
+local until_ns_str = string.format('%.0f', until_ns)
+redis.call('HSET', sub, phase_field, 'live', holder_field, '1', holder_worker_field, ARGV[2], lease_until_field, until_ns_str)
+redis.call('ZADD', KEYS[2], until_ns_str, ARGV[7])
 return { 'CLAIMED', gen, wake, ARGV[2], lapsed and '1' or '0' }

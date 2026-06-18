@@ -39,6 +39,7 @@ var (
 	ackScript            = loadScript("ack.lua")
 	releaseScript        = loadScript("release.lua")
 	expireLeaseScript    = loadScript("expire_lease.lua")
+	reconcileLeaseScript = loadScript("reconcile_lease.lua")
 	claimDueScript       = loadScript("claim_due.lua")
 	scheduleRetryScript  = loadScript("schedule_retry.lua")
 	recordSuccessScript  = loadScript("record_success.lua")

@@ -78,7 +78,7 @@ func (s *Spec) applyDefaults() {
 		s.SUT.Replicas = 1
 	}
 	if s.SUT.SweepInterval == "" {
-		s.SUT.SweepInterval = "2s"
+		s.SUT.SweepInterval = "30s"
 	}
 	if s.SUT.CPU == "" {
 		s.SUT.CPU = "2"
