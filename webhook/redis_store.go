@@ -24,6 +24,11 @@ type RedisStore struct {
 	// WithMetrics. It lives on the store, not the Manager, because the contention
 	// fan-in driver and any direct claim/ack caller record the same signal.
 	metrics Metrics
+	// durPlan is the tunable-consistency durability barrier issued on the
+	// fence-minting writes (#16, doc 05 Tier B). The zero value (Wait:false) is
+	// Tier A — no WAIT, today's behavior — so a store built without WithConsistency
+	// is byte-for-byte unchanged. Only Tier B populates it.
+	durPlan DurabilityPlan
 }
 
 var _ Store = (*RedisStore)(nil)
@@ -41,6 +46,18 @@ func (s *RedisStore) WithMetrics(m Metrics) *RedisStore {
 		m = NopMetrics{}
 	}
 	s.metrics = m
+	return s
+}
+
+// WithConsistency sets the tunable-consistency tier for the fence-minting writes
+// and returns the store for chaining (#16, doc 05 Tier B). Tier A/C leave the
+// store on the no-WAIT default; Tier B arms a WAITAOF (numLocal=1, numReplicas)
+// barrier on arm_wake/claim with the given server-side timeout. numReplicas is
+// the deployment's replica requirement (1 on the STANDARD_HA substrate — the
+// Redis Software HA ceiling, 06:70; 0 on the single-Redis local rig — local AOF
+// fsync only). timeoutMs<=0 falls back to the default.
+func (s *RedisStore) WithConsistency(tier ConsistencyTier, numReplicas, timeoutMs int) *RedisStore {
+	s.durPlan = DurabilityFor(tier, numReplicas, timeoutMs)
 	return s
 }
 
@@ -73,6 +90,66 @@ func (s *RedisStore) evalStrings(script *redis.Script, keys []string, args ...an
 		}
 	}
 	return out, nil
+}
+
+// awaitDurable issues the tier's WAIT/WAITAOF barrier on the fence-minting write
+// that just completed on this store's client and reduces the reply to a DURABILITY
+// verdict (Tier B; a no-op for Tier A/C). It is the thin IO shell over the pure
+// InterpretWaitAOF/InterpretWait core (FCIS).
+//
+// WAIT/WAITAOF block until the master's CURRENT replication/AOF offset is
+// acknowledged, and that offset is monotonic, so issuing the barrier immediately
+// after the EVAL is a correct (conservative) durability gate even though go-redis
+// may route it on a different pooled connection — it can only over-wait, never
+// under-wait, for our write. go-redis types WaitAOF as an IntCmd and cannot parse
+// the [numlocal, numreplicas] array, so the store issues both via Do().
+//
+// CRITICAL (correction #3): the returned count flows ONLY into the pure
+// interpreters, whose sole output is durability. It never feeds the fence /
+// exclusivity decision — the Lua reply already made that. A short reply is
+// surfaced as an error, never swallowed and never read as "I hold the lease".
+func (s *RedisStore) awaitDurable() error {
+	plan := s.durPlan
+	if !plan.Wait {
+		return nil
+	}
+	if plan.UseAOF {
+		raw, err := s.client.Do(s.ctx(), "WAITAOF", plan.NumLocal, plan.NumReplicas, plan.TimeoutMs).Slice()
+		if err != nil {
+			return fmt.Errorf("webhook: WAITAOF: %w", err)
+		}
+		gotLocal, gotReplicas := waitAOFCounts(raw)
+		return InterpretWaitAOF(plan, gotLocal, gotReplicas)
+	}
+	n, err := s.client.Do(s.ctx(), "WAIT", plan.NumReplicas, plan.TimeoutMs).Int()
+	if err != nil {
+		return fmt.Errorf("webhook: WAIT: %w", err)
+	}
+	return InterpretWait(plan, n)
+}
+
+// waitAOFCounts decodes WAITAOF's [numlocal, numreplicas] integer-pair reply.
+func waitAOFCounts(raw []any) (local, replicas int) {
+	if len(raw) > 0 {
+		local = replyInt(raw[0])
+	}
+	if len(raw) > 1 {
+		replicas = replyInt(raw[1])
+	}
+	return local, replicas
+}
+
+// replyInt coerces a RESP integer reply element to int (go-redis decodes RESP
+// integers as int64).
+func replyInt(v any) int {
+	switch n := v.(type) {
+	case int64:
+		return int(n)
+	case int:
+		return n
+	default:
+		return 0
+	}
 }
 
 // CreateOrConfirm seeds the create_sub script with the config fields and the
@@ -380,7 +457,19 @@ func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLeas
 	switch reply[0] {
 	case "ARMED":
 		gen, _ := strconv.ParseInt(reply[1], 10, 64)
-		return ArmResult{Armed: true, Generation: gen, WakeID: reply[2]}, nil
+		res := ArmResult{Armed: true, Generation: gen, WakeID: reply[2]}
+		// Tier B: the generation HINCRBY (arm_wake.lua:23) just minted the fence on
+		// the primary; block on WAITAOF BEFORE the caller dispatches so a wake we
+		// externalize is durable to ~the AOF fsync interval (doc 05 Tier B). A short
+		// reply means the write reached the primary but durability is unproven — it
+		// is returned as an error so issueWake does NOT dispatch (recovery re-fires
+		// the wake after lease expiry), never swallowed. The result is returned
+		// alongside it as the truthful primary fence state. BUSY/NOSUB/FENCED mint no
+		// fence, so they need no barrier.
+		if err := s.awaitDurable(); err != nil {
+			return res, err
+		}
+		return res, nil
 	case "BUSY":
 		gen, _ := strconv.ParseInt(reply[1], 10, 64)
 		return ArmResult{Busy: true, Generation: gen, WakeID: reply[2]}, nil
@@ -418,7 +507,17 @@ func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now tim
 	case "CLAIMED":
 		s.recordContention("claimed", id)
 		gen, _ := strconv.ParseInt(reply[1], 10, 64)
-		return ClaimResult{Claimed: true, Generation: gen, WakeID: reply[2], Holder: reply[3]}, nil
+		res := ClaimResult{Claimed: true, Generation: gen, WakeID: reply[2], Holder: reply[3]}
+		// Tier B: a claim grant rotates/confirms the fence generation (claim.lua:41)
+		// and arms the lease; block on WAITAOF so the worker proceeds only once the
+		// claim is durable (doc 05 Tier B). A short reply is surfaced as an error so a
+		// non-durable claim does not silently process — the lease self-heals via
+		// expiry + takeover. Durability only; the (gen,wake_id) fence still governs
+		// who may ack. BUSY/NOSUB hold no new grant, so they need no barrier.
+		if err := s.awaitDurable(); err != nil {
+			return res, err
+		}
+		return res, nil
 	case "BUSY":
 		s.recordContention("already_claimed", id)
 		gen, _ := strconv.ParseInt(reply[1], 10, 64)
