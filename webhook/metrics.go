@@ -25,6 +25,39 @@ type Metrics interface {
 	// WorkerTick records one lease/retry worker pass: the kind ("lease" or
 	// "retry") and how many due items it claimed this tick.
 	WorkerTick(kind string, due int)
+
+	// The methods below are the golden signals for the horizontal-scale
+	// mechanisms (docs/specs/horizontal-scale/research/05 "New metrics"). The
+	// interface is APPEND-ONLY: each new mechanism ships its method here with a
+	// NopMetrics no-op AND a metrics.Prometheus implementation AND a
+	// metrics/metrics_test.go golden entry in the same change, or CI breaks for
+	// every downstream slice (epic #9, GAP2). They are wired to real call sites by
+	// the issues that add the mechanism (#12–#15); they are no-ops until then.
+
+	// FanOut records one OnStreamAppend fan-out under slot-homing: its wall-clock
+	// duration, how many slots it probed, and how many subscribers it found.
+	// Feeds gate #2 (fan-out p99 regression). Wired at OnStreamAppend in #15.
+	FanOut(dur time.Duration, slotsProbed, subs int)
+	// DueSetMutation records one mutation of a per-subscription due-set: op is
+	// "arm", "ack", or "expire". Feeds gate #3 (due write amplification). Wired at
+	// the arm/ack/expire call sites in #12.
+	DueSetMutation(op string)
+	// DueWorkerTick records one due-worker pass over an owned slot: its duration
+	// and how many owed subscriptions it fired. Feeds gate #3. Wired at dueWorker
+	// in #12.
+	DueWorkerTick(dur time.Duration, fired int)
+	// SlotOwnership records a slot-ownership lifecycle event for slot: event is
+	// "claimed", "renewed", "busy", or "released". Feeds gate #4 (churn,
+	// double-grant). Wired at claim_shard / the reconcile loop in #14.
+	SlotOwnership(event string, slot int)
+	// CoverageGap records the latency of a wake the full sweep issued for a
+	// subscription whose slot was unowned at append time — the rebalance coverage
+	// gap. Feeds gate #4 (coverage-gap latency). Wired at sweepOnce in #14.
+	CoverageGap(dur time.Duration)
+	// OwnerFenced records an owner-epoch fence firing: scope is "check_owner"
+	// (the external webhook POST) or "inline" (a schedule/due write). Feeds gate
+	// #4/#5 (fence firing). Wired at check_owner / the inlined checks in #14.
+	OwnerFenced(scope string)
 }
 
 // NopMetrics is the no-op Metrics used when none is configured. The Manager
@@ -42,3 +75,21 @@ func (NopMetrics) WakeEvent(time.Duration, string) {}
 
 // WorkerTick implements Metrics.
 func (NopMetrics) WorkerTick(string, int) {}
+
+// FanOut implements Metrics.
+func (NopMetrics) FanOut(time.Duration, int, int) {}
+
+// DueSetMutation implements Metrics.
+func (NopMetrics) DueSetMutation(string) {}
+
+// DueWorkerTick implements Metrics.
+func (NopMetrics) DueWorkerTick(time.Duration, int) {}
+
+// SlotOwnership implements Metrics.
+func (NopMetrics) SlotOwnership(string, int) {}
+
+// CoverageGap implements Metrics.
+func (NopMetrics) CoverageGap(time.Duration) {}
+
+// OwnerFenced implements Metrics.
+func (NopMetrics) OwnerFenced(string) {}
