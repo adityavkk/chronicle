@@ -45,6 +45,24 @@ func webhookCfg(url string) Config {
 	return Config{Type: DispatchWebhook, Pattern: "events/*", WebhookURL: url, LeaseTTLMs: 1000}
 }
 
+func dueMembers(t *testing.T, client goredis.UniversalClient) []string {
+	t.Helper()
+	members, err := client.ZRange(context.Background(), dueSetKey(), 0, -1).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return members
+}
+
+func dueScore(t *testing.T, client goredis.UniversalClient, id string) float64 {
+	t.Helper()
+	score, err := client.ZScore(context.Background(), dueSetKey(), id).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return score
+}
+
 func TestStoreCreateConfirmConflict(t *testing.T) {
 	s, _ := newTestStore(t)
 	now := time.Now()
@@ -96,9 +114,16 @@ func TestStoreArmWakeSurvivesRestart(t *testing.T) {
 	if err != nil || !res.Armed || res.Generation != 1 || res.WakeID != "w_first" {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
+	if members := dueMembers(t, client); len(members) != 1 || members[0] != "s1" {
+		t.Fatalf("arm should add one due-set member, got %v", members)
+	}
+	firstDueScore := dueScore(t, client, "s1")
 	// Coalesce: a second arm while in flight is BUSY, not a new generation.
 	if busy, _ := s.ArmWake("s1", now, 1000, true, "w_second"); !busy.Busy || busy.Generation != 1 {
 		t.Fatalf("second arm should be BUSY at gen 1, got %+v", busy)
+	}
+	if got := dueScore(t, client, "s1"); got != firstDueScore {
+		t.Fatalf("BUSY arm must not update due-set score: got %v want %v", got, firstDueScore)
 	}
 
 	// Simulate an origin restart: a brand-new store over the same Redis sees the
@@ -199,6 +224,33 @@ func TestStoreClaimModeRejectsMixedLegacyAndShardedClaims(t *testing.T) {
 	}
 }
 
+func TestStoreAckDoneClearsDueSetHeartbeatDoesNot(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+
+	armed, err := s.ArmWake("s1", now, 1000, true, "w_a")
+	if err != nil || !armed.Armed {
+		t.Fatalf("arm = %+v err=%v", armed, err)
+	}
+	if members := dueMembers(t, client); len(members) != 1 {
+		t.Fatalf("precondition: due set should contain s1, got %v", members)
+	}
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation, false, nil, now, 1000); st != "OK" {
+		t.Fatalf("heartbeat ack = %q, want OK", st)
+	}
+	if members := dueMembers(t, client); len(members) != 1 || members[0] != "s1" {
+		t.Fatalf("heartbeat ack must leave due member in place, got %v", members)
+	}
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation, true, nil, now, 1000); st != "OK" {
+		t.Fatalf("done ack = %q, want OK", st)
+	}
+	if members := dueMembers(t, client); len(members) != 0 {
+		t.Fatalf("done ack must clear due member, got %v", members)
+	}
+}
+
 func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	s, client := newTestStore(t)
 	base := time.Now()
@@ -207,17 +259,20 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	_, _ = s.ArmWake("s1", base, 1000, true, "w_a")
 
 	// Before the deadline: not expired.
-	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), base); st != "ACTIVE" {
+	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), base, true); st != "ACTIVE" {
 		t.Fatalf("lease not yet due should be ACTIVE, got %q", st)
 	}
 	// After the deadline: expired, back to idle.
 	after := base.Add(2 * time.Second)
-	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), after); st != "EXPIRED" {
+	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), after, true); st != "EXPIRED" {
 		t.Fatalf("expired lease should be EXPIRED, got %q", st)
 	}
 	sub, _, _ := s.Get("s1")
 	if sub.Phase != PhaseIdle || sub.Holder {
 		t.Fatalf("expiry must clear holder and idle the subscription: %+v", sub)
+	}
+	if members := dueMembers(t, client); len(members) != 1 || members[0] != "s1" {
+		t.Fatalf("pending expiry should re-owe s1 in due set, got %v", members)
 	}
 
 	// Due claim re-scores forward, it does not remove (research 07 §6.1): a
@@ -233,6 +288,81 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	// Immediately re-claiming finds nothing — it was re-scored into the future.
 	if again, _ := s.DueLeases(after.Add(2*time.Second), 16, 30*time.Second); len(again) != 0 {
 		t.Fatalf("re-scored member must not be due again immediately, got %v", again)
+	}
+}
+
+func TestStoreExpireLeaseClearsDueSetWhenNoPending(t *testing.T) {
+	s, client := newTestStore(t)
+	base := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, base)
+	_, _ = s.ArmWake("s1", base, 1000, true, "w_a")
+	if members := dueMembers(t, client); len(members) != 1 {
+		t.Fatalf("precondition: arm should add due member, got %v", members)
+	}
+	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), base.Add(2*time.Second), false); st != "EXPIRED" {
+		t.Fatalf("expired lease should be EXPIRED, got %q", st)
+	}
+	if members := dueMembers(t, client); len(members) != 0 {
+		t.Fatalf("non-pending expiry should clear stale due member, got %v", members)
+	}
+}
+
+func TestStoreReleaseClearsDueSet(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+	armed, _ := s.ArmWake("s1", now, 1000, true, "w_a")
+	if members := dueMembers(t, client); len(members) != 1 {
+		t.Fatalf("precondition: arm should add due member, got %v", members)
+	}
+	if st, _ := s.Release("s1", ClaimModeLegacy, DefaultClaimShard, armed.Generation, armed.WakeID, armed.Generation); st != "OK" {
+		t.Fatalf("release = %q, want OK", st)
+	}
+	if members := dueMembers(t, client); len(members) != 0 {
+		t.Fatalf("release must clear due member, got %v", members)
+	}
+}
+
+func TestStoreStaleAckAfterReleaseDoesNotClearNewDue(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+
+	first, _ := s.ArmWake("s1", now, 1000, true, "w_a")
+	if st, _ := s.Release("s1", ClaimModeLegacy, DefaultClaimShard, first.Generation, first.WakeID, first.Generation); st != "OK" {
+		t.Fatalf("release first wake = %q, want OK", st)
+	}
+	second, _ := s.ArmWake("s1", now.Add(time.Millisecond), 1000, true, "w_b")
+	if !second.Armed || second.Generation == first.Generation {
+		t.Fatalf("second arm should mint a newer generation, got %+v after %+v", second, first)
+	}
+	acks := []Ack{{Stream: "events/a", Offset: "0000000000000001_0000000000000050"}}
+	if st, _ := s.Ack("s1", ClaimModeLegacy, DefaultClaimShard, first.Generation, first.WakeID, first.Generation, true, acks, now, 1000); st != "FENCED" {
+		t.Fatalf("stale ack after release/re-arm should FENCE, got %q", st)
+	}
+	if members := dueMembers(t, client); len(members) != 1 || members[0] != "s1" {
+		t.Fatalf("stale ack must not clear newer due member, got %v", members)
+	}
+	sub, _, _ := s.Get("s1")
+	if sub.Links[0].AckedOffset != "0000000000000000_0000000000000000" {
+		t.Fatalf("stale ack must not advance cursor, got %+v", sub.Links)
+	}
+}
+
+func TestStoreDeleteClearsDueSet(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+	_, _ = s.ArmWake("s1", now, 1000, true, "w_a")
+	if members := dueMembers(t, client); len(members) != 1 {
+		t.Fatalf("precondition: arm should add due member, got %v", members)
+	}
+	if err := s.Delete("s1"); err != nil {
+		t.Fatal(err)
+	}
+	if members := dueMembers(t, client); len(members) != 0 {
+		t.Fatalf("delete must clear due member, got %v", members)
 	}
 }
 

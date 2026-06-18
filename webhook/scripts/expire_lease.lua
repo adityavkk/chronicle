@@ -3,8 +3,8 @@
 -- a re-wake can be issued if pending work remains. Pull-wake "waking" with no
 -- lease (lease_until_ns=0) is left untouched — its wake event is already in the
 -- wake stream for workers to claim.
--- KEYS: 1=sub 2=lease_zset
--- ARGV: 1=id 2=now_ns 3=shard 4=lease_member
+-- KEYS: 1=sub 2=lease_zset 3=due_zset
+-- ARGV: 1=id 2=now_ns 3=shard 4=lease_member 5=pending('0'/'1')
 -- Reply: {status} ; EXPIRED | ACTIVE | NOSUB
 local sub = KEYS[1]
 if redis.call('EXISTS', sub) == 0 then
@@ -22,6 +22,11 @@ if (phase == 'live' or phase == 'waking') and lease_until > 0 and lease_until <=
   redis.call('HSET', sub, phase_field, 'idle', holder_field, '0', holder_worker_field, '',
     wake_field, '', lease_until_field, '0')
   redis.call('ZREM', KEYS[2], ARGV[4])
+  if ARGV[5] == '1' then
+    redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1])
+  else
+    redis.call('ZREM', KEYS[3], ARGV[1])
+  end
   return { 'EXPIRED' }
 end
 return { 'ACTIVE' }

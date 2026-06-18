@@ -372,11 +372,12 @@ return { 'OWNER' }
 
 **Resolve the TOCTOU explicitly.** A separate `check_owner` round-trip *before* a Go-side
 write does **not** fence a GC pause between the two. So every schedule-/due-mutating
-script (`arm_wake`, `ack`, `expire_lease`, `schedule_retry`, the due `ZADD`/`ZREM`) takes
-the slot key as an **extra KEY** and inlines the owner+epoch check at the top — the check
-and the write are then one atomic script. Standalone `check_owner.lua` is reserved for the
-external webhook POST, where atomicity across the network is impossible anyway and the
-`(gen,wake_id)` fence on the returned ack is the real guard.
+script (`arm_wake`, `ack`, `expire_lease`, `release`, `schedule_retry`, the due
+`ZADD`/`ZREM`) takes the slot key as an **extra KEY** and inlines the owner+epoch check
+at the top — the check and the write are then one atomic script. Standalone
+`check_owner.lua` is reserved for the external webhook POST, where atomicity across the
+network is impossible anyway and the `(gen,wake_id)` fence on the returned ack is the
+real guard.
 
 ### Membership and ownership — the concrete protocol
 
@@ -418,12 +419,16 @@ external webhook POST, where atomicity across the network is impossible anyway a
   | `arm_wake.lua` | add `KEYS[3]=due_zset`; in the `ARMED` branch `ZADD due now_ns id` |
   | `ack.lua` | add the `due_zset` KEY; in the `done='1'` branch `ZREM due id` (alongside the existing lease/retry `ZREM`) |
   | `expire_lease.lua` | in the `EXPIRED` branch, `ZADD due now_ns id` when pending work remains (re-owe) |
+  | `release.lua` | add the `due_zset` KEY; in the idle-reset branch `ZREM due id` (GAP3: mirrors `ack`'s done branch) |
+  | `delete_sub.lua` | include the due key in tombstone cleanup so a deleted in-flight sub cannot leave a permanent due member |
 
-  Update the matching `redis_store.go` call sites (`ArmWake`, `Ack`, `ExpireLease`) to
-  compute `h` and pass the new per-slot key.
+  Update the matching `redis_store.go` call sites (`ArmWake`, `Ack`, `ExpireLease`,
+  `Release`, and delete cleanup) to compute `h` and pass the new per-slot key.
 - **New `dueWorker()` loop**, modeled on `leaseWorker`: for each *owned* slot, run
   `claim_due.lua` against `ds:{__ds:h}:due` and `maybeWake` each returned id. `claim_due.lua`
   (1 key, the ZSET) is **unchanged** — it just runs once per owned slot.
+  The full cursor-reading recovery sweep remains enabled as the correctness backstop; the
+  due worker removes the low-latency path's dependence on a full `O(K)` re-evaluation.
 
 ### Background-loop change map (`manager.go`)
 
@@ -629,7 +634,7 @@ tooling, so they are sequenced against the build, not all "run first":
 
 1. **`O(N·K)` redundancy** *(runnable now, + a Redis-CPU reader)* — ramp replicas 1→4 at K=10k, read managed-Redis CPU. Confirms the scan multiplies (the whole premise). Pass: CPU scales with N at fixed K.
 2. **`OnStreamAppend` fan-out regression** *(after step 5: the `S`-slot shard)* — append→wake p99 with 1 vs `S` parallel `SMEMBERS` at S=2/4/8/256 on a real cluster. *The* number that decides whether slot-homing is viable. Pass: p99 regression within budget; with the occupied-slots bitmap it tracks occupied-slots-per-stream, not `S`.
-3. **Due-set write amplification** *(after step 4: the due-set)* — the added `ZADD`/`ZREM` QPS on append/ack vs the recovery-latency win (uses the new `DueSetMutation` metric). Sizes the cost of the due-set step; informs, does not gate.
+3. **Due-set write amplification** *(after step 4: the due-set)* — the added `ZADD`/`ZREM` QPS on append/ack vs the recovery-latency win (uses the new `DueSetMutation` metric). Sizes the cost of the due-set step; informs, does not gate. Local #12 evidence records the per-branch Redis-op delta: `arm_wake` `ARMED` adds one `ZADD`; `arm_wake` `BUSY` adds zero; `ack` `done='1'` adds one `ZREM`; `ack` heartbeat adds zero; `expire_lease` `EXPIRED` adds one `ZADD` when pending remains or one `ZREM` when the old due mark is stale; `release` `OK` adds one `ZREM`; `delete_sub` adds one cleanup `ZREM`. Real GKE `DueSetMutation` QPS is an orchestrator-run sizing campaign, not a worker-local gate.
 4. **Membership churn window** *(after step 3: leased ownership; needs a chaos step + ≥2 replicas)* — pod-kill a slot owner; measure the coverage-gap latency (the detectable case recovers at the new owner's `claim_shard` + eager reconcile, so **≤ membership-lease TTL + RTT**, not a sweep tick) and confirm zero lost wakes / zero double-grants. This is [07](07-jepsen-style-verification.md)'s L2/L4 as a rig run.
 5. **Failover fence drill** *(after step 4; needs `STANDARD_HA` Redis + fault-injection + a webhook receiver)* — drop the lease-ZSET tail mid-lease; confirm only the cursor-reading reconciler (the failover-aware eager reconcile) recovers a stranded webhook sub, and a deposed ack returns `FENCED` (HTTP 409, not silent success). This is [07](07-jepsen-style-verification.md)'s L3, and the basic-tier Redis `ltctl` provisions has no failover — provision `STANDARD_HA`.
 

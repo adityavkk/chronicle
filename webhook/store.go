@@ -64,14 +64,17 @@ type Store interface {
 	// Release fences then releases the lease without acking (PROTOCOL §7.2).
 	Release(id string, mode ClaimMode, shard ClaimShard, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error)
 
-	// ExpireLease clears an expired lease, returning the subscription to idle.
-	ExpireLease(ref LeaseRef, now time.Time) (string, error)
+	// ExpireLease clears an expired shard lease, returning that claim shard to
+	// idle. pending records that the caller saw durable pending work and lets the
+	// script atomically re-owe the subscription in the due set.
+	ExpireLease(ref LeaseRef, now time.Time, pending bool) (string, error)
 
-	// DueLeases / DueRetries take due schedule members by re-scoring them forward
-	// to a visibility window (never removing them), so a crashed worker's item
-	// recurs (docs/research/07 §6.1).
+	// DueLeases / DueRetries / DueWakes take due schedule members by re-scoring
+	// them forward to a visibility window (never removing them), so a crashed
+	// worker's item recurs (docs/research/07 §6.1).
 	DueLeases(now time.Time, limit int, visibility time.Duration) ([]LeaseRef, error)
 	DueRetries(now time.Time, limit int, visibility time.Duration) ([]string, error)
+	DueWakes(now time.Time, limit int, visibility time.Duration) ([]string, error)
 
 	// ScheduleRetry records a webhook failure and persists next_attempt; returns
 	// the new retry count.

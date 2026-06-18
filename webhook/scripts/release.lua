@@ -1,6 +1,6 @@
 -- release.lua — voluntary lease release without acking (PROTOCOL §7.2). Fenced
 -- like ack. The caller re-issues a wake afterward if pending work remains.
--- KEYS: 1=sub 2=lease_zset 3=retry_zset
+-- KEYS: 1=sub 2=lease_zset 3=retry_zset 4=due_zset
 -- ARGV: 1=id 2=req_gen 3=req_wake 4=token_gen 5=shard 6=lease_member
 --       7=claim_mode('legacy'|'sharded')
 -- Reply: {status} ; OK | FENCED | NOSUB
@@ -30,4 +30,5 @@ redis.call('ZREM', KEYS[2], ARGV[6])
 if shard == '0' then
   redis.call('ZREM', KEYS[3], ARGV[1])
 end
+redis.call('ZREM', KEYS[4], ARGV[1])
 return { 'OK' }
