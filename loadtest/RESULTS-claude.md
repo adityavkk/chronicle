@@ -8,6 +8,17 @@ that refuses all Compute API calls (environment-wide, reproducible, zero resourc
 confirmed by both orchestrators). Those carry the exact committed run spec + command so they
 execute the moment a permitted GCP path is available.
 
+## Epic verdict
+
+**All seven sub-issues (#10–#16) are implemented, adversarially reviewed, and integrated**
+into `epic-hscale-claude`, build/vet/`test -short` + the full webhook Redis integration GREEN
+at the tip. **Phase 1 (the actual collapse) is fixed and proven: C3 / doc-05 gate #6 GREEN —
+the per-type claim-contention knee moves ~G×.** The full safety suite **T1–T5 is GREEN**,
+liveness **L1/L3 GREEN**, and the contention suite **C1–C3 GREEN** on a real Chronicle + Redis
+stack. The cloud-only gates (#1–#5, the L2/L4/L5 multi-replica/scale runs, the K=10k
+regression-floor reproduction) are **PENDING-CLOUD** — GKE is blocked environment-wide by VPC
+Service Controls (zero resources created) — each with its committed run spec + exact command.
+
 ## Test substrate used
 
 - **Unit / pure-core:** `go test -short ./...` (both the root module and `loadgen/`) — no Redis, no clock.
