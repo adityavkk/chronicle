@@ -37,10 +37,23 @@ local function shard_field(base, shard)
   return base .. ':' .. shard
 end
 
+-- legacy_base_used reports whether pre-upgrade shard-0 state already proves the
+-- subscription has used the original unsharded pull-claim contract.
+local function legacy_base_used(sub)
+  local gen = tonumber(redis.call('HGET', sub, 'generation')) or 0
+  local phase = redis.call('HGET', sub, 'phase') or 'idle'
+  local wake = redis.call('HGET', sub, 'wake_id') or ''
+  local holder = redis.call('HGET', sub, 'holder') or '0'
+  local lease_until = tonumber(redis.call('HGET', sub, 'lease_until_ns')) or 0
+  return gen ~= 0 or phase ~= 'idle' or wake ~= '' or holder == '1' or lease_until ~= 0
+end
+
 -- claim_mode_conflict reports whether the request tries to mix the original
 -- unsharded pull-claim contract with the explicit-shard extension. The first
--- claim fixes claim_mode; ack/release fence on a later mismatch.
+-- post-upgrade claim fixes claim_mode unless shard-0 legacy fields already
+-- imply legacy mode; ack/release fence on a later mismatch.
 local function claim_mode_conflict(sub, mode)
   local cur = redis.call('HGET', sub, 'claim_mode') or ''
+  if cur == '' and legacy_base_used(sub) then cur = 'legacy' end
   return cur ~= '' and cur ~= mode, cur
 end

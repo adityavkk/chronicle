@@ -164,6 +164,14 @@ func TestStoreClaimModeRejectsMixedLegacyAndShardedClaims(t *testing.T) {
 	if err != nil || !legacy.Claimed {
 		t.Fatalf("legacy claim = %+v err=%v", legacy, err)
 	}
+	if mode, _ := client.HGet(context.Background(), subKey("legacy-first"), "claim_mode").Result(); mode != ClaimModeLegacy.String() {
+		t.Fatalf("claim_mode = %q, want legacy", mode)
+	}
+	// Simulate an in-flight pre-upgrade legacy claim: base shard-0 lease/fence
+	// fields exist, but the new claim_mode field has not been written yet.
+	if err := client.HDel(context.Background(), subKey("legacy-first"), "claim_mode").Err(); err != nil {
+		t.Fatal(err)
+	}
 	shard, _ := NewClaimShard(4)
 	if got, _ := s.Claim("legacy-first", ClaimModeSharded, shard, "worker-sharded", "w_sharded", now, 1000); !got.ModeConflict || got.Mode != ClaimModeLegacy {
 		t.Fatalf("sharded claim should conflict with legacy mode, got %+v", got)
@@ -171,11 +179,14 @@ func TestStoreClaimModeRejectsMixedLegacyAndShardedClaims(t *testing.T) {
 	if st, _ := s.Ack("legacy-first", ClaimModeSharded, DefaultClaimShard, legacy.Generation, legacy.WakeID, legacy.Generation, true, nil, now, 1000); st != "FENCED" {
 		t.Fatalf("mixed-mode ack should FENCE, got %q", st)
 	}
-	if mode, _ := client.HGet(context.Background(), subKey("legacy-first"), "claim_mode").Result(); mode != ClaimModeLegacy.String() {
-		t.Fatalf("claim_mode = %q, want legacy", mode)
+	if exists, _ := client.HExists(context.Background(), subKey("legacy-first"), "claim_mode").Result(); exists {
+		t.Fatal("pre-upgrade conflict should be inferred from base fields, not claim_mode")
 	}
 
 	_, _ = s.CreateOrConfirm("sharded-first", pullWakeCfg(), nil, now)
+	if exists, _ := client.HExists(context.Background(), subKey("sharded-first"), "claim_mode").Result(); exists {
+		t.Fatal("fresh subscription should not start with claim_mode")
+	}
 	first, err := s.Claim("sharded-first", ClaimModeSharded, shard, "worker-sharded", "w_sharded", now, 1000)
 	if err != nil || !first.Claimed {
 		t.Fatalf("sharded claim = %+v err=%v", first, err)
