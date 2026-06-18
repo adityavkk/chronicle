@@ -116,9 +116,9 @@ func leaseWorker(base, subID string, id int, leaseTTLMs int64, deadline time.Tim
 
 		// gcPause nemesis: on roughly every third grant, stall past the lease so a
 		// peer takes over (rotating the fence) and this ack races in with a stale
-		// token.
+		// token (nemesis.go gcPause).
 		if grants%3 == 0 {
-			sleep(time.Duration(leaseTTLMs)*time.Millisecond + 250*time.Millisecond)
+			sleep(gcPause(time.Duration(leaseTTLMs) * time.Millisecond))
 		}
 
 		callNs = rec.now()
