@@ -454,6 +454,10 @@ func (m *Manager) issueWake(sub Subscription, triggerStream string) {
 	if !res.Armed {
 		return // already in flight (coalesced) or gone
 	}
+	// The arm→emit surgical window (07 honest-gap #2): the fence is minted but the
+	// wake is not yet emitted. A no-op in production; a test failpoint can crash/stall
+	// here to exercise the stranded-wake recovery the host nemesis cannot pin down.
+	failpoint(fpArmedBeforeEmit)
 	switch sub.Config.Type {
 	case DispatchWebhook:
 		go m.deliverWebhook(sub.ID, res.Generation, res.WakeID)
