@@ -283,7 +283,7 @@ func (m *Manager) issueWake(sub Subscription, triggerStream string) {
 		return
 	}
 	armLease := sub.Config.Type == DispatchWebhook
-	res, err := m.store.ArmWake(sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID)
+	res, err := m.armWake(sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID)
 	if err != nil {
 		m.log.Warn("webhook: arm wake", "sub", sub.ID, "error", err)
 		return
@@ -381,7 +381,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
 	_ = m.store.RecordSuccess(id)
 	if parsed.Done != nil && *parsed.Done {
 		acks := acksFromSnapshot(snapshot)
-		status, err := m.store.Ack(id, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs)
+		status, err := m.ack(id, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs)
 		if err != nil {
 			m.log.Warn("webhook: auto-ack done", "sub", id, "error", err)
 			return
@@ -448,13 +448,63 @@ func jitterFraction() float64 {
 	return float64(n.Int64()) / float64(int64(1)<<53)
 }
 
+// ---- due-set outbox mutators (Move 2) ----
+//
+// arm_wake / ack(done) / release / expire_lease are the four scripts that mutate
+// the ds:{__ds}:due "needs a wake" outbox. These thin wrappers record the
+// DueSetMutation the corresponding Lua branch performed, at the one place the
+// reply reveals which branch ran, so the metric stays honest while the store
+// stays free of the Metrics seam. Each is the sole entry point its callers use,
+// so a mutation cannot escape unrecorded.
+
+// armWake arms a wake (arm_wake): the ARMED branch ZADDs the due mark.
+func (m *Manager) armWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error) {
+	res, err := m.store.ArmWake(id, now, leaseTTLMs, armLease, wakeID)
+	if err == nil && res.Armed {
+		m.metrics.DueSetMutation("arm")
+	}
+	return res, err
+}
+
+// ack fences and acks (ack): the done branch ZREMs the due mark; a heartbeat
+// (done=false) does not, so only a done-ack records the mutation.
+func (m *Manager) ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+	status, err := m.store.Ack(id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs)
+	if err == nil && done && status == "OK" {
+		m.metrics.DueSetMutation("ack")
+	}
+	return status, err
+}
+
+// release voluntarily releases the lease (release): the idle-reset branch ZREMs
+// the due mark (GAP3).
+func (m *Manager) release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error) {
+	status, err := m.store.Release(id, reqGeneration, reqWakeID, tokenGeneration)
+	if err == nil && status == "OK" {
+		m.metrics.DueSetMutation("release")
+	}
+	return status, err
+}
+
+// expireLease clears an expired lease (expire_lease): the EXPIRED branch re-owes
+// (ZADDs) the due mark so the dueWorker re-fires it.
+func (m *Manager) expireLease(id string, now time.Time) (string, error) {
+	status, err := m.store.ExpireLease(id, now)
+	if err == nil && status == "EXPIRED" {
+		m.metrics.DueSetMutation("expire")
+	}
+	return status, err
+}
+
 // ---- background loops ----
 
-// Start launches the lease worker, retry worker, and recovery sweep.
+// Start launches the lease worker, retry worker, due-set worker, recovery sweep,
+// and the slow reconcile loop.
 func (m *Manager) Start() {
-	m.wg.Add(4)
+	m.wg.Add(5)
 	go m.leaseWorker()
 	go m.retryWorker()
+	go m.dueWorker()
 	go m.recoverySweeper()
 	go m.reconcileLoop()
 }
@@ -465,9 +515,11 @@ func (m *Manager) Stop() {
 	m.wg.Wait()
 }
 
-// leaseWorker expires due leases and re-wakes subscriptions that still have
-// pending work (PROTOCOL §7.3). Due members are re-scored forward, so a crash
-// mid-handling leaves the lease to fall due again.
+// leaseWorker expires due leases (PROTOCOL §7.3). Due members are re-scored
+// forward, so a crash mid-handling leaves the lease to fall due again. The
+// EXPIRED branch re-owes the due-set; re-firing a still-pending subscription is
+// the dueWorker's job (Move 2 — doc-05 background-loop change map), so this loop
+// no longer re-evaluates each expired sub inline.
 func (m *Manager) leaseWorker() {
 	defer m.wg.Done()
 	ticker := time.NewTicker(m.workerTick)
@@ -486,13 +538,79 @@ func (m *Manager) leaseWorker() {
 				m.metrics.WorkerTick("lease", len(ids))
 			}
 			for _, id := range ids {
-				status, err := m.store.ExpireLease(id, now)
-				if err == nil && status == "EXPIRED" {
-					m.rewakeIfPending(id)
-				}
+				_, _ = m.expireLease(id, now) // EXPIRED re-owes the due-set; dueWorker re-fires
 			}
 		}
 	}
+}
+
+// dueWorker drains the "needs a wake" due-set outbox (Move 2): it claims owed
+// subscriptions in O(owed) via the unchanged claim_due.lua (re-score-forward,
+// never ZREM — at-least-once by construction) and reconciles each against its
+// live state. This is the event-driven replacement for re-firing owed wakes by
+// re-evaluating every subscription on every tick; the full recovery sweep stays
+// the correctness backstop for what the outbox cannot cover (an owed mark on an
+// unowned, quiet slot — narrowed further in #13).
+func (m *Manager) dueWorker() {
+	defer m.wg.Done()
+	ticker := time.NewTicker(m.workerTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stop:
+			return
+		case <-ticker.C:
+			m.drainDue()
+		}
+	}
+}
+
+// drainDue runs one due-set drain: claim owed ids in O(owed) and reconcile each.
+// Split out so a test can drive a single pass deterministically (cf. RunSweep).
+// It records DueWorkerTick only for non-empty passes, so the duration histogram
+// reflects real work rather than idle ticks. Returns the number of wakes fired.
+func (m *Manager) drainDue() int {
+	start := time.Now()
+	ids, err := m.store.ClaimDue(start, dueClaimLimit, m.workerTick*2)
+	if err != nil || len(ids) == 0 {
+		return 0
+	}
+	fired := 0
+	for _, id := range ids {
+		if m.fireDue(id) {
+			fired++
+		}
+	}
+	m.metrics.DueWorkerTick(time.Since(start), fired)
+	return fired
+}
+
+// RunDueWorker drains the due-set once immediately (tests).
+func (m *Manager) RunDueWorker() int { return m.drainDue() }
+
+// fireDue reconciles one drained due-set mark against the subscription's live
+// state (DecideDue): re-fire an owed idle sub, clear a stale mark (gone, or idle
+// with its cursor caught up), or leave an in-flight wake to coalesce. A mark
+// wrongly cleared by a race with a concurrent re-arm is re-covered by the
+// retained full sweep — the due-set is an optimization over a still-correct
+// baseline (epic #9, correction #1). Returns whether a wake was issued.
+func (m *Manager) fireDue(id string) bool {
+	sub, ok, err := m.store.Get(id)
+	if err != nil {
+		return false
+	}
+	switch DecideDue(ok, sub.Phase, ok && HasPendingWork(sub.Links, m.tailOf)) {
+	case DueFire:
+		m.issueWake(sub, "")
+		return true
+	case DueClear:
+		if err := m.store.ClearDue(id); err != nil {
+			m.log.Warn("webhook: clear due mark", "sub", id, "error", err)
+		}
+	case DueSkip:
+		// a wake is in flight; the mark clears on the eventual done-ack/release
+	}
+	return false
 }
 
 // retryWorker re-delivers webhooks whose backoff has elapsed (PROTOCOL §7.1).
@@ -575,7 +693,7 @@ func (m *Manager) sweepOnce() {
 			continue
 		}
 		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
-			if status, err := m.store.ExpireLease(sub.ID, now); err == nil && status == "EXPIRED" {
+			if status, err := m.expireLease(sub.ID, now); err == nil && status == "EXPIRED" {
 				sub.Phase = PhaseIdle
 			}
 		}
@@ -781,7 +899,7 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 		return false, true, false, nil
 	}
 	done := req.Done != nil && *req.Done
-	status, aerr := m.store.Ack(id, req.Generation, req.WakeID, tokenGeneration, done, req.Acks, time.Now(), sub.Config.LeaseTTLMs)
+	status, aerr := m.ack(id, req.Generation, req.WakeID, tokenGeneration, done, req.Acks, time.Now(), sub.Config.LeaseTTLMs)
 	if aerr != nil {
 		return false, false, false, aerr
 	}
@@ -799,7 +917,7 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 
 // applyRelease fences and releases the lease, re-waking if pending (PROTOCOL §7.2).
 func (m *Manager) applyRelease(id string, req ReleaseRequest, tokenGeneration int64) (fenced, gone bool, err error) {
-	status, rerr := m.store.Release(id, req.Generation, req.WakeID, tokenGeneration)
+	status, rerr := m.release(id, req.Generation, req.WakeID, tokenGeneration)
 	if rerr != nil {
 		return false, false, rerr
 	}

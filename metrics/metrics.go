@@ -110,7 +110,7 @@ func New() *Prometheus {
 		}),
 		dueSetMutations: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_due_set_mutations_total",
-			Help: "Per-subscription due-set mutations by op (arm|ack|expire) — gate #3 write amplification.",
+			Help: "Per-subscription due-set mutations by op (arm|ack|expire|release) — gate #3 write amplification.",
 		}, []string{"op"}),
 		dueWorkerSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "chronicle_due_worker_tick_seconds",

@@ -39,8 +39,8 @@ type Metrics interface {
 	// Feeds gate #2 (fan-out p99 regression). Wired at OnStreamAppend in #15.
 	FanOut(dur time.Duration, slotsProbed, subs int)
 	// DueSetMutation records one mutation of a per-subscription due-set: op is
-	// "arm", "ack", or "expire". Feeds gate #3 (due write amplification). Wired at
-	// the arm/ack/expire call sites in #12.
+	// "arm", "ack", "expire", or "release" (GAP3). Feeds gate #3 (due write
+	// amplification). Wired at the arm/ack/expire/release call sites in #12.
 	DueSetMutation(op string)
 	// DueWorkerTick records one due-worker pass over an owned slot: its duration
 	// and how many owed subscriptions it fired. Feeds gate #3. Wired at dueWorker
