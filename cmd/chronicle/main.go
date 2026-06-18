@@ -145,7 +145,9 @@ func run() error {
 		}
 		handler.Subscriptions = router
 		handler.SubHooks = service
-		service.RunSweep() // re-fire anything owed before serving (closes the restart gap)
+		// Start runs the boot reconcile synchronously before launching its loops, so
+		// anything owed is re-fired before serving (issue #13 — the boot recovery
+		// event closes the restart gap; no separate RunSweep is needed).
 		service.Start()
 		defer service.Stop()
 		subscriptionsEnabled = true
