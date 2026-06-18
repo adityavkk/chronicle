@@ -3,10 +3,16 @@
 -- lease is held). Coalescing falls out of the phase check. For webhook delivery
 -- the lease is armed here (arm_lease='1'); for pull-wake it is not (the lease
 -- starts at claim, PROTOCOL §7.3).
--- KEYS: 1=sub 2=lease_zset 3=due_zset
+-- KEYS: 1=sub 2=lease_zset 3=due_zset 4=slot (ds:{ownership}:slot:<h>)
 -- ARGV: 1=id 2=now_ns 3=lease_ttl_ms 4=arm_lease('0'/'1') 5=new_wake_id
--- Reply: {status, generation, wake_id} ; ARMED | BUSY | NOSUB
+--       6=replica_id 7=expected_epoch (epoch '' on the load-balanced path => skip)
+-- Reply: {status, generation, wake_id} ; ARMED | BUSY | NOSUB | FENCED
 local sub = KEYS[1]
+-- Owner-epoch fence (issue #14, TOCTOU): when an owner-scoped caller (epoch ~= '')
+-- arms a wake for a slot it no longer owns, suppress it atomically with the write.
+if owner_fenced(KEYS[4], ARGV[6], ARGV[7]) then
+  return { 'FENCED' }
+end
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
 end
