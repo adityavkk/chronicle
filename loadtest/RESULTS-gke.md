@@ -45,9 +45,66 @@ the in-cluster Job seeding + scraping the SUT; and the SLO gate as a pass/fail.
 (Artifact Registry images kept for re-runs). Total spend for the ~25-minute
 provision-run-destroy cycle was well under $1.
 
+## Gate #1 — O(N·K) premise (ramp replicas 1→4, read Memorystore CPU) — TO RUN
+
+This is the rig extension issue #10 adds; **it has not been run** (the orchestrator
+owns all cloud campaigns — the worktree builds the rig + spec + command only, never
+spends on GKE). The hypothesis: at a **fixed K=10k**, every replica runs the
+recovery sweep over all K identically, so the control-plane `{__ds}` slot's
+**Redis CPU grows ~N×** while the per-replica `chronicle_sweep_*` histogram stays
+flat. That rising Redis CPU is the `O(N·K)` redundancy the epic exists to relieve
+(the inverse number — CPU flat as N rises after work-sharding — lands in #14's
+gate #4).
+
+**Exact command** (after authenticating gcloud — `! gcloud auth login`):
+
+```sh
+cd loadtest
+make up                                 # provision cluster + Memorystore + images (once)
+make gate1                              # ramp replicas 1→4 at K=10k, read Memorystore CPU
+make down                               # ALWAYS tear down — stop the meter
+```
+
+`make gate1` (≡ `./ltctl.sh gate1 spec/sweep-10k-scale.yaml`) renders the
+[`spec/sweep-10k-scale.yaml`](spec/sweep-10k-scale.yaml) variant at replicas
+`1,2,3,4` (via `render -replicas N`), deploys the SUT, runs the SLO-gated
+`sweepscale` Job at each N, then reads the Memorystore CPU over the just-finished
+measure window with the new `rediscpu` reader
+(`loadgen/cmd/rediscpu`, backed by `loadgen/redismon` → Cloud Monitoring
+`redis.googleapis.com/stats/cpu_utilization`). It writes a CPU-vs-N table to
+`gate1-results.tsv`:
+
+```
+N   sweep_p99_ms   redis_cpu_max   redis_cpu_mean
+1   ...            ...             ...
+2   ...            ...             ...
+3   ...            ...             ...
+4   ...            ...             ...
+```
+
+**Pass:** `redis_cpu_*` scales with N at fixed K (confirms the premise) **AND**
+the K=10k sweep p99 stays under the 1500 ms SLO at every N (the
+[Run 1](#run-1--2026-06-14-sweep-smoke-k10k) 509 ms floor reproduces — every
+replica's sweep tick still fits the interval; only the shared Redis pays the
+redundancy). Read CPU directly from Cloud Monitoring / the Memorystore console as
+a cross-check; the chronicle sweep histogram is per-replica, so it cannot show the
+multi-replica effect (it's read at `replicas: 1`).
+
+## Other rig extensions (issue #10)
+
+- **Chaos / pod-kill** — `make chaos` (≡ `./ltctl.sh chaos`) force-deletes the SUT
+  pods mid-run (the rig analogue of the jepsen nemesis; `loadgen/chaos` is the
+  unit-tested command builder). Used to observe the membership churn window at
+  scale once leased ownership lands (#14, gate #4 / 07 L2/L4).
+- **New SUT golden signals** — `chronicle_fanout_seconds` (gate #2),
+  `chronicle_due_set_mutations_total` / `chronicle_due_worker_tick_seconds`
+  (gate #3), `chronicle_slot_ownership_events_total` / `chronicle_coverage_gap_seconds`
+  / `chronicle_owner_fenced_total` (gate #4/#5) ship as `NopMetrics` no-ops in this
+  slice (GAP2). Cross-read them from the SUT `/metrics` once #12–#15 wire their
+  call sites; they read 0 until then.
+
 ## Next
 
-- Sweep K (1k → 100k) for the full curve; raise `sut.replicas` and read
-  Memorystore CPU to quantify the `O(N·K)` redundancy.
+- Sweep K (1k → 100k) for the full curve.
 - Bigger SUT + HA Redis to push the `{__ds}`-slot ceiling.
 - `dispatch: webhook` with a receiver to add append→delivery latency.

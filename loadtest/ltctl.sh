@@ -97,6 +97,49 @@ cmd_run() {
   fi
 }
 
+# cmd_chaos force-deletes the SUT pods mid-run — the rig's coarse pod-kill nemesis
+# (Migration slice 0; gate #4 / 07 L2/L4). Safe to repeat: the Deployment
+# reschedules the pods, and chronicle's recovery sweep re-fires owed wakes.
+cmd_chaos() {
+  log "chaos: force-deleting chronicle pods in $NS (the deployment reschedules them)"
+  kubectl -n "$NS" delete pods -l app=chronicle --grace-period=0 --force
+}
+
+# cmd_gate1 is experiment 1 (the O(N·K) premise): ramp the SUT replicas 1→4 at a
+# FIXED K and read Memorystore CPU at each N. Every replica sweeps all K, so the
+# control-plane {__ds} slot's Redis CPU should grow ~N× while the per-replica
+# sweep p99 stays flat (and under the SLO — the K=10k floor reproduces). Assumes
+# `up` already ran. Writes a CPU-vs-N table to gate1-results.tsv.
+cmd_gate1() {
+  local spec="${1:-spec/sweep-10k-scale.yaml}"
+  local spec_abs out redis_host p99 cpu cmax cmean
+  spec_abs="$(cd "$(dirname "$spec")" && pwd)/$(basename "$spec")"
+  redis_host="$("${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" --format='value(host)')"
+
+  log "gate #1: ramp replicas 1→4 at fixed K, read Memorystore CPU"
+  printf 'N\tsweep_p99_ms\tredis_cpu_max\tredis_cpu_mean\n' | tee gate1-results.tsv
+  for n in 1 2 3 4; do
+    out="$(mktemp -d)"
+    log "gate #1 step: replicas=$n"
+    ( cd "$REPO_ROOT/loadgen" && go run ./cmd/render -spec "$spec_abs" -out "$out" \
+        -redis-url "redis://${redis_host}:6379/0" -replicas "$n" \
+        -image "$REG/chronicle:$LT_TAG" -loadgen-image "$REG/chronicle-loadgen:$LT_TAG" )
+    kubectl apply -f "$out/sut.yaml"
+    kubectl -n "$NS" rollout status deploy/chronicle --timeout=180s
+    kubectl -n "$NS" delete job -l app=sweepscale --ignore-not-found >/dev/null
+    kubectl apply -f "$out/job.yaml"
+    kubectl -n "$NS" wait --for=condition=complete --timeout=600s job -l app=sweepscale 2>/dev/null ||
+      kubectl -n "$NS" wait --for=condition=failed --timeout=5s job -l app=sweepscale 2>/dev/null || true
+    p99="$(kubectl -n "$NS" logs -l app=sweepscale --tail=-1 | grep -o '"sweep_p99_ms":[ ]*[0-9.]*' | head -1 | grep -o '[0-9.]*$')"
+    # Read Memorystore CPU over the just-finished measure window (the gate-#1 signal).
+    cpu="$( cd "$REPO_ROOT/loadgen" && go run ./cmd/rediscpu -project "$LT_PROJECT" -instance "${LT_CLUSTER}-redis" -window 2m 2>/dev/null )"
+    cmax="$(printf '%s' "$cpu" | grep -o 'max=[0-9.]*' | cut -d= -f2)"
+    cmean="$(printf '%s' "$cpu" | grep -o 'mean=[0-9.]*' | cut -d= -f2)"
+    printf '%s\t%s\t%s\t%s\n' "$n" "${p99:-?}" "${cmax:-?}" "${cmean:-?}" | tee -a gate1-results.tsv
+  done
+  log "gate #1 done — CPU-vs-N curve in gate1-results.tsv (expect Redis CPU to rise ~N× at fixed K)"
+}
+
 _torn=0
 cmd_down() {
   [ "$_torn" = 1 ] && return 0
@@ -121,7 +164,9 @@ cmd_all() {
 case "${1:-}" in
   up) shift; cmd_up "$@" ;;
   run) shift; cmd_run "$@" ;;
+  gate1) shift; cmd_gate1 "$@" ;;
+  chaos) shift; cmd_chaos "$@" ;;
   down) shift; cmd_down "$@" ;;
   all) shift; cmd_all "$@" ;;
-  *) echo "usage: $0 {up | run <spec> | down | all <spec>}" >&2; exit 2 ;;
+  *) echo "usage: $0 {up | run <spec> | gate1 [spec] | chaos | down | all <spec>}" >&2; exit 2 ;;
 esac

@@ -1,0 +1,38 @@
+# Gate #1 (the O(N·K) premise) — ramp the SUT replicas 1→4 at a FIXED K=10k and
+# read managed-Redis (Memorystore) CPU at each N. Every replica runs the recovery
+# sweep over all K identically, so the control-plane {__ds} slot's Redis load
+# grows ~N× while the per-replica chronicle_sweep_* histogram stays flat. That
+# rising Redis CPU is the redundancy the epic exists to relieve (the inverse
+# number lands in #14's gate #4).
+#
+# This is the SAME experiment as sweep-10k.yaml; the only knob is sut.replicas,
+# which `ltctl gate1` overrides per step via `render -replicas N` (so the spec is
+# never hand-edited). The K=10k sweep p99 must also stay under the SLO at every N
+# (the regression floor reproduces, RESULTS-gke.md: 509 ms).
+#
+# Run it (the orchestrator owns the cloud; do NOT run GKE from the worktree):
+#   cd loadtest && make gate1 SPEC=spec/sweep-10k-scale.yaml
+# The exact rendered command and the reading guide are in RESULTS-gke.md "Gate #1".
+name: sweep-10k-scale
+
+loadgen_image: REGISTRY/chronicle-loadgen:TAG
+
+sut:
+  image: REGISTRY/chronicle:TAG
+  replicas: 1 # the gate-#1 ramp overrides this per step (1 → 2 → 3 → 4)
+  sweep_interval: 2s
+  sweep_batch: 0
+  redis_url: "" # fill from `terraform output redis_url`, or production's managed Redis 8
+  cpu: "2"
+  memory: 2Gi
+
+workload:
+  subscriptions: 10000 # K — held FIXED across the replica ramp
+  links_per_sub: 5 # P
+  dispatch: pull-wake
+  warmup: 30s
+  measure: 120s
+
+slo:
+  sweep_p99_ms: 1500 # the per-replica sweep tick must still beat the interval at every N
+  max_seed_errors: 0
