@@ -1,0 +1,91 @@
+---
+// Diagram.astro — embeds a pre-rendered Mermaid sequence diagram (themed to
+// the Chronicle/Flexoki palette, compiled to SVG by diagrams/render.sh) in the
+// same figure chrome as RedisTrace. The SVG is inlined (not <img>) so its live
+// <text> re-renders crisply with the page's JetBrains Mono webfont at any size.
+//
+// Source .mmd and the theme live in docs-site/diagrams/; outputs in
+// src/diagrams/. To change a diagram, edit its .mmd and re-run render.sh.
+const svgs = import.meta.glob("../diagrams/*.svg", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+
+interface Props {
+  /** Basename of the SVG in src/diagrams, e.g. "seq-create". */
+  name: string;
+  /** Mono micro-label in the figure header. */
+  label?: string;
+  /** Optional caption below the diagram. Inline HTML allowed. */
+  caption?: string;
+}
+const { name, label = "Request lifecycle", caption } = Astro.props;
+
+const entry = Object.entries(svgs).find(([k]) => k.endsWith(`/${name}.svg`));
+if (!entry) {
+  throw new Error(`Diagram "${name}" not found in src/diagrams (run diagrams/render.sh)`);
+}
+const svg = entry[1] as string;
+---
+
+<figure class="seqfig">
+  <div class="seqfig-label mono">{label}</div>
+  <div class="seqfig-body" set:html={svg} />
+  {caption && <figcaption class="seqfig-caption" set:html={caption} />}
+</figure>
+
+<style lang="scss">
+  .seqfig {
+    margin: 32px 0 0 var(--rail-indent);
+    max-width: var(--prose-max);
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .seqfig-label {
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--rule);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .seqfig-body {
+    padding: 22px 24px;
+    overflow-x: auto;
+  }
+  // The Mermaid SVG fills the figure width and scales by its own aspect ratio;
+  // a min-width keeps the text legible on phones (the body scrolls instead).
+  .seqfig-body :global(svg) {
+    display: block;
+    width: 100%;
+    min-width: 520px;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto;
+  }
+  .seqfig-caption {
+    padding: 14px 24px 18px;
+    border-top: 1px solid var(--rule);
+    background: var(--paper);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--muted);
+    :global(strong) { color: var(--ink); font-weight: 600; }
+    :global(code) {
+      font-family: var(--mono);
+      font-size: 0.92em;
+      background: var(--tint);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--accent-deep);
+    }
+  }
+
+  @media (max-width: 840px) {
+    .seqfig { margin-left: 0; max-width: none; }
+  }
+</style>

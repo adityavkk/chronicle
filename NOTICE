@@ -1,0 +1,12 @@
+Chronicle — Durable Streams protocol server on Redis 8
+
+Portions of this software (the storage contract in store/, protocol header
+constants, and handler structure) are derived from the Durable Streams
+reference Caddy plugin:
+
+  https://github.com/durable-streams/durable-streams (packages/caddy-plugin)
+  Copyright (c) 2025 durable-stream contributors
+  Licensed under the MIT License (see LICENSE)
+
+The derivation is deliberate: chronicle mirrors the upstream implementation's
+API surface so the two codebases can evolve together. See docs/PLAN.md §3.

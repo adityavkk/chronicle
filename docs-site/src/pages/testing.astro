@@ -1,0 +1,13 @@
+---
+// The MDX lives in _testing.mdx (underscore = not routed) and is wrapped here,
+// so the layout receives frontmatter explicitly — same pattern as index.astro
+// wrapping _overview.mdx and subscriptions.astro wrapping _subscriptions.mdx.
+import type { ComponentProps } from "astro/types";
+import Doc from "../layouts/Doc.astro";
+import Testing, { frontmatter } from "./_testing.mdx";
+
+const fm = frontmatter as ComponentProps<typeof Doc>["frontmatter"];
+---
+<Doc frontmatter={fm}>
+  <Testing />
+</Doc>

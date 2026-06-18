@@ -1,0 +1,12 @@
+sequenceDiagram
+    autonumber
+    participant O1 as Origin 1
+    participant O2 as Origin 2
+    participant O3 as Origin 3
+    participant R as Redis · one {__ds} slot
+    Note over O1,O3: every replica runs the same recovery sweep, every ~2s
+    O1->>R: SMEMBERS {__ds}:subs — all K subscriptions
+    O2->>R: SMEMBERS {__ds}:subs — all K subscriptions
+    O3->>R: SMEMBERS {__ds}:subs — all K subscriptions
+    Note over R: one slot absorbs N×K reads per tick — O(N·K)
+    Note over O1,R: adding replicas multiplies the sweep, it does not divide it

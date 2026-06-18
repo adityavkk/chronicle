@@ -1,0 +1,338 @@
+---
+title: "Three requests, <em>traced to the metal</em>"
+summary: "Tracer-bullet walkthroughs of chronicle: a write, a long-polling read, and a subscription wake — each followed function by function from the HTTP edge down through the store to Redis and back, with verbatim snippets at every hop."
+eyebrow: "Code Wiki"
+meta: "Tracer bullets"
+deck: "A tracer bullet is one request followed all the way down. Three of them: a <strong>write</strong> that lands, a <strong>read</strong> that blocks for the next write, and a <strong>subscription wake</strong> that fans a durable append out to a worker. Each step is the real function, the real lines, and what it hands to the next."
+byline:
+  - label: "Reading"
+    value: "source at main"
+    href: "https://github.com/adityavkk/chronicle"
+  - label: "Flows"
+    value: "append · read · wake"
+---
+import SectionHead from "../../components/SectionHead.astro";
+import Diagram from "../../components/Diagram.astro";
+import Step from "../../components/Step.astro";
+import Callout from "../../components/Callout.astro";
+
+<section class="block" id="append">
+  <SectionHead num="01" label="POST" title="A write <em>lands</em>" />
+
+  A `POST` with a JSON batch, against a stream that already exists. The path
+  crosses five files: the shell parses and delegates, the backend snapshots and
+  ships one Lua call, the script validates and writes, and the shell answers. The
+  diagram is the shape; the steps below are the lines.
+
+  <Diagram name="seq-trace-append" label="Append · call stack" caption="The optimistic-concurrency loop is the subtlety: the backend snapshots the tail before framing, and <code>append.lua</code> rejects the write with <code>RETRY</code> if the live tail has moved — the Go caller re-snapshots and retries, up to 64 times." />
+
+  <Step n="1" fn="Handler.ServeHTTP" loc="handler.go:130" role="The method switch routes POST to handleAppend — the same switch every verb takes.">
+
+```go title="handler.go" showLineNumbers startLineNumber=130
+	case http.MethodPost:
+		err = h.handleAppend(w, r, streamPath)
+```
+
+By the time control reaches the switch, `ServeHTTP` has set CORS and security
+headers, answered any `OPTIONS` preflight, and ruled out the reserved `__ds`
+namespace. The dispatch is the whole router.
+
+  </Step>
+
+  <Step n="2" fn="Handler.handleAppend" loc="handler.go:582" role="Confirm the stream exists, parse the producer and closure headers, read the body, build options, call the store.">
+
+```go title="handler.go"
+meta, err := h.Store.Get(path)
+if err != nil {
+	if errors.Is(err, store.ErrStreamNotFound) {
+		return newHTTPError(http.StatusNotFound, "stream not found")
+```
+
+After the existence check, `handleAppend` parses `Producer-Id` / `Producer-Epoch`
+/ `Producer-Seq` and `Stream-Closed`, reads the request body, verifies the
+`Content-Type` matches the stream, and packs it all into an `AppendOptions`
+before calling `h.Store.Append`. It decides nothing about ordering or
+idempotency — that is the store's and the script's job.
+
+  </Step>
+
+  <Step n="3" fn="redis.Store.Append" loc="store/redis/store.go:513" role="The backend has already HMGET-snapshotted the tail and pre-framed the batch; now it ships everything to one EVALSHA.">
+
+```go title="store/redis/store.go" showLineNumbers startLineNumber=513
+args := append([]any{
+	nowNsArg(), notifyChannel(path), reqCT, opts.Seq, closeArg,
+	hasProd, pid, epochArg, seqArg,
+	base.String(), newTail.String(), valOnly,
+}, frames...)
+raw, err := appendScript.Run(ctx, s.client, keysFor(path), args...).Result()
+```
+
+`base.String()` is the snapshot tail — the optimistic-concurrency token the
+script must still see. `newTail.String()` is where the tail moves if this write
+wins. `frames` are the `endOffset|bytes` members to add. `Run` is
+`EVALSHA`, transparently reloading the script on a `NOSCRIPT` miss. If the script
+replies `RETRY`, the caller loops back, re-snapshots the tail, and tries again —
+up to 64 times before giving up.
+
+  </Step>
+
+  <Step n="4" fn="append.lua — commit" loc="store/redis/scripts/append.lua:95" role="Every check has passed and the snapshot tail still matches. The script writes — atomically, because the whole script is one Redis step.">
+
+```lua title="store/redis/scripts/append.lua" showLineNumbers startLineNumber=95
+-- 11. Write frames (chunked: unpack is C-stack bounded) and commit metadata.
+if #ARGV >= 13 then
+  local i = 13
+  while i <= #ARGV do
+    local stop = math.min(i + 999, #ARGV)
+    local zargs = { 'ZADD', KEYS[2] }
+    for j = i, stop do
+      zargs[#zargs + 1] = '0'
+      zargs[#zargs + 1] = ARGV[j]
+    end
+    redis.call(unpack(zargs))
+    i = stop + 1
+  end
+  redis.call('HSET', KEYS[1], 'tail', new_tail)
+end
+```
+
+Every frame goes into the `msg` sorted set at score `0`; the ordering lives in
+the offset prefix of each member, so `ZRANGEBYLEX` reads them back in sequence.
+The `ZADD` is chunked at 1,000 because Lua's `unpack` is C-stack bounded. Then
+the tail advances. Just below this, the script records producer state into the
+`prod` hash and runs `PUBLISH channel 'a'` — the wakeup that the [read
+tracer](#read) is waiting on — before returning `OK` with the new tail.
+
+  </Step>
+
+  <Step n="5" fn="Handler.handleAppend — respond" loc="handler.go:775" role="Back in Go: fire the subscription hook, set the next offset, choose the status.">
+
+```go title="handler.go" showLineNumbers startLineNumber=775
+h.onStreamAppend(path)
+w.Header().Set(protocol.HeaderStreamNextOffset, result.Offset.String())
+if opts.ProducerId != "" {
+	w.WriteHeader(http.StatusOK)
+} else {
+	w.WriteHeader(http.StatusNoContent)
+}
+return nil
+```
+
+`onStreamAppend` is the best-effort hand-off into the subscription plane — the
+[wake tracer](#wake) starts exactly here. A producer append answers `200 OK`; a
+plain one answers `204 No Content`. Both carry `Stream-Next-Offset`, the single
+string a client stores and passes back as `?offset=` to resume. No consumer
+groups, no server-side cursor.
+
+  </Step>
+
+  Five files, one durable write, decisions made only in the core and enforced
+  only in the script. The one place this path is fragile is concurrency: several
+  in-flight appends on the *same* stream collide on the `RETRY` loop, and past
+  roughly 1,000/s aggregate the retries exhaust and goodput collapses.[^perf]
+  One in-flight append per stream sustains far more.
+</section>
+
+<section class="block" id="read">
+  <SectionHead num="02" label="GET live=long-poll" title="A reader <em>tails</em>" />
+
+  A `GET` with `offset=now&live=long-poll`: the caller is at the tail and wants
+  the *next* write. The fast path reads and finds nothing; the slow path
+  subscribes to a pub/sub channel and blocks. The correctness hinges on doing
+  those two in the right order.
+
+  <Diagram name="seq-trace-read" label="Long-poll · call stack" caption="The race the design closes: an append landing between the fast-path read and the <code>SUBSCRIBE</code> would be missed by a naive waiter. Subscribing first, then re-reading, guarantees the waiter sees data that arrived in the gap or the <code>PUBLISH</code> that follows." />
+
+  <Step n="1" fn="Handler.handleRead — parse" loc="handler.go:369" role="Resolve the offset and the live mode. offset=now means the tail; live=long-poll means block.">
+
+```go title="handler.go" showLineNumbers startLineNumber=369
+	// Parse offset
+	offset, err := store.ParseOffset(offsetStr)
+	if err != nil {
+		return newHTTPError(http.StatusBadRequest, "invalid offset")
+	}
+
+	// Check for live mode
+	liveMode := query.Get("live")
+	cursor := query.Get("cursor")
+	// Validate long-poll requires offset
+	if liveMode == "long-poll" && !offsetProvided {
+		return newHTTPError(http.StatusBadRequest, "offset required for long-poll mode")
+	}
+```
+
+`ParseOffset` maps `now` to a sentinel meaning the current tail and `-1` to the
+start; otherwise it parses `readseq_byteoffset`. `cursor` is the CDN
+cache-buster — echoed back, monotonically advanced, so a cache can't serve a
+stale tail in a loop.
+
+  </Step>
+
+  <Step n="2" fn="redis.Store.Read" loc="store/redis/store.go:583" role="One Lua call with a lexicographic lower bound built from the caller's offset.">
+
+```go title="store/redis/store.go" showLineNumbers startLineNumber=583
+func (s *Store) Read(path string, offset store.Offset) ([]store.Message, bool, error) {
+	ctx := context.Background()
+	raw, err := readScript.Run(ctx, s.client, keysFor(path), nowNsArg(), lexLowerBound(offset)).Result()
+```
+
+`lexLowerBound(offset)` is the exclusive bound just past the caller's offset — everything
+strictly after the caller's position. The work happens inside `read.lua`.
+
+  </Step>
+
+  <Step n="3" fn="read.lua — range the set" loc="store/redis/scripts/read.lua:22" role="A read counts as access, so it slides the TTL forward, then ranges the sorted set.">
+
+```lua title="store/redis/scripts/read.lua" showLineNumbers startLineNumber=22
+-- Sliding-TTL touch: Read counts as access (Get does not).
+m.accessedAtNs = string.format('%.0f', now)
+redis.call('HSET', KEYS[1], 'accessedAtNs', m.accessedAtNs)
+refresh_backstop(m, now)
+
+local members = redis.call('ZRANGEBYLEX', KEYS[2], ARGV[2], '+')
+return { 'OK', redis.call('HGETALL', KEYS[1]), members }
+```
+
+`ZRANGEBYLEX` returns every frame from the caller's bound to the end —
+`O(log N + M)` for `M` frames returned. Go decodes the `offset|bytes` members
+into messages. When the caller is already at the tail, `members` is empty —
+which is what sends this request onto the waiting path.
+
+  </Step>
+
+  <Step n="4" fn="Handler.handleRead — decide to wait" loc="handler.go:457" role="Empty result, caller at the tail, long-poll asked for: only now does the request block.">
+
+```go title="handler.go" showLineNumbers startLineNumber=457
+	shouldWait := liveMode == "long-poll" && len(messages) == 0 && (isNowOffset || effectiveOffset.Equal(meta.CurrentOffset))
+	if shouldWait {
+```
+
+If the stream is already closed at the tail, the handler returns `204`
+immediately rather than waiting forever. Otherwise it calls
+`h.Store.WaitForMessages` with the configured `LongPollTimeout` — 30 seconds by
+default.
+
+  </Step>
+
+  <Step n="5" fn="redis.Store.WaitForMessages" loc="store/redis/notify.go:48" role="Subscribe first, then re-read. The order is the entire correctness argument.">
+
+```go title="store/redis/notify.go" showLineNumbers startLineNumber=48
+	pubsub := s.client.Subscribe(ctx, notifyChannel(path))
+	defer func() { _ = pubsub.Close() }()
+	if _, err := pubsub.Receive(ctx); err != nil { // confirm subscription
+		return nil, false, false, err
+	}
+	wake := pubsub.Channel()
+
+	// Re-read before waiting: closes the missed-wakeup race window between
+	// the fast-path read and the subscribe.
+	if msgs, closed, done, err := s.recheck(path, offset); done {
+		return msgs, false, closed, err
+	}
+```
+
+An append that lands between the fast-path read and the `SUBSCRIBE` would never
+reach a listener that wasn't there yet. Subscribing *before* the re-read closes
+that window: if the write arrived in the gap, the re-read finds it; if it
+arrives later, the subscription catches the `PUBLISH 'a'`. From here a `select`
+loop waits on the wake channel, a one-second defensive poll, or the timeout.
+
+  </Step>
+
+  When [trace one](#append) runs `PUBLISH channel 'a'` on this stream, the wake
+  channel fires, `recheck` re-runs the read, and the new frames come back. The
+  handler formats them, sets a fresh `Stream-Cursor`, and answers `200` with the
+  frames and the next offset. If nothing arrives before the timeout, it answers
+  `204 No Content` — and the client long-polls again.
+
+  <Callout icon="info" label="One known cost">
+    Each `WaitForMessages` opens a dedicated pub/sub subscription, and the SSE
+    path polls in 100 ms quanta. That puts a floor of roughly 300 ms on delivery
+    latency even when nothing is saturated. The fix sketched in the benchmark
+    report is a persistent per-stream pub/sub hub.[^perf]
+  </Callout>
+</section>
+
+<section class="block" id="wake">
+  <SectionHead num="03" label="OnStreamAppend" title="A subscription <em>wakes</em>" />
+
+  The append trace ended by firing `onStreamAppend`. This trace picks it up: a
+  durable write on a matched stream wakes a registered subscriber — by signed
+  webhook, or by a pull-wake event a worker claims. Every message is fenced by a
+  generation counter, so a crash anywhere costs latency, not correctness.
+
+  <Diagram name="seq-trace-wake" label="Subscription wake · call stack" caption="Two delivery modes share one fencing model. <strong>Webhook</strong>: sign and POST, auto-ack on <code>{done:true}</code>. <strong>Pull-wake</strong>: append a wake event, let workers race to <code>claim</code> a lease. A <code>recoverySweeper</code> re-arms anything stranded by a crash." />
+
+  <Step n="1" fn="Handler.onStreamAppend" loc="handler.go:63" role="The exact call that closed the append trace. With no subscription layer wired, it is a no-op.">
+
+```go title="handler.go" showLineNumbers startLineNumber=63
+func (h *Handler) onStreamAppend(path string) {
+	if h.SubHooks != nil {
+		h.SubHooks.OnStreamAppend(subStreamPath(path))
+	}
+}
+```
+
+`subStreamPath` strips the leading slash to match the protocol's wire paths.
+This runs inline on the append's goroutine, right after the durable write — the
+best-effort, low-latency path into the subscription plane.
+
+  </Step>
+
+  <Step n="2" fn="Manager.OnStreamAppend" loc="webhook/manager.go:220" role="Look up who is listening on this stream from the fan-out index, and wake each.">
+
+```go title="webhook/manager.go" showLineNumbers startLineNumber=220
+func (m *Manager) OnStreamAppend(path string) {
+	ids, err := m.store.StreamSubscribers(path)
+	if err != nil {
+		m.log.Warn("webhook: stream subscribers", "path", path, "error", err)
+		return
+	}
+	for _, id := range ids {
+		m.maybeWake(id, path)
+```
+
+`StreamSubscribers` reads a Redis set kept per stream — the fan-out index. For
+each subscription, `maybeWake` checks that it is idle and that its cursor is
+behind the new tail (it has pending work) before arming anything. Arming a wake
+runs `arm_wake.lua`, which bumps the subscription's `generation` and stamps a
+fresh `wake_id` — shown on the [modules page](./modules#subs).
+
+  </Step>
+
+  <Step n="3" fn="claim.lua — the pull-wake fence" loc="webhook/scripts/claim.lua:27" role="Two workers race to claim the wake; the lease compare-and-set picks one, and the fence rotates.">
+
+```lua title="webhook/scripts/claim.lua"
+-- Reuse in-flight waking wake's fence OR rotate to new generation/wake_id
+local gen = redis.call('HGET', sub, 'generation')
+local wake = redis.call('HGET', sub, 'wake_id')
+if not (phase == 'waking' and wake ~= '') then
+  gen = tostring(redis.call('HINCRBY', sub, 'generation', 1))
+  wake = ARGV[5]
+  redis.call('HSET', sub, 'wake_id', wake)
+end
+local until_ns = now + tonumber(ARGV[4]) * 1000000
+redis.call('HSET', sub, 'phase', 'live', 'holder', '1', 'holder_worker', ARGV[2], 'lease_until_ns', tostring(until_ns))
+```
+
+The winner takes the lease and the current `generation`; the loser finds a held,
+unexpired lease and gets `409 ALREADY_CLAIMED`. Every ack the holder later sends
+carries its generation — and any ack under a stale generation, from a deposed
+holder whose lease expired and was reclaimed, is fenced out. The webhook path
+skips the race entirely: `deliverWebhook` signs the body with Ed25519, runs the
+URL past an SSRF guard, POSTs it, and auto-acks on a `2xx {done:true}` — the
+same generation fence applied to a push instead of a pull.
+
+  </Step>
+
+  What makes the whole plane survivable is the backstop. Every two seconds,
+  `recoverySweeper` walks all subscriptions and re-derives what should be true: a
+  pull-wake event armed but never written (`wake_event_sent_ns == 0`) is
+  re-emitted; a lease whose holder vanished is expired; an idle subscription
+  with pending work is re-woken. That is why a crash between any two steps above
+  is recoverable — the append-time hook is the fast path, and the sweep is the
+  guarantee. The [Subscriptions](./../subscriptions) reference walks the fencing
+  and recovery in full.
+
+  [^perf]: Both the append-collapse and the wakeup-latency floor are measured and explained in the [benchmark report](https://github.com/adityavkk/chronicle/blob/loadgen/docs/benchmarks/2026-06-10/REPORT.md); the [Overview](./../#performance) summarizes them.
+</section>

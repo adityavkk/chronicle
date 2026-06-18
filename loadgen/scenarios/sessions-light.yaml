@@ -1,0 +1,25 @@
+# Low-rate session workload sized to fit inside the Caddy file store's
+# fsync-bound write envelope (~80 appends/s aggregate on macOS, measured
+# ~12 ms F_FULLFSYNC per append) so all three backends can be compared
+# unsaturated. 10 sessions at a "deliberate typist + tool events" pace
+# rather than full token-rate streaming.
+name: sessions-light
+description: >
+  10 sessions: one writer per stream at 2 msg/s (120 B), two SSE
+  tailers per stream — sized for fsync-per-append file stores.
+
+duration: 60s
+warmup: 5s
+
+streams:
+  count: 10
+  prefix: bench/light
+
+writers:
+  per_stream: 1
+  rate: 2/s
+  message_bytes: 120
+
+tailers:
+  sse_per_stream: 2
+  connect_ramp: 2s

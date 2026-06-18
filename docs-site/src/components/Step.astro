@@ -1,0 +1,144 @@
+---
+// Step.astro — one node in a code walkthrough: a numbered header (step number,
+// the function/symbol invoked, and a source locator that links to the exact
+// lines on GitHub), an optional one-line role, then a slot that holds the code
+// block and prose. Consecutive Steps share a continuous left rail so a tracer
+// reads as one thread down the page.
+//
+// The slot is where the fenced code block lives in MDX; astro-expressive-code
+// transforms it in place, so the snippet keeps the same chrome (frame, copy
+// button, line numbers) as every other code block on the site. The rail-indent
+// is zeroed inside a Step — the rail itself is the left structure here.
+interface Props {
+  /** Step number, e.g. 1. Omit for a standalone snippet. */
+  n?: number | string;
+  /** Function / symbol invoked at this step, shown in mono. */
+  fn: string;
+  /** Source locator "file:line" or "file:line-line". Becomes a GitHub link. */
+  loc: string;
+  /** Optional one-line role (HTML allowed) shown under the header. */
+  role?: string;
+}
+const { n, fn, loc, role } = Astro.props;
+
+const REPO = "https://github.com/adityavkk/chronicle/blob/main";
+function ghHref(l: string): string {
+  const i = l.lastIndexOf(":");
+  if (i < 0) return `${REPO}/${l}`;
+  const file = l.slice(0, i);
+  const lines = l.slice(i + 1);
+  const [a, b] = lines.split("-");
+  if (!a || Number.isNaN(Number(a))) return `${REPO}/${file}`;
+  return `${REPO}/${file}#L${a}${b ? `-L${b}` : ""}`;
+}
+---
+
+<div class="step">
+  <div class="step-head">
+    {n != null && <span class="step-n mono">{n}</span>}
+    <span class="step-fn mono">{fn}</span>
+    <a class="step-loc mono" href={ghHref(loc)} target="_blank" rel="noopener">
+      {loc}<span class="arr" aria-hidden="true"> ↗</span>
+    </a>
+  </div>
+  {role && <p class="step-role" set:html={role} />}
+  <div class="step-body"><slot /></div>
+</div>
+
+<style lang="scss">
+  .step {
+    position: relative;
+    margin: 22px 0 0 6px;
+    padding: 0 0 4px 28px;
+    border-left: 2px solid var(--rule);
+    --rail-indent: 0px;
+  }
+  // A continuous thread: collapse the gap between adjacent steps so the left
+  // rails join into one line, with each numbered node sitting on it.
+  .step + :global(.step) { margin-top: 0; padding-top: 22px; }
+
+  .step-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px 12px;
+    padding-bottom: 2px;
+  }
+  .step-n {
+    position: absolute;
+    left: -13px;
+    top: -2px;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--card);
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .step-fn {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+  .step-loc {
+    font-size: 11.5px;
+    color: var(--muted);
+    text-decoration: none;
+    margin-left: auto;
+    white-space: nowrap;
+    transition: color 0.2s ease;
+  }
+  .step-loc:hover { color: var(--accent); }
+  .step-loc .arr { color: var(--accent); }
+
+  .step-role {
+    margin: 6px 0 0;
+    max-width: var(--prose-measure);
+    font-size: 14.5px;
+    line-height: 1.5;
+    color: var(--ink-mute);
+    :global(strong) { color: var(--ink); font-weight: 600; }
+    :global(em) { font-family: var(--serif-italic); font-style: italic; color: var(--accent-deep); }
+    :global(code) {
+      font-family: var(--mono);
+      font-size: 0.86em;
+      background: var(--tint);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--accent-deep);
+    }
+  }
+
+  // The code block + prose inside the slot. Zero the rail-indent so the code
+  // aligns to the step rail, and let it use the full step width.
+  .step-body :global(.expressive-code) {
+    margin: 14px 0 0;
+    max-width: none;
+  }
+  .step-body :global(p) {
+    margin: 12px 0 0;
+    max-width: var(--prose-measure);
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--ink);
+  }
+  .step-body :global(p code) {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--tint);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--accent-deep);
+    overflow-wrap: anywhere;
+  }
+  .step-body :global(strong) { color: var(--ink); font-weight: 700; }
+  .step-body :global(em) { font-family: var(--serif-italic); font-style: italic; color: var(--accent-deep); }
+
+  @media (max-width: 840px) {
+    .step { margin-left: 0; }
+  }
+</style>

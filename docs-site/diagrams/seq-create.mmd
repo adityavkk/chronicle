@@ -1,0 +1,14 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Handler
+    participant S as Store
+    participant R as Redis
+    C->>H: PUT /v1/stream/chat
+    H->>S: Store.Create(path, opts) · handler.go:188
+    S->>R: HGETALL :meta — pre-check · store.go:187
+    S->>R: EVALSHA create.lua · store.go:319
+    Note over R: runs atomically — HGETALL → DEL → HSET → PEXPIRE
+    R-->>S: reply CREATED
+    S-->>H: meta, wasCreated = true
+    H-->>C: 201 · Location · Stream-Next-Offset 0_0

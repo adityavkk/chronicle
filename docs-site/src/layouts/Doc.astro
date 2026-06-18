@@ -1,0 +1,123 @@
+---
+import "../styles/base.scss";
+import "@fontsource-variable/inter";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+import "@fontsource/jetbrains-mono/600.css";
+import "@fontsource/jetbrains-mono/700.css";
+import Head from "../components/Head.astro";
+import Masthead from "../components/Masthead.astro";
+import Hero from "../components/Hero.astro";
+import Glyph from "../components/Glyph.astro";
+import FootnoteRail from "../components/FootnoteRail.astro";
+
+interface Props {
+  /** Frontmatter passed from MDX */
+  frontmatter: {
+    title: string;
+    /** One-line unfurl summary for <meta> description; falls back to deck. */
+    summary?: string;
+    eyebrow?: string;
+    meta?: string;
+    deck?: string;
+    byline?: Array<{ label: string; value: string; href?: string }>;
+  };
+}
+const { frontmatter: f } = Astro.props;
+const metaDesc = f.summary ?? f.deck;
+
+// Home href for the footer mark, built from BASE_URL so it resolves under the
+// deployed base path (/chronicle) — a bare "/" would 404 on GitHub Pages.
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const home = `${base}/`;
+const REPO = "https://github.com/adityavkk/chronicle";
+
+// Footnote-rail detection happens HERE, at render time, not client-side:
+// the slot is rendered once to a string, sniffed for remark-gfm's footnote
+// section, and re-emitted via set:html (no double render). The class lands
+// on <html> in the static HTML, so the rail column is part of the first
+// paint and mounting it causes zero layout shift. FootnoteRail.astro then
+// clones the citations into the rail and adds html.fn-rail-live.
+const bodyHtml = await Astro.slots.render("default");
+const hasCitations = bodyHtml.includes("data-footnotes");
+---
+
+<!doctype html>
+<html lang="en" class={hasCitations ? "fn-rail-on" : undefined}>
+  <head>
+    <Head title={f.title} description={metaDesc} />
+  </head>
+  <body>
+    <Masthead />
+    <main class="shell">
+      {/* A transparent block below 1440px, and the single content cell once
+          the shell becomes a [content | rail] grid for the footnote rail. */}
+      <div class="doc-col">
+        <Hero
+          eyebrow={f.eyebrow}
+          meta={f.meta}
+          title={f.title}
+          deck={f.deck}
+          byline={f.byline}
+        />
+
+        <div class="doc-body" set:html={bodyHtml} />
+
+        <footer class="foot">
+          <a class="mark" href={home} aria-label="Chronicle documentation — home">
+            <Glyph />
+            <span>CHRONICLE &middot; DURABLE STREAMS SERVER</span>
+          </a>
+          <div>
+            <a href={REPO}>Source</a>
+            {" · "}
+            <a href={`${REPO}/blob/main/LICENSE`}>License</a>
+          </div>
+        </footer>
+      </div>
+      <FootnoteRail />
+    </main>
+  </body>
+</html>
+
+<style lang="scss">
+  .doc-col { min-width: 0; }
+
+  // Footnote rail column — only when the page has citations (html.fn-rail-on,
+  // set at render time from the slot HTML) and the viewport affords it. The
+  // shell grows by exactly one rail column + gap (1180 → 1408px), so
+  // .doc-col keeps its narrow-viewport width to the pixel and nothing in
+  // the prose reflows when the rail mounts. The 1440px breakpoint also
+  // lives in FootnoteRail.astro and base.scss — grep "1440px".
+  @media screen and (min-width: 1440px) {
+    :global(html.fn-rail-on) {
+      --shell-max: 1408px;
+    }
+    :global(html.fn-rail-on) .shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) var(--fn-rail);
+      gap: 44px;
+    }
+  }
+
+  footer.foot {
+    margin-top: 80px;
+    padding: 36px 0 0;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-mute);
+    letter-spacing: 0.06em;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px;
+  }
+  footer.foot a {
+    color: var(--accent);
+    text-decoration: none;
+    transition: color 0.25s;
+  }
+  footer.foot a:hover { color: var(--ink); }
+  .mark {
+    display: inline-flex; align-items: center; gap: 10px;
+  }
+  @media print { footer.foot { display: none; } }
+</style>

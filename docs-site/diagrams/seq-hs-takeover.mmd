@@ -1,0 +1,20 @@
+sequenceDiagram
+    autonumber
+    participant OA as Origin A · handles the append
+    participant OB as Origin B · owns slot h
+    participant R as Redis · {ownership} + {__ds:h}
+    participant OC as Origin C
+    participant Recv as Receiver
+    OA->>R: arm_wake.lua on {__ds:h} — generation++ · ZADD {__ds:h}:due now
+    Note over OA: Origin A crashes before its fast-path delivery completes
+    Note over OB: Origin B's due-worker drains {__ds:h}:due for the slots it owns
+    OB->>R: claim_due {__ds:h}:due · check_owner {ownership}:slot:h → OWNER
+    OB->>Recv: POST signed wake — delivered after Origin A is gone
+    Recv-->>OB: 200 {done:true}
+    OB->>R: ack.lua — cursor → tail · ZREM {__ds:h}:due
+    Note over OB,R: now Origin B crashes too — member lease + slot:h lease expire (~9s TTL)
+    OC->>R: HRW points slot h at Origin C · claim_shard.lua — CAS, owner_epoch++ (fences B)
+    OC->>R: eager reconcile at takeover — re-derive owed work for slot h from durable cursors → arm_wake (fence-safe)
+    Note over OC: recovery rides the takeover event, not a timer
+    Note over OB,OC: a late wake from a resumed zombie B → check_owner FENCED
+    Note over R: a coarse periodic floor (seconds-to-minutes) backstops only the eventless unowned-and-quiet case

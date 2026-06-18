@@ -1,0 +1,17 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Handler
+    participant S as Store
+    participant R as Redis
+    participant N as notify ch
+    C->>H: GET ?offset=now and live=long-poll
+    H->>S: WaitForMessages(ctx, path, offset, 30s) · handler.go:425
+    S->>R: EVAL read.lua — fast path · notify.go:33
+    R-->>S: empty — nothing past the tail
+    S->>N: SUBSCRIBE ds:notify:p · notify.go:48
+    S->>R: EVAL read.lua — re-check after subscribe · notify.go:57
+    Note over S: block — wake on a/c/d · 1 s poll · 30 s timeout
+    N-->>S: message 'a' — a concurrent append published it
+    S->>R: EVAL read.lua — read what landed · notify.go:95
+    H-->>C: 200 · data — or 204 · Up-To-Date on timeout

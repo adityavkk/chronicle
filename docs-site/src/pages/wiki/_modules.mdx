@@ -1,0 +1,305 @@
+---
+title: "The modules, <em>one at a time</em>"
+summary: "A package-by-package walkthrough of chronicle: the imperative shell, the pure protocol core, the store contract, the Redis backend, and the subscription plane — each with its load-bearing function and a snippet read from the source."
+eyebrow: "Code Wiki"
+meta: "Modules"
+deck: "Five packages, each with one job. This page takes them in the order a request meets them: the HTTP <strong>shell</strong>, the pure <strong>core</strong> it consults, the <strong>store</strong> contract it calls, the <strong>Redis</strong> backend behind that contract, and the <strong>subscription</strong> plane a write trips on its way out."
+byline:
+  - label: "Reading"
+    value: "source at main"
+    href: "https://github.com/adityavkk/chronicle"
+  - label: "Order"
+    value: "edge → core → store"
+---
+import SectionHead from "../../components/SectionHead.astro";
+import Step from "../../components/Step.astro";
+import Table from "../../components/Table.astro";
+import Callout from "../../components/Callout.astro";
+
+<section class="block" id="shell">
+  <SectionHead num="01" label="handler.go · mount.go" title="The imperative <em>shell</em>" />
+
+  The shell is the only code that knows it is on a network. `Handler.ServeHTTP`
+  is the entry point: it sets CORS and the browser security headers, answers
+  `OPTIONS` preflight, intercepts the reserved `__ds` subscription namespace,
+  and then dispatches on the HTTP method. The dispatch itself is one `switch` —
+  there is no router, no route table, no regex. A verb maps to a handler, and
+  the handler maps to a store call.
+
+  <Step n="1" fn="Handler.ServeHTTP — the dispatch" loc="handler.go:122-141" role="Five verbs, five handlers. This switch is the entire router; everything above it is headers and the <code>__ds</code> guard, everything below is one centralized error writer.">
+
+```go title="handler.go" showLineNumbers startLineNumber=122
+	var err error
+	switch r.Method {
+	case http.MethodPut:
+		err = h.handleCreate(w, r, streamPath)
+	case http.MethodHead:
+		err = h.handleHead(w, r, streamPath)
+	case http.MethodGet:
+		err = h.handleRead(w, r, streamPath)
+	case http.MethodPost:
+		err = h.handleAppend(w, r, streamPath)
+	case http.MethodDelete:
+		err = h.handleDelete(w, r, streamPath)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err != nil {
+		h.writeError(w, err)
+	}
+```
+
+Each `handle*` method does the same three things in order: parse the request
+(headers, query, body), call one method on `h.Store`, and translate the result
+into a status code and response headers. Errors bubble up as values and meet a
+single `writeError` at the bottom, which maps each `store` error variable to its
+HTTP status. `Mount` wraps this handler to strip the stream-root prefix
+(`/v1/stream/`) before dispatch and rewrite `Location` headers on the way back
+out, so the handler core only ever sees store-relative paths.
+
+  </Step>
+
+  <Table>
+    | Function | Verb | Calls |
+    | --- | --- | --- |
+    | [`handleCreate`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L145) | `PUT` | `Store.Create` → `201`/`200` |
+    | [`handleRead`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L341) | `GET` | `Store.Read`, then `handleSSE` or `WaitForMessages` |
+    | [`handleAppend`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L582) | `POST` | `Store.Append` / `CloseStreamWithProducer` |
+    | [`handleSSE`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go#L23) | `GET live=sse` | polls `Store.Read` on a reconnect timer |
+    | [`Mount`](https://github.com/adityavkk/chronicle/blob/main/mount.go#L27) | — | wraps the handler; prefix + `Location` rewriting |
+  </Table>
+</section>
+
+<section class="block" id="protocol">
+  <SectionHead num="02" label="protocol/ · store/producer.go" title="The pure <em>core</em>" />
+
+  Everything decidable without I/O lives here as plain functions over immutable
+  inputs: the TTL and offset grammars (`ParseTTL`, `ParseOffset`), the CDN
+  cache-busting cursor math (`GenerateResponseCursor`), and the producer-validation
+  state machine. None of it touches Redis or the network, so all of it is tested
+  without mocks.
+
+  The state machine is the centerpiece. Protocol section 5.2.1 — idempotent
+  producers — is transcribed once into `ValidateProducer`: given a producer's
+  stored state and an incoming `(epoch, seq)`, it returns exactly one of five
+  outcomes.
+
+  <Step n="1" fn="ValidateProducer — two of five branches" loc="store/producer.go:17" role="State in, decision out, no side effects. The same five branches are re-implemented in Lua so Redis can enforce them atomically — with this function as the test oracle.">
+
+```go title="store/producer.go" showLineNumbers startLineNumber=17
+func ValidateProducer(state *ProducerState, epoch, seq, nowUnix int64) (AppendResult, *ProducerState, error) {
+	// No existing state - accept as new producer
+	if state == nil {
+		if seq != 0 {
+			// First message from producer must be seq=0
+			return AppendResult{
+				ProducerResult: ProducerResultNone,
+				ExpectedSeq:    0,
+				ReceivedSeq:    seq,
+			}, nil, ErrProducerSeqGap
+		}
+		newState := &ProducerState{
+			Epoch:       epoch,
+			LastSeq:     0,
+			LastUpdated: nowUnix,
+		}
+		return AppendResult{
+			ProducerResult: ProducerResultAccepted,
+			LastSeq:        0,
+		}, newState, nil
+	}
+
+	// Epoch validation (client-declared, server-validated)
+	if epoch < state.Epoch {
+		// Stale epoch - zombie fencing
+		return AppendResult{
+			ProducerResult: ProducerResultNone,
+			CurrentEpoch:   state.Epoch,
+		}, nil, ErrStaleEpoch
+	}
+```
+
+Three more branches follow in the same shape: an **epoch bump** (a higher epoch
+must restart at `seq=0`, fencing out a resurrected zombie writer), a **duplicate**
+(`seq ≤ lastSeq` returns idempotent success so a retried append never
+double-writes), and a **gap** (`seq > lastSeq+1` is rejected with the expected
+and received sequence numbers). The function returns a new state value rather
+than mutating its argument — the caller decides whether to persist it.
+
+  </Step>
+</section>
+
+<section class="block" id="store">
+  <SectionHead num="03" label="store/store.go" title="The storage <em>contract</em>" />
+
+  The handler never names Redis. It depends on `store.Store`, an interface of
+  eleven methods, and on a small set of error variables (`ErrStreamNotFound`,
+  `ErrStreamClosed`, `ErrStaleEpoch`, and so on) that the handler maps to status
+  codes. Two backends satisfy the interface: the Redis store in production, and
+  an in-memory store used as the reference implementation in tests. Because the
+  handler can't tell them apart, the in-memory store doubles as an executable
+  specification of what Redis must do.
+
+  <Step n="1" fn="store.Store — the method set" loc="store/store.go:98" role="The whole contract. Doc comments — which spell out every error case — are elided here; follow the locator to read them.">
+
+```go title="store/store.go — the Store interface (doc comments elided)"
+type Store interface {
+	Create(path string, opts CreateOptions) (*StreamMetadata, bool, error)
+	Get(path string) (*StreamMetadata, error)
+	Has(path string) bool
+	Delete(path string) error
+	Append(path string, data []byte, opts AppendOptions) (AppendResult, error)
+	CloseStream(path string) (*CloseResult, error)
+	CloseStreamWithProducer(path string, opts CloseProducerOptions) (*CloseProducerResult, error)
+	Read(path string, offset Offset) ([]Message, bool, error)
+	WaitForMessages(ctx context.Context, path string, offset Offset, timeout time.Duration) (messages []Message, timedOut bool, streamClosed bool, err error)
+	GetCurrentOffset(path string) (Offset, error)
+	Close() error
+}
+```
+
+The contract's vocabulary is the `Offset`: two zero-padded 64-bit integers,
+`ReadSeq` and `ByteOffset`, formatted as `"%016d_%016d"`. The padding is the
+point — it makes the string form **lexicographically sortable**, so the Redis
+backend can store frames in a sorted set keyed by offset string and read a range
+with one `ZRANGEBYLEX`. `Read` returns the messages plus an `upToDate` bool;
+`WaitForMessages` is the long-poll primitive that blocks until an append, a
+close, or a timeout.
+
+  </Step>
+
+  <Table>
+    | Symbol | Role |
+    | --- | --- |
+    | [`Offset`](https://github.com/adityavkk/chronicle/blob/main/store/offset.go#L11) | Position as `ReadSeq_ByteOffset`; lexicographically sortable |
+    | [`ValidateProducer`](https://github.com/adityavkk/chronicle/blob/main/store/producer.go#L17) | The pure producer state machine (shared by both backends) |
+    | [`ProcessJSONAppend`](https://github.com/adityavkk/chronicle/blob/main/store/json.go#L16) | Flattens a JSON array into one frame per element |
+    | [`MemoryStore`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store.go#L79) | The in-memory reference backend used in tests |
+  </Table>
+</section>
+
+<section class="block" id="redis">
+  <SectionHead num="04" label="store/redis/" title="The Redis <em>backend</em>" />
+
+  Each stream is four Redis keys, all sharing a `{path}` hash tag so they live in
+  one cluster slot: a `meta` hash (tail offset, content type, closed flag, TTL),
+  a `msg` sorted set (the frames), a `prod` hash (producer state), and a
+  `notify` pub/sub channel. Every mutation — create, append, close, delete — is
+  one Lua script run via `EVALSHA`, so its whole validate-write-publish sequence
+  is atomic and serialized per stream. The Go side prepares arguments, runs the
+  script, and handles retries; the script makes the decisions.
+
+  `append.lua` opens with a validation chain in strict spec precedence. The Go
+  caller has already snapshotted the tail and pre-framed the batch; the script
+  re-checks everything against live state before it writes a byte.
+
+  <Step n="1" fn="append.lua — the validation chain" loc="store/redis/scripts/append.lua:34" role="Existence, soft-delete, expiry, TTL touch — in that order, because the order is the spec. A mismatch returns an error reply and writes nothing.">
+
+```lua title="store/redis/scripts/append.lua" showLineNumbers startLineNumber=34
+-- 1. Existence.
+local m = meta_map(KEYS[1])
+if m == nil then return make_reply('NOTFOUND') end
+
+-- 2. Soft-deleted (before expiry, mirroring MemoryStore order).
+if m.softDel == '1' then return make_reply('SOFTDEL') end
+
+-- 3. Lazy expiry.
+if is_expired(m, now) then
+  expire_cleanup(m)
+  return make_reply('NOTFOUND')
+end
+
+-- 4. Sliding-TTL touch (upstream touches before the closed check, so even
+-- rejected appends refresh the window).
+m.accessedAtNs = string.format('%.0f', now)
+redis.call('HSET', KEYS[1], 'accessedAtNs', m.accessedAtNs)
+```
+
+After this come the closed-stream check, the content-type check, the producer
+state machine (the Lua mirror of `ValidateProducer`), and the `Stream-Seq`
+ordering check. Only then does the script compare the snapshot tail against the
+live tail: if another append moved it, the script returns `RETRY` and the Go
+caller re-snapshots and tries again — up to 64 times. If the tail still matches,
+the script writes the frames with `ZADD`, advances the tail, records producer
+state, and `PUBLISH`es to the notify channel — all in the same atomic step.
+
+  </Step>
+
+  <Table>
+    | Piece | Where | Does |
+    | --- | --- | --- |
+    | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L459) | `store.go` | snapshots tail, frames batch, runs the script, retries on `RETRY` |
+    | [`keysFor`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go#L45) | `keys.go` | builds the four `{path}`-tagged keys for one slot |
+    | [`WaitForMessages`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go#L22) | `notify.go` | `SUBSCRIBE` + re-read + defensive poll for long-poll |
+    | [`Delete`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L720) | `store.go` | soft-delete if referenced, else hard-delete + cascade |
+  </Table>
+
+  <Callout icon="alert" label="Durability">
+    Atomicity is per primary. Redis replication is asynchronous, so an
+    acknowledged append can be lost on failover. Within a healthy primary,
+    appends are atomic and producer idempotency is exact.
+  </Callout>
+</section>
+
+<section class="block" id="subs">
+  <SectionHead num="05" label="webhook/" title="Subscriptions &amp; <em>webhooks</em>" />
+
+  The subscription plane is optional and bolts on through two hooks the handler
+  fires: `OnStreamCreated` and `OnStreamAppend`. When a durable append lands on a
+  matched stream, the webhook `Manager` looks up the stream's subscribers in a
+  fan-out index and wakes any that are idle with pending work. A wake is not a
+  fire-and-forget notification — it is a fenced state transition in Redis, so a
+  crash on either side can be recovered rather than lost or double-delivered.
+
+  `arm_wake.lua` is where a wake is born. It only fires if the subscription is
+  idle, and it bumps a monotonic `generation` counter that fences every later
+  message about this wake.
+
+  <Step n="1" fn="arm_wake.lua — arming a fenced wake" loc="webhook/scripts/arm_wake.lua" role="Idle-guard, then bump the generation and stamp a fresh wake_id. Webhook delivery arms a lease immediately; pull-wake leaves a flag the recovery sweep watches.">
+
+```lua title="webhook/scripts/arm_wake.lua"
+local sub = KEYS[1]
+if redis.call('EXISTS', sub) == 0 then
+  return { 'NOSUB' }
+end
+if redis.call('HGET', sub, 'phase') ~= 'idle' then
+  return { 'BUSY', redis.call('HGET', sub, 'generation'), redis.call('HGET', sub, 'wake_id') }
+end
+local gen = redis.call('HINCRBY', sub, 'generation', 1)
+redis.call('HSET', sub, 'wake_id', ARGV[5], 'phase', 'waking', 'holder', '0', 'holder_worker', '')
+if ARGV[4] == '1' then
+  local until_ns = tonumber(ARGV[2]) + tonumber(ARGV[3]) * 1000000
+  redis.call('HSET', sub, 'lease_until_ns', tostring(until_ns))
+  redis.call('ZADD', KEYS[2], until_ns, ARGV[1])
+else
+  redis.call('HSET', sub, 'wake_event_sent_ns', '0')
+end
+return { 'ARMED', tostring(gen), ARGV[5] }
+```
+
+That `generation` is the whole fencing story. Every delivery, ack, and claim
+carries the generation it was issued under; Redis rejects any that arrives under
+a stale one with a `409`. Webhook delivery signs the POST with Ed25519 and runs
+it past an SSRF guard. Pull-wake instead appends an event to the worker's wake
+stream and lets workers race to `claim` a lease. Backing both is a
+`recoverySweeper` that runs every two seconds, re-arming wakes stranded by a
+crash and expiring leases whose holder went away — the durability backstop under
+the best-effort append-time hook.
+
+  </Step>
+
+  <Table>
+    | Function | Where | Does |
+    | --- | --- | --- |
+    | [`OnStreamAppend`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L214) | `manager.go` | fan-out: wake every idle subscriber with pending work |
+    | [`issueWake`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L256) | `manager.go` | arm a generation; sign+POST, or append a wake event |
+    | [`Claim`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store.go#L225) | `redis_store.go` | pull-wake lease compare-and-set; rotates the fence |
+    | [`recoverySweeper`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L495) | `manager.go` | every 2 s: re-arm stranded wakes, expire dead leases |
+  </Table>
+
+  The [Subscriptions](./../subscriptions) reference covers the fencing,
+  generations, and recovery sweep in full; the [wake tracer](./tracers#wake)
+  follows one wake through this code end to end.
+</section>

@@ -1,0 +1,33 @@
+# Rendered by `render` — the sweep-scale load job. It runs on the loadgen node
+# pool so it never shares a node with the SUT. It scrapes the chronicle Service
+# /metrics, which is exact when sut.replicas is 1 (each replica sweeps all K
+# identically, so one replica's tick is the scaling signal). With several
+# replicas, read the per-replica histogram via Prometheus and the O(N*K) Redis
+# load via the managed-Redis metrics instead.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sweepscale-{{.Name}}
+  namespace: {{.SUT.Namespace}}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels: { app: sweepscale }
+    spec:
+      nodeSelector: { role: loadgen }
+      restartPolicy: Never
+      containers:
+        - name: sweepscale
+          image: {{.LoadgenImage}}
+          command:
+            - "sweepscale"
+            - "-base-url=http://chronicle.{{.SUT.Namespace}}:4437"
+            - "-metrics-url=http://chronicle.{{.SUT.Namespace}}:9090/metrics"
+            - "-subscriptions={{.Workload.Subscriptions}}"
+            - "-links-per-sub={{.Workload.LinksPerSub}}"
+            - "-dispatch={{.Workload.Dispatch}}"
+            - "-warmup={{.Workload.Warmup}}"
+            - "-measure={{.Workload.Measure}}"
+            - "-slo-p99-ms={{.SLO.SweepP99Ms}}"
+            - "-max-seed-errors={{.SLO.MaxSeedErrors}}"

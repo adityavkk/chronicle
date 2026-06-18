@@ -1,0 +1,27 @@
+# Idempotent-producer variant of token-sessions: every append carries
+# the Producer-Id/Epoch/Seq triplet, exercising the server's producer
+# state machine (in-process for Caddy, inside the append Lua script for
+# Chronicle). The protocol requires strictly sequential Producer-Seq, so
+# this path is serialized per stream — one in-flight append per writer —
+# which is exactly how real idempotent producers behave.
+name: producer-sessions
+description: >
+  50 sessions with idempotent producers: 30 msg/s per stream attempted
+  (serialized per protocol), 120 B messages, two SSE tailers per stream.
+
+duration: 60s
+warmup: 5s
+
+streams:
+  count: 50
+  prefix: bench/prod
+
+writers:
+  per_stream: 1
+  rate: 30/s
+  message_bytes: 120
+  producer: idempotent
+
+tailers:
+  sse_per_stream: 2
+  connect_ramp: 3s

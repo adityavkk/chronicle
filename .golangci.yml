@@ -1,0 +1,88 @@
+version: "2"
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - exhaustive
+    - forbidigo
+    - gocritic
+    - misspell
+    - nilerr
+    - noctx
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+    - wastedassign
+  settings:
+    errcheck:
+      exclude-functions:
+        # Best-effort writes to the HTTP client; the upstream Caddy plugin
+        # ignores these results too, and there is no useful recovery.
+        - (net/http.ResponseWriter).Write
+        - fmt.Fprintf
+    exhaustive:
+      default-signifies-exhaustive: true
+    forbidigo:
+      # Always run Lua via *redis.Script (Run/RunRO). A bare EVAL/EVALSHA inside a
+      # pipeline/MULTI loses the NOSCRIPT->EVAL self-heal (go-redis #3228), so it
+      # can fail NOSCRIPT after a managed-Redis cache flush/failover. chronicle has
+      # zero such calls today; this keeps it that way. If batching a script is ever
+      # genuinely needed, SCRIPT LOAD it first and take an explicit, justified
+      # //nolint:forbidigo at the call site.
+      forbid:
+        - pattern: \.Eval(Sha)?(RO)?\b
+          msg: use *redis.Script.Run/RunRO, not a bare EVAL/EVALSHA; the NOSCRIPT->EVAL self-heal does not fire inside a pipeline/MULTI (go-redis #3228). If batching is truly needed, SCRIPT LOAD first and add a justified //nolint:forbidigo.
+    revive:
+      rules:
+        - name: exported
+          disabled: false
+  exclusions:
+    rules:
+      # Tests: deferred Close() results are noise (failures surface through
+      # assertions), httptest requests don't need contexts, and fixed test
+      # fixtures legitimately pass the same constant to a helper.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - noctx
+          - unparam
+      # jepsen/ is a local consistency-checker harness, not shipped product
+      # code. It runs scenarios against a live server and reads the results;
+      # best-effort cleanup and scenario plumbing don't earn production lint.
+      - path: (^|/)jepsen/
+        linters:
+          - errcheck
+          - noctx
+          - gocritic
+          - unparam
+          - unused
+      # Files ported line-for-line from the upstream Caddy plugin (see the
+      # provenance headers). Upstream diffability wins over stylistic
+      # rewrites here.
+      - path: (^|/)(handler|handler_sse)\.go$
+        linters:
+          - gocritic
+          - unparam
+          - wastedassign
+      - path: store/memory_store\.go$
+        linters:
+          - gocritic
+      # store/store.go is a frozen parity file; upstream documents the
+      # ProducerResult constants with trailing comments only.
+      - path: store/store\.go$
+        linters:
+          - revive
+        text: ProducerResult
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - gecgithub01.walmart.com/auk000v/chronicle
