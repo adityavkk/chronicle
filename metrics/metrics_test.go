@@ -24,6 +24,7 @@ func TestMuxEndpoints(t *testing.T) {
 	p.SlotOwnership("claimed", 7)
 	p.CoverageGap(8 * time.Millisecond)
 	p.OwnerFenced("check_owner")
+	p.ClaimContention("already_claimed", "agent-handler")
 	mux := p.Mux(func() error { return nil })
 
 	get := func(path string) *httptest.ResponseRecorder {
@@ -56,6 +57,7 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_slot_ownership_events_total",
 		"chronicle_coverage_gap_seconds",
 		"chronicle_owner_fenced_total",
+		"chronicle_claim_contention_total",
 	} {
 		if !strings.Contains(body, name) {
 			t.Errorf("/metrics output missing %q", name)

@@ -223,6 +223,7 @@ func (f *fakeMetrics) DueWorkerTick(time.Duration, int) {}
 func (f *fakeMetrics) SlotOwnership(string, int)        {}
 func (f *fakeMetrics) CoverageGap(time.Duration)        {}
 func (f *fakeMetrics) OwnerFenced(string)               {}
+func (f *fakeMetrics) ClaimContention(string, string)   {}
 
 // TestSweepRecordsMetrics verifies the sweep reports its per-tick cost to the
 // Metrics seam: one tick recorded, carrying the subscription/tail counts and the
