@@ -57,6 +57,9 @@ make all SPEC=spec/sweep-10k.yaml   # provision → run → ALWAYS tear down
 `all` tears down on success, failure, **or Ctrl-C** (a trap), so the meter is
 never left running by accident. Edit the spec (K, P, replicas, SLO) and re-run;
 override the target with env vars (`LT_PROJECT`, `LT_ZONE`, `LT_MACHINE`, …).
+This worker's defaults suffix external resource names with `-codex`
+(`chronicle-loadtest-codex`, `chronicle-codex`) so the gate runs do not collide
+with the shared rig.
 
 Granular, when iterating (the cluster + Redis stay up between `run`s):
 
@@ -65,6 +68,17 @@ make up                          # provision once (idempotent)
 make run SPEC=spec/sweep-50k.yaml   # render + deploy + run + report
 make run SPEC=spec/sweep-10k.yaml   # ... again, no re-provision
 make down                        # delete cluster + Redis (keeps AR images)
+```
+
+Reports are written under `loadtest/out/reports/`: the raw `sweepscale` JSON/log
+and a parsed Memorystore CPU summary from Cloud Monitoring
+(`redis.googleapis.com/stats/cpu_utilization`). Cloud Monitoring can lag by a few
+minutes; a zero-sample CPU file is a collection result, not a fabricated number.
+
+Chaos hooks are opt-in for runs that need them:
+
+```sh
+LT_CHAOS=pod-kill LT_CHAOS_PERIOD=15s make run SPEC=spec/gate1-replicas-4-codex.yaml
 ```
 
 A non-zero Job exit (and `make run` exit) means an SLO breach (sweep p99 over
@@ -93,6 +107,17 @@ On-demand by design — no CI wiring. For cheap per-change regression detection
 without a cluster, run the `BenchmarkSweepOnce` microbenchmark with `benchstat`
 against a `main` baseline; it catches round-trip regressions in seconds. The
 cloud rig is for validating absolute scale, not every commit.
+
+Gate #1 uses the K=10k specs committed for this slice:
+
+```sh
+cd loadtest
+make up
+make run SPEC=spec/gate1-replicas-1-codex.yaml
+make run SPEC=spec/gate1-replicas-2-codex.yaml
+make run SPEC=spec/gate1-replicas-4-codex.yaml
+make down
+```
 
 ## Constraint
 

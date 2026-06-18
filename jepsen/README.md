@@ -3,7 +3,8 @@
 A fault-injection harness that runs chronicle on a local Kubernetes cluster and
 verifies that the subscription layer delivers every durably-appended message even
 when origins and Redis are killed mid-flight. It is the empirical counterpart to
-the crash-window analysis in [docs/research/07](../docs/research/07-subscription-wake-lease-durability.md);
+the horizontal-scale verification plan in
+[docs/specs/horizontal-scale/research/07](../docs/specs/horizontal-scale/research/07-jepsen-style-verification.md);
 results and interpretation live in [docs/jepsen/results.md](../docs/jepsen/results.md).
 
 ## Prerequisites
@@ -20,13 +21,18 @@ jepsen/run.sh                      # run baseline, origin-restart, redis-restart
 jepsen/run.sh origin-restart       # or a single scenario
 jepsen/run.sh expired-lease-takeover glob-create-crash  # the hardening scenarios
 jepsen/run.sh single-holder-linz cursor-monotonic       # the safety scenarios (07)
+jepsen/run.sh stale-gen-noop lease-tail-drop-recovery   # #10 baseline additions
 jepsen/down.sh                     # tear down the cluster
 ```
 
 The hardening scenarios (`pull-wake-arm-crash`, `expired-lease-takeover`,
-`glob-create-crash`, `index-repair`) and the safety scenarios
-(`single-holder-linz`, `cursor-monotonic`) are not in the default `run.sh` set
-yet; pass them by name.
+`glob-create-crash`, `index-repair`), the safety scenarios
+(`single-holder-linz`, `cursor-monotonic`, `stale-gen-noop`,
+`lease-tail-drop-recovery`), and the proposed-mechanism scaffolds
+(`ownership-exclusivity`, `slot-isolation`, `contention-contract`) are not in
+the default `run.sh` set yet; pass them by name. Proposed-mechanism scaffolds
+fail clearly unless run with `-nemesis-dry-run`, because the ownership and
+slot-homing mechanisms do not exist in today's SUT.
 
 `up.sh` maps `localhost:4438` to the chronicle NodePort through the k3d
 loadbalancer, so the host driver keeps reaching chronicle while individual pods
@@ -108,6 +114,21 @@ the scenario drivers and the recorder are the shell.
   samples each subscription cursor on a ticker, then checks the samples with the
   pure forward-only checker (`check_cursor.go`): an acked offset never regresses
   and never phantom-advances.
+- **`stale-gen-noop` (T4, no stale-generation effect).** Forces a takeover,
+  replays the deposed worker's stale ack, and checks the response status plus a
+  byte-identical durable subscription snapshot with `check_stale_generation.go`.
+- **`lease-tail-drop-recovery` (L3, lease-tail-drop recovery).** ZREMs exactly
+  `ds:{__ds}:sched:lease` for the live subscription, waits past the explicit
+  `-sweep`/`-settle` bounds, then asserts a later holder gets a rotated fence and
+  the deposed ack is `FENCED`. The exact `-sweep=0` proof is blocked on today's
+  binary because the recovery sweep is not separately disableable from a future
+  floor/eager-reconcile path.
+
+The enriched nemesis surface includes randomized action windows
+(`-nemesis-window-min`, `-nemesis-window-max`), in-process `gcPause`,
+`dropLeaseTail`, and fail-fast contracts for `killSlotOwner`, `toxiproxy`
+partition, and clock skew. Use `-nemesis-dry-run` only to verify wiring for
+external primitives that the current k3d deployment cannot perform.
 
 **Modeling note (a real subtlety).** The fence model is *time-free*: lease expiry
 governs only grant-vs-BUSY (an observed output), not the safety algebra. One
@@ -126,7 +147,10 @@ the history was too concurrent to decide in the timeout — reduce `-workers` or
 - `Dockerfile` — wraps the host-built `bin/chronicle-linux`.
 - `checker/main.go` — receiver + workload + nemesis + durability checker.
 - `checker/model_fence.go` — pure porcupine lease-fence model (T1).
+- `checker/model_shard.go` — pure porcupine shard-ownership CAS model scaffold (T3).
 - `checker/check_cursor.go` — pure cursor-monotonicity checker (T2).
+- `checker/check_stale_generation.go` — pure stale-generation no-op checker (T4).
+- `checker/check_contention.go` — pure C1/C2/C3 contention rate-contract scaffold.
 - `checker/history.go` — the recorder seam (driver-host monotonic clock).
 - `checker/scenario_lease.go` — `single-holder-linz` driver + gcPause nemesis.
 - `checker/scenario_cursor.go` — `cursor-monotonic` driver + cursor poller.

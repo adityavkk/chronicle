@@ -23,6 +23,58 @@ host, reachable from pods via `host.k3d.internal`; the receiver returns
 
 Reproduce: `jepsen/up.sh && jepsen/run.sh` (`jepsen/down.sh` to tear down).
 
+## #10 harness baseline — 2026-06-18
+
+Commands run from `/Users/auk000v/orca/workspaces/chronicle/hs-10-harness`:
+
+```sh
+jepsen/up.sh
+jepsen/run.sh single-holder-linz cursor-monotonic stale-gen-noop at-least-once lease-tail-drop-recovery
+kubectl --context k3d-chronicle-jepsen -n chronicle-jepsen exec deploy/redis -- redis-cli -n 0 flushdb
+jepsen/bin/jepsen-checker -base http://localhost:4438 -cluster chronicle-jepsen \
+  -scenario cursor-monotonic -streams 8 -msgs 120 \
+  -nemesis-window-min=100ms -nemesis-window-max=200ms -settle=25s
+for i in 1 2 3; do
+  kubectl --context k3d-chronicle-jepsen -n chronicle-jepsen exec deploy/redis -- redis-cli -n 0 flushdb
+  jepsen/bin/jepsen-checker -base http://localhost:4438 -cluster chronicle-jepsen \
+    -scenario single-holder-linz -workers 5 -workload-ms 5000
+  kubectl --context k3d-chronicle-jepsen -n chronicle-jepsen exec deploy/redis -- redis-cli -n 0 flushdb
+  jepsen/bin/jepsen-checker -base http://localhost:4438 -cluster chronicle-jepsen \
+    -scenario stale-gen-noop
+done
+jepsen/bin/jepsen-checker -base http://localhost:4438 -cluster chronicle-jepsen \
+  -scenario ownership-exclusivity -nemesis-dry-run
+jepsen/bin/jepsen-checker -base http://localhost:4438 -cluster chronicle-jepsen \
+  -scenario slot-isolation -nemesis-dry-run
+jepsen/bin/jepsen-checker -base http://localhost:4438 -cluster chronicle-jepsen \
+  -scenario contention-contract -nemesis-dry-run
+jepsen/bin/jepsen-checker -base http://localhost:4438 -cluster chronicle-jepsen \
+  -scenario lease-tail-drop-recovery -sweep=0
+```
+
+Observed results:
+
+| Scenario | Property | Result |
+| --- | --- | --- |
+| `single-holder-linz` | T1 single-holder lease | **PASS**. Porcupine `CheckResult == Ok`; representative run recorded 651 ops, 626 claims, 25 grants. Three stress iterations at 5 workers also returned `linearizable: yes` with no `Illegal` or `Unknown`. |
+| `cursor-monotonic` | T2 cursor monotonicity | **PASS**. The normal baseline had no regression. A short-window rerun produced 46 `kill-origin` actions, 1500 cursor samples across 8 streams, and no cursor regression. |
+| `stale-gen-noop` | T4 no stale-generation effect | **PASS**. Stale ack returned `409 FENCED`; before/after subscription snapshots were byte-identical (`393` bytes). Three stress iterations also passed. |
+| `at-least-once` | L1 at-least-once delivery | **PASS**. 320 messages appended, 306 wakes delivered, duplicate factor 1.00, 8/8 streams at tail. |
+| `lease-tail-drop-recovery` | L3 lease-tail-drop recovery | **PASS** for the default sweep-bound variant. The nemesis performed one `drop-lease-tail` (`ZREM ds:{__ds}:sched:lease <sub>`); the later holder got generation 2 and the deposed ack returned `409 FENCED`. |
+| `ownership-exclusivity` | T3 proposed shard ownership | **SCAFFOLDED / BLOCKED**. Dry-run wiring succeeds. Live check is blocked until `claim_shard.lua`, `check_owner.lua`, and `ds:{ownership}:slot:<h>` exist. |
+| `slot-isolation` | T5 proposed slot homing | **SCAFFOLDED / BLOCKED**. Dry-run wiring succeeds. Live check is blocked until S-slot `{__ds:h}` key homing exists. |
+| `contention-contract` | C1/C2/C3 contention suite | **SCAFFOLDED / BLOCKED**. Pure rate-contract checker is unit-tested; live C1/C2/C3 require the claimant fan-in measurement rig and, for C3, the claim-granularity fix. |
+
+Honest L3 gap: `lease-tail-drop-recovery -sweep=0` intentionally fails on
+today's binary with:
+
+```text
+FAIL: lease-tail-drop-recovery with -sweep=0 is blocked on today's SUT: the deployed binary exposes the recovery sweep, not a separately disableable floor/eager-reconcile path
+```
+
+One stress-loop Redis flush hit a transient `kubectl` TLS handshake timeout, then
+the scenario itself ran and passed. No checker failure was observed.
+
 ## Scenario matrix
 
 | Scenario | Fault | Crash window (research 07) | Observed |

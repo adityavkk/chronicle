@@ -41,6 +41,11 @@ kubectl -n chronicle-loadtest logs -f -l app=sweepscale   # the JSON report; exi
 ( cd loadtest/terraform && terraform destroy )            # STOP THE METER
 ```
 
+For Codex issue-slice runs, keep the defaults suffixed with `-codex`
+(`LT_CLUSTER=chronicle-loadtest-codex`, `LT_AR_REPO=chronicle-codex`,
+namespace `chronicle-loadtest-codex`) unless the coordinator explicitly assigns
+a different isolated name.
+
 ---
 
 ## Pre-flight (do these FIRST — each one is a failed ~6-min cluster create)
@@ -80,6 +85,7 @@ kubectl -n chronicle-loadtest logs -f -l app=sweepscale   # the JSON report; exi
 | `/readyz` flaps | readiness pings Redis; Memorystore not reachable from the SUT pool | Authorized network / same VPC; `/readyz` returns 503 until Redis is up (by design) |
 | Sweep histogram looks "mixed" / counts jump around with replicas>1 | the Job scrapes the Service, which load-balances across replicas, each with its own histogram | Scrape **one** replica. Run the sweep-scale measurement at `sut.replicas: 1` (every replica sweeps all K identically); use Redis metrics for the multi-replica `O(N·K)` effect |
 | Env pollution `CHRONICLE_*_PORT` in the pod | k8s service links inject them from the Service named `chronicle` (harmless — chronicle reads `CHRONICLE_LISTEN`, not `CHRONICLE_PORT`) | `enableServiceLinks: false` (sut template sets it) — best practice, not required |
+| Redis CPU report has zero samples | Cloud Monitoring metrics can lag several minutes, or the query window was shorter than the sampling period | Re-run only the CPU query over the same window if the cluster is still up, or record the zero-sample CPU file as the collection blocker |
 
 Not applicable here (Electric-stack only): Node V8 heap OOM, Postgres pool /
 `max_connections`, Drizzle migration races, embedded-DS replica split-brain.
@@ -102,6 +108,13 @@ store is Redis.
   (`sweep_tails_batched`, `worker_due_items`), cAdvisor CPU (GKE **Standard** —
   Autopilot blocks the node-proxy scrape), and Memorystore CPU/ops (the
   control-plane `{__ds}` slot is the shared ceiling). Don't guess.
+- **Gate #1 is three specs, not an edited live object.** Run
+  `spec/gate1-replicas-1-codex.yaml`, `spec/gate1-replicas-2-codex.yaml`, and
+  `spec/gate1-replicas-4-codex.yaml` through `make run`; each run writes
+  sweepscale plus Redis CPU summaries under `loadtest/out/reports/`.
+- **Pod-kill chaos is opt-in.** Set `LT_CHAOS=pod-kill` (and optionally
+  `LT_CHAOS_PERIOD=15s`) to kill one Chronicle pod repeatedly while the Job
+  runs. Leave it off for the clean CPU-vs-replicas gate unless measuring churn.
 - **Right-size so the SUT gets its core.** Pin `sut.cpu` limits so node
   contention doesn't masquerade as the sweep's ceiling, and keep the load
   generator on its own node pool — a driver co-located with the SUT gives fake
