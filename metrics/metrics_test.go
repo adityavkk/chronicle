@@ -15,6 +15,12 @@ func TestMuxEndpoints(t *testing.T) {
 	p.WakeDelivery(2*time.Millisecond, "ok")
 	p.WakeEvent(time.Millisecond, "ok")
 	p.WorkerTick("lease", 7)
+	p.FanOut(3*time.Millisecond, 4, 100)
+	p.DueSetMutation("arm")
+	p.DueWorkerTick(4*time.Millisecond, 3)
+	p.SlotOwnership("claimed", 7)
+	p.CoverageGap(5 * time.Millisecond)
+	p.OwnerFenced("due")
 	mux := p.Mux(func() error { return nil })
 
 	get := func(path string) *httptest.ResponseRecorder {
@@ -37,7 +43,17 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_sweep_tails_batched",
 		"chronicle_sweep_wakes_total",
 		"chronicle_wake_delivery_seconds",
+		"chronicle_wake_event_seconds",
 		"chronicle_worker_due_items",
+		"chronicle_fanout_seconds",
+		"chronicle_fanout_slots_probed",
+		"chronicle_fanout_subscribers",
+		"chronicle_due_set_mutations_total",
+		"chronicle_due_worker_tick_seconds",
+		"chronicle_due_worker_fired",
+		"chronicle_slot_ownership_events_total",
+		"chronicle_coverage_gap_seconds",
+		"chronicle_owner_fenced_total",
 	} {
 		if !strings.Contains(body, name) {
 			t.Errorf("/metrics output missing %q", name)

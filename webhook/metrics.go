@@ -25,6 +25,18 @@ type Metrics interface {
 	// WorkerTick records one lease/retry worker pass: the kind ("lease" or
 	// "retry") and how many due items it claimed this tick.
 	WorkerTick(kind string, due int)
+	// FanOut records one stream-append fan-out index probe.
+	FanOut(dur time.Duration, slotsProbed, subs int)
+	// DueSetMutation records a proposed due-set mutation by operation.
+	DueSetMutation(op string)
+	// DueWorkerTick records one proposed due-worker pass.
+	DueWorkerTick(dur time.Duration, fired int)
+	// SlotOwnership records a proposed slot-ownership lifecycle event.
+	SlotOwnership(event string, slot int)
+	// CoverageGap records an observed unowned-slot recovery gap.
+	CoverageGap(dur time.Duration)
+	// OwnerFenced records a proposed owner-epoch fence firing.
+	OwnerFenced(scope string)
 }
 
 // NopMetrics is the no-op Metrics used when none is configured. The Manager
@@ -42,3 +54,21 @@ func (NopMetrics) WakeEvent(time.Duration, string) {}
 
 // WorkerTick implements Metrics.
 func (NopMetrics) WorkerTick(string, int) {}
+
+// FanOut implements Metrics.
+func (NopMetrics) FanOut(time.Duration, int, int) {}
+
+// DueSetMutation implements Metrics.
+func (NopMetrics) DueSetMutation(string) {}
+
+// DueWorkerTick implements Metrics.
+func (NopMetrics) DueWorkerTick(time.Duration, int) {}
+
+// SlotOwnership implements Metrics.
+func (NopMetrics) SlotOwnership(string, int) {}
+
+// CoverageGap implements Metrics.
+func (NopMetrics) CoverageGap(time.Duration) {}
+
+// OwnerFenced implements Metrics.
+func (NopMetrics) OwnerFenced(string) {}

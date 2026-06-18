@@ -7,6 +7,7 @@ package metrics
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -29,6 +30,15 @@ type Prometheus struct {
 	delivery     *prometheus.HistogramVec
 	wakeEvent    *prometheus.HistogramVec
 	workerDue    *prometheus.HistogramVec
+	fanOut       prometheus.Histogram
+	fanOutSlots  prometheus.Histogram
+	fanOutSubs   prometheus.Histogram
+	dueMutations *prometheus.CounterVec
+	dueWorker    prometheus.Histogram
+	dueFired     prometheus.Histogram
+	slotEvents   *prometheus.CounterVec
+	coverageGap  prometheus.Histogram
+	ownerFenced  *prometheus.CounterVec
 }
 
 var _ webhook.Metrics = (*Prometheus)(nil)
@@ -78,8 +88,56 @@ func New() *Prometheus {
 			Help:    "Due items claimed per lease/retry worker tick, by kind.",
 			Buckets: prometheus.ExponentialBuckets(1, 2, 12),
 		}, []string{"kind"}),
+		fanOut: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_fanout_seconds",
+			Help:    "Stream append fan-out index probe duration.",
+			Buckets: prometheus.DefBuckets,
+		}),
+		fanOutSlots: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_fanout_slots_probed",
+			Help:    "Slot fan-out indexes probed per stream append.",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 10),
+		}),
+		fanOutSubs: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_fanout_subscribers",
+			Help:    "Subscribers discovered per stream append fan-out probe.",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 18),
+		}),
+		dueMutations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_due_set_mutations_total",
+			Help: "Proposed due-set mutations by operation.",
+		}, []string{"op"}),
+		dueWorker: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_due_worker_tick_seconds",
+			Help:    "Proposed due-worker tick wall-clock duration.",
+			Buckets: prometheus.DefBuckets,
+		}),
+		dueFired: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_due_worker_fired",
+			Help:    "Wakes fired per proposed due-worker tick.",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 12),
+		}),
+		slotEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_slot_ownership_events_total",
+			Help: "Proposed slot-ownership lifecycle events.",
+		}, []string{"event", "slot"}),
+		coverageGap: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_coverage_gap_seconds",
+			Help:    "Observed recovery latency after an unowned-slot coverage gap.",
+			Buckets: prometheus.ExponentialBuckets(0.001, 2, 18),
+		}),
+		ownerFenced: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_owner_fenced_total",
+			Help: "Proposed owner-epoch fence firings.",
+		}, []string{"scope"}),
 	}
-	reg.MustRegister(p.sweepSeconds, p.sweepSubs, p.sweepTails, p.sweepWakes, p.delivery, p.wakeEvent, p.workerDue)
+	reg.MustRegister(
+		p.sweepSeconds, p.sweepSubs, p.sweepTails, p.sweepWakes,
+		p.delivery, p.wakeEvent, p.workerDue,
+		p.fanOut, p.fanOutSlots, p.fanOutSubs,
+		p.dueMutations, p.dueWorker, p.dueFired,
+		p.slotEvents, p.coverageGap, p.ownerFenced,
+	)
 	return p
 }
 
@@ -104,6 +162,39 @@ func (p *Prometheus) WakeEvent(dur time.Duration, outcome string) {
 // WorkerTick implements webhook.Metrics.
 func (p *Prometheus) WorkerTick(kind string, due int) {
 	p.workerDue.WithLabelValues(kind).Observe(float64(due))
+}
+
+// FanOut implements webhook.Metrics.
+func (p *Prometheus) FanOut(dur time.Duration, slotsProbed, subs int) {
+	p.fanOut.Observe(dur.Seconds())
+	p.fanOutSlots.Observe(float64(slotsProbed))
+	p.fanOutSubs.Observe(float64(subs))
+}
+
+// DueSetMutation implements webhook.Metrics.
+func (p *Prometheus) DueSetMutation(op string) {
+	p.dueMutations.WithLabelValues(op).Inc()
+}
+
+// DueWorkerTick implements webhook.Metrics.
+func (p *Prometheus) DueWorkerTick(dur time.Duration, fired int) {
+	p.dueWorker.Observe(dur.Seconds())
+	p.dueFired.Observe(float64(fired))
+}
+
+// SlotOwnership implements webhook.Metrics.
+func (p *Prometheus) SlotOwnership(event string, slot int) {
+	p.slotEvents.WithLabelValues(event, strconv.Itoa(slot)).Inc()
+}
+
+// CoverageGap implements webhook.Metrics.
+func (p *Prometheus) CoverageGap(dur time.Duration) {
+	p.coverageGap.Observe(dur.Seconds())
+}
+
+// OwnerFenced implements webhook.Metrics.
+func (p *Prometheus) OwnerFenced(scope string) {
+	p.ownerFenced.WithLabelValues(scope).Inc()
 }
 
 // Mux returns the observability HTTP surface: /metrics (Prometheus exposition),

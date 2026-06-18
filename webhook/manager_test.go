@@ -214,6 +214,12 @@ func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
 func (f *fakeMetrics) WakeDelivery(time.Duration, string) {}
 func (f *fakeMetrics) WakeEvent(time.Duration, string)    {}
 func (f *fakeMetrics) WorkerTick(string, int)             {}
+func (f *fakeMetrics) FanOut(time.Duration, int, int)     {}
+func (f *fakeMetrics) DueSetMutation(string)              {}
+func (f *fakeMetrics) DueWorkerTick(time.Duration, int)   {}
+func (f *fakeMetrics) SlotOwnership(string, int)          {}
+func (f *fakeMetrics) CoverageGap(time.Duration)          {}
+func (f *fakeMetrics) OwnerFenced(string)                 {}
 
 // TestSweepRecordsMetrics verifies the sweep reports its per-tick cost to the
 // Metrics seam: one tick recorded, carrying the subscription/tail counts and the
