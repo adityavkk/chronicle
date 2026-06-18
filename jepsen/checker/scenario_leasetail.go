@@ -18,14 +18,17 @@ import (
 //
 // Two variants, selected by -floor (07 honest-gap #4, resolved by #13):
 //
-//   - SHARPENED (-floor=0 + explicit takeover): the server runs with its periodic
-//     floor disabled, so a sweep tick can NOT be the recoverer. After the drop we
-//     force an explicit takeover (restart the origins → the boot recovery event),
-//     and the new process's failover-aware eager reconcile (manager.go
-//     reconcileLeases) re-ZADDs the lease entry from the durable sub hash so the
-//     fast lease worker drives expiry. Recovery within lease_ttl_ms + RTT — far
-//     under any periodic floor — proves the EAGER reconcile at the trigger, not a
-//     tick, recovered the stranded live/waking sub (#13's load-bearing claim).
+//   - SHARPENED (-floor=0 + explicit takeover): -floor=0 is a HARNESS-only knob —
+//     it selects this variant and its tight assertion bound; it does NOT reconfigure
+//     the deployed server, which always runs the 30s coarse floor (deploy.yaml sets
+//     no -sweep-interval). After the drop we force an explicit takeover (restart the
+//     origins → the boot recovery event), and the new process's failover-aware eager
+//     reconcile (manager.go reconcileLeases) re-ZADDs the lease entry from the
+//     durable sub hash so the fast lease worker drives expiry. Recovery within
+//     lease_ttl_ms + RTT (a few seconds) lands FAR under the 30s server floor, so a
+//     periodic tick cannot account for it — proving the EAGER reconcile at the
+//     trigger, not a floor tick, recovered the stranded live/waking sub (#13's
+//     load-bearing claim).
 //
 //   - FLOOR (-floor>0, no takeover): no event fires, so the coarse periodic floor
 //     is the recoverer; the bound is lease_ttl_ms + floor + RTT. This is the
