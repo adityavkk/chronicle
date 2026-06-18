@@ -154,3 +154,59 @@ the proof of completeness.
   the other sweeps. The fence makes these safe in principle (research 07 §9);
   adding a partition nemesis (e.g. `iptables`/`tc` in the pod netns) is the next
   step.
+
+## Contention suite (issue #11) — the 6-clean/12-collapse baseline
+
+The verification plan's [Contention suite](../specs/horizontal-scale/research/07-jepsen-style-verification.md#contention-suite--saturation-under-load-no-fault-the-load-test-gap)
+(**C1/C2/C3**, doc-05 **gate #6**) is the third validation class: a throughput
+collapse under claimant concurrency with **no fault**. The GKE load test proved
+the binding constraint at 12 replicas is per-type claim contention — all of a
+type's entities and replicas serialize on one `(generation, lease)` — while every
+tier sat ≤12% CPU.
+
+The `contention` scenario (`jepsen/checker`, `scenario_contention.go`) reproduces
+it executably with **no rebuild**: N concurrent workers claim/ack one logical type
+through the real `claim.lua`/`ack.lua` against a local Redis, ramping 6→12→24.
+Scaled timers (hold 5 ms, think 25 ms → ~6-claimant per-lease capacity) reproduce
+the empirical signature in seconds; the ratio, not the absolute ms, is faithful
+(the literal 10 s/30 s/10 s rig run is documented in
+[`08-claim-granularity.md`](../specs/horizontal-scale/research/08-claim-granularity.md)).
+
+Reproduce: `docker run -d -p 6380:6379 --name hs11-redis-claude redis:7` then
+`REDIS_URL=redis://localhost:6380/14 go run ./jepsen/checker -scenario contention -c3 -G 16`.
+
+**G=1 — the collapse (C1 and C2 both fail; this IS the regression baseline):**
+
+| N | ops | busy/op | fenced/op | thru/worker | aggregate | p50 ms | p99 ms |
+|---|-----|---------|-----------|-------------|-----------|--------|--------|
+| 6  | 1784  | 0.78 | 0.00 | 21.7 | 130 | 16  | 85  |
+| 12 | 6045  | 0.94 | 0.00 | 10.4 | 125 | 49  | 337 |
+| 24 | 13665 | 0.97 | 0.00 | 5.2  | 124 | 119 | 727 |
+
+The signature is **aggregate throughput pinned flat (~125/s) while per-worker
+throughput halves at every rung** — adding claimants adds *zero* throughput
+because they all serialize on one lease. `busy/op` (`ALREADY_CLAIMED`) climbs to
+0.97 and wake p99 blows out 85 → 727 ms. C2 flags the knee at N=12 (per-worker
+−49%) and N=24 (−69%); C1 flags the runaway `ALREADY_CLAIMED` rate. `fenced/op`
+stays 0: a *fence storm* additionally needs lease lapses (queueing past the 30 s
+TTL), which a laptop's sub-ms Redis does not produce — the local suite reproduces
+the **BUSY-contention throughput knee**, the executable C2 signature; the literal
+fence storm is the GKE campaign (documented, not run here).
+
+**G=16 — the fix (C1, C2 pass):**
+
+| N | ops | busy/op | fenced/op | thru/worker | aggregate | p50 ms | p99 ms |
+|---|-----|---------|-----------|-------------|-----------|--------|--------|
+| 6  | 516  | 0.00 | 0.00 | 28.7 | 172 | 9 | 15 |
+| 12 | 1161 | 0.12 | 0.00 | 28.5 | 342 | 9 | 27 |
+| 24 | 2423 | 0.16 | 0.00 | 28.2 | 676 | 9 | 63 |
+
+Aggregate throughput **scales** with N (172 → 342 → 676), per-worker stays flat
+(~28.5), `busy/op` stays low, and p99 stays bounded.
+
+**C3 / gate #6 — PASS.** The knee that collapsed G=1 at N=12 moved beyond the
+entire G=16 ramp (`CheckGranularityMovesKnee`, strongest pass form). This run uses
+client-side sharding (G subscriptions `<type>-handler:<g>`); the chronicle
+per-`(subId,g)` capability (same split inside one subscription) is re-run as the
+acceptance gate in
+[`08-claim-granularity.md`](../specs/horizontal-scale/research/08-claim-granularity.md).
