@@ -23,6 +23,50 @@ host, reachable from pods via `host.k3d.internal`; the receiver returns
 
 Reproduce: `jepsen/up.sh && jepsen/run.sh` (`jepsen/down.sh` to tear down).
 
+## Horizontal-scale no-rebuild baseline (issue #10)
+
+The verification plan
+[`07-jepsen-style-verification.md`](../specs/horizontal-scale/research/07-jepsen-style-verification.md)
+calls for **T1, T2, T4, L1, L3** to be green on today's single-`{__ds}` code as
+the regression floor — no production rebuild. These were obtained on **2026-06-18**.
+
+**Substrate honesty.** The k3d Jepsen cluster could not get a clean run in this
+environment: the local colima VM (4 CPU / 8 GB) was shared with a concurrent
+`k3d-bakeoff-*` cluster (another orchestrator's), and bringing up a second k3d
+cluster saturated the Docker daemon (`docker version` hung > 12 s; recovered in
+~5 s once load was shed). That is a **shared-VM resource limit, not a code
+failure**. So the live runs below were driven against a **local chronicle binary
++ a single local Redis 7 container** (a far lighter footprint than a full k3d
+cluster) — the same `jepsen/checker` scenarios over the real HTTP/Redis paths,
+just without the k3d `kubectl` nemesis. The namespaced k3d cluster
+(`chronicle-jepsen-claude`) was torn down cleanly; nothing was stranded.
+
+| Property | Scenario | Verdict | Evidence |
+| --- | --- | --- | --- |
+| **T1** single-holder lease | `single-holder-linz` | **GREEN** | porcupine `linearizable: yes` over 293 ops (270 claims, 23 grants), 4 workers + in-process `gcPause` nemesis |
+| **T2** cursor monotonicity | `cursor-monotonic` | **GREEN (no-fault)** | 137 cursor samples / 3 streams, no regression / no phantom advance. The origin-churn nemesis is `kubectl`-bound, so it was a no-op locally — the **faulted** T2 needs k3d (command below) |
+| **T4** no stale-gen effect | `stale-gen-noop` | **GREEN** | deposed worker's stale ack `409 FENCED` **and** the durable cursor byte-identical; the same ack under the current generation advanced the cursor (`events/t4-0` `…0042 → …0077`) |
+| **L1** at-least-once | `at-least-once` | **GREEN** | 4/4 streams at tail, 40 msgs → 28 coalesced wakes, dup ×1.00, delivered ≤ one sweep tick |
+| **L3** lease-tail-drop recovery | `lease-tail-drop` | **GREEN** (manual ZREM) | the lease ZSET entry `ds:{__ds}:sched:lease` was ZREM'd with the sub hash left `live`; the cursor-reading sweep recovered it (fresh claim rotated gen 1→2, acked to tail) and the deposed ack was `409 FENCED`. The scenario's `dropLeaseTail` issues the ZREM via `kubectl`, so the **scenario** form needs k3d; the property was reproduced directly here |
+| (regression) | `expired-lease-takeover` | **GREEN** | fence rotated gen 1→2 on takeover; deposed ack `409 FENCED` |
+| **T3** ownership exclusivity | `ownership-exclusivity` | **GATED (#14)** | reaches the cluster, `killSlotOwner` cleanly no-ops (no ownership record yet); the porcupine CAS model is unit-tested (`go test ./jepsen/checker/ -run TestShardModel`) |
+| **T5** slot isolation | `slot-isolation` | **GATED (#15)** | reports gated; needs the S-slot `{__ds:h}` tagging |
+
+**Pure-core unit floor (the real gate): all green** — `go test -short ./...`
+(root + `loadgen`) covers the T1 lease model (13 cases), the T3 ownership-CAS
+model (13 cases), the T4 effect checker, the L1 delivery checker, the C1/C2/C3
+contention skeleton, the six nemesis primitives, the `redismon`/`chaos` rig
+builders, and the metrics golden list.
+
+**Reproduce the full faulted suite on k3d** (when the VM is not contended):
+
+```sh
+jepsen/up.sh                                                   # CLUSTER=… to namespace it
+jepsen/run.sh single-holder-linz cursor-monotonic stale-gen-noop lease-tail-drop at-least-once
+jepsen/run.sh ownership-exclusivity slot-isolation             # gated scaffolds (#14/#15)
+jepsen/down.sh                                                 # ALWAYS tear down
+```
+
 ## Scenario matrix
 
 | Scenario | Fault | Crash window (research 07) | Observed |
