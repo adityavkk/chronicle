@@ -249,7 +249,7 @@ func (s *RedisStore) deindexStream(path, id string) error {
 // ArmWake issues a wake if idle. An optional OwnerScope makes arm_wake inline the
 // owner-epoch fence (issue #14): an owner-scoped caller deposed since it last
 // claimed the slot is FENCED, suppressing its wasted re-arm. The external/hot path
-// passes no scope (epoch ''), so the check is skipped and behavior is unchanged.
+// passes no scope (epoch ”), so the check is skipped and behavior is unchanged.
 func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, owner ...OwnerScope) (ArmResult, error) {
 	arm := "0"
 	if armLease {
@@ -261,6 +261,7 @@ func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLeas
 	if err != nil {
 		return ArmResult{}, err
 	}
+	s.recordInlineFence(epoch, reply[0])
 	switch reply[0] {
 	case "ARMED":
 		gen, _ := strconv.ParseInt(reply[1], 10, 64)
@@ -322,6 +323,21 @@ func (s *RedisStore) recordContention(status, id string) {
 	s.metrics.ClaimContention(status, id)
 }
 
+// recordInlineFence reports an inlined owner-epoch fence firing (issue #14). The
+// store is the single place a schedule/due script's reply is observed, so every
+// owner-scoped script (arm_wake/ack/expire_lease/schedule_retry/release) records
+// OwnerFenced("inline") here uniformly. It fires ONLY when the caller presented an
+// active owner scope (a non-empty expected epoch) AND the reply is FENCED — so on
+// the load-balanced external path (epoch "") it is a no-op, and for ack/release a
+// FENCED with an active scope is the owner fence (it is the script's first gate,
+// above the still-byte-for-byte (gen,wake_id) fence).
+func (s *RedisStore) recordInlineFence(epoch, status string) {
+	if s.metrics == nil || epoch == "" || status != "FENCED" {
+		return
+	}
+	s.metrics.OwnerFenced("inline")
+}
+
 // Ack fences, applies acks, and releases or heartbeats on the subscription's
 // single per-type lease (shard 0) — today's behavior, on the Store interface.
 func (s *RedisStore) Ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, owner ...OwnerScope) (string, error) {
@@ -354,6 +370,7 @@ func (s *RedisStore) AckShard(id string, g int, reqGeneration int64, reqWakeID s
 	if err != nil {
 		return "", err
 	}
+	s.recordInlineFence(epoch, reply[0])
 	s.recordContention(contentionStatusOf(reply[0]), id)
 	return reply[0], nil
 }
@@ -368,6 +385,7 @@ func (s *RedisStore) Release(id string, reqGeneration int64, reqWakeID string, t
 	if err != nil {
 		return "", err
 	}
+	s.recordInlineFence(epoch, reply[0])
 	s.recordContention(contentionStatusOf(reply[0]), id)
 	return reply[0], nil
 }
@@ -399,6 +417,7 @@ func (s *RedisStore) ExpireLease(id string, now time.Time, owner ...OwnerScope) 
 	if err != nil {
 		return "", err
 	}
+	s.recordInlineFence(epoch, reply[0])
 	return reply[0], nil
 }
 
@@ -470,6 +489,7 @@ func (s *RedisStore) ScheduleRetry(id string, now, nextAttempt time.Time, owner 
 	if err != nil {
 		return 0, err
 	}
+	s.recordInlineFence(epoch, reply[0])
 	// NOSUB (gone) and FENCED (a deposed owner-scoped scheduler) both schedule
 	// nothing; the caller treats a non-OK as "no retry recorded".
 	if reply[0] == "NOSUB" || reply[0] == "FENCED" {
