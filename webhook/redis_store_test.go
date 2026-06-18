@@ -115,7 +115,7 @@ func TestStoreArmWakeSurvivesRestart(t *testing.T) {
 		t.Fatalf("durable cursor lost across restart: %+v", sub.Links)
 	}
 	// The lease deadline is a durable ZSET score, not a goroutine.
-	if n, _ := client.ZCard(context.Background(), leaseZKey).Result(); n != 1 {
+	if n, _ := client.ZCard(context.Background(), leaseZKey(slotOf("s1"))).Result(); n != 1 {
 		t.Fatalf("lease ZSET should hold one durable deadline, got %d", n)
 	}
 }
@@ -180,15 +180,15 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	// Due claim re-scores forward, it does not remove (research 07 §6.1): a
 	// crashed worker's item must recur.
 	_, _ = s.ArmWake("s1", after, 1000, true, "w_b")
-	due, err := s.DueLeases(after.Add(2*time.Second), 16, 30*time.Second)
+	due, err := s.DueLeases(slotOf("s1"), after.Add(2*time.Second), 16, 30*time.Second)
 	if err != nil || len(due) != 1 || due[0] != "s1" {
 		t.Fatalf("due = %v err=%v, want [s1]", due, err)
 	}
-	if n, _ := client.ZCard(context.Background(), leaseZKey).Result(); n != 1 {
+	if n, _ := client.ZCard(context.Background(), leaseZKey(slotOf("s1"))).Result(); n != 1 {
 		t.Fatalf("claimed member must remain in the ZSET (re-scored, not removed), got %d", n)
 	}
 	// Immediately re-claiming finds nothing — it was re-scored into the future.
-	if again, _ := s.DueLeases(after.Add(2*time.Second), 16, 30*time.Second); len(again) != 0 {
+	if again, _ := s.DueLeases(slotOf("s1"), after.Add(2*time.Second), 16, 30*time.Second); len(again) != 0 {
 		t.Fatalf("re-scored member must not be due again immediately, got %v", again)
 	}
 }
@@ -197,11 +197,18 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 // currently owed a wake. It must track owed and return to 0 at quiescence.
 func dueCard(t *testing.T, client goredis.UniversalClient) int64 {
 	t.Helper()
-	n, err := client.ZCard(context.Background(), dueZKey).Result()
-	if err != nil {
-		t.Fatalf("zcard due: %v", err)
+	// Slot-homed: the due outbox is sharded into S per-slot ZSETs, so the global
+	// "owed" count is their sum (a sub's mark lives in dueZKey(slotOf(id))).
+	ctx := context.Background()
+	var total int64
+	for h := 0; h < subSlots; h++ {
+		n, err := client.ZCard(ctx, dueZKey(h)).Result()
+		if err != nil {
+			t.Fatalf("zcard due slot %d: %v", h, err)
+		}
+		total += n
 	}
-	return n
+	return total
 }
 
 // TestRestoreLeaseReDerivesDroppedTail is the issue-#13 store contract for the
@@ -229,10 +236,10 @@ func TestRestoreLeaseReDerivesDroppedTail(t *testing.T) {
 	}
 
 	// The L3 fault: drop the lease AND due tail, leaving the sub hash intact.
-	if err := client.ZRem(ctx, leaseZKey, "s1").Err(); err != nil {
+	if err := client.ZRem(ctx, leaseZKey(slotOf("s1")), "s1").Err(); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.ZRem(ctx, dueZKey, "s1").Err(); err != nil {
+	if err := client.ZRem(ctx, dueZKey(slotOf("s1")), "s1").Err(); err != nil {
 		t.Fatal(err)
 	}
 	if ids, _ := s.LeasedIDs(); len(ids) != 0 {
@@ -244,7 +251,7 @@ func TestRestoreLeaseReDerivesDroppedTail(t *testing.T) {
 	if st, err := s.RestoreLease("s1", true, now); err != nil || st != "RESTORED" {
 		t.Fatalf("RestoreLease = %q err=%v, want RESTORED", st, err)
 	}
-	got, err := client.ZScore(ctx, leaseZKey, "s1").Result()
+	got, err := client.ZScore(ctx, leaseZKey(slotOf("s1")), "s1").Result()
 	if err != nil {
 		t.Fatalf("lease entry should be restored: %v", err)
 	}
@@ -334,7 +341,7 @@ func TestDueSetExpireLeaseReOwes(t *testing.T) {
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 	_, _ = s.ArmWake("s1", base, 1000, true, "w_a")
 
-	armScore, err := client.ZScore(context.Background(), dueZKey, "s1").Result()
+	armScore, err := client.ZScore(context.Background(), dueZKey(slotOf("s1")), "s1").Result()
 	if err != nil {
 		t.Fatalf("zscore after arm: %v", err)
 	}
@@ -346,7 +353,7 @@ func TestDueSetExpireLeaseReOwes(t *testing.T) {
 	if n := dueCard(t, client); n != 1 {
 		t.Fatalf("EXPIRED branch must re-owe the due mark, got card %d", n)
 	}
-	reScore, _ := client.ZScore(context.Background(), dueZKey, "s1").Result()
+	reScore, _ := client.ZScore(context.Background(), dueZKey(slotOf("s1")), "s1").Result()
 	if reScore <= armScore {
 		t.Fatalf("re-owe must ZADD at the new now_ns: arm=%v re-owe=%v", armScore, reScore)
 	}
@@ -382,14 +389,14 @@ func TestDueSetClaimDueReScoresForward(t *testing.T) {
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 	_, _ = s.ArmWake("s1", now, 1000, true, "w_a")
 
-	due, err := s.ClaimDue(now.Add(time.Millisecond), 16, 30*time.Second)
+	due, err := s.ClaimDue(slotOf("s1"), now.Add(time.Millisecond), 16, 30*time.Second)
 	if err != nil || len(due) != 1 || due[0] != "s1" {
 		t.Fatalf("ClaimDue = %v err=%v, want [s1]", due, err)
 	}
 	if n := dueCard(t, client); n != 1 {
 		t.Fatalf("claimed mark must remain (re-scored, not removed), got card %d", n)
 	}
-	if again, _ := s.ClaimDue(now.Add(time.Millisecond), 16, 30*time.Second); len(again) != 0 {
+	if again, _ := s.ClaimDue(slotOf("s1"), now.Add(time.Millisecond), 16, 30*time.Second); len(again) != 0 {
 		t.Fatalf("re-scored mark must not be due again immediately, got %v", again)
 	}
 	// ClearDue removes it (the dueWorker's reconcile of a no-longer-owed mark).
@@ -486,16 +493,16 @@ func TestReconcileRepairsMissingFanoutIndex(t *testing.T) {
 
 	// Simulate the crash-dropped index: the canonical link survives, the fan-out
 	// SADD did not happen.
-	if err := client.SRem(ctx, streamSubsKey("events/a"), "s1").Err(); err != nil {
+	if err := client.SRem(ctx, streamSubsKey(slotOf("s1"), "events/a"), "s1").Err(); err != nil {
 		t.Fatal(err)
 	}
-	if subs, _ := s.StreamSubscribers("events/a"); len(subs) != 0 {
+	if subs, _, _ := s.StreamSubscribers("events/a"); len(subs) != 0 {
 		t.Fatalf("precondition: fan-out should be empty, got %v", subs)
 	}
 	if err := s.ReconcileIndexes(); err != nil {
 		t.Fatal(err)
 	}
-	if subs, _ := s.StreamSubscribers("events/a"); len(subs) != 1 || subs[0] != "s1" {
+	if subs, _, _ := s.StreamSubscribers("events/a"); len(subs) != 1 || subs[0] != "s1" {
 		t.Fatalf("repair should restore the fan-out entry from the canonical link, got %v", subs)
 	}
 }
@@ -509,10 +516,10 @@ func TestReconcileIndexDoesNotInventMembership(t *testing.T) {
 	if err := s.ReconcileIndexes(); err != nil {
 		t.Fatal(err)
 	}
-	if subs, _ := s.StreamSubscribers("events/unrelated"); len(subs) != 0 {
+	if subs, _, _ := s.StreamSubscribers("events/unrelated"); len(subs) != 0 {
 		t.Fatalf("repair must not invent membership for an unlinked stream, got %v", subs)
 	}
-	if subs, _ := s.StreamSubscribers("events/a"); len(subs) != 1 {
+	if subs, _, _ := s.StreamSubscribers("events/a"); len(subs) != 1 {
 		t.Fatalf("the linked stream should be indexed, got %v", subs)
 	}
 }

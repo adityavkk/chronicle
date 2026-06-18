@@ -89,7 +89,10 @@ func (s *RedisStore) CreateOrConfirm(id string, cfg Config, links []StreamLink, 
 	for _, l := range links {
 		args = append(args, l.Path, string(l.LinkType), l.AckedOffset)
 	}
-	reply, err := s.evalStrings(createSubScript, []string{subKey(id), subsKey, linksKey(id)}, args...)
+	// h once per id: the sub hash, its id-set, and its links share one {__ds:h}
+	// slot, so create_sub.lua stays single-slot.
+	h := slotOf(id)
+	reply, err := s.evalStrings(createSubScript, []string{subKey(id), subsKey(h), linksKey(id)}, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -159,14 +162,16 @@ func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 }
 
 // Delete removes the subscription and de-indexes its streams. Links are read
-// first so the fan-out entries can be cleaned up.
+// first so the fan-out entries can be cleaned up. h once per id keeps delete_sub.lua
+// (5 keys) single-slot.
 func (s *RedisStore) Delete(id string) error {
 	links, err := s.client.HKeys(s.ctx(), linksKey(id)).Result()
 	if err != nil {
 		return err
 	}
+	h := slotOf(id)
 	if _, err := s.evalStrings(deleteSubScript,
-		[]string{subKey(id), subsKey, linksKey(id), leaseZKey, retryZKey}, id); err != nil {
+		[]string{subKey(id), subsKey(h), linksKey(id), leaseZKey(h), retryZKey(h)}, id); err != nil {
 		return err
 	}
 	for _, path := range links {
@@ -177,9 +182,26 @@ func (s *RedisStore) Delete(id string) error {
 	return nil
 }
 
-// List returns all subscription ids.
+// List returns all subscription ids, UNIONed across the S per-slot id-sets (GAP4):
+// under slot-homing the ids no longer live in one global SET, so reading a single
+// key would silently see only slot 0. The S SMEMBERS are pipelined into one batch
+// (go-redis groups per cluster node, so ~max-node-RTT, not S serial). The sweep's
+// unguarded backstop relies on this seeing EVERY slot, owned or not (05:439).
 func (s *RedisStore) List() ([]string, error) {
-	return s.client.SMembers(s.ctx(), subsKey).Result()
+	ctx := s.ctx()
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.StringSliceCmd, subSlots)
+	for h := 0; h < subSlots; h++ {
+		cmds[h] = pipe.SMembers(ctx, subsKey(h))
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0)
+	for _, c := range cmds {
+		out = append(out, c.Val()...)
+	}
+	return out, nil
 }
 
 // Link links a stream and maintains the fan-out index.
@@ -206,9 +228,41 @@ func (s *RedisStore) Unlink(id, path string, stillGlob bool) error {
 	return nil
 }
 
-// StreamSubscribers returns the subscription ids linked to a stream.
-func (s *RedisStore) StreamSubscribers(path string) ([]string, error) {
-	return s.client.SMembers(s.ctx(), streamSubsKey(path)).Result()
+// StreamSubscribers returns the subscriber ids linked to a stream by
+// SCATTER-GATHERING across the per-slot fan-out shards (GAP4 / the gate-#2 fan-out):
+// it reads the per-stream occupied-slots bitmap once, then issues one SMEMBERS per
+// SET bit, pipelined into a single batch (go-redis groups per cluster node, so the
+// wall-clock is ~max-node-RTT, not S serial). The bitmap collapses sparse-wide-stream
+// cost from S to occupied-slots-per-stream (05:490-500). It also reports slotsProbed
+// — the number of slots actually probed — for the FanOut metric OnStreamAppend feeds
+// to gate #2. A subscriber homed in any slot is found; none from a foreign slot is
+// returned (T5: scatter-gather set ≡ the canonical subscriber set, no foreign wake).
+func (s *RedisStore) StreamSubscribers(path string) (ids []string, slotsProbed int, err error) {
+	ctx := s.ctx()
+	raw, gerr := s.client.Get(ctx, streamSlotsKey(path)).Result()
+	if gerr == redis.Nil {
+		return nil, 0, nil // no slot has a subscriber for this stream yet
+	}
+	if gerr != nil {
+		return nil, 0, gerr
+	}
+	occ := decodeOccupiedSlots(raw)
+	slots := occ.Slots()
+	if len(slots) == 0 {
+		return nil, 0, nil
+	}
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.StringSliceCmd, len(slots))
+	for i, h := range slots {
+		cmds[i] = pipe.SMembers(ctx, streamSubsKey(h, path))
+	}
+	if _, eerr := pipe.Exec(ctx); eerr != nil {
+		return nil, len(slots), eerr
+	}
+	for _, c := range cmds {
+		ids = append(ids, c.Val()...)
+	}
+	return ids, len(slots), nil
 }
 
 // ReconcileIndexes rebuilds the per-stream fan-out index from the canonical
@@ -220,7 +274,9 @@ func (s *RedisStore) StreamSubscribers(path string) ([]string, error) {
 // re-adding the missing entry is the correctness-critical part.
 func (s *RedisStore) ReconcileIndexes() error {
 	ctx := s.ctx()
-	ids, err := s.client.SMembers(ctx, subsKey).Result()
+	// UNION the canonical id set across the S per-slot id-sets (GAP4) — reading a
+	// single global SET would silently see only slot 0.
+	ids, err := s.List()
 	if err != nil {
 		return err
 	}
@@ -230,7 +286,10 @@ func (s *RedisStore) ReconcileIndexes() error {
 			return err
 		}
 		for _, path := range paths {
-			if err := s.client.SAdd(ctx, streamSubsKey(path), id).Err(); err != nil {
+			// Re-add the fan-out membership in the SUBSCRIBER's slot AND re-assert the
+			// occupied-slots bit (the bitmap is never cleared on deindex, so the
+			// reconcile loop is where a missing/torn bit is repaired — 05:496-500).
+			if err := s.indexStream(path, id); err != nil {
 				return err
 			}
 		}
@@ -238,12 +297,26 @@ func (s *RedisStore) ReconcileIndexes() error {
 	return nil
 }
 
+// indexStream adds a subscriber to a stream's per-slot fan-out shard and SETs the
+// stream's occupied-slots bit for that slot. The bit drives OnStreamAppend's
+// scatter-gather; setting it on every link keeps the bitmap a superset of the
+// occupied slots, so the bitmap-gated fan-out never misses a subscriber.
 func (s *RedisStore) indexStream(path, id string) error {
-	return s.client.SAdd(s.ctx(), streamSubsKey(path), id).Err()
+	ctx := s.ctx()
+	h := slotOf(id)
+	if err := s.client.SAdd(ctx, streamSubsKey(h, path), id).Err(); err != nil {
+		return err
+	}
+	return s.client.SetBit(ctx, streamSlotsKey(path), int64(h), 1).Err()
 }
 
+// deindexStream removes a subscriber from its slot's fan-out shard. It does NOT
+// clear the occupied-slots bit: a stale set bit only costs one empty SMEMBERS on a
+// later append (race-safe), and clearing it would race a concurrent re-link in the
+// same slot and drop a live subscriber from the bitmap (05:496-500). The reconcile
+// loop repairs the bitmap; it is never narrowed here.
 func (s *RedisStore) deindexStream(path, id string) error {
-	return s.client.SRem(s.ctx(), streamSubsKey(path), id).Err()
+	return s.client.SRem(s.ctx(), streamSubsKey(slotOf(id), path), id).Err()
 }
 
 // ArmWake issues a wake if idle. An optional OwnerScope makes arm_wake inline the
@@ -256,7 +329,8 @@ func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLeas
 		arm = "1"
 	}
 	sk, me, epoch := firstOwnerScope(owner)
-	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey, dueZKey, sk},
+	h := slotOf(id)
+	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey(h), dueZKey(h), sk},
 		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID, me, epoch)
 	if err != nil {
 		return ArmResult{}, err
@@ -290,7 +364,11 @@ func (s *RedisStore) Claim(id, worker, wakeID string, now time.Time, leaseTTLMs 
 // subscription config; the per-shard fence (KEYS[2]) is minted on first claim. g
 // == 0 is the bare per-type lease (== Claim), byte-for-byte today.
 func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
-	reply, err := s.evalStrings(claimScript, []string{subKey(id), subShardKey(id, g), leaseZKey},
+	// h from the BASE id (slotOf strips the g-suffix), so the config hash, the
+	// per-(id,g) shard hash, and the lease ZSET all share the sub's one slot —
+	// claim.lua stays single-slot for any g.
+	h := slotOf(id)
+	reply, err := s.evalStrings(claimScript, []string{subKey(id), subShardKey(id, g), leaseZKey(h)},
 		shardMember(id, g), worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID)
 	if err != nil {
 		return ClaimResult{}, err
@@ -366,7 +444,10 @@ func (s *RedisStore) AckShard(id string, g int, reqGeneration int64, reqWakeID s
 	// replica_id, expected_epoch are the trailing pair ack.lua reads via #ARGV
 	// (after the variable-length acks) for the owner-epoch fence (issue #14).
 	args = append(args, me, epoch)
-	reply, err := s.evalStrings(ackScript, []string{subShardKey(id, g), linksKey(id), leaseZKey, retryZKey, dueZKey, sk}, args...)
+	// h from the base id: the shard fence hash, the shared cursor hash, all three
+	// schedule ZSETs, and the due outbox share one slot — ack.lua stays single-slot.
+	h := slotOf(id)
+	reply, err := s.evalStrings(ackScript, []string{subShardKey(id, g), linksKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), sk}, args...)
 	if err != nil {
 		return "", err
 	}
@@ -380,7 +461,8 @@ func (s *RedisStore) AckShard(id string, g int, reqGeneration int64, reqWakeID s
 // and clears the due mark exactly like ack(done), so it joins the inline-check set).
 func (s *RedisStore) Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, owner ...OwnerScope) (string, error) {
 	sk, me, epoch := firstOwnerScope(owner)
-	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey, retryZKey, dueZKey, sk},
+	h := slotOf(id)
+	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), sk},
 		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10), me, epoch)
 	if err != nil {
 		return "", err
@@ -413,7 +495,8 @@ func contentionStatusOf(reply string) string {
 // FENCED atomically with the ZREM/ZADD — the new owner alone drives the schedule.
 func (s *RedisStore) ExpireLease(id string, now time.Time, owner ...OwnerScope) (string, error) {
 	sk, me, epoch := firstOwnerScope(owner)
-	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(id), leaseZKey, dueZKey, sk}, id, nsArg(now), me, epoch)
+	h := slotOf(id)
+	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(id), leaseZKey(h), dueZKey(h), sk}, id, nsArg(now), me, epoch)
 	if err != nil {
 		return "", err
 	}
@@ -421,11 +504,27 @@ func (s *RedisStore) ExpireLease(id string, now time.Time, owner ...OwnerScope) 
 	return reply[0], nil
 }
 
-// LeasedIDs returns the members of the lease schedule ZSET (the failover-aware
-// reconcile's view of what the lease worker can see). It is a single-key ZRANGE
-// over the in-flight set, which is O(in-flight), not O(subscriptions).
+// LeasedIDs returns the members of the lease schedule ZSETs (the failover-aware
+// reconcile's view of what the lease worker can see), UNIONed across the S per-slot
+// lease ZSETs (GAP4): under slot-homing the in-flight set is sharded, so reading one
+// global ZSET would see only slot 0 and wrongly flag every other slot's live sub as
+// stranded. Pipelined into one batch; O(in-flight) across all slots, not
+// O(subscriptions). The sweep's reconcileLeases diffs the durable sub set against it.
 func (s *RedisStore) LeasedIDs() ([]string, error) {
-	return s.client.ZRange(s.ctx(), leaseZKey, 0, -1).Result()
+	ctx := s.ctx()
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.StringSliceCmd, subSlots)
+	for h := 0; h < subSlots; h++ {
+		cmds[h] = pipe.ZRange(ctx, leaseZKey(h), 0, -1)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0)
+	for _, c := range cmds {
+		out = append(out, c.Val()...)
+	}
+	return out, nil
 }
 
 // RestoreLease runs restore_lease.lua to re-derive a stranded subscription's
@@ -437,23 +536,27 @@ func (s *RedisStore) RestoreLease(id string, owed bool, now time.Time) (string, 
 	if owed {
 		owedArg = "1"
 	}
-	reply, err := s.evalStrings(restoreLeaseScript, []string{subKey(id), leaseZKey, dueZKey}, id, nsArg(now), owedArg)
+	h := slotOf(id)
+	reply, err := s.evalStrings(restoreLeaseScript, []string{subKey(id), leaseZKey(h), dueZKey(h)}, id, nsArg(now), owedArg)
 	if err != nil {
 		return "", err
 	}
 	return reply[0], nil
 }
 
-// DueLeases takes due lease-schedule members by re-scoring them forward, so a
-// dropped worker's subscription recurs (docs/research/07 §6.1).
-func (s *RedisStore) DueLeases(now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	return s.due(leaseZKey, now, limit, visibility)
+// DueLeases takes due lease-schedule members from SLOT h by re-scoring them forward,
+// so a dropped worker's subscription recurs (docs/research/07 §6.1). The lease worker
+// iterates its owned slots and drains each — under slot-homing the schedule shards
+// with the subs, so h selects the per-slot ZSET (claim_due.lua runs unchanged, 1 key,
+// once per slot — 05:152-157).
+func (s *RedisStore) DueLeases(h int, now time.Time, limit int, visibility time.Duration) ([]string, error) {
+	return s.due(leaseZKey(h), now, limit, visibility)
 }
 
-// DueRetries takes due retry-schedule members by re-scoring them forward, the
-// same re-score-never-ZREM machinery as DueLeases (docs/research/07 §6.1).
-func (s *RedisStore) DueRetries(now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	return s.due(retryZKey, now, limit, visibility)
+// DueRetries takes due retry-schedule members from SLOT h by re-scoring them forward,
+// the same re-score-never-ZREM machinery as DueLeases (docs/research/07 §6.1).
+func (s *RedisStore) DueRetries(h int, now time.Time, limit int, visibility time.Duration) ([]string, error) {
+	return s.due(retryZKey(h), now, limit, visibility)
 }
 
 func (s *RedisStore) due(zkey string, now time.Time, limit int, visibility time.Duration) ([]string, error) {
@@ -467,8 +570,8 @@ func (s *RedisStore) due(zkey string, now time.Time, limit int, visibility time.
 // construction. The dueWorker drains it in O(owed) and reconciles each id via
 // DecideDue; a mark only leaves the set on a done-ack/release ZREM or a dueWorker
 // ClearDue, never here.
-func (s *RedisStore) ClaimDue(now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	return s.due(dueZKey, now, limit, visibility)
+func (s *RedisStore) ClaimDue(h int, now time.Time, limit int, visibility time.Duration) ([]string, error) {
+	return s.due(dueZKey(h), now, limit, visibility)
 }
 
 // ClearDue removes a subscription's due-set wake mark. It is a single-key ZREM
@@ -477,14 +580,15 @@ func (s *RedisStore) ClaimDue(now time.Time, limit int, visibility time.Duration
 // Without it a caught-up mark would churn forever, since claim_due re-scores and
 // never removes and expire_lease re-owes unconditionally.
 func (s *RedisStore) ClearDue(id string) error {
-	return s.client.ZRem(s.ctx(), dueZKey, id).Err()
+	return s.client.ZRem(s.ctx(), dueZKey(slotOf(id)), id).Err()
 }
 
 // ScheduleRetry records a webhook failure and persists next_attempt; returns the
 // new retry count.
 func (s *RedisStore) ScheduleRetry(id string, now, nextAttempt time.Time, owner ...OwnerScope) (int, error) {
 	sk, me, epoch := firstOwnerScope(owner)
-	reply, err := s.evalStrings(scheduleRetryScript, []string{subKey(id), retryZKey, sk},
+	h := slotOf(id)
+	reply, err := s.evalStrings(scheduleRetryScript, []string{subKey(id), retryZKey(h), sk},
 		id, nsArg(now), nsArg(nextAttempt), me, epoch)
 	if err != nil {
 		return 0, err
@@ -501,7 +605,7 @@ func (s *RedisStore) ScheduleRetry(id string, now, nextAttempt time.Time, owner 
 
 // RecordSuccess clears webhook failure bookkeeping after an accepted delivery.
 func (s *RedisStore) RecordSuccess(id string) error {
-	_, err := s.evalStrings(recordSuccessScript, []string{subKey(id), retryZKey}, id)
+	_, err := s.evalStrings(recordSuccessScript, []string{subKey(id), retryZKey(slotOf(id))}, id)
 	return err
 }
 
