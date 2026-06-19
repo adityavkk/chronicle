@@ -33,8 +33,8 @@ sut:
   sweep_interval: 30s # the coarse recovery FLOOR (#13); the eager reconcile, not this, closes the gap
   sweep_batch: 0
   redis_url: "" # fill from `terraform output redis_url`, or production's managed Redis 8
-  cpu: "2"
-  memory: 2Gi
+  cpu: "1"
+  memory: 1Gi
 
 workload:
   subscriptions: 10000 # K

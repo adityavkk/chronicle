@@ -45,8 +45,8 @@ sut:
   sweep_interval: 30s # the coarse floor; the append→wake fan-out (not the sweep) is what this gate stresses
   sweep_batch: 0
   redis_url: "" # a REAL MULTI-NODE Redis Cluster (not single-node) — loopback erases the max-node-RTT
-  cpu: "2"
-  memory: 2Gi
+  cpu: "1"
+  memory: 1Gi
 
 workload:
   # The fan-out condition: MANY subscribers per stream, spread by fnv32a across the S

@@ -36,8 +36,8 @@ sut:
   sweep_interval: 30s # the coarse recovery FLOOR (#13); the eager reconcile, not this, closes the gap
   sweep_batch: 0
   redis_url: "" # fill from the Memorystore STANDARD_HA `terraform output redis_url`
-  cpu: "2"
-  memory: 2Gi
+  cpu: "1"
+  memory: 1Gi
   # Tier B (issue #16): WAITAOF 1 1 on the fence-minting writes. numreplicas=1 is the
   # realistic Redis Software HA ceiling (06:70) and needs the STANDARD_HA replica; a
   # short reply is surfaced as an error, never swallowed, never read as exclusivity.

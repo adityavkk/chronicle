@@ -11,6 +11,11 @@ metadata:
   namespace: {{.SUT.Namespace}}
 spec:
   replicas: {{.SUT.Replicas}}
+  # Recreate (not the default RollingUpdate): on a tight node pool each replica
+  # fills a node, so a rolling surge pod (maxSurge>0) has nowhere to schedule and
+  # the re-deploy for the next gate stalls. Recreate terminates old pods first.
+  strategy:
+    type: Recreate
   selector:
     matchLabels: { app: chronicle }
   template:
