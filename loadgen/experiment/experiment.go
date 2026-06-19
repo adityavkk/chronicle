@@ -46,6 +46,14 @@ type SUT struct {
 	RedisURL string `yaml:"redis_url"`
 	CPU      string `yaml:"cpu"`
 	Memory   string `yaml:"memory"`
+	// Consistency / WaitReplicas / WaitTimeoutMs are the tunable-consistency tier
+	// (issue #16) injected as CHRONICLE_CONSISTENCY_TIER / _WAIT_REPLICAS /
+	// _WAIT_TIMEOUT_MS. Empty Consistency renders "" => chronicle defaults to Tier A
+	// (no WAIT) — so existing specs are unchanged. The STANDARD_HA load spec sets
+	// "B" + 1 replica to exercise the WAITAOF durability barrier under load.
+	Consistency   string `yaml:"consistency"`
+	WaitReplicas  int    `yaml:"wait_replicas"`
+	WaitTimeoutMs int    `yaml:"wait_timeout_ms"`
 }
 
 // SLO is the pass/fail gate the run asserts (enforced by sweepscale's exit code).

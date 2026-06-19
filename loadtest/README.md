@@ -15,8 +15,10 @@ renders to the Kubernetes manifests and Terraform vars for one reproducible run.
 | --- | --- |
 | `terraform/` | GKE cluster + managed Redis 8 (Memorystore) + three isolated node pools (`sut`, `loadgen`, `obs`). Ephemeral: apply → run → destroy. |
 | `spec/` | The declarative experiment specs. |
-| `../loadgen/cmd/render` | `spec.yaml` → `sut.yaml` + `job.yaml` + `terraform.auto.tfvars`. |
+| `../loadgen/cmd/render` | `spec.yaml` → `sut.yaml` + `job.yaml` + `terraform.auto.tfvars`. `-replicas N` overrides `sut.replicas` for the gate-#1 ramp. |
 | `../loadgen/cmd/sweepscale` | Seeds K subscriptions, scrapes `chronicle_sweep_*`, reports per-tick mean/p50/p99. SLO-gated (non-zero exit on breach). |
+| `../loadgen/cmd/rediscpu` | Reads managed-Redis (Memorystore) CPU from Cloud Monitoring — the gate-#1 signal (`../loadgen/redismon`). |
+| `../loadgen/chaos` | The pod-kill nemesis command builder (`make chaos`). |
 | `../loadgen/Dockerfile` | The load-generator image (sweepscale + dsload). |
 | `../metrics` | The SUT's `/metrics` + `/healthz` + `/readyz` (enabled with `-metrics-listen`). |
 
@@ -79,11 +81,15 @@ The Terraform under `terraform/` is the equivalent IaC for those who prefer it
 - **Sweep-scale curve** — re-render with rising `workload.subscriptions`
   (1k → 10k → 100k) and plot the reported `sweep_p99_ms`. The cliff is where it
   approaches `sweep_interval`.
-- **Per-replica redundancy (`O(N·K)`)** — raise `sut.replicas` and watch the
-  managed-Redis CPU (Memorystore metrics): every replica sweeps all K, so the
-  control-plane slot's load grows ~N×. The chronicle sweep histogram stays
-  per-replica, so read it at `replicas: 1` for a crisp tick; use Redis metrics
-  for the redundancy effect.
+- **Per-replica redundancy (`O(N·K)`) — gate #1** — `make up && make gate1` ramps
+  `sut.replicas` 1→4 at a fixed K=10k and reads Memorystore CPU at each N with the
+  `rediscpu` reader, writing a CPU-vs-N table to `gate1-results.tsv`. Every replica
+  sweeps all K, so the control-plane slot's Redis load grows ~N×. The chronicle
+  sweep histogram stays per-replica (read it at `replicas: 1` for a crisp tick); use
+  the Redis CPU for the redundancy effect. The exact command + reading guide is in
+  [`RESULTS-gke.md`](RESULTS-gke.md) "Gate #1".
+- **Chaos / pod-kill** — `make chaos` force-deletes the SUT pods mid-run (the rig
+  nemesis), to observe the membership churn window once leased ownership lands (#14).
 - **Cap relief** — set `sut.sweep_batch` > 0 to bound per-tick cost on a large
   keyspace (trades recovery latency).
 

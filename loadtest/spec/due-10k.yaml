@@ -1,0 +1,49 @@
+# Gate #3 (the due-set write amplification) — the K=10k sweep-scale experiment,
+# re-pointed at the webhook dispatch path so every wake the control plane issues
+# flows arm_wake -> deliver -> ack(done), exercising the Move-2 due-set ZADD/ZREM
+# the outbox adds to the hot path (issue #12, doc-05 honest cost O3, 05:104-107).
+#
+# This is the SAME rig as sweep-10k.yaml (the K=10k sweep p99 stays the standing
+# regression floor — RESULTS-gke.md: 509 ms, SLO PASS); the only change is
+# dispatch=webhook so the run drives the due path rather than a pure pull-wake
+# sweep. Gate #3 SIZES the step — it informs, it does not block the merge
+# (doc-05 05:631).
+#
+# What to read (the gate-#3 number): scrape the SUT's /metrics over the measure
+# window and report the rate of
+#   chronicle_due_set_mutations_total{op="arm"|"ack"|"expire"|"release"}
+# (the added ZADD/ZREM QPS on the hot path) alongside
+#   chronicle_due_worker_tick_seconds / chronicle_due_worker_fired
+# (the drain must track O(owed), not O(K)). The K=10k sweep p99 SLO below must
+# still hold — the due-set must not regress the sweep baseline.
+#
+# Run it (the orchestrator owns the cloud; do NOT run GKE from the worktree):
+#   cd loadtest && make run SPEC=spec/due-10k.yaml
+# NOTE: the pure sweep-scale runner seeds K subs and samples metrics; driving a
+# sustained append/ack storm to amplify the due ZADD/ZREM at high QPS is a rig
+# workload knob the orchestrator owns (loadgen). This spec is the starting point
+# + the metric-reading guide for that gate-#3 run.
+name: due-10k
+
+loadgen_image: REGISTRY/chronicle-loadgen:TAG
+
+sut:
+  image: REGISTRY/chronicle:TAG
+  replicas: 1 # 1 = crisp per-tick histograms; the due-worker is per-replica O(owed)
+  sweep_interval: 2s
+  sweep_batch: 0 # 0 = no per-tick cap
+  redis_url: "" # fill from `terraform output redis_url`, or production's managed Redis 8
+  cpu: "2"
+  memory: 2Gi
+
+workload:
+  subscriptions: 10000 # K — held at the sweep baseline
+  links_per_sub: 5 # P — distinct tails read per subscription per tick
+  dispatch: webhook # exercise arm -> deliver -> ack(done): the due ZADD then ZREM
+  webhook_url: "" # fill with the loadgen receiver URL (dispatch=webhook requires it)
+  warmup: 30s
+  measure: 120s
+
+slo:
+  sweep_p99_ms: 1500 # the K=10k sweep baseline must still beat the 2s interval
+  max_seed_errors: 0

@@ -15,6 +15,16 @@ func TestMuxEndpoints(t *testing.T) {
 	p.WakeDelivery(2*time.Millisecond, "ok")
 	p.WakeEvent(time.Millisecond, "ok")
 	p.WorkerTick("lease", 7)
+	// Horizontal-scale golden signals (GAP2): exercise each appended method so its
+	// series appears in the exposition (a CounterVec emits nothing until a label
+	// value is observed).
+	p.FanOut(3*time.Millisecond, 4, 12)
+	p.DueSetMutation("arm")
+	p.DueWorkerTick(time.Millisecond, 2)
+	p.SlotOwnership("claimed", 7)
+	p.CoverageGap(8 * time.Millisecond)
+	p.OwnerFenced("check_owner")
+	p.ClaimContention("already_claimed", "agent-handler")
 	mux := p.Mux(func() error { return nil })
 
 	get := func(path string) *httptest.ResponseRecorder {
@@ -38,6 +48,16 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_sweep_wakes_total",
 		"chronicle_wake_delivery_seconds",
 		"chronicle_worker_due_items",
+		"chronicle_fanout_seconds",
+		"chronicle_fanout_slots_probed",
+		"chronicle_fanout_subs",
+		"chronicle_due_set_mutations_total",
+		"chronicle_due_worker_tick_seconds",
+		"chronicle_due_worker_fired",
+		"chronicle_slot_ownership_events_total",
+		"chronicle_coverage_gap_seconds",
+		"chronicle_owner_fenced_total",
+		"chronicle_claim_contention_total",
 	} {
 		if !strings.Contains(body, name) {
 			t.Errorf("/metrics output missing %q", name)

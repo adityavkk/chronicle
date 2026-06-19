@@ -39,10 +39,16 @@ var (
 	ackScript            = loadScript("ack.lua")
 	releaseScript        = loadScript("release.lua")
 	expireLeaseScript    = loadScript("expire_lease.lua")
+	restoreLeaseScript   = loadScript("restore_lease.lua")
 	claimDueScript       = loadScript("claim_due.lua")
 	scheduleRetryScript  = loadScript("schedule_retry.lua")
 	recordSuccessScript  = loadScript("record_success.lua")
 	recordWakeSentScript = loadScript("record_wake_sent.lua")
 	deleteSubScript      = loadScript("delete_sub.lua")
 	getOrCreateKeyScript = loadScript("get_or_create_key.lua")
+	// Work-sharded leased slot ownership (issue #14): the {ownership}-tagged CAS
+	// and its owner-epoch fence. Orthogonal to the per-(subId,g) claim granularity
+	// above (#11) — slot ownership shards which replica runs background work.
+	claimShardScript = loadScript("claim_shard.lua")
+	checkOwnerScript = loadScript("check_owner.lua")
 )

@@ -41,8 +41,12 @@ type Store interface {
 	// link (cursor preserved), else removed and de-indexed.
 	Unlink(id, path string, stillGlob bool) error
 
-	// StreamSubscribers returns the subscription ids linked to a stream.
-	StreamSubscribers(path string) ([]string, error)
+	// StreamSubscribers returns the subscriber ids linked to a stream by
+	// scatter-gathering across the per-slot fan-out shards named in the stream's
+	// occupied-slots bitmap, and reports slotsProbed — how many slots it probed —
+	// for the FanOut gate-#2 metric (#15). The bitmap collapses the probe set from S
+	// to occupied-slots-per-stream.
+	StreamSubscribers(path string) (ids []string, slotsProbed int, err error)
 
 	// ReconcileIndexes rebuilds the per-stream fan-out index from the canonical
 	// links, re-adding any membership a crash dropped between the link write and
@@ -51,30 +55,61 @@ type Store interface {
 
 	// ArmWake issues a new wake generation if the subscription is idle; armLease
 	// arms the lease at issue (webhook) versus deferring it to claim (pull-wake).
-	ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error)
+	// An optional OwnerScope makes arm_wake inline the owner-epoch fence (#14).
+	ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, owner ...OwnerScope) (ArmResult, error)
 
 	// Claim is the pull-wake compare-and-set claim (PROTOCOL §7.2).
 	Claim(id, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error)
 
 	// Ack fences then applies acks forward-only; done releases the lease, else it
-	// extends the lease as a heartbeat (PROTOCOL §7.1, §7.2).
-	Ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error)
+	// extends the lease as a heartbeat (PROTOCOL §7.1, §7.2). An optional OwnerScope
+	// makes ack inline the owner-epoch fence (#14).
+	Ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, owner ...OwnerScope) (string, error)
 
-	// Release fences then releases the lease without acking (PROTOCOL §7.2).
-	Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error)
+	// Release fences then releases the lease without acking (PROTOCOL §7.2). An
+	// optional OwnerScope makes release inline the owner-epoch fence (GAP3, #14).
+	Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, owner ...OwnerScope) (string, error)
 
-	// ExpireLease clears an expired lease, returning the subscription to idle.
-	ExpireLease(id string, now time.Time) (string, error)
+	// ExpireLease clears an expired lease, returning the subscription to idle. An
+	// optional OwnerScope makes expire_lease inline the owner-epoch fence (#14).
+	ExpireLease(id string, now time.Time, owner ...OwnerScope) (string, error)
 
-	// DueLeases / DueRetries take due schedule members by re-scoring them forward
-	// to a visibility window (never removing them), so a crashed worker's item
-	// recurs (docs/research/07 §6.1).
-	DueLeases(now time.Time, limit int, visibility time.Duration) ([]string, error)
-	DueRetries(now time.Time, limit int, visibility time.Duration) ([]string, error)
+	// LeasedIDs returns the members currently in the lease schedule ZSET — the set
+	// the lease worker can see. The failover-aware eager reconcile diffs the durable
+	// subscription set against this to find a live/waking sub whose lease tail a
+	// failover dropped (absent here, but live/waking in its hash).
+	LeasedIDs() ([]string, error)
+
+	// RestoreLease re-derives a stranded subscription's dropped schedule entries
+	// from its durable sub hash (issue #13): it re-ZADDs the lease entry at the
+	// hash's lease_until_ns while the sub is still live/waking, and re-owes the due
+	// mark when owed (pending work, which the caller computes — the single-slot
+	// script cannot read a stream tail). Conditioned on the live/waking phase so a
+	// sub a concurrent release/ack idled is left untouched (no stale schedule entry
+	// leaked back for claim_due to churn). Returns RESTORED, INTACT, or NOSUB.
+	RestoreLease(id string, owed bool, now time.Time) (string, error)
+
+	// DueLeases / DueRetries take due schedule members from SLOT h by re-scoring them
+	// forward to a visibility window (never removing them), so a crashed worker's item
+	// recurs (docs/research/07 §6.1). Under slot-homing the schedule shards with the
+	// subs, so the worker iterates its owned slots and drains each per-slot ZSET (#15).
+	DueLeases(h int, now time.Time, limit int, visibility time.Duration) ([]string, error)
+	DueRetries(h int, now time.Time, limit int, visibility time.Duration) ([]string, error)
+
+	// ClaimDue takes due members of slot h's "needs a wake" due-set outbox, re-scoring
+	// them forward like DueLeases/DueRetries (Move 2). The dueWorker drains each owned
+	// slot's outbox in O(owed) instead of re-evaluating every subscription.
+	ClaimDue(h int, now time.Time, limit int, visibility time.Duration) ([]string, error)
+
+	// ClearDue removes a subscription's due-set mark when it is no longer owed (the
+	// dueWorker's reconcile). claim_due never removes, so this is how a caught-up or
+	// deleted subscription leaves the due-set and its cardinality returns to ~0.
+	ClearDue(id string) error
 
 	// ScheduleRetry records a webhook failure and persists next_attempt; returns
-	// the new retry count.
-	ScheduleRetry(id string, now, nextAttempt time.Time) (int, error)
+	// the new retry count. An optional OwnerScope makes schedule_retry inline the
+	// owner-epoch fence (#14); a FENCED (deposed) caller schedules nothing (count 0).
+	ScheduleRetry(id string, now, nextAttempt time.Time, owner ...OwnerScope) (int, error)
 
 	// RecordSuccess clears webhook failure bookkeeping after an accepted delivery.
 	RecordSuccess(id string) error
@@ -83,6 +118,36 @@ type Store interface {
 	// appended to the wake stream, fenced on (generation, wakeID). A no-op when
 	// the wake has been superseded.
 	RecordWakeEventSent(id string, generation int64, wakeID string, now time.Time) error
+
+	// ---- leased slot ownership (issue #14) ----
+	//
+	// These shard autonomous BACKGROUND work across replicas by a leased slot, so
+	// total work is O(total owed) regardless of N. The owner-epoch fence they
+	// implement is layered ABOVE the per-subscription (gen,wake_id) fence, never
+	// replacing it. This axis is orthogonal to #11's per-(subId,g) claim
+	// granularity.
+
+	// ClaimSlot runs the {ownership}-tagged CAS (claim_shard.lua) against the slot
+	// HASH at slotKey: it grants the lease only when the current owner is expired,
+	// missing, or the caller, bumping owner_epoch on transfer only. The returned
+	// SlotClaim is a sealed sum (CLAIMED|RENEWED|BUSY), never a bool, so a
+	// silently-dropping LWW is unrepresentable (T3's contract).
+	ClaimSlot(slotKey, replicaID string, now time.Time, slotLeaseTTL time.Duration) (SlotClaim, error)
+
+	// CheckOwner runs check_owner.lua: the owner-epoch fence for the EXTERNAL
+	// webhook POST, where an atomic inline check is impossible. Returns the sealed
+	// OwnerCheck (OWNER|FENCED|UNOWNED). Schedule/due writes inline the same check
+	// rather than calling this (the TOCTOU resolution).
+	CheckOwner(slotKey, replicaID, expectedEpoch string) (OwnerCheck, error)
+
+	// Heartbeat re-ZADDs this replica into the members ZSET at now+memberLeaseTTL
+	// and evicts members whose lease has expired (ZREMRANGEBYSCORE -inf (now).
+	// Idempotent under single-threaded Redis; every replica runs it.
+	Heartbeat(replicaID string, now time.Time, memberLeaseTTL time.Duration) error
+
+	// LiveMembers returns the replica ids whose membership lease has not expired
+	// (ZRANGEBYSCORE members (now +inf) — the live set HRW assigns slots over.
+	LiveMembers(now time.Time) ([]string, error)
 
 	// LoadSigningKey adopts or installs the persisted active webhook signing key.
 	LoadSigningKey(now time.Time) (SigningKey, error)
@@ -109,6 +174,7 @@ type ArmResult struct {
 	Armed      bool // a new wake was issued
 	Busy       bool // a wake was already in flight or a lease was held
 	NoSub      bool // the subscription no longer exists
+	Fenced     bool // an owner-scoped caller was deposed (the inlined owner-epoch fence, #14)
 	Generation int64
 	WakeID     string
 }

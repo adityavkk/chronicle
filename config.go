@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
 // Environment variables recognized by Config.LoadEnv. Precedence in
@@ -21,6 +23,10 @@ const (
 	EnvReconcileInterval    = "CHRONICLE_RECONCILE_INTERVAL"
 	EnvSweepBatch           = "CHRONICLE_SWEEP_BATCH"
 	EnvMetricsListen        = "CHRONICLE_METRICS_LISTEN"
+	// Tunable-consistency surface (issue #16, doc 05 "Tunable consistency").
+	EnvConsistencyTier = "CHRONICLE_CONSISTENCY_TIER" // A (default) | B | C
+	EnvWaitReplicas    = "CHRONICLE_WAIT_REPLICAS"    // Tier B WAITAOF numreplicas (1 on STANDARD_HA, 0 on a single Redis)
+	EnvWaitTimeoutMs   = "CHRONICLE_WAIT_TIMEOUT_MS"  // Tier B WAIT/WAITAOF server-side block bound
 )
 
 // Config holds the chronicle server configuration. LongPollTimeout and
@@ -65,10 +71,13 @@ type Config struct {
 	// default; enable only on a trusted network.
 	WebhookAllowPrivate bool
 
-	// SweepInterval is how often the recovery sweep re-evaluates every
-	// subscription against its durable cursor (default 2s). The sweep is the
-	// backstop for a wake lost to a crash; lengthen it to trade recovery latency
-	// for less steady-state Redis load on a large subscription keyspace.
+	// SweepInterval is the coarse recovery FLOOR — how often the full cursor
+	// reconcile runs on a timer with no triggering event (issue #13; default 30s).
+	// It is NOT the old 2s fast sweep: the latency-sensitive recovery cases are now
+	// event-triggered (boot, a Redis reconnect, an append/delivery error and, from
+	// #14, an owner-epoch bump each fire a reconcile at the moment they happen), so
+	// the timer only bounds the one eventless case (an owed mark on an unowned,
+	// quiet slot). Steady-state delivery latency is unchanged by the longer floor.
 	SweepInterval time.Duration
 
 	// ReconcileInterval is how often the slow reconcile loop runs (missed glob
@@ -85,6 +94,23 @@ type Config struct {
 	// /healthz, /readyz). Empty (the default) disables it; a load-test or
 	// production deployment sets e.g. ":9090".
 	MetricsListen string
+
+	// Consistency is the tunable-consistency tier for the fence-minting writes
+	// (issue #16, doc 05). Parsed into the sealed webhook.ConsistencyTier at the env
+	// boundary (parse, don't validate). TierA (no WAIT, the default) keeps today's
+	// best-latency behavior; TierB adds the WAITAOF durability barrier; TierC is the
+	// read-your-writes config surface (freshness token designed + stubbed). Only
+	// Tier B touches the hot path.
+	Consistency webhook.ConsistencyTier
+
+	// WaitReplicas is the Tier B WAITAOF replica requirement (1 on the STANDARD_HA
+	// substrate — the Redis Software HA per-shard ceiling; 0 on a single Redis with
+	// AOF — local fsync only). Ignored by Tier A/C.
+	WaitReplicas int
+
+	// WaitTimeoutMs bounds the Tier B WAIT/WAITAOF server-side block; on timeout the
+	// achieved-ack count is checked and a short reply is surfaced as an error.
+	WaitTimeoutMs int
 }
 
 // DefaultConfig returns the defaults: port 4437 (the IANA-assigned Durable
@@ -100,8 +126,11 @@ func DefaultConfig() Config {
 		SSEReconnectInterval: 60 * time.Second,
 		PublicBaseURL:        "http://localhost:4437",
 		Subscriptions:        true,
-		SweepInterval:        2 * time.Second,
+		SweepInterval:        30 * time.Second, // coarse recovery floor (issue #13); recovery is event-triggered, not a 2s sweep
 		ReconcileInterval:    30 * time.Second,
+		Consistency:          webhook.TierA, // no WAIT by default — best latency, at-least-once
+		WaitReplicas:         1,             // the realistic Redis Software HA ceiling (06:70), used only by Tier B
+		WaitTimeoutMs:        1000,
 	}
 }
 
@@ -163,6 +192,27 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvMetricsListen); ok {
 		c.MetricsListen = v
+	}
+	if v, ok := lookup(EnvConsistencyTier); ok {
+		tier, err := webhook.ParseConsistencyTier(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvConsistencyTier, err)
+		}
+		c.Consistency = tier
+	}
+	if v, ok := lookup(EnvWaitReplicas); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvWaitReplicas, err)
+		}
+		c.WaitReplicas = n
+	}
+	if v, ok := lookup(EnvWaitTimeoutMs); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvWaitTimeoutMs, err)
+		}
+		c.WaitTimeoutMs = n
 	}
 	return nil
 }
