@@ -11,6 +11,8 @@ metadata:
   namespace: {{.SUT.Namespace}}
 spec:
   replicas: {{.SUT.Replicas}}
+  strategy:
+    type: Recreate
   selector:
     matchLabels: { app: chronicle }
   template:

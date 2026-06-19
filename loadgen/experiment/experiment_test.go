@@ -19,6 +19,10 @@ workload:
   subscriptions: 10000
   links_per_sub: 5
   dispatch: pull-wake
+  shared_stream: loadtest/fanout/hot
+  occupied_slots: 8
+  fanout_appends: 20
+  fanout_interval: 100ms
   warmup: 30s
   measure: 120s
 slo:
@@ -41,7 +45,7 @@ slo:
 			t.Errorf("sut manifest missing %q", want)
 		}
 	}
-	for _, want := range []string{"kind: Job", "image: example/loadgen:dev", "-subscriptions=10000", "-slo-p99-ms=1500", "-warmup=30s"} {
+	for _, want := range []string{"kind: Job", "image: example/loadgen:dev", "-subscriptions=10000", "-shared-stream=loadtest/fanout/hot", "-occupied-slots=8", "-fanout-appends=20", "-fanout-interval=100ms", "-slo-p99-ms=1500", "-warmup=30s"} {
 		if !strings.Contains(r.JobManifest, want) {
 			t.Errorf("job manifest missing %q", want)
 		}

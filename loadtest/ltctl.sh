@@ -15,6 +15,26 @@
 # LT_REDIS_TIER=standard LT_REDIS_VERSION=redis_7_2 LT_CHAOS=none
 set -euo pipefail
 
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --project)
+      if [ "$#" -lt 2 ]; then
+        echo "usage: ltctl.sh --project <project> {up|run|down|all}" >&2
+        exit 2
+      fi
+      LT_PROJECT="$2"
+      shift 2
+      ;;
+    --project=*)
+      LT_PROJECT="${1#--project=}"
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
 : "${LT_PROJECT:=$(gcloud config get-value project 2>/dev/null)}"
 : "${LT_ZONE:=us-central1-a}"
 : "${LT_REGION:=us-central1}"
@@ -33,6 +53,9 @@ NS=chronicle-loadtest-codex
 REG="${LT_REGION}-docker.pkg.dev/${LT_PROJECT}/${LT_AR_REPO}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${LT_REPORT_DIR:=$REPO_ROOT/loadtest/out/reports}"
+: "${LT_KUBECONFIG:=$REPO_ROOT/loadtest/out/kubeconfig-${LT_CLUSTER}}"
+mkdir -p "$(dirname "$LT_KUBECONFIG")"
+export KUBECONFIG="$LT_KUBECONFIG"
 G=(gcloud --project "$LT_PROJECT" --quiet)
 
 log() { printf '\n\033[1;36m▸ %s\033[0m\n' "$*" >&2; }
@@ -95,8 +118,7 @@ cmd_run() {
 	start_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	kubectl apply -f "$out/job.yaml"
 	start_chaos
-	kubectl -n "$NS" wait --for=condition=complete --timeout=600s job -l app=sweepscale 2>/dev/null ||
-	kubectl -n "$NS" wait --for=condition=failed --timeout=5s job -l app=sweepscale 2>/dev/null || true
+	wait_sweepscale_job || true
 	stop_chaos
 	end_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -109,6 +131,23 @@ cmd_run() {
   else
     log "SLO FAIL (sweep p99 over budget, or error)"; return 1
 	fi
+}
+
+wait_sweepscale_job() {
+	local deadline succeeded failed
+	deadline=$((SECONDS + 600))
+	while [ "$SECONDS" -lt "$deadline" ]; do
+		succeeded="$(kubectl -n "$NS" get job -l app=sweepscale -o jsonpath='{.items[0].status.succeeded}' 2>/dev/null || true)"
+		failed="$(kubectl -n "$NS" get job -l app=sweepscale -o jsonpath='{.items[0].status.failed}' 2>/dev/null || true)"
+		if [ "$succeeded" = "1" ]; then
+			return 0
+		fi
+		if [ -n "$failed" ] && [ "$failed" != "0" ]; then
+			return 0
+		fi
+		sleep 2
+	done
+	return 1
 }
 
 CHAOS_PID=""

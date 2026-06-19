@@ -9,6 +9,7 @@ kind: Job
 metadata:
   name: sweepscale-{{.Name}}
   namespace: {{.SUT.Namespace}}
+  labels: { app: sweepscale }
 spec:
   backoffLimit: 0
   template:
@@ -27,6 +28,12 @@ spec:
             - "-subscriptions={{.Workload.Subscriptions}}"
             - "-links-per-sub={{.Workload.LinksPerSub}}"
             - "-dispatch={{.Workload.Dispatch}}"
+            {{- if .Workload.SharedStream }}
+            - "-shared-stream={{.Workload.SharedStream}}"
+            - "-occupied-slots={{.Workload.OccupiedSlots}}"
+            - "-fanout-appends={{.Workload.FanOutAppends}}"
+            - "-fanout-interval={{.Workload.FanOutInterval}}"
+            {{- end }}
             {{- if .Workload.WebhookURL }}
             - "-webhook-url={{.Workload.WebhookURL}}"
             {{- end }}

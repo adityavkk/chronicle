@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestSpecPrepared(t *testing.T) {
@@ -24,6 +25,46 @@ func TestSpecPrepared(t *testing.T) {
 	}
 	if _, err := (Spec{Subscriptions: 1, Dispatch: "bogus"}).Prepared(); err == nil {
 		t.Fatal("unknown dispatch should error")
+	}
+}
+
+func TestSpecPreparedSharedStreamFanOut(t *testing.T) {
+	s, err := (Spec{
+		Subscriptions:  4,
+		SharedStream:   "loadtest/fanout/hot",
+		FanOutAppends:  10,
+		FanOutInterval: Dur(100 * time.Millisecond),
+	}).Prepared()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.OccupiedSlots != 4 {
+		t.Fatalf("occupied_slots = %d, want 4", s.OccupiedSlots)
+	}
+	if s.Dispatch != "pull-wake" {
+		t.Fatalf("dispatch = %q, want pull-wake", s.Dispatch)
+	}
+}
+
+func TestSpecPreparedRejectsImpossibleFanOut(t *testing.T) {
+	for _, spec := range []Spec{
+		{Subscriptions: 1, OccupiedSlots: 1},
+		{Subscriptions: 1, SharedStream: "x", OccupiedSlots: 2},
+		{Subscriptions: 300, SharedStream: "x", OccupiedSlots: 257},
+		{Subscriptions: 1, FanOutAppends: 1},
+	} {
+		if _, err := spec.Prepared(); err == nil {
+			t.Fatalf("Prepared(%+v) succeeded, want error", spec)
+		}
+	}
+}
+
+func TestSubscriptionIDForSlot(t *testing.T) {
+	for slot := 0; slot < 16; slot++ {
+		id := subscriptionIDForSlot(slot, 0)
+		if got := int(fnv32a(id) % subSlots); got != slot {
+			t.Fatalf("subscriptionIDForSlot(%d) hashes to %d with id %q", slot, got, id)
+		}
 	}
 }
 

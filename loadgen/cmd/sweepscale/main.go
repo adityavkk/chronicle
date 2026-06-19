@@ -34,6 +34,10 @@ func run() int {
 	links := flag.Int("links-per-sub", 0, "override: P links per subscription")
 	dispatch := flag.String("dispatch", "", "override: pull-wake or webhook")
 	webhookURL := flag.String("webhook-url", "", "override: webhook receiver URL for dispatch=webhook")
+	sharedStream := flag.String("shared-stream", "", "override: link every subscription to this stream")
+	occupiedSlots := flag.Int("occupied-slots", 0, "override: exact occupied subscription slots for shared-stream fan-out")
+	fanOutAppends := flag.Int("fanout-appends", 0, "override: append count against shared-stream during measure")
+	fanOutInterval := flag.Duration("fanout-interval", 0, "override: interval between fan-out appends")
 	warmup := flag.Duration("warmup", 0, "override: settle time after seeding")
 	measure := flag.Duration("measure", 0, "override: metric sampling window")
 	sloP99 := flag.Float64("slo-p99-ms", 0, "fail (exit 1) if sweep tick p99 exceeds this; 0 disables")
@@ -61,6 +65,18 @@ func run() int {
 	}
 	if *webhookURL != "" {
 		spec.WebhookURL = *webhookURL
+	}
+	if *sharedStream != "" {
+		spec.SharedStream = *sharedStream
+	}
+	if *occupiedSlots > 0 {
+		spec.OccupiedSlots = *occupiedSlots
+	}
+	if *fanOutAppends > 0 {
+		spec.FanOutAppends = *fanOutAppends
+	}
+	if *fanOutInterval > 0 {
+		spec.FanOutInterval = sweep.Dur(*fanOutInterval)
 	}
 	if *warmup > 0 {
 		spec.Warmup = sweep.Dur(*warmup)
@@ -95,6 +111,12 @@ func run() int {
 		"\nK=%d P=%d %s | seeded %d/%d in %.1fs | sweep tick over %.0fs: mean=%.1fms p50=%.1fms p99=%.1fms | subs/tick=%.0f tails/tick=%.0f | %.0f ticks\n",
 		spec.Subscriptions, spec.LinksPerSub, spec.Dispatch, rep.Seeded, spec.Subscriptions, rep.SeedSeconds,
 		rep.WindowSeconds, rep.SweepMeanMs, rep.SweepP50Ms, rep.SweepP99Ms, rep.MeanSubs, rep.MeanTails, rep.SweepTicks)
+	if spec.FanOutAppends > 0 {
+		fmt.Fprintf(os.Stderr,
+			"fanout stream %q occupied_slots=%d | appends %d/%d errors=%d | fanout count=%.0f mean=%.2fms p50=%.2fms p99=%.2fms | slots=%.1f subs=%.1f\n",
+			spec.SharedStream, spec.OccupiedSlots, rep.FanOutAppended, spec.FanOutAppends, rep.FanOutAppendErrors,
+			rep.FanOutCount, rep.FanOutMeanMs, rep.FanOutP50Ms, rep.FanOutP99Ms, rep.MeanFanOutSlots, rep.MeanFanOutSubscribers)
+	}
 	if rep.SeedErrors > 0 {
 		fmt.Fprintf(os.Stderr, "warning: %d seed errors\n", rep.SeedErrors)
 	}
@@ -110,6 +132,10 @@ func run() int {
 	}
 	if *maxSeedErrs >= 0 && rep.SeedErrors > *maxSeedErrs {
 		fmt.Fprintf(os.Stderr, "SLO FAIL: seed errors %d > %d\n", rep.SeedErrors, *maxSeedErrs)
+		failed = true
+	}
+	if rep.FanOutAppendErrors > 0 {
+		fmt.Fprintf(os.Stderr, "SLO FAIL: fanout append errors %d\n", rep.FanOutAppendErrors)
 		failed = true
 	}
 	if failed {

@@ -1,0 +1,28 @@
+# Gate #2: OnStreamAppend fan-out cost with 256 occupied subscription slots.
+name: gate2-fanout-s256-codex
+loadgen_image: REGISTRY/chronicle-loadgen:TAG
+
+sut:
+  image: REGISTRY/chronicle:TAG
+  replicas: 1
+  namespace: chronicle-loadtest-codex
+  sweep_interval: 30s
+  sweep_batch: 0
+  redis_url: ""
+  cpu: "1"
+  memory: 1Gi
+
+workload:
+  subscriptions: 256
+  links_per_sub: 1
+  dispatch: pull-wake
+  shared_stream: loadtest/fanout/s256
+  occupied_slots: 256
+  fanout_appends: 100
+  fanout_interval: 100ms
+  warmup: 5s
+  measure: 20s
+
+slo:
+  sweep_p99_ms: 1500
+  max_seed_errors: 0

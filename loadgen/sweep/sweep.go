@@ -13,9 +13,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -70,6 +72,10 @@ type Spec struct {
 	LinksPerSub     int    `yaml:"links_per_sub" json:"links_per_sub"` // P
 	Dispatch        string `yaml:"dispatch" json:"dispatch"`           // "pull-wake" (default) or "webhook"
 	WebhookURL      string `yaml:"webhook_url" json:"webhook_url"`     // required for dispatch=webhook
+	SharedStream    string `yaml:"shared_stream" json:"shared_stream"`
+	OccupiedSlots   int    `yaml:"occupied_slots" json:"occupied_slots"`
+	FanOutAppends   int    `yaml:"fanout_appends" json:"fanout_appends"`
+	FanOutInterval  Dur    `yaml:"fanout_interval" json:"fanout_interval"`
 	SeedConcurrency int    `yaml:"seed_concurrency" json:"seed_concurrency"`
 	Warmup          Dur    `yaml:"warmup" json:"warmup"`   // settle time after seeding
 	Measure         Dur    `yaml:"measure" json:"measure"` // metric sampling window
@@ -105,6 +111,37 @@ func (s Spec) Prepared() (Spec, error) {
 	if s.Subscriptions <= 0 {
 		return Spec{}, fmt.Errorf("subscriptions must be > 0")
 	}
+	if s.OccupiedSlots < 0 {
+		return Spec{}, fmt.Errorf("occupied_slots must be >= 0")
+	}
+	if s.OccupiedSlots > 0 {
+		if s.SharedStream == "" {
+			return Spec{}, fmt.Errorf("shared_stream is required when occupied_slots is set")
+		}
+		if s.OccupiedSlots > subSlots {
+			return Spec{}, fmt.Errorf("occupied_slots must be <= %d", subSlots)
+		}
+		if s.Subscriptions < s.OccupiedSlots {
+			return Spec{}, fmt.Errorf("subscriptions must be >= occupied_slots")
+		}
+	}
+	if s.SharedStream != "" && s.OccupiedSlots == 0 {
+		s.OccupiedSlots = min(s.Subscriptions, subSlots)
+	}
+	if s.FanOutAppends < 0 {
+		return Spec{}, fmt.Errorf("fanout_appends must be >= 0")
+	}
+	if s.FanOutAppends > 0 {
+		if s.SharedStream == "" {
+			return Spec{}, fmt.Errorf("shared_stream is required when fanout_appends is set")
+		}
+		if s.FanOutInterval == 0 {
+			s.FanOutInterval = Dur(s.Measure.D() / time.Duration(s.FanOutAppends))
+			if s.FanOutInterval == 0 {
+				s.FanOutInterval = Dur(time.Millisecond)
+			}
+		}
+	}
 	switch s.Dispatch {
 	case "pull-wake":
 	case "webhook":
@@ -130,6 +167,14 @@ type Report struct {
 	SweepP99Ms             float64            `json:"sweep_p99_ms"`
 	MeanSubs               float64            `json:"mean_subs_evaluated"`
 	MeanTails              float64            `json:"mean_tails_batched"`
+	FanOutAppended         int                `json:"fanout_appended"`
+	FanOutAppendErrors     int                `json:"fanout_append_errors"`
+	FanOutCount            float64            `json:"fanout_count"`
+	FanOutMeanMs           float64            `json:"fanout_mean_ms"`
+	FanOutP50Ms            float64            `json:"fanout_p50_ms"`
+	FanOutP99Ms            float64            `json:"fanout_p99_ms"`
+	MeanFanOutSlots        float64            `json:"mean_fanout_slots_probed"`
+	MeanFanOutSubscribers  float64            `json:"mean_fanout_subscribers"`
 	ProposedMetricActivity map[string]float64 `json:"proposed_metric_activity"`
 }
 
@@ -139,12 +184,21 @@ func Run(ctx context.Context, baseURL, root, metricsURL string, spec Spec) (Repo
 	cli := dsclient.New(baseURL, root)
 	hc := &http.Client{Timeout: 15 * time.Second}
 
+	if spec.SharedStream != "" {
+		if resp, err := cli.Create(ctx, spec.SharedStream, "text/plain"); err != nil {
+			return Report{}, fmt.Errorf("create shared stream: %w", err)
+		} else if resp.Status >= http.StatusBadRequest && resp.Status != http.StatusConflict {
+			return Report{}, fmt.Errorf("create shared stream: status %d", resp.Status)
+		}
+	}
+
 	seedStart := time.Now()
 	seeded, seedErrs := seedSubscriptions(ctx, cli, spec)
 	seedDur := time.Since(seedStart)
 	if err := ctx.Err(); err != nil {
 		return Report{}, err
 	}
+	defer cleanupSeeded(cli, spec)
 
 	if !sleepCtx(ctx, spec.Warmup.D()) {
 		return Report{}, ctx.Err()
@@ -154,17 +208,33 @@ func Run(ctx context.Context, baseURL, root, metricsURL string, spec Spec) (Repo
 		"chronicle_sweep_tick_seconds",
 		"chronicle_sweep_subs_evaluated",
 		"chronicle_sweep_tails_batched",
+		"chronicle_fanout_seconds",
+		"chronicle_fanout_slots_probed",
+		"chronicle_fanout_subscribers",
 	}
 	before, err := scrape(ctx, hc, metricsURL, names...)
 	if err != nil {
 		return Report{}, fmt.Errorf("scrape before: %w", err)
 	}
+	appendDone := make(chan appendStats, 1)
+	appendCancel := func() {}
+	if spec.FanOutAppends > 0 {
+		appendCtx, cancel := context.WithCancel(ctx)
+		appendCancel = cancel
+		go func() { appendDone <- appendFanOut(appendCtx, cli, spec) }()
+	}
 	if !sleepCtx(ctx, spec.Measure.D()) {
+		appendCancel()
 		return Report{}, ctx.Err()
 	}
+	appendCancel()
 	after, err := scrape(ctx, hc, metricsURL, names...)
 	if err != nil {
 		return Report{}, fmt.Errorf("scrape after: %w", err)
+	}
+	appends := appendStats{}
+	if spec.FanOutAppends > 0 {
+		appends = <-appendDone
 	}
 	activity, err := scrapeMetricActivity(ctx, hc, metricsURL, proposedMetricNames...)
 	if err != nil {
@@ -174,6 +244,9 @@ func Run(ctx context.Context, baseURL, root, metricsURL string, spec Spec) (Repo
 	tick := after[names[0]].sub(before[names[0]])
 	subs := after[names[1]].sub(before[names[1]])
 	tails := after[names[2]].sub(before[names[2]])
+	fanOut := after[names[3]].sub(before[names[3]])
+	fanOutSlots := after[names[4]].sub(before[names[4]])
+	fanOutSubs := after[names[5]].sub(before[names[5]])
 
 	return Report{
 		Spec:                   spec,
@@ -187,6 +260,14 @@ func Run(ctx context.Context, baseURL, root, metricsURL string, spec Spec) (Repo
 		SweepP99Ms:             tick.quantile(0.99) * 1000,
 		MeanSubs:               subs.mean(),
 		MeanTails:              tails.mean(),
+		FanOutAppended:         appends.appended,
+		FanOutAppendErrors:     appends.errs,
+		FanOutCount:            fanOut.count,
+		FanOutMeanMs:           fanOut.mean() * 1000,
+		FanOutP50Ms:            fanOut.quantile(0.5) * 1000,
+		FanOutP99Ms:            fanOut.quantile(0.99) * 1000,
+		MeanFanOutSlots:        fanOutSlots.mean(),
+		MeanFanOutSubscribers:  fanOutSubs.mean(),
 		ProposedMetricActivity: activity,
 	}, nil
 }
@@ -210,7 +291,7 @@ func seedSubscriptions(ctx context.Context, cli *dsclient.Client, spec Spec) (se
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				resp, err := cli.CreateSubscription(ctx, fmt.Sprintf("loadtest-%d", i), subscriptionBody(spec, i))
+				resp, err := cli.CreateSubscription(ctx, subscriptionID(spec, i), subscriptionBody(spec, i))
 				mu.Lock()
 				if err != nil || resp.Status >= 300 {
 					errs++
@@ -238,7 +319,11 @@ func seedSubscriptions(ctx context.Context, cli *dsclient.Client, spec Spec) (se
 func subscriptionBody(spec Spec, i int) []byte {
 	streams := make([]string, spec.LinksPerSub)
 	for j := range streams {
-		streams[j] = fmt.Sprintf("loadtest/s/%d/%d", i, j)
+		if spec.SharedStream != "" {
+			streams[j] = spec.SharedStream
+		} else {
+			streams[j] = fmt.Sprintf("loadtest/s/%d/%d", i, j)
+		}
 	}
 	m := map[string]any{
 		"type":         spec.Dispatch,
@@ -252,6 +337,92 @@ func subscriptionBody(spec Spec, i int) []byte {
 	}
 	b, _ := json.Marshal(m)
 	return b
+}
+
+func subscriptionID(spec Spec, i int) string {
+	if spec.OccupiedSlots <= 0 {
+		return fmt.Sprintf("loadtest-%d", i)
+	}
+	slot := i % spec.OccupiedSlots
+	return subscriptionIDForSlot(slot, i/spec.OccupiedSlots)
+}
+
+const subSlots = 256
+
+func subscriptionIDForSlot(slot, ordinal int) string {
+	for nonce := 0; ; nonce++ {
+		id := fmt.Sprintf("loadtest-slot-%03d-%d-%d", slot, ordinal, nonce)
+		if int(fnv32a(id)%subSlots) == slot {
+			return id
+		}
+	}
+}
+
+func fnv32a(s string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum32()
+}
+
+type appendStats struct {
+	appended int
+	errs     int
+}
+
+func appendFanOut(ctx context.Context, cli *dsclient.Client, spec Spec) appendStats {
+	var appended, errs atomic.Int64
+	interval := spec.FanOutInterval.D()
+	if interval <= 0 {
+		interval = time.Millisecond
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for i := 0; i < spec.FanOutAppends; i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return appendStats{appended: int(appended.Load()), errs: int(errs.Load())}
+			case <-ticker.C:
+			}
+		}
+		resp, err := cli.Append(ctx, spec.SharedStream, "text/plain", []byte(fmt.Sprintf("fanout-%d", i)), nil)
+		if err != nil || resp.Status >= http.StatusBadRequest {
+			errs.Add(1)
+			continue
+		}
+		appended.Add(1)
+	}
+	return appendStats{appended: int(appended.Load()), errs: int(errs.Load())}
+}
+
+func cleanupSeeded(cli *dsclient.Client, spec Spec) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	jobs := make(chan int, spec.SeedConcurrency)
+	var wg sync.WaitGroup
+	for w := 0; w < spec.SeedConcurrency; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				_, _ = cli.DeleteSubscription(ctx, subscriptionID(spec, i))
+			}
+		}()
+	}
+	for i := 0; i < spec.Subscriptions; i++ {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return
+		case jobs <- i:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	if spec.SharedStream != "" {
+		_, _ = cli.Delete(ctx, spec.SharedStream)
+	}
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) bool {
