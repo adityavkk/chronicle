@@ -1,9 +1,12 @@
 package webhook
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
+
+	goredis "github.com/redis/go-redis/v9"
 )
 
 // fakeStreams is an in-memory Streams adapter for manager tests: it records the
@@ -198,11 +201,17 @@ func TestSweepWindowCapCoversAll(t *testing.T) {
 // fakeMetrics records what the Manager observes, so a test can assert the
 // instrumentation seam is actually wired through the sweep.
 type fakeMetrics struct {
-	mu        sync.Mutex
-	sweeps    int
-	lastSubs  int
-	lastTails int
-	lastWakes int
+	mu          sync.Mutex
+	sweeps      int
+	lastSubs    int
+	lastTails   int
+	lastWakes   int
+	dueMuts     map[string]int // DueSetMutation ops by op (arm|ack|expire|release)
+	dueTicks    int
+	dueFiredSum int
+	slotOwn     map[string]int // SlotOwnership events (claimed|renewed|busy), #14
+	ownerFenced map[string]int // OwnerFenced scopes (inline|check_owner), #14
+	coverageGap int            // CoverageGap samples, #14
 }
 
 func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
@@ -214,6 +223,75 @@ func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
 func (f *fakeMetrics) WakeDelivery(time.Duration, string) {}
 func (f *fakeMetrics) WakeEvent(time.Duration, string)    {}
 func (f *fakeMetrics) WorkerTick(string, int)             {}
+
+func (f *fakeMetrics) FanOut(time.Duration, int, int) {}
+
+// DueSetMutation / DueWorkerTick are wired by Move 2 (#12); record them so the
+// dueWorker tests can assert the mutations and drain ticks actually fire.
+func (f *fakeMetrics) DueSetMutation(op string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.dueMuts == nil {
+		f.dueMuts = map[string]int{}
+	}
+	f.dueMuts[op]++
+}
+
+func (f *fakeMetrics) DueWorkerTick(_ time.Duration, fired int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dueTicks++
+	f.dueFiredSum += fired
+}
+
+// SlotOwnership / CoverageGap / OwnerFenced are wired by Move 3 (#14); record them
+// so the ownership tests can assert the events actually fire at the call sites.
+func (f *fakeMetrics) SlotOwnership(event string, _ int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.slotOwn == nil {
+		f.slotOwn = map[string]int{}
+	}
+	f.slotOwn[event]++
+}
+func (f *fakeMetrics) CoverageGap(time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.coverageGap++
+}
+func (f *fakeMetrics) OwnerFenced(scope string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ownerFenced == nil {
+		f.ownerFenced = map[string]int{}
+	}
+	f.ownerFenced[scope]++
+}
+func (f *fakeMetrics) ClaimContention(string, string) {}
+
+func (f *fakeMetrics) slotOwnership(event string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.slotOwn[event]
+}
+
+func (f *fakeMetrics) ownerFences(scope string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ownerFenced[scope]
+}
+
+func (f *fakeMetrics) dueMutation(op string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dueMuts[op]
+}
+
+func (f *fakeMetrics) sweepCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sweeps
+}
 
 // TestSweepRecordsMetrics verifies the sweep reports its per-tick cost to the
 // Metrics seam: one tick recorded, carrying the subscription/tail counts and the
@@ -246,6 +324,189 @@ func TestSweepRecordsMetrics(t *testing.T) {
 	if fm.lastSubs < 1 || fm.lastTails < 1 || fm.lastWakes < 1 {
 		t.Fatalf("sweep metrics should reflect the pending sub: subs=%d tails=%d wakes=%d",
 			fm.lastSubs, fm.lastTails, fm.lastWakes)
+	}
+}
+
+// newDueManager builds a manager over live Redis with a fakeStreams and a
+// recording fakeMetrics, for the dueWorker drain tests.
+func newDueManager(t *testing.T) (*Manager, *RedisStore, *fakeStreams, *fakeMetrics, goredis.UniversalClient) {
+	t.Helper()
+	store, client := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	fm := &fakeMetrics{}
+	mgr, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/", Metrics: fm})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	return mgr, store, fs, fm, client
+}
+
+// TestDueWorkerFiresOwedSubscription is the Move-2 drain: a re-owed mark on an
+// idle subscription with pending work is re-fired in O(owed) by the dueWorker
+// (here a pull-wake, so the fire is an observable wake-stream append), and the
+// drain records DueWorkerTick.
+func TestDueWorkerFiresOwedSubscription(t *testing.T) {
+	mgr, store, fs, fm, client := newDueManager(t)
+	now := time.Now()
+	begin := "0000000000000000_0000000000000000"
+	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
+	_ = store.Link("s1", "events/a", LinkGlob, begin)
+	fs.mu.Lock()
+	fs.tails["events/a"] = "0000000000000001_0000000000000000" // pending work
+	fs.mu.Unlock()
+	// A re-owed mark on an idle sub (as expire_lease would leave it).
+	if err := client.ZAdd(context.Background(), dueZKey(slotOf("s1")), goredis.Z{Score: float64(now.UnixNano()), Member: "s1"}).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	if fired := mgr.RunDueWorker(); fired != 1 {
+		t.Fatalf("dueWorker should fire the one owed sub, fired=%d", fired)
+	}
+	if fs.count() != 1 {
+		t.Fatalf("owed pull-wake should have been re-fired (wake-stream append), got %d", fs.count())
+	}
+	if fm.dueTicks != 1 || fm.dueFiredSum != 1 {
+		t.Fatalf("DueWorkerTick not recorded: ticks=%d firedSum=%d", fm.dueTicks, fm.dueFiredSum)
+	}
+	// The re-fire arms a fresh wake, recording the arm mutation.
+	if got := fm.dueMutation("arm"); got != 1 {
+		t.Fatalf("re-fire should record one arm mutation, got %d", got)
+	}
+}
+
+// TestDueWorkerClearsStaleMark proves the dueWorker reconciles away a mark for a
+// subscription that is no longer owed (idle, cursor caught up) — without this the
+// due-set would never return to ~0 at quiescence (claim_due never ZREMs and
+// expire_lease re-owes unconditionally).
+func TestDueWorkerClearsStaleMark(t *testing.T) {
+	mgr, store, fs, fm, client := newDueManager(t)
+	now := time.Now()
+	begin := "0000000000000000_0000000000000000"
+	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
+	_ = store.Link("s1", "events/a", LinkGlob, begin)
+	// No tail set => cursor caught up => not pending.
+	if err := client.ZAdd(context.Background(), dueZKey(slotOf("s1")), goredis.Z{Score: float64(now.UnixNano()), Member: "s1"}).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	if fired := mgr.RunDueWorker(); fired != 0 {
+		t.Fatalf("a not-owed sub must not be fired, fired=%d", fired)
+	}
+	if fs.count() != 0 {
+		t.Fatalf("no wake should be issued for a caught-up sub, got %d", fs.count())
+	}
+	if n := dueCard(t, client); n != 0 {
+		t.Fatalf("stale mark must be cleared, got card %d", n)
+	}
+	if fm.dueTicks != 1 {
+		t.Fatalf("drain over a non-empty due-set should record one tick, got %d", fm.dueTicks)
+	}
+}
+
+// TestDueWorkerSkipsInFlight proves a mark for a subscription with a wake already
+// in flight (waking/live) is left to coalesce, not re-fired or cleared — it clears
+// on the eventual done-ack/release.
+func TestDueWorkerSkipsInFlight(t *testing.T) {
+	mgr, store, fs, _, client := newDueManager(t)
+	now := time.Now()
+	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
+	_ = store.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+	// Arm directly so the sub is waking with a due mark, without a wake-stream append.
+	if res, _ := store.ArmWake("s1", now, 1000, false, "w_a"); !res.Armed {
+		t.Fatal("arm should succeed")
+	}
+
+	if fired := mgr.RunDueWorker(); fired != 0 {
+		t.Fatalf("an in-flight wake must coalesce (not re-fire), fired=%d", fired)
+	}
+	if fs.count() != 0 {
+		t.Fatalf("no new wake should be issued for an in-flight sub, got %d", fs.count())
+	}
+	if n := dueCard(t, client); n != 1 {
+		t.Fatalf("an in-flight mark must be left in place, got card %d", n)
+	}
+}
+
+// TestDueRoundTripReturnsToZero is the integration round trip the issue names:
+// maybeWake arms (due-ZADD), the dueWorker coalesces the in-flight mark (no
+// double-fire), and the done-ack ZREMs it — so the due-set's cardinality tracks
+// owed and returns to 0 at quiescence, never lingering at K.
+func TestDueRoundTripReturnsToZero(t *testing.T) {
+	mgr, store, fs, _, client := newDueManager(t)
+	now := time.Now()
+	begin := "0000000000000000_0000000000000000"
+	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
+	_ = store.Link("s1", "events/a", LinkGlob, begin)
+	fs.mu.Lock()
+	fs.tails["events/a"] = "0000000000000001_0000000000000000" // pending work
+	fs.mu.Unlock()
+
+	// arm via the append-driven path → due-ZADD + a pull-wake event.
+	mgr.maybeWake("s1", "events/a")
+	if n := dueCard(t, client); n != 1 {
+		t.Fatalf("maybeWake should outbox one due mark, got card %d", n)
+	}
+	if fs.count() != 1 {
+		t.Fatalf("maybeWake should have emitted one wake event, got %d", fs.count())
+	}
+
+	// dueWorker drains while the wake is in flight: it must coalesce, not re-fire.
+	if fired := mgr.RunDueWorker(); fired != 0 {
+		t.Fatalf("in-flight mark must coalesce at the dueWorker, fired=%d", fired)
+	}
+	if fs.count() != 1 {
+		t.Fatalf("dueWorker must not duplicate the in-flight wake, got %d", fs.count())
+	}
+
+	// The worker completes: a done-ack clears the mark.
+	sub, _, _ := store.Get("s1")
+	acks := []Ack{{Stream: "events/a", Offset: "0000000000000001_0000000000000000"}}
+	if st, _ := mgr.ack("s1", sub.Generation, sub.WakeID, sub.Generation, true, acks, now, 1000); st != "OK" {
+		t.Fatalf("done ack = %q, want OK", st)
+	}
+	if n := dueCard(t, client); n != 0 {
+		t.Fatalf("done-ack must clear the mark — due-set should return to 0, got %d", n)
+	}
+}
+
+// TestDueMutationWrappersRecord asserts each due-mutating wrapper records its op
+// exactly when the corresponding Lua branch runs — and that a heartbeat ack does
+// not.
+func TestDueMutationWrappersRecord(t *testing.T) {
+	mgr, store, _, fm, _ := newDueManager(t)
+	now := time.Now()
+	_, _ = store.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+	_ = store.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+
+	res, err := mgr.armWake("s1", now, 1000, true, "w_a")
+	if err != nil || !res.Armed {
+		t.Fatalf("armWake = %+v err=%v", res, err)
+	}
+	// Heartbeat ack: no due mutation recorded.
+	if st, _ := mgr.ack("s1", res.Generation, res.WakeID, res.Generation, false, nil, now, 1000); st != "OK" {
+		t.Fatalf("heartbeat ack = %q", st)
+	}
+	// Done ack: records "ack".
+	if st, _ := mgr.ack("s1", res.Generation, res.WakeID, res.Generation, true, nil, now, 1000); st != "OK" {
+		t.Fatalf("done ack = %q", st)
+	}
+	// Re-arm then release: records "release".
+	res2, _ := mgr.armWake("s1", now, 1000, true, "w_b")
+	if st, _ := mgr.release("s1", res2.Generation, res2.WakeID, res2.Generation); st != "OK" {
+		t.Fatalf("release = %q", st)
+	}
+	// Re-arm then expire past the deadline: records "expire".
+	res3, _ := mgr.armWake("s1", now, 1000, true, "w_c")
+	_ = res3
+	if st, _ := mgr.expireLease("s1", now.Add(2*time.Second)); st != "EXPIRED" {
+		t.Fatalf("expireLease = %q", st)
+	}
+
+	want := map[string]int{"arm": 3, "ack": 1, "release": 1, "expire": 1}
+	for op, n := range want {
+		if got := fm.dueMutation(op); got != n {
+			t.Errorf("DueSetMutation(%q) = %d, want %d", op, got, n)
+		}
 	}
 }
 
@@ -302,5 +563,253 @@ func TestReconcileBackfillsPreexistingStreamAtTail(t *testing.T) {
 	sub, _, _ := store.Get("s1")
 	if len(sub.Links) != 1 || sub.Links[0].AckedOffset != stream.Tail {
 		t.Fatalf("pre-existing stream should link at tail (no replay), got %+v", sub.Links)
+	}
+}
+
+// TestRecoveryFloorIsCoarse asserts the recovery floor was re-defaulted off the old
+// 2s fast sweep into the seconds-to-minutes band, aligned with the index reconcile
+// (issue #13: the latency-sensitive cases are event-triggered now, so the floor
+// bounds only the one eventless case).
+func TestRecoveryFloorIsCoarse(t *testing.T) {
+	if defaultSweepInterval < 10*time.Second {
+		t.Fatalf("the recovery floor must be coarse (off the old 2s), got %s", defaultSweepInterval)
+	}
+	if defaultSweepInterval != defaultReconcileInterval {
+		t.Fatalf("the floor should align with the index-reconcile band: sweep=%s reconcile=%s",
+			defaultSweepInterval, defaultReconcileInterval)
+	}
+}
+
+// TestReconcileScopeRouting asserts every recovery event routes through the single
+// reconcile seam to a full cursor reconcile (sweepOnce). #14 fills in the
+// owner-epoch-bump / new-owner-CAS scopes #13 stubbed: they now run the eager
+// reconcile at the takeover trigger (the freshly-claimed slot's owed work), so
+// every scope in the taxonomy drives a sweep — a plug-in, not a refactor.
+func TestReconcileScopeRouting(t *testing.T) {
+	mgr, store, _, fm, _ := newDueManager(t)
+	if _, err := store.CreateOrConfirm("s1", pullWakeCfg(), nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	detectable := []scope{scopeBoot, scopeReconnect, scopeAppendError, scopeFloor}
+	for _, s := range detectable {
+		mgr.reconcile(s)
+	}
+	if got := fm.sweepCount(); got != len(detectable) {
+		t.Fatalf("each detectable event must run exactly one sweep: got %d for %d events", got, len(detectable))
+	}
+	// #14: the owner-epoch-bump / new-owner-CAS scopes now drive the eager reconcile
+	// (one sweep each), closing the rebalance coverage gap at the takeover trigger
+	// rather than waiting for a floor tick.
+	before := fm.sweepCount()
+	mgr.reconcile(scopeEpochBump)
+	mgr.reconcile(scopeNewOwnerCAS)
+	if got := fm.sweepCount(); got != before+2 {
+		t.Fatalf("epoch-bump/new-owner-CAS must each run the eager reconcile: got %d sweeps (was %d)", got, before)
+	}
+}
+
+// TestOnRedisReconnectCoalesces asserts the reconnect seam enqueues a single
+// coalesced reconcile onto the depth-1 channel without blocking: repeated events
+// collapse to one queued reconcile (duplicate reconciles are claim-fence-safe).
+func TestOnRedisReconnectCoalesces(t *testing.T) {
+	mgr := &Manager{reconcileC: make(chan scope, 1)}
+	mgr.OnRedisReconnect()
+	mgr.OnRedisReconnect() // must not block; must coalesce, not enqueue a second
+	select {
+	case s := <-mgr.reconcileC:
+		if s != scopeReconnect {
+			t.Fatalf("reconnect should enqueue scopeReconnect, got %v", s)
+		}
+	default:
+		t.Fatal("OnRedisReconnect should have enqueued a reconcile")
+	}
+	select {
+	case s := <-mgr.reconcileC:
+		t.Fatalf("a repeated event must coalesce, but a second reconcile was queued: %v", s)
+	default:
+	}
+}
+
+// TestReconcileLeasesSkipsHealthySubs asserts the failover-aware reconcile restores
+// only stranded subs: an idle sub (holds no lease) and a live/waking sub still
+// present in the lease ZSET are both left untouched, so reconcileLeases issues no
+// spurious schedule writes in steady state.
+func TestReconcileLeasesSkipsHealthySubs(t *testing.T) {
+	mgr, store, fs, _, _ := newDueManager(t)
+	now := time.Now()
+	begin := "0000000000000000_0000000000000000"
+	// idle: created, never armed.
+	_, _ = store.CreateOrConfirm("idle", pullWakeCfg(), nil, now)
+	_ = store.Link("idle", "events/i", LinkGlob, begin)
+	// present: webhook armed (waking, lease ZADDed, still in the lease ZSET).
+	_, _ = store.CreateOrConfirm("present", webhookCfg("https://w.example/h"), nil, now)
+	_ = store.Link("present", "events/p", LinkGlob, begin)
+	if res, _ := store.ArmWake("present", now, 1000, true, "w_p"); !res.Armed {
+		t.Fatal("arm present")
+	}
+	fs.mu.Lock()
+	fs.tails["events/i"] = "0000000000000001_0000000000000000"
+	fs.tails["events/p"] = "0000000000000001_0000000000000000"
+	fs.mu.Unlock()
+
+	ids, _ := store.List()
+	subs, _ := store.GetMany(ids)
+	tails := fs.TailOffsets(distinctLinkPaths(subs))
+	if n := mgr.reconcileLeases(subs, tails, mgr.leasedSet(), now); n != 0 {
+		t.Fatalf("no sub is stranded (idle holds no lease; present is in the zset), got %d restored", n)
+	}
+}
+
+// TestLeaseTailDropRecoveredByEagerReconcile is the sharpened L3 (07 line 60,
+// honest-gap #4) as a deterministic in-process test: a claimed pull-wake whose
+// lease tail a failover dropped is recovered ONLY by the failover-aware eager
+// reconcile, with the coarse floor never running. It proves the lease worker is
+// blind to the drop, that the eager reconcile re-derives the lease entry from the
+// durable hash so the worker sees it, that recovery then re-fires the owed wake,
+// and that the deposed holder's late ack is FENCED.
+func TestLeaseTailDropRecoveredByEagerReconcile(t *testing.T) {
+	mgr, store, fs, _, client := newDueManager(t)
+	now := time.Now()
+	const leaseTTLMs = 1000
+	begin := "0000000000000000_0000000000000000"
+	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
+	_ = store.Link("s1", "events/a", LinkGlob, begin)
+	fs.mu.Lock()
+	fs.tails["events/a"] = "0000000000000001_0000000000000000" // pending work
+	fs.mu.Unlock()
+
+	// Arm + claim: worker A holds the lease at generation gA (the pre-recovery fence).
+	mgr.maybeWake("s1", "events/a")
+	armed, _, _ := store.Get("s1")
+	a, err := store.Claim("s1", "worker-A", armed.WakeID, now, leaseTTLMs)
+	if err != nil || !a.Claimed {
+		t.Fatalf("worker A claim = %+v err=%v", a, err)
+	}
+	if firedBefore := fs.count(); firedBefore != 1 {
+		t.Fatalf("the initial arm should have emitted one wake event, got %d", firedBefore)
+	}
+
+	// The L3 fault: drop the lease AND due tail, sub hash intact (phase live).
+	if err := client.ZRem(context.Background(), leaseZKey(slotOf("s1")), "s1").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ZRem(context.Background(), dueZKey(slotOf("s1")), "s1").Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The lease worker is now blind: even well past the deadline it sees nothing,
+	// because the schedule entry — not the durable cursor — is what it reads.
+	future := now.Add(2 * time.Second) // past the 1s lease
+	if due, _ := store.DueLeases(slotOf("s1"), future, dueClaimLimit, time.Second); len(due) != 0 {
+		t.Fatalf("the lease worker must be blind to the dropped tail, got due=%v", due)
+	}
+
+	// The explicit takeover trigger — a Redis reconnect — fires the eager reconcile.
+	// The coarse floor never runs (we drive reconcile directly, no recoveryLoop).
+	mgr.reconcile(scopeReconnect)
+
+	// The eager reconcile re-derived the lease entry from the durable hash, so the
+	// fast lease worker now sees the lapse — the cursor-reading reconciler doing
+	// exactly what the lease worker could not.
+	due, _ := store.DueLeases(slotOf("s1"), future, dueClaimLimit, time.Second)
+	if len(due) != 1 || due[0] != "s1" {
+		t.Fatalf("the eager reconcile must restore the lease entry so the worker sees it, got due=%v", due)
+	}
+
+	// Drive the recovery the restored schedule now enables, on the same lapsed
+	// clock the lease worker and dueWorker would observe in production: expire the
+	// lapsed lease (idle + re-owe due at `future`), then drain the due-set at
+	// `future` — exactly what drainDue does, with the clock injected so the test is
+	// deterministic rather than sleeping out the lease TTL.
+	if st, _ := mgr.expireLease("s1", future); st != "EXPIRED" {
+		t.Fatalf("the restored lapsed lease must expire to idle, got %q", st)
+	}
+	claimed, _ := store.ClaimDue(slotOf("s1"), future, dueClaimLimit, time.Second)
+	fired := 0
+	for _, id := range claimed {
+		if mgr.fireDue(id) {
+			fired++
+		}
+	}
+	if fired != 1 {
+		t.Fatalf("recovery must re-fire the owed wake, fired=%d (claimed=%v)", fired, claimed)
+	}
+	if fs.count() != 2 {
+		t.Fatalf("the re-fired wake should be a fresh wake-stream append, got %d", fs.count())
+	}
+
+	// The deposed worker A's late ack with its stale (generation, wake_id) must be
+	// FENCED — recovery rotated a fresh generation on the re-fire.
+	acks := []Ack{{Stream: "events/a", Offset: "0000000000000001_0000000000000000"}}
+	if st, _ := mgr.ack("s1", a.Generation, a.WakeID, a.Generation, true, acks, future, leaseTTLMs); st != "FENCED" {
+		t.Fatalf("the deposed holder's late ack must be FENCED, got %q", st)
+	}
+}
+
+// TestPromoteDrivesEagerReconcile is the #16 promotion-recovery unit: a DR
+// promotion (Manager.Promote) drives the failover-aware eager reconcile so a
+// live/waking sub whose lease-ZSET entry the failover dropped — lease_until_ns>0
+// in the durable hash but ABSENT from the lease ZSET, the async-replication RPO
+// window — is re-derived from the durable `sub` hash and re-ZADDed, recovering the
+// stranded-webhook-wake case. It mirrors TestLeaseTailDropRecoveredByEagerReconcile
+// but the trigger is Promote(), the DR seam, not a bare reconnect.
+func TestPromoteDrivesEagerReconcile(t *testing.T) {
+	mgr, store, fs, _, client := newDueManager(t)
+	now := time.Now()
+	const leaseTTLMs = 1000
+	begin := "0000000000000000_0000000000000000"
+	// A webhook sub armed to waking with the lease ZADDed (it holds a lease).
+	_, _ = store.CreateOrConfirm("present", webhookCfg("https://w.example/h"), nil, now)
+	_ = store.Link("present", "events/p", LinkGlob, begin)
+	fs.mu.Lock()
+	fs.tails["events/p"] = "0000000000000001_0000000000000000" // pending work
+	fs.mu.Unlock()
+	armed, err := store.ArmWake("present", now, leaseTTLMs, true, "w_p")
+	if err != nil || !armed.Armed {
+		t.Fatalf("arm present = %+v err=%v", armed, err)
+	}
+
+	// The failover RPO window: the lease-ZSET tail was lost (the async replica had
+	// not yet applied the ZADD when the primary failed), but the durable sub hash
+	// survived (phase waking, lease_until_ns>0). The lease worker is now blind to it.
+	if err := client.ZRem(context.Background(), leaseZKey(slotOf("present")), "present").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if _, in := mgr.leasedSet()["present"]; in {
+		t.Fatal("precondition: the stranded sub must be absent from the lease ZSET")
+	}
+
+	// The DR promotion. slotReconcileOnce re-establishes ownership on the (here
+	// single-member) promoted primary; the eager reconcile is enqueued onto the
+	// coalescing recovery channel. The recovery loop is not running, so drain the
+	// queue deterministically and run each reconcile inline — the same code path the
+	// loop would, without the timing nondeterminism.
+	mgr.Promote()
+	drained := 0
+	for drained < cap(mgr.reconcileC)+2 {
+		select {
+		case s := <-mgr.reconcileC:
+			mgr.reconcile(s)
+			drained++
+			continue
+		default:
+		}
+		break
+	}
+	if drained == 0 {
+		t.Fatal("Promote must enqueue at least one eager reconcile")
+	}
+
+	// The eager reconcile re-derived the lease entry from the durable hash, so the
+	// fast lease worker can see the lapse again — the cursor-reading reconciler
+	// doing exactly what the lease worker, blind to the dropped ZSET entry, could not.
+	if _, in := mgr.leasedSet()["present"]; !in {
+		t.Fatal("promotion must re-ZADD the stranded sub's lease entry from the durable hash")
+	}
+	future := now.Add(2 * time.Second) // past the lease deadline
+	due, _ := store.DueLeases(slotOf("present"), future, dueClaimLimit, time.Second)
+	if len(due) != 1 || due[0] != "present" {
+		t.Fatalf("the restored lease entry must be visible to the lease worker, got due=%v", due)
 	}
 }

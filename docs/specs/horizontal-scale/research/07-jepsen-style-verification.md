@@ -151,14 +151,25 @@ root `go.mod` (`jepsen/checker` inherits it). Then:
    only tests AOF replay. L3 is tested more directly by the `ZREM` lease-tail drop; a true
    failover (Sentinel/cluster, or the managed Redis 8 SKU + WAIT/WAITAOF RPO) is out of
    scope of the current k3d substrate and is its own rig.
-4. **Recovery model — refined in [05](05-proposed-architecture.md).** Recovery is
-   event-triggered, not perpetual: the detectable cases (boot, epoch bump, new-owner CAS,
-   reconnect, append error) reconcile at the event, so L2 asserts the churn case recovers at
-   the takeover trigger (`deliver − append ≤ membership-lease TTL + RTT`), not on a sweep
-   tick. A coarse periodic floor (seconds-to-minutes, not 2 s) bounds only the one eventless
-   case — an owed-mark lost on an unowned, quiet slot. L3's `-sweep=0` variant must therefore
-   become `-floor=0` plus an explicit takeover, and assert the **eager reconcile at the new
-   owner's CAS** reaches tail; the periodic floor is tested separately on the eventless case.
+4. **Recovery model — refined in [05](05-proposed-architecture.md); RESOLVED by #13.**
+   Recovery is event-triggered, not perpetual: the detectable cases (boot, epoch bump,
+   new-owner CAS, reconnect, append error) reconcile at the event, so L2 asserts the churn
+   case recovers at the takeover trigger (`deliver − append ≤ membership-lease TTL + RTT`),
+   not on a sweep tick. A coarse periodic floor (seconds-to-minutes, not 2 s) bounds only the
+   one eventless case — an owed-mark lost on an unowned, quiet slot. L3's `-sweep=0` variant
+   must therefore become `-floor=0` plus an explicit takeover, and assert the **eager
+   reconcile** reaches tail; the periodic floor is tested separately on the eventless case.
+
+   **#13 implemented this:** `recoverySweeper` is split into the single `reconcile(scope)`
+   seam (`scope` ∈ Boot | Reconnect | AppendError | Floor, plus the stubbed EpochBump |
+   NewOwnerCAS cases #14 plugs into) plus a coarse floor ticker (`defaultSweepInterval`
+   raised 2 s → 30 s, aligned with the index reconcile). The failover-aware eager reconcile
+   `reconcileLeases` re-derives a stranded live/waking sub's dropped lease (+due) tail from
+   the durable `sub` hash, so the fast lease worker — not the floor — drives its expiry.
+   `scenario_leasetail.go` now carries both variants: `-floor=0` (explicit takeover →
+   the boot event's eager reconcile reaches tail within lease + RTT, far under any tick) and
+   `-floor>0` (the eventless floor case). The new-owner-CAS half stays the #14 trigger that
+   plugs into the same `reconcile(scope)` seam (the EpochBump/NewOwnerCAS scopes).
 5. **Clock-skew nemesis blurs real-time edges.** Pin the `porcupine` recorder's clock to
    the *driver host*, never a skewed node, so `[Call,Return]` ordering stays sound.
 
@@ -204,9 +215,17 @@ Two findings from the adversarial review are worth folding back into this plan:
    a caller-supplied `wake_id` with no uniqueness check, so the monotone generation
    alone carries the fence; the model asserts only `gen' > gen`, never `wake' != wake`.
 
+**#13 sharpened L3** (honest-gap #4): `scenario_leasetail.go` now carries the
+`-floor=0` + explicit-takeover variant asserting the failover-aware eager reconcile
+(`reconcileLeases`) reaches tail within lease + RTT — far under any periodic floor —
+so only the cursor-reading reconciler at the takeover, not a tick, could have
+recovered the stranded live/waking sub; the coarse floor is exercised separately on
+the `-floor>0` eventless case. The mechanism is also pinned by a deterministic
+in-process unit test (`TestLeaseTailDropRecoveredByEagerReconcile`, webhook pkg).
+
 Still gated on the rebuild (acceptance gates, red until the mechanism lands): **T3,
-T5, L2, L4, L5**, and the live drivers for **L1/L3** beyond the existing `ZREM`
-lease-tail-drop and the durability scenarios.
+T5, L2, L4, L5**, and the live drivers for **L1** beyond the existing durability
+scenarios.
 
 ## Sources
 

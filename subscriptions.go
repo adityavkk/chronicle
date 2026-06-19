@@ -15,14 +15,46 @@ import (
 )
 
 // SubscriptionTuning configures the subscription background loops. Zero values
-// fall back to the Manager's defaults (2s sweep, 30s reconcile, no sweep cap).
+// fall back to the Manager's defaults (a 30s coarse recovery floor, 30s reconcile,
+// no sweep cap).
 type SubscriptionTuning struct {
+	// SweepInterval is the coarse recovery FLOOR, not a fast sweep (issue #13):
+	// recovery is event-triggered (boot, a Redis reconnect, an append/delivery
+	// error and, from #14, an owner-epoch bump), so this only bounds the one
+	// eventless case. Zero defaults to 30s. Steady-state delivery latency is
+	// unaffected by the value — the happy path is the event-driven wake pipeline.
 	SweepInterval     time.Duration
 	ReconcileInterval time.Duration
 	SweepBatch        int
 	// Metrics, if set, receives sweep/delivery/worker observations from the
 	// Manager. Nil leaves the Manager on its no-op recorder.
 	Metrics webhook.Metrics
+
+	// ---- leased slot ownership (issue #14) ----
+	// ReplicaID is this process's membership identity; empty makes the Manager
+	// generate it (POD_NAME + a crypto/rand nonce). MemberLeaseTTL /
+	// HeartbeatInterval / SlotLeaseTTL / SlotReconcileInterval are the membership +
+	// slot-ownership timers (a DIFFERENT lease layer from the per-subscription
+	// webhook lease_ttl_ms). Zero values default to 9s/3s/9s/3s; the Manager
+	// enforces heartbeatInterval < memberLeaseTTL/2 and slotReconcileInterval <=
+	// heartbeatInterval, falling back to defaults if violated.
+	ReplicaID             string
+	MemberLeaseTTL        time.Duration
+	HeartbeatInterval     time.Duration
+	SlotLeaseTTL          time.Duration
+	SlotReconcileInterval time.Duration
+
+	// ---- tunable consistency (issue #16) ----
+	// Consistency is the durability tier applied to the fence-minting writes
+	// (arm_wake/claim generation HINCRBY). TierA (the zero value) issues no WAIT —
+	// today's behavior; TierB issues WAITAOF and checks the returned pair before
+	// dispatch (durability, not linearizability — the fence stays the only
+	// exclusivity guard). WaitReplicas / WaitTimeoutMs parameterize Tier B's barrier
+	// (1 replica on STANDARD_HA, 0 on a single AOF Redis). Per-deployment here; the
+	// tier type is also the vocabulary for the documented per-subscription surface.
+	Consistency   webhook.ConsistencyTier
+	WaitReplicas  int
+	WaitTimeoutMs int
 }
 
 // storePath maps a stream-root-relative subscription path ("events/abc") to the
@@ -44,13 +76,21 @@ type SubscriptionHooks interface {
 }
 
 // SubscriptionService is the runnable subscription manager: the lifecycle hooks
-// plus its background loops (lease worker, retry worker, recovery sweep).
-// *webhook.Manager satisfies it.
+// plus its background loops (lease worker, retry worker, due worker, the recovery
+// loop — a coarse floor plus event-triggered reconciles — and the slow reconcile
+// loop). *webhook.Manager satisfies it; its OnRedisReconnect is the reconnect
+// recovery seam the connection/DR layer drives (issue #13, exercised by #16).
 type SubscriptionService interface {
 	SubscriptionHooks
 	Start()
 	Stop()
 	RunSweep()
+	// Promote drives the failover-aware eager reconcile a DR promotion requires
+	// (issue #16): on an active-passive failover the DR layer calls this so each
+	// owner re-establishes slot ownership on the promoted primary and re-derives any
+	// schedule tail the async-replication RPO window dropped. *webhook.Manager
+	// satisfies it.
+	Promote()
 }
 
 // streamAdapter adapts the durable stream store to webhook.Streams: the seam the
@@ -143,11 +183,23 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		ReconcileInterval:          tuning.ReconcileInterval,
 		SweepBatch:                 tuning.SweepBatch,
 		Metrics:                    tuning.Metrics,
+		ReplicaID:                  tuning.ReplicaID,
+		MemberLeaseTTL:             tuning.MemberLeaseTTL,
+		HeartbeatInterval:          tuning.HeartbeatInterval,
+		SlotLeaseTTL:               tuning.SlotLeaseTTL,
+		SlotReconcileInterval:      tuning.SlotReconcileInterval,
 	}
 	if rs != nil {
 		opts.Lister = redisLister{rs: rs}
 	}
-	mgr, err := webhook.NewManager(webhook.NewRedisStore(client), streamAdapter{st: streamStore, rs: rs}, opts)
+	// Tier B (issue #16) arms the WAITAOF durability barrier on the fence-minting
+	// writes; TierA/C leave the store on the no-WAIT default. WithConsistency is a
+	// no-op for the zero (TierA) value, so a deployment that never sets the tier is
+	// byte-for-byte unchanged.
+	store := webhook.NewRedisStore(client).
+		WithConsistency(tuning.Consistency, tuning.WaitReplicas, tuning.WaitTimeoutMs).
+		WithMetrics(tuning.Metrics)
+	mgr, err := webhook.NewManager(store, streamAdapter{st: streamStore, rs: rs}, opts)
 	if err != nil {
 		return nil, nil, err
 	}

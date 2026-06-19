@@ -16,8 +16,8 @@ sut:
   sweep_interval: 2s
   sweep_batch: 0 # 0 = no per-tick cap
   redis_url: "" # fill from `terraform output redis_url`, or production's managed Redis 8
-  cpu: "2"
-  memory: 2Gi
+  cpu: "1"
+  memory: 1Gi
 
 workload:
   subscriptions: 10000 # K

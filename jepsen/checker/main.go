@@ -49,6 +49,37 @@ type config struct {
 	settle     time.Duration
 	workloadMs int
 	workers    int
+	// Explicit per-scenario liveness bounds (07 step 6: a liveness verdict is only
+	// meaningful relative to its time bound). sweep is the no-fault L1 bound (one
+	// sweep tick); floor is the coarse periodic reconcile bound for the one
+	// eventless recovery case (07 honest-gap #4). They mirror the server's
+	// defaultSweepInterval / index-reconcile so the harness asserts against the
+	// same numbers the SUT runs.
+	sweep time.Duration
+	floor time.Duration
+	// Optional extra nemeses, off by default (they need privileged/proxy
+	// substrate): a clock skew applied to a chronicle pod, and a toxiproxy admin
+	// URL + the proxy name fronting Redis.
+	clockSkewBy time.Duration
+	toxiproxy   string
+	redisProxy  string
+
+	// Contention suite (C1/C2/C3, gate #6). The driver talks to Redis directly,
+	// not the cluster, so it needs only redisURL. gShards is G (1 = today's hot
+	// per-type lease, the collapse); leaseTTLMs/holdMs/thinkMs/backoffMs are the
+	// scaled timers (see scenario_contention.go); ramp is the claimant ramp; c3
+	// adds the G=1-vs-G differential.
+	redisURL   string
+	gShards    int
+	slots      int // ownership-exclusivity (T3): number of ds:{ownership} slots contended
+	leaseTTLMs int
+	holdMs     int
+	thinkMs    int
+	backoffMs  int
+	roundMs    int
+	ramp       string
+	c3         bool
+	sharded    bool
 }
 
 func main() {
@@ -60,10 +91,26 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
+	flag.DurationVar(&c.sweep, "sweep", 2*time.Second, "the L1 no-fault delivery bound (one sweep tick); the server's defaultSweepInterval")
+	flag.DurationVar(&c.floor, "floor", 30*time.Second, "the coarse periodic-reconcile floor for the eventless recovery case (07 honest-gap #4)")
+	flag.DurationVar(&c.clockSkewBy, "clock-skew", 0, "optional: skew a chronicle pod's clock by this much (best-effort; needs a privileged container)")
+	flag.StringVar(&c.toxiproxy, "toxiproxy", "", "optional: toxiproxy admin URL (e.g. http://localhost:8474) to inject Redis partition/latency")
+	flag.StringVar(&c.redisProxy, "redis-proxy", "redis-claude", "the toxiproxy proxy name fronting Redis (used with -toxiproxy)")
+	flag.StringVar(&c.redisURL, "redis-url", "", "contention: Redis URL for the fan-in driver (else $REDIS_URL), e.g. redis://localhost:6379/14")
+	flag.IntVar(&c.gShards, "G", 16, "contention: claim granularity G (1 = today's hot per-type lease; >1 = per-shard-of-type leases)")
+	flag.IntVar(&c.leaseTTLMs, "lease-ttl-ms", 30000, "contention: per-subscription lease TTL (30 s, matching the runtime)")
+	flag.IntVar(&c.holdMs, "hold-ms", 5, "contention: lease hold per wake (scaled processing time)")
+	flag.IntVar(&c.thinkMs, "think-ms", 25, "contention: idle between wakes (sets the per-lease claimant capacity ~ (hold+think)/hold)")
+	flag.IntVar(&c.backoffMs, "backoff-ms", 2, "contention: pause after an ALREADY_CLAIMED bounce before retrying")
+	flag.IntVar(&c.roundMs, "round-ms", 3000, "contention: wall-clock per claimant rung")
+	flag.StringVar(&c.ramp, "ramp", "6,12,24", "contention: comma-separated claimant ramp")
+	flag.BoolVar(&c.c3, "c3", false, "contention: also run the G=1 baseline and assert C3 (the knee moves ~Gx; gate #6)")
+	flag.BoolVar(&c.sharded, "sharded", false, "contention/shard-linz: use the chronicle per-(subId,g) capability (ClaimShard) rather than client-side G subscriptions")
+	flag.IntVar(&c.slots, "slots", 4, "ownership-exclusivity (T3): number of ds:{ownership} slots concurrent claimants contend over")
 	flag.Parse()
 
 	r := newReceiver()
@@ -87,11 +134,56 @@ func run(c config, r *receiver) error {
 		return runSingleHolderLinz(c)
 	}
 
+	// contention (C1/C2/C3, gate #6) is the claimant-fan-in driver. It drives the
+	// real claim.lua/ack.lua against Redis directly — no cluster, no receiver — so
+	// it runs its own self-contained flow (scenario_contention.go).
+	if c.scenario == "contention" {
+		return runContention(c)
+	}
+
+	// shard-linz (T1 per (subId,g)) drives the chronicle per-shard capability with
+	// contending workers + a gcPause nemesis and checks the porcupine leaseModel
+	// partitioned per (subId,g) — no cluster (scenario_shard.go).
+	if c.scenario == "shard-linz" {
+		return runShardLinz(c)
+	}
+
 	// cursor-monotonic drives the webhook delivery workload under origin churn
 	// while sampling cursors, then checks forward-only advance with the pure
 	// CheckCursorMonotonic (T2, scenario_cursor.go). It reuses the receiver.
 	if c.scenario == "cursor-monotonic" {
 		return runCursorMonotonic(c, r)
+	}
+
+	// stale-gen-noop (T4) and lease-tail-drop (L3) are self-contained claim/ack
+	// flows over the pull-wake API — no webhook receiver — so they run their own
+	// flow like expired-lease-takeover does (scenario_stalegen.go / _leasetail.go).
+	if c.scenario == "stale-gen-noop" {
+		return runStaleGenNoop(c)
+	}
+	if c.scenario == "lease-tail-drop" {
+		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		return runLeaseTailDrop(c, nem)
+	}
+
+	// ownership-exclusivity (T3) is now LIVE (#14 landed claim_shard.lua /
+	// check_owner.lua / ds:{ownership}). Like shard-linz it drives the real CAS
+	// against Redis directly with concurrent claimants + a gcPause nemesis, records
+	// the history, and checks it against the porcupine shardModel — no cluster
+	// (scenario_ownership.go). It is THE acceptance gate proving claim_shard is a
+	// real single-holder CAS, not a silently-dropping LWW.
+	if c.scenario == "ownership-exclusivity" {
+		return runOwnershipExclusivity(c)
+	}
+	// slot-isolation (T5) is now LIVE (#15 landed the S-slot {__ds:h} state shard).
+	// Like ownership-exclusivity / shard-linz it drives webhook.RedisStore directly
+	// against Redis — no cluster: the differential checker (the S-slot scatter-gather
+	// subscriber set EQUALS the unsharded reference, no foreign wake, every sub
+	// whole-homed in one slot) is a correctness property loopback proves
+	// (scenario_slot.go). The gate-#2 fan-out p99 is the only T5-adjacent claim that
+	// needs a real multi-node cluster (loadtest gate #2, PENDING-CLOUD).
+	if c.scenario == "slot-isolation" {
+		return runSlotIsolation(c)
 	}
 
 	fmt.Printf("== scenario %q: %d streams x %d msgs ==\n", c.scenario, c.streams, c.msgs)
@@ -424,17 +516,13 @@ func verify(c config, subID string, expected map[string]string, r *receiver, nem
 		acked[s.Path] = s.AckedOffset
 	}
 
-	var lagging []string
-	streams := make([]string, 0, len(expected))
-	for s := range expected {
-		streams = append(streams, s)
+	// L1 per-message delivery check (the pure CheckAtLeastOnce over the keyspace):
+	// every linked stream's appended range must be covered by its final cursor.
+	exp := make([]deliveryExpectation, 0, len(expected))
+	for _, s := range sortedKeys(expected) {
+		exp = append(exp, deliveryExpectation{path: s, tail: expected[s], msgs: c.msgs})
 	}
-	sort.Strings(streams)
-	for _, s := range streams {
-		if acked[s] != expected[s] {
-			lagging = append(lagging, fmt.Sprintf("%s acked=%s want=%s", s, short(acked[s]), short(expected[s])))
-		}
-	}
+	gaps := CheckAtLeastOnce(exp, acked)
 
 	delivered, dupFactor := r.stats()
 	fmt.Println("---- result ----")
@@ -443,14 +531,15 @@ func verify(c config, subID string, expected map[string]string, r *receiver, nem
 	fmt.Printf("messages appended: %d\n", c.streams*c.msgs)
 	fmt.Printf("wakes delivered:   %d\n", delivered)
 	fmt.Printf("duplicate factor:  %.2f (at-least-once; duplicates fenced-safe)\n", dupFactor)
-	fmt.Printf("streams at tail:   %d/%d\n", c.streams-len(lagging), c.streams)
-	if len(lagging) > 0 {
-		for _, l := range lagging {
-			fmt.Printf("  LAGGING %s\n", l)
+	fmt.Printf("L1 delivery bound: <= one sweep tick (%s) no-fault; <= max(sweep,floor)+RTT (%s) after heal\n", c.sweep, maxDur(c.sweep, c.floor))
+	fmt.Printf("streams at tail:   %d/%d\n", c.streams-len(gaps), c.streams)
+	if len(gaps) > 0 {
+		for _, g := range gaps {
+			fmt.Printf("  LAGGING %s\n", g)
 		}
-		return fmt.Errorf("%d/%d streams never reached their tail — a wake was lost and not recovered", len(lagging), c.streams)
+		return fmt.Errorf("L1 violated: %d/%d streams never reached their tail — a wake was lost and not recovered", len(gaps), c.streams)
 	}
-	fmt.Println("PASS: every durably-appended message was delivered and acked despite faults")
+	fmt.Println("PASS: L1 at-least-once — every durably-appended message was delivered and acked despite faults")
 	return nil
 }
 
@@ -798,6 +887,11 @@ type nemesis struct {
 	ctx, ns, scenario string
 	mu                sync.Mutex
 	log               []string
+	// runner executes an external command; nil means exec.Command (the default).
+	// Tests inject a recording runner to assert a nemesis issues exactly the
+	// intended command (e.g. dropLeaseTail ZREMs only the schedule entry) without
+	// shelling out to kubectl/redis-cli.
+	runner func(name string, args ...string) ([]byte, error)
 }
 
 func (n *nemesis) record(action string) {
@@ -846,7 +940,8 @@ func (n *nemesis) run(stop <-chan struct{}) {
 			n.killRedis()
 			<-stop
 		}
-	default: // baseline
+	default: // baseline, at-least-once: no fault — assert steady-state L1 delivery
+		// within one sweep tick (no fault to heal from), the L1 control case.
 		<-stop
 	}
 }
@@ -891,7 +986,17 @@ func (n *nemesis) redisCLI(args ...string) ([]byte, error) {
 
 func (n *nemesis) kubectl(args ...string) ([]byte, error) {
 	full := append([]string{"--context", n.ctx, "-n", n.ns}, args...)
-	return exec.Command("kubectl", full...).CombinedOutput()
+	return n.exec("kubectl", full...)
+}
+
+// exec runs an external command through the injectable runner (exec.Command by
+// default). Every kubectl/redis-cli call routes through here so a test can
+// capture the exact command a nemesis issues.
+func (n *nemesis) exec(name string, args ...string) ([]byte, error) {
+	if n.runner != nil {
+		return n.runner(name, args...)
+	}
+	return exec.Command(name, args...).CombinedOutput()
 }
 
 // ---- small helpers ----
@@ -908,6 +1013,25 @@ func retry(attempts int, delay time.Duration, f func() error) error {
 }
 
 func sleep(d time.Duration) { <-time.After(d) }
+
+// sortedKeys returns the map's keys in deterministic order, so a result listing
+// is stable run to run.
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// maxDur returns the larger of two durations.
+func maxDur(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
+}
 
 func short(o string) string {
 	if len(o) > 12 {

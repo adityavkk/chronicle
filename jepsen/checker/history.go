@@ -43,6 +43,23 @@ func (r *recorder) record(clientID int, in fenceInput, out fenceOutput, callNs i
 	r.mu.Unlock()
 }
 
+// recordOp is the model-agnostic form of record: it brackets an operation whose
+// input/output are any porcupine-model values (e.g. the shardInput/shardOutput of
+// the ownership-exclusivity T3 driver), not just the fence model's types. callNs
+// is captured by the caller before the request; the return stamp is taken here.
+func (r *recorder) recordOp(clientID int, in, out interface{}, callNs int64) {
+	ret := r.now()
+	r.mu.Lock()
+	r.ops = append(r.ops, porcupine.Operation{
+		ClientId: clientID,
+		Input:    in,
+		Output:   out,
+		Call:     callNs,
+		Return:   ret,
+	})
+	r.mu.Unlock()
+}
+
 // history returns a copy of the recorded operations, safe to hand to porcupine
 // while workers may still be running.
 func (r *recorder) history() []porcupine.Operation {
