@@ -59,8 +59,13 @@ cmd_up() {
     "${G[@]}" artifacts repositories create "$LT_AR_REPO" --repository-format=docker --location "$LT_REGION"
 
   log "images → $REG (Cloud Build, amd64)"
+  # --default-buckets-behavior=regional-user-owned-bucket: the legacy global
+  # gs://PROJECT_cloudbuild staging bucket was deprecated (submit now 403s even for
+  # an owner); the regional user-owned bucket is owner-writable. --region pins the
+  # build (+ its bucket) to LT_REGION.
   ( cd "$REPO_ROOT" && "${G[@]}" builds submit --config loadtest/cloudbuild.yaml \
-      --substitutions=_REG="$REG",_TAG="$LT_TAG" . )
+      --substitutions=_REG="$REG",_TAG="$LT_TAG" \
+      --default-buckets-behavior=regional-user-owned-bucket --region="$LT_REGION" . )
 
   log "Memorystore Redis (${LT_REDIS_TIER} ${LT_REDIS_SIZE_GB}G, noeviction)"
   # standard tier => a managed failover replica + a stable endpoint (gate #5 needs a
@@ -72,7 +77,7 @@ cmd_up() {
 
   log "GKE cluster + node pools (sut, loadgen)"
   "${G[@]}" container clusters describe "$LT_CLUSTER" --zone "$LT_ZONE" >/dev/null 2>&1 ||
-    "${G[@]}" container clusters create "$LT_CLUSTER" --zone "$LT_ZONE" --num-nodes 1 \
+    "${G[@]}" container clusters create "$LT_CLUSTER" --zone "$LT_ZONE" --num-nodes 2 \
       --machine-type "$LT_MACHINE" --disk-type pd-standard --disk-size "$LT_DISK_GB" \
       --node-labels role=sut --no-enable-autoupgrade
   "${G[@]}" container node-pools describe loadgen --cluster "$LT_CLUSTER" --zone "$LT_ZONE" >/dev/null 2>&1 ||
@@ -187,7 +192,10 @@ cmd_gate2() {
   kubectl apply -f "$out/job.yaml"
   kubectl -n "$NS" wait --for=condition=complete --timeout=600s job -l app=sweepscale 2>/dev/null ||
     kubectl -n "$NS" wait --for=condition=failed --timeout=5s job -l app=sweepscale 2>/dev/null || true
-  sweepp99="$(kubectl -n "$NS" logs -l app=sweepscale --tail=-1 | grep -o '"sweep_p99_ms":[ ]*[0-9.]*' | head -1 | grep -o '[0-9.]*$')"
+  # The fan-out gate's job emits fan-out metrics, NOT sweep_p99_ms, so this grep
+  # usually finds nothing — tolerate it (|| true) or set -e/pipefail kills cmd_gate2
+  # BEFORE the histogram scrape below (which IS the gate-#2 number).
+  sweepp99="$(kubectl -n "$NS" logs -l app=sweepscale --tail=-1 | grep -o '"sweep_p99_ms":[ ]*[0-9.]*' | head -1 | grep -o '[0-9.]*$' || true)"
 
   log "gate #2: fan-out p99 + slots-probed from a surviving pod (the deciding number)"
   # chronicle_fanout_seconds is the append→wake fan-out p99 (the regression gate #2
