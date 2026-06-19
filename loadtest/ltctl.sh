@@ -11,8 +11,8 @@
 #
 # Config via env (defaults shown): LT_PROJECT LT_ZONE=us-central1-a
 # LT_REGION=us-central1 LT_CLUSTER=chronicle-loadtest-codex LT_AR_REPO=chronicle-codex
-# LT_TAG=v1 LT_MACHINE=e2-standard-2 LT_DISK_GB=50 LT_REDIS_SIZE_GB=1
-# LT_REDIS_VERSION=redis_7_2 LT_CHAOS=none
+# LT_TAG=v1 LT_MACHINE=e2-standard-2 LT_DISK_GB=50 LT_REDIS_SIZE_GB=5
+# LT_REDIS_TIER=standard LT_REDIS_VERSION=redis_7_2 LT_CHAOS=none
 set -euo pipefail
 
 : "${LT_PROJECT:=$(gcloud config get-value project 2>/dev/null)}"
@@ -23,7 +23,8 @@ set -euo pipefail
 : "${LT_TAG:=v1}"
 : "${LT_MACHINE:=e2-standard-2}"
 : "${LT_DISK_GB:=50}"
-: "${LT_REDIS_SIZE_GB:=1}"
+: "${LT_REDIS_SIZE_GB:=5}"
+: "${LT_REDIS_TIER:=standard}"
 : "${LT_REDIS_VERSION:=redis_7_2}"
 : "${LT_CHAOS:=none}"
 : "${LT_CHAOS_PERIOD:=15s}"
@@ -49,10 +50,10 @@ cmd_up() {
   ( cd "$REPO_ROOT" && "${G[@]}" builds submit --config loadtest/cloudbuild.yaml \
       --substitutions=_REG="$REG",_TAG="$LT_TAG" . )
 
-  log "Memorystore Redis (basic ${LT_REDIS_SIZE_GB}G, noeviction)"
+  log "Memorystore Redis (${LT_REDIS_TIER} ${LT_REDIS_SIZE_GB}G, noeviction)"
   "${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" >/dev/null 2>&1 ||
     "${G[@]}" redis instances create "${LT_CLUSTER}-redis" --size "$LT_REDIS_SIZE_GB" --region "$LT_REGION" \
-      --tier basic --redis-version "$LT_REDIS_VERSION" --redis-config maxmemory-policy=noeviction
+      --tier "$LT_REDIS_TIER" --redis-version "$LT_REDIS_VERSION" --redis-config maxmemory-policy=noeviction
 
   log "GKE cluster + node pools (sut, loadgen)"
   "${G[@]}" container clusters describe "$LT_CLUSTER" --zone "$LT_ZONE" >/dev/null 2>&1 ||

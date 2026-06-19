@@ -1037,15 +1037,18 @@ func (n *nemesis) clockSkew() error {
 	return fmt.Errorf("clock-skew nemesis requires privileged pod time control or a clock seam; recorder timestamps remain pinned to the driver host")
 }
 
-// deleteStreamIndex removes one stream's fan-out index SET
-// (ds:{__ds}:stream:<path>) directly in Redis, simulating a crash between the
+// deleteStreamIndex removes one stream's slot-homed fan-out index SETs directly
+// in Redis, simulating a crash between the
 // canonical Lua link write and the Go-side SADD that maintains the index. The
-// link survives; only the index entry is dropped. ReconcileIndexes must rebuild
-// it from the canonical links. The deployment uses Redis DB 0 (deploy.yaml
+// link and occupied-slot bitmap survive; only the index entry is dropped.
+// ReconcileIndexes must rebuild it from the canonical links. The deployment uses Redis DB 0 (deploy.yaml
 // REDIS_URL .../0); run.sh flushes the same DB between scenarios.
 func (n *nemesis) deleteStreamIndex(path string) {
-	key := fmt.Sprintf("ds:{__ds}:stream:%s", path)
-	n.redisCLI("del", key)
+	args := []string{"del"}
+	for slot := 0; slot < checkerSubSlots; slot++ {
+		args = append(args, checkerStreamSubsKey(slot, path))
+	}
+	n.redisCLI(args...)
 	n.record("drop-stream-index")
 }
 
@@ -1061,7 +1064,7 @@ func (n *nemesis) dropLeaseTail(id string) error {
 }
 
 func dropLeaseTailCommand(id string) []string {
-	return []string{"zrem", "ds:{__ds}:sched:lease", id}
+	return []string{"zrem", checkerLeaseZKeyForSub(id), id}
 }
 
 // redisCLI runs redis-cli inside the redis pod against DB 0 (the deployment DB).

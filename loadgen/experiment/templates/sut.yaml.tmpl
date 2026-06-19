@@ -37,6 +37,7 @@ spec:
             - { name: CHRONICLE_PUBLIC_URL, value: "http://chronicle.{{.SUT.Namespace}}:4437" }
             - { name: CHRONICLE_SWEEP_INTERVAL, value: "{{.SUT.SweepInterval}}" }
             - { name: CHRONICLE_SWEEP_BATCH, value: "{{.SUT.SweepBatch}}" }
+            - { name: CHRONICLE_CONSISTENCY_TIER, value: "{{.SUT.ConsistencyTier}}" }
             - { name: CHRONICLE_LOG_LEVEL, value: "info" }
           ports:
             - { containerPort: 4437, name: http }

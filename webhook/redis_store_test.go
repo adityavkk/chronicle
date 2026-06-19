@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -114,6 +115,68 @@ func redisCommandKey(cmd goredis.Cmder) string {
 	return key
 }
 
+type durabilityCommandHook struct {
+	waitReply      int64
+	waitAOFLocal   int64
+	waitAOFReplica int64
+
+	mu       sync.Mutex
+	commands []string
+}
+
+func (h *durabilityCommandHook) DialHook(next goredis.DialHook) goredis.DialHook {
+	return next
+}
+
+func (h *durabilityCommandHook) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook {
+	return func(ctx context.Context, cmd goredis.Cmder) error {
+		name := strings.ToLower(cmd.Name())
+		switch name {
+		case "wait":
+			h.record(name)
+			if intCmd, ok := cmd.(*goredis.IntCmd); ok {
+				intCmd.SetVal(h.waitReply)
+			}
+			cmd.SetErr(nil)
+			return nil
+		case "waitaof":
+			h.record(name)
+			switch typed := cmd.(type) {
+			case *goredis.SliceCmd:
+				typed.SetVal([]any{h.waitAOFLocal, h.waitAOFReplica})
+			case *goredis.Cmd:
+				typed.SetVal([]any{h.waitAOFLocal, h.waitAOFReplica})
+			}
+			cmd.SetErr(nil)
+			return nil
+		default:
+			return next(ctx, cmd)
+		}
+	}
+}
+
+func (h *durabilityCommandHook) ProcessPipelineHook(next goredis.ProcessPipelineHook) goredis.ProcessPipelineHook {
+	return next
+}
+
+func (h *durabilityCommandHook) record(name string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.commands = append(h.commands, name)
+}
+
+func (h *durabilityCommandHook) count(name string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	count := 0
+	for _, got := range h.commands {
+		if got == name {
+			count++
+		}
+	}
+	return count
+}
+
 func TestConcurrentLegacyMigrationCannotReplayStaleHash(t *testing.T) {
 	s, _ := newTestStore(t)
 	const (
@@ -148,7 +211,7 @@ func TestConcurrentLegacyMigrationCannotReplayStaleHash(t *testing.T) {
 	if _, ok, err := s.Get(id); err != nil || !ok {
 		t.Fatalf("winning migration = ok %v err %v", ok, err)
 	}
-	armed, err := s.ArmWake(id, now.Add(time.Millisecond), 1000, false, "w_after_migration", NoOwnerFence())
+	armed, err := s.ArmWake(id, now.Add(time.Millisecond), 1000, false, "w_after_migration", NoOwnerFence(), ConsistencyTierA)
 	if err != nil {
 		t.Fatalf("ArmWake after winning migration: %v", err)
 	}
@@ -291,6 +354,215 @@ func TestStoreCreateConfirmConflict(t *testing.T) {
 	}
 }
 
+func TestStorePersistsConsistencyTier(t *testing.T) {
+	s, _ := newTestStore(t)
+	cfg := webhookCfg("https://w.example/h")
+	cfg.ConsistencyTier = ConsistencyTierB
+	if st, err := s.CreateOrConfirm("tier-b", cfg, nil, time.Now()); err != nil || st != CreateCreated {
+		t.Fatalf("create tier-b = %v/%v", st, err)
+	}
+	sub, ok, err := s.Get("tier-b")
+	if err != nil || !ok {
+		t.Fatalf("get tier-b = ok %v err %v", ok, err)
+	}
+	if sub.Config.ConsistencyTier != ConsistencyTierB {
+		t.Fatalf("hydrated tier = %s, want B", sub.Config.ConsistencyTier)
+	}
+
+	legacy := subscriptionFromHash("old", map[string]string{
+		"created_ns":     "1781800000000000000",
+		"type":           string(DispatchWebhook),
+		"pattern":        "events/*",
+		"webhook_url":    "https://w.example/h",
+		"lease_ttl_ms":   "1000",
+		"status":         string(StatusActive),
+		"phase":          string(PhaseIdle),
+		"lease_until_ns": "0",
+	}, nil)
+	if legacy.Config.ConsistencyTier != ConsistencyTierA {
+		t.Fatalf("legacy hash tier = %s, want A", legacy.Config.ConsistencyTier)
+	}
+}
+
+func TestCreateOrConfirmMatchesLegacyTierAHash(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	cfg := NormalizeConfig(pullWakeCfg())
+	id := "legacy-tier-a"
+	k := keysForSubscription(id)
+	if err := client.HSet(context.Background(), k.sub,
+		"id", id,
+		"cfg_hash", legacyConfigHash(cfg),
+		"created_ns", nsArg(now),
+		"type", string(cfg.Type),
+		"pattern", cfg.Pattern,
+		"wake_stream", cfg.WakeStream,
+		"lease_ttl_ms", strconv.FormatInt(cfg.LeaseTTLMs, 10),
+		"status", string(StatusActive),
+		"phase", string(PhaseIdle),
+		"generation", "0",
+		"lease_until_ns", "0",
+	).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SAdd(context.Background(), k.subs, id).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	if st, err := s.CreateOrConfirm(id, cfg, nil, now); err != nil || st != CreateMatched {
+		t.Fatalf("legacy Tier A confirm = %v err=%v, want MATCHED", st, err)
+	}
+	got, ok, err := s.Get(id)
+	if err != nil || !ok {
+		t.Fatalf("Get upgraded legacy sub = ok %v err %v", ok, err)
+	}
+	if got.Config.ConsistencyTier != ConsistencyTierA || got.CfgHash != ConfigHash(cfg) {
+		t.Fatalf("legacy upgrade tier/hash = %s %s, want A %s", got.Config.ConsistencyTier, got.CfgHash, ConfigHash(cfg))
+	}
+
+	tierB := cfg
+	tierB.ConsistencyTier = ConsistencyTierB
+	if st, err := s.CreateOrConfirm(id, tierB, nil, now); err != nil || st != CreateConflict {
+		t.Fatalf("legacy Tier B confirm = %v err=%v, want CONFLICT", st, err)
+	}
+}
+
+func TestStoreTierADoesNotWaitAfterFenceMintingWrites(t *testing.T) {
+	client := newTestRedisClient(t, true)
+	hook := &durabilityCommandHook{waitReply: 1, waitAOFLocal: 1, waitAOFReplica: 1}
+	client.AddHook(hook)
+	s := NewRedisStore(client)
+	now := time.Now()
+	if _, err := s.CreateOrConfirm("arm-a", webhookCfg("https://w.example/h"), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.ArmWake("arm-a", now, 1000, true, "w_a", NoOwnerFence(), ConsistencyTierA); err != nil || !res.Armed {
+		t.Fatalf("tier A arm = %+v err=%v", res, err)
+	}
+	if _, err := s.CreateOrConfirm("claim-a", pullWakeCfg(), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.Claim("claim-a", ClaimModeLegacy, DefaultClaimShard, "worker-a", "w_claim", now, 1000, ConsistencyTierA); err != nil || !res.Claimed {
+		t.Fatalf("tier A claim = %+v err=%v", res, err)
+	}
+	if hook.count("wait") != 0 || hook.count("waitaof") != 0 {
+		t.Fatalf("tier A issued durability commands: wait=%d waitaof=%d", hook.count("wait"), hook.count("waitaof"))
+	}
+}
+
+func TestStoreTierBWaitsAfterArmWakeMint(t *testing.T) {
+	client := newTestRedisClient(t, true)
+	hook := &durabilityCommandHook{waitReply: 1, waitAOFLocal: 1, waitAOFReplica: 1}
+	client.AddHook(hook)
+	s := NewRedisStore(client)
+	now := time.Now()
+	cfg := webhookCfg("https://w.example/h")
+	cfg.ConsistencyTier = ConsistencyTierB
+	if _, err := s.CreateOrConfirm("arm-b", cfg, nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.ArmWake("arm-b", now, 1000, true, "w_b", NoOwnerFence(), ConsistencyTierB); err != nil || !res.Armed {
+		t.Fatalf("tier B arm = %+v err=%v", res, err)
+	}
+	if hook.count("wait") != 1 || hook.count("waitaof") != 1 {
+		t.Fatalf("tier B arm durability commands = wait %d waitaof %d, want 1/1", hook.count("wait"), hook.count("waitaof"))
+	}
+	if res, err := s.ArmWake("arm-b", now, 1000, true, "w_busy", NoOwnerFence(), ConsistencyTierB); err != nil || !res.Busy {
+		t.Fatalf("tier B busy arm = %+v err=%v", res, err)
+	}
+	if hook.count("wait") != 1 || hook.count("waitaof") != 1 {
+		t.Fatalf("busy arm must not wait again: wait %d waitaof %d", hook.count("wait"), hook.count("waitaof"))
+	}
+}
+
+func TestStoreTierBWaitsOnlyAfterClaimMint(t *testing.T) {
+	client := newTestRedisClient(t, true)
+	hook := &durabilityCommandHook{waitReply: 1, waitAOFLocal: 1, waitAOFReplica: 1}
+	client.AddHook(hook)
+	s := NewRedisStore(client)
+	now := time.Now()
+	cfg := pullWakeCfg()
+	cfg.ConsistencyTier = ConsistencyTierB
+	if _, err := s.CreateOrConfirm("claim-b", cfg, nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.Claim("claim-b", ClaimModeLegacy, DefaultClaimShard, "worker-a", "w_a", now, 1000, ConsistencyTierB); err != nil || !res.Claimed {
+		t.Fatalf("tier B idle claim = %+v err=%v", res, err)
+	}
+	if hook.count("wait") != 1 || hook.count("waitaof") != 1 {
+		t.Fatalf("tier B idle claim durability commands = wait %d waitaof %d, want 1/1", hook.count("wait"), hook.count("waitaof"))
+	}
+	if res, err := s.Claim("claim-b", ClaimModeLegacy, DefaultClaimShard, "worker-b", "w_b", now, 1000, ConsistencyTierB); err != nil || !res.Busy {
+		t.Fatalf("tier B busy claim = %+v err=%v", res, err)
+	}
+	if hook.count("wait") != 1 || hook.count("waitaof") != 1 {
+		t.Fatalf("busy claim must not wait again: wait %d waitaof %d", hook.count("wait"), hook.count("waitaof"))
+	}
+
+	if _, err := s.CreateOrConfirm("claim-waking", cfg, nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := s.ArmWake("claim-waking", now, 1000, false, "w_armed", NoOwnerFence(), ConsistencyTierB); err != nil || !res.Armed {
+		t.Fatalf("tier B pull arm = %+v err=%v", res, err)
+	}
+	if res, err := s.Claim("claim-waking", ClaimModeLegacy, DefaultClaimShard, "worker-c", "w_unused", now, 1000, ConsistencyTierB); err != nil || !res.Claimed {
+		t.Fatalf("tier B waking claim = %+v err=%v", res, err)
+	}
+	if hook.count("wait") != 2 || hook.count("waitaof") != 2 {
+		t.Fatalf("waking claim reused arm fence and must not wait: wait %d waitaof %d", hook.count("wait"), hook.count("waitaof"))
+	}
+}
+
+func TestStoreTierBShortDurabilityRepliesAreErrors(t *testing.T) {
+	client := newTestRedisClient(t, true)
+	waitShort := &durabilityCommandHook{waitReply: 0, waitAOFLocal: 1, waitAOFReplica: 1}
+	client.AddHook(waitShort)
+	s := NewRedisStore(client)
+	now := time.Now()
+	if _, err := s.CreateOrConfirm("wait-short", webhookCfg("https://w.example/h"), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ArmWake("wait-short", now, 1000, true, "w_short", NoOwnerFence(), ConsistencyTierB); err == nil || !strings.Contains(err.Error(), "WAIT acknowledged") {
+		t.Fatalf("short WAIT error = %v, want WAIT acknowledged", err)
+	}
+	if waitShort.count("waitaof") != 0 {
+		t.Fatal("WAITAOF should not run after WAIT short reply")
+	}
+
+	client2 := newTestRedisClient(t, true)
+	aofShort := &durabilityCommandHook{waitReply: 1, waitAOFLocal: 1, waitAOFReplica: 0}
+	client2.AddHook(aofShort)
+	s2 := NewRedisStore(client2)
+	if _, err := s2.CreateOrConfirm("aof-short", webhookCfg("https://w.example/h"), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s2.ArmWake("aof-short", now, 1000, true, "w_short", NoOwnerFence(), ConsistencyTierB); err == nil || !strings.Contains(err.Error(), "WAITAOF acknowledged") {
+		t.Fatalf("short WAITAOF error = %v, want WAITAOF acknowledged", err)
+	}
+}
+
+func TestStoreTierBDurabilityDoesNotReplaceGenerationFence(t *testing.T) {
+	client := newTestRedisClient(t, true)
+	hook := &durabilityCommandHook{waitReply: 1, waitAOFLocal: 1, waitAOFReplica: 1}
+	client.AddHook(hook)
+	s := NewRedisStore(client)
+	now := time.Now()
+	if _, err := s.CreateOrConfirm("durability-not-authority", pullWakeCfg(), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.Claim("durability-not-authority", ClaimModeLegacy, DefaultClaimShard, "worker-a", "w_a", now, 1000, ConsistencyTierB)
+	if err != nil || !a.Claimed {
+		t.Fatalf("worker A claim = %+v err=%v", a, err)
+	}
+	b, err := s.Claim("durability-not-authority", ClaimModeLegacy, DefaultClaimShard, "worker-b", "w_b", now.Add(2*time.Second), 1000, ConsistencyTierB)
+	if err != nil || !b.Claimed || b.Generation <= a.Generation {
+		t.Fatalf("worker B takeover = %+v err=%v after %+v", b, err, a)
+	}
+	if st, _ := s.Ack("durability-not-authority", ClaimModeLegacy, DefaultClaimShard, a.Generation, a.WakeID, a.Generation, true, nil, now.Add(2*time.Second), 1000, NoOwnerFence()); st != "FENCED" {
+		t.Fatalf("durably acknowledged stale generation ack = %q, want FENCED", st)
+	}
+}
+
 func TestClaimShardScriptGoldenSemantics(t *testing.T) {
 	s, _ := newTestStore(t)
 	slot, _ := NewOwnershipSlot(0)
@@ -384,7 +656,7 @@ func TestOwnerEpochFencesScheduleMutatingScriptsInline(t *testing.T) {
 		t.Fatal(err)
 	}
 	staleFence := staleFenceForID("arm-stale")
-	armed, err := s.ArmWake("arm-stale", now, 1000, true, "w_stale", staleFence)
+	armed, err := s.ArmWake("arm-stale", now, 1000, true, "w_stale", staleFence, ConsistencyTierA)
 	if err != nil || !armed.Fenced {
 		t.Fatalf("stale ArmWake = %+v err=%v, want FENCED", armed, err)
 	}
@@ -396,7 +668,7 @@ func TestOwnerEpochFencesScheduleMutatingScriptsInline(t *testing.T) {
 		t.Fatal(err)
 	}
 	staleFence = staleFenceForID("ack-stale")
-	goodArm, _ := s.ArmWake("ack-stale", now, 1000, true, "w_good", NoOwnerFence())
+	goodArm, _ := s.ArmWake("ack-stale", now, 1000, true, "w_good", NoOwnerFence(), ConsistencyTierA)
 	if st, _ := s.Ack("ack-stale", ClaimModeLegacy, DefaultClaimShard, goodArm.Generation, goodArm.WakeID, goodArm.Generation, true, nil, now, 1000, staleFence); st != "FENCED" {
 		t.Fatalf("stale Ack = %q, want FENCED", st)
 	}
@@ -453,7 +725,7 @@ func TestStoreArmWakeSurvivesRestart(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	res, err := s.ArmWake("s1", now, 1000, true, "w_first", NoOwnerFence())
+	res, err := s.ArmWake("s1", now, 1000, true, "w_first", NoOwnerFence(), ConsistencyTierA)
 	if err != nil || !res.Armed || res.Generation != 1 || res.WakeID != "w_first" {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
@@ -462,7 +734,7 @@ func TestStoreArmWakeSurvivesRestart(t *testing.T) {
 	}
 	firstDueScore := dueScore(t, client, "s1")
 	// Coalesce: a second arm while in flight is BUSY, not a new generation.
-	if busy, _ := s.ArmWake("s1", now, 1000, true, "w_second", NoOwnerFence()); !busy.Busy || busy.Generation != 1 {
+	if busy, _ := s.ArmWake("s1", now, 1000, true, "w_second", NoOwnerFence(), ConsistencyTierA); !busy.Busy || busy.Generation != 1 {
 		t.Fatalf("second arm should be BUSY at gen 1, got %+v", busy)
 	}
 	if got := dueScore(t, client, "s1"); got != firstDueScore {
@@ -497,12 +769,12 @@ func TestStoreClaimCASAckFence(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", cfg, nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	c1, err := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-1", "w_a", now, 1000)
+	c1, err := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-1", "w_a", now, 1000, ConsistencyTierA)
 	if err != nil || !c1.Claimed {
 		t.Fatalf("claim1 = %+v err=%v", c1, err)
 	}
 	// Second worker is fenced out while the lease is held.
-	if c2, _ := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-2", "w_b", now, 1000); !c2.Busy || c2.Holder != "worker-1" {
+	if c2, _ := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-2", "w_b", now, 1000, ConsistencyTierA); !c2.Busy || c2.Holder != "worker-1" {
 		t.Fatalf("claim2 should be BUSY held by worker-1, got %+v", c2)
 	}
 	// Stale-generation ack is fenced.
@@ -528,7 +800,7 @@ func TestStoreClaimModeRejectsMixedLegacyAndShardedClaims(t *testing.T) {
 	s, client := newTestStore(t)
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("legacy-first", pullWakeCfg(), nil, now)
-	legacy, err := s.Claim("legacy-first", ClaimModeLegacy, DefaultClaimShard, "worker-legacy", "w_legacy", now, 1000)
+	legacy, err := s.Claim("legacy-first", ClaimModeLegacy, DefaultClaimShard, "worker-legacy", "w_legacy", now, 1000, ConsistencyTierA)
 	if err != nil || !legacy.Claimed {
 		t.Fatalf("legacy claim = %+v err=%v", legacy, err)
 	}
@@ -541,7 +813,7 @@ func TestStoreClaimModeRejectsMixedLegacyAndShardedClaims(t *testing.T) {
 		t.Fatal(err)
 	}
 	shard, _ := NewClaimShard(4)
-	if got, _ := s.Claim("legacy-first", ClaimModeSharded, shard, "worker-sharded", "w_sharded", now, 1000); !got.ModeConflict || got.Mode != ClaimModeLegacy {
+	if got, _ := s.Claim("legacy-first", ClaimModeSharded, shard, "worker-sharded", "w_sharded", now, 1000, ConsistencyTierA); !got.ModeConflict || got.Mode != ClaimModeLegacy {
 		t.Fatalf("sharded claim should conflict with legacy mode, got %+v", got)
 	}
 	if st, _ := s.Ack("legacy-first", ClaimModeSharded, DefaultClaimShard, legacy.Generation, legacy.WakeID, legacy.Generation, true, nil, now, 1000, NoOwnerFence()); st != "FENCED" {
@@ -555,11 +827,11 @@ func TestStoreClaimModeRejectsMixedLegacyAndShardedClaims(t *testing.T) {
 	if exists, _ := client.HExists(context.Background(), subKey("sharded-first"), "claim_mode").Result(); exists {
 		t.Fatal("fresh subscription should not start with claim_mode")
 	}
-	first, err := s.Claim("sharded-first", ClaimModeSharded, shard, "worker-sharded", "w_sharded", now, 1000)
+	first, err := s.Claim("sharded-first", ClaimModeSharded, shard, "worker-sharded", "w_sharded", now, 1000, ConsistencyTierA)
 	if err != nil || !first.Claimed {
 		t.Fatalf("sharded claim = %+v err=%v", first, err)
 	}
-	if got, _ := s.Claim("sharded-first", ClaimModeLegacy, DefaultClaimShard, "worker-legacy", "w_legacy", now, 1000); !got.ModeConflict || got.Mode != ClaimModeSharded {
+	if got, _ := s.Claim("sharded-first", ClaimModeLegacy, DefaultClaimShard, "worker-legacy", "w_legacy", now, 1000, ConsistencyTierA); !got.ModeConflict || got.Mode != ClaimModeSharded {
 		t.Fatalf("legacy claim should conflict with sharded mode, got %+v", got)
 	}
 	if st, _ := s.Ack("sharded-first", ClaimModeLegacy, shard, first.Generation, first.WakeID, first.Generation, true, nil, now, 1000, NoOwnerFence()); st != "FENCED" {
@@ -573,7 +845,7 @@ func TestStoreAckDoneClearsDueSetHeartbeatDoesNot(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	armed, err := s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence())
+	armed, err := s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence(), ConsistencyTierA)
 	if err != nil || !armed.Armed {
 		t.Fatalf("arm = %+v err=%v", armed, err)
 	}
@@ -599,7 +871,7 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	base := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, base)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
-	_, _ = s.ArmWake("s1", base, 1000, true, "w_a", NoOwnerFence())
+	_, _ = s.ArmWake("s1", base, 1000, true, "w_a", NoOwnerFence(), ConsistencyTierA)
 
 	// Before the deadline: not expired.
 	if st, _ := s.ExpireLease(NewLeaseRef("s1", DefaultClaimShard), base, true, NoOwnerFence()); st != "ACTIVE" {
@@ -620,7 +892,7 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 
 	// Due claim re-scores forward, it does not remove (research 07 §6.1): a
 	// crashed worker's item must recur.
-	_, _ = s.ArmWake("s1", after, 1000, true, "w_b", NoOwnerFence())
+	_, _ = s.ArmWake("s1", after, 1000, true, "w_b", NoOwnerFence(), ConsistencyTierA)
 	due, err := s.DueLeases(subscriptionOwnershipSlot("s1"), after.Add(2*time.Second), 16, 30*time.Second, NoOwnerFence())
 	if err != nil || len(due) != 1 || due[0] != NewLeaseRef("s1", DefaultClaimShard) {
 		t.Fatalf("due = %v err=%v, want [s1]", due, err)
@@ -638,7 +910,7 @@ func TestStoreExpireLeaseClearsDueSetWhenNoPending(t *testing.T) {
 	s, client := newTestStore(t)
 	base := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, base)
-	_, _ = s.ArmWake("s1", base, 1000, true, "w_a", NoOwnerFence())
+	_, _ = s.ArmWake("s1", base, 1000, true, "w_a", NoOwnerFence(), ConsistencyTierA)
 	if members := dueMembers(t, client, "s1"); len(members) != 1 {
 		t.Fatalf("precondition: arm should add due member, got %v", members)
 	}
@@ -654,7 +926,7 @@ func TestStoreReleaseClearsDueSet(t *testing.T) {
 	s, client := newTestStore(t)
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
-	armed, _ := s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence())
+	armed, _ := s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence(), ConsistencyTierA)
 	if members := dueMembers(t, client, "s1"); len(members) != 1 {
 		t.Fatalf("precondition: arm should add due member, got %v", members)
 	}
@@ -672,11 +944,11 @@ func TestStoreStaleAckAfterReleaseDoesNotClearNewDue(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	first, _ := s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence())
+	first, _ := s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence(), ConsistencyTierA)
 	if st, _ := s.Release("s1", ClaimModeLegacy, DefaultClaimShard, first.Generation, first.WakeID, first.Generation, NoOwnerFence()); st != "OK" {
 		t.Fatalf("release first wake = %q, want OK", st)
 	}
-	second, _ := s.ArmWake("s1", now.Add(time.Millisecond), 1000, true, "w_b", NoOwnerFence())
+	second, _ := s.ArmWake("s1", now.Add(time.Millisecond), 1000, true, "w_b", NoOwnerFence(), ConsistencyTierA)
 	if !second.Armed || second.Generation == first.Generation {
 		t.Fatalf("second arm should mint a newer generation, got %+v after %+v", second, first)
 	}
@@ -697,7 +969,7 @@ func TestStoreDeleteClearsDueSet(t *testing.T) {
 	s, client := newTestStore(t)
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
-	_, _ = s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence())
+	_, _ = s.ArmWake("s1", now, 1000, true, "w_a", NoOwnerFence(), ConsistencyTierA)
 	if members := dueMembers(t, client, "s1"); len(members) != 1 {
 		t.Fatalf("precondition: arm should add due member, got %v", members)
 	}
@@ -741,13 +1013,13 @@ func TestClaimExpiredLeaseRotatesFence(t *testing.T) {
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
 	// Worker A claims an idle subscription: mints generation 1, wake w_a.
-	a, err := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-A", "w_a", base, 1000)
+	a, err := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-A", "w_a", base, 1000, ConsistencyTierA)
 	if err != nil || !a.Claimed {
 		t.Fatalf("claim A = %+v err=%v", a, err)
 	}
 	// Worker B claims after A's lease deadline has passed: takeover rotates.
 	after := base.Add(2 * time.Second)
-	b, err := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-B", "w_b", after, 1000)
+	b, err := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-B", "w_b", after, 1000, ConsistencyTierA)
 	if err != nil || !b.Claimed {
 		t.Fatalf("claim B = %+v err=%v", b, err)
 	}
@@ -773,12 +1045,12 @@ func TestClaimUnexpiredLeaseStillBusy(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	a, _ := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-A", "w_a", now, 1000)
+	a, _ := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-A", "w_a", now, 1000, ConsistencyTierA)
 	if !a.Claimed {
 		t.Fatal("worker A should claim the idle subscription")
 	}
 	// B claims while A's lease is still live.
-	b, _ := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-B", "w_b", now, 1000)
+	b, _ := s.Claim("s1", ClaimModeLegacy, DefaultClaimShard, "worker-B", "w_b", now, 1000, ConsistencyTierA)
 	if !b.Busy || b.Holder != "worker-A" {
 		t.Fatalf("unexpired lease should be BUSY held by worker-A, got %+v", b)
 	}
@@ -792,15 +1064,15 @@ func TestClaimShardGranularityAllowsDisjointClaimsAndFences(t *testing.T) {
 	shardA, _ := NewClaimShard(3)
 	shardB, _ := NewClaimShard(7)
 
-	a, err := s.Claim("s1", ClaimModeSharded, shardA, "worker-A", "w_a", now, 1000)
+	a, err := s.Claim("s1", ClaimModeSharded, shardA, "worker-A", "w_a", now, 1000, ConsistencyTierA)
 	if err != nil || !a.Claimed {
 		t.Fatalf("shard A claim = %+v err=%v", a, err)
 	}
-	b, err := s.Claim("s1", ClaimModeSharded, shardB, "worker-B", "w_b", now, 1000)
+	b, err := s.Claim("s1", ClaimModeSharded, shardB, "worker-B", "w_b", now, 1000, ConsistencyTierA)
 	if err != nil || !b.Claimed {
 		t.Fatalf("shard B claim = %+v err=%v", b, err)
 	}
-	if again, _ := s.Claim("s1", ClaimModeSharded, shardA, "worker-C", "w_c", now, 1000); !again.Busy || again.Holder != "worker-A" {
+	if again, _ := s.Claim("s1", ClaimModeSharded, shardA, "worker-C", "w_c", now, 1000, ConsistencyTierA); !again.Busy || again.Holder != "worker-A" {
 		t.Fatalf("same shard should still be single-holder, got %+v", again)
 	}
 	if st, _ := s.Ack("s1", ClaimModeSharded, shardB, a.Generation, a.WakeID, a.Generation, true, nil, now, 1000, NoOwnerFence()); st != "FENCED" {
@@ -1029,17 +1301,18 @@ func TestCompletedMigrationCleansLegacyResidueWithoutOverwritingNewState(t *test
 func createLegacySubForTest(t *testing.T, s *RedisStore, id string, cfg Config, links []StreamLink, now time.Time) {
 	t.Helper()
 	cfg = NormalizeConfig(cfg)
-	args := make([]any, 0, 10+3*len(links))
+	args := make([]any, 0, 12+3*len(links))
 	args = append(
 		args,
 		id, ConfigHash(cfg), nsArg(now),
 		string(cfg.Type), cfg.Pattern, cfg.WebhookURL, cfg.WakeStream,
-		strconv.FormatInt(cfg.LeaseTTLMs, 10), cfg.Description,
-		strconv.Itoa(len(links)),
+		strconv.FormatInt(cfg.LeaseTTLMs, 10), cfg.ConsistencyTier.storageValue(),
+		cfg.Description, strconv.Itoa(len(links)),
 	)
 	for _, l := range links {
 		args = append(args, l.Path, string(l.LinkType), l.AckedOffset)
 	}
+	args = append(args, legacyConfigHash(cfg))
 	if _, err := s.evalStrings(createSubScript, []string{legacySubKey(id), legacySubsKey(), legacyLinksKey(id)}, args...); err != nil {
 		t.Fatal(err)
 	}

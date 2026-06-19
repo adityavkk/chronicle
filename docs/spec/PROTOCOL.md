@@ -856,6 +856,7 @@ Content-Type: application/json
   "webhook": { "url": "https://worker.example/hooks" },
   "wake_stream": "wake/pool",
   "lease_ttl_ms": 30000,
+  "consistency_tier": "A",
   "description": "event processor"
 }
 ```
@@ -870,6 +871,7 @@ Fields:
 | `webhook.url`  | For `type: "webhook"`   | URL that receives wake notifications                              |
 | `wake_stream`  | For `type: "pull-wake"` | Stream-root-relative durable stream path used as the wake channel |
 | `lease_ttl_ms` | No                      | Lease duration, from 1 second to 10 minutes. Default: 30 seconds  |
+| `consistency_tier` | No                  | Durability tier `A`, `B`, or implementation-defined `C`. Default: `A` |
 | `description`  | No                      | Human-readable description                                        |
 
 At least one of `pattern` or `streams` MUST be present. `pattern` uses these glob rules: `*` matches one path segment and `**` matches zero or more path segments.
@@ -882,7 +884,15 @@ Responses:
 | 200    | Existing subscription re-confirmed with an identical configuration. |
 | 409    | Subscription exists with the same ID but a different configuration. |
 
-Servers MUST hash the normalized subscription configuration and compare that hash for idempotent re-confirmation. The hash includes `type`, `pattern`, normalized `streams[]`, delivery configuration, `lease_ttl_ms`, and `description`.
+Servers MUST hash the normalized subscription configuration and compare that hash for idempotent re-confirmation. The hash includes `type`, `pattern`, normalized `streams[]`, delivery configuration, `lease_ttl_ms`, `consistency_tier`, and `description`. Servers that add `consistency_tier` to an existing deployment MAY accept a legacy hash that omitted the field only when the stored subscription has no tier and the requested tier defaults to `A`.
+
+`consistency_tier` controls durability work after the server mints a new subscription generation fence:
+
+- `A`: no extra replication or fsync wait beyond the storage backend's normal acknowledgement path.
+- `B`: active-passive durability. Redis-backed implementations issue `WAIT 1` and `WAITAOF 1 1` after generation-minting writes and fail the operation if the requested replica/fsync acknowledgements are short.
+- `C`: reserved for stronger implementation-specific semantics. Redis `WAIT` and `WAITAOF` are durability mechanisms only and do not provide linearizability or lease exclusivity; Redis-backed implementations SHOULD reject `C` unless they can document stronger semantics.
+
+The monotonic `generation`/`wake_id` fence remains the authority for stale-worker rejection in every tier. Clients and servers MUST NOT treat `WAIT` or `WAITAOF` success as proof of owner or lease exclusivity.
 
 Webhook deliveries are signed by the server using an asymmetric webhook signing key. Webhook subscription responses MUST NOT include shared webhook signing secrets. Webhook public key discovery is described in Section 6.5.
 
@@ -918,6 +928,7 @@ Response:
   "webhook": { "url": "https://worker.example/hooks" },
   "wake_stream": null,
   "lease_ttl_ms": 30000,
+  "consistency_tier": "A",
   "created_at": "2026-05-09T00:00:00.000Z",
   "status": "active",
   "description": "event processor"

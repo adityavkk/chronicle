@@ -90,6 +90,7 @@ func run() error {
 	}
 
 	logLevel := "info"
+	consistencyTier := cfg.ConsistencyTier.String()
 	flag.StringVar(&cfg.Listen, "listen", cfg.Listen, "HTTP listen address")
 	flag.StringVar(&cfg.StreamRoot, "stream-root", cfg.StreamRoot, "URL prefix the protocol is served under")
 	flag.StringVar(&cfg.RedisURL, "redis-url", cfg.RedisURL, "redis connection URL (redis backend)")
@@ -107,9 +108,16 @@ func run() error {
 	flag.DurationVar(&cfg.HeartbeatInterval, "heartbeat-interval", cfg.HeartbeatInterval, "membership heartbeat interval (subscriptions)")
 	flag.DurationVar(&cfg.SlotLeaseTTL, "slot-lease-ttl", cfg.SlotLeaseTTL, "slot ownership lease TTL (subscriptions)")
 	flag.DurationVar(&cfg.SlotReconcileInterval, "slot-reconcile-interval", cfg.SlotReconcileInterval, "slot ownership reconcile interval (subscriptions)")
+	flag.StringVar(&consistencyTier, "consistency-tier", consistencyTier, "default subscription consistency tier: A or B (C is parsed but unsupported on Redis)")
 	flag.StringVar(&cfg.MetricsListen, "metrics-listen", cfg.MetricsListen, "address for /metrics + /healthz + /readyz, e.g. :9090 (empty disables)")
 	flag.StringVar(&logLevel, "log-level", logLevel, "log level: debug, info, warn or error")
 	flag.Parse()
+
+	parsedTier, err := webhook.ParseConsistencyTier(consistencyTier)
+	if err != nil {
+		return fmt.Errorf("invalid -consistency-tier %q: %w", consistencyTier, err)
+	}
+	cfg.ConsistencyTier = parsedTier
 
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(logLevel)); err != nil {
@@ -175,6 +183,7 @@ func run() error {
 			HeartbeatInterval:     cfg.HeartbeatInterval,
 			SlotLeaseTTL:          cfg.SlotLeaseTTL,
 			SlotReconcileInterval: cfg.SlotReconcileInterval,
+			ConsistencyTier:       cfg.ConsistencyTier,
 			Metrics:               subMetrics,
 		}
 		router, service, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)

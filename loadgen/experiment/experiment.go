@@ -8,6 +8,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"strings"
 	"text/template"
 
 	"gopkg.in/yaml.v3"
@@ -40,6 +41,9 @@ type SUT struct {
 	Namespace     string `yaml:"namespace"`
 	SweepInterval string `yaml:"sweep_interval"`
 	SweepBatch    int    `yaml:"sweep_batch"`
+	// ConsistencyTier is the deployment default for subscription creates in the
+	// SUT. Use B for active-passive DR runs that exercise WAIT/WAITAOF.
+	ConsistencyTier string `yaml:"consistency_tier"`
 	// RedisURL is the managed Redis 8 URL. Leave empty to use the Memorystore
 	// instance Terraform provisions (fill it in from the redis_url output), or
 	// set it to production's managed Redis 8 so the numbers transfer.
@@ -80,6 +84,9 @@ func (s *Spec) applyDefaults() {
 	if s.SUT.SweepInterval == "" {
 		s.SUT.SweepInterval = "30s"
 	}
+	if s.SUT.ConsistencyTier == "" {
+		s.SUT.ConsistencyTier = "A"
+	}
 	if s.SUT.CPU == "" {
 		s.SUT.CPU = "2"
 	}
@@ -91,7 +98,7 @@ func (s *Spec) applyDefaults() {
 	}
 }
 
-func (s Spec) validate() error {
+func (s *Spec) validate() error {
 	if s.SUT.Image == "" {
 		return fmt.Errorf("sut.image is required")
 	}
@@ -101,6 +108,14 @@ func (s Spec) validate() error {
 	if _, err := s.Workload.Prepared(); err != nil {
 		return fmt.Errorf("workload: %w", err)
 	}
+	switch strings.ToUpper(strings.TrimSpace(s.SUT.ConsistencyTier)) {
+	case "A", "B":
+	case "C":
+		return fmt.Errorf("sut.consistency_tier C is unsupported on Redis")
+	default:
+		return fmt.Errorf("sut.consistency_tier must be A or B, got %q", s.SUT.ConsistencyTier)
+	}
+	s.SUT.ConsistencyTier = strings.ToUpper(strings.TrimSpace(s.SUT.ConsistencyTier))
 	return nil
 }
 

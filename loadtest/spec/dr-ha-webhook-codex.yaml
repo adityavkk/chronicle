@@ -1,0 +1,30 @@
+# Full-system active-passive DR/load variant for #16.
+# Requires a STANDARD_HA / managed Redis 8-compatible endpoint. The Terraform
+# path defaults to STANDARD_HA; if using production's managed Redis 8, render
+# with -redis-url instead of hand-editing this file.
+name: dr-ha-webhook-codex
+
+loadgen_image: REGISTRY/chronicle-loadgen:TAG
+
+sut:
+  image: REGISTRY/chronicle:TAG
+  replicas: 2
+  namespace: chronicle-loadtest-codex
+  sweep_interval: 30s
+  sweep_batch: 0
+  consistency_tier: B
+  redis_url: "" # fill from STANDARD_HA terraform output or managed Redis 8
+  cpu: "2"
+  memory: 2Gi
+
+workload:
+  subscriptions: 10000
+  links_per_sub: 5
+  dispatch: webhook
+  webhook_url: http://webhook-receiver-codex.chronicle-loadtest-codex.svc.cluster.local/hook
+  warmup: 30s
+  measure: 300s
+
+slo:
+  sweep_p99_ms: 1500
+  max_seed_errors: 0

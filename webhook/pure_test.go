@@ -73,6 +73,11 @@ func TestConfigHashIdempotentAndOrderIndependent(t *testing.T) {
 	if ConfigHash(z) != ConfigHash(d) {
 		t.Fatal("clamped lease TTL must be hashed, so 0 == default")
 	}
+	tierB := a
+	tierB.ConsistencyTier = ConsistencyTierB
+	if ConfigHash(a) == ConfigHash(tierB) {
+		t.Fatal("different consistency tier must change the config hash")
+	}
 }
 
 func TestConfigHashFieldBoundaries(t *testing.T) {
@@ -98,12 +103,80 @@ func TestValidateConfig(t *testing.T) {
 		{"no pattern or streams", Config{Type: DispatchWebhook, WebhookURL: "https://x/h"}, true},
 		{"webhook without url", Config{Type: DispatchWebhook, Pattern: "events/*"}, true},
 		{"pullwake without wake_stream", Config{Type: DispatchPullWake, Pattern: "events/*"}, true},
+		{"unsupported tier C", Config{Type: DispatchWebhook, Pattern: "events/*", WebhookURL: "https://x/h", ConsistencyTier: ConsistencyTierC}, true},
 	}
 	for _, c := range cases {
 		got := ValidateConfig(NormalizeConfig(c.cfg)) != ""
 		if got != c.wantErr {
 			t.Errorf("%s: got err=%v want %v", c.name, got, c.wantErr)
 		}
+	}
+}
+
+func TestConsistencyTierParsingDefaultingAndPolicy(t *testing.T) {
+	unspecified, err := ParseConsistencyTier("")
+	if err != nil || unspecified != ConsistencyTierUnspecified {
+		t.Fatalf("empty tier parse = %v/%v, want unspecified nil", unspecified, err)
+	}
+	tierB, err := ParseConsistencyTier("b")
+	if err != nil || tierB != ConsistencyTierB {
+		t.Fatalf("tier b parse = %v/%v, want B", tierB, err)
+	}
+	if _, err := ParseConsistencyTier("strong"); err == nil {
+		t.Fatal("unknown tier should be rejected")
+	}
+	if got := NormalizeConsistencyTier(ConsistencyTierUnspecified, ConsistencyTierB); got != ConsistencyTierB {
+		t.Fatalf("defaulted tier = %s, want B", got)
+	}
+	if reason := ValidateConsistencyTier(ConsistencyTierC); reason == "" {
+		t.Fatal("tier C must be explicit but unsupported on Redis")
+	}
+	a, err := fenceDurabilityForTier(ConsistencyTierA)
+	if err != nil || a.enabled() {
+		t.Fatalf("tier A policy = %+v err=%v, want disabled", a, err)
+	}
+	b, err := fenceDurabilityForTier(ConsistencyTierB)
+	if err != nil || b.waitReplicas != 1 || b.aofLocal != 1 || b.aofReplicas != 1 {
+		t.Fatalf("tier B policy = %+v err=%v, want WAIT 1 + WAITAOF 1 1", b, err)
+	}
+}
+
+func TestConsistencyTierDoesNotGrantLeaseAuthority(t *testing.T) {
+	policy, err := fenceDurabilityForTier(ConsistencyTierB)
+	if err != nil || !policy.enabled() {
+		t.Fatalf("tier B policy unavailable: %+v err=%v", policy, err)
+	}
+	current := ClaimLeaseState{Generation: 2, WakeID: "w_current"}
+	if got := FenceLeaseDecision(current, 1, "w_old", 1); got != ErrCodeFenced {
+		t.Fatalf("stale generation with durable write policy = %q, want FENCED", got)
+	}
+}
+
+func TestParseCreateConfigConsistencyTier(t *testing.T) {
+	cfg, reason := ParseCreateConfigWithDefault([]byte(`{
+		"type":"webhook",
+		"pattern":"events/*",
+		"webhook":{"url":"https://x/h"}
+	}`), ConsistencyTierB)
+	if reason != "" || cfg.ConsistencyTier != ConsistencyTierB {
+		t.Fatalf("defaulted create config = tier %s reason %q, want B", cfg.ConsistencyTier, reason)
+	}
+	cfg, reason = ParseCreateConfig([]byte(`{
+		"type":"pull-wake",
+		"pattern":"events/*",
+		"wake_stream":"wake/pool",
+		"consistency_tier":"B"
+	}`))
+	if reason != "" || cfg.ConsistencyTier != ConsistencyTierB {
+		t.Fatalf("explicit create config = tier %s reason %q, want B", cfg.ConsistencyTier, reason)
+	}
+	if _, reason = ParseCreateConfig([]byte(`{
+		"type":"webhook",
+		"pattern":"events/*",
+		"webhook":{"url":"https://x/h"},
+		"consistency_tier":"C"
+	}`)); reason == "" {
+		t.Fatal("tier C create request should be rejected on Redis")
 	}
 }
 

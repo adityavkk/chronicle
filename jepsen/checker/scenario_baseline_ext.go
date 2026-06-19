@@ -224,7 +224,7 @@ func subscriptionField(nem *nemesis, id, field string) (string, error) {
 }
 
 func subscriptionFieldCommand(id, field string) []string {
-	return []string{"--raw", "hget", "ds:{__ds}:sub:" + id, field}
+	return []string{"--raw", "hget", checkerSubKey(id), field}
 }
 
 func leaseScheduleMemberPresent(nem *nemesis, id string) (bool, error) {
@@ -237,7 +237,7 @@ func leaseScheduleMemberPresent(nem *nemesis, id string) (bool, error) {
 }
 
 func leaseScheduleScoreCommand(id string) []string {
-	return []string{"--raw", "zscore", "ds:{__ds}:sched:lease", id}
+	return []string{"--raw", "zscore", checkerLeaseZKeyForSub(id), id}
 }
 
 func claimSnapshotCovers(streams []claimStreamSnap, stream, tail string) bool {
@@ -343,7 +343,7 @@ func waitOwnershipTransfer(nem *nemesis, slot int, before ownershipSlotView, tim
 }
 
 func readOwnershipSlot(nem *nemesis, slot int) (ownershipSlotView, error) {
-	key := fmt.Sprintf("ds:{ownership}:slot:%d", slot)
+	key := checkerOwnershipSlotKey(slot)
 	out, err := nem.redisCLI("hgetall", key)
 	if err != nil {
 		return ownershipSlotView{}, err
@@ -360,10 +360,10 @@ func readOwnershipSlot(nem *nemesis, slot int) (ownershipSlotView, error) {
 
 func runSlotIsolation(c config) error {
 	if c.nemDryRun {
-		fmt.Println("DRY RUN: slot-isolation scaffold is installed; live check waits for S-slot {__ds:h} homing")
+		fmt.Println("DRY RUN: slot-isolation pure checker is installed; live T5 still requires the faulted scatter/gather run")
 		return nil
 	}
-	return fmt.Errorf("slot-isolation is a proposed-mechanism scaffold: S-slot {__ds:h} key homing is not implemented in today's SUT")
+	return fmt.Errorf("slot-isolation live T5 is not a dry-run: run against a prepared faulted cluster and feed CheckSlotIsolationT5 observations; this command intentionally fails closed until that driver is complete")
 }
 
 func runContentionContract(c config) error {

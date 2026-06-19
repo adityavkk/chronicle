@@ -98,7 +98,7 @@ func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string
 		writeErr(w, http.StatusBadRequest, ErrCodeInvalidRequest)
 		return
 	}
-	cfg, reason := ParseCreateConfig(body)
+	cfg, reason := ParseCreateConfigWithDefault(body, rt.mgr.consistencyTier)
 	if reason != "" {
 		writeErrMsg(w, ErrCodeInvalidRequest, reason)
 		return
@@ -263,7 +263,7 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	res, err := rt.mgr.store.Claim(id, selection.Mode, selection.Shard, req.Worker, wakeID, time.Now(), sub.Config.LeaseTTLMs)
+	res, err := rt.mgr.store.Claim(id, selection.Mode, selection.Shard, req.Worker, wakeID, time.Now(), sub.Config.LeaseTTLMs, sub.Config.ConsistencyTier)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

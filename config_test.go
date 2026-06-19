@@ -28,6 +28,9 @@ func TestDefaultConfigOwnershipTiming(t *testing.T) {
 		t.Fatalf("ownership defaults = member %s heartbeat %s slot %s reconcile %s",
 			cfg.MemberLeaseTTL, cfg.HeartbeatInterval, cfg.SlotLeaseTTL, cfg.SlotReconcileInterval)
 	}
+	if cfg.ConsistencyTier.String() != "A" {
+		t.Fatalf("default consistency tier = %s, want A", cfg.ConsistencyTier)
+	}
 }
 
 func TestConfigLoadEnvOwnership(t *testing.T) {
@@ -38,6 +41,7 @@ func TestConfigLoadEnvOwnership(t *testing.T) {
 		EnvHeartbeatInterval: "4s",
 		EnvSlotLeaseTTL:      "12s",
 		EnvSlotReconcile:     "2s",
+		EnvConsistencyTier:   "B",
 	}
 	if err := cfg.LoadEnv(func(k string) (string, bool) {
 		v, ok := values[k]
@@ -49,7 +53,21 @@ func TestConfigLoadEnvOwnership(t *testing.T) {
 		cfg.MemberLeaseTTL != 11*time.Second ||
 		cfg.HeartbeatInterval != 4*time.Second ||
 		cfg.SlotLeaseTTL != 12*time.Second ||
-		cfg.SlotReconcileInterval != 2*time.Second {
+		cfg.SlotReconcileInterval != 2*time.Second ||
+		cfg.ConsistencyTier.String() != "B" {
 		t.Fatalf("loaded ownership env = %+v", cfg)
+	}
+}
+
+func TestConfigLoadEnvRejectsInvalidConsistencyTier(t *testing.T) {
+	cfg := DefaultConfig()
+	err := cfg.LoadEnv(func(k string) (string, bool) {
+		if k == EnvConsistencyTier {
+			return "strong", true
+		}
+		return "", false
+	})
+	if err == nil {
+		t.Fatal("invalid consistency tier env should be rejected")
 	}
 }

@@ -66,11 +66,11 @@ type Store interface {
 
 	// ArmWake issues a new wake generation if the subscription is idle; armLease
 	// arms the lease at issue (webhook) versus deferring it to claim (pull-wake).
-	ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, fence OwnershipFence) (ArmResult, error)
+	ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, fence OwnershipFence, tier ConsistencyTier) (ArmResult, error)
 
 	// Claim is the pull-wake compare-and-set claim for one claim shard
 	// (PROTOCOL §7.2 plus Chronicle's shard extension).
-	Claim(id string, mode ClaimMode, shard ClaimShard, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error)
+	Claim(id string, mode ClaimMode, shard ClaimShard, worker, wakeID string, now time.Time, leaseTTLMs int64, tier ConsistencyTier) (ClaimResult, error)
 
 	// Ack fences then applies acks forward-only; done releases the lease, else it
 	// extends the lease as a heartbeat (PROTOCOL §7.1, §7.2).

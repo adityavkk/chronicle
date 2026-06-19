@@ -59,17 +59,17 @@ func TestUnsupportedNemesisPrimitivesDryRun(t *testing.T) {
 }
 
 func TestDropLeaseTailCommandOnlyZREMsLeaseSchedule(t *testing.T) {
-	want := []string{"zrem", "ds:{__ds}:sched:lease", "sub-1"}
+	want := []string{"zrem", "ds:{__ds:91}:sched:lease", "sub-1"}
 	if got := dropLeaseTailCommand("sub-1"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("dropLeaseTailCommand = %#v, want %#v", got, want)
 	}
 }
 
 func TestLeaseTailDropRecoveryProbeCommands(t *testing.T) {
-	if got, want := leaseScheduleScoreCommand("sub-1"), []string{"--raw", "zscore", "ds:{__ds}:sched:lease", "sub-1"}; !reflect.DeepEqual(got, want) {
+	if got, want := leaseScheduleScoreCommand("sub-1"), []string{"--raw", "zscore", "ds:{__ds:91}:sched:lease", "sub-1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("leaseScheduleScoreCommand = %#v, want %#v", got, want)
 	}
-	if got, want := subscriptionFieldCommand("sub-1", "phase"), []string{"--raw", "hget", "ds:{__ds}:sub:sub-1", "phase"}; !reflect.DeepEqual(got, want) {
+	if got, want := subscriptionFieldCommand("sub-1", "phase"), []string{"--raw", "hget", "ds:{__ds:91}:sub:sub-1", "phase"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("subscriptionFieldCommand = %#v, want %#v", got, want)
 	}
 }

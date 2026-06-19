@@ -98,6 +98,9 @@ type ManagerOptions struct {
 	// SlotReconcileInterval is how often HRW assignment is recomputed and slot
 	// leases are claimed or renewed.
 	SlotReconcileInterval time.Duration
+	// ConsistencyTier is the deployment default for new subscriptions whose
+	// create request omits consistency_tier.
+	ConsistencyTier ConsistencyTier
 	// AllowPrivateWebhookTargets relaxes SSRF validation to accept any http(s)
 	// webhook URL (e.g. cluster-internal receivers on RFC1918 addresses). Off by
 	// default; the operator opts in for trusted networks.
@@ -132,6 +135,7 @@ type Manager struct {
 	heartbeatInterval time.Duration
 	slotLeaseTTL      time.Duration
 	slotReconcile     time.Duration
+	consistencyTier   ConsistencyTier
 	allowPrivate      bool
 	metrics           Metrics
 
@@ -182,6 +186,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		heartbeatInterval: opts.HeartbeatInterval,
 		slotLeaseTTL:      opts.SlotLeaseTTL,
 		slotReconcile:     opts.SlotReconcileInterval,
+		consistencyTier:   NormalizeConsistencyTier(opts.ConsistencyTier, defaultConsistencyTier),
 		allowPrivate:      opts.AllowPrivateWebhookTargets,
 		metrics:           opts.Metrics,
 		stop:              make(chan struct{}),
@@ -223,6 +228,9 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 	}
 	if err := validateOwnershipTiming(m.memberLeaseTTL, m.heartbeatInterval, m.slotLeaseTTL, m.slotReconcile); err != nil {
 		return nil, err
+	}
+	if reason := ValidateConsistencyTier(m.consistencyTier); reason != "" {
+		return nil, errors.New(reason)
 	}
 	return m, nil
 }
@@ -345,7 +353,7 @@ func (m *Manager) issueWake(sub Subscription, triggerStream string, fence Owners
 		return false
 	}
 	armLease := sub.Config.Type == DispatchWebhook
-	res, err := m.store.ArmWake(sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID, fence)
+	res, err := m.store.ArmWake(sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID, fence, sub.Config.ConsistencyTier)
 	if err != nil {
 		m.log.Warn("webhook: arm wake", "sub", sub.ID, "error", err)
 		m.reconcile(recoveryScopeAppendError)

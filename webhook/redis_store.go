@@ -333,11 +333,122 @@ func (s *RedisStore) evalStrings(script *redis.Script, keys []string, args ...an
 	if err := validateSingleHashTag(keys); err != nil {
 		return nil, err
 	}
-	raw, err := script.Run(s.ctx(), s.client, keys, args...).Result()
+	raw, err := s.runScript(s.client, script, keys, args...)
 	if err != nil {
 		return nil, err
 	}
 	return decodeScriptStrings(raw)
+}
+
+func (s *RedisStore) runScript(c redis.Scripter, script *redis.Script, keys []string, args ...any) (any, error) {
+	return script.Run(s.ctx(), c, keys, args...).Result()
+}
+
+type pinnedRedisClient interface {
+	Conn() *redis.Conn
+}
+
+type fenceDurabilityClient interface {
+	redis.Scripter
+	Wait(context.Context, int, time.Duration) *redis.IntCmd
+	Process(context.Context, redis.Cmder) error
+}
+
+func (s *RedisStore) evalFenceMintingStrings(tier ConsistencyTier, script *redis.Script, keys []string, minted func([]string) bool, args ...any) ([]string, error) {
+	policy, err := fenceDurabilityForTier(tier)
+	if err != nil {
+		return nil, err
+	}
+	if !policy.enabled() {
+		return s.evalStrings(script, keys, args...)
+	}
+	if err := validateSingleHashTag(keys); err != nil {
+		return nil, err
+	}
+	pinner, ok := s.client.(pinnedRedisClient)
+	if !ok {
+		return nil, fmt.Errorf("webhook: consistency tier %s requires a Redis client with pinned connections", tier)
+	}
+	conn := pinner.Conn()
+	defer func() { _ = conn.Close() }()
+	raw, err := s.runScript(conn, script, keys, args...)
+	if err != nil {
+		return nil, err
+	}
+	reply, err := decodeScriptStrings(raw)
+	if err != nil {
+		return nil, err
+	}
+	if minted(reply) {
+		if err := ensureFenceDurability(s.ctx(), conn, policy); err != nil {
+			return nil, err
+		}
+	}
+	return reply, nil
+}
+
+func ensureFenceDurability(ctx context.Context, client fenceDurabilityClient, policy fenceDurabilityPolicy) error {
+	if policy.waitReplicas > 0 {
+		got, err := client.Wait(ctx, policy.waitReplicas, policy.timeout).Result()
+		if err != nil {
+			return fmt.Errorf("redis WAIT %d: %w", policy.waitReplicas, err)
+		}
+		if got < int64(policy.waitReplicas) {
+			return fmt.Errorf("redis WAIT acknowledged %d replica(s), want %d", got, policy.waitReplicas)
+		}
+	}
+	if policy.aofLocal > 0 || policy.aofReplicas > 0 {
+		local, replicas, err := waitAOF(ctx, client, policy.aofLocal, policy.aofReplicas, policy.timeout)
+		if err != nil {
+			return fmt.Errorf("redis WAITAOF %d %d: %w", policy.aofLocal, policy.aofReplicas, err)
+		}
+		if local < int64(policy.aofLocal) || replicas < int64(policy.aofReplicas) {
+			return fmt.Errorf("redis WAITAOF acknowledged local=%d replica=%d, want local=%d replica=%d",
+				local, replicas, policy.aofLocal, policy.aofReplicas)
+		}
+	}
+	return nil
+}
+
+func waitAOF(ctx context.Context, client fenceDurabilityClient, numLocal, numReplicas int, timeout time.Duration) (int64, int64, error) {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout+500*time.Millisecond)
+		defer cancel()
+	}
+	cmd := redis.NewSliceCmd(ctx, "waitaof", numLocal, numReplicas, int(timeout/time.Millisecond))
+	if err := client.Process(ctx, cmd); err != nil {
+		return 0, 0, err
+	}
+	reply, err := cmd.Result()
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(reply) != 2 {
+		return 0, 0, fmt.Errorf("unexpected reply %v", reply)
+	}
+	local, err := waitAOFCount(reply[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("local count: %w", err)
+	}
+	replicas, err := waitAOFCount(reply[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("replica count: %w", err)
+	}
+	return local, replicas, nil
+}
+
+func waitAOFCount(v any) (int64, error) {
+	switch n := v.(type) {
+	case int64:
+		return n, nil
+	case int:
+		return int64(n), nil
+	case string:
+		return strconv.ParseInt(n, 10, 64)
+	default:
+		return 0, fmt.Errorf("unexpected type %T", v)
+	}
 }
 
 func decodeScriptStrings(raw any) ([]string, error) {
@@ -369,17 +480,18 @@ func (s *RedisStore) CreateOrConfirm(id string, cfg Config, links []StreamLink, 
 	}
 	k := keysForSubscription(id)
 	cfg = NormalizeConfig(cfg)
-	args := make([]any, 0, 10+3*len(links))
+	args := make([]any, 0, 12+3*len(links))
 	args = append(
 		args,
 		id, ConfigHash(cfg), nsArg(now),
 		string(cfg.Type), cfg.Pattern, cfg.WebhookURL, cfg.WakeStream,
-		strconv.FormatInt(cfg.LeaseTTLMs, 10), cfg.Description,
-		strconv.Itoa(len(links)),
+		strconv.FormatInt(cfg.LeaseTTLMs, 10), cfg.ConsistencyTier.storageValue(),
+		cfg.Description, strconv.Itoa(len(links)),
 	)
 	for _, l := range links {
 		args = append(args, l.Path, string(l.LinkType), l.AckedOffset)
 	}
+	args = append(args, legacyConfigHash(cfg))
 	reply, err := s.evalStrings(createSubScript, []string{k.sub, k.subs, k.links}, args...)
 	if err != nil {
 		return 0, err
@@ -867,7 +979,7 @@ func stringSliceToAny(values []string) []any {
 }
 
 // ArmWake issues a wake if idle.
-func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, fence OwnershipFence) (ArmResult, error) {
+func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, fence OwnershipFence, tier ConsistencyTier) (ArmResult, error) {
 	if err := s.migrateSubscription(id); err != nil {
 		return ArmResult{}, err
 	}
@@ -877,7 +989,8 @@ func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLeas
 		arm = "1"
 	}
 	ownerID, ownerEpoch := fenceArgs(fence)
-	reply, err := s.evalStrings(armWakeScript, []string{k.sub, k.lease, k.due, fenceKey(fence, k.sub)},
+	reply, err := s.evalFenceMintingStrings(tier, armWakeScript, []string{k.sub, k.lease, k.due, fenceKey(fence, k.sub)},
+		func(reply []string) bool { return len(reply) > 0 && reply[0] == "ARMED" },
 		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID, ownerID, ownerEpoch)
 	if err != nil {
 		return ArmResult{}, err
@@ -899,13 +1012,14 @@ func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLeas
 }
 
 // Claim runs the pull-wake CAS claim.
-func (s *RedisStore) Claim(id string, mode ClaimMode, shard ClaimShard, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+func (s *RedisStore) Claim(id string, mode ClaimMode, shard ClaimShard, worker, wakeID string, now time.Time, leaseTTLMs int64, tier ConsistencyTier) (ClaimResult, error) {
 	if err := s.migrateSubscription(id); err != nil {
 		return ClaimResult{}, err
 	}
 	k := keysForSubscription(id)
 	ref := NewLeaseRef(id, shard)
-	reply, err := s.evalStrings(claimScript, []string{k.sub, k.lease},
+	reply, err := s.evalFenceMintingStrings(tier, claimScript, []string{k.sub, k.lease},
+		func(reply []string) bool { return len(reply) > 5 && reply[0] == "CLAIMED" && reply[5] == "1" },
 		id, worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID, shard.String(), ref.Member(), mode.String())
 	if err != nil {
 		return ClaimResult{}, err
@@ -1225,12 +1339,13 @@ func subscriptionFromHash(id string, f map[string]string, linkFields map[string]
 	sub := Subscription{
 		ID: id,
 		Config: Config{
-			Type:        DispatchType(f["type"]),
-			Pattern:     f["pattern"],
-			WebhookURL:  f["webhook_url"],
-			WakeStream:  f["wake_stream"],
-			LeaseTTLMs:  atoi("lease_ttl_ms"),
-			Description: f["description"],
+			Type:            DispatchType(f["type"]),
+			Pattern:         f["pattern"],
+			WebhookURL:      f["webhook_url"],
+			WakeStream:      f["wake_stream"],
+			LeaseTTLMs:      atoi("lease_ttl_ms"),
+			ConsistencyTier: consistencyTierFromHash(f),
+			Description:     f["description"],
 		},
 		CfgHash:         f["cfg_hash"],
 		CreatedAt:       time.Unix(0, createdNs),
@@ -1269,6 +1384,14 @@ func claimLeasesFromHash(f map[string]string, atoi func(string) int64) []ClaimSh
 		}
 	}
 	return leases
+}
+
+func consistencyTierFromHash(f map[string]string) ConsistencyTier {
+	tier, err := ParseConsistencyTier(f["consistency_tier"])
+	if err != nil || tier == ConsistencyTierUnspecified {
+		return defaultConsistencyTier
+	}
+	return tier
 }
 
 func claimLeaseFromHash(f map[string]string, shard ClaimShard, atoi func(string) int64) (ClaimLeaseState, bool) {

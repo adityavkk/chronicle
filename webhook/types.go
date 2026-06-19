@@ -93,13 +93,17 @@ const (
 // idempotent re-confirmation (PROTOCOL §6.2). Streams is normalized (sorted,
 // deduplicated) so the hash is order-independent.
 type Config struct {
-	Type        DispatchType
-	Pattern     string
-	Streams     []string
-	WebhookURL  string
-	WakeStream  string
-	LeaseTTLMs  int64
-	Description string
+	Type       DispatchType
+	Pattern    string
+	Streams    []string
+	WebhookURL string
+	WakeStream string
+	LeaseTTLMs int64
+	// ConsistencyTier controls durability work after generation-minting writes.
+	// It does not participate in ownership or lease exclusivity; the monotonic
+	// generation fence remains that safety boundary.
+	ConsistencyTier ConsistencyTier
+	Description     string
 }
 
 // Subscription is a full subscription record: immutable Config plus the durable

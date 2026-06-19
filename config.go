@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
 // Environment variables recognized by Config.LoadEnv. Precedence in
@@ -25,6 +27,7 @@ const (
 	EnvHeartbeatInterval    = "CHRONICLE_HEARTBEAT_INTERVAL"
 	EnvSlotLeaseTTL         = "CHRONICLE_SLOT_LEASE_TTL"
 	EnvSlotReconcile        = "CHRONICLE_SLOT_RECONCILE_INTERVAL"
+	EnvConsistencyTier      = "CHRONICLE_CONSISTENCY_TIER"
 	EnvMetricsListen        = "CHRONICLE_METRICS_LISTEN"
 )
 
@@ -98,6 +101,11 @@ type Config struct {
 	SlotLeaseTTL          time.Duration
 	SlotReconcileInterval time.Duration
 
+	// ConsistencyTier is the default for new subscriptions that omit
+	// consistency_tier. Tier A is default; Tier B adds WAIT/WAITAOF after
+	// generation-minting writes; Tier C is parsed but rejected on Redis.
+	ConsistencyTier webhook.ConsistencyTier
+
 	// MetricsListen is the address for the observability server (/metrics,
 	// /healthz, /readyz). Empty (the default) disables it; a load-test or
 	// production deployment sets e.g. ":9090".
@@ -123,6 +131,7 @@ func DefaultConfig() Config {
 		HeartbeatInterval:     3 * time.Second,
 		SlotLeaseTTL:          9 * time.Second,
 		SlotReconcileInterval: 3 * time.Second,
+		ConsistencyTier:       webhook.ConsistencyTierA,
 	}
 }
 
@@ -212,6 +221,13 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvSlotReconcile, err)
 		}
 		c.SlotReconcileInterval = d
+	}
+	if v, ok := lookup(EnvConsistencyTier); ok {
+		tier, err := webhook.ParseConsistencyTier(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvConsistencyTier, err)
+		}
+		c.ConsistencyTier = tier
 	}
 	if v, ok := lookup(EnvMetricsListen); ok {
 		c.MetricsListen = v

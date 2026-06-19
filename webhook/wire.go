@@ -19,6 +19,7 @@ type createRequest struct {
 	} `json:"webhook"`
 	WakeStream  string `json:"wake_stream"`
 	LeaseTTLMs  int64  `json:"lease_ttl_ms"`
+	Consistency string `json:"consistency_tier"`
 	Description string `json:"description"`
 }
 
@@ -26,22 +27,33 @@ type createRequest struct {
 // A non-empty reason means the request is a 400; SSRF validation of the webhook
 // URL is the caller's separate step (ClassifyWebhookURL).
 func ParseCreateConfig(body []byte) (Config, string) {
+	return ParseCreateConfigWithDefault(body, defaultConsistencyTier)
+}
+
+// ParseCreateConfigWithDefault decodes a PUT body and applies the deployment
+// consistency tier when the request omits one.
+func ParseCreateConfigWithDefault(body []byte, deploymentTier ConsistencyTier) (Config, string) {
 	var req createRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		return Config{}, "invalid JSON body"
 	}
+	tier, err := ParseConsistencyTier(req.Consistency)
+	if err != nil {
+		return Config{}, err.Error()
+	}
 	c := Config{
-		Type:        req.Type,
-		Pattern:     req.Pattern,
-		Streams:     req.Streams,
-		WakeStream:  req.WakeStream,
-		LeaseTTLMs:  req.LeaseTTLMs,
-		Description: req.Description,
+		Type:            req.Type,
+		Pattern:         req.Pattern,
+		Streams:         req.Streams,
+		WakeStream:      req.WakeStream,
+		LeaseTTLMs:      req.LeaseTTLMs,
+		ConsistencyTier: tier,
+		Description:     req.Description,
 	}
 	if req.Webhook != nil {
 		c.WebhookURL = req.Webhook.URL
 	}
-	c = NormalizeConfig(c)
+	c = NormalizeConfigWithDefault(c, deploymentTier)
 	if reason := ValidateConfig(c); reason != "" {
 		return Config{}, reason
 	}
@@ -80,6 +92,7 @@ type SubscriptionView struct {
 	Webhook        *HookView        `json:"webhook,omitempty"`
 	WakeStream     *string          `json:"wake_stream"`
 	LeaseTTLMs     int64            `json:"lease_ttl_ms"`
+	Consistency    string           `json:"consistency_tier"`
 	CreatedAt      string           `json:"created_at"`
 	Status         Status           `json:"status"`
 	Description    string           `json:"description,omitempty"`
@@ -95,6 +108,7 @@ func BuildSubscriptionView(sub Subscription, signing *SigningView) SubscriptionV
 		Pattern:        sub.Config.Pattern,
 		Streams:        linkViews(sub.Links),
 		LeaseTTLMs:     sub.Config.LeaseTTLMs,
+		Consistency:    sub.Config.ConsistencyTier.storageValue(),
 		CreatedAt:      sub.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z07:00"),
 		Status:         sub.Status,
 		Description:    sub.Config.Description,

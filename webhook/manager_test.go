@@ -86,7 +86,7 @@ func TestRecordWakeEventSentFences(t *testing.T) {
 	s, _ := newTestStore(t)
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
-	res, err := s.ArmWake("s1", now, 1000, false, "w_a", NoOwnerFence())
+	res, err := s.ArmWake("s1", now, 1000, false, "w_a", NoOwnerFence(), ConsistencyTierA)
 	if err != nil || !res.Armed {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
@@ -121,7 +121,7 @@ func TestSweepReemitsStrandedPullWake(t *testing.T) {
 
 	// Simulate "arm, then crash before the wake-stream append": ArmWake sets
 	// phase=waking and wake_event_sent_ns=0, but no event is written.
-	res, err := store.ArmWake("s1", now, 1000, false, "w_a", NoOwnerFence())
+	res, err := store.ArmWake("s1", now, 1000, false, "w_a", NoOwnerFence(), ConsistencyTierA)
 	if err != nil || !res.Armed {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
@@ -206,7 +206,7 @@ func TestExpiredNonzeroClaimShardRewakesPendingStreams(t *testing.T) {
 	fs.tails[path] = "0000000000000001_0000000000000000"
 	fs.mu.Unlock()
 
-	claimed, err := store.Claim("s1", ClaimModeSharded, shard, "worker-shard", "w_shard", now, 1000)
+	claimed, err := store.Claim("s1", ClaimModeSharded, shard, "worker-shard", "w_shard", now, 1000, ConsistencyTierA)
 	if err != nil || !claimed.Claimed {
 		t.Fatalf("claim shard %d = %+v err=%v", shard.Int(), claimed, err)
 	}
@@ -395,7 +395,7 @@ func TestRecoveryScopesRunExactlyOneSweepPath(t *testing.T) {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
 	if fm.sweeps != 4 {
-		t.Fatalf("ownership stub scopes should not run the full sweep before #14, got %d sweeps", fm.sweeps)
+		t.Fatalf("ownership transfer scopes should run lease repair, not the full sweep; got %d sweeps", fm.sweeps)
 	}
 }
 
@@ -460,7 +460,7 @@ func TestDeadMemberAgesOutAndSlotReclaimsAfterLeaseExpiry(t *testing.T) {
 	if _, err := store.CreateOrConfirm("reconcile-on-claim", pullWakeCfg(), nil, base); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.Claim("reconcile-on-claim", ClaimModeLegacy, DefaultClaimShard, "worker", "w_reconcile", base, 1000)
+	claimed, err := store.Claim("reconcile-on-claim", ClaimModeLegacy, DefaultClaimShard, "worker", "w_reconcile", base, 1000, ConsistencyTierA)
 	if err != nil || !claimed.Claimed {
 		t.Fatalf("precondition claim = %+v err=%v", claimed, err)
 	}
@@ -618,7 +618,7 @@ func TestReconcileLeasesRestoresDroppedLeaseAndDueFromDurableState(t *testing.T)
 	if err := store.Link(id, path, LinkGlob, begin); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.Claim(id, ClaimModeLegacy, DefaultClaimShard, "worker-A", "w_a", now, 1000)
+	claimed, err := store.Claim(id, ClaimModeLegacy, DefaultClaimShard, "worker-A", "w_a", now, 1000, ConsistencyTierA)
 	if err != nil || !claimed.Claimed {
 		t.Fatalf("claim = %+v err=%v", claimed, err)
 	}
@@ -674,7 +674,7 @@ func TestRedisReconnectRepairsDroppedNonDefaultClaimShardLease(t *testing.T) {
 	if err := store.Link(id, path, LinkGlob, begin); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.Claim(id, ClaimModeSharded, shard, "worker-shard", "w_sharded", now, 1000)
+	claimed, err := store.Claim(id, ClaimModeSharded, shard, "worker-shard", "w_sharded", now, 1000, ConsistencyTierA)
 	if err != nil || !claimed.Claimed {
 		t.Fatalf("claim shard %d = %+v err=%v", shard.Int(), claimed, err)
 	}
@@ -782,7 +782,7 @@ func TestDueWorkerCoalescesBusyDueMark(t *testing.T) {
 	fs.mu.Lock()
 	fs.tails["events/1"] = "0000000000000001_0000000000000000"
 	fs.mu.Unlock()
-	if res, err := store.ArmWake("s1", now, 1000, false, "w_a", NoOwnerFence()); err != nil || !res.Armed {
+	if res, err := store.ArmWake("s1", now, 1000, false, "w_a", NoOwnerFence(), ConsistencyTierA); err != nil || !res.Armed {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
 

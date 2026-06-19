@@ -97,6 +97,47 @@ GKE replicas>=2 pod-kill coverage-gap load gate. Those require a healthy k3d or
 GKE fault-injection environment and should not be inferred from the local Redis
 evidence above.
 
+## #16 DR capstone local evidence — 2026-06-18
+
+Commands run from `/Users/auk000v/orca/workspaces/chronicle/hs-16-dr-capstone`:
+
+```sh
+go test -count=1 -short ./...
+go test -race -count=1 -short ./...
+go test -count=1 ./webhook ./metrics ./jepsen/checker
+(cd loadgen && go test -count=1 ./...)
+(cd loadgen && go run ./cmd/render -spec ../loadtest/spec/dr-ha-webhook-codex.yaml \
+  -image example.com/chronicle:codex \
+  -loadgen-image example.com/chronicle-loadgen:codex \
+  -redis-url redis://standard-ha-codex.example:6379/0)
+```
+
+Observed local results:
+
+| Gate | Evidence | Result |
+| --- | --- | --- |
+| Consistency tiers | `webhook.ConsistencyTier` parses/defaults A/B/C as typed values; validation rejects C on Redis with an explicit durability-only reason. Config/env/flag/create-request paths all store `consistency_tier`, and legacy missing-tier hashes re-confirm as Tier A only. | **PASS** |
+| Tier A/B fence durability | Redis integration tests prove Tier A does not issue `WAIT`/`WAITAOF`; Tier B issues `WAIT 1` and raw `WAITAOF 1 1` only after `arm_wake.lua` or `claim.lua` actually mints a generation. Short `WAIT` and short `WAITAOF` local/replica pairs return errors. | **PASS** |
+| Durability is not authority | `TestStoreTierBDurabilityDoesNotReplaceGenerationFence` forces a Tier B takeover after the first worker's lease lapses; the old generation's later ack is still `FENCED`. The code does not use `WAIT` or `WAITAOF` as a lease/owner exclusivity signal. | **PASS** |
+| Promotion / eager reconcile | `TestDeadMemberAgesOutAndSlotReclaimsAfterLeaseExpiry`, `TestReconcileLeasesRestoresDroppedLeaseAndDueFromDurableState`, and `TestRedisReconnectRepairsDroppedNonDefaultClaimShardLease` cover epoch-bump/reconnect repair of missing lease and due schedule entries from durable HASH state for live/waking leases. Existing owner-fence tests still prove deposed owner writes are rejected. | **PASS** |
+| Checker classifications | `jepsen/checker` now has pure classifiers and tests for T5 slot isolation, L2 bounded recovery, L4 ownership convergence, and L5 max inter-delivery gap under pending work. These are classifier tests, not live nemesis results. | **PASS / LOCAL ONLY** |
+| Local Redis integration | `go test -count=1 ./webhook ./metrics ./jepsen/checker` passed, including Redis-backed Tier A/B durability paths, slot-homed migration/build checks, promotion repair, deposed ack fencing, metrics, and checker tests. | **PASS** |
+| HA load render path | `loadtest/spec/dr-ha-webhook-codex.yaml` renders a 2-replica Tier B SUT in namespace `chronicle-loadtest-codex` with `CHRONICLE_CONSISTENCY_TIER=B`, a STANDARD_HA-compatible Redis URL override, and webhook receiver URL `webhook-receiver-codex...`. | **PASS / RENDER ONLY** |
+
+Blocked or not claimed green:
+
+| Gate | Status |
+| --- | --- |
+| Full T1-T5, L1-L5 live Jepsen suite | **BLOCKED / NOT RUN** in this worker. The local checker and Redis tests passed, but no k3d or cloud fault-injection cluster was started for #16. Do not infer T1-T5 or L1-L5 live GREEN from this section. |
+| L5 combined never-quiescing nemesis | **BLOCKED / NOT RUN**. The L5 classifier exists, but the combined `kill-slot-owner + partition/heal + redis-failover + lease-tail-drop near R` scenario still needs a live harness run. |
+| C1-C3 | **UNCHANGED** from the #10/#15 notes: local rate-contract/checker pieces exist, but the live claimant fan-in and C3 granularity stress are not recorded green here. |
+| Gate #5 real failover | **BLOCKED** before provisioning. Read-only GCP preflights from this workspace failed: Compute quota inspection was prohibited by organization policy (`vpcServiceControlsUniqueIdentifier: J6OZ1osBAlaRnbh5admsDmQq4dVPl9nCgUI4StWAyLr9AMW2Oi6rsT_vY7wvK8mJnqz_Uwfwz4dCxGA`), and `gcloud redis instances list --region=us-central1` failed with `PERMISSION_DENIED` / `SERVICE_DISABLED` for `redis.googleapis.com` in project `adityavkk-prototyping`. No RPO/RTO number is recorded. |
+| Single Redis Recreate | **NOT A GATE #5 PASS**. The existing k3d deployment's single Redis `Recreate` path remains useful for AOF replay and reconnect repair, but it is not active-passive failover and is not reported as STANDARD_HA / managed Redis 8 evidence. |
+
+Resource note: no cloud, k3d, Kubernetes namespace, or Docker resource was
+created for the #16 evidence run. Redis integration used the locally reachable
+test Redis URL; no `-codex` container or volume was started by this worker.
+
 ## #15 local slot-homing evidence — 2026-06-18
 
 Commands run from `/Users/auk000v/orca/workspaces/chronicle/hs-15-slot-homing`:

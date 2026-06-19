@@ -27,6 +27,9 @@ spec:
             - "-subscriptions={{.Workload.Subscriptions}}"
             - "-links-per-sub={{.Workload.LinksPerSub}}"
             - "-dispatch={{.Workload.Dispatch}}"
+            {{- if .Workload.WebhookURL }}
+            - "-webhook-url={{.Workload.WebhookURL}}"
+            {{- end }}
             - "-warmup={{.Workload.Warmup}}"
             - "-measure={{.Workload.Measure}}"
             - "-slo-p99-ms={{.SLO.SweepP99Ms}}"

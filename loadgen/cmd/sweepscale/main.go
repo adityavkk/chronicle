@@ -33,6 +33,7 @@ func run() int {
 	subs := flag.Int("subscriptions", 0, "override: K subscriptions")
 	links := flag.Int("links-per-sub", 0, "override: P links per subscription")
 	dispatch := flag.String("dispatch", "", "override: pull-wake or webhook")
+	webhookURL := flag.String("webhook-url", "", "override: webhook receiver URL for dispatch=webhook")
 	warmup := flag.Duration("warmup", 0, "override: settle time after seeding")
 	measure := flag.Duration("measure", 0, "override: metric sampling window")
 	sloP99 := flag.Float64("slo-p99-ms", 0, "fail (exit 1) if sweep tick p99 exceeds this; 0 disables")
@@ -57,6 +58,9 @@ func run() int {
 	}
 	if *dispatch != "" {
 		spec.Dispatch = *dispatch
+	}
+	if *webhookURL != "" {
+		spec.WebhookURL = *webhookURL
 	}
 	if *warmup > 0 {
 		spec.Warmup = sweep.Dur(*warmup)

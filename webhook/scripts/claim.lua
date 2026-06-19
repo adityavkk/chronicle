@@ -13,7 +13,7 @@
 -- KEYS: 1=sub 2=lease_zset
 -- ARGV: 1=id 2=worker 3=now_ns 4=lease_ttl_ms 5=new_wake_id 6=shard
 --       7=lease_member 8=claim_mode('legacy'|'sharded')
--- Reply: {status, generation, wake_id, holder, lease_lapsed('0'|'1')} ; CLAIMED | BUSY | NOSUB | MODE_CONFLICT
+-- Reply: {status, generation, wake_id, holder, lease_lapsed('0'|'1'), minted('0'|'1')} ; CLAIMED | BUSY | NOSUB | MODE_CONFLICT
 local sub = KEYS[1]
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
@@ -42,15 +42,17 @@ end
 local gen = redis.call('HGET', sub, gen_field) or '0'
 local wake = redis.call('HGET', sub, wake_field) or ''
 local lapsed = (phase == 'live' and holder == '1' and lease_until <= now)
+local minted = '0'
 -- Reaching here with phase == 'live' means the lease is expired (the BUSY guard
 -- above already returned for an unexpired live lease), so that case rotates too.
 if not (phase == 'waking' and wake ~= '') then
   gen = tostring(redis.call('HINCRBY', sub, gen_field, 1))
   wake = ARGV[5]
   redis.call('HSET', sub, wake_field, wake)
+  minted = '1'
 end
 local until_ns = now + tonumber(ARGV[4]) * 1000000
 local until_ns_str = string.format('%.0f', until_ns)
 redis.call('HSET', sub, phase_field, 'live', holder_field, '1', holder_worker_field, ARGV[2], lease_until_field, until_ns_str)
 redis.call('ZADD', KEYS[2], until_ns_str, ARGV[7])
-return { 'CLAIMED', gen, wake, ARGV[2], lapsed and '1' or '0' }
+return { 'CLAIMED', gen, wake, ARGV[2], lapsed and '1' or '0', minted }

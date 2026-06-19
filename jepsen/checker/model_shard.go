@@ -8,9 +8,9 @@ import (
 
 // model_shard.go is the PURE CORE scaffold for T3 (ownership exclusivity in
 // docs/specs/horizontal-scale/research/07): a time-free model of the proposed
-// ds:{ownership}:slot:<h> CAS register. The live claim_shard.lua/check_owner.lua
-// mechanism does not exist in today's production code, so this file is the
-// executable contract future slices must satisfy rather than a green live test.
+// co-located owner slot CAS register. The live claim_shard.lua/check_owner.lua
+// mechanism feeds this shape; the model stays pure so faulted histories can be
+// checked without Redis or Kubernetes.
 //
 // The model deliberately omits TTL time. A CLAIMED output is treated as the
 // observed fact that the current owner was absent/expired or the caller won the

@@ -27,8 +27,15 @@ func ClampLeaseTTL(ms int64) int64 {
 // the lease TTL is clamped, and streams[] is trimmed, de-duplicated, and sorted
 // so the hash is independent of input order or repetition (PROTOCOL §6.2).
 func NormalizeConfig(c Config) Config {
+	return NormalizeConfigWithDefault(c, defaultConsistencyTier)
+}
+
+// NormalizeConfigWithDefault produces the canonical form used for hashing and
+// storage, applying the deployment default for an omitted consistency tier.
+func NormalizeConfigWithDefault(c Config, deploymentTier ConsistencyTier) Config {
 	c.LeaseTTLMs = ClampLeaseTTL(c.LeaseTTLMs)
 	c.Streams = normalizeStreams(c.Streams)
+	c.ConsistencyTier = NormalizeConsistencyTier(c.ConsistencyTier, deploymentTier)
 	return c
 }
 
@@ -61,6 +68,14 @@ func normalizeStreams(in []string) []string {
 // delivery configuration, lease_ttl_ms, and description. The field-tagged,
 // length-prefixed encoding makes the hash unambiguous across field boundaries.
 func ConfigHash(c Config) string {
+	return configHash(c, true)
+}
+
+func legacyConfigHash(c Config) string {
+	return configHash(c, false)
+}
+
+func configHash(c Config, includeConsistency bool) string {
 	n := NormalizeConfig(c)
 	var b strings.Builder
 	writeField(&b, "type", string(n.Type))
@@ -69,6 +84,9 @@ func ConfigHash(c Config) string {
 	writeField(&b, "webhook_url", n.WebhookURL)
 	writeField(&b, "wake_stream", n.WakeStream)
 	writeField(&b, "lease_ttl_ms", strconv.FormatInt(n.LeaseTTLMs, 10))
+	if includeConsistency {
+		writeField(&b, "consistency_tier", n.ConsistencyTier.storageValue())
+	}
 	writeField(&b, "description", n.Description)
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])
@@ -103,6 +121,9 @@ func ValidateConfig(c Config) string {
 	}
 	if c.Type == DispatchPullWake && c.WakeStream == "" {
 		return "wake_stream is required for type \"pull-wake\""
+	}
+	if reason := ValidateConsistencyTier(c.ConsistencyTier); reason != "" {
+		return reason
 	}
 	return ""
 }

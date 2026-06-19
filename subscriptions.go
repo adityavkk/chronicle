@@ -25,6 +25,7 @@ type SubscriptionTuning struct {
 	HeartbeatInterval     time.Duration
 	SlotLeaseTTL          time.Duration
 	SlotReconcileInterval time.Duration
+	ConsistencyTier       webhook.ConsistencyTier
 	// Metrics, if set, receives sweep/delivery/worker observations from the
 	// Manager. Nil leaves the Manager on its no-op recorder.
 	Metrics webhook.Metrics
@@ -153,6 +154,7 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		HeartbeatInterval:          tuning.HeartbeatInterval,
 		SlotLeaseTTL:               tuning.SlotLeaseTTL,
 		SlotReconcileInterval:      tuning.SlotReconcileInterval,
+		ConsistencyTier:            tuning.ConsistencyTier,
 		Metrics:                    tuning.Metrics,
 	}
 	if rs != nil {
