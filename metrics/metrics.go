@@ -21,14 +21,16 @@ import (
 // duration and the K and U (subscriptions, unique tails) that drive it, plus
 // wake-delivery latency and per-worker backlog.
 type Prometheus struct {
-	reg          *prometheus.Registry
-	sweepSeconds prometheus.Histogram
-	sweepSubs    prometheus.Histogram
-	sweepTails   prometheus.Histogram
-	sweepWakes   prometheus.Counter
-	delivery     *prometheus.HistogramVec
-	wakeEvent    *prometheus.HistogramVec
-	workerDue    *prometheus.HistogramVec
+	reg           *prometheus.Registry
+	sweepSeconds  prometheus.Histogram
+	sweepSubs     prometheus.Histogram
+	sweepTails    prometheus.Histogram
+	sweepWakes    prometheus.Counter
+	delivery      *prometheus.HistogramVec
+	wakeEvent     *prometheus.HistogramVec
+	workerDue     *prometheus.HistogramVec
+	fanoutSeconds *prometheus.HistogramVec // label: stage (probe|total)
+	fanoutSubs    prometheus.Histogram
 }
 
 var _ webhook.Metrics = (*Prometheus)(nil)
@@ -44,10 +46,12 @@ func New() *Prometheus {
 	)
 	p := &Prometheus{
 		reg: reg,
+		// 22 buckets from 1ms → ~4194s covers K=10k sweeps that were hitting the
+		// old 16384ms (2^14 ms) ceiling and reporting a flat artifact.
 		sweepSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "chronicle_sweep_tick_seconds",
 			Help:    "Recovery sweep tick wall-clock duration.",
-			Buckets: prometheus.ExponentialBuckets(0.0005, 2, 16), // 0.5ms .. ~16s
+			Buckets: prometheus.ExponentialBuckets(0.001, 2, 22), // 1ms .. ~4194s
 		}),
 		sweepSubs: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "chronicle_sweep_subs_evaluated",
@@ -78,8 +82,25 @@ func New() *Prometheus {
 			Help:    "Due items claimed per lease/retry worker tick, by kind.",
 			Buckets: prometheus.ExponentialBuckets(1, 2, 12),
 		}, []string{"kind"}),
+		// gate #2: OnStreamAppend fan-out latency, split by stage.
+		// stage=probe  → Redis SMEMBERS index-lookup only.
+		// stage=total  → probe + wake issuance for all S subscribers.
+		fanoutSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "chronicle_fanout_seconds",
+			Help:    "OnStreamAppend fan-out duration by stage (probe|total).",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms .. ~52s
+		}, []string{"stage"}),
+		fanoutSubs: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_fanout_subs",
+			Help:    "Subscriber count (S) per OnStreamAppend fan-out.",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 10), // 1 .. 512
+		}),
 	}
-	reg.MustRegister(p.sweepSeconds, p.sweepSubs, p.sweepTails, p.sweepWakes, p.delivery, p.wakeEvent, p.workerDue)
+	reg.MustRegister(
+		p.sweepSeconds, p.sweepSubs, p.sweepTails, p.sweepWakes,
+		p.delivery, p.wakeEvent, p.workerDue,
+		p.fanoutSeconds, p.fanoutSubs,
+	)
 	return p
 }
 
@@ -104,6 +125,13 @@ func (p *Prometheus) WakeEvent(dur time.Duration, outcome string) {
 // WorkerTick implements webhook.Metrics.
 func (p *Prometheus) WorkerTick(kind string, due int) {
 	p.workerDue.WithLabelValues(kind).Observe(float64(due))
+}
+
+// FanOut implements webhook.Metrics.
+func (p *Prometheus) FanOut(probeDur, totalDur time.Duration, subs int) {
+	p.fanoutSeconds.WithLabelValues("probe").Observe(probeDur.Seconds())
+	p.fanoutSeconds.WithLabelValues("total").Observe(totalDur.Seconds())
+	p.fanoutSubs.Observe(float64(subs))
 }
 
 // Mux returns the observability HTTP surface: /metrics (Prometheus exposition),

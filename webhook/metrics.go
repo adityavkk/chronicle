@@ -25,6 +25,12 @@ type Metrics interface {
 	// WorkerTick records one lease/retry worker pass: the kind ("lease" or
 	// "retry") and how many due items it claimed this tick.
 	WorkerTick(kind string, due int)
+	// FanOut records one OnStreamAppend fan-out: the Redis index-probe duration
+	// (SMEMBERS round-trip), the total duration including wake issuance for all S
+	// subscribers, and how many subscriber IDs the index returned. Both durations
+	// drive chronicle_fanout_seconds; subs drives chronicle_fanout_subs.
+	// gate #2 gate: total p99 at S=2/4/8/256 on a sharded CLUSTER.
+	FanOut(probeDur, totalDur time.Duration, subs int)
 }
 
 // NopMetrics is the no-op Metrics used when none is configured. The Manager
@@ -42,3 +48,6 @@ func (NopMetrics) WakeEvent(time.Duration, string) {}
 
 // WorkerTick implements Metrics.
 func (NopMetrics) WorkerTick(string, int) {}
+
+// FanOut implements Metrics.
+func (NopMetrics) FanOut(time.Duration, time.Duration, int) {}

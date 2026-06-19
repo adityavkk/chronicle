@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -235,7 +236,9 @@ func (m *Manager) OnStreamCreated(path string) {
 // (PROTOCOL §7). It is the best-effort low-latency path; the recovery sweep is
 // the durability backstop if this is lost to a crash (docs/research/09 §2).
 func (m *Manager) OnStreamAppend(path string) {
+	t0 := time.Now()
 	ids, err := m.store.StreamSubscribers(path)
+	probeDur := time.Since(t0)
 	if err != nil {
 		m.log.Warn("webhook: stream subscribers", "path", path, "error", err)
 		return
@@ -243,6 +246,7 @@ func (m *Manager) OnStreamAppend(path string) {
 	for _, id := range ids {
 		m.maybeWake(id, path)
 	}
+	m.metrics.FanOut(probeDur, time.Since(t0), len(ids))
 }
 
 // OnStreamDeleted unlinks a deleted stream from all its subscribers.
@@ -361,12 +365,17 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string) {
 	resp, err := m.client.Do(req)
 	if err != nil {
 		m.metrics.WakeDelivery(time.Since(postStart), "error")
+		m.log.Warn("webhook: delivery transport error", "sub", id, "error", err)
 		m.recordFailure(id)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		m.metrics.WakeDelivery(time.Since(postStart), "failed")
+		m.log.Warn("webhook: delivery failed", "sub", id,
+			"http_status", resp.StatusCode,
+			"body_excerpt", strings.TrimSpace(string(snippet)))
 		m.recordFailure(id)
 		return
 	}
