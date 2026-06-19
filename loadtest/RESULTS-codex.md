@@ -1,4 +1,36 @@
-# Results — Codex gate runs for horizontal-scale #10
+# Results — Codex gate runs for horizontal-scale #9
+
+## Cloud V&V — real GKE run
+Environment: project adityavkk-prototyping | commit `24afd50` tested (`codex-24afd50`; later PR commits add harness-only fixes and this results record) | run 2026-06-19 11:18 UTC | wall 36m
+### SUT (System Under Test)
+- GKE cluster: `chronicle-hscale-codex` | zone `us-central1-a` | `2` x `e2-standard-2`
+- Chronicle: `1` replica | image `us-central1-docker.pkg.dev/adityavkk-prototyping/chronicle-codex/chronicle:codex-24afd50` | metrics enabled
+- Redis: `Memorystore BASIC 1GB` | persistence `none`
+- Load: sweepscale | scenarios `spec/gate2-fanout-s2-codex.yaml`, `spec/gate2-fanout-s4-codex.yaml`, `spec/gate2-fanout-s8-codex.yaml`, `spec/gate2-fanout-s256-codex.yaml`, `spec/gate1-replicas-1-codex.yaml`, `/tmp/sweep-10k-floor-codex.yaml`
+### Gate results (REAL numbers — no PENDING rows)
+| Gate | Scenario | Metric | Measured | Budget/SLO | Verdict |
+|------|----------|--------|----------|-----------|---------|
+| #2 fan-out | S=2 | OnStreamAppend p99 (ms) | 4.95 ms; 100/100 appends, 0 errors | p99 < 100 ms; 0 errors | PASS |
+| #2 fan-out | S=4 | p99 (ms) | 4.95 ms; 100/100 appends, 0 errors | p99 < 100 ms; 0 errors | PASS |
+| #2 fan-out | S=8 | p99 (ms) | 4.95 ms; 100/100 appends, 0 errors | p99 < 100 ms; 0 errors | PASS |
+| #2 fan-out | S=256 | p99 (ms) | 9.94 ms from 20 observations; 19/100 appends, 2 errors; sweep p99 2037.8 ms | p99 < 100 ms; 0 errors; sweep p99 < 1500 ms | FAIL |
+| baseline | K=10k sweep | sweep p50 / p99 (ms) | committed P=5 gate: 16384 / 16384; one-link control: 16384 / 16384 | p99 < 1500 | FAIL |
+| #4 | ownership churn | live churn convergence | not run; required #2 S=256 and K=10k baseline failed first | run only after required gates are green | NOT RUN |
+| #5 | failover drill | RPO / recovery (s) | not run; BASIC Redis used for cost-bounded required gates | STANDARD_HA failover evidence | NOT RUN |
+| L2 | required-gate liveness | liveness | not run; stopped after required gate failures | PASS/FAIL | NOT RUN |
+| L4 | ownership churn | single-owner under churn | not run; stopped after required gate failures | PASS/FAIL | NOT RUN |
+| L5 | combined-nemesis stress | liveness under stress | not run; stopped after required gate failures | PASS/FAIL | NOT RUN |
+### #15 slot-homing decision
+DEFER — S=256 kept sub-10 ms p99 for the samples it completed, but it failed the zero-error fan-out gate (`19/100` appends, `2` errors) and breached the sweep floor (`2037.8 ms` p99).
+### Teardown confirmation
+clusters = none, Memorystore = none, $0 ongoing.
+
+Notes:
+
+- Exact teardown checks after the run returned `chronicle-hscale-codex: none` and `chronicle-hscale-codex-redis: none`.
+- The K=10k regression floor failed even on the one-link historical control (`seeded 10000/10000`, sweep mean `26183.9 ms`, p50/p99 `16384/16384 ms`, `2` ticks over `40s`), so this is a real blocker.
+- Cloud Monitoring CPU capture did not work in this local gcloud install: `gcloud monitoring time-series list` is not available, so `*-redis-cpu.json` contains `{"error":"gcloud monitoring time-series list failed"}`.
+- The run exposed harness hazards that are now fixed in this branch: per-cluster `LT_KUBECONFIG`, prompt failed-job detection, Job metadata labels, and Recreate SUT rollouts for one-node test clusters.
 
 This file records the #10 worker's load-gate attempt. Numbers are recorded only
 when measured; blocked runs list the exact command and blocker.
