@@ -1,0 +1,31 @@
+# Rendered by `render -fanout` — the gate #2 fan-out load job.
+# Runs fanoutscale on the loadgen node pool (never on the SUT node).
+# For the gate #2 sweep, run this job once per S value (2/4/8/256).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fanoutscale-{{.Name}}-s{{.Fanout.Subs}}
+  namespace: {{.SUT.Namespace}}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels: { app: fanoutscale }
+    spec:
+      nodeSelector: { role: loadgen }
+      restartPolicy: Never
+      containers:
+        - name: fanoutscale
+          image: {{.LoadgenImage}}
+          command:
+            - "fanoutscale"
+            - "-base-url=http://chronicle.{{.SUT.Namespace}}:4437"
+            - "-root=/v1/stream/"
+            - "-metrics-url=http://chronicle.{{.SUT.Namespace}}:9090/metrics"
+            - "-subs={{.Fanout.Subs}}"
+            - "-rate={{.Fanout.Rate}}"
+            - "-dispatch={{.Fanout.Dispatch}}"
+            - "-warmup={{.Fanout.Warmup}}"
+            - "-measure={{.Fanout.Measure}}"
+            - "-stream=gate2/sentinel"
+            - "-slo-p99-ms={{.SLO.FanoutP99Ms}}"

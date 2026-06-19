@@ -1,0 +1,53 @@
+# Gate #2: slot-homing fan-out p99 at S=2/4/8/256 on Memorystore CLUSTER.
+#
+# This spec drives ONE sentinel stream with S pull-wake subscriptions all linked
+# to it. fanoutscale seeds the subscriptions, drives appends, and reports
+# chronicle_fanout_seconds p99 (probe + total) scraped from /metrics.
+#
+# Run the job once per S value:
+#   for S in 2 4 8 256; do
+#     render -fanout -spec fanout-gate2.yaml -subs $S -out out/ \
+#       -redis-url "redis+cluster://$(gcloud redis clusters describe ... --format='value(discoveryEndpoints[0].address)'):6379" \
+#       -image $REG/chronicle:$TAG -loadgen-image $REG/chronicle-loadgen:$TAG
+#     kubectl apply -f out/sut.yaml && kubectl -n chronicle-gate2 rollout status deploy/chronicle --timeout=180s
+#     kubectl delete job -l app=fanoutscale -n chronicle-gate2 --ignore-not-found
+#     kubectl apply -f out/job.yaml
+#     kubectl -n chronicle-gate2 wait --for=condition=complete --timeout=600s job -l app=fanoutscale
+#     kubectl -n chronicle-gate2 logs -l app=fanoutscale --tail=-1
+#   done
+#
+# Acceptance criteria (gate #2 passes when ALL S values pass):
+#   fanout_p99_ms < 50ms   at S=2, S=4, S=8
+#   fanout_p99_ms < 100ms  at S=256  (cross-node max-RTT on 3-shard CLUSTER)
+#
+# The CLUSTER Terraform is in loadtest/terraform/cluster.tf.
+# Provision with: cd loadtest/terraform && terraform apply -var provision_gate2_cluster=true
+name: fanout-gate2
+
+loadgen_image: REGISTRY/chronicle-loadgen:TAG
+
+sut:
+  image: REGISTRY/chronicle:TAG
+  replicas: 1
+  namespace: chronicle-gate2
+  sweep_interval: 2s
+  sweep_batch: 0
+  # Fill from `terraform output gate2_redis_discovery` after provisioning:
+  # redis+cluster://<discovery-endpoint>:6379
+  redis_url: ""
+  cpu: "2"
+  memory: 2Gi
+
+fanout:
+  # subs is S — override per run: render -subs 2 / 4 / 8 / 256
+  subs: 4
+  rate: "10/s"
+  dispatch: pull-wake
+  warmup: 30s
+  measure: 120s
+
+slo:
+  # Gate #2 SLO: fanout end-to-end p99 must stay below the sweep interval
+  # with significant headroom. 50ms at S≤8; 100ms at S=256 (CLUSTER RTT).
+  # Override per S: render -slo-p99-ms 100 for S=256.
+  fanout_p99_ms: 50
