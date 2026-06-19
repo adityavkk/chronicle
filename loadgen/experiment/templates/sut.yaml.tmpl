@@ -11,6 +11,11 @@ metadata:
   namespace: {{.SUT.Namespace}}
 spec:
   replicas: {{.SUT.Replicas}}
+  # Recreate avoids two generations of pods sharing a Redis connection pool
+  # during rolling updates — the old pod's subscribe state would race with the
+  # new one's. This is a GKE rig bug that both fleets hit live on epic #9.
+  strategy:
+    type: Recreate
   selector:
     matchLabels: { app: chronicle }
   template:
