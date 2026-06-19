@@ -885,6 +885,7 @@ type nemesis struct {
 	maxWindow         time.Duration
 	dryRun            bool
 	rng               *rand.Rand
+	kubectlFn         func(args ...string) ([]byte, error)
 	mu                sync.Mutex
 	log               []string
 }
@@ -997,7 +998,7 @@ func (n *nemesis) killSlotOwner(slot int) error {
 		n.record(fmt.Sprintf("dry-run-kill-slot-owner-%d", slot))
 		return nil
 	}
-	out, err := n.redisCLI("hget", fmt.Sprintf("ds:{ownership}:slot:%d", slot), "owner_id")
+	out, err := n.redisCLI(slotOwnerCommand(slot)...)
 	if err != nil {
 		return fmt.Errorf("read slot owner: %w", err)
 	}
@@ -1019,6 +1020,10 @@ func (n *nemesis) killSlotOwner(slot int) error {
 		}
 	}
 	return fmt.Errorf("owner_id %q did not match live chronicle pods %q", owner, strings.TrimSpace(string(podsRaw)))
+}
+
+func slotOwnerCommand(slot int) []string {
+	return []string{"hget", checkerOwnershipSlotKey(slot), "owner_id"}
 }
 
 func (n *nemesis) toxiproxyPartition() error {
@@ -1074,6 +1079,9 @@ func (n *nemesis) redisCLI(args ...string) ([]byte, error) {
 }
 
 func (n *nemesis) kubectl(args ...string) ([]byte, error) {
+	if n.kubectlFn != nil {
+		return n.kubectlFn(args...)
+	}
 	full := append([]string{"--context", n.ctx, "-n", n.ns}, args...)
 	return exec.Command("kubectl", full...).CombinedOutput()
 }

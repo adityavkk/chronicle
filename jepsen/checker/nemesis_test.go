@@ -58,6 +58,43 @@ func TestUnsupportedNemesisPrimitivesDryRun(t *testing.T) {
 	}
 }
 
+func TestKillSlotOwnerReadsSlotHomedOwnerKey(t *testing.T) {
+	slot := 3
+	redisLookup := append([]string{"exec", "deploy/redis", "--", "redis-cli", "-n", "0"}, slotOwnerCommand(slot)...)
+	listPods := []string{"get", "pods", "-l", "app=chronicle", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}"}
+	deletePod := []string{"delete", "pod", "chronicle-0", "--grace-period=0", "--force"}
+	var calls [][]string
+	n := &nemesis{kubectlFn: func(args ...string) ([]byte, error) {
+		call := append([]string(nil), args...)
+		calls = append(calls, call)
+		switch {
+		case reflect.DeepEqual(call, redisLookup):
+			return []byte("chronicle-0-abcd\n"), nil
+		case reflect.DeepEqual(call, listPods):
+			return []byte("chronicle-0\nchronicle-1\n"), nil
+		case reflect.DeepEqual(call, deletePod):
+			return []byte("pod deleted\n"), nil
+		default:
+			t.Fatalf("unexpected kubectl call: %#v", call)
+			return nil, nil
+		}
+	}}
+
+	if err := n.killSlotOwner(slot); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(calls[0], redisLookup) {
+		t.Fatalf("owner lookup command = %#v, want %#v", calls[0], redisLookup)
+	}
+	// This legacy key string is intentionally kept only as a regression guard.
+	if strings.Contains(strings.Join(calls[0], " "), "ds:{ownership}:slot") {
+		t.Fatalf("owner lookup used legacy ownership key: %#v", calls[0])
+	}
+	if got := join(n.log); !strings.Contains(got, "kill-slot-owner-3:chronicle-0") {
+		t.Fatalf("killSlotOwner log = %q, want chronicle-0 kill", got)
+	}
+}
+
 func TestDropLeaseTailCommandOnlyZREMsLeaseSchedule(t *testing.T) {
 	want := []string{"zrem", "ds:{__ds:91}:sched:lease", "sub-1"}
 	if got := dropLeaseTailCommand("sub-1"); !reflect.DeepEqual(got, want) {
