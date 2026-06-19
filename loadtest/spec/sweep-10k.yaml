@@ -12,6 +12,7 @@ loadgen_image: REGISTRY/chronicle-loadgen:TAG
 
 sut:
   image: REGISTRY/chronicle:TAG
+  namespace: chronicle-gate2
   replicas: 1 # 1 = crisp per-tick histogram (every replica sweeps all K identically)
   sweep_interval: 2s
   sweep_batch: 0 # 0 = no per-tick cap

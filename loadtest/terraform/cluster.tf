@@ -27,9 +27,8 @@ resource "google_redis_cluster" "gate2" {
   # This guarantees cross-node routing for keys outside {__ds} hash slots.
   shard_count = 3
 
-  # No replicas — gate2 is a single ephemeral rig, not a production HA setup.
+  # No replicas per shard — gate2 is an ephemeral rig, not production HA.
   # Cost: ~$0.10/hr for 3 REDIS_SHARED_CORE_NANO nodes (tear down immediately).
-  replica_count_per_shard = 0
 
   # Smallest node type — sufficient for the gate #2 fan-out measurement.
   node_type = "REDIS_SHARED_CORE_NANO"

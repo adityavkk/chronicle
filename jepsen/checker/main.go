@@ -42,6 +42,7 @@ type config struct {
 	recvHost   string
 	recvPort   int
 	cluster    string
+	kctx       string // kubectl context override; defaults to "k3d-" + cluster
 	namespace  string
 	streams    int
 	msgs       int
@@ -57,6 +58,7 @@ func main() {
 	flag.StringVar(&c.recvHost, "recv-host", "host.k3d.internal", "hostname the cluster uses to reach this receiver")
 	flag.IntVar(&c.recvPort, "recv-port", 8099, "local webhook receiver port")
 	flag.StringVar(&c.cluster, "cluster", "chronicle-jepsen", "k3d cluster name (for kubectl context)")
+	flag.StringVar(&c.kctx, "context", "", "kubectl context override (default: k3d-<cluster>; use GKE context for cloud runs)")
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
@@ -77,7 +79,10 @@ func main() {
 }
 
 func run(c config, r *receiver) error {
-	ctx := fmt.Sprintf("k3d-%s", c.cluster)
+	ctx := c.kctx
+	if ctx == "" {
+		ctx = fmt.Sprintf("k3d-%s", c.cluster)
+	}
 
 	// single-holder-linz is a pure fence-contention linearizability test over the
 	// claim/ack API: N workers + an in-process GC-pause nemesis, checked with

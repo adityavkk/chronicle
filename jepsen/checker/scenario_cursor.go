@@ -22,7 +22,10 @@ func runCursorMonotonic(c config, r *receiver) error {
 	if err := waitReady(c.base, 60*time.Second); err != nil {
 		return fmt.Errorf("chronicle not ready: %w", err)
 	}
-	ctx := fmt.Sprintf("k3d-%s", c.cluster)
+	ctx := c.kctx
+	if ctx == "" {
+		ctx = fmt.Sprintf("k3d-%s", c.cluster)
+	}
 	subID := fmt.Sprintf("jepsen-cursor-%d", time.Now().UnixNano())
 	webhookURL := fmt.Sprintf("http://%s:%d/webhook", c.recvHost, c.recvPort)
 
