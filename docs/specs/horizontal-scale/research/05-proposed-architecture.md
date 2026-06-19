@@ -371,8 +371,8 @@ return { 'OWNER' }
 
 **Resolve the TOCTOU explicitly.** A separate `check_owner` round-trip *before* a Go-side
 write does **not** fence a GC pause between the two. So every schedule-/due-mutating
-script (`arm_wake`, `ack`, `expire_lease`, `schedule_retry`, the due `ZADD`/`ZREM`) takes
-the slot key as an **extra KEY** and inlines the owner+epoch check at the top — the check
+script (`arm_wake`, `ack`, `expire_lease`, `release`, `schedule_retry`, the due `ZADD`/`ZREM`)
+takes the slot key as an **extra KEY** and inlines the owner+epoch check at the top — the check
 and the write are then one atomic script. Standalone `check_owner.lua` is reserved for the
 external webhook POST, where atomicity across the network is impossible anyway and the
 `(gen,wake_id)` fence on the returned ack is the real guard.
@@ -416,10 +416,14 @@ external webhook POST, where atomicity across the network is impossible anyway a
   |---|---|
   | `arm_wake.lua` | add `KEYS[3]=due_zset`; in the `ARMED` branch `ZADD due now_ns id` |
   | `ack.lua` | add the `due_zset` KEY; in the `done='1'` branch `ZREM due id` (alongside the existing lease/retry `ZREM`) |
-  | `expire_lease.lua` | in the `EXPIRED` branch, `ZADD due now_ns id` when pending work remains (re-owe) |
+  | `expire_lease.lua` | in the `EXPIRED` branch, `ZADD due now_ns id` to re-owe (unconditional — the single-slot script cannot read stream tails; the dueWorker reconciles it, firing only when pending work remains, else clearing the mark) |
+  | `release.lua` | add the `due_zset` KEY; in the idle-reset branch `ZREM due id` (**GAP3**: release idles the sub exactly like `ack`'s done branch, so it must clear the mark too, or a voluntarily-released sub strands a phantom due-mark the `dueWorker` re-fires forever) |
 
-  Update the matching `redis_store.go` call sites (`ArmWake`, `Ack`, `ExpireLease`) to
-  compute `h` and pass the new per-slot key.
+  Update the matching `redis_store.go` call sites (`ArmWake`, `Ack`, `ExpireLease`, `Release`)
+  to compute `h` and pass the new per-slot key. The `dueWorker` reconciles each drained
+  mark (`DecideDue`): a not-owed mark (the sub is gone, or idle with its cursor caught up)
+  is `ClearDue`'d, since `claim_due` never `ZREM`s — this is what keeps the due-set's
+  cardinality tracking owed and returning to ~0 at quiescence.
 - **New `dueWorker()` loop**, modeled on `leaseWorker`: for each *owned* slot, run
   `claim_due.lua` against `ds:{__ds:h}:due` and `maybeWake` each returned id. `claim_due.lua`
   (1 key, the ZSET) is **unchanged** — it just runs once per owned slot.

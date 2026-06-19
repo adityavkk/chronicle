@@ -1,0 +1,199 @@
+# STANDARD_HA — the real-failover Redis substrate for the #16 DR drills (gate #5).
+#
+# 07 honest-gap #3: the single-Redis `deploy.yaml` (replicas:1, strategy Recreate)
+# only tests AOF *replay* on a pod restart — NOT a failover. A failover needs a
+# SECOND node that is promoted while the first is gone, and a STABLE endpoint the
+# clients keep using across the promotion. This substrate provides exactly that
+# without any chronicle client change (the managed-Redis-8 floor of 06:130:
+# single-primary + async replica + WAIT/WAITAOF, active-passive):
+#
+#   * redis-primary + redis-replica Deployments, BOTH with AOF on a PVC. The
+#     replica runs `replicaof redis-primary 6379`, so WAITAOF 1 1 (Tier B) has a
+#     real replica to fsync-ack — the durability the single-Redis rig cannot test.
+#   * a STABLE `redis` Service (the endpoint chronicle uses) whose selector starts
+#     on `role: primary`. A failover repoints it to the promoted node by flipping
+#     ONE label selector — so chronicle's plain redis URL survives the failover
+#     (its connection drops and reconnects to the same DNS name, now backed by the
+#     promoted node). This mirrors a managed SKU repointing its endpoint for you.
+#
+# The gate-#5 failover-fence drill (kill primary -> promote replica -> flip the
+# endpoint -> recover) lives in standard-ha-failover.sh, which ALWAYS tears down
+# (STOP-THE-METER). Teardown of this whole substrate is `kubectl delete namespace
+# chronicle-jepsen-ha`.
+#
+# PENDING-CLOUD: the actual failover RUN is the orchestrator's (the worktree does
+# not run clusters). The managed path is Memorystore-for-Redis STANDARD_HA tier
+# (or any managed Redis 8 HA SKU) — see loadtest/spec/dispatch-webhook-ha.yaml and
+# ltctl gate5.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chronicle-jepsen-ha
+---
+# --- Redis primary: AOF on a PVC; appendfsync everysec bounds the local-fsync RPO.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-primary-data
+  namespace: chronicle-jepsen-ha
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-primary
+  namespace: chronicle-jepsen-ha
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: redis, role: primary }
+  template:
+    metadata:
+      labels: { app: redis, role: primary }
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: redis
+          image: redis:8-alpine
+          # AOF + everysec: the fence-minting write is fsync'd locally within ~1s
+          # and replicated to the replica; WAITAOF 1 1 blocks until BOTH ack.
+          args: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--dir", "/data"]
+          ports: [{ containerPort: 6379 }]
+          volumeMounts: [{ name: data, mountPath: /data }]
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            periodSeconds: 1
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: redis-primary-data }
+---
+# --- Redis replica: AOF + replicaof the primary. Promoted on failover.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-replica-data
+  namespace: chronicle-jepsen-ha
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-replica
+  namespace: chronicle-jepsen-ha
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: redis, role: replica }
+  template:
+    metadata:
+      labels: { app: redis, role: replica }
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: redis
+          image: redis:8-alpine
+          # Replicate from the primary's headless Service; keep its own AOF so a
+          # WAITAOF replica-ack is a real fsync, and so the promoted node is durable.
+          args: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--dir", "/data", "--replicaof", "redis-primary", "6379"]
+          ports: [{ containerPort: 6379 }]
+          volumeMounts: [{ name: data, mountPath: /data }]
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            periodSeconds: 1
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: redis-replica-data }
+---
+# --- redis-primary: the headless address the replica replicates from.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-primary
+  namespace: chronicle-jepsen-ha
+spec:
+  selector: { app: redis, role: primary }
+  ports: [{ port: 6379, targetPort: 6379 }]
+---
+# --- redis: the STABLE endpoint chronicle uses. Selector starts on the primary;
+#     the failover drill flips it to `role: replica` after promoting the replica,
+#     so chronicle reconnects to the promoted node without a config/URL change.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: chronicle-jepsen-ha
+spec:
+  selector: { app: redis, role: primary }
+  ports: [{ port: 6379, targetPort: 6379 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chronicle
+  namespace: chronicle-jepsen-ha
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: chronicle }
+  template:
+    metadata:
+      labels: { app: chronicle }
+    spec:
+      terminationGracePeriodSeconds: 2
+      containers:
+        - name: chronicle
+          image: chronicle:jepsen
+          imagePullPolicy: IfNotPresent
+          args: ["--listen", ":4437"]
+          env:
+            - { name: CHRONICLE_REDIS_URL, value: "redis://redis:6379/0" } # the STABLE endpoint
+            - { name: CHRONICLE_SUBSCRIPTIONS, value: "true" }
+            - { name: CHRONICLE_WEBHOOK_ALLOW_PRIVATE, value: "true" }
+            - { name: CHRONICLE_PUBLIC_URL, value: "http://chronicle:4437" }
+            - { name: CHRONICLE_LONG_POLL_TIMEOUT, value: "2s" }
+            # Tier B (issue #16): WAITAOF 1 1 on the fence-minting writes. The
+            # replica makes numreplicas=1 satisfiable — the realistic HA ceiling
+            # (06:70). A short reply is surfaced as an error, never swallowed.
+            - { name: CHRONICLE_CONSISTENCY_TIER, value: "B" }
+            - { name: CHRONICLE_WAIT_REPLICAS, value: "1" }
+            - { name: CHRONICLE_WAIT_TIMEOUT_MS, value: "1000" }
+            - { name: CHRONICLE_LOG_LEVEL, value: "info" }
+          ports: [{ containerPort: 4437 }]
+          readinessProbe:
+            tcpSocket: { port: 4437 }
+            periodSeconds: 1
+            failureThreshold: 2
+          livenessProbe:
+            tcpSocket: { port: 4437 }
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chronicle
+  namespace: chronicle-jepsen-ha
+spec:
+  selector: { app: chronicle }
+  ports: [{ port: 4437, targetPort: 4437 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chronicle-nodeport
+  namespace: chronicle-jepsen-ha
+spec:
+  type: NodePort
+  selector: { app: chronicle }
+  ports: [{ port: 4437, targetPort: 4437, nodePort: 30438 }]

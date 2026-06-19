@@ -3,11 +3,31 @@
 -- callback and the pull-wake ack (PROTOCOL §7.1, §7.2). The fence — not the
 -- lease — is the correctness mechanism: a stale wake/generation is rejected and
 -- cannot advance a cursor.
--- KEYS: 1=sub 2=links 3=lease_zset 4=retry_zset
--- ARGV: 1=id 2=req_gen 3=req_wake 4=token_gen 5=done('0'/'1') 6=now_ns
---       7=lease_ttl_ms 8=num_acks then (path, offset)*
+--
+-- Claim granularity (the third axis, design 08): KEYS[1] is the per-(subId,g)
+-- SHARDSTATE hash whose (generation, wake_id) fence this ack checks and whose
+-- idle/lease fields the done/heartbeat branches write; ARGV[1] is the per-shard
+-- schedule MEMBER for the lease/retry ZREM/ZADD. The cursor hash (KEYS[2]) is
+-- shared across a subscription's shards — cursors are forward-only watermarks, so
+-- an ack only ever advances the streams it names, fenced by its own shard's
+-- register. At G=1 / shard 0, KEYS[1]==sub hash and ARGV[1]==id (today). The
+-- due-set ZREM in the done branch (Move 2, KEYS[5]) uses this same ARGV[1] member,
+-- so a per-shard due mark is cleared by its own shard's ack.
+-- KEYS: 1=shardstate 2=links 3=lease_zset 4=retry_zset 5=due_zset
+--       6=slot (ds:{ownership}:slot:<h>)
+-- ARGV: 1=member 2=req_gen 3=req_wake 4=token_gen 5=done('0'/'1') 6=now_ns
+--       7=lease_ttl_ms 8=num_acks then (path, offset)* then
+--       replica_id, expected_epoch (the trailing pair; epoch '' => skip the check)
 -- Reply: {status} ; OK | FENCED | NOSUB
 local sub = KEYS[1]
+-- Owner-epoch fence (issue #14, TOCTOU): the replica_id/expected_epoch are the
+-- LAST two ARGV (after the variable-length acks). For the load-balanced external
+-- ack path epoch is '' and this is a no-op — the (gen,wake_id) fence below is the
+-- guard. A reused-as-FENCED reply is indistinguishable from the gen fence on the
+-- wire, which is fine: both grant and mutate nothing.
+if owner_fenced(KEYS[6], ARGV[#ARGV - 1], ARGV[#ARGV]) then
+  return { 'FENCED' }
+end
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
 end
@@ -36,6 +56,7 @@ if ARGV[5] == '1' then
     'retry_count', '0', 'first_fail_ns', '0', 'next_attempt_ns', '0')
   redis.call('ZREM', KEYS[3], ARGV[1])
   redis.call('ZREM', KEYS[4], ARGV[1])
+  redis.call('ZREM', KEYS[5], ARGV[1]) -- clear the due-set wake mark (Move 2)
 else
   local until_ns = tonumber(ARGV[6]) + tonumber(ARGV[7]) * 1000000
   redis.call('HSET', sub, 'lease_until_ns', tostring(until_ns), 'phase', 'live')
