@@ -583,6 +583,20 @@ func (m *Manager) sweepOnce() {
 			wakes++
 			continue
 		}
+		// Emit-without-claim recovery: the wake event was durably written
+		// (WakeEventSentNs > 0) but no consumer has claimed it — the consumer
+		// or origin crashed after emit.  For pull-wake, armLease=false means
+		// there is no lease and no expiry path to flush a stale waking state.
+		// After a staleness window (3× sweep interval), re-emit the same
+		// (gen, wakeID) so a restarted consumer can reclaim it.  Duplicate
+		// events with the same fence token are claim-safe.
+		if sub.Config.Type == DispatchPullWake && sub.Phase == PhaseWaking &&
+			sub.WakeEventSentNs != 0 &&
+			now.UnixNano()-sub.WakeEventSentNs > (3*m.sweepInterval).Nanoseconds() {
+			m.writeWakeEvent(sub, "", sub.Generation, sub.WakeID)
+			wakes++
+			continue
+		}
 		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
 			if status, err := m.store.ExpireLease(sub.ID, now); err == nil && status == "EXPIRED" {
 				sub.Phase = PhaseIdle

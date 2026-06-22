@@ -560,12 +560,21 @@ func claim(base, id, worker string) (claimResult, error) {
 }
 
 // ackPullWake POSTs a pull-wake ack with done=true under the holder's token and
-// fence. It returns the HTTP status and (on a 4xx error envelope) the error code,
+// fence. streams is the claim snapshot; each pending stream is acked to its
+// current tail so the subscription cursor advances. Callers that only need fence
+// verification (expired-lease-takeover) pass no streams.
+// It returns the HTTP status and (on a 4xx error envelope) the error code,
 // without retrying — the caller asserts on the exact status. status 200 means the
 // ack landed; 409 with code "FENCED" means the fence rotated under this token.
-func ackPullWake(base, id, token, wakeID string, generation int64) (status int, code string, err error) {
+func ackPullWake(base, id, token, wakeID string, generation int64, streams ...claimStreamSnap) (status int, code string, err error) {
 	done := true
-	body, _ := json.Marshal(CallbackBody{WakeID: wakeID, Generation: generation, Done: &done})
+	var acks []ackEntry
+	for _, s := range streams {
+		if s.HasPending && s.TailOffset != "" {
+			acks = append(acks, ackEntry{Stream: s.Path, Offset: s.TailOffset})
+		}
+	}
+	body, _ := json.Marshal(CallbackBody{WakeID: wakeID, Generation: generation, Acks: acks, Done: &done})
 	url := fmt.Sprintf("%s/v1/stream/__ds/subscriptions/%s/ack", base, id)
 	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -603,7 +612,7 @@ func drainWorker(base, id, wakeStream string, stop <-chan struct{}) {
 			sleep(200 * time.Millisecond)
 			continue
 		}
-		ackPullWake(base, id, res.Token, res.WakeID, res.Generation)
+		ackPullWake(base, id, res.Token, res.WakeID, res.Generation, res.Streams...)
 	}
 }
 
@@ -613,10 +622,16 @@ type ClaimBody struct {
 	Worker string `json:"worker"`
 }
 
+type ackEntry struct {
+	Stream string `json:"stream"`
+	Offset string `json:"offset"`
+}
+
 type CallbackBody struct {
-	WakeID     string `json:"wake_id"`
-	Generation int64  `json:"generation"`
-	Done       *bool  `json:"done"`
+	WakeID     string     `json:"wake_id"`
+	Generation int64      `json:"generation"`
+	Acks       []ackEntry `json:"acks,omitempty"`
+	Done       *bool      `json:"done"`
 }
 
 type errEnvelope struct {
