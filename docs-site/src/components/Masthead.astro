@@ -11,6 +11,7 @@ const endpoints = `${base}/endpoints`;
 const subscriptions = `${base}/subscriptions`;
 const scaling = `${base}/horizontal-scale`;
 const testing = `${base}/testing`;
+const loadtesting = `${base}/load-testing`;
 const wiki = `${base}/wiki`;
 const REPO = "https://github.com/adityavkk/chronicle";
 
@@ -22,6 +23,7 @@ const onEndpoints = rel === "/endpoints";
 const onSubscriptions = rel === "/subscriptions";
 const onScaling = rel === "/horizontal-scale";
 const onTesting = rel === "/testing";
+const onLoadTesting = rel === "/load-testing";
 const onWiki = rel === "/wiki" || rel.startsWith("/wiki/");
 const onHome = rel === "" || rel === "/";
 ---
@@ -36,6 +38,7 @@ const onHome = rel === "" || rel === "/";
     <a href={subscriptions} class:list={["link", { active: onSubscriptions }]} aria-current={onSubscriptions ? "page" : undefined}>Subscriptions</a>
     <a href={scaling} class:list={["link", { active: onScaling }]} aria-current={onScaling ? "page" : undefined}>Scaling</a>
     <a href={testing} class:list={["link", { active: onTesting }]} aria-current={onTesting ? "page" : undefined}>Testing</a>
+    <a href={loadtesting} class:list={["link", { active: onLoadTesting }]} aria-current={onLoadTesting ? "page" : undefined}>Load tests</a>
     <a href={wiki} class:list={["link", { active: onWiki }]} aria-current={onWiki ? "page" : undefined}>Wiki</a>
   </div>
   <a class="src" href={REPO}>

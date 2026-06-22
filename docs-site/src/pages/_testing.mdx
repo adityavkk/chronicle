@@ -28,7 +28,8 @@ import Complexity from "../components/Complexity.astro";
     <li><strong>Jepsen kills pods and Redis on a live cluster.</strong> A <code>kubectl</code>/<code>redis-cli</code> nemesis crashes origins and Redis mid-flight on <code>k3d</code>; final-state checks assert every subscription cursor reaches its stream tail within a settle window, and a deposed worker's late ack is <code>FENCED</code>.</li>
     <li><strong>Real-Redis-or-skip, isolated DBs, no miniredis.</strong> Store, webhook, and bench each ping a dedicated DB (15 / 14 / 13), <code>FlushDB</code> once, and skip under <code>-short</code> or when Redis is unreachable — so <code>go test ./...</code> stays green serverless while still exercising the embedded Lua and round-trip cost.</li>
     <li><strong>The wire surface is pinned externally.</strong> ~330 black-box conformance tests (vitest + fast-check property fuzzing) hold Chronicle to the Durable Streams spec; a batched-sweep microbenchmark and an on-demand GKE rig validate scale at K=10,000 subscriptions.</li>
-    <li><strong>Honest about what is not tested.</strong> The few-microsecond arm/emit window is only approximated; there is no real Redis failover substrate; Lua/Go parity is asserted by convention, not enforced; and store and HTTP layers are example-based tables with no fuzz, property, or linearizability harness.</li>
+    <li><strong>The full property contract is named, and most of it is green.</strong> One table lists all thirteen properties: five safety (T1 to T5), five liveness (L1 to L5), and three contention (C1 to C3). Ten pass today on a local Chronicle plus Redis stack, including every safety property and the whole contention suite, because the horizontal-scale epic is merged. The three that do not are liveness bounds (L2, L4, L5) whose mechanism and rig are built but whose verdict needs a multi-node cloud run that GCP quota blocked. The cloud results that exercise these at scale are on the <a href="./load-testing">load and stress page</a>.</li>
+    <li><strong>Honest about what is not tested.</strong> The jepsen pod-kill still only approximates the few-microsecond arm/emit window, though an in-process failpoint seam now hits it exactly; the real Redis failover substrate is built but its run is cloud-pending; Lua/Go parity is asserted by convention, not enforced; and store and HTTP layers are example-based tables with no fuzz, property, or linearizability harness.</li>
   </ul>
 </Tldr>
 
@@ -408,16 +409,24 @@ import Complexity from "../components/Complexity.astro";
   ```
 
   <Callout icon="alert" label="What Jepsen does not yet cover">
-    <strong>The arm-crash is an approximation.</strong> The few-microsecond
-    arm/emit window cannot be hit from an external host driver; it is approximated
-    with coarse pod-kill plus churn, and the code itself notes a surgical kill
-    needs a server-side fault-injection seam this harness lacks (research doc 07
-    proposes <code>gofail</code>).
-    <strong>There is no real failover substrate.</strong> <code>killRedis</code>
-    deletes the one Redis pod and relies on PVC-backed AOF replay; there is no
-    replica, sentinel, or cluster failover, so split-brain and replication-lag
-    durability are untested. Acceptance gates T3/T5 and liveness L2/L4/L5 are
-    unimplemented until proposed sharding lands, and a porcupine
+    <strong>The jepsen pod-kill still approximates the arm-crash, but an
+    in-process seam now hits it exactly.</strong> The few-microsecond arm/emit
+    window cannot be hit from the external host driver, so the jepsen scenario
+    stands in with coarse pod-kill plus churn (the checker notes it lacks a
+    server-side seam). An in-process gofail-style failpoint now closes the gap
+    directly: <code>webhook/failpoint.go</code> crashes at the exact
+    arm-to-emit point and the recovery sweep then re-emits the stranded wake
+    (doc 07 honest-gap #2).
+    <strong>The local failover substrate is still single-node.</strong>
+    <code>killRedis</code> deletes the one Redis pod and relies on PVC-backed AOF
+    replay. A STANDARD_HA substrate with a replica and a promotion drill is now
+    built (<code>jepsen/deploy/standard-ha.yaml</code> and
+    <code>standard-ha-failover.sh</code>), but its run is cloud-pending, so
+    split-brain and replication-lag durability are specified, not yet measured. The T3 ownership-exclusivity and T5 slot-isolation acceptance
+    gates are now built and green, checked by the porcupine CAS shard model and
+    the slot differential checker on live local-Redis drivers; the liveness gates
+    L2/L4/L5 are built mechanisms whose verdict is pending a multi-node cloud run
+    that has not happened yet. A porcupine
     <code>Unknown</code> on an over-concurrent history is an accepted T1 limit.
   </Callout>
 </section>
@@ -543,12 +552,12 @@ import Complexity from "../components/Complexity.astro";
   <Table wide>
     | Gap | Severity | Why it matters |
     | --- | --- | --- |
-    | Jepsen arm-crash is an approximation | **high** | the few-microsecond arm/emit window can't be hit from an external host; coarse pod-kill + churn stands in, and the code says a surgical kill needs a server-side seam this harness lacks (07 proposes `gofail`)[^g-arm] |
-    | Single-node Redis, no real failover | **high** | `killRedis` deletes the one pod and relies on AOF replay; no replica/sentinel/cluster substrate, so split-brain and replication-lag durability are untested[^g-failover] |
+    | Jepsen arm-crash still approximated; in-process seam added | medium | the external pod-kill still can't hit the few-microsecond arm/emit window, but an in-process gofail-style failpoint (`webhook/failpoint.go`) now crashes at the exact arm-to-emit point and the sweep re-emits the stranded wake (07 honest-gap #2)[^g-arm] |
+    | Real-failover substrate built, run cloud-pending | medium | local `killRedis` still deletes the one pod and relies on AOF replay; a STANDARD_HA replica + promotion substrate (`jepsen/deploy/standard-ha.yaml`) is now built but its run is cloud-pending, so split-brain and replication-lag durability are specified, not yet measured[^g-failover] |
     | Lua/Go parity asserted by convention | medium | no test `EVAL`s the Lua and runs the Go mirror on identical inputs for byte-equal output; parity rests on mirrored assertions plus doc comments[^g-parity] |
     | No fuzz/property/linearizability in store or HTTP | medium | despite the repo name, store and handler layers are example-based tables only — no `go test fuzz`, no property harness, no `-race` multi-writer store test[^g-fuzz] |
     | True concurrency simulated sequentially | medium | webhook two-worker races are reproduced by advancing a clock, not running in parallel; only the jepsen single-holder-linz driver runs genuinely concurrent[^g-concurrency] |
-    | Acceptance/liveness gates unimplemented | low | jepsen T3/T5 and L2/L4/L5 are red until proposed sharding lands; porcupine `Unknown` on over-concurrent histories is an accepted T1 limit[^g-gates] |
+    | Liveness gates pending a cloud run | low | jepsen T3 and T5 are now built and green (porcupine CAS shard model + slot differential checker on live drivers); L2/L4/L5 are built mechanisms whose verdict is pending a multi-node cloud run that has not happened; porcupine `Unknown` on over-concurrent histories is an accepted T1 limit[^g-gates] |
     | Memory-vs-Redis parity is structural | low | both back the same `Store` interface but most contract cases are duplicated per-backend, not run through one shared harness, so divergences rely on hand-kept mirroring[^g-parity-store] |
     | Thin packages; conformance not installed | low | `metrics` has only 2 tests; conformance `node_modules` isn't vendored in-tree, so the ~330 count needs `npm ci` in CI[^g-thin] |
   </Table>
@@ -575,6 +584,32 @@ import Complexity from "../components/Complexity.astro";
   concurrent history all at once. What it does *not* yet have is a real failover
   substrate or a surgical crash seam, and it leans on convention where it could
   enforce equivalence. Those are the named next steps, not silent omissions.
+</section>
+
+<section class="block" id="contract">
+  <SectionHead num="08" label="Contract" title="The full property contract, <em>green and cloud-pending</em>" />
+
+  The Jepsen suite names a fixed contract of thirteen properties in three families: five safety properties T1 to T5, five liveness properties L1 to L5, and three contention properties C1 to C3. The contract is defined in `docs/specs/horizontal-scale/research/07-jepsen-style-verification.md`, and the horizontal-scale epic that builds it is merged on main. Ten of the thirteen pass today on a local Chronicle plus Redis stack, including all five safety properties and the whole contention suite. The other three are liveness bounds (L2, L4, L5) whose mechanism and rig are built but whose verdict needs a multi-node cloud run that GCP project quota blocked. The table below states each property, what it checks, and where it runs, so the reader can tell a green check from a cloud-pending gate.
+
+  <Table wide>
+    | ID | Property | What it checks | Where it runs |
+    | --- | --- | --- | --- |
+    | **T1** | single-holder-linz | only one worker holds a `(gen, wake)` token `ack.lua` accepts per subscription; a deposed holder's ack is `FENCED` | green — `single-holder-linz` (`scenario_lease.go`) drives 4 workers under a gcPause nemesis against the porcupine `leaseModel` (`model_fence.go`); linearizable over 463 ops, no cloud |
+    | **T2** | cursor-monotonic | per `(sub, path)` the acked offset is forward-only; a stale or replayed ack never regresses or jumps ahead | green — `cursor-monotonic` (`scenario_cursor.go`) + pure `CheckCursorMonotonic` (`check_cursor.go`); 770 samples over 4 streams under churn, no regression |
+    | **T3** | ownership-exclusivity | at most one owner per `ds:{ownership}:slot:<h>`; `claim_shard.lua` is a real compare-and-set, the epoch bumps on transfer, `check_owner.lua` never re-grants a deposed owner | green — `ownership-exclusivity` (`scenario_ownership.go`) against the porcupine `shardModel` (`model_shard.go`), linearizable over 165 ops / 4 slots; an injected last-writer-wins bug flips it to Illegal, so the gate has teeth |
+    | **T4** | no stale-generation effect | a stale-generation ack returns `FENCED` and leaves the durable snapshot byte-identical; a current-generation ack advances the cursor | green — `stale-gen-noop` (`scenario_stalegen.go`) + pure `CheckNoStaleGenEffect` (`check_stalegen.go`), no cloud |
+    | **T5** | slot-isolation | the S-slot scatter-gather subscriber set equals the independent reference and the brute-force union; zero foreign wakes; a mis-tag is detected as `CROSSSLOT` | green — `slot-isolation` differential checker (`scenario_slot.go`, `computeSlotLeakage`); 320 subs over 8 streams spanning 204 of 256 slots, 0 foreign wakes |
+    | **L1** | at-least-once delivery | after the workload settles every linked stream cursor reaches its tail; duplicates are reported but fenced-safe, not failures | green (no fault) — `at-least-once`, `baseline`, `index-repair` via `verify()` + `CheckAtLeastOnce` (`check_delivery.go`); 6 of 6 streams at tail. The faulted forms need the kubectl nemesis on a cluster |
+    | **L2** | bounded recovery under churn | owed work is reclaimed within the membership-lease TTL plus RTT (about 9s) as the slot owner is killed repeatedly, with no lost wakes and no double-grants | pending-cloud — `killSlotOwner` nemesis (`nemesis.go`) + rig `loadtest/spec/sweep-10k-churn.yaml` (`ltctl gate4`); the verdict needs 2 or more replicas on a multi-node cluster, not yet run |
+    | **L3** | failover recovery | when the lease-schedule tail is dropped, only the cursor-reading eager reconcile reaches tail; the deposed ack is `FENCED` | green — `lease-tail-drop` (`scenario_leasetail.go`, `dropLeaseTail`) with `-floor=0`; also pinned in-process by `TestLeaseTailDropRecoveredByEagerReconcile` |
+    | **L4** | ownership re-convergence | after churn settles, HRW plus the slot-reconcile loop reassign each slot to exactly one live replica | pending-cloud — triggers proven in-process (`TestManagerSlotReconcileClaimsOwnsAndFires`, `TestSlotReclaimedAfterMemberAndLeaseExpire`); the live convergence verdict needs 2 or more replicas, not yet run |
+    | **L5** | no permanent starvation | under a never-quiescing combined nemesis, every sub's max inter-delivery gap stays at or below 3R over a multi-minute run | pending-cloud — spec `loadtest/spec/dispatch-webhook-ha.yaml` (S=256, STANDARD_HA, `ltctl gate5`); needs the multi-replica failover cluster, not yet run |
+    | **C1** | bounded claim contention | the `ALREADY_CLAIMED` and `FENCED` rates per op stay bounded as claimants rise 6 to 12 to 24; no lease lapses under an active heartbeat | green — `contention` (`scenario_contention.go`) + `CheckBoundedContention`; the G=1 busy rate climbs 0.78 to 0.94 to 0.97, the runaway it flags, while the G=16 fix holds it low |
+    | **C2** | no throughput collapse | per-busy-worker throughput does not fall off a knee while aggregate stays pinned; the 6-clean then 12-collapse signature | green — same `contention` scenario + `CheckNoThroughputCollapse`; at G=1 per-worker throughput halves 21.7 to 10.4 to 5.2 while aggregate pins near 125; at G=16 it holds near 28 and aggregate scales |
+    | **C3** | granularity fix moves the knee | the per-`(subId, g)` split moves the collapse out about G times, and single-holder safety still holds per shard | green — `contention -c3 -G 16 -sharded` + `CheckGranularityMovesKnee` (G=16 holds near 27, aggregate scales to 650); `shard-linz` (`scenario_shard.go`) confirms T1 per shard, linearizable over 363 ops. This is doc-05 gate #6 |
+  </Table>
+
+  Read the last column honestly. The ten green rows run against a real Chronicle binary and a real Redis, with no cluster, so they pass today. The three pending-cloud rows are the liveness bounds (L2, L4, L5) that only a multi-node cluster under sustained churn can settle, and that cluster has not run because GCP quota blocked it. The cloud rig that drives these properties at scale, the flat fan-out curve from 1 to 8 replicas, the linearizable claim up to 16 workers, and the K=10,000 recovery sweep inside its budget, is written up on the <a href="./load-testing">load and stress page</a>.
 </section>
 
 [^split]: The pure-core/imperative-shell split, stated for the fence model: [`jepsen/checker/model_fence.go:9`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_fence.go) — `model_fence.go` and `check_cursor.go` are I/O-free oracles; the `scenario_*.go` files are the live drivers.
@@ -713,9 +748,9 @@ import Complexity from "../components/Complexity.astro";
 
 [^f-timing]: Conformance + timing-bound concurrency assertions: [`store/redis/notify_test.go:31`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify_test.go).
 
-[^g-arm]: Jepsen arm-crash is an approximation; the code notes a surgical kill needs a server-side fault-injection seam this harness lacks ([`jepsen/checker/main.go:305`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go)). `gofail` (etcd's failpoint library) is the proposed seam, named in [research doc 07](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/07-jepsen-style-verification.md), not in the harness today.
+[^g-arm]: The jepsen pod-kill approximates the arm/emit window from outside the process ([`jepsen/checker/main.go`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go) notes it lacks a server-side seam). A gofail-style in-process failpoint now closes doc 07 honest-gap #2 directly: [`webhook/failpoint.go`](https://github.com/adityavkk/chronicle/blob/main/webhook/failpoint.go) crashes at the exact arm-to-emit point and [`webhook/failpoint_test.go`](https://github.com/adityavkk/chronicle/blob/main/webhook/failpoint_test.go) asserts the sweep then re-emits the stranded wake.
 
-[^g-failover]: Single-node Redis, no real failover — `killRedis` relies on PVC-backed AOF replay: [`jepsen/checker/main.go:869`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go).
+[^g-failover]: The local jepsen `killRedis` relies on PVC-backed AOF replay ([`jepsen/checker/main.go`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go)); a STANDARD_HA replica + promotion substrate now exists ([`jepsen/deploy/standard-ha.yaml`](https://github.com/adityavkk/chronicle/blob/main/jepsen/deploy/standard-ha.yaml)) but its failover-drill run is cloud-pending.
 
 [^g-parity]: Lua/Go parity asserted by convention, not enforced — no test `EVAL`s the Lua against the Go mirror for byte-equal output: [`webhook/scripts/common.lua:29`](https://github.com/adityavkk/chronicle/blob/main/webhook/scripts/common.lua).
 
@@ -723,7 +758,7 @@ import Complexity from "../components/Complexity.astro";
 
 [^g-concurrency]: True concurrency simulated sequentially in the webhook layer (clock advance, not parallel): [`webhook/redis_store_test.go:221`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store_test.go).
 
-[^g-gates]: Acceptance/liveness gates (T3/T5, L2/L4/L5) unimplemented; over-concurrent porcupine `Unknown` is an accepted T1 limit: [`docs/specs/horizontal-scale/research/07-jepsen-style-verification.md:170`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/07-jepsen-style-verification.md).
+[^g-gates]: T3 and T5 acceptance gates are built and green (`jepsen/checker/scenario_ownership.go` + `model_shard.go` for T3, `scenario_slot.go` + `check_slot.go` for T5); L2/L4/L5 are built mechanisms whose liveness verdict is pending a multi-node cloud run; over-concurrent porcupine `Unknown` is an accepted T1 limit: [`docs/specs/horizontal-scale/research/07-jepsen-style-verification.md:170`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/07-jepsen-style-verification.md).
 
 [^g-parity-store]: Memory-vs-Redis parity is structural, not a shared harness — most contract cases are duplicated per-backend: [`store/store.go:98`](https://github.com/adityavkk/chronicle/blob/main/store/store.go).
 
