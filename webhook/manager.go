@@ -1182,6 +1182,23 @@ func (m *Manager) sweepOnce() {
 			wakes++
 			continue
 		}
+		// Recover a pull-wake stranded in waking AFTER a durable emit (T4, #24): the
+		// wake event was written (its sent flag is set) but no consumer ever claimed
+		// it — the origin or consumer crashed after emit. Pull-wake arms no lease, so
+		// LeaseExpired never fires and the sub never flips back to idle; the due-set
+		// coalesces it (DecideDue is DueSkip for a non-idle phase) and reconcileLeases
+		// skips it (a pull-wake's lease_until_ns is 0, never LeaseStranded). Nothing
+		// else delivers, so it strands forever. Once the emitted wake is stale (older
+		// than a few floor ticks: a live consumer would have claimed it long before),
+		// re-emit the SAME (generation, wakeID) so a restarted consumer can reclaim it;
+		// the (gen, wake) fence makes the duplicate event claim-safe. Idempotent: it
+		// re-fires at most once per floor tick while the sub remains stranded.
+		if sub.Config.Type == DispatchPullWake && sub.Phase == PhaseWaking && sub.WakeEventSentNs != 0 &&
+			now.UnixNano()-sub.WakeEventSentNs > (3*m.sweepInterval).Nanoseconds() {
+			m.writeWakeEvent(sub, "", sub.Generation, sub.WakeID)
+			wakes++
+			continue
+		}
 		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
 			if status, err := m.expireLease(sub.ID, now); err == nil && status == "EXPIRED" {
 				sub.Phase = PhaseIdle
