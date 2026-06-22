@@ -27,16 +27,20 @@ import (
 // newStore builds the stream store. For the redis backend it also returns the
 // concrete Redis store and the shared client so the subscription layer can run
 // on the same Redis; both are nil for the memory backend.
+//
+// Two URL schemes are supported:
+//   - redis://host:port/db — standalone (Memorystore STANDARD_HA or single node)
+//   - redis+cluster://host1:port,host2:port,... — sharded cluster
+//     (Memorystore for Redis Cluster; gate #2 cross-node RTT testing)
 func newStore(cfg chronicle.Config, logger *slog.Logger) (store.Store, *redisstore.Store, goredis.UniversalClient, error) {
 	switch cfg.StoreBackend {
 	case "memory":
 		return store.NewMemoryStore(), nil, nil, nil
 	case "redis":
-		opt, err := goredis.ParseURL(cfg.RedisURL)
+		client, err := newRedisClient(cfg.RedisURL)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("invalid redis URL: %w", err)
+			return nil, nil, nil, err
 		}
-		client := goredis.NewClient(opt)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := client.Ping(ctx).Err(); err != nil {
@@ -47,6 +51,32 @@ func newStore(cfg chronicle.Config, logger *slog.Logger) (store.Store, *redissto
 	default:
 		return nil, nil, nil, fmt.Errorf("unknown store backend %q (want %q or %q)", cfg.StoreBackend, "redis", "memory")
 	}
+}
+
+// newRedisClient parses a Redis URL and creates the appropriate client.
+// redis://host:port/db creates a standalone client; redis+cluster://h1,h2,h3
+// creates a ClusterClient that speaks the Redis Cluster protocol (required for
+// Memorystore for Redis Cluster, which shards keys across nodes — gate #2).
+func newRedisClient(rawURL string) (goredis.UniversalClient, error) {
+	if strings.HasPrefix(rawURL, "redis+cluster://") {
+		addrs := strings.TrimPrefix(rawURL, "redis+cluster://")
+		// Strip any /db suffix — cluster mode ignores DB selection.
+		if i := strings.LastIndex(addrs, "/"); i >= 0 {
+			addrs = addrs[:i]
+		}
+		seeds := strings.Split(addrs, ",")
+		for i := range seeds {
+			seeds[i] = strings.TrimSpace(seeds[i])
+		}
+		return goredis.NewClusterClient(&goredis.ClusterOptions{
+			Addrs: seeds,
+		}), nil
+	}
+	opt, err := goredis.ParseURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid redis URL: %w", err)
+	}
+	return goredis.NewClient(opt), nil
 }
 
 func main() {
