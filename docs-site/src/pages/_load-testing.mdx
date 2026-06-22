@@ -1,0 +1,481 @@
+---
+title: "Proving <em>horizontal scale</em>"
+summary: "Chronicle once fence-stormed at 12 replicas while every tier sat at 12 percent CPU or less. A cloud load and stress rig on GKE plus Memorystore re-ran the wake path across replica counts and found the append fan-out latency flat from 1 to 8 replicas, the K=10,000 recovery sweep inside its budget, and the single-holder claim linearizable up to 16 workers. The rig also found one real recovery bug, which was fixed and re-verified. Two load-bearing numbers could not be measured because GCP project quota blocked them."
+eyebrow: "Reference"
+meta: "Load and stress testing"
+deck: "A cloud rig on Google Kubernetes Engine and Memorystore drives Chronicle under load, then tears every resource down to zero ongoing cost. It measured the append fan-out latency as replicas grow from 1 to 8, the recovery sweep at 10,000 subscriptions, and the claim lease under contention. It also crashed origins and Redis under a Jepsen nemesis. <strong>Two numbers it set out to measure stayed unmeasured</strong> because the GCP project ran out of quota, and that bounds the claim."
+byline:
+  - label: "Verdict"
+    value: "fan-out flat 1 to 8 · fence-storm gone"
+  - label: "Status"
+    value: "measured · two gates quota-blocked"
+  - label: "Rig"
+    value: "GKE + Memorystore · teardown to $0"
+  - label: "Source"
+    value: "loadtest/RESULTS-gate2.md"
+    href: "https://github.com/adityavkk/chronicle/blob/adityavkk/gate2-vandv/loadtest/RESULTS-gate2.md"
+---
+
+import Tldr from "../components/Tldr.astro";
+import SectionHead from "../components/SectionHead.astro";
+import Callout from "../components/Callout.astro";
+import Table from "../components/Table.astro";
+import Complexity from "../components/Complexity.astro";
+
+<Tldr>
+  <ul>
+    <li><strong>The motivating failure was a fence storm at 12 replicas.</strong> When the agents runtime drove Chronicle as its backend, the wake path collapsed at 12 replicas while chronicle sat at 4 percent CPU, Redis at 4 percent, and Postgres at 12 percent. The cause was lock contention on one per-type subscription lease, not saturated hardware, and giving chronicle 2.5 times the CPU made it worse.</li>
+    <li><strong>The headline result is a flat fan-out curve.</strong> On the cloud rig the append-to-wake p99 held at 12.5 milliseconds plus or minus 0.1 across 1, 2, 4, and 8 replicas, with zero append errors at every count. The signal is the flatness, not the absolute value, because the measurement includes about 10 milliseconds of port-forward round-trip time.</li>
+    <li><strong>The recovery sweep stays inside budget at 10,000 subscriptions.</strong> At a fair node size the sweep tick p99 was 1019 milliseconds against a 1500 millisecond limit, with 5 links per subscription. An earlier run failed this at 2037.8 milliseconds, but that run had been shrunk to 1 CPU to save money and the sweep is CPU-bound, so the failure was a sizing artifact, not a regression.</li>
+    <li><strong>The single-holder claim stayed linearizable under contention.</strong> The claim lease was linearizable at 4 and at 16 concurrent claim workers, measured on the post-epic binary that already carries the finer-grained per-(subId,g) claim. That finer-grained design is built and green locally (the contention suite C1 to C3 and doc-05 gate #6 pass on a real Chronicle plus Redis stack: at G=16 per-worker throughput stays flat near 27 while aggregate scales 158 to 336 to 650, so the G=1 collapse knee moved beyond the whole G=16 ramp). The cloud measurement here is the single-lease G=1 contention point on one healthy node, not the cloud re-proof of the knee moving under scale.</li>
+    <li><strong>The run found a real recovery bug, and it was fixed.</strong> The recovery sweep did not re-emit pull-wake wakes after an origin crash, so a subscription cursor wedged while the stream tail moved on. The fix re-emits the same fenced wake on recovery, and a re-run passed with 6 of 6 streams reaching their tail.</li>
+    <li><strong>Two numbers are still unmeasured, and they bound the claim.</strong> The 12 replica point itself was never re-run because GCP returned insufficient project quota on the node pool, and the multi-shard cross-node fan-out latency was never measured because the Redis Cluster never reached a ready state for the same reason. The fence-storm-gone verdict rests on a flat 1 to 8 trend, not on a passing 12 replica run.</li>
+  </ul>
+</Tldr>
+
+<Callout icon="alert" label="What this proves, and what it does not">
+  The slot-homed, work-sharded design is built and green locally. PR #18 landed
+  the whole horizontal-scale epic on main: subscriptions are slot-homed into 256
+  `{__ds:h}` slots, ownership is leased over a `{ownership}` keyspace, and the
+  claim is split per `(subId, g)`. Its safety and liveness suite passes on a real
+  Chronicle plus Redis stack: T1 to T5 GREEN, L1 and L3 GREEN, and the contention
+  suite C1 to C3 with doc-05 gate #6 GREEN. The cloud rig deployed that same
+  post-epic binary, so the numbers on this page measure the sharded design, not a
+  pre-sharding baseline. The one thing the cloud rig could not exercise is the
+  multi-shard layout: it ran on a single-node Memorystore BASIC, which has one
+  hash-slot range on one node, so the slots never spanned nodes. The measured
+  gates therefore show the sharded binary on a single-slot substrate no longer
+  fence-storms as replicas grow, holds its sweep at 10,000 subscriptions, and
+  keeps its claim lease linearizable under contention. They do **not** yet carry
+  the cross-node, multi-shard fan-out number, and they do not re-prove the 12
+  replica point. Those two gates, plus the L2, L4, and L5 multi-node liveness
+  runs, stayed unmeasured on cloud because GCP project quota blocked the 3-shard
+  Redis Cluster and the larger node pool. See [the honest limits](#limits) for
+  exactly which, and why.
+</Callout>
+
+<section class="block" id="goal">
+  <SectionHead num="01" label="The goal" title="What we set out to <em>prove</em>" />
+
+  Chronicle is one Go binary that serves durable streams and runs the
+  subscription control plane. The open question was whether adding replicas
+  helps the control plane or hurts it. A prior load test, the agents runtime
+  driven against chronicle as its Durable-Streams backend, had answered "hurts"
+  in the worst way.
+
+  At 6 replicas the wake path was clean. At 12 it collapsed. The load
+  generators' warmup fence-stormed, with 489 to 735 FENCED rejections per pod,
+  and only about 40 percent of entities ever woke, while every tier sat at 12
+  percent CPU or less. The numbers are stated identically in three places:
+  research doc 05 (`05-proposed-architecture.md` lines 92 to 93), research doc
+  07 (`07-jepsen-style-verification.md` lines 75 to 77), and the epic #9
+  objective on GitHub.
+
+  <Table>
+    | Tier | CPU at collapse |
+    | --- | --- |
+    | chronicle | 4% |
+    | Redis | 4% |
+    | Postgres | 12% |
+  </Table>
+
+  The cause was not capacity and not the recovery sweep. The agents runtime
+  registers one subscription per entity *type*, named `"<type>-handler"`, and
+  chronicle holds exactly one single-holder lease per subscription. So every
+  entity of a type and every replica hosting one contends for that one lease.
+  More replicas means more contenders on one lock, so the queue on the single
+  control-plane slot lengthens, heartbeats land late, leases lapse, takeovers
+  fence the deposed holder's in-flight work, and the loser retries, which adds
+  more operations. Research doc 05 (lines 91 to 96) names the binding
+  constraint as lock contention on a single subscription's lease, and adds that
+  2.5 times the CPU made it worse, which is the signature of a contention
+  collapse rather than a saturation one.
+
+  The job of the rig was to show the inverse of that collapse on real cloud
+  infrastructure: that adding replicas no longer fence-storms, that the state
+  and sweep cost stay inside budget at scale, and that the claim lease stays
+  correct under load and under faults.
+
+  <Callout icon="info" label="One provenance caveat on the original numbers">
+    The 489 to 735 FENCED, the roughly 40 percent woke, and the 12 percent CPU
+    figures are cited by research doc 05 (line 96) to two Electric-rig files
+    that were not in the read set for this page, so they were verified only as
+    restated consistently across the three documents above, not opened at the
+    primary source. Research doc 05 (line 109) itself notes that the exact
+    per-wake interleaving at 12 replicas is inferred from the proven halves plus
+    the collapse counts.
+  </Callout>
+</section>
+
+<section class="block" id="configs">
+  <SectionHead num="02" label="The configurations" title="Every System-Under-Test that <em>ran</em>" />
+
+  Five separate campaigns drove chronicle on the cloud. They used different
+  node sizes, replica counts, and Redis tiers, and that variation matters
+  because some of the differences are exactly what confounds or confirms a
+  result. The table below lists each run, its chronicle configuration, its
+  Redis, its GKE nodes, and its replica count. The numbers come from each run's
+  results file, cited in the rows that follow and in section 04.
+
+  <Table wide>
+    | Run | chronicle SUT | Redis | GKE nodes | Replicas |
+    | --- | --- | --- | --- | --- |
+    | Sweep-smoke (first shakeout) | 1 replica, 1 CPU / 1 Gi, sweep interval 2s | Memorystore BASIC, 1 GB, REDIS_7_2, noeviction, single node | 1x e2-standard-2 SUT + 1x e2-standard-2 loadgen | 1 |
+    | Claude-fleet V&V | 2 replicas, 1 CPU / 1 Gi (downsized from 2 CPU to fit the node) | Memorystore BASIC, 1 GB, single node | 2x e2-standard-2 SUT + 1x e2-standard-2 loadgen | 2 |
+    | Codex-fleet V&V | 1 replica, metrics enabled | Memorystore BASIC, 1 GB, single node | 2x e2-standard-2 | 1 |
+    | Gate2 Phase 1 (scale curve) | CPU overridden to 1 per pod so N=12 would fit | Standalone Memorystore BASIC | 2x e2-standard-4 loadgen + 3x e2-standard-2 obs; SUT pool quota-exhausted | swept 1, 2, 4, 8 (12 attempted, not run) |
+    | Gate2 Phase 2 (contention) | 2 replicas | Standalone Memorystore BASIC | 2x e2-standard-4 loadgen + 3x e2-standard-2 obs | 2 |
+    | Gate2 Phase 3 (multi-shard fan-out) | 1 replica, 2 CPU / 2 Gi (intended) | Memorystore CLUSTER, 3 shards (intended; never reached ready) | 2x e2-standard-4 loadgen + 3x e2-standard-2 obs | 1 (intended; not measured) |
+    | Gate2 Phase 4 (fair K=10k sweep) | 1 replica, 2 CPU / 2 Gi (the fair size) | Standalone Memorystore BASIC | SUT on e2-standard-4-class capacity + 3x e2-standard-2 obs | 1 |
+    | Gate2 Phase 5 (Jepsen) | 2 replicas | Standalone Memorystore BASIC | 2x e2-standard-4 loadgen + 3x e2-standard-2 obs | 2 |
+  </Table>
+
+  Two configuration choices drive the results. First, several runs used 1 CPU
+  per pod instead of the 2 CPU default, either to fit cost-minimal
+  e2-standard-2 nodes or so that 12 replicas could fit on three e2-standard-4
+  nodes at 12 vCPU total. The recovery sweep is CPU-bound, so a 1 CPU run is not
+  a like-for-like comparison against a 2 CPU baseline, and section 04 shows one
+  result that flips between fail and pass purely on this. Second, every
+  successful Redis phase ran on Memorystore BASIC, which is a single node with
+  no sharding and no managed failover. A single-node Redis has one hash slot
+  range on one node, so the cross-node maximum round-trip time that a sharded
+  cluster would expose was never on the table for those phases.
+
+  <Callout icon="info" label="One project, suffixed resources">
+    Every campaign ran in the GCP project `adityavkk-prototyping`, in region
+    `us-central1` and zone `us-central1-a` (`run-gate2.sh` lines 21 to 23). The
+    parallel fleets used resource names suffixed `-claude` and `-codex` in the
+    same project to keep their clusters and Redis instances separate.
+  </Callout>
+</section>
+
+<section class="block" id="rig">
+  <SectionHead num="03" label="The rig" title="Provision, five phases, <em>teardown to zero</em>" />
+
+  A run is a single shell script, `run-gate2.sh`, that provisions cloud
+  infrastructure, drives five phases of load, and then destroys everything. The
+  whole cycle is designed to leave no resource running, because a stranded GKE
+  cluster keeps billing.
+
+  Provisioning builds the container images for `linux/amd64` through Cloud
+  Build into Artifact Registry, because the development machine is an ARM Mac
+  with no cross-architecture emulation (`run-gate2.sh` lines 185 to 191). It
+  then stands up the cluster and Redis with Terraform in `loadtest/terraform`
+  (`run-gate2.sh` line 29). The script enables six GCP APIs first: container,
+  redis, artifactregistry, cloudbuild, servicenetworking, and
+  networkconnectivity (`run-gate2.sh` lines 172 to 178).
+
+  The five phases run in order, each driven by a purpose-built Go load
+  generator (`run-gate2.sh` lines 11 to 16):
+
+  <Table wide>
+    | Phase | What it drives | Driver |
+    | --- | --- | --- |
+    | 1 | Horizontal-scale curve: append fan-out p99 as replicas grow | fanoutscale |
+    | 2 | Claim contention: single-holder linearizability at higher worker counts | jepsen single-holder-linz |
+    | 3 | Gate #2 cross-node fan-out on a Redis Cluster | fanoutscale |
+    | 4 | Recovery sweep at K=10,000 subscriptions | sweepscale |
+    | 5 | Jepsen correctness under pod and Redis kills | jepsen-checker |
+  </Table>
+
+  The fan-out driver, `fanoutscale`, creates one sentinel stream, seeds the
+  subscriptions all linked to it with 32-way concurrency, drives appends at a
+  steady rate, and scrapes the `chronicle_fanout_seconds` and
+  `chronicle_fanout_subs` metrics from `/metrics` to report fan-out p50, p99,
+  and p999 in milliseconds (`fanoutscale/main.go` lines 98 to 257). It exists
+  because the earlier `sweepscale` driver seeded subscriptions but drove no
+  appends, so `chronicle_fanout_seconds` stayed at a count of zero and the
+  fan-out latency was never populated (`fanoutscale/main.go` lines 4 to 7).
+
+  Teardown is mandatory and runs on every exit path. The script installs a trap
+  on the EXIT, INT, and TERM signals (`run-gate2.sh` line 84), which runs a
+  Terraform destroy of the GKE cluster and both the standalone and cluster Redis
+  instances, then verifies that no clusters remain in the region
+  (`run-gate2.sh` lines 49 to 83). The cost estimate is about 3 dollars per
+  hour, with a total under 80 dollars (`run-gate2.sh` line 18). Phase 5 uses a
+  self-restarting port-forward loop because the Jepsen nemesis kills pods, which
+  would otherwise break a static port-forward (`run-gate2.sh` lines 108 to 125).
+
+  <Callout icon="info" label="Teardown confirmed at zero ongoing cost">
+    Every campaign confirmed teardown left nothing running. The gate2 trap
+    completed its destroy (`run-gate2.sh` lines 81 to 82). The claude-fleet run
+    recorded clusters none, Memorystore none, and zero dollars ongoing, verified
+    with `gcloud container clusters list` and `gcloud redis instances list`
+    against its `-claude`-suffixed resources. The codex run recorded the same
+    zero-ongoing result for its `-codex`-suffixed resources.
+  </Callout>
+</section>
+
+<section class="block" id="results">
+  <SectionHead num="04" label="The results" title="Flat fan-out, a sweep floor, <em>a contention knee</em>" />
+
+  Three measured gates passed on the cluster `chronicle-gate2` on 2026-06-22,
+  recorded in `loadtest/RESULTS-gate2.md`. They are the inverse of the original
+  collapse. A fourth gate, the one that would have been the most decisive, did
+  not run.
+
+  ### The headline: a flat fan-out curve
+
+  Phase 1 is the fence-storm regression test. It ramps replicas through 1, 2,
+  4, and 8, with 4 pull-wake subscriptions, an append rate of 10 per second, a
+  20 second warmup, and a 60 second measurement window, port-forwarded to the
+  first pod for each replica count (`RESULTS-gate2.md` lines 13 to 28). The
+  append-to-wake p99 is flat.
+
+  <Table wide>
+    | Replicas N | fanout p99 (ms) | fanout p50 (ms) | subs per fanout | append errors | Verdict |
+    | --- | --- | --- | --- | --- | --- |
+    | 1 | 12.48 | 5.20 | 4 | 0 | PASS |
+    | 2 | 12.61 | 5.59 | 4 | 0 | PASS |
+    | 4 | 12.58 | 5.45 | 4 | 0 | PASS |
+    | 8 | 12.53 | 5.29 | 4 | 0 | PASS |
+  </Table>
+
+  The p99 holds at 12.5 milliseconds plus or minus 0.1 across the range, a
+  spread of 0.13 milliseconds while the replica count quadruples, with zero
+  append errors at every count. If the single control-plane slot were still
+  serializing under concurrency, the p99 would climb as replicas grow. It does
+  not. The original failure showed fence-storming that worsened with more
+  replicas and worsened further with more CPU. Here the curve is flat.
+
+  The downside of this result is that the absolute number is not meaningful and
+  the failing replica count was not reached. The p99 includes about 10
+  milliseconds of port-forward round-trip time, so the file's claim is about
+  flatness across N, not the absolute 12.5 milliseconds (`RESULTS-gate2.md`
+  lines 16 to 17). Phase 1 also used 1 CPU per pod, not the 2 CPU default, so
+  that 12 replicas could fit on the available nodes, which means it measures
+  relative latency against N and not absolute throughput. And N=12, the exact
+  count that originally collapsed, was not run, which section 05 covers.
+
+  ### The K=10,000 regression floor
+
+  Phase 4 measures the recovery sweep at 10,000 subscriptions with 5 links each,
+  at the fair node size of 2 CPU on e2-standard-4-class capacity
+  (`RESULTS-gate2.md` lines 53 to 60). The limit is a sweep tick p99 under 1500
+  milliseconds.
+
+  <Table wide>
+    | Run | CPU | K | Links per sub | sweep p50 (ms) | sweep p99 (ms) | Verdict |
+    | --- | --- | --- | --- | --- | --- | --- |
+    | Sweep-smoke (single link) | 1 | 10,000 | 1 | 384 | 509 | PASS |
+    | Claude-fleet | 1 | 10,000 | 5 | 1536 | 2037.8 | FAIL (confounded) |
+    | Gate2 Phase 4 (fair) | 2 | 10,000 | 5 | 768 | 1019 | PASS |
+  </Table>
+
+  The fair re-run passed at 1019 milliseconds, seeding all 10,000 subscriptions
+  in 4.1 seconds with zero seed errors and running 60 sweep ticks in 120
+  seconds. The claude-fleet run failed the same gate at 2037.8 milliseconds, but
+  that run had been shrunk from 2 CPU to 1 CPU to fit cost-minimal nodes, and
+  the sweep is CPU-bound because it reads many slots and tails per tick. The
+  fair re-run at 2 CPU resolves the confound: the failure was the 1 CPU sizing,
+  not a code regression (`RESULTS-gate2.md` lines 53 to 60 and 94). The earlier
+  509 millisecond single-link result from the first shakeout is the standing
+  baseline that every later campaign cites (`RESULTS-gke.md` lines 7 to 46), and
+  the downside to comparing against it is that it used 1 link per subscription
+  while the gate uses 5, so the 1019 millisecond figure is the right
+  apples-to-apples result at 5 links and the 509 millisecond figure is a lighter
+  single-link control.
+
+  ### The contention knee
+
+  Phase 2 checks that the single-holder claim lease stays linearizable as the
+  number of concurrent claim workers rises, using the jepsen
+  single-holder-linz checker over a 12,000 millisecond workload
+  (`RESULTS-gate2.md` lines 30 to 37).
+
+  <Table wide>
+    | Workers W | Operations | Claims | Granted | Linearizable | Verdict |
+    | --- | --- | --- | --- | --- | --- |
+    | 4 | 451 | 417 | 34 | yes | PASS |
+    | 16 | 1267 | 1225 | 42 | yes | PASS |
+  </Table>
+
+  The claim is linearizable at both 4 and 16 workers. This is the G=1 point, the
+  claim granularity of one lease per type, which is the granularity that
+  originally collapsed. The downside is what this cloud phase does not test. It
+  measures the single-lease G=1 design at higher worker counts on one healthy
+  node, so it does not on its own show the knee moving. The finer-grained claim
+  fix the original collapse calls for is built and green locally, not pending:
+  the per-(subId,g) claim split lands in `webhook/shard.go` (FNV-1a, default
+  G=16) and the contention suite proves the knee moved. On a real Chronicle plus
+  Redis stack the `contention` scenario (jepsen/checker `scenario_contention.go`)
+  shows that at G=16 per-worker throughput holds near 27 while aggregate scales
+  158 to 336 to 650, while G=1 collapses, so the C2 knee that broke G=1 at N=12
+  moved beyond the whole G=16 ramp (C1 to C3 and doc-05 gate #6 GREEN,
+  `docs/jepsen/results.md` lines 214 to 234). What stays cloud-pending is the
+  multi-node reproduction of that knee under scale, blocked by quota, not the
+  mechanism itself.
+
+  ### Gate #2: the number that was never measured
+
+  Phase 3 was meant to be the deciding gate. It would measure the append fan-out
+  p99 at 2, 4, 8, and 256 subscribers on a 3-shard Memorystore Cluster, which is
+  the sharded substrate where slots span nodes and a cross-node maximum
+  round-trip time appears. It did not run.
+
+  <Table wide>
+    | Subscribers S | Substrate | fan-out p99 | Verdict |
+    | --- | --- | --- | --- |
+    | 2 | Memorystore Cluster (3 shards) | not measured | SKIPPED |
+    | 4 | Memorystore Cluster (3 shards) | not measured | SKIPPED |
+    | 8 | Memorystore Cluster (3 shards) | not measured | SKIPPED |
+    | 256 | Memorystore Cluster (3 shards) | not measured | SKIPPED |
+  </Table>
+
+  The Memorystore Cluster never reached a ready state. Provisioning failed with
+  an insufficient project quota error on every attempt, twice, each time
+  entering a create-then-delete loop and never becoming ready
+  (`RESULTS-gate2.md` lines 40 to 51 and 93). The standalone Redis phases were
+  unaffected. This is the single most important unmeasured number across all
+  campaigns, because the cross-node fan-out latency is what decides whether the
+  built slot-homing layout is affordable to keep enabled in production, and
+  Memorystore BASIC is single-shard so its slots never span nodes. The fan-out
+  mechanism itself is built and proven correct locally: T5, the slot-isolation
+  differential checker (jepsen/checker `scenario_slot.go`), is GREEN, with 320
+  subscriptions spread across 204 of 256 slots, the scatter-gather subscriber set
+  equal to the independent reference and to the brute-force union, zero foreign
+  wakes, and a mis-tag detected as CROSSSLOT. What single-node Redis erases is the
+  max-node round-trip time, which is the only thing gate #2 reads, so the verdict
+  it gates is enable-versus-defer for an already-built and already-correct design,
+  not whether the design exists. Section 05 records this as a hard limit on the
+  claim.
+</section>
+
+<section class="block" id="faults">
+  <SectionHead num="05" label="Under faults" title="Killed mid-flight, <em>and a bug found</em>" />
+
+  Phase 5 ran a Jepsen nemesis against 2 replicas, killing origins and using a
+  self-restarting port-forward so a second pod served traffic while one was
+  killed (`RESULTS-gate2.md` lines 62 to 99). It ran three scenarios that work
+  without a cluster-to-host webhook back-channel, which the GKE network did not
+  allow. Two passed and one failed.
+
+  <Table wide>
+    | Scenario | What it checks | Result |
+    | --- | --- | --- |
+    | expired-lease-takeover | a deposed worker's late ack is fenced | PASS |
+    | single-holder-linz | the claim lease is linearizable under a GC-pause nemesis | PASS |
+    | pull-wake-arm-crash | a pull-wake cursor recovers after an origin crash | FAIL, then fixed |
+  </Table>
+
+  The lease fence passed cleanly. In expired-lease-takeover, Worker A claimed
+  generation 1, stalled 2.5 seconds past its lease time-to-live, Worker B took
+  over at generation 2, and Worker A's late ack returned a 409 FENCED rather
+  than a silent success. In single-holder-linz at 4 workers, 440 operations were
+  linearizable. So the fence rotates correctly on a stale-lease takeover and
+  the claim is linearizable under fault injection.
+
+  The third scenario found a real bug. In pull-wake-arm-crash the driver
+  appended 120 messages across 6 streams, all 120 reachable in Redis, then the
+  nemesis killed all origins once and killed one origin twelve more times. After
+  a 120 second settle the subscription cursor was stuck at offset
+  `000000000150` for all 6 streams while the stream tail had advanced to
+  `000000000293` (`RESULTS-gate2.md` lines 80 to 87). About 143 messages were
+  never acked. The root cause was that the recovery sweep did not re-emit
+  pull-wake wake events after an origin restart. Pull-wake arms no lease, so the
+  lease-expiry path never fires, and a subscription stuck in the waking phase
+  with a durably emitted but unclaimed wake had no exit, so it wedged
+  permanently and later appends only coalesced against it.
+
+  The bug was fixed in commit `5b99bb9` and re-verified. The fix adds an
+  emit-without-claim recovery block to `sweepOnce` in `webhook/manager.go`
+  (lines 587 to 599): when a pull-wake subscription has been in the waking phase
+  with a sent wake for longer than three sweep intervals, the sweep re-emits the
+  same generation and wake id, and a duplicate event with the same fence token
+  is claim-safe. It also fixes the jepsen checker, whose drain worker had sent
+  zero stream acks, so cursors never advanced. The re-run of
+  `jepsen-checker -scenario pull-wake-arm-crash -settle 120s` passed with 6 of 6
+  streams reaching their tail under 47 nemesis actions, with no regression on
+  the two scenarios that already passed and with the full test suite green.
+
+  <Callout icon="alert" label="The results file shows this as FAIL">
+    `RESULTS-gate2.md` was committed before the fix landed and was never updated,
+    so it still records pull-wake-arm-crash as FAIL. The re-verified pass lives in
+    the commit message for `5b99bb9` and in the closing comments of GitHub issue
+    #24, roughly one hour later, not in the results file. Anyone reading only the
+    results file would see the bug marked open.
+  </Callout>
+</section>
+
+<section class="block" id="limits">
+  <SectionHead num="06" label="The limits" title="What quota <em>blocked</em>" />
+
+  Two of the numbers this campaign set out to measure were never measured,
+  because the GCP project ran out of quota. These are measurement gaps, things
+  that did not run, not observed defects. They bound the claim, and the honest
+  statement is that the fence-storm-gone verdict rests on a flat trend through 8
+  replicas, not on a passing run at the replica count that originally failed.
+
+  <Table wide>
+    | Gap | What was blocked | Why | What it bounds |
+    | --- | --- | --- | --- |
+    | N=12 not re-run | the 12 replica point on the scale curve | insufficient project quota on the SUT node pool | the curve is flat 1 to 8; the count that collapsed was not re-tested |
+    | Gate #2 multi-shard fan-out skipped | cross-node fan-out p99 at S=2, 4, 8, 256 | the Redis Cluster never reached ready under insufficient project quota | the viability of spreading subscriptions across slots is unproven |
+  </Table>
+
+  The first gap is the direct one. The original collapse was at 12 replicas, and
+  Phase 1 measured only 1 through 8 because GCP returned an insufficient project
+  quota error on the SUT node pool (`RESULTS-gate2.md` line 28). The script does
+  attempt 12, but the pool was exhausted, so the SUT pods were rescheduled onto
+  the loadgen and observation nodes for that run. The file's own claim is that
+  the trend through 8 is conclusive, not that 12 passed.
+
+  The second gap is the deeper one. Gate #2, the cross-node fan-out latency on a
+  sharded cluster, is described in the research as the number that decides
+  whether the built slot-homing layout stays enabled in production or is deferred
+  to the single-slot ownership build. It has no measured value in any campaign,
+  on any rig, because no run ever stood up a multi-shard Redis. The claude-fleet
+  run could not populate the fan-out metric at all because its driver seeded
+  subscriptions but drove no appends, and the codex run reached an S=256 result
+  from only 20 observations rather than a full 100 appends, which is not a valid
+  gate. So the headline cross-node fan-out p99 stays unknown. The slot-homing it
+  measures is already built and locally correct (T5 GREEN), so this is a missing
+  production-readiness number on a shipped mechanism, not a test of an unbuilt
+  one.
+
+  Several further gaps follow from the same constraints. The webhook-based
+  Jepsen scenarios, baseline and origin-restart, were skipped because they need
+  a cluster-to-host back-channel the GKE network did not provide
+  (`RESULTS-gate2.md` lines 69 to 70). Gates #3, #4, and #5 test mechanisms that
+  do exist on the main branch (the due-set outbox, leased slot ownership over the
+  `{ownership}` keyspace, and the failover-fence drill, all merged by PR #18 and
+  green in the local suite), but their cloud numbers were not measured because
+  each needs at least two replicas plus chaos on a clean multi-node rig, and the
+  same quota that blocked the cluster blocked that rig. The acceptance gates for
+  those mechanisms passed locally already: gate #4's ownership exclusivity (T3)
+  is linearizable on a real Redis, and the L3 failover recovery is proven
+  in-process. The recommended follow-up is to request a quota increase for
+  `redis.googleapis.com` in `adityavkk-prototyping`, then re-run Phase 3 in
+  isolation, and to re-run Phase 1 with node pool quota for 12 replicas.
+
+  <Callout icon="info" label="The verdict, stated plainly">
+    The slot-homed, work-sharded design is built and green locally (T1 to T5,
+    L1, L3, and C1 to C3 with doc-05 gate #6 all pass on a real Chronicle plus
+    Redis stack). Deployed on cloud on a single-slot substrate, that binary no
+    longer fence-storms as replicas grow from 1 to 8, holds its recovery sweep
+    inside budget at 10,000 subscriptions, and keeps its claim lease
+    linearizable up to 16 workers. It found and fixed one real recovery bug along
+    the way. On cloud it did not re-prove the 12 replica point that originally
+    failed, and it did not measure the cross-node, multi-shard fan-out latency
+    that decides whether the built slot-homing stays enabled in production. Both,
+    along with the L2, L4, and L5 multi-node liveness gates, are blocked on GCP
+    project quota, and until that quota is granted, the cloud claim is bounded to
+    the range that was actually measured.
+  </Callout>
+</section>
+
+<section class="block" id="further">
+  <SectionHead num="07" label="Further reading" title="Where this <em>comes from</em>" />
+
+  This page is the readable form of the load and stress campaign. The results
+  files and the design they test carry the full method, the gate definitions,
+  and the architecture itself.
+
+  - [Horizontal scale](./horizontal-scale) — the design these gates test, including the three sharding moves and the gating experiments
+  - [Testing and verification](./testing) — the unit, integration, and Jepsen suites under the cloud rig
+  - [Subscriptions](./subscriptions) — the control plane: durable cursors, the generation fence, and the recovery sweep
+  - [loadtest/RESULTS-gate2.md](https://github.com/adityavkk/chronicle/blob/adityavkk/gate2-vandv/loadtest/RESULTS-gate2.md) — the five-phase cloud campaign with the gate table
+  - [loadtest/RESULTS-gke.md](https://github.com/adityavkk/chronicle/blob/main/loadtest/RESULTS-gke.md) — the first cloud shakeout and the 509 millisecond sweep baseline
+  - [loadtest/run-gate2.sh](https://github.com/adityavkk/chronicle/blob/adityavkk/gate2-vandv/loadtest/run-gate2.sh) — the provision, five phases, and mandatory teardown trap
+
+</section>
