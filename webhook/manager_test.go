@@ -131,6 +131,51 @@ func TestSweepReemitsStrandedPullWake(t *testing.T) {
 	}
 }
 
+// TestSweepReemitsStrandedPullWakeAfterEmit is the T4 regression (#24): a
+// pull-wake stranded in PhaseWaking with the wake DURABLY EMITTED
+// (WakeEventSentNs != 0) but never claimed — the origin/consumer crashed AFTER
+// emit. Pull-wake arms no lease, so LeaseExpired never fires and the sub can
+// never flip back to idle to be re-fired; nothing in the lease ZSET, the due-set
+// (DecideDue returns DueSkip for a non-idle phase), or reconcileLeases
+// (leaseUntilNs == 0 is never LeaseStranded) recovers it. The sweep must re-emit
+// the SAME (gen, wakeID) wake event once the wake is stale (> 3x the sweep
+// interval), so a restarted consumer can reclaim it; the fence makes a duplicate
+// claim-safe. Before this fix the sub stranded in waking forever.
+func TestSweepReemitsStrandedPullWakeAfterEmit(t *testing.T) {
+	mgr, store, fs := newTestManager(t)
+	// A short sweep interval so the 3x staleness window is comfortably in the past.
+	mgr.sweepInterval = 10 * time.Millisecond
+	now := time.Now()
+	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
+	// Pending work: the linked tail is beyond the seeded cursor.
+	begin := "0000000000000000_0000000000000000"
+	_ = store.Link("s1", "events/a", LinkGlob, begin)
+	fs.mu.Lock()
+	fs.tails["events/a"] = "0000000000000001_0000000000000000"
+	fs.mu.Unlock()
+
+	// Arm the pull-wake (phase=waking, no lease) and durably record the emit at a
+	// timestamp far enough in the past that any staleness window is exceeded.
+	res, err := store.ArmWake("s1", now, 1000, false, "w_a")
+	if err != nil || !res.Armed {
+		t.Fatalf("arm = %+v err=%v", res, err)
+	}
+	emittedAt := now.Add(-time.Hour) // older than 3x any sane sweep interval
+	if err := store.RecordWakeEventSent("s1", res.Generation, res.WakeID, emittedAt); err != nil {
+		t.Fatal(err)
+	}
+	sub, _, _ := store.Get("s1")
+	if sub.Phase != PhaseWaking || sub.WakeEventSentNs == 0 || sub.LeaseUntilNs != 0 {
+		t.Fatalf("expected stranded waking/sent!=0/no-lease, got %+v", sub)
+	}
+
+	// The recovery sweep must re-emit the stranded-after-emit wake.
+	mgr.RunSweep()
+	if fs.count() == 0 {
+		t.Fatal("sweep should have re-emitted the stranded-after-emit pull-wake (T4): the sub strands in waking forever")
+	}
+}
+
 // TestSweepBatchedWakesOnlyPendingSubs verifies the batched sweep (GetMany +
 // TailOffsets + HasPendingWorkFrom) wakes exactly the idle subscriptions whose
 // linked tail is beyond the cursor, and leaves not-pending and missing-stream
