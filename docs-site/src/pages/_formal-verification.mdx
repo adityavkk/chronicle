@@ -1,0 +1,318 @@
+---
+title: "Correct by <em>proof</em>"
+summary: "A proposal for formally verifying Chronicle: model-based property testing against the MemoryStore oracle, generative differential testing, porcupine linearizability of the log, Lean 4 proofs of the pure cores, a TLA+ model of the subscription fence with trace validation, and Alloy for fork lineage — each mapped to the exact invariant it pins and what it is worth."
+eyebrow: "Proposal"
+meta: "Formal verification"
+deck: "Chronicle's tests already pin the load-bearing invariants from more than one side. This page proposes the next rung: <strong>formal verification</strong> — seven candidates, from generative property tests the existing <code>MemoryStore</code> oracle drives for free, through <code>porcupine</code> linearizability of the log, to machine-checked <strong>Lean</strong> proofs of the pure cores and a <strong>TLA+</strong> model of the subscription fence. Each candidate is matched to the condition it locks down, and ranked by leverage against effort."
+byline:
+  - label: "Status"
+    value: "proposal · design phase"
+  - label: "Tracks"
+    value: "property-based-testing · formal-verification"
+  - label: "Source"
+    value: "store/ · jepsen/ · webhook/"
+    href: "https://github.com/adityavkk/chronicle/tree/main"
+---
+
+import Tldr from "../components/Tldr.astro";
+import SectionHead from "../components/SectionHead.astro";
+import Callout from "../components/Callout.astro";
+import Table from "../components/Table.astro";
+
+<Tldr>
+  <ul>
+    <li><strong>This is a proposal, not a status report.</strong> Nothing here is built yet. The <a href="./testing">testing page</a> describes what Chronicle <em>does</em>; this page describes what formal verification <em>would add</em>, and what each candidate is worth against its cost.</li>
+    <li><strong>Why prove when the tests are already good?</strong> Tests sample the input space; the bugs that survive a strong suite live in the gaps between the examples. Formal methods quantify over <em>all</em> inputs and interleavings, hand back a machine-checked argument, and produce the minimal counterexample when a property fails.</li>
+    <li><strong>The targets are already isolated.</strong> Chronicle lifted its hardest logic into pure, total cores — <code>ValidateProducer</code>, the offset order, the cursor, the generation fence. Small, total, and central is exactly the profile that rewards proof.</li>
+    <li><strong>The cheapest rung has the highest coverage.</strong> Model-based property testing reuses the <code>MemoryStore</code> as a reference oracle: drive random operation sequences through both backends and assert they agree after every step. One property subsumes dozens of hand-written cases.</li>
+    <li><strong>Linearizability checking is already half-built.</strong> <code>porcupine</code> is a vendored dependency and already models the subscription lease fence. The gap is the <em>log itself</em> — append, read, and close have never been linearizability-checked.</li>
+    <li><strong>Lean proves the pure cores; TLA+ proves the protocol.</strong> Lean 4 closes the sequential value-functions for all inputs; TLA+ closes the concurrent subscription fence/lease/generation machine for all interleavings — including the lease clock and the liveness the porcupine model deliberately omits.</li>
+    <li><strong>"Is it too late for TLA+?" No.</strong> Trace validation binds a spec to running code by checking real execution traces are behaviours the spec allows — the technique MongoDB and Microsoft CCF use on shipping systems.</li>
+    <li><strong>Honest about the ceiling.</strong> Everything inside one Redis primary and all the pure logic is provable or exhaustively checkable. Cross-failover durability is <em>not</em> — async replication can lose an acked append. That is a property of the substrate, documented and chaos-tested, never proven.</li>
+  </ul>
+</Tldr>
+
+<section class="block" id="why">
+  <SectionHead num="01" label="Motivation" title="Why prove, when the <em>tests</em> are already good?" />
+
+  Chronicle is tested unusually well. A single producer table is the oracle for
+  both backends[^t-diff]; the subscription fence is model-checked from a pure
+  sequential register[^t-porcupine]; a live `k3d` cluster kills pods and Redis
+  mid-flight[^t-fault]. The suite is layered, and the most dangerous logic is
+  pinned from more than one side.
+
+  So the question is fair: what does formal verification add? Three things that
+  examples cannot give, no matter how many you write.
+
+  <Table>
+    | Examples give you | Formal methods give you |
+    | --- | --- |
+    | The cases you thought to write | A statement that holds for **every** input or interleaving |
+    | A green check | A **machine-checked argument** a reviewer can re-run |
+    | A failure you have to reproduce | The **minimal counterexample** the tool already shrank for you |
+  </Table>
+
+  The bugs that survive a good suite are the ones in the gaps — the rare
+  interleaving nobody scripted, the input nobody imagined. Chronicle already
+  fights this by lifting its hardest logic into pure cores so a rare race becomes
+  a hand-built table row. Formal verification is the next move on the same logic:
+  stop adding examples and start quantifying over all of them.
+
+  It pays the most exactly where Chronicle already invested — the producer fence,
+  the offset order, the generation fence, the cursor. These are small, total, and
+  central. That is the profile that rewards a proof: little enough to model
+  faithfully, important enough that a single missed case is a correctness bug.
+</section>
+
+<section class="block" id="ladder">
+  <SectionHead num="02" label="The spectrum" title="Seven candidates, <em>cheapest first</em>" />
+
+  The candidates form a spectrum of rigor against cost. The cheap end samples a
+  vast space and shrinks failures; the rigorous end proves a statement closed for
+  all inputs. They compose: the cheap rungs find the bugs a proof would have to
+  assume away, and the proofs cover the tail the samples keep missing.
+
+  <Table wide={true}>
+    | # | Candidate | What it establishes | Coverage | Effort | Status |
+    | --- | --- | --- | --- | --- | --- |
+    | 1 | **Model-based property testing** (`rapid`) | `MemoryStore` oracle ≡ Redis backend over random op sequences | reachable states (sampled, shrunk) | low | proposed |
+    | 2 | **Differential testing**, generative | Lua mirror ≡ pure-Go validators for every generated input | input space (sampled, shrunk) | low | seed exists[^t-diff] |
+    | 3 | **Metamorphic testing** | relations: `read∘append`, fork-prefix, batch-split equivalence | sampled | low | proposed |
+    | 4 | **Linearizability** (`porcupine`) | per-stream append/read/close has a valid serialization | recorded histories | low–med | infra vendored[^fn-porc] |
+    | 5 | **Machine-checked proof** (Lean 4) | the pure cores correct for all inputs | exhaustive (proof) | medium | proposed |
+    | 6 | **Model checking** (TLA+ / TLC / Apalache) | subscription fence safety + liveness, all interleavings | exhaustive (bounded) | med–high | proposed |
+    | 7 | **Bounded relational** (Alloy) | fork lineage + refcount GC has no bad configuration | bounded exhaustive | medium | optional |
+  </Table>
+</section>
+
+<section class="block" id="pbt">
+  <SectionHead num="03" label="Candidates 1–3" title="The cheap layer: <em>oracle</em>, differential, metamorphic" />
+
+  The highest-leverage move costs the least, because the reference model already
+  exists. `MemoryStore` is pure-Go and is the designated oracle for the whole
+  `Store` contract[^t-store]. A model-based property test treats it as a
+  specification: generate a random sequence of `Create` / `Append` / `Close` /
+  `Delete` / `Read` / `Fork` operations, run each against both `MemoryStore` and
+  the Redis backend, and assert the two observably agree after every step. One
+  property replaces dozens of example tests and explores sequences no one would
+  write by hand. `rapid` drives the state machine and shrinks any failure to a
+  minimal reproducer.
+
+  **Generative differential testing** generalizes the existing oracle table. Today
+  one hand-built §5.2.1 producer table is asserted byte-identical between
+  pure-Go `ValidateProducer` and the Redis Lua path[^t-diff]. Replace the fixed
+  rows with a generator over `(state, epoch, seq)` and the same assertion now
+  covers the whole input space — the Lua mirror cannot drift from the Go oracle
+  on any input without a shrunk witness.
+
+  **Metamorphic testing** pins relations that hold without a full oracle: reading
+  from the start returns exactly what was appended; a fork read equals the source
+  prefix stitched to the fork's own data[^fn-fork]; for byte streams, one batch of
+  N bytes and N split batches are indistinguishable on read.
+
+  <Callout icon="info" label="Why the oracle is the unlock">
+    The expensive part of property testing is usually <em>writing the model</em>.
+    Chronicle already paid that cost: <code>MemoryStore</code> is a complete,
+    pure, in-process implementation of the same contract the Redis backend
+    serves. Pointing a generator at both and asserting agreement turns the model
+    Chronicle already maintains into an exhaustive-ish conformance check for free.
+  </Callout>
+</section>
+
+<section class="block" id="linearizability">
+  <SectionHead num="04" label="Candidate 4" title="Linearizability of the <em>log</em>" />
+
+  Chronicle already uses `porcupine` — the Go linearizability checker — to model
+  one subscription's lease fence as a `(generation, wake)` register, and an `OK`
+  ack under a stale token is the two-holder violation it surfaces[^t-porcupine].
+  The checker, the histories, and the dependency are all in the tree[^fn-porc].
+
+  The gap is the **log itself**. Append, read, and close have never been
+  linearizability-checked, even though Chronicle makes a strong claim about them:
+  every mutation is a single Lua script over keys in one hash-tag slot, so writes
+  to a stream are totally ordered and serialized on the Redis primary[^fn-lua].
+  That claim is exactly what a linearizability checker tests. Record a concurrent
+  history of appends and reads against a live stream, define the sequential model
+  (the `MemoryStore` semantics), and let `porcupine` decide whether a valid
+  serialization exists. A torn read, a lost append, or a re-ordering has no
+  linearization, and the checker hands back the witness.
+
+  Linearizability is the right correctness condition here — the one Herlihy and
+  Wing defined for concurrent objects — and it pins the property the single-script
+  design rests on, from the outside, under real concurrency.[^fn-hw]
+</section>
+
+<section class="block" id="lean">
+  <SectionHead num="05" label="Candidate 5" title="Machine-checked proof of the <em>pure cores</em>" />
+
+  Three functions carry most of Chronicle's correctness, and all three are pure,
+  total, and deterministic — the ideal shape for a proof assistant.
+
+  <Table>
+    | Core | File | Theorem to prove |
+    | --- | --- | --- |
+    | Idempotent producer | `ValidateProducer`[^fn-prod] | within an epoch the accepted sequences are a contiguous prefix; a stale epoch is always fenced; a replay is always a duplicate, never a second write |
+    | Offset ordering | `Offset.Compare`[^fn-off] | `Compare` is a strict total order; appended offsets strictly increase; parse∘format is identity; no append mints a reserved sentinel |
+    | Cursor progression | `GenerateResponseCursor`[^fn-cur] | the returned cursor is strictly greater than any client cursor at or ahead of the current interval — it never goes backwards |
+  </Table>
+
+  In **Lean 4** (with `mathlib`'s order and induction libraries) these are
+  ordinary theorems: model the function as a value over an inductive state, state
+  the invariant, prove it by case analysis and induction over the operation
+  sequence. The result holds for all `2^53` epochs and every sequence, not the ten
+  rows in the table.
+
+  The honest catch is the **proof-to-code gap**: a Lean proof proves the Lean
+  *model*, not the Go. Chronicle already has the bridge — generative differential
+  testing (candidate 2) ties the Go to the same statement the proof closes, so the
+  proof and the running code are pinned to one specification from two directions.
+  This is the pragmatic alternative to verified extraction or a Dafny rewrite:
+  prove the model, differential-test the implementation, and let the oracle the
+  codebase already trusts be the contract between them.
+</section>
+
+<section class="block" id="tla">
+  <SectionHead num="06" label="Candidate 6" title="A <em>TLA+</em> model of the subscription protocol" />
+
+  The subscription engine is the part no sequential proof reaches: a wake / claim /
+  ack / release protocol with a monotonic `generation` fence, leases with a TTL,
+  and a recovery sweep hardened against four origin-restart windows[^fn-sub]. This
+  is the prime model-checking target.
+
+  A **TLA+** specification states the protocol once and `TLC` (or `Apalache`,
+  symbolically) explores every interleaving of concurrent workers, crashes, and
+  lease expiries, checking:
+
+  - **Safety** — at most one worker holds a fence an ack will accept for a given
+    `(subscription, generation)`; `generation` is monotonic; a stale generation or
+    wake is always `FENCED`; an ack never advances a cursor past the stream tail.
+  - **Liveness** — pending work eventually issues a wake; an expired lease is
+    eventually reclaimed; no wake is lost across a restart.
+
+  This does not duplicate the existing porcupine fence model — it **completes** it.
+  That model is deliberately time-free and safety-only: it omits the lease clock
+  and cannot express liveness[^t-porcupine]. TLA+ models exactly those — the
+  TTL-driven expiry and the "eventually" properties — and cross-validates the
+  hand-built register against a full state-space search.
+
+  <Callout icon="arrow" label="Is it too late for TLA+ on a built system?">
+    No, for two independent reasons. First, <code>TLC</code> still finds
+    <em>design</em> bugs in the subscription protocol by reaching interleavings no
+    test scripts. Second, <strong>trace validation</strong> binds the spec to the
+    running code: instrument Chronicle (or the jepsen harness) to emit operation
+    traces and check each is a behaviour the spec permits — the technique MongoDB
+    and Microsoft's CCF apply to shipping systems. The spec also becomes precise,
+    executable documentation of the fence the porcupine model only half-captures.
+  </Callout>
+</section>
+
+<section class="block" id="alloy">
+  <SectionHead num="07" label="Candidate 7" title="Alloy for the <em>fork graph</em> (optional)" />
+
+  Forking forms a relational structure: a stream points at a source and a fork
+  offset, a reference count tracks live forks, and deleting a referenced stream
+  soft-deletes it until a cascading garbage collector reclaims it. The invariants
+  are relational — the reference count equals the number of live forks, the GC
+  cascade terminates, no live fork ever loses inherited data, no soft-deleted
+  stream is stranded after its last fork is gone.
+
+  **Alloy** is built for exactly this: declare the relations, assert the
+  invariants, and the analyzer finds a minimal counterexample configuration within
+  a bounded scope or reports none exists. It is the right tool for the lineage
+  graph in a way neither a value proof nor a linear-history checker is. This rung
+  is optional — the same invariants are reachable with model-based PBT (candidate
+  1) — but Alloy gives a cleaner, exhaustive argument over the graph shape.
+</section>
+
+<section class="block" id="map">
+  <SectionHead num="08" label="The map" title="Every invariant, matched to its <em>method</em>" />
+
+  The value of each candidate is concrete: it locks down named conditions. This is
+  the proposed coverage map — invariant, where it lives in the code, the method
+  that best pins it, and how it is checked today.
+
+  <Table wide={true}>
+    | Invariant | Lives in | Proposed method | Today |
+    | --- | --- | --- | --- |
+    | Offset is a strict total order; minted offsets strictly increase | `store/offset.go`[^fn-off] | Lean + `rapid` | example tests |
+    | Append/read byte-exactness; resume from `Stream-Next-Offset` has no gap, dup, or tear | `store/` + `handler.go` | `rapid` (model-based) + `porcupine` | example tests |
+    | Closure is monotonic; no append after close; EOF signalled across catch-up / long-poll / SSE | `store/` + `protocol/` | `rapid` + Lean (closure machine) | example tests |
+    | Idempotent producer: exactly-once within epoch, zombie fenced, gap rejected, replay = duplicate | `ValidateProducer`[^fn-prod] | Lean + differential + `rapid` | differential table[^t-diff] |
+    | `Stream-Seq` strictly increasing (lexicographic) | `store/` | `rapid` + differential | example tests |
+    | Fork read = source prefix ⧺ fork's own data; producer state not inherited | `store/redis/`[^fn-fork] | `rapid` + metamorphic + Alloy | example tests |
+    | Reference count = live forks; GC cascade terminates; no premature data loss | `store/redis/`[^fn-fork] | Alloy + `rapid` | example tests |
+    | Cursor strictly advances past an echoed client cursor | `GenerateResponseCursor`[^fn-cur] | Lean + `rapid` | checker mirror[^t-mirror] |
+    | Lua mirror ≡ Go oracle for every input | `store/redis/scripts/`[^fn-lua] | generative differential | fixed table[^t-diff] |
+    | Per-stream linearizability of mutations (single-script commit point) | `store/redis/`[^fn-lua] | `porcupine` + TLA+ | not checked |
+    | Subscription: ≤1 acceptable fence per `(sub, generation)`; stale gen/wake `FENCED`; ack ≤ tail | `webhook/`[^fn-sub] | TLA+ + `porcupine` | porcupine + jepsen[^t-porcupine] |
+    | Subscription liveness: pending ⇒ eventual wake; expired lease reclaimed | `webhook/`[^fn-sub] | TLA+ | jepsen (bounded)[^t-fault] |
+    | Durability of an acked append across failover | Redis substrate | **not provable** — chaos-tested + documented | jepsen nemesis[^t-fault] |
+  </Table>
+</section>
+
+<section class="block" id="verdicts">
+  <SectionHead num="09" label="Decisions" title="The strategic <em>verdicts</em>" />
+
+  <Table>
+    | Question | Verdict |
+    | --- | --- |
+    | **Is it too late for TLA+?** | No. `TLC`/`Apalache` still find protocol design bugs, and **trace validation** binds the spec to the running Go. The spec doubles as precise documentation. |
+    | **Lean vs Dafny vs TLA+ for the cores?** | **Lean** for the pure, sequential, total functions — value-level, all-inputs proof. Dafny shines when the proof must discharge against imperative code, but Chronicle's cores are already pure and the Go is the oracle, so a Lean model + differential PBT is lower-friction. TLA+ is the wrong tool for value functions and the right one for the concurrent protocol. |
+    | **Which Go property library?** | **`rapid`** — built-in stateful state-machine testing and integrated shrinking; `gopter` is heavier and `testing/quick` has no shrinking. Native Go fuzzing complements it for the byte-level parsers. |
+    | **What is provable vs only chaos-testable?** | Everything inside one Redis primary and all the pure logic is provable or exhaustively checkable — per-stream serialization, the fences, the orders. **Cross-failover durability is not**: async replication can lose an acked write. That is documented honestly and exercised by the pod/Redis-kill nemesis, never proven. |
+  </Table>
+</section>
+
+<section class="block" id="lands">
+  <SectionHead num="10" label="Plan" title="What proof does <em>not</em> buy, and where this lands" />
+
+  A proof is only as good as its model. A Lean proof of `ValidateProducer` proves
+  the model — differential PBT is what ties it to the Go. A TLA+ spec abstracts
+  Redis and the network, so it finds protocol bugs, not implementation typos.
+  Bounded checkers — `TLC`, Alloy — are exhaustive only up to a scope. None of it
+  replaces the jepsen durability runs; it surrounds them.
+
+  The work splits across two worktrees, cheapest and highest-coverage first:
+
+  <Table>
+    | Phase | Work | Worktree |
+    | --- | --- | --- |
+    | **P1** | Model-based equivalence + generative differential + metamorphic, on `rapid`; native fuzz on the parsers | `property-based-testing` |
+    | **P2** | `porcupine` linearizability of the log; Lean proofs of the three cores | both |
+    | **P3** | TLA+ spec of the subscription fence + trace-validation hooks | `formal-verification` |
+    | **P4** | Alloy fork-lineage model; wire the green checks into CI | `formal-verification` |
+  </Table>
+
+  <Callout icon="alert" label="Proposal status">
+    Nothing on this page is implemented yet. It is the plan for the
+    <code>property-based-testing</code> and <code>formal-verification</code>
+    worktrees. Track it against the <a href="./testing">testing page</a>, which
+    records what is actually built and green.
+  </Callout>
+</section>
+
+[^t-diff]: Differential / oracle parity, the seed this generalizes: [`store/redis/differential_test.go:16`](https://github.com/adityavkk/chronicle/blob/main/store/redis/differential_test.go).
+
+[^t-porcupine]: The existing porcupine fence model — safety-only and time-free by design: [`jepsen/checker/model_fence.go:141`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_fence.go).
+
+[^t-mirror]: The cursor checker, a pure mirror of the cursor rule: [`jepsen/checker/check_cursor.go:74`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/check_cursor.go).
+
+[^t-fault]: Fault injection on `k3d` — the `kubectl`/`redis-cli` nemesis: [`jepsen/checker/main.go:864`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/main.go).
+
+[^t-store]: The `Store` contract `MemoryStore` and the Redis backend both satisfy: [`store/store.go:98`](https://github.com/adityavkk/chronicle/blob/main/store/store.go).
+
+[^fn-prod]: The idempotent-producer state machine, pure and total: [`store/producer.go:17`](https://github.com/adityavkk/chronicle/blob/main/store/producer.go).
+
+[^fn-off]: Offset ordering and parsing: [`store/offset.go:128`](https://github.com/adityavkk/chronicle/blob/main/store/offset.go).
+
+[^fn-cur]: Monotonic cursor progression: [`protocol/cursor.go:39`](https://github.com/adityavkk/chronicle/blob/main/protocol/cursor.go).
+
+[^fn-lua]: Per-stream mutation as a single Lua script over one hash-tag slot: [`store/redis/scripts/append.lua`](https://github.com/adityavkk/chronicle/blob/main/store/redis/scripts/append.lua).
+
+[^fn-fork]: Fork lineage, reference counts, and soft-delete cascade: [`store/redis/fork_test.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/fork_test.go).
+
+[^fn-sub]: The subscription wake / lease / generation engine: [`webhook/manager.go`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go).
+
+[^fn-porc]: `porcupine` is already a direct dependency: [`go.mod`](https://github.com/adityavkk/chronicle/blob/main/go.mod) — [github.com/anishathalye/porcupine](https://github.com/anishathalye/porcupine).
+
+[^fn-hw]: Linearizability as the correctness condition for concurrent objects: Herlihy & Wing, *Linearizability: A Correctness Condition for Concurrent Objects*, ACM TOPLAS, 1990.
