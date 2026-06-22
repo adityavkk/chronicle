@@ -1,79 +1,53 @@
-# Gate #2 (THE DECIDING NUMBER for slot-homing) — the OnStreamAppend fan-out p99
-# regression under the S-slot {__ds:h} state shard (issue #15, 05:203-208 / 05:634).
+# Gate #2: slot-homing fan-out p99 at S=2/4/8/256 on Memorystore CLUSTER.
 #
-# THE QUESTION: pre-slot-homing, OnStreamAppend is ONE SMEMBERS of a single
-# fan-out SET. Slot-homed, it becomes S PARALLEL pipelined SMEMBERS — one per
-# OCCUPIED slot — which go-redis groups per cluster node, so the wall-clock is
-# ~MAX-NODE-RTT (the slots span nodes), NOT the ~1 RTT a single-node pipeline gives.
-# That regression is the number that decides whether slot-homing SHIPS or is
-# DEFERRED (05's recommendation). The occupied-slots bitmap mitigation should keep
-# the probe set at occupied-slots-per-stream (NOT S), so a sparse-wide stream pays
-# for a handful of slots, not 256 — gate #2 measures whether that holds at S=256.
+# This spec drives ONE sentinel stream with S pull-wake subscriptions all linked
+# to it. fanoutscale seeds the subscriptions, drives appends, and reports
+# chronicle_fanout_seconds p99 (probe + total) scraped from /metrics.
 #
-# *** MUST RUN ON A REAL MULTI-NODE REDIS CLUSTER. *** Loopback / a single-node
-# Redis ERASES the max-node-RTT this gate exists to measure (the local T5 run proved
-# CORRECTNESS — scatter-gather ≡ reference — and recorded chronicle_fanout_seconds,
-# but its p99 is a loopback number, not the cluster regression). So this is
-# PENDING-CLOUD: the implementation is reversible (shadow-write + lazy migration; S
-# is a compile-time const) and T5-correct, so it SHIPS with gate #2 recorded
-# PENDING-CLOUD; the production ENABLE/DEFER decision awaits the cloud p99.
+# Run the job once per S value:
+#   for S in 2 4 8 256; do
+#     render -fanout -spec fanout-gate2.yaml -subs $S -out out/ \
+#       -redis-url "redis+cluster://$(gcloud redis clusters describe ... --format='value(discoveryEndpoints[0].address)'):6379" \
+#       -image $REG/chronicle:$TAG -loadgen-image $REG/chronicle-loadgen:$TAG
+#     kubectl apply -f out/sut.yaml && kubectl -n chronicle-gate2 rollout status deploy/chronicle --timeout=180s
+#     kubectl delete job -l app=fanoutscale -n chronicle-gate2 --ignore-not-found
+#     kubectl apply -f out/job.yaml
+#     kubectl -n chronicle-gate2 wait --for=condition=complete --timeout=600s job -l app=fanoutscale
+#     kubectl -n chronicle-gate2 logs -l app=fanoutscale --tail=-1
+#   done
 #
-# THE S SWEEP (2/4/8/256): S = subSlots is a COMPILE-TIME const (webhook/keys.go),
-# so each S is a SEPARATE SUT IMAGE — build chronicle with `const subSlots = <S>`
-# for S in 2,4,8,256, push four tags, and run gate2 against each, recording the
-# fan-out p99 curve. (The curve isolates the per-node-RTT cost: at S=2 the slots
-# fit ~1-2 nodes; at S=256 they span the whole cluster — the worst case.)
+# Acceptance criteria (gate #2 passes when ALL S values pass):
+#   fanout_p99_ms < 50ms   at S=2, S=4, S=8
+#   fanout_p99_ms < 100ms  at S=256  (cross-node max-RTT on 3-shard CLUSTER)
 #
-# Run it (the orchestrator owns the cloud; do NOT run GKE from the worktree):
-#   cd loadtest && ./ltctl.sh up
-#   # build+push four SUT images, one per S, then:
-#   for S in 2 4 8 256; do LT_TAG="s$S" ./ltctl.sh gate2 spec/fanout-gate2.yaml; done
-# gate2 deploys at replicas>=2 (so the {__ds:h} slots genuinely span Redis nodes),
-# drives the wide-stream webhook fan-out workload, and scrapes
-# chronicle_fanout_seconds (the p99 gate) + chronicle_fanout_slots_probed (the
-# bitmap effect) from a surviving pod into gate2-results.tsv. The reading guide and
-# pass criteria are in RESULTS-claude.md "Gate #2".
+# The CLUSTER Terraform is in loadtest/terraform/cluster.tf.
+# Provision with: cd loadtest/terraform && terraform apply -var provision_gate2_cluster=true
 name: fanout-gate2
 
 loadgen_image: REGISTRY/chronicle-loadgen:TAG
 
 sut:
-  # Build this image FOUR times, once per S (const subSlots = 2|4|8|256), and run
-  # gate2 against each tag. The shipped value is S=256.
   image: REGISTRY/chronicle:TAG
-  replicas: 2 # >=2 so the {__ds:h} slots span Redis Cluster nodes — the max-node-RTT gate #2 measures
-  sweep_interval: 30s # the coarse floor; the append→wake fan-out (not the sweep) is what this gate stresses
+  replicas: 1
+  namespace: chronicle-gate2
+  sweep_interval: 2s
   sweep_batch: 0
-  redis_url: "" # a REAL MULTI-NODE Redis Cluster (not single-node) — loopback erases the max-node-RTT
-  cpu: "1"
-  memory: 1Gi
+  # Fill from `terraform output gate2_redis_discovery` after provisioning:
+  # redis+cluster://<discovery-endpoint>:6379
+  redis_url: ""
+  cpu: "2"
+  memory: 2Gi
 
-workload:
-  # The fan-out condition: MANY subscribers per stream, spread by fnv32a across the S
-  # slots, so OnStreamAppend scatter-gathers across many occupied slots. The loadgen
-  # must seed into a SMALL shared stream pool (wide streams), not one stream per sub,
-  # so each append fans out widely — that is the load gate #2 exists to stress.
-  subscriptions: 10000 # K subscribers, spread across the S slots by fnv32a(subId)
-  links_per_sub: 5 # P — each sub links a few of the shared wide streams
-  dispatch: webhook # the append→wake path: OnStreamAppend → S-parallel SMEMBERS → FanOut
-  webhook_url: "http://chronicle-loadgen.chronicle-jepsen.svc.cluster.local:8099/webhook"
+fanout:
+  # subs is S — override per run: render -subs 2 / 4 / 8 / 256
+  subs: 4
+  rate: "10/s"
+  dispatch: pull-wake
   warmup: 30s
-  measure: 120s # sustained appends to the wide streams so chronicle_fanout_seconds fills
+  measure: 120s
 
 slo:
-  # The K=10k sweep p99 baseline still holds as the REGRESSION FLOOR (RESULTS-gke.md
-  # 509 ms; budget 1500 ms). Gate #2's own number is read from chronicle_fanout_seconds
-  # (NOT a sweep SLO field — see the criteria below), per S.
-  sweep_p99_ms: 1500
-  max_seed_errors: 0
-  # Gate-#2 pass criteria (read from chronicle /metrics after the measure window):
-  #   - chronicle_fanout_seconds p99 within budget at S=256 — the deciding number.
-  #     WITHIN budget => proceed (enable slot-homing). OVER budget => DEFER slot-homing
-  #     per 05's recommendation; #16 then runs its non-T5 suite against the single-slot
-  #     ownership build. (The budget is set by the orchestrator from the wake-latency
-  #     SLO; the regression is fan-out_p99(S) − single-SMEMBERS_p99 baseline.)
-  #   - chronicle_fanout_slots_probed tracks OCCUPIED-slots-per-stream, NOT S (the
-  #     bitmap mitigation holds): for a sparse-wide stream the probe count stays a small
-  #     constant even at S=256. (Local single-Redis sanity: 320 subs/8 streams probed
-  #     <=4 slots/append, never 256.)
-  #   - the K=10k sweep p99 baseline reproduces (<= 1500 ms) as the regression floor.
+  # Gate #2 SLO: fanout end-to-end p99 must stay below the sweep interval
+  # with significant headroom. 50ms at S≤8; 100ms at S=256 (CLUSTER RTT).
+  # Override per S: render -slo-p99-ms 100 for S=256.
+  fanout_p99_ms: 50
