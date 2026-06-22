@@ -21,7 +21,7 @@ import Table from "../components/Table.astro";
 
 <Tldr>
   <ul>
-    <li><strong>This is a proposal, not a status report.</strong> Nothing here is built yet. The <a href="./testing">testing page</a> describes what Chronicle <em>does</em>; this page describes what formal verification <em>would add</em>, and what each candidate is worth against its cost.</li>
+    <li><strong>This is a proposal, not a status report.</strong> Nothing here is built yet. The <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/testing`}>testing page</a> describes what Chronicle <em>does</em>; this page describes what formal verification <em>would add</em>, and what each candidate is worth against its cost.</li>
     <li><strong>Why prove when the tests are already good?</strong> Tests sample the input space; the bugs that survive a strong suite live in the gaps between the examples. Formal methods quantify over <em>all</em> inputs and interleavings, hand back a machine-checked argument, and produce the minimal counterexample when a property fails.</li>
     <li><strong>The targets are already isolated.</strong> Chronicle lifted its hardest logic into pure, total cores — <code>ValidateProducer</code>, the offset order, the cursor, the generation fence. Small, total, and central is exactly the profile that rewards proof.</li>
     <li><strong>The cheapest rung has the highest coverage.</strong> Model-based property testing reuses the <code>MemoryStore</code> as a reference oracle: drive random operation sequences through both backends and assert they agree after every step. One property subsumes dozens of hand-written cases.</li>
@@ -286,7 +286,7 @@ import Table from "../components/Table.astro";
   <Callout icon="alert" label="Proposal status">
     Nothing on this page is implemented yet. It is the plan for the
     <code>property-based-testing</code> and <code>formal-verification</code>
-    worktrees. Track it against the <a href="./testing">testing page</a>, which
+    worktrees. Track it against the <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/testing`}>testing page</a>, which
     records what is actually built and green.
   </Callout>
 </section>
