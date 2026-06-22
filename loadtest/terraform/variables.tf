@@ -83,3 +83,12 @@ variable "redis_version" {
     sut.redis_url at that instance instead.
   EOT
 }
+
+# Gate #2 requires a sharded CLUSTER (google_redis_cluster) so that stream data
+# keys route to different nodes and cross-node max-RTT is exercised. This is
+# SEPARATE from the single-shard instance above (which is for the sweep test).
+variable "provision_gate2_cluster" {
+  type        = bool
+  default     = false
+  description = "Provision the Memorystore for Redis Cluster for gate #2 (cluster.tf). Tear down immediately after the run."
+}
