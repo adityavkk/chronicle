@@ -44,6 +44,15 @@ func TestDifferentialProducerTable(t *testing.T) {
 			// Oracle: the pure-Go state machine.
 			wantResult, wantNewState, wantErr := store.ValidateProducer(tt.state, tt.epoch, tt.seq, now)
 
+			// Third oracle (P1.2, issue #31): the proven Lean model compiled to
+			// C and called via cgo. Asserts the proven model agrees with the Go
+			// core on the full reply tuple and the persist/no-persist decision.
+			// Since the Go core is pinned to the live Lua subject below, this
+			// pins all THREE — Go core, live Lua, proven Lean — to one
+			// statement. A no-op unless built with -tags leanoracle (the
+			// vendored C is absent in routine Go CI). [INV-PROD-08]
+			checkLeanProducer(t, tt.state, tt.epoch, tt.seq, now)
+
 			// Subject: a fresh stream with the producer state seeded directly.
 			path := testPath("diff")
 			mustCreate(t, s, path, store.CreateOptions{})
@@ -113,6 +122,43 @@ func TestDifferentialProducerTable(t *testing.T) {
 			} else if wrote {
 				t.Error("non-accepted append wrote data")
 			}
+		})
+	}
+}
+
+// TestDifferentialOffsetCompare pins the proven Lean Offset.compare against the
+// Go core store.Compare over a table of boundary pairs, including the LB-1
+// boundary (10^16) and the top of the uint64 domain. It does NOT touch Redis
+// (offset order is a pure-core property); the live-Lua side of the offset order
+// is exercised by the read path's ZRANGEBYLEX usage elsewhere. The check is a
+// no-op without -tags leanoracle. [INV-OFF-01, INV-OFF-02]
+func TestDifferentialOffsetCompare(t *testing.T) {
+	const safe = uint64(1e16)
+	off := func(rs, bo uint64) store.Offset { return store.Offset{ReadSeq: rs, ByteOffset: bo} }
+
+	pairs := []struct {
+		name string
+		a, b store.Offset
+	}{
+		{"equal zero", off(0, 0), off(0, 0)},
+		{"byteOffset less", off(0, 5), off(0, 9)},
+		{"byteOffset greater", off(0, 9), off(0, 5)},
+		{"readSeq dominates", off(2, 0), off(1, ^uint64(0))},
+		{"tie", off(7, 7), off(7, 7)},
+		{"just below LB-1 boundary", off(0, safe-1), off(0, safe-2)},
+		{"straddle LB-1 boundary", off(0, safe-1), off(0, safe)},     // labeled LB-1 region
+		{"both above LB-1 boundary", off(0, safe+1), off(0, safe+2)}, // labeled LB-1 region
+		{"max uint64 byteOffset", off(0, ^uint64(0)), off(0, ^uint64(0)-1)},
+		{"max uint64 readSeq", off(^uint64(0), 0), off(^uint64(0)-1, ^uint64(0))},
+	}
+
+	for _, p := range pairs {
+		t.Run(p.name, func(t *testing.T) {
+			// Sanity: Go core's sign is in {-1,0,1} (the order contract).
+			if s := store.Compare(p.a, p.b); s < -1 || s > 1 {
+				t.Fatalf("Go core Compare out of range: %d", s)
+			}
+			checkLeanOffsetCompare(t, p.a, p.b)
 		})
 	}
 }
