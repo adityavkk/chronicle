@@ -77,14 +77,16 @@ function encodeStreamPath(path: string): string {
 }
 
 /**
- * Build the absolute URL for a subscription control-plane endpoint. The reserved
- * /__ds/* surface is served on the connection origin (NOT under streamRoot), so
- * the id is appended after the fixed prefix. `suffix` is an already-shaped tail
- * such as "/streams", "/claim", "/ack", "/release", "/callback", or
+ * Build the absolute URL for a subscription control-plane endpoint. Per the
+ * Durable Streams spec the reserved `__ds` prefix is STREAM-ROOT-RELATIVE
+ * (`{stream-url}/__ds/subscriptions/:id`), so it is built as
+ * baseUrl + streamRoot + the fixed prefix — the same shape as a stream URL, not
+ * the bare origin. `suffix` is an already-shaped tail such as "/streams",
+ * "/claim", "/ack", "/release", "/callback", "/wake_stream", or
  * "/streams/<encoded-path>".
  */
 export function subscriptionUrl(conn: Connection, id: string, suffix = ""): string {
-	return `${conn.baseUrl}${SUBSCRIPTIONS_PREFIX}/${encodeURIComponent(id)}${suffix}`;
+	return `${conn.baseUrl}${conn.streamRoot}${SUBSCRIPTIONS_PREFIX}/${encodeURIComponent(id)}${suffix}`;
 }
 
 /** Flatten a Headers object into a plain, lowercased-key record. */
