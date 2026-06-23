@@ -69,3 +69,45 @@ jobs:
           npm --prefix test/conformance install --no-audit --no-fund
           cd test/conformance && CONFORMANCE_TEST_URL=http://localhost:4437 \
             npx vitest run --no-coverage --reporter=default
+
+  # Lean pure-core proofs (issue #30 / P1.1). Separate from the Go jobs and gated
+  # on `lean/` changes so routine Go CI never invokes Lean. The toolchain is pinned
+  # by lean/lean-toolchain (leanprover/lean4:v4.31.0); mathlib oleans are fetched
+  # from the upstream cache (`lake exe cache get`) — mathlib is NOT built from source.
+  lean-proofs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lean
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install elan (Lean toolchain manager)
+        run: |
+          curl -sSfL https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Cache mathlib build (oleans)
+        uses: actions/cache@v4
+        with:
+          path: lean/.lake/packages/mathlib/.lake/build
+          key: mathlib-${{ hashFiles('lean/lake-manifest.json') }}
+      - name: Fetch prebuilt mathlib oleans
+        run: lake exe cache get
+      - name: Build all proofs (lake build must succeed)
+        run: lake build
+      - name: Axiom gate — no theorem may depend on `sorry` or `native_decide`
+        run: |
+          lake env lean Chronicle/Axioms.lean > axioms.txt 2>&1
+          cat axioms.txt
+          if grep -qE 'sorryAx|ofReduceBool' axioms.txt; then
+            echo "::error::a theorem depends on sorry (sorryAx) or native_decide (ofReduceBool)"
+            exit 1
+          fi
+      - name: No `sorry` tactic / `native_decide` in proof sources
+        run: |
+          # Match `sorry` only as a tactic/term (`:= sorry`, `by sorry`, a `sorry`
+          # on its own), not the word "sorry" in doc-comment prose. The axiom gate
+          # above is the authoritative check; this is a fast belt-and-suspenders.
+          if grep -rnE '(:=|\bby\b|·|<;>)\s*(sorry|native_decide)\b' Chronicle/ ; then
+            echo "::error::found a sorry tactic or native_decide in Chronicle/ sources"
+            exit 1
+          fi
