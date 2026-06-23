@@ -4,24 +4,30 @@
  *   ┌──────────────────────────────────────────────────────────────┐
  *   │ head: stream path · kind · honest batch offset range + pills   │
  *   ├──────────────────────────────────────────────────────────────┤
- *   │ toolbar: [Earliest|Latest|At offset…] · rows cap · Read/Refresh│
+ *   │ toolbar: [Catch-up|Long-poll|SSE] · [Earliest|Latest|At…] ·    │
+ *   │          rows cap (catch-up) · Read/Refresh OR Start/Stop tail │
  *   ├──────────────────────────────────────────────────────────────┤
- *   │ grid: #  · size · time? · preview   (content-type aware)       │
- *   │       pager: Read next batch (Stream-Next-Offset)              │
+ *   │ catch-up: grid (#·size·time?·preview) + Read-next-batch pager  │
+ *   │ live:     <TailPanel> (status badge · pause · stop · live grid)│
  *   ├──────────────────────────────────────────────────────────────┤
  *   │ "Under the hood" protocol disclosure (collapsed by default)    │
  *   └──────────────────────────────────────────────────────────────┘
  *
- * Reads go through the store: the toolbar mutates startMode / customOffset /
- * rowCap signals and calls readFromToolbar(), which resolves the toolbar choice
- * into a concrete protocol offset (lib/messages.resolveOffset) via
- * dsClient.readStream. Selecting a row sets store.selectedRow, driving the
- * Inspector. The grid is content-type aware: JSON batches render one row per
- * array element (honest about per-element offsets — there are none, only a
- * batch range), and a Time column appears only when elements carry a timestamp.
+ * The Mode segmented control (tailMode) chooses between the paged read path and
+ * a live tail. In catch-up mode the toolbar mutates startMode / customOffset /
+ * rowCap and calls readFromToolbar(), which resolves the choice into a concrete
+ * protocol offset (lib/messages.resolveOffset) via dsClient.readStream; the grid
+ * is content-type aware (one row per JSON element; a Time column only when rows
+ * carry a timestamp). In a live mode (long-poll | sse) the primary control is
+ * Start tail / Stop, which calls store.startTail(resolveOffset(...)) / stopTail,
+ * and the body renders <TailPanel> instead of the paged grid. Either way the
+ * "Under the hood" disclosure reflects the current exchange — and, while
+ * tailing, the live connection (the GET …&live=… request + status) via the
+ * tailDisclosure built from the store's tailOperation / tailStatus.
  *
- * Extensibility seam: add a toolbar control inside .dsui-toolbar, or a new tab
- * strip / section between the toolbar and the grid. Keep reads in the store.
+ * Extensibility seam: add a toolbar control inside .dsui-toolbar (the Segmented
+ * helper is reusable for any roving-tabindex picker), or a new section between
+ * the toolbar and the grid. Keep reads + the tail lifecycle in the store.
  */
 
 import { useComputed } from "@preact/signals";
@@ -34,8 +40,10 @@ import {
 	extractTimestamp,
 	formatBytes,
 	formatTime,
+	resolveOffset,
 } from "../lib/messages";
-import type { GridRow } from "../lib/types";
+import { describeTailMode, isLiveMode } from "../lib/tail";
+import type { GridRow, TailMode } from "../lib/types";
 import {
 	customOffset,
 	lastExchange,
@@ -51,16 +59,28 @@ import {
 	setCustomOffset,
 	setRowCap,
 	setStartMode,
+	setTailMode,
 	startMode,
+	startTail,
+	stopTail,
+	tailMode,
+	tailOperation,
+	tailStartOffset,
+	tailStatus,
 } from "../state/store";
-import { ProtocolPanel } from "./ProtocolPanel";
+import { ProtocolPanel, type TailDisclosure } from "./ProtocolPanel";
+import { PublishComposer } from "./PublishComposer";
+import { StreamActionsMenu } from "./StreamActionsMenu";
+import { TailPanel } from "./TailPanel";
 import {
+	IconBroadcast,
 	IconChevronDown,
 	IconChevronRight,
 	IconClock,
 	IconCornerDownRight,
 	IconPlay,
 	IconRefresh,
+	IconStop,
 } from "./icons";
 
 /* ---------------------------------------------------------------------------
@@ -73,46 +93,62 @@ const START_OPTIONS: readonly { value: StartMode; label: string; title: string }
 	{ value: "at", label: "At offset…", title: "Read from an explicit opaque offset cursor" },
 ];
 
-/** Starting-position segmented control + custom-offset input + rows cap + Read. */
-function Toolbar(props: { hasRead: boolean }): JSX.Element {
-	const mode = startMode.value;
-	const loading = readLoading.value;
-	const segmentedRef = useRef<HTMLDivElement>(null);
+/** The read-mode choices: paged catch-up vs the two live-tail transports. */
+const MODE_OPTIONS: readonly { value: TailMode; label: string; title: string }[] = [
+	{ value: "catchup", label: "Catch-up", title: "Read a batch at a time and page forward by hand" },
+	{
+		value: "long-poll",
+		label: "Long-poll",
+		title: "Follow the tail by long-polling (GET …&live=long-poll)",
+	},
+	{ value: "sse", label: "SSE", title: "Follow the tail over Server-Sent Events (GET …&live=sse)" },
+];
 
-	/** Move both selection and focus to the segment at index (wrapping). */
-	function activateSegment(index: number): void {
-		const count = START_OPTIONS.length;
+/**
+ * A roving-tabindex segmented control (one tab stop, arrow keys move between
+ * segments) shared by the Start-position and the Read-mode pickers. Mirrors the
+ * accessible pattern the toolbar already used for the Start control.
+ */
+function Segmented<T extends string>(props: {
+	label: string;
+	labelId: string;
+	value: T;
+	options: readonly { value: T; label: string; title: string }[];
+	onSelect: (value: T) => void;
+}): JSX.Element {
+	const { label, labelId, value, options, onSelect } = props;
+	const ref = useRef<HTMLDivElement>(null);
+
+	function activate(index: number): void {
+		const count = options.length;
 		const wrapped = ((index % count) + count) % count;
-		const next = START_OPTIONS[wrapped];
+		const next = options[wrapped];
 		if (next === undefined) return;
-		setStartMode(next.value);
-		segmentedRef.current
-			?.querySelectorAll<HTMLButtonElement>("[data-segment]")
-			.item(wrapped)
-			?.focus();
+		onSelect(next.value);
+		ref.current?.querySelectorAll<HTMLButtonElement>("[data-segment]").item(wrapped)?.focus();
 	}
 
-	function onSegmentKeyDown(e: KeyboardEvent): void {
-		const current = START_OPTIONS.findIndex((o) => o.value === mode);
+	function onKeyDown(e: KeyboardEvent): void {
+		const current = options.findIndex((o) => o.value === value);
 		if (current < 0) return;
 		switch (e.key) {
 			case "ArrowRight":
 			case "ArrowDown":
 				e.preventDefault();
-				activateSegment(current + 1);
+				activate(current + 1);
 				break;
 			case "ArrowLeft":
 			case "ArrowUp":
 				e.preventDefault();
-				activateSegment(current - 1);
+				activate(current - 1);
 				break;
 			case "Home":
 				e.preventDefault();
-				activateSegment(0);
+				activate(0);
 				break;
 			case "End":
 				e.preventDefault();
-				activateSegment(START_OPTIONS.length - 1);
+				activate(options.length - 1);
 				break;
 			default:
 				break;
@@ -120,38 +156,80 @@ function Toolbar(props: { hasRead: boolean }): JSX.Element {
 	}
 
 	return (
+		<>
+			<span class="dsui-toolbar__label" id={labelId}>
+				{label}
+			</span>
+			<div
+				class="dsui-segmented"
+				// biome-ignore lint/a11y/useSemanticElements: a <fieldset> cannot host an arrow-key roving toolbar segment group; role="group" is the correct ARIA container for these aria-pressed toggle buttons.
+				role="group"
+				aria-labelledby={labelId}
+				ref={ref}
+			>
+				{options.map((opt) => (
+					<button
+						key={opt.value}
+						type="button"
+						aria-pressed={value === opt.value}
+						aria-label={`${label}: ${opt.label}`}
+						tabIndex={value === opt.value ? 0 : -1}
+						data-segment="true"
+						class={`dsui-segmented__btn${value === opt.value ? " is-active" : ""}`}
+						title={opt.title}
+						onClick={() => onSelect(opt.value)}
+						onKeyDown={onKeyDown}
+					>
+						{opt.label}
+					</button>
+				))}
+			</div>
+		</>
+	);
+}
+
+/**
+ * The workspace read toolbar. A Mode picker (Catch-up | Long-poll | SSE) chooses
+ * between the paged read path and a live tail; the Start picker + offset input
+ * choose where to begin (a tail can replay from Earliest, jump to Latest, or
+ * start At an offset). The primary control switches with the mode: Read/Refresh
+ * for catch-up, Start tail / Stop for a live mode.
+ */
+function Toolbar(props: { hasRead: boolean }): JSX.Element {
+	const start = startMode.value;
+	const mode = tailMode.value;
+	const loading = readLoading.value;
+	const status = tailStatus.value;
+	const live = isLiveMode(mode);
+	// A live connection is "running" while connecting or connected; closed/error/
+	// idle are settled, so the control offers Start again.
+	const tailRunning = status.state === "connecting" || status.state === "live";
+
+	function startTailNow(): void {
+		startTail(resolveOffset(start, customOffset.value));
+	}
+
+	return (
 		<div class="dsui-toolbar" role="toolbar" aria-label="Read controls">
 			<div class="dsui-toolbar__group">
-				<span class="dsui-toolbar__label" id="dsui-start-label">
-					Start
-				</span>
-				<div
-					class="dsui-segmented"
-					// biome-ignore lint/a11y/useSemanticElements: <fieldset> cannot host an arrow-key roving toolbar segment group; role="group" is the correct ARIA container for these aria-pressed toggle buttons.
-					role="group"
-					aria-labelledby="dsui-start-label"
-					ref={segmentedRef}
-				>
-					{START_OPTIONS.map((opt) => (
-						<button
-							key={opt.value}
-							type="button"
-							aria-pressed={mode === opt.value}
-							aria-label={`Start: ${opt.label}`}
-							// Roving tabindex: only the active segment is in the Tab
-							// sequence; ArrowLeft/Right move between segments.
-							tabIndex={mode === opt.value ? 0 : -1}
-							data-segment="true"
-							class={`dsui-segmented__btn${mode === opt.value ? " is-active" : ""}`}
-							title={opt.title}
-							onClick={() => setStartMode(opt.value)}
-							onKeyDown={onSegmentKeyDown}
-						>
-							{opt.label}
-						</button>
-					))}
-				</div>
-				{mode === "at" ? (
+				<Segmented
+					label="Mode"
+					labelId="dsui-mode-label"
+					value={mode}
+					options={MODE_OPTIONS}
+					onSelect={setTailMode}
+				/>
+			</div>
+
+			<div class="dsui-toolbar__group">
+				<Segmented
+					label="Start"
+					labelId="dsui-start-label"
+					value={start}
+					options={START_OPTIONS}
+					onSelect={setStartMode}
+				/>
+				{start === "at" ? (
 					<input
 						type="text"
 						class="dsui-toolbar__offset"
@@ -162,45 +240,74 @@ function Toolbar(props: { hasRead: boolean }): JSX.Element {
 						spellcheck={false}
 						onInput={(e) => setCustomOffset(e.currentTarget.value)}
 						onKeyDown={(e) => {
-							if (e.key === "Enter") void readFromToolbar();
+							if (e.key === "Enter") {
+								if (live) startTailNow();
+								else void readFromToolbar();
+							}
 						}}
 					/>
 				) : null}
 			</div>
 
-			<div class="dsui-toolbar__group">
-				<label class="dsui-toolbar__label" for="dsui-rowcap">
-					Rows
-				</label>
-				<select
-					id="dsui-rowcap"
-					class="dsui-toolbar__select"
-					value={String(rowCap.value)}
-					onChange={(e) => setRowCap(Number(e.currentTarget.value))}
-				>
-					{ROW_CAP_OPTIONS.map((n) => (
-						<option key={n} value={String(n)}>
-							{n}
-						</option>
-					))}
-				</select>
-			</div>
+			{!live ? (
+				<div class="dsui-toolbar__group">
+					<label class="dsui-toolbar__label" for="dsui-rowcap">
+						Rows
+					</label>
+					<select
+						id="dsui-rowcap"
+						class="dsui-toolbar__select"
+						value={String(rowCap.value)}
+						onChange={(e) => setRowCap(Number(e.currentTarget.value))}
+					>
+						{ROW_CAP_OPTIONS.map((n) => (
+							<option key={n} value={String(n)}>
+								{n}
+							</option>
+						))}
+					</select>
+				</div>
+			) : null}
 
 			<div class="dsui-toolbar__spacer" />
 
-			<button
-				type="button"
-				class="dsui-btn dsui-btn--primary"
-				disabled={loading}
-				onClick={() => void readFromToolbar()}
-			>
-				{props.hasRead ? (
-					<IconRefresh size={14} class={loading ? "dsui-spin" : undefined} />
+			{live ? (
+				tailRunning ? (
+					<button
+						type="button"
+						class="dsui-btn dsui-btn--danger"
+						title="Stop the live tail and close the connection"
+						onClick={() => stopTail()}
+					>
+						<IconStop size={14} />
+						<span>Stop tail</span>
+					</button>
 				) : (
-					<IconPlay size={14} />
-				)}
-				<span>{loading ? "Reading…" : props.hasRead ? "Refresh" : "Read"}</span>
-			</button>
+					<button
+						type="button"
+						class="dsui-btn dsui-btn--primary"
+						title={`Start following the tail with ${describeTailMode(mode)}`}
+						onClick={startTailNow}
+					>
+						<IconBroadcast size={14} />
+						<span>Start tail</span>
+					</button>
+				)
+			) : (
+				<button
+					type="button"
+					class="dsui-btn dsui-btn--primary"
+					disabled={loading}
+					onClick={() => void readFromToolbar()}
+				>
+					{props.hasRead ? (
+						<IconRefresh size={14} class={loading ? "dsui-spin" : undefined} />
+					) : (
+						<IconPlay size={14} />
+					)}
+					<span>{loading ? "Reading…" : props.hasRead ? "Refresh" : "Read"}</span>
+				</button>
+			)}
 		</div>
 	);
 }
@@ -330,6 +437,21 @@ export function MessagesWorkspace(): JSX.Element {
 
 	const hasRead = read !== null;
 	const showTimeCol = showTime.value;
+	// In a live mode the workspace shows the TailPanel instead of the paged grid.
+	const currentMode = tailMode.value;
+	const live = isLiveMode(currentMode);
+	// Describe the open live connection for the under-the-hood disclosure, when
+	// one exists (the operation is set by startTail and cleared by stopTail).
+	const tailOp = tailOperation.value;
+	const tailDisclosure: TailDisclosure | null =
+		isLiveMode(currentMode) && tailOp !== null
+			? {
+					operation: tailOp,
+					status: tailStatus.value,
+					mode: currentMode,
+					fromOffset: tailStartOffset.value ?? "now",
+				}
+			: null;
 	// Which row owns the single tab stop: the active row if it is in this batch,
 	// otherwise the first row, so the grid always has exactly one tabbable cell.
 	const activeInBatch =
@@ -343,120 +465,129 @@ export function MessagesWorkspace(): JSX.Element {
 					<span class={`dsui-kind dsui-kind--${stream.kind}`}>{stream.kind}</span>
 					{stream.manual ? <span class="dsui-pill">manual</span> : null}
 				</div>
-				{read !== null ? (
-					<div class="dsui-ws__offsets" title="Honest batch offset range (no per-element offset)">
-						batch&nbsp;
-						<code>{read.requestedOffset}</code>
-						&nbsp;→&nbsp;
-						<code>{read.nextOffset ?? "—"}</code>
-						{read.upToDate ? <span class="dsui-pill dsui-pill--ok">up to date</span> : null}
-						{read.closed ? <span class="dsui-pill dsui-pill--warn">closed</span> : null}
-					</div>
-				) : null}
+				<div class="dsui-ws__headend">
+					{!live && read !== null ? (
+						<div class="dsui-ws__offsets" title="Honest batch offset range (no per-element offset)">
+							batch&nbsp;
+							<code>{read.requestedOffset}</code>
+							&nbsp;→&nbsp;
+							<code>{read.nextOffset ?? "—"}</code>
+							{read.upToDate ? <span class="dsui-pill dsui-pill--ok">up to date</span> : null}
+							{read.closed ? <span class="dsui-pill dsui-pill--warn">closed</span> : null}
+						</div>
+					) : null}
+					<StreamActionsMenu stream={stream} />
+				</div>
 			</header>
 
 			<Toolbar hasRead={hasRead} />
 
-			<section class="dsui-ws__grid" aria-label="Messages">
-				<div
-					class={`dsui-grid__header${showTimeCol ? " dsui-grid__header--timed" : ""}`}
-					aria-hidden="true"
-				>
-					<span>#</span>
-					<span>Size</span>
-					{showTimeCol ? (
-						<span class="dsui-grid__timehead">
-							<IconClock size={11} />
-							Time
-						</span>
-					) : null}
-					<span>Preview</span>
-				</div>
-				<div class="dsui-grid__rows" ref={gridRef}>
-					{loading && read === null ? (
-						<GridSkeleton />
-					) : read !== null && read.rows.length > 0 ? (
-						<>
-							{/* biome-ignore lint/a11y/useFocusableInteractive: focus lives on the option rows via roving tabindex (one row has tabIndex=0), so the listbox container itself is intentionally not a tab stop. */}
-							{/* biome-ignore lint/a11y/useSemanticElements: a native <select> cannot host these rich, focusable message rows; role="listbox" with role="option" children is the correct single-select pattern. */}
-							<div role="listbox" class="dsui-grid__body" aria-label="Message rows">
-								{read.rows.map((row, i) => (
-									<Row
-										key={row.index}
-										row={row}
-										active={active?.index === row.index}
-										showTime={showTimeCol}
-										// Roving tabindex: exactly one row owns the tab stop —
-										// the active row, else the first row — so the list is one
-										// Tab stop and ArrowUp/Down/Home/End move between rows.
-										tabbable={activeInBatch ? active?.index === row.index : i === 0}
-										onKeyDown={onRowKeyDown(i)}
-									/>
-								))}
-							</div>
-							{truncated ? (
-								<p class="dsui-grid__truncated" role="note">
-									Showing the first {read.rows.length} of a larger batch. Raise the row cap or read
-									the next batch to see more. The full bytes are in the inspector's Raw view.
-								</p>
-							) : null}
-						</>
-					) : read !== null ? (
-						<div class="dsui-empty dsui-empty--inline">
-							<p class="dsui-empty__title">
-								{read.exchange.status === 0
-									? "Could not read this stream"
-									: read.exchange.status >= 400
-										? `Server responded ${read.exchange.status}`
-										: "No messages in this batch"}
-							</p>
-							<p class="dsui-empty__hint">
-								{read.exchange.status === 0
-									? (read.exchange.error ?? "The request failed before a response.")
-									: read.exchange.status >= 400
-										? "The stream may not exist yet, or the offset is out of range."
-										: read.upToDate
-											? "The read returned an empty body — you are at the tail."
-											: "The read returned an empty body."}
-							</p>
-						</div>
-					) : (
-						<div class="dsui-empty dsui-empty--inline">
-							<IconPlay size={22} class="dsui-empty__icon" />
-							<p class="dsui-empty__title">Ready to read</p>
-							<p class="dsui-empty__hint">
-								Choose a starting position and press Read to load messages.
-							</p>
-						</div>
-					)}
-				</div>
-				<div class="dsui-ws__pager">
-					<span class="dsui-ws__pagerinfo">
-						{read !== null && read.rows.length > 0
-							? `${read.rows.length} ${read.rows.length === 1 ? "row" : "rows"}`
-							: ""}
-					</span>
-					<button
-						type="button"
-						class="dsui-btn dsui-btn--ghost"
-						title={
-							read?.nextOffset != null
-								? `Resume from Stream-Next-Offset ${read.nextOffset}`
-								: "No further offset — you are at the tail"
-						}
-						disabled={read?.nextOffset === null || read?.nextOffset === undefined || loading}
-						onClick={() => void readNext()}
-					>
-						<IconCornerDownRight size={14} />
-						<span>Read next batch</span>
-						{read?.nextOffset !== null && read?.nextOffset !== undefined ? (
-							<code class="dsui-ws__nextoffset">{read.nextOffset}</code>
-						) : null}
-					</button>
-				</div>
-			</section>
+			<PublishComposer />
 
-			<ProtocolPanel exchange={lastExchange.value} />
+			{live ? (
+				<TailPanel />
+			) : (
+				<section class="dsui-ws__grid" aria-label="Messages">
+					<div
+						class={`dsui-grid__header${showTimeCol ? " dsui-grid__header--timed" : ""}`}
+						aria-hidden="true"
+					>
+						<span>#</span>
+						<span>Size</span>
+						{showTimeCol ? (
+							<span class="dsui-grid__timehead">
+								<IconClock size={11} />
+								Time
+							</span>
+						) : null}
+						<span>Preview</span>
+					</div>
+					<div class="dsui-grid__rows" ref={gridRef}>
+						{loading && read === null ? (
+							<GridSkeleton />
+						) : read !== null && read.rows.length > 0 ? (
+							<>
+								{/* biome-ignore lint/a11y/useFocusableInteractive: focus lives on the option rows via roving tabindex (one row has tabIndex=0), so the listbox container itself is intentionally not a tab stop. */}
+								{/* biome-ignore lint/a11y/useSemanticElements: a native <select> cannot host these rich, focusable message rows; role="listbox" with role="option" children is the correct single-select pattern. */}
+								<div role="listbox" class="dsui-grid__body" aria-label="Message rows">
+									{read.rows.map((row, i) => (
+										<Row
+											key={row.index}
+											row={row}
+											active={active?.index === row.index}
+											showTime={showTimeCol}
+											// Roving tabindex: exactly one row owns the tab stop —
+											// the active row, else the first row — so the list is one
+											// Tab stop and ArrowUp/Down/Home/End move between rows.
+											tabbable={activeInBatch ? active?.index === row.index : i === 0}
+											onKeyDown={onRowKeyDown(i)}
+										/>
+									))}
+								</div>
+								{truncated ? (
+									<p class="dsui-grid__truncated" role="note">
+										Showing the first {read.rows.length} of a larger batch. Raise the row cap or
+										read the next batch to see more. The full bytes are in the inspector's Raw view.
+									</p>
+								) : null}
+							</>
+						) : read !== null ? (
+							<div class="dsui-empty dsui-empty--inline">
+								<p class="dsui-empty__title">
+									{read.exchange.status === 0
+										? "Could not read this stream"
+										: read.exchange.status >= 400
+											? `Server responded ${read.exchange.status}`
+											: "No messages in this batch"}
+								</p>
+								<p class="dsui-empty__hint">
+									{read.exchange.status === 0
+										? (read.exchange.error ?? "The request failed before a response.")
+										: read.exchange.status >= 400
+											? "The stream may not exist yet, or the offset is out of range."
+											: read.upToDate
+												? "The read returned an empty body — you are at the tail."
+												: "The read returned an empty body."}
+								</p>
+							</div>
+						) : (
+							<div class="dsui-empty dsui-empty--inline">
+								<IconPlay size={22} class="dsui-empty__icon" />
+								<p class="dsui-empty__title">Ready to read</p>
+								<p class="dsui-empty__hint">
+									Choose a starting position and press Read to load messages.
+								</p>
+							</div>
+						)}
+					</div>
+					<div class="dsui-ws__pager">
+						<span class="dsui-ws__pagerinfo">
+							{read !== null && read.rows.length > 0
+								? `${read.rows.length} ${read.rows.length === 1 ? "row" : "rows"}`
+								: ""}
+						</span>
+						<button
+							type="button"
+							class="dsui-btn dsui-btn--ghost"
+							title={
+								read?.nextOffset != null
+									? `Resume from Stream-Next-Offset ${read.nextOffset}`
+									: "No further offset — you are at the tail"
+							}
+							disabled={read?.nextOffset === null || read?.nextOffset === undefined || loading}
+							onClick={() => void readNext()}
+						>
+							<IconCornerDownRight size={14} />
+							<span>Read next batch</span>
+							{read?.nextOffset !== null && read?.nextOffset !== undefined ? (
+								<code class="dsui-ws__nextoffset">{read.nextOffset}</code>
+							) : null}
+						</button>
+					</div>
+				</section>
+			)}
+
+			<ProtocolPanel exchange={lastExchange.value} tail={tailDisclosure} />
 		</div>
 	);
 }
