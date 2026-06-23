@@ -30,27 +30,34 @@
  * the toolbar and the grid. Keep reads + the tail lifecycle in the store.
  */
 
-import { useComputed } from "@preact/signals";
+import { useComputed, useSignal } from "@preact/signals";
 import type { JSX } from "preact";
-import { useRef } from "preact/hooks";
+import { useLayoutEffect, useRef } from "preact/hooks";
+import { relativeTime } from "../lib/format";
 import {
 	ROW_CAP_OPTIONS,
 	type StartMode,
 	batchHasTimes,
+	compileQuery,
 	extractTimestamp,
 	formatBytes,
 	formatTime,
+	matchCompiled,
 	resolveOffset,
 } from "../lib/messages";
+import { offsetChipLabel } from "../lib/readHistory";
 import { describeTailMode, isLiveMode } from "../lib/tail";
-import type { GridRow, TailMode } from "../lib/types";
+import type { GridRow, ReadHistoryEntry, TailMode } from "../lib/types";
+import { ROW_HEIGHT, WINDOW_THRESHOLD, windowRange } from "../lib/virtual";
 import {
 	customOffset,
 	lastExchange,
 	lastRead,
 	readFromToolbar,
+	readHistory,
 	readLoading,
 	readNext,
+	readSelected,
 	rowCap,
 	rowsTruncated,
 	selectRow,
@@ -68,8 +75,11 @@ import {
 	tailStartOffset,
 	tailStatus,
 } from "../state/store";
+import { CopyButton } from "./CopyButton";
+import { ExportMenu } from "./ExportMenu";
 import { ProtocolPanel, type TailDisclosure } from "./ProtocolPanel";
 import { PublishComposer } from "./PublishComposer";
+import { RowFilter } from "./RowFilter";
 import { StreamActionsMenu } from "./StreamActionsMenu";
 import { TailPanel } from "./TailPanel";
 import {
@@ -77,9 +87,12 @@ import {
 	IconChevronDown,
 	IconChevronRight,
 	IconClock,
+	IconClose,
 	IconCornerDownRight,
+	IconHistory,
 	IconPlay,
 	IconRefresh,
+	IconSearch,
 	IconStop,
 } from "./icons";
 
@@ -240,10 +253,12 @@ function Toolbar(props: { hasRead: boolean }): JSX.Element {
 						spellcheck={false}
 						onInput={(e) => setCustomOffset(e.currentTarget.value)}
 						onKeyDown={(e) => {
-							if (e.key === "Enter") {
-								if (live) startTailNow();
-								else void readFromToolbar();
-							}
+							if (e.key !== "Enter") return;
+							// Gate the read path on !loading, mirroring the Read button / pager /
+							// history chips, so repeated Enter cannot launch overlapping reads
+							// that resolve out of order and reshuffle the history.
+							if (live) startTailNow();
+							else if (!loading) void readFromToolbar();
 						}}
 					/>
 				) : null}
@@ -353,6 +368,7 @@ function Row(props: {
 			onClick={() => selectRow(row)}
 			tabIndex={tabbable ? 0 : -1}
 			data-messagerow="true"
+			data-rowindex={row.index}
 			aria-selected={active}
 			aria-label={label}
 			onKeyDown={onKeyDown}
@@ -373,6 +389,72 @@ function Row(props: {
 }
 
 /* ---------------------------------------------------------------------------
+ * History strip
+ * ------------------------------------------------------------------------ */
+
+/** One clickable breadcrumb chip for a previously-visited read position. */
+function HistoryChip(props: {
+	entry: ReadHistoryEntry;
+	current: boolean;
+	disabled: boolean;
+}): JSX.Element {
+	const { entry, current, disabled } = props;
+	const label = offsetChipLabel(entry.requestedOffset);
+	const rows = `${entry.rowCount} ${entry.rowCount === 1 ? "row" : "rows"}`;
+	const detail = `offset ${entry.requestedOffset} · ${rows} · ${relativeTime(entry.at)}`;
+	const title = current ? `Current position · ${detail}` : `Re-read ${detail}`;
+	// WCAG 2.5.3 (Label in Name): the accessible name must contain the visible
+	// label (e.g. "earliest"/"latest"/the cursor) so speech-control users can
+	// target the chip by what they see — so lead the name with that label.
+	const ariaLabel = current
+		? `${label}, current position · ${detail}`
+		: `${label}, re-read · ${detail}`;
+	return (
+		<button
+			type="button"
+			class={`dsui-history__chip${current ? " is-current" : ""}`}
+			aria-current={current ? "true" : undefined}
+			aria-label={ariaLabel}
+			title={title}
+			disabled={disabled}
+			onClick={() => void readSelected(entry.requestedOffset)}
+		>
+			{label}
+		</button>
+	);
+}
+
+/**
+ * A compact strip of the read positions visited for this stream, newest last.
+ * Each chip re-reads its cursor in one click — a navigable breadcrumb over the
+ * protocol's opaque, forward-only offsets. Renders nothing until a read lands.
+ */
+function HistoryStrip(): JSX.Element | null {
+	const history = readHistory.value;
+	if (history.length === 0) return null;
+	const loading = readLoading.value;
+	const lastIndex = history.length - 1;
+	return (
+		<nav class="dsui-history" aria-label="Read history">
+			<span class="dsui-history__label">
+				<IconHistory size={13} />
+				History
+			</span>
+			<div class="dsui-history__chips">
+				{history.map((entry, i) => (
+					<HistoryChip
+						key={`${entry.at}-${i}`}
+						entry={entry}
+						current={i === lastIndex}
+						disabled={loading}
+					/>
+				))}
+			</div>
+		</nav>
+	);
+}
+
+/* ---------------------------------------------------------------------------
  * Workspace
  * ------------------------------------------------------------------------ */
 
@@ -382,20 +464,95 @@ export function MessagesWorkspace(): JSX.Element {
 	const loading = readLoading.value;
 	const active = selectedRow.value;
 	const truncated = rowsTruncated.value;
+	// gridRef is the scroll container (.dsui-grid__rows); it both reports scroll
+	// geometry for windowing and is the root for row focus queries.
 	const gridRef = useRef<HTMLDivElement>(null);
+	// Scroll geometry driving fixed-height windowing (see the render below).
+	const scrollTop = useSignal(0);
+	const viewport = useSignal(0);
+	// An absolute row index to focus once it scrolls into the rendered window —
+	// set when arrow/Home/End navigation targets a row outside the current slice.
+	const pendingFocus = useSignal<number | null>(null);
+
+	// Component-local, instant filter over the loaded batch — never touches the
+	// store (issue #53). Matching lives in lib/messages: compile the query once,
+	// run it per row. row.index is preserved, so the batch-index # stays honest.
+	const filter = useSignal("");
+	const compiled = useComputed(() => compileQuery(filter.value));
+	const visibleRows = useComputed(() => {
+		const q = compiled.value;
+		const rows = read?.rows ?? [];
+		return q.active ? rows.filter((r) => matchCompiled(r, q)) : rows;
+	});
 
 	// Show the Time column only when at least one row in the batch has a time.
 	const showTime = useComputed(() => (read === null ? false : batchHasTimes(read.rows)));
 
-	/** Move roving focus to the n-th row button (clamped). */
-	function focusRow(index: number): void {
-		const cells = gridRef.current?.querySelectorAll<HTMLButtonElement>("[data-messagerow]");
-		if (cells === undefined || cells.length === 0) return;
-		const clamped = Math.max(0, Math.min(index, cells.length - 1));
-		cells.item(clamped)?.focus();
+	/** Capture the scroll element's geometry into the windowing signals. */
+	function syncMetrics(el: HTMLDivElement): void {
+		scrollTop.value = el.scrollTop;
+		viewport.value = el.clientHeight;
 	}
 
-	/** Arrow-key roving for a row at the given position within the batch. */
+	function onGridScroll(): void {
+		const el = gridRef.current;
+		if (el !== null) syncMetrics(el);
+	}
+
+	// Measure the viewport whenever a new batch loads, so windowing has a real
+	// clientHeight before the first scroll (and tracks the clamped scrollTop when
+	// a smaller batch replaces a larger one).
+	// biome-ignore lint/correctness/useExhaustiveDependencies: gridRef is a stable handle; re-measure exactly when the loaded batch changes.
+	useLayoutEffect(() => {
+		const el = gridRef.current;
+		if (el !== null) syncMetrics(el);
+	}, [read]);
+
+	// Focus a row that navigation targeted but that was outside the rendered
+	// window. No dependency array: it runs after every commit so it catches the
+	// target as soon as scrolling re-windows it into the DOM, then clears the
+	// request (a no-op on the commits where nothing is pending).
+	useLayoutEffect(() => {
+		const idx = pendingFocus.value;
+		if (idx === null) return;
+		const el = gridRef.current?.querySelector<HTMLButtonElement>(`[data-rowindex="${idx}"]`);
+		if (el !== null && el !== undefined) {
+			el.focus();
+			pendingFocus.value = null;
+		}
+	});
+
+	/**
+	 * Move roving focus to the row at the given position in the FILTERED list
+	 * (clamped). If that row is already rendered, focus it directly; otherwise
+	 * scroll its position into view (uniform 30px rows) and let the pendingFocus
+	 * effect focus it once windowing mounts it. pendingFocus carries the row's
+	 * absolute batch index (its data-rowindex) so the lookup survives re-windowing.
+	 */
+	function focusRow(pos: number): void {
+		const list = visibleRows.value;
+		if (list.length === 0) return;
+		const clamped = Math.max(0, Math.min(pos, list.length - 1));
+		const targetIndex = list[clamped]?.index;
+		if (targetIndex === undefined) return;
+		const el = gridRef.current?.querySelector<HTMLButtonElement>(
+			`[data-rowindex="${targetIndex}"]`,
+		);
+		if (el !== null && el !== undefined) {
+			el.focus();
+			return;
+		}
+		// Outside the window: scroll the position to the top of the viewport,
+		// refresh the metrics so the re-render includes it, and queue the focus.
+		pendingFocus.value = targetIndex;
+		const scroller = gridRef.current;
+		if (scroller !== null) {
+			scroller.scrollTop = clamped * ROW_HEIGHT;
+			syncMetrics(scroller);
+		}
+	}
+
+	/** Arrow-key roving for a row at the given position within the filtered list. */
 	function onRowKeyDown(pos: number): (e: KeyboardEvent) => void {
 		return (e) => {
 			switch (e.key) {
@@ -413,7 +570,7 @@ export function MessagesWorkspace(): JSX.Element {
 					break;
 				case "End":
 					e.preventDefault();
-					focusRow((read?.rows.length ?? 1) - 1);
+					focusRow(visibleRows.value.length - 1);
 					break;
 				default:
 					break;
@@ -452,10 +609,34 @@ export function MessagesWorkspace(): JSX.Element {
 					fromOffset: tailStartOffset.value ?? "now",
 				}
 			: null;
-	// Which row owns the single tab stop: the active row if it is in this batch,
-	// otherwise the first row, so the grid always has exactly one tabbable cell.
-	const activeInBatch =
-		active !== null && (read?.rows.some((r) => r.index === active.index) ?? false);
+	// Which row owns the single tab stop: the active row if it is in the VISIBLE
+	// subset, otherwise the first visible row, so the grid always has exactly one
+	// tabbable cell even when a filter hides the active row.
+	const rows = visibleRows.value;
+	const filterQuery = compiled.value;
+	const activeIsVisible = active !== null && rows.some((r) => r.index === active.index);
+
+	// Fixed-height windowing for the paged grid (issue #58) over the FILTERED rows
+	// (issue #53): above the threshold render only the visible slice inside
+	// top/bottom spacers (uniform 30px rows), keeping the DOM small for a large
+	// batch; at or below it render every row. The spacers preserve scrollHeight so
+	// the sticky header and scrollbar are unchanged. Windowing tracks the filtered
+	// set, so a query both shrinks the list and re-pins the window to it.
+	const gridTotal = rows.length;
+	const gridWindowed = gridTotal > WINDOW_THRESHOLD;
+	const gridRange = gridWindowed
+		? windowRange(scrollTop.value, viewport.value, ROW_HEIGHT, gridTotal)
+		: { startIndex: 0, endIndex: gridTotal, padTop: 0, padBottom: 0 };
+	// The visible slice plus, for each row, its position in the filtered list, so
+	// arrow-key roving moves by filtered position while the # column stays honest.
+	const gridVisible = rows
+		.slice(gridRange.startIndex, gridRange.endIndex)
+		.map((row, i) => ({ row, pos: gridRange.startIndex + i }));
+	// The single tab stop must be on a rendered row: the active row (when it
+	// survives the filter) else the first row, when that row is in the window,
+	// otherwise the first visible (windowed-in) row.
+	const tabStopPos = activeIsVisible ? rows.findIndex((r) => r.index === active?.index) : 0;
+	const tabStopVisible = tabStopPos >= gridRange.startIndex && tabStopPos < gridRange.endIndex;
 
 	return (
 		<div class="dsui-ws">
@@ -470,8 +651,20 @@ export function MessagesWorkspace(): JSX.Element {
 						<div class="dsui-ws__offsets" title="Honest batch offset range (no per-element offset)">
 							batch&nbsp;
 							<code>{read.requestedOffset}</code>
+							<CopyButton
+								text={read.requestedOffset}
+								label="Copy this batch's start cursor"
+								copyKey="offset-from"
+							/>
 							&nbsp;→&nbsp;
 							<code>{read.nextOffset ?? "—"}</code>
+							{read.nextOffset !== null ? (
+								<CopyButton
+									text={read.nextOffset}
+									label="Copy the next-batch cursor"
+									copyKey="offset-next"
+								/>
+							) : null}
 							{read.upToDate ? <span class="dsui-pill dsui-pill--ok">up to date</span> : null}
 							{read.closed ? <span class="dsui-pill dsui-pill--warn">closed</span> : null}
 						</div>
@@ -497,104 +690,174 @@ export function MessagesWorkspace(): JSX.Element {
 			{live ? (
 				<TailPanel />
 			) : (
-				<section class="dsui-ws__grid" aria-label="Messages">
-					<div
-						class={`dsui-grid__header${showTimeCol ? " dsui-grid__header--timed" : ""}`}
-						aria-hidden="true"
-					>
-						<span>#</span>
-						<span>Size</span>
-						{showTimeCol ? (
-							<span class="dsui-grid__timehead">
-								<IconClock size={11} />
-								Time
-							</span>
+				<>
+					<HistoryStrip />
+					<section class="dsui-ws__grid" aria-label="Messages">
+						{read !== null && read.rows.length > 0 ? (
+							<RowFilter
+								value={filter.value}
+								matched={rows.length}
+								total={read.rows.length}
+								active={filterQuery.active}
+								error={filterQuery.error}
+								label="Filter messages"
+								variant="grid"
+								onInput={(v) => {
+									filter.value = v;
+								}}
+								onClear={() => {
+									filter.value = "";
+								}}
+							/>
 						) : null}
-						<span>Preview</span>
-					</div>
-					<div class="dsui-grid__rows" ref={gridRef}>
-						{loading && read === null ? (
-							<GridSkeleton />
-						) : read !== null && read.rows.length > 0 ? (
-							<>
-								{/* biome-ignore lint/a11y/useFocusableInteractive: focus lives on the option rows via roving tabindex (one row has tabIndex=0), so the listbox container itself is intentionally not a tab stop. */}
-								{/* biome-ignore lint/a11y/useSemanticElements: a native <select> cannot host these rich, focusable message rows; role="listbox" with role="option" children is the correct single-select pattern. */}
-								<div role="listbox" class="dsui-grid__body" aria-label="Message rows">
-									{read.rows.map((row, i) => (
-										<Row
-											key={row.index}
-											row={row}
-											active={active?.index === row.index}
-											showTime={showTimeCol}
-											// Roving tabindex: exactly one row owns the tab stop —
-											// the active row, else the first row — so the list is one
-											// Tab stop and ArrowUp/Down/Home/End move between rows.
-											tabbable={activeInBatch ? active?.index === row.index : i === 0}
-											onKeyDown={onRowKeyDown(i)}
-										/>
-									))}
-								</div>
-								{truncated ? (
-									<p class="dsui-grid__truncated" role="note">
-										Showing the first {read.rows.length} of a larger batch. Raise the row cap or
-										read the next batch to see more. The full bytes are in the inspector's Raw view.
-									</p>
-								) : null}
-							</>
-						) : read !== null ? (
-							<div class="dsui-empty dsui-empty--inline">
-								<p class="dsui-empty__title">
-									{read.exchange.status === 0
-										? "Could not read this stream"
-										: read.exchange.status >= 400
-											? `Server responded ${read.exchange.status}`
-											: "No messages in this batch"}
-								</p>
-								<p class="dsui-empty__hint">
-									{read.exchange.status === 0
-										? (read.exchange.error ?? "The request failed before a response.")
-										: read.exchange.status >= 400
-											? "The stream may not exist yet, or the offset is out of range."
-											: read.upToDate
-												? "The read returned an empty body — you are at the tail."
-												: "The read returned an empty body."}
-								</p>
-							</div>
-						) : (
-							<div class="dsui-empty dsui-empty--inline">
-								<IconPlay size={22} class="dsui-empty__icon" />
-								<p class="dsui-empty__title">Ready to read</p>
-								<p class="dsui-empty__hint">
-									Choose a starting position and press Read to load messages.
-								</p>
-							</div>
-						)}
-					</div>
-					<div class="dsui-ws__pager">
-						<span class="dsui-ws__pagerinfo">
-							{read !== null && read.rows.length > 0
-								? `${read.rows.length} ${read.rows.length === 1 ? "row" : "rows"}`
-								: ""}
-						</span>
-						<button
-							type="button"
-							class="dsui-btn dsui-btn--ghost"
-							title={
-								read?.nextOffset != null
-									? `Resume from Stream-Next-Offset ${read.nextOffset}`
-									: "No further offset — you are at the tail"
-							}
-							disabled={read?.nextOffset === null || read?.nextOffset === undefined || loading}
-							onClick={() => void readNext()}
+						<div
+							class={`dsui-grid__header${showTimeCol ? " dsui-grid__header--timed" : ""}`}
+							aria-hidden="true"
 						>
-							<IconCornerDownRight size={14} />
-							<span>Read next batch</span>
-							{read?.nextOffset !== null && read?.nextOffset !== undefined ? (
-								<code class="dsui-ws__nextoffset">{read.nextOffset}</code>
+							<span>#</span>
+							<span>Size</span>
+							{showTimeCol ? (
+								<span class="dsui-grid__timehead">
+									<IconClock size={11} />
+									Time
+								</span>
 							) : null}
-						</button>
-					</div>
-				</section>
+							<span>Preview</span>
+						</div>
+						<div class="dsui-grid__rows" ref={gridRef} onScroll={onGridScroll}>
+							{loading && read === null ? (
+								<GridSkeleton />
+							) : read !== null && read.rows.length > 0 ? (
+								rows.length > 0 ? (
+									<>
+										{/* biome-ignore lint/a11y/useFocusableInteractive: focus lives on the option rows via roving tabindex (one row has tabIndex=0), so the listbox container itself is intentionally not a tab stop. */}
+										{/* biome-ignore lint/a11y/useSemanticElements: a native <select> cannot host these rich, focusable message rows; role="listbox" with role="option" children is the correct single-select pattern. */}
+										<div
+											role="listbox"
+											class="dsui-grid__body"
+											aria-label="Message rows"
+											// Spacers stand in for the windowed-out rows so scrollHeight
+											// (and the sticky header) is identical to rendering every row.
+											style={{
+												paddingBlockStart: gridRange.padTop,
+												paddingBlockEnd: gridRange.padBottom,
+											}}
+										>
+											{gridVisible.map(({ row, pos }) => (
+												<Row
+													key={row.index}
+													row={row}
+													active={active?.index === row.index}
+													showTime={showTimeCol}
+													// Roving tabindex: exactly one rendered row owns the tab
+													// stop — the active row (when it survives the filter) else
+													// the first row, when windowed in, otherwise the first
+													// visible row — so the filtered, windowed list is one Tab
+													// stop and ArrowUp/Down/Home/End move between rows.
+													tabbable={
+														tabStopVisible ? pos === tabStopPos : pos === gridRange.startIndex
+													}
+													onKeyDown={onRowKeyDown(pos)}
+												/>
+											))}
+										</div>
+										{truncated ? (
+											<p class="dsui-grid__truncated" role="note">
+												Showing the first {read.rows.length} of a larger batch. Raise the row cap or
+												read the next batch to see more. The full bytes are in the inspector's Raw
+												view.
+											</p>
+										) : null}
+									</>
+								) : (
+									<div class="dsui-empty dsui-empty--inline">
+										<IconSearch size={22} class="dsui-empty__icon" />
+										<p class="dsui-empty__title">No rows match the filter</p>
+										<p class="dsui-empty__hint">
+											None of the {read.rows.length}{" "}
+											{read.rows.length === 1 ? "loaded row" : "loaded rows"} match{" "}
+											<code>{filter.value}</code>. Clear the filter to see them all.
+										</p>
+										<button
+											type="button"
+											class="dsui-btn dsui-btn--ghost"
+											onClick={() => {
+												filter.value = "";
+											}}
+										>
+											<IconClose size={14} />
+											<span>Clear filter</span>
+										</button>
+									</div>
+								)
+							) : read !== null ? (
+								<div class="dsui-empty dsui-empty--inline">
+									<p class="dsui-empty__title">
+										{read.exchange.status === 0
+											? "Could not read this stream"
+											: read.exchange.status >= 400
+												? `Server responded ${read.exchange.status}`
+												: "No messages in this batch"}
+									</p>
+									<p class="dsui-empty__hint">
+										{read.exchange.status === 0
+											? (read.exchange.error ?? "The request failed before a response.")
+											: read.exchange.status >= 400
+												? "The stream may not exist yet, or the offset is out of range."
+												: read.upToDate
+													? "The read returned an empty body — you are at the tail."
+													: "The read returned an empty body."}
+									</p>
+								</div>
+							) : (
+								<div class="dsui-empty dsui-empty--inline">
+									<IconPlay size={22} class="dsui-empty__icon" />
+									<p class="dsui-empty__title">Ready to read</p>
+									<p class="dsui-empty__hint">
+										Choose a starting position and press Read to load messages.
+									</p>
+								</div>
+							)}
+						</div>
+						<div class="dsui-ws__pager">
+							<span class="dsui-ws__pagerinfo">
+								{read !== null && read.rows.length > 0
+									? filterQuery.active
+										? `${rows.length} of ${read.rows.length} ${read.rows.length === 1 ? "row" : "rows"}`
+										: `${read.rows.length} ${read.rows.length === 1 ? "row" : "rows"}`
+									: ""}
+							</span>
+							<div class="dsui-ws__pageractions">
+								{read !== null ? (
+									<ExportMenu
+										rows={read.rows}
+										kind={read.kind}
+										streamPath={stream.path}
+										offset={read.requestedOffset}
+										rawBytes={read.rawBytes}
+									/>
+								) : null}
+								<button
+									type="button"
+									class="dsui-btn dsui-btn--ghost"
+									title={
+										read?.nextOffset != null
+											? `Resume from Stream-Next-Offset ${read.nextOffset}`
+											: "No further offset — you are at the tail"
+									}
+									disabled={read?.nextOffset === null || read?.nextOffset === undefined || loading}
+									onClick={() => void readNext()}
+								>
+									<IconCornerDownRight size={14} />
+									<span>Read next batch</span>
+									{read?.nextOffset !== null && read?.nextOffset !== undefined ? (
+										<code class="dsui-ws__nextoffset">{read.nextOffset}</code>
+									) : null}
+								</button>
+							</div>
+						</div>
+					</section>
+				</>
 			)}
 
 			<ProtocolPanel exchange={lastExchange.value} tail={tailDisclosure} />

@@ -97,6 +97,32 @@ describe("TailPanel", () => {
 		expect(screen.queryByRole("button", { name: /^Stop$/ })).toBeNull();
 	});
 
+	it("windows the live list above the threshold, rendering only a visible slice", () => {
+		// jsdom computes no layout, so windowRange would render everything (a
+		// non-measurable viewport falls back to the full range). Give the scroller
+		// a real clientHeight, then scroll to engage the fixed-height windowing.
+		tailRows.value = Array.from({ length: 300 }, (_, i) => makeRow(i));
+		const { container } = render(<TailPanel />);
+		const scroller = container.querySelector(".dsui-tail__rows") as HTMLElement;
+		Object.defineProperty(scroller, "clientHeight", { value: 300, configurable: true });
+		Object.defineProperty(scroller, "scrollHeight", { value: 300 * 30, configurable: true });
+		fireEvent.scroll(scroller);
+		const options = screen.getAllByRole("option");
+		// Only a small slice of the 300 rows is in the DOM.
+		expect(options.length).toBeGreaterThan(0);
+		expect(options.length).toBeLessThan(60);
+		// The spacers stand in for the windowed-out rows, preserving scroll height.
+		const body = screen.getByRole("listbox", { name: "Live message rows" });
+		expect(body.style.paddingBlockEnd).not.toBe("");
+		expect(body.style.paddingBlockEnd).not.toBe("0px");
+	});
+
+	it("renders every row at or below the windowing threshold", () => {
+		tailRows.value = Array.from({ length: 30 }, (_, i) => makeRow(i));
+		render(<TailPanel />);
+		expect(screen.getAllByRole("option")).toHaveLength(30);
+	});
+
 	it("surfaces the error status assertively", () => {
 		tailStatus.value = { state: "error", message: "the SSE connection closed" };
 		render(<TailPanel />);
@@ -105,5 +131,37 @@ describe("TailPanel", () => {
 		expect(text).toContain("Error");
 		expect(text).toContain("the SSE connection closed");
 		expect(status.getAttribute("aria-live")).toBe("assertive");
+	});
+
+	it("filters the live buffer without dropping the connection and keeps seq honest", () => {
+		render(<TailPanel />);
+		expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(2);
+
+		const input = screen.getByRole("searchbox", { name: "Filter live messages" });
+		fireEvent.input(input, { target: { value: "live 1" } });
+
+		const options = within(screen.getByRole("listbox")).getAllByRole("option");
+		expect(options).toHaveLength(1);
+		// Filtering hides row 0; the surviving row keeps its true arrival number
+		// (seq 1 = dropped 0 + buffer position 1), not a re-numbered 0.
+		expect(options[0]?.getAttribute("aria-label")).toContain("Live message 1");
+		// The store buffer is untouched — filtering is purely a view concern.
+		expect(tailRows.value).toHaveLength(2);
+		expect(tailStatus.value.state).toBe("live");
+	});
+
+	it("shows a 'showing N of M' count and a no-match note with a clear", () => {
+		render(<TailPanel />);
+		const input = screen.getByRole("searchbox", { name: "Filter live messages" });
+
+		fireEvent.input(input, { target: { value: "live 1" } });
+		expect(screen.getByText(/showing 1 of 2/)).toBeTruthy();
+
+		fireEvent.input(input, { target: { value: "no-such-row" } });
+		expect(screen.queryByRole("listbox")).toBeNull();
+		expect(screen.getByText("No messages match the filter")).toBeTruthy();
+
+		fireEvent.input(input, { target: { value: "" } });
+		expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(2);
 	});
 });

@@ -16,7 +16,7 @@
  * validation + the preview come from lib/streamForm (pure); this lays it out.
  */
 
-import { useComputed, useSignal } from "@preact/signals";
+import { useComputed, useSignal, useSignalEffect } from "@preact/signals";
 import type { JSX } from "preact";
 import { useId } from "preact/hooks";
 import {
@@ -30,9 +30,13 @@ import type { AppendOptions, ProducerIdentity, StreamContentType, StreamKind } f
 import {
 	activeConnection,
 	appendMessages,
+	composerOpen,
 	operationInFlight,
+	producerSeqHint,
 	selectedStream,
+	setComposerOpen,
 	setProducerIdentity,
+	setProducerSeqHint,
 } from "../state/store";
 import { CurlPreview } from "./CurlPreview";
 import { IconLoader, IconSend } from "./icons";
@@ -67,6 +71,18 @@ export function PublishComposer(): JSX.Element | null {
 	const producerEpoch = useSignal("0");
 	const producerSeq = useSignal("0");
 	const showErrors = useSignal(false);
+
+	// Consume the "Use expected seq" hint from a producer-conflict toast: adopt the
+	// server's expected seq, reveal the producer block, and clear the hint so it
+	// applies once. Writing the hint signal here just re-runs this effect, which
+	// then reads null and bails — no loop.
+	useSignalEffect(() => {
+		const hint = producerSeqHint.value;
+		if (hint === null) return;
+		producerSeq.value = String(hint);
+		useProducer.value = true;
+		setProducerSeqHint(null);
+	});
 
 	const idBase = useId();
 
@@ -170,7 +186,18 @@ export function PublishComposer(): JSX.Element | null {
 	const pe = producerErrors.value;
 
 	return (
-		<details class="dsui-publish">
+		<details
+			class="dsui-publish"
+			// The open state is store-driven (composerOpen): forced open on an empty
+			// or freshly-created stream so writing is one step, else the remembered
+			// manual preference. onToggle records a user's own open/collapse; a
+			// programmatic change is already in sync, so the guard skips re-writing it.
+			open={composerOpen.value}
+			onToggle={(e) => {
+				const open = e.currentTarget.open;
+				if (open !== composerOpen.value) setComposerOpen(open);
+			}}
+		>
 			<summary class="dsui-publish__summary">
 				<IconSend size={14} class="dsui-publish__icon" />
 				<span class="dsui-publish__title">Publish to this stream</span>

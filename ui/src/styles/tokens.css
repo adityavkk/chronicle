@@ -5,39 +5,55 @@
  * type (fluid clamp), shadows, motion. Light is the default; dark applies via
  * prefers-color-scheme AND a manual [data-theme] override on <html>.
  *
- * Color model: a neutral gray ramp plus one tasteful accent. Semantic tokens
- * (--bg, --fg, --border, ...) are derived from the ramp so components never
- * reach for raw scale steps directly.
+ * Color model: the Flexoki palette (stephango.com/flexoki) in a warm, editorial
+ * paper-and-ink style — a warm off-white ground (never stark white), near-black
+ * ink text, and a single teal accent reserved for primary action + selection.
+ * Beyond the neutral ramp and teal accent we carry the Flexoki status hues
+ * (green/yellow/red/blue) plus three extra accent slots (violet/orange/magenta)
+ * so semantically distinct chips get distinct hues instead of all sharing the
+ * accent. Semantic tokens (--bg, --fg, --border, --info, ...) are derived from
+ * these scales so components never reach for raw scale steps directly. Values
+ * are oklch; the trailing comment is the Flexoki source hex for traceability.
  */
 
 :root {
-	/* ---- Neutral ramp (oklch: lightness chroma hue) -------------------- */
-	--gray-50: oklch(98.5% 0.002 250);
-	--gray-100: oklch(96.5% 0.003 250);
-	--gray-150: oklch(94% 0.004 250);
-	--gray-200: oklch(90% 0.005 250);
-	--gray-300: oklch(83% 0.006 250);
-	--gray-400: oklch(70% 0.008 250);
-	--gray-500: oklch(58% 0.01 250);
-	--gray-600: oklch(47% 0.012 250);
-	--gray-700: oklch(37% 0.014 255);
-	--gray-800: oklch(27% 0.016 260);
-	--gray-850: oklch(22% 0.016 262);
-	--gray-900: oklch(18% 0.017 264);
-	--gray-950: oklch(13% 0.018 266);
+	/* ---- Neutral ramp — Flexoki warm "base" scale ---------------------- */
+	--gray-50: oklch(99% 0.016 95.2); /* paper   #FFFCF0 */
+	--gray-100: oklch(95.4% 0.015 98.3); /* base-50  #F2F0E5 */
+	--gray-150: oklch(91.7% 0.015 98.3); /* base-100 #E6E4D9 */
+	--gray-200: oklch(88.1% 0.014 97.5); /* base-150 #DAD8CE */
+	--gray-300: oklch(84.6% 0.014 102.1); /* base-200 #CECDC3 */
+	--gray-400: oklch(77.2% 0.013 96.5); /* base-300 #B7B5AC */
+	--gray-500: oklch(61.7% 0.008 88.7); /* base-500 #878580 */
+	--gray-600: oklch(53.8% 0.008 97.4); /* base-600 #6F6E69 */
+	--gray-700: oklch(45.3% 0.005 91.5); /* base-700 #575653 */
+	--gray-800: oklch(32.1% 0.004 84.6); /* base-850 #343331 */
+	--gray-850: oklch(27.3% 0.002 67.7); /* base-900 #282726 */
+	--gray-900: oklch(22.3% 0.002 67.7); /* base-950 #1C1B1A */
+	--gray-950: oklch(17% 0.004 60); /* black   #100F0F */
 
-	/* ---- Accent ramp (calm indigo/violet) ----------------------------- */
-	--accent-300: oklch(82% 0.09 270);
-	--accent-400: oklch(72% 0.13 270);
-	--accent-500: oklch(62% 0.17 270);
-	--accent-600: oklch(54% 0.18 270);
-	--accent-700: oklch(46% 0.16 270);
+	/* ---- Accent ramp — Flexoki cyan (the one teal accent) -------------- */
+	--accent-300: oklch(73.4% 0.097 180.7); /* cyan-300 #5ABDAC */
+	--accent-400: oklch(67% 0.1 186.6); /* cyan-400 #3AA99F */
+	--accent-500: oklch(61% 0.092 187); /* cyan-500 (interp) */
+	--accent-600: oklch(55.4% 0.086 186.7); /* cyan-600 #24837B */
+	--accent-700: oklch(46% 0.078 187); /* cyan-700 (interp) */
 
-	/* ---- Status hues --------------------------------------------------- */
-	--ok-500: oklch(64% 0.15 155);
-	--warn-500: oklch(76% 0.15 80);
-	--danger-500: oklch(60% 0.2 25);
-	--info-500: oklch(66% 0.13 235);
+	/* ---- Extended hues — Flexoki 600 (for light) + 400 (for dark) ------ */
+	--blue-600: oklch(48.2% 0.131 254.8); /* blue-600    #205EA6 */
+	--blue-400: oklch(59.9% 0.11 247); /* blue-400    #4385BE */
+	--green-600: oklch(55.9% 0.134 122.9); /* green-600   #66800B */
+	--green-400: oklch(65.1% 0.124 119.4); /* green-400   #879A39 */
+	--yellow-600: oklch(63.3% 0.129 85.8); /* yellow-600  #AD8301 */
+	--yellow-400: oklch(73.5% 0.146 87.5); /* yellow-400  #D0A215 */
+	--red-600: oklch(50.4% 0.165 27.8); /* red-600     #AF3029 */
+	--red-400: oklch(59.7% 0.169 28.4); /* red-400     #D14D41 */
+	--purple-600: oklch(45.4% 0.145 294.8); /* purple-600  #5E409D */
+	--purple-400: oklch(63.5% 0.11 291); /* purple-400  #8B7EC8 */
+	--orange-600: oklch(56.7% 0.152 45); /* orange-600  #BC5215 */
+	--orange-400: oklch(65.8% 0.154 49.3); /* orange-400  #DA702C */
+	--magenta-600: oklch(49.5% 0.161 349.8); /* magenta-600 #A02F6F */
+	--magenta-400: oklch(63.5% 0.156 350.5); /* magenta-400 #CE5D97 */
 
 	/* ---- Spacing scale (rem) ------------------------------------------- */
 	--space-0: 0;
@@ -62,21 +78,27 @@
 		sans-serif;
 	--font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas,
 		monospace;
+	/* Serif for section ledes + emphasis (doc-site deck/<em> feel); system/local
+	   stack only — no webfont dependency, offline-safe. */
+	--font-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
 
-	/* Fluid type: small/dense console — narrow range, readable floor. */
-	--text-2xs: 0.6875rem; /* 11px */
-	--text-xs: 0.75rem; /* 12px */
+	/* Fluid type: dense console, widened range — a readable floor plus a real
+	   display tier. Clamp-based fluid sizing throughout; mins hold steady so the
+	   dense panels do not reflow, maxes grow so the headline tiers gain presence. */
+	--text-2xs: 0.6875rem; /* 11px — all-caps eyebrow labels + chips ONLY */
+	--text-xs: 0.75rem; /* 12px — reading floor for dense explanatory prose */
 	--text-sm: 0.8125rem; /* 13px */
-	--text-base: clamp(0.875rem, 0.84rem + 0.18vw, 0.9375rem);
-	--text-md: 1rem;
-	--text-lg: clamp(1.0625rem, 1rem + 0.3vw, 1.1875rem);
-	--text-xl: clamp(1.25rem, 1.15rem + 0.5vw, 1.5rem);
+	--text-base: clamp(0.875rem, 0.83rem + 0.22vw, 0.9688rem); /* 14 -> 15.5px */
+	--text-md: 1rem; /* 16px */
+	--text-lg: clamp(1.0625rem, 0.99rem + 0.4vw, 1.25rem); /* 17 -> 20px */
+	--text-xl: clamp(1.375rem, 1.18rem + 0.85vw, 1.75rem); /* 22 -> 28px display */
 
 	--leading-tight: 1.25;
 	--leading-normal: 1.5;
 	--weight-normal: 400;
 	--weight-medium: 500;
 	--weight-semibold: 600;
+	--weight-bold: 700;
 
 	/* ---- Motion -------------------------------------------------------- */
 	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -92,44 +114,58 @@
 	--z-toast: 900;
 
 	/* ====================================================================
-	 * Semantic tokens — LIGHT (default)
+	 * Semantic tokens — LIGHT (default). Flexoki warm paper + ink + teal.
 	 * ==================================================================== */
-	--bg: var(--gray-50);
-	--bg-raised: oklch(100% 0 0);
-	--bg-sunken: var(--gray-100);
-	--bg-inset: var(--gray-150);
-	--panel: oklch(100% 0 0);
-	--panel-2: var(--gray-50);
+	--bg: var(--gray-50); /* paper #FFFCF0 */
+	--bg-raised: oklch(99.6% 0.007 97.3); /* card  #FFFEF9 */
+	--bg-sunken: var(--gray-100); /* base-50 #F2F0E5 */
+	--bg-inset: var(--gray-150); /* base-100 #E6E4D9 */
+	--panel: oklch(99.6% 0.007 97.3); /* card  #FFFEF9 */
+	--panel-2: var(--gray-100); /* base-50 #F2F0E5 */
 
+	--fg: var(--gray-950); /* ink   #100F0F */
+	--fg-muted: var(--gray-600); /* base-600 #6F6E69 */
+	--fg-subtle: var(--gray-500); /* base-500 #878580 */
+	--fg-on-accent: oklch(98.5% 0.012 95); /* warm white */
 	--fg: var(--gray-900);
 	--fg-muted: var(--gray-600);
-	--fg-subtle: var(--gray-500);
+	/* #55: AA small text — Flexoki ink-mute #6F6E69, 4.89:1 on --bg (was 4.0:1).
+	   The only color token #55 touches; pre-aligned with the #51 palette, reconciled at merge. */
+	--fg-subtle: oklch(53.8% 0.008 97);
 	--fg-on-accent: oklch(99% 0 0);
 
-	--border: var(--gray-200);
-	--border-strong: var(--gray-300);
-	--border-subtle: var(--gray-150);
+	--border: var(--gray-200); /* rule      #DAD8CE */
+	--border-strong: var(--gray-300); /* base-200  #CECDC3 */
+	--border-subtle: var(--gray-150); /* rule-soft #E6E4D9 */
 
-	--accent: var(--accent-600);
+	--accent: var(--accent-600); /* teal #24837B */
 	--accent-hover: var(--accent-700);
-	--accent-soft: color-mix(in oklch, var(--accent-500) 14%, transparent);
+	--accent-soft: oklch(95.1% 0.01 181.4); /* accent-tint #E8F1EF */
 	--accent-ring: color-mix(in oklch, var(--accent-500) 45%, transparent);
 
-	--ok: var(--ok-500);
-	--warn: oklch(58% 0.13 70);
-	--danger: var(--danger-500);
-	--info: var(--info-500);
-	--ok-soft: color-mix(in oklch, var(--ok-500) 16%, transparent);
-	--danger-soft: color-mix(in oklch, var(--danger-500) 14%, transparent);
-	--warn-soft: color-mix(in oklch, var(--warn-500) 20%, transparent);
+	--ok: var(--green-600);
+	--warn: var(--yellow-600);
+	--danger: var(--red-600);
+	--info: var(--blue-600);
+	--violet: var(--purple-600);
+	--orange: var(--orange-600);
+	--magenta: var(--magenta-600);
+	--ok-soft: color-mix(in oklch, var(--ok) 16%, transparent);
+	--danger-soft: color-mix(in oklch, var(--danger) 14%, transparent);
+	--warn-soft: color-mix(in oklch, var(--warn) 18%, transparent);
+	--info-soft: color-mix(in oklch, var(--info) 16%, transparent);
+	--violet-soft: color-mix(in oklch, var(--violet) 16%, transparent);
+	--orange-soft: color-mix(in oklch, var(--orange) 16%, transparent);
+	--magenta-soft: color-mix(in oklch, var(--magenta) 16%, transparent);
 
-	--code-bg: var(--gray-100);
+	--code-bg: var(--gray-100); /* tint #F2F0E5 */
 	--selection: color-mix(in oklch, var(--accent-500) 28%, transparent);
 
-	--shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.06), 0 1px 1px oklch(0% 0 0 / 0.04);
-	--shadow-md: 0 2px 4px oklch(0% 0 0 / 0.06), 0 4px 12px oklch(0% 0 0 / 0.08);
-	--shadow-lg: 0 8px 24px oklch(0% 0 0 / 0.12), 0 2px 6px oklch(0% 0 0 / 0.08);
-	--shadow-pop: 0 10px 38px oklch(0% 0 0 / 0.16), 0 0 0 1px var(--border);
+	/* Warm, ink-tinted shadows (never hard gray drop-shadows). */
+	--shadow-sm: 0 1px 2px oklch(17% 0.01 60 / 0.06), 0 1px 1px oklch(17% 0.01 60 / 0.04);
+	--shadow-md: 0 2px 4px oklch(17% 0.01 60 / 0.06), 0 4px 12px oklch(17% 0.01 60 / 0.08);
+	--shadow-lg: 0 8px 24px oklch(17% 0.01 60 / 0.12), 0 2px 6px oklch(17% 0.01 60 / 0.08);
+	--shadow-pop: 0 10px 38px oklch(17% 0.01 60 / 0.16), 0 0 0 1px var(--border);
 
 	color-scheme: light;
 }
@@ -137,40 +173,54 @@
 /* ====================================================================
  * Semantic tokens — DARK
  * Applied for users who prefer dark AND have not forced light, OR who
- * explicitly select [data-theme="dark"].
+ * explicitly select [data-theme="dark"]. Standard Flexoki dark scale:
+ * warm near-black grounds, base-200 ink, a lighter teal (cyan-400) accent,
+ * and the 400-level extended hues so chips stay legible on dark.
  * ==================================================================== */
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme="light"]) {
-		--bg: var(--gray-950);
-		--bg-raised: var(--gray-900);
-		--bg-sunken: oklch(10% 0.018 266);
-		--bg-inset: var(--gray-850);
-		--panel: var(--gray-900);
-		--panel-2: var(--gray-850);
+		--bg: var(--gray-950); /* #100F0F */
+		--bg-raised: var(--gray-900); /* #1C1B1A */
+		--bg-sunken: oklch(13.5% 0.004 60); /* deepest */
+		--bg-inset: var(--gray-850); /* #282726 */
+		--panel: var(--gray-900); /* #1C1B1A */
+		--panel-2: var(--gray-850); /* #282726 */
 
+		--fg: var(--gray-300); /* ink      #CECDC3 */
+		--fg-muted: var(--gray-500); /* ink-mute #878580 */
+		--fg-subtle: var(--gray-600); /* muted    #6F6E69 */
+		--fg-on-accent: oklch(17% 0.004 60); /* ink on light teal */
 		--fg: var(--gray-100);
 		--fg-muted: var(--gray-400);
-		--fg-subtle: var(--gray-500);
+		/* #55: AA small text — Flexoki base-300 #B7B5AC, 9.79:1 on --bg; pre-aligned with #51. */
+		--fg-subtle: oklch(77.2% 0.013 96);
 		--fg-on-accent: oklch(99% 0 0);
 
-		--border: oklch(28% 0.016 262);
-		--border-strong: oklch(36% 0.016 262);
-		--border-subtle: oklch(23% 0.016 262);
+		--border: var(--gray-800); /* rule      #343331 */
+		--border-strong: var(--gray-700); /* #575653 */
+		--border-subtle: var(--gray-850); /* rule-soft #282726 */
 
-		--accent: var(--accent-500);
-		--accent-hover: var(--accent-400);
-		--accent-soft: color-mix(in oklch, var(--accent-500) 20%, transparent);
+		--accent: var(--accent-400); /* teal #3AA99F */
+		--accent-hover: var(--accent-300);
+		--accent-soft: oklch(27.5% 0.02 190.9); /* accent-tint #1C2B2A */
 		--accent-ring: color-mix(in oklch, var(--accent-400) 55%, transparent);
 
-		--ok: var(--ok-500);
-		--warn: var(--warn-500);
-		--danger: oklch(66% 0.2 25);
-		--info: var(--info-500);
-		--ok-soft: color-mix(in oklch, var(--ok-500) 22%, transparent);
-		--danger-soft: color-mix(in oklch, var(--danger-500) 24%, transparent);
-		--warn-soft: color-mix(in oklch, var(--warn-500) 24%, transparent);
+		--ok: var(--green-400);
+		--warn: var(--yellow-400);
+		--danger: var(--red-400);
+		--info: var(--blue-400);
+		--violet: var(--purple-400);
+		--orange: var(--orange-400);
+		--magenta: var(--magenta-400);
+		--ok-soft: color-mix(in oklch, var(--ok) 22%, transparent);
+		--danger-soft: color-mix(in oklch, var(--danger) 24%, transparent);
+		--warn-soft: color-mix(in oklch, var(--warn) 24%, transparent);
+		--info-soft: color-mix(in oklch, var(--info) 22%, transparent);
+		--violet-soft: color-mix(in oklch, var(--violet) 22%, transparent);
+		--orange-soft: color-mix(in oklch, var(--orange) 22%, transparent);
+		--magenta-soft: color-mix(in oklch, var(--magenta) 22%, transparent);
 
-		--code-bg: oklch(16% 0.016 266);
+		--code-bg: var(--gray-850); /* #282726 */
 		--selection: color-mix(in oklch, var(--accent-400) 36%, transparent);
 
 		--shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.4);
@@ -184,36 +234,48 @@
 
 /* Manual override: forcing dark wins regardless of OS preference. */
 :root[data-theme="dark"] {
-	--bg: var(--gray-950);
-	--bg-raised: var(--gray-900);
-	--bg-sunken: oklch(10% 0.018 266);
-	--bg-inset: var(--gray-850);
-	--panel: var(--gray-900);
-	--panel-2: var(--gray-850);
+	--bg: var(--gray-950); /* #100F0F */
+	--bg-raised: var(--gray-900); /* #1C1B1A */
+	--bg-sunken: oklch(13.5% 0.004 60); /* deepest */
+	--bg-inset: var(--gray-850); /* #282726 */
+	--panel: var(--gray-900); /* #1C1B1A */
+	--panel-2: var(--gray-850); /* #282726 */
 
+	--fg: var(--gray-300); /* ink      #CECDC3 */
+	--fg-muted: var(--gray-500); /* ink-mute #878580 */
+	--fg-subtle: var(--gray-600); /* muted    #6F6E69 */
+	--fg-on-accent: oklch(17% 0.004 60); /* ink on light teal */
 	--fg: var(--gray-100);
 	--fg-muted: var(--gray-400);
-	--fg-subtle: var(--gray-500);
+	/* #55: AA small text — Flexoki base-300 #B7B5AC, 9.79:1 on --bg; pre-aligned with #51. */
+	--fg-subtle: oklch(77.2% 0.013 96);
 	--fg-on-accent: oklch(99% 0 0);
 
-	--border: oklch(28% 0.016 262);
-	--border-strong: oklch(36% 0.016 262);
-	--border-subtle: oklch(23% 0.016 262);
+	--border: var(--gray-800); /* rule      #343331 */
+	--border-strong: var(--gray-700); /* #575653 */
+	--border-subtle: var(--gray-850); /* rule-soft #282726 */
 
-	--accent: var(--accent-500);
-	--accent-hover: var(--accent-400);
-	--accent-soft: color-mix(in oklch, var(--accent-500) 20%, transparent);
+	--accent: var(--accent-400); /* teal #3AA99F */
+	--accent-hover: var(--accent-300);
+	--accent-soft: oklch(27.5% 0.02 190.9); /* accent-tint #1C2B2A */
 	--accent-ring: color-mix(in oklch, var(--accent-400) 55%, transparent);
 
-	--ok: var(--ok-500);
-	--warn: var(--warn-500);
-	--danger: oklch(66% 0.2 25);
-	--info: var(--info-500);
-	--ok-soft: color-mix(in oklch, var(--ok-500) 22%, transparent);
-	--danger-soft: color-mix(in oklch, var(--danger-500) 24%, transparent);
-	--warn-soft: color-mix(in oklch, var(--warn-500) 24%, transparent);
+	--ok: var(--green-400);
+	--warn: var(--yellow-400);
+	--danger: var(--red-400);
+	--info: var(--blue-400);
+	--violet: var(--purple-400);
+	--orange: var(--orange-400);
+	--magenta: var(--magenta-400);
+	--ok-soft: color-mix(in oklch, var(--ok) 22%, transparent);
+	--danger-soft: color-mix(in oklch, var(--danger) 24%, transparent);
+	--warn-soft: color-mix(in oklch, var(--warn) 24%, transparent);
+	--info-soft: color-mix(in oklch, var(--info) 22%, transparent);
+	--violet-soft: color-mix(in oklch, var(--violet) 22%, transparent);
+	--orange-soft: color-mix(in oklch, var(--orange) 22%, transparent);
+	--magenta-soft: color-mix(in oklch, var(--magenta) 22%, transparent);
 
-	--code-bg: oklch(16% 0.016 266);
+	--code-bg: var(--gray-850); /* #282726 */
 	--selection: color-mix(in oklch, var(--accent-400) 36%, transparent);
 
 	--shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.4);
