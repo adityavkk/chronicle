@@ -887,6 +887,29 @@ export function closeDialog(): void {
 }
 
 /* ----------------------------------------------------------------------------
+ * Command palette (Cmd/Ctrl-K)
+ *
+ * Open-state for the keyboard command palette overlay. This is cross-cutting
+ * shared state — a global keydown registered once in app.tsx opens it, and the
+ * CommandPalette component closes it — so it lives in the store rather than as
+ * component-local state. The palette itself is pure layout over the existing
+ * actions above; the only state it needs is this open flag.
+ * ------------------------------------------------------------------------- */
+
+/** Whether the Cmd/Ctrl-K command palette overlay is open. */
+export const commandPaletteOpen = signal<boolean>(false);
+
+/** Open the command palette overlay. */
+export function openCommandPalette(): void {
+	commandPaletteOpen.value = true;
+}
+
+/** Close the command palette overlay. */
+export function closeCommandPalette(): void {
+	commandPaletteOpen.value = false;
+}
+
+/* ----------------------------------------------------------------------------
  * Write actions (create / append / close / delete / fork)
  *
  * Each mirrors the captured exchange into lastExchange (so the protocol panel
