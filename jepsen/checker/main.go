@@ -91,7 +91,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
@@ -146,6 +146,18 @@ func run(c config, r *receiver) error {
 	// partitioned per (subId,g) — no cluster (scenario_shard.go).
 	if c.scenario == "shard-linz" {
 		return runShardLinz(c)
+	}
+
+	// store-linz (#35) is the DATA-PLANE linearizability test: K clients hammer
+	// append/read/close/getOffset on ONE stream against live Redis under the
+	// gcPause (+ optional toxiproxy) nemeses, and the recorded history is checked
+	// against the pure streamModel() (model_store.go). It proves INV-LIN-01/02,
+	// INV-CLOSE-01, INV-READ-01 (the single-slot EVAL is the linearization point,
+	// the optimistic re-frame loop never tears/gaps/dupes, close is an idempotent
+	// latch, read returns the exact offset-exclusive suffix incl. clean EOF). Like
+	// shard-linz it drives the store directly — no cluster (scenario_store.go).
+	if c.scenario == "store-linz" {
+		return runStoreLinz(c)
 	}
 
 	// cursor-monotonic drives the webhook delivery workload under origin churn
