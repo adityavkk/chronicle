@@ -18,7 +18,7 @@ package webhook
 // pod-kill+many-seeds approximation it replaces are documented in
 // docs/jepsen/results.md.
 
-// FailpointHook, when non-nil, is invoked with the failpoint name at each wired
+// FailpointHook is invoked, when non-nil, with the failpoint name at each wired
 // injection site. Production leaves it nil; only tests set it, and must reset it
 // (t.Cleanup). It is process-global and not concurrency-guarded — matching
 // gofail — so a test that installs it drives the injected path single-threaded.
