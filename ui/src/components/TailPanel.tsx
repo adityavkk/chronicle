@@ -35,7 +35,7 @@
 
 import { useComputed, useSignal } from "@preact/signals";
 import type { JSX } from "preact";
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import {
 	batchHasTimes,
 	compileQuery,
@@ -53,6 +53,7 @@ import {
 	tailTone,
 } from "../lib/tail";
 import type { GridRow, TailStatus } from "../lib/types";
+import { ROW_HEIGHT, WINDOW_THRESHOLD, windowRange } from "../lib/virtual";
 import {
 	TAIL_BUFFER_CAP,
 	clearTailBuffer,
@@ -170,6 +171,10 @@ export function TailPanel(): JSX.Element {
 	// "Stuck to bottom": follow new rows. Disengages when the user scrolls up,
 	// re-engages when they scroll back to the bottom (or press "Jump to latest").
 	const stuck = useSignal(true);
+	// Scroll geometry that drives fixed-height windowing (below). Updated from the
+	// scroll element on scroll, on mount, and after each auto-scroll.
+	const scrollTop = useSignal(0);
+	const viewport = useSignal(0);
 
 	// Component-local, instant filter over the live buffer — never touches the
 	// store, never drops the connection (issue #53). Each visible row keeps its
@@ -188,14 +193,47 @@ export function TailPanel(): JSX.Element {
 	const idle = status.state === "idle";
 	const terminal = isTerminalTailState(status);
 
+	// Window the live list (issue #58) over the FILTERED rows (issue #53) so a
+	// fast stream keeps the DOM small: above the threshold render only the visible
+	// slice inside top/bottom spacers; at or below it render every row (small reads
+	// stay simple). The spacers preserve scrollHeight, so stick-to-bottom and the
+	// scrollbar keep working. The math is pure (lib/virtual); padBottom === 0 means
+	// the newest filtered row is rendered. `visible` already carries each row's
+	// honest arrival seq, so windowing slices it without disturbing the numbering.
+	const filtered = visible.value;
+	const total = filtered.length;
+	const windowed = total > WINDOW_THRESHOLD;
+	const range = windowed
+		? windowRange(scrollTop.value, viewport.value, ROW_HEIGHT, total)
+		: { startIndex: 0, endIndex: total, padTop: 0, padBottom: 0 };
+	const windowSlice = windowed ? filtered.slice(range.startIndex, range.endIndex) : filtered;
+	const atBottom = range.padBottom === 0;
+
+	/** Capture the scroll element's geometry into the windowing signals. */
+	function syncMetrics(el: HTMLDivElement): void {
+		scrollTop.value = el.scrollTop;
+		viewport.value = el.clientHeight;
+	}
+
 	// Stop the tail when the panel unmounts (belt-and-braces; the store also
 	// stops on stream / connection / mode change). A bare cleanup, run once.
 	useEffect(() => stopTail, []);
 
+	// Measure the viewport once mounted so windowing has a real clientHeight
+	// before rows arrive faster than the user scrolls.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: scrollRef is a stable handle; this measures exactly once after mount.
+	useLayoutEffect(() => {
+		const el = scrollRef.current;
+		if (el !== null) syncMetrics(el);
+	}, []);
+
 	// Auto-scroll to the newest row while stuck. Runs whenever the visible row
 	// count changes (so typing a filter re-pins to the bottom of the filtered
 	// set); reduced-motion users get an instant jump via the global CSS rule
-	// (scroll-behavior is forced to auto), so this stays honest for them.
+	// (scroll-behavior is forced to auto), so this stays honest for them. The
+	// spacers keep scrollHeight at total × row height, so scrolling to the bottom
+	// lands on the true tail even when the newest rows are not yet windowed in;
+	// syncMetrics then recomputes the window to include them.
 	const visibleCount = visible.value.length;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: scrollRef + the stuck signal are stable handles; the effect is intentionally driven by the visible row count alone.
 	useEffect(() => {
@@ -203,13 +241,15 @@ export function TailPanel(): JSX.Element {
 		const el = scrollRef.current;
 		if (el === null) return;
 		el.scrollTop = el.scrollHeight;
+		syncMetrics(el);
 	}, [visibleCount]);
 
 	function onScroll(): void {
 		const el = scrollRef.current;
 		if (el === null) return;
-		const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_THRESHOLD;
-		stuck.value = atBottom;
+		const stickAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_THRESHOLD;
+		stuck.value = stickAtBottom;
+		syncMetrics(el);
 	}
 
 	function jumpToLatest(): void {
@@ -311,12 +351,23 @@ export function TailPanel(): JSX.Element {
 					{showTime.value ? <span>Time</span> : null}
 					<span>Preview</span>
 				</div>
-				<div class="dsui-tail__rows" ref={scrollRef} onScroll={onScroll}>
+				<div
+					class={`dsui-tail__rows${atBottom ? " is-atbottom" : ""}`}
+					ref={scrollRef}
+					onScroll={onScroll}
+				>
 					{vis.length > 0 ? (
 						// biome-ignore lint/a11y/useFocusableInteractive: focus lives on the option rows; the live listbox container itself is intentionally not a tab stop (matches the paged grid).
 						// biome-ignore lint/a11y/useSemanticElements: a native <select> cannot host these rich, clickable live rows; role="listbox" with role="option" children is the correct single-select pattern.
-						<div role="listbox" class="dsui-grid__body" aria-label="Live message rows">
-							{vis.map(({ row, seq }) => (
+						<div
+							role="listbox"
+							class="dsui-grid__body"
+							aria-label="Live message rows"
+							// Spacers stand in for the windowed-out rows so scrollHeight stays
+							// total × row height (sticky header + stick-to-bottom keep working).
+							style={{ paddingBlockStart: range.padTop, paddingBlockEnd: range.padBottom }}
+						>
+							{windowSlice.map(({ row, seq }) => (
 								<TailRow
 									key={`${seq}-${row.index}-${row.preview}`}
 									row={row}

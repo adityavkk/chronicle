@@ -122,6 +122,30 @@ describe("MessagesWorkspace grid", () => {
 		expect(tabbable[0]?.getAttribute("aria-selected")).toBe("true");
 	});
 
+	it("windows a large batch, rendering only a visible slice with one tab stop", () => {
+		// A 1000-row batch (the max row cap) would be ~4–5k DOM nodes unwindowed.
+		// jsdom has no layout, so give the scroller a real clientHeight and scroll
+		// to engage the fixed-height windowing.
+		seed(1000);
+		const { container } = render(<MessagesWorkspace />);
+		const scroller = container.querySelector(".dsui-grid__rows") as HTMLElement;
+		Object.defineProperty(scroller, "clientHeight", { value: 300, configurable: true });
+		Object.defineProperty(scroller, "scrollHeight", { value: 1000 * 30, configurable: true });
+		fireEvent.scroll(scroller);
+
+		const list = screen.getByRole("listbox", { name: "Message rows" });
+		const options = within(list).getAllByRole("option");
+		// Only a slice is rendered, not all 1000 rows.
+		expect(options.length).toBeGreaterThan(0);
+		expect(options.length).toBeLessThan(60);
+		// Roving tabindex survives windowing: exactly one rendered row is tabbable.
+		const tabbable = options.filter((o) => o.getAttribute("tabindex") === "0");
+		expect(tabbable).toHaveLength(1);
+		// The spacers preserve the scrollable height (sticky header stays put).
+		expect(list.style.paddingBlockEnd).not.toBe("");
+		expect(list.style.paddingBlockEnd).not.toBe("0px");
+	});
+
 	it("moves focus between rows with ArrowDown / ArrowUp / End", () => {
 		render(<MessagesWorkspace />);
 		const list = screen.getByRole("listbox", { name: "Message rows" });
