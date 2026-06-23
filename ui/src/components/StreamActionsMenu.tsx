@@ -34,6 +34,7 @@ import {
 } from "../state/store";
 import { CurlPreview } from "./CurlPreview";
 import { IconFork, IconLoader, IconLock, IconMore, IconRefresh, IconTrash } from "./icons";
+import { focusFirstMenuItem, focusMenuItem, handleMenuKeydown } from "./menuKeyboard";
 
 export function StreamActionsMenu(props: { stream: StreamInfo }): JSX.Element {
 	const { stream } = props;
@@ -45,7 +46,33 @@ export function StreamActionsMenu(props: { stream: StreamInfo }): JSX.Element {
 	const [open, setOpen] = useState(false);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const wrapRef = useRef<HTMLDivElement>(null);
+	const popRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
+	const deleteItemRef = useRef<HTMLButtonElement>(null);
+	const confirmCancelRef = useRef<HTMLButtonElement>(null);
+	const confirmWasOpen = useRef(false);
+
+	// On open, move focus into the menu (first item); the roving-tabindex helper
+	// keeps Arrow/Home/End/Tab inside it from there.
+	useEffect(() => {
+		if (open) focusFirstMenuItem(popRef.current);
+	}, [open]);
+
+	// The delete-confirm sub-flow swaps the "Delete stream…" menuitem for a
+	// Cancel/Delete pair. Keep focus inside the open menu across that swap: focus
+	// Cancel when the confirm opens, and return focus to the Delete item when it
+	// closes — otherwise focus would fall back to <body> and the popover's
+	// Arrow/Tab handling (which is wired on the popover) would stop firing.
+	useEffect(() => {
+		if (confirmingDelete) {
+			confirmCancelRef.current?.focus();
+			confirmWasOpen.current = true;
+		} else if (confirmWasOpen.current) {
+			confirmWasOpen.current = false;
+			const item = deleteItemRef.current;
+			if (item !== null && popRef.current !== null) focusMenuItem(popRef.current, item);
+		}
+	}, [confirmingDelete]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -100,10 +127,17 @@ export function StreamActionsMenu(props: { stream: StreamInfo }): JSX.Element {
 			</button>
 
 			{open ? (
-				<div class="dsui-actions__pop" role="menu" aria-label={`Actions for ${stream.path}`}>
+				<div
+					class="dsui-actions__pop"
+					role="menu"
+					aria-label={`Actions for ${stream.path}`}
+					ref={popRef}
+					onKeyDown={(e) => handleMenuKeydown(e, popRef.current)}
+				>
 					<button
 						type="button"
 						role="menuitem"
+						tabIndex={-1}
 						class="dsui-actions__item"
 						onClick={() => {
 							openForkDialog(stream.path, forkOffset);
@@ -118,6 +152,7 @@ export function StreamActionsMenu(props: { stream: StreamInfo }): JSX.Element {
 					<button
 						type="button"
 						role="menuitem"
+						tabIndex={-1}
 						class="dsui-actions__item"
 						disabled={metaBusy}
 						onClick={() => {
@@ -134,6 +169,7 @@ export function StreamActionsMenu(props: { stream: StreamInfo }): JSX.Element {
 					<button
 						type="button"
 						role="menuitem"
+						tabIndex={-1}
 						class="dsui-actions__item"
 						disabled={inFlight}
 						onClick={() => {
@@ -157,6 +193,7 @@ export function StreamActionsMenu(props: { stream: StreamInfo }): JSX.Element {
 							<div class="dsui-actions__confirmrow">
 								<button
 									type="button"
+									ref={confirmCancelRef}
 									class="dsui-btn dsui-btn--xs dsui-btn--ghost"
 									onClick={() => setConfirmingDelete(false)}
 								>
@@ -179,7 +216,9 @@ export function StreamActionsMenu(props: { stream: StreamInfo }): JSX.Element {
 					) : (
 						<button
 							type="button"
+							ref={deleteItemRef}
 							role="menuitem"
+							tabIndex={-1}
 							class="dsui-actions__item dsui-actions__item--danger"
 							onClick={() => setConfirmingDelete(true)}
 						>
