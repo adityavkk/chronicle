@@ -123,10 +123,12 @@ describe("Navigator", () => {
 		expect(screen.getByText("No matches")).toBeTruthy();
 	});
 
-	it("shows the empty-discovery placeholder when there are no streams at all", () => {
+	it("shows the empty-discovery placeholder pointing at the Playground when there are no streams", () => {
 		seedStore([]);
 		render(<Navigator />);
-		expect(screen.getByText("No streams discovered")).toBeTruthy();
+		expect(screen.getByText("No streams yet")).toBeTruthy();
+		// The first-run hint points a newcomer at the Playground presets.
+		expect(screen.getByRole("button", { name: "Start with the Playground" })).toBeTruthy();
 	});
 
 	it("surfaces a list error as an alert with a retry affordance", () => {

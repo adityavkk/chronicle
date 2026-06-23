@@ -11,17 +11,28 @@
 import { computed, effect, signal } from "@preact/signals";
 import { loadConfig } from "../lib/config";
 import { type DsClient, createClient } from "../lib/dsClient";
-import { isRecord } from "../lib/guards";
+import { isRecord, kindFromContentType } from "../lib/guards";
 import { DEFAULT_ROW_CAP, type StartMode, clampRowCap, resolveOffset } from "../lib/messages";
+import { isLiveMode, previewTailOperation } from "../lib/tail";
 import type {
 	Connection,
 	ConnectionProbe,
 	GridRow,
 	HttpExchange,
+	Operation,
 	ProbeStatus,
+	ProducerIdentity,
 	ReadResult,
+	StreamContentType,
 	StreamInfo,
+	TailBatch,
+	TailMode,
+	TailStatus,
+	TailStopper,
 	Theme,
+	Toast,
+	ToastAction,
+	ToastKind,
 } from "../lib/types";
 
 // Re-exported for back-compat: ProbeStatus now lives in lib/types (a shared
@@ -104,6 +115,123 @@ export const switcherOpen = signal<boolean>(false);
 
 /** A surfaced, dismissible error message, or null. */
 export const errorMessage = signal<string | null>(null);
+
+/* ----------------------------------------------------------------------------
+ * Write / operation state
+ *
+ * Every write the UI performs (create, append, close, delete, fork) goes
+ * through a single in-flight flag plus the last {@link Operation} descriptor,
+ * so a control can disable itself while running and the protocol panel + the
+ * "Copy as curl" affordance can show exactly what was (or will be) sent.
+ * ------------------------------------------------------------------------- */
+
+/** True while any write/operation is in flight (drives optimistic disabling). */
+export const operationInFlight = signal<boolean>(false);
+
+/**
+ * The descriptor of the most recently issued (or previewed) operation, for the
+ * curl helper and the under-the-hood disclosure. Null until one has been built.
+ */
+export const lastOperation = signal<Operation | null>(null);
+
+/**
+ * The active producer identity used for idempotent appends, or null when the
+ * user is publishing without one. The seq is advanced after a successful
+ * append via {@link bumpProducerSeq} so consecutive publishes dedupe correctly.
+ */
+export const producerIdentity = signal<ProducerIdentity | null>(null);
+
+/* ----------------------------------------------------------------------------
+ * Write-operation dialog + metadata state
+ *
+ * The create / fork forms are modal dialogs; their open-state lives here so any
+ * affordance (the navigator's "New stream", a workspace "Fork" button) can open
+ * them and the shell can render exactly one at a time. A fork dialog carries the
+ * source path + the offset to prefill. The latest HEAD/metadata exchange is
+ * surfaced too, so the workspace can show a "refresh metadata" affordance whose
+ * result also flows into the protocol disclosure.
+ * ------------------------------------------------------------------------- */
+
+/** Which write dialog is open, or null when none is. */
+export const activeDialog = signal<"create" | "fork" | null>(null);
+
+/**
+ * A one-shot highlight pulse on the Playground, set by the first-run empty-state
+ * hint so the navigator's Playground section can briefly draw the eye and scroll
+ * into view. A monotonic counter (rather than a boolean) so re-triggering it
+ * always re-fires the effect even if the section is already highlighted.
+ */
+export const playgroundHighlight = signal<number>(0);
+
+/** Pulse the Playground highlight, pointing a first-run user at the presets. */
+export function highlightPlayground(): void {
+	playgroundHighlight.value = playgroundHighlight.value + 1;
+}
+
+/** When the fork dialog is open, the source it forks from + a default offset. */
+export const forkSeed = signal<{ readonly fromPath: string; readonly offset: string } | null>(null);
+
+/** The most recent HEAD/metadata exchange for the selected stream, or null. */
+export const streamMeta = signal<HttpExchange | null>(null);
+
+/** True while a HEAD/metadata refresh is in flight. */
+export const metaLoading = signal<boolean>(false);
+
+/* ----------------------------------------------------------------------------
+ * Live-tail state
+ *
+ * A live tail (long-poll or SSE) streams rows into a bounded buffer. The buffer
+ * is capped so a fast stream cannot grow memory without bound; `tailDropped`
+ * records how many rows aged out. `tailPaused` stops appending to the buffer
+ * without tearing down the connection. The stopper handle lives here (not in a
+ * component) so a stream switch / unmount can always clean it up.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The chosen read mode — the toolbar's Catch-up | Long-poll | SSE selector.
+ * "catchup" is the existing paged-read path; the two live modes open a tail.
+ * Defaults to "catchup" so the workspace opens in the familiar paged view.
+ */
+export const tailMode = signal<TailMode>("catchup");
+
+/** The live-tail connection lifecycle status. */
+export const tailStatus = signal<TailStatus>({ state: "idle" });
+
+/**
+ * The {@link Operation} descriptor of the live connection currently being
+ * followed (the GET …?offset=X&live=…), or null when not tailing. SSE captures
+ * no per-request {@link HttpExchange}, so this is what lets the protocol
+ * disclosure show the live request and the copy-as-curl work for both modes.
+ */
+export const tailOperation = signal<Operation | null>(null);
+
+/** The offset a live tail started from, for the protocol disclosure copy. */
+export const tailStartOffset = signal<string | null>(null);
+
+/** The rolling buffer of rows received by the active tail (most recent last). */
+export const tailRows = signal<readonly GridRow[]>([]);
+
+/** True when the tail is connected but the user has paused buffering. */
+export const tailPaused = signal<boolean>(false);
+
+/** How many rows have aged out of the capped tail buffer. */
+export const tailDropped = signal<number>(0);
+
+/** Max rows kept in the tail buffer before the oldest age out. */
+export const TAIL_BUFFER_CAP = 1000;
+
+/** The stopper for the active tail, or null when not tailing. Not reactive UI. */
+let tailStopper: TailStopper | null = null;
+
+/* ----------------------------------------------------------------------------
+ * Toasts (transient notifications)
+ * ------------------------------------------------------------------------- */
+
+/** The live toast stack, newest last. Rendered by the Toaster. */
+export const toasts = signal<readonly Toast[]>([]);
+
+/** Per-toast auto-dismiss timers, so dismissing early can clear them. */
+const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /* ----------------------------------------------------------------------------
  * Derived (computed) state
@@ -220,6 +348,7 @@ export function removeConnection(id: string): void {
  * and closes the switcher popover. Passing null returns to the start screen.
  */
 export function setActiveConnection(id: string | null): void {
+	stopTail();
 	activeConnectionId.value = id;
 	streams.value = [];
 	selectedStreamPath.value = null;
@@ -340,6 +469,9 @@ export function addManualStream(path: string): void {
  * the user can then change the starting position and Read again.
  */
 export function selectStream(path: string): void {
+	stopTail();
+	tailRows.value = [];
+	tailDropped.value = 0;
 	selectedStreamPath.value = path;
 	selectedRow.value = null;
 	lastRead.value = null;
@@ -434,6 +566,439 @@ export function cycleTheme(): void {
 /** Clear the surfaced error. */
 export function dismissError(): void {
 	errorMessage.value = null;
+}
+
+/* ----------------------------------------------------------------------------
+ * Toast actions
+ * ------------------------------------------------------------------------- */
+
+/** Default auto-dismiss delays per tone (errors linger; successes are brief). */
+const TOAST_DEFAULT_MS: Readonly<Record<ToastKind, number>> = {
+	info: 4000,
+	success: 3000,
+	warning: 6000,
+	error: 8000,
+};
+
+/**
+ * Push a toast and schedule its auto-dismiss. Returns the toast id so a caller
+ * can dismiss it early. A `durationMs` of 0 makes it sticky (no auto-dismiss).
+ */
+export function addToast(input: {
+	kind: ToastKind;
+	title: string;
+	message?: string;
+	durationMs?: number;
+	action?: ToastAction;
+}): string {
+	const id = newId();
+	const durationMs = input.durationMs ?? TOAST_DEFAULT_MS[input.kind];
+	const toast: Toast = {
+		id,
+		kind: input.kind,
+		title: input.title,
+		durationMs,
+		createdAt: Date.now(),
+		...(input.message !== undefined ? { message: input.message } : {}),
+		...(input.action !== undefined ? { action: input.action } : {}),
+	};
+	toasts.value = [...toasts.value, toast];
+	if (durationMs > 0) {
+		const timer = globalThis.setTimeout(() => dismissToast(id), durationMs);
+		toastTimers.set(id, timer);
+	}
+	return id;
+}
+
+/** Dismiss a toast by id and clear its timer. */
+export function dismissToast(id: string): void {
+	const timer = toastTimers.get(id);
+	if (timer !== undefined) {
+		globalThis.clearTimeout(timer);
+		toastTimers.delete(id);
+	}
+	toasts.value = toasts.value.filter((t) => t.id !== id);
+}
+
+/* ----------------------------------------------------------------------------
+ * Producer-identity actions (idempotent appends)
+ * ------------------------------------------------------------------------- */
+
+/** Set (or clear) the active producer identity used for appends. */
+export function setProducerIdentity(identity: ProducerIdentity | null): void {
+	producerIdentity.value = identity;
+}
+
+/** Advance the active producer's seq after a successful append. */
+export function bumpProducerSeq(): void {
+	const p = producerIdentity.value;
+	if (p === null) return;
+	producerIdentity.value = { ...p, seq: p.seq + 1 };
+}
+
+/* ----------------------------------------------------------------------------
+ * Dialog actions (open / close the create + fork modals)
+ * ------------------------------------------------------------------------- */
+
+/** Open the create-stream dialog. */
+export function openCreateDialog(): void {
+	forkSeed.value = null;
+	activeDialog.value = "create";
+}
+
+/**
+ * Open the fork dialog seeded from a source path and a default offset (usually
+ * the current read's Stream-Next-Offset, the selected row's batch, or "now").
+ */
+export function openForkDialog(fromPath: string, offset: string): void {
+	forkSeed.value = { fromPath, offset };
+	activeDialog.value = "fork";
+}
+
+/** Close whichever write dialog is open. */
+export function closeDialog(): void {
+	activeDialog.value = null;
+	forkSeed.value = null;
+}
+
+/* ----------------------------------------------------------------------------
+ * Write actions (create / append / close / delete / fork)
+ *
+ * Each mirrors the captured exchange into lastExchange (so the protocol panel
+ * updates), records the Operation for the curl helper, surfaces a toast, and
+ * refreshes the stream list so the navigator reflects the change. They never
+ * throw: a failed write resolves to ok:false and a toast.
+ * ------------------------------------------------------------------------- */
+
+/** Create a stream from typed options; refreshes the list and toasts the result. */
+export async function createStream(opts: {
+	path: string;
+	contentType: StreamContentType;
+	ttl?: string;
+	expiresAt?: string;
+	closed?: boolean;
+}): Promise<boolean> {
+	const client = activeClient.value;
+	if (client === null) return false;
+	operationInFlight.value = true;
+	try {
+		const result = await client.createStream(opts);
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			addToast({ kind: "success", title: "Stream created", message: opts.path });
+			await refreshStreams();
+			selectStream(opts.path);
+		} else {
+			addToast({ kind: "error", title: "Create failed", message: result.error ?? opts.path });
+		}
+		return result.ok;
+	} finally {
+		operationInFlight.value = false;
+	}
+}
+
+/**
+ * Append/publish to a stream. Uses the active producer identity when set, and
+ * advances its seq on success. Surfaces a producer-conflict toast when the
+ * server reports a sequence mismatch.
+ */
+export async function appendMessages(
+	path: string,
+	body: string | Uint8Array,
+	opts?: { closeAfter?: boolean; contentType?: StreamContentType },
+): Promise<boolean> {
+	const client = activeClient.value;
+	if (client === null) return false;
+	operationInFlight.value = true;
+	try {
+		const producer = producerIdentity.value;
+		const result = await client.appendMessages(path, {
+			body,
+			...(producer !== null ? { producer } : {}),
+			...(opts?.closeAfter !== undefined ? { closeAfter: opts.closeAfter } : {}),
+			...(opts?.contentType !== undefined ? { contentType: opts.contentType } : {}),
+		});
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			if (producer !== null) bumpProducerSeq();
+			addToast({ kind: "success", title: "Published", message: path });
+			// Reflect the new tail if we are viewing this stream.
+			if (selectedStreamPath.value === path) await readSelected("now");
+		} else if (result.conflict !== null) {
+			const { expectedSeq, receivedSeq } = result.conflict;
+			addToast({
+				kind: "warning",
+				title: "Producer sequence conflict",
+				message: `server expected seq ${expectedSeq ?? "?"}, received ${receivedSeq ?? "?"}`,
+			});
+		} else {
+			addToast({ kind: "error", title: "Publish failed", message: result.error ?? path });
+		}
+		return result.ok;
+	} finally {
+		operationInFlight.value = false;
+	}
+}
+
+/** Close a stream; toasts and refreshes. */
+export async function closeStream(path: string): Promise<boolean> {
+	const client = activeClient.value;
+	if (client === null) return false;
+	operationInFlight.value = true;
+	try {
+		const result = await client.closeStream(path);
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			addToast({ kind: "success", title: "Stream closed", message: path });
+			await refreshStreams();
+		} else {
+			addToast({ kind: "error", title: "Close failed", message: result.error ?? path });
+		}
+		return result.ok;
+	} finally {
+		operationInFlight.value = false;
+	}
+}
+
+/** Delete a stream; clears selection if it was the active stream. */
+export async function deleteStream(path: string): Promise<boolean> {
+	const client = activeClient.value;
+	if (client === null) return false;
+	operationInFlight.value = true;
+	try {
+		const result = await client.deleteStream(path);
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			addToast({ kind: "success", title: "Stream deleted", message: path });
+			if (selectedStreamPath.value === path) {
+				selectedStreamPath.value = null;
+				lastRead.value = null;
+				selectedRow.value = null;
+			}
+			await refreshStreams();
+		} else {
+			addToast({ kind: "error", title: "Delete failed", message: result.error ?? path });
+		}
+		return result.ok;
+	} finally {
+		operationInFlight.value = false;
+	}
+}
+
+/** Fork a stream into newPath at a source offset; refreshes and selects it. */
+export async function forkStream(
+	newPath: string,
+	fromPath: string,
+	offset: string,
+	subOffset?: number,
+): Promise<boolean> {
+	const client = activeClient.value;
+	if (client === null) return false;
+	operationInFlight.value = true;
+	try {
+		const result = await client.forkStream(newPath, fromPath, offset, subOffset);
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			addToast({ kind: "success", title: "Stream forked", message: `${fromPath} → ${newPath}` });
+			await refreshStreams();
+			selectStream(newPath);
+		} else {
+			addToast({ kind: "error", title: "Fork failed", message: result.error ?? newPath });
+		}
+		return result.ok;
+	} finally {
+		operationInFlight.value = false;
+	}
+}
+
+/**
+ * Refresh the selected stream's metadata via HEAD. Records the exchange in both
+ * {@link streamMeta} (for the metadata affordance) and lastExchange (so the
+ * protocol disclosure shows it), and upgrades the StreamInfo's Content-Type/kind
+ * when the server reports one. Toasts the closed/open + tail summary on success.
+ */
+export async function refreshMeta(path?: string): Promise<void> {
+	const client = activeClient.value;
+	const target = path ?? selectedStreamPath.value;
+	if (client === null || target === null) return;
+	metaLoading.value = true;
+	try {
+		const exchange = await client.headStream(target);
+		streamMeta.value = exchange;
+		lastExchange.value = exchange;
+		const ct = exchange.protocol.contentType;
+		if (ct !== null) {
+			const kind = kindFromContentType(ct);
+			streams.value = streams.value.map((s) =>
+				s.path === target ? { ...s, contentType: ct, kind } : s,
+			);
+		}
+		if (exchange.status === 0) {
+			addToast({ kind: "error", title: "Metadata unavailable", message: exchange.error ?? target });
+		} else {
+			const closed = headerLooseTrue(exchange.protocol.streamClosed);
+			const next = exchange.protocol.streamNextOffset;
+			addToast({
+				kind: "info",
+				title: closed ? "Stream is closed" : "Metadata refreshed",
+				message: next === null ? target : `${target} · next offset ${next}`,
+			});
+		}
+	} finally {
+		metaLoading.value = false;
+	}
+}
+
+/**
+ * Run a small demo producer against a stream: publish `total` JSON messages one
+ * at a time with a delay between them, so a live tail visibly updates. Each
+ * message is a single-element JSON batch. Resolves when the run finishes (or is
+ * cut short by a failure). Intended for the Playground's "Run a demo producer"
+ * preset on a JSON stream; never throws.
+ */
+export async function runDemoProducer(
+	path: string,
+	options?: { total?: number; delayMs?: number },
+): Promise<void> {
+	const client = activeClient.value;
+	if (client === null) return;
+	const total = options?.total ?? 5;
+	const delayMs = options?.delayMs ?? 700;
+	operationInFlight.value = true;
+	addToast({
+		kind: "info",
+		title: "Demo producer started",
+		message: `${total} messages → ${path}`,
+	});
+	try {
+		for (let i = 1; i <= total; i++) {
+			const body = JSON.stringify([
+				{ seq: i, of: total, note: `demo message ${i}`, at: new Date().toISOString() },
+			]);
+			const result = await client.appendMessages(path, { body });
+			lastOperation.value = result.operation;
+			lastExchange.value = result.exchange;
+			if (!result.ok) {
+				addToast({ kind: "error", title: "Demo producer stopped", message: result.error ?? path });
+				return;
+			}
+			if (selectedStreamPath.value === path && tailStatus.value.state === "idle") {
+				await readSelected("now");
+			}
+			if (i < total) await sleep(delayMs);
+		}
+		addToast({ kind: "success", title: "Demo producer finished", message: path });
+	} finally {
+		operationInFlight.value = false;
+	}
+}
+
+/** A plain delay used by the demo producer. */
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+}
+
+/** Interpret a protocol boolean-ish header loosely (present/true/1/yes). */
+function headerLooseTrue(value: string | null): boolean {
+	if (value === null) return false;
+	const v = value.trim().toLowerCase();
+	return v === "" || v === "true" || v === "1" || v === "yes";
+}
+
+/* ----------------------------------------------------------------------------
+ * Live-tail actions
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Set the read mode (the toolbar's Catch-up | Long-poll | SSE selector).
+ * Changing the mode tears down any active tail, since a tail belongs to the
+ * mode that started it; the user then starts the new mode explicitly. A no-op
+ * when the mode is unchanged so re-selecting the active mode never kills a live
+ * connection.
+ */
+export function setTailMode(mode: TailMode): void {
+	if (tailMode.value === mode) return;
+	stopTail();
+	tailMode.value = mode;
+}
+
+/** Pause/resume appending received rows to the tail buffer. */
+export function setTailPaused(paused: boolean): void {
+	tailPaused.value = paused;
+}
+
+/** Clear the tail buffer (and the dropped counter) without stopping the tail. */
+export function clearTailBuffer(): void {
+	tailRows.value = [];
+	tailDropped.value = 0;
+}
+
+/** Append a received tail batch into the capped buffer (unless paused). */
+function pushTailBatch(batch: TailBatch): void {
+	if (tailPaused.value) return;
+	if (batch.rows.length === 0) return;
+	const combined = [...tailRows.value, ...batch.rows];
+	if (combined.length > TAIL_BUFFER_CAP) {
+		const overflow = combined.length - TAIL_BUFFER_CAP;
+		tailDropped.value += overflow;
+		tailRows.value = combined.slice(overflow);
+	} else {
+		tailRows.value = combined;
+	}
+	if (batch.exchange !== null) lastExchange.value = batch.exchange;
+}
+
+/**
+ * Start following the selected stream from the given offset using the current
+ * {@link tailMode}. Stops any existing tail first. A no-op when no stream is
+ * selected. The opener handles errors internally; this only wires the buffer.
+ */
+export function startTail(fromOffset: string): void {
+	const client = activeClient.value;
+	const conn = activeConnection.value;
+	const path = selectedStreamPath.value;
+	const mode = tailMode.value;
+	// A live tail only opens for the two streaming modes; "catchup" is the paged
+	// read path and never starts a connection here.
+	if (client === null || conn === null || path === null || !isLiveMode(mode)) return;
+	stopTail();
+	tailRows.value = [];
+	tailDropped.value = 0;
+	tailPaused.value = false;
+	tailStatus.value = { state: "connecting" };
+	// Record the live request so the protocol disclosure can show it (SSE has no
+	// per-request exchange, so this is the only honest source for its curl).
+	tailStartOffset.value = fromOffset;
+	const op = previewTailOperation(conn.baseUrl, conn.streamRoot, path, fromOffset, mode);
+	tailOperation.value = op;
+	lastOperation.value = op;
+	const onState = (status: TailStatus): void => {
+		tailStatus.value = status;
+		if (status.state === "closed")
+			addToast({ kind: "info", title: "Stream closed", message: path });
+		if (status.state === "error")
+			addToast({ kind: "error", title: "Live tail error", message: status.message });
+	};
+	tailStopper =
+		mode === "sse"
+			? client.openSse(path, fromOffset, pushTailBatch, onState)
+			: client.openLongPoll(path, fromOffset, pushTailBatch, onState);
+}
+
+/** Stop the active tail and reset its status to idle. Safe to call when idle. */
+export function stopTail(): void {
+	if (tailStopper !== null) {
+		tailStopper();
+		tailStopper = null;
+	}
+	tailStatus.value = { state: "idle" };
+	tailOperation.value = null;
+	tailStartOffset.value = null;
 }
 
 /* ----------------------------------------------------------------------------

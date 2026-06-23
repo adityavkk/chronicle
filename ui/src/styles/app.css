@@ -1566,6 +1566,16 @@
 	color: var(--fg-subtle);
 	max-inline-size: 30ch;
 }
+.dsui-empty__actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--space-2);
+	margin-block-start: var(--space-1);
+}
+.dsui-empty--firstrun .dsui-empty__icon {
+	color: var(--accent);
+}
 
 .dsui-skel-row {
 	block-size: 26px;
@@ -1882,4 +1892,987 @@
 	.dsui-start__hero {
 		flex-direction: column;
 	}
+}
+
+/* ---- Toaster (transient notifications) ------------------------------ */
+.dsui-toaster {
+	position: fixed;
+	inset-block-end: var(--space-4);
+	inset-inline-end: var(--space-4);
+	z-index: var(--z-toast);
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	inline-size: min(360px, calc(100vw - 2 * var(--space-4)));
+	pointer-events: none;
+}
+.dsui-toaster__region {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+}
+.dsui-toaster__region:empty {
+	display: none;
+}
+
+.dsui-toast {
+	pointer-events: auto;
+	display: grid;
+	grid-template-columns: auto 1fr auto;
+	align-items: start;
+	gap: var(--space-2);
+	padding: var(--space-3);
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-inline-start: 3px solid var(--border-strong);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-lg);
+	animation: dsui-toast-in var(--dur-3) var(--ease-out);
+}
+.dsui-toast--success {
+	border-inline-start-color: var(--ok);
+}
+.dsui-toast--info {
+	border-inline-start-color: var(--info);
+}
+.dsui-toast--warning {
+	border-inline-start-color: var(--warn);
+}
+.dsui-toast--error {
+	border-inline-start-color: var(--danger);
+}
+
+.dsui-toast__icon {
+	display: inline-flex;
+	margin-block-start: 1px;
+}
+.dsui-toast--success .dsui-toast__icon {
+	color: var(--ok);
+}
+.dsui-toast--info .dsui-toast__icon {
+	color: var(--info);
+}
+.dsui-toast--warning .dsui-toast__icon {
+	color: var(--warn);
+}
+.dsui-toast--error .dsui-toast__icon {
+	color: var(--danger);
+}
+
+.dsui-toast__body {
+	min-inline-size: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+.dsui-toast__title {
+	margin: 0;
+	font-size: var(--text-sm);
+	font-weight: var(--weight-semibold);
+	color: var(--fg);
+}
+.dsui-toast__message {
+	margin: 0;
+	font-size: var(--text-xs);
+	color: var(--fg-muted);
+	overflow-wrap: anywhere;
+}
+.dsui-toast__actions {
+	margin-block-start: var(--space-1);
+}
+.dsui-toast__close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--fg-subtle);
+	border-radius: var(--radius-sm);
+	padding: 2px;
+	transition: color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
+}
+.dsui-toast__close:hover {
+	color: var(--fg);
+	background: var(--bg-inset);
+}
+
+@keyframes dsui-toast-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+/* ====================================================================
+ * Write-operation UI (create / publish / fork / lifecycle) + Playground
+ *
+ * Shared building blocks for the dialogs, the publish composer, the stream
+ * actions menu, the curl-preview disclosure, and the Playground presets. All
+ * colors are semantic tokens; spacing/radius/motion come from the scales.
+ * ==================================================================== */
+
+/* ---- Shared form primitives (forms inside dialogs + the composer) --- */
+.dsui-form {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+}
+.dsui-form__actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	margin-block-start: var(--space-1);
+}
+.dsui-formrow {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: var(--space-3);
+}
+.dsui-formrow--three {
+	grid-template-columns: 1.4fr 1fr 1fr;
+}
+@container shell (max-width: 560px) {
+	.dsui-formrow,
+	.dsui-formrow--three {
+		grid-template-columns: 1fr;
+	}
+}
+
+/* A monospace variant of the shared text input, for paths / offsets / ids. */
+.dsui-input--mono {
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+}
+.dsui-input--mono::placeholder {
+	font-family: var(--font-sans);
+}
+
+/* Textarea (the publish composer body editor). */
+.dsui-textarea {
+	inline-size: 100%;
+	padding: var(--space-2) var(--space-3);
+	font-size: var(--text-sm);
+	line-height: 1.5;
+	color: var(--fg);
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	resize: vertical;
+	min-block-size: 4.5rem;
+	transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+}
+.dsui-textarea--mono {
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+}
+.dsui-textarea::placeholder {
+	color: var(--fg-subtle);
+}
+.dsui-textarea:hover {
+	border-color: var(--border-strong);
+}
+.dsui-textarea:focus {
+	outline: none;
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.dsui-textarea[aria-invalid="true"] {
+	border-color: var(--danger);
+}
+.dsui-textarea[aria-invalid="true"]:focus {
+	box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
+/* Radio set (content-type chooser, binary mode). */
+.dsui-radioset {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	border: none;
+	padding: 0;
+	margin: 0;
+	min-inline-size: 0;
+}
+.dsui-radiorow {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+.dsui-radio {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	cursor: pointer;
+	transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
+}
+.dsui-radio:hover {
+	border-color: var(--border-strong);
+}
+.dsui-radio.is-checked {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+.dsui-radio input {
+	accent-color: var(--accent);
+	flex: none;
+}
+.dsui-radio__label {
+	font-size: var(--text-sm);
+	font-weight: var(--weight-medium);
+	color: var(--fg);
+}
+.dsui-radio__hint {
+	font-family: var(--font-mono);
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+}
+.dsui-radio--inline {
+	padding: var(--space-1) var(--space-3);
+}
+
+/* Checkbox row. */
+.dsui-check {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--space-2);
+	font-size: var(--text-sm);
+	color: var(--fg);
+	cursor: pointer;
+}
+.dsui-check input {
+	accent-color: var(--accent);
+	margin-block-start: 2px;
+	flex: none;
+}
+.dsui-check code {
+	font-size: var(--text-2xs);
+}
+.dsui-check--inline {
+	align-items: center;
+	font-size: var(--text-xs);
+	color: var(--fg-muted);
+}
+
+/* A nested disclosure (Advanced, Idempotent producer). */
+.dsui-disclose {
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-md);
+	background: var(--bg-raised);
+}
+.dsui-disclose__summary {
+	padding: var(--space-2) var(--space-3);
+	font-size: var(--text-xs);
+	font-weight: var(--weight-medium);
+	color: var(--fg-muted);
+	cursor: pointer;
+	user-select: none;
+	list-style: none;
+	border-radius: var(--radius-md);
+}
+.dsui-disclose__summary::-webkit-details-marker {
+	display: none;
+}
+.dsui-disclose__summary::before {
+	content: "▸";
+	display: inline-block;
+	margin-inline-end: var(--space-2);
+	color: var(--fg-subtle);
+	transition: transform var(--dur-2) var(--ease-out);
+}
+.dsui-disclose[open] .dsui-disclose__summary::before {
+	transform: rotate(90deg);
+}
+.dsui-disclose__summary:hover {
+	color: var(--fg);
+}
+.dsui-disclose__body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	padding: var(--space-3);
+	border-block-start: 1px solid var(--border-subtle);
+}
+
+/* ---- Modal (create + fork dialogs) ---------------------------------- */
+.dsui-modal {
+	position: fixed;
+	inset: 0;
+	z-index: var(--z-overlay);
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	padding: clamp(var(--space-4), 8vh, var(--space-10)) var(--space-4);
+	background: oklch(0% 0 0 / 0.45);
+	overflow-y: auto;
+	animation: dsui-fade-in var(--dur-2) var(--ease-out);
+	container-type: inline-size;
+	container-name: shell;
+}
+.dsui-modal__panel {
+	position: static;
+	inline-size: 100%;
+	max-inline-size: 34rem;
+	display: flex;
+	flex-direction: column;
+	padding: 0;
+	margin: 0;
+	color: var(--fg);
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-lg);
+	animation: dsui-pop var(--dur-2) var(--ease-out);
+	transform-origin: top center;
+}
+.dsui-modal__head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--space-3);
+	padding: var(--space-4) var(--space-4) var(--space-3);
+	border-block-end: 1px solid var(--border-subtle);
+}
+.dsui-modal__titlewrap {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--space-3);
+	min-inline-size: 0;
+}
+.dsui-modal__icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	inline-size: 30px;
+	block-size: 30px;
+	flex: none;
+	color: var(--accent);
+	background: var(--accent-soft);
+	border-radius: var(--radius-md);
+}
+.dsui-modal__titletext {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-inline-size: 0;
+}
+.dsui-modal__title {
+	font-size: var(--text-md);
+	font-weight: var(--weight-semibold);
+}
+.dsui-modal__desc {
+	font-size: var(--text-xs);
+	color: var(--fg-muted);
+	max-inline-size: 42ch;
+}
+.dsui-modal__body {
+	padding: var(--space-4);
+	overflow-y: auto;
+}
+
+@keyframes dsui-fade-in {
+	from {
+		opacity: 0;
+	}
+}
+
+/* ---- Curl preview disclosure ---------------------------------------- */
+.dsui-curl {
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-md);
+	background: var(--bg-sunken);
+}
+.dsui-curl__summary {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	font-size: var(--text-xs);
+	font-weight: var(--weight-medium);
+	color: var(--fg-muted);
+	cursor: pointer;
+	user-select: none;
+	list-style: none;
+	border-radius: var(--radius-md);
+}
+.dsui-curl__summary::-webkit-details-marker {
+	display: none;
+}
+.dsui-curl__summary:hover {
+	color: var(--fg);
+}
+.dsui-curl__caret {
+	color: var(--fg-subtle);
+	flex: none;
+	transition: transform var(--dur-2) var(--ease-out);
+}
+.dsui-curl[open] .dsui-curl__caret {
+	transform: rotate(90deg);
+}
+.dsui-curl__icon {
+	color: var(--accent);
+	flex: none;
+}
+.dsui-curl__label {
+	flex: 1;
+}
+.dsui-curl__body {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--space-2);
+	padding: 0 var(--space-3) var(--space-3);
+}
+.dsui-curl__cmd {
+	flex: 1;
+	min-inline-size: 0;
+	margin: 0;
+	padding: var(--space-2) var(--space-3);
+	font-family: var(--font-mono);
+	font-size: var(--text-2xs);
+	line-height: 1.5;
+	color: var(--fg);
+	background: var(--code-bg);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-sm);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.dsui-curl__copy {
+	flex: none;
+	margin-block-start: 2px;
+}
+
+/* ---- Workspace header: actions menu + offsets group ----------------- */
+.dsui-ws__headend {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-inline-size: 0;
+}
+.dsui-actions {
+	position: relative;
+	flex: none;
+}
+.dsui-actions__pop {
+	position: absolute;
+	inset-block-start: calc(100% + var(--space-1));
+	inset-inline-end: 0;
+	z-index: var(--z-overlay);
+	min-inline-size: 16rem;
+	max-inline-size: min(22rem, 90vw);
+	padding: var(--space-2);
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-pop);
+	animation: dsui-pop var(--dur-2) var(--ease-out);
+	transform-origin: top right;
+}
+.dsui-actions__item {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	inline-size: 100%;
+	padding: var(--space-2);
+	border-radius: var(--radius-md);
+	font-size: var(--text-sm);
+	color: var(--fg);
+	text-align: start;
+	transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.dsui-actions__item svg {
+	color: var(--fg-subtle);
+	flex: none;
+}
+.dsui-actions__item:hover:not(:disabled) {
+	background: var(--bg-inset);
+}
+.dsui-actions__item:disabled {
+	opacity: 0.5;
+}
+.dsui-actions__item--danger {
+	color: var(--danger);
+}
+.dsui-actions__item--danger svg {
+	color: var(--danger);
+}
+.dsui-actions__item--danger:hover:not(:disabled) {
+	background: var(--danger-soft);
+}
+.dsui-actions__label {
+	flex: 1;
+}
+.dsui-actions__meta {
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+	background: var(--code-bg);
+	max-inline-size: 8ch;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.dsui-actions__sep {
+	block-size: 1px;
+	background: var(--border-subtle);
+	margin: var(--space-1) 0;
+}
+.dsui-actions__confirm {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-2);
+	background: var(--danger-soft);
+	border-radius: var(--radius-md);
+}
+.dsui-actions__confirmtext {
+	font-size: var(--text-xs);
+	color: var(--fg);
+	line-height: 1.45;
+}
+.dsui-actions__confirmtext code {
+	font-size: var(--text-2xs);
+}
+.dsui-actions__confirmrow {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--space-2);
+}
+/* The curl-preview inside the actions menu sits flush + quiet. */
+.dsui-actions .dsui-curl {
+	background: transparent;
+	border: none;
+}
+.dsui-actions .dsui-curl__summary {
+	padding: var(--space-1) var(--space-2);
+	font-size: var(--text-2xs);
+}
+
+/* ---- Publish composer ----------------------------------------------- */
+.dsui-publish {
+	border-block-end: 1px solid var(--border-subtle);
+	background: var(--panel-2);
+}
+.dsui-publish__summary {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-2) var(--space-4);
+	font-size: var(--text-sm);
+	font-weight: var(--weight-medium);
+	cursor: pointer;
+	user-select: none;
+	list-style: none;
+	transition: background var(--dur-2) var(--ease-out);
+}
+.dsui-publish__summary::-webkit-details-marker {
+	display: none;
+}
+.dsui-publish__summary:hover {
+	background: var(--bg-inset);
+}
+.dsui-publish__icon {
+	color: var(--accent);
+	flex: none;
+}
+.dsui-publish__title {
+	color: var(--fg);
+}
+.dsui-publish__hint {
+	margin-inline-start: auto;
+	font-size: var(--text-xs);
+	font-weight: var(--weight-normal);
+	color: var(--fg-subtle);
+}
+.dsui-publish__body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	padding: var(--space-3) var(--space-4) var(--space-4);
+	border-block-start: 1px solid var(--border-subtle);
+	background: var(--panel);
+	animation: dsui-proto-reveal var(--dur-3) var(--ease-out);
+}
+.dsui-publish__modes {
+	display: flex;
+	gap: var(--space-2);
+	border: none;
+	padding: 0;
+	margin: 0;
+}
+.dsui-publish__status {
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+	min-block-size: 1em;
+}
+.dsui-publish__status.is-error {
+	color: var(--danger);
+}
+.dsui-publish__tools {
+	display: flex;
+	justify-content: flex-end;
+}
+.dsui-publish__foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+}
+
+/* ---- Fork source banner --------------------------------------------- */
+.dsui-forksource {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	background: var(--bg-sunken);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-md);
+}
+.dsui-forksource__label {
+	font-size: var(--text-2xs);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--fg-subtle);
+}
+.dsui-forksource__path {
+	font-size: var(--text-xs);
+	color: var(--accent);
+	background: var(--accent-soft);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ---- Navigator: stream-section header actions ----------------------- */
+.dsui-nav__headactions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+
+/* ---- Playground ----------------------------------------------------- */
+.dsui-playground {
+	gap: var(--space-2);
+	padding: 0 0 var(--space-2);
+	border-block-start: 1px solid var(--border-subtle);
+}
+.dsui-playground__sparkle {
+	color: var(--accent);
+}
+.dsui-playground__lead {
+	padding: 0 var(--space-3) var(--space-1);
+	font-size: var(--text-2xs);
+	line-height: 1.5;
+	color: var(--fg-subtle);
+}
+.dsui-playground__lead code {
+	font-size: var(--text-2xs);
+	background: var(--code-bg);
+}
+.dsui-playground__list {
+	list-style: none;
+	padding: 0 var(--space-2);
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.dsui-playground__btn {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	inline-size: 100%;
+	padding: var(--space-2);
+	border-radius: var(--radius-md);
+	text-align: start;
+	transition: background var(--dur-1) var(--ease-out);
+}
+.dsui-playground__btn:hover:not(:disabled) {
+	background: var(--bg-inset);
+}
+.dsui-playground__btn:disabled {
+	opacity: 0.5;
+}
+.dsui-playground__btnicon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	inline-size: 26px;
+	block-size: 26px;
+	flex: none;
+	color: var(--accent);
+	background: var(--accent-soft);
+	border-radius: var(--radius-sm);
+}
+.dsui-playground__btn--danger .dsui-playground__btnicon {
+	color: var(--danger);
+	background: var(--danger-soft);
+}
+.dsui-playground__btntext {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	min-inline-size: 0;
+}
+.dsui-playground__btnlabel {
+	font-size: var(--text-sm);
+	color: var(--fg);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.dsui-playground__btnhint {
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+	font-family: var(--font-mono);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ---- Playground: per-preset "what it does + curl" disclosure -------- */
+.dsui-playground__row {
+	display: flex;
+	flex-direction: column;
+}
+.dsui-playground__detail {
+	margin-inline: var(--space-2);
+}
+.dsui-playground__detailsummary {
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+	padding: 2px var(--space-2) var(--space-1) calc(26px + var(--space-2) + var(--space-2));
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+	cursor: pointer;
+	user-select: none;
+	list-style: none;
+}
+.dsui-playground__detailsummary::-webkit-details-marker {
+	display: none;
+}
+.dsui-playground__detailsummary:hover {
+	color: var(--fg-muted);
+}
+.dsui-playground__detailcaret {
+	color: var(--fg-subtle);
+	flex: none;
+	transition: transform var(--dur-2) var(--ease-out);
+}
+.dsui-playground__detail[open] .dsui-playground__detailcaret {
+	transform: rotate(90deg);
+}
+.dsui-playground__does {
+	padding: 0 var(--space-2) var(--space-2);
+	font-size: var(--text-2xs);
+	line-height: 1.5;
+	color: var(--fg-subtle);
+}
+/* The per-preset curl preview sits inside the narrow rail: stack copy below. */
+.dsui-playground__detail .dsui-curl {
+	margin: 0 var(--space-2) var(--space-2);
+}
+.dsui-playground__detail .dsui-curl__body {
+	flex-direction: column;
+	gap: var(--space-1);
+}
+.dsui-playground__detail .dsui-curl__copy {
+	align-self: flex-end;
+	margin-block-start: 0;
+}
+
+/* ---- Playground: first-run highlight pulse -------------------------- */
+.dsui-playground.is-pulsing {
+	animation: dsui-playground-pulse 1.6s var(--ease-out);
+}
+@keyframes dsui-playground-pulse {
+	0%,
+	100% {
+		box-shadow: inset 0 0 0 0 transparent;
+	}
+	30% {
+		box-shadow: inset 0 0 0 2px var(--accent-ring);
+	}
+}
+
+/* ====================================================================
+ * Live tail panel — the long-poll / SSE follow view in the workspace.
+ * Reuses the grid row classes (.dsui-grid__header / .dsui-row) for the
+ * live message list; everything else is dsui-tail*.
+ * ==================================================================== */
+.dsui-tail {
+	flex: 1;
+	min-block-size: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+/* ---- Status / control bar ------------------------------------------- */
+.dsui-tail__bar {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	padding: var(--space-2) var(--space-4);
+	border-block-end: 1px solid var(--border-subtle);
+	background: var(--panel-2);
+}
+.dsui-tail__spacer {
+	flex: 1;
+	min-inline-size: var(--space-2);
+}
+.dsui-tail__status {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-inline-size: 0;
+}
+.dsui-tail__dot {
+	inline-size: 9px;
+	block-size: 9px;
+	border-radius: var(--radius-full);
+	flex: none;
+	background: var(--fg-subtle);
+}
+.dsui-tail__status--ok .dsui-tail__dot {
+	background: var(--ok);
+	box-shadow: 0 0 0 3px var(--ok-soft);
+}
+.dsui-tail__status--pending .dsui-tail__dot {
+	background: var(--info);
+	box-shadow: 0 0 0 3px color-mix(in oklch, var(--info) 18%, transparent);
+}
+.dsui-tail__status--warn .dsui-tail__dot {
+	background: var(--warn);
+	box-shadow: 0 0 0 3px var(--warn-soft);
+}
+.dsui-tail__status--err .dsui-tail__dot {
+	background: var(--danger);
+	box-shadow: 0 0 0 3px var(--danger-soft);
+}
+/* The connecting / reconnecting dot pulses to signal in-flight work. */
+.dsui-tail__dot.is-pulsing {
+	animation: dsui-pulse 1.4s var(--ease-in-out) infinite;
+}
+.dsui-tail__statuslabel {
+	font-size: var(--text-sm);
+	font-weight: var(--weight-medium);
+	color: var(--fg);
+	flex: none;
+}
+.dsui-tail__status--ok .dsui-tail__statuslabel {
+	color: var(--ok);
+}
+.dsui-tail__status--err .dsui-tail__statuslabel {
+	color: var(--danger);
+}
+.dsui-tail__statusdetail {
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.dsui-tail__mode {
+	font-size: var(--text-2xs);
+	font-weight: var(--weight-semibold);
+	letter-spacing: 0.04em;
+	padding: 0.1em 0.5em;
+	border-radius: var(--radius-sm);
+	color: var(--accent);
+	background: var(--accent-soft);
+	flex: none;
+}
+
+/* ---- Paused note ---------------------------------------------------- */
+.dsui-tail__paused {
+	padding: var(--space-2) var(--space-4);
+	font-size: var(--text-2xs);
+	color: var(--warn);
+	background: var(--warn-soft);
+	border-block-end: 1px solid color-mix(in oklch, var(--warn) 30%, transparent);
+}
+
+/* ---- Live grid ------------------------------------------------------ */
+.dsui-tail__gridwrap {
+	flex: 1;
+	min-block-size: 0;
+	display: flex;
+	flex-direction: column;
+	position: relative;
+}
+.dsui-tail__rows {
+	flex: 1;
+	min-block-size: 0;
+	overflow-y: auto;
+	scroll-behavior: smooth;
+}
+.dsui-tail__rowmark {
+	color: var(--accent);
+}
+/* A freshly appended row briefly tints to draw the eye to new data. */
+.dsui-tail__rows .dsui-row:last-child {
+	animation: dsui-tail-flash var(--dur-3) var(--ease-out);
+}
+@keyframes dsui-tail-flash {
+	from {
+		background: var(--accent-soft);
+	}
+}
+
+/* "Jump to latest" floating affordance (shown when scroll is unstuck). */
+.dsui-tail__jump {
+	position: absolute;
+	inset-block-end: var(--space-3);
+	inset-inline-end: var(--space-4);
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-1) var(--space-3);
+	font-size: var(--text-xs);
+	font-weight: var(--weight-medium);
+	color: var(--fg-on-accent);
+	background: var(--accent);
+	border-radius: var(--radius-full);
+	box-shadow: var(--shadow-md);
+	animation: dsui-pop var(--dur-2) var(--ease-out);
+}
+.dsui-tail__jump:hover {
+	background: var(--accent-hover);
+}
+
+/* ---- Footer: buffer count + scroll state ---------------------------- */
+.dsui-tail__foot {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-4);
+	border-block-start: 1px solid var(--border-subtle);
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+	font-variant-numeric: tabular-nums;
+}
+.dsui-tail__dropped {
+	color: var(--warn);
+}
+.dsui-tail__stick {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	color: var(--fg-subtle);
+}
+.dsui-tail__stick.is-on {
+	color: var(--ok);
 }

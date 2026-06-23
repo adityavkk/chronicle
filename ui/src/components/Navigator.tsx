@@ -39,6 +39,8 @@ import {
 	activeConnection,
 	addManualStream,
 	errorMessage,
+	highlightPlayground,
+	openCreateDialog,
 	probeStatuses,
 	refreshStreams,
 	selectStream,
@@ -46,14 +48,17 @@ import {
 	streams,
 	streamsLoading,
 } from "../state/store";
+import { Playground } from "./Playground";
 import { StatusDot } from "./StatusDot";
 import {
 	IconBell,
 	IconChart,
+	IconFilePlus,
 	IconPlus,
 	IconRefresh,
 	IconSearch,
 	IconServer,
+	IconSparkles,
 	IconStream,
 } from "./icons";
 
@@ -132,13 +137,27 @@ function StreamsPlaceholder(props: {
 		);
 	}
 	return (
-		<div class="dsui-empty dsui-empty--inline">
+		<div class="dsui-empty dsui-empty--inline dsui-empty--firstrun">
 			<IconStream size={26} class="dsui-empty__icon" />
-			<p class="dsui-empty__title">No streams discovered</p>
+			<p class="dsui-empty__title">No streams yet</p>
 			<p class="dsui-empty__hint">
-				The <code>__registry__</code> stream is empty or absent. Add a stream path below to view it
-				directly.
+				The <code>__registry__</code> stream is empty or absent. New here? The Playground below
+				bootstraps the whole API in one click each.
 			</p>
+			<div class="dsui-empty__actions">
+				<button
+					type="button"
+					class="dsui-btn dsui-btn--xs dsui-btn--primary"
+					onClick={() => highlightPlayground()}
+				>
+					<IconSparkles size={13} />
+					<span>Start with the Playground</span>
+				</button>
+				<button type="button" class="dsui-btn dsui-btn--xs" onClick={() => openCreateDialog()}>
+					<IconFilePlus size={13} />
+					<span>New stream</span>
+				</button>
+			</div>
 		</div>
 	);
 }
@@ -266,16 +285,28 @@ export function Navigator(): JSX.Element {
 						Streams
 						{all.length > 0 ? <span class="dsui-nav__count">{all.length}</span> : null}
 					</span>
-					<button
-						type="button"
-						class="dsui-iconbtn dsui-iconbtn--sm"
-						title="Refresh streams"
-						aria-label="Refresh streams"
-						disabled={conn === null || loading}
-						onClick={() => void refreshStreams()}
-					>
-						<IconRefresh size={14} class={loading ? "dsui-spin" : undefined} />
-					</button>
+					<div class="dsui-nav__headactions">
+						<button
+							type="button"
+							class="dsui-iconbtn dsui-iconbtn--sm"
+							title="New stream"
+							aria-label="New stream"
+							disabled={conn === null}
+							onClick={() => openCreateDialog()}
+						>
+							<IconFilePlus size={14} />
+						</button>
+						<button
+							type="button"
+							class="dsui-iconbtn dsui-iconbtn--sm"
+							title="Refresh streams"
+							aria-label="Refresh streams"
+							disabled={conn === null || loading}
+							onClick={() => void refreshStreams()}
+						>
+							<IconRefresh size={14} class={loading ? "dsui-spin" : undefined} />
+						</button>
+					</div>
 				</header>
 
 				<div class="dsui-nav__filter">
@@ -348,6 +379,8 @@ export function Navigator(): JSX.Element {
 					</button>
 				</form>
 			</section>
+
+			<Playground />
 
 			<section class="dsui-nav__section dsui-nav__section--soon" aria-label="Coming next">
 				<ComingNext icon={<IconBell size={14} />} label="Subscriptions" />

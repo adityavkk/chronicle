@@ -16,12 +16,15 @@
 
 import type { JSX } from "preact";
 import { ConnectionManager } from "./components/ConnectionManager";
+import { CreateStreamDialog } from "./components/CreateStreamDialog";
+import { ForkDialog } from "./components/ForkDialog";
 import { Inspector } from "./components/Inspector";
 import { MessagesWorkspace } from "./components/MessagesWorkspace";
 import { Navigator } from "./components/Navigator";
 import { StartScreen } from "./components/StartScreen";
+import { Toaster } from "./components/Toaster";
 import { IconStream } from "./components/icons";
-import { activeConnection, dismissError, errorMessage } from "./state/store";
+import { activeConnection, activeDialog, dismissError, errorMessage } from "./state/store";
 
 function ErrorBanner(): JSX.Element | null {
 	const msg = errorMessage.value;
@@ -36,7 +39,8 @@ function ErrorBanner(): JSX.Element | null {
 	);
 }
 
-export function App(): JSX.Element {
+/** The routed content: the start screen, or the three-pane workspace shell. */
+function Shell(): JSX.Element {
 	// No active connection -> the connection manager's start screen. Otherwise
 	// the three-pane workspace shell. This is the top-level routing seam.
 	if (activeConnection.value === null) {
@@ -72,5 +76,29 @@ export function App(): JSX.Element {
 				</aside>
 			</main>
 		</div>
+	);
+}
+
+/** The active write dialog (create / fork), or nothing. Driven by the store. */
+function Dialogs(): JSX.Element | null {
+	switch (activeDialog.value) {
+		case "create":
+			return <CreateStreamDialog />;
+		case "fork":
+			return <ForkDialog />;
+		case null:
+			return null;
+	}
+}
+
+export function App(): JSX.Element {
+	// The Toaster + write dialogs are mounted above the routing seam so they
+	// survive a start-screen ↔ workspace transition and overlay either view.
+	return (
+		<>
+			<Shell />
+			<Dialogs />
+			<Toaster />
+		</>
 	);
 }

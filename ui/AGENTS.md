@@ -163,6 +163,225 @@ To add a whole new region to the shell (a fourth pane), edit the grid template i
 `app.css` (`.dsui-main` and the `.dsui-region--*` rules plus the container-query
 breakpoints) and drop a component into a new `<aside>`/`<section>` in `app.tsx`.
 
+## Stream operations: the write / fork / live-tail seams
+
+dsui is no longer read-only. The write, fork, lifecycle, and live-tail surface
+follows the same layering — logic and contracts in `lib/`, the only `fetch` in
+`dsClient.ts`, mutations only in the store — and adds these typed seams:
+
+- **Operation descriptors + curl (`lib/types.ts`, `lib/curl.ts`).** An
+  `Operation` is `{ method, url, headers, body? }` — a protocol-level
+  description of one request, independent of whether it has run. `toCurl(op)` in
+  `lib/curl.ts` turns one into the exact equivalent curl string (string bodies as
+  `--data-raw`, binary as `--data-binary @-`). It is pure and unit-tested
+  (`curl.test.ts`). Note there are two `toCurl`s: this one works from an intended
+  `Operation`; the older `protocol.ts` one reproduces a completed `HttpExchange`.
+  Import whichever matches what you have in hand.
+- **Write methods on `DsClient` (`lib/dsClient.ts`).** `createStream`,
+  `appendMessages`, `closeStream`, `deleteStream`, and `forkStream` each map their
+  typed options onto the chronicle headers (Content-Type, Stream-TTL,
+  Stream-Expires-At, Stream-Closed, Producer-Id/Epoch/Seq,
+  Stream-Forked-From/Fork-Offset/Fork-Sub-Offset) and resolve to a `WriteResult`
+  — never throwing. A `WriteResult` carries `ok`, `nextOffset`, `location`, a
+  `ProducerConflict | null` (from Producer-Expected-Seq / Producer-Received-Seq),
+  the `Operation` that was sent, and the captured `HttpExchange`. Build any new
+  write the same way: map options → headers, call the shared `doWrite`.
+- **Live tail (`lib/dsClient.ts`).** `openLongPoll(path, fromOffset, onBatch,
+  onState)` loops `GET …&live=long-poll`, honoring `Stream-Next-Offset` and
+  `Stream-Up-To-Date`, with backoff + an internal `AbortController`.
+  `openSse(path, fromOffset, onMessage, onState)` opens a browser `EventSource`
+  on `…&live=sse`. Both return a `TailStopper` (`() => void`) and report progress
+  via `TailStatus` — they never throw to the caller. A `TailBatch` is the
+  delivered rows plus the resume cursor.
+- **Store actions + state (`state/store.ts`).** The write actions
+  (`createStream`/`appendMessages`/`closeStream`/`deleteStream`/`forkStream`)
+  wrap the client, flip `operationInFlight`, record `lastOperation` + mirror
+  `lastExchange`, raise a toast, and refresh the stream list. Live-tail state is
+  the read mode `tailMode` (`catchup` | `long-poll` | `sse`, default `catchup`)
+  plus `tailStatus`/`tailRows`/`tailPaused`/`tailDropped` with a capped buffer
+  (`TAIL_BUFFER_CAP`), and `tailOperation`/`tailStartOffset` (the live GET
+  descriptor + the offset it started from, for the disclosure). `startTail`
+  (guarded to the two live modes) / `stopTail` own the single stopper; `stopTail`
+  also clears `tailOperation`/`tailStartOffset`. Switching stream/connection,
+  and `setTailMode` when the mode changes, always stop the tail. Idempotent-
+  producer state is `producerIdentity` with `setProducerIdentity`/
+  `bumpProducerSeq`.
+- **Toasts (`state/store.ts` + `components/Toaster.tsx`).** `addToast` /
+  `dismissToast` manage a `Toast[]` signal with per-toast auto-dismiss timers;
+  the `Toaster` (mounted above the routing seam in `app.tsx`) is pure layout —
+  two `aria-live` log regions (assertive for error/warning, polite otherwise),
+  per-toast sr-only kind label, dismiss button, and an optional inline action.
+  Styling is the `dsui-toast*` classes (semantic tokens, `--z-toast`).
+
+When adding the operation UI (create/publish/fork/close/delete controls, a
+Playground with presets, a live-tail view), keep building on these seams: a
+control calls a store action, the store calls the client, and the equivalent
+curl comes from `toCurl(result.operation)` (or a previewed `Operation`).
+
+### The write-operation UI (built on the seams above)
+
+The create/publish/fork/lifecycle controls and the Playground are now built.
+They add no new logic to components — every one is a thin layout over a store
+action plus a pure preview. The pieces and their seams:
+
+- **`lib/streamForm.ts` (pure, tested).** All write-form validation lives here,
+  next to `lib/validation.ts` in spirit: `validateStreamPath`, `validateTtl`,
+  `validateExpiresAt`, `validateJsonBatch` (returns a typed count + normalized
+  array), `validateProducer` / `toProducerIdentity`, `validateSubOffset`. It
+  also holds the **operation previews** — `previewCreateOperation`,
+  `previewAppendOperation`, `previewCloseOperation`, `previewDeleteOperation`,
+  and `previewStreamUrl` — which build the exact `Operation` a form WILL send so
+  the equivalent curl can show before the request runs. These mirror the private
+  header builders in `dsClient` and are unit-tested against the same
+  expectations (`streamForm.test.ts`), so a drift between preview and reality is
+  caught. Add a write-form rule or a new preview here, not in a component.
+- **Store glue (`state/store.ts`).** Dialog open-state is `activeDialog`
+  (`"create" | "fork" | null`) + `forkSeed`, opened via `openCreateDialog` /
+  `openForkDialog(fromPath, offset)` and closed with `closeDialog`. `refreshMeta`
+  HEADs the selected stream (mirrors into `streamMeta` + `lastExchange`, upgrades
+  the StreamInfo kind, toasts). `runDemoProducer(path, {total, delayMs})` streams
+  a few JSON messages with a delay so a live tail visibly updates. These are the
+  only new mutation entry points; components never write signals.
+- **Shared UI primitives.** `components/Modal.tsx` is the dialog shell (a native
+  `<dialog open>` over a backdrop, with Escape/backdrop close, focus move-in +
+  restore, and a Tab focus trap). `components/CurlPreview.tsx` is the
+  collapsed "Equivalent curl" disclosure over any `Operation` (it renders
+  nothing when handed `null`, so a form can pass a not-yet-valid preview and let
+  it hide itself). Both are pure layout.
+- **The feature components.** `CreateStreamDialog` (path + content-type radios +
+  an Advanced disclosure for TTL/Expires-At/closed), `ForkDialog` (seeded from
+  `forkSeed`; new path + fork offset + optional sub-offset), `PublishComposer`
+  (a content-type-aware editor mounted in the workspace under the toolbar — a
+  JSON batch editor, a text area, or a binary text/base64 input, plus an
+  idempotent-producer disclosure and a "close after sending" checkbox),
+  `StreamActionsMenu` (the workspace-header popover: Fork / Refresh metadata /
+  Close / Delete-with-confirm, each with its curl), and `Playground` (a Navigator
+  section of one-click presets on the `playground/…` sample namespace that drive
+  the real store actions). The create + fork dialogs are mounted above the
+  routing seam in `app.tsx` (next to the `Toaster`) and switched by
+  `activeDialog`.
+- **The Playground bootstrap (`components/Playground.tsx`).** Seven presets —
+  Create sample JSON stream, Publish a sample batch, Run a demo producer (the
+  cancellable spaced loop via `store.runDemoProducer`), Tail live (SSE), Fork at
+  latest, Close, and Delete / reset — each calls the SAME store action the rest
+  of the UI uses (no special path), and each discloses, before it runs, a
+  plain-language "what it does" line plus its EXACT equivalent curl. The curl
+  comes from the same pure preview helpers (`lib/streamForm` + `lib/tail`,
+  `tailToCurl` for the SSE `-N`), built from the active connection's origin (or a
+  placeholder origin so the curl still teaches the shape when no connection is
+  active). Add a preset in `buildPresets`: a label, a "what it does" line, the
+  store action, and the previewed `Operation`. A first-run empty-state in the
+  Navigator points a newcomer at it via `store.highlightPlayground`, a one-shot
+  monotonic pulse signal the `Playground` section keys an effect off (scroll-into-
+  view + a brief outline). `CurlPreview` gained an optional `command` override
+  for transports `toCurl` cannot infer (SSE's `-N`).
+- **New icons.** `IconFork`, `IconSend`, `IconLock`, `IconMore`, `IconSparkles`,
+  `IconFilePlus`, `IconZap` were added to `components/icons.tsx` in the existing
+  inline-SVG style. **New CSS** for all of the above lives under the
+  `dsui-modal*`, `dsui-curl*`, `dsui-publish*`, `dsui-actions*`, `dsui-form*`,
+  `dsui-radio*`, `dsui-check*`, `dsui-disclose*`, `dsui-textarea*`,
+  `dsui-forksource*`, and `dsui-playground*` classes (semantic tokens only).
+
+### The live-tail UI (built on the seams above)
+
+Live tailing (long-poll + SSE) follows the same pattern — pure logic in `lib/`,
+the connection owned by the store's `startTail`/`stopTail`, layout in the
+component. Its pieces and seams:
+
+- **`lib/tail.ts` (pure, tested).** The live-tail counterpart to
+  `lib/streamForm`: `isLiveMode`/`describeTailMode` classify the read mode;
+  `previewTailUrl`/`previewTailOperation` build the exact live request
+  (`GET …?offset=X&live=long-poll|sse`) the tail WILL open — mirroring dsClient's
+  private `tailUrl` and unit-tested against it so preview and reality cannot
+  drift; `tailToCurl` reproduces it as curl, adding `-N` for SSE; and
+  `tailTone`/`tailStatusLabel`/`tailStatusDetail`/`tailAnnouncePolite`/
+  `isTerminalTailState` turn a `TailStatus` into the small pieces a status
+  affordance needs (color tone, label, detail, aria-live politeness, terminal
+  check). Add a tail rule or status mapping here, not in a component.
+- **Store glue (`state/store.ts`).** Covered above: the read-mode `tailMode`
+  selector, the bounded buffer, `startTail`/`stopTail`, and the
+  `tailOperation`/`tailStartOffset` descriptor the disclosure reads. `startTail`
+  records the live `Operation` into `tailOperation` + `lastOperation` so the
+  curl works for SSE (which captures no per-request `HttpExchange`); long-poll
+  also mirrors each batch's real exchange into `lastExchange`.
+- **`components/TailPanel.tsx`.** The live view rendered in place of the paged
+  grid when `tailMode` is a live mode. It is layout + the scroll "stick to
+  bottom" (a purely visual concern): a `role="status"` aria-live badge whose
+  politeness follows the status urgency, Pause/Resume (`setTailPaused`), Clear
+  (`clearTailBuffer`), Start/Stop (`startTail("now")`/`stopTail`), a live
+  `role="listbox"` of `role="option"` rows driving the inspector (matching the
+  paged grid), a "Jump to latest" affordance when scroll is unstuck, and a
+  buffered/aged-out footer. It stops the tail on unmount as a belt-and-braces
+  guard (the store already stops on stream/connection/mode change), so no
+  EventSource / long-poll loop leaks.
+- **Toolbar + disclosure wiring (`MessagesWorkspace.tsx`, `ProtocolPanel.tsx`).**
+  A reusable `Segmented` roving-tabindex picker drives both the Mode and Start
+  controls. `ProtocolPanel` gained an optional `tail` prop (`TailDisclosure` =
+  the live `Operation` + `TailStatus` + mode + start offset); when present it
+  renders a "Live connection" block (the long-lived GET + its status, copy-as-
+  curl with `-N` for SSE) above the last captured exchange and reflects the live
+  status in the summary. It renders when there is an exchange OR an open tail.
+- **New icons + CSS.** `IconPause`, `IconStop`, `IconBroadcast`,
+  `IconArrowDownToLine` were added to `components/icons.tsx`. New CSS lives under
+  the `dsui-tail*` classes (semantic tokens only); the live grid reuses the
+  existing `dsui-grid__header` / `dsui-row` classes. Motion (the auto-scroll +
+  the new-row flash + the connecting pulse) honors `prefers-reduced-motion` via
+  the global rule in `base.css`.
+
+## How to add another operation, end to end
+
+Every operation in dsui follows the same path: a client method does the request,
+a store action drives it, a component triggers the action, a pure preview builds
+the curl, and tests pin the behavior. Add a new one in this order. Do not add a
+dependency for any of it; the lightweight stack rules above still hold.
+
+1. **Add the client method (`lib/dsClient.ts`).** This is the only place a
+   request is made. Map the typed options onto headers in a small builder, then
+   call the shared `doWrite` (for a write) or open a tail. Return a typed result
+   and never throw: a write resolves to a `WriteResult` (the `Operation` that was
+   sent, the captured `HttpExchange`, `ok`, and any conflict or error), and a
+   read resolves to a `ReadResult`. Follow `createStream` / `appendMessages` as
+   the model. If the result needs a new shape, add it to `lib/types.ts` first and
+   keep that file dependency-free.
+
+2. **Add the store action (`state/store.ts`).** The store is the only place state
+   changes. Write an action that calls the client method, flips
+   `operationInFlight` while it runs, records the result's `operation` into
+   `lastOperation` and its `exchange` into `lastExchange` (so the curl and the
+   "Under the hood" panel update), raises a toast through `addToast`, and
+   refreshes anything the change affects (usually `refreshStreams`). A new piece
+   of shared state gets a `signal` and is mutated only here. State that is local
+   to one view stays a `useSignal` in the component.
+
+3. **Add the curl preview (`lib/streamForm.ts` or `lib/tail.ts`).** A form should
+   show the exact curl before it submits, so write a pure `preview…Operation`
+   that builds the same `Operation` the client will send. It must mirror the
+   client's header builder exactly. The previews are unit-tested against the same
+   expectations as the client, which is what keeps the preview and the real
+   request from drifting. Put validation rules next to the previews here too.
+
+4. **Build the component (`components/`).** The component is layout only. It reads
+   store signals, reads the pure preview, calls the store action, and arranges
+   the result. Reuse the shared primitives: `Modal` for a dialog, `CurlPreview`
+   for the equivalent curl, and the form, radio, check, and disclosure classes in
+   `app.css`. Match the accessibility of the existing components: labelled
+   controls, inline errors wired with `aria-describedby`, a roving tabindex for
+   any interactive list, and motion behind `prefers-reduced-motion`. Add a new
+   icon to `components/icons.tsx` in the inline-SVG style if you need one. Wire
+   the component into the Navigator, the workspace, the actions menu, a dialog
+   slot in `app.tsx`, or a Playground preset, depending on where it belongs.
+
+5. **Add the tests.** Unit-test the pure pieces directly: the preview against the
+   client's headers (so they cannot drift), and any new validation. Add a
+   `dsClient.test.ts` case for the new method using the existing `fetch` stub.
+   Add a component test with `@testing-library/preact` for the happy path and the
+   error path. Run `typecheck`, `lint`, and `test` before you finish.
+
+The same five steps describe every operation already in the tree, so the closest
+existing operation is your template. A create-shaped write follows
+`createStream`; an append-shaped write follows `appendMessages`; a live read
+follows `openLongPoll` / `openSse` and the `startTail` / `stopTail` pair.
+
 ## Commands
 
 Run these from the `ui/` directory.
@@ -207,8 +426,12 @@ All visual values come from `src/styles/tokens.css`. The rules:
 
 ## Protocol facts an agent needs
 
-dsui reads Durable Streams; it does not create or append. The protocol surface it
-touches:
+dsui both reads and writes Durable Streams: it reads and pages, follows a tail
+live, and runs the full write / fork / lifecycle surface (create, publish,
+close, delete, fork) plus a metadata HEAD. The write headers it sends are listed
+under "Stream operations" above (Content-Type, Stream-TTL, Stream-Expires-At,
+Stream-Closed, Producer-Id / Epoch / Seq, Stream-Forked-From / Fork-Offset /
+Fork-Sub-Offset). The read protocol surface it touches:
 
 - **Stream URL.** `{baseUrl}{streamRoot}/{path}`. Default `streamRoot` is
   `/v1/stream`. Path segments are URL-encoded but slashes are kept as separators
@@ -248,4 +471,3 @@ touches:
 When in doubt about a protocol detail, the source of truth is the server in this
 repo's root (`handler.go`, `protocol/headers.go`) and the project root
 `README.md`. Match those; do not guess header names or semantics.
-</content>

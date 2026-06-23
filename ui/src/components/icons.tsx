@@ -286,3 +286,113 @@ export function IconArrowUpRight(props: IconProps): JSX.Element {
 		</Icon>
 	);
 }
+
+export function IconAlertTriangle(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M12 3 2.5 19.5h19L12 3Z" />
+			<path d="M12 10v4M12 17h.01" />
+		</Icon>
+	);
+}
+
+export function IconFork(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<circle cx="6" cy="5" r="2.4" />
+			<circle cx="18" cy="5" r="2.4" />
+			<circle cx="12" cy="19" r="2.4" />
+			<path d="M6 7.4v3a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v-3" />
+			<path d="M12 13.4v3.2" />
+		</Icon>
+	);
+}
+
+export function IconSend(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M21 3 10.5 13.5" />
+			<path d="M21 3 14.5 21l-4-7.5L3 9.5 21 3Z" />
+		</Icon>
+	);
+}
+
+export function IconLock(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<rect x="5" y="11" width="14" height="9" rx="2" />
+			<path d="M8 11V8a4 4 0 0 1 8 0v3" />
+		</Icon>
+	);
+}
+
+export function IconMore(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<circle cx="5" cy="12" r="1" />
+			<circle cx="12" cy="12" r="1" />
+			<circle cx="19" cy="12" r="1" />
+		</Icon>
+	);
+}
+
+export function IconSparkles(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M12 4c.6 2.8 1.2 3.4 4 4-2.8.6-3.4 1.2-4 4-.6-2.8-1.2-3.4-4-4 2.8-.6 3.4-1.2 4-4Z" />
+			<path d="M18 14c.3 1.4.6 1.7 2 2-1.4.3-1.7.6-2 2-.3-1.4-.6-1.7-2-2 1.4-.3 1.7-.6 2-2Z" />
+		</Icon>
+	);
+}
+
+export function IconFilePlus(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+			<path d="M14 3v5h5" />
+			<path d="M12 12v5M9.5 14.5h5" />
+		</Icon>
+	);
+}
+
+export function IconZap(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M13 3 4 14h7l-1 7 9-11h-7l1-7Z" />
+		</Icon>
+	);
+}
+
+export function IconPause(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M8 5v14M16 5v14" />
+		</Icon>
+	);
+}
+
+export function IconStop(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<rect x="6" y="6" width="12" height="12" rx="2" />
+		</Icon>
+	);
+}
+
+export function IconBroadcast(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<circle cx="12" cy="12" r="2" />
+			<path d="M6.3 6.3a8 8 0 0 0 0 11.4M17.7 6.3a8 8 0 0 1 0 11.4" />
+			<path d="M9.2 9.2a4 4 0 0 0 0 5.6M14.8 9.2a4 4 0 0 1 0 5.6" />
+		</Icon>
+	);
+}
+
+export function IconArrowDownToLine(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M12 4v10M8 10l4 4 4-4M5 20h14" />
+		</Icon>
+	);
+}

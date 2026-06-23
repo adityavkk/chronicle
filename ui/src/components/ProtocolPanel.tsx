@@ -42,9 +42,29 @@ import {
 	statusLabel,
 	toCurl,
 } from "../lib/protocol";
-import type { HttpExchange } from "../lib/types";
+import {
+	type LiveTailMode,
+	describeTailMode,
+	tailStatusDetail,
+	tailStatusLabel,
+	tailToCurl,
+	tailTone,
+} from "../lib/tail";
+import type { HttpExchange, Operation, TailStatus } from "../lib/types";
 import { CopyButton } from "./CopyButton";
-import { IconChevronRight, IconCode, IconCornerDownRight } from "./icons";
+import { IconBroadcast, IconChevronRight, IconCode, IconCornerDownRight } from "./icons";
+
+/** The live-tail connection the disclosure is currently following, if any. */
+export interface TailDisclosure {
+	/** The GET …?offset=X&live=… operation being followed. */
+	readonly operation: Operation;
+	/** Its lifecycle status (drives the status pill + announcement copy). */
+	readonly status: TailStatus;
+	/** Which transport (long-poll | sse) — selects curl -N for SSE. */
+	readonly mode: LiveTailMode;
+	/** The offset the tail started from, for the resume/primer copy. */
+	readonly fromOffset: string;
+}
 
 /* ---------------------------------------------------------------------------
  * Small building blocks
@@ -227,34 +247,132 @@ function OffsetPrimer(props: { exchange: HttpExchange }): JSX.Element {
 	);
 }
 
+/* ---------------------------------------------------------------------------
+ * Live connection block (shown while a long-poll / SSE tail is open)
+ * ------------------------------------------------------------------------ */
+
+/** A pill coloured by the live-tail status tone (reuses the proto status hues). */
+function LiveStatusPill(props: { status: TailStatus }): JSX.Element {
+	const tone = tailTone(props.status);
+	// Map the tail tone onto the proto status palette: ok→ok, warn/pending→fail,
+	// err→err, idle→err-less neutral via fail (idle never renders here).
+	const cls = tone === "ok" ? "ok" : tone === "err" ? "err" : "fail";
+	return (
+		<span class={`dsui-proto__status dsui-proto__status--${cls}`}>
+			{tailStatusLabel(props.status)}
+		</span>
+	);
+}
+
+/**
+ * The live-connection transcript: the long-lived GET that is being followed,
+ * its current status, and the equivalent curl (curl -N for SSE). It is honest
+ * about SSE having no per-request captured exchange — this Operation is the live
+ * request itself, not a completed round-trip.
+ */
+function LiveBlock(props: { tail: TailDisclosure }): JSX.Element {
+	const { operation, status, mode, fromOffset } = props.tail;
+	const { base, query } = splitUrl(operation.url);
+	const command = tailToCurl(operation, mode);
+	const detail = tailStatusDetail(status);
+	return (
+		<ProtoSection
+			label={`Live connection · ${describeTailMode(mode)}`}
+			action={
+				<CopyButton
+					text={command}
+					label="Copy the live tail request as a curl command"
+					copyKey="proto-tail-curl"
+					variant="pill"
+					pillLabel="Copy as curl"
+				/>
+			}
+		>
+			<div class="dsui-proto__reqline">
+				<MethodChip method={operation.method} />
+				<code class="dsui-proto__url" title={operation.url}>
+					{base}
+				</code>
+				<LiveStatusPill status={status} />
+			</div>
+			{query.length > 0 ? (
+				<dl class="dsui-proto__kv" aria-label="Live query parameters">
+					{query.map(([key, value]) => (
+						<div key={key} class="dsui-proto__kvrow">
+							<dt class="dsui-proto__kvkey">{key}</dt>
+							<dd class="dsui-proto__kvval">
+								<code>{value}</code>
+								{key === "live" ? (
+									<span class="dsui-proto__kvnote">
+										the live mode — the server holds the connection open and streams new messages
+										instead of returning a single batch
+									</span>
+								) : key === "offset" ? (
+									<span class="dsui-proto__kvnote">
+										the cursor the tail started from — <code>{fromOffset}</code>
+									</span>
+								) : null}
+							</dd>
+						</div>
+					))}
+				</dl>
+			) : null}
+			{detail !== "" ? <p class="dsui-proto__muted">{detail}</p> : null}
+		</ProtoSection>
+	);
+}
+
 export interface ProtocolPanelProps {
 	/** The captured exchange to disclose, or null when nothing has run yet. */
 	readonly exchange: HttpExchange | null;
+	/** The live tail being followed, if any — shown as a Live connection block. */
+	readonly tail?: TailDisclosure | null | undefined;
 }
 
 /**
  * The collapsed-by-default "Under the hood" disclosure. Renders nothing until
- * there is an exchange to show, so it never occupies space on an empty view.
+ * there is something to show — a captured exchange OR an open live tail — so it
+ * never occupies space on an empty view. When a tail is open it adds a Live
+ * connection block (the long-lived GET …&live=… and its status) above the last
+ * captured exchange, and the summary reflects the live status.
  */
 export function ProtocolPanel(props: ProtocolPanelProps): JSX.Element | null {
 	const { exchange } = props;
-	if (exchange === null) return null;
+	const tail = props.tail ?? null;
+	if (exchange === null && tail === null) return null;
 	return (
 		<details class="dsui-proto">
 			<summary class="dsui-proto__summary">
 				<IconChevronRight size={13} class="dsui-proto__summarycaret" />
-				<IconCode size={14} class="dsui-proto__summaryicon" />
+				{tail !== null ? (
+					<IconBroadcast size={14} class="dsui-proto__summaryicon" />
+				) : (
+					<IconCode size={14} class="dsui-proto__summaryicon" />
+				)}
 				<span class="dsui-proto__summarytitle">Under the hood</span>
-				<span class="dsui-proto__summaryhint">the real HTTP exchange</span>
+				<span class="dsui-proto__summaryhint">
+					{tail !== null ? "the live connection" : "the real HTTP exchange"}
+				</span>
 				<span class="dsui-proto__summarymeta">
-					<MethodChip method={exchange.method} />
-					<StatusPill exchange={exchange} />
+					{tail !== null ? (
+						<LiveStatusPill status={tail.status} />
+					) : exchange !== null ? (
+						<>
+							<MethodChip method={exchange.method} />
+							<StatusPill exchange={exchange} />
+						</>
+					) : null}
 				</span>
 			</summary>
 			<div class="dsui-proto__body">
-				<RequestBlock exchange={exchange} />
-				<ResponseBlock exchange={exchange} />
-				<OffsetPrimer exchange={exchange} />
+				{tail !== null ? <LiveBlock tail={tail} /> : null}
+				{exchange !== null ? (
+					<>
+						<RequestBlock exchange={exchange} />
+						<ResponseBlock exchange={exchange} />
+						<OffsetPrimer exchange={exchange} />
+					</>
+				) : null}
 			</div>
 		</details>
 	);
