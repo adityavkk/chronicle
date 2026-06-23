@@ -13,8 +13,16 @@ import { type CaptureStopper, openCaptureStream } from "../lib/capture";
 import { loadConfig } from "../lib/config";
 import { type DsClient, createClient } from "../lib/dsClient";
 import { isRecord, kindFromContentType } from "../lib/guards";
-import { DEFAULT_ROW_CAP, type StartMode, clampRowCap, resolveOffset } from "../lib/messages";
+import {
+	DEFAULT_ROW_CAP,
+	type StartMode,
+	clampRowCap,
+	republishOffset,
+	resolveOffset,
+} from "../lib/messages";
+import { appendReadHistory } from "../lib/readHistory";
 import { isLiveMode, previewTailOperation } from "../lib/tail";
+import { appendCapped } from "../lib/tailBuffer";
 import type {
 	CaptureDelivery,
 	Connection,
@@ -27,6 +35,7 @@ import type {
 	Operation,
 	ProbeStatus,
 	ProducerIdentity,
+	ReadHistoryEntry,
 	ReadResult,
 	StreamContentType,
 	StreamInfo,
@@ -60,6 +69,7 @@ const LS_ACTIVE = "dsui.activeConnection";
 const LS_THEME = "dsui.theme";
 const LS_INSPECTOR_COLLAPSED = "dsui.inspector-collapsed";
 const LS_PLAYGROUND_OPEN = "dsui.playground-open";
+const LS_COMPOSER_OPEN = "dsui.composer-open";
 /** Known subscription ids are tracked per connection (no list-all endpoint). */
 const LS_SUBS_PREFIX = "dsui.subs.";
 /** The metrics URL is remembered per connection (a separate --metrics-listen). */
@@ -83,6 +93,22 @@ export const selectedStreamPath = signal<string | null>(null);
 
 /** The most recent read result for the selected stream, or null. */
 export const lastRead = signal<ReadResult | null>(null);
+
+/**
+ * The sequence of read positions visited for the selected stream this session,
+ * newest last. Appended on every successful read (see {@link readSelected}) and
+ * reset on a stream or connection switch. Bounded by {@link READ_HISTORY_CAP}
+ * and never persisted — it turns the protocol's opaque, forward-only offsets
+ * into a navigable breadcrumb the user can click to re-read a prior position.
+ */
+export const readHistory = signal<readonly ReadHistoryEntry[]>([]);
+
+/**
+ * Cap for {@link readHistory}. Like {@link TAIL_BUFFER_CAP}, the history is a
+ * bounded in-memory buffer; this is sized for a legible breadcrumb strip rather
+ * than the tail buffer's bulk, so the oldest positions age out once exceeded.
+ */
+export const READ_HISTORY_CAP = 30;
 
 /** The last HTTP exchange of any kind, for the protocol disclosure. */
 export const lastExchange = signal<HttpExchange | null>(null);
@@ -151,6 +177,34 @@ export const inspectorCollapsed = signal<boolean>(loadBool(LS_INSPECTOR_COLLAPSE
  */
 export const playgroundOpen = signal<boolean>(loadBool(LS_PLAYGROUND_OPEN, true));
 
+/**
+ * Whether the workspace's "Under the hood" protocol disclosure is expanded.
+ * Default false (collapsed) so a beginner is not overwhelmed; a failed write's
+ * "Show details" toast action drives it open ({@link openProtocolPanel}). The
+ * ProtocolPanel two-way binds its `<details open>` to this. Not persisted — it
+ * is a transient inspection aid, not a layout preference.
+ */
+export const protocolOpen = signal<boolean>(false);
+
+/**
+ * The publish composer's effective open state — what the composer's `<details>`
+ * binds to. A transient value, NOT persisted: it starts collapsed and is
+ * recomputed on every stream selection (forced open on an empty or freshly-
+ * created stream so writing the first message is one step, otherwise reset to
+ * the remembered manual preference {@link composerOpenPref}). The user's own
+ * toggle updates both via {@link setComposerOpen}; only composerOpenPref loads
+ * from / persists to localStorage.
+ */
+export const composerOpen = signal<boolean>(false);
+
+/**
+ * The remembered manual open/closed preference for the publish composer, default
+ * false (collapsed). Persisted to localStorage like {@link playgroundOpen}; only
+ * an explicit user toggle changes it, so an auto-open on an empty stream never
+ * pollutes the memory used for non-empty streams.
+ */
+export const composerOpenPref = signal<boolean>(loadBool(LS_COMPOSER_OPEN, false));
+
 /** Coarse async status for the stream list and reads. */
 export const streamsLoading = signal<boolean>(false);
 export const readLoading = signal<boolean>(false);
@@ -195,6 +249,14 @@ export const lastOperation = signal<Operation | null>(null);
  * append via {@link bumpProducerSeq} so consecutive publishes dedupe correctly.
  */
 export const producerIdentity = signal<ProducerIdentity | null>(null);
+
+/**
+ * A one-shot hint to the publish composer to pre-fill its producer Seq field
+ * with this value and reveal the producer block. Set by the producer-conflict
+ * warning toast's "Use expected seq" action to the server's expected seq; the
+ * composer consumes it and clears it back to null. Null means no pending hint.
+ */
+export const producerSeqHint = signal<number | null>(null);
 
 /* ----------------------------------------------------------------------------
  * Write-operation dialog + metadata state
@@ -275,8 +337,84 @@ export const tailDropped = signal<number>(0);
 /** Max rows kept in the tail buffer before the oldest age out. */
 export const TAIL_BUFFER_CAP = 1000;
 
+/**
+ * How many rows age out at once when the buffer overflows (~10% of the cap).
+ * Evicting in a block, rather than trimming to exactly the cap on every append,
+ * lets the steady-state appends fall through the cheap no-eviction branch in
+ * {@link appendCapped} — eviction work is paid once per block, not per message.
+ */
+const TAIL_EVICT_BLOCK = TAIL_BUFFER_CAP / 10;
+
 /** The stopper for the active tail, or null when not tailing. Not reactive UI. */
 let tailStopper: TailStopper | null = null;
+
+/* ----------------------------------------------------------------------------
+ * Tail coalescer
+ *
+ * A fast producer delivers one onMessage per event; writing the `tailRows`
+ * signal on each one means a full render per message — more updates than a
+ * human can read. Instead, received rows accumulate in a module-level scratch
+ * array and flush to the signal once per animation frame, so a burst within one
+ * frame becomes a single signal write (one render). This is store-internal and
+ * invisible to components, which still just read `tailRows`.
+ * ------------------------------------------------------------------------- */
+
+/** Rows received since the last flush, awaiting the next animation frame. */
+let tailScratch: GridRow[] = [];
+
+/** The most recent batch exchange seen since the last flush (long-poll only). */
+let tailPendingExchange: HttpExchange | null = null;
+
+/** The pending requestAnimationFrame handle, or null when none is scheduled. */
+let tailFrame: number | null = null;
+
+/** Schedule a flush of {@link tailScratch} on the next frame (idempotent). */
+function scheduleTailFlush(): void {
+	if (tailFrame !== null) return;
+	if (typeof requestAnimationFrame !== "function") {
+		// No rAF (non-browser / test without a stub): flush synchronously so the
+		// buffer never silently strands rows.
+		flushTailRows();
+		return;
+	}
+	tailFrame = requestAnimationFrame(flushTailRows);
+}
+
+/** Cancel any scheduled flush and drop the un-flushed scratch rows. */
+function cancelTailFlush(): void {
+	if (tailFrame !== null) {
+		if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(tailFrame);
+		tailFrame = null;
+	}
+	tailScratch = [];
+	tailPendingExchange = null;
+}
+
+/**
+ * Flush the coalesced scratch rows into the bounded `tailRows` buffer in a
+ * single signal write. This is the scheduled animation-frame callback (and the
+ * no-rAF synchronous fallback) — nothing else calls it.
+ */
+function flushTailRows(): void {
+	tailFrame = null;
+	const incoming = tailScratch;
+	const exchange = tailPendingExchange;
+	tailScratch = [];
+	tailPendingExchange = null;
+	if (incoming.length > 0) {
+		const { rows, dropped } = appendCapped(
+			tailRows.value,
+			incoming,
+			TAIL_BUFFER_CAP,
+			TAIL_EVICT_BLOCK,
+		);
+		tailRows.value = rows;
+		if (dropped > 0) tailDropped.value += dropped;
+	}
+	// Mirror the latest long-poll exchange (SSE carries none) so the protocol
+	// disclosure stays current without a write per message.
+	if (exchange !== null) lastExchange.value = exchange;
+}
 
 /* ----------------------------------------------------------------------------
  * Subscription state (the reserved /__ds/* control plane)
@@ -456,6 +594,10 @@ effect(() => {
 	writeLs(LS_PLAYGROUND_OPEN, playgroundOpen.value ? "true" : "false");
 });
 
+effect(() => {
+	writeLs(LS_COMPOSER_OPEN, composerOpenPref.value ? "true" : "false");
+});
+
 /* ----------------------------------------------------------------------------
  * Wake-feed lifecycle effect
  *
@@ -550,6 +692,7 @@ export function setActiveConnection(id: string | null): void {
 	streams.value = [];
 	selectedStreamPath.value = null;
 	lastRead.value = null;
+	readHistory.value = [];
 	selectedRow.value = null;
 	rowsTruncated.value = false;
 	startMode.value = "earliest";
@@ -682,11 +825,36 @@ export function selectStream(path: string): void {
 	selectedStreamPath.value = path;
 	selectedRow.value = null;
 	lastRead.value = null;
+	// The read-cursor history is per stream; clear it before the first read of
+	// the newly selected stream (which appends the opening breadcrumb).
+	readHistory.value = [];
 	startMode.value = "earliest";
 	customOffset.value = "";
 	// Selecting a stream brings the messages workspace back to the center pane.
 	centerView.value = "messages";
-	void readSelected(OFFSET_EARLIEST_VALUE);
+	void readSelected(OFFSET_EARLIEST_VALUE).then(() => {
+		// Once the first read settles, drive the composer's open state: open it on
+		// an empty/new stream (writing is one step), else fall back to the user's
+		// remembered manual preference. Guard on the path so a stream switch mid-
+		// read does not apply to the wrong stream.
+		if (selectedStreamPath.value === path) applyComposerOpenForSelection();
+	});
+}
+
+/**
+ * Set the publish composer's open state for the just-selected stream: open it
+ * when the stream is empty and writable (rows came back empty, the read reached
+ * the server, and the stream is not closed) so the primary write surface is one
+ * step; otherwise reflect the remembered manual preference so a manual collapse
+ * is respected on non-empty streams. This is the single place stream selection
+ * influences the composer; an explicit user toggle goes through
+ * {@link setComposerOpen}.
+ */
+function applyComposerOpenForSelection(): void {
+	const read = lastRead.value;
+	const emptyWritable =
+		read !== null && read.rows.length === 0 && read.exchange.status !== 0 && !read.closed;
+	composerOpen.value = emptyWritable ? true : composerOpenPref.value;
 }
 
 /**
@@ -702,12 +870,36 @@ export async function readSelected(offset: string): Promise<void> {
 	errorMessage.value = null;
 	try {
 		const result = await client.readStream(path, offset);
+		// If the user switched stream (or connection) while this read was in
+		// flight, drop its result: the captured path no longer matches the
+		// selection, so writing lastRead/readHistory here would contaminate the
+		// now-current stream's state (and undo the history reset on switch).
+		if (selectedStreamPath.value !== path) return;
 		const cap = clampRowCap(rowCap.value);
 		const truncated = result.rows.length > cap;
 		const capped: ReadResult = truncated ? { ...result, rows: result.rows.slice(0, cap) } : result;
 		rowsTruncated.value = truncated;
 		lastRead.value = capped;
 		lastExchange.value = result.exchange;
+		// Record this visited position so the History strip can offer a one-click
+		// revisit — but only for a successful read. client.readStream resolves
+		// (rather than throwing) on a 404/5xx/network failure, and such a read did
+		// not visit a cursor, so it must not become a breadcrumb (least of all the
+		// "current" one). An empty 2xx read (e.g. at the tail) is a real position.
+		const ok = result.exchange.status >= 200 && result.exchange.status < 300;
+		if (ok) {
+			readHistory.value = appendReadHistory(
+				readHistory.value,
+				{
+					path,
+					requestedOffset: offset,
+					nextOffset: result.nextOffset,
+					rowCount: result.rows.length,
+					at: Date.now(),
+				},
+				READ_HISTORY_CAP,
+			);
+		}
 		selectedRow.value = capped.rows[0] ?? null;
 		// If the read revealed the real Content-Type, upgrade the StreamInfo.
 		const ct = result.exchange.protocol.contentType;
@@ -780,6 +972,36 @@ export function toggleInspector(): void {
 /** Toggle the left sidebar's foldable Playground section open/closed. */
 export function togglePlayground(): void {
 	playgroundOpen.value = !playgroundOpen.value;
+}
+
+/** Set the "Under the hood" protocol disclosure open state (the panel's onToggle). */
+export function setProtocolOpen(open: boolean): void {
+	protocolOpen.value = open;
+}
+
+/** Expand the protocol disclosure — the "Show details" failure-toast action. */
+export function openProtocolPanel(): void {
+	protocolOpen.value = true;
+}
+
+/**
+ * Record an explicit user open/collapse of the publish composer: update both the
+ * effective open state and the remembered manual preference (persisted via the
+ * effect), so the choice survives both a stream switch to a non-empty stream and
+ * a reload. The composer's `<details onToggle>` calls this for user toggles only.
+ */
+export function setComposerOpen(open: boolean): void {
+	composerOpen.value = open;
+	composerOpenPref.value = open;
+}
+
+/**
+ * Hint the publish composer to pre-fill its producer Seq with `seq` and reveal
+ * the producer block — the "Use expected seq" action on a producer-conflict
+ * toast. Pass null to clear it (the composer does this after consuming it).
+ */
+export function setProducerSeqHint(seq: number | null): void {
+	producerSeqHint.value = seq;
 }
 
 /** Clear the surfaced error. */
@@ -887,13 +1109,53 @@ export function closeDialog(): void {
 }
 
 /* ----------------------------------------------------------------------------
+ * Command palette (Cmd/Ctrl-K)
+ *
+ * Open-state for the keyboard command palette overlay. This is cross-cutting
+ * shared state — a global keydown registered once in app.tsx opens it, and the
+ * CommandPalette component closes it — so it lives in the store rather than as
+ * component-local state. The palette itself is pure layout over the existing
+ * actions above; the only state it needs is this open flag.
+ * ------------------------------------------------------------------------- */
+
+/** Whether the Cmd/Ctrl-K command palette overlay is open. */
+export const commandPaletteOpen = signal<boolean>(false);
+
+/** Open the command palette overlay. */
+export function openCommandPalette(): void {
+	commandPaletteOpen.value = true;
+}
+
+/** Close the command palette overlay. */
+export function closeCommandPalette(): void {
+	commandPaletteOpen.value = false;
+}
+
+/* ----------------------------------------------------------------------------
  * Write actions (create / append / close / delete / fork)
  *
  * Each mirrors the captured exchange into lastExchange (so the protocol panel
  * updates), records the Operation for the curl helper, surfaces a toast, and
  * refreshes the stream list so the navigator reflects the change. They never
  * throw: a failed write resolves to ok:false and a toast.
+ *
+ * A failed write toast is actionable: it rides the single Toast.action slot. A
+ * network failure (status 0) is worth retrying as-is, so it offers "Retry"
+ * (re-invokes the same action); any server rejection (4xx/5xx) is better
+ * understood than repeated, so it offers "Show details", which expands the
+ * Under-the-hood transcript of the captured exchange. The exchange is already
+ * mirrored into lastExchange before the toast, so the panel has it to show.
  * ------------------------------------------------------------------------- */
+
+/**
+ * Build the inline action for a failed write toast from its captured exchange: a
+ * network failure (status 0) gets "Retry" (running `retry`); a server rejection
+ * gets "Show details" (expanding the protocol disclosure on the failed exchange).
+ */
+function failureToastAction(exchange: HttpExchange, retry: () => void): ToastAction {
+	if (exchange.status === 0) return { label: "Retry", onAction: retry };
+	return { label: "Show details", onAction: openProtocolPanel };
+}
 
 /** Create a stream from typed options; refreshes the list and toasts the result. */
 export async function createStream(opts: {
@@ -918,7 +1180,12 @@ export async function createStream(opts: {
 			await refreshStreams();
 			selectStream(opts.path);
 		} else {
-			addToast({ kind: "error", title: "Create failed", message: result.error ?? opts.path });
+			addToast({
+				kind: "error",
+				title: "Create failed",
+				message: result.error ?? opts.path,
+				action: failureToastAction(result.exchange, () => void createStream(opts)),
+			});
 		}
 		return result.ok;
 	} finally {
@@ -938,6 +1205,11 @@ export async function appendMessages(
 ): Promise<boolean> {
 	const client = activeClient.value;
 	if (client === null) return false;
+	// Capture the tail cursor as it stands before the append. A publish lands
+	// exactly here, so re-reading from this cursor on success shows the just-
+	// appended rows; reading "now" would return the empty new tail and blank the
+	// grid (issue #50).
+	const priorTail = lastRead.value?.nextOffset;
 	operationInFlight.value = true;
 	try {
 		const producer = producerIdentity.value;
@@ -952,17 +1224,34 @@ export async function appendMessages(
 		if (result.ok) {
 			if (producer !== null) bumpProducerSeq();
 			addToast({ kind: "success", title: "Published", message: path });
-			// Reflect the new tail if we are viewing this stream.
-			if (selectedStreamPath.value === path) await readSelected("now");
+			// Show the just-appended rows if we are viewing this stream, re-reading
+			// from the pre-append tail cursor (falling back to the toolbar's
+			// resolved offset) rather than the empty new tail.
+			if (selectedStreamPath.value === path) {
+				await readSelected(
+					republishOffset(priorTail, resolveOffset(startMode.value, customOffset.value)),
+				);
+			}
 		} else if (result.conflict !== null) {
 			const { expectedSeq, receivedSeq } = result.conflict;
 			addToast({
 				kind: "warning",
 				title: "Producer sequence conflict",
 				message: `server expected seq ${expectedSeq ?? "?"}, received ${receivedSeq ?? "?"}`,
+				// Offer to adopt the server's expected seq so the next publish dedupes
+				// correctly; fall back to the transcript when the server gave no number.
+				action:
+					expectedSeq !== null
+						? { label: "Use expected seq", onAction: () => setProducerSeqHint(expectedSeq) }
+						: { label: "Show details", onAction: openProtocolPanel },
 			});
 		} else {
-			addToast({ kind: "error", title: "Publish failed", message: result.error ?? path });
+			addToast({
+				kind: "error",
+				title: "Publish failed",
+				message: result.error ?? path,
+				action: failureToastAction(result.exchange, () => void appendMessages(path, body, opts)),
+			});
 		}
 		return result.ok;
 	} finally {
@@ -983,7 +1272,12 @@ export async function closeStream(path: string): Promise<boolean> {
 			addToast({ kind: "success", title: "Stream closed", message: path });
 			await refreshStreams();
 		} else {
-			addToast({ kind: "error", title: "Close failed", message: result.error ?? path });
+			addToast({
+				kind: "error",
+				title: "Close failed",
+				message: result.error ?? path,
+				action: failureToastAction(result.exchange, () => void closeStream(path)),
+			});
 		}
 		return result.ok;
 	} finally {
@@ -1011,7 +1305,12 @@ export async function deleteStream(path: string): Promise<boolean> {
 			}
 			await refreshStreams();
 		} else {
-			addToast({ kind: "error", title: "Delete failed", message: result.error ?? path });
+			addToast({
+				kind: "error",
+				title: "Delete failed",
+				message: result.error ?? path,
+				action: failureToastAction(result.exchange, () => void deleteStream(path)),
+			});
 		}
 		return result.ok;
 	} finally {
@@ -1040,7 +1339,15 @@ export async function forkStream(
 			await refreshStreams();
 			selectStream(newPath);
 		} else {
-			addToast({ kind: "error", title: "Fork failed", message: result.error ?? newPath });
+			addToast({
+				kind: "error",
+				title: "Fork failed",
+				message: result.error ?? newPath,
+				action: failureToastAction(
+					result.exchange,
+					() => void forkStream(newPath, fromPath, offset, subOffset),
+				),
+			});
 		}
 		return result.ok;
 	} finally {
@@ -1166,23 +1473,26 @@ export function setTailPaused(paused: boolean): void {
 
 /** Clear the tail buffer (and the dropped counter) without stopping the tail. */
 export function clearTailBuffer(): void {
+	// Drop any rows still waiting in the coalescer so a pending flush cannot
+	// re-populate what the user just cleared; the connection stays open.
+	tailScratch = [];
+	tailPendingExchange = null;
 	tailRows.value = [];
 	tailDropped.value = 0;
 }
 
-/** Append a received tail batch into the capped buffer (unless paused). */
-function pushTailBatch(batch: TailBatch): void {
+/**
+ * Accept a received tail batch (unless paused). Rows are buffered into the
+ * coalescer scratch and flushed to the `tailRows` signal once per frame rather
+ * than written per message — see the coalescer block above. Exported only so a
+ * store test can feed batches; the tail openers are the real callers.
+ */
+export function pushTailBatch(batch: TailBatch): void {
 	if (tailPaused.value) return;
 	if (batch.rows.length === 0) return;
-	const combined = [...tailRows.value, ...batch.rows];
-	if (combined.length > TAIL_BUFFER_CAP) {
-		const overflow = combined.length - TAIL_BUFFER_CAP;
-		tailDropped.value += overflow;
-		tailRows.value = combined.slice(overflow);
-	} else {
-		tailRows.value = combined;
-	}
-	if (batch.exchange !== null) lastExchange.value = batch.exchange;
+	for (const row of batch.rows) tailScratch.push(row);
+	if (batch.exchange !== null) tailPendingExchange = batch.exchange;
+	scheduleTailFlush();
 }
 
 /**
@@ -1228,6 +1538,9 @@ export function stopTail(): void {
 		tailStopper();
 		tailStopper = null;
 	}
+	// Drop any scheduled flush so a frame queued by the last batch cannot fire
+	// after the connection is gone (also clears the un-flushed scratch rows).
+	cancelTailFlush();
 	tailStatus.value = { state: "idle" };
 	tailOperation.value = null;
 	tailStartOffset.value = null;

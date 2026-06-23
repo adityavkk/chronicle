@@ -35,8 +35,15 @@
 
 import { useComputed, useSignal } from "@preact/signals";
 import type { JSX } from "preact";
-import { useEffect, useRef } from "preact/hooks";
-import { batchHasTimes, extractTimestamp, formatBytes, formatTime } from "../lib/messages";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import {
+	batchHasTimes,
+	compileQuery,
+	extractTimestamp,
+	formatBytes,
+	formatTime,
+	matchCompiled,
+} from "../lib/messages";
 import {
 	describeTailMode,
 	isTerminalTailState,
@@ -46,11 +53,13 @@ import {
 	tailTone,
 } from "../lib/tail";
 import type { GridRow, TailStatus } from "../lib/types";
+import { ROW_HEIGHT, WINDOW_THRESHOLD, windowRange } from "../lib/virtual";
 import {
 	TAIL_BUFFER_CAP,
 	clearTailBuffer,
 	selectRow,
 	selectedRow,
+	selectedStream,
 	setTailPaused,
 	startTail,
 	stopTail,
@@ -58,14 +67,19 @@ import {
 	tailMode,
 	tailPaused,
 	tailRows,
+	tailStartOffset,
 	tailStatus,
 } from "../state/store";
+import { ExportMenu } from "./ExportMenu";
+import { RowFilter } from "./RowFilter";
 import {
 	IconArrowDownToLine,
 	IconBroadcast,
+	IconClose,
 	IconLoader,
 	IconPause,
 	IconPlay,
+	IconSearch,
 	IconStop,
 	IconTrash,
 } from "./icons";
@@ -150,36 +164,92 @@ export function TailPanel(): JSX.Element {
 	const paused = tailPaused.value;
 	const mode = tailMode.value;
 	const active = selectedRow.value;
+	const stream = selectedStream.value;
+	const startOffset = tailStartOffset.value;
 
 	const scrollRef = useRef<HTMLDivElement>(null);
 	// "Stuck to bottom": follow new rows. Disengages when the user scrolls up,
 	// re-engages when they scroll back to the bottom (or press "Jump to latest").
 	const stuck = useSignal(true);
+	// Scroll geometry that drives fixed-height windowing (below). Updated from the
+	// scroll element on scroll, on mount, and after each auto-scroll.
+	const scrollTop = useSignal(0);
+	const viewport = useSignal(0);
+
+	// Component-local, instant filter over the live buffer — never touches the
+	// store, never drops the connection (issue #53). Each visible row keeps its
+	// true arrival number (dropped + buffer position), so the # stays honest even
+	// when the filter hides earlier rows: number first, then filter.
+	const filter = useSignal("");
+	const compiled = useComputed(() => compileQuery(filter.value));
+	const visible = useComputed(() => {
+		const q = compiled.value;
+		return rows
+			.map((row, i) => ({ row, seq: dropped + i }))
+			.filter(({ row }) => matchCompiled(row, q));
+	});
 
 	const showTime = useComputed(() => batchHasTimes(rows));
 	const idle = status.state === "idle";
 	const terminal = isTerminalTailState(status);
 
+	// Window the live list (issue #58) over the FILTERED rows (issue #53) so a
+	// fast stream keeps the DOM small: above the threshold render only the visible
+	// slice inside top/bottom spacers; at or below it render every row (small reads
+	// stay simple). The spacers preserve scrollHeight, so stick-to-bottom and the
+	// scrollbar keep working. The math is pure (lib/virtual); padBottom === 0 means
+	// the newest filtered row is rendered. `visible` already carries each row's
+	// honest arrival seq, so windowing slices it without disturbing the numbering.
+	const filtered = visible.value;
+	const total = filtered.length;
+	const windowed = total > WINDOW_THRESHOLD;
+	const range = windowed
+		? windowRange(scrollTop.value, viewport.value, ROW_HEIGHT, total)
+		: { startIndex: 0, endIndex: total, padTop: 0, padBottom: 0 };
+	const windowSlice = windowed ? filtered.slice(range.startIndex, range.endIndex) : filtered;
+	const atBottom = range.padBottom === 0;
+
+	/** Capture the scroll element's geometry into the windowing signals. */
+	function syncMetrics(el: HTMLDivElement): void {
+		scrollTop.value = el.scrollTop;
+		viewport.value = el.clientHeight;
+	}
+
 	// Stop the tail when the panel unmounts (belt-and-braces; the store also
 	// stops on stream / connection / mode change). A bare cleanup, run once.
 	useEffect(() => stopTail, []);
 
-	// Auto-scroll to the newest row while stuck. Runs whenever the row count
-	// changes; reduced-motion users get an instant jump via the global CSS rule
-	// (scroll-behavior is forced to auto), so this stays honest for them.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: scrollRef + the stuck signal are stable handles; the effect is intentionally driven by the row count alone.
+	// Measure the viewport once mounted so windowing has a real clientHeight
+	// before rows arrive faster than the user scrolls.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: scrollRef is a stable handle; this measures exactly once after mount.
+	useLayoutEffect(() => {
+		const el = scrollRef.current;
+		if (el !== null) syncMetrics(el);
+	}, []);
+
+	// Auto-scroll to the newest row while stuck. Runs whenever the visible row
+	// count changes (so typing a filter re-pins to the bottom of the filtered
+	// set); reduced-motion users get an instant jump via the global CSS rule
+	// (scroll-behavior is forced to auto), so this stays honest for them. The
+	// spacers keep scrollHeight at total × row height, so scrolling to the bottom
+	// lands on the true tail even when the newest rows are not yet windowed in;
+	// syncMetrics then recomputes the window to include them.
+	const visibleCount = visible.value.length;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: scrollRef + the stuck signal are stable handles; the effect is intentionally driven by the visible row count alone.
 	useEffect(() => {
 		if (!stuck.value) return;
 		const el = scrollRef.current;
 		if (el === null) return;
 		el.scrollTop = el.scrollHeight;
-	}, [rows.length]);
+		syncMetrics(el);
+	}, [visibleCount]);
 
 	function onScroll(): void {
 		const el = scrollRef.current;
 		if (el === null) return;
-		const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_THRESHOLD;
-		stuck.value = atBottom;
+		const stickAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_THRESHOLD;
+		stuck.value = stickAtBottom;
+		syncMetrics(el);
 	}
 
 	function jumpToLatest(): void {
@@ -190,6 +260,8 @@ export function TailPanel(): JSX.Element {
 	}
 
 	const modeLabel = describeTailMode(mode);
+	const vis = visible.value;
+	const filterQuery = compiled.value;
 
 	return (
 		<section class="dsui-tail" aria-label={`Live tail (${modeLabel})`}>
@@ -198,6 +270,23 @@ export function TailPanel(): JSX.Element {
 				<span class="dsui-tail__mode" title={`Following with ${modeLabel}`}>
 					{modeLabel}
 				</span>
+				{rows.length > 0 ? (
+					<RowFilter
+						value={filter.value}
+						matched={vis.length}
+						total={rows.length}
+						active={filterQuery.active}
+						error={filterQuery.error}
+						label="Filter live messages"
+						variant="tail"
+						onInput={(v) => {
+							filter.value = v;
+						}}
+						onClear={() => {
+							filter.value = "";
+						}}
+					/>
+				) : null}
 				<span class="dsui-tail__spacer" />
 				{!terminal ? (
 					<button
@@ -262,20 +351,50 @@ export function TailPanel(): JSX.Element {
 					{showTime.value ? <span>Time</span> : null}
 					<span>Preview</span>
 				</div>
-				<div class="dsui-tail__rows" ref={scrollRef} onScroll={onScroll}>
-					{rows.length > 0 ? (
+				<div
+					class={`dsui-tail__rows${atBottom ? " is-atbottom" : ""}`}
+					ref={scrollRef}
+					onScroll={onScroll}
+				>
+					{vis.length > 0 ? (
 						// biome-ignore lint/a11y/useFocusableInteractive: focus lives on the option rows; the live listbox container itself is intentionally not a tab stop (matches the paged grid).
 						// biome-ignore lint/a11y/useSemanticElements: a native <select> cannot host these rich, clickable live rows; role="listbox" with role="option" children is the correct single-select pattern.
-						<div role="listbox" class="dsui-grid__body" aria-label="Live message rows">
-							{rows.map((row, i) => (
+						<div
+							role="listbox"
+							class="dsui-grid__body"
+							aria-label="Live message rows"
+							// Spacers stand in for the windowed-out rows so scrollHeight stays
+							// total × row height (sticky header + stick-to-bottom keep working).
+							style={{ paddingBlockStart: range.padTop, paddingBlockEnd: range.padBottom }}
+						>
+							{windowSlice.map(({ row, seq }) => (
 								<TailRow
-									key={`${i}-${row.index}-${row.preview}`}
+									key={`${seq}-${row.index}-${row.preview}`}
 									row={row}
-									seq={dropped + i}
+									seq={seq}
 									active={active === row}
 									showTime={showTime.value}
 								/>
 							))}
+						</div>
+					) : rows.length > 0 ? (
+						<div class="dsui-empty dsui-empty--inline">
+							<IconSearch size={22} class="dsui-empty__icon" />
+							<p class="dsui-empty__title">No messages match the filter</p>
+							<p class="dsui-empty__hint">
+								None of the {rows.length} buffered {rows.length === 1 ? "message" : "messages"}{" "}
+								match <code>{filter.value}</code>. New matching messages will appear as they arrive.
+							</p>
+							<button
+								type="button"
+								class="dsui-btn dsui-btn--xs"
+								onClick={() => {
+									filter.value = "";
+								}}
+							>
+								<IconClose size={13} />
+								<span>Clear filter</span>
+							</button>
 						</div>
 					) : (
 						<div class="dsui-empty dsui-empty--inline">
@@ -307,7 +426,7 @@ export function TailPanel(): JSX.Element {
 					)}
 				</div>
 
-				{!stuck.value && rows.length > 0 ? (
+				{!stuck.value && vis.length > 0 ? (
 					<button
 						type="button"
 						class="dsui-tail__jump"
@@ -331,6 +450,13 @@ export function TailPanel(): JSX.Element {
 					</span>
 				) : null}
 				<span class="dsui-tail__spacer" />
+				<ExportMenu
+					rows={rows}
+					kind={stream?.kind ?? rows[0]?.kind ?? "json"}
+					streamPath={stream?.path ?? "stream"}
+					offset={`tail-${startOffset ?? "now"}`}
+					size="xs"
+				/>
 				<span class={`dsui-tail__stick${stuck.value ? " is-on" : ""}`}>
 					{stuck.value ? "Following tail" : "Paused scroll"}
 				</span>
