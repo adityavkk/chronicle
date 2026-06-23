@@ -27,9 +27,11 @@
  * headers the server did NOT send. All the explanatory copy and classification
  * lives in lib/protocol (pure + tested); this component only lays it out.
  *
- * Extensibility seam: this is a self-contained `<details>` driven by one
- * exchange. Drop it anywhere a captured exchange is in scope (the workspace
- * uses store.lastExchange). Add a section by adding a `<ProtoSection>`.
+ * Extensibility seam: this is a `<details>` driven by one exchange; drop it
+ * anywhere a captured exchange is in scope (the workspace uses store.lastExchange)
+ * and add a section with a `<ProtoSection>`. Its open state is the one piece of
+ * shared state it reads: the `protocolOpen` store signal, so a failed write's
+ * "Show details" toast action can expand it from across the app.
  */
 
 import type { ComponentChildren, JSX } from "preact";
@@ -51,6 +53,7 @@ import {
 	tailTone,
 } from "../lib/tail";
 import type { HttpExchange, Operation, TailStatus } from "../lib/types";
+import { protocolOpen, setProtocolOpen } from "../state/store";
 import { CopyButton } from "./CopyButton";
 import { IconBroadcast, IconChevronRight, IconCode, IconCornerDownRight } from "./icons";
 
@@ -341,7 +344,18 @@ export function ProtocolPanel(props: ProtocolPanelProps): JSX.Element | null {
 	const tail = props.tail ?? null;
 	if (exchange === null && tail === null) return null;
 	return (
-		<details class="dsui-proto">
+		<details
+			class="dsui-proto"
+			// The open state is store-driven (protocolOpen) so a failed write's
+			// "Show details" toast action can expand it. onToggle records a user's
+			// own open/collapse back into the signal; a programmatic change is already
+			// in sync, so the guard skips re-writing it.
+			open={protocolOpen.value}
+			onToggle={(e) => {
+				const open = e.currentTarget.open;
+				if (open !== protocolOpen.value) setProtocolOpen(open);
+			}}
+		>
 			<summary class="dsui-proto__summary">
 				<IconChevronRight size={13} class="dsui-proto__summarycaret" />
 				{tail !== null ? (
