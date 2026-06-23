@@ -530,6 +530,21 @@ describe("forkStream", () => {
 		// The PUT is the second call, after the HEAD probe.
 		expect(reqHeaders(fetchFn, 1)["Stream-Fork-Sub-Offset"]).toBeUndefined();
 	});
+
+	it("resolves a 'now' fork offset to the source tail (Stream-Next-Offset), which the server accepts", async () => {
+		const fetchFn = stubFetch(
+			// HEAD source: content type + the concrete current tail offset
+			{
+				status: 200,
+				headers: { "Content-Type": "application/json", "Stream-Next-Offset": "tail-42" },
+			},
+			{ status: 201 }, // PUT fork
+		);
+		await createClient(CONN).forkStream("fork", "orders", "now");
+		// "now" is rejected by the server as "beyond source stream length"; the
+		// client substitutes the source's concrete tail offset.
+		expect(reqHeaders(fetchFn, 1)["Stream-Fork-Offset"]).toBe("tail-42");
+	});
 });
 
 /* ----------------------------------------------------------------------------

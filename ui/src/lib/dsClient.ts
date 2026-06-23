@@ -418,9 +418,15 @@ export function createClient(connection: Connection): DsClient {
 		},
 
 		async forkStream(newPath, fromPath, offset, subOffset, signal) {
-			// A fork's content type MUST match the source stream's, or the server
-			// rejects the create with 409 ("fork content type does not match source
-			// stream"). Discover the source's type via HEAD rather than assuming.
+			// HEAD the source once to learn two things the fork must respect:
+			//  1. its content type — a fork's type MUST match the source or the
+			//     server rejects with 409 ("fork content type does not match source");
+			//  2. its current tail offset — the valid fork range is
+			//     0 <= forkOffset <= source.CurrentOffset, and the literal "now"
+			//     sentinel resolves ABOVE CurrentOffset, so the server rejects it with
+			//     400 ("fork offset beyond source stream length"). Resolve "now"/blank
+			//     to the concrete Stream-Next-Offset (the tail) so "fork at latest"
+			//     inherits everything instead of failing.
 			const probe = await doFetch(
 				"HEAD",
 				streamUrl(connection, fromPath),
@@ -428,7 +434,15 @@ export function createClient(connection: Connection): DsClient {
 				signal,
 			);
 			const sourceType = probe.exchange.protocol.contentType ?? "application/octet-stream";
-			const fork = subOffset === undefined ? { fromPath, offset } : { fromPath, offset, subOffset };
+			const wantsTail = offset.trim() === "" || offset.trim() === "now";
+			const resolvedOffset =
+				wantsTail && probe.exchange.protocol.streamNextOffset !== null
+					? probe.exchange.protocol.streamNextOffset
+					: offset;
+			const fork =
+				subOffset === undefined
+					? { fromPath, offset: resolvedOffset }
+					: { fromPath, offset: resolvedOffset, subOffset };
 			return createStream({ path: newPath, contentType: sourceType, fork }, signal);
 		},
 
