@@ -17,16 +17,20 @@
 import type { JSX } from "preact";
 import { ConnectionManager } from "./components/ConnectionManager";
 import { CreateStreamDialog } from "./components/CreateStreamDialog";
+import { CreateSubscriptionDialog } from "./components/CreateSubscriptionDialog";
 import { ForkDialog } from "./components/ForkDialog";
 import { Inspector } from "./components/Inspector";
 import { MessagesWorkspace } from "./components/MessagesWorkspace";
+import { MetricsWorkspace } from "./components/MetricsWorkspace";
 import { Navigator } from "./components/Navigator";
 import { StartScreen } from "./components/StartScreen";
+import { SubscriptionWorkspace } from "./components/SubscriptionWorkspace";
 import { Toaster } from "./components/Toaster";
 import { IconPanelRight, IconStream } from "./components/icons";
 import {
 	activeConnection,
 	activeDialog,
+	centerView,
 	dismissError,
 	errorMessage,
 	inspectorCollapsed,
@@ -46,6 +50,18 @@ function ErrorBanner(): JSX.Element | null {
 	);
 }
 
+/** The center workspace for the active view. The single center-pane routing seam. */
+function CenterWorkspace(): JSX.Element {
+	switch (centerView.value) {
+		case "subscription":
+			return <SubscriptionWorkspace />;
+		case "metrics":
+			return <MetricsWorkspace />;
+		case "messages":
+			return <MessagesWorkspace />;
+	}
+}
+
 /** The routed content: the start screen, or the three-pane workspace shell. */
 function Shell(): JSX.Element {
 	// No active connection -> the connection manager's start screen. Otherwise
@@ -54,10 +70,16 @@ function Shell(): JSX.Element {
 		return <StartScreen />;
 	}
 
+	// The right-hand inspector is the message inspector; it is meaningful only in
+	// the messages view. The subscription + metrics views carry their own detail
+	// in the center pane, so the inspector folds away for them. Within the
+	// messages view the user can also collapse it by hand (the header toggle).
 	const collapsed = inspectorCollapsed.value;
+	const inMessages = centerView.value === "messages";
+	const showInspector = inMessages && !collapsed;
 
 	return (
-		<div class="dsui-shell">
+		<div class={`dsui-shell${showInspector ? "" : " dsui-shell--noinspector"}`}>
 			<header class="dsui-header">
 				<div class="dsui-brand">
 					<span class="dsui-brand__badge" aria-hidden="true">
@@ -67,34 +89,36 @@ function Shell(): JSX.Element {
 					<span class="dsui-brand__sub">Durable Streams console</span>
 				</div>
 				<div class="dsui-header__actions">
-					<button
-						type="button"
-						class="dsui-iconbtn"
-						aria-pressed={!collapsed}
-						aria-label="Toggle inspector panel"
-						title={collapsed ? "Show inspector panel" : "Hide inspector panel"}
-						onClick={() => toggleInspector()}
-					>
-						<IconPanelRight size={16} />
-					</button>
+					{inMessages ? (
+						<button
+							type="button"
+							class="dsui-iconbtn"
+							aria-pressed={!collapsed}
+							aria-label="Toggle inspector panel"
+							title={collapsed ? "Show inspector panel" : "Hide inspector panel"}
+							onClick={() => toggleInspector()}
+						>
+							<IconPanelRight size={16} />
+						</button>
+					) : null}
 					<ConnectionManager />
 				</div>
 			</header>
 
 			<ErrorBanner />
 
-			<main class={`dsui-main${collapsed ? " dsui-main--noinspector" : ""}`}>
+			<main class={`dsui-main${showInspector ? "" : " dsui-main--noinspector"}`}>
 				<aside class="dsui-region dsui-region--nav">
 					<Navigator />
 				</aside>
 				<section class="dsui-region dsui-region--workspace">
-					<MessagesWorkspace />
+					<CenterWorkspace />
 				</section>
-				{collapsed ? null : (
+				{showInspector ? (
 					<aside class="dsui-region dsui-region--inspector">
 						<Inspector />
 					</aside>
-				)}
+				) : null}
 			</main>
 		</div>
 	);
@@ -107,6 +131,8 @@ function Dialogs(): JSX.Element | null {
 			return <CreateStreamDialog />;
 		case "fork":
 			return <ForkDialog />;
+		case "subscription":
+			return <CreateSubscriptionDialog />;
 		case null:
 			return null;
 	}

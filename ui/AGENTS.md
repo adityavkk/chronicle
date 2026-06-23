@@ -352,6 +352,128 @@ the collapse/fold affordances reuses `.dsui-iconbtn` and the existing caret
 rotation idiom (a chevron `transform: rotate(90deg)` under reduced-motion safety
 from `base.css`).
 
+## The subscription + metrics seams (the reserved `/__ds/*` control plane)
+
+The "Subscriptions" and "Metrics" rail affordances are wired onto the same
+layering as everything else — contracts + guards + previews in `lib/`, the only
+`fetch` in `dsClient.ts`, mutations only in the store. The control plane is the
+chronicle fan-out surface: a subscription links streams (by glob `pattern`
+and/or an explicit `streams` list) and delivers wakes by POSTing a signed
+notification to a webhook URL ("webhook") or by appending wake events to a wake
+stream that workers claim ("pull-wake"). Two facts shape the design:
+
+- **There is NO list-all endpoint** (just like streams). The UI tracks the set
+  of known subscription ids client-side, persisted per connection to
+  localStorage (`dsui.subs.<connId>`), exactly like the connection list. The
+  store hydrates it on connect and on `initStore`, and `rememberSubscriptionId`/
+  `forgetSubscriptionId` keep it in sync as ids are created/deleted/404'd.
+- **The `/__ds/*` surface is served on the connection ORIGIN, not under
+  `streamRoot`.** So `subscriptionUrl(conn, id, suffix)` joins `baseUrl +
+  /__ds/subscriptions/<encoded-id> + suffix` (no `streamRoot`), distinct from
+  `streamUrl`. Metrics live on a SEPARATE listener (the `--metrics-listen`
+  address, e.g. `:9090`), so the metrics URL is an explicit per-connection
+  setting (`dsui.metricsUrl.<connId>`), not derived from the stream origin.
+
+The typed seams (all verified against the server source in `webhook/wire.go` +
+`webhook/types.go`, not guessed):
+
+- **Contracts (`lib/types.ts`).** `Subscription` (+ `SubscriptionType`,
+  `LinkType`, `SubscriptionStatus`, `SubscriptionPhase`, `StreamLink`,
+  `WebhookConfig`/`WebhookSigning`), `CreateSubscriptionOptions`, the pull-wake
+  worker shapes `WakeClaim` / `WakeStreamSnapshot` / `OffsetAck` / `AckRequest` /
+  `AckResult`, and the generic outcome `SubscriptionResult<T>` (carries `ok`,
+  the parsed `value`, the typed `fenced` flag + wire `errorCode`, plus the
+  `Operation` + `HttpExchange` like `WriteResult`). NOTE the serialized GET
+  `streams[]` only carries `path`/`link_type`/`acked_offset`; the richer
+  `tail_offset`/`has_pending` appear only in the claim + wake plane
+  (`WakeStreamSnapshot`). `phase`/`generation` are runtime-only (not in the GET
+  body), modeled as optional. Metrics: `Metric` / `MetricSample` / `MetricType`
+  / `MetricsSnapshot`.
+- **Guards + previews (`lib/subscriptions.ts`, pure + tested).** Hand-written,
+  tolerant parsers: `parseSubscription`, `parseStreamLink`,
+  `parseWakeStreamSnapshot`, `parseWakeClaim`, `parseAckResult`, and
+  `parseErrorCode` (reads the `{"error":{"code":…}}` envelope so FENCED /
+  ALREADY_CLAIMED / CONFIG_CONFLICT surface typed). Body builders
+  `buildCreateBody`/`buildAckBody` (wire field names, empties omitted to match
+  the server's config-hash idempotency). Operation previews
+  (`previewCreateSubscriptionOperation`, `previewClaimOperation`,
+  `previewAckOperation`, …) mirror the client's request builders so a form's
+  copy-as-curl is identical to what runs — unit-tested against the client to
+  catch drift, same discipline as `lib/streamForm` / `lib/tail`.
+- **Metrics parser (`lib/metrics.ts`, pure + tested).** `parseMetrics(text)`
+  parses the Prometheus 0.0.4 text exposition format into a `MetricsSnapshot`,
+  grouping the `_bucket`/`_sum`/`_count` series of a histogram/summary back under
+  one base family, reading `# HELP`/`# TYPE`, and preserving `NaN`/`±Inf`.
+  Convenience accessors `findMetric` / `sumSamples`.
+- **Client methods (`lib/dsClient.ts`).** `createSubscription`,
+  `getSubscription`, `deleteSubscription`, `addSubscriptionStreams`,
+  `removeSubscriptionStream`, `claimWake`, `ackWake` (Bearer token), `releaseWake`
+  (Bearer token), and `fetchMetrics(metricsUrl)`. Each subscription op runs
+  through the shared `doSubscriptionOp` and resolves to a typed
+  `SubscriptionResult` — never throwing; a 409 FENCED (ack/release) or
+  ALREADY_CLAIMED (claim) sets `fenced`/`errorCode` rather than looking like an
+  opaque failure. `fetchMetrics` returns `{ snapshot, exchange }` (null snapshot
+  on non-2xx / network failure).
+- **Store glue (`state/store.ts`).** Signals: `subscriptionIds` (persisted set),
+  `subscriptionDetails` (cache by id), `selectedSubscriptionId`,
+  `subscriptionInFlight`/`subscriptionLoading`, plus the derived
+  `selectedSubscription`; the pull-wake worker session `activeClaim` (the
+  `WakeClaim` whose Bearer token + fencing the ack/release controls use —
+  ephemeral, never persisted) and `claimInFlight`; and `metricsUrl` (persisted),
+  `metrics`, `metricsLoading`, `metricsError`. Actions: `trackSubscriptionId` /
+  `untrackSubscriptionId` (local-only id tracking), `selectSubscription`,
+  `createSubscription`, `getSubscription`, `deleteSubscription`,
+  `addSubscriptionStreams`, `removeSubscriptionStream`, the worker plane
+  `claimWake` / `ackWake` (with `done` to release+apply or `false` to
+  heartbeat-extend) / `releaseWake` (each mirrors `lastOperation`/`lastExchange`,
+  toasts, keeps the known-ids set in sync, and surfaces a 409 FENCED /
+  ALREADY_CLAIMED as a distinct warning toast that clears the stale claim), and
+  `setMetricsUrl` / `refreshMetrics`. `setActiveConnection` + `initStore`
+  rehydrate the per-connection subscription set and metrics URL.
+- **Center-pane routing (`state/store.ts`, `app.tsx`).** `centerView`
+  (`"messages" | "subscription" | "metrics"`) + `setCenterView` are the single
+  seam for what the center region shows. Selecting a stream flips it to
+  `"messages"`, selecting a subscription to `"subscription"`, and the Metrics
+  rail entry to `"metrics"`. `app.tsx`'s `CenterWorkspace` switches on it; the
+  right-hand `Inspector` folds away (`dsui-shell--noinspector`) for the
+  subscription/metrics views, which carry their own detail in the center pane.
+  The subscription create modal is the third `activeDialog` value
+  (`"subscription"`, opened by `openCreateSubscriptionDialog`).
+- **The feature components.** `CreateSubscriptionDialog` (the modal — a delivery-
+  type picker that swaps the webhook-URL vs wake-stream field, glob pattern
+  and/or an explicit-streams textarea, an Advanced disclosure for lease TTL +
+  description; validates via `lib/subscriptionForm` and previews the PUT curl).
+  `SubscriptionWorkspace` (the center detail view, parallel to
+  `MessagesWorkspace`: type/phase/generation/lease meta, the links table with
+  link-type + acked→tail + pending state and add/remove-stream controls, the
+  Delete confirm; for webhook subs the delivery URL + JWKS link + ack-callback
+  curl, for pull-wake subs the Claim / Ack+release / Heartbeat / Release worker
+  controls — the FENCED 409 is surfaced as a warning toast). `MetricsWorkspace`
+  (the metrics URL input + Scrape, a curated key-metric tile grid, and the full
+  families table). Each action shows copy-as-curl and feeds the `ProtocolPanel`
+  from `lastExchange`. Validation + the curl/callback previews are pure in
+  `lib/subscriptionForm` (unit-tested), so components only lay out the controls.
+
+**Runtime constraint (documented for whoever builds the UI on top):**
+subscriptions require chronicle's REDIS backend (`-store redis`); the memory
+store rejects them. Docker/Colima may be down in this environment, so there is
+NO live `__ds` server to hit here — these seams are built + UNIT-tested with a
+mocked `fetch` (see the subscription/metrics cases in `dsClient.test.ts`,
+`subscriptions.test.ts`, `metrics.test.ts`) and typecheck/lint/build clean. Do
+NOT block UI work on a live subscriptions server; the parsers are robust to
+4xx/5xx/network and the 409 fencing path is covered by tests.
+
+The Navigator's old `<ComingNext>` rows are now real: a Subscriptions section
+(the client-side known-ids list, a "track existing id" affordance, and a create
+button) and a Metrics rail entry that switches the center pane. The UI keeps to
+these seams: a control calls a store action, the store calls the client, and the
+equivalent curl comes from the `preview…Operation` helpers in
+`lib/subscriptions.ts` (plus `previewCallbackOperation` in `lib/subscriptionForm`
+for the webhook ack-callback path the control-plane preview set does not cover).
+The whole panel is built + unit-tested against a mocked store/`fetch` — there is
+no live `__ds` server in this environment (Redis-only backend; Docker/Colima may
+be down), so do NOT block on one.
+
 ## How to add another operation, end to end
 
 Every operation in dsui follows the same path: a client method does the request,
