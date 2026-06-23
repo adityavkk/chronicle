@@ -47,11 +47,13 @@ import {
 	lastRead,
 	operationInFlight,
 	playgroundHighlight,
+	playgroundOpen,
 	runDemoProducer,
 	selectStream,
 	selectedStreamPath,
 	setTailMode,
 	startTail,
+	togglePlayground,
 } from "../state/store";
 import { CurlPreview } from "./CurlPreview";
 import {
@@ -278,6 +280,7 @@ export function Playground(): JSX.Element {
 		return () => globalThis.clearTimeout(id);
 	}, [highlightTick]);
 
+	const open = playgroundOpen.value;
 	const origin = conn ?? PLACEHOLDER_CONN;
 	const presets = buildPresets(origin, read?.nextOffset ?? "now", onSample);
 
@@ -288,21 +291,33 @@ export function Playground(): JSX.Element {
 			ref={sectionRef}
 		>
 			<header class="dsui-nav__head">
-				<span class="dsui-nav__title">
-					<IconSparkles size={13} class="dsui-playground__sparkle" />
-					Playground
-				</span>
+				<button
+					type="button"
+					class="dsui-playground__toggle"
+					aria-expanded={open}
+					onClick={() => togglePlayground()}
+				>
+					<span class="dsui-nav__title">
+						<IconSparkles size={13} class="dsui-playground__sparkle" />
+						Playground
+					</span>
+					<IconChevronRight size={14} class="dsui-playground__caret" />
+				</button>
 			</header>
-			<p class="dsui-playground__lead">
-				One-click presets on the sample stream <code>{SAMPLE_STREAM}</code>. Each runs the real
-				operation — watch the toasts, the live grid, and the protocol disclosure — and shows the
-				equivalent <code>curl</code>.
-			</p>
-			<ul class="dsui-playground__list">
-				{presets.map((p) => (
-					<PresetRow key={p.key} preset={p} disabled={inFlight} />
-				))}
-			</ul>
+			{open ? (
+				<>
+					<p class="dsui-playground__lead">
+						One-click presets on the sample stream <code>{SAMPLE_STREAM}</code>. Each runs the real
+						operation — watch the toasts, the live grid, and the protocol disclosure — and shows the
+						equivalent <code>curl</code>.
+					</p>
+					<ul class="dsui-playground__list">
+						{presets.map((p) => (
+							<PresetRow key={p.key} preset={p} disabled={inFlight} />
+						))}
+					</ul>
+				</>
+			) : null}
 		</section>
 	);
 }

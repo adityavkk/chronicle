@@ -394,6 +394,14 @@
 	overflow: hidden;
 }
 
+/* User-collapsed inspector: drop to two columns (nav + workspace). The
+   inspector aside is not rendered while collapsed, so this just reclaims its
+   track. Declared before the @container rules so a wider shell still honors it;
+   a re-declaration inside @container shell keeps it winning at every width. */
+.dsui-main--noinspector {
+	grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+}
+
 .dsui-region {
 	min-block-size: 0;
 	overflow: hidden;
@@ -417,9 +425,13 @@
 	background: var(--panel-2);
 }
 
-/* Collapse the inspector on medium widths, then the nav on small. */
+/* Collapse the inspector on medium widths, then the nav on small. The
+   --noinspector modifier is re-declared at each breakpoint so its higher
+   specificity never overrides the responsive template: at every width it
+   tracks the same column layout the auto-collapse would use. */
 @container shell (max-width: 1000px) {
-	.dsui-main {
+	.dsui-main,
+	.dsui-main--noinspector {
 		grid-template-columns: minmax(180px, 230px) minmax(0, 1fr);
 	}
 	.dsui-region--inspector {
@@ -427,7 +439,8 @@
 	}
 }
 @container shell (max-width: 680px) {
-	.dsui-main {
+	.dsui-main,
+	.dsui-main--noinspector {
 		grid-template-columns: minmax(0, 1fr);
 	}
 	.dsui-region--nav {
@@ -1357,8 +1370,18 @@
 	min-block-size: 0;
 }
 .dsui-inspector__head {
+	display: flex;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: var(--space-2);
 	border-block-end: 1px solid var(--border-subtle);
 	padding: var(--space-2) var(--space-2) 0;
+}
+/* The collapse (»/chevron) button sits at the end of the tab row and nudges up
+   to sit flush with the tab strip's resting baseline. */
+.dsui-inspector__collapse {
+	flex: none;
+	margin-block-end: var(--space-1);
 }
 .dsui-tabs {
 	display: flex;
@@ -2594,6 +2617,30 @@
 }
 .dsui-playground__sparkle {
 	color: var(--accent);
+}
+
+/* The section header is a fold toggle: a full-width button carrying the
+   nav title + a chevron that rotates when the section is open. */
+.dsui-playground__toggle {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2);
+	inline-size: 100%;
+	border-radius: var(--radius-sm);
+	text-align: start;
+	transition: color var(--dur-1) var(--ease-out);
+}
+.dsui-playground__toggle:hover .dsui-nav__title {
+	color: var(--fg-muted);
+}
+.dsui-playground__caret {
+	color: var(--fg-subtle);
+	flex: none;
+	transition: transform var(--dur-2) var(--ease-out);
+}
+.dsui-playground__toggle[aria-expanded="true"] .dsui-playground__caret {
+	transform: rotate(90deg);
 }
 .dsui-playground__lead {
 	padding: 0 var(--space-3) var(--space-1);

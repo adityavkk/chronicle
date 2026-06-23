@@ -23,8 +23,15 @@ import { MessagesWorkspace } from "./components/MessagesWorkspace";
 import { Navigator } from "./components/Navigator";
 import { StartScreen } from "./components/StartScreen";
 import { Toaster } from "./components/Toaster";
-import { IconStream } from "./components/icons";
-import { activeConnection, activeDialog, dismissError, errorMessage } from "./state/store";
+import { IconPanelRight, IconStream } from "./components/icons";
+import {
+	activeConnection,
+	activeDialog,
+	dismissError,
+	errorMessage,
+	inspectorCollapsed,
+	toggleInspector,
+} from "./state/store";
 
 function ErrorBanner(): JSX.Element | null {
 	const msg = errorMessage.value;
@@ -47,6 +54,8 @@ function Shell(): JSX.Element {
 		return <StartScreen />;
 	}
 
+	const collapsed = inspectorCollapsed.value;
+
 	return (
 		<div class="dsui-shell">
 			<header class="dsui-header">
@@ -58,22 +67,34 @@ function Shell(): JSX.Element {
 					<span class="dsui-brand__sub">Durable Streams console</span>
 				</div>
 				<div class="dsui-header__actions">
+					<button
+						type="button"
+						class="dsui-iconbtn"
+						aria-pressed={!collapsed}
+						aria-label="Toggle inspector panel"
+						title={collapsed ? "Show inspector panel" : "Hide inspector panel"}
+						onClick={() => toggleInspector()}
+					>
+						<IconPanelRight size={16} />
+					</button>
 					<ConnectionManager />
 				</div>
 			</header>
 
 			<ErrorBanner />
 
-			<main class="dsui-main">
+			<main class={`dsui-main${collapsed ? " dsui-main--noinspector" : ""}`}>
 				<aside class="dsui-region dsui-region--nav">
 					<Navigator />
 				</aside>
 				<section class="dsui-region dsui-region--workspace">
 					<MessagesWorkspace />
 				</section>
-				<aside class="dsui-region dsui-region--inspector">
-					<Inspector />
-				</aside>
+				{collapsed ? null : (
+					<aside class="dsui-region dsui-region--inspector">
+						<Inspector />
+					</aside>
+				)}
 			</main>
 		</div>
 	);

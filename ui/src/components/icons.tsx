@@ -396,3 +396,13 @@ export function IconArrowDownToLine(props: IconProps): JSX.Element {
 		</Icon>
 	);
 }
+
+/** A rounded rect with a divided right column — the inspector-panel toggle. */
+export function IconPanelRight(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<rect x="3" y="4" width="18" height="16" rx="2" />
+			<path d="M15 4v16" />
+		</Icon>
+	);
+}
