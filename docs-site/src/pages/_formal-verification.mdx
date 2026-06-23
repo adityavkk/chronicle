@@ -1,16 +1,16 @@
 ---
 title: "Correct by <em>proof</em>"
-summary: "A proposal for formally verifying Chronicle: model-based property testing against the MemoryStore oracle, generative differential testing, porcupine linearizability of the log, Lean 4 proofs of the pure cores, a TLA+ model of the subscription fence with trace validation, and Alloy for fork lineage — each mapped to the exact invariant it pins and what it is worth."
-eyebrow: "Proposal"
+summary: "How Chronicle is formally verified, now built and merged on main: model-based property testing against the MemoryStore oracle, generative differential testing, porcupine linearizability of the log, Lean 4 proofs of the pure cores, a TLA+ model of the subscription fence with trace validation and an Apalache inductive proof, and Alloy for fork lineage. Each is mapped to the exact invariant it pins and what it is worth."
+eyebrow: "Built and verified"
 meta: "Formal verification"
-deck: "Chronicle's tests already pin the load-bearing invariants from more than one side. This page proposes the next rung: <strong>formal verification</strong> — seven candidates, from generative property tests the existing <code>MemoryStore</code> oracle drives for free, through <code>porcupine</code> linearizability of the log, to machine-checked <strong>Lean</strong> proofs of the pure cores and a <strong>TLA+</strong> model of the subscription fence. Each candidate is matched to the condition it locks down, and ranked by leverage against effort."
+deck: "Chronicle's tests already pin the load-bearing invariants from more than one side. This page laid out the next rung, and it is now <strong>built and verified</strong> on <code>main</code>: <strong>formal verification</strong> — seven candidates, from generative property tests the <code>MemoryStore</code> oracle drives for free, through <code>porcupine</code> linearizability of the log, to machine-checked <strong>Lean</strong> proofs of the pure cores and a <strong>TLA+</strong> model of the subscription fence. Each candidate is matched to the condition it locks down, and ranked by leverage against effort. The plain catalog of what landed is the test catalog."
 byline:
   - label: "Status"
-    value: "proposal · design phase"
+    value: "built · verified · merged to main"
   - label: "Tracks"
     value: "property-based-testing · formal-verification"
   - label: "Source"
-    value: "store/ · jepsen/ · webhook/"
+    value: "store/ · jepsen/ · webhook/ · lean/ · formal/"
     href: "https://github.com/adityavkk/chronicle/tree/main"
 ---
 
@@ -21,7 +21,7 @@ import Table from "../components/Table.astro";
 
 <Tldr>
   <ul>
-    <li><strong>This is a proposal, not a status report.</strong> Nothing here is built yet. The <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/testing`}>testing page</a> describes what Chronicle <em>does</em>; this page describes what formal verification <em>would add</em>, and what each candidate is worth against its cost.</li>
+    <li><strong>This is now built and verified, not a proposal.</strong> All of the formal-verification epic, <a href="https://github.com/adityavkk/chronicle/issues/25">#25</a>, has landed and merged to <code>main</code>: the Lean proofs, the TLA+ and Apalache and Alloy models, the Porcupine linearizability checks, the differential and fuzz tests, and the failover nemesis. The plain catalog of every kind of test, what it gives you, and its downside is the <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/test-catalog`}>test catalog</a>. This page is the reasoning behind it: it describes what each candidate is worth against its cost, and the wording below is kept as written so the argument and the result can be read side by side.</li>
     <li><strong>Why prove when the tests are already good?</strong> Tests sample the input space; the bugs that survive a strong suite live in the gaps between the examples. Formal methods quantify over <em>all</em> inputs and interleavings, hand back a machine-checked argument, and produce the minimal counterexample when a property fails.</li>
     <li><strong>The targets are already isolated.</strong> Chronicle lifted its hardest logic into pure, total cores — <code>ValidateProducer</code>, the offset order, the cursor, the generation fence. Small, total, and central is exactly the profile that rewards proof.</li>
     <li><strong>The cheapest rung has the highest coverage.</strong> Model-based property testing reuses the <code>MemoryStore</code> as a reference oracle: drive random operation sequences through both backends and assert they agree after every step. One property subsumes dozens of hand-written cases.</li>
@@ -75,13 +75,13 @@ import Table from "../components/Table.astro";
   <Table wide={true}>
     | # | Candidate | What it establishes | Coverage | Effort | Status |
     | --- | --- | --- | --- | --- | --- |
-    | 1 | **Model-based property testing** (`rapid`) | `MemoryStore` oracle ≡ Redis backend over random op sequences | reachable states (sampled, shrunk) | low | proposed |
-    | 2 | **Differential testing**, generative | Lua mirror ≡ pure-Go validators for every generated input | input space (sampled, shrunk) | low | seed exists[^t-diff] |
-    | 3 | **Metamorphic testing** | relations: `read∘append`, fork-prefix, batch-split equivalence | sampled | low | proposed |
-    | 4 | **Linearizability** (`porcupine`) | per-stream append/read/close has a valid serialization | recorded histories | low–med | infra vendored[^fn-porc] |
-    | 5 | **Machine-checked proof** (Lean 4) | the pure cores correct for all inputs | exhaustive (proof) | medium | proposed |
-    | 6 | **Model checking** (TLA+ / TLC / Apalache) | subscription fence safety + liveness, all interleavings | exhaustive (bounded) | med–high | proposed |
-    | 7 | **Bounded relational** (Alloy) | fork lineage + refcount GC has no bad configuration | bounded exhaustive | medium | optional |
+    | 1 | **Model-based property testing** (`rapid`) | `MemoryStore` oracle ≡ Redis backend over random op sequences | reachable states (sampled, shrunk) | low | built[^t-diff] |
+    | 2 | **Differential testing**, generative | Lua mirror ≡ pure-Go validators for every generated input | input space (sampled, shrunk) | low | built[^t-diff] |
+    | 3 | **Metamorphic testing** | relations: `read∘append`, fork-prefix, batch-split equivalence | sampled | low | built |
+    | 4 | **Linearizability** (`porcupine`) | per-stream append/read/close has a valid serialization | recorded histories | low–med | built[^fn-porc] |
+    | 5 | **Machine-checked proof** (Lean 4) | the pure cores correct for all inputs | exhaustive (proof) | medium | built |
+    | 6 | **Model checking** (TLA+ / TLC / Apalache) | subscription fence safety + liveness, all interleavings | exhaustive (bounded) | med–high | built |
+    | 7 | **Bounded relational** (Alloy) | fork lineage + refcount GC has no bad configuration | bounded exhaustive | medium | built |
   </Table>
 </section>
 
@@ -283,11 +283,18 @@ import Table from "../components/Table.astro";
     | **P4** | Alloy fork-lineage model; wire the green checks into CI | `formal-verification` |
   </Table>
 
-  <Callout icon="alert" label="Proposal status">
-    Nothing on this page is implemented yet. It is the plan for the
-    <code>property-based-testing</code> and <code>formal-verification</code>
-    worktrees. Track it against the <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/testing`}>testing page</a>, which
-    records what is actually built and green.
+  <Callout icon="info" label="Built and verified">
+    Everything on this page is now implemented and merged to <code>main</code>.
+    The formal-verification epic, <a href="https://github.com/adityavkk/chronicle/issues/25">#25</a>,
+    landed the Lean proofs, the TLA+ and Apalache and Alloy models, the Porcupine
+    linearizability checks, the differential and fuzz tests, and the failover
+    nemesis from the <code>property-based-testing</code> and
+    <code>formal-verification</code> worktrees. The formal work also found three
+    real bugs, tracked with the <code>found-by-formal-methods</code> label. For the
+    plain catalog of every kind of test, what it gives you, where it lives, and its
+    downside, read the <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/test-catalog`}>test catalog</a>.
+    The <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/testing`}>testing page</a>
+    records the full property contract and what is green today.
   </Callout>
 </section>
 
