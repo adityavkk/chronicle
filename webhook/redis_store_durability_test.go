@@ -98,6 +98,53 @@ func TestStoreTierAIssuesNoWait(t *testing.T) {
 	}
 }
 
+// TestRecordDurabilityShortIncrementsMetric is the pure (no-cluster) metric-seam
+// spec for issue #43: a short WAIT/WAITAOF verdict (a *DurabilityShortError)
+// increments chronicle_durability_short_total labeled by the command that fell
+// short, while a satisfied barrier (nil) records nothing. The verdict is returned
+// unchanged either way — the metric makes the short reply OBSERVABLE, it never
+// swallows the error that stops dispatch. The double captures only the command
+// name, mirroring the correction-#3 durability-only contract (no holder/gen/count).
+func TestRecordDurabilityShortIncrementsMetric(t *testing.T) {
+	fm := &fakeMetrics{}
+	s := &RedisStore{metrics: fm}
+
+	// A satisfied barrier records nothing and returns nil.
+	if got := s.recordDurabilityShort(nil, "WAITAOF"); got != nil {
+		t.Errorf("nil verdict must pass through unchanged, got %v", got)
+	}
+	if n := fm.durabilityShorts("WAITAOF"); n != 0 {
+		t.Errorf("satisfied barrier must record no DurabilityShort, got %d", n)
+	}
+
+	// A short WAITAOF reply increments the WAITAOF counter and is returned unchanged.
+	short := &DurabilityShortError{WantLocal: 1, GotLocal: 1, WantReplicas: 1, GotReplicas: 0, UseAOF: true}
+	if got := s.recordDurabilityShort(short, "WAITAOF"); got != error(short) {
+		t.Errorf("short verdict must be returned unchanged (never swallowed), got %v", got)
+	}
+	if n := fm.durabilityShorts("WAITAOF"); n != 1 {
+		t.Errorf("short WAITAOF reply must increment WAITAOF counter once, got %d", n)
+	}
+	// A short plain-WAIT reply is labeled separately so the operator gauge splits
+	// the two barrier commands.
+	if got := s.recordDurabilityShort(short, "WAIT"); got != error(short) {
+		t.Errorf("short WAIT verdict must be returned unchanged, got %v", got)
+	}
+	if n := fm.durabilityShorts("WAIT"); n != 1 {
+		t.Errorf("short WAIT reply must increment WAIT counter once, got %d", n)
+	}
+
+	// A non-durability error (e.g. a transport/Lua failure) is NOT a DurabilityShort
+	// — it passes through without touching the RPO-exposure counter.
+	other := errors.New("webhook: WAITAOF: connection reset")
+	if got := s.recordDurabilityShort(other, "WAITAOF"); got != other {
+		t.Errorf("non-DurabilityShort error must pass through, got %v", got)
+	}
+	if n := fm.durabilityShorts("WAITAOF"); n != 1 {
+		t.Errorf("non-DurabilityShort error must not increment the counter, got %d", n)
+	}
+}
+
 // TestStoreTierBClaimDurable: the pull-wake claim grant (claim.lua fence rotation)
 // also takes the Tier B barrier; with local fsync it is durable.
 func TestStoreTierBClaimDurable(t *testing.T) {

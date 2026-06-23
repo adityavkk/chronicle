@@ -139,6 +139,130 @@ func isHex(s string) bool {
 	return len(s) > 0
 }
 
+// ---- redisFailover: kill the primary, promote the AOF replica, flip the endpoint ----
+//
+// This is the gate #5 REAL-failover primitive (issue #43): the single-Redis
+// deploy.yaml only replays AOF on a pod restart (07 honest-gap #3); a real
+// failover needs a SECOND node promoted while the first is gone, behind a STABLE
+// endpoint the clients keep using. On the STANDARD_HA substrate
+// (standard-ha.yaml) that is: kill the primary, REPLICAOF NO ONE on the AOF
+// replica, and repoint the `redis` Service selector to the promoted node — so
+// chronicle's plain redis URL survives (its connection drops and reconnects to
+// the same DNS name, now backed by the promotion). On a managed SKU
+// (Memorystore STANDARD_HA) the provider does steps 2+3 for you; -managed
+// selects that path. The command builders are pure and unit-tested; the methods
+// are the thin shell over the injectable runner, matching killSlotOwner/dropLeaseTail.
+//
+// CRITICAL (correction #3): this primitive injects a DURABILITY fault — it can
+// drop fence-minting writes that reached the primary but not the replica in the
+// async-replication RPO window. It is the scenario (scenario_failover.go), via the
+// monotone (gen, wake_id) fence and the at-least-once oracle, that proves a dropped
+// write degrades only to a re-delivery, never a safety violation. Nothing here
+// reads a WAIT/WAITAOF count or a lease TTL to decide who holds the fence.
+
+// promoteReplicaCmd is the redis-cli command that promotes the AOF replica to a
+// standalone primary: REPLICAOF NO ONE detaches it from the (now-dead) primary so
+// it accepts writes. Pure: returned as an arg slice for the injectable runner.
+func promoteReplicaCmd() []string { return []string{"REPLICAOF", "NO", "ONE"} }
+
+// flipEndpointPatch is the strategic-merge patch that repoints the STABLE `redis`
+// Service selector to the promoted node (role: replica), so chronicle's unchanged
+// redis://redis:6379 URL reconnects to the promotion. Pure JSON; the role arg is
+// the label the promoted node carries (standard-ha.yaml gives the replica
+// role=replica). This mirrors a managed SKU repointing its endpoint for you.
+func flipEndpointPatch(toRole string) string {
+	return fmt.Sprintf(`{"spec":{"selector":{"app":"redis","role":%q}}}`, toRole)
+}
+
+// parseMasterReplOffset extracts master_repl_offset from a Redis INFO replication
+// section — the primary's byte offset in its replication stream. Pure and total: a
+// missing/garbage field yields 0. The scenario samples it on the primary just
+// before the kill and on the promoted node just after, so (primary - promoted) is
+// the empirical RPO: the bytes the failover dropped (writes the primary had but the
+// replica had not yet received). It is a DURABILITY measurement only — never read
+// to decide exclusivity (correction #3).
+func parseMasterReplOffset(infoReplication string) int64 {
+	for _, line := range strings.Split(infoReplication, "\n") {
+		line = strings.TrimSpace(line)
+		if v, ok := strings.CutPrefix(line, "master_repl_offset:"); ok {
+			n := int64(0)
+			v = strings.TrimSpace(v)
+			if v == "" {
+				return 0
+			}
+			for _, c := range v {
+				if c < '0' || c > '9' {
+					return 0
+				}
+				n = n*10 + int64(c-'0')
+			}
+			return n
+		}
+	}
+	return 0
+}
+
+// replicaCLI runs redis-cli inside the redis-replica pod of the HA substrate (the
+// node that gets promoted). It is the HA-substrate analogue of redisCLI (which
+// targets the single-Redis `deploy/redis`); the failover scenario reads/writes the
+// replica directly to promote it and to sample its post-promotion repl offset.
+func (n *nemesis) replicaCLI(args ...string) ([]byte, error) {
+	full := append([]string{"exec", "deploy/redis-replica", "--", "redis-cli", "-n", "0"}, args...)
+	return n.kubectl(full...)
+}
+
+// primaryCLI runs redis-cli inside the redis-primary pod (pre-failover sampling).
+func (n *nemesis) primaryCLI(args ...string) ([]byte, error) {
+	full := append([]string{"exec", "deploy/redis-primary", "--", "redis-cli", "-n", "0"}, args...)
+	return n.kubectl(full...)
+}
+
+// redisFailover injects a real primary loss + replica promotion on the
+// self-managed STANDARD_HA substrate and returns the empirical RPO in replication
+// bytes (primary_offset_before - promoted_offset_after; clamped to >=0). The
+// sequence matches standard-ha-failover.sh step 3 but is driven from the checker so
+// the scenario can bracket it for RTO and assert recovery:
+//
+//  1. sample the primary's master_repl_offset (the RPO baseline),
+//  2. force-delete the primary pod (the real loss),
+//  3. REPLICAOF NO ONE on the replica (promote it to accept writes),
+//  4. flip the stable `redis` Service selector to role=replica,
+//  5. sample the promoted node's master_repl_offset.
+//
+// On any step error it records the failure tag and returns -1 (the scenario treats
+// a -1 RPO as "failover injection failed", not a 0-byte RPO). It never blocks on a
+// WAIT count or a lease — the fence, asserted by the scenario, is what keeps the
+// dropped-write degradation safe.
+func (n *nemesis) redisFailover() int64 {
+	before := parseMasterReplOffset(asString(n.primaryCLI("INFO", "replication")))
+	if _, err := n.kubectl("delete", "pod", "-l", "app=redis,role=primary", "--grace-period=0", "--force"); err != nil {
+		n.record("redis-failover-kill-failed")
+		return -1
+	}
+	n.record("redis-failover-kill-primary")
+	if _, err := n.replicaCLI(promoteReplicaCmd()...); err != nil {
+		n.record("redis-failover-promote-failed")
+		return -1
+	}
+	n.record("redis-failover-promote-replica")
+	if _, err := n.kubectl("patch", "service", "redis", "-p", flipEndpointPatch("replica")); err != nil {
+		n.record("redis-failover-flip-failed")
+		return -1
+	}
+	n.record("redis-failover-flip-endpoint")
+	after := parseMasterReplOffset(asString(n.replicaCLI("INFO", "replication")))
+	rpo := before - after
+	if rpo < 0 {
+		rpo = 0 // the replica may have caught up / advanced; no bytes were dropped
+	}
+	return rpo
+}
+
+// asString is the (out, err)->string adapter for the redis-cli helpers when only
+// the stdout matters (the failover sampling reads are best-effort; an error yields
+// an empty INFO, parsed as a 0 offset, which the scenario reports honestly).
+func asString(out []byte, _ error) string { return strings.TrimSpace(string(out)) }
+
 // ---- clock skew (best-effort; the recorder clock stays on the host) ----
 
 // clockSkewShell builds the shell command that advances a pod's wall clock by

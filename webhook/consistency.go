@@ -129,6 +129,136 @@ func DurabilityFor(tier ConsistencyTier, numReplicas, timeoutMs int) DurabilityP
 	return DurabilityPlan{Wait: true, UseAOF: true, NumLocal: 1, NumReplicas: numReplicas, TimeoutMs: timeoutMs}
 }
 
+// AOFConfigError is the typed startup refusal raised when a Tier B deployment is
+// pointed at a Redis that cannot honor its WAITAOF barrier: either AOF is off (so
+// WAITAOF is meaningless or errors) or the replication topology cannot satisfy the
+// configured replica requirement (so every Tier B write would short forever). It
+// is a PROVISIONING verdict only — like DurabilityShortError it carries no holder
+// or generation, so it cannot be laundered into an exclusivity decision; it exists
+// solely to fail a mis-provisioned durability path fast at boot rather than run a
+// path that proves nothing.
+type AOFConfigError struct {
+	// AppendOnly is the observed CONFIG GET appendonly value ("yes"/"no"/"").
+	AppendOnly string
+	// WantReplicas is the configured WAITAOF replica requirement; GotReplicas is
+	// the count the topology can currently satisfy (connected, online replicas).
+	WantReplicas, GotReplicas int
+}
+
+func (e *AOFConfigError) Error() string {
+	if e.AppendOnly != "yes" {
+		return fmt.Sprintf(
+			"webhook: Tier B (WAITAOF) configured but Redis has appendonly=%q (want \"yes\") — WAITAOF is meaningless without AOF; enable appendonly or run Tier A",
+			e.AppendOnly,
+		)
+	}
+	return fmt.Sprintf(
+		"webhook: Tier B (WAITAOF) configured for %d replica(s) but the topology has %d online replica(s) — every fence-minting write would short forever; provision the replica(s) or lower WAIT_REPLICAS",
+		e.WantReplicas, e.GotReplicas,
+	)
+}
+
+// AssertAOFEnabled is the pure, total boot-time guard that a Tier B deployment is
+// provisioned to honor its WAITAOF barrier. It is a no-op for any tier that issues
+// no WAIT (A and C return nil regardless of the Redis config, since they never
+// touch WAITAOF). For Tier B it returns a typed *AOFConfigError when:
+//
+//   - appendonlyValue is not exactly "yes" — WAITAOF errors or is meaningless
+//     without AOF, so a Tier-B-configured deployment on a non-AOF Redis must fail
+//     fast rather than silently run a durability path that proves nothing; or
+//   - the topology's online replica count cannot satisfy wantReplicas — a Tier B
+//     write requiring N replica acks against fewer than N online replicas would
+//     short on every write, so the deployment is mis-provisioned.
+//
+// It reads ONLY a config value and a replica count: it makes no exclusivity or
+// ordering decision and returns no holder/generation (correction #3). The caller
+// passes the parsed CONFIG GET appendonly value and the connected-replica count
+// (see ParseConnectedReplicas) so the function stays pure and unit-testable
+// without a live Redis.
+func AssertAOFEnabled(tier ConsistencyTier, appendonlyValue string, onlineReplicas, wantReplicas int) error {
+	if tier != TierB {
+		return nil // A and C issue no WAITAOF — nothing to assert
+	}
+	if strings.ToLower(strings.TrimSpace(appendonlyValue)) != "yes" {
+		return &AOFConfigError{AppendOnly: appendonlyValue, WantReplicas: wantReplicas, GotReplicas: onlineReplicas}
+	}
+	if wantReplicas > onlineReplicas {
+		return &AOFConfigError{AppendOnly: "yes", WantReplicas: wantReplicas, GotReplicas: onlineReplicas}
+	}
+	return nil
+}
+
+// ParseConnectedReplicas extracts the count of online replicas from a Redis INFO
+// replication section. It is pure and total. When the per-replica "slaveN:" lines
+// are present it counts ONLY those whose state is "online", so a replica that is
+// attached but still doing its initial sync (state=send_bulk/wait_bgsave) does not
+// count toward a satisfiable WAITAOF replica requirement — that is the tighter,
+// correct bound. When those per-replica lines are absent entirely (some managed
+// SKUs redact them) it falls back to the connected_slaves count, which is then the
+// best available signal. A reply with no replication section yields 0. The INFO
+// field names keep Redis's historical "slave" spelling; this mirrors the wire.
+func ParseConnectedReplicas(infoReplication string) int {
+	connected := 0
+	online := 0
+	sawPerReplicaLine := false
+	for _, line := range strings.Split(infoReplication, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "connected_slaves:"):
+			connected = atoiSafe(strings.TrimPrefix(line, "connected_slaves:"))
+		case isSlaveStatLine(line):
+			// A per-replica "slaveN:ip=...,state=..." line. Its mere presence tells us
+			// the server did not redact the breakdown, so the online count is then
+			// authoritative; only state=online counts toward the requirement.
+			sawPerReplicaLine = true
+			if strings.Contains(line, "state=online") {
+				online++
+			}
+		}
+	}
+	// Per-replica lines present → trust the online count (a connected-but-syncing
+	// replica is correctly excluded). Per-replica lines redacted → fall back to the
+	// connected_slaves header count.
+	if sawPerReplicaLine {
+		return online
+	}
+	return connected
+}
+
+// isSlaveStatLine reports whether a line is a per-replica "slaveN:..." stat line
+// (e.g. "slave0:ip=10.0.0.2,...,state=online"), as opposed to the connected_slaves
+// header or another field. It requires the digit-then-colon shape so it does not
+// match unrelated keys that merely start with "slave".
+func isSlaveStatLine(line string) bool {
+	rest := strings.TrimPrefix(line, "slave")
+	if rest == line { // no "slave" prefix
+		return false
+	}
+	i := 0
+	for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+		i++
+	}
+	return i > 0 && i < len(rest) && rest[i] == ':'
+}
+
+// atoiSafe parses a base-10 int, returning 0 on any parse failure — the INFO
+// fields are server-generated integers, so a non-integer means a malformed/absent
+// line, which is correctly counted as 0.
+func atoiSafe(s string) int {
+	n := 0
+	s = strings.TrimSpace(s)
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	if s == "" {
+		return 0
+	}
+	return n
+}
+
 // DurabilityShortError is the surfaced (NEVER swallowed) result of a WAIT/WAITAOF
 // reply that fell short of the plan's required acks: the fence-minting write
 // reached the primary but its durability could not be proven within TimeoutMs, so
