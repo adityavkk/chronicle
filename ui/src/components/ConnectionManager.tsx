@@ -17,7 +17,7 @@
  */
 
 import { useComputed } from "@preact/signals";
-import type { JSX } from "preact";
+import type { JSX, RefObject } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { compactUrl, dotStatusOf } from "../lib/format";
 import {
@@ -42,6 +42,7 @@ import {
 	IconServer,
 	IconSun,
 } from "./icons";
+import { focusFirstMenuItem, handleMenuKeydown } from "./menuKeyboard";
 
 function ThemeToggle(): JSX.Element {
 	const t = theme.value;
@@ -70,9 +71,16 @@ export function ConnectionManager(): JSX.Element {
 	const probe = connectionProbe.value;
 	const open = switcherOpen.value;
 	const wrapRef = useRef<HTMLDivElement>(null);
+	const popRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
 
 	const status = probe === null ? "unknown" : probe.ok ? "ok" : "down";
+
+	// On open, move focus into the menu (first item); the roving-tabindex helper
+	// keeps Arrow/Home/End/Tab inside it from there.
+	useEffect(() => {
+		if (open) focusFirstMenuItem(popRef.current);
+	}, [open]);
 
 	// Close on outside click or Escape; restore focus to the trigger on Escape.
 	useEffect(() => {
@@ -120,7 +128,7 @@ export function ConnectionManager(): JSX.Element {
 					<IconChevronDown size={14} class="dsui-connswitch__caret" />
 				</button>
 
-				{open ? <SwitcherPopover /> : null}
+				{open ? <SwitcherPopover popRef={popRef} /> : null}
 			</div>
 
 			<ThemeToggle />
@@ -128,12 +136,19 @@ export function ConnectionManager(): JSX.Element {
 	);
 }
 
-function SwitcherPopover(): JSX.Element {
+function SwitcherPopover(props: { popRef: RefObject<HTMLDivElement> }): JSX.Element {
+	const { popRef } = props;
 	const list = connections.value;
 	const activeId = activeConnectionId.value;
 
 	return (
-		<div class="dsui-switcher__pop" role="menu" aria-label="Connections">
+		<div
+			class="dsui-switcher__pop"
+			role="menu"
+			aria-label="Connections"
+			ref={popRef}
+			onKeyDown={(e) => handleMenuKeydown(e, popRef.current)}
+		>
 			<p class="dsui-switcher__heading">Connections</p>
 			{list.length === 0 ? (
 				<p class="dsui-switcher__empty">No saved connections.</p>
@@ -148,6 +163,7 @@ function SwitcherPopover(): JSX.Element {
 			<button
 				type="button"
 				role="menuitem"
+				tabIndex={-1}
 				class="dsui-switcher__action"
 				onClick={() => setActiveConnection(null)}
 			>
@@ -158,6 +174,7 @@ function SwitcherPopover(): JSX.Element {
 				<button
 					type="button"
 					role="menuitem"
+					tabIndex={-1}
 					class="dsui-switcher__action"
 					onClick={() => setActiveConnection(null)}
 				>
@@ -180,6 +197,7 @@ function SwitcherRow(props: { id: string; active: boolean }): JSX.Element {
 			<button
 				type="button"
 				role="menuitemradio"
+				tabIndex={-1}
 				aria-checked={active}
 				class={`dsui-switcher__row${active ? " is-active" : ""}`}
 				onClick={() => setActiveConnection(id)}
