@@ -2237,8 +2237,26 @@
 .dsui-disclose[open] .dsui-disclose__summary::before {
 	transform: rotate(90deg);
 }
+/* Button-driven (controlled) variant: reset the native button chrome and key the
+   caret off an .is-open class instead of the <details open> attribute. */
+.dsui-disclose__summary--btn {
+	display: flex;
+	align-items: center;
+	inline-size: 100%;
+	text-align: start;
+	background: transparent;
+	border: none;
+	font: inherit;
+}
+.dsui-disclose.is-open .dsui-disclose__summary--btn::before {
+	transform: rotate(90deg);
+}
 .dsui-disclose__summary:hover {
 	color: var(--fg);
+}
+.dsui-disclose__summary--btn:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
 }
 .dsui-disclose__body {
 	display: flex;

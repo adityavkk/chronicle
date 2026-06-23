@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { toCurl } from "./curl";
 import {
 	contentTypeForKind,
+	forkSelection,
 	isProducerValid,
 	parseSubOffset,
 	previewAppendOperation,
@@ -11,6 +12,7 @@ import {
 	previewStreamUrl,
 	toProducerIdentity,
 	validateExpiresAt,
+	validateFirstN,
 	validateJsonBatch,
 	validateProducer,
 	validateStreamPath,
@@ -119,6 +121,49 @@ describe("sub-offset", () => {
 		expect(parseSubOffset("")).toBeUndefined();
 		expect(parseSubOffset("4")).toBe(4);
 		expect(parseSubOffset("bad")).toBeUndefined();
+	});
+});
+
+describe("forkSelection", () => {
+	it('maps "everything" to the tail with no sub-offset', () => {
+		expect(forkSelection("everything", 0)).toEqual({ offset: "now", subOffset: undefined });
+	});
+
+	it('maps "nothing" to the beginning with no sub-offset', () => {
+		expect(forkSelection("nothing", 0)).toEqual({ offset: "-1", subOffset: undefined });
+	});
+
+	it('maps "first-n" to the beginning + N as the sub-offset', () => {
+		expect(forkSelection("first-n", 3)).toEqual({ offset: "-1", subOffset: 3 });
+		expect(forkSelection("first-n", 0)).toEqual({ offset: "-1", subOffset: 0 });
+	});
+
+	it("clamps an out-of-range N defensively", () => {
+		expect(forkSelection("first-n", -5)).toEqual({ offset: "-1", subOffset: 0 });
+		expect(forkSelection("first-n", Number.NaN)).toEqual({ offset: "-1", subOffset: 0 });
+	});
+});
+
+describe("validateFirstN", () => {
+	it("requires a value and rejects non-whole / negative input", () => {
+		expect(validateFirstN("", null)).not.toBeNull();
+		expect(validateFirstN("2.5", null)).not.toBeNull();
+		expect(validateFirstN("-1", null)).not.toBeNull();
+		expect(validateFirstN("abc", null)).not.toBeNull();
+	});
+
+	it("accepts any N ≥ 0 when the count is unknown", () => {
+		expect(validateFirstN("0", null)).toBeNull();
+		expect(validateFirstN("9999", null)).toBeNull();
+	});
+
+	it("rejects an N that overshoots a known count, accepts up to it", () => {
+		expect(validateFirstN("3", 3)).toBeNull();
+		expect(validateFirstN("0", 3)).toBeNull();
+		const err = validateFirstN("4", 3);
+		expect(err).not.toBeNull();
+		expect(err).toContain("overshoots");
+		expect(validateFirstN("2", 1)).toContain("1 message");
 	});
 });
 

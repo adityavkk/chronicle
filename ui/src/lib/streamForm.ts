@@ -209,6 +209,72 @@ export function parseSubOffset(raw: string): number | undefined {
 }
 
 /* ----------------------------------------------------------------------------
+ * Message-centric fork selection
+ *
+ * The raw (Stream-Fork-Offset, Stream-Fork-Sub-Offset) pair is coupled in a way
+ * that confuses users: the offset is a batch boundary in [-1 (beginning), tail],
+ * and the sub-offset (for a JSON source) is the number of messages PAST the fork
+ * offset to ALSO inherit — so it must not overshoot what is available past that
+ * point. Pairing the TAIL offset with a sub-offset always overshoots (zero
+ * messages past the tail) and the server returns 400.
+ *
+ * To spare users that coupling, the dialog offers a friendly "Fork point" choice
+ * and {@link forkSelection} maps it to the correct (offset, subOffset):
+ *   - "everything" → offset "now"  (tail), no sub-offset → inherit all messages.
+ *   - "nothing"    → offset "-1"   (beginning), no sub-offset → an empty fork.
+ *   - "first-n"    → offset "-1"   (beginning) + sub-offset N → keep the first N.
+ * Only "first-n" uses a sub-offset, and it pins the offset to the beginning, so a
+ * sub-offset can never be paired with the tail from the friendly control.
+ * ------------------------------------------------------------------------- */
+
+/** The friendly fork-point choices offered in place of raw offset + sub-offset. */
+export type ForkPoint = "everything" | "nothing" | "first-n";
+
+/** The resolved wire pair a fork CREATE sends, derived from a {@link ForkPoint}. */
+export interface ForkSelection {
+	readonly offset: string;
+	readonly subOffset: number | undefined;
+}
+
+/**
+ * Map a friendly {@link ForkPoint} (and, for "first-n", the message count N) to
+ * the correct (Stream-Fork-Offset, Stream-Fork-Sub-Offset) pair. See the block
+ * comment above for the semantics. For "first-n" an out-of-range N is clamped to
+ * 0 defensively; callers should gate submit on {@link validateFirstN} first.
+ */
+export function forkSelection(point: ForkPoint, n: number): ForkSelection {
+	switch (point) {
+		case "everything":
+			return { offset: "now", subOffset: undefined };
+		case "nothing":
+			return { offset: "-1", subOffset: undefined };
+		case "first-n": {
+			const count = Number.isSafeInteger(n) && n >= 0 ? n : 0;
+			return { offset: "-1", subOffset: count };
+		}
+	}
+}
+
+/**
+ * Validate the "First N messages" number input. N is the sub-offset counted from
+ * the start of the source, so it must be a whole number ≥ 0. When the source's
+ * message count `max` is known (the read in hand is for this same JSON source),
+ * N may not exceed it — the server rejects an overshoot with a 400. When `max`
+ * is null the count is unknown, so any N ≥ 0 is allowed and the server is the
+ * final arbiter. Returns an error string, or null when valid.
+ */
+export function validateFirstN(raw: string, max: number | null): string | null {
+	const t = raw.trim();
+	if (t === "") return "Enter how many messages to keep (0 or more).";
+	const n = parseNonNegInt(t);
+	if (n === null) return "Keep a whole number of messages ≥ 0 (counted from the start).";
+	if (max !== null && n > max) {
+		return `Only ${max} message${max === 1 ? "" : "s"} are available — that overshoots and is rejected.`;
+	}
+	return null;
+}
+
+/* ----------------------------------------------------------------------------
  * Operation preview (the equivalent curl, before the request runs)
  *
  * These mirror the header builders in dsClient so a form can show the EXACT
