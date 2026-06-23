@@ -48,6 +48,14 @@ plain HTTP requests from the browser.
 - Scrape and read the server's Prometheus metrics from the separate
   `--metrics-listen` endpoint: a curated set of key fan-out / wake / claim
   counters plus the full list of metric families.
+- Watch the whole wake loop in a dual split-screen Wake Monitor: publish on a
+  source stream on the left and see the resulting wake fire on the right —
+  either a webhook subscription's signed delivery (captured by the dsui binary
+  and relayed live, since a browser cannot host an inbound webhook) or a
+  pull-wake subscription's `wake_stream` tailed as it grows — with the signature
+  parts (kid + a JWKS link), the woken streams and their offsets, and one-click
+  ack / claim. A one-click "Wake demo" sets the whole thing up against a sample
+  stream.
 - Show, on demand, the real HTTP request and response that produced what you are
   looking at, with a plain-language explanation of the protocol headers.
 
@@ -178,6 +186,14 @@ The feature components are:
 - `MetricsWorkspace` — the center metrics view: the `--metrics-listen` URL input
   and a Scrape button, a curated key-metric tile grid, and the full list of
   metric families.
+- `WakeMonitorWorkspace` — the center dual split-screen for one subscription: a
+  source-stream pane on the left (a compact publish composer over the selected
+  linked stream, plus its live tail) and a wake-timeline pane on the right (the
+  captured webhook deliveries — timestamp, wake id / generation, woken streams
+  and offsets, the parsed signature with a JWKS link, and an Ack control — or
+  the tailed pull-wake `wake_stream` events with claim / ack). Publishing on the
+  left visibly cues the right pane so the publish → wake → hook → ack loop reads
+  in one glance.
 - `CreateSubscriptionDialog` — the modal to create a subscription (webhook vs
   pull-wake, glob pattern and/or explicit streams, lease TTL, the type-specific
   target), with live validation and a copy-as-curl preview.
@@ -322,15 +338,60 @@ what you see is exactly what happens when you do it by hand.
 The presets are: create the sample JSON stream, publish a sample batch, run a
 demo producer that sends five messages a short time apart so a live tail visibly
 updates, tail the stream live over SSE, fork the stream at its latest offset,
-close the stream, and delete the stream to reset the playground. Every preset
-works only on the `playground/…` sample namespace, so it can never touch your
-real streams.
+close the stream, and delete the stream to reset the playground. A separate
+one-click "Wake demo" row creates a sample stream, registers a webhook
+subscription pointed at the dsui binary's own capture endpoint, publishes a
+message, and opens the Wake Monitor so a newcomer sees a wake fire end to end.
+Every preset works only on the `playground/…` sample namespace, so it can never
+touch your real streams.
 
 Each preset also explains itself before you run it. It shows a plain-language
 line that says exactly what the request will do, and it shows the exact
 equivalent curl. The curl is built from the same code that builds the real
 request, so it is honest even when there is no server connected yet. A first-run
 hint in the empty stream list points you at the Playground.
+
+## The Wake Monitor
+
+A subscription's job is to *wake* something when a stream it watches gets new
+data. That loop is normally invisible — a message lands, the server fires a wake,
+a hook runs somewhere else. The Wake Monitor makes the whole loop visible on one
+screen. Open it from a subscription's "Watch wakes" action, and the center pane
+splits in two:
+
+- **Left — the source.** Pick one of the subscription's linked streams, publish a
+  message into it with a compact composer, and watch the stream's own live tail.
+- **Right — the wake timeline.** The wakes that the subscription produces, newest
+  last, as they arrive.
+
+Publishing on the left cues the right pane that a wake should be on its way, so
+you see the causal chain — message in, wake out, hook invoked, acked — in one
+glance rather than across two terminals.
+
+The right pane shows whichever of the two wake mechanisms the subscription uses:
+
+- **A webhook subscription** has chronicle POST a signed notification to a URL.
+  A browser cannot host that URL, so the dsui binary hosts a small capture
+  endpoint (`/__hooks/{id}`); the subscription's `webhook_url` points at it, the
+  binary buffers each delivery, and relays it to the browser over SSE. The
+  timeline shows each delivery's timestamp, the `wake_id` and generation, the
+  woken streams and their offsets, and the parsed `Webhook-Signature`
+  (timestamp, key id, and the Ed25519 value) with a link to the server's
+  `/__ds/jwks.json`. dsui shows the signature parts but does not verify them —
+  verification is asymmetric Ed25519 against the JWKS, and the link is there so
+  you can. An Ack control drives the subscription's ack-callback.
+- **A pull-wake subscription** has chronicle append wake events to a durable
+  `wake_stream` that workers claim. The timeline tails that stream live over SSE
+  and renders each wake event (the woken stream, generation, timestamp), with the
+  Claim / Ack worker controls from the subscription view.
+
+The fastest way to see it work is the Playground's one-click **Wake demo**, which
+creates a sample stream, registers a webhook subscription pointed at the capture
+endpoint, publishes a message, and opens the monitor — so the first wake animates
+in without any setup. As with subscriptions generally, real webhook delivery
+needs a Redis-backed chronicle with subscriptions enabled and the dsui *binary*
+running (not `vite dev`), because only the binary can host the capture endpoint;
+the monitor says so plainly when the capture endpoint is unavailable.
 
 ## Copy as curl
 
@@ -419,10 +480,21 @@ single-page-app fallback to `index.html`.
 
 When you run the resulting `dsui` binary it serves the UI on `:4438` by default
 and opens a browser at it. It also serves `/dsui-config.json`, which carries the
-`defaultServer` value from the binary's `--server` flag. dsui fetches that file
-on load and prefills it as a connection if it is set, so a packaged build can
-point at a known server out of the box. The `--server` flag only prefills a
-connection; the UI can connect to any server you type in regardless.
+`defaultServer` value from the binary's `--server` flag plus the `captureBase`
+the Wake Monitor uses. dsui fetches that file on load and prefills `defaultServer`
+as a connection if it is set, so a packaged build can point at a known server out
+of the box. The `--server` flag only prefills a connection; the UI can connect to
+any server you type in regardless.
+
+The binary also hosts the **webhook-capture endpoint** the Wake Monitor relies on
+(`POST /__hooks/{id}` to receive a delivery, `GET /__hooks/{id}/stream` to relay
+it to the browser over SSE, `GET /__hooks/{id}` to list the recent buffer). This
+is a tool feature, not part of the Durable Streams protocol — it exists only
+because a browser cannot host an inbound webhook. A webhook subscription's
+`webhook_url` points at `<captureBase>/__hooks/<id>`; `captureBase` defaults to
+`http://localhost<port>` and is overridable with `--capture-base` when chronicle
+must reach this binary at a different address. The capture buffer is in-memory
+and bounded, so it survives only as long as the binary runs.
 
 The build flow end to end:
 
@@ -444,8 +516,8 @@ per connection.
 
 ## Coming next
 
-The Navigator's read/write/tail surface plus the Subscriptions panel and Metrics
-view are all live. The remaining planned addition is:
+The Navigator's read/write/tail surface, the Subscriptions panel, the Metrics
+view, and the Wake Monitor are all live. The remaining planned addition is:
 
 - **A real stream-list endpoint.** Discovery today reads the `__registry__`
   stream. A dedicated `GET /__ds/streams` listing endpoint would replace the
