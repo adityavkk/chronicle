@@ -1,0 +1,40 @@
+name: Formal (nightly)
+
+# The heavy formal model checks that are too slow to gate every push run here on
+# a schedule instead. The per-push CI (ci.yml) runs the fast subset:
+# `make tlc38-fast`, plus tlc / lean-proofs / formal-verification. This nightly
+# job runs the parts that take many minutes:
+#   - make tlc38-heavy : the scaled 2/2/2 Composed layering proof (#38),
+#                        about 25.9M distinct states each for fence-on and
+#                        fence-off, roughly 18 minutes on a runner.
+#   - make tlc40       : the membership / HRW convergence spec and the L3
+#                        lease-tail refinement (#40).
+# A violation in either fails the job, the same as the per-push checks.
+#
+# Trigger it by hand from the Actions tab (workflow_dispatch) to confirm a
+# change before the next nightly.
+
+on:
+  schedule:
+    - cron: "41 7 * * *" # nightly at 07:41 UTC (off the :00 / :30 marks)
+  workflow_dispatch:
+
+jobs:
+  heavy-formal:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: formal/tla
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Cache tla2tools.jar
+        uses: actions/cache@v4
+        with:
+          path: formal/tla/tla2tools.jar
+          key: tla2tools-v1.7.4
+      - name: TLA+ heavy — scaled 2/2/2 layering proof (#38) + membership/HRW convergence (#40)
+        run: make tlc38-heavy tlc40
