@@ -76,6 +76,53 @@ jobs:
             -redis-url redis://localhost:6379/14 \
             -workers 4 -workload-ms 4000
 
+  # P1.2 (issue #31): the THIRD differential oracle — the proven Lean
+  # producer/offset model compiled to C and linked via cgo, pinned against the
+  # Go core and the live Lua mirror. Two jobs:
+  #
+  #   property-based-testing — links the VENDORED archive (no Lean toolchain) and
+  #     runs the triple-oracle differential with -tags leanoracle.
+  #   formal-verification    — rebuilds the C from Lean and asserts the freshly
+  #     built archive is byte-identical to the committed one (drift guard), so a
+  #     stale vendored oracle cannot pass silently.
+  #
+  # Both run on macos-14 (Apple Silicon) because the committed
+  # store/leanoracle/libchronicle_oracle.a is a Mach-O arm64 archive: linking and
+  # the byte-identity drift guard are arch-specific (see store/leanoracle/PROVENANCE.txt).
+  # A Linux/x86_64 consumer must rebuild the archive for its arch via the build
+  # script before linking; cross-arch vendoring is a documented follow-up.
+  property-based-testing:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Start Redis 8
+        run: |
+          brew install redis
+          redis-server --daemonize yes --port 6379
+          for i in $(seq 1 30); do redis-cli ping && break; sleep 0.2; done
+      - name: Triple-oracle differential (Go core vs live Lua vs proven Lean) — vendored C, NO Lean toolchain
+        env:
+          CGO_ENABLED: "1"
+          MACOSX_DEPLOYMENT_TARGET: "15.0"
+        run: |
+          # Links the committed store/leanoracle/libchronicle_oracle.a; no elan/Lean installed.
+          go test -tags leanoracle -count=1 ./store/leanoracle/ ./store/redis/
+
+  formal-verification:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Lean toolchain (elan reads lean-toolchain)
+        run: |
+          curl https://elan.lean-lang.org/elan-init.sh -sSf | sh -s -- -y --no-modify-path
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Drift guard — rebuild the C from Lean and assert byte-identity with the vendored archive
+        run: |
+          store/leanoracle/scripts/build-lean-oracle.sh --check
+
   conformance:
     runs-on: ubuntu-latest
     services:
