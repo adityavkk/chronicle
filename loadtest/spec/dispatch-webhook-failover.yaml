@@ -1,0 +1,84 @@
+# Gate #5 — the ASSERTING failover workload (issue #43, P4.4). The Tier B,
+# replica-backed dispatch:webhook spec the managed-failover gate renders against a
+# Memorystore STANDARD_HA SKU. Where dispatch-webhook-ha.yaml is the full-system
+# capstone (K=10k SLO floor under combined chaos + DR), THIS spec is the focused
+# durability-honesty assertion: drive a measured webhook workload to a known
+# cursor==tail, trigger a real managed failover INSIDE the async-replication RPO
+# window (so some fence-minting writes are dropped), and assert the load-bearing
+# claim — a lost acked write degrades ONLY to at-least-once (re-delivery deduped by
+# the consumer's monotone offset), NEVER to a safety violation. It makes NO
+# strong-consistency claim.
+#
+# This is the empirical half of INV-DUR-01 / INV-JEP-L1-01 / INV-FENCE-01: the Lean
+# proofs and the TLA+/Apalache model-checks all assume the durable Lua write
+# happened; none can model a primary dying and a replica that never received the
+# write being promoted. The single surface the proofs structurally cannot reach.
+#
+# Run it (PENDING-CLOUD — the orchestrator owns the cloud; do NOT run GKE from the
+# worktree). The STANDARD_HA Redis is Memorystore STANDARD_HA tier (replica +
+# managed failover + a stable endpoint), NOT the basic tier (no failover):
+#   cd loadtest && ./ltctl.sh up --redis-tier=STANDARD_HA \
+#                && ./ltctl.sh gate5 spec/dispatch-webhook-failover.yaml
+# gate5 launches the webhook workload, triggers the managed failover mid-measure,
+# rolls chronicle (the boot reconcile = the eager reconcile Manager.Promote drives),
+# then asserts: (a) every appended message reached tail = at-least-once (the
+# loadgen tail check, the under-load analogue of the checker's CheckAtLeastOnce);
+# (b) a deposed ack returns 409 FENCED (chronicle_owner_fenced_total rises, NOT a
+# silent success); (c) zero double-grants; (d) the RPO-exposure signal
+# chronicle_durability_short_total is scraped (how often a Tier B write reached the
+# primary but could not prove durability within the WAITAOF timeout — durability
+# only, never exclusivity). The in-cluster deposed-FENCED + cursor-only-recovery +
+# empirical-RPO/RTO proof across a REAL (self-managed) promotion is
+# jepsen/deploy/standard-ha-failover.sh gate #5d (GATE5-FAILOVER-VERDICT). ltctl
+# ALWAYS tears down (trap on EXIT/INT/TERM) — STOP THE METER on the expensive,
+# replica-backed STANDARD_HA instance.
+name: dispatch-webhook-failover
+
+loadgen_image: REGISTRY/chronicle-loadgen:TAG
+
+sut:
+  image: REGISTRY/chronicle:TAG
+  replicas: 2 # >=2 so a pod-kill/failover forces a real takeover (new-owner claim_shard CAS)
+  sweep_interval: 30s # the coarse recovery FLOOR (#13); the eager reconcile, not this, closes the gap
+  sweep_batch: 0
+  redis_url: "" # fill from the Memorystore STANDARD_HA `terraform output redis_url`
+  cpu: "1"
+  memory: 1Gi
+  # Tier B (issue #16/#43): WAITAOF 1 1 on the fence-minting writes. numreplicas=1 is
+  # the realistic Redis Software HA ceiling (06:70) and needs the STANDARD_HA replica;
+  # a short reply is surfaced as an error (never swallowed), increments
+  # chronicle_durability_short_total, and is NEVER read as exclusivity. The startup
+  # AssertAOFEnabled guard fails fast if this tier is pointed at a non-AOF Redis.
+  consistency: "B"
+  wait_replicas: 1
+  wait_timeout_ms: 1000
+
+workload:
+  # A smaller K than the capstone: the failover window (not the K=10k SLO floor) is
+  # the focus here, so the run can drive to a clean cursor==tail, fail over, and
+  # assert recovery within a tight measure window.
+  subscriptions: 2000 # K — enough to have writes in flight across the failover
+  links_per_sub: 5 # P
+  dispatch: webhook # the receiver + append->POST->ack path (delivery, not just the sweep tick)
+  webhook_url: "http://loadgen-receiver.chronicle-loadtest:8099/webhook"
+  warmup: 30s
+  measure: 120s # long enough to reach cursor==tail, trigger the managed failover, and recover
+
+slo:
+  sweep_p99_ms: 1500 # the K=2k run stays well under the K=10k regression floor (RESULTS-gke.md 509 ms)
+  max_seed_errors: 0
+  # Gate-#5 / issue-#43 pass criteria (read from chronicle /metrics + the loadgen
+  # tail check after the managed failover step):
+  #   - AT-LEAST-ONCE: every appended message delivered (cursor reached tail) across
+  #     the failover — a dropped fence-write re-fired and was deduped by the monotone
+  #     cursor. A surviving gap is a lost update (FAIL). NOT a strong-consistency claim.
+  #   - DEPOSED FENCED: a deposed worker's late ack returns 409 FENCED
+  #     (chronicle_owner_fenced_total rises; NOT a silent success).
+  #   - ZERO double-grants: chronicle_slot_ownership_events_total never shows two live
+  #     owners for one slot; no cursor regression.
+  #   - RPO-EXPOSURE: chronicle_durability_short_total scraped (the count of Tier B
+  #     fence-minting writes that reached the primary but could not prove durability
+  #     within the WAITAOF timeout — durability only, never exclusivity).
+  #   - RPO/RTO recorded as durability-honest tiers: Tier B WAITAOF 1 1 shrinks RPO to
+  #     the replica-fsync ack (~0 for the acked write); Tier A RPO = full async lag.
+  #     RTO = managed promotion + reconnect + boot reconcile.
