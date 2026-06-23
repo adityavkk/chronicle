@@ -101,8 +101,10 @@ func runStaleGenNoop(c config) error {
 	}
 
 	obs := []staleGenObservation{
-		{sub: subID, op: "ack", reqGen: a.Generation, curGen: b.Generation,
-			status: ackStatusOf(aStatus, aCode), before: before, after: after},
+		{
+			sub: subID, op: "ack", reqGen: a.Generation, curGen: b.Generation,
+			status: ackStatusOf(aStatus, aCode), before: before, after: after,
+		},
 	}
 	violations := CheckNoStaleGenEffect(obs)
 
