@@ -25,7 +25,8 @@ SANY               = $(JAVA) -cp $(JAR) tla2sany.SANY
         composed-deposed liveness liveness-nofair liveness-safety liveness-sensitivity parse38 \
         parse-trace trace-validate trace-negative \
         tlc40 parse40 membership-safety membership-convergence membership-nofair \
-        membership-witness leasetail leasetail-witness alloy
+        membership-witness leasetail leasetail-witness alloy \
+        tlc41 apalache
 
 # The CI target (issue #37): parse, then both faithful safety configs.
 tlc: jar parse tlc-1x1 tlc-2x2
@@ -107,6 +108,33 @@ leasetail-witness: jar
 # `check` must print UNSAT (the assertion holds) and every witness `run` SAT.
 alloy:
 	bash ../alloy/run.sh
+
+# --- issue #41: Apalache inductive-invariant proof of []SingleHolder ----------
+#
+# FenceCore.tla is the fence CORE (SubscriptionFence.tla minus the recovery-
+# liveness machinery), type-annotated for Apalache. `make apalache` downloads
+# apalache-mc to /tmp on demand (NEVER committed) and discharges the three
+# inductive obligations -- IndInit (Init => IndInv), IndStep (IndInv /\ Next =>
+# IndInv'), and Implies (IndInv => SingleHolder) -- which together prove
+# []SingleHolder by INDUCTION for ALL instance sizes, not just the bounded N
+# TLC enumerates. It also runs the non-vacuity witnesses and the INV-FENCE-04
+# negative control. See apalache/README.md for exactly what is proved vs what
+# remains bounded-N-only.
+tlc41: apalache spectacle-frames
+
+apalache:
+	bash apalache/run.sh
+
+# Spectacle animation (#41 part B): render the four crash-window filmstrips +
+# the SingleHolder-breach negative control as SVG via TLC's AnimAlias. Needs a
+# newer tla2tools (>= 1.8) + CommunityModules (the SVGSerialize override),
+# both downloaded to /tmp on demand and NOT committed. Spectacle itself renders
+# SubscriptionFence_anim.tla's AnimView live in the browser; this is the
+# headless companion. See spectacle/README.md for the browser load recipe.
+spectacle-frames:
+	bash spectacle/render_frames.sh
+
+.PHONY: spectacle-frames
 
 # --- issue #38 targets --------------------------------------------------------
 
