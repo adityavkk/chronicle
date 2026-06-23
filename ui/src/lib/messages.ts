@@ -45,6 +45,25 @@ export function resolveOffset(mode: StartMode, customOffset: string): string {
 	}
 }
 
+/**
+ * The offset to re-read from after a successful manual publish, so the just-
+ * appended rows land in the grid instead of the empty new tail. A publish lands
+ * exactly where the stream's tail was, so the prior read's Stream-Next-Offset
+ * (`priorNextOffset` — the tail cursor as it stood before the append) reads back
+ * precisely the newly appended batch. When there is no prior read cursor to
+ * resume from (e.g. nothing has been read yet), fall back to the toolbar's
+ * resolved offset. Never re-reads from "now", which would return the empty tail
+ * and blank the grid (see issue #50).
+ */
+export function republishOffset(
+	priorNextOffset: string | null | undefined,
+	toolbarOffset: string,
+): string {
+	return priorNextOffset !== null && priorNextOffset !== undefined && priorNextOffset !== ""
+		? priorNextOffset
+		: toolbarOffset;
+}
+
 /** Clamp a requested row cap to a positive integer, defaulting on bad input. */
 export function clampRowCap(value: number, fallback: number = DEFAULT_ROW_CAP): number {
 	if (!Number.isFinite(value) || value <= 0) return fallback;
