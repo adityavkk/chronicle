@@ -21,7 +21,7 @@ TLC                = $(JAVA) -XX:+UseParallelGC -cp $(JAR) tlc2.TLC -deadlock -w
 SANY               = $(JAVA) -cp $(JAR) tla2sany.SANY
 
 .PHONY: tlc tlc-1x1 tlc-2x2 fault-expire fault-lease coverage parse jar clean \
-        tlc38 ownership composed-on composed-off composed-on-2x2 composed-off-2x2 \
+        tlc38 tlc38-fast tlc38-heavy ownership composed-on composed-off composed-on-2x2 composed-off-2x2 \
         composed-deposed liveness liveness-nofair liveness-safety liveness-sensitivity parse38 \
         parse-trace trace-validate trace-negative \
         tlc40 parse40 membership-safety membership-convergence membership-nofair \
@@ -34,8 +34,19 @@ tlc: jar parse tlc-1x1 tlc-2x2
 # The issue #38 CI target: the standalone Ownership module, the fence-on/
 # fence-off layering proof (1 slot + scaled 2/2/2), and the liveness/fairness
 # encoding (incl. the no-fairness negative test and the LB-5 sensitivity check).
-tlc38: jar parse38 ownership composed-on composed-off composed-on-2x2 composed-off-2x2 \
-       composed-deposed liveness liveness-nofair liveness-safety liveness-sensitivity
+# Full local run = the fast PR-gate subset plus the heavy 2x2 layering proof.
+tlc38: tlc38-fast tlc38-heavy
+
+# PR-gate subset (fast, ~2 min): standalone ownership, the 1-slot fence-on/
+# fence-off layering proof, the deposed-witness non-vacuity, and the whole
+# liveness suite. Excludes the two 25.9M-state Composed 2x2 layering runs.
+tlc38-fast: jar parse38 ownership composed-on composed-off composed-deposed \
+       liveness liveness-nofair liveness-safety liveness-sensitivity
+
+# Heavy (nightly, ~18 min): the scaled 2/2/2 layering proof, ~25.9M distinct
+# states each for fence-on and fence-off. Runs on the formal-nightly schedule;
+# also part of the full local `make tlc38`.
+tlc38-heavy: jar parse38 composed-on-2x2 composed-off-2x2
 
 jar:
 	@test -f $(JAR) || curl -L -o $(JAR) "$(TLA_TOOLS_URL)"

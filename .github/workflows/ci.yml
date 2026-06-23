@@ -335,5 +335,5 @@ jobs:
         with:
           path: formal/tla/tla2tools.jar
           key: tla2tools-v1.7.4
-      - name: Ownership + layering proof + liveness (fails on any violation)
-        run: make tlc38
+      - name: Ownership + 1-slot layering proof + liveness (fast subset; the heavy 2x2 runs in formal-nightly)
+        run: make tlc38-fast
