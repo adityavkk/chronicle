@@ -91,7 +91,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
@@ -158,6 +158,20 @@ func run(c config, r *receiver) error {
 	// shard-linz it drives the store directly — no cluster (scenario_store.go).
 	if c.scenario == "store-linz" {
 		return runStoreLinz(c)
+	}
+
+	// composed (P2.2, #36) is the TWO-FENCE COMPOSITION linearizability test: K
+	// workers contend on ONE (subscription, slot), racing the subscription's inner
+	// (gen, wake) lease fence AND that slot's outer (owner, epoch) ownership lease at
+	// once (claim_shard transfer/renew interleaved with claim/ack/release under the
+	// caller's OwnerScope so ack.lua inlines owner_fenced above the (gen,wake) fence),
+	// and the recorded history is checked against the porcupine composedModel()
+	// (model_composed.go). It binds INV-FENCE-01 (single-holder) ACROSS owner-epoch
+	// transitions and INV-OWNER-02 (owner-epoch is optimization-only): every OK must
+	// be fence-valid under the inner register ALONE. Like the other Redis-direct gates
+	// it needs no cluster (scenario_composed.go).
+	if c.scenario == "composed" {
+		return runComposedFences(c)
 	}
 
 	// cursor-monotonic drives the webhook delivery workload under origin churn
