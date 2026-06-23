@@ -36,7 +36,14 @@
 import { useComputed, useSignal } from "@preact/signals";
 import type { JSX } from "preact";
 import { useEffect, useRef } from "preact/hooks";
-import { batchHasTimes, extractTimestamp, formatBytes, formatTime } from "../lib/messages";
+import {
+	batchHasTimes,
+	compileQuery,
+	extractTimestamp,
+	formatBytes,
+	formatTime,
+	matchCompiled,
+} from "../lib/messages";
 import {
 	describeTailMode,
 	isTerminalTailState,
@@ -60,12 +67,15 @@ import {
 	tailRows,
 	tailStatus,
 } from "../state/store";
+import { RowFilter } from "./RowFilter";
 import {
 	IconArrowDownToLine,
 	IconBroadcast,
+	IconClose,
 	IconLoader,
 	IconPause,
 	IconPlay,
+	IconSearch,
 	IconStop,
 	IconTrash,
 } from "./icons";
@@ -156,6 +166,19 @@ export function TailPanel(): JSX.Element {
 	// re-engages when they scroll back to the bottom (or press "Jump to latest").
 	const stuck = useSignal(true);
 
+	// Component-local, instant filter over the live buffer — never touches the
+	// store, never drops the connection (issue #53). Each visible row keeps its
+	// true arrival number (dropped + buffer position), so the # stays honest even
+	// when the filter hides earlier rows: number first, then filter.
+	const filter = useSignal("");
+	const compiled = useComputed(() => compileQuery(filter.value));
+	const visible = useComputed(() => {
+		const q = compiled.value;
+		return rows
+			.map((row, i) => ({ row, seq: dropped + i }))
+			.filter(({ row }) => matchCompiled(row, q));
+	});
+
 	const showTime = useComputed(() => batchHasTimes(rows));
 	const idle = status.state === "idle";
 	const terminal = isTerminalTailState(status);
@@ -164,16 +187,18 @@ export function TailPanel(): JSX.Element {
 	// stops on stream / connection / mode change). A bare cleanup, run once.
 	useEffect(() => stopTail, []);
 
-	// Auto-scroll to the newest row while stuck. Runs whenever the row count
-	// changes; reduced-motion users get an instant jump via the global CSS rule
+	// Auto-scroll to the newest row while stuck. Runs whenever the visible row
+	// count changes (so typing a filter re-pins to the bottom of the filtered
+	// set); reduced-motion users get an instant jump via the global CSS rule
 	// (scroll-behavior is forced to auto), so this stays honest for them.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: scrollRef + the stuck signal are stable handles; the effect is intentionally driven by the row count alone.
+	const visibleCount = visible.value.length;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: scrollRef + the stuck signal are stable handles; the effect is intentionally driven by the visible row count alone.
 	useEffect(() => {
 		if (!stuck.value) return;
 		const el = scrollRef.current;
 		if (el === null) return;
 		el.scrollTop = el.scrollHeight;
-	}, [rows.length]);
+	}, [visibleCount]);
 
 	function onScroll(): void {
 		const el = scrollRef.current;
@@ -190,6 +215,8 @@ export function TailPanel(): JSX.Element {
 	}
 
 	const modeLabel = describeTailMode(mode);
+	const vis = visible.value;
+	const filterQuery = compiled.value;
 
 	return (
 		<section class="dsui-tail" aria-label={`Live tail (${modeLabel})`}>
@@ -198,6 +225,23 @@ export function TailPanel(): JSX.Element {
 				<span class="dsui-tail__mode" title={`Following with ${modeLabel}`}>
 					{modeLabel}
 				</span>
+				{rows.length > 0 ? (
+					<RowFilter
+						value={filter.value}
+						matched={vis.length}
+						total={rows.length}
+						active={filterQuery.active}
+						error={filterQuery.error}
+						label="Filter live messages"
+						variant="tail"
+						onInput={(v) => {
+							filter.value = v;
+						}}
+						onClear={() => {
+							filter.value = "";
+						}}
+					/>
+				) : null}
 				<span class="dsui-tail__spacer" />
 				{!terminal ? (
 					<button
@@ -263,19 +307,38 @@ export function TailPanel(): JSX.Element {
 					<span>Preview</span>
 				</div>
 				<div class="dsui-tail__rows" ref={scrollRef} onScroll={onScroll}>
-					{rows.length > 0 ? (
+					{vis.length > 0 ? (
 						// biome-ignore lint/a11y/useFocusableInteractive: focus lives on the option rows; the live listbox container itself is intentionally not a tab stop (matches the paged grid).
 						// biome-ignore lint/a11y/useSemanticElements: a native <select> cannot host these rich, clickable live rows; role="listbox" with role="option" children is the correct single-select pattern.
 						<div role="listbox" class="dsui-grid__body" aria-label="Live message rows">
-							{rows.map((row, i) => (
+							{vis.map(({ row, seq }) => (
 								<TailRow
-									key={`${i}-${row.index}-${row.preview}`}
+									key={`${seq}-${row.index}-${row.preview}`}
 									row={row}
-									seq={dropped + i}
+									seq={seq}
 									active={active === row}
 									showTime={showTime.value}
 								/>
 							))}
+						</div>
+					) : rows.length > 0 ? (
+						<div class="dsui-empty dsui-empty--inline">
+							<IconSearch size={22} class="dsui-empty__icon" />
+							<p class="dsui-empty__title">No messages match the filter</p>
+							<p class="dsui-empty__hint">
+								None of the {rows.length} buffered {rows.length === 1 ? "message" : "messages"}{" "}
+								match <code>{filter.value}</code>. New matching messages will appear as they arrive.
+							</p>
+							<button
+								type="button"
+								class="dsui-btn dsui-btn--xs"
+								onClick={() => {
+									filter.value = "";
+								}}
+							>
+								<IconClose size={13} />
+								<span>Clear filter</span>
+							</button>
 						</div>
 					) : (
 						<div class="dsui-empty dsui-empty--inline">
@@ -307,7 +370,7 @@ export function TailPanel(): JSX.Element {
 					)}
 				</div>
 
-				{!stuck.value && rows.length > 0 ? (
+				{!stuck.value && vis.length > 0 ? (
 					<button
 						type="button"
 						class="dsui-tail__jump"

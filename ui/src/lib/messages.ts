@@ -151,3 +151,171 @@ export function formatBytes(n: number): string {
 export function batchHasTimes(rows: readonly GridRow[]): boolean {
 	return rows.some((r) => r.kind === "json" && extractTimestamp(r.value) !== null);
 }
+
+/* ---------------------------------------------------------------------------
+ * In-grid row filtering (issue #53)
+ *
+ * Pure, client-side matching over the already-loaded batch and the live tail
+ * buffer — there is no server query, just narrowing the rows in memory. Three
+ * query shapes, all case-insensitive by default:
+ *
+ *  - substring (the default): the trimmed query must appear in the row's
+ *    "haystack" — its preview, the full stringified decoded value, and (for
+ *    JSON rows) the formatted time. Matching the full value, not just the
+ *    160-char preview, lets a search reach text the preview truncated.
+ *  - /regex/flags: a query wrapped in slashes compiles to a RegExp tested
+ *    against the same haystack. g/y flags are stripped so .test() is stateless
+ *    across rows; an invalid pattern does NOT empty the grid (it is inert until
+ *    the user finishes typing, and the input surfaces the error).
+ *  - field:value: a leading bare identifier + ':' targets one decoded JSON
+ *    field (dotted paths like user.id descend objects). The ':' must not be
+ *    followed by '/' or ':' so a URL like http://… stays a substring search.
+ *    An empty value matches "field exists".
+ *
+ * The matcher is split so a component compiles the query once (useComputed) and
+ * runs matchCompiled per row; rowMatches is the issue-named convenience that
+ * compiles + matches in one call (used directly by the tests).
+ * ------------------------------------------------------------------------ */
+
+/** The classified shape of a filter query. */
+export type FilterKind = "empty" | "substring" | "field" | "regex" | "invalid";
+
+/** A query compiled once, then run against many rows. */
+export interface CompiledQuery {
+	/** The original, untrimmed query text. */
+	readonly raw: string;
+	/** Which matching strategy applies. */
+	readonly kind: FilterKind;
+	/** True when the query actually narrows rows (substring | field | regex). */
+	readonly active: boolean;
+	/** A human-readable reason when kind is "invalid" (e.g. a bad regex). */
+	readonly error: string | null;
+	/** Lowercased substring needle, for "substring" and "field" kinds. */
+	readonly needle: string;
+	/** Dotted JSON field path, for the "field" kind. */
+	readonly field: string;
+	/** Compiled pattern, for the "regex" kind. */
+	readonly regex: RegExp | null;
+}
+
+/** Options shared by the matcher (kept small and explicit). */
+export interface RowMatchOptions {
+	/** Include the formatted time in the haystack (default true). */
+	readonly includeTime?: boolean;
+}
+
+/** A query wrapped in slashes, optionally with trailing flags: /body/flags. */
+const REGEX_FORM = /^\/(.+)\/([a-z]*)$/;
+/**
+ * A leading bare identifier + ':' targeting one JSON field. The negative
+ * lookahead keeps URLs (http://…) and "::" out of field syntax so they fall
+ * through to a normal substring search.
+ */
+const FIELD_FORM = /^([A-Za-z_$][\w.$-]*):(?![/:])(.*)$/;
+
+/** Classify + compile a raw filter query. Pure; never throws. */
+export function compileQuery(query: string): CompiledQuery {
+	const trimmed = query.trim();
+	const base = { raw: query, error: null, needle: "", field: "", regex: null } as const;
+	if (trimmed === "") {
+		return { ...base, kind: "empty", active: false };
+	}
+
+	const regexMatch = REGEX_FORM.exec(trimmed);
+	if (regexMatch) {
+		const body = regexMatch[1] ?? "";
+		// Strip g/y: a stateful lastIndex would make .test() flip-flop per row.
+		const flags = (regexMatch[2] ?? "").replace(/[gy]/g, "");
+		try {
+			const regex = new RegExp(body, flags);
+			return { ...base, kind: "regex", active: true, regex };
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "invalid regular expression";
+			return { ...base, kind: "invalid", active: false, error: message };
+		}
+	}
+
+	const fieldMatch = FIELD_FORM.exec(trimmed);
+	if (fieldMatch) {
+		const field = fieldMatch[1] ?? "";
+		const value = fieldMatch[2] ?? "";
+		return { ...base, kind: "field", active: true, field, needle: value.trim().toLowerCase() };
+	}
+
+	return { ...base, kind: "substring", active: true, needle: trimmed.toLowerCase() };
+}
+
+/** Stringify a row's decoded value for searching (full, not preview-truncated). */
+function stringifyValue(value: unknown): string {
+	if (typeof value === "string") return value;
+	try {
+		return JSON.stringify(value) ?? String(value);
+	} catch {
+		return String(value);
+	}
+}
+
+/**
+ * The searchable text for a row: its preview, the full stringified decoded
+ * value (so search reaches past the truncated preview), and the formatted time
+ * for JSON rows. Binary rows contribute only their preview (the raw bytes are
+ * not meaningfully searchable as text).
+ */
+export function rowHaystack(row: GridRow, opts: RowMatchOptions = {}): string {
+	const includeTime = opts.includeTime ?? true;
+	const parts: string[] = [row.preview];
+	if (row.kind === "json") {
+		parts.push(stringifyValue(row.value));
+		if (includeTime) {
+			const time = formatTime(extractTimestamp(row.value));
+			if (time !== "") parts.push(time);
+		}
+	} else if (row.kind === "text" && typeof row.value === "string") {
+		parts.push(row.value);
+	}
+	return parts.join("\n");
+}
+
+/** Resolve a dotted field path against a decoded value, or undefined. */
+function resolveFieldPath(value: unknown, path: string): unknown {
+	let current: unknown = value;
+	for (const segment of path.split(".")) {
+		if (!isRecord(current)) return undefined;
+		current = current[segment];
+	}
+	return current;
+}
+
+/** Run a pre-compiled query against one row. Pure; never throws. */
+export function matchCompiled(
+	row: GridRow,
+	query: CompiledQuery,
+	opts: RowMatchOptions = {},
+): boolean {
+	switch (query.kind) {
+		case "empty":
+		case "invalid":
+			// Not an active filter — never narrow the visible rows.
+			return true;
+		case "substring":
+			return rowHaystack(row, opts).toLowerCase().includes(query.needle);
+		case "regex":
+			return query.regex?.test(rowHaystack(row, opts)) ?? false;
+		case "field": {
+			if (row.kind !== "json") return false;
+			const found = resolveFieldPath(row.value, query.field);
+			if (found === undefined) return false;
+			if (query.needle === "") return true; // field-exists query
+			return stringifyValue(found).toLowerCase().includes(query.needle);
+		}
+	}
+}
+
+/**
+ * Does a row match a raw filter query? The issue-named entry point: compiles the
+ * query and matches in one call. Components that filter many rows should
+ * `compileQuery` once and call {@link matchCompiled} per row instead.
+ */
+export function rowMatches(row: GridRow, query: string, opts: RowMatchOptions = {}): boolean {
+	return matchCompiled(row, compileQuery(query), opts);
+}
