@@ -10,6 +10,7 @@ import {
 	formatBytes,
 	formatTime,
 	formatTimeFull,
+	republishOffset,
 	resolveOffset,
 } from "./messages";
 import type { GridRow } from "./types";
@@ -24,6 +25,22 @@ describe("resolveOffset", () => {
 	it("trims a custom offset and falls back to the beginning when blank", () => {
 		expect(resolveOffset("at", "  cursor  ")).toBe("cursor");
 		expect(resolveOffset("at", "   ")).toBe(OFFSET_EARLIEST);
+	});
+});
+
+describe("republishOffset", () => {
+	it("re-reads from the pre-append tail cursor so the new rows are shown", () => {
+		expect(republishOffset("cursor-42", OFFSET_EARLIEST)).toBe("cursor-42");
+	});
+
+	it("never re-reads from the empty tail (the prior cursor wins over the toolbar)", () => {
+		expect(republishOffset("cursor-42", OFFSET_LATEST)).toBe("cursor-42");
+	});
+
+	it("falls back to the toolbar offset when there is no prior read cursor", () => {
+		expect(republishOffset(null, OFFSET_EARLIEST)).toBe(OFFSET_EARLIEST);
+		expect(republishOffset(undefined, "cursor-7")).toBe("cursor-7");
+		expect(republishOffset("", OFFSET_EARLIEST)).toBe(OFFSET_EARLIEST);
 	});
 });
 

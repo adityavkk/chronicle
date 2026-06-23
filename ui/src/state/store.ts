@@ -13,7 +13,13 @@ import { type CaptureStopper, openCaptureStream } from "../lib/capture";
 import { loadConfig } from "../lib/config";
 import { type DsClient, createClient } from "../lib/dsClient";
 import { isRecord, kindFromContentType } from "../lib/guards";
-import { DEFAULT_ROW_CAP, type StartMode, clampRowCap, resolveOffset } from "../lib/messages";
+import {
+	DEFAULT_ROW_CAP,
+	type StartMode,
+	clampRowCap,
+	republishOffset,
+	resolveOffset,
+} from "../lib/messages";
 import { isLiveMode, previewTailOperation } from "../lib/tail";
 import type {
 	CaptureDelivery,
@@ -938,6 +944,11 @@ export async function appendMessages(
 ): Promise<boolean> {
 	const client = activeClient.value;
 	if (client === null) return false;
+	// Capture the tail cursor as it stands before the append. A publish lands
+	// exactly here, so re-reading from this cursor on success shows the just-
+	// appended rows; reading "now" would return the empty new tail and blank the
+	// grid (issue #50).
+	const priorTail = lastRead.value?.nextOffset;
 	operationInFlight.value = true;
 	try {
 		const producer = producerIdentity.value;
@@ -952,8 +963,14 @@ export async function appendMessages(
 		if (result.ok) {
 			if (producer !== null) bumpProducerSeq();
 			addToast({ kind: "success", title: "Published", message: path });
-			// Reflect the new tail if we are viewing this stream.
-			if (selectedStreamPath.value === path) await readSelected("now");
+			// Show the just-appended rows if we are viewing this stream, re-reading
+			// from the pre-append tail cursor (falling back to the toolbar's
+			// resolved offset) rather than the empty new tail.
+			if (selectedStreamPath.value === path) {
+				await readSelected(
+					republishOffset(priorTail, resolveOffset(startMode.value, customOffset.value)),
+				);
+			}
 		} else if (result.conflict !== null) {
 			const { expectedSeq, receivedSeq } = result.conflict;
 			addToast({
