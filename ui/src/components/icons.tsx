@@ -396,3 +396,33 @@ export function IconArrowDownToLine(props: IconProps): JSX.Element {
 		</Icon>
 	);
 }
+
+export function IconWebhook(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M9 8a3 3 0 1 1 4.5 2.6l2.5 4.4" />
+			<path d="M15 16a3 3 0 1 1-3 3" />
+			<path d="M12 19H7a3 3 0 0 1-1-5.8" />
+			<path d="M8 13.5 5.5 9" />
+			<path d="M16 13.5h-3" />
+		</Icon>
+	);
+}
+
+export function IconKey(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<circle cx="7.5" cy="15.5" r="3.5" />
+			<path d="m10 13 9-9M16 7l2 2M13.5 9.5l2 2" />
+		</Icon>
+	);
+}
+
+export function IconLink(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M10 13a4 4 0 0 0 5.66 0l2-2a4 4 0 0 0-5.66-5.66l-1 1" />
+			<path d="M14 11a4 4 0 0 0-5.66 0l-2 2a4 4 0 0 0 5.66 5.66l1-1" />
+		</Icon>
+	);
+}

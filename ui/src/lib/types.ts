@@ -390,3 +390,290 @@ export interface ParseError {
 export type ParseOutcome<T> =
 	| { readonly ok: true; readonly value: T }
 	| { readonly ok: false; readonly error: ParseError };
+
+/* ----------------------------------------------------------------------------
+ * Subscription control plane (the reserved /__ds/* surface)
+ *
+ * Subscriptions are the chronicle fan-out plane: a subscription links a set of
+ * streams (by glob pattern and/or an explicit list) and delivers wakes either by
+ * POSTing a signed notification to a webhook URL ("webhook") or by appending a
+ * wake event to a wake stream that workers claim ("pull-wake"). The shapes below
+ * map onto the verified server contract (webhook/wire.go + webhook/types.go):
+ *
+ *   - CREATE  PUT    /__ds/subscriptions/{id}            (201 new / 200 match / 409 conflict)
+ *   - GET     GET    /__ds/subscriptions/{id}            (404 when absent)
+ *   - DELETE  DELETE /__ds/subscriptions/{id}            (204)
+ *   - ADD     POST   /__ds/subscriptions/{id}/streams    (204)
+ *   - REMOVE  DELETE /__ds/subscriptions/{id}/streams/{path}  (204)
+ *   - CLAIM   POST   /__ds/subscriptions/{id}/claim       (200 / 409 ALREADY_CLAIMED)
+ *   - ACK     POST   /__ds/subscriptions/{id}/ack         (200 / 409 FENCED)
+ *   - RELEASE POST   /__ds/subscriptions/{id}/release     (204 / 409 FENCED)
+ *   - CALLBACK POST  /__ds/subscriptions/{id}/callback    (200 / 409 FENCED)
+ *   - JWKS    GET    /__ds/jwks.json
+ *
+ * IMPORTANT: there is no list-all endpoint. The UI tracks known subscription ids
+ * client-side, persisted per connection (see the store), exactly as it does for
+ * the connection list. These shapes carry only what the server actually
+ * serializes; runtime-only fields (phase / generation / wake_id) appear in the
+ * claim/wake plane, not the GET response, so they are modeled as optional.
+ *
+ * Like the rest of the client, the methods that take/return these resolve to
+ * typed outcomes and never throw; they all carry the captured {@link HttpExchange}.
+ * ------------------------------------------------------------------------- */
+
+/** How a subscription delivers wakes (DispatchType). */
+export type SubscriptionType = "webhook" | "pull-wake";
+
+/** How a stream came to be linked to a subscription. Explicit wins on display. */
+export type LinkType = "glob" | "explicit";
+
+/** Serialized delivery status: normal, or a webhook retry is scheduled. */
+export type SubscriptionStatus = "active" | "failed";
+
+/**
+ * Runtime wake/lease state. Not serialized in the GET response (the server keeps
+ * it internal), so it is optional everywhere the UI surfaces it.
+ *  - "idle":   no lease held and no wake in flight; eligible to wake.
+ *  - "waking": a wake was issued/POSTed but not yet claimed/completed.
+ *  - "live":   a worker holds the lease, or a webhook callback was received
+ *              without done=true.
+ */
+export type SubscriptionPhase = "idle" | "waking" | "live";
+
+/**
+ * Webhook signing metadata (asymmetric Ed25519; never a shared secret). A
+ * receiver selects the verification key by {@link kid} from the
+ * Webhook-Signature header and fetches the public key from {@link jwksUrl}.
+ */
+export interface WebhookSigning {
+	/** Signature algorithm, the lowercase "ed25519" (distinct from JWK "EdDSA"). */
+	readonly alg: string;
+	/** Stable key id ("ds_<base64url-thumbprint>"). */
+	readonly kid: string;
+	/** Absolute URL of the JWKS document (…/streams/__ds/jwks.json). */
+	readonly jwksUrl: string;
+}
+
+/** The webhook block of a webhook-type subscription. */
+export interface WebhookConfig {
+	/** Delivery target URL. */
+	readonly url: string;
+	/** Signing metadata, present once the server has minted a key. */
+	readonly signing: WebhookSigning | null;
+}
+
+/**
+ * One serialized stream link as returned in the GET / create response. The
+ * server only serializes path / link_type / acked_offset here; the richer
+ * tail_offset / has_pending live in {@link WakeStreamSnapshot} (claim + wake).
+ */
+export interface StreamLink {
+	/** Stream-root-relative path of the linked stream. */
+	readonly path: string;
+	/** How the link was formed (glob match vs explicit add). */
+	readonly linkType: LinkType;
+	/** Opaque, inclusive cursor of the last processed offset for this stream. */
+	readonly ackedOffset: string;
+}
+
+/**
+ * A per-stream snapshot returned in a claim response and a webhook wake
+ * notification: a link plus the current tail and whether work is pending.
+ */
+export interface WakeStreamSnapshot {
+	readonly path: string;
+	readonly linkType: LinkType;
+	/** Opaque, inclusive cursor of the last processed offset. */
+	readonly ackedOffset: string;
+	/** The stream's current tail cursor (opaque). */
+	readonly tailOffset: string;
+	/** True when tailOffset > ackedOffset (unprocessed data exists). */
+	readonly hasPending: boolean;
+}
+
+/**
+ * A subscription as the UI models it: the serialized GET / create fields, plus
+ * optional runtime fields the UI may learn from a claim. `wakeStream` is set for
+ * pull-wake subscriptions, `webhook` for webhook subscriptions.
+ */
+export interface Subscription {
+	/** Client-provided id, unique within the __ds namespace. */
+	readonly id: string;
+	/** Delivery type. */
+	readonly type: SubscriptionType;
+	/** Glob pattern matching stream paths, or null when only explicit streams. */
+	readonly pattern: string | null;
+	/** Linked streams with their acked cursors. */
+	readonly streams: readonly StreamLink[];
+	/** Webhook block (webhook type only), or null. */
+	readonly webhook: WebhookConfig | null;
+	/** Wake stream path (pull-wake type only), or null. */
+	readonly wakeStream: string | null;
+	/** Lease TTL in ms (1000–600000; default 30000). */
+	readonly leaseTtlMs: number;
+	/** RFC3339 creation timestamp, or null when the server omitted it. */
+	readonly createdAt: string | null;
+	/** Serialized delivery status. */
+	readonly status: SubscriptionStatus;
+	/** Optional human-readable label. */
+	readonly description: string | null;
+	/** Runtime phase, when the UI has learned it (not in the GET response). */
+	readonly phase?: SubscriptionPhase;
+	/** Current fencing generation, when known (from a claim). */
+	readonly generation?: number;
+}
+
+/**
+ * Options for creating (or re-confirming) a subscription via PUT
+ * /__ds/subscriptions/{id}. At least one of {@link pattern} or {@link streams}
+ * is required. {@link webhookUrl} is required for type "webhook";
+ * {@link wakeStream} for type "pull-wake".
+ */
+export interface CreateSubscriptionOptions {
+	/** Client-provided subscription id (the {id} path segment). */
+	readonly id: string;
+	/** Delivery type. */
+	readonly type: SubscriptionType;
+	/** Glob pattern to match stream paths (* = one segment, ** = zero or more). */
+	readonly pattern?: string;
+	/** Explicit stream paths to link at their current tail. */
+	readonly streams?: readonly string[];
+	/** Webhook delivery URL (type "webhook"). */
+	readonly webhookUrl?: string;
+	/** Wake stream path (type "pull-wake"). */
+	readonly wakeStream?: string;
+	/** Lease TTL in ms; the server clamps to 1000–600000, 0 → 30000 default. */
+	readonly leaseTtlMs?: number;
+	/** Optional human-readable label. */
+	readonly description?: string;
+}
+
+/**
+ * The successful result of a pull-wake claim (POST …/claim). Carries the Bearer
+ * {@link token} the worker uses for ack/release, the fencing {@link generation}
+ * + {@link wakeId}, and the per-stream snapshots with pending work.
+ */
+export interface WakeClaim {
+	/** Unique id of this wake (prevents replay within a generation). */
+	readonly wakeId: string;
+	/** Monotonic fencing generation; tokens are valid only for it. */
+	readonly generation: number;
+	/** Bearer token (signed JWT) for ack/release of this claim. */
+	readonly token: string;
+	/** Per-stream snapshots (tail + has_pending) at claim time. */
+	readonly streams: readonly WakeStreamSnapshot[];
+	/** Lease TTL in ms granted for this claim. */
+	readonly leaseTtlMs: number;
+}
+
+/** A single offset acknowledgment in an ack/callback body. */
+export interface OffsetAck {
+	/** The stream-root-relative path being acked. */
+	readonly stream: string;
+	/** The opaque offset processed (inclusive). */
+	readonly offset: string;
+}
+
+/**
+ * The body of an ack (POST …/ack) or webhook callback (POST …/callback). Fences
+ * on (generation, wakeId). {@link done} true releases the lease and applies the
+ * acks; absent/false extends the lease as a heartbeat.
+ */
+export interface AckRequest {
+	/** The wake being acked. */
+	readonly wakeId: string;
+	/** The generation the claim/wake was issued under. */
+	readonly generation: number;
+	/** Offsets processed, applied when done. */
+	readonly acks: readonly OffsetAck[];
+	/** True to release + apply; absent/false to heartbeat-extend the lease. */
+	readonly done?: boolean;
+}
+
+/** The success body of an ack / callback (POST …/ack | …/callback). */
+export interface AckResult {
+	/** Always true on a 2xx ack. */
+	readonly ok: boolean;
+	/** Whether the server determined a new wake is due. */
+	readonly nextWake: boolean;
+}
+
+/**
+ * The outcome of a subscription control-plane operation. Like {@link WriteResult}
+ * it is returned, never thrown, and carries the {@link Operation} descriptor + the
+ * captured {@link HttpExchange} for copy-as-curl and the under-the-hood panel.
+ *
+ * `fenced` is the typed surfacing of the protocol's 409 cases: a "FENCED" ack/
+ * release/callback (stale generation/wake/token, or deleted subscription) or an
+ * "ALREADY_CLAIMED" claim. `errorCode` is the wire code when the server sent an
+ * `{"error":{"code":…}}` envelope. `value` is the parsed body for ops that return
+ * one (a {@link Subscription} from create/get, a {@link WakeClaim} from claim, an
+ * {@link AckResult} from ack/callback); null for 204 ops and failures.
+ */
+export interface SubscriptionResult<T> {
+	/** True when the server returned a 2xx. */
+	readonly ok: boolean;
+	/** The parsed body for this op, or null (204 / failure / unparseable). */
+	readonly value: T | null;
+	/** True when the op was rejected by fencing (409 FENCED / ALREADY_CLAIMED). */
+	readonly fenced: boolean;
+	/** The wire error code from an {"error":{"code":…}} body, when present. */
+	readonly errorCode: string | null;
+	/** A short human error, present when ok is false. */
+	readonly error: string | null;
+	/** The operation descriptor that was sent (for the curl helper). */
+	readonly operation: Operation;
+	/** The captured HTTP exchange (for the protocol disclosure). */
+	readonly exchange: HttpExchange;
+}
+
+/* ----------------------------------------------------------------------------
+ * Metrics (Prometheus text-exposition parsing)
+ *
+ * The server exposes Prometheus metrics on a separate listener (the
+ * --metrics-listen address, e.g. :9090) at GET /metrics, in the text exposition
+ * format (Content-Type: text/plain; version=0.0.4). lib/metrics.ts parses that
+ * text into the typed snapshot below; the client just fetches the raw text.
+ * ------------------------------------------------------------------------- */
+
+/** The metric type as declared by a `# TYPE name kind` comment line. */
+export type MetricType = "counter" | "gauge" | "histogram" | "summary" | "untyped";
+
+/** One parsed sample: a metric name, its label set, and a numeric value. */
+export interface MetricSample {
+	/**
+	 * The base metric name (without the _bucket/_sum/_count suffix a histogram or
+	 * summary series carries). e.g. "chronicle_wake_delivery_seconds".
+	 */
+	readonly name: string;
+	/**
+	 * The full series name as it appeared on the line, including any suffix
+	 * (e.g. "chronicle_wake_delivery_seconds_bucket"). Distinguishes the
+	 * component series of a histogram/summary family.
+	 */
+	readonly series: string;
+	/** Label set as a plain record (le / quantile included verbatim). */
+	readonly labels: Readonly<Record<string, string>>;
+	/** The parsed numeric value (NaN / +Inf / -Inf are preserved). */
+	readonly value: number;
+}
+
+/** A metric family: its declared HELP/TYPE plus every parsed sample. */
+export interface Metric {
+	/** The base metric name. */
+	readonly name: string;
+	/** Declared type from the `# TYPE` line, or "untyped" when none was given. */
+	readonly type: MetricType;
+	/** The HELP text from the `# HELP` line, or null. */
+	readonly help: string | null;
+	/** All samples belonging to this family, in document order. */
+	readonly samples: readonly MetricSample[];
+}
+
+/** A parsed Prometheus exposition document: metric families keyed by name. */
+export interface MetricsSnapshot {
+	/** Metric families in first-seen order. */
+	readonly metrics: readonly Metric[];
+	/** Wall-clock ms when the snapshot was parsed. */
+	readonly parsedAt: number;
+}

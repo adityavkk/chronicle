@@ -16,23 +16,44 @@ import {
 	previewOf,
 	reduceRegistry,
 } from "./guards";
+import { parseMetrics } from "./metrics";
+import {
+	buildAckBody,
+	buildCreateBody,
+	parseAckResult,
+	parseErrorCode,
+	parseSubscription,
+	parseWakeClaim,
+} from "./subscriptions";
 import type {
+	AckResult,
 	AppendOptions,
 	Connection,
 	ConnectionProbe,
 	CreateStreamOptions,
+	CreateSubscriptionOptions,
 	GridRow,
 	HttpExchange,
+	MetricsSnapshot,
 	Operation,
 	ProducerConflict,
 	ProtocolHeaders,
 	ReadResult,
 	StreamInfo,
+	Subscription,
+	SubscriptionResult,
 	TailBatch,
 	TailStatus,
 	TailStopper,
+	WakeClaim,
 	WriteResult,
 } from "./types";
+
+/** The reserved control-plane prefix for subscriptions (no streamRoot). */
+export const SUBSCRIPTIONS_PREFIX = "/__ds/subscriptions";
+
+/** The well-known JWKS path for webhook-signature verification (no streamRoot). */
+export const JWKS_PATH = "/__ds/jwks.json";
 
 /** The registry stream path used for discovery (no native list-all endpoint). */
 export const REGISTRY_PATH = "__registry__";
@@ -53,6 +74,17 @@ function encodeStreamPath(path: string): string {
 		.split("/")
 		.map((seg) => encodeURIComponent(seg))
 		.join("/");
+}
+
+/**
+ * Build the absolute URL for a subscription control-plane endpoint. The reserved
+ * /__ds/* surface is served on the connection origin (NOT under streamRoot), so
+ * the id is appended after the fixed prefix. `suffix` is an already-shaped tail
+ * such as "/streams", "/claim", "/ack", "/release", "/callback", or
+ * "/streams/<encoded-path>".
+ */
+export function subscriptionUrl(conn: Connection, id: string, suffix = ""): string {
+	return `${conn.baseUrl}${SUBSCRIPTIONS_PREFIX}/${encodeURIComponent(id)}${suffix}`;
 }
 
 /** Flatten a Headers object into a plain, lowercased-key record. */
@@ -239,6 +271,86 @@ export interface DsClient {
 		onMessage: (batch: TailBatch) => void,
 		onState: (status: TailStatus) => void,
 	): TailStopper;
+
+	/* ---- Subscription control plane (reserved /__ds/* surface) ----------
+	 *
+	 * Each resolves to a typed {@link SubscriptionResult}, never throwing. The
+	 * protocol's 409 cases are surfaced typed: a CONFIG_CONFLICT on create, an
+	 * ALREADY_CLAIMED on claim, or a FENCED on ack/release/callback all set
+	 * `fenced`/`errorCode` rather than looking like an opaque failure. There is no
+	 * list-all endpoint — the store tracks known ids client-side.
+	 */
+
+	/** Create or re-confirm a subscription (PUT). 201 new / 200 match / 409 conflict. */
+	createSubscription(
+		opts: CreateSubscriptionOptions,
+		signal?: AbortSignal,
+	): Promise<SubscriptionResult<Subscription>>;
+	/** Fetch a subscription's current view (GET). 404 → ok:false, value:null. */
+	getSubscription(id: string, signal?: AbortSignal): Promise<SubscriptionResult<Subscription>>;
+	/** Tombstone a subscription (DELETE). 204 → ok:true, value:null. */
+	deleteSubscription(id: string, signal?: AbortSignal): Promise<SubscriptionResult<null>>;
+	/** Add explicit stream links to a subscription (POST …/streams). 204. */
+	addSubscriptionStreams(
+		id: string,
+		streams: readonly string[],
+		signal?: AbortSignal,
+	): Promise<SubscriptionResult<null>>;
+	/** Remove an explicit stream link (DELETE …/streams/{path}). 204, idempotent. */
+	removeSubscriptionStream(
+		id: string,
+		path: string,
+		signal?: AbortSignal,
+	): Promise<SubscriptionResult<null>>;
+
+	/* ---- Pull-wake worker plane (claim → ack/heartbeat → release) -------- */
+
+	/** Claim a pull-wake lease (POST …/claim). 200 → WakeClaim; 409 ALREADY_CLAIMED → fenced. */
+	claimWake(
+		id: string,
+		worker: string,
+		signal?: AbortSignal,
+	): Promise<SubscriptionResult<WakeClaim>>;
+	/**
+	 * Ack a pull-wake claim (POST …/ack) with the Bearer token from the claim.
+	 * `done:true` releases + applies acks; absent/false heartbeat-extends the
+	 * lease. 409 FENCED (stale generation/wake/token) → fenced.
+	 */
+	ackWake(
+		id: string,
+		token: string,
+		req: {
+			wakeId: string;
+			generation: number;
+			acks: readonly { stream: string; offset: string }[];
+			done?: boolean;
+		},
+		signal?: AbortSignal,
+	): Promise<SubscriptionResult<AckResult>>;
+	/**
+	 * Voluntarily release a pull-wake lease without acking (POST …/release) with
+	 * the Bearer token. 204 → ok:true; 409 FENCED → fenced.
+	 */
+	releaseWake(
+		id: string,
+		token: string,
+		req: { wakeId: string; generation: number },
+		signal?: AbortSignal,
+	): Promise<SubscriptionResult<null>>;
+
+	/* ---- Metrics (Prometheus text on the separate --metrics-listen) ----- */
+
+	/**
+	 * Fetch + parse the Prometheus metrics document from an explicit metrics URL
+	 * (the --metrics-listen address's /metrics, e.g. http://host:9090/metrics).
+	 * It is a separate origin from the stream handler, so the URL is passed in
+	 * rather than derived. Resolves to the parsed snapshot or null on failure,
+	 * always with the captured exchange.
+	 */
+	fetchMetrics(
+		metricsUrl: string,
+		signal?: AbortSignal,
+	): Promise<{ snapshot: MetricsSnapshot | null; exchange: HttpExchange }>;
 }
 
 /** Create a {@link DsClient} for the given connection. */
@@ -307,6 +419,63 @@ export function createClient(connection: Connection): DsClient {
 		const url = streamUrl(connection, opts.path);
 		const headers = createHeaders(opts, connection.streamRoot);
 		return doWrite("PUT", url, headers, signal);
+	}
+
+	/**
+	 * Run a single subscription control-plane request and shape it into a typed
+	 * {@link SubscriptionResult}. Never throws: a network error, a non-2xx, or a
+	 * fencing 409 all resolve. `parse` maps the (already-read) response body text
+	 * to the typed value on a 2xx; pass `null` for 204 ops. The 409 cases are
+	 * surfaced via `fenced` + `errorCode` from the `{"error":{"code":…}}` body.
+	 */
+	async function doSubscriptionOp<T>(
+		method: string,
+		url: string,
+		headers: Record<string, string>,
+		body: string | undefined,
+		parse: (bodyText: string) => T | null,
+		signal: AbortSignal | undefined,
+	): Promise<SubscriptionResult<T>> {
+		const operation: Operation =
+			body === undefined ? { method, url, headers } : { method, url, headers, body };
+		const { exchange, response } = await doFetch(method, url, headers, signal, body);
+		if (response === null) {
+			return {
+				ok: false,
+				value: null,
+				fenced: false,
+				errorCode: null,
+				error: exchange.error ?? "network request failed",
+				operation,
+				exchange,
+			};
+		}
+		const text = await safeText(response);
+		if (response.ok) {
+			return {
+				ok: true,
+				value: parse(text),
+				fenced: false,
+				errorCode: null,
+				error: null,
+				operation,
+				exchange,
+			};
+		}
+		const errorCode = parseErrorCode(jsonOrNull(text));
+		// A 409 with FENCED (ack/release/callback) or ALREADY_CLAIMED (claim) is the
+		// protocol's fencing signal; surface it typed rather than as a flat failure.
+		const fenced =
+			response.status === 409 && (errorCode === "FENCED" || errorCode === "ALREADY_CLAIMED");
+		return {
+			ok: false,
+			value: null,
+			fenced,
+			errorCode,
+			error: writeErrorLabel(response.status, response.statusText),
+			operation,
+			exchange,
+		};
 	}
 
 	return {
@@ -464,7 +633,146 @@ export function createClient(connection: Connection): DsClient {
 		openSse(path, fromOffset, onMessage, onState) {
 			return runSse(connection, path, fromOffset, onMessage, onState);
 		},
+
+		/* ---- Subscription control plane ----------------------------------- */
+
+		createSubscription(opts, signal) {
+			const url = subscriptionUrl(connection, opts.id);
+			const headers: Record<string, string> = {
+				...ACCEPT_HEADER,
+				"Content-Type": "application/json",
+			};
+			const body = JSON.stringify(
+				buildCreateBody({
+					type: opts.type,
+					...(opts.pattern !== undefined ? { pattern: opts.pattern } : {}),
+					...(opts.streams !== undefined ? { streams: opts.streams } : {}),
+					...(opts.webhookUrl !== undefined ? { webhookUrl: opts.webhookUrl } : {}),
+					...(opts.wakeStream !== undefined ? { wakeStream: opts.wakeStream } : {}),
+					...(opts.leaseTtlMs !== undefined ? { leaseTtlMs: opts.leaseTtlMs } : {}),
+					...(opts.description !== undefined ? { description: opts.description } : {}),
+				}),
+			);
+			return doSubscriptionOp(
+				"PUT",
+				url,
+				headers,
+				body,
+				(t) => parseSubscription(jsonOrNull(t)),
+				signal,
+			);
+		},
+
+		getSubscription(id, signal) {
+			const url = subscriptionUrl(connection, id);
+			return doSubscriptionOp(
+				"GET",
+				url,
+				{ ...ACCEPT_HEADER },
+				undefined,
+				(t) => parseSubscription(jsonOrNull(t)),
+				signal,
+			);
+		},
+
+		deleteSubscription(id, signal) {
+			const url = subscriptionUrl(connection, id);
+			return doSubscriptionOp("DELETE", url, { ...ACCEPT_HEADER }, undefined, () => null, signal);
+		},
+
+		addSubscriptionStreams(id, streams, signal) {
+			const url = subscriptionUrl(connection, id, "/streams");
+			const headers: Record<string, string> = {
+				...ACCEPT_HEADER,
+				"Content-Type": "application/json",
+			};
+			const body = JSON.stringify({ streams: [...streams] });
+			return doSubscriptionOp("POST", url, headers, body, () => null, signal);
+		},
+
+		removeSubscriptionStream(id, path, signal) {
+			// The path is the stream-root-relative path, URL-encoded as a single
+			// segment after /streams/ (its own slashes are encoded too).
+			const clean = path.trim().replace(/^\/+/, "");
+			const url = subscriptionUrl(connection, id, `/streams/${encodeURIComponent(clean)}`);
+			return doSubscriptionOp("DELETE", url, { ...ACCEPT_HEADER }, undefined, () => null, signal);
+		},
+
+		claimWake(id, worker, signal) {
+			const url = subscriptionUrl(connection, id, "/claim");
+			const headers: Record<string, string> = {
+				...ACCEPT_HEADER,
+				"Content-Type": "application/json",
+			};
+			const body = JSON.stringify({ worker });
+			return doSubscriptionOp(
+				"POST",
+				url,
+				headers,
+				body,
+				(t) => parseWakeClaim(jsonOrNull(t)),
+				signal,
+			);
+		},
+
+		ackWake(id, token, req, signal) {
+			const url = subscriptionUrl(connection, id, "/ack");
+			const headers: Record<string, string> = {
+				...ACCEPT_HEADER,
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${token}`,
+			};
+			const body = JSON.stringify(
+				buildAckBody({
+					wakeId: req.wakeId,
+					generation: req.generation,
+					acks: req.acks,
+					...(req.done !== undefined ? { done: req.done } : {}),
+				}),
+			);
+			return doSubscriptionOp(
+				"POST",
+				url,
+				headers,
+				body,
+				(t) => parseAckResult(jsonOrNull(t)),
+				signal,
+			);
+		},
+
+		releaseWake(id, token, req, signal) {
+			const url = subscriptionUrl(connection, id, "/release");
+			const headers: Record<string, string> = {
+				...ACCEPT_HEADER,
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${token}`,
+			};
+			const body = JSON.stringify({ wake_id: req.wakeId, generation: req.generation });
+			return doSubscriptionOp("POST", url, headers, body, () => null, signal);
+		},
+
+		/* ---- Metrics ------------------------------------------------------ */
+
+		async fetchMetrics(metricsUrl, signal) {
+			const { exchange, response } = await doFetch("GET", metricsUrl, { ...ACCEPT_HEADER }, signal);
+			if (response === null || !response.ok) {
+				return { snapshot: null, exchange };
+			}
+			const text = await safeText(response);
+			return { snapshot: parseMetrics(text), exchange };
+		},
 	};
+}
+
+/** JSON.parse a body text to unknown, or null when it is empty / not JSON. */
+function jsonOrNull(text: string): unknown {
+	const trimmed = text.trim();
+	if (trimmed === "") return null;
+	try {
+		return JSON.parse(trimmed) as unknown;
+	} catch {
+		return null;
+	}
 }
 
 /* ----------------------------------------------------------------------------
