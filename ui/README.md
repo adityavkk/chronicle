@@ -19,8 +19,21 @@ plain HTTP requests from the browser.
 - Add a stream by path even when the registry does not list it.
 - Read a stream from the beginning, from the current tail, or from an offset you
   type, and page forward batch by batch.
+- Follow a stream's tail live, by long-polling or over Server-Sent Events, with
+  a connection-status badge, pause/resume, a stick-to-bottom auto-scroll, and a
+  stop control — messages appear as they arrive.
 - Render each message according to its content type: JSON elements pretty-print,
   text shows verbatim, and binary shows as a hex dump.
+- Create a stream (PUT) with a chosen content type and optional TTL / expiry /
+  "create closed", publish a message batch (POST) with an optional idempotent
+  producer and an atomic "close after sending", close a stream, delete a stream
+  (behind a confirm), fork a stream at an offset, and refresh a stream's
+  metadata (HEAD).
+- See the exact equivalent `curl` command for every operation, next to the
+  control and under the hood, and copy it in one click.
+- Bootstrap the whole API from a Playground of one-click presets on a safe
+  `playground/…` sample namespace (create, publish, demo producer, live tail,
+  fork, close, delete).
 - Show, on demand, the real HTTP request and response that produced what you are
   looking at, with a plain-language explanation of the protocol headers.
 
@@ -137,18 +150,49 @@ The feature components are:
   connection" step that probes a candidate before you save it.
 - `ConnectionManager` — the header switcher and theme toggle.
 - `Navigator` — the left rail: the connected server, the stream list with an
-  instant filter and a manual-add box, and the disabled "coming next" rows.
-- `MessagesWorkspace` — the center: the read toolbar, the message grid with its
-  pager, and the "Under the hood" protocol disclosure.
+  instant filter, a manual-add box, a "New stream" button, the Playground, and
+  the disabled "coming next" rows.
+- `MessagesWorkspace` — the center: the read-mode + start toolbar, the publish
+  composer, the message grid (or the live tail), the pager, and the "Under the
+  hood" protocol disclosure.
 - `Inspector` — the right panel: the decoded value, the raw bytes, and the
   captured response headers for the selected row.
-- `ProtocolPanel` — the collapsible HTTP transcript and protocol primer.
+- `ProtocolPanel` — the collapsible HTTP transcript and protocol primer, plus a
+  "Live connection" block while a tail is open.
+
+The write, fork, live-tail, and Playground feature components are:
+
+- `CreateStreamDialog` — the modal form to create a stream (path, content type,
+  and an Advanced disclosure for TTL / Expires-At / "create closed").
+- `PublishComposer` — the content-type-aware publish editor under the toolbar (a
+  JSON batch editor, a text area, or a binary text/base64 input), with an
+  idempotent-producer disclosure and a "close after sending" checkbox.
+- `ForkDialog` — the modal form to fork a stream at an offset (and optional
+  sub-offset) into a new stream.
+- `StreamActionsMenu` — the workspace-header popover for per-stream lifecycle:
+  Fork, Refresh metadata, Close, and Delete (behind a confirm).
+- `TailPanel` — the live view shown in place of the paged grid while a tail is
+  open: a connection-status badge, Pause / Resume / Clear / Start / Stop, a
+  stick-to-bottom auto-scroll, and a buffered / aged-out footer.
+- `Playground` — a Navigator section of one-click presets that bootstrap the
+  whole API on a safe `playground/…` sample namespace.
+
+The shared UI primitives are:
+
+- `Modal` — the accessible dialog shell (focus move-in + restore, focus trap,
+  Escape / backdrop close) used by the create and fork dialogs.
+- `CurlPreview` — the collapsed "Equivalent curl" disclosure shown next to every
+  operation, with one-click copy.
+- `Toaster` — the transient-notification stack (success / info / warning / error)
+  with per-toast auto-dismiss and an optional inline action.
 - `StatusDot`, `CopyButton`, `icons` — small shared pieces.
 
 ## The Durable Streams protocol dsui speaks
 
 A Durable Streams server exposes append-only byte streams over plain HTTP. dsui
-only reads; it does not create or append. The parts of the protocol it uses are:
+reads streams, follows them live (long-poll / SSE), and performs the full
+write/fork/lifecycle surface (create, publish, close, delete, fork). The parts
+of the protocol it uses are:
 
 - **Streams are URLs.** A stream lives at `{baseUrl}{streamRoot}/{path}`. The
   default stream route is `/v1/stream`, so a stream named `orders/created` on a
@@ -180,6 +224,107 @@ only reads; it does not create or append. The parts of the protocol it uses are:
   stream paths (a `deleted` operation removes a path; later events win), and
   shows the result as the stream list. If the registry is empty or absent, the
   list is honestly empty and you can add stream paths by hand.
+
+## The stream operations
+
+dsui can do every operation a Durable Streams server supports, not just read.
+Each operation is one HTTP request. The UI builds the request, sends it once
+through the client, and shows you the result and the exact equivalent curl. None
+of these throw. A failure becomes a clear message in a toast, and the failed
+request still shows up in the "Under the hood" panel.
+
+- **Create a stream.** The "New stream" button in the Navigator opens a dialog.
+  You give the stream a path and pick its content type (text, JSON, or binary).
+  An Advanced section lets you set a time to live, an expiry time, or create the
+  stream already closed. The request is a `PUT` to the stream URL. The server
+  fixes the content type at creation, so you choose it once here.
+
+- **Publish a batch of messages.** When a stream is selected, a publish editor
+  sits under the toolbar. It changes shape to match the stream's content type. A
+  JSON stream gets an editor for a JSON array, where each element is one message,
+  with a live count and a "Format JSON" helper. A text stream gets a plain text
+  box. A binary stream gets a box that accepts UTF-8 text or base64, and base64
+  is decoded to the exact bytes before sending. The request is a `POST` to the
+  stream URL.
+
+- **Use an idempotent producer.** Inside the publish editor, an optional section
+  lets you send a producer identity with the append: a producer id, an epoch, and
+  a sequence number. The epoch fences out older producers that share the id, and
+  the sequence number lets the server drop duplicates and keep order. After a
+  successful publish the UI advances the sequence number for you, so the next
+  publish from the same producer is the next number in line. If the server
+  rejects the append because the sequence did not match, the UI shows a warning
+  with the number the server expected and the number it received.
+
+- **Close after sending, or close on its own.** The publish editor has a "close
+  stream after sending" checkbox that appends your batch and closes the stream in
+  the same request. You can also close a stream on its own from the stream
+  actions menu in the workspace header. A closed stream takes no more messages.
+
+- **Follow a stream live.** The toolbar has a mode picker: Catch-up, Long-poll,
+  or SSE. Catch-up is the normal paged read. The two live modes open a tail that
+  shows new messages as they arrive. Long-poll repeats a `GET` that the server
+  holds open until there is new data. SSE opens a browser EventSource. Both show
+  a connection-status badge, and you can pause buffering without dropping the
+  connection, clear what you have, and stop the tail. The live view keeps a
+  bounded buffer, so a fast stream cannot grow memory without limit. When the
+  buffer is full the oldest messages age out, and the footer tells you how many.
+
+- **Fork a stream.** The stream actions menu has a "Fork" item, and the dialog is
+  seeded from where your current read ended. A fork is a new stream that inherits
+  the source stream's data up to an offset you choose, then goes its own way. The
+  request is a `PUT` that carries the source path and the fork offset.
+
+- **Delete a stream.** The stream actions menu has a "Delete" item behind a small
+  confirm step. The request is a `DELETE`. The server soft-deletes the stream if
+  forks depend on it, and removes it entirely otherwise.
+
+- **Refresh a stream's metadata.** The stream actions menu can send a `HEAD` to
+  the stream. This updates the content type, the closed flag, and the next offset
+  without reading the body, and the result flows into the "Under the hood" panel.
+
+## The Playground
+
+If you open dsui against an empty server, the stream list is empty and there is
+nothing to click. The Playground solves that. It is a section in the Navigator
+with one button per operation, and each button runs the real operation against a
+sample stream named `playground/demo`. Nothing about the Playground is a special
+code path. Each button calls the same store action the rest of the UI uses, so
+what you see is exactly what happens when you do it by hand.
+
+The presets are: create the sample JSON stream, publish a sample batch, run a
+demo producer that sends five messages a short time apart so a live tail visibly
+updates, tail the stream live over SSE, fork the stream at its latest offset,
+close the stream, and delete the stream to reset the playground. Every preset
+works only on the `playground/…` sample namespace, so it can never touch your
+real streams.
+
+Each preset also explains itself before you run it. It shows a plain-language
+line that says exactly what the request will do, and it shows the exact
+equivalent curl. The curl is built from the same code that builds the real
+request, so it is honest even when there is no server connected yet. A first-run
+hint in the empty stream list points you at the Playground.
+
+## Copy as curl
+
+Every operation in dsui can be copied as a curl command. The point is that you
+can learn the protocol by reading the command, paste it into a terminal to run
+the same request by hand, or drop it into a script or a bug report.
+
+The command is the exact request. It is not a rough sketch. The method, the URL
+with its query string, and every header appear in the order the UI sends them. A
+text body is shown as `--data-raw` with the body quoted for the shell. A binary
+body cannot be put on one line safely, so the command reads the bytes from
+standard input with `--data-binary @-` and a note of the byte count, rather than
+corrupting the payload. An SSE tail adds curl's `-N` flag so the stream is not
+buffered.
+
+You see the curl in three places. It sits next to each form before you submit,
+so you can preview what a control will send. It sits next to each Playground
+preset. And it sits in the "Under the hood" panel for the request that actually
+ran. The first two come from a preview of the request the UI is about to send;
+the last comes from the request it already sent. Both produce the same command
+for the same operation.
 
 ## The progressive-disclosure feature
 
@@ -260,17 +405,13 @@ ui/ source ──vite build──▶ cmd/dsui/embedded ──go:embed──▶ d
 
 ## Coming next
 
-The Navigator shows two disabled "coming next" rows (Subscriptions and Metrics),
-and the workspace is read-and-page today. The planned additions are:
+The Navigator shows two disabled "coming next" rows (Subscriptions and Metrics).
+The workspace can now read-and-page or follow a stream's tail live (long-poll /
+SSE). The planned additions are:
 
-- **Live tail.** Follow a stream's tail as new messages arrive, using the
-  server's long-poll and SSE live-tailing support, instead of pressing "Read next
-  batch" by hand.
 - **Subscriptions.** A panel for the server's reserved `__ds` subscription APIs
   (signed webhook delivery and pull-wake), so you can view and manage
   subscriptions from the console.
 - **A real stream-list endpoint.** Discovery today reads the `__registry__`
   stream. A dedicated `GET /__ds/streams` listing endpoint would replace the
   registry reduction with a direct, paginated list of streams.
-</content>
-</invoke>

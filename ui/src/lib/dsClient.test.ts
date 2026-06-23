@@ -376,3 +376,230 @@ describe("headStream", () => {
 		expect(exchange.protocol.contentType).toBe("application/json");
 	});
 });
+
+/* ----------------------------------------------------------------------------
+ * Write / fork / lifecycle — header mapping + WriteResult shaping
+ * ------------------------------------------------------------------------- */
+
+/** The RequestInit headers for the Nth fetch call, as a plain record. */
+function reqHeaders(fn: ReturnType<typeof vi.fn>, n = 0): Record<string, string> {
+	const init = fn.mock.calls[n]?.[1] as RequestInit | undefined;
+	return (init?.headers as Record<string, string>) ?? {};
+}
+
+describe("createStream", () => {
+	it("PUTs with Content-Type and optional TTL / expiry / closed headers", async () => {
+		const fetchFn = stubFetch({ status: 201, headers: { Location: "/v1/stream/s" } });
+		const result = await createClient(CONN).createStream({
+			path: "s",
+			contentType: "application/json",
+			ttl: "1h",
+			expiresAt: "2026-01-01T00:00:00Z",
+			closed: true,
+		});
+		const init = fetchFn.mock.calls[0]?.[1] as RequestInit;
+		expect(init.method).toBe("PUT");
+		expect(fetchFn.mock.calls[0]?.[0]).toBe(streamUrl(CONN, "s"));
+		expect(reqHeaders(fetchFn)).toMatchObject({
+			"Content-Type": "application/json",
+			"Stream-TTL": "1h",
+			"Stream-Expires-At": "2026-01-01T00:00:00Z",
+			"Stream-Closed": "true",
+		});
+		expect(result.ok).toBe(true);
+		expect(result.location).toBe("/v1/stream/s");
+		expect(result.operation.method).toBe("PUT");
+	});
+
+	it("omits optional headers when not provided", async () => {
+		const fetchFn = stubFetch({ status: 201 });
+		await createClient(CONN).createStream({ path: "s", contentType: "text/plain" });
+		const headers = reqHeaders(fetchFn);
+		expect(headers["Content-Type"]).toBe("text/plain");
+		expect(headers["Stream-TTL"]).toBeUndefined();
+		expect(headers["Stream-Closed"]).toBeUndefined();
+	});
+
+	it("reports ok:false with an error label on a non-2xx", async () => {
+		stubFetch({ status: 409, statusText: "Conflict" });
+		const result = await createClient(CONN).createStream({ path: "s", contentType: "text/plain" });
+		expect(result.ok).toBe(false);
+		expect(result.error).toBe("409 Conflict");
+	});
+
+	it("never throws on a network failure", async () => {
+		stubFetchReject(new TypeError("Failed to fetch"));
+		const result = await createClient(CONN).createStream({ path: "s", contentType: "text/plain" });
+		expect(result.ok).toBe(false);
+		expect(result.error).toBe("Failed to fetch");
+		expect(result.exchange.status).toBe(0);
+	});
+});
+
+describe("appendMessages", () => {
+	it("POSTs the body and sets Producer-* + Stream-Closed when given", async () => {
+		const fetchFn = stubFetch({ status: 204, headers: { "Stream-Next-Offset": "99" } });
+		const body = JSON.stringify([{ id: 1 }]);
+		const result = await createClient(CONN).appendMessages("orders", {
+			body,
+			producer: { id: "p1", epoch: 2, seq: 7 },
+			closeAfter: true,
+			contentType: "application/json",
+		});
+		const init = fetchFn.mock.calls[0]?.[1] as RequestInit;
+		expect(init.method).toBe("POST");
+		expect(init.body).toBe(body);
+		expect(reqHeaders(fetchFn)).toMatchObject({
+			"Content-Type": "application/json",
+			"Producer-Id": "p1",
+			"Producer-Epoch": "2",
+			"Producer-Seq": "7",
+			"Stream-Closed": "true",
+		});
+		expect(result.ok).toBe(true);
+		expect(result.nextOffset).toBe("99");
+	});
+
+	it("surfaces producer-conflict detail from the response headers", async () => {
+		stubFetch({
+			status: 409,
+			statusText: "Conflict",
+			headers: { "Producer-Expected-Seq": "5", "Producer-Received-Seq": "8" },
+		});
+		const result = await createClient(CONN).appendMessages("s", {
+			body: "[]",
+			producer: { id: "p", epoch: 1, seq: 8 },
+		});
+		expect(result.ok).toBe(false);
+		expect(result.conflict).toEqual({ expectedSeq: 5, receivedSeq: 8 });
+	});
+});
+
+describe("closeStream / deleteStream", () => {
+	it("closeStream POSTs Stream-Closed: true with an empty body", async () => {
+		const fetchFn = stubFetch({ status: 204 });
+		const result = await createClient(CONN).closeStream("s");
+		const init = fetchFn.mock.calls[0]?.[1] as RequestInit;
+		expect(init.method).toBe("POST");
+		expect(init.body).toBe("");
+		expect(reqHeaders(fetchFn)["Stream-Closed"]).toBe("true");
+		expect(result.ok).toBe(true);
+	});
+
+	it("deleteStream issues a DELETE", async () => {
+		const fetchFn = stubFetch({ status: 204 });
+		const result = await createClient(CONN).deleteStream("s");
+		expect((fetchFn.mock.calls[0]?.[1] as RequestInit).method).toBe("DELETE");
+		expect(fetchFn.mock.calls[0]?.[0]).toBe(streamUrl(CONN, "s"));
+		expect(result.ok).toBe(true);
+	});
+});
+
+describe("forkStream", () => {
+	it("PUTs the new path with Stream-Forked-From / Stream-Fork-Offset", async () => {
+		const fetchFn = stubFetch({ status: 201, headers: { Location: "/v1/stream/fork" } });
+		const result = await createClient(CONN).forkStream("fork", "orders", "cursor-3", 2);
+		const init = fetchFn.mock.calls[0]?.[1] as RequestInit;
+		expect(init.method).toBe("PUT");
+		expect(fetchFn.mock.calls[0]?.[0]).toBe(streamUrl(CONN, "fork"));
+		expect(reqHeaders(fetchFn)).toMatchObject({
+			"Stream-Forked-From": "orders",
+			"Stream-Fork-Offset": "cursor-3",
+			"Stream-Fork-Sub-Offset": "2",
+		});
+		expect(result.ok).toBe(true);
+	});
+
+	it("omits the sub-offset header when not given", async () => {
+		const fetchFn = stubFetch({ status: 201 });
+		await createClient(CONN).forkStream("fork", "orders", "cursor-3");
+		expect(reqHeaders(fetchFn)["Stream-Fork-Sub-Offset"]).toBeUndefined();
+	});
+});
+
+/* ----------------------------------------------------------------------------
+ * Live tail — long-poll loop + SSE stopper
+ * ------------------------------------------------------------------------- */
+
+describe("openLongPoll", () => {
+	it("emits batches, advances on Stream-Next-Offset, and stops cleanly", async () => {
+		// First poll returns one row + next offset; we stop before the second poll.
+		const fetchFn = vi.fn(async (url: string) => {
+			if (String(url).includes("offset=-1")) {
+				return makeResponse({
+					status: 200,
+					headers: {
+						"Content-Type": "application/json",
+						"Stream-Next-Offset": "42",
+						"Stream-Up-To-Date": "true",
+					},
+					body: JSON.stringify([{ id: 1 }]),
+				});
+			}
+			// Subsequent polls block-ish: return up-to-date with no new rows.
+			return makeResponse({
+				status: 200,
+				headers: { "Content-Type": "application/json", "Stream-Up-To-Date": "true" },
+				body: "[]",
+			});
+		});
+		vi.stubGlobal("fetch", fetchFn);
+
+		const batches: number[] = [];
+		const states: string[] = [];
+		const client = createClient(CONN);
+		const stop = client.openLongPoll(
+			"orders",
+			"-1",
+			(b) => batches.push(b.rows.length),
+			(s) => states.push(s.state),
+		);
+
+		// Let the first poll resolve.
+		await new Promise((r) => setTimeout(r, 5));
+		stop();
+
+		expect(batches[0]).toBe(1);
+		expect(states).toContain("connecting");
+		expect(states).toContain("live");
+		// The URL carried live=long-poll.
+		expect(String(fetchFn.mock.calls[0]?.[0])).toContain("live=long-poll");
+		// Stopping flips back to idle.
+		expect(states[states.length - 1]).toBe("idle");
+	});
+
+	it("ends the loop and reports closed when Stream-Closed is set", async () => {
+		stubFetch({
+			status: 200,
+			headers: { "Content-Type": "application/json", "Stream-Closed": "true" },
+			body: "[]",
+		});
+		const states: string[] = [];
+		const stop = createClient(CONN).openLongPoll(
+			"s",
+			"-1",
+			() => {},
+			(s) => states.push(s.state),
+		);
+		await new Promise((r) => setTimeout(r, 5));
+		stop();
+		expect(states).toContain("closed");
+	});
+});
+
+describe("openSse", () => {
+	it("returns a no-op stopper and an error state when EventSource is unavailable", () => {
+		// jsdom does not implement EventSource; the client degrades gracefully.
+		const states: string[] = [];
+		const stop = createClient(CONN).openSse(
+			"s",
+			"-1",
+			() => {},
+			(s) => states.push(s.state),
+		);
+		expect(typeof stop).toBe("function");
+		expect(states).toContain("error");
+		// Calling the stopper does not throw.
+		expect(() => stop()).not.toThrow();
+	});
+});
