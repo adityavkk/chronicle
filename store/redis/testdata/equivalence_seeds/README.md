@@ -49,7 +49,17 @@ in the harness as an equivalence class, not a bug (see `diffErr` /
 Out-of-scope divergences expected to land seeds here when their sibling issues
 generalize the generator:
 
-- JSON-mode flatten/fork-sub-offset arithmetic (#44).
+- fork-sub-offset arithmetic (#36).
+
+JSON-mode flatten-append (#44) now has its own dedicated differential,
+`TestJSONDifferentialFlattenAppend` in `store/redis/json_differential_test.go`
+(MemoryStore oracle vs live Redis over adversarial JSON: scalars, nested
+arrays/objects, whitespace, deep nesting, the empty-array create-vs-append
+split). It is green — no Go/Lua divergence surfaced — so no `.fail` seed is
+committed; its hand-picked regression corpus lives at
+`store/redis/testdata/json_corpus/adversarial.json` and is replayed by
+`TestJSONDifferentialCorpus`. A future JSON divergence would shrink to a single
+body and land its `.fail` here per the steps above.
 
 ## Pinned elsewhere (no seed needed here)
 
