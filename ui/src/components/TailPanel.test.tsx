@@ -97,6 +97,32 @@ describe("TailPanel", () => {
 		expect(screen.queryByRole("button", { name: /^Stop$/ })).toBeNull();
 	});
 
+	it("windows the live list above the threshold, rendering only a visible slice", () => {
+		// jsdom computes no layout, so windowRange would render everything (a
+		// non-measurable viewport falls back to the full range). Give the scroller
+		// a real clientHeight, then scroll to engage the fixed-height windowing.
+		tailRows.value = Array.from({ length: 300 }, (_, i) => makeRow(i));
+		const { container } = render(<TailPanel />);
+		const scroller = container.querySelector(".dsui-tail__rows") as HTMLElement;
+		Object.defineProperty(scroller, "clientHeight", { value: 300, configurable: true });
+		Object.defineProperty(scroller, "scrollHeight", { value: 300 * 30, configurable: true });
+		fireEvent.scroll(scroller);
+		const options = screen.getAllByRole("option");
+		// Only a small slice of the 300 rows is in the DOM.
+		expect(options.length).toBeGreaterThan(0);
+		expect(options.length).toBeLessThan(60);
+		// The spacers stand in for the windowed-out rows, preserving scroll height.
+		const body = screen.getByRole("listbox", { name: "Live message rows" });
+		expect(body.style.paddingBlockEnd).not.toBe("");
+		expect(body.style.paddingBlockEnd).not.toBe("0px");
+	});
+
+	it("renders every row at or below the windowing threshold", () => {
+		tailRows.value = Array.from({ length: 30 }, (_, i) => makeRow(i));
+		render(<TailPanel />);
+		expect(screen.getAllByRole("option")).toHaveLength(30);
+	});
+
 	it("surfaces the error status assertively", () => {
 		tailStatus.value = { state: "error", message: "the SSE connection closed" };
 		render(<TailPanel />);
