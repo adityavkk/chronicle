@@ -69,8 +69,8 @@ import {
 	tailStartOffset,
 	tailStatus,
 } from "../state/store";
-import { RowFilter } from "./RowFilter";
 import { ExportMenu } from "./ExportMenu";
+import { RowFilter } from "./RowFilter";
 import {
 	IconArrowDownToLine,
 	IconBroadcast,
