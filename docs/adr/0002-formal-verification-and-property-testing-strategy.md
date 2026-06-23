@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-06-22
 - **Deciders:** @adityavkk
-- **Tracking epic:** _(formal-verification epic — link added on epic creation)_
+- **Tracking epic:** [#25 — Formal verification & property-based testing](https://github.com/adityavkk/chronicle/issues/25) (19 sequenced child issues, #26–#44)
 - **Research:** [`docs/specs/formal-verification/`](../specs/formal-verification/README.md) (design, prior-art dossier, invariant catalog, findings, roadmap)
 
 ## Context
