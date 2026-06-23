@@ -305,7 +305,7 @@ export function createClient(connection: Connection): DsClient {
 	/** Create (or fork) a stream via PUT. Shared by createStream + forkStream. */
 	function createStream(opts: CreateStreamOptions, signal?: AbortSignal): Promise<WriteResult> {
 		const url = streamUrl(connection, opts.path);
-		const headers = createHeaders(opts);
+		const headers = createHeaders(opts, connection.streamRoot);
 		return doWrite("PUT", url, headers, signal);
 	}
 
@@ -417,9 +417,19 @@ export function createClient(connection: Connection): DsClient {
 			return doWrite("DELETE", url, { ...ACCEPT_HEADER }, signal);
 		},
 
-		forkStream(newPath, fromPath, offset, subOffset, signal) {
+		async forkStream(newPath, fromPath, offset, subOffset, signal) {
+			// A fork's content type MUST match the source stream's, or the server
+			// rejects the create with 409 ("fork content type does not match source
+			// stream"). Discover the source's type via HEAD rather than assuming.
+			const probe = await doFetch(
+				"HEAD",
+				streamUrl(connection, fromPath),
+				{ ...ACCEPT_HEADER },
+				signal,
+			);
+			const sourceType = probe.exchange.protocol.contentType ?? "application/octet-stream";
 			const fork = subOffset === undefined ? { fromPath, offset } : { fromPath, offset, subOffset };
-			return createStream({ path: newPath, contentType: "application/octet-stream", fork }, signal);
+			return createStream({ path: newPath, contentType: sourceType, fork }, signal);
 		},
 
 		async writeRegistryEvent(path, contentType, operation, signal) {
@@ -462,7 +472,7 @@ export function createClient(connection: Connection): DsClient {
  * ------------------------------------------------------------------------- */
 
 /** Build the PUT request headers for a CREATE / FORK from its options. */
-function createHeaders(opts: CreateStreamOptions): Record<string, string> {
+function createHeaders(opts: CreateStreamOptions, streamRoot: string): Record<string, string> {
 	const headers: Record<string, string> = {
 		...ACCEPT_HEADER,
 		"Content-Type": opts.contentType,
@@ -471,7 +481,12 @@ function createHeaders(opts: CreateStreamOptions): Record<string, string> {
 	if (opts.expiresAt !== undefined) headers["Stream-Expires-At"] = opts.expiresAt;
 	if (opts.closed === true) headers["Stream-Closed"] = "true";
 	if (opts.fork !== undefined) {
-		headers["Stream-Forked-From"] = opts.fork.fromPath;
+		// Stream-Forked-From must be the source stream's full request path
+		// (e.g. /v1/stream/orders), not the bare stream path — the server keys
+		// streams by their full path and 404s ("source stream not found") on a
+		// bare name.
+		const cleanFrom = opts.fork.fromPath.trim().replace(/^\/+/, "");
+		headers["Stream-Forked-From"] = `${streamRoot}/${encodeStreamPath(cleanFrom)}`;
 		headers["Stream-Fork-Offset"] = opts.fork.offset;
 		if (opts.fork.subOffset !== undefined) {
 			headers["Stream-Fork-Sub-Offset"] = String(opts.fork.subOffset);
@@ -647,11 +662,31 @@ function runSse(
 		onState({ state: "live", atOffset: null });
 	};
 
+	// chronicle sends NAMED SSE events: `event: data` (a JSON array batch of
+	// messages) and `event: control` (offset / up-to-date metadata). The default
+	// `onmessage` only fires for UNNAMED events, so named events were silently
+	// dropped — the "tail shows no new messages" bug. Listen by name, and keep
+	// onmessage as a fallback for servers that emit unnamed events.
+	const onData = (ev: Event): void => {
+		if (stopped) return;
+		onMessage({
+			rows: decodeSseBatch((ev as MessageEvent<string>).data),
+			nextOffset: null,
+			upToDate: false,
+			exchange: null,
+		});
+	};
+	const onControl = (ev: Event): void => {
+		if (stopped) return;
+		const ctrl = parseSseControl((ev as MessageEvent<string>).data);
+		onState({ state: "live", atOffset: ctrl.nextOffset });
+	};
+	es.addEventListener("data", onData);
+	es.addEventListener("control", onControl);
 	es.onmessage = (ev: MessageEvent<string>): void => {
 		if (stopped) return;
-		const row = decodeSseEvent(ev.data, ev.lastEventId);
 		onMessage({
-			rows: [row],
+			rows: decodeSseBatch(ev.data),
 			nextOffset: nonEmptyOrNull(ev.lastEventId),
 			upToDate: false,
 			exchange: null,
@@ -680,27 +715,48 @@ function runSse(
 	};
 }
 
-/** Decode one SSE event payload into a grid row (JSON if it parses, else text). */
-function decodeSseEvent(data: string, lastEventId: string): GridRow {
+/**
+ * Decode an SSE `data` event payload into grid rows. chronicle frames a batch as
+ * a JSON array of messages, so this returns one row per element (mirroring how a
+ * catch-up read is decoded); a non-JSON payload becomes a single text row.
+ */
+function decodeSseBatch(data: string): GridRow[] {
 	const parsed = parseJsonArray(data);
-	if (parsed.ok && parsed.value.length === 1) {
-		const el = parsed.value[0];
-		return {
-			index: 0,
+	if (parsed.ok) {
+		return parsed.value.map((el, i) => ({
+			index: i,
 			byteSize: jsonByteSize(el),
 			preview: previewOf(el),
-			kind: "json",
+			kind: "json" as const,
 			value: el,
-		};
+		}));
 	}
-	void lastEventId;
-	return {
-		index: 0,
-		byteSize: new Blob([data]).size,
-		preview: previewOf(data),
-		kind: "text",
-		value: data,
-	};
+	return [
+		{
+			index: 0,
+			byteSize: new Blob([data]).size,
+			preview: previewOf(data),
+			kind: "text" as const,
+			value: data,
+		},
+	];
+}
+
+/** Parse an SSE `control` event payload (offset + up-to-date metadata). */
+function parseSseControl(data: string): { nextOffset: string | null; upToDate: boolean } {
+	try {
+		const parsed: unknown = JSON.parse(data);
+		if (parsed !== null && typeof parsed === "object") {
+			const rec = parsed as Record<string, unknown>;
+			return {
+				nextOffset: typeof rec.streamNextOffset === "string" ? rec.streamNextOffset : null,
+				upToDate: rec.upToDate === true,
+			};
+		}
+	} catch {
+		// Malformed control payload — treat as no metadata.
+	}
+	return { nextOffset: null, upToDate: false };
 }
 
 /** Trim a string and return null when empty, for optional id headers. */
