@@ -4,6 +4,8 @@ This directory is the design home for hardening Chronicle's correctness claims
 to be *ironclad* — using property-based testing and formal methods, each pointed
 at the part of the system it can actually close.
 
+**Tracking epic:** [#25 — Formal verification & property-based testing](https://github.com/adityavkk/chronicle/issues/25) — the MECE, phase-sequenced issue set (19 issues, #26–#44, across the two worktrees) lives there.
+
 **Start with [`DESIGN.md`](./DESIGN.md)** — the keystone. The thesis in one
 sentence: Chronicle's correctness surface splits into **sequential pure cores**
 (provable in Lean 4, differentially tested with `rapid`) and a **concurrent
