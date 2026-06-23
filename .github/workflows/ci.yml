@@ -33,6 +33,49 @@ jobs:
           go-version: "1.26"
       - run: go test -race -count=1 ./...
 
+  # The Redis-direct jepsen linearizability scenarios drive webhook.RedisStore's
+  # real Lua against the containerized Redis (no k3d cluster, no chronicle HTTP
+  # server), so they run in CI. ownership-exclusivity (T3) is the live binding of
+  # model_shard.go's shardModel() to the shipped claim_shard.lua / check_owner.lua
+  # over the ds:{ownership}:slot:<h> hash — without it, INV-OWNER-01/02 would rest
+  # only on the model agreeing with its own unit tests. shard-linz (T1) is the
+  # sibling Redis-direct gate over leaseModel(). Bounds (-slots/-workers/-workload-ms)
+  # keep each per-key Porcupine search inside its 20s budget; Unknown counts as FAIL,
+  # so a future drift between the oracle and the shipped Lua is caught here.
+  #
+  # The other linz scenarios (single-holder-linz, stale-gen-noop) drive the full
+  # claim/ack HTTP API and so need a running chronicle server, not just Redis; they
+  # belong with the cluster-backed jepsen rig (jepsen/run.sh), not this Redis-only
+  # job.
+  linz:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Build the jepsen checker
+        run: go build -o jepsen/bin/jepsen-checker ./jepsen/checker
+      - name: T3 ownership exclusivity (claim_shard / check_owner against live Redis)
+        run: |
+          jepsen/bin/jepsen-checker -scenario ownership-exclusivity \
+            -redis-url redis://localhost:6379/14 \
+            -slots 4 -workers 4 -workload-ms 4000
+      - name: T1 per-(subId,g) shard lease linearizability
+        run: |
+          jepsen/bin/jepsen-checker -scenario shard-linz \
+            -redis-url redis://localhost:6379/14 \
+            -workers 4 -workload-ms 4000
+
   conformance:
     runs-on: ubuntu-latest
     services:
