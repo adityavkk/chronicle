@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -596,7 +597,7 @@ func TestLazyMigrationServesFromNewTag(t *testing.T) {
 	if _, err := client.ZScore(ctx, dueZKey(h), id).Result(); err != nil {
 		t.Fatalf("due mark must be re-homed to slot %d: %v", h, err)
 	}
-	if _, err := client.ZScore(ctx, leaseZKeyLegacy, id).Result(); err != goredis.Nil {
+	if _, err := client.ZScore(ctx, leaseZKeyLegacy, id).Result(); !errors.Is(err, goredis.Nil) {
 		t.Fatalf("legacy lease entry must be dropped, got %v", err)
 	}
 

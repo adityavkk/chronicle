@@ -197,14 +197,12 @@ func shardLeaseWorker(store *webhook.RedisStore, id string, G, workerID int, ttl
 		if aerr != nil {
 			continue
 		}
-		astatus := statusOK
+		astatus := st
 		switch st {
 		case "OK":
 			astatus = statusOK
 		case "FENCED":
 			astatus = statusFenced
-		default:
-			astatus = st
 		}
 		rec.record(workerID, fenceInput{
 			sub: sub, op: opAck, worker: worker,

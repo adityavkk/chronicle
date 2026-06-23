@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -358,7 +359,7 @@ func (s *RedisStore) Unlink(id, path string, stillGlob bool) error {
 func (s *RedisStore) StreamSubscribers(path string) (ids []string, slotsProbed int, err error) {
 	ctx := s.ctx()
 	raw, gerr := s.client.Get(ctx, streamSlotsKey(path)).Result()
-	if gerr == redis.Nil {
+	if errors.Is(gerr, redis.Nil) {
 		return nil, 0, nil // no slot has a subscriber for this stream yet
 	}
 	if gerr != nil {

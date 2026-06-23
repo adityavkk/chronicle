@@ -1,6 +1,10 @@
 package webhook
 
-import "github.com/redis/go-redis/v9"
+import (
+	"errors"
+
+	"github.com/redis/go-redis/v9"
+)
 
 // migrate.go is the shadow-write + lazy per-sub migration from the pre-slot-homing
 // keyspace (the single {__ds} tag) to the slot-homed {__ds:h} keyspace (Move 1,
@@ -80,7 +84,7 @@ func (s *RedisStore) migrateSub(id string) (bool, error) {
 		dueZKeyLegacy:   dueZKey(h),
 	} {
 		score, serr := s.client.ZScore(ctx, legacyZ, id).Result()
-		if serr == redis.Nil {
+		if errors.Is(serr, redis.Nil) {
 			continue
 		}
 		if serr != nil {

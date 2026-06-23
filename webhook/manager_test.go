@@ -299,11 +299,13 @@ func (f *fakeMetrics) SlotOwnership(event string, _ int) {
 	}
 	f.slotOwn[event]++
 }
+
 func (f *fakeMetrics) CoverageGap(time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.coverageGap++
 }
+
 func (f *fakeMetrics) OwnerFenced(scope string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
