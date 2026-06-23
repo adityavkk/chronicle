@@ -22,7 +22,8 @@ SANY               = $(JAVA) -cp $(JAR) tla2sany.SANY
 
 .PHONY: tlc tlc-1x1 tlc-2x2 fault-expire fault-lease coverage parse jar clean \
         tlc38 ownership composed-on composed-off composed-on-2x2 composed-off-2x2 \
-        composed-deposed liveness liveness-nofair liveness-safety liveness-sensitivity parse38
+        composed-deposed liveness liveness-nofair liveness-safety liveness-sensitivity parse38 \
+        parse-trace trace-validate trace-negative
 
 # The CI target (issue #37): parse, then both faithful safety configs.
 tlc: jar parse tlc-1x1 tlc-2x2
@@ -109,6 +110,33 @@ coverage: jar
 		echo "=== Window W$$W reachability (must be VIOLATED) ==="; \
 		$(TLC) -config SubscriptionFence_coverage_W$$W.cfg MC_2x2.tla 2>&1 | grep -E "Invariant NotW$$W is violated|No error has been found"; \
 	done
+
+# --- issue #39: trace validation (the CCF "smart casual verification" bridge) -
+#
+# parse-trace : SANY-parse the Trace.tla wrapper against a sample generated
+#               TraceData so the bridge module stays well-formed in CI.
+# trace-validate : drive the full pipeline — produce a real fence trace from the
+#               running engine (subtrace build) against a live Redis, convert it,
+#               and run TLC (DFS) to confirm every recorded trace is a legal
+#               behavior of SubscriptionFence (S ∩ T ≠ ∅). Needs Redis at
+#               $(CHRONICLE_REDIS_ADDR) (default localhost:6379).
+CHRONICLE_REDIS_ADDR ?= localhost:6379
+
+parse-trace: jar
+	@tmp=$$(mktemp -d); jar=$$(cd $$(dirname $(JAR)) 2>/dev/null && pwd)/$$(basename $(JAR)); \
+	[ -f $(JAR) ] && jar=$$(pwd)/$(JAR); \
+	printf '%s\n' '---- MODULE TraceData ----' 'EXTENDS Naturals, Sequences' \
+	  'NoWorker == "none"' 'TraceWorkers == { "w1", "w2" }' 'TraceMaxGen == 2' \
+	  'TraceLog == << >>' '====' > $$tmp/TraceData.tla; \
+	cp Trace.tla SubscriptionFence.tla $$tmp/; \
+	( cd $$tmp && $(JAVA) -cp $$jar tla2sany.SANY Trace.tla ) && echo "Trace.tla parses"; rm -rf $$tmp
+
+trace-validate: jar
+	JAR=$(JAR) bash trace/validate.sh $(CHRONICLE_REDIS_ADDR)
+
+# Non-vacuity check: an impossible (deposed-OK-ack) trace MUST be REJECTED.
+trace-negative: jar
+	JAR=$(JAR) bash trace/negative_control.sh $(CHRONICLE_REDIS_ADDR)
 
 clean:
 	rm -f *.jar states/ -r 2>/dev/null || true

@@ -6,3 +6,8 @@ states/
 *.st
 *.fp
 MC.out
+# Trace-validation work products (#39): real traces + generated TraceData + the
+# per-scenario TLC scratch are produced on demand by `make trace-validate`.
+*.jsonl
+trace/scenarios/
+T39_INDEX.txt
