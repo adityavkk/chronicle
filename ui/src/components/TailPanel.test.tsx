@@ -106,4 +106,36 @@ describe("TailPanel", () => {
 		expect(text).toContain("the SSE connection closed");
 		expect(status.getAttribute("aria-live")).toBe("assertive");
 	});
+
+	it("filters the live buffer without dropping the connection and keeps seq honest", () => {
+		render(<TailPanel />);
+		expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(2);
+
+		const input = screen.getByRole("searchbox", { name: "Filter live messages" });
+		fireEvent.input(input, { target: { value: "live 1" } });
+
+		const options = within(screen.getByRole("listbox")).getAllByRole("option");
+		expect(options).toHaveLength(1);
+		// Filtering hides row 0; the surviving row keeps its true arrival number
+		// (seq 1 = dropped 0 + buffer position 1), not a re-numbered 0.
+		expect(options[0]?.getAttribute("aria-label")).toContain("Live message 1");
+		// The store buffer is untouched — filtering is purely a view concern.
+		expect(tailRows.value).toHaveLength(2);
+		expect(tailStatus.value.state).toBe("live");
+	});
+
+	it("shows a 'showing N of M' count and a no-match note with a clear", () => {
+		render(<TailPanel />);
+		const input = screen.getByRole("searchbox", { name: "Filter live messages" });
+
+		fireEvent.input(input, { target: { value: "live 1" } });
+		expect(screen.getByText(/showing 1 of 2/)).toBeTruthy();
+
+		fireEvent.input(input, { target: { value: "no-such-row" } });
+		expect(screen.queryByRole("listbox")).toBeNull();
+		expect(screen.getByText("No messages match the filter")).toBeTruthy();
+
+		fireEvent.input(input, { target: { value: "" } });
+		expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(2);
+	});
 });

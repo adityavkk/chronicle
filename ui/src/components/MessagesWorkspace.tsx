@@ -30,16 +30,18 @@
  * the toolbar and the grid. Keep reads + the tail lifecycle in the store.
  */
 
-import { useComputed } from "@preact/signals";
+import { useComputed, useSignal } from "@preact/signals";
 import type { JSX } from "preact";
 import { useRef } from "preact/hooks";
 import {
 	ROW_CAP_OPTIONS,
 	type StartMode,
 	batchHasTimes,
+	compileQuery,
 	extractTimestamp,
 	formatBytes,
 	formatTime,
+	matchCompiled,
 	resolveOffset,
 } from "../lib/messages";
 import { describeTailMode, isLiveMode } from "../lib/tail";
@@ -70,6 +72,7 @@ import {
 } from "../state/store";
 import { ProtocolPanel, type TailDisclosure } from "./ProtocolPanel";
 import { PublishComposer } from "./PublishComposer";
+import { RowFilter } from "./RowFilter";
 import { StreamActionsMenu } from "./StreamActionsMenu";
 import { TailPanel } from "./TailPanel";
 import {
@@ -77,9 +80,11 @@ import {
 	IconChevronDown,
 	IconChevronRight,
 	IconClock,
+	IconClose,
 	IconCornerDownRight,
 	IconPlay,
 	IconRefresh,
+	IconSearch,
 	IconStop,
 } from "./icons";
 
@@ -384,10 +389,21 @@ export function MessagesWorkspace(): JSX.Element {
 	const truncated = rowsTruncated.value;
 	const gridRef = useRef<HTMLDivElement>(null);
 
+	// Component-local, instant filter over the loaded batch — never touches the
+	// store (issue #53). Matching lives in lib/messages: compile the query once,
+	// run it per row. row.index is preserved, so the batch-index # stays honest.
+	const filter = useSignal("");
+	const compiled = useComputed(() => compileQuery(filter.value));
+	const visibleRows = useComputed(() => {
+		const q = compiled.value;
+		const rows = read?.rows ?? [];
+		return q.active ? rows.filter((r) => matchCompiled(r, q)) : rows;
+	});
+
 	// Show the Time column only when at least one row in the batch has a time.
 	const showTime = useComputed(() => (read === null ? false : batchHasTimes(read.rows)));
 
-	/** Move roving focus to the n-th row button (clamped). */
+	/** Move roving focus to the n-th visible row button (clamped). */
 	function focusRow(index: number): void {
 		const cells = gridRef.current?.querySelectorAll<HTMLButtonElement>("[data-messagerow]");
 		if (cells === undefined || cells.length === 0) return;
@@ -413,7 +429,7 @@ export function MessagesWorkspace(): JSX.Element {
 					break;
 				case "End":
 					e.preventDefault();
-					focusRow((read?.rows.length ?? 1) - 1);
+					focusRow(visibleRows.value.length - 1);
 					break;
 				default:
 					break;
@@ -452,10 +468,12 @@ export function MessagesWorkspace(): JSX.Element {
 					fromOffset: tailStartOffset.value ?? "now",
 				}
 			: null;
-	// Which row owns the single tab stop: the active row if it is in this batch,
-	// otherwise the first row, so the grid always has exactly one tabbable cell.
-	const activeInBatch =
-		active !== null && (read?.rows.some((r) => r.index === active.index) ?? false);
+	// Which row owns the single tab stop: the active row if it is in the VISIBLE
+	// subset, otherwise the first visible row, so the grid always has exactly one
+	// tabbable cell even when a filter hides the active row.
+	const rows = visibleRows.value;
+	const filterQuery = compiled.value;
+	const activeIsVisible = active !== null && rows.some((r) => r.index === active.index);
 
 	return (
 		<div class="dsui-ws">
@@ -498,6 +516,23 @@ export function MessagesWorkspace(): JSX.Element {
 				<TailPanel />
 			) : (
 				<section class="dsui-ws__grid" aria-label="Messages">
+					{read !== null && read.rows.length > 0 ? (
+						<RowFilter
+							value={filter.value}
+							matched={rows.length}
+							total={read.rows.length}
+							active={filterQuery.active}
+							error={filterQuery.error}
+							label="Filter messages"
+							variant="grid"
+							onInput={(v) => {
+								filter.value = v;
+							}}
+							onClear={() => {
+								filter.value = "";
+							}}
+						/>
+					) : null}
 					<div
 						class={`dsui-grid__header${showTimeCol ? " dsui-grid__header--timed" : ""}`}
 						aria-hidden="true"
@@ -516,31 +551,55 @@ export function MessagesWorkspace(): JSX.Element {
 						{loading && read === null ? (
 							<GridSkeleton />
 						) : read !== null && read.rows.length > 0 ? (
-							<>
-								{/* biome-ignore lint/a11y/useFocusableInteractive: focus lives on the option rows via roving tabindex (one row has tabIndex=0), so the listbox container itself is intentionally not a tab stop. */}
-								{/* biome-ignore lint/a11y/useSemanticElements: a native <select> cannot host these rich, focusable message rows; role="listbox" with role="option" children is the correct single-select pattern. */}
-								<div role="listbox" class="dsui-grid__body" aria-label="Message rows">
-									{read.rows.map((row, i) => (
-										<Row
-											key={row.index}
-											row={row}
-											active={active?.index === row.index}
-											showTime={showTimeCol}
-											// Roving tabindex: exactly one row owns the tab stop —
-											// the active row, else the first row — so the list is one
-											// Tab stop and ArrowUp/Down/Home/End move between rows.
-											tabbable={activeInBatch ? active?.index === row.index : i === 0}
-											onKeyDown={onRowKeyDown(i)}
-										/>
-									))}
-								</div>
-								{truncated ? (
-									<p class="dsui-grid__truncated" role="note">
-										Showing the first {read.rows.length} of a larger batch. Raise the row cap or
-										read the next batch to see more. The full bytes are in the inspector's Raw view.
+							rows.length > 0 ? (
+								<>
+									{/* biome-ignore lint/a11y/useFocusableInteractive: focus lives on the option rows via roving tabindex (one row has tabIndex=0), so the listbox container itself is intentionally not a tab stop. */}
+									{/* biome-ignore lint/a11y/useSemanticElements: a native <select> cannot host these rich, focusable message rows; role="listbox" with role="option" children is the correct single-select pattern. */}
+									<div role="listbox" class="dsui-grid__body" aria-label="Message rows">
+										{rows.map((row, i) => (
+											<Row
+												key={row.index}
+												row={row}
+												active={active?.index === row.index}
+												showTime={showTimeCol}
+												// Roving tabindex: exactly one row owns the tab stop —
+												// the active row (when it survives the filter), else the
+												// first visible row — so the filtered list is one Tab
+												// stop and ArrowUp/Down/Home/End move between rows.
+												tabbable={activeIsVisible ? active?.index === row.index : i === 0}
+												onKeyDown={onRowKeyDown(i)}
+											/>
+										))}
+									</div>
+									{truncated ? (
+										<p class="dsui-grid__truncated" role="note">
+											Showing the first {read.rows.length} of a larger batch. Raise the row cap or
+											read the next batch to see more. The full bytes are in the inspector's Raw
+											view.
+										</p>
+									) : null}
+								</>
+							) : (
+								<div class="dsui-empty dsui-empty--inline">
+									<IconSearch size={22} class="dsui-empty__icon" />
+									<p class="dsui-empty__title">No rows match the filter</p>
+									<p class="dsui-empty__hint">
+										None of the {read.rows.length}{" "}
+										{read.rows.length === 1 ? "loaded row" : "loaded rows"} match{" "}
+										<code>{filter.value}</code>. Clear the filter to see them all.
 									</p>
-								) : null}
-							</>
+									<button
+										type="button"
+										class="dsui-btn dsui-btn--ghost"
+										onClick={() => {
+											filter.value = "";
+										}}
+									>
+										<IconClose size={14} />
+										<span>Clear filter</span>
+									</button>
+								</div>
+							)
 						) : read !== null ? (
 							<div class="dsui-empty dsui-empty--inline">
 								<p class="dsui-empty__title">
@@ -573,7 +632,9 @@ export function MessagesWorkspace(): JSX.Element {
 					<div class="dsui-ws__pager">
 						<span class="dsui-ws__pagerinfo">
 							{read !== null && read.rows.length > 0
-								? `${read.rows.length} ${read.rows.length === 1 ? "row" : "rows"}`
+								? filterQuery.active
+									? `${rows.length} of ${read.rows.length} ${read.rows.length === 1 ? "row" : "rows"}`
+									: `${read.rows.length} ${read.rows.length === 1 ? "row" : "rows"}`
 								: ""}
 						</span>
 						<button
