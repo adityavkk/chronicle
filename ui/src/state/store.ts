@@ -14,6 +14,7 @@ import { loadConfig } from "../lib/config";
 import { type DsClient, createClient } from "../lib/dsClient";
 import { isRecord, kindFromContentType } from "../lib/guards";
 import { DEFAULT_ROW_CAP, type StartMode, clampRowCap, resolveOffset } from "../lib/messages";
+import { appendReadHistory } from "../lib/readHistory";
 import { isLiveMode, previewTailOperation } from "../lib/tail";
 import type {
 	CaptureDelivery,
@@ -27,6 +28,7 @@ import type {
 	Operation,
 	ProbeStatus,
 	ProducerIdentity,
+	ReadHistoryEntry,
 	ReadResult,
 	StreamContentType,
 	StreamInfo,
@@ -83,6 +85,22 @@ export const selectedStreamPath = signal<string | null>(null);
 
 /** The most recent read result for the selected stream, or null. */
 export const lastRead = signal<ReadResult | null>(null);
+
+/**
+ * The sequence of read positions visited for the selected stream this session,
+ * newest last. Appended on every successful read (see {@link readSelected}) and
+ * reset on a stream or connection switch. Bounded by {@link READ_HISTORY_CAP}
+ * and never persisted — it turns the protocol's opaque, forward-only offsets
+ * into a navigable breadcrumb the user can click to re-read a prior position.
+ */
+export const readHistory = signal<readonly ReadHistoryEntry[]>([]);
+
+/**
+ * Cap for {@link readHistory}. Like {@link TAIL_BUFFER_CAP}, the history is a
+ * bounded in-memory buffer; this is sized for a legible breadcrumb strip rather
+ * than the tail buffer's bulk, so the oldest positions age out once exceeded.
+ */
+export const READ_HISTORY_CAP = 30;
 
 /** The last HTTP exchange of any kind, for the protocol disclosure. */
 export const lastExchange = signal<HttpExchange | null>(null);
@@ -550,6 +568,7 @@ export function setActiveConnection(id: string | null): void {
 	streams.value = [];
 	selectedStreamPath.value = null;
 	lastRead.value = null;
+	readHistory.value = [];
 	selectedRow.value = null;
 	rowsTruncated.value = false;
 	startMode.value = "earliest";
@@ -682,6 +701,9 @@ export function selectStream(path: string): void {
 	selectedStreamPath.value = path;
 	selectedRow.value = null;
 	lastRead.value = null;
+	// The read-cursor history is per stream; clear it before the first read of
+	// the newly selected stream (which appends the opening breadcrumb).
+	readHistory.value = [];
 	startMode.value = "earliest";
 	customOffset.value = "";
 	// Selecting a stream brings the messages workspace back to the center pane.
@@ -702,12 +724,36 @@ export async function readSelected(offset: string): Promise<void> {
 	errorMessage.value = null;
 	try {
 		const result = await client.readStream(path, offset);
+		// If the user switched stream (or connection) while this read was in
+		// flight, drop its result: the captured path no longer matches the
+		// selection, so writing lastRead/readHistory here would contaminate the
+		// now-current stream's state (and undo the history reset on switch).
+		if (selectedStreamPath.value !== path) return;
 		const cap = clampRowCap(rowCap.value);
 		const truncated = result.rows.length > cap;
 		const capped: ReadResult = truncated ? { ...result, rows: result.rows.slice(0, cap) } : result;
 		rowsTruncated.value = truncated;
 		lastRead.value = capped;
 		lastExchange.value = result.exchange;
+		// Record this visited position so the History strip can offer a one-click
+		// revisit — but only for a successful read. client.readStream resolves
+		// (rather than throwing) on a 404/5xx/network failure, and such a read did
+		// not visit a cursor, so it must not become a breadcrumb (least of all the
+		// "current" one). An empty 2xx read (e.g. at the tail) is a real position.
+		const ok = result.exchange.status >= 200 && result.exchange.status < 300;
+		if (ok) {
+			readHistory.value = appendReadHistory(
+				readHistory.value,
+				{
+					path,
+					requestedOffset: offset,
+					nextOffset: result.nextOffset,
+					rowCount: result.rows.length,
+					at: Date.now(),
+				},
+				READ_HISTORY_CAP,
+			);
+		}
 		selectedRow.value = capped.rows[0] ?? null;
 		// If the read revealed the real Content-Type, upgrade the StreamInfo.
 		const ct = result.exchange.protocol.contentType;

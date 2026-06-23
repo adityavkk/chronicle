@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { GridRow, HttpExchange, ReadResult, StreamInfo } from "../lib/types";
+import type { GridRow, HttpExchange, ReadHistoryEntry, ReadResult, StreamInfo } from "../lib/types";
 import {
 	activeConnectionId,
 	connections,
 	lastRead,
+	readHistory,
 	rowsTruncated,
 	selectedRow,
 	selectedStreamPath,
@@ -90,9 +91,14 @@ afterEach(() => {
 	streams.value = [];
 	selectedStreamPath.value = null;
 	lastRead.value = null;
+	readHistory.value = [];
 	selectedRow.value = null;
 	rowsTruncated.value = false;
 });
+
+function historyEntry(over: Partial<ReadHistoryEntry> = {}): ReadHistoryEntry {
+	return { path: "orders", requestedOffset: "-1", nextOffset: "42", rowCount: 3, at: 0, ...over };
+}
 
 describe("MessagesWorkspace grid", () => {
 	it("exposes the rows as a single-select listbox with one option per row", () => {
@@ -129,5 +135,60 @@ describe("MessagesWorkspace grid", () => {
 
 		fireEvent.keyDown(options[0] as HTMLElement, { key: "End" });
 		expect(document.activeElement).toBe(options[2]);
+	});
+});
+
+describe("MessagesWorkspace read-cursor history", () => {
+	it("renders no History strip until a position has been read", () => {
+		readHistory.value = [];
+		render(<MessagesWorkspace />);
+		expect(screen.queryByRole("navigation", { name: "Read history" })).toBeNull();
+	});
+
+	it("renders a clickable chip per visited position, newest last", () => {
+		readHistory.value = [
+			historyEntry({ requestedOffset: "-1" }),
+			historyEntry({ requestedOffset: "42" }),
+			historyEntry({ requestedOffset: "now" }),
+		];
+		render(<MessagesWorkspace />);
+		const strip = screen.getByRole("navigation", { name: "Read history" });
+		const chips = within(strip).getAllByRole("button");
+		expect(chips).toHaveLength(3);
+		// Sentinel offsets read as words; the opaque cursor shows verbatim.
+		expect(chips.map((c) => c.textContent)).toEqual(["earliest", "42", "latest"]);
+	});
+
+	it("marks only the newest chip as the current position", () => {
+		readHistory.value = [
+			historyEntry({ requestedOffset: "-1" }),
+			historyEntry({ requestedOffset: "42" }),
+		];
+		render(<MessagesWorkspace />);
+		const strip = screen.getByRole("navigation", { name: "Read history" });
+		const current = within(strip)
+			.getAllByRole("button")
+			.filter((c) => c.getAttribute("aria-current") === "true");
+		expect(current).toHaveLength(1);
+		expect(current[0]?.textContent).toBe("42");
+	});
+
+	it("leads each chip's accessible name with its visible label (WCAG 2.5.3)", () => {
+		readHistory.value = [
+			historyEntry({ requestedOffset: "-1" }),
+			historyEntry({ requestedOffset: "now" }),
+		];
+		render(<MessagesWorkspace />);
+		// The visible word ("earliest"/"latest") must appear in the accessible
+		// name so a speech-control user can target the chip by what they see.
+		expect(screen.getByRole("button", { name: /^earliest, re-read/ })).toBeTruthy();
+		expect(screen.getByRole("button", { name: /^latest, current position/ })).toBeTruthy();
+	});
+
+	it("offers a copy-cursor control on the batch-offset readout", () => {
+		render(<MessagesWorkspace />);
+		// The read seeded by `seed(3)` has requestedOffset "-1" and nextOffset "42".
+		expect(screen.getByRole("button", { name: "Copy this batch's start cursor" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Copy the next-batch cursor" })).toBeTruthy();
 	});
 });
