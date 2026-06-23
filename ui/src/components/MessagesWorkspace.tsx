@@ -484,6 +484,16 @@ export function MessagesWorkspace(): JSX.Element {
 
 			<PublishComposer />
 
+			{stream.kind !== "json" ? (
+				<p class="dsui-ws__unframed">
+					<code>{stream.kind}</code> streams are unframed — the server stores appended bytes with no
+					message boundaries, so a refresh reads them back as one concatenated entry. The live view
+					shows appends separately only because each is delivered as its own batch; those boundaries
+					are not persisted. Use an <code>application/json</code> stream for discrete, persisted
+					messages.
+				</p>
+			) : null}
+
 			{live ? (
 				<TailPanel />
 			) : (
