@@ -15,6 +15,8 @@
  */
 
 import type { JSX } from "preact";
+import { useEffect } from "preact/hooks";
+import { CommandPalette } from "./components/CommandPalette";
 import { ConnectionManager } from "./components/ConnectionManager";
 import { CreateStreamDialog } from "./components/CreateStreamDialog";
 import { CreateSubscriptionDialog } from "./components/CreateSubscriptionDialog";
@@ -28,15 +30,31 @@ import { SubscriptionWorkspace } from "./components/SubscriptionWorkspace";
 import { Toaster } from "./components/Toaster";
 import { WakeMonitorWorkspace } from "./components/WakeMonitorWorkspace";
 import { IconPanelRight, IconStream } from "./components/icons";
+import { isPaletteHotkey } from "./lib/commandPalette";
 import {
 	activeConnection,
 	activeDialog,
 	centerView,
+	commandPaletteOpen,
 	dismissError,
 	errorMessage,
 	inspectorCollapsed,
+	openCommandPalette,
 	toggleInspector,
 } from "./state/store";
+
+/**
+ * Whether a keydown originated from a control where typing should win over the
+ * global hotkey: a text input, a textarea, a select, or any contenteditable
+ * surface. Cmd/Ctrl-K is ignored in those so it never steals a keystroke.
+ */
+function isEditableTarget(target: EventTarget | null): boolean {
+	if (!(target instanceof HTMLElement)) return false;
+	const tag = target.tagName;
+	return (
+		tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable === true
+	);
+}
 
 function ErrorBanner(): JSX.Element | null {
 	const msg = errorMessage.value;
@@ -141,13 +159,34 @@ function Dialogs(): JSX.Element | null {
 	}
 }
 
+/** The command palette overlay, rendered only while open. */
+function CommandPaletteSlot(): JSX.Element | null {
+	return commandPaletteOpen.value ? <CommandPalette /> : null;
+}
+
 export function App(): JSX.Element {
-	// The Toaster + write dialogs are mounted above the routing seam so they
-	// survive a start-screen ↔ workspace transition and overlay either view.
+	// A single global keydown opens the command palette on Cmd/Ctrl-K, except
+	// while the user is typing in an input/textarea/select/contenteditable (so
+	// it never steals a keystroke). Registered once for the app's lifetime; the
+	// palette's own Escape/close is owned by the Modal shell it reuses.
+	useEffect(() => {
+		function onKeyDown(e: KeyboardEvent): void {
+			if (!isPaletteHotkey(e) || isEditableTarget(e.target)) return;
+			e.preventDefault();
+			openCommandPalette();
+		}
+		document.addEventListener("keydown", onKeyDown);
+		return () => document.removeEventListener("keydown", onKeyDown);
+	}, []);
+
+	// The Toaster + write dialogs + command palette are mounted above the routing
+	// seam so they survive a start-screen ↔ workspace transition and overlay
+	// either view.
 	return (
 		<>
 			<Shell />
 			<Dialogs />
+			<CommandPaletteSlot />
 			<Toaster />
 		</>
 	);
