@@ -328,6 +328,40 @@ component. Its pieces and seams:
   the new-row flash + the connecting pulse) honors `prefers-reduced-motion` via
   the global rule in `base.css`.
 
+### The read-cursor history seam (revisitable per-stream offsets)
+
+Offsets are opaque, forward-only cursors, so the client keeps the sequence of
+read positions it has visited for the selected stream this session and renders
+them as a clickable breadcrumb. It follows the same layering — pure mechanics in
+`lib/`, state + reset in the store, layout in the component:
+
+- **`lib/readHistory.ts` (pure, tested).** `appendReadHistory(history, entry,
+  cap)` returns the next capped buffer newest-last, collapsing an immediate
+  re-read of the same `(path, requestedOffset)` (a Refresh, or clicking the chip
+  you are on) into the latest entry instead of duplicating it, and dropping the
+  oldest when over `cap`. `offsetChipLabel(offset)` is the short chip label
+  (`-1`→"earliest", `now`→"latest", a long cursor middle-truncated). Both are in
+  `readHistory.test.ts`. A `ReadHistoryEntry` (`lib/types.ts`) is `{ path,
+  requestedOffset, nextOffset, rowCount, at }`.
+- **Store state + wiring (`state/store.ts`).** `readHistory` (a
+  `signal<readonly ReadHistoryEntry[]>`) is appended in `readSelected` **only on
+  a 2xx read** (`client.readStream` resolves rather than throws on 404/5xx/
+  network failure, and a failed read is not a visited position) and **only when
+  the read is still for the selected stream** (a stale in-flight read whose
+  `path` no longer matches is dropped, so a stream switch's reset is not undone).
+  It is reset to `[]` on stream switch (`selectStream`, before its opening read)
+  and connection switch (`setActiveConnection`), capped by `READ_HISTORY_CAP`
+  (sized for a legible strip, in the spirit of `TAIL_BUFFER_CAP`), and **never
+  persisted** — it is per-connection ephemeral.
+- **Layout (`components/MessagesWorkspace.tsx`).** `HistoryStrip` (a
+  `<nav aria-label="Read history">`, catch-up mode only) renders a `HistoryChip`
+  per entry; the newest is the current position (`aria-current`), each chip's
+  accessible name leads with its visible label (WCAG 2.5.3), and a click calls
+  `readSelected(entry.requestedOffset)`. The `dsui-ws__offsets` readout also
+  carries two `CopyButton`s (start cursor; next cursor when non-null) so a cursor
+  can be grabbed for a script. Styling is the `dsui-history*` classes (semantic
+  tokens), and the breadcrumb icon is `IconHistory`.
+
 ### Persisted UI-layout signals (the toggle pattern)
 
 Two layout preferences live in the store and survive a reload the same way the

@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { GridRow, HttpExchange, ReadResult, StreamInfo } from "../lib/types";
+import type { GridRow, HttpExchange, ReadHistoryEntry, ReadResult, StreamInfo } from "../lib/types";
 import {
 	activeConnectionId,
 	connections,
 	lastRead,
+	readHistory,
 	rowsTruncated,
 	selectedRow,
 	selectedStreamPath,
@@ -90,9 +91,14 @@ afterEach(() => {
 	streams.value = [];
 	selectedStreamPath.value = null;
 	lastRead.value = null;
+	readHistory.value = [];
 	selectedRow.value = null;
 	rowsTruncated.value = false;
 });
+
+function historyEntry(over: Partial<ReadHistoryEntry> = {}): ReadHistoryEntry {
+	return { path: "orders", requestedOffset: "-1", nextOffset: "42", rowCount: 3, at: 0, ...over };
+}
 
 describe("MessagesWorkspace grid", () => {
 	it("exposes the rows as a single-select listbox with one option per row", () => {
@@ -116,6 +122,30 @@ describe("MessagesWorkspace grid", () => {
 		expect(tabbable[0]?.getAttribute("aria-selected")).toBe("true");
 	});
 
+	it("windows a large batch, rendering only a visible slice with one tab stop", () => {
+		// A 1000-row batch (the max row cap) would be ~4–5k DOM nodes unwindowed.
+		// jsdom has no layout, so give the scroller a real clientHeight and scroll
+		// to engage the fixed-height windowing.
+		seed(1000);
+		const { container } = render(<MessagesWorkspace />);
+		const scroller = container.querySelector(".dsui-grid__rows") as HTMLElement;
+		Object.defineProperty(scroller, "clientHeight", { value: 300, configurable: true });
+		Object.defineProperty(scroller, "scrollHeight", { value: 1000 * 30, configurable: true });
+		fireEvent.scroll(scroller);
+
+		const list = screen.getByRole("listbox", { name: "Message rows" });
+		const options = within(list).getAllByRole("option");
+		// Only a slice is rendered, not all 1000 rows.
+		expect(options.length).toBeGreaterThan(0);
+		expect(options.length).toBeLessThan(60);
+		// Roving tabindex survives windowing: exactly one rendered row is tabbable.
+		const tabbable = options.filter((o) => o.getAttribute("tabindex") === "0");
+		expect(tabbable).toHaveLength(1);
+		// The spacers preserve the scrollable height (sticky header stays put).
+		expect(list.style.paddingBlockEnd).not.toBe("");
+		expect(list.style.paddingBlockEnd).not.toBe("0px");
+	});
+
 	it("moves focus between rows with ArrowDown / ArrowUp / End", () => {
 		render(<MessagesWorkspace />);
 		const list = screen.getByRole("listbox", { name: "Message rows" });
@@ -129,5 +159,111 @@ describe("MessagesWorkspace grid", () => {
 
 		fireEvent.keyDown(options[0] as HTMLElement, { key: "End" });
 		expect(document.activeElement).toBe(options[2]);
+	});
+});
+
+describe("MessagesWorkspace filter", () => {
+	function typeFilter(value: string): void {
+		const input = screen.getByRole("searchbox", { name: "Filter messages" });
+		fireEvent.input(input, { target: { value } });
+	}
+
+	it("narrows the visible rows to the matching subset", () => {
+		render(<MessagesWorkspace />);
+		expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(3);
+
+		typeFilter("line 1");
+
+		const options = within(screen.getByRole("listbox")).getAllByRole("option");
+		expect(options).toHaveLength(1);
+		// The batch-index # stays honest: the surviving row keeps its original
+		// index (1), not a re-numbered filtered position.
+		expect(options[0]?.getAttribute("aria-label")).toContain("Message 1");
+	});
+
+	it("shows a 'showing N of M' count while filtering", () => {
+		render(<MessagesWorkspace />);
+		typeFilter("line 1");
+		expect(screen.getByText(/showing 1 of 3/)).toBeTruthy();
+	});
+
+	it("keeps exactly one tab stop over the filtered subset, even when the active row is hidden", () => {
+		// The active (selected) row is index 0; filtering to "line 2" hides it.
+		render(<MessagesWorkspace />);
+		typeFilter("line 2");
+		const options = within(screen.getByRole("listbox")).getAllByRole("option");
+		expect(options).toHaveLength(1);
+		// The lone visible row (index 2) must own the single tab stop so the list
+		// stays reachable rather than orphaning the tab stop on the hidden row.
+		expect(options[0]?.getAttribute("tabindex")).toBe("0");
+		expect(options[0]?.getAttribute("aria-label")).toContain("Message 2");
+	});
+
+	it("shows a no-match note and a Clear control that restores every row", () => {
+		render(<MessagesWorkspace />);
+		typeFilter("nothing-matches-this");
+		expect(screen.queryByRole("listbox")).toBeNull();
+		expect(screen.getByText("No rows match the filter")).toBeTruthy();
+
+		// Both the filter box and the no-match note offer a Clear control; either
+		// restores the full batch.
+		const clears = screen.getAllByRole("button", { name: "Clear filter" });
+		fireEvent.click(clears[0] as HTMLElement);
+		expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(3);
+	});
+});
+
+describe("MessagesWorkspace read-cursor history", () => {
+	it("renders no History strip until a position has been read", () => {
+		readHistory.value = [];
+		render(<MessagesWorkspace />);
+		expect(screen.queryByRole("navigation", { name: "Read history" })).toBeNull();
+	});
+
+	it("renders a clickable chip per visited position, newest last", () => {
+		readHistory.value = [
+			historyEntry({ requestedOffset: "-1" }),
+			historyEntry({ requestedOffset: "42" }),
+			historyEntry({ requestedOffset: "now" }),
+		];
+		render(<MessagesWorkspace />);
+		const strip = screen.getByRole("navigation", { name: "Read history" });
+		const chips = within(strip).getAllByRole("button");
+		expect(chips).toHaveLength(3);
+		// Sentinel offsets read as words; the opaque cursor shows verbatim.
+		expect(chips.map((c) => c.textContent)).toEqual(["earliest", "42", "latest"]);
+	});
+
+	it("marks only the newest chip as the current position", () => {
+		readHistory.value = [
+			historyEntry({ requestedOffset: "-1" }),
+			historyEntry({ requestedOffset: "42" }),
+		];
+		render(<MessagesWorkspace />);
+		const strip = screen.getByRole("navigation", { name: "Read history" });
+		const current = within(strip)
+			.getAllByRole("button")
+			.filter((c) => c.getAttribute("aria-current") === "true");
+		expect(current).toHaveLength(1);
+		expect(current[0]?.textContent).toBe("42");
+	});
+
+	it("leads each chip's accessible name with its visible label (WCAG 2.5.3)", () => {
+		readHistory.value = [
+			historyEntry({ requestedOffset: "-1" }),
+			historyEntry({ requestedOffset: "now" }),
+		];
+		render(<MessagesWorkspace />);
+		// The visible word ("earliest"/"latest") must appear in the accessible
+		// name so a speech-control user can target the chip by what they see.
+		expect(screen.getByRole("button", { name: /^earliest, re-read/ })).toBeTruthy();
+		expect(screen.getByRole("button", { name: /^latest, current position/ })).toBeTruthy();
+	});
+
+	it("offers a copy-cursor control on the batch-offset readout", () => {
+		render(<MessagesWorkspace />);
+		// The read seeded by `seed(3)` has requestedOffset "-1" and nextOffset "42".
+		expect(screen.getByRole("button", { name: "Copy this batch's start cursor" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Copy the next-batch cursor" })).toBeTruthy();
 	});
 });

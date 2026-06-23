@@ -261,6 +261,16 @@ export function IconCopy(props: IconProps): JSX.Element {
 	);
 }
 
+export function IconHistory(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+			<path d="M3 4v4h4" />
+			<path d="M12 8v4l3 2" />
+		</Icon>
+	);
+}
+
 export function IconTerminal(props: IconProps): JSX.Element {
 	return (
 		<Icon {...props}>
@@ -433,6 +443,17 @@ export function IconLink(props: IconProps): JSX.Element {
 		<Icon {...props}>
 			<path d="M10 13a4 4 0 0 0 5.66 0l2-2a4 4 0 0 0-5.66-5.66l-1 1" />
 			<path d="M14 11a4 4 0 0 0-5.66 0l-2 2a4 4 0 0 0 5.66 5.66l1-1" />
+		</Icon>
+	);
+}
+
+/** A tray with a down-arrow into it — the export / save-to-disk affordance. */
+export function IconDownload(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M12 3v10" />
+			<path d="M8 9l4 4 4-4" />
+			<path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
 		</Icon>
 	);
 }
