@@ -2,6 +2,7 @@ package redis
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -30,8 +31,20 @@ var (
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
+	return testStoreFor(t)
+}
+
+// testStoreFor is the live-Redis setup for the integration / property tests,
+// generalized to any testing.TB (it no longer relies on *testing.T.Context, so
+// the one-time client/flush/handshake works from any test entry point). The
+// coverage-guided fuzz target uses its OWN non-flushing variant (fuzzStore in
+// equivalence_fuzz_test.go) because `go test -fuzz` runs many worker processes
+// that share one DB and a FlushDB would wipe a peer's streams. This skips under
+// -short and when Redis is unreachable, exactly as the original newTestStore did.
+func testStoreFor(tb testing.TB) *Store {
+	tb.Helper()
 	if testing.Short() {
-		t.Skip("skipping Redis integration test in -short mode")
+		tb.Skip("skipping Redis integration test in -short mode")
 	}
 	setupOnce.Do(func() {
 		url := os.Getenv("REDIS_URL")
@@ -44,7 +57,7 @@ func newTestStore(t *testing.T) *Store {
 			return
 		}
 		testClient = goredis.NewClient(opts)
-		ctx := t.Context()
+		ctx := context.Background()
 		if err := testClient.Ping(ctx).Err(); err != nil {
 			setupErr = fmt.Errorf("redis not reachable at %s: %w (run `docker compose up -d --wait redis`)", url, err)
 			return
@@ -56,7 +69,7 @@ func newTestStore(t *testing.T) *Store {
 		testStore = New(testClient, Options{})
 	})
 	if setupErr != nil {
-		t.Fatal(setupErr)
+		tb.Fatal(setupErr)
 	}
 	return testStore
 }

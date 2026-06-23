@@ -116,8 +116,22 @@ func (m *chronicleModel) Check(t *rapid.T) {
 
 func (m *chronicleModel) newPath() string {
 	n := eqPathCounter.Add(1)
-	return fmt.Sprintf("/eq%d/%d", testRunStamp, n)
+	return fmt.Sprintf("/eq%d%s/%d", testRunStamp, eqWorkerTag, n)
 }
+
+// eqWorkerTag namespaces every generated path with a per-PROCESS suffix. It is
+// empty for the in-process property runner (TestEquivalenceMemoryVsRedis, where
+// a single process owns the test DB after the one-time flush), so that test's
+// paths are byte-for-byte unchanged. The fuzz target (FuzzStoreEquivalence)
+// sets it to a per-process token because `go test -fuzz` spawns MULTIPLE worker
+// PROCESSES that all share the same live Redis DB; without a per-process suffix
+// two workers whose testRunStamp collided (both = time.Now().UnixNano() at
+// package init) could alias the same key, and one worker's create/delete would
+// corrupt the other's oracle-vs-subject comparison. Combined with the
+// non-flushing fuzz setup (a worker must NOT FlushDB out from under its peers),
+// this keeps concurrent fuzz workers fully isolated on one shared DB. See the
+// FINDING note in equivalence_fuzz_test.go.
+var eqWorkerTag = ""
 
 // pickPath draws an existing path (or skips if none). Heavily biases toward
 // recently-created paths to keep sequences focused on live streams.
@@ -527,25 +541,57 @@ func TestEquivalenceMemoryVsRedis(t *testing.T) {
 	base := newTestStore(t) // skips under -short / unreachable Redis
 
 	rapid.Check(t, func(t *rapid.T) {
-		// Anchor the shared clock at the Unix epoch so every UnixNano timestamp
-		// the harness produces stays well below 2^53 and is therefore EXACTLY
-		// representable as a Lua double. Redis's is_expired runs in Lua (doubles)
-		// while the MemoryStore oracle compares int64s; at multi-billion-second
-		// wall-clock magnitudes a double loses ~256ns, which could make the two
-		// backends disagree inside a sub-microsecond expiry window. Keeping now
-		// small removes that rounding entirely, so is_expired is bit-identical
-		// across backends at every generated instant (INV-DIFF-06).
-		clock := store.NewFakeClock(eqClockStart)
-		oracle := store.NewMemoryStore(store.WithClock(clock))
-		subject := New(base.client, Options{Clock: clock})
-
-		m := &chronicleModel{
-			oracle:  oracle,
-			subject: subject,
-			clock:   clock,
-		}
-		t.Repeat(rapid.StateMachineActions(m))
+		runEquivalenceModel(t, base)
 	})
+}
+
+// runEquivalenceModel is the ONE state-machine property body driven by both the
+// PR-gate property runner (TestEquivalenceMemoryVsRedis above, via rapid.Check)
+// and the nightly coverage-guided fuzz target (FuzzStoreEquivalence in
+// equivalence_fuzz_test.go, via rapid.MakeFuzz). Both consume the identical
+// chronicleModel, the identical StateMachineActions, and the identical
+// after-every-step Check oracle — the only difference is who feeds the
+// bitstream rapid draws from (uniform PRNG for Check, the coverage-guided fuzz
+// input bytes for MakeFuzz). Keeping a single body is the whole point of the
+// MakeFuzz bridge (issue #42): one model serves both regimes, so a fuzz-found
+// divergence is byte-for-byte the same failure the property runner would report.
+func runEquivalenceModel(t *rapid.T, base *Store) {
+	// Anchor the shared clock at the Unix epoch so every UnixNano timestamp
+	// the harness produces stays well below 2^53 and is therefore EXACTLY
+	// representable as a Lua double. Redis's is_expired runs in Lua (doubles)
+	// while the MemoryStore oracle compares int64s; at multi-billion-second
+	// wall-clock magnitudes a double loses ~256ns, which could make the two
+	// backends disagree inside a sub-microsecond expiry window. Keeping now
+	// small removes that rounding entirely, so is_expired is bit-identical
+	// across backends at every generated instant (INV-DIFF-06).
+	clock := store.NewFakeClock(eqClockStart)
+	oracle := store.NewMemoryStore(store.WithClock(clock))
+	subject := New(base.client, Options{Clock: clock})
+
+	m := &chronicleModel{
+		oracle:  oracle,
+		subject: subject,
+		clock:   clock,
+	}
+
+	// Bootstrap one baseline stream so the model's initial state is non-degenerate
+	// (paths is never empty). Every path-requiring action (Append/Read/Delete/
+	// Close*/Fork*/GetCurrentOffset) calls pickPath, which t.Skip()s the action
+	// when no stream exists yet. Under rapid.Check the uniform action draw almost
+	// always reaches Create early, so this corner never bit. Under rapid.MakeFuzz
+	// a degenerate fuzz bitstream (e.g. a long run of one byte) can draw the SAME
+	// path-requiring action on every one of rapid's 100 executeAction tries; with
+	// no stream to act on, all 100 skip and rapid aborts the whole property with
+	// "can't find a valid (non-skipped) action" — a fuzz crasher that is a harness
+	// robustness gap, NOT a backend divergence (FINDING, issue #42). Seeding a
+	// baseline stream guarantees at least one applicable action from step 1 (a real
+	// server likewise always has a stream available once one is created), and is
+	// behavior-identical for rapid.Check (which created a stream that early anyway).
+	// This is the standard rapid idiom for an action precondition that some entity
+	// exists; it adds no new action, generator, or invariant.
+	m.applyCreate(t, m.newPath(), store.CreateOptions{})
+
+	t.Repeat(rapid.StateMachineActions(m))
 }
 
 // TestEquivalenceExpiryBoundary is the focused, deterministic frozen-clock test
