@@ -77,7 +77,7 @@ func main() {
 	// Each scenario lives in its own subdirectory as module `TraceData` (TLA+
 	// requires filename == module name, and Trace.tla EXTENDS TraceData), so the
 	// runner points TLC at <outdir>/<scenario>/ with a copy of Trace.tla + the cfg.
-	var scenarios []string
+	scenarios := make([]string, 0, len(order))
 	for _, sub := range order {
 		scen := sanitize(lastSeg(sub))
 		recs := bySub[sub]
@@ -104,7 +104,7 @@ func load(path string) (map[string][]rec, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	bySub := map[string][]rec{}
 	var order []string
 	sc := bufio.NewScanner(f)
@@ -212,7 +212,7 @@ func emit(name string, recs []rec) (string, int64, int) {
 	fmt.Fprintf(&b, "   (a deposed/stale-token FENCED op). Matches SubscriptionFence's NoWorker. *)\n")
 	fmt.Fprintf(&b, "NoWorker == \"none\"\n\n")
 	fmt.Fprintf(&b, "(* The traced workers, canonicalized to w1..wN. *)\n")
-	var wsyms []string
+	wsyms := make([]string, 0, len(wseen))
 	for i := range wseen {
 		wsyms = append(wsyms, fmt.Sprintf("\"w%d\"", i+1))
 	}
@@ -243,7 +243,8 @@ func emit(name string, recs []rec) (string, int64, int) {
 		if r.Op == "claim" && r.LuaStatus == "CLAIMED" && r.Args.Worker != "" {
 			claimedGen[r.PostState.Generation] = r.Args.Worker
 		}
-		fmt.Fprintf(&b,
+		fmt.Fprintf(
+			&b,
 			"  [ op |-> \"%s\", status |-> \"%s\", worker |-> %s,\n"+
 				"    reqGen |-> %d, tokGen |-> %d, reqWake |-> %d, done |-> %s, armLease |-> %s, dispatch |-> \"%s\",\n"+
 				"    preGen |-> %d, postGen |-> %d, preWake |-> %d, postWake |-> %d,\n"+
