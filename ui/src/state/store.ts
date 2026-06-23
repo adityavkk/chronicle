@@ -22,6 +22,7 @@ import {
 } from "../lib/messages";
 import { appendReadHistory } from "../lib/readHistory";
 import { isLiveMode, previewTailOperation } from "../lib/tail";
+import { appendCapped } from "../lib/tailBuffer";
 import type {
 	CaptureDelivery,
 	Connection,
@@ -336,8 +337,84 @@ export const tailDropped = signal<number>(0);
 /** Max rows kept in the tail buffer before the oldest age out. */
 export const TAIL_BUFFER_CAP = 1000;
 
+/**
+ * How many rows age out at once when the buffer overflows (~10% of the cap).
+ * Evicting in a block, rather than trimming to exactly the cap on every append,
+ * lets the steady-state appends fall through the cheap no-eviction branch in
+ * {@link appendCapped} — eviction work is paid once per block, not per message.
+ */
+const TAIL_EVICT_BLOCK = TAIL_BUFFER_CAP / 10;
+
 /** The stopper for the active tail, or null when not tailing. Not reactive UI. */
 let tailStopper: TailStopper | null = null;
+
+/* ----------------------------------------------------------------------------
+ * Tail coalescer
+ *
+ * A fast producer delivers one onMessage per event; writing the `tailRows`
+ * signal on each one means a full render per message — more updates than a
+ * human can read. Instead, received rows accumulate in a module-level scratch
+ * array and flush to the signal once per animation frame, so a burst within one
+ * frame becomes a single signal write (one render). This is store-internal and
+ * invisible to components, which still just read `tailRows`.
+ * ------------------------------------------------------------------------- */
+
+/** Rows received since the last flush, awaiting the next animation frame. */
+let tailScratch: GridRow[] = [];
+
+/** The most recent batch exchange seen since the last flush (long-poll only). */
+let tailPendingExchange: HttpExchange | null = null;
+
+/** The pending requestAnimationFrame handle, or null when none is scheduled. */
+let tailFrame: number | null = null;
+
+/** Schedule a flush of {@link tailScratch} on the next frame (idempotent). */
+function scheduleTailFlush(): void {
+	if (tailFrame !== null) return;
+	if (typeof requestAnimationFrame !== "function") {
+		// No rAF (non-browser / test without a stub): flush synchronously so the
+		// buffer never silently strands rows.
+		flushTailRows();
+		return;
+	}
+	tailFrame = requestAnimationFrame(flushTailRows);
+}
+
+/** Cancel any scheduled flush and drop the un-flushed scratch rows. */
+function cancelTailFlush(): void {
+	if (tailFrame !== null) {
+		if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(tailFrame);
+		tailFrame = null;
+	}
+	tailScratch = [];
+	tailPendingExchange = null;
+}
+
+/**
+ * Flush the coalesced scratch rows into the bounded `tailRows` buffer in a
+ * single signal write. This is the scheduled animation-frame callback (and the
+ * no-rAF synchronous fallback) — nothing else calls it.
+ */
+function flushTailRows(): void {
+	tailFrame = null;
+	const incoming = tailScratch;
+	const exchange = tailPendingExchange;
+	tailScratch = [];
+	tailPendingExchange = null;
+	if (incoming.length > 0) {
+		const { rows, dropped } = appendCapped(
+			tailRows.value,
+			incoming,
+			TAIL_BUFFER_CAP,
+			TAIL_EVICT_BLOCK,
+		);
+		tailRows.value = rows;
+		if (dropped > 0) tailDropped.value += dropped;
+	}
+	// Mirror the latest long-poll exchange (SSE carries none) so the protocol
+	// disclosure stays current without a write per message.
+	if (exchange !== null) lastExchange.value = exchange;
+}
 
 /* ----------------------------------------------------------------------------
  * Subscription state (the reserved /__ds/* control plane)
@@ -1373,23 +1450,26 @@ export function setTailPaused(paused: boolean): void {
 
 /** Clear the tail buffer (and the dropped counter) without stopping the tail. */
 export function clearTailBuffer(): void {
+	// Drop any rows still waiting in the coalescer so a pending flush cannot
+	// re-populate what the user just cleared; the connection stays open.
+	tailScratch = [];
+	tailPendingExchange = null;
 	tailRows.value = [];
 	tailDropped.value = 0;
 }
 
-/** Append a received tail batch into the capped buffer (unless paused). */
-function pushTailBatch(batch: TailBatch): void {
+/**
+ * Accept a received tail batch (unless paused). Rows are buffered into the
+ * coalescer scratch and flushed to the `tailRows` signal once per frame rather
+ * than written per message — see the coalescer block above. Exported only so a
+ * store test can feed batches; the tail openers are the real callers.
+ */
+export function pushTailBatch(batch: TailBatch): void {
 	if (tailPaused.value) return;
 	if (batch.rows.length === 0) return;
-	const combined = [...tailRows.value, ...batch.rows];
-	if (combined.length > TAIL_BUFFER_CAP) {
-		const overflow = combined.length - TAIL_BUFFER_CAP;
-		tailDropped.value += overflow;
-		tailRows.value = combined.slice(overflow);
-	} else {
-		tailRows.value = combined;
-	}
-	if (batch.exchange !== null) lastExchange.value = batch.exchange;
+	for (const row of batch.rows) tailScratch.push(row);
+	if (batch.exchange !== null) tailPendingExchange = batch.exchange;
+	scheduleTailFlush();
 }
 
 /**
@@ -1435,6 +1515,9 @@ export function stopTail(): void {
 		tailStopper();
 		tailStopper = null;
 	}
+	// Drop any scheduled flush so a frame queued by the last batch cannot fire
+	// after the connection is gone (also clears the un-flushed scratch rows).
+	cancelTailFlush();
 	tailStatus.value = { state: "idle" };
 	tailOperation.value = null;
 	tailStartOffset.value = null;
