@@ -1,11 +1,16 @@
 # Chronicle formal-verification: Lean 4 pure-core package
 
-This is the **P0.5 skeleton** of Chronicle's formal-verification track (GitHub
-issue #29, epic #25). It is a faithful **typed transcription** of Chronicle's
-three correctness-critical pure cores into Lean 4. It contains **no theorems or
-proofs** — its only job is to typecheck and compile under a pinned toolchain so
-the proofs (issue #30 / P1.1) have a typed subject. The Lean→C compile and cgo
-differential oracle (P1.2) come later still.
+This package is the faithful **typed transcription** of Chronicle's
+correctness-critical pure cores into Lean 4 (issue #29, epic #25) **plus their
+machine-checked correctness proofs** (issue #30 / P1.1). The Lean→C compile and
+cgo differential oracle (P1.2) come later.
+
+**Proofs (issue #30):** the function-level theorems live under
+`Chronicle/<Core>/Proofs.lean`, the parametric fence lemma in
+`Chronicle/Fence/SingleHolder.lean`, and the `#print axioms` anti-`sorry` gate in
+`Chronicle/Axioms.lean`. See [PROOFS.md](PROOFS.md) for the full theorem → `INV-…`
+→ Go-source map. `lake build` compiles every transcription and proof; no theorem
+depends on `sorry` or `native_decide` (verified by `Chronicle/Axioms.lean`).
 
 ## What is transcribed
 

@@ -1,12 +1,18 @@
 name = "chronicle"
 defaultTargets = ["Chronicle"]
 
-# P0.5 skeleton: core Lean only. No mathlib dependency yet — mathlib is heavy
-# and version-sensitive, and is only needed once the PROOFS land (P1.1, the
-# pure-core-proofs issue). This package is a faithful typed transcription that
-# must typecheck and compile under the pinned toolchain; it states no theorems.
-# When the proofs issue adds `require mathlib`, it also commits a
-# `lake-manifest.json` pinning mathlib + transitive deps to exact revisions.
+# P1.1 pure-core proofs (issue #30): mathlib is now required for the order /
+# arithmetic automation (`LinearOrder`, `Prod.Lex`, `omega`, `decide`, `aesop`).
+# It is pinned to the `v4.31.0` tag, whose own `lean-toolchain` is exactly
+# `leanprover/lean4:v4.31.0` — so the toolchain is unchanged from the skeleton and
+# `lake exe cache get` fetches prebuilt oleans (mathlib is NOT built from source).
+# The committed `lake-manifest.json` pins mathlib + every transitive dep to an
+# exact revision so this never floats.
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.31.0"
 
 [[lean_lib]]
 name = "Chronicle"
