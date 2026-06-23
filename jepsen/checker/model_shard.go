@@ -11,18 +11,28 @@ import (
 // ownership CAS register, checked for linearizability by porcupine. Like
 // model_fence.go it has no I/O, no clock, and no dependency on the package under
 // test — an independent oracle, deterministic and unit-testable in isolation
-// (model_shard_test.go). The imperative shell that would drive a live cluster
-// lives in scenario_shard.go.
+// (model_shard_test.go).
 //
-// SCAFFOLD. The mechanism it models — claim_shard.lua / check_owner.lua and the
-// ds:{ownership}:slot:<h> record — does NOT exist on today's code; it lands in
-// #14. So this model is the EXECUTABLE SPEC for that slice (07: "Write them as
-// the spec, red until the step lands"): it compiles, it is unit-tested against
-// crafted histories, and the live driver wires onto it when claim_shard.lua
-// ships. It is T3's acceptance gate — it proves the proposed CAS is a real
-// single-holder compare-and-set, not a silently-dropping last-writer-wins
-// register (the exact failure mode 06 correction #3 warns against putting a
-// correctness-critical lease on).
+// SHIPPED. The mechanism it models — claim_shard.lua / check_owner.lua and the
+// ds:{ownership}:slot:<h> record — landed in #14 and is live in webhook/. This
+// model is the PURE ORACLE for that mechanism, and it is exercised against the
+// shipped Lua by the live driver runOwnershipExclusivity in scenario_ownership.go
+// (the -scenario ownership-exclusivity gate): N concurrent claimants race
+// webhook.RedisStore.ClaimSlot (-> claim_shard.lua) / CheckOwner (-> check_owner.lua)
+// over real ds:{ownership} slot hashes with a gcPause nemesis, and the recorded
+// history is checked against shardModel() with Unknown counted as FAIL. So
+// INV-OWNER-01/02 are validated against the shipped Redis, not just the model
+// agreeing with itself. The unit tests in model_shard_test.go are the oracle's
+// OWN spec (crafted histories, no Redis); the binding to real Lua is the
+// ownership-exclusivity scenario. NOTE for the next reader: the live owner-epoch
+// driver is scenario_ownership.go (this file's shell), NOT scenario_shard.go —
+// scenario_shard.go drives the orthogonal per-(subId,g) lease layer via
+// leaseModel() (the ROADMAP P0.4 row names the wrong file).
+//
+// It is T3's acceptance gate — it proves the CAS is a real single-holder
+// compare-and-set, not a silently-dropping last-writer-wins register (the exact
+// failure mode 06 correction #3 warns against putting a correctness-critical
+// lease on).
 //
 // The modeling insight mirrors T1's: the linearizable object is not the wake but
 // the OWNERSHIP register, here {owner_id, owner_epoch}. claim_shard.lua is a CAS:
