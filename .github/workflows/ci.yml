@@ -55,9 +55,16 @@ jobs:
   # model_shard.go's shardModel() to the shipped claim_shard.lua / check_owner.lua
   # over the ds:{ownership}:slot:<h> hash — without it, INV-OWNER-01/02 would rest
   # only on the model agreeing with its own unit tests. shard-linz (T1) is the
-  # sibling Redis-direct gate over leaseModel(). Bounds (-slots/-workers/-workload-ms)
-  # keep each per-key Porcupine search inside its 20s budget; Unknown counts as FAIL,
-  # so a future drift between the oracle and the shipped Lua is caught here.
+  # sibling Redis-direct gate over leaseModel(). store-linz (#35) is the DATA-PLANE
+  # gate: K clients race append/read/close/getOffset on ONE stream and the history
+  # is checked against streamModel() (model_store.go), binding INV-LIN-01/02,
+  # INV-CLOSE-01, INV-READ-01 (single-slot EVAL = linearization point, no torn /
+  # gapped / duplicated frame, idempotent close, exact offset-exclusive suffix incl.
+  # clean read-past-close EOF) to the shipped store/redis Lua — prose-only before.
+  # Bounds (-slots/-workers/-workload-ms) keep each per-key Porcupine search inside
+  # its budget; Unknown counts as FAIL, so a future drift between the oracle and the
+  # shipped Lua is caught here. On a counterexample the VisualizePath witness is
+  # uploaded as an artifact.
   #
   # The other linz scenarios (single-holder-linz, stale-gen-noop) drive the full
   # claim/ack HTTP API and so need a running chronicle server, not just Redis; they
@@ -91,6 +98,18 @@ jobs:
           jepsen/bin/jepsen-checker -scenario shard-linz \
             -redis-url redis://localhost:6379/14 \
             -workers 4 -workload-ms 4000
+      - name: INV-LIN-01 data-plane linearizability (append/read/close on one stream)
+        run: |
+          jepsen/bin/jepsen-checker -scenario store-linz \
+            -redis-url redis://localhost:6379/14 \
+            -workers 4 -workload-ms 4000
+      - name: Upload store-linz Porcupine counterexample (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-linz-counterexample
+          path: store-linz-counterexample.html
+          if-no-files-found: ignore
 
   # P1.2 (issue #31): the THIRD differential oracle — the proven Lean
   # producer/offset model compiled to C and linked via cgo, pinned against the
