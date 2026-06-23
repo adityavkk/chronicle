@@ -1,4 +1,4 @@
-# ADR-0002: Offset.String() `%016d` minimum-width inverts lexicographic order at a field ≥ 10^16 (LB-1) — migration decision
+# ADR-0003: Offset.String() `%016d` minimum-width inverts lexicographic order at a field ≥ 10^16 (LB-1) — migration decision
 
 - **Status:** Proposed
 - **Date:** 2026-06-22
@@ -6,7 +6,7 @@
 - **Surfaced by:** [#27](https://github.com/adityavkk/chronicle/issues/27) (LB-1 unguarded Compare-vs-strcmp rapid property + checked-in counterexample fixture)
 - **Epic:** [#25](https://github.com/adityavkk/chronicle/issues/25) · **Track:** `property-based-testing`
 - **Discharges (the DECISION half of):** `INV-OFF-02`
-- **Tracking issue:** _to be filed_ — this ADR is the in-repo record of the finding; file a GitHub issue referencing it so the wire/persisted-format change is scheduled and reviewed on its own, never bundled into a verification pass.
+- **Tracking issue:** [#46](https://github.com/adityavkk/chronicle/issues/46) — the wire/persisted-format change is scheduled and reviewed on its own, never bundled into a verification pass.
 
 ## Context
 
