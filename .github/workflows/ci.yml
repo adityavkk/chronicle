@@ -69,3 +69,115 @@ jobs:
           npm --prefix test/conformance install --no-audit --no-fund
           cd test/conformance && CONFORMANCE_TEST_URL=http://localhost:4437 \
             npx vitest run --no-coverage --reporter=default
+
+  # Lean pure-core proofs (issue #30 / P1.1). Separate from the Go jobs and gated
+  # on `lean/` changes so routine Go CI never invokes Lean. The toolchain is pinned
+  # by lean/lean-toolchain (leanprover/lean4:v4.31.0); mathlib oleans are fetched
+  # from the upstream cache (`lake exe cache get`) — mathlib is NOT built from source.
+  lean-proofs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lean
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install elan (Lean toolchain manager)
+        run: |
+          curl -sSfL https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Cache mathlib build (oleans)
+        uses: actions/cache@v4
+        with:
+          path: lean/.lake/packages/mathlib/.lake/build
+          key: mathlib-${{ hashFiles('lean/lake-manifest.json') }}
+      - name: Fetch prebuilt mathlib oleans
+        run: lake exe cache get
+      - name: Build all proofs (lake build must succeed)
+        run: lake build
+      - name: Axiom gate — no theorem may depend on `sorry` or `native_decide`
+        run: |
+          lake env lean Chronicle/Axioms.lean > axioms.txt 2>&1
+          cat axioms.txt
+          if grep -qE 'sorryAx|ofReduceBool' axioms.txt; then
+            echo "::error::a theorem depends on sorry (sorryAx) or native_decide (ofReduceBool)"
+            exit 1
+          fi
+      - name: No `sorry` tactic / `native_decide` in proof sources
+        run: |
+          # Match `sorry` only as a tactic/term (`:= sorry`, `by sorry`, a `sorry`
+          # on its own), not the word "sorry" in doc-comment prose. The axiom gate
+          # above is the authoritative check; this is a fast belt-and-suspenders.
+          if grep -rnE '(:=|\bby\b|·|<;>)\s*(sorry|native_decide)\b' Chronicle/ ; then
+            echo "::error::found a sorry tactic or native_decide in Chronicle/ sources"
+            exit 1
+          fi
+
+  # TLA+ model-check of the subscription-fence concurrent protocol (issue #37).
+  # Its own job, NOT a step in the Go `test` job, so it never blocks ordinary
+  # Go CI. Pins tla2tools.jar to a release and fails on any invariant violation
+  # or an undeclared deadlock (the spec runs TLC with -deadlock off because
+  # quiescence is benign; see formal/tla/README.md).
+  tlc:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: formal/tla
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Cache tla2tools.jar
+        uses: actions/cache@v4
+        with:
+          path: formal/tla/tla2tools.jar
+          key: tla2tools-v1.7.4
+      - name: Model-check both faithful configs (fails on any violation)
+        run: make tlc
+      - name: Negative test — expire fault MUST violate SingleHolder (INV-FENCE-04)
+        run: make fault-expire
+      - name: Negative test — claim ZREM fault MUST violate NoStrandedLease (INV-LEASE-02)
+        run: make fault-lease
+      - name: Crash-window coverage — each window MUST be reachable on 2x2
+        run: |
+          fail=0
+          for W in 1 2 3 4; do
+            if make tlc 2>/dev/null; then :; fi
+            out=$(java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -deadlock -workers auto \
+                    -config SubscriptionFence_coverage_W${W}.cfg MC_2x2.tla 2>&1 || true)
+            if echo "$out" | grep -q "Invariant NotW${W} is violated"; then
+              echo "W${W}: reached"
+            else
+              echo "::error::crash window W${W} was NOT reached on the 2x2 config"
+              fail=1
+            fi
+          done
+          exit $fail
+
+  # TLA+ model-check of the Ownership module + the fence-on/fence-off layering
+  # proof + the liveness/fairness encoding (issue #38). Its own job, parallel to
+  # the #37 `tlc` job. Runs the standalone owner-epoch CAS, the twin layering
+  # runs (owner_fenced Real and AlwaysPass, at 1 slot and the symmetry-quotiented
+  # 2/2/2 scale), the Deposed-owner-late-write non-vacuity witness, the leads-to
+  # liveness properties under weak fairness, the no-fairness negative test, and
+  # the LB-5 threshold-sensitivity safety check. Fails on any safety-invariant
+  # violation, temporal-property violation, or a missing-fairness deadlock.
+  tlc38:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: formal/tla
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Cache tla2tools.jar
+        uses: actions/cache@v4
+        with:
+          path: formal/tla/tla2tools.jar
+          key: tla2tools-v1.7.4
+      - name: Ownership + layering proof + liveness (fails on any violation)
+        run: make tlc38

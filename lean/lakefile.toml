@@ -1,0 +1,18 @@
+name = "chronicle"
+defaultTargets = ["Chronicle"]
+
+# P1.1 pure-core proofs (issue #30): mathlib is now required for the order /
+# arithmetic automation (`LinearOrder`, `Prod.Lex`, `omega`, `decide`, `aesop`).
+# It is pinned to the `v4.31.0` tag, whose own `lean-toolchain` is exactly
+# `leanprover/lean4:v4.31.0` — so the toolchain is unchanged from the skeleton and
+# `lake exe cache get` fetches prebuilt oleans (mathlib is NOT built from source).
+# The committed `lake-manifest.json` pins mathlib + every transitive dep to an
+# exact revision so this never floats.
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.31.0"
+
+[[lean_lib]]
+name = "Chronicle"
