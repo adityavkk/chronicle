@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,9 @@ import (
 	"testing"
 	"time"
 )
+
+// errKill is a test sentinel for a failed kubectl delete in the redisFailover tests.
+var errKill = errors.New("kubectl delete pod failed")
 
 // One unit test per nemesis primitive (nemesis.go), all cluster-free: the pure
 // pieces are tested directly, and the shell methods are tested through a
@@ -188,6 +192,122 @@ func TestToxiproxy_NonOKIsError(t *testing.T) {
 	defer srv.Close()
 	if err := newToxiproxy(srv.URL, "missing").partition(); err == nil {
 		t.Fatal("expected an error on a 404 admin reply")
+	}
+}
+
+// ---- redisFailover (#43, gate #5) ----
+
+// promoteReplicaCmd is exactly REPLICAOF NO ONE — the standalone-promotion command.
+func TestPromoteReplicaCmd(t *testing.T) {
+	got := strings.Join(promoteReplicaCmd(), " ")
+	if got != "REPLICAOF NO ONE" {
+		t.Fatalf("promoteReplicaCmd() = %q, want %q", got, "REPLICAOF NO ONE")
+	}
+}
+
+// flipEndpointPatch repoints the stable `redis` Service selector to the given role,
+// so chronicle's unchanged redis URL reconnects to the promoted node.
+func TestFlipEndpointPatch(t *testing.T) {
+	got := flipEndpointPatch("replica")
+	for _, want := range []string{`"selector"`, `"app":"redis"`, `"role":"replica"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("flipEndpointPatch missing %q in %q", want, got)
+		}
+	}
+}
+
+// parseMasterReplOffset reads master_repl_offset; absent/garbage -> 0.
+func TestParseMasterReplOffset(t *testing.T) {
+	cases := []struct {
+		name string
+		info string
+		want int64
+	}{
+		{"absent", "role:master\r\nconnected_slaves:1\r\n", 0},
+		{"present", "role:master\r\nmaster_repl_offset:123456\r\nconnected_slaves:1\r\n", 123456},
+		{"zero", "master_repl_offset:0\n", 0},
+		{"garbage", "master_repl_offset:not-a-number\n", 0},
+		{"empty", "", 0},
+	}
+	for _, tc := range cases {
+		if got := parseMasterReplOffset(tc.info); got != tc.want {
+			t.Errorf("%s: parseMasterReplOffset = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+// redisFailover issues the full sequence (kill primary -> REPLICAOF NO ONE on the
+// replica -> patch the redis Service) and computes the RPO from the sampled
+// offsets. With the primary 200 bytes ahead of the replica at promotion time, the
+// empirical RPO is 200 dropped replication bytes.
+func TestRedisFailover_SequenceAndRPO(t *testing.T) {
+	n, cmds := recordingNemesis(map[string]string{
+		// The pre-kill primary sample and the post-promotion replica sample. The
+		// recordingNemesis matches by a command substring; we key on the pod the exec
+		// targets so the two INFO replication reads return different offsets.
+		"deploy/redis-primary": "master_repl_offset:1200\r\nconnected_slaves:1\r\n",
+		"deploy/redis-replica": "master_repl_offset:1000\r\nrole:master\r\n",
+	})
+	rpo := n.redisFailover()
+	if rpo != 200 {
+		t.Fatalf("empirical RPO = %d, want 200 (primary 1200 - promoted 1000)", rpo)
+	}
+
+	var sawKill, sawPromote, sawFlip bool
+	for _, c := range *cmds {
+		j := strings.Join(c, " ")
+		if strings.Contains(j, "delete pod") && strings.Contains(j, "role=primary") {
+			sawKill = true
+		}
+		if strings.Contains(j, "deploy/redis-replica") && strings.Contains(j, "REPLICAOF NO ONE") {
+			sawPromote = true
+		}
+		if strings.Contains(j, "patch service redis") && strings.Contains(j, `"role":"replica"`) {
+			sawFlip = true
+		}
+	}
+	if !sawKill || !sawPromote || !sawFlip {
+		t.Fatalf("redisFailover must kill the primary, REPLICAOF NO ONE the replica, and flip the endpoint; got %v", *cmds)
+	}
+	// The promotion fault must NOT issue any WAIT/WAITAOF or read a lease — safety is
+	// the fence's job, asserted by the scenario, never inferred from a durability
+	// count here (correction #3).
+	for _, c := range *cmds {
+		j := strings.ToUpper(strings.Join(c, " "))
+		if strings.Contains(j, "WAITAOF") || strings.Contains(j, "WAIT ") {
+			t.Fatalf("redisFailover must not issue a WAIT/WAITAOF (correction #3), saw %q", j)
+		}
+	}
+}
+
+// A negative RPO (the promoted node advanced past the pre-kill primary sample) is
+// clamped to 0 — no bytes were dropped.
+func TestRedisFailover_NegativeRPOClampsToZero(t *testing.T) {
+	n, _ := recordingNemesis(map[string]string{
+		"deploy/redis-primary": "master_repl_offset:1000\r\n",
+		"deploy/redis-replica": "master_repl_offset:1500\r\n",
+	})
+	if rpo := n.redisFailover(); rpo != 0 {
+		t.Fatalf("a caught-up replica must yield RPO 0, got %d", rpo)
+	}
+}
+
+// When the primary kill fails, redisFailover returns -1 (injection failed) and does
+// NOT proceed to promote — the scenario reports an honest failure, not a 0 RPO.
+func TestRedisFailover_KillFailureReturnsMinusOne(t *testing.T) {
+	var n *nemesis
+	n = &nemesis{ctx: "k3d-x", ns: "ns", runner: func(name string, args ...string) ([]byte, error) {
+		j := strings.Join(args, " ")
+		if strings.Contains(j, "delete pod") {
+			return nil, errKill
+		}
+		return nil, nil
+	}}
+	if rpo := n.redisFailover(); rpo != -1 {
+		t.Fatalf("a failed primary kill must return -1, got %d", rpo)
+	}
+	if n.log[len(n.log)-1] != "redis-failover-kill-failed" {
+		t.Fatalf("expected redis-failover-kill-failed, got %v", n.log)
 	}
 }
 

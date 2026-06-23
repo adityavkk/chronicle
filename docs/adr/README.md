@@ -12,3 +12,4 @@ Naming: `NNNN-short-title.md`, zero-padded, monotonically increasing.
 |---|---|---|
 | [0001](0001-lua-scripts-for-atomic-grouped-redis-operations.md) | Accepted | Use Lua `EVAL`/`EVALSHA` (not Redis Functions) for atomic grouped Redis operations |
 | [0002](0002-formal-verification-and-property-testing-strategy.md) | Accepted | Two-track verification: `rapid` model-based PBT + Lean 4 pure-core proofs + TLA+/trace-validation for the subscription protocol + Porcupine data-plane linearizability |
+| [0003](0003-offset-string-width-migration-lb1.md) | Proposed | Offset.String() `%016d` minimum-width inverts lex order at a field ≥ 10^16 (LB-1) — migration decision |

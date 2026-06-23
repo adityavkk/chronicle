@@ -15,6 +15,22 @@ jobs:
           go-version: "1.26"
       - uses: golangci/golangci-lint-action@v8
 
+  # The containerized-Redis PBT job: `go test ./...` against a live Redis 8.
+  # Besides the MemoryStore-vs-Redis equivalence harness (#26) and the producer
+  # differential (#32), this runs the control-plane fence/ordering/slot
+  # triple-mirror differential (#33): TestFenceDecisionTripleMirror /
+  # TestOffsetGreaterTripleMirror / TestSlotHomingMirror in ./webhook (Go core vs
+  # live Lua via probe_predicates.lua, on DB 14), TestStreamSeqLexMirror in
+  # ./store/redis (the LB-2 Stream-Seq `<=` digit-width property, INV-DIFF-03, on
+  # DB 15), and the checker-side mirrors in ./jepsen/checker (Go core vs the
+  # checker's independent reference, pure). It also runs the config/normalization
+  # parse-seam properties (#34): the pure ContentTypeMatches / ConfigMatches /
+  # ParseTTL / ParseSubOffset / IsValidIntegerString grammar + overflow-seam
+  # properties in ./store and ./protocol, plus their live-Lua legs in ./store/redis
+  # (norm_ct three-way agreement and config_matches MATCHED/MISMATCH cross-check,
+  # on DB 15). All skip cleanly when Redis is unreachable; here it is the `redis`
+  # service below, so they exercise the live Lua and a divergence shrinks to a
+  # replayable rapid seed.
   test:
     runs-on: ubuntu-latest
     services:
@@ -32,6 +48,137 @@ jobs:
         with:
           go-version: "1.26"
       - run: go test -race -count=1 ./...
+
+  # The Redis-direct jepsen linearizability scenarios drive webhook.RedisStore's
+  # real Lua against the containerized Redis (no k3d cluster, no chronicle HTTP
+  # server), so they run in CI. ownership-exclusivity (T3) is the live binding of
+  # model_shard.go's shardModel() to the shipped claim_shard.lua / check_owner.lua
+  # over the ds:{ownership}:slot:<h> hash — without it, INV-OWNER-01/02 would rest
+  # only on the model agreeing with its own unit tests. shard-linz (T1) is the
+  # sibling Redis-direct gate over leaseModel(). store-linz (#35) is the DATA-PLANE
+  # gate: K clients race append/read/close/getOffset on ONE stream and the history
+  # is checked against streamModel() (model_store.go), binding INV-LIN-01/02,
+  # INV-CLOSE-01, INV-READ-01 (single-slot EVAL = linearization point, no torn /
+  # gapped / duplicated frame, idempotent close, exact offset-exclusive suffix incl.
+  # clean read-past-close EOF) to the shipped store/redis Lua — prose-only before.
+  # composed (#36) is the TWO-FENCE COMPOSITION gate: K workers contend on ONE
+  # (sub, slot), racing the subscription's inner (gen, wake) lease fence AND that
+  # slot's outer (owner, epoch) ownership lease at once (claim_shard transfer/renew
+  # interleaved with claim/ack/release under the caller's OwnerScope so ack.lua
+  # inlines owner_fenced above the (gen,wake) fence), and the history is checked
+  # against composedModel() (model_composed.go). It binds INV-FENCE-01 (single-holder)
+  # ACROSS owner-epoch transitions and INV-OWNER-02 (owner-epoch is optimization-only,
+  # never a correctness dependency): every server OK must be fence-valid under the
+  # inner register ALONE. The fork-sub-offset differential (#36 data plane) runs in
+  # the `test` job's `go test ./...` (store/redis against the containerized Redis).
+  # Bounds (-slots/-workers/-workload-ms) keep each per-key Porcupine search inside
+  # its budget; Unknown counts as FAIL, so a future drift between the oracle and the
+  # shipped Lua is caught here. On a counterexample the VisualizePath witness is
+  # uploaded as an artifact.
+  #
+  # The other linz scenarios (single-holder-linz, stale-gen-noop) drive the full
+  # claim/ack HTTP API and so need a running chronicle server, not just Redis; they
+  # belong with the cluster-backed jepsen rig (jepsen/run.sh), not this Redis-only
+  # job.
+  linz:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Build the jepsen checker
+        run: go build -o jepsen/bin/jepsen-checker ./jepsen/checker
+      - name: T3 ownership exclusivity (claim_shard / check_owner against live Redis)
+        run: |
+          jepsen/bin/jepsen-checker -scenario ownership-exclusivity \
+            -redis-url redis://localhost:6379/14 \
+            -slots 4 -workers 4 -workload-ms 4000
+      - name: T1 per-(subId,g) shard lease linearizability
+        run: |
+          jepsen/bin/jepsen-checker -scenario shard-linz \
+            -redis-url redis://localhost:6379/14 \
+            -workers 4 -workload-ms 4000
+      - name: INV-LIN-01 data-plane linearizability (append/read/close on one stream)
+        run: |
+          jepsen/bin/jepsen-checker -scenario store-linz \
+            -redis-url redis://localhost:6379/14 \
+            -workers 4 -workload-ms 4000
+      - name: INV-OWNER-02 composed two-fence ((gen,wake) x (owner,epoch)) interaction
+        run: |
+          jepsen/bin/jepsen-checker -scenario composed \
+            -redis-url redis://localhost:6379/14 \
+            -workers 4 -workload-ms 4000
+      - name: Upload store-linz Porcupine counterexample (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-linz-counterexample
+          path: store-linz-counterexample.html
+          if-no-files-found: ignore
+      - name: Upload composed Porcupine counterexample (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: composed-counterexample
+          path: composed-counterexample.html
+          if-no-files-found: ignore
+
+  # P1.2 (issue #31): the THIRD differential oracle — the proven Lean
+  # producer/offset model compiled to C and linked via cgo, pinned against the
+  # Go core and the live Lua mirror. Two jobs:
+  #
+  #   property-based-testing — links the VENDORED archive (no Lean toolchain) and
+  #     runs the triple-oracle differential with -tags leanoracle.
+  #   formal-verification    — rebuilds the C from Lean and asserts the freshly
+  #     built archive is byte-identical to the committed one (drift guard), so a
+  #     stale vendored oracle cannot pass silently.
+  #
+  # Both run on macos-14 (Apple Silicon) because the committed
+  # store/leanoracle/libchronicle_oracle.a is a Mach-O arm64 archive: linking and
+  # the byte-identity drift guard are arch-specific (see store/leanoracle/PROVENANCE.txt).
+  # A Linux/x86_64 consumer must rebuild the archive for its arch via the build
+  # script before linking; cross-arch vendoring is a documented follow-up.
+  property-based-testing:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Start Redis 8
+        run: |
+          brew install redis
+          redis-server --daemonize yes --port 6379
+          for i in $(seq 1 30); do redis-cli ping && break; sleep 0.2; done
+      - name: Triple-oracle differential (Go core vs live Lua vs proven Lean) — vendored C, NO Lean toolchain
+        env:
+          CGO_ENABLED: "1"
+          MACOSX_DEPLOYMENT_TARGET: "15.0"
+        run: |
+          # Links the committed store/leanoracle/libchronicle_oracle.a; no elan/Lean installed.
+          go test -tags leanoracle -count=1 ./store/leanoracle/ ./store/redis/
+
+  formal-verification:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Lean toolchain (elan reads lean-toolchain)
+        run: |
+          curl https://elan.lean-lang.org/elan-init.sh -sSf | sh -s -- -y --no-modify-path
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Drift guard — rebuild the C from Lean and assert byte-identity with the vendored archive
+        run: |
+          store/leanoracle/scripts/build-lean-oracle.sh --check
 
   conformance:
     runs-on: ubuntu-latest
