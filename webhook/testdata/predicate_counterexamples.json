@@ -1,0 +1,58 @@
+{
+  "_comment": "Committed boundary/regression seeds for the control-plane fence/ordering/slot predicate triple-mirror differential (issue #33). These are the human-readable mirror of the Go literals the generators always cover (fenceBoundaryTuples / offsetBoundaryPairs / slotBoundaryIDs in webhook/predicate_differential_test.go; streamSeqBoundaryPairs in store/redis/predicate_streamseq_test.go). rapid also auto-persists any FAILING seed under testdata/rapid/<TestName>/ on a divergence; promote a minimized one here as a named regression row. The generators draw from the Go literals directly, so editing this file is documentation, not the source of coverage.",
+
+  "fence_tuples": {
+    "_schema": "[cur_gen, cur_wake, req_gen, req_wake, token_gen] -> may_proceed iff all three gens equal AND req_wake==cur_wake AND req_wake!=\"\"",
+    "all_three_equal_accept":        [0, "w", 0, "w", 0],
+    "all_three_equal_accept_nonzero":[5, "w", 5, "w", 5],
+    "token_gen_off_by_one_below":    [5, "w", 5, "w", 4],
+    "token_gen_off_by_one_above":    [5, "w", 5, "w", 6],
+    "req_gen_off_by_one_below":      [5, "w", 4, "w", 5],
+    "req_gen_off_by_one_above":      [5, "w", 6, "w", 5],
+    "req_wake_empty_fenced":         [5, "w", 5, "", 5],
+    "both_wakes_empty_fenced":       [5, "", 5, "", 5],
+    "wake_mismatch_fenced":          [5, "w", 5, "x", 5],
+    "all_zero_empty_wake_fenced":    [0, "", 0, "", 0],
+    "int64_max_accept":              [9223372036854775807, "w", 9223372036854775807, "w", 9223372036854775807]
+  },
+
+  "offset_pairs": {
+    "_schema": "[a, b] -> offsetGreater(a,b); \"-1\" and \"\" are equivalent beginning sentinels (less than any real offset)",
+    "both_sentinel_dash1":      ["-1", "-1"],
+    "both_sentinel_empty":      ["", ""],
+    "sentinel_spellings_equal": ["-1", ""],
+    "real_gt_sentinel":         ["5", "-1"],
+    "real_gt_empty":            ["5", ""],
+    "fixed_width_equal":        ["0000000000000005", "0000000000000005"],
+    "fixed_width_greater":      ["0000000000000006", "0000000000000005"],
+    "adversarial_10_lt_9":      ["10", "9"],
+    "adversarial_9_lt_10":      ["9", "10"],
+    "adversarial_100_lt_99":    ["100", "99"]
+  },
+
+  "slot_ids": {
+    "_schema": "subscription ids; SlotOf strips a trailing :g:<digits> claim-granularity suffix (only when the suffix is all digits and non-empty)",
+    "plain":                  "agent-handler",
+    "with_braces":            "sub-with-{braces}",
+    "colons_no_g_suffix":     "x:y:z",
+    "g0_valid":               "sub1:g:0",
+    "g7_valid":               "sub1:g:7",
+    "g_multidigit":           "sub1:g:42",
+    "g_empty_not_stripped":   "sub1:g:",
+    "g_nondigit_not_stripped":"sub1:g:x",
+    "g_mixed_not_stripped":   "sub1:g:7x",
+    "real_id_ends_g7":        "real:id:that:ends:g:7"
+  },
+
+  "stream_seq_pairs": {
+    "_schema": "[last, next] -> conflict iff last != \"\" AND next <= last bytewise (INV-DIFF-03)",
+    "adversarial_9_then_10_rejected":  ["9", "10"],
+    "padded_09_then_10_advances":      ["09", "10"],
+    "equal_conflict":                  ["9", "9"],
+    "unpadded_99_then_100_rejected":   ["99", "100"],
+    "padded_099_then_100_advances":    ["099", "100"],
+    "fixed_width_advance":             ["0001", "0002"],
+    "fixed_width_regression_conflict": ["0002", "0001"],
+    "empty_last_no_prior":             ["", "1"]
+  }
+}
