@@ -11,3 +11,15 @@ MC.out
 *.jsonl
 trace/scenarios/
 T39_INDEX.txt
+# Apalache (#41) scratch output + the on-demand-downloaded apalache-mc dist
+# (lives in /tmp, never committed). The inductive proof is reproduced by
+# `make apalache`; the .itf.json / violation traces are regenerated on demand.
+_apalache-out/
+apalache-*/
+apalache.tgz
+*.itf.json
+# Spectacle (#41) headless-render scratch: TLC trace-exploration spin-offs and
+# the loose per-state SVG frames before they are moved into spectacle/frames/.
+MC_Anim_TTrace_*.tla
+MC_Anim_TTrace_*.bin
+/SubscriptionFence_anim_*.svg

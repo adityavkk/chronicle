@@ -125,8 +125,15 @@ liveness/Ownership sibling, not this issue.
 
 ## Bounds rationale
 
-TLC checks **bounded instances**; the size-independent (all-N) guarantee is the
-deferred Apalache inductive-invariant sibling (research/01 §Phase 3).
+TLC checks **bounded instances**; the size-independent (all-N) guarantee for the
+single-holder fence is the **Apalache inductive-invariant proof landed in #41**
+(`FenceCore.tla`, [`apalache/README.md`](apalache/README.md)), which discharges
+`Init => IndInv`, `IndInv /\ Next => IndInv'`, and `IndInv => SingleHolder` as
+symbolic SMT queries — see that README for exactly what is proved size-
+independent vs what remains bounded-N (liveness, the owner-fence layering, the
+cursor). The Spectacle living-documentation animation of the four crash windows
++ the rotate-vs-coalesce decision also landed in #41
+([`spectacle/README.md`](spectacle/README.md)).
 
 - **N = 2 workers** is the smallest scope that exercises the cross-worker races
   the single-holder property is about: rotate-on-expired-takeover and the
@@ -396,3 +403,62 @@ reconcile loop.
 - `LeaseTail.tla` + `LeaseTail.cfg` — the L3 lease-tail-drop refinement.
 - Alloy relational models live in [`../alloy/`](../alloy/) (INV-RECOVER-04 +
   INV-JEP-T5-01); see that directory's `README.md`.
+
+---
+
+# Apalache inductive proof + Spectacle animation (issue #41)
+
+Issue #41 · Epic #25 · Phase P4.1 / P4.3 · discharges INV-FENCE-01 as a
+size-independent inductive invariant and turns the spec into living documentation.
+
+`SubscriptionFence.tla` (#37) confirms `[]SingleHolder` on **bounded** instances.
+`FenceCore.tla` (#41) lifts it to an **inductive** invariant proved by Apalache
+(SMT, not enumeration), establishing it for all instance sizes within the cut-off
+argument documented in [`apalache/README.md`](apalache/README.md). The companion
+Spectacle artifacts animate the four crash windows + the rotate-vs-coalesce
+decision (and a visual SingleHolder breach under the INV-FENCE-04 fault).
+
+## How to run
+
+```sh
+make tlc41              # the whole #41 lane: apalache + spectacle-frames
+make apalache           # the three inductive obligations + witnesses + negative control
+make spectacle-frames   # render the offline SVG filmstrips into spectacle/frames/
+```
+
+`make apalache` downloads `apalache-mc` to `/tmp` on demand (never committed) and
+prints a PASS/FAIL per obligation. `make spectacle-frames` needs a newer
+tla2tools (≥ 1.8.0) + CommunityModules for the `SVGSerialize` override (also
+`/tmp`, not committed).
+
+## What Apalache proved vs what stays bounded-N
+
+| Proved size-independent (Apalache, `FenceCore.tla`) | Stays bounded-N (TLC) |
+|---|---|
+| `[]SingleHolder` (INV-FENCE-01) via IndInit + IndStep + Implies | Liveness / recovery (INV-WAKE-01, RECOVER-01/02, L1) — `Liveness.tla` |
+| The fence/(gen,wake) register safety under arm/claim/ack/release/expire/crash | The owner-epoch outer fence + layering (INV-OWNER-01/02) — `Composed.tla` |
+| | Cursor forward-only + at-least-once (INV-CURSOR-01, INV-LEASE-02) — #37 |
+
+The "all N" is exact for the 2×2 SMT instance and a corroborated cut-off for
+larger sizes (the invariant references ≤ 2 workers + 1 sub, no cardinality
+arithmetic; IndStep also re-checked at 3×2 and 4×3). Full caveats — including
+that `MaxGen` is still a finite ceiling and the cut-off theorem itself is not
+mechanized — are in [`apalache/README.md`](apalache/README.md). **No fake proof:
+what is inductive is the fence-safety core only.**
+
+## #41 files
+
+- `FenceCore.tla` — the type-annotated fence core + the inductive invariant
+  `IndInv` (seven clauses) and `SingleHolder`.
+- `FenceCore_3x2.tla` / `FenceCore_4x3.tla` — larger-scope IndStep reruns.
+- `FenceCore_Witness.tla` — non-vacuity witnesses (a live holder + a waking fence
+  are reachable).
+- `FenceCore_Fault.tla` — the INV-FENCE-04 negative control (unsound expire MUST
+  break SingleHolder).
+- `apalache/run.sh` + `apalache/README.md` — the obligation runner and the
+  proved-vs-bounded writeup.
+- `SubscriptionFence_anim.tla` — the Spectacle `AnimView`/`AnimAlias` animation.
+- `MC_Anim.tla` + `Anim_W{1..4}.cfg` + `Anim_Violation.cfg` — the headless render
+  harness.
+- `spectacle/render_frames.sh` + `spectacle/frames/` + `spectacle/README.md` —
+  the offline filmstrips and the browser load recipe / share links.
