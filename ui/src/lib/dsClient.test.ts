@@ -521,6 +521,40 @@ describe("forkStream", () => {
  * Live tail — long-poll loop + SSE stopper
  * ------------------------------------------------------------------------- */
 
+describe("writeRegistryEvent", () => {
+	it("POSTs an upsert event to the registry stream", async () => {
+		const fetchFn = stubFetch({ status: 204 });
+		const result = await createClient(CONN).writeRegistryEvent(
+			"orders",
+			"application/json",
+			"upsert",
+		);
+		const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe(streamUrl(CONN, "__registry__"));
+		expect(init.method).toBe("POST");
+		expect(reqHeaders(fetchFn)).toMatchObject({ "Content-Type": "application/json" });
+		const body = JSON.parse(init.body as string) as ReadonlyArray<{
+			key: string;
+			value: { contentType: string | null };
+			headers: { operation: string };
+		}>;
+		expect(body[0]?.key).toBe("orders");
+		expect(body[0]?.value.contentType).toBe("application/json");
+		expect(body[0]?.headers.operation).toBe("upsert");
+		expect(result.ok).toBe(true);
+	});
+
+	it("creates the registry stream (PUT) then retries the append when it is absent", async () => {
+		const fetchFn = stubFetch({ status: 404 }, { status: 201 }, { status: 204 });
+		const result = await createClient(CONN).writeRegistryEvent("gone", null, "deleted");
+		expect(fetchFn.mock.calls.length).toBe(3);
+		expect((fetchFn.mock.calls[0]?.[1] as RequestInit).method).toBe("POST");
+		expect((fetchFn.mock.calls[1]?.[1] as RequestInit).method).toBe("PUT");
+		expect((fetchFn.mock.calls[2]?.[1] as RequestInit).method).toBe("POST");
+		expect(result.ok).toBe(true);
+	});
+});
+
 describe("openLongPoll", () => {
 	it("emits batches, advances on Stream-Next-Offset, and stops cleanly", async () => {
 		// First poll returns one row + next offset; we stop before the second poll.

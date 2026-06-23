@@ -686,6 +686,9 @@ export async function createStream(opts: {
 		lastOperation.value = result.operation;
 		lastExchange.value = result.exchange;
 		if (result.ok) {
+			// Register the stream so the navigator (which discovers via __registry__)
+			// surfaces it; the server has no stream-listing API.
+			await client.writeRegistryEvent(opts.path, opts.contentType, "upsert");
 			addToast({ kind: "success", title: "Stream created", message: opts.path });
 			await refreshStreams();
 			selectStream(opts.path);
@@ -773,6 +776,8 @@ export async function deleteStream(path: string): Promise<boolean> {
 		lastOperation.value = result.operation;
 		lastExchange.value = result.exchange;
 		if (result.ok) {
+			// Drop it from the discovery registry so it leaves the navigator.
+			await client.writeRegistryEvent(path, null, "deleted");
 			addToast({ kind: "success", title: "Stream deleted", message: path });
 			if (selectedStreamPath.value === path) {
 				selectedStreamPath.value = null;
@@ -804,6 +809,8 @@ export async function forkStream(
 		lastOperation.value = result.operation;
 		lastExchange.value = result.exchange;
 		if (result.ok) {
+			// Register the new fork so it appears in the navigator.
+			await client.writeRegistryEvent(newPath, null, "upsert");
 			addToast({ kind: "success", title: "Stream forked", message: `${fromPath} → ${newPath}` });
 			await refreshStreams();
 			selectStream(newPath);

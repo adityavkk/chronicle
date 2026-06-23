@@ -403,6 +403,11 @@
 .dsui-region--nav {
 	border-inline-end: 1px solid var(--border);
 	background: var(--panel-2);
+	/* The rail stacks several sections (server, streams, playground, coming-next).
+	   Let it scroll as a whole so the lower sections are never clipped at tight
+	   heights / high browser zoom — the base .dsui-region has overflow:hidden. */
+	overflow-y: auto;
+	overflow-x: hidden;
 }
 .dsui-region--workspace {
 	background: var(--bg);
@@ -434,8 +439,9 @@
 .dsui-nav {
 	display: flex;
 	flex-direction: column;
-	block-size: 100%;
-	min-block-size: 0;
+	/* Fill the rail, but grow past it when content is tall so the region scrolls
+	   instead of clipping the lower sections. */
+	min-block-size: 100%;
 }
 
 /* Connected-server header: name · url · live reachability dot. */
@@ -484,7 +490,9 @@
 	min-block-size: 0;
 }
 .dsui-nav__section--streams {
-	flex: 1;
+	/* Size to content; the rail (not this section) owns the scroll, so the
+	   streams list, playground and coming-next all stay reachable at any height. */
+	flex: 0 0 auto;
 }
 .dsui-nav__section--soon {
 	gap: 1px;
@@ -566,9 +574,10 @@
 }
 
 .dsui-nav__body {
-	flex: 1;
+	/* The rail scrolls as a whole (see .dsui-region--nav), so the list flows at
+	   its natural height rather than owning a competing inner scroll. */
+	flex: 0 0 auto;
 	min-block-size: 0;
-	overflow-y: auto;
 	padding: var(--space-1) var(--space-2);
 }
 .dsui-nav__list {

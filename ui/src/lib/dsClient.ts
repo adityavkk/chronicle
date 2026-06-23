@@ -200,6 +200,19 @@ export interface DsClient {
 		signal?: AbortSignal,
 	): Promise<WriteResult>;
 
+	/**
+	 * Append a discovery event to the registry stream (__registry__) so the
+	 * navigator surfaces (operation "upsert") or drops (operation "deleted") a
+	 * stream. The server exposes no stream-listing API, so the client maintains
+	 * this convention stream. Best-effort; resolves to a WriteResult, never throws.
+	 */
+	writeRegistryEvent(
+		path: string,
+		contentType: string | null,
+		operation: "upsert" | "deleted",
+		signal?: AbortSignal,
+	): Promise<WriteResult>;
+
 	/* ---- Live tail (each returns a stopper; never throws to the caller) --- */
 
 	/**
@@ -407,6 +420,31 @@ export function createClient(connection: Connection): DsClient {
 		forkStream(newPath, fromPath, offset, subOffset, signal) {
 			const fork = subOffset === undefined ? { fromPath, offset } : { fromPath, offset, subOffset };
 			return createStream({ path: newPath, contentType: "application/octet-stream", fork }, signal);
+		},
+
+		async writeRegistryEvent(path, contentType, operation, signal) {
+			const url = streamUrl(connection, REGISTRY_PATH);
+			const headers: Record<string, string> = {
+				...ACCEPT_HEADER,
+				"Content-Type": "application/json",
+			};
+			const event = {
+				type: "stream",
+				key: path,
+				value: { path, contentType, createdAt: new Date().toISOString() },
+				headers: { operation },
+			};
+			const body = JSON.stringify([event]);
+			// The registry is an ordinary JSON stream maintained client-side. Append
+			// the event; if the registry stream does not exist yet, create it (PUT)
+			// and retry the append once. Best-effort — a failed write never blocks
+			// the original operation that triggered it.
+			let result = await doWrite("POST", url, headers, signal, body);
+			if (!result.ok) {
+				await doWrite("PUT", url, headers, signal);
+				result = await doWrite("POST", url, headers, signal, body);
+			}
+			return result;
 		},
 
 		openLongPoll(path, fromOffset, onBatch, onState) {
