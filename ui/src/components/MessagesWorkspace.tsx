@@ -70,6 +70,7 @@ import {
 	tailStartOffset,
 	tailStatus,
 } from "../state/store";
+import { ExportMenu } from "./ExportMenu";
 import { ProtocolPanel, type TailDisclosure } from "./ProtocolPanel";
 import { PublishComposer } from "./PublishComposer";
 import { RowFilter } from "./RowFilter";
@@ -637,23 +638,34 @@ export function MessagesWorkspace(): JSX.Element {
 									: `${read.rows.length} ${read.rows.length === 1 ? "row" : "rows"}`
 								: ""}
 						</span>
-						<button
-							type="button"
-							class="dsui-btn dsui-btn--ghost"
-							title={
-								read?.nextOffset != null
-									? `Resume from Stream-Next-Offset ${read.nextOffset}`
-									: "No further offset — you are at the tail"
-							}
-							disabled={read?.nextOffset === null || read?.nextOffset === undefined || loading}
-							onClick={() => void readNext()}
-						>
-							<IconCornerDownRight size={14} />
-							<span>Read next batch</span>
-							{read?.nextOffset !== null && read?.nextOffset !== undefined ? (
-								<code class="dsui-ws__nextoffset">{read.nextOffset}</code>
+						<div class="dsui-ws__pageractions">
+							{read !== null ? (
+								<ExportMenu
+									rows={read.rows}
+									kind={read.kind}
+									streamPath={stream.path}
+									offset={read.requestedOffset}
+									rawBytes={read.rawBytes}
+								/>
 							) : null}
-						</button>
+							<button
+								type="button"
+								class="dsui-btn dsui-btn--ghost"
+								title={
+									read?.nextOffset != null
+										? `Resume from Stream-Next-Offset ${read.nextOffset}`
+										: "No further offset — you are at the tail"
+								}
+								disabled={read?.nextOffset === null || read?.nextOffset === undefined || loading}
+								onClick={() => void readNext()}
+							>
+								<IconCornerDownRight size={14} />
+								<span>Read next batch</span>
+								{read?.nextOffset !== null && read?.nextOffset !== undefined ? (
+									<code class="dsui-ws__nextoffset">{read.nextOffset}</code>
+								) : null}
+							</button>
+						</div>
 					</div>
 				</section>
 			)}
