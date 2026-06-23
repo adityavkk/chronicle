@@ -30,9 +30,9 @@
  * the toolbar and the grid. Keep reads + the tail lifecycle in the store.
  */
 
-import { useComputed } from "@preact/signals";
+import { useComputed, useSignal } from "@preact/signals";
 import type { JSX } from "preact";
-import { useRef } from "preact/hooks";
+import { useLayoutEffect, useRef } from "preact/hooks";
 import {
 	ROW_CAP_OPTIONS,
 	type StartMode,
@@ -44,6 +44,7 @@ import {
 } from "../lib/messages";
 import { describeTailMode, isLiveMode } from "../lib/tail";
 import type { GridRow, TailMode } from "../lib/types";
+import { ROW_HEIGHT, WINDOW_THRESHOLD, windowRange } from "../lib/virtual";
 import {
 	customOffset,
 	lastExchange,
@@ -353,6 +354,7 @@ function Row(props: {
 			onClick={() => selectRow(row)}
 			tabIndex={tabbable ? 0 : -1}
 			data-messagerow="true"
+			data-rowindex={row.index}
 			aria-selected={active}
 			aria-label={label}
 			onKeyDown={onKeyDown}
@@ -382,30 +384,88 @@ export function MessagesWorkspace(): JSX.Element {
 	const loading = readLoading.value;
 	const active = selectedRow.value;
 	const truncated = rowsTruncated.value;
+	// gridRef is the scroll container (.dsui-grid__rows); it both reports scroll
+	// geometry for windowing and is the root for row focus queries.
 	const gridRef = useRef<HTMLDivElement>(null);
+	// Scroll geometry driving fixed-height windowing (see the render below).
+	const scrollTop = useSignal(0);
+	const viewport = useSignal(0);
+	// An absolute row index to focus once it scrolls into the rendered window —
+	// set when arrow/Home/End navigation targets a row outside the current slice.
+	const pendingFocus = useSignal<number | null>(null);
 
 	// Show the Time column only when at least one row in the batch has a time.
 	const showTime = useComputed(() => (read === null ? false : batchHasTimes(read.rows)));
 
-	/** Move roving focus to the n-th row button (clamped). */
-	function focusRow(index: number): void {
-		const cells = gridRef.current?.querySelectorAll<HTMLButtonElement>("[data-messagerow]");
-		if (cells === undefined || cells.length === 0) return;
-		const clamped = Math.max(0, Math.min(index, cells.length - 1));
-		cells.item(clamped)?.focus();
+	/** Capture the scroll element's geometry into the windowing signals. */
+	function syncMetrics(el: HTMLDivElement): void {
+		scrollTop.value = el.scrollTop;
+		viewport.value = el.clientHeight;
 	}
 
-	/** Arrow-key roving for a row at the given position within the batch. */
-	function onRowKeyDown(pos: number): (e: KeyboardEvent) => void {
+	function onGridScroll(): void {
+		const el = gridRef.current;
+		if (el !== null) syncMetrics(el);
+	}
+
+	// Measure the viewport whenever a new batch loads, so windowing has a real
+	// clientHeight before the first scroll (and tracks the clamped scrollTop when
+	// a smaller batch replaces a larger one).
+	// biome-ignore lint/correctness/useExhaustiveDependencies: gridRef is a stable handle; re-measure exactly when the loaded batch changes.
+	useLayoutEffect(() => {
+		const el = gridRef.current;
+		if (el !== null) syncMetrics(el);
+	}, [read]);
+
+	// Focus a row that navigation targeted but that was outside the rendered
+	// window. No dependency array: it runs after every commit so it catches the
+	// target as soon as scrolling re-windows it into the DOM, then clears the
+	// request (a no-op on the commits where nothing is pending).
+	useLayoutEffect(() => {
+		const idx = pendingFocus.value;
+		if (idx === null) return;
+		const el = gridRef.current?.querySelector<HTMLButtonElement>(`[data-rowindex="${idx}"]`);
+		if (el !== null && el !== undefined) {
+			el.focus();
+			pendingFocus.value = null;
+		}
+	});
+
+	/**
+	 * Move roving focus to the row at the given absolute batch index (clamped).
+	 * If the row is already rendered, focus it directly; otherwise scroll it into
+	 * view and let the pendingFocus effect focus it once windowing mounts it.
+	 */
+	function focusRow(index: number): void {
+		const total = read?.rows.length ?? 0;
+		if (total === 0) return;
+		const clamped = Math.max(0, Math.min(index, total - 1));
+		const el = gridRef.current?.querySelector<HTMLButtonElement>(`[data-rowindex="${clamped}"]`);
+		if (el !== null && el !== undefined) {
+			el.focus();
+			return;
+		}
+		// Outside the window: scroll it to the top of the viewport, refresh the
+		// metrics so the re-render includes it, and queue the focus.
+		pendingFocus.value = clamped;
+		const scroller = gridRef.current;
+		if (scroller !== null) {
+			scroller.scrollTop = clamped * ROW_HEIGHT;
+			syncMetrics(scroller);
+		}
+	}
+
+	/** Arrow-key roving for a row at the given absolute index within the batch. */
+	function onRowKeyDown(absIndex: number): (e: KeyboardEvent) => void {
 		return (e) => {
 			switch (e.key) {
 				case "ArrowDown":
 					e.preventDefault();
-					focusRow(pos + 1);
+					focusRow(absIndex + 1);
 					break;
 				case "ArrowUp":
 					e.preventDefault();
-					focusRow(pos - 1);
+					focusRow(absIndex - 1);
 					break;
 				case "Home":
 					e.preventDefault();
@@ -456,6 +516,24 @@ export function MessagesWorkspace(): JSX.Element {
 	// otherwise the first row, so the grid always has exactly one tabbable cell.
 	const activeInBatch =
 		active !== null && (read?.rows.some((r) => r.index === active.index) ?? false);
+
+	// Fixed-height windowing for the paged grid: above the threshold render only
+	// the visible slice inside top/bottom spacers (uniform 30px rows), keeping the
+	// DOM small for a large batch; at or below it render every row. The spacers
+	// preserve scrollHeight so the sticky header and scrollbar are unchanged.
+	const gridRows = read?.rows ?? [];
+	const gridTotal = gridRows.length;
+	const gridWindowed = gridTotal > WINDOW_THRESHOLD;
+	const gridRange = gridWindowed
+		? windowRange(scrollTop.value, viewport.value, ROW_HEIGHT, gridTotal)
+		: { startIndex: 0, endIndex: gridTotal, padTop: 0, padBottom: 0 };
+	const gridVisible = gridWindowed
+		? gridRows.slice(gridRange.startIndex, gridRange.endIndex)
+		: gridRows;
+	// The single tab stop must be on a rendered row: the active row (else the
+	// first row) when it is in the window, otherwise the first visible row.
+	const tabStopIndex = activeInBatch ? (active?.index ?? 0) : 0;
+	const tabStopVisible = gridVisible.some((r) => r.index === tabStopIndex);
 
 	return (
 		<div class="dsui-ws">
@@ -512,25 +590,40 @@ export function MessagesWorkspace(): JSX.Element {
 						) : null}
 						<span>Preview</span>
 					</div>
-					<div class="dsui-grid__rows" ref={gridRef}>
+					<div class="dsui-grid__rows" ref={gridRef} onScroll={onGridScroll}>
 						{loading && read === null ? (
 							<GridSkeleton />
 						) : read !== null && read.rows.length > 0 ? (
 							<>
 								{/* biome-ignore lint/a11y/useFocusableInteractive: focus lives on the option rows via roving tabindex (one row has tabIndex=0), so the listbox container itself is intentionally not a tab stop. */}
 								{/* biome-ignore lint/a11y/useSemanticElements: a native <select> cannot host these rich, focusable message rows; role="listbox" with role="option" children is the correct single-select pattern. */}
-								<div role="listbox" class="dsui-grid__body" aria-label="Message rows">
-									{read.rows.map((row, i) => (
+								<div
+									role="listbox"
+									class="dsui-grid__body"
+									aria-label="Message rows"
+									// Spacers stand in for the windowed-out rows so scrollHeight
+									// (and the sticky header) is identical to rendering every row.
+									style={{
+										paddingBlockStart: gridRange.padTop,
+										paddingBlockEnd: gridRange.padBottom,
+									}}
+								>
+									{gridVisible.map((row) => (
 										<Row
 											key={row.index}
 											row={row}
 											active={active?.index === row.index}
 											showTime={showTimeCol}
-											// Roving tabindex: exactly one row owns the tab stop —
-											// the active row, else the first row — so the list is one
-											// Tab stop and ArrowUp/Down/Home/End move between rows.
-											tabbable={activeInBatch ? active?.index === row.index : i === 0}
-											onKeyDown={onRowKeyDown(i)}
+											// Roving tabindex: exactly one rendered row owns the tab stop
+											// — the active row (else the first row) when windowed in, else
+											// the first visible row — so the list is one Tab stop and
+											// ArrowUp/Down/Home/End move between rows.
+											tabbable={
+												tabStopVisible
+													? row.index === tabStopIndex
+													: row.index === gridRange.startIndex
+											}
+											onKeyDown={onRowKeyDown(row.index)}
 										/>
 									))}
 								</div>

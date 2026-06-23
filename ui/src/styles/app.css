@@ -2910,8 +2910,13 @@
 .dsui-tail__rowmark {
 	color: var(--accent);
 }
-/* A freshly appended row briefly tints to draw the eye to new data. */
-.dsui-tail__rows .dsui-row:last-child {
+/* A freshly appended row briefly tints to draw the eye to new data. Gated on
+ * .is-atbottom so windowing (which renders a slice — the last rendered row is
+ * the newest only when the bottom spacer is absent) never flashes a mid-list
+ * row while the user scrolls up. Unwindowed lists are always .is-atbottom, so
+ * the small-buffer behavior is unchanged. Reduced motion still suppresses it
+ * via the global rule in base.css. */
+.dsui-tail__rows.is-atbottom .dsui-row:last-child {
 	animation: dsui-tail-flash var(--dur-3) var(--ease-out);
 }
 @keyframes dsui-tail-flash {
