@@ -8,12 +8,23 @@ import (
 
 // These tests exercise the pure slot-ownership CAS model (model_shard.go)
 // directly against crafted histories — no cluster, no Redis. They prove the
-// oracle accepts every legal interleaving of the proposed claim_shard /
+// oracle accepts every legal interleaving of the SHIPPED claim_shard /
 // check_owner protocol and rejects the silently-dropping-LWW violations T3
 // exists to catch. With no timeout, CheckOperations is definitive: true ==
 // linearizable (Ok), false == a violation (Illegal).
 //
-// Epochs start at 1 to mirror the proposed claim_shard.lua: HINCRBY owner_epoch
+// These are the oracle's OWN spec, NOT the binding to the shipped Lua. The
+// real-Lua binding — the proof that claim_shard.lua / check_owner.lua and the
+// ds:{ownership}:slot:<h> hash agree with this model under live concurrency — is
+// the -scenario ownership-exclusivity gate (runOwnershipExclusivity in
+// scenario_ownership.go), which drives webhook.RedisStore against a containerized
+// Redis and checks the recorded history against shardModel(). The negative-control
+// cases below (NonBumpingTransferIsIllegal, RenewThatBumpsIsIllegal,
+// DeposedOwnerGrantedIsIllegal, RenewWithoutPriorOwnershipIsIllegal) are what
+// guarantees the oracle still bites if the shipped Lua ever drifts into an LWW or
+// a stale-OWNER verdict.
+//
+// Epochs start at 1 to mirror the shipped claim_shard.lua: HINCRBY owner_epoch
 // mints 1 on the first transfer, so 1 is the first epoch a real run records.
 
 // shardOp is the shard-history operation builder (model_fence_test.go's op() is
