@@ -28,8 +28,10 @@ jepsen/down.sh                     # tear down the cluster
 The hardening scenarios (`pull-wake-arm-crash`, `expired-lease-takeover`,
 `glob-create-crash`, `index-repair`), the safety scenarios (`single-holder-linz`,
 `cursor-monotonic`, `stale-gen-noop`), the liveness scenarios (`lease-tail-drop`,
-`at-least-once`), and the gated acceptance-gate scaffolds (`ownership-exclusivity`,
-`slot-isolation`) are not in the default `run.sh` set yet; pass them by name.
+`at-least-once`), and the now-live acceptance gates (`ownership-exclusivity`,
+`slot-isolation`) are not in the default `run.sh` set yet; pass them by name. The
+Redis-direct gates (`ownership-exclusivity`, `shard-linz`) need no cluster — just
+`-redis-url` — so they also run in CI (`.github/workflows/ci.yml`, the `linz` job).
 
 `up.sh` maps `localhost:4438` to the chronicle NodePort through the k3d
 loadbalancer, so the host driver keeps reaching chronicle while individual pods
@@ -135,15 +137,21 @@ These run against today's code as the regression floor — no production rebuild
   stream's appended range is covered by its final cursor within ≤ one sweep tick
   (`-sweep`).
 
-## Acceptance-gate scaffolds (research/07: T3, T5 — red until the mechanism lands)
+## Live acceptance gates (research/07: T3, T5 — mechanism shipped)
 
-`ownership-exclusivity` (T3) and `slot-isolation` (T5) are the executable contract
-for mechanisms that do not exist on today's code — `claim_shard.lua` /
-`ds:{ownership}` (#14) and the S-slot `{__ds:h}` tagging (#15). They reach the
-cluster, exercise the matching nemesis seam (e.g. `killSlotOwner` cleanly no-ops
-against the mechanism-less keyspace), and report **GATED** (exit 0 — there is
-nothing to fail yet). Their pure models/checkers are unit-tested without a cluster:
-`go test ./jepsen/checker/ -run TestShardModel` (the T3 ownership-CAS oracle).
+`ownership-exclusivity` (T3) and `slot-isolation` (T5) are LIVE: the mechanisms
+they gate have shipped — `claim_shard.lua` / `check_owner.lua` / `ds:{ownership}`
+(#14) and the S-slot `{__ds:h}` tagging (#15). `ownership-exclusivity`
+(`scenario_ownership.go`, not the orthogonal per-`(subId,g)` `scenario_shard.go`)
+drives N concurrent claimants against `webhook.RedisStore.ClaimSlot`
+(→ `claim_shard.lua`) / `CheckOwner` (→ `check_owner.lua`) over the real
+`ds:{ownership}:slot:<h>` hash with a `gcPause` nemesis, records the history, and
+checks it against the porcupine `shardModel()` with Unknown counted as FAIL —
+reporting `PASS: T3 ownership exclusivity linearizable`. This is the binding of the
+oracle to the shipped Lua, so `INV-OWNER-01/02` are validated against real Redis,
+not just the model agreeing with itself. The pure oracle is unit-tested without a
+cluster too: `go test ./jepsen/checker/ -run TestShardModel` (its own spec, not the
+real-Lua binding).
 
 **Modeling note (a real subtlety).** The fence model is *time-free*: lease expiry
 governs only grant-vs-BUSY (an observed output), not the safety algebra. One
@@ -162,7 +170,7 @@ the history was too concurrent to decide in the timeout — reduce `-workers` or
 - `Dockerfile` — wraps the host-built `bin/chronicle-linux`.
 - `checker/main.go` — receiver + workload + nemesis + durability/L1 checker + the `-scenario` switch.
 - `checker/model_fence.go` — pure porcupine lease-fence model (T1).
-- `checker/model_shard.go` — pure porcupine ownership-CAS model (T3 scaffold, #14).
+- `checker/model_shard.go` — pure porcupine ownership-CAS model (T3); driven live against the shipped Lua by `scenario_ownership.go`.
 - `checker/check_cursor.go` — pure cursor-monotonicity checker (T2).
 - `checker/check_stalegen.go` — pure no-stale-generation-effect checker (T4).
 - `checker/check_delivery.go` — pure at-least-once / per-message delivery checker (L1).
@@ -173,6 +181,7 @@ the history was too concurrent to decide in the timeout — reduce `-workers` or
 - `checker/scenario_cursor.go` — `cursor-monotonic` driver + cursor poller.
 - `checker/scenario_stalegen.go` — `stale-gen-noop` driver (T4).
 - `checker/scenario_leasetail.go` — `lease-tail-drop` driver (L3).
-- `checker/scenario_gated.go` — `ownership-exclusivity` / `slot-isolation` gate scaffolds (T3/T5).
+- `checker/scenario_ownership.go` — `ownership-exclusivity` driver (T3): live `claim_shard.lua` / `check_owner.lua` CAS, no cluster.
+- `checker/scenario_slot.go` — `slot-isolation` driver (T5): live S-slot `{__ds:h}` differential checker, no cluster.
 - `checker/*_test.go` — unit tests for the pure models/checkers/nemesis (no cluster).
 - `up.sh` / `run.sh` / `down.sh` — lifecycle.

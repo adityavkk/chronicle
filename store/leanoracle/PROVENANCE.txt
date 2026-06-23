@@ -1,0 +1,68 @@
+Vendored Lean->C differential oracle — provenance and regeneration
+==================================================================
+Issue #31 (P1.2). This file records exactly how the vendored artifact in this
+directory was produced, so it is reproducible and the CI drift guard can assert
+byte-identity. Routine Go CI consumes the vendored artifact and needs NO Lean
+toolchain; only this regeneration step and the gated drift-guard job need Lean.
+
+Vendored artifact
+------------------
+  libchronicle_oracle.a   self-contained static archive (Lean export shims +
+                          the two proven cores + the slice of the Lean runtime
+                          they pull in; only libc/libc++/libSystem left for the
+                          final Go cgo link to resolve)
+  chronicle_oracle.h      maintained C header for the entry points (cgo includes this)
+
+Lean source (in this worktree, lean/Chronicle/)
+-----------------------------------------------
+  Extern.lean             the @[export] C-entry shims (NEW for #31)
+  Producer.lean           BYTE-IDENTICAL copy of the proven transcription
+  Offset.lean             BYTE-IDENTICAL copy of the proven transcription
+
+The two cores are copied verbatim from the formal-verification worktree so the
+oracle runs the SAME definitions the proofs are about. Source of the copies:
+
+  repo:    chronicle (formal-verification worktree)
+  branch:  adityavkk/formal-verification
+  commit:  c3941ca06df3264da8cfb2c2dbb93632dee2895d
+  files:   lean/Chronicle/Producer.lean
+           lean/Chronicle/Offset.lean
+
+  sha256 (copied here, must match the source commit's files):
+    9cace67b6a6e917fec9845ccab141a21dc11e744aad261f02a4108595d823279  Producer.lean
+    b2ddfefeda530762387b8114078908f642728a34d22ed3331c8956542819fc8e  Offset.lean
+
+Pinned toolchain (lean/lean-toolchain)
+--------------------------------------
+  leanprover/lean4:v4.31.0
+  Lean 4.31.0 (commit 68218e876d2a38b1985b8590fff244a83c321783)
+  Lake 5.0.0
+  No mathlib: the two cores are pure core-Lean, so this compile target requires
+  no external packages and emits no lake-manifest.json. (The PROOFS, in the
+  formal-verification worktree, DO require mathlib v4.31.0; the oracle does not.)
+
+Regeneration (the command of record)
+------------------------------------
+  PATH="$HOME/.elan/bin:$PATH" store/leanoracle/scripts/build-lean-oracle.sh
+
+  The script: lake build (emits C) -> compile each C with the SYSTEM clang at
+  -fvisibility=default and -mmacosx-version-min=15.0 -> ld -r partial-link the
+  three objects with the referenced members of libleanrt/libInit/libgmp/libuv,
+  keeping the public entry points global -> ZERO_AR_DATE=1 ar to pack a
+  deterministic (zero-timestamp) archive. The compile and partial-link steps are
+  deterministic; ZERO_AR_DATE makes the ar step deterministic, so the archive is
+  byte-identical across rebuilds on the same toolchain.
+
+  NOTE: use the SYSTEM clang, not leanc. leanc bakes -fvisibility=hidden, which
+  demotes the @[export] symbols to private and breaks cgo linking.
+
+Drift guard
+-----------
+  PATH="$HOME/.elan/bin:$PATH" store/leanoracle/scripts/build-lean-oracle.sh --check
+  rebuilds into a temp dir and asserts byte-identity with the committed archive.
+
+Artifact hash (this revision)
+-----------------------------
+  sha256(libchronicle_oracle.a) = 790509fc1cb1fd4a534c1add5eaf1749259daba3d056b79ea5db0302bb540d66
+  built on: arm64-apple-darwin (Apple Silicon). The archive is arch-specific
+  (Mach-O arm64); a CI runner on a different arch must rebuild for that arch.

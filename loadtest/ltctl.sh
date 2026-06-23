@@ -315,12 +315,27 @@ cmd_gate5() {
   kubectl -n "$NS" wait --for=condition=complete --timeout=600s job -l app=sweepscale 2>/dev/null ||
     kubectl -n "$NS" wait --for=condition=failed --timeout=5s job -l app=sweepscale 2>/dev/null || true
 
-  log "gate #5: sweepscale report (SLO gate)"
-  kubectl -n "$NS" logs -l app=sweepscale --tail=-1
-  log "gate #5: fence + ownership + coverage-gap metrics from a surviving pod"
+  log "gate #5: sweepscale report (SLO gate + at-least-once tail check)"
+  kubectl -n "$NS" logs -l app=sweepscale --tail=-1 | tee "$out/sweepscale.log"
+  # At-least-once across the managed failover (#43, INV-JEP-L1-01): the loadgen tail
+  # check is the under-load analogue of the checker's CheckAtLeastOnce oracle — every
+  # appended message must have been delivered (cursor reached tail) even though the
+  # managed failover dropped some fence-minting writes in the async-replication RPO
+  # window. A dropped write re-fired and was deduped by the monotone cursor; a
+  # surviving gap would be a lost update (FAIL).
+  if grep -qiE 'lost|gap|undelivered|FAIL' "$out/sweepscale.log"; then
+    log "gate #5: AT-LEAST-ONCE check found a shortfall in the sweepscale tail report (see above) — a dropped fence-write was NOT re-fired"
+  else
+    log "gate #5: at-least-once held — every appended message reached tail across the managed failover (deduped by the monotone cursor)"
+  fi
+  log "gate #5: fence + ownership + coverage-gap + durability-short metrics from a surviving pod"
+  # chronicle_durability_short_total (#43) is the RPO-exposure signal: how often a
+  # Tier B fence-minting write reached the primary but could not prove durability
+  # within the WAITAOF timeout — durability only, never laundered into exclusivity.
   kubectl -n "$NS" exec deploy/chronicle -- sh -c 'wget -qO- http://localhost:9090/metrics' 2>/dev/null |
-    grep -E 'chronicle_coverage_gap_seconds|chronicle_slot_ownership_events_total|chronicle_owner_fenced_total' || true
-  log "gate #5 done — see jepsen/deploy/standard-ha-failover.sh for the deposed-FENCED + cursor-only-recovery proof"
+    grep -E 'chronicle_coverage_gap_seconds|chronicle_slot_ownership_events_total|chronicle_owner_fenced_total|chronicle_durability_short_total' || true
+  log "gate #5 done — see jepsen/deploy/standard-ha-failover.sh gate #5d for the asserting"
+  log "  at-least-once + deposed-FENCED proof across a REAL promotion (GATE5-FAILOVER-VERDICT) + RPO/RTO"
 }
 
 _torn=0

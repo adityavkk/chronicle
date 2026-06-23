@@ -91,7 +91,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|failover|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
@@ -148,6 +148,32 @@ func run(c config, r *receiver) error {
 		return runShardLinz(c)
 	}
 
+	// store-linz (#35) is the DATA-PLANE linearizability test: K clients hammer
+	// append/read/close/getOffset on ONE stream against live Redis under the
+	// gcPause (+ optional toxiproxy) nemeses, and the recorded history is checked
+	// against the pure streamModel() (model_store.go). It proves INV-LIN-01/02,
+	// INV-CLOSE-01, INV-READ-01 (the single-slot EVAL is the linearization point,
+	// the optimistic re-frame loop never tears/gaps/dupes, close is an idempotent
+	// latch, read returns the exact offset-exclusive suffix incl. clean EOF). Like
+	// shard-linz it drives the store directly — no cluster (scenario_store.go).
+	if c.scenario == "store-linz" {
+		return runStoreLinz(c)
+	}
+
+	// composed (P2.2, #36) is the TWO-FENCE COMPOSITION linearizability test: K
+	// workers contend on ONE (subscription, slot), racing the subscription's inner
+	// (gen, wake) lease fence AND that slot's outer (owner, epoch) ownership lease at
+	// once (claim_shard transfer/renew interleaved with claim/ack/release under the
+	// caller's OwnerScope so ack.lua inlines owner_fenced above the (gen,wake) fence),
+	// and the recorded history is checked against the porcupine composedModel()
+	// (model_composed.go). It binds INV-FENCE-01 (single-holder) ACROSS owner-epoch
+	// transitions and INV-OWNER-02 (owner-epoch is optimization-only): every OK must
+	// be fence-valid under the inner register ALONE. Like the other Redis-direct gates
+	// it needs no cluster (scenario_composed.go).
+	if c.scenario == "composed" {
+		return runComposedFences(c)
+	}
+
 	// cursor-monotonic drives the webhook delivery workload under origin churn
 	// while sampling cursors, then checks forward-only advance with the pure
 	// CheckCursorMonotonic (T2, scenario_cursor.go). It reuses the receiver.
@@ -164,6 +190,19 @@ func run(c config, r *receiver) error {
 	if c.scenario == "lease-tail-drop" {
 		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
 		return runLeaseTailDrop(c, nem)
+	}
+
+	// failover (#43, gate #5) is the REAL-failover assertion: drive K pull-wake subs
+	// to cursor==tail, inject a real primary loss + replica promotion (the
+	// redisFailover nemesis on the STANDARD_HA substrate), wait for the boot
+	// reconcile, then assert via CheckAtLeastOnce that every stream still reaches
+	// tail (a dropped fence-write degraded only to at-least-once) AND a deposed
+	// worker's late ack is FENCED (no double-grant / cursor regression survived the
+	// promotion). It records the empirical RPO/RTO. Self-contained over the claim/ack
+	// API — no webhook receiver (scenario_failover.go).
+	if c.scenario == "failover" {
+		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		return runFailover(c, nem)
 	}
 
 	// ownership-exclusivity (T3) is now LIVE (#14 landed claim_shard.lua /

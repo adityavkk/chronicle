@@ -25,6 +25,13 @@ type Options struct {
 	// Logger receives operational warnings (e.g. eviction policy). Defaults
 	// to slog.Default().
 	Logger *slog.Logger
+
+	// Clock is the time source for the now argument passed into the Lua
+	// scripts (is_expired / sliding-TTL) and the Go-side expiry checks.
+	// Defaults to the real wall clock; the equivalence harness (issue #26)
+	// injects a shared FakeClock so the Redis backend and the MemoryStore
+	// oracle make identical lazy-expiry decisions at a frozen now.
+	Clock store.Clock
 }
 
 // Store implements store.Store on Redis 8 using the ZSET-lex frame
@@ -36,6 +43,7 @@ type Options struct {
 type Store struct {
 	client redis.UniversalClient
 	log    *slog.Logger
+	clock  store.Clock
 }
 
 var _ store.Store = (*Store)(nil)
@@ -49,7 +57,11 @@ func New(client redis.UniversalClient, opts Options) *Store {
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Store{client: client, log: log}
+	clock := opts.Clock
+	if clock == nil {
+		clock = store.RealClock()
+	}
+	s := &Store{client: client, log: log, clock: clock}
 	s.warnEvictionPolicy()
 	return s
 }
@@ -71,8 +83,20 @@ func keysFor(path string) []string {
 	return []string{metaKey(path), msgKey(path), prodKey(path), forksKey(path)}
 }
 
-func nowNsArg() string {
-	return strconv.FormatInt(time.Now().UnixNano(), 10)
+// isExpired evaluates a stream's lazy expiry against the injected clock, so
+// the Go-side pre-checks (Get/Has/Create) agree with the Lua is_expired
+// (which receives the same now via nowNsArg) and the MemoryStore oracle at a
+// shared frozen instant (issue #26).
+func (s *Store) isExpired(m *store.StreamMetadata) bool {
+	return m.IsExpiredAt(s.clock.Now())
+}
+
+// nowNsArg renders the now argument (UnixNano decimal) passed into every
+// mutation/read script. It reads the store's injected clock so the Lua
+// is_expired / sliding-TTL math is driven by the same time source as the
+// Go-side checks and the MemoryStore oracle (issue #26).
+func (s *Store) nowNsArg() string {
+	return strconv.FormatInt(s.clock.Now().UnixNano(), 10)
 }
 
 // normalizeCT mirrors store.ContentTypeMatches normalization: empty
@@ -144,7 +168,7 @@ func (s *Store) Get(path string) (*store.StreamMetadata, error) {
 	if m.SoftDeleted {
 		return nil, store.ErrStreamSoftDeleted
 	}
-	if m.IsExpired() {
+	if s.isExpired(m) {
 		return nil, store.ErrStreamNotFound
 	}
 	if m.Producers, err = producersFromHash(prodCmd.Val()); err != nil {
@@ -157,7 +181,7 @@ func (s *Store) Get(path string) (*store.StreamMetadata, error) {
 // invisible. No TTL touch.
 func (s *Store) Has(path string) bool {
 	m, err := s.fetchMeta(context.Background(), path)
-	return err == nil && m != nil && !m.SoftDeleted && !m.IsExpired()
+	return err == nil && m != nil && !m.SoftDeleted && !s.isExpired(m)
 }
 
 // GetCurrentOffset returns the tail offset. Mirroring MemoryStore, it does
@@ -223,7 +247,7 @@ func (s *Store) Create(path string, opts store.CreateOptions) (*store.StreamMeta
 	// before fork validation and before InitialData parsing.
 	if existing, err := s.fetchMeta(ctx, path); err != nil {
 		return nil, false, err
-	} else if existing != nil && !existing.IsExpired() {
+	} else if existing != nil && !s.isExpired(existing) {
 		if existing.SoftDeleted {
 			return nil, false, store.ErrStreamExists
 		}
@@ -240,7 +264,7 @@ func (s *Store) Create(path string, opts store.CreateOptions) (*store.StreamMeta
 		return nil, false, store.ErrConfigMismatch
 	}
 
-	now := time.Now()
+	now := s.clock.Now()
 	meta := &store.StreamMetadata{
 		Path:           path,
 		ContentType:    opts.ContentType,
@@ -264,7 +288,7 @@ func (s *Store) Create(path string, opts store.CreateOptions) (*store.StreamMeta
 		if srcMeta.SoftDeleted {
 			return nil, false, store.ErrStreamSoftDeleted
 		}
-		if srcMeta.IsExpired() {
+		if s.isExpired(srcMeta) {
 			return nil, false, store.ErrStreamNotFound
 		}
 		// Content-type mismatch is rejected before taking a reference on the
@@ -307,7 +331,7 @@ func (s *Store) Create(path string, opts store.CreateOptions) (*store.StreamMeta
 		}
 
 		// Take the fork reference on the source (re-validated atomically).
-		status, _, err := s.runStatusScript(ctx, incrRefScript, keysFor(opts.ForkedFrom), nowNsArg(), path)
+		status, _, err := s.runStatusScript(ctx, incrRefScript, keysFor(opts.ForkedFrom), s.nowNsArg(), path)
 		if err != nil {
 			return nil, false, err
 		}
@@ -409,7 +433,7 @@ func (s *Store) createArgs(meta *store.StreamMetadata, opts store.CreateOptions,
 
 	fields := metaToFields(meta)
 	args := make([]any, 0, 10+2*len(fields)+len(frames))
-	args = append(args, nowNsArg(), notifyChannel(meta.Path),
+	args = append(args, s.nowNsArg(), notifyChannel(meta.Path),
 		normalizeCT(opts.ContentType), probeTTL, probeExp, probeClosed,
 		opts.ForkedFrom, probeForkOff, probeSubOff,
 		strconv.Itoa(len(fields)))
@@ -548,7 +572,7 @@ func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (stor
 		}
 
 		args := append([]any{
-			nowNsArg(), notifyChannel(path), reqCT, opts.Seq, closeArg,
+			s.nowNsArg(), notifyChannel(path), reqCT, opts.Seq, closeArg,
 			hasProd, pid, epochArg, seqArg,
 			base.String(), newTail.String(), valOnly,
 		}, frames...)
@@ -619,7 +643,7 @@ func (s *Store) mapAppendReply(r *scriptReply) (store.AppendResult, error) {
 // It refreshes the sliding TTL (Read counts as access).
 func (s *Store) Read(path string, offset store.Offset) ([]store.Message, bool, error) {
 	ctx := context.Background()
-	raw, err := readScript.Run(ctx, s.client, keysFor(path), nowNsArg(), lexLowerBound(offset)).Result()
+	raw, err := readScript.Run(ctx, s.client, keysFor(path), s.nowNsArg(), lexLowerBound(offset)).Result()
 	if err != nil {
 		return nil, false, err
 	}
@@ -786,7 +810,7 @@ func (s *Store) Delete(path string) error {
 func (s *Store) releaseRef(ctx context.Context, parent, child string) error {
 	for parent != "" {
 		status, rest, err := s.runStatusScript(ctx, decrRefScript, keysFor(parent),
-			nowNsArg(), notifyChannel(parent), child)
+			s.nowNsArg(), notifyChannel(parent), child)
 		if err != nil {
 			return err
 		}
@@ -872,7 +896,7 @@ func (s *Store) CloseStreamWithProducer(path string, opts store.CloseProducerOpt
 
 func (s *Store) runCloseScript(ctx context.Context, path, hasProd, pid, epoch, seq string) (*scriptReply, error) {
 	raw, err := closeScript.Run(ctx, s.client, keysFor(path),
-		nowNsArg(), notifyChannel(path), hasProd, pid, epoch, seq).Result()
+		s.nowNsArg(), notifyChannel(path), hasProd, pid, epoch, seq).Result()
 	if err != nil {
 		return nil, err
 	}

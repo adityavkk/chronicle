@@ -1,0 +1,23 @@
+name = "chronicleoracle"
+defaultTargets = ["ChronicleOracle"]
+
+# P1.2 Lean→C differential oracle (issue #31), self-contained compile target.
+#
+# This is a STANDALONE lake project (it lives inside the property-based-testing
+# worktree, not the formal-verification one) whose only purpose is to emit the C
+# / object code for the `@[export]` shims in `Chronicle/Extern.lean`. It depends
+# on NO external packages: `Chronicle/Producer.lean` and `Chronicle/Offset.lean`
+# are byte-identical copies of the proven transcriptions, and they are pure
+# core-Lean, so there is no `require mathlib` and no `lake-manifest.json` to
+# fetch. That keeps this build fast and makes the emitted C link against only the
+# Lean runtime — exactly what the vendored static archive needs.
+#
+# `scripts/build-lean-oracle.sh` builds `ChronicleOracle`, then packs the three
+# emitted `.o` files (Extern + Producer + Offset) into
+# `store/leanoracle/libchronicle_oracle.a`.
+
+[[lean_lib]]
+name = "ChronicleOracle"
+# All three modules are roots so `lake build` compiles the two proven cores
+# (Producer, Offset) and the export shims (Extern), emitting C / `.o` for each.
+roots = ["Chronicle.Producer", "Chronicle.Offset", "Chronicle.Extern"]

@@ -199,6 +199,14 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 	store := webhook.NewRedisStore(client).
 		WithConsistency(tuning.Consistency, tuning.WaitReplicas, tuning.WaitTimeoutMs).
 		WithMetrics(tuning.Metrics)
+	// Tier B fails fast at startup if the connected Redis cannot honor its WAITAOF
+	// barrier — appendonly is off, or the topology has fewer online replicas than
+	// WaitReplicas requires (issue #43). A no-op for Tier A/C. Running a Tier B
+	// durability path against a non-AOF Redis would prove nothing, so refuse to
+	// start rather than silently expose the RPO the tier exists to bound.
+	if err := store.AssertAOFEnabled(tuning.Consistency, tuning.WaitReplicas); err != nil {
+		return nil, nil, err
+	}
 	mgr, err := webhook.NewManager(store, streamAdapter{st: streamStore, rs: rs}, opts)
 	if err != nil {
 		return nil, nil, err
