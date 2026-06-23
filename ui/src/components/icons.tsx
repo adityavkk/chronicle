@@ -436,3 +436,14 @@ export function IconLink(props: IconProps): JSX.Element {
 		</Icon>
 	);
 }
+
+/** A tray with a down-arrow into it — the export / save-to-disk affordance. */
+export function IconDownload(props: IconProps): JSX.Element {
+	return (
+		<Icon {...props}>
+			<path d="M12 3v10" />
+			<path d="M8 9l4 4 4-4" />
+			<path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+		</Icon>
+	);
+}

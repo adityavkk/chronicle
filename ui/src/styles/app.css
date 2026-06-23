@@ -1011,6 +1011,12 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+/* The right side of the pager: Export menu + Read-next-batch, kept together. */
+.dsui-ws__pageractions {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
 
 /* ====================================================================
  * Protocol disclosure — "Under the hood" (Feature 4)
@@ -2520,6 +2526,77 @@
 .dsui-actions .dsui-curl__summary {
 	padding: var(--space-1) var(--space-2);
 	font-size: var(--text-2xs);
+}
+
+/* ---- Export menu (download the loaded batch / tail buffer) ---------- */
+.dsui-export {
+	position: relative;
+	flex: none;
+}
+.dsui-export__pop {
+	position: absolute;
+	inset-block-start: calc(100% + var(--space-1));
+	inset-inline-end: 0;
+	z-index: var(--z-overlay);
+	min-inline-size: 13rem;
+	max-inline-size: min(20rem, 90vw);
+	padding: var(--space-2);
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-pop);
+	animation: dsui-pop var(--dur-2) var(--ease-out);
+	transform-origin: top right;
+}
+/* Both call sites are bottom-anchored, so the popover opens upward. */
+.dsui-export__pop--up {
+	inset-block-start: auto;
+	inset-block-end: calc(100% + var(--space-1));
+	transform-origin: bottom right;
+}
+.dsui-export__hint {
+	padding: var(--space-1) var(--space-2);
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+	font-variant-numeric: tabular-nums;
+}
+.dsui-export__item {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	inline-size: 100%;
+	padding: var(--space-2);
+	border-radius: var(--radius-md);
+	font-size: var(--text-sm);
+	color: var(--fg);
+	text-align: start;
+	transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.dsui-export__item svg {
+	color: var(--fg-subtle);
+	flex: none;
+}
+.dsui-export__item:hover:not(:disabled) {
+	background: var(--bg-inset);
+}
+.dsui-export__item:disabled {
+	opacity: 0.5;
+}
+.dsui-export__label {
+	flex: 1;
+}
+.dsui-export__meta {
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+	background: var(--code-bg);
+}
+.dsui-export__sep {
+	block-size: 1px;
+	background: var(--border-subtle);
+	margin: var(--space-1) 0;
 }
 
 /* ---- Publish composer ----------------------------------------------- */
