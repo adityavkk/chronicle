@@ -31,15 +31,18 @@ func composedOp(client int, in composedInput, out composedOutput, call, ret int6
 func cArm(sub, slot string) composedInput {
 	return composedInput{sub: sub, slot: slot, class: classInner, innerOp: opArm}
 }
+
 func cClaim(sub, slot, w string) composedInput {
 	return composedInput{sub: sub, slot: slot, class: classInner, innerOp: opClaim, worker: w}
 }
+
 func cAck(sub, slot, w string, gen int64, wake string, epoch int64, done bool) composedInput {
 	return composedInput{
 		sub: sub, slot: slot, class: classInner, innerOp: opAck, worker: w,
 		reqGen: gen, reqWake: wake, tokenGen: gen, reqEpoch: epoch, done: done,
 	}
 }
+
 func cRelease(sub, slot, w string, gen int64, wake string, epoch int64) composedInput {
 	return composedInput{
 		sub: sub, slot: slot, class: classInner, innerOp: opRelease, worker: w,
@@ -51,6 +54,7 @@ func cRelease(sub, slot, w string, gen int64, wake string, epoch int64) composed
 func cClaimShard(sub, slot, caller string) composedInput {
 	return composedInput{sub: sub, slot: slot, class: classOuter, outerOp: opClaimShard, caller: caller}
 }
+
 func cCheckOwner(sub, slot, caller string, epoch int64) composedInput {
 	return composedInput{sub: sub, slot: slot, class: classOuter, outerOp: opCheckOwner, caller: caller, reqEpoch: epoch}
 }
@@ -59,6 +63,7 @@ func cCheckOwner(sub, slot, caller string, epoch int64) composedInput {
 func cArmedOut(gen int64, wake string) composedOutput {
 	return composedOutput{status: statusArmed, gen: gen, wake: wake}
 }
+
 func cClaimedOut(gen int64, wake string) composedOutput {
 	return composedOutput{status: statusClaimed, gen: gen, wake: wake}
 }
@@ -69,6 +74,7 @@ func cBusyOut() composedOutput   { return composedOutput{status: statusBusy} }
 func cClaimedShardOut(owner string, epoch int64) composedOutput {
 	return composedOutput{status: statusClaimed, owner: owner, epoch: epoch}
 }
+
 func cRenewedShardOut(owner string, epoch int64) composedOutput {
 	return composedOutput{status: statusRenewed, owner: owner, epoch: epoch}
 }
@@ -238,13 +244,15 @@ func TestComposedModel_PartitionsBySubAndSlot(t *testing.T) {
 		composedOp(0, cClaim("s1", "h0", "A"), cClaimedOut(1, "wA"), 3, 4),
 		composedOp(0, cAck("s1", "h0", "A", 1, "wA", 1, true), cOKOut(), 5, 6),
 	}
-	checkComposedLinearizable(t, "two clean keys", append(append([]porcupine.Operation{}, clean...),
+	checkComposedLinearizable(t, "two clean keys", append(
+		append([]porcupine.Operation{}, clean...),
 		composedOp(1, cClaimShard("s2", "h1", "B"), cClaimedShardOut("B", 1), 7, 8),
 		composedOp(1, cClaim("s2", "h1", "B"), cClaimedOut(1, "wB"), 9, 10),
 		composedOp(1, cAck("s2", "h1", "B", 1, "wB", 1, true), cOKOut(), 11, 12),
 	), true)
 
-	checkComposedLinearizable(t, "violation isolated to one key", append(append([]porcupine.Operation{}, clean...),
+	checkComposedLinearizable(t, "violation isolated to one key", append(
+		append([]porcupine.Operation{}, clean...),
 		composedOp(1, cClaimShard("s2", "h1", "B"), cClaimedShardOut("B", 1), 7, 8),
 		composedOp(1, cClaim("s2", "h1", "B"), cClaimedOut(1, "wB"), 9, 10),
 		composedOp(2, cClaim("s2", "h1", "B"), cClaimedOut(2, "wB2"), 11, 12),    // inner rotates 1 -> 2
