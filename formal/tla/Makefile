@@ -23,7 +23,9 @@ SANY               = $(JAVA) -cp $(JAR) tla2sany.SANY
 .PHONY: tlc tlc-1x1 tlc-2x2 fault-expire fault-lease coverage parse jar clean \
         tlc38 ownership composed-on composed-off composed-on-2x2 composed-off-2x2 \
         composed-deposed liveness liveness-nofair liveness-safety liveness-sensitivity parse38 \
-        parse-trace trace-validate trace-negative
+        parse-trace trace-validate trace-negative \
+        tlc40 parse40 membership-safety membership-convergence membership-nofair \
+        membership-witness leasetail leasetail-witness alloy
 
 # The CI target (issue #37): parse, then both faithful safety configs.
 tlc: jar parse tlc-1x1 tlc-2x2
@@ -44,6 +46,67 @@ parse38: jar
 	$(SANY) Ownership.tla
 	$(SANY) Composed.tla
 	$(SANY) Liveness.tla
+
+# --- issue #40 targets: membership/HRW convergence + L3 lease-tail refinement -
+#
+# (A) The distributed membership + HRW + slot-reconcile CONVERGENCE surface
+# (L2/L4/L5, INV-JEP-L4-01 / INV-HRW-01) that no exhaustive check covered:
+#   membership-safety      : AtMostOneOwner / NoLiveSplitBrain / EpochMonotone /
+#                            TransferBumpsEpoch over the full churn interleaving.
+#   membership-convergence : under WF(reconcile)+SF(heartbeat)+WF(tick), after
+#                            churn stops the system converges and STAYS converged
+#                            (one unexpired HRW-target owner per slot, no oscill.).
+#   membership-nofair      : negative control -- WITHOUT fairness convergence MUST
+#                            FAIL (the leads-to is non-trivial).
+#   membership-witness     : non-vacuity -- a genuine TRANSFER and a genuine
+#                            zero-owner coverage GAP are each really reached.
+# (B) The L3 lease-tail-drop refinement (INV-LR-01 / INV-JEP-L3-01): the lease
+# ZSET is a cache repairable from the durable record.
+#   leasetail              : NoSpuriousLease (never invent a lease) + a stranded
+#                            lease is eventually restored from the durable hash.
+tlc40: jar parse40 membership-safety membership-convergence membership-nofair \
+       membership-witness leasetail leasetail-witness
+
+parse40: jar
+	$(SANY) Membership.tla
+	$(SANY) MC_Membership.tla
+	$(SANY) LeaseTail.tla
+
+membership-safety: jar
+	$(TLC) -config Membership_Safety.cfg MC_Membership.tla
+
+membership-convergence: jar
+	$(TLC) -config Membership_Convergence.cfg MC_Membership.tla
+
+# Negative control: WITHOUT fairness the convergence leads-to MUST FAIL.
+membership-nofair: jar
+	@! $(TLC) -config Membership_NoFair.cfg MC_Membership.tla 2>&1 | tee /dev/stderr | grep -q 'No error has been found' \
+		|| (echo "FAIL: convergence held WITHOUT fairness — property is trivial" && exit 1)
+
+# Non-vacuity: a genuine TRANSFER and a genuine zero-owner GAP are each reached
+# (each NotX invariant MUST be violated).
+membership-witness: jar
+	@! $(TLC) -config Membership_Witness.cfg MC_Membership.tla 2>&1 | tee /dev/stderr | grep -q 'No error has been found' \
+		|| (echo "FAIL: no TRANSFER was reachable — convergence run is vacuous" && exit 1)
+	@! $(TLC) -config Membership_WitnessGap.cfg MC_Membership.tla 2>&1 | tee /dev/stderr | grep -q 'No error has been found' \
+		|| (echo "FAIL: no zero-owner GAP was reachable — convergence run is vacuous" && exit 1)
+
+leasetail: jar
+	$(TLC) -config LeaseTail.cfg LeaseTail.tla
+
+# Non-vacuity: the stranded-lease state is actually reachable (NoStranded MUST
+# be violated), so LeaseRecoverable is not vacuously true.
+leasetail-witness: jar
+	@printf 'SPECIFICATION SpecNoFair\nCONSTANTS\n Records = {r1, r2}\nINVARIANT NoStranded\n' > LeaseTail_witness.cfg
+	@! $(TLC) -config LeaseTail_witness.cfg LeaseTail.tla 2>&1 | tee /dev/stderr | grep -q 'No error has been found' \
+		|| (echo "FAIL: stranded-lease state not reachable — LeaseRecoverable is vacuous" && exit 1)
+	@rm -f LeaseTail_witness.cfg
+
+# (B) The Alloy relational models (INV-RECOVER-04 + INV-JEP-T5-01). The Alloy
+# dist jar is downloaded on demand to /tmp by run.sh and is NOT committed. Every
+# `check` must print UNSAT (the assertion holds) and every witness `run` SAT.
+alloy:
+	bash ../alloy/run.sh
 
 # --- issue #38 targets --------------------------------------------------------
 

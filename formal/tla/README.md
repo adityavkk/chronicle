@@ -307,3 +307,92 @@ transitions into it — so the layering proof compares like with like.
 - `Liveness.tla` + `MC_Liveness.tla` + `MC_LiveRace.tla` (two-token-race witness).
 - `Liveness.cfg`, `Liveness_NoFair.cfg`, `Liveness_Safety.cfg`,
   `Liveness_Sensitivity.cfg`.
+
+---
+
+# Membership + HRW slot-ownership convergence + L3 lease-tail refinement (issue #40)
+
+`Membership.tla` + `LeaseTail.tla` close the **L2/L4/L5 distributed-convergence
+surface** that had no exhaustive check (INVARIANTS.md: "the distributed
+membership/HRW/slot-reconcile convergence — the heart of the horizontal-scale
+design — has no exhaustive consistency check"). `Ownership.tla` (#38) modeled one
+slot's owner-epoch CAS **in isolation**; this models the whole loop — the members
+ZSET (heartbeat + lease eviction), the per-replica HRW computation, and the
+`slotReconcile` claim loop — and proves convergence under fairness.
+
+## How to run
+
+```sh
+make tlc40                  # the whole #40 CI lane (all of the below)
+make membership-safety      # AtMostOneOwner / NoLiveSplitBrain / Epoch* over full churn
+make membership-convergence # <>[]Converged after churn stops (under WF/SF fairness)
+make membership-nofair      # negative control: WITHOUT fairness convergence MUST FAIL
+make membership-witness     # non-vacuity: a real TRANSFER and a real zero-owner GAP
+make leasetail              # L3: NoSpuriousLease + a stranded lease is restored
+make leasetail-witness      # non-vacuity: the stranded-lease state is reachable
+make alloy                  # the two Alloy relational models (one dir up, formal/alloy)
+```
+
+## The convergence claim (INV-JEP-L4-01 / INV-HRW-01)
+
+After membership churn stops, under **weak fairness of the slot-reconcile claim
+loop + the clock + StopChurn, and STRONG fairness of each survivor's heartbeat**,
+every slot ends with **exactly one unexpired owner = its HRW target, and stays
+there (no oscillation)**: `EventualConvergence == churnStopped ~> []Converged`.
+
+Two modeling decisions are load-bearing and documented in the spec header:
+
+- **Relative remaining-TTL time**, not an absolute clock. A member/slot lease is
+  a "ticks remaining" counter; a heartbeat/claim resets it to full TTL, a `Tick`
+  decrements toward 0. This removes the absolute-clock ceiling that otherwise
+  makes "a renewed lease stays live forever" inexpressible in a bounded model,
+  and it is faithful (the store only ever uses `score − now`, the difference).
+- **The heartbeat-headroom gate on `Tick`** is the model-level encoding of
+  `CheckOwnershipConfig`'s `heartbeatInterval < memberLeaseTTL/2` and
+  `slotReconcileInterval ≤ heartbeatInterval` (INV-MEMBER-01): `Tick` is disabled
+  if it would lapse an *alive* replica's member lease, or an *alive HRW-target*
+  owner's slot lease — so time can never starve a survivor. SF(Heartbeat) then
+  forces the renew while `Tick` is blocked. A **bounded churn budget** (`MaxChurn`)
+  caps pre-stop transfers so the epoch ceiling can never block the post-churn
+  convergence transfers (the state-constraint-during-liveness hazard).
+
+`membership-nofair` removes the fairness and TLC finds a counterexample, proving
+the leads-to is non-trivial. `membership-witness` proves a genuine TRANSFER
+(epoch ≥ 2) and a genuine zero-owner coverage gap (a previously-claimed slot
+whose owner crashed and whose lease lapsed) are each really reached — so the
+convergence run is not vacuous.
+
+## The L3 lease-tail-drop refinement (INV-LR-01 / INV-JEP-L3-01)
+
+`LeaseTail.tla` models the lease as recoverable from the durable record even
+after the schedule ZSET entry is `ZREM`med: a `DropLeaseTail` removes the ZSET
+entry with the durable hash intact, and `ReconcileLease` re-derives it from the
+durable hash, **phase-conditioned** (only restores a still-live/waking record)
+and **idempotent**. It checks `NoSpuriousLease` (reconcile never invents a lease
+absent from the durable record — the lease analogue of INV-RECOVER-04) and the
+recoverability liveness `StrandedLease ~> (Recovered ∨ Idled)` under WF of the
+reconcile loop.
+
+## Results (TLC 2.19, tla2tools v1.7.4)
+
+| Run | Verdict |
+|---|---|
+| `membership-safety` (Inv + Epoch action-props, 3 replicas × 2 slots) | No error — 21038 distinct states |
+| `membership-convergence` (`<>[]Converged` under fairness) | No error — both leads-to branches hold |
+| `membership-nofair` (negative control) | Temporal property violated (as required) |
+| `membership-witness` (NotTransferReachable / NotZeroOwnerGapReachable) | both violated (as required — non-vacuous) |
+| `leasetail` (Inv + `LeaseRecoverable`) | No error |
+| `leasetail-witness` (NoStranded) | violated (as required — stranded state reachable) |
+
+## #40 files
+
+- `Membership.tla` — members ZSET (relative-TTL) + HRW argmax + `ReconcileClaim`
+  CAS + the churn-budget + the heartbeat/slot-lease headroom gates; safety
+  invariants, the convergence leads-to, the no-fairness spec, and the
+  TRANSFER / zero-owner-gap reachability witnesses.
+- `MC_Membership.tla` — pins a concrete distinct-per-(replica,slot) HRW `Score`.
+- `Membership_Safety.cfg`, `Membership_Convergence.cfg`, `Membership_NoFair.cfg`,
+  `Membership_Witness.cfg`, `Membership_WitnessGap.cfg`.
+- `LeaseTail.tla` + `LeaseTail.cfg` — the L3 lease-tail-drop refinement.
+- Alloy relational models live in [`../alloy/`](../alloy/) (INV-RECOVER-04 +
+  INV-JEP-T5-01); see that directory's `README.md`.
