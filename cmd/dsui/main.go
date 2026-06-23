@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"io/fs"
@@ -101,7 +102,7 @@ func portOnly(addr string) string {
 
 func openBrowser(url string) {
 	var name string
-	var args []string
+	args := make([]string, 0, 1)
 	switch runtime.GOOS {
 	case "darwin":
 		name = "open"
@@ -111,5 +112,8 @@ func openBrowser(url string) {
 		name = "xdg-open"
 	}
 	args = append(args, url)
-	_ = exec.Command(name, args...).Start()
+	// Fire-and-forget: the spawned browser outlives the call, so there is no
+	// meaningful deadline — context.Background() satisfies the no-context lint
+	// without pretending to a cancellation we never act on.
+	_ = exec.CommandContext(context.Background(), name, args...).Start()
 }

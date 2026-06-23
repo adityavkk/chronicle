@@ -260,10 +260,7 @@ func TestCaptureUnsubscribeOnDisconnect(t *testing.T) {
 	// The handler's deferred unsubscribe runs once the context is observed. Poll
 	// briefly for it rather than sleeping a fixed time.
 	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if subscriberCount(store, id) == 0 {
-			break
-		}
+	for subscriberCount(store, id) != 0 {
 		if time.Now().After(deadline) {
 			t.Fatalf("subscriber not cleaned up after disconnect")
 		}
