@@ -1,6 +1,9 @@
 /bin/
 /dist/
 *.test
+# Stray `go build` outputs for the #39 trace tooling (the pipeline uses `go run`).
+/produce
+/tracegen
 coverage.out
 coverage.html
 .tmp/
