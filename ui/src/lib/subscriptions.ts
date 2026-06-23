@@ -300,23 +300,30 @@ export function buildAckBody(req: {
  * These mirror the request builders in dsClient so a subscription form can show
  * the EXACT {@link Operation} it will send. Like the stream previews in
  * lib/streamForm, they are pure and unit-tested against the client, so a drift
- * between preview and reality is caught by tests. The /__ds/* surface is served
- * on the connection origin (no streamRoot), so only baseUrl is needed.
+ * between preview and reality is caught by tests. Per the spec the /__ds/*
+ * surface is STREAM-ROOT-RELATIVE, so the previews take streamRoot too (matching
+ * the stream previews in lib/streamForm).
  * ------------------------------------------------------------------------- */
 
 /** Build the absolute /__ds subscription URL the same way dsClient does. */
-export function previewSubscriptionUrl(baseUrl: string, id: string, suffix = ""): string {
-	return `${baseUrl}${SUBSCRIPTIONS_PREFIX}/${encodeURIComponent(id)}${suffix}`;
+export function previewSubscriptionUrl(
+	baseUrl: string,
+	streamRoot: string,
+	id: string,
+	suffix = "",
+): string {
+	return `${baseUrl}${streamRoot}${SUBSCRIPTIONS_PREFIX}/${encodeURIComponent(id)}${suffix}`;
 }
 
 /** Build the create (PUT) operation a subscription form will send, for the preview. */
 export function previewCreateSubscriptionOperation(
 	baseUrl: string,
+	streamRoot: string,
 	opts: CreateSubscriptionOptions,
 ): Operation {
 	return {
 		method: "PUT",
-		url: previewSubscriptionUrl(baseUrl, opts.id),
+		url: previewSubscriptionUrl(baseUrl, streamRoot, opts.id),
 		headers: { ...ACCEPT_HEADER, "Content-Type": "application/json" },
 		body: JSON.stringify(
 			buildCreateBody({
@@ -333,15 +340,27 @@ export function previewCreateSubscriptionOperation(
 }
 
 /** Build the GET subscription operation, for the curl preview. */
-export function previewGetSubscriptionOperation(baseUrl: string, id: string): Operation {
-	return { method: "GET", url: previewSubscriptionUrl(baseUrl, id), headers: { ...ACCEPT_HEADER } };
+export function previewGetSubscriptionOperation(
+	baseUrl: string,
+	streamRoot: string,
+	id: string,
+): Operation {
+	return {
+		method: "GET",
+		url: previewSubscriptionUrl(baseUrl, streamRoot, id),
+		headers: { ...ACCEPT_HEADER },
+	};
 }
 
 /** Build the DELETE subscription operation, for the curl preview. */
-export function previewDeleteSubscriptionOperation(baseUrl: string, id: string): Operation {
+export function previewDeleteSubscriptionOperation(
+	baseUrl: string,
+	streamRoot: string,
+	id: string,
+): Operation {
 	return {
 		method: "DELETE",
-		url: previewSubscriptionUrl(baseUrl, id),
+		url: previewSubscriptionUrl(baseUrl, streamRoot, id),
 		headers: { ...ACCEPT_HEADER },
 	};
 }
@@ -349,32 +368,43 @@ export function previewDeleteSubscriptionOperation(baseUrl: string, id: string):
 /** Build the add-streams (POST …/streams) operation, for the curl preview. */
 export function previewAddStreamsOperation(
 	baseUrl: string,
+	streamRoot: string,
 	id: string,
 	streams: readonly string[],
 ): Operation {
 	return {
 		method: "POST",
-		url: previewSubscriptionUrl(baseUrl, id, "/streams"),
+		url: previewSubscriptionUrl(baseUrl, streamRoot, id, "/streams"),
 		headers: { ...ACCEPT_HEADER, "Content-Type": "application/json" },
 		body: JSON.stringify({ streams: [...streams] }),
 	};
 }
 
 /** Build the remove-stream (DELETE …/streams/{path}) operation, for the preview. */
-export function previewRemoveStreamOperation(baseUrl: string, id: string, path: string): Operation {
+export function previewRemoveStreamOperation(
+	baseUrl: string,
+	streamRoot: string,
+	id: string,
+	path: string,
+): Operation {
 	const clean = path.trim().replace(/^\/+/, "");
 	return {
 		method: "DELETE",
-		url: previewSubscriptionUrl(baseUrl, id, `/streams/${encodeURIComponent(clean)}`),
+		url: previewSubscriptionUrl(baseUrl, streamRoot, id, `/streams/${encodeURIComponent(clean)}`),
 		headers: { ...ACCEPT_HEADER },
 	};
 }
 
 /** Build the claim (POST …/claim) operation, for the curl preview. */
-export function previewClaimOperation(baseUrl: string, id: string, worker: string): Operation {
+export function previewClaimOperation(
+	baseUrl: string,
+	streamRoot: string,
+	id: string,
+	worker: string,
+): Operation {
 	return {
 		method: "POST",
-		url: previewSubscriptionUrl(baseUrl, id, "/claim"),
+		url: previewSubscriptionUrl(baseUrl, streamRoot, id, "/claim"),
 		headers: { ...ACCEPT_HEADER, "Content-Type": "application/json" },
 		body: JSON.stringify({ worker }),
 	};
@@ -383,6 +413,7 @@ export function previewClaimOperation(baseUrl: string, id: string, worker: strin
 /** Build the ack (POST …/ack) operation with a Bearer token, for the preview. */
 export function previewAckOperation(
 	baseUrl: string,
+	streamRoot: string,
 	id: string,
 	token: string,
 	req: {
@@ -394,7 +425,7 @@ export function previewAckOperation(
 ): Operation {
 	return {
 		method: "POST",
-		url: previewSubscriptionUrl(baseUrl, id, "/ack"),
+		url: previewSubscriptionUrl(baseUrl, streamRoot, id, "/ack"),
 		headers: {
 			...ACCEPT_HEADER,
 			"Content-Type": "application/json",
@@ -407,13 +438,14 @@ export function previewAckOperation(
 /** Build the release (POST …/release) operation with a Bearer token, for preview. */
 export function previewReleaseOperation(
 	baseUrl: string,
+	streamRoot: string,
 	id: string,
 	token: string,
 	req: { readonly wakeId: string; readonly generation: number },
 ): Operation {
 	return {
 		method: "POST",
-		url: previewSubscriptionUrl(baseUrl, id, "/release"),
+		url: previewSubscriptionUrl(baseUrl, streamRoot, id, "/release"),
 		headers: {
 			...ACCEPT_HEADER,
 			"Content-Type": "application/json",
