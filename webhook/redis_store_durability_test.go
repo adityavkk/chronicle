@@ -119,7 +119,7 @@ func TestRecordDurabilityShortIncrementsMetric(t *testing.T) {
 
 	// A short WAITAOF reply increments the WAITAOF counter and is returned unchanged.
 	short := &DurabilityShortError{WantLocal: 1, GotLocal: 1, WantReplicas: 1, GotReplicas: 0, UseAOF: true}
-	if got := s.recordDurabilityShort(short, "WAITAOF"); got != error(short) {
+	if got := s.recordDurabilityShort(short, "WAITAOF"); !errors.Is(got, short) {
 		t.Errorf("short verdict must be returned unchanged (never swallowed), got %v", got)
 	}
 	if n := fm.durabilityShorts("WAITAOF"); n != 1 {
@@ -127,7 +127,7 @@ func TestRecordDurabilityShortIncrementsMetric(t *testing.T) {
 	}
 	// A short plain-WAIT reply is labeled separately so the operator gauge splits
 	// the two barrier commands.
-	if got := s.recordDurabilityShort(short, "WAIT"); got != error(short) {
+	if got := s.recordDurabilityShort(short, "WAIT"); !errors.Is(got, short) {
 		t.Errorf("short WAIT verdict must be returned unchanged, got %v", got)
 	}
 	if n := fm.durabilityShorts("WAIT"); n != 1 {
@@ -137,7 +137,7 @@ func TestRecordDurabilityShortIncrementsMetric(t *testing.T) {
 	// A non-durability error (e.g. a transport/Lua failure) is NOT a DurabilityShort
 	// — it passes through without touching the RPO-exposure counter.
 	other := errors.New("webhook: WAITAOF: connection reset")
-	if got := s.recordDurabilityShort(other, "WAITAOF"); got != other {
+	if got := s.recordDurabilityShort(other, "WAITAOF"); !errors.Is(got, other) {
 		t.Errorf("non-DurabilityShort error must pass through, got %v", got)
 	}
 	if n := fm.durabilityShorts("WAITAOF"); n != 1 {

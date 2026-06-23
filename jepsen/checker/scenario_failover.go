@@ -251,7 +251,7 @@ func drainToTail(c config, subID string, expected map[string]string, within time
 			allAtTail := true
 			for stream, tail := range expected {
 				got := acked[stream]
-				if !(got == tail || offsetGreater(got, tail)) {
+				if got != tail && !offsetGreater(got, tail) {
 					allAtTail = false
 					break
 				}
