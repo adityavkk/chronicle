@@ -726,6 +726,21 @@
 	block-size: 100%;
 	min-block-size: 0;
 }
+
+/* Honest note for unframed (text/binary) streams: appends concatenate on read. */
+.dsui-ws__unframed {
+	margin: 0;
+	padding: var(--space-2) var(--space-3);
+	font-size: var(--text-xs);
+	line-height: 1.45;
+	color: var(--fg-muted);
+	background: color-mix(in oklch, var(--accent) 7%, var(--panel-2));
+	border-block-end: 1px solid var(--border-subtle);
+}
+.dsui-ws__unframed code {
+	font-family: var(--font-mono);
+	color: var(--fg);
+}
 .dsui-ws--empty {
 	align-items: center;
 	justify-content: center;
