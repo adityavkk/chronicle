@@ -284,6 +284,7 @@ export function buildSubscriptionOptions(v: SubscriptionFormValues): CreateSubsc
  */
 export function previewCallbackOperation(
 	baseUrl: string,
+	streamRoot: string,
 	id: string,
 	callbackToken: string,
 	req: {
@@ -301,7 +302,7 @@ export function previewCallbackOperation(
 	if (req.done !== undefined) body.done = req.done;
 	return {
 		method: "POST",
-		url: `${baseUrl}${SUBSCRIPTIONS_PREFIX}/${encodeURIComponent(id)}/callback`,
+		url: `${baseUrl}${streamRoot}${SUBSCRIPTIONS_PREFIX}/${encodeURIComponent(id)}/callback`,
 		headers: {
 			...ACCEPT_HEADER,
 			"Content-Type": "application/json",

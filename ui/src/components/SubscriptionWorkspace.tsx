@@ -227,12 +227,14 @@ function PullWakeControls(props: { sub: Subscription }): JSX.Element {
 	);
 
 	const claimOp = useComputed(() =>
-		conn === null ? null : previewClaimOperation(conn.baseUrl, sub.id, worker.value.trim()),
+		conn === null
+			? null
+			: previewClaimOperation(conn.baseUrl, conn.streamRoot, sub.id, worker.value.trim()),
 	);
 	const ackOp = useComputed(() =>
 		conn === null || claim === null
 			? null
-			: previewAckOperation(conn.baseUrl, sub.id, claim.token, {
+			: previewAckOperation(conn.baseUrl, conn.streamRoot, sub.id, claim.token, {
 					wakeId: claim.wakeId,
 					generation: claim.generation,
 					acks: acks.value,
@@ -242,7 +244,7 @@ function PullWakeControls(props: { sub: Subscription }): JSX.Element {
 	const releaseOp = useComputed(() =>
 		conn === null || claim === null
 			? null
-			: previewReleaseOperation(conn.baseUrl, sub.id, claim.token, {
+			: previewReleaseOperation(conn.baseUrl, conn.streamRoot, sub.id, claim.token, {
 					wakeId: claim.wakeId,
 					generation: claim.generation,
 				}),
@@ -392,7 +394,7 @@ function WebhookPanel(props: { sub: Subscription }): JSX.Element {
 	const callbackOp = useComputed(() =>
 		conn === null
 			? null
-			: previewCallbackOperation(conn.baseUrl, sub.id, "<callback_token>", {
+			: previewCallbackOperation(conn.baseUrl, conn.streamRoot, sub.id, "<callback_token>", {
 					wakeId: "<wake_id>",
 					generation: sub.generation ?? 0,
 					acks: [{ stream: "<stream>", offset: "<offset>" }],
@@ -470,7 +472,7 @@ function AddStreamsForm(props: { sub: Subscription }): JSX.Element {
 	const addOp = useComputed(() =>
 		conn === null || parsed.value.length === 0
 			? null
-			: previewAddStreamsOperation(conn.baseUrl, sub.id, parsed.value),
+			: previewAddStreamsOperation(conn.baseUrl, conn.streamRoot, sub.id, parsed.value),
 	);
 
 	function submit(e: Event): void {
