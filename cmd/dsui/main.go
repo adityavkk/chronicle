@@ -21,6 +21,7 @@ import (
 func main() {
 	listen := flag.String("listen", ":4438", "address for the dsui web server")
 	server := flag.String("server", "", "default Durable Streams server URL to prefill (e.g. http://localhost:4437)")
+	captureBase := flag.String("capture-base", "", "base URL the chronicle server uses to reach this binary's webhook-capture endpoint (default derived from --listen, e.g. http://localhost:4438)")
 	open := flag.Bool("open", true, "open the UI in a browser on start")
 	flag.Parse()
 
@@ -32,10 +33,28 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// The built-in webhook-capture endpoint (/__hooks/{id}). A webhook
+	// subscription's webhook_url points at <captureBase>/__hooks/<id>; chronicle
+	// POSTs signed wakes there, this binary buffers them and relays to the browser
+	// over SSE (the browser cannot host an inbound endpoint itself).
+	captureStore := newCaptureStore()
+	registerCaptureRoutes(mux, captureStore)
+
+	// The base URL the chronicle server uses to reach this capture endpoint. The
+	// browser builds a webhook_url as <captureBase>/__hooks/<id> from this, so it
+	// must be reachable by chronicle (localhost when both run on the same host).
+	resolvedCaptureBase := *captureBase
+	if resolvedCaptureBase == "" {
+		resolvedCaptureBase = "http://localhost" + portOnly(*listen)
+	}
+
 	// Runtime config the front-end fetches on load.
 	mux.HandleFunc("/dsui-config.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"defaultServer": *server})
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"defaultServer": *server,
+			"captureBase":   resolvedCaptureBase,
+		})
 	})
 
 	// Serve embedded assets with a single-page-app fallback to index.html.
@@ -53,7 +72,7 @@ func main() {
 	})
 
 	url := "http://localhost" + portOnly(*listen)
-	log.Printf("dsui: serving UI on %s (default server %q)", url, *server)
+	log.Printf("dsui: serving UI on %s (default server %q, capture base %q)", url, *server, resolvedCaptureBase)
 	if *open {
 		go openBrowser(url)
 	}

@@ -72,11 +72,12 @@ describe("Playground", () => {
 
 	it("discloses the exact equivalent curl for every preset", () => {
 		render(<Playground />);
-		// Each preset's curl-preview disclosure shows a copy-as-curl control.
+		// Each preset's curl-preview disclosure shows a copy-as-curl control: the
+		// seven stream presets plus the wake demo's three (register/create/publish).
 		const copyButtons = screen.getAllByRole("button", {
 			name: "Copy the equivalent curl command",
 		});
-		expect(copyButtons.length).toBe(7);
+		expect(copyButtons.length).toBe(10);
 
 		// The create preset's curl is a PUT against the sample stream URL.
 		const blocks = document.querySelectorAll(".dsui-playground__detail .dsui-curl__cmd");
@@ -84,5 +85,16 @@ describe("Playground", () => {
 		expect(commands.some((c) => c.includes("-X PUT") && c.includes("playground/demo"))).toBe(true);
 		// The SSE tail preset carries curl's -N (no-buffering) flag for the stream.
 		expect(commands.some((c) => c.includes("curl -N") && c.includes("live=sse"))).toBe(true);
+	});
+
+	it("shows the wake-demo row pointing the webhook at the capture endpoint", () => {
+		render(<Playground />);
+		expect(screen.getByRole("button", { name: /Wake demo — capture a webhook/ })).toBeTruthy();
+		// The registration curl PUTs a subscription whose webhook_url is the capture
+		// endpoint for the demo bucket.
+		const blocks = document.querySelectorAll(".dsui-playground__detail .dsui-curl__cmd");
+		const commands = Array.from(blocks).map((el) => el.textContent ?? "");
+		expect(commands.some((c) => c.includes("/__ds/subscriptions/dsui-wake-demo"))).toBe(true);
+		expect(commands.some((c) => c.includes("/__hooks/dsui-wake-demo"))).toBe(true);
 	});
 });

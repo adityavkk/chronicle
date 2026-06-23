@@ -47,6 +47,7 @@ import {
 	deleteSubscription,
 	getSubscription,
 	lastExchange,
+	openWakeMonitor,
 	releaseWake,
 	removeSubscriptionStream,
 	selectedSubscription,
@@ -60,6 +61,7 @@ import { ProtocolPanel } from "./ProtocolPanel";
 import {
 	IconArrowUpRight,
 	IconBell,
+	IconBroadcast,
 	IconCheck,
 	IconKey,
 	IconLink,
@@ -620,6 +622,15 @@ export function SubscriptionWorkspace(): JSX.Element {
 					{sub.status === "failed" ? <span class="dsui-pill dsui-pill--warn">failed</span> : null}
 				</div>
 				<div class="dsui-ws__headend">
+					<button
+						type="button"
+						class="dsui-btn dsui-btn--xs"
+						title="Open the Wake Monitor — publish and watch wakes fire"
+						onClick={() => openWakeMonitor(sub.id)}
+					>
+						<IconBroadcast size={13} />
+						<span>Watch wakes</span>
+					</button>
 					<button
 						type="button"
 						class="dsui-iconbtn dsui-iconbtn--sm"

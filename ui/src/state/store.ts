@@ -9,12 +9,14 @@
  */
 
 import { computed, effect, signal } from "@preact/signals";
+import { type CaptureStopper, openCaptureStream } from "../lib/capture";
 import { loadConfig } from "../lib/config";
 import { type DsClient, createClient } from "../lib/dsClient";
 import { isRecord, kindFromContentType } from "../lib/guards";
 import { DEFAULT_ROW_CAP, type StartMode, clampRowCap, resolveOffset } from "../lib/messages";
 import { isLiveMode, previewTailOperation } from "../lib/tail";
 import type {
+	CaptureDelivery,
 	Connection,
 	ConnectionProbe,
 	CreateSubscriptionOptions,
@@ -38,7 +40,16 @@ import type {
 	ToastAction,
 	ToastKind,
 	WakeClaim,
+	WakeEvent,
 } from "../lib/types";
+import {
+	WAKE_DEMO_CONTENT_TYPE,
+	WAKE_DEMO_STREAM,
+	WAKE_DEMO_SUB_ID,
+	captureUrl,
+	parseWakeEvent,
+	wakeDemoBody,
+} from "../lib/wakes";
 
 // Re-exported for back-compat: ProbeStatus now lives in lib/types (a shared
 // contract), but existing imports of it from the store keep working.
@@ -84,11 +95,12 @@ export const selectedRow = signal<GridRow | null>(null);
  *  - "messages":     the stream messages workspace (the default / on stream select)
  *  - "subscription": the subscription detail workspace (on subscription select)
  *  - "metrics":      the Prometheus metrics workspace (from the Metrics nav entry)
+ *  - "wakes":        the Wake Monitor split-screen (from a "Watch wakes" action)
  *
  * This is the single routing seam for the center pane; selecting a stream, a
  * subscription, or the Metrics entry flips it through the matching action.
  */
-export type CenterView = "messages" | "subscription" | "metrics";
+export type CenterView = "messages" | "subscription" | "metrics" | "wakes";
 
 /** The active center-workspace view. Defaults to the messages workspace. */
 export const centerView = signal<CenterView>("messages");
@@ -319,6 +331,56 @@ export const metricsLoading = signal<boolean>(false);
 export const metricsError = signal<string | null>(null);
 
 /* ----------------------------------------------------------------------------
+ * Wake monitor state (the publish → wake → hook → ack loop, made visible)
+ *
+ * The monitor watches ONE subscription at a time. The left pane publishes to /
+ * tails a chosen source stream (reusing the existing publish + tail seams via
+ * selectedStreamPath); the right pane shows the wake plane: for a webhook
+ * subscription, captured deliveries relayed over SSE from the dsui binary; for a
+ * pull-wake subscription, wake events tailed from the wake_stream. A short-lived
+ * `wakePulse` tick fires when a publish lands so the right pane can animate the
+ * causal link (respecting prefers-reduced-motion in CSS).
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The dsui binary's capture-endpoint base URL (from /dsui-config.json), or null
+ * under `vite dev` / when the binary did not supply one. The webhook wake plane
+ * needs this to build the capture URL + open the relay SSE.
+ */
+export const captureBase = signal<string | null>(null);
+
+/** The subscription id the Wake Monitor is watching, or null when not open. */
+export const wakeSubId = signal<string | null>(null);
+
+/** The capture bucket the monitor streams from (the subscription id by convention). */
+export const wakeBucket = signal<string | null>(null);
+
+/** Captured webhook deliveries for the watched bucket, newest last (capped). */
+export const wakeDeliveries = signal<readonly CaptureDelivery[]>([]);
+
+/** Decoded pull-wake wake events tailed from the wake_stream, newest last (capped). */
+export const wakeEvents = signal<readonly WakeEvent[]>([]);
+
+/** Connection lifecycle of the right-pane wake feed (capture SSE or wake_stream). */
+export const wakeFeedStatus = signal<TailStatus>({ state: "idle" });
+
+/** Max wake records (deliveries or events) kept before the oldest age out. */
+export const WAKE_BUFFER_CAP = 200;
+
+/**
+ * A monotonically-incrementing tick bumped each time a publish to the watched
+ * stream lands, so the right pane can flash the causal "a wake should be coming"
+ * cue. Not persisted; purely a visual pulse.
+ */
+export const wakePulse = signal<number>(0);
+
+/** True while the one-click "Wake demo" setup is running its steps. */
+export const wakeDemoInFlight = signal<boolean>(false);
+
+/** The stopper for the active wake feed (capture SSE or wake_stream tail). */
+let wakeFeedStopper: CaptureStopper | TailStopper | null = null;
+
+/* ----------------------------------------------------------------------------
  * Toasts (transient notifications)
  * ------------------------------------------------------------------------- */
 
@@ -359,6 +421,13 @@ export const selectedSubscription = computed<Subscription | null>(() => {
 	return subscriptionDetails.value[id] ?? null;
 });
 
+/** The cached view of the subscription the Wake Monitor is watching, or null. */
+export const wakeSubscription = computed<Subscription | null>(() => {
+	const id = wakeSubId.value;
+	if (id === null) return null;
+	return subscriptionDetails.value[id] ?? null;
+});
+
 /* ----------------------------------------------------------------------------
  * Persistence effects
  * ------------------------------------------------------------------------- */
@@ -385,6 +454,23 @@ effect(() => {
 
 effect(() => {
 	writeLs(LS_PLAYGROUND_OPEN, playgroundOpen.value ? "true" : "false");
+});
+
+/* ----------------------------------------------------------------------------
+ * Wake-feed lifecycle effect
+ *
+ * The wake feed (capture SSE / wake_stream EventSource) is owned by the
+ * module-level wakeFeedStopper, but WakeMonitorWorkspace only mounts while
+ * centerView === "wakes". The always-visible Navigator can flip centerView away
+ * (selectStream → "messages", selectSubscription → "subscription", the Metrics
+ * entry → "metrics") and unmount the workspace WITHOUT going through
+ * closeWakeMonitor(). This effect is the single seam that tears the live feed
+ * down whenever the center pane leaves the monitor, so a hidden view never keeps
+ * an SSE connection open or mutates the wake buffers. Re-opening the monitor
+ * re-establishes the feed via openWakeMonitor → startWakeFeed.
+ */
+effect(() => {
+	if (centerView.value !== "wakes") stopWakeFeed();
 });
 
 /* ----------------------------------------------------------------------------
@@ -459,6 +545,7 @@ export function removeConnection(id: string): void {
  */
 export function setActiveConnection(id: string | null): void {
 	stopTail();
+	closeWakeMonitor();
 	activeConnectionId.value = id;
 	streams.value = [];
 	selectedStreamPath.value = null;
@@ -1469,6 +1556,240 @@ export async function releaseWake(id: string): Promise<boolean> {
 }
 
 /* ----------------------------------------------------------------------------
+ * Wake monitor actions (the publish → wake → hook → ack loop)
+ *
+ * openWakeMonitor flips the center pane to the split-screen, points the left pane
+ * at a source stream (reusing selectedStreamPath + the existing publish/tail
+ * seams), and opens the right-pane wake feed: a capture-endpoint SSE for a
+ * webhook subscription, or a wake_stream tail for a pull-wake one. The feed
+ * stopper + the deliveries/events buffers are owned here; the workspace only
+ * reads signals and calls these actions. closeWakeMonitor tears the feed down.
+ * ------------------------------------------------------------------------- */
+
+/** Stop the active wake feed (capture SSE or wake_stream tail). Safe when idle. */
+function stopWakeFeed(): void {
+	if (wakeFeedStopper !== null) {
+		wakeFeedStopper();
+		wakeFeedStopper = null;
+	}
+	wakeFeedStatus.value = { state: "idle" };
+}
+
+/** Append a captured webhook delivery into the capped buffer, deduped on seq. */
+function pushDelivery(delivery: CaptureDelivery): void {
+	const existing = wakeDeliveries.value;
+	if (existing.some((d) => d.seq === delivery.seq)) return;
+	const combined = [...existing, delivery];
+	wakeDeliveries.value =
+		combined.length > WAKE_BUFFER_CAP
+			? combined.slice(combined.length - WAKE_BUFFER_CAP)
+			: combined;
+}
+
+/** Append decoded pull-wake events from a tailed batch into the capped buffer. */
+function pushWakeEvents(batch: TailBatch): void {
+	const decoded: WakeEvent[] = [];
+	for (const row of batch.rows) {
+		const ev = parseWakeEvent(row.value);
+		if (ev !== null) decoded.push(ev);
+	}
+	if (batch.exchange !== null) lastExchange.value = batch.exchange;
+	if (decoded.length === 0) return;
+	const combined = [...wakeEvents.value, ...decoded];
+	wakeEvents.value =
+		combined.length > WAKE_BUFFER_CAP
+			? combined.slice(combined.length - WAKE_BUFFER_CAP)
+			: combined;
+}
+
+/**
+ * Open the right-pane wake feed for the watched subscription. A webhook
+ * subscription opens the capture-endpoint SSE (needs captureBase); a pull-wake
+ * subscription tails its wake_stream over SSE. A no-op precondition (no client,
+ * no capture base for a webhook sub) leaves the feed idle with a clear status.
+ */
+function startWakeFeed(sub: Subscription): void {
+	stopWakeFeed();
+	const client = activeClient.value;
+	if (client === null) return;
+	const onState = (status: TailStatus): void => {
+		wakeFeedStatus.value = status;
+	};
+	if (sub.type === "webhook") {
+		const base = captureBase.value;
+		const bucket = wakeBucket.value;
+		if (base === null || bucket === null) {
+			wakeFeedStatus.value = {
+				state: "error",
+				message:
+					"No capture endpoint — run the dsui binary (not vite dev) so it can receive webhooks.",
+			};
+			return;
+		}
+		wakeFeedStopper = openCaptureStream(base, bucket, pushDelivery, onState);
+	} else {
+		// Pull-wake: tail the wake_stream from its current tail over SSE.
+		wakeFeedStopper = client.openWakeStreamSse(sub.id, "now", pushWakeEvents, onState);
+	}
+}
+
+/**
+ * Open the Wake Monitor for a subscription: flip the center pane to the
+ * split-screen, default the left source stream to the subscription's first
+ * linked stream (when none is already chosen), fetch the subscription view, and
+ * open the right-pane wake feed. Reuses the existing publish + tail seams for the
+ * left pane via selectedStreamPath.
+ */
+export function openWakeMonitor(id: string): void {
+	stopWakeFeed();
+	wakeDeliveries.value = [];
+	wakeEvents.value = [];
+	wakePulse.value = 0;
+	wakeSubId.value = id;
+	wakeBucket.value = id;
+	centerView.value = "wakes";
+	const cached = subscriptionDetails.value[id];
+	// Default the left pane to the first linked stream, if the user has not already
+	// chosen one (selecting a stream elsewhere keeps that choice).
+	if (cached !== undefined && selectedStreamPath.value === null) {
+		const first = cached.streams[0];
+		if (first !== undefined) addManualStream(first.path);
+	}
+	// Fetch the view, then open the matching feed once it is known.
+	void getSubscription(id).then(() => {
+		if (wakeSubId.value !== id) return;
+		const sub = subscriptionDetails.value[id];
+		if (sub !== undefined) {
+			if (selectedStreamPath.value === null) {
+				const first = sub.streams[0];
+				if (first !== undefined) addManualStream(first.path);
+			}
+			startWakeFeed(sub);
+		}
+	});
+}
+
+/** Re-open the wake feed (e.g. after a connection blip), reusing the cached view. */
+export function restartWakeFeed(): void {
+	const sub = wakeSubscription.value;
+	if (sub !== null) startWakeFeed(sub);
+}
+
+/** Close the Wake Monitor: tear down the feed and clear its buffers. */
+export function closeWakeMonitor(): void {
+	stopWakeFeed();
+	wakeSubId.value = null;
+	wakeBucket.value = null;
+	wakeDeliveries.value = [];
+	wakeEvents.value = [];
+	wakePulse.value = 0;
+}
+
+/**
+ * Publish a single text/JSON body to the watched source stream from the monitor's
+ * left pane, then pulse the causal cue so the right pane animates the incoming
+ * wake. Reuses the shared appendMessages action (which records the exchange +
+ * advances the producer seq); on success it bumps {@link wakePulse}.
+ */
+export async function publishAndPulse(
+	path: string,
+	body: string | Uint8Array,
+	opts?: { contentType?: StreamContentType },
+): Promise<boolean> {
+	const ok = await appendMessages(path, body, opts ?? {});
+	if (ok) wakePulse.value += 1;
+	return ok;
+}
+
+/**
+ * Ack a captured WEBHOOK wake on the callback path, using the callback_token +
+ * fencing fields decoded from the delivery. `done` true releases the lease and
+ * applies the acks; false heartbeat-extends. Refreshes the subscription view so
+ * the links table reflects advanced cursors. Surfaces FENCED as a warning.
+ */
+export async function callbackAck(
+	id: string,
+	token: string,
+	req: { wakeId: string; generation: number; acks: readonly OffsetAck[]; done: boolean },
+): Promise<boolean> {
+	const client = activeClient.value;
+	if (client === null) return false;
+	claimInFlight.value = true;
+	try {
+		const result = await client.callbackWake(id, token, req);
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			addToast({
+				kind: "success",
+				title: req.done ? "Callback acked + released" : "Callback heartbeat",
+				message: result.value?.nextWake === true ? "Another wake is due." : id,
+			});
+			await getSubscription(id);
+		} else if (result.fenced) {
+			addToast({
+				kind: "warning",
+				title: "Fenced (409)",
+				message: "Stale wake, generation, or token — re-claim or wait for the next wake.",
+			});
+		} else {
+			addToast({ kind: "error", title: "Callback failed", message: result.error ?? id });
+		}
+		return result.ok;
+	} finally {
+		claimInFlight.value = false;
+	}
+}
+
+/**
+ * One-click "Wake demo": create the sample stream, register a webhook
+ * subscription whose webhook_url is the binary's capture endpoint, publish a
+ * message to fire a wake, and open the Wake Monitor on it. Runs the SAME store
+ * actions the rest of the UI uses, so toasts + the protocol disclosure + the
+ * copy-as-curl all stay honest. Needs an active connection + a capture base
+ * (the dsui binary, not vite dev); without the latter it explains why and stops.
+ */
+export async function runWakeDemo(): Promise<void> {
+	const conn = activeConnection.value;
+	const client = activeClient.value;
+	if (conn === null || client === null) return;
+	const base = captureBase.value;
+	if (base === null) {
+		addToast({
+			kind: "warning",
+			title: "No capture endpoint",
+			message: "Run the dsui binary (not vite dev) so webhooks can be received.",
+		});
+		return;
+	}
+	wakeDemoInFlight.value = true;
+	try {
+		// 1) Create the sample JSON stream (idempotent-ish; a 409 just means it
+		//    already exists, which the toast surfaces but does not block on).
+		await createStream({ path: WAKE_DEMO_STREAM, contentType: WAKE_DEMO_CONTENT_TYPE });
+		// 2) Register a webhook subscription pointed at the capture endpoint.
+		const ok = await createSubscription({
+			id: WAKE_DEMO_SUB_ID,
+			type: "webhook",
+			streams: [WAKE_DEMO_STREAM],
+			webhookUrl: captureUrl(base, WAKE_DEMO_SUB_ID),
+			description: "dsui wake demo — fires captured webhooks on playground/wakes",
+		});
+		if (!ok) return;
+		// 3) Select the source stream + open the monitor (which opens the feed).
+		selectStream(WAKE_DEMO_STREAM);
+		openWakeMonitor(WAKE_DEMO_SUB_ID);
+		// 4) Publish a message so a wake should arrive (visible on the right pane,
+		//    if the server is redis-backed with subscriptions enabled).
+		await publishAndPulse(WAKE_DEMO_STREAM, wakeDemoBody(), {
+			contentType: WAKE_DEMO_CONTENT_TYPE,
+		});
+	} finally {
+		wakeDemoInFlight.value = false;
+	}
+}
+
+/* ----------------------------------------------------------------------------
  * Metrics actions (Prometheus scrape of the separate --metrics-listen address)
  * ------------------------------------------------------------------------- */
 
@@ -1648,6 +1969,9 @@ export function ensureConnection(input: {
  */
 export async function prefillFromConfig(): Promise<void> {
 	const cfg = await loadConfig();
+	// Remember the binary's capture-endpoint base so the webhook wake plane can
+	// build the capture URL + open the relay SSE (null under pure `vite dev`).
+	captureBase.value = cfg.captureBase;
 	if (cfg.defaultServer !== null) {
 		const conn = ensureConnection({ name: "Default server", baseUrl: cfg.defaultServer });
 		void probeConnection(conn.id);

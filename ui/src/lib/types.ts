@@ -32,6 +32,14 @@ export interface Connection {
 export interface DsuiConfig {
 	/** A Durable Streams server URL to prefill as a connection, if any. */
 	readonly defaultServer: string | null;
+	/**
+	 * Base URL the dsui binary's built-in webhook-capture endpoint is reachable
+	 * at (e.g. "http://localhost:4438"), or null under pure `vite dev`. A webhook
+	 * subscription's webhook_url is built as `${captureBase}/__hooks/{id}`; the
+	 * browser opens an EventSource on `${captureBase}/__hooks/{id}/stream` to see
+	 * captured deliveries. This is a tool feature, not part of the protocol.
+	 */
+	readonly captureBase: string | null;
 }
 
 /** Result of a connectivity probe against a {@link Connection}. */
@@ -676,4 +684,88 @@ export interface MetricsSnapshot {
 	readonly metrics: readonly Metric[];
 	/** Wall-clock ms when the snapshot was parsed. */
 	readonly parsedAt: number;
+}
+
+/* ----------------------------------------------------------------------------
+ * Wake monitor (webhook capture + pull-wake wake events)
+ *
+ * The browser cannot receive an inbound webhook, so for a "webhook" subscription
+ * the dsui binary hosts a capture endpoint that chronicle POSTs signed wakes to;
+ * the binary relays each one to the browser over SSE as a {@link CaptureDelivery}.
+ * For a "pull-wake" subscription there is no webhook — wakes are durable events
+ * appended to the subscription's wake_stream, which the UI tails (reusing the
+ * live-tail machinery) and decodes into {@link WakeEvent}s.
+ *
+ * These shapes are dependency-free contracts; the parsing lives in lib/wakes.ts.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * One captured webhook delivery as the dsui binary relays it over SSE (mirrors
+ * the Go `Delivery` struct in cmd/dsui/capture.go). The {@link body} is the
+ * exact raw bytes the server POSTed, kept verbatim so signature verification
+ * (which is over the unmodified body) stays honest.
+ */
+export interface CaptureDelivery {
+	/** Monotonic per-bucket sequence number (1-based), stamped on receipt. */
+	readonly seq: number;
+	/** Capture time in Unix milliseconds. */
+	readonly receivedAt: number;
+	/** HTTP method of the delivery (normally POST). */
+	readonly method: string;
+	/** The raw Webhook-Signature header value, or "" when none was sent. */
+	readonly signature: string;
+	/** The delivery's Content-Type header (normally application/json). */
+	readonly contentType: string;
+	/** Full request headers, each value joined by ", ". */
+	readonly headers: Readonly<Record<string, string>>;
+	/** The exact raw request body bytes as a string. */
+	readonly body: string;
+}
+
+/**
+ * The decoded `Webhook-Signature` header: `t=<ts>,kid=<id>,ed25519=<sig>`. Any
+ * part may be absent (a delivery may carry no signature at all); the UI shows
+ * what is present without verifying — it is a display + honesty aid, and full
+ * Ed25519 verification needs the JWKS, which the UI links to rather than embeds.
+ */
+export interface WebhookSignatureParts {
+	/** The `t=` Unix timestamp (seconds), or null when absent / unparseable. */
+	readonly timestamp: number | null;
+	/** The `kid=` key id identifying the JWKS key, or null when absent. */
+	readonly kid: string | null;
+	/** The unpadded base64url Ed25519 signature, or null when absent. */
+	readonly ed25519: string | null;
+	/** The raw header value, kept verbatim for display. */
+	readonly raw: string;
+}
+
+/**
+ * A decoded wake notification (the JSON body of a webhook delivery; mirrors the
+ * server's WakeNotification). Carries the fencing fields, the per-stream
+ * snapshots, and the callback target the receiver acks to. Parsed leniently:
+ * missing optional fields degrade rather than throw.
+ */
+export interface WakeNotification {
+	readonly subscriptionId: string;
+	readonly wakeId: string;
+	readonly generation: number;
+	readonly streams: readonly WakeStreamSnapshot[];
+	/** Absolute URL to POST the callback ack to, or null when absent. */
+	readonly callbackUrl: string | null;
+	/** Bearer token for the callback, or null when absent. */
+	readonly callbackToken: string | null;
+}
+
+/**
+ * A pull-wake wake event, as appended to the subscription's wake_stream (mirrors
+ * the server's wake event: `{type:"wake", subscription_id, stream, generation,
+ * ts}`). Parsed from a tailed grid row's decoded JSON value.
+ */
+export interface WakeEvent {
+	readonly subscriptionId: string;
+	/** Stream-root-relative path of the stream with pending data. */
+	readonly stream: string;
+	readonly generation: number;
+	/** Unix timestamp in milliseconds. */
+	readonly ts: number;
 }

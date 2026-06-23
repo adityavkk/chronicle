@@ -26,6 +26,7 @@ import { Navigator } from "./components/Navigator";
 import { StartScreen } from "./components/StartScreen";
 import { SubscriptionWorkspace } from "./components/SubscriptionWorkspace";
 import { Toaster } from "./components/Toaster";
+import { WakeMonitorWorkspace } from "./components/WakeMonitorWorkspace";
 import { IconPanelRight, IconStream } from "./components/icons";
 import {
 	activeConnection,
@@ -55,6 +56,8 @@ function CenterWorkspace(): JSX.Element {
 	switch (centerView.value) {
 		case "subscription":
 			return <SubscriptionWorkspace />;
+		case "wakes":
+			return <WakeMonitorWorkspace />;
 		case "metrics":
 			return <MetricsWorkspace />;
 		case "messages":

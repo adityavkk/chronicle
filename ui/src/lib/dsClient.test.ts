@@ -950,6 +950,94 @@ describe("claimWake / ackWake / releaseWake", () => {
 });
 
 /* ----------------------------------------------------------------------------
+ * callbackWake — the webhook async-ack path (POST …/callback)
+ * ------------------------------------------------------------------------- */
+
+describe("callbackWake", () => {
+	it("POSTs the callback with the Bearer token + ack body, parsing next_wake", async () => {
+		const fetchFn = stubFetch({
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ ok: true, next_wake: false }),
+		});
+		const result = await createClient(CONN).callbackWake(
+			"s",
+			"cbtok",
+			{ wakeId: "w_1", generation: 3, acks: [{ stream: "events/a", offset: "t" }], done: true },
+			undefined,
+		);
+		const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe(subscriptionUrl(CONN, "s", "/callback"));
+		expect(reqHeaders(fetchFn).Authorization).toBe("Bearer cbtok");
+		expect(JSON.parse(init.body as string)).toEqual({
+			wake_id: "w_1",
+			generation: 3,
+			acks: [{ stream: "events/a", offset: "t" }],
+			done: true,
+		});
+		expect(result.ok).toBe(true);
+		expect(result.value?.nextWake).toBe(false);
+	});
+
+	it("surfaces a 409 FENCED as fenced on callback", async () => {
+		stubFetch({
+			status: 409,
+			statusText: "Conflict",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ error: { code: "FENCED" } }),
+		});
+		const result = await createClient(CONN).callbackWake(
+			"s",
+			"cbtok",
+			{ wakeId: "w", generation: 1, acks: [] },
+			undefined,
+		);
+		expect(result.ok).toBe(false);
+		expect(result.fenced).toBe(true);
+		expect(result.errorCode).toBe("FENCED");
+	});
+});
+
+/* ----------------------------------------------------------------------------
+ * openWakeStreamSse — tails the /__ds wake_stream (NOT under streamRoot)
+ * ------------------------------------------------------------------------- */
+
+describe("openWakeStreamSse", () => {
+	it("opens an EventSource on the subscription's wake_stream with offset + live", () => {
+		type Listener = (ev: Event) => void;
+		let openedUrl = "";
+		class MockEventSource {
+			static readonly CLOSED = 2;
+			readyState = 1;
+			onopen: Listener | null = null;
+			onmessage: Listener | null = null;
+			onerror: Listener | null = null;
+			constructor(url: string) {
+				openedUrl = url;
+			}
+			addEventListener(): void {}
+			close(): void {
+				this.readyState = MockEventSource.CLOSED;
+			}
+		}
+		vi.stubGlobal("EventSource", MockEventSource);
+
+		const stop = createClient(CONN).openWakeStreamSse(
+			"sub-1",
+			"now",
+			() => {},
+			() => {},
+		);
+		stop();
+
+		// On the reserved /__ds origin (not under streamRoot), with the tail query.
+		expect(openedUrl).toContain(subscriptionUrl(CONN, "sub-1", "/wake_stream"));
+		expect(openedUrl).toContain("offset=now");
+		expect(openedUrl).toContain("live=sse");
+	});
+});
+
+/* ----------------------------------------------------------------------------
  * fetchMetrics — Prometheus text on the separate --metrics-listen address
  * ------------------------------------------------------------------------- */
 
