@@ -159,6 +159,26 @@ export interface ReadResult {
 	readonly exchange: HttpExchange;
 }
 
+/**
+ * One visited read position for the per-stream, session-only read-cursor
+ * history. Offsets are opaque cursors the server hands out and the protocol has
+ * no backward read, so the client keeps the sequence of positions it has read
+ * this session — turning opaque offsets into navigable breadcrumbs. Bounded and
+ * ephemeral (reset on stream/connection switch, never persisted).
+ */
+export interface ReadHistoryEntry {
+	/** The stream this position belongs to (all entries share the selected one). */
+	readonly path: string;
+	/** The offset that was requested ("-1", "now", or an opaque cursor). */
+	readonly requestedOffset: string;
+	/** Stream-Next-Offset returned by that read; the cursor to resume from. */
+	readonly nextOffset: string | null;
+	/** Number of rows the read decoded (the honest batch size, pre-cap). */
+	readonly rowCount: number;
+	/** Wall-clock ms when the read completed. */
+	readonly at: number;
+}
+
 /* ----------------------------------------------------------------------------
  * Write / fork / live-tail contracts (Feature: stream operations)
  *

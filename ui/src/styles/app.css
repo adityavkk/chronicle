@@ -1116,6 +1116,68 @@
 	gap: var(--space-2);
 }
 
+/* ---- Read-cursor history strip -------------------------------------- */
+.dsui-history {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-4);
+	border-block-end: 1px solid var(--border-subtle);
+	background: var(--panel-2);
+}
+.dsui-history__label {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	flex: none;
+	font-size: var(--text-2xs);
+	color: var(--fg-muted);
+}
+.dsui-history__chips {
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+	min-inline-size: 0;
+	overflow-x: auto;
+	padding-block-end: 2px;
+	scrollbar-width: thin;
+}
+.dsui-history__chip {
+	flex: none;
+	max-inline-size: 16ch;
+	padding: 0.1em 0.55em;
+	font-family: var(--font-mono);
+	font-size: var(--text-2xs);
+	color: var(--fg-muted);
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-full);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	cursor: pointer;
+	transition: border-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out),
+		box-shadow var(--dur-2) var(--ease-out);
+}
+.dsui-history__chip:hover:not(:disabled) {
+	border-color: var(--border-strong);
+	color: var(--fg);
+}
+.dsui-history__chip:focus-visible {
+	outline: none;
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.dsui-history__chip:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+.dsui-history__chip.is-current {
+	color: var(--accent);
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+
 /* ====================================================================
  * Protocol disclosure — "Under the hood" (Feature 4)
  *
