@@ -29,8 +29,9 @@ import { useId, useRef } from "preact/hooks";
 import { extractTimestamp, formatBytes, formatTimeFull } from "../lib/messages";
 import { isSignificantHeader, partitionHeaders } from "../lib/protocol";
 import type { GridRow, ReadResult } from "../lib/types";
-import { lastRead, selectedRow } from "../state/store";
+import { lastRead, selectedRow, toggleInspector } from "../state/store";
 import { CopyButton } from "./CopyButton";
+import { IconChevronRight } from "./icons";
 
 type Tab = "value" | "raw" | "headers";
 
@@ -328,6 +329,15 @@ export function Inspector(): JSX.Element {
 						<TabButton key={t.id} tab={t.id} label={t.label} base={base} onKeyDown={onTabKeyDown} />
 					))}
 				</div>
+				<button
+					type="button"
+					class="dsui-iconbtn dsui-iconbtn--sm dsui-inspector__collapse"
+					aria-label="Collapse inspector panel"
+					title="Collapse inspector panel"
+					onClick={() => toggleInspector()}
+				>
+					<IconChevronRight size={15} />
+				</button>
 			</header>
 			<div class="dsui-inspector__body" role="tabpanel" id={panelId} aria-labelledby={tabId}>
 				{tab === "value" ? (

@@ -328,6 +328,30 @@ component. Its pieces and seams:
   the new-row flash + the connecting pulse) honors `prefers-reduced-motion` via
   the global rule in `base.css`.
 
+### Persisted UI-layout signals (the toggle pattern)
+
+Two layout preferences live in the store and survive a reload the same way the
+`theme` does — they are the template to copy for any future persisted toggle:
+
+- **`inspectorCollapsed`** (`boolean`, default `false` = expanded) collapses the
+  right-hand Inspector pane. The `Shell` renders the inspector `<aside>` only
+  when expanded and adds `.dsui-main--noinspector` to the grid when collapsed; a
+  header icon button (`IconPanelRight`, `aria-pressed`) and an in-panel collapse
+  chevron both call `toggleInspector()`.
+- **`playgroundOpen`** (`boolean`, default `true` = open) folds the left rail's
+  Playground section. Its header is a `<button aria-expanded>` with a chevron
+  that rotates open; when closed only the header renders. Toggled via
+  `togglePlayground()`.
+
+The pattern, mirroring `theme` exactly: a `LS_*` key constant, a defensive
+`loadBool(key, fallback)` loader (next to `loadTheme`), the signal initialized
+from that loader, a persistence `effect(...)` that writes `"true"`/`"false"` on
+change (next to the theme effect), and a `toggle…()` action. Keep these in
+`state/store.ts`; components only read the signal and call the action. CSS for
+the collapse/fold affordances reuses `.dsui-iconbtn` and the existing caret
+rotation idiom (a chevron `transform: rotate(90deg)` under reduced-motion safety
+from `base.css`).
+
 ## How to add another operation, end to end
 
 Every operation in dsui follows the same path: a client method does the request,

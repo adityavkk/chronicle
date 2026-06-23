@@ -42,6 +42,8 @@ export type { ProbeStatus } from "../lib/types";
 const LS_CONNECTIONS = "dsui.connections";
 const LS_ACTIVE = "dsui.activeConnection";
 const LS_THEME = "dsui.theme";
+const LS_INSPECTOR_COLLAPSED = "dsui.inspector-collapsed";
+const LS_PLAYGROUND_OPEN = "dsui.playground-open";
 
 /* ----------------------------------------------------------------------------
  * Signals (the reactive state atoms)
@@ -95,6 +97,19 @@ export const rowsTruncated = signal<boolean>(false);
 
 /** Current theme preference. */
 export const theme = signal<Theme>(loadTheme());
+
+/**
+ * Whether the right-hand Inspector panel is collapsed. Default false (expanded).
+ * Persisted to localStorage, mirroring the theme preference, so a user's
+ * layout choice survives a reload.
+ */
+export const inspectorCollapsed = signal<boolean>(loadBool(LS_INSPECTOR_COLLAPSED, false));
+
+/**
+ * Whether the left sidebar's foldable Playground section is open. Default true
+ * (open). Persisted to localStorage like {@link inspectorCollapsed}.
+ */
+export const playgroundOpen = signal<boolean>(loadBool(LS_PLAYGROUND_OPEN, true));
 
 /** Coarse async status for the stream list and reads. */
 export const streamsLoading = signal<boolean>(false);
@@ -275,6 +290,14 @@ effect(() => {
 	const t = theme.value;
 	writeLs(LS_THEME, t);
 	applyTheme(t);
+});
+
+effect(() => {
+	writeLs(LS_INSPECTOR_COLLAPSED, inspectorCollapsed.value ? "true" : "false");
+});
+
+effect(() => {
+	writeLs(LS_PLAYGROUND_OPEN, playgroundOpen.value ? "true" : "false");
 });
 
 /* ----------------------------------------------------------------------------
@@ -561,6 +584,16 @@ export function cycleTheme(): void {
 	const idx = order.indexOf(theme.value);
 	const next = order[(idx + 1) % order.length] ?? "system";
 	theme.value = next;
+}
+
+/** Toggle the right-hand Inspector panel between collapsed and expanded. */
+export function toggleInspector(): void {
+	inspectorCollapsed.value = !inspectorCollapsed.value;
+}
+
+/** Toggle the left sidebar's foldable Playground section open/closed. */
+export function togglePlayground(): void {
+	playgroundOpen.value = !playgroundOpen.value;
 }
 
 /** Clear the surfaced error. */
@@ -1075,6 +1108,14 @@ function loadTheme(): Theme {
 	const raw = readLs(LS_THEME);
 	if (raw === "light" || raw === "dark" || raw === "system") return raw;
 	return "system";
+}
+
+/** Read a persisted boolean ("true"/"false"), falling back on anything else. */
+function loadBool(key: string, fallback: boolean): boolean {
+	const raw = readLs(key);
+	if (raw === "true") return true;
+	if (raw === "false") return false;
+	return fallback;
 }
 
 /** Reflect the theme onto <html data-theme>. "system" removes the attribute. */
