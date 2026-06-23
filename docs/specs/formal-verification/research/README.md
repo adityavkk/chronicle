@@ -14,6 +14,7 @@ decisions are in [ADR-0002](../../../adr/0002-formal-verification-and-property-t
 | 04 | [`04-linearizability-checking.md`](./04-linearizability-checking.md) | Linearizability & consistency checking of histories (Porcupine, Knossos, Elle) |
 | 05 | [`05-event-sourcing-and-fencing.md`](./05-event-sourcing-and-fencing.md) | Event sourcing / CQRS / append-only logs; exactly-once; fencing tokens; leases; CALM |
 | 06 | [`06-redis-substrate-and-durability.md`](./06-redis-substrate-and-durability.md) | Redis 8 as the substrate: Lua atomicity, async-replication durability honesty, lease safety |
+| 07 | [`07-lean-squad-automated-verification.md`](./07-lean-squad-automated-verification.md) | Don Syme's "Lean Squad" (agentic, near-zero-labour Lean verification) — and what Chronicle adopts for the Lean track (#30 proofs, #31 Lean→C oracle) |
 
 Each note follows the same shape: abstract → key findings (with citations) →
 techniques and their maturity/effort → the concrete recommendation for
