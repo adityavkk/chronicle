@@ -255,7 +255,11 @@ export function previewWakeDemoCreateStream(baseUrl: string, streamRoot: string)
  * wake demo issues: a webhook subscription on the sample stream whose
  * webhook_url is the binary's capture endpoint for the demo bucket.
  */
-export function previewWakeDemoRegister(baseUrl: string, captureBase: string): Operation {
+export function previewWakeDemoRegister(
+	baseUrl: string,
+	streamRoot: string,
+	captureBase: string,
+): Operation {
 	const body = {
 		type: "webhook",
 		streams: [WAKE_DEMO_STREAM],
@@ -263,7 +267,7 @@ export function previewWakeDemoRegister(baseUrl: string, captureBase: string): O
 	};
 	return {
 		method: "PUT",
-		url: `${baseUrl}${SUBSCRIPTIONS_PREFIX}/${encodeURIComponent(WAKE_DEMO_SUB_ID)}`,
+		url: `${baseUrl}${streamRoot}${SUBSCRIPTIONS_PREFIX}/${encodeURIComponent(WAKE_DEMO_SUB_ID)}`,
 		headers: { ...ACCEPT_HEADER, "Content-Type": "application/json" },
 		body: JSON.stringify(body),
 	};
