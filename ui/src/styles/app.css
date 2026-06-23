@@ -585,6 +585,104 @@
 	appearance: none;
 }
 
+/* In-grid / in-tail row filter (issue #53). A self-contained block reused by
+   the message grid and the live tail; the box mirrors .dsui-nav__filter, with a
+   match count + Clear + a regex-error chip alongside. */
+.dsui-rowfilter {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+.dsui-rowfilter--grid {
+	padding: var(--space-2) var(--space-3);
+	border-block-end: 1px solid var(--border-subtle);
+}
+.dsui-rowfilter--tail {
+	/* Sits inside the dsui-tail__bar; grows to fill but yields to the controls. */
+	flex: 1 1 12rem;
+	min-inline-size: 8rem;
+}
+.dsui-rowfilter__box {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	flex: 1;
+	min-inline-size: 0;
+	padding-inline: var(--space-2);
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+}
+.dsui-rowfilter__box:focus-within {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.dsui-rowfilter.is-error .dsui-rowfilter__box {
+	border-color: var(--danger);
+}
+.dsui-rowfilter.is-error .dsui-rowfilter__box:focus-within {
+	box-shadow: 0 0 0 3px var(--danger-soft);
+}
+.dsui-rowfilter__icon {
+	color: var(--fg-subtle);
+	flex: none;
+}
+.dsui-rowfilter__input {
+	flex: 1;
+	min-inline-size: 0;
+	padding-block: var(--space-1);
+	font-size: var(--text-sm);
+	color: var(--fg);
+	background: transparent;
+	border: none;
+}
+.dsui-rowfilter__input:focus {
+	outline: none;
+}
+.dsui-rowfilter__input::placeholder {
+	color: var(--fg-subtle);
+}
+.dsui-rowfilter__input::-webkit-search-cancel-button {
+	appearance: none;
+}
+.dsui-rowfilter__clear {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	padding: var(--space-1);
+	color: var(--fg-subtle);
+	background: transparent;
+	border: none;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	transition: color var(--dur-2) var(--ease-out), background var(--dur-2) var(--ease-out);
+}
+.dsui-rowfilter__clear:hover {
+	color: var(--fg);
+	background: var(--bg-inset);
+}
+.dsui-rowfilter__status {
+	flex: none;
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+	white-space: nowrap;
+}
+.dsui-rowfilter__count {
+	font-variant-numeric: tabular-nums;
+}
+.dsui-rowfilter__error {
+	display: inline-flex;
+	align-items: center;
+	padding-block: 1px;
+	padding-inline: var(--space-1);
+	font-weight: var(--weight-semibold);
+	color: var(--danger);
+	background: var(--danger-soft);
+	border-radius: var(--radius-sm);
+}
+
 .dsui-nav__body {
 	/* The rail scrolls as a whole (see .dsui-region--nav), so the list flows at
 	   its natural height rather than owning a competing inner scroll. */
