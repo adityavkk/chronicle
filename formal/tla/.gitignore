@@ -1,0 +1,25 @@
+# The TLA+ toolbox jar is downloaded on demand (make jar), never committed.
+tla2tools.jar
+*.jar
+# TLC scratch output.
+states/
+*.st
+*.fp
+MC.out
+# Trace-validation work products (#39): real traces + generated TraceData + the
+# per-scenario TLC scratch are produced on demand by `make trace-validate`.
+*.jsonl
+trace/scenarios/
+T39_INDEX.txt
+# Apalache (#41) scratch output + the on-demand-downloaded apalache-mc dist
+# (lives in /tmp, never committed). The inductive proof is reproduced by
+# `make apalache`; the .itf.json / violation traces are regenerated on demand.
+_apalache-out/
+apalache-*/
+apalache.tgz
+*.itf.json
+# Spectacle (#41) headless-render scratch: TLC trace-exploration spin-offs and
+# the loose per-state SVG frames before they are moved into spectacle/frames/.
+MC_Anim_TTrace_*.tla
+MC_Anim_TTrace_*.bin
+/SubscriptionFence_anim_*.svg
