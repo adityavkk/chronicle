@@ -210,13 +210,13 @@ func parseSlotClaim(reply []string) (SlotClaim, error) {
 type OwnerCheck int
 
 const (
-	// OwnerCheckOwner: the caller is the current owner at the expected epoch — its
-	// external side effect is authorized.
+	// OwnerCheckOwner means the caller is the current owner at the expected epoch —
+	// its external side effect is authorized.
 	OwnerCheckOwner OwnerCheck = iota
-	// OwnerCheckFenced: a different owner, or the caller at a stale epoch — a
+	// OwnerCheckFenced means a different owner, or the caller at a stale epoch — a
 	// deposed owner. Its side effect is suppressed.
 	OwnerCheckFenced
-	// OwnerCheckUnowned: the slot has no owner.
+	// OwnerCheckUnowned means the slot has no owner.
 	OwnerCheckUnowned
 )
 
