@@ -367,12 +367,18 @@ stream that workers claim ("pull-wake"). Two facts shape the design:
   localStorage (`dsui.subs.<connId>`), exactly like the connection list. The
   store hydrates it on connect and on `initStore`, and `rememberSubscriptionId`/
   `forgetSubscriptionId` keep it in sync as ids are created/deleted/404'd.
-- **The `/__ds/*` surface is served on the connection ORIGIN, not under
-  `streamRoot`.** So `subscriptionUrl(conn, id, suffix)` joins `baseUrl +
-  /__ds/subscriptions/<encoded-id> + suffix` (no `streamRoot`), distinct from
-  `streamUrl`. Metrics live on a SEPARATE listener (the `--metrics-listen`
-  address, e.g. `:9090`), so the metrics URL is an explicit per-connection
-  setting (`dsui.metricsUrl.<connId>`), not derived from the stream origin.
+- **The `/__ds/*` surface is STREAM-ROOT-RELATIVE.** Per the protocol spec a
+  subscription lives at `{stream-url}/__ds/subscriptions/:id`, so
+  `subscriptionUrl(conn, id, suffix)` joins `baseUrl + streamRoot +
+  /__ds/subscriptions/<encoded-id> + suffix` — the same base as a stream URL.
+  (The pure previews in `lib/subscriptions` / `lib/subscriptionForm` / `lib/wakes`
+  therefore take `streamRoot` too, matching the `lib/streamForm` previews — do not
+  drop it, or the curl drifts from the real request.) This was originally built
+  against the bare origin and only caught against a live Redis-backed server (the
+  unit tests mocked `fetch`); the spec and `webhook/routes.go` are the source of
+  truth. Metrics live on a SEPARATE listener (the `--metrics-listen` address,
+  e.g. `:9090`), so the metrics URL is an explicit per-connection setting
+  (`dsui.metricsUrl.<connId>`), not derived from the stream origin.
 
 The typed seams (all verified against the server source in `webhook/wire.go` +
 `webhook/types.go`, not guessed):
