@@ -51,6 +51,7 @@ import {
 	clearTailBuffer,
 	selectRow,
 	selectedRow,
+	selectedStream,
 	setTailPaused,
 	startTail,
 	stopTail,
@@ -58,8 +59,10 @@ import {
 	tailMode,
 	tailPaused,
 	tailRows,
+	tailStartOffset,
 	tailStatus,
 } from "../state/store";
+import { ExportMenu } from "./ExportMenu";
 import {
 	IconArrowDownToLine,
 	IconBroadcast,
@@ -150,6 +153,8 @@ export function TailPanel(): JSX.Element {
 	const paused = tailPaused.value;
 	const mode = tailMode.value;
 	const active = selectedRow.value;
+	const stream = selectedStream.value;
+	const startOffset = tailStartOffset.value;
 
 	const scrollRef = useRef<HTMLDivElement>(null);
 	// "Stuck to bottom": follow new rows. Disengages when the user scrolls up,
@@ -331,6 +336,13 @@ export function TailPanel(): JSX.Element {
 					</span>
 				) : null}
 				<span class="dsui-tail__spacer" />
+				<ExportMenu
+					rows={rows}
+					kind={stream?.kind ?? rows[0]?.kind ?? "json"}
+					streamPath={stream?.path ?? "stream"}
+					offset={`tail-${startOffset ?? "now"}`}
+					size="xs"
+				/>
 				<span class={`dsui-tail__stick${stuck.value ? " is-on" : ""}`}>
 					{stuck.value ? "Following tail" : "Paused scroll"}
 				</span>
