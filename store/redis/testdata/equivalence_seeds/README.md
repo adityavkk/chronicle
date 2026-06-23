@@ -49,7 +49,20 @@ in the harness as an equivalence class, not a bug (see `diffErr` /
 Out-of-scope divergences expected to land seeds here when their sibling issues
 generalize the generator:
 
-- **LB-3** — `MemoryStore` reads by comparing the numeric `ByteOffset` while
-  Redis compares the full offset string (the generalized producer differential /
-  ReadSeq issue).
 - JSON-mode flatten/fork-sub-offset arithmetic (#44).
+
+## Pinned elsewhere (no seed needed here)
+
+- **LB-3** — `MemoryStore.readOwnMessages` compares the numeric `ByteOffset`
+  alone while Redis compares the full offset string (incl. `ReadSeq`) via
+  `read.lua`'s `ZRANGEBYLEX`. Armed and pinned directly as committed boundary
+  fixtures in `store/readseq_divergence_test.go` (`TestReadSeqAgreesWhileZero`,
+  `TestReadSeqDivergesWhenNonZero`, `TestReadSeqDivergenceCounterexampleLB3`,
+  issue #32) rather than as an equivalence-harness `.fail` seed — the divergence
+  is a pure read-comparison-key property and never materializes through the
+  harness while `ReadSeq == 0`.
+- The producer Go/Lua reply boundary at `10^14` (validate_producer's `tostring`
+  of the SEQ_GAP detail fields renders `>= 10^14` in `%.14g` scientific
+  notation, which `decodeScriptReply`'s `ParseInt` rejects) is pinned in
+  `store/redis/differential_producer_test.go`
+  (`TestDifferentialProducerReplyTostringLB`, issue #32).
