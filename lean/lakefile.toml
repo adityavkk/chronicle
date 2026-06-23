@@ -1,0 +1,12 @@
+name = "chronicle"
+defaultTargets = ["Chronicle"]
+
+# P0.5 skeleton: core Lean only. No mathlib dependency yet — mathlib is heavy
+# and version-sensitive, and is only needed once the PROOFS land (P1.1, the
+# pure-core-proofs issue). This package is a faithful typed transcription that
+# must typecheck and compile under the pinned toolchain; it states no theorems.
+# When the proofs issue adds `require mathlib`, it also commits a
+# `lake-manifest.json` pinning mathlib + transitive deps to exact revisions.
+
+[[lean_lib]]
+name = "Chronicle"
