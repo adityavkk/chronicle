@@ -60,6 +60,7 @@ const LS_ACTIVE = "dsui.activeConnection";
 const LS_THEME = "dsui.theme";
 const LS_INSPECTOR_COLLAPSED = "dsui.inspector-collapsed";
 const LS_PLAYGROUND_OPEN = "dsui.playground-open";
+const LS_COMPOSER_OPEN = "dsui.composer-open";
 /** Known subscription ids are tracked per connection (no list-all endpoint). */
 const LS_SUBS_PREFIX = "dsui.subs.";
 /** The metrics URL is remembered per connection (a separate --metrics-listen). */
@@ -151,6 +152,34 @@ export const inspectorCollapsed = signal<boolean>(loadBool(LS_INSPECTOR_COLLAPSE
  */
 export const playgroundOpen = signal<boolean>(loadBool(LS_PLAYGROUND_OPEN, true));
 
+/**
+ * Whether the workspace's "Under the hood" protocol disclosure is expanded.
+ * Default false (collapsed) so a beginner is not overwhelmed; a failed write's
+ * "Show details" toast action drives it open ({@link openProtocolPanel}). The
+ * ProtocolPanel two-way binds its `<details open>` to this. Not persisted — it
+ * is a transient inspection aid, not a layout preference.
+ */
+export const protocolOpen = signal<boolean>(false);
+
+/**
+ * The publish composer's effective open state — what the composer's `<details>`
+ * binds to. A transient value, NOT persisted: it starts collapsed and is
+ * recomputed on every stream selection (forced open on an empty or freshly-
+ * created stream so writing the first message is one step, otherwise reset to
+ * the remembered manual preference {@link composerOpenPref}). The user's own
+ * toggle updates both via {@link setComposerOpen}; only composerOpenPref loads
+ * from / persists to localStorage.
+ */
+export const composerOpen = signal<boolean>(false);
+
+/**
+ * The remembered manual open/closed preference for the publish composer, default
+ * false (collapsed). Persisted to localStorage like {@link playgroundOpen}; only
+ * an explicit user toggle changes it, so an auto-open on an empty stream never
+ * pollutes the memory used for non-empty streams.
+ */
+export const composerOpenPref = signal<boolean>(loadBool(LS_COMPOSER_OPEN, false));
+
 /** Coarse async status for the stream list and reads. */
 export const streamsLoading = signal<boolean>(false);
 export const readLoading = signal<boolean>(false);
@@ -195,6 +224,14 @@ export const lastOperation = signal<Operation | null>(null);
  * append via {@link bumpProducerSeq} so consecutive publishes dedupe correctly.
  */
 export const producerIdentity = signal<ProducerIdentity | null>(null);
+
+/**
+ * A one-shot hint to the publish composer to pre-fill its producer Seq field
+ * with this value and reveal the producer block. Set by the producer-conflict
+ * warning toast's "Use expected seq" action to the server's expected seq; the
+ * composer consumes it and clears it back to null. Null means no pending hint.
+ */
+export const producerSeqHint = signal<number | null>(null);
 
 /* ----------------------------------------------------------------------------
  * Write-operation dialog + metadata state
@@ -456,6 +493,10 @@ effect(() => {
 	writeLs(LS_PLAYGROUND_OPEN, playgroundOpen.value ? "true" : "false");
 });
 
+effect(() => {
+	writeLs(LS_COMPOSER_OPEN, composerOpenPref.value ? "true" : "false");
+});
+
 /* ----------------------------------------------------------------------------
  * Wake-feed lifecycle effect
  *
@@ -686,7 +727,29 @@ export function selectStream(path: string): void {
 	customOffset.value = "";
 	// Selecting a stream brings the messages workspace back to the center pane.
 	centerView.value = "messages";
-	void readSelected(OFFSET_EARLIEST_VALUE);
+	void readSelected(OFFSET_EARLIEST_VALUE).then(() => {
+		// Once the first read settles, drive the composer's open state: open it on
+		// an empty/new stream (writing is one step), else fall back to the user's
+		// remembered manual preference. Guard on the path so a stream switch mid-
+		// read does not apply to the wrong stream.
+		if (selectedStreamPath.value === path) applyComposerOpenForSelection();
+	});
+}
+
+/**
+ * Set the publish composer's open state for the just-selected stream: open it
+ * when the stream is empty and writable (rows came back empty, the read reached
+ * the server, and the stream is not closed) so the primary write surface is one
+ * step; otherwise reflect the remembered manual preference so a manual collapse
+ * is respected on non-empty streams. This is the single place stream selection
+ * influences the composer; an explicit user toggle goes through
+ * {@link setComposerOpen}.
+ */
+function applyComposerOpenForSelection(): void {
+	const read = lastRead.value;
+	const emptyWritable =
+		read !== null && read.rows.length === 0 && read.exchange.status !== 0 && !read.closed;
+	composerOpen.value = emptyWritable ? true : composerOpenPref.value;
 }
 
 /**
@@ -780,6 +843,36 @@ export function toggleInspector(): void {
 /** Toggle the left sidebar's foldable Playground section open/closed. */
 export function togglePlayground(): void {
 	playgroundOpen.value = !playgroundOpen.value;
+}
+
+/** Set the "Under the hood" protocol disclosure open state (the panel's onToggle). */
+export function setProtocolOpen(open: boolean): void {
+	protocolOpen.value = open;
+}
+
+/** Expand the protocol disclosure — the "Show details" failure-toast action. */
+export function openProtocolPanel(): void {
+	protocolOpen.value = true;
+}
+
+/**
+ * Record an explicit user open/collapse of the publish composer: update both the
+ * effective open state and the remembered manual preference (persisted via the
+ * effect), so the choice survives both a stream switch to a non-empty stream and
+ * a reload. The composer's `<details onToggle>` calls this for user toggles only.
+ */
+export function setComposerOpen(open: boolean): void {
+	composerOpen.value = open;
+	composerOpenPref.value = open;
+}
+
+/**
+ * Hint the publish composer to pre-fill its producer Seq with `seq` and reveal
+ * the producer block — the "Use expected seq" action on a producer-conflict
+ * toast. Pass null to clear it (the composer does this after consuming it).
+ */
+export function setProducerSeqHint(seq: number | null): void {
+	producerSeqHint.value = seq;
 }
 
 /** Clear the surfaced error. */
@@ -893,7 +986,24 @@ export function closeDialog(): void {
  * updates), records the Operation for the curl helper, surfaces a toast, and
  * refreshes the stream list so the navigator reflects the change. They never
  * throw: a failed write resolves to ok:false and a toast.
+ *
+ * A failed write toast is actionable: it rides the single Toast.action slot. A
+ * network failure (status 0) is worth retrying as-is, so it offers "Retry"
+ * (re-invokes the same action); any server rejection (4xx/5xx) is better
+ * understood than repeated, so it offers "Show details", which expands the
+ * Under-the-hood transcript of the captured exchange. The exchange is already
+ * mirrored into lastExchange before the toast, so the panel has it to show.
  * ------------------------------------------------------------------------- */
+
+/**
+ * Build the inline action for a failed write toast from its captured exchange: a
+ * network failure (status 0) gets "Retry" (running `retry`); a server rejection
+ * gets "Show details" (expanding the protocol disclosure on the failed exchange).
+ */
+function failureToastAction(exchange: HttpExchange, retry: () => void): ToastAction {
+	if (exchange.status === 0) return { label: "Retry", onAction: retry };
+	return { label: "Show details", onAction: openProtocolPanel };
+}
 
 /** Create a stream from typed options; refreshes the list and toasts the result. */
 export async function createStream(opts: {
@@ -918,7 +1028,12 @@ export async function createStream(opts: {
 			await refreshStreams();
 			selectStream(opts.path);
 		} else {
-			addToast({ kind: "error", title: "Create failed", message: result.error ?? opts.path });
+			addToast({
+				kind: "error",
+				title: "Create failed",
+				message: result.error ?? opts.path,
+				action: failureToastAction(result.exchange, () => void createStream(opts)),
+			});
 		}
 		return result.ok;
 	} finally {
@@ -960,9 +1075,20 @@ export async function appendMessages(
 				kind: "warning",
 				title: "Producer sequence conflict",
 				message: `server expected seq ${expectedSeq ?? "?"}, received ${receivedSeq ?? "?"}`,
+				// Offer to adopt the server's expected seq so the next publish dedupes
+				// correctly; fall back to the transcript when the server gave no number.
+				action:
+					expectedSeq !== null
+						? { label: "Use expected seq", onAction: () => setProducerSeqHint(expectedSeq) }
+						: { label: "Show details", onAction: openProtocolPanel },
 			});
 		} else {
-			addToast({ kind: "error", title: "Publish failed", message: result.error ?? path });
+			addToast({
+				kind: "error",
+				title: "Publish failed",
+				message: result.error ?? path,
+				action: failureToastAction(result.exchange, () => void appendMessages(path, body, opts)),
+			});
 		}
 		return result.ok;
 	} finally {
@@ -983,7 +1109,12 @@ export async function closeStream(path: string): Promise<boolean> {
 			addToast({ kind: "success", title: "Stream closed", message: path });
 			await refreshStreams();
 		} else {
-			addToast({ kind: "error", title: "Close failed", message: result.error ?? path });
+			addToast({
+				kind: "error",
+				title: "Close failed",
+				message: result.error ?? path,
+				action: failureToastAction(result.exchange, () => void closeStream(path)),
+			});
 		}
 		return result.ok;
 	} finally {
@@ -1011,7 +1142,12 @@ export async function deleteStream(path: string): Promise<boolean> {
 			}
 			await refreshStreams();
 		} else {
-			addToast({ kind: "error", title: "Delete failed", message: result.error ?? path });
+			addToast({
+				kind: "error",
+				title: "Delete failed",
+				message: result.error ?? path,
+				action: failureToastAction(result.exchange, () => void deleteStream(path)),
+			});
 		}
 		return result.ok;
 	} finally {
@@ -1040,7 +1176,15 @@ export async function forkStream(
 			await refreshStreams();
 			selectStream(newPath);
 		} else {
-			addToast({ kind: "error", title: "Fork failed", message: result.error ?? newPath });
+			addToast({
+				kind: "error",
+				title: "Fork failed",
+				message: result.error ?? newPath,
+				action: failureToastAction(
+					result.exchange,
+					() => void forkStream(newPath, fromPath, offset, subOffset),
+				),
+			});
 		}
 		return result.ok;
 	} finally {
