@@ -1,0 +1,78 @@
+name: Fuzz (nightly)
+
+# The coverage-guided fuzz job (issue #42). It is DELIBERATELY NOT on push /
+# pull_request: the PR gate is the fast deterministic property run plus the
+# committed testdata/fuzz corpus replay in the main CI `test` job (`go test
+# ./...`, no -fuzz, which Go replays every corpus file under as a regression
+# fixture for free). THIS job is the long coverage-guided regime: it runs
+# `go test -fuzz=FuzzStoreEquivalence` for a bounded budget against a
+# containerized Redis 8, mutating the input bitstream of the SAME
+# MemoryStore-vs-Redis rapid state machine toward the rare Lua branches uniform
+# random under-samples (epoch-bump-at-nonzero-seq, seq gap at the boundary,
+# fork-sub-offset overshoot, close-by-producer duplicate). A divergence or panic
+# fails the job; rapid prints a minimal replayable sequence + a deterministic
+# seed, and `go test -fuzz` writes the crashing input under
+# testdata/fuzz/FuzzStoreEquivalence/, which this workflow uploads as an artifact
+# to be minimized and committed as a permanent regression fixture.
+
+on:
+  schedule:
+    - cron: "27 7 * * *" # nightly at 07:27 UTC
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "Fuzz budget (go -fuzztime, e.g. 10m)"
+        required: false
+        default: "10m"
+
+jobs:
+  fuzz-equivalence:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      # First replay the committed corpus deterministically (no -fuzz): the
+      # persisted seeds + every regression fixture must stay green before the
+      # coverage-guided run extends the corpus. This is the same replay the PR
+      # gate runs, pinned here too so a corpus rot is caught even if the main CI
+      # `test` job is skipped.
+      - name: Replay committed fuzz corpus (regression fixtures)
+        run: go test -run='^FuzzStoreEquivalence$' -count=1 ./store/redis/
+      # The coverage-guided budget. -parallel=1 keeps a single fuzz worker so
+      # workers never contend on the one shared Redis DB (the fuzz setup also
+      # avoids FlushDB and namespaces keys per process, but one worker removes
+      # the contention entirely — under many parallel workers a long generated
+      # op sequence of real-Redis round-trips can exceed Go's per-exec -timeout
+      # and false-fail with "context deadline exceeded", which is NOT a
+      # divergence). -timeout is raised well above any single exec as a further
+      # guard. On a real crasher/divergence rapid prints a minimal replayable
+      # sequence + a deterministic seed and Go writes the input under
+      # testdata/fuzz/, which the next step uploads.
+      - name: Coverage-guided fuzz against live Redis
+        env:
+          FUZZTIME: ${{ github.event.inputs.fuzztime || '10m' }}
+        run: |
+          go test -run='^$' -fuzz='^FuzzStoreEquivalence$' \
+            -fuzztime="$FUZZTIME" -timeout=30m \
+            -parallel=1 -count=1 ./store/redis/
+      # Any newly-discovered crashing input Go persisted under testdata/fuzz/
+      # FuzzStoreEquivalence/ is uploaded so it can be minimized and committed as
+      # a permanent regression fixture (the corpus is the durable artifact).
+      - name: Upload newly-discovered corpus / crashers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus-new
+          path: store/redis/testdata/fuzz/FuzzStoreEquivalence/
+          if-no-files-found: ignore

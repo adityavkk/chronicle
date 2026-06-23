@@ -257,6 +257,7 @@ type fakeMetrics struct {
 	slotOwn     map[string]int // SlotOwnership events (claimed|renewed|busy), #14
 	ownerFenced map[string]int // OwnerFenced scopes (inline|check_owner), #14
 	coverageGap int            // CoverageGap samples, #14
+	durShort    map[string]int // DurabilityShort by cmd (WAITAOF|WAIT), #43
 }
 
 func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
@@ -315,6 +316,19 @@ func (f *fakeMetrics) OwnerFenced(scope string) {
 	f.ownerFenced[scope]++
 }
 func (f *fakeMetrics) ClaimContention(string, string) {}
+func (f *fakeMetrics) DurabilityShort(cmd string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.durShort == nil {
+		f.durShort = map[string]int{}
+	}
+	f.durShort[cmd]++
+}
+func (f *fakeMetrics) durabilityShorts(cmd string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.durShort[cmd]
+}
 
 func (f *fakeMetrics) slotOwnership(event string) int {
 	f.mu.Lock()

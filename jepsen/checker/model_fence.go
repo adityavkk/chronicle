@@ -196,13 +196,27 @@ func stepClaim(s fenceState, out fenceOutput) (bool, fenceState) {
 	return ok, fenceState{gen: out.gen, wake: out.wake, phase: phaseLive}
 }
 
+// checkerFenced is the checker's INDEPENDENT copy of the fence predicate (the
+// third mirror of webhook.FenceDecision / common.lua's `fenced`): a token is
+// stale — and the op must be rejected — unless its generation, the request
+// generation, and the request wake_id all match the current fence and the
+// wake_id is non-empty. Like FenceDecision and `fenced` it is hand-maintained and
+// must be changed together with the other two; the triple-mirror differential
+// (predicate_mirror_test.go / webhook's predicate_differential_test.go) pins all
+// three together over a generated domain. Extracted from the inline expression
+// stepAckOrRelease used so the checker copy is a single reachable reference, not
+// a buried literal a fourth transcription could drift from. [INV-FENCE-01/03]
+func checkerFenced(curGen, reqGen, tokenGen int64, curWake, reqWake string) bool {
+	return tokenGen != curGen || reqGen != curGen || reqWake == "" || reqWake != curWake
+}
+
 // stepAckOrRelease models ack.lua / release.lua, whose first act is the fence
 // check (common.lua's `fenced`).
 func stepAckOrRelease(s fenceState, in fenceInput, out fenceOutput) (bool, fenceState) {
 	// The fence predicate, byte-for-byte the common.lua mirror: a token is stale
 	// unless its generation, the request generation, and the request wake_id all
 	// match the current fence (and the wake_id is non-empty).
-	fenced := in.tokenGen != s.gen || in.reqGen != s.gen || in.reqWake == "" || in.reqWake != s.wake
+	fenced := checkerFenced(s.gen, in.reqGen, in.tokenGen, s.wake, in.reqWake)
 
 	switch out.status {
 	case statusOK:
