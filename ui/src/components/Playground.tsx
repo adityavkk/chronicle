@@ -291,7 +291,11 @@ function WakeDemoRow(props: {
 	const publishOp = previewWakeDemoPublish(origin.baseUrl, origin.streamRoot);
 	// The registration curl needs a capture base; fall back to a placeholder so the
 	// shape is still teachable when no binary is present.
-	const registerOp = previewWakeDemoRegister(origin.baseUrl, capture ?? "http://localhost:4438");
+	const registerOp = previewWakeDemoRegister(
+		origin.baseUrl,
+		origin.streamRoot,
+		capture ?? "http://localhost:4438",
+	);
 
 	return (
 		<li class="dsui-playground__row dsui-playground__row--wake">
