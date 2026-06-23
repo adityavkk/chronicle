@@ -331,12 +331,18 @@ function DeliveryCard(props: {
 	const callbackOp = useComputed(() =>
 		conn === null || note === null
 			? null
-			: previewCallbackOperation(conn.baseUrl, sub.id, note.callbackToken ?? "<callback_token>", {
-					wakeId: note.wakeId,
-					generation: note.generation,
-					acks,
-					done: true,
-				}),
+			: previewCallbackOperation(
+					conn.baseUrl,
+					conn.streamRoot,
+					sub.id,
+					note.callbackToken ?? "<callback_token>",
+					{
+						wakeId: note.wakeId,
+						generation: note.generation,
+						acks,
+						done: true,
+					},
+				),
 	);
 
 	const canAck = note !== null && note.callbackToken !== null;
@@ -575,7 +581,9 @@ function PullWakePane(props: { sub: Subscription }): JSX.Element {
 	}, [newestTs, pulse]);
 
 	const claimOp = useComputed(() =>
-		conn === null ? null : previewClaimOperation(conn.baseUrl, sub.id, worker.value.trim()),
+		conn === null
+			? null
+			: previewClaimOperation(conn.baseUrl, conn.streamRoot, sub.id, worker.value.trim()),
 	);
 
 	return (

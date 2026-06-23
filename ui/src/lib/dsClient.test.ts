@@ -716,15 +716,19 @@ describe("openSse", () => {
 });
 
 /* ----------------------------------------------------------------------------
- * subscriptionUrl — the reserved /__ds origin (NOT under streamRoot)
+ * subscriptionUrl — the reserved /__ds prefix, stream-root-relative (per spec)
  * ------------------------------------------------------------------------- */
 
 describe("subscriptionUrl", () => {
-	it("builds /__ds/subscriptions/{id} on the connection origin, encoding the id", () => {
-		expect(subscriptionUrl(CONN, "sub-1")).toBe("http://localhost:4437/__ds/subscriptions/sub-1");
-		expect(subscriptionUrl(CONN, "a/b")).toBe("http://localhost:4437/__ds/subscriptions/a%2Fb");
+	it("builds {baseUrl}{streamRoot}/__ds/subscriptions/{id}, encoding the id", () => {
+		expect(subscriptionUrl(CONN, "sub-1")).toBe(
+			"http://localhost:4437/v1/stream/__ds/subscriptions/sub-1",
+		);
+		expect(subscriptionUrl(CONN, "a/b")).toBe(
+			"http://localhost:4437/v1/stream/__ds/subscriptions/a%2Fb",
+		);
 		expect(subscriptionUrl(CONN, "sub-1", "/claim")).toBe(
-			"http://localhost:4437/__ds/subscriptions/sub-1/claim",
+			"http://localhost:4437/v1/stream/__ds/subscriptions/sub-1/claim",
 		);
 	});
 });

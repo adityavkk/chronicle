@@ -255,8 +255,8 @@ describe("buildAckBody", () => {
  * ------------------------------------------------------------------------- */
 
 describe("operation previews", () => {
-	it("previews a create PUT on the /__ds origin (no streamRoot)", () => {
-		const op = previewCreateSubscriptionOperation(BASE, {
+	it("previews a create PUT under the stream root (/__ds is stream-root-relative)", () => {
+		const op = previewCreateSubscriptionOperation(BASE, "/v1/stream", {
 			id: "sub 1",
 			type: "webhook",
 			pattern: "events/**",
@@ -264,7 +264,7 @@ describe("operation previews", () => {
 		});
 		expect(op.method).toBe("PUT");
 		// id is URL-encoded as a single segment.
-		expect(op.url).toBe("http://localhost:4437/__ds/subscriptions/sub%201");
+		expect(op.url).toBe("http://localhost:4437/v1/stream/__ds/subscriptions/sub%201");
 		expect(op.headers).toMatchObject({ Accept: "*/*", "Content-Type": "application/json" });
 		expect(op.body).toBe(
 			JSON.stringify({
@@ -276,19 +276,19 @@ describe("operation previews", () => {
 	});
 
 	it("previews a claim POST", () => {
-		const op = previewClaimOperation(BASE, "sub-1", "worker-7");
-		expect(op.url).toBe("http://localhost:4437/__ds/subscriptions/sub-1/claim");
+		const op = previewClaimOperation(BASE, "/v1/stream", "sub-1", "worker-7");
+		expect(op.url).toBe("http://localhost:4437/v1/stream/__ds/subscriptions/sub-1/claim");
 		expect(op.body).toBe(JSON.stringify({ worker: "worker-7" }));
 	});
 
 	it("previews an ack POST carrying the Bearer token", () => {
-		const op = previewAckOperation(BASE, "sub-1", "tok-9", {
+		const op = previewAckOperation(BASE, "/v1/stream", "sub-1", "tok-9", {
 			wakeId: "w",
 			generation: 4,
 			acks: [{ stream: "s", offset: "o" }],
 			done: true,
 		});
-		expect(op.url).toBe("http://localhost:4437/__ds/subscriptions/sub-1/ack");
+		expect(op.url).toBe("http://localhost:4437/v1/stream/__ds/subscriptions/sub-1/ack");
 		expect(op.headers.Authorization).toBe("Bearer tok-9");
 	});
 });

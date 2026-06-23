@@ -187,14 +187,14 @@ describe("buildSubscriptionOptions", () => {
 
 describe("previewCallbackOperation", () => {
 	it("builds the POST …/callback request with a Bearer token and ack body", () => {
-		const op = previewCallbackOperation("http://localhost:4437", "sub-1", "tok123", {
+		const op = previewCallbackOperation("http://localhost:4437", "/v1/stream", "sub-1", "tok123", {
 			wakeId: "w_abc",
 			generation: 7,
 			acks: [{ stream: "events/x", offset: "off-9" }],
 			done: true,
 		});
 		expect(op.method).toBe("POST");
-		expect(op.url).toBe("http://localhost:4437/__ds/subscriptions/sub-1/callback");
+		expect(op.url).toBe("http://localhost:4437/v1/stream/__ds/subscriptions/sub-1/callback");
 		expect(op.headers.Authorization).toBe("Bearer tok123");
 		expect(JSON.parse(op.body as string)).toEqual({
 			wake_id: "w_abc",
@@ -206,6 +206,6 @@ describe("previewCallbackOperation", () => {
 		const curl = toCurl(op);
 		expect(curl).toContain("-X POST");
 		expect(curl).toContain("'Authorization: Bearer tok123'");
-		expect(curl).toContain("/__ds/subscriptions/sub-1/callback");
+		expect(curl).toContain("/v1/stream/__ds/subscriptions/sub-1/callback");
 	});
 });

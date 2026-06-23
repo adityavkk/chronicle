@@ -102,7 +102,11 @@ export function CreateSubscriptionDialog(): JSX.Element {
 	// Live curl preview, only once the form is valid (so the URL is well-formed).
 	const previewOp = useComputed(() => {
 		if (conn === null || !valid.value) return null;
-		return previewCreateSubscriptionOperation(conn.baseUrl, buildSubscriptionOptions(values.value));
+		return previewCreateSubscriptionOperation(
+			conn.baseUrl,
+			conn.streamRoot,
+			buildSubscriptionOptions(values.value),
+		);
 	});
 
 	function onSubmit(e: Event): void {
