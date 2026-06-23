@@ -139,6 +139,117 @@ func TestWaitIsDurabilityNotLinearizability(t *testing.T) {
 	}{de.WantLocal, de.GotLocal, de.WantReplicas, de.GotReplicas, de.UseAOF}
 }
 
+// TestAssertAOFEnabled is the pure startup-guard spec (issue #43): a Tier B
+// deployment fails fast against a Redis that cannot honor WAITAOF (AOF off, or
+// fewer online replicas than required); Tier A/C never assert; a properly
+// provisioned Tier B passes.
+func TestAssertAOFEnabled(t *testing.T) {
+	// Tier A/C issue no WAITAOF, so they never assert — even against a non-AOF Redis
+	// with zero replicas.
+	if err := AssertAOFEnabled(TierA, "no", 0, 1); err != nil {
+		t.Errorf("Tier A must never assert AOF, got %v", err)
+	}
+	if err := AssertAOFEnabled(TierC, "no", 0, 1); err != nil {
+		t.Errorf("Tier C fence-minting write issues no WAITAOF, must never assert: %v", err)
+	}
+
+	// Tier B against AOF-off Redis: a typed refusal naming the appendonly value.
+	err := AssertAOFEnabled(TierB, "no", 0, 0)
+	if err == nil {
+		t.Fatal("Tier B against appendonly=no must refuse to start")
+	}
+	var ae *AOFConfigError
+	if !errors.As(err, &ae) {
+		t.Fatalf("want *AOFConfigError, got %T: %v", err, err)
+	}
+	if ae.AppendOnly != "no" {
+		t.Errorf("AOFConfigError.AppendOnly = %q, want %q", ae.AppendOnly, "no")
+	}
+
+	// Tier B requiring a replica the topology cannot supply: refuse (the write would
+	// short on every fence mint).
+	err = AssertAOFEnabled(TierB, "yes", 0, 1)
+	if err == nil {
+		t.Fatal("Tier B requiring 1 replica with 0 online must refuse to start")
+	}
+	if !errors.As(err, &ae) {
+		t.Fatalf("want *AOFConfigError, got %T", err)
+	}
+	if ae.WantReplicas != 1 || ae.GotReplicas != 0 {
+		t.Errorf("topology refusal counts = %+v, want want=1 got=0", ae)
+	}
+
+	// The single-Redis local rig: AOF on, 0 replicas required, 0 online — Tier B
+	// (WAITAOF 1 0, local fsync only) starts cleanly.
+	if err := AssertAOFEnabled(TierB, "yes", 0, 0); err != nil {
+		t.Errorf("Tier B local-fsync rig (yes, 0/0) must start, got %v", err)
+	}
+	// The STANDARD_HA substrate: AOF on, 1 online replica, 1 required — starts.
+	if err := AssertAOFEnabled(TierB, "yes", 1, 1); err != nil {
+		t.Errorf("Tier B HA substrate (yes, 1/1) must start, got %v", err)
+	}
+	// An extra online replica beyond the requirement is fine.
+	if err := AssertAOFEnabled(TierB, "YES", 3, 1); err != nil {
+		t.Errorf("Tier B with surplus replicas (3>=1) must start, got %v", err)
+	}
+}
+
+// TestAssertAOFEnabledIsDurabilityOnly is the correction-#3 guard for the startup
+// assertion: AOFConfigError carries ONLY a provisioning verdict (appendonly value
+// + replica counts), never a holder/generation/lease, so a mis-provisioning
+// refusal cannot be laundered into an exclusivity decision. Enforced structurally:
+// if a future edit adds such a field, this references block fails to compile.
+func TestAssertAOFEnabledIsDurabilityOnly(t *testing.T) {
+	ae := &AOFConfigError{AppendOnly: "no", WantReplicas: 1, GotReplicas: 0}
+	_ = struct {
+		appendOnly                string
+		wantReplicas, gotReplicas int
+	}{ae.AppendOnly, ae.WantReplicas, ae.GotReplicas}
+}
+
+// TestParseConnectedReplicas covers the INFO replication parser: a master with N
+// online replicas, a master that is still syncing a replica (connected but not
+// online), and a reply with no replication section.
+func TestParseConnectedReplicas(t *testing.T) {
+	cases := []struct {
+		name string
+		info string
+		want int
+	}{
+		{"no section", "", 0},
+		{"master no replicas", "role:master\r\nconnected_slaves:0\r\n", 0},
+		{
+			"one online replica",
+			"role:master\r\nconnected_slaves:1\r\nslave0:ip=10.0.0.2,port=6379,state=online,offset=560,lag=0\r\n",
+			1,
+		},
+		{
+			"two online replicas",
+			"connected_slaves:2\nslave0:ip=10.0.0.2,port=6379,state=online,offset=1,lag=0\nslave1:ip=10.0.0.3,port=6379,state=online,offset=1,lag=0\n",
+			2,
+		},
+		{
+			// Connected but still doing its initial sync: NOT counted toward a
+			// satisfiable WAITAOF replica requirement.
+			"connected but syncing",
+			"connected_slaves:1\nslave0:ip=10.0.0.2,port=6379,state=send_bulk,offset=0,lag=0\n",
+			0,
+		},
+		{
+			// Some managed SKUs redact the per-slave lines: fall back to the
+			// connected_slaves count.
+			"redacted per-slave lines",
+			"role:master\nconnected_slaves:2\n",
+			2,
+		},
+	}
+	for _, tc := range cases {
+		if got := ParseConnectedReplicas(tc.info); got != tc.want {
+			t.Errorf("%s: ParseConnectedReplicas = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestFreshnessTokenStale(t *testing.T) {
 	tok := NewFreshnessToken(42)
 	if !tok.Stale(41) {

@@ -73,6 +73,18 @@ type Metrics interface {
 	// type-cardinality), the same discipline SlotOwnership uses for its slot arg.
 	// Wired at the RedisStore claim/ack/release call sites in #11.
 	ClaimContention(status, subID string)
+
+	// DurabilityShort records a Tier B fence-minting write that reached the primary
+	// but could not prove durability within the WAIT/WAITAOF timeout — the
+	// RPO-exposure signal (issue #43, INV-DUR-01). cmd is the barrier that fell
+	// short, drawn from a fixed two-value vocabulary so the operator gauge stays
+	// low-cardinality: "WAITAOF" (Tier B local+replica AOF fsync) or "WAIT" (plain
+	// replica-memory ack). It conveys DURABILITY ONLY (correction #3): it carries no
+	// holder, generation, or ack count laundered into exclusivity — a short reply
+	// means "this write is not proven durable, the fence still governs who holds
+	// it," nothing more. Wired at the awaitDurable/ArmWake/Claim short-reply site in
+	// the RedisStore (#43).
+	DurabilityShort(cmd string)
 }
 
 // NopMetrics is the no-op Metrics used when none is configured. The Manager
@@ -111,3 +123,6 @@ func (NopMetrics) OwnerFenced(string) {}
 
 // ClaimContention implements Metrics.
 func (NopMetrics) ClaimContention(string, string) {}
+
+// DurabilityShort implements Metrics.
+func (NopMetrics) DurabilityShort(string) {}
