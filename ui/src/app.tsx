@@ -1,0 +1,76 @@
+/**
+ * App shell — the top-level layout. Four regions on a CSS grid:
+ *
+ *   ┌───────────────────────── header ─────────────────────────┐
+ *   │ brand · ConnectionManager (switcher + theme)              │
+ *   ├──────────┬─────────────────────────────┬─────────────────┤
+ *   │ Navigator│  MessagesWorkspace          │  Inspector      │
+ *   │  (left)  │  (center)                   │  (right)        │
+ *   └──────────┴─────────────────────────────┴─────────────────┘
+ *
+ * The grid collapses responsively via container queries (see app.css). Each
+ * region is a typed component slot, so adding a new tab/panel is a localized
+ * change — swap the component rendered in a slot, or add a region to the grid
+ * template and drop a component into it.
+ */
+
+import type { JSX } from "preact";
+import { ConnectionManager } from "./components/ConnectionManager";
+import { Inspector } from "./components/Inspector";
+import { MessagesWorkspace } from "./components/MessagesWorkspace";
+import { Navigator } from "./components/Navigator";
+import { StartScreen } from "./components/StartScreen";
+import { IconStream } from "./components/icons";
+import { activeConnection, dismissError, errorMessage } from "./state/store";
+
+function ErrorBanner(): JSX.Element | null {
+	const msg = errorMessage.value;
+	if (msg === null) return null;
+	return (
+		<div class="dsui-banner dsui-banner--error" role="alert">
+			<span>{msg}</span>
+			<button type="button" class="dsui-banner__close" onClick={() => dismissError()}>
+				Dismiss
+			</button>
+		</div>
+	);
+}
+
+export function App(): JSX.Element {
+	// No active connection -> the connection manager's start screen. Otherwise
+	// the three-pane workspace shell. This is the top-level routing seam.
+	if (activeConnection.value === null) {
+		return <StartScreen />;
+	}
+
+	return (
+		<div class="dsui-shell">
+			<header class="dsui-header">
+				<div class="dsui-brand">
+					<span class="dsui-brand__badge" aria-hidden="true">
+						<IconStream size={16} class="dsui-brand__mark" />
+					</span>
+					<span class="dsui-brand__name">dsui</span>
+					<span class="dsui-brand__sub">Durable Streams console</span>
+				</div>
+				<div class="dsui-header__actions">
+					<ConnectionManager />
+				</div>
+			</header>
+
+			<ErrorBanner />
+
+			<main class="dsui-main">
+				<aside class="dsui-region dsui-region--nav">
+					<Navigator />
+				</aside>
+				<section class="dsui-region dsui-region--workspace">
+					<MessagesWorkspace />
+				</section>
+				<aside class="dsui-region dsui-region--inspector">
+					<Inspector />
+				</aside>
+			</main>
+		</div>
+	);
+}
