@@ -16,10 +16,37 @@
 package store
 
 import (
+	"math"
 	"testing"
 
 	"pgregory.net/rapid"
 )
+
+// offsetFieldGen draws a uint64 biased toward the 10^16 boundary so the LB-1
+// divergence is hit in a handful of generator draws rather than relying on
+// uniform luck across the full 2^64 space. The OneOf mixes a uniform draw
+// with the boundary values {0, 10^16-1, 10^16, 10^16+1, MaxUint64}.
+func offsetFieldGen() *rapid.Generator[uint64] {
+	return rapid.OneOf(
+		rapid.Uint64(),
+		rapid.SampledFrom([]uint64{
+			0,
+			offsetWidthSafeBound - 1, // 9999999999999999  -> 16 digits
+			offsetWidthSafeBound,     // 10000000000000000 -> 17 digits (boundary)
+			offsetWidthSafeBound + 1,
+			math.MaxUint64, // 18446744073709551615 -> 20 digits
+		}),
+	)
+}
+
+func offsetGen() *rapid.Generator[Offset] {
+	return rapid.Custom(func(t *rapid.T) Offset {
+		return Offset{
+			ReadSeq:    offsetFieldGen().Draw(t, "readSeq"),
+			ByteOffset: offsetFieldGen().Draw(t, "byteOffset"),
+		}
+	})
+}
 
 // TestOffsetCompareMatchesStrcmpUnguarded asserts sign(Compare(a,b)) ==
 // sign(strcmp(a.String(), b.String())) over the FULL uint64 domain (no

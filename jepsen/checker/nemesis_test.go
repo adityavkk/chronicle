@@ -295,8 +295,7 @@ func TestRedisFailover_NegativeRPOClampsToZero(t *testing.T) {
 // When the primary kill fails, redisFailover returns -1 (injection failed) and does
 // NOT proceed to promote — the scenario reports an honest failure, not a 0 RPO.
 func TestRedisFailover_KillFailureReturnsMinusOne(t *testing.T) {
-	var n *nemesis
-	n = &nemesis{ctx: "k3d-x", ns: "ns", runner: func(name string, args ...string) ([]byte, error) {
+	n := &nemesis{ctx: "k3d-x", ns: "ns", runner: func(name string, args ...string) ([]byte, error) {
 		j := strings.Join(args, " ")
 		if strings.Contains(j, "delete pod") {
 			return nil, errKill

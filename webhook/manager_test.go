@@ -324,6 +324,7 @@ func (f *fakeMetrics) DurabilityShort(cmd string) {
 	}
 	f.durShort[cmd]++
 }
+
 func (f *fakeMetrics) durabilityShorts(cmd string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

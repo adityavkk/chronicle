@@ -48,6 +48,7 @@ func indetOut() storeOutput               { return storeOutput{status: stoIndet}
 func freshCloseOut(off uint64) storeOutput {
 	return storeOutput{status: stoClosedFresh, offset: off}
 }
+
 func alreadyCloseOut(off uint64) storeOutput {
 	return storeOutput{status: stoClosedAlrdy, offset: off}
 }
