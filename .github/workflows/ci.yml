@@ -15,6 +15,17 @@ jobs:
           go-version: "1.26"
       - uses: golangci/golangci-lint-action@v8
 
+  # The containerized-Redis PBT job: `go test ./...` against a live Redis 8.
+  # Besides the MemoryStore-vs-Redis equivalence harness (#26) and the producer
+  # differential (#32), this runs the control-plane fence/ordering/slot
+  # triple-mirror differential (#33): TestFenceDecisionTripleMirror /
+  # TestOffsetGreaterTripleMirror / TestSlotHomingMirror in ./webhook (Go core vs
+  # live Lua via probe_predicates.lua, on DB 14), TestStreamSeqLexMirror in
+  # ./store/redis (the LB-2 Stream-Seq `<=` digit-width property, INV-DIFF-03, on
+  # DB 15), and the checker-side mirrors in ./jepsen/checker (Go core vs the
+  # checker's independent reference, pure). All skip cleanly when Redis is
+  # unreachable; here it is the `redis` service below, so they exercise the live
+  # Lua and a divergence shrinks to a replayable rapid seed.
   test:
     runs-on: ubuntu-latest
     services:
