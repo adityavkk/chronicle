@@ -219,10 +219,20 @@ type StreamMetadata struct {
 	SoftDeleted         bool                      // Logically deleted but retained for fork readers
 }
 
-// IsExpired checks if the stream has expired based on TTL or ExpiresAt
+// IsExpired checks if the stream has expired based on TTL or ExpiresAt,
+// evaluated against the wall clock. It is preserved for backward
+// compatibility; expiry-sensitive code that needs a controllable clock
+// (the equivalence harness, issue #26) calls IsExpiredAt with an injected
+// now instead.
 func (m *StreamMetadata) IsExpired() bool {
-	now := time.Now()
+	return m.IsExpiredAt(time.Now())
+}
 
+// IsExpiredAt checks expiry against an explicit now. This is the lazy-expiry
+// source of truth mirrored by the Lua is_expired in
+// store/redis/scripts/common.lua. Both sides use a strict ">" so the
+// boundary now == expiry means NOT expired.
+func (m *StreamMetadata) IsExpiredAt(now time.Time) bool {
 	// Check explicit expiry time
 	if m.ExpiresAt != nil && now.After(*m.ExpiresAt) {
 		return true
