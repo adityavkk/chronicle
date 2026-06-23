@@ -38,8 +38,15 @@ import {
 import { previewTailOperation, tailToCurl } from "../lib/tail";
 import type { Connection, Operation } from "../lib/types";
 import {
+	WAKE_DEMO_SUB_ID,
+	previewWakeDemoCreateStream,
+	previewWakeDemoPublish,
+	previewWakeDemoRegister,
+} from "../lib/wakes";
+import {
 	activeConnection,
 	appendMessages,
+	captureBase,
 	closeStream,
 	createStream,
 	deleteStream,
@@ -49,22 +56,27 @@ import {
 	playgroundHighlight,
 	playgroundOpen,
 	runDemoProducer,
+	runWakeDemo,
 	selectStream,
 	selectedStreamPath,
 	setTailMode,
 	startTail,
 	togglePlayground,
+	wakeDemoInFlight,
 } from "../state/store";
 import { CurlPreview } from "./CurlPreview";
 import {
+	IconBroadcast,
 	IconChevronRight,
 	IconFilePlus,
 	IconFork,
+	IconLoader,
 	IconLock,
 	IconPlay,
 	IconSend,
 	IconSparkles,
 	IconTrash,
+	IconWebhook,
 	IconZap,
 } from "./icons";
 
@@ -259,6 +271,85 @@ function PresetRow(props: { preset: Preset; disabled: boolean }): JSX.Element {
 	);
 }
 
+/**
+ * The one-click "Wake demo" row: a single button that creates a sample stream,
+ * registers a webhook subscription pointed at the built-in capture endpoint, and
+ * publishes a message — then opens the Wake Monitor so a newcomer sees the whole
+ * publish → wake → hook → ack loop. It discloses all three exact curls (register,
+ * create, publish). It needs the dsui binary's capture endpoint (not vite dev);
+ * without it the button explains why, and webhooks only fire for real against a
+ * redis-backed chronicle with subscriptions enabled.
+ */
+function WakeDemoRow(props: {
+	origin: Pick<Connection, "baseUrl" | "streamRoot">;
+	capture: string | null;
+	disabled: boolean;
+}): JSX.Element {
+	const { origin, capture, disabled } = props;
+	const busy = wakeDemoInFlight.value;
+	const createOp = previewWakeDemoCreateStream(origin.baseUrl, origin.streamRoot);
+	const publishOp = previewWakeDemoPublish(origin.baseUrl, origin.streamRoot);
+	// The registration curl needs a capture base; fall back to a placeholder so the
+	// shape is still teachable when no binary is present.
+	const registerOp = previewWakeDemoRegister(origin.baseUrl, capture ?? "http://localhost:4438");
+
+	return (
+		<li class="dsui-playground__row dsui-playground__row--wake">
+			<button
+				type="button"
+				class="dsui-playground__btn dsui-playground__btn--wake"
+				disabled={disabled || busy || capture === null}
+				onClick={() => void runWakeDemo()}
+			>
+				<span class="dsui-playground__btnicon">
+					{busy ? <IconLoader size={15} class="dsui-spin" /> : <IconBroadcast size={15} />}
+				</span>
+				<span class="dsui-playground__btntext">
+					<span class="dsui-playground__btnlabel">
+						<IconWebhook size={12} /> Wake demo — capture a webhook
+					</span>
+					<span class="dsui-playground__btnhint">
+						register {WAKE_DEMO_SUB_ID} → publish → watch the wake
+					</span>
+				</span>
+			</button>
+			<details class="dsui-playground__detail">
+				<summary class="dsui-playground__detailsummary">
+					<IconChevronRight size={12} class="dsui-playground__detailcaret" />
+					<span>What it does &amp; curl</span>
+				</summary>
+				<p class="dsui-playground__does">
+					Creates the sample stream, registers a <strong>webhook</strong> subscription whose
+					webhook_url is this binary's built-in capture endpoint, then publishes a message and opens
+					the Wake Monitor. The browser cannot receive a webhook directly, so the dsui binary
+					captures it and relays it over SSE.{" "}
+					{capture === null ? (
+						<strong>No capture endpoint detected — run the dsui binary, not vite dev.</strong>
+					) : (
+						"Webhooks only fire for real against a redis-backed chronicle with subscriptions enabled."
+					)}
+				</p>
+				<CurlPreview
+					operation={registerOp}
+					copyKey="wakedemo-register-curl"
+					label="1 · register subscription"
+					open
+				/>
+				<CurlPreview
+					operation={createOp}
+					copyKey="wakedemo-create-curl"
+					label="2 · create sample stream"
+				/>
+				<CurlPreview
+					operation={publishOp}
+					copyKey="wakedemo-publish-curl"
+					label="3 · publish (fires the wake)"
+				/>
+			</details>
+		</li>
+	);
+}
+
 export function Playground(): JSX.Element {
 	const inFlight = operationInFlight.value;
 	const conn = activeConnection.value;
@@ -282,6 +373,7 @@ export function Playground(): JSX.Element {
 
 	const open = playgroundOpen.value;
 	const origin = conn ?? PLACEHOLDER_CONN;
+	const capture = captureBase.value;
 	const presets = buildPresets(origin, read?.nextOffset ?? "now", onSample);
 
 	return (
@@ -315,6 +407,7 @@ export function Playground(): JSX.Element {
 						{presets.map((p) => (
 							<PresetRow key={p.key} preset={p} disabled={inFlight} />
 						))}
+						<WakeDemoRow origin={origin} capture={capture} disabled={inFlight} />
 					</ul>
 				</>
 			) : null}

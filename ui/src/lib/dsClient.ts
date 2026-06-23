@@ -134,6 +134,25 @@ function tailUrl(
 }
 
 /**
+ * Build a {@link TailUrlFor} for a pull-wake subscription's wake_stream. It is on
+ * the reserved /__ds/* surface (…/subscriptions/{id}/wake_stream), so the URL is
+ * built from {@link subscriptionUrl} rather than streamUrl, then carries the same
+ * ?offset=…&live=… query the stream tail uses.
+ */
+function wakeStreamUrlFor(
+	conn: Connection,
+	id: string,
+): (offset: string, live: "long-poll" | "sse") => string {
+	const base = subscriptionUrl(conn, id, "/wake_stream");
+	return (offset, live) => {
+		const u = new URL(base);
+		u.searchParams.set("offset", offset);
+		u.searchParams.set("live", live);
+		return u.toString();
+	};
+}
+
+/**
  * Extract producer-conflict detail from a response, or null when the response
  * did not report one. The server surfaces Producer-Expected-Seq /
  * Producer-Received-Seq when an append's producer sequence did not match.
@@ -303,6 +322,28 @@ export interface DsClient {
 		signal?: AbortSignal,
 	): Promise<SubscriptionResult<null>>;
 
+	/**
+	 * Tail a pull-wake subscription's wake_stream by long-polling. The wake_stream
+	 * lives on the reserved /__ds/* surface (GET …/subscriptions/{id}/wake_stream),
+	 * NOT under streamRoot, so it has its own opener; the loop machinery (offset
+	 * advance, backoff, decode) is shared with {@link openLongPoll}. Each row is a
+	 * wake event JSON object the caller decodes via lib/wakes.
+	 */
+	openWakeStreamLongPoll(
+		id: string,
+		fromOffset: string,
+		onBatch: (batch: TailBatch) => void,
+		onState: (status: TailStatus) => void,
+	): TailStopper;
+
+	/** Tail a subscription's wake_stream over SSE (the /__ds/* analogue of openSse). */
+	openWakeStreamSse(
+		id: string,
+		fromOffset: string,
+		onMessage: (batch: TailBatch) => void,
+		onState: (status: TailStatus) => void,
+	): TailStopper;
+
 	/* ---- Pull-wake worker plane (claim → ack/heartbeat → release) -------- */
 
 	/** Claim a pull-wake lease (POST …/claim). 200 → WakeClaim; 409 ALREADY_CLAIMED → fenced. */
@@ -337,6 +378,26 @@ export interface DsClient {
 		req: { wakeId: string; generation: number },
 		signal?: AbortSignal,
 	): Promise<SubscriptionResult<null>>;
+
+	/**
+	 * Ack a WEBHOOK wake on the callback path (POST …/callback) with the
+	 * callback_token from the received wake notification. The body shape matches
+	 * {@link ackWake} ({wake_id, generation, acks, done}); `done:true` releases the
+	 * lease and applies the acks. 200 → AckResult; 409 FENCED (stale token/wake/
+	 * generation) → fenced. This is the asynchronous-ack half of the webhook
+	 * contract — the receiver calls it instead of returning {"done":true} inline.
+	 */
+	callbackWake(
+		id: string,
+		token: string,
+		req: {
+			wakeId: string;
+			generation: number;
+			acks: readonly { stream: string; offset: string }[];
+			done?: boolean;
+		},
+		signal?: AbortSignal,
+	): Promise<SubscriptionResult<AckResult>>;
 
 	/* ---- Metrics (Prometheus text on the separate --metrics-listen) ----- */
 
@@ -641,11 +702,21 @@ export function createClient(connection: Connection): DsClient {
 		},
 
 		openLongPoll(path, fromOffset, onBatch, onState) {
-			return runLongPoll(connection, path, fromOffset, onBatch, onState, doFetch);
+			const urlFor: TailUrlFor = (offset, live) => tailUrl(connection, path, offset, live);
+			return runLongPoll(urlFor, fromOffset, onBatch, onState, doFetch);
 		},
 
 		openSse(path, fromOffset, onMessage, onState) {
-			return runSse(connection, path, fromOffset, onMessage, onState);
+			const urlFor: TailUrlFor = (offset, live) => tailUrl(connection, path, offset, live);
+			return runSse(urlFor, fromOffset, onMessage, onState);
+		},
+
+		openWakeStreamLongPoll(id, fromOffset, onBatch, onState) {
+			return runLongPoll(wakeStreamUrlFor(connection, id), fromOffset, onBatch, onState, doFetch);
+		},
+
+		openWakeStreamSse(id, fromOffset, onMessage, onState) {
+			return runSse(wakeStreamUrlFor(connection, id), fromOffset, onMessage, onState);
 		},
 
 		/* ---- Subscription control plane ----------------------------------- */
@@ -765,6 +836,33 @@ export function createClient(connection: Connection): DsClient {
 			return doSubscriptionOp("POST", url, headers, body, () => null, signal);
 		},
 
+		callbackWake(id, token, req, signal) {
+			// The webhook ack path mirrors …/ack exactly (same body, Bearer token)
+			// but POSTs to …/callback, which the server routes to the same fencing.
+			const url = subscriptionUrl(connection, id, "/callback");
+			const headers: Record<string, string> = {
+				...ACCEPT_HEADER,
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${token}`,
+			};
+			const body = JSON.stringify(
+				buildAckBody({
+					wakeId: req.wakeId,
+					generation: req.generation,
+					acks: req.acks,
+					...(req.done !== undefined ? { done: req.done } : {}),
+				}),
+			);
+			return doSubscriptionOp(
+				"POST",
+				url,
+				headers,
+				body,
+				(t) => parseAckResult(jsonOrNull(t)),
+				signal,
+			);
+		},
+
 		/* ---- Metrics ------------------------------------------------------ */
 
 		async fetchMetrics(metricsUrl, signal) {
@@ -856,9 +954,16 @@ type DoFetchFn = (
 	body?: string | Uint8Array,
 ) => Promise<FetchOutcome>;
 
+/**
+ * A builder for the live-read URL at a given offset + mode. Stream tails build it
+ * via {@link tailUrl}; the subscription wake_stream builds it from the reserved
+ * /__ds/* path instead (it is not under streamRoot), so the loop/EventSource
+ * machinery is shared by passing the URL builder in.
+ */
+type TailUrlFor = (offset: string, live: "long-poll" | "sse") => string;
+
 function runLongPoll(
-	conn: Connection,
-	path: string,
+	urlFor: TailUrlFor,
 	fromOffset: string,
 	onBatch: (batch: TailBatch) => void,
 	onState: (status: TailStatus) => void,
@@ -879,7 +984,7 @@ function runLongPoll(
 	async function loop(): Promise<void> {
 		onState({ state: "connecting" });
 		while (!stopped) {
-			const url = tailUrl(conn, path, offset, "long-poll");
+			const url = urlFor(offset, "long-poll");
 			const { exchange, response } = await doFetch(
 				"GET",
 				url,
@@ -959,13 +1064,12 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
  * ------------------------------------------------------------------------- */
 
 function runSse(
-	conn: Connection,
-	path: string,
+	urlFor: TailUrlFor,
 	fromOffset: string,
 	onMessage: (batch: TailBatch) => void,
 	onState: (status: TailStatus) => void,
 ): TailStopper {
-	const url = tailUrl(conn, path, fromOffset, "sse");
+	const url = urlFor(fromOffset, "sse");
 	let stopped = false;
 	let opened = false;
 

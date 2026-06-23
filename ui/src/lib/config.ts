@@ -14,19 +14,27 @@ import type { DsuiConfig } from "./types";
 export const CONFIG_PATH = "/dsui-config.json";
 
 /** A config with no prefill — the safe fallback for every failure mode. */
-const EMPTY_CONFIG: DsuiConfig = { defaultServer: null };
+const EMPTY_CONFIG: DsuiConfig = { defaultServer: null, captureBase: null };
+
+/** Read a string field, trimming and mapping "" / non-string to null. */
+function trimmedOrNull(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const trimmed = value.trim();
+	return trimmed === "" ? null : trimmed;
+}
 
 /**
  * Narrow an unknown parsed body into a {@link DsuiConfig}. An empty-string
  * defaultServer (the binary's "no --server" encoding) is treated as null so
- * callers get a single "nothing to prefill" sentinel.
+ * callers get a single "nothing to prefill" sentinel; captureBase is read the
+ * same way (the binary always sends a non-empty value, but `vite dev` omits it).
  */
 export function coerceConfig(raw: unknown): DsuiConfig {
 	if (!isRecord(raw)) return EMPTY_CONFIG;
-	const ds = raw.defaultServer;
-	if (typeof ds !== "string") return EMPTY_CONFIG;
-	const trimmed = ds.trim();
-	return { defaultServer: trimmed === "" ? null : trimmed };
+	return {
+		defaultServer: trimmedOrNull(raw.defaultServer),
+		captureBase: trimmedOrNull(raw.captureBase),
+	};
 }
 
 /**
