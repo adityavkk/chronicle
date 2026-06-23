@@ -131,3 +131,54 @@ describe("MessagesWorkspace grid", () => {
 		expect(document.activeElement).toBe(options[2]);
 	});
 });
+
+describe("MessagesWorkspace filter", () => {
+	function typeFilter(value: string): void {
+		const input = screen.getByRole("searchbox", { name: "Filter messages" });
+		fireEvent.input(input, { target: { value } });
+	}
+
+	it("narrows the visible rows to the matching subset", () => {
+		render(<MessagesWorkspace />);
+		expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(3);
+
+		typeFilter("line 1");
+
+		const options = within(screen.getByRole("listbox")).getAllByRole("option");
+		expect(options).toHaveLength(1);
+		// The batch-index # stays honest: the surviving row keeps its original
+		// index (1), not a re-numbered filtered position.
+		expect(options[0]?.getAttribute("aria-label")).toContain("Message 1");
+	});
+
+	it("shows a 'showing N of M' count while filtering", () => {
+		render(<MessagesWorkspace />);
+		typeFilter("line 1");
+		expect(screen.getByText(/showing 1 of 3/)).toBeTruthy();
+	});
+
+	it("keeps exactly one tab stop over the filtered subset, even when the active row is hidden", () => {
+		// The active (selected) row is index 0; filtering to "line 2" hides it.
+		render(<MessagesWorkspace />);
+		typeFilter("line 2");
+		const options = within(screen.getByRole("listbox")).getAllByRole("option");
+		expect(options).toHaveLength(1);
+		// The lone visible row (index 2) must own the single tab stop so the list
+		// stays reachable rather than orphaning the tab stop on the hidden row.
+		expect(options[0]?.getAttribute("tabindex")).toBe("0");
+		expect(options[0]?.getAttribute("aria-label")).toContain("Message 2");
+	});
+
+	it("shows a no-match note and a Clear control that restores every row", () => {
+		render(<MessagesWorkspace />);
+		typeFilter("nothing-matches-this");
+		expect(screen.queryByRole("listbox")).toBeNull();
+		expect(screen.getByText("No rows match the filter")).toBeTruthy();
+
+		// Both the filter box and the no-match note offer a Clear control; either
+		// restores the full batch.
+		const clears = screen.getAllByRole("button", { name: "Clear filter" });
+		fireEvent.click(clears[0] as HTMLElement);
+		expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(3);
+	});
+});
