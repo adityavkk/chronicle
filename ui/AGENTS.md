@@ -474,6 +474,102 @@ The whole panel is built + unit-tested against a mocked store/`fetch` — there 
 no live `__ds` server in this environment (Redis-only backend; Docker/Colima may
 be down), so do NOT block on one.
 
+## The wake-monitor seam (and the tool-side webhook-capture endpoint)
+
+The Wake Monitor (`centerView === "wakes"`, `components/WakeMonitorWorkspace.tsx`)
+makes the publish → wake → hook → ack loop visible as a dual split-screen for one
+subscription. It follows the same layering — pure logic in `lib/`, the only
+chronicle `fetch` in `dsClient.ts`, mutation only in the store, layout in the
+component — but it adds one thing that is NOT chronicle: a small webhook receiver
+the dsui *binary* hosts, because a browser cannot host an inbound webhook.
+
+**The hard rule first: the capture endpoint is a TOOL feature, not protocol.**
+`cmd/dsui/capture.go` is a plain in-memory webhook receiver (`POST /__hooks/{id}`
+buffers a delivery into a bounded per-bucket ring; `GET /__hooks/{id}/stream`
+replays the buffer then streams new deliveries over SSE as named `delivery`
+events; `GET /__hooks/{id}` lists the buffer). It touches NO protocol/server code
+and changes nothing about Durable Streams — it exists only so a webhook
+subscription's `webhook_url` has something to point at. Keep it that way: do not
+let capture logic leak into the chronicle server, and do not let it pretend to be
+part of the protocol surface. It is unit-tested standalone (`capture_test.go`,
+`go test ./cmd/dsui/...`) against an `httptest` mux with no chronicle and no
+embedded UI.
+
+Two wake planes, two transports:
+
+- **Webhook plane → the capture transport (`lib/capture.ts`).** `openCaptureStream`
+  opens a browser `EventSource` on `<captureBase>/__hooks/<bucket>/stream` and
+  reports lifecycle via the SAME `TailStatus` vocabulary as the stream tail (so
+  the monitor reuses `lib/tail`'s status helpers). It is deliberately SEPARATE
+  from `dsClient`: `dsClient` is bound to a chronicle `Connection` and only ever
+  speaks the protocol; the capture endpoint is the tool's own origin (`captureBase`,
+  served by the same dsui binary), so its single `EventSource` lives in
+  `lib/capture.ts`, mirroring how `dsClient.openSse` owns the stream `EventSource`.
+  It never throws (missing `EventSource` / malformed event → error status / skipped
+  record) and returns a `CaptureStopper`.
+- **Pull-wake plane → a normal chronicle tail (`dsClient.openWakeStreamSse`).** A
+  pull-wake subscription's wakes are durable events on its `wake_stream`, which IS
+  chronicle, so that one stays in `dsClient` as an ordinary SSE tail returning a
+  `TailStopper`.
+
+The pure seam (`lib/wakes.ts`, dependency-free + unit-tested in `wakes.test.ts`):
+`captureUrl` / `captureStreamUrl` build the capture URLs; `parseCaptureDelivery`
+/ `parseCaptureDeliveryData` parse the relayed SSE record; `parseSignatureHeader`
+/ `hasSignature` split a `Webhook-Signature` (`t=…,kid=…,ed25519=…`) for DISPLAY
+only (verification is asymmetric Ed25519 over `"<t>.<rawBody>"` against the JWKS —
+the monitor links to `/__ds/jwks.json` rather than verifying); `parseWakeNotification`
+parses a webhook delivery's JSON body (requires a `wake_id`); `parseWakeEvent`
+decodes a tailed pull-wake row (requires `type:"wake"` + a stream). All are
+tolerant of missing/extra fields, like `lib/guards` / `lib/subscriptions`. The
+file also holds the **Wake demo** previewed operations (`previewWakeDemoCreateStream`
+/ `previewWakeDemoRegister` / `previewWakeDemoPublish`, the `WAKE_DEMO_*`
+constants) so the demo's copy-as-curl is exact — same preview discipline as
+`lib/streamForm`.
+
+Store glue (`state/store.ts`): the watched-subscription signals `wakeSubId` /
+`wakeBucket` (the capture-bucket name, the sub id by convention) / `wakeSubscription`
+(derived); the capped buffers `wakeDeliveries` (webhook, deduped on the monotonic
+`seq`) and `wakeEvents` (pull-wake), both bounded by `WAKE_BUFFER_CAP`; the feed
+status `wakeFeedStatus`; the causal cue `wakePulse` (a monotonic counter the left
+pane bumps on publish so the right pane can flash "a wake is coming"); and the
+tool-config signal `captureBase` (from `/dsui-config.json`). The actions are
+`openWakeMonitor(id)` (flip to `"wakes"`, default the left source to the sub's
+first linked stream, fetch the view, open the matching feed), `closeWakeMonitor`,
+`restartWakeFeed`, and `publishAndPulse` (publish on the left + bump `wakePulse`).
+The live feed is owned by a module-level `wakeFeedStopper` that `startWakeFeed` /
+`stopWakeFeed` are the ONLY mutators of — `startWakeFeed` picks capture-SSE vs
+`wake_stream`-tail by `sub.type`; `pushDelivery` / `pushWakeEvents` are the feed
+callbacks.
+
+**The wake-feed lifecycle effect — do not remove it.** `WakeMonitorWorkspace`
+only mounts while `centerView === "wakes"`, but the always-visible Navigator can
+flip `centerView` away (selecting a stream / subscription / Metrics) and unmount
+the workspace WITHOUT going through `closeWakeMonitor()`. So the single seam that
+tears the live feed down is a store-level effect:
+
+```ts
+effect(() => {
+  if (centerView.value !== "wakes") stopWakeFeed();
+});
+```
+
+This is what prevents a hidden view from leaking an `EventSource` / `wake_stream`
+tail. Re-opening the monitor re-establishes the feed via `openWakeMonitor →
+startWakeFeed`. If you add another way to leave the monitor, this effect already
+covers it (it keys off `centerView`, not off any one exit path) — keep routing
+exits through `centerView` rather than tearing the feed down ad hoc.
+
+The binary side (`cmd/dsui/main.go`): `registerCaptureRoutes` wires the endpoint;
+`--capture-base` overrides the URL chronicle uses to reach it (default
+`http://localhost<port>`); `/dsui-config.json` carries `captureBase` alongside
+`defaultServer`. Entry points into the monitor: a subscription's "Watch wakes"
+action (`SubscriptionWorkspace`) and the Playground's one-click "Wake demo"
+(`store.runWakeDemo`). Real webhook delivery needs a Redis-backed chronicle with
+subscriptions enabled AND the dsui binary running (not `vite dev`, which serves no
+capture endpoint) — the monitor surfaces a clear status when `captureBase` is
+absent, and everything is unit-tested against a mocked feed, so do NOT block wake
+work on a live server.
+
 ## How to add another operation, end to end
 
 Every operation in dsui follows the same path: a client method does the request,
