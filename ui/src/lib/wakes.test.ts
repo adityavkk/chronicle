@@ -189,9 +189,9 @@ describe("parseWakeEvent", () => {
 
 describe("wake-demo previews", () => {
 	it("registers a webhook subscription pointed at the capture endpoint", () => {
-		const op = previewWakeDemoRegister(BASE, CAPTURE);
+		const op = previewWakeDemoRegister(BASE, "/v1/stream", CAPTURE);
 		expect(op.method).toBe("PUT");
-		expect(op.url).toBe(`${BASE}/__ds/subscriptions/${WAKE_DEMO_SUB_ID}`);
+		expect(op.url).toBe(`${BASE}/v1/stream/__ds/subscriptions/${WAKE_DEMO_SUB_ID}`);
 		const body = JSON.parse(String(op.body));
 		expect(body.type).toBe("webhook");
 		expect(body.streams).toEqual([WAKE_DEMO_STREAM]);
