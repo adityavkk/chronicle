@@ -61,6 +61,16 @@ jobs:
   # INV-CLOSE-01, INV-READ-01 (single-slot EVAL = linearization point, no torn /
   # gapped / duplicated frame, idempotent close, exact offset-exclusive suffix incl.
   # clean read-past-close EOF) to the shipped store/redis Lua — prose-only before.
+  # composed (#36) is the TWO-FENCE COMPOSITION gate: K workers contend on ONE
+  # (sub, slot), racing the subscription's inner (gen, wake) lease fence AND that
+  # slot's outer (owner, epoch) ownership lease at once (claim_shard transfer/renew
+  # interleaved with claim/ack/release under the caller's OwnerScope so ack.lua
+  # inlines owner_fenced above the (gen,wake) fence), and the history is checked
+  # against composedModel() (model_composed.go). It binds INV-FENCE-01 (single-holder)
+  # ACROSS owner-epoch transitions and INV-OWNER-02 (owner-epoch is optimization-only,
+  # never a correctness dependency): every server OK must be fence-valid under the
+  # inner register ALONE. The fork-sub-offset differential (#36 data plane) runs in
+  # the `test` job's `go test ./...` (store/redis against the containerized Redis).
   # Bounds (-slots/-workers/-workload-ms) keep each per-key Porcupine search inside
   # its budget; Unknown counts as FAIL, so a future drift between the oracle and the
   # shipped Lua is caught here. On a counterexample the VisualizePath witness is
@@ -103,12 +113,24 @@ jobs:
           jepsen/bin/jepsen-checker -scenario store-linz \
             -redis-url redis://localhost:6379/14 \
             -workers 4 -workload-ms 4000
+      - name: INV-OWNER-02 composed two-fence ((gen,wake) x (owner,epoch)) interaction
+        run: |
+          jepsen/bin/jepsen-checker -scenario composed \
+            -redis-url redis://localhost:6379/14 \
+            -workers 4 -workload-ms 4000
       - name: Upload store-linz Porcupine counterexample (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: store-linz-counterexample
           path: store-linz-counterexample.html
+          if-no-files-found: ignore
+      - name: Upload composed Porcupine counterexample (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: composed-counterexample
+          path: composed-counterexample.html
           if-no-files-found: ignore
 
   # P1.2 (issue #31): the THIRD differential oracle — the proven Lean
