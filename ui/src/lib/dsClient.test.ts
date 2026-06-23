@@ -496,14 +496,25 @@ describe("closeStream / deleteStream", () => {
 });
 
 describe("forkStream", () => {
-	it("PUTs the new path with Stream-Forked-From / Stream-Fork-Offset", async () => {
-		const fetchFn = stubFetch({ status: 201, headers: { Location: "/v1/stream/fork" } });
+	it("HEADs the source for its content type, then PUTs the fork with the full source path", async () => {
+		const fetchFn = stubFetch(
+			{ status: 200, headers: { "Content-Type": "application/json" } }, // HEAD source
+			{ status: 201, headers: { Location: "/v1/stream/fork" } }, // PUT fork
+		);
 		const result = await createClient(CONN).forkStream("fork", "orders", "cursor-3", 2);
-		const init = fetchFn.mock.calls[0]?.[1] as RequestInit;
-		expect(init.method).toBe("PUT");
-		expect(fetchFn.mock.calls[0]?.[0]).toBe(streamUrl(CONN, "fork"));
-		expect(reqHeaders(fetchFn)).toMatchObject({
-			"Stream-Forked-From": "orders",
+
+		// call 0 = HEAD the source stream to learn its content type
+		expect((fetchFn.mock.calls[0]?.[1] as RequestInit).method).toBe("HEAD");
+		expect(fetchFn.mock.calls[0]?.[0]).toBe(streamUrl(CONN, "orders"));
+
+		// call 1 = PUT the fork, matching the source's content type
+		expect((fetchFn.mock.calls[1]?.[1] as RequestInit).method).toBe("PUT");
+		expect(fetchFn.mock.calls[1]?.[0]).toBe(streamUrl(CONN, "fork"));
+		expect(reqHeaders(fetchFn, 1)).toMatchObject({
+			// must match the source's content type or the server 409s
+			"Content-Type": "application/json",
+			// the full source request path, not the bare name (the server 404s on bare)
+			"Stream-Forked-From": "/v1/stream/orders",
 			"Stream-Fork-Offset": "cursor-3",
 			"Stream-Fork-Sub-Offset": "2",
 		});
@@ -511,9 +522,13 @@ describe("forkStream", () => {
 	});
 
 	it("omits the sub-offset header when not given", async () => {
-		const fetchFn = stubFetch({ status: 201 });
+		const fetchFn = stubFetch(
+			{ status: 200, headers: { "Content-Type": "application/json" } },
+			{ status: 201 },
+		);
 		await createClient(CONN).forkStream("fork", "orders", "cursor-3");
-		expect(reqHeaders(fetchFn)["Stream-Fork-Sub-Offset"]).toBeUndefined();
+		// The PUT is the second call, after the HEAD probe.
+		expect(reqHeaders(fetchFn, 1)["Stream-Fork-Sub-Offset"]).toBeUndefined();
 	});
 });
 
@@ -635,5 +650,52 @@ describe("openSse", () => {
 		expect(states).toContain("error");
 		// Calling the stopper does not throw.
 		expect(() => stop()).not.toThrow();
+	});
+
+	it("decodes chronicle's named 'data' / 'control' events (not just onmessage)", () => {
+		type Listener = (ev: Event) => void;
+		const listeners = new Map<string, Listener>();
+		class MockEventSource {
+			static readonly CLOSED = 2;
+			readyState = 1;
+			onopen: Listener | null = null;
+			onmessage: Listener | null = null;
+			onerror: Listener | null = null;
+			readonly url: string;
+			constructor(url: string) {
+				this.url = url;
+			}
+			addEventListener(type: string, fn: Listener): void {
+				listeners.set(type, fn);
+			}
+			close(): void {
+				this.readyState = MockEventSource.CLOSED;
+			}
+		}
+		vi.stubGlobal("EventSource", MockEventSource);
+
+		const values: unknown[] = [];
+		const liveOffsets: Array<string | null> = [];
+		const stop = createClient(CONN).openSse(
+			"s",
+			"now",
+			(batch) => {
+				for (const r of batch.rows) values.push(r.value);
+			},
+			(status) => {
+				if (status.state === "live") liveOffsets.push(status.atOffset);
+			},
+		);
+
+		// chronicle frames a batch as a JSON array on a named `data` event,
+		// and reports the resume offset on a named `control` event.
+		listeners.get("data")?.({ data: '[{"id":1},{"id":2}]' } as unknown as Event);
+		listeners.get("control")?.({
+			data: '{"streamNextOffset":"off-9","upToDate":true}',
+		} as unknown as Event);
+		stop();
+
+		expect(values).toEqual([{ id: 1 }, { id: 2 }]);
+		expect(liveOffsets).toContain("off-9");
 	});
 });

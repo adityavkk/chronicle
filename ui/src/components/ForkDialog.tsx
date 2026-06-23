@@ -171,7 +171,8 @@ export function ForkDialog(): JSX.Element | null {
 							</p>
 						) : (
 							<p class="dsui-field__hint" id={`${ids.offset}-hint`}>
-								<code>Stream-Fork-Offset</code> — data up to here is inherited.
+								The batch boundary to cut at — everything up to here is inherited. Defaults to the
+								current tail (inherit all messages).
 							</p>
 						)}
 					</div>
@@ -203,7 +204,8 @@ export function ForkDialog(): JSX.Element | null {
 							</p>
 						) : (
 							<p class="dsui-field__hint" id={`${ids.sub}-hint`}>
-								<code>Stream-Fork-Sub-Offset</code> — a batch element index.
+								Optional. Messages from one publish share a single batch offset, so set this to a
+								message index to cut inside that batch — keep the first N messages of it.
 							</p>
 						)}
 					</div>
