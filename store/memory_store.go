@@ -20,10 +20,30 @@ type MemoryStore struct {
 	streams  map[string]*memoryStream
 	longPoll *longPollManager
 
+	// clock is the time source for sliding-TTL touches, lazy-expiry
+	// decisions, and producer-state stamping. Defaults to the real wall
+	// clock; the equivalence harness (issue #26) injects a FakeClock so
+	// TTL/expiry is reproducible at a frozen instant.
+	clock Clock
+
 	// Per-producer locks for serializing validation+append
 	// Key: "{streamPath}:{producerId}"
 	producerLocks   map[string]*sync.Mutex
 	producerLocksMu sync.Mutex
+}
+
+// MemoryStoreOption configures a MemoryStore at construction.
+type MemoryStoreOption func(*MemoryStore)
+
+// WithClock injects a Clock into the MemoryStore so expiry/TTL decisions are
+// driven by a controllable time source (default: the real wall clock). A nil
+// clock is ignored.
+func WithClock(c Clock) MemoryStoreOption {
+	return func(s *MemoryStore) {
+		if c != nil {
+			s.clock = c
+		}
+	}
 }
 
 type memoryStream struct {
@@ -37,15 +57,31 @@ type longPollManager struct {
 	waiters map[string][]chan struct{}
 }
 
-// NewMemoryStore creates a new in-memory store
-func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
+// NewMemoryStore creates a new in-memory store. By default it uses the real
+// wall clock; pass WithClock to inject a controllable time source.
+func NewMemoryStore(opts ...MemoryStoreOption) *MemoryStore {
+	s := &MemoryStore{
 		streams: make(map[string]*memoryStream),
 		longPoll: &longPollManager{
 			waiters: make(map[string][]chan struct{}),
 		},
+		clock:         RealClock(),
 		producerLocks: make(map[string]*sync.Mutex),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// now returns the store's current time via the injected clock.
+func (s *MemoryStore) now() time.Time { return s.clock.Now() }
+
+// isExpired evaluates a stream's expiry against the injected clock, so the
+// MemoryStore's lazy-expiry agrees with the Redis backend at a shared frozen
+// instant (issue #26).
+func (s *MemoryStore) isExpired(m *StreamMetadata) bool {
+	return m.IsExpiredAt(s.clock.Now())
 }
 
 // getProducerLock returns a per-producer mutex for serializing validation+append.
@@ -72,7 +108,7 @@ func (s *MemoryStore) validateProducer(meta *StreamMetadata, opts AppendOptions)
 	if meta.Producers != nil {
 		state = meta.Producers[opts.ProducerId]
 	}
-	return ValidateProducer(state, *opts.ProducerEpoch, *opts.ProducerSeq, time.Now().Unix())
+	return ValidateProducer(state, *opts.ProducerEpoch, *opts.ProducerSeq, s.now().Unix())
 }
 
 // Create implements Store.
@@ -82,7 +118,7 @@ func (s *MemoryStore) Create(path string, opts CreateOptions) (*StreamMetadata, 
 
 	// Check if stream already exists
 	if existing, ok := s.streams[path]; ok {
-		if existing.metadata.IsExpired() {
+		if s.isExpired(&existing.metadata) {
 			// Expired: delete and proceed with creation
 			delete(s.streams, path)
 		} else if existing.metadata.SoftDeleted {
@@ -112,7 +148,7 @@ func (s *MemoryStore) Create(path string, opts CreateOptions) (*StreamMetadata, 
 		if ss.metadata.SoftDeleted {
 			return nil, false, ErrStreamSoftDeleted
 		}
-		if ss.metadata.IsExpired() {
+		if s.isExpired(&ss.metadata) {
 			return nil, false, ErrStreamNotFound
 		}
 
@@ -170,7 +206,7 @@ func (s *MemoryStore) Create(path string, opts CreateOptions) (*StreamMetadata, 
 	}
 
 	// Build metadata
-	now := time.Now()
+	now := s.now()
 	meta := StreamMetadata{
 		Path:           path,
 		ContentType:    contentType,
@@ -282,7 +318,7 @@ func (s *MemoryStore) Get(path string) (*StreamMetadata, error) {
 	}
 
 	// Check if stream has expired
-	if stream.metadata.IsExpired() {
+	if s.isExpired(&stream.metadata) {
 		return nil, ErrStreamNotFound // Return not found for expired streams
 	}
 
@@ -303,7 +339,7 @@ func (s *MemoryStore) Has(path string) bool {
 		return false
 	}
 	// Check if stream has expired
-	return !stream.metadata.IsExpired()
+	return !s.isExpired(&stream.metadata)
 }
 
 // Delete implements Store.
@@ -381,7 +417,7 @@ func (s *MemoryStore) CloseStream(path string) (*CloseResult, error) {
 	}
 
 	// Check if stream has expired
-	if stream.metadata.IsExpired() {
+	if s.isExpired(&stream.metadata) {
 		return nil, ErrStreamNotFound
 	}
 
@@ -413,7 +449,7 @@ func (s *MemoryStore) CloseStreamWithProducer(path string, opts CloseProducerOpt
 	}
 
 	// Check if stream has expired
-	if stream.metadata.IsExpired() {
+	if s.isExpired(&stream.metadata) {
 		return nil, ErrStreamNotFound
 	}
 
@@ -520,12 +556,12 @@ func (s *MemoryStore) Append(path string, data []byte, opts AppendOptions) (Appe
 	}
 
 	// Check if stream has expired
-	if stream.metadata.IsExpired() {
+	if s.isExpired(&stream.metadata) {
 		return AppendResult{}, ErrStreamNotFound
 	}
 
 	// Refresh TTL sliding window
-	stream.metadata.LastAccessedAt = time.Now()
+	stream.metadata.LastAccessedAt = s.now()
 
 	// Check if stream is closed
 	if stream.metadata.Closed {
@@ -758,7 +794,7 @@ func (s *MemoryStore) Read(path string, offset Offset) ([]Message, bool, error) 
 	}
 
 	// Check if stream has expired
-	if stream.metadata.IsExpired() {
+	if s.isExpired(&stream.metadata) {
 		if stream.metadata.RefCount > 0 {
 			// Expiry with active forks: treat as soft-delete
 			stream.metadata.SoftDeleted = true
@@ -774,7 +810,7 @@ func (s *MemoryStore) Read(path string, offset Offset) ([]Message, bool, error) 
 	}
 
 	// Refresh TTL sliding window
-	stream.metadata.LastAccessedAt = time.Now()
+	stream.metadata.LastAccessedAt = s.now()
 
 	// Read messages across fork chain
 	messages := s.readForkedStream(stream, offset)
