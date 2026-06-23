@@ -106,7 +106,48 @@ echo "############################################################"
 jepsen/bin/jepsen-checker -base "$BASE" -cluster "${CTX#k3d-}" -namespace "$NS" \
   -scenario lease-tail-drop -floor 0
 
-echo "==> gate #5 PASS criteria: BOTH lease-tail-drop runs exit 0 — the stranded webhook"
-echo "    sub is recovered ONLY by the cursor-reading eager reconcile (the lease worker"
-echo "    was blind to the dropped tail) AND the deposed ack returned 409 FENCED, across"
-echo "    a REAL promotion (not AOF replay). Teardown runs on exit."
+echo "############################################################"
+echo "# gate #5d: the ASSERTING failover scenario (#43) — at-least-once + deposed-FENCED"
+echo "#           across a REAL promotion, with empirical RPO/RTO"
+echo "############################################################"
+# This is the issue-#43 deliverable: rather than re-running lease-tail-drop, drive
+# the dedicated `failover` scenario, which itself injects the real primary loss +
+# replica promotion mid-flight (the redisFailover nemesis), waits for the boot
+# reconcile, then asserts via CheckAtLeastOnce that every linked stream still
+# reaches acked_offset == tail (a dropped fence-write degraded ONLY to at-least-once,
+# deduped by the monotone cursor) AND that a deposed worker's late ack is 409 FENCED
+# (no double-grant / cursor regression survived the promotion). It prints a single
+# machine-readable verdict line (GATE5-FAILOVER-VERDICT: PASS|FAIL) plus the
+# durability-honest RPO/RTO tiers. We re-apply the substrate so the scenario has a
+# fresh primary/replica pair to fail over (gate #5b already deposed the first one).
+echo "==> re-apply STANDARD_HA so the asserting scenario has a fresh primary to fail over"
+kubectl --context "$CTX" apply -f deploy/standard-ha.yaml
+K rollout status deploy/redis-primary --timeout=120s
+K rollout status deploy/redis-replica --timeout=120s
+K rollout status deploy/chronicle --timeout=180s
+# re-point the stable endpoint back to the primary (gate #5b left it on the replica)
+K patch service redis -p '{"spec":{"selector":{"app":"redis","role":"primary"}}}'
+for _ in $(seq 1 30); do
+  K exec deploy/redis-replica -- redis-cli info replication 2>/dev/null | grep -q 'master_link_status:up' && break
+  sleep 2
+done
+kill "$pf_pid" 2>/dev/null || true
+K port-forward svc/chronicle 4438:4437 >/dev/null 2>&1 &
+pf_pid=$!
+sleep 3
+
+set +e
+verdict_out="$(jepsen/bin/jepsen-checker -base "$BASE" -cluster "${CTX#k3d-}" -namespace "$NS" \
+  -scenario failover -streams 6 -msgs 30 2>&1)"
+verdict_rc=$?
+set -e
+echo "$verdict_out"
+echo "$verdict_out" | grep -E '^GATE5-FAILOVER-VERDICT|empirical RPO|empirical RTO|CLAIM:' || true
+
+echo "==> gate #5 PASS criteria: gate #5a/#5b/#5c lease-tail-drop runs exit 0 (the stranded"
+echo "    sub is recovered ONLY by the cursor-reading eager reconcile and the deposed ack is"
+echo "    409 FENCED across a real promotion), AND gate #5d prints GATE5-FAILOVER-VERDICT: PASS"
+echo "    (every linked stream reached tail = at-least-once; the deposed ack was FENCED; the"
+echo "    empirical RPO/RTO are recorded as durability-honest tiers, NOT a strong-consistency"
+echo "    claim). Teardown runs on exit (STOP THE METER)."
+exit $verdict_rc

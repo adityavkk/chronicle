@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -119,13 +120,54 @@ func (s *RedisStore) awaitDurable() error {
 			return fmt.Errorf("webhook: WAITAOF: %w", err)
 		}
 		gotLocal, gotReplicas := waitAOFCounts(raw)
-		return InterpretWaitAOF(plan, gotLocal, gotReplicas)
+		return s.recordDurabilityShort(InterpretWaitAOF(plan, gotLocal, gotReplicas), "WAITAOF")
 	}
 	n, err := s.client.Do(s.ctx(), "WAIT", plan.NumReplicas, plan.TimeoutMs).Int()
 	if err != nil {
 		return fmt.Errorf("webhook: WAIT: %w", err)
 	}
-	return InterpretWait(plan, n)
+	return s.recordDurabilityShort(InterpretWait(plan, n), "WAIT")
+}
+
+// recordDurabilityShort reports a short WAIT/WAITAOF reply to the Metrics seam (the
+// RPO-exposure signal, issue #43) and returns the verdict unchanged. It fires ONLY
+// when the verdict is a *DurabilityShortError — a satisfied durability barrier
+// (nil) records nothing. The metric conveys durability only: it takes the command
+// name, never the ack counts, holder, or generation (correction #3). The verdict
+// itself is still returned so it remains a surfaced error that stops dispatch; the
+// metric makes it OBSERVABLE, it does not swallow it.
+func (s *RedisStore) recordDurabilityShort(verdict error, cmd string) error {
+	var de *DurabilityShortError
+	if verdict != nil && errors.As(verdict, &de) && s.metrics != nil {
+		s.metrics.DurabilityShort(cmd)
+	}
+	return verdict
+}
+
+// AssertAOFEnabled is the IO shell over the pure consistency.AssertAOFEnabled
+// boot-time guard: when this store is configured Tier B it reads CONFIG GET
+// appendonly and INFO replication from the connected Redis and asserts AOF is on
+// and the topology can satisfy the configured replica requirement, so a
+// mis-provisioned Tier B deployment fails fast at startup rather than silently
+// running a WAITAOF path that proves nothing (issue #43). It is a no-op for Tier
+// A/C (which issue no WAITAOF), returning nil without touching Redis. The numbers
+// flow only into the pure total function; nothing here makes an exclusivity
+// decision (correction #3).
+func (s *RedisStore) AssertAOFEnabled(tier ConsistencyTier, wantReplicas int) error {
+	if tier != TierB {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(s.ctx(), 5*time.Second)
+	defer cancel()
+	appendonly, err := s.client.ConfigGet(ctx, "appendonly").Result()
+	if err != nil {
+		return fmt.Errorf("webhook: Tier B AOF assertion: CONFIG GET appendonly: %w", err)
+	}
+	info, err := s.client.Info(ctx, "replication").Result()
+	if err != nil {
+		return fmt.Errorf("webhook: Tier B AOF assertion: INFO replication: %w", err)
+	}
+	return AssertAOFEnabled(tier, appendonly["appendonly"], ParseConnectedReplicas(info), wantReplicas)
 }
 
 // waitAOFCounts decodes WAITAOF's [numlocal, numreplicas] integer-pair reply.

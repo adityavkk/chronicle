@@ -91,7 +91,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|failover|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
@@ -190,6 +190,19 @@ func run(c config, r *receiver) error {
 	if c.scenario == "lease-tail-drop" {
 		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
 		return runLeaseTailDrop(c, nem)
+	}
+
+	// failover (#43, gate #5) is the REAL-failover assertion: drive K pull-wake subs
+	// to cursor==tail, inject a real primary loss + replica promotion (the
+	// redisFailover nemesis on the STANDARD_HA substrate), wait for the boot
+	// reconcile, then assert via CheckAtLeastOnce that every stream still reaches
+	// tail (a dropped fence-write degraded only to at-least-once) AND a deposed
+	// worker's late ack is FENCED (no double-grant / cursor regression survived the
+	// promotion). It records the empirical RPO/RTO. Self-contained over the claim/ack
+	// API — no webhook receiver (scenario_failover.go).
+	if c.scenario == "failover" {
+		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		return runFailover(c, nem)
 	}
 
 	// ownership-exclusivity (T3) is now LIVE (#14 landed claim_shard.lua /
