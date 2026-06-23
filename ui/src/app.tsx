@@ -17,14 +17,23 @@
 import type { JSX } from "preact";
 import { ConnectionManager } from "./components/ConnectionManager";
 import { CreateStreamDialog } from "./components/CreateStreamDialog";
+import { CreateSubscriptionDialog } from "./components/CreateSubscriptionDialog";
 import { ForkDialog } from "./components/ForkDialog";
 import { Inspector } from "./components/Inspector";
 import { MessagesWorkspace } from "./components/MessagesWorkspace";
+import { MetricsWorkspace } from "./components/MetricsWorkspace";
 import { Navigator } from "./components/Navigator";
 import { StartScreen } from "./components/StartScreen";
+import { SubscriptionWorkspace } from "./components/SubscriptionWorkspace";
 import { Toaster } from "./components/Toaster";
 import { IconStream } from "./components/icons";
-import { activeConnection, activeDialog, dismissError, errorMessage } from "./state/store";
+import {
+	activeConnection,
+	activeDialog,
+	centerView,
+	dismissError,
+	errorMessage,
+} from "./state/store";
 
 function ErrorBanner(): JSX.Element | null {
 	const msg = errorMessage.value;
@@ -39,6 +48,18 @@ function ErrorBanner(): JSX.Element | null {
 	);
 }
 
+/** The center workspace for the active view. The single center-pane routing seam. */
+function CenterWorkspace(): JSX.Element {
+	switch (centerView.value) {
+		case "subscription":
+			return <SubscriptionWorkspace />;
+		case "metrics":
+			return <MetricsWorkspace />;
+		case "messages":
+			return <MessagesWorkspace />;
+	}
+}
+
 /** The routed content: the start screen, or the three-pane workspace shell. */
 function Shell(): JSX.Element {
 	// No active connection -> the connection manager's start screen. Otherwise
@@ -47,8 +68,13 @@ function Shell(): JSX.Element {
 		return <StartScreen />;
 	}
 
+	// The right-hand inspector is the message inspector; it is meaningful only in
+	// the messages view. The subscription + metrics views carry their own detail
+	// in the center pane, so the inspector folds away for them.
+	const showInspector = centerView.value === "messages";
+
 	return (
-		<div class="dsui-shell">
+		<div class={`dsui-shell${showInspector ? "" : " dsui-shell--noinspector"}`}>
 			<header class="dsui-header">
 				<div class="dsui-brand">
 					<span class="dsui-brand__badge" aria-hidden="true">
@@ -69,11 +95,13 @@ function Shell(): JSX.Element {
 					<Navigator />
 				</aside>
 				<section class="dsui-region dsui-region--workspace">
-					<MessagesWorkspace />
+					<CenterWorkspace />
 				</section>
-				<aside class="dsui-region dsui-region--inspector">
-					<Inspector />
-				</aside>
+				{showInspector ? (
+					<aside class="dsui-region dsui-region--inspector">
+						<Inspector />
+					</aside>
+				) : null}
 			</main>
 		</div>
 	);
@@ -86,6 +114,8 @@ function Dialogs(): JSX.Element | null {
 			return <CreateStreamDialog />;
 		case "fork":
 			return <ForkDialog />;
+		case "subscription":
+			return <CreateSubscriptionDialog />;
 		case null:
 			return null;
 	}

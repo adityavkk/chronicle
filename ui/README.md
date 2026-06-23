@@ -34,6 +34,20 @@ plain HTTP requests from the browser.
 - Bootstrap the whole API from a Playground of one-click presets on a safe
   `playground/…` sample namespace (create, publish, demo producer, live tail,
   fork, close, delete).
+- Manage the server's reserved `__ds` subscription control plane: create a
+  webhook or pull-wake subscription (glob pattern and/or explicit streams, lease
+  TTL), view a subscription's detail (type, phase, generation, lease, and its
+  linked streams with their acked/tail offsets and pending state), add or remove
+  explicit stream links, and delete it. For a webhook subscription, see the
+  delivery URL, the signing key id, and a link to `/__ds/jwks.json`, plus the
+  exact ack-callback curl. For a pull-wake subscription, claim a lease, ack
+  offsets (with done to release or as a heartbeat), and release — with the
+  `409 FENCED` / `ALREADY_CLAIMED` cases surfaced as clear warnings. Because the
+  control plane has no list-all endpoint, dsui remembers the subscription ids you
+  create or track, per connection, in the browser.
+- Scrape and read the server's Prometheus metrics from the separate
+  `--metrics-listen` endpoint: a curated set of key fan-out / wake / claim
+  counters plus the full list of metric families.
 - Show, on demand, the real HTTP request and response that produced what you are
   looking at, with a plain-language explanation of the protocol headers.
 
@@ -150,15 +164,28 @@ The feature components are:
   connection" step that probes a candidate before you save it.
 - `ConnectionManager` — the header switcher and theme toggle.
 - `Navigator` — the left rail: the connected server, the stream list with an
-  instant filter, a manual-add box, a "New stream" button, the Playground, and
-  the disabled "coming next" rows.
-- `MessagesWorkspace` — the center: the read-mode + start toolbar, the publish
-  composer, the message grid (or the live tail), the pager, and the "Under the
-  hood" protocol disclosure.
-- `Inspector` — the right panel: the decoded value, the raw bytes, and the
-  captured response headers for the selected row.
+  instant filter, a manual-add box, a "New stream" button, the Playground, the
+  Subscriptions section (the tracked-ids list, a "track existing id" box, and a
+  create button), and a Metrics entry that switches the center pane.
+- `MessagesWorkspace` — the center messages view: the read-mode + start toolbar,
+  the publish composer, the message grid (or the live tail), the pager, and the
+  "Under the hood" protocol disclosure.
+- `SubscriptionWorkspace` — the center detail view for a selected subscription:
+  its type / phase / generation / lease metadata, the linked-streams table
+  (path · link type · acked → tail · pending) with add/remove controls, Delete,
+  and the type-specific controls (a webhook URL + JWKS link + ack-callback curl,
+  or the pull-wake Claim / Ack / Heartbeat / Release worker controls).
+- `MetricsWorkspace` — the center metrics view: the `--metrics-listen` URL input
+  and a Scrape button, a curated key-metric tile grid, and the full list of
+  metric families.
+- `CreateSubscriptionDialog` — the modal to create a subscription (webhook vs
+  pull-wake, glob pattern and/or explicit streams, lease TTL, the type-specific
+  target), with live validation and a copy-as-curl preview.
+- `Inspector` — the right panel (messages view only): the decoded value, the raw
+  bytes, and the captured response headers for the selected row.
 - `ProtocolPanel` — the collapsible HTTP transcript and protocol primer, plus a
-  "Live connection" block while a tail is open.
+  "Live connection" block while a tail is open. Every center view ends in one,
+  fed by the last captured exchange.
 
 The write, fork, live-tail, and Playground feature components are:
 
@@ -403,15 +430,23 @@ The build flow end to end:
 ui/ source ──vite build──▶ cmd/dsui/embedded ──go:embed──▶ dsui binary ──serves──▶ browser
 ```
 
+## A note on subscriptions and a live server
+
+The subscription control plane requires chronicle's Redis backend (`-store
+redis`); the in-memory store rejects subscriptions. So the Subscriptions panel
+is built and tested against a mocked client (the parsers handle 4xx / 5xx /
+network failures and the `409` fencing path is covered by unit tests), not
+against a live `__ds` server — there may not be one available in every
+environment. Point dsui at a Redis-backed chronicle server to exercise it for
+real. Metrics are served on a separate listener (the `--metrics-listen`
+address), so you enter that `/metrics` URL in the Metrics view; it is remembered
+per connection.
+
 ## Coming next
 
-The Navigator shows two disabled "coming next" rows (Subscriptions and Metrics).
-The workspace can now read-and-page or follow a stream's tail live (long-poll /
-SSE). The planned additions are:
+The Navigator's read/write/tail surface plus the Subscriptions panel and Metrics
+view are all live. The remaining planned addition is:
 
-- **Subscriptions.** A panel for the server's reserved `__ds` subscription APIs
-  (signed webhook delivery and pull-wake), so you can view and manage
-  subscriptions from the console.
 - **A real stream-list endpoint.** Discovery today reads the `__registry__`
   stream. A dedicated `GET /__ds/streams` listing endpoint would replace the
   registry reduction with a direct, paginated list of streams.

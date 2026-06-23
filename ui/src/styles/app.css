@@ -491,13 +491,9 @@
 }
 .dsui-nav__section--streams {
 	/* Size to content; the rail (not this section) owns the scroll, so the
-	   streams list, playground and coming-next all stay reachable at any height. */
+	   streams list, playground, subscriptions and metrics entry all stay
+	   reachable at any height. */
 	flex: 0 0 auto;
-}
-.dsui-nav__section--soon {
-	gap: 1px;
-	padding: var(--space-2);
-	border-block-start: 1px solid var(--border-subtle);
 }
 
 .dsui-nav__head {
@@ -2884,4 +2880,487 @@
 }
 .dsui-tail__stick.is-on {
 	color: var(--ok);
+}
+
+/* ====================================================================== */
+/* Subscriptions + Metrics (the reserved /__ds/* control plane)            */
+/* ====================================================================== */
+
+/* ---- Navigator: subscriptions section + metrics entry --------------- */
+.dsui-nav__section--subs {
+	flex: 0 0 auto;
+	border-block-start: 1px solid var(--border-subtle);
+}
+.dsui-nav__section--metrics {
+	flex: 0 0 auto;
+	padding: var(--space-2);
+	border-block-start: 1px solid var(--border-subtle);
+}
+
+/* A small type marker on a subscription row (webhook / pull-wake). */
+.dsui-subdot {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	color: var(--fg-subtle);
+}
+.dsui-treeitem.is-active .dsui-subdot {
+	color: var(--accent);
+}
+
+/* The Metrics rail entry — a single selectable row that switches the pane. */
+.dsui-nav__entry {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	inline-size: 100%;
+	padding: var(--space-2) var(--space-3);
+	font-size: var(--text-sm);
+	color: var(--fg-muted);
+	background: transparent;
+	border: 1px solid transparent;
+	border-radius: var(--radius-md);
+	transition: background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+.dsui-nav__entry:hover {
+	background: var(--bg-inset);
+	color: var(--fg);
+}
+.dsui-nav__entry.is-active {
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+.dsui-nav__entryicon {
+	flex: none;
+}
+.dsui-nav__entrylabel {
+	flex: 1;
+	text-align: start;
+	font-weight: var(--weight-medium);
+}
+.dsui-nav__entrycaret {
+	color: var(--fg-subtle);
+	flex: none;
+}
+
+/* ---- Shell: fold the inspector away for non-message views ----------- */
+.dsui-shell--noinspector .dsui-main {
+	grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+}
+
+/* ---- Workspace: a scrolling body for the detail views --------------- */
+.dsui-ws__scroll {
+	flex: 1;
+	min-block-size: 0;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+	padding: var(--space-4);
+}
+
+/* ---- A workspace detail section ------------------------------------- */
+.dsui-subsection {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+}
+.dsui-subsection__head {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	color: var(--fg-muted);
+}
+.dsui-subsection__title {
+	font-size: var(--text-xs);
+	font-weight: var(--weight-semibold);
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--fg-subtle);
+}
+.dsui-subsection__lede {
+	margin: 0;
+	font-size: var(--text-xs);
+	line-height: 1.6;
+	color: var(--fg-muted);
+}
+.dsui-subsection__lede code {
+	font-size: var(--text-2xs);
+	background: var(--code-bg);
+	padding: 0.05em 0.35em;
+	border-radius: var(--radius-xs);
+}
+
+/* ---- Type chip + phase pill ----------------------------------------- */
+.dsui-subchip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3em;
+	font-size: var(--text-2xs);
+	font-weight: var(--weight-medium);
+	padding: 0.1em 0.55em;
+	border-radius: var(--radius-full);
+	border: 1px solid transparent;
+}
+.dsui-subchip--webhook {
+	color: var(--accent);
+	background: var(--accent-soft);
+}
+.dsui-subchip--pull {
+	color: var(--info);
+	background: color-mix(in oklch, var(--info) 16%, transparent);
+}
+
+.dsui-phase {
+	font-size: var(--text-2xs);
+	font-weight: var(--weight-medium);
+	padding: 0.1em 0.55em;
+	border-radius: var(--radius-full);
+	text-transform: lowercase;
+}
+.dsui-phase--ok {
+	color: var(--ok);
+	background: var(--ok-soft);
+}
+.dsui-phase--warn {
+	color: var(--warn);
+	background: var(--warn-soft);
+}
+.dsui-phase--muted {
+	color: var(--fg-muted);
+	background: var(--bg-inset);
+}
+
+/* ---- Meta extras ---------------------------------------------------- */
+.dsui-meta__muted {
+	color: var(--fg-subtle);
+	font-style: italic;
+}
+.dsui-keyline {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	flex-wrap: wrap;
+}
+.dsui-keyline code {
+	background: var(--code-bg);
+	padding: 0.05em 0.35em;
+	border-radius: var(--radius-xs);
+}
+.dsui-extlink {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	color: var(--accent);
+	text-decoration: none;
+}
+.dsui-extlink:hover {
+	text-decoration: underline;
+}
+.dsui-extlink code {
+	color: inherit;
+	background: transparent;
+}
+
+/* ---- Linked-streams table ------------------------------------------- */
+.dsui-linktable {
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-md);
+	overflow: hidden;
+}
+.dsui-linktable {
+	border-collapse: collapse;
+	inline-size: 100%;
+}
+.dsui-linktable__head tr,
+.dsui-linktable__row {
+	display: grid;
+	grid-template-columns: minmax(0, 1.6fr) 5rem minmax(0, 1.4fr) 6rem auto;
+	gap: var(--space-2);
+	align-items: center;
+}
+.dsui-linktable th,
+.dsui-linktable td {
+	padding: var(--space-2) var(--space-3);
+	text-align: start;
+	min-inline-size: 0;
+}
+.dsui-linktable__head th {
+	font-size: var(--text-2xs);
+	font-weight: var(--weight-medium);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--fg-subtle);
+	background: var(--panel-2);
+	border-block-end: 1px solid var(--border-subtle);
+}
+.dsui-linktable__row {
+	font-size: var(--text-xs);
+	border-block-end: 1px solid var(--border-subtle);
+}
+.dsui-linktable tbody tr:last-child {
+	border-block-end: none;
+}
+.dsui-linktable__path {
+	font-family: var(--font-mono);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.dsui-linktable__offsets {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	min-inline-size: 0;
+}
+.dsui-linktable__offsets code {
+	font-size: var(--text-2xs);
+	background: var(--code-bg);
+	padding: 0.05em 0.3em;
+	border-radius: var(--radius-xs);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-inline-size: 9rem;
+}
+.dsui-linktable__arrow {
+	color: var(--fg-subtle);
+	flex: none;
+}
+.dsui-linktable__rmcol {
+	display: flex;
+	justify-content: flex-end;
+}
+.dsui-linktable__globnote {
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+}
+
+.dsui-linktype {
+	font-size: var(--text-2xs);
+	font-weight: var(--weight-medium);
+	padding: 0.05em 0.45em;
+	border-radius: var(--radius-full);
+}
+.dsui-linktype--explicit {
+	color: var(--accent);
+	background: var(--accent-soft);
+}
+.dsui-linktype--glob {
+	color: var(--fg-muted);
+	background: var(--bg-inset);
+}
+
+/* Add-streams inline form under the table. */
+.dsui-addstreams {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	gap: var(--space-2);
+	align-items: start;
+}
+.dsui-addstreams .dsui-curl {
+	grid-column: 1 / -1;
+}
+
+/* ---- Pull-wake worker controls -------------------------------------- */
+.dsui-inlineform {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	flex-wrap: wrap;
+}
+.dsui-inlineform .dsui-input {
+	flex: 1;
+	min-inline-size: 8rem;
+}
+.dsui-inlineform .dsui-field__label {
+	margin: 0;
+}
+.dsui-btnrow {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	flex-wrap: wrap;
+}
+.dsui-claiminfo {
+	display: flex;
+	gap: var(--space-4);
+	flex-wrap: wrap;
+	margin: 0;
+	padding: var(--space-3);
+	background: var(--bg-raised);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-md);
+}
+.dsui-claiminfo > div {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+}
+.dsui-claiminfo dt {
+	font-size: var(--text-2xs);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--fg-subtle);
+}
+.dsui-claiminfo dd {
+	margin: 0;
+}
+.dsui-claiminfo code {
+	font-size: var(--text-xs);
+	background: var(--code-bg);
+	padding: 0.05em 0.35em;
+	border-radius: var(--radius-xs);
+	overflow-wrap: anywhere;
+}
+
+/* ---- Inline confirm (delete) ---------------------------------------- */
+.dsui-confirm {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+.dsui-confirm__text {
+	font-size: var(--text-xs);
+	color: var(--fg-muted);
+}
+.dsui-iconbtn--danger:hover:not(:disabled) {
+	background: var(--danger-soft);
+	color: var(--danger);
+}
+
+/* ---- Small button size variant -------------------------------------- */
+.dsui-btn--sm {
+	padding: 0.15rem var(--space-2);
+	font-size: var(--text-xs);
+}
+
+/* ---- Form hint variant ---------------------------------------------- */
+.dsui-field__hint--warn {
+	color: var(--warn);
+}
+
+/* ---- Metrics workspace ---------------------------------------------- */
+.dsui-toolbar__group--grow {
+	flex: 1;
+	min-inline-size: 0;
+}
+.dsui-metrics__url {
+	flex: 1;
+	min-inline-size: 0;
+}
+
+.dsui-metrictiles {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+	gap: var(--space-3);
+}
+.dsui-metrictile {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	padding: var(--space-3);
+	background: var(--bg-raised);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-md);
+}
+.dsui-metrictile.is-absent {
+	opacity: 0.55;
+}
+.dsui-metrictile__value {
+	font-size: var(--text-lg);
+	font-weight: var(--weight-semibold);
+	font-variant-numeric: tabular-nums;
+	color: var(--fg);
+}
+.dsui-metrictile__label {
+	font-size: var(--text-xs);
+	font-weight: var(--weight-medium);
+	color: var(--fg-muted);
+}
+.dsui-metrictile__note {
+	font-size: var(--text-2xs);
+	line-height: 1.4;
+	color: var(--fg-subtle);
+}
+
+.dsui-metrictable {
+	inline-size: 100%;
+	border-collapse: collapse;
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-md);
+	overflow: hidden;
+}
+.dsui-metrictable__head tr,
+.dsui-metrictable__row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 6rem 4rem;
+	gap: var(--space-2);
+	align-items: center;
+}
+.dsui-metrictable th,
+.dsui-metrictable td {
+	padding: var(--space-2) var(--space-3);
+	text-align: start;
+	min-inline-size: 0;
+}
+.dsui-metrictable__head th {
+	font-size: var(--text-2xs);
+	font-weight: var(--weight-medium);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--fg-subtle);
+	background: var(--panel-2);
+	border-block-end: 1px solid var(--border-subtle);
+}
+.dsui-metrictable__row {
+	font-size: var(--text-xs);
+	border-block-end: 1px solid var(--border-subtle);
+}
+.dsui-metrictable tbody tr:last-child {
+	border-block-end: none;
+}
+.dsui-metrictable__name {
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+	min-inline-size: 0;
+}
+.dsui-metrictable__name code {
+	font-size: var(--text-xs);
+	overflow-wrap: anywhere;
+}
+.dsui-metrictable__help {
+	font-size: var(--text-2xs);
+	color: var(--fg-subtle);
+	line-height: 1.4;
+}
+.dsui-metrictable__count {
+	font-variant-numeric: tabular-nums;
+	color: var(--fg-muted);
+	text-align: end;
+}
+
+.dsui-mtype {
+	font-size: var(--text-2xs);
+	font-weight: var(--weight-medium);
+	padding: 0.05em 0.45em;
+	border-radius: var(--radius-full);
+	color: var(--fg-muted);
+	background: var(--bg-inset);
+}
+.dsui-mtype--counter {
+	color: var(--info);
+	background: color-mix(in oklch, var(--info) 16%, transparent);
+}
+.dsui-mtype--histogram {
+	color: var(--accent);
+	background: var(--accent-soft);
+}
+.dsui-mtype--gauge {
+	color: var(--ok);
+	background: var(--ok-soft);
 }

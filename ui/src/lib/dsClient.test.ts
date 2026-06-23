@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { REGISTRY_PATH, createClient, streamUrl } from "./dsClient";
+import { REGISTRY_PATH, createClient, streamUrl, subscriptionUrl } from "./dsClient";
 import type { Connection } from "./types";
 
 /* ----------------------------------------------------------------------------
@@ -697,5 +697,279 @@ describe("openSse", () => {
 
 		expect(values).toEqual([{ id: 1 }, { id: 2 }]);
 		expect(liveOffsets).toContain("off-9");
+	});
+});
+
+/* ----------------------------------------------------------------------------
+ * subscriptionUrl — the reserved /__ds origin (NOT under streamRoot)
+ * ------------------------------------------------------------------------- */
+
+describe("subscriptionUrl", () => {
+	it("builds /__ds/subscriptions/{id} on the connection origin, encoding the id", () => {
+		expect(subscriptionUrl(CONN, "sub-1")).toBe("http://localhost:4437/__ds/subscriptions/sub-1");
+		expect(subscriptionUrl(CONN, "a/b")).toBe("http://localhost:4437/__ds/subscriptions/a%2Fb");
+		expect(subscriptionUrl(CONN, "sub-1", "/claim")).toBe(
+			"http://localhost:4437/__ds/subscriptions/sub-1/claim",
+		);
+	});
+});
+
+/* ----------------------------------------------------------------------------
+ * Subscription control plane — request shaping + typed SubscriptionResult
+ * ------------------------------------------------------------------------- */
+
+describe("createSubscription", () => {
+	it("PUTs the create body and parses the returned view on 201", async () => {
+		const view = {
+			id: "sub-1",
+			subscription_id: "sub-1",
+			type: "webhook",
+			pattern: "events/**",
+			streams: [],
+			webhook: { url: "https://hook.example" },
+			wake_stream: null,
+			lease_ttl_ms: 30000,
+			created_at: "2026-05-09T00:00:00.000Z",
+			status: "active",
+		};
+		const fetchFn = stubFetch({
+			status: 201,
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(view),
+		});
+		const result = await createClient(CONN).createSubscription({
+			id: "sub-1",
+			type: "webhook",
+			pattern: "events/**",
+			webhookUrl: "https://hook.example",
+		});
+
+		const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe(subscriptionUrl(CONN, "sub-1"));
+		expect(init.method).toBe("PUT");
+		expect(reqHeaders(fetchFn)).toMatchObject({ "Content-Type": "application/json" });
+		expect(JSON.parse(init.body as string)).toEqual({
+			type: "webhook",
+			pattern: "events/**",
+			webhook: { url: "https://hook.example" },
+		});
+		expect(result.ok).toBe(true);
+		expect(result.value?.id).toBe("sub-1");
+		expect(result.value?.webhook?.url).toBe("https://hook.example");
+		expect(result.operation.method).toBe("PUT");
+	});
+
+	it("surfaces a 409 CONFIG_CONFLICT with the typed error code (not fenced)", async () => {
+		stubFetch({
+			status: 409,
+			statusText: "Conflict",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ error: { code: "CONFIG_CONFLICT" } }),
+		});
+		const result = await createClient(CONN).createSubscription({
+			id: "sub-1",
+			type: "webhook",
+			pattern: "x",
+		});
+		expect(result.ok).toBe(false);
+		expect(result.errorCode).toBe("CONFIG_CONFLICT");
+		expect(result.fenced).toBe(false);
+	});
+
+	it("never throws on a network failure", async () => {
+		stubFetchReject(new TypeError("Failed to fetch"));
+		const result = await createClient(CONN).createSubscription({ id: "s", type: "pull-wake" });
+		expect(result.ok).toBe(false);
+		expect(result.error).toBe("Failed to fetch");
+		expect(result.exchange.status).toBe(0);
+	});
+});
+
+describe("getSubscription / deleteSubscription", () => {
+	it("GETs and parses the view; a 404 is ok:false with value null", async () => {
+		stubFetch({
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ id: "s", type: "pull-wake", streams: [], wake_stream: "w" }),
+		});
+		const ok = await createClient(CONN).getSubscription("s");
+		expect(ok.ok).toBe(true);
+		expect(ok.value?.wakeStream).toBe("w");
+
+		stubFetch({ status: 404, body: JSON.stringify({ error: { code: "NOT_FOUND" } }) });
+		const missing = await createClient(CONN).getSubscription("gone");
+		expect(missing.ok).toBe(false);
+		expect(missing.value).toBeNull();
+		expect(missing.exchange.status).toBe(404);
+	});
+
+	it("DELETEs and returns ok with a null value on 204", async () => {
+		const fetchFn = stubFetch({ status: 204 });
+		const result = await createClient(CONN).deleteSubscription("s");
+		expect((fetchFn.mock.calls[0]?.[1] as RequestInit).method).toBe("DELETE");
+		expect(result.ok).toBe(true);
+		expect(result.value).toBeNull();
+	});
+});
+
+describe("addSubscriptionStreams / removeSubscriptionStream", () => {
+	it("POSTs {streams:[...]} to …/streams", async () => {
+		const fetchFn = stubFetch({ status: 204 });
+		const result = await createClient(CONN).addSubscriptionStreams("s", ["a", "b"]);
+		const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe(subscriptionUrl(CONN, "s", "/streams"));
+		expect(init.method).toBe("POST");
+		expect(JSON.parse(init.body as string)).toEqual({ streams: ["a", "b"] });
+		expect(result.ok).toBe(true);
+	});
+
+	it("DELETEs the URL-encoded path under …/streams/", async () => {
+		const fetchFn = stubFetch({ status: 204 });
+		await createClient(CONN).removeSubscriptionStream("s", "events/a");
+		const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe(subscriptionUrl(CONN, "s", "/streams/events%2Fa"));
+		expect(init.method).toBe("DELETE");
+	});
+});
+
+describe("claimWake / ackWake / releaseWake", () => {
+	it("claims and parses the WakeClaim on 200", async () => {
+		const fetchFn = stubFetch({
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				wake_id: "w_abc",
+				generation: 7,
+				token: "tok",
+				streams: [
+					{
+						path: "events/a",
+						link_type: "glob",
+						acked_offset: "a",
+						tail_offset: "t",
+						has_pending: true,
+					},
+				],
+				lease_ttl_ms: 30000,
+			}),
+		});
+		const result = await createClient(CONN).claimWake("s", "worker-1");
+		const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe(subscriptionUrl(CONN, "s", "/claim"));
+		expect(JSON.parse(init.body as string)).toEqual({ worker: "worker-1" });
+		expect(result.ok).toBe(true);
+		expect(result.value?.token).toBe("tok");
+		expect(result.value?.streams[0]?.hasPending).toBe(true);
+	});
+
+	it("surfaces a 409 ALREADY_CLAIMED as fenced on claim", async () => {
+		stubFetch({
+			status: 409,
+			statusText: "Conflict",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ error: { code: "ALREADY_CLAIMED", current_holder: "w2" } }),
+		});
+		const result = await createClient(CONN).claimWake("s", "worker-1");
+		expect(result.ok).toBe(false);
+		expect(result.fenced).toBe(true);
+		expect(result.errorCode).toBe("ALREADY_CLAIMED");
+	});
+
+	it("acks with the Bearer token + done, parsing next_wake", async () => {
+		const fetchFn = stubFetch({
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ ok: true, next_wake: true }),
+		});
+		const result = await createClient(CONN).ackWake(
+			"s",
+			"tok",
+			{ wakeId: "w_abc", generation: 7, acks: [{ stream: "events/a", offset: "t" }], done: true },
+			undefined,
+		);
+		const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe(subscriptionUrl(CONN, "s", "/ack"));
+		expect(reqHeaders(fetchFn).Authorization).toBe("Bearer tok");
+		expect(JSON.parse(init.body as string)).toEqual({
+			wake_id: "w_abc",
+			generation: 7,
+			acks: [{ stream: "events/a", offset: "t" }],
+			done: true,
+		});
+		expect(result.ok).toBe(true);
+		expect(result.value?.nextWake).toBe(true);
+	});
+
+	it("surfaces a 409 FENCED as fenced on ack", async () => {
+		stubFetch({
+			status: 409,
+			statusText: "Conflict",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ error: { code: "FENCED" } }),
+		});
+		const result = await createClient(CONN).ackWake(
+			"s",
+			"tok",
+			{ wakeId: "w", generation: 1, acks: [] },
+			undefined,
+		);
+		expect(result.ok).toBe(false);
+		expect(result.fenced).toBe(true);
+		expect(result.errorCode).toBe("FENCED");
+	});
+
+	it("releases with the Bearer token on 204", async () => {
+		const fetchFn = stubFetch({ status: 204 });
+		const result = await createClient(CONN).releaseWake(
+			"s",
+			"tok",
+			{ wakeId: "w", generation: 1 },
+			undefined,
+		);
+		const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe(subscriptionUrl(CONN, "s", "/release"));
+		expect(reqHeaders(fetchFn).Authorization).toBe("Bearer tok");
+		expect(JSON.parse(init.body as string)).toEqual({ wake_id: "w", generation: 1 });
+		expect(result.ok).toBe(true);
+	});
+});
+
+/* ----------------------------------------------------------------------------
+ * fetchMetrics — Prometheus text on the separate --metrics-listen address
+ * ------------------------------------------------------------------------- */
+
+describe("fetchMetrics", () => {
+	it("GETs the explicit metrics URL and parses the text into a snapshot", async () => {
+		const body = [
+			"# TYPE chronicle_sweep_wakes_total counter",
+			"chronicle_sweep_wakes_total 5",
+		].join("\n");
+		const fetchFn = stubFetch({
+			status: 200,
+			headers: { "Content-Type": "text/plain; version=0.0.4" },
+			body,
+		});
+		const { snapshot, exchange } = await createClient(CONN).fetchMetrics(
+			"http://localhost:9090/metrics",
+		);
+		expect(fetchFn.mock.calls[0]?.[0]).toBe("http://localhost:9090/metrics");
+		expect(snapshot).not.toBeNull();
+		expect(snapshot?.metrics[0]?.name).toBe("chronicle_sweep_wakes_total");
+		expect(snapshot?.metrics[0]?.samples[0]?.value).toBe(5);
+		expect(exchange.status).toBe(200);
+	});
+
+	it("returns a null snapshot + captured exchange on a non-2xx", async () => {
+		stubFetch({ status: 503 });
+		const { snapshot, exchange } = await createClient(CONN).fetchMetrics("http://x/metrics");
+		expect(snapshot).toBeNull();
+		expect(exchange.status).toBe(503);
+	});
+
+	it("returns a null snapshot + status-0 exchange on a network failure", async () => {
+		stubFetchReject(new TypeError("Failed to fetch"));
+		const { snapshot, exchange } = await createClient(CONN).fetchMetrics("http://x/metrics");
+		expect(snapshot).toBeNull();
+		expect(exchange.status).toBe(0);
 	});
 });
