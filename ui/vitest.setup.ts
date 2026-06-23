@@ -15,3 +15,10 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 			dispatchEvent: () => false,
 		}) as unknown as MediaQueryList;
 }
+
+// jsdom does not implement scrollIntoView; the command palette scrolls its
+// active row into view as the selection moves. Provide a no-op so component
+// tests can mount and navigate without crashing.
+if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
+	Element.prototype.scrollIntoView = (): void => {};
+}
