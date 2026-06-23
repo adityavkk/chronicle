@@ -17,14 +17,18 @@ import { isLiveMode, previewTailOperation } from "../lib/tail";
 import type {
 	Connection,
 	ConnectionProbe,
+	CreateSubscriptionOptions,
 	GridRow,
 	HttpExchange,
+	MetricsSnapshot,
+	OffsetAck,
 	Operation,
 	ProbeStatus,
 	ProducerIdentity,
 	ReadResult,
 	StreamContentType,
 	StreamInfo,
+	Subscription,
 	TailBatch,
 	TailMode,
 	TailStatus,
@@ -33,6 +37,7 @@ import type {
 	Toast,
 	ToastAction,
 	ToastKind,
+	WakeClaim,
 } from "../lib/types";
 
 // Re-exported for back-compat: ProbeStatus now lives in lib/types (a shared
@@ -44,6 +49,10 @@ const LS_ACTIVE = "dsui.activeConnection";
 const LS_THEME = "dsui.theme";
 const LS_INSPECTOR_COLLAPSED = "dsui.inspector-collapsed";
 const LS_PLAYGROUND_OPEN = "dsui.playground-open";
+/** Known subscription ids are tracked per connection (no list-all endpoint). */
+const LS_SUBS_PREFIX = "dsui.subs.";
+/** The metrics URL is remembered per connection (a separate --metrics-listen). */
+const LS_METRICS_PREFIX = "dsui.metricsUrl.";
 
 /* ----------------------------------------------------------------------------
  * Signals (the reactive state atoms)
@@ -69,6 +78,25 @@ export const lastExchange = signal<HttpExchange | null>(null);
 
 /** The selected grid row (drives the inspector), or null. */
 export const selectedRow = signal<GridRow | null>(null);
+
+/**
+ * Which view occupies the center workspace region. The shell renders one of:
+ *  - "messages":     the stream messages workspace (the default / on stream select)
+ *  - "subscription": the subscription detail workspace (on subscription select)
+ *  - "metrics":      the Prometheus metrics workspace (from the Metrics nav entry)
+ *
+ * This is the single routing seam for the center pane; selecting a stream, a
+ * subscription, or the Metrics entry flips it through the matching action.
+ */
+export type CenterView = "messages" | "subscription" | "metrics";
+
+/** The active center-workspace view. Defaults to the messages workspace. */
+export const centerView = signal<CenterView>("messages");
+
+/** Switch the center workspace view directly (used by the Metrics nav entry). */
+export function setCenterView(view: CenterView): void {
+	centerView.value = view;
+}
 
 /* ----------------------------------------------------------------------------
  * Messages workspace toolbar state
@@ -168,7 +196,7 @@ export const producerIdentity = signal<ProducerIdentity | null>(null);
  * ------------------------------------------------------------------------- */
 
 /** Which write dialog is open, or null when none is. */
-export const activeDialog = signal<"create" | "fork" | null>(null);
+export const activeDialog = signal<"create" | "fork" | "subscription" | null>(null);
 
 /**
  * A one-shot highlight pulse on the Playground, set by the first-run empty-state
@@ -239,6 +267,58 @@ export const TAIL_BUFFER_CAP = 1000;
 let tailStopper: TailStopper | null = null;
 
 /* ----------------------------------------------------------------------------
+ * Subscription state (the reserved /__ds/* control plane)
+ *
+ * There is NO list-all endpoint, so the UI keeps the set of known subscription
+ * ids client-side, persisted per connection to localStorage exactly like the
+ * connection list. `subscriptionDetails` caches the last fetched view per id.
+ * The selected id drives the detail panel; in-flight flags disable controls.
+ * ------------------------------------------------------------------------- */
+
+/** Known subscription ids for the active connection (persisted per connection). */
+export const subscriptionIds = signal<readonly string[]>([]);
+
+/** Cached subscription views by id (the last GET / create response). */
+export const subscriptionDetails = signal<Readonly<Record<string, Subscription>>>({});
+
+/** The selected subscription id (drives the detail panel), or null. */
+export const selectedSubscriptionId = signal<string | null>(null);
+
+/** True while any subscription create/get/delete/streams op is in flight. */
+export const subscriptionInFlight = signal<boolean>(false);
+
+/** True while the selected subscription's detail is being (re)fetched. */
+export const subscriptionLoading = signal<boolean>(false);
+
+/**
+ * The active pull-wake claim for the selected subscription, or null when no
+ * lease is held in this session. A claim carries the Bearer token + fencing
+ * (generation, wake_id) the ack/release controls need; it is ephemeral (a
+ * worker identity lives only as long as the lease) so it is never persisted and
+ * is cleared on a connection switch or a successful release / done-ack.
+ */
+export const activeClaim = signal<WakeClaim | null>(null);
+
+/** True while a claim / ack / release request is in flight. */
+export const claimInFlight = signal<boolean>(false);
+
+/* ----------------------------------------------------------------------------
+ * Metrics state (Prometheus on the separate --metrics-listen address)
+ * ------------------------------------------------------------------------- */
+
+/** The metrics endpoint URL for the active connection, or "" when unset. */
+export const metricsUrl = signal<string>("");
+
+/** The last parsed metrics snapshot, or null when never fetched / failed. */
+export const metrics = signal<MetricsSnapshot | null>(null);
+
+/** True while a metrics scrape is in flight. */
+export const metricsLoading = signal<boolean>(false);
+
+/** A surfaced metrics error (unreachable / non-2xx), or null. */
+export const metricsError = signal<string | null>(null);
+
+/* ----------------------------------------------------------------------------
  * Toasts (transient notifications)
  * ------------------------------------------------------------------------- */
 
@@ -270,6 +350,13 @@ export const selectedStream = computed<StreamInfo | null>(() => {
 export const activeClient = computed<DsClient | null>(() => {
 	const conn = activeConnection.value;
 	return conn === null ? null : createClient(conn);
+});
+
+/** The selected subscription's cached view, or null. */
+export const selectedSubscription = computed<Subscription | null>(() => {
+	const id = selectedSubscriptionId.value;
+	if (id === null) return null;
+	return subscriptionDetails.value[id] ?? null;
 });
 
 /* ----------------------------------------------------------------------------
@@ -383,6 +470,16 @@ export function setActiveConnection(id: string | null): void {
 	connectionProbe.value = null;
 	errorMessage.value = null;
 	switcherOpen.value = false;
+	// Reset + rehydrate the per-connection subscription set and metrics URL. The
+	// known-ids set has no server-side discovery, so it is restored from storage.
+	subscriptionDetails.value = {};
+	selectedSubscriptionId.value = null;
+	activeClaim.value = null;
+	centerView.value = "messages";
+	metrics.value = null;
+	metricsError.value = null;
+	subscriptionIds.value = id === null ? [] : loadSubscriptionIds(id);
+	metricsUrl.value = id === null ? "" : loadMetricsUrl(id);
 	if (id !== null) {
 		const now = Date.now();
 		connections.value = connections.value.map((c) => (c.id === id ? { ...c, lastUsedAt: now } : c));
@@ -500,6 +597,8 @@ export function selectStream(path: string): void {
 	lastRead.value = null;
 	startMode.value = "earliest";
 	customOffset.value = "";
+	// Selecting a stream brings the messages workspace back to the center pane.
+	centerView.value = "messages";
 	void readSelected(OFFSET_EARLIEST_VALUE);
 }
 
@@ -677,6 +776,12 @@ export function bumpProducerSeq(): void {
 export function openCreateDialog(): void {
 	forkSeed.value = null;
 	activeDialog.value = "create";
+}
+
+/** Open the create-subscription dialog (the reserved /__ds/* control plane). */
+export function openCreateSubscriptionDialog(): void {
+	forkSeed.value = null;
+	activeDialog.value = "subscription";
 }
 
 /**
@@ -1042,6 +1147,373 @@ export function stopTail(): void {
 }
 
 /* ----------------------------------------------------------------------------
+ * Subscription actions (the reserved /__ds/* control plane)
+ *
+ * Each mirrors the captured exchange into lastExchange + records the Operation
+ * for the curl helper (matching the write actions), toasts the result, and keeps
+ * the client-side known-ids set in sync (since there is no list-all endpoint).
+ * They never throw: a failed op resolves and toasts. The FENCED / ALREADY_CLAIMED
+ * 409 cases surface as a distinct warning toast.
+ * ------------------------------------------------------------------------- */
+
+/** Add an id to the per-connection known set and persist it. */
+function rememberSubscriptionId(id: string): void {
+	if (subscriptionIds.value.includes(id)) return;
+	const next = [...subscriptionIds.value, id].sort((a, b) => a.localeCompare(b));
+	subscriptionIds.value = next;
+	persistSubscriptionIds();
+}
+
+/** Drop an id from the per-connection known set, its cache, and persist. */
+function forgetSubscriptionId(id: string): void {
+	subscriptionIds.value = subscriptionIds.value.filter((x) => x !== id);
+	const next = { ...subscriptionDetails.value };
+	delete next[id];
+	subscriptionDetails.value = next;
+	if (selectedSubscriptionId.value === id) selectedSubscriptionId.value = null;
+	persistSubscriptionIds();
+}
+
+/** Cache a fetched subscription view by id (immutably). */
+function cacheSubscription(sub: Subscription): void {
+	subscriptionDetails.value = { ...subscriptionDetails.value, [sub.id]: sub };
+}
+
+/**
+ * Add a subscription id to the tracked set WITHOUT contacting the server (the
+ * user already knows the id of a subscription created elsewhere). Persists it
+ * and selects it so the detail panel can fetch its view.
+ */
+export function trackSubscriptionId(id: string): void {
+	const clean = id.trim();
+	if (clean === "") return;
+	rememberSubscriptionId(clean);
+	selectSubscription(clean);
+}
+
+/** Forget a subscription id locally (does not delete it on the server). */
+export function untrackSubscriptionId(id: string): void {
+	forgetSubscriptionId(id);
+}
+
+/**
+ * Select a subscription, bring its detail view to the center pane, and fetch its
+ * current view. Switching to a different subscription drops any claim held for
+ * the previous one (a Bearer token is scoped to a single subscription).
+ */
+export function selectSubscription(id: string | null): void {
+	if (id !== selectedSubscriptionId.value) activeClaim.value = null;
+	selectedSubscriptionId.value = id;
+	if (id !== null) {
+		centerView.value = "subscription";
+		void getSubscription(id);
+	}
+}
+
+/**
+ * Create (or re-confirm) a subscription. On success, remembers + selects its id,
+ * caches the returned view, and toasts (distinguishing a 200 idempotent match
+ * from a 201 create is not surfaced separately — both are "ready"). A 409
+ * CONFIG_CONFLICT toasts a warning. Returns ok.
+ */
+export async function createSubscription(opts: CreateSubscriptionOptions): Promise<boolean> {
+	const client = activeClient.value;
+	if (client === null) return false;
+	subscriptionInFlight.value = true;
+	try {
+		const result = await client.createSubscription(opts);
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			if (result.value !== null) cacheSubscription(result.value);
+			rememberSubscriptionId(opts.id);
+			selectedSubscriptionId.value = opts.id;
+			addToast({ kind: "success", title: "Subscription ready", message: opts.id });
+		} else if (result.errorCode === "CONFIG_CONFLICT") {
+			addToast({
+				kind: "warning",
+				title: "Subscription config conflict",
+				message: `${opts.id} exists with a different config`,
+			});
+		} else {
+			addToast({ kind: "error", title: "Create failed", message: result.error ?? opts.id });
+		}
+		return result.ok;
+	} finally {
+		subscriptionInFlight.value = false;
+	}
+}
+
+/**
+ * Fetch a subscription's current view and cache it. A 404 forgets the id from
+ * the tracked set (the server tombstoned it). Surfaces the exchange.
+ */
+export async function getSubscription(id: string): Promise<void> {
+	const client = activeClient.value;
+	if (client === null) return;
+	subscriptionLoading.value = true;
+	try {
+		const result = await client.getSubscription(id);
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok && result.value !== null) {
+			cacheSubscription(result.value);
+		} else if (result.exchange.status === 404) {
+			addToast({ kind: "warning", title: "Subscription not found", message: id });
+			forgetSubscriptionId(id);
+		} else if (!result.ok) {
+			addToast({
+				kind: "error",
+				title: "Could not load subscription",
+				message: result.error ?? id,
+			});
+		}
+	} finally {
+		subscriptionLoading.value = false;
+	}
+}
+
+/** Delete a subscription (DELETE), then forget it locally. */
+export async function deleteSubscription(id: string): Promise<boolean> {
+	const client = activeClient.value;
+	if (client === null) return false;
+	subscriptionInFlight.value = true;
+	try {
+		const result = await client.deleteSubscription(id);
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			forgetSubscriptionId(id);
+			addToast({ kind: "success", title: "Subscription deleted", message: id });
+		} else {
+			addToast({ kind: "error", title: "Delete failed", message: result.error ?? id });
+		}
+		return result.ok;
+	} finally {
+		subscriptionInFlight.value = false;
+	}
+}
+
+/** Add explicit stream links to a subscription, then refresh its view. */
+export async function addSubscriptionStreams(
+	id: string,
+	streams: readonly string[],
+): Promise<boolean> {
+	const client = activeClient.value;
+	if (client === null) return false;
+	subscriptionInFlight.value = true;
+	try {
+		const result = await client.addSubscriptionStreams(id, streams);
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			addToast({ kind: "success", title: "Streams linked", message: `${streams.length} → ${id}` });
+			await getSubscription(id);
+		} else {
+			addToast({ kind: "error", title: "Link failed", message: result.error ?? id });
+		}
+		return result.ok;
+	} finally {
+		subscriptionInFlight.value = false;
+	}
+}
+
+/** Remove one explicit stream link from a subscription, then refresh its view. */
+export async function removeSubscriptionStream(id: string, path: string): Promise<boolean> {
+	const client = activeClient.value;
+	if (client === null) return false;
+	subscriptionInFlight.value = true;
+	try {
+		const result = await client.removeSubscriptionStream(id, path);
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			addToast({ kind: "success", title: "Stream unlinked", message: `${path} ← ${id}` });
+			await getSubscription(id);
+		} else {
+			addToast({ kind: "error", title: "Unlink failed", message: result.error ?? path });
+		}
+		return result.ok;
+	} finally {
+		subscriptionInFlight.value = false;
+	}
+}
+
+/* ----------------------------------------------------------------------------
+ * Pull-wake worker actions (claim → ack/heartbeat → release)
+ *
+ * These drive a pull-wake subscription's lease lifecycle from the console so a
+ * user can exercise the worker plane by hand: claim a lease (racing other
+ * workers), ack offsets (with done to release + apply, or as a heartbeat that
+ * extends the lease), or release without acking. The claim carries the Bearer
+ * token + fencing (generation, wake_id) the ack/release need; it lives in
+ * {@link activeClaim} for the session. A 409 (ALREADY_CLAIMED on claim, FENCED
+ * on ack/release) surfaces as a distinct warning toast and clears the stale
+ * claim so the controls reset. Like the other ops they never throw.
+ * ------------------------------------------------------------------------- */
+
+/** Claim a pull-wake lease (POST …/claim) as the given worker. */
+export async function claimWake(id: string, worker: string): Promise<boolean> {
+	const client = activeClient.value;
+	if (client === null) return false;
+	claimInFlight.value = true;
+	try {
+		const result = await client.claimWake(id, worker.trim());
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok && result.value !== null) {
+			activeClaim.value = result.value;
+			addToast({
+				kind: "success",
+				title: "Lease claimed",
+				message: `${id} · gen ${result.value.generation}`,
+			});
+		} else if (result.fenced || result.errorCode === "ALREADY_CLAIMED") {
+			addToast({
+				kind: "warning",
+				title: "Already claimed",
+				message: "Another worker holds the lease.",
+			});
+		} else {
+			addToast({ kind: "error", title: "Claim failed", message: result.error ?? id });
+		}
+		return result.ok;
+	} finally {
+		claimInFlight.value = false;
+	}
+}
+
+/**
+ * Ack a pull-wake claim (POST …/ack) with the active claim's Bearer token. With
+ * `done` true the lease is released and the acks applied (clearing the claim);
+ * with `done` false it heartbeat-extends the lease. Refreshes the subscription
+ * view afterwards so the links table reflects the advanced cursors.
+ */
+export async function ackWake(
+	id: string,
+	acks: readonly OffsetAck[],
+	done: boolean,
+): Promise<boolean> {
+	const client = activeClient.value;
+	const claim = activeClaim.value;
+	if (client === null || claim === null) return false;
+	claimInFlight.value = true;
+	try {
+		const result = await client.ackWake(id, claim.token, {
+			wakeId: claim.wakeId,
+			generation: claim.generation,
+			acks,
+			done,
+		});
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			if (done) {
+				activeClaim.value = null;
+				addToast({
+					kind: "success",
+					title: "Acked + released",
+					message: result.value?.nextWake === true ? "Another wake is due." : id,
+				});
+			} else {
+				addToast({ kind: "info", title: "Lease extended", message: "Heartbeat acked." });
+			}
+			await getSubscription(id);
+		} else if (result.fenced) {
+			activeClaim.value = null;
+			addToast({
+				kind: "warning",
+				title: "Fenced (409)",
+				message: "Stale generation, wake, or token — the claim was superseded.",
+			});
+		} else {
+			addToast({ kind: "error", title: "Ack failed", message: result.error ?? id });
+		}
+		return result.ok;
+	} finally {
+		claimInFlight.value = false;
+	}
+}
+
+/** Release a pull-wake lease without acking (POST …/release), then clear it. */
+export async function releaseWake(id: string): Promise<boolean> {
+	const client = activeClient.value;
+	const claim = activeClaim.value;
+	if (client === null || claim === null) return false;
+	claimInFlight.value = true;
+	try {
+		const result = await client.releaseWake(id, claim.token, {
+			wakeId: claim.wakeId,
+			generation: claim.generation,
+		});
+		lastOperation.value = result.operation;
+		lastExchange.value = result.exchange;
+		if (result.ok) {
+			activeClaim.value = null;
+			addToast({ kind: "success", title: "Lease released", message: id });
+			await getSubscription(id);
+		} else if (result.fenced) {
+			activeClaim.value = null;
+			addToast({
+				kind: "warning",
+				title: "Fenced (409)",
+				message: "The lease was already superseded.",
+			});
+		} else {
+			addToast({ kind: "error", title: "Release failed", message: result.error ?? id });
+		}
+		return result.ok;
+	} finally {
+		claimInFlight.value = false;
+	}
+}
+
+/* ----------------------------------------------------------------------------
+ * Metrics actions (Prometheus scrape of the separate --metrics-listen address)
+ * ------------------------------------------------------------------------- */
+
+/** Set + persist the metrics endpoint URL for the active connection. */
+export function setMetricsUrl(url: string): void {
+	metricsUrl.value = url.trim();
+	const id = activeConnectionId.value;
+	if (id === null) return;
+	if (metricsUrl.value === "") removeLs(`${LS_METRICS_PREFIX}${id}`);
+	else writeLs(`${LS_METRICS_PREFIX}${id}`, metricsUrl.value);
+}
+
+/**
+ * Scrape + parse the metrics endpoint. Uses the explicit {@link metricsUrl} (the
+ * separate --metrics-listen address); a blank URL surfaces a hint rather than a
+ * request. Never throws: a failure sets {@link metricsError} and leaves the last
+ * snapshot in place. Surfaces the exchange so the protocol panel can show it.
+ */
+export async function refreshMetrics(): Promise<void> {
+	const client = activeClient.value;
+	const url = metricsUrl.value.trim();
+	if (client === null) return;
+	if (url === "") {
+		metricsError.value = "Set the metrics endpoint URL (the --metrics-listen address) first.";
+		return;
+	}
+	metricsLoading.value = true;
+	metricsError.value = null;
+	try {
+		const { snapshot, exchange } = await client.fetchMetrics(url);
+		lastExchange.value = exchange;
+		if (snapshot !== null) {
+			metrics.value = snapshot;
+		} else {
+			metricsError.value =
+				exchange.status === 0
+					? (exchange.error ?? "metrics endpoint unreachable")
+					: `metrics request failed (${exchange.status})`;
+		}
+	} finally {
+		metricsLoading.value = false;
+	}
+}
+
+/* ----------------------------------------------------------------------------
  * localStorage helpers + loaders (defensive: never throw on bad storage)
  * ------------------------------------------------------------------------- */
 
@@ -1104,6 +1576,32 @@ function loadActiveId(): string | null {
 	return readLs(LS_ACTIVE);
 }
 
+/** Load the persisted known subscription ids for a connection (defensive). */
+function loadSubscriptionIds(connId: string): readonly string[] {
+	const raw = readLs(`${LS_SUBS_PREFIX}${connId}`);
+	if (raw === null) return [];
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return [];
+		const out = parsed.filter((x): x is string => typeof x === "string" && x !== "");
+		return [...new Set(out)].sort((a, b) => a.localeCompare(b));
+	} catch {
+		return [];
+	}
+}
+
+/** Persist the current known subscription ids for the active connection. */
+function persistSubscriptionIds(): void {
+	const id = activeConnectionId.value;
+	if (id === null) return;
+	writeLs(`${LS_SUBS_PREFIX}${id}`, JSON.stringify(subscriptionIds.value));
+}
+
+/** Load the persisted metrics URL for a connection. */
+function loadMetricsUrl(connId: string): string {
+	return readLs(`${LS_METRICS_PREFIX}${connId}`) ?? "";
+}
+
 function loadTheme(): Theme {
 	const raw = readLs(LS_THEME);
 	if (raw === "light" || raw === "dark" || raw === "system") return raw;
@@ -1164,7 +1662,10 @@ export async function prefillFromConfig(): Promise<void> {
  */
 export function initStore(): void {
 	applyTheme(theme.value);
-	if (activeConnectionId.value !== null) {
+	const restored = activeConnectionId.value;
+	if (restored !== null) {
+		subscriptionIds.value = loadSubscriptionIds(restored);
+		metricsUrl.value = loadMetricsUrl(restored);
 		void refreshStreams();
 	}
 	void probeAllConnections();

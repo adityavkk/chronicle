@@ -11,9 +11,13 @@
  *   │ │ tree (role=tree)         │  │
  *   │ └──────────────────────────┘  │
  *   ├──────────────────────────────┤
- *   │ Subscriptions  coming next    │  disabled affordances — wired later
- *   │ Metrics        coming next    │
- *   └──────────────────────────────┘
+ *   │ Playground                    │  one-click API bootstrap presets
+ *   ├──────────────────────────────┤
+ *   │ Subscriptions  (count)   +    │  the client-side known-ids list, a
+ *   │ [ track existing id…  ] +     │  "track existing id" box, create button
+ *   ├──────────────────────────────┤
+ *   │ Metrics                  ›    │  a rail entry that switches the center
+ *   └──────────────────────────────┘  pane to the metrics workspace
  *
  * Discovery comes from the store (`refreshStreams` reads __registry__ via
  * dsClient.listStreams; `addManualStream` covers streams the registry did not
@@ -25,34 +29,50 @@
  * role="treeitem" children, roving focus via ArrowUp/ArrowDown/Home/End, and
  * aria-selected on the active item.
  *
+ * The Subscriptions section lists store.subscriptionIds (the per-connection
+ * known-ids set; there is no list-all endpoint) and selects one via
+ * selectSubscription, which flips centerView to "subscription". The Metrics
+ * entry calls setCenterView("metrics"). Both are the same center-pane routing
+ * seam the rest of the app uses.
+ *
  * Extensibility seam: each rail block is a <section class="dsui-nav__section">.
- * Add a new side-panel section by adding a section here; promote a "coming
- * next" affordance by swapping its <ComingNext> for a real, enabled control.
+ * Add a new side-panel section by adding a section here, reading store signals
+ * and calling store actions (keep the fetch in dsClient and mutation in the
+ * store).
  */
 
 import { useComputed, useSignal } from "@preact/signals";
 import type { JSX } from "preact";
 import { useRef } from "preact/hooks";
 import { compactUrl, describeProbe, dotStatusOf } from "../lib/format";
-import type { StreamInfo } from "../lib/types";
+import type { StreamInfo, Subscription } from "../lib/types";
 import {
 	activeConnection,
 	addManualStream,
+	centerView,
 	errorMessage,
 	highlightPlayground,
 	openCreateDialog,
+	openCreateSubscriptionDialog,
 	probeStatuses,
 	refreshStreams,
 	selectStream,
+	selectSubscription,
 	selectedStreamPath,
+	selectedSubscriptionId,
+	setCenterView,
 	streams,
 	streamsLoading,
+	subscriptionDetails,
+	subscriptionIds,
+	trackSubscriptionId,
 } from "../state/store";
 import { Playground } from "./Playground";
 import { StatusDot } from "./StatusDot";
 import {
 	IconBell,
 	IconChart,
+	IconChevronRight,
 	IconFilePlus,
 	IconPlus,
 	IconRefresh,
@@ -60,6 +80,8 @@ import {
 	IconServer,
 	IconSparkles,
 	IconStream,
+	IconWebhook,
+	IconZap,
 } from "./icons";
 
 /* ---------------------------------------------------------------------------
@@ -198,19 +220,159 @@ function StreamItem(props: {
 }
 
 /* ---------------------------------------------------------------------------
- * "Coming next" disabled affordances
+ * Subscriptions section (the reserved /__ds/* control plane)
+ *
+ * There is no list-all endpoint, so the rail lists the client-side known-ids set
+ * (store.subscriptionIds, persisted per connection). Each row selects the
+ * subscription (which flips the center pane to its detail view); a small form
+ * tracks an id created elsewhere, and the header "+" opens the create dialog.
  * ------------------------------------------------------------------------ */
 
-function ComingNext(props: {
-	readonly icon: JSX.Element;
-	readonly label: string;
+/** A single subscription row: id + a type chip when the view is cached. */
+function SubscriptionItem(props: {
+	readonly id: string;
+	readonly detail: Subscription | undefined;
+	readonly active: boolean;
 }): JSX.Element {
+	const { id, detail, active } = props;
+	const type = detail?.type;
 	return (
-		<div class="dsui-nav__coming" aria-disabled="true">
-			{props.icon}
-			<span class="dsui-nav__cominglabel">{props.label}</span>
-			<span class="dsui-nav__comingtag">coming next</span>
-		</div>
+		<li role="treeitem" aria-selected={active}>
+			<button
+				type="button"
+				class={`dsui-treeitem${active ? " is-active" : ""}`}
+				title={id}
+				onClick={() => selectSubscription(id)}
+			>
+				<IconBell size={14} class="dsui-treeitem__icon" />
+				<span class="dsui-treeitem__label">{id}</span>
+				{type === "webhook" ? (
+					<span class="dsui-subdot" title="webhook">
+						<IconWebhook size={12} />
+					</span>
+				) : type === "pull-wake" ? (
+					<span class="dsui-subdot" title="pull-wake">
+						<IconZap size={12} />
+					</span>
+				) : null}
+			</button>
+		</li>
+	);
+}
+
+function SubscriptionsSection(): JSX.Element {
+	const conn = activeConnection.value;
+	const ids = subscriptionIds.value;
+	const details = subscriptionDetails.value;
+	const selectedSub = selectedSubscriptionId.value;
+	const onSubView = centerView.value === "subscription";
+	const draft = useSignal("");
+
+	function commitTrack(): void {
+		const id = draft.value.trim();
+		if (id === "") return;
+		draft.value = "";
+		trackSubscriptionId(id);
+	}
+
+	return (
+		<section class="dsui-nav__section dsui-nav__section--subs" aria-label="Subscriptions">
+			<header class="dsui-nav__head">
+				<span class="dsui-nav__title">
+					Subscriptions
+					{ids.length > 0 ? <span class="dsui-nav__count">{ids.length}</span> : null}
+				</span>
+				<div class="dsui-nav__headactions">
+					<button
+						type="button"
+						class="dsui-iconbtn dsui-iconbtn--sm"
+						title="New subscription"
+						aria-label="New subscription"
+						disabled={conn === null}
+						onClick={() => openCreateSubscriptionDialog()}
+					>
+						<IconPlus size={14} />
+					</button>
+				</div>
+			</header>
+
+			<div class="dsui-nav__body">
+				{ids.length === 0 ? (
+					<div class="dsui-empty dsui-empty--inline">
+						<IconBell size={24} class="dsui-empty__icon" />
+						<p class="dsui-empty__title">No subscriptions tracked</p>
+						<p class="dsui-empty__hint">
+							The control plane has no list-all endpoint, so dsui remembers the ids you create or
+							track here (per connection). Create one, or track an existing id below.
+						</p>
+					</div>
+				) : (
+					<ul class="dsui-nav__list" role="tree" aria-label="Subscriptions">
+						{ids.map((id) => (
+							<SubscriptionItem
+								key={id}
+								id={id}
+								detail={details[id]}
+								active={onSubView && id === selectedSub}
+							/>
+						))}
+					</ul>
+				)}
+			</div>
+
+			<form
+				class="dsui-nav__add"
+				onSubmit={(e) => {
+					e.preventDefault();
+					commitTrack();
+				}}
+			>
+				<input
+					type="text"
+					class="dsui-nav__addinput"
+					placeholder="Track existing id…"
+					aria-label="Track an existing subscription id"
+					value={draft.value}
+					disabled={conn === null}
+					autocomplete="off"
+					spellcheck={false}
+					onInput={(e) => {
+						draft.value = e.currentTarget.value;
+					}}
+				/>
+				<button
+					type="submit"
+					class="dsui-iconbtn dsui-iconbtn--sm"
+					title="Track subscription id"
+					aria-label="Track subscription id"
+					disabled={conn === null || draft.value.trim() === ""}
+				>
+					<IconPlus size={14} />
+				</button>
+			</form>
+		</section>
+	);
+}
+
+/* ---------------------------------------------------------------------------
+ * Metrics entry (switches the center pane to the metrics workspace)
+ * ------------------------------------------------------------------------ */
+
+function MetricsEntry(): JSX.Element {
+	const active = centerView.value === "metrics";
+	return (
+		<section class="dsui-nav__section dsui-nav__section--metrics" aria-label="Metrics">
+			<button
+				type="button"
+				class={`dsui-nav__entry${active ? " is-active" : ""}`}
+				aria-current={active ? "page" : undefined}
+				onClick={() => setCenterView("metrics")}
+			>
+				<IconChart size={15} class="dsui-nav__entryicon" />
+				<span class="dsui-nav__entrylabel">Metrics</span>
+				<IconChevronRight size={14} class="dsui-nav__entrycaret" />
+			</button>
+		</section>
 	);
 }
 
@@ -382,10 +544,9 @@ export function Navigator(): JSX.Element {
 
 			<Playground />
 
-			<section class="dsui-nav__section dsui-nav__section--soon" aria-label="Coming next">
-				<ComingNext icon={<IconBell size={14} />} label="Subscriptions" />
-				<ComingNext icon={<IconChart size={14} />} label="Metrics" />
-			</section>
+			<SubscriptionsSection />
+
+			<MetricsEntry />
 		</nav>
 	);
 }
