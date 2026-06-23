@@ -23,9 +23,14 @@ jobs:
   # live Lua via probe_predicates.lua, on DB 14), TestStreamSeqLexMirror in
   # ./store/redis (the LB-2 Stream-Seq `<=` digit-width property, INV-DIFF-03, on
   # DB 15), and the checker-side mirrors in ./jepsen/checker (Go core vs the
-  # checker's independent reference, pure). All skip cleanly when Redis is
-  # unreachable; here it is the `redis` service below, so they exercise the live
-  # Lua and a divergence shrinks to a replayable rapid seed.
+  # checker's independent reference, pure). It also runs the config/normalization
+  # parse-seam properties (#34): the pure ContentTypeMatches / ConfigMatches /
+  # ParseTTL / ParseSubOffset / IsValidIntegerString grammar + overflow-seam
+  # properties in ./store and ./protocol, plus their live-Lua legs in ./store/redis
+  # (norm_ct three-way agreement and config_matches MATCHED/MISMATCH cross-check,
+  # on DB 15). All skip cleanly when Redis is unreachable; here it is the `redis`
+  # service below, so they exercise the live Lua and a divergence shrinks to a
+  # replayable rapid seed.
   test:
     runs-on: ubuntu-latest
     services:
