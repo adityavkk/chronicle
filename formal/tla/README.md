@@ -153,4 +153,157 @@ deferred Apalache inductive-invariant sibling (research/01 §Phase 3).
 - `SubscriptionFence_fault_expire.cfg` — INV-FENCE-04 negative test.
 - `SubscriptionFence_fault_lease.cfg` — INV-LEASE-02 negative test.
 - `SubscriptionFence_coverage_W{1..4}.cfg` — crash-window reachability witnesses.
-- `Makefile` — `make tlc` (CI lane), `fault-*`, `coverage`.
+- `Makefile` — `make tlc` (CI lane), `fault-*`, `coverage`, plus `make tlc38`.
+
+---
+
+# Ownership + the fence-on/fence-off layering proof + the liveness encoding (issue #38)
+
+Issue #38 · Epic #25 · Phase P2.4 / P2.5 · discharges INV-OWNER-01, INV-OWNER-02,
+INV-WAKE-01, INV-RECOVER-01/02, INV-DUE-01, INV-JEP-L1-01/02.
+
+Chronicle authorises every schedule-mutating write through **two** fences. The
+inner one is the per-subscription `(generation, wake_id)` fence (`SubscriptionFence`,
+#37). The outer one is the per-slot **owner-epoch** CAS (`claim_shard.lua` /
+`owner_fenced`, inlined into `arm_wake` / `ack` / `expire_lease` / `schedule_retry`
+/ `release`). #38 adds the owner-epoch register, composes the two, and discharges
+the two claims that were prose-only:
+
+1. **The owner-epoch fence is an optimization, never a correctness dependency** —
+   single-holder is upheld by the `(gen,wake)` fence **alone**. (INV-OWNER-02,
+   [FINDINGS.md "layering claim unproven"](../../docs/specs/formal-verification/FINDINGS.md).)
+2. **The `3*sweepInterval` T4 re-emit threshold** is sufficient for eventual
+   re-emit and cannot create a double-live holder. (LB-5,
+   [FINDINGS.md LB-5](../../docs/specs/formal-verification/FINDINGS.md#lb-5-the-3--sweepinterval-t4-re-emit-threshold-is-an-unvalidated-magic-number).)
+
+## How to run
+
+```sh
+make tlc38              # the whole #38 CI lane (all of the below)
+
+make ownership          # standalone owner-epoch CAS, 1 + 2 slots (INV-OWNER-01)
+make composed-on        # layering proof, owner_fenced Real,       1 slot
+make composed-off       # layering proof, owner_fenced AlwaysPass, 1 slot (load-bearing)
+make composed-on-2x2    # layering proof, Real,       scaled 2 subs x 2 workers x 2 slots
+make composed-off-2x2   # layering proof, AlwaysPass, scaled 2/2/2 (load-bearing, scaled)
+make composed-deposed   # NON-VACUITY: Deposed-owner-late-write MUST be reachable
+make liveness           # leads-to under weak fairness (INV-WAKE-01, RECOVER-01/02)
+make liveness-nofair    # NEGATIVE: leads-to MUST FAIL without fairness (non-trivial)
+make liveness-safety    # NoDoubleLiveHolder under SlowConsumer + re-emit (INV-JEP-L1-01)
+make liveness-sensitivity # LB-5: NoDoubleLiveHolder MUST still hold at ReemitTicks=0
+```
+
+## The layering proof (INV-OWNER-02)
+
+`Composed.tla` reproduces the `SubscriptionFence` state machine inline and wires
+`owner_fenced(slot, me, epoch)` as a guard onto **every** mutating subscription
+action (`Arm`, `Ack`, `Release`, `ExpireLease` — the inlined-Lua set; `Claim` is
+the load-balanced external/hot path and is **not** in that set, matching the
+code). The owner register is driven by `ClaimShard` / `Depose`, so a caller can be
+deposed mid-protocol. The proof is the **twin model check** under a single
+`FENCE_MODE` switch that differs in nothing else:
+
+| Config | `FENCE_MODE` | Owner fence | `[]SingleHolder` |
+|---|---|---|---|
+| `Composed_FenceOn.cfg`  | `Real`       | enforced | **HOLDS** |
+| `Composed_FenceOff.cfg` | `AlwaysPass` | **deleted** (`owner_fenced ≡ FALSE`) | **HOLDS** |
+
+The **AlwaysPass run is load-bearing**: with the outer fence gone, the only thing
+preventing two ack-acceptable holders is the inner `(gen,wake)` fence — its holding
+is exactly "owner-epoch is optimization-only." `Composed_DeposedWitness.cfg` proves
+the run is **non-vacuous**: the Deposed-owner-late-write (an owner-scoped caller
+whose slot was transferred, carrying a stale epoch, attempting a mutation) is
+reachable under AlwaysPass, so the run genuinely exercises the write the owner
+fence would have stopped. `SingleHolder` absorbs it via the `(gen,wake)` fence and
+the empty `wake_id` left by `expire_lease` (the INV-FENCE-04 escape hatch).
+
+## The liveness / fairness encoding (INV-WAKE-01, RECOVER, LB-5)
+
+`Liveness.tla` is a deliberately small pull-wake model carrying just enough state
+to state the temporal properties under weak fairness of the sweep / due-drain
+loops:
+
+- `PendingWorkLeadsToWake == [](idle ∧ HasPendingWork) ~> WakeIssued` — the headline
+  liveness (INV-WAKE-01). The **no-fairness** spec (`Liveness_NoFair.cfg`,
+  `SpecNoFair`) makes this **fail**, confirming the property is non-trivial.
+- `StrandedT1LeadsToReemit` / `StrandedT4LeadsToReemit` — a pull-wake stranded in
+  the arm-before-emit window (crash window 1, `wake_sent=0`) or the post-emit T4
+  window (`wake_sent=1`, no lease, never claimed) is eventually re-emitted under
+  sweep fairness (INV-RECOVER-01/02).
+- `NoDoubleLiveHolder == []SingleHolder` under the `SlowConsumer` + re-emit
+  scenario (`Liveness_Safety.cfg`, `SafetySpec` with `LeaseLapse`): a re-emit to a
+  still-live slow consumer never yields two ack-acceptable holders — the duplicate
+  degrades to **at-least-once** (INV-JEP-L1-01), backstopped by the `(gen,wake)`
+  fence and the empty `wake_id` left by `expire_lease`.
+
+### LB-5 resolution — the `3*sweepInterval` threshold
+
+The wall-clock test `now - wake_event_sent_ns > 3*sweepInterval` is modeled
+discretely: a stranded-emitted pull-wake ages one `staleTicks` per sweep tick, and
+the T4 re-emit becomes enabled only once `staleTicks > ReemitTicks` (`ReemitTicks
+= 3` = the `3*sweep` floor). This makes **`3x` a tuning knob for _when_ re-emit
+fires** — a liveness/efficiency heuristic, **not** a safety guarantee. The
+`Liveness_Sensitivity.cfg` config re-runs the safety check at the most aggressive
+`ReemitTicks = 0` (re-emit as early as possible) and `NoDoubleLiveHolder` **still
+holds**: **safety is threshold-independent**. The `(gen,wake)` fence is the
+backstop regardless of the threshold value. This discharges LB-5: the `3x` is
+validated as sufficient-for-eventual-re-emit (the leads-to holds) and
+safe-against-double-live-holder at any value (the sensitivity run).
+
+> **CONSTRAINT-vs-liveness note.** The liveness configs declare **no** state
+> `CONSTRAINT`: the state space is already bounded by the action guards (`DueFire`
+> / `Claim` require `gen < MaxGen`; `SweepTick` requires `staleTicks < MaxStale`),
+> so a CONSTRAINT would be redundant — and a state CONSTRAINT during *liveness*
+> checking can truncate behaviors and mask a real leads-to violation (Specifying
+> Systems §14.3.5). Omitting it makes TLC check the temporal properties on the
+> genuinely-complete state graph.
+
+## Results (TLC 2.19, tla2tools v1.7.4)
+
+| Config | Instance | Distinct states | Depth | Verdict |
+|---|---|---|---|---|
+| `Ownership_1slot.cfg` | 2 replicas × 1 slot | 27 | 8 | `OInv` + epoch props HOLD |
+| `Ownership_2slot.cfg` | 2 replicas × 2 slots | 123 | 9 | `OInv` + epoch props HOLD |
+| `Composed_FenceOn.cfg`  | 2 wkr × 1 sub × 1 slot, `Real`       | 53,566 | 17 | `Inv` (`SingleHolder`) HOLDS |
+| `Composed_FenceOff.cfg` | 2 wkr × 1 sub × 1 slot, `AlwaysPass` | 53,566 | 17 | `Inv` (`SingleHolder`) **HOLDS (load-bearing)** |
+| `Composed_FenceOn_2x2.cfg`  | 2/2/2, `Real`,       symmetry | 25,972,640 | 29 | `Inv` HOLDS (~7.5 min) |
+| `Composed_FenceOff_2x2.cfg` | 2/2/2, `AlwaysPass`, symmetry | 25,972,640 | 29 | `Inv` **HOLDS (load-bearing, scaled)** (~10.5 min) |
+| `Composed_DeposedWitness.cfg` | `AlwaysPass`, 1 slot | — to witness | 2 | `NotDeposedLateWrite` VIOLATED ⇒ scenario reachable (intended) |
+| `Liveness.cfg` | 1 worker, `ReemitTicks=3` | 10 | 8 | all 4 leads-to props HOLD |
+| `Liveness_NoFair.cfg` | `SpecNoFair` | — to CEX | — | `PendingWorkLeadsToWake` **VIOLATED** (intended; non-trivial) |
+| `Liveness_Safety.cfg` | 2 workers, `ReemitTicks=3`, `SafetySpec` | 83 | — | `NoDoubleLiveHolder` HOLDS |
+| `Liveness_Sensitivity.cfg` | 2 workers, `ReemitTicks=0` | 83 | — | `NoDoubleLiveHolder` HOLDS (threshold-independent) |
+
+The two `*_2x2` configs run against `MC_ComposedSym.tla` (symmetry over
+Workers ∪ Subs ∪ Slots) so the un-quotiented 2/2/2 state space stays tractable; the
+1-slot runs and the Deposed witness use the un-quotiented `MC_Composed.tla` for
+legible named traces. The Real and AlwaysPass runs reach the **identical**
+reachable durable-state set (same distinct count) — AlwaysPass simply enables more
+transitions into it — so the layering proof compares like with like.
+
+## Action ⇆ shipped source mirror (#38 additions)
+
+| Spec action | Source mirror | Guard transcribed |
+|---|---|---|
+| `ClaimShard(me,h)` | `webhook/scripts/claim_shard.lua` (`webhook/ownership.go SlotClaim`) | BUSY iff a live foreign owner; else grant — `owner=me` RENEW (epoch kept), `owner≠me` TRANSFER (`HINCRBY owner_epoch +1`, strictly up). |
+| `OwnerVerdict` / `OwnerFenced` | `webhook/scripts/check_owner.lua` / `common.lua owner_fenced` | UNOWNED / FENCED (owner≠me ∨ epoch mismatch) / OWNER; `epoch=''`(=0) short-circuits to pass (external/hot path). |
+| `Depose(h)` | membership drop | the slot lease lapses; `owner_id`/`owner_epoch` persist (fenced only by a later TRANSFER bump). |
+| `Arm`/`Ack`/`Release`/`ExpireLease` owner guard | inlined `owner_fenced(...)` at the top of each mutating Lua | a FENCED owner check is a no-op (`return {'FENCED'}`), exactly the inlined-Lua set; `Claim` is intentionally un-guarded (load-balanced external path). |
+| `DueFire` / `SweepEmitT1` / `SweepEmitT4` / `SweepTick` | `manager.go` `DecideDue` / `sweepOnce` re-emit branches | DueFire = idle+pending arm; T1 = `wake_event_sent_ns==0` immediate re-emit; T4 = `now-sent_ns > 3*sweepInterval` (modeled as `staleTicks > ReemitTicks`). |
+| `LeaseLapse` | `expire_lease.lua` on a slow/crashed holder | idle + clear `wake_id`, **gen unchanged** (INV-FENCE-04): the slow holder's token is fenced by the empty `wake_id`. |
+
+## #38 files
+
+- `Ownership.tla` — the owner-epoch register + `ClaimShard`/`Depose`/`OTick`, the
+  `OwnerVerdict` operator, `SingleOwner` + epoch action-properties, BUSY/TRANSFER
+  reachability witnesses.
+- `MC_Ownership.tla` + `Ownership_{1,2}slot.cfg` — standalone INV-OWNER-01 runs.
+- `Composed.tla` — `SubscriptionFence` × `Ownership` with `owner_fenced` wired as a
+  guard, the `FENCE_MODE` switch, and the `DeposedLateWriteEnabled` witness.
+- `MC_Composed.tla` (un-quotiented, for 1 slot + witness) and `MC_ComposedSym.tla`
+  (symmetry-quotiented, for the scaled 2/2/2 runs).
+- `Composed_FenceOn.cfg` / `Composed_FenceOff.cfg` and their `*_2x2.cfg` scaled
+  twins; `Composed_DeposedWitness.cfg` (non-vacuity).
+- `Liveness.tla` + `MC_Liveness.tla` + `MC_LiveRace.tla` (two-token-race witness).
+- `Liveness.cfg`, `Liveness_NoFair.cfg`, `Liveness_Safety.cfg`,
+  `Liveness_Sensitivity.cfg`.
