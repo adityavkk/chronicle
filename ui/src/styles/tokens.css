@@ -62,21 +62,27 @@
 		sans-serif;
 	--font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas,
 		monospace;
+	/* Serif for section ledes + emphasis (doc-site deck/<em> feel); system/local
+	   stack only — no webfont dependency, offline-safe. */
+	--font-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
 
-	/* Fluid type: small/dense console — narrow range, readable floor. */
-	--text-2xs: 0.6875rem; /* 11px */
-	--text-xs: 0.75rem; /* 12px */
+	/* Fluid type: dense console, widened range — a readable floor plus a real
+	   display tier. Clamp-based fluid sizing throughout; mins hold steady so the
+	   dense panels do not reflow, maxes grow so the headline tiers gain presence. */
+	--text-2xs: 0.6875rem; /* 11px — all-caps eyebrow labels + chips ONLY */
+	--text-xs: 0.75rem; /* 12px — reading floor for dense explanatory prose */
 	--text-sm: 0.8125rem; /* 13px */
-	--text-base: clamp(0.875rem, 0.84rem + 0.18vw, 0.9375rem);
-	--text-md: 1rem;
-	--text-lg: clamp(1.0625rem, 1rem + 0.3vw, 1.1875rem);
-	--text-xl: clamp(1.25rem, 1.15rem + 0.5vw, 1.5rem);
+	--text-base: clamp(0.875rem, 0.83rem + 0.22vw, 0.9688rem); /* 14 -> 15.5px */
+	--text-md: 1rem; /* 16px */
+	--text-lg: clamp(1.0625rem, 0.99rem + 0.4vw, 1.25rem); /* 17 -> 20px */
+	--text-xl: clamp(1.375rem, 1.18rem + 0.85vw, 1.75rem); /* 22 -> 28px display */
 
 	--leading-tight: 1.25;
 	--leading-normal: 1.5;
 	--weight-normal: 400;
 	--weight-medium: 500;
 	--weight-semibold: 600;
+	--weight-bold: 700;
 
 	/* ---- Motion -------------------------------------------------------- */
 	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
