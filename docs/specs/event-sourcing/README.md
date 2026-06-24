@@ -217,6 +217,8 @@ because that is the one shape Chronicle is built to avoid.
 - [`LANDSCAPE.md`](LANDSCAPE.md): the design reference, with a comparison table of nine systems, the
   five design axes in detail, the scoped gaps, a phased extension plan, an API sketch, and the Lean
   and TLA+ proof obligations.
+- [`TANSTACK-DB.md`](TANSTACK-DB.md): a from-first-principles guide to the client-side materialization
+  stack: the State Protocol, MaterializedState, TanStack DB, and the d2ts differential-dataflow engine.
 - [`research/01-eventstoredb.md`](research/01-eventstoredb.md): EventStoreDB and KurrentDB.
 - [`research/02-akka.md`](research/02-akka.md): Akka Persistence, sharding, query, and projections.
 - [`research/03-axon-marten.md`](research/03-axon-marten.md): Axon and Marten, the projection spectrum.
