@@ -110,6 +110,25 @@ describe("MessagesWorkspace grid", () => {
 		expect(selected).toHaveLength(1);
 	});
 
+	it("shows rows that arrive AFTER mount (visibleRows stays reactive to lastRead)", async () => {
+		// Reproduces the real-app sequence the other tests skip: the component mounts
+		// BEFORE the async read lands. A useComputed that closed over the render-scoped
+		// `read` const would freeze to this mount-time null and render "No rows match"
+		// forever once the read arrived.
+		lastRead.value = null;
+		selectedRow.value = null;
+		render(<MessagesWorkspace />);
+		expect(screen.queryByRole("listbox", { name: "Message rows" })).toBeNull();
+
+		// The read lands after mount.
+		lastRead.value = makeRead(3);
+
+		const list = await screen.findByRole("listbox", { name: "Message rows" });
+		expect(within(list).getAllByRole("option")).toHaveLength(3);
+		// And the (empty) filter must NOT report a no-match state.
+		expect(screen.queryByText(/No rows match the filter/)).toBeNull();
+	});
+
 	it("keeps exactly one row in the Tab sequence (roving tabindex)", () => {
 		render(<MessagesWorkspace />);
 		// Scope to the listbox: the toolbar's Rows <select> also exposes native

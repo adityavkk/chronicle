@@ -183,13 +183,18 @@ export function TailPanel(): JSX.Element {
 	const filter = useSignal("");
 	const compiled = useComputed(() => compileQuery(filter.value));
 	const visible = useComputed(() => {
+		// Read the signals INSIDE the computed so the live buffer stays reactive. A
+		// useComputed closing over the render-scoped `rows`/`dropped` consts would
+		// freeze to the mount-time (empty) buffer and never show incoming rows.
+		const buffer = tailRows.value;
+		const drop = tailDropped.value;
 		const q = compiled.value;
-		return rows
-			.map((row, i) => ({ row, seq: dropped + i }))
+		return buffer
+			.map((row, i) => ({ row, seq: drop + i }))
 			.filter(({ row }) => matchCompiled(row, q));
 	});
 
-	const showTime = useComputed(() => batchHasTimes(rows));
+	const showTime = useComputed(() => batchHasTimes(tailRows.value));
 	const idle = status.state === "idle";
 	const terminal = isTerminalTailState(status);
 
