@@ -74,6 +74,9 @@ const LS_COMPOSER_OPEN = "dsui.composer-open";
 const LS_SUBS_PREFIX = "dsui.subs.";
 /** The metrics URL is remembered per connection (a separate --metrics-listen). */
 const LS_METRICS_PREFIX = "dsui.metricsUrl.";
+/** Per-stream message schemas (client-side authoring aid; the API stores none).
+ *  One JSON object per connection: { [streamPath]: schemaText }. */
+const LS_SCHEMA_PREFIX = "dsui.schema.";
 
 /* ----------------------------------------------------------------------------
  * Signals (the reactive state atoms)
@@ -546,6 +549,21 @@ export const selectedStream = computed<StreamInfo | null>(() => {
 	return streams.value.find((s) => s.path === path) ?? null;
 });
 
+/**
+ * Per-stream message schemas for the active connection, keyed by stream path. A
+ * client-side authoring aid only (the Durable Streams API stores no schema), kept
+ * in localStorage like the known-subscription-ids set. The publish composer reads
+ * the selected stream's schema to pre-fill an empty skeleton.
+ */
+export const streamSchemas = signal<Readonly<Record<string, string>>>({});
+
+/** The saved JSON-Schema text for the selected stream, or null when none is set. */
+export const selectedStreamSchema = computed<string | null>(() => {
+	const path = selectedStreamPath.value;
+	if (path === null) return null;
+	return streamSchemas.value[path] ?? null;
+});
+
 /** A client bound to the active connection, recreated when it changes. */
 export const activeClient = computed<DsClient | null>(() => {
 	const conn = activeConnection.value;
@@ -710,6 +728,7 @@ export function setActiveConnection(id: string | null): void {
 	metricsError.value = null;
 	subscriptionIds.value = id === null ? [] : loadSubscriptionIds(id);
 	metricsUrl.value = id === null ? "" : loadMetricsUrl(id);
+	streamSchemas.value = id === null ? {} : loadStreamSchemas(id);
 	if (id !== null) {
 		const now = Date.now();
 		connections.value = connections.value.map((c) => (c.id === id ? { ...c, lastUsedAt: now } : c));
@@ -839,6 +858,30 @@ export function selectStream(path: string): void {
 		// read does not apply to the wrong stream.
 		if (selectedStreamPath.value === path) applyComposerOpenForSelection();
 	});
+}
+
+/**
+ * Set (or, with empty text, clear) the client-side message schema for a stream.
+ * Stored per connection in localStorage — a local authoring aid only; it is never
+ * sent to the server and does not change the protocol. The publish composer reads
+ * it to pre-fill an empty skeleton.
+ */
+export function setStreamSchema(path: string, schemaText: string): void {
+	const trimmed = schemaText.trim();
+	const next = { ...streamSchemas.value };
+	if (trimmed === "") delete next[path];
+	else next[path] = trimmed;
+	streamSchemas.value = next;
+	persistStreamSchemas();
+}
+
+/** Forget the saved message schema for a stream. */
+export function clearStreamSchema(path: string): void {
+	if (!(path in streamSchemas.value)) return;
+	const next = { ...streamSchemas.value };
+	delete next[path];
+	streamSchemas.value = next;
+	persistStreamSchemas();
 }
 
 /**
@@ -2236,6 +2279,33 @@ function loadMetricsUrl(connId: string): string {
 	return readLs(`${LS_METRICS_PREFIX}${connId}`) ?? "";
 }
 
+/** Load the persisted per-stream schemas for a connection (defensive). */
+function loadStreamSchemas(connId: string): Record<string, string> {
+	const raw = readLs(`${LS_SCHEMA_PREFIX}${connId}`);
+	if (raw === null) return {};
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (!isRecord(parsed)) return {};
+		const out: Record<string, string> = {};
+		for (const [path, schema] of Object.entries(parsed)) {
+			if (typeof schema === "string" && schema !== "") out[path] = schema;
+		}
+		return out;
+	} catch {
+		return {};
+	}
+}
+
+/** Persist the current per-stream schemas for the active connection (or drop the
+ *  key entirely when none remain). */
+function persistStreamSchemas(): void {
+	const id = activeConnectionId.value;
+	if (id === null) return;
+	const map = streamSchemas.value;
+	if (Object.keys(map).length === 0) removeLs(`${LS_SCHEMA_PREFIX}${id}`);
+	else writeLs(`${LS_SCHEMA_PREFIX}${id}`, JSON.stringify(map));
+}
+
 function loadTheme(): Theme {
 	const raw = readLs(LS_THEME);
 	if (raw === "light" || raw === "dark" || raw === "system") return raw;
@@ -2303,6 +2373,7 @@ export function initStore(): void {
 	if (restored !== null) {
 		subscriptionIds.value = loadSubscriptionIds(restored);
 		metricsUrl.value = loadMetricsUrl(restored);
+		streamSchemas.value = loadStreamSchemas(restored);
 		void refreshStreams();
 	}
 	void probeAllConnections();
