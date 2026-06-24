@@ -1,0 +1,117 @@
+---
+// Aside.astro — progressive disclosure with a native <details>/<summary>.
+//
+// No client JS and no hydration: the browser's built-in disclosure widget
+// does the toggling. Use it to move deep detail, edge cases, and limitations
+// off the main read path so a page reads short, while a reader who wants the
+// detail is one click away. Collapsed by default; pass `open` to start open.
+//
+// The slot holds MDX content (prose, a code block, a Table). The figure rail
+// (margin + prose cap) matches Callout and RedisTrace so it lines up with the
+// rest of the page.
+interface Props {
+  /** Summary line, shown on the always-visible row. Inline HTML allowed. */
+  summary: string;
+  /** Optional mono micro-label before the summary, e.g. "Edge case". */
+  label?: string;
+  /** Start expanded. Default false (collapsed). */
+  open?: boolean;
+}
+const { summary, label, open = false } = Astro.props;
+---
+
+<details class="aside" open={open}>
+  <summary class="aside-summary">
+    {label && <span class="aside-label mono">{label}</span>}
+    <span class="aside-text" set:html={summary} />
+    <span class="aside-mark" aria-hidden="true"></span>
+  </summary>
+  <div class="aside-body"><slot /></div>
+</details>
+
+<style lang="scss">
+  .aside {
+    margin: 24px 0 0 var(--rail-indent);
+    max-width: var(--prose-max);
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--rule);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    &[open] { border-left-color: var(--accent); }
+  }
+  .aside-summary {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 14px 20px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 14.5px;
+    line-height: 1.5;
+    color: var(--ink);
+    &::-webkit-details-marker { display: none; }
+    :global(code) {
+      font-family: var(--mono);
+      font-size: 0.86em;
+      background: var(--tint);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--accent-deep);
+    }
+  }
+  .aside-summary:hover { background: var(--paper); }
+  .aside-label {
+    flex: 0 0 auto;
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .aside-text { flex: 1 1 auto; :global(strong) { color: var(--ink); font-weight: 600; } }
+  // A CSS-only twisty: a chevron that rotates when the parent <details> opens.
+  .aside-mark {
+    flex: 0 0 auto;
+    align-self: center;
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid var(--muted);
+    border-bottom: 2px solid var(--muted);
+    transform: rotate(-45deg);
+    transition: transform 0.2s ease;
+  }
+  .aside[open] .aside-mark { transform: rotate(45deg); }
+
+  .aside-body {
+    padding: 4px 20px 18px;
+    border-top: 1px solid var(--rule-soft);
+    :global(p) {
+      margin: 12px 0 0;
+      max-width: var(--prose-measure);
+      font-size: 14.5px;
+      line-height: 1.6;
+      color: var(--ink);
+    }
+    :global(p:first-child) { margin-top: 14px; }
+    :global(strong) { color: var(--ink); font-weight: 700; }
+    :global(em) { font-family: var(--serif-italic); font-style: italic; color: var(--accent-deep); }
+    :global(code) {
+      font-family: var(--mono);
+      font-size: 0.88em;
+      background: var(--tint);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--accent-deep);
+      overflow-wrap: anywhere;
+    }
+    :global(.expressive-code) { margin: 14px 0 0; max-width: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .aside-mark { transition: none; }
+  }
+  @media (max-width: 840px) {
+    .aside { margin-left: 0; max-width: none; }
+  }
+</style>

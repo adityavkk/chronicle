@@ -3,7 +3,7 @@ title: "The test <em>catalog</em>"
 summary: "Every kind of test and proof Chronicle runs, what each one gives you, where it lives, and its downside, plus the line between what is proven, what is only sampled, and what cannot be proven at all. Thirteen kinds, from Lean proofs and Apalache induction through porcupine linearizability and the failover nemesis."
 eyebrow: "Reference"
 meta: "Test catalog"
-deck: "This page lists <strong>every kind of test and proof</strong> Chronicle runs. For each one it states what the test is, what it gives you, where it lives in the code, and its <strong>downside</strong>. It then draws the line between what is <strong>proven</strong>, what is only <strong>sampled</strong>, and what <strong>cannot be proven</strong> at all, names the three bugs the formal work found, and shows how to run everything. It mirrors the in-repo catalog at <code>docs/TESTING.md</code>."
+deck: "This page lists <strong>every kind of test and proof</strong> Chronicle runs. Each one states what the test is, what it gives you, where it lives in the code, and its <strong>downside</strong>. It then sets out what is <strong>proven</strong>, what is only <strong>sampled</strong>, and what <strong>cannot be proven</strong> at all, names the three bugs the formal work found, and shows how to run everything. It mirrors the in-repo catalog at <code>docs/TESTING.md</code>."
 byline:
   - label: "Kinds"
     value: "13 — proofs · property · linearizability · fault injection"
@@ -18,17 +18,19 @@ import Tldr from "../components/Tldr.astro";
 import SectionHead from "../components/SectionHead.astro";
 import Callout from "../components/Callout.astro";
 import Table from "../components/Table.astro";
+import Aside from "../components/Aside.astro";
+import Complexity from "../components/Complexity.astro";
 
 <Tldr>
   <ul>
-    <li><strong>This page lists every kind of test and proof, and what each one is worth.</strong> There are thirteen kinds. For each one this page states what it is, what it gives you, where the code is, and its downside, so a green check is never read as more than it proves.</li>
-    <li><strong>One rule shapes the whole suite.</strong> Split each component into a pure deterministic core and an imperative shell that does input and output. Test each part at the cheapest level that is still faithful. The cores are tested by proofs and by properties that hold for every input. The shell is tested against a real Redis.</li>
-    <li><strong>The pure cores are proven for every input.</strong> Lean 4 proves the producer state machine, the offset order, and the cursor progression, checked by Lean's kernel with no <code>sorry</code> and no <code>native_decide</code>.</li>
-    <li><strong>The concurrent fence is checked over all interleavings, and for one property over all sizes.</strong> TLA+ checks the subscription protocol over every interleaving up to a bounded size, and Apalache proves single-holder as an inductive invariant for all sizes.</li>
+    <li><strong>This page lists every kind of test and proof Chronicle runs, and what each one is worth.</strong> There are thirteen kinds. Each one states what it is, what it gives you, where the code lives, and its downside, so a green check is never read as more than it proves.</li>
+    <li><strong>One rule shapes the suite.</strong> Split each component into a pure deterministic core and an imperative shell that does input and output. Test each part at the cheapest level that stays faithful. Proofs and per-input properties test the cores. A real Redis tests the shell.</li>
+    <li><strong>The pure cores are proven for every input.</strong> Lean 4 proves the producer state machine, the offset order, and the cursor progression. Lean's kernel checks the proofs with no <code>sorry</code> and no <code>native_decide</code>.</li>
+    <li><strong>The concurrent fence is checked over all interleavings, and one property over all sizes.</strong> TLA+ checks the subscription protocol over every interleaving up to a bounded size. Apalache proves single-holder as an inductive invariant for all sizes.</li>
     <li><strong>The data plane is linearizability-checked.</strong> Porcupine decides whether a recorded concurrent history of append, read, and close has a valid sequential order, and prints the witness when it does not.</li>
-    <li><strong>The formal work found three real bugs.</strong> Issues <a href="https://github.com/adityavkk/chronicle/issues/47">#47</a>, <a href="https://github.com/adityavkk/chronicle/issues/46">#46</a>, and <a href="https://github.com/adityavkk/chronicle/issues/48">#48</a>, each labelled <code>found-by-formal-methods</code>. They are bugs that example tests had missed.</li>
-    <li><strong>One thing is not provable, and the page says so.</strong> Durability across a Redis failover cannot be proven, because Redis replication is asynchronous. It is tested with the failover nemesis and documented as a durability-honest property, not proven.</li>
-    <li><strong>The formal-verification epic is built and merged.</strong> The companion <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/formal-verification`}>verification page</a> is no longer a proposal. All of this is on <code>main</code>.</li>
+    <li><strong>The formal work found three real bugs.</strong> Issues <a href="https://github.com/adityavkk/chronicle/issues/47">#47</a>, <a href="https://github.com/adityavkk/chronicle/issues/46">#46</a>, and <a href="https://github.com/adityavkk/chronicle/issues/48">#48</a>, each labelled <code>found-by-formal-methods</code>. Example tests had missed all three.</li>
+    <li><strong>One thing cannot be proven, and the page says so.</strong> Durability of an acknowledged write across a Redis failover cannot be proven, because Redis replication is asynchronous. The failover nemesis tests it and the page documents it as a durability-honest property, not as a proof.</li>
+    <li><strong>The formal-verification work is built and merged.</strong> The companion <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/formal-verification`}>verification page</a> is no longer a proposal. All of this is on <code>main</code>.</li>
   </ul>
 </Tldr>
 
@@ -36,16 +38,12 @@ import Table from "../components/Table.astro";
   <SectionHead num="01" label="Shape" title="One rule shapes the <em>whole suite</em>" />
 
   Chronicle splits each component into a pure deterministic core and an imperative
-  shell that does input and output, then tests each part at the cheapest level that
-  is still faithful. The cores are tested by proofs and by properties that hold for
-  every input. The shell is tested against a real Redis. Properties that only
-  appear across processes, such as a failover or a race between two workers, are
-  tested with fault injection and linearizability checks. The wire protocol is
-  checked from outside the code by a black-box suite.
-
-  The table below lists the levels at a glance. Each row names what runs at that
-  level, what the level gives you, and the infrastructure it needs. The sections
-  after the table take each kind of test one at a time.
+  shell that does input and output. It tests each part at the cheapest level that
+  stays faithful. Proofs and per-input properties test the cores. A real Redis tests
+  the shell. Some properties only appear across processes, e.g. a failover or a race
+  between two workers, and fault injection and linearizability checks test those. A
+  black-box suite checks the wire protocol from outside the code. The table below
+  maps each level to what it gives you and the infrastructure it needs.
 
   <Table wide>
     | Level | What runs | What it gives you | Infrastructure |
@@ -62,10 +60,10 @@ import Table from "../components/Table.astro";
   </Table>
 
   <Callout icon="info" label="How to read each section">
-    Every section that follows states four things: what the test is, what it gives
-    you, where it lives, and its downside. The downside is the point. A test that
-    is described as all upside is being oversold. The honest limit of each kind is
-    what tells you which other kind covers the gap.
+    Every section that follows states four things. What the test is, what it gives
+    you, where it lives, and its downside. The downside is the point. A test
+    described as all upside is being oversold. The limit of each kind tells you which
+    other kind covers the gap.
   </Callout>
 </section>
 
@@ -74,29 +72,27 @@ import Table from "../components/Table.astro";
 
   ### 1. Unit tests on the pure cores
 
-  Table-driven Go tests on the pure functions. They cover `ValidateProducer`, which
-  is the idempotent producer state machine, `Offset.Compare` and the offset codec,
+  Table-driven Go tests on the pure functions. They cover `ValidateProducer`, the
+  idempotent producer state machine, `Offset.Compare` and the offset codec,
   `GenerateResponseCursor`, and the webhook reducers such as `FenceDecision` and
   `MergeAcks`. They run in milliseconds with no Redis and no clock, because the
-  clock is passed in.
+  caller passes the clock in. The downside is that they only check the cases you
+  wrote, so they miss the inputs you did not think of. The proofs and the property
+  tests below close that gap.
 
-  They give you correctness on the specific cases you wrote. The downside is that
-  they only check the cases you wrote, so they miss the inputs you did not think
-  of. That gap is closed by the proofs and the property tests below.
-
-  Where: the pure-Go cores under [`store/`](https://github.com/adityavkk/chronicle/blob/main/store/producer.go)
-  and [`webhook/`](https://github.com/adityavkk/chronicle/blob/main/webhook/state.go). Run: `make test-unit`.
+  Where: `ValidateProducer` at [`store/producer.go:17`](https://github.com/adityavkk/chronicle/blob/main/store/producer.go#L17),
+  `Compare` at [`store/offset.go:128`](https://github.com/adityavkk/chronicle/blob/main/store/offset.go#L128),
+  and the webhook reducers `FenceDecision` ([`webhook/state.go:119`](https://github.com/adityavkk/chronicle/blob/main/webhook/state.go#L119))
+  and `MergeAcks` ([`webhook/state.go:235`](https://github.com/adityavkk/chronicle/blob/main/webhook/state.go#L235)).
+  Run: `make test-unit`.
 
   ### 2. Integration tests against a real Redis
 
   The `store/redis` and `webhook` packages run against a live Redis 8. Each uses
   its own database, flushes once at start, and skips cleanly when Redis is not
-  reachable or under `-short`. These exercise the Lua scripts and the full
-  read-write round trip that the in-memory store cannot.
-
-  They give you confidence that the bytes actually move correctly through the real
-  storage layer. The downside is that they need Redis, so they do not run in a bare
-  unit pass.
+  reachable or under `-short`. These run the Lua scripts and the full read-write
+  round trip that the in-memory store cannot. The downside is that they need Redis,
+  so they do not run in a bare unit pass.
 
   Where: [`store/redis/integration_test.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/integration_test.go)
   and [`webhook/redis_store_test.go`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store_test.go).
@@ -104,41 +100,39 @@ import Table from "../components/Table.astro";
 
   ### 3. Differential tests
 
-  The same input is sent through three independent implementations and the results
-  are required to match. The three are the pure Go function, which is the oracle,
-  the Lua script Redis runs, which is the mirror, and the Lean model compiled to C,
-  which is the proof and is described in kind 9. The producer state machine, the
-  fence and slot predicates, the content-type and config normalizers, the
-  `Stream-Seq` comparison, and the JSON flatten path each have a differential test.
+  The same input goes through three independent implementations and the results must
+  match. The three are the pure Go function, which is the oracle, the Lua script
+  Redis runs, which is the mirror, and the Lean model compiled to C, which is the
+  proof and is kind 9 below. The producer state machine, the fence and slot
+  predicates, the content-type and config normalizers, the `Stream-Seq` comparison,
+  and the JSON flatten path each have a differential test.
 
   This gives you confidence that the three copies of a rule have not drifted apart.
   A differential test found the `10^14` producer-reply bug, issue
   [#47](https://github.com/adityavkk/chronicle/issues/47). The Lua reply rendered
-  large sequence numbers in scientific notation, which the Go reply parser
-  rejected. The downside is that a differential test only catches a disagreement.
-  If all three copies share the same wrong assumption, they agree and the test
-  passes. That residual gap is covered by the independent properties and the
-  proofs.
+  large sequence numbers in scientific notation, which the Go reply parser rejected.
+  The downside is that a differential test only catches a disagreement. If all three
+  copies share the same wrong assumption, they agree and the test passes.
+  The independent properties and the proofs cover that gap.
 
   Where: [`store/redis/differential_test.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/differential_test.go),
   [`webhook/predicate_differential_test.go`](https://github.com/adityavkk/chronicle/blob/main/webhook/predicate_differential_test.go),
   and [`store/leanoracle`](https://github.com/adityavkk/chronicle/blob/main/store/leanoracle),
-  which is the compiled-Lean oracle behind the `leanoracle` build tag.
+  which is the compiled-Lean oracle behind the `leanoracle` build tag. Run:
+  `go test -run Differential ./store/redis/`, e.g. the producer differential property
+  in [`differential_producer_test.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/differential_producer_test.go).
 
   ### 4. Property-based and model-based tests
 
   The `rapid` library generates random, shrinking sequences of operations and runs
   each operation against both backends. One backend is the in-memory `MemoryStore`,
-  which is the reference model. The other is the live Redis backend, which is the
-  subject. After every step the two must agree on the result, the error, the tail
-  offset, the metadata, and the bytes a read returns. A single fake clock drives
-  both, so expiry is reproducible.
-
-  This gives you agreement across many reachable states rather than a fixed list,
-  and when it fails it shrinks the failure to the smallest sequence that still
-  breaks it. The downside is that it samples the space rather than covering it, and
-  both backends call the same pure cores, so a bug in a shared core agrees in both.
-  Independent metamorphic checks and the proofs cover that.
+  the reference model. The other is the live Redis backend, the subject. After every
+  step the two must agree on the result, the error, the tail offset, the metadata,
+  and the bytes a read returns. A single fake clock drives both, so expiry is
+  reproducible. When it fails it shrinks the failure to the smallest sequence that
+  still breaks it. The downside is that it samples the space rather than covering it,
+  and a bug in a pure core both backends share agrees in both. The independent
+  metamorphic checks and the proofs cover that gap.
 
   Where: [`store/redis/equivalence_test.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/equivalence_test.go),
   [`store/redis/differential_producer_test.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/differential_producer_test.go),
@@ -146,12 +140,12 @@ import Table from "../components/Table.astro";
 
   ### 5. Coverage-guided fuzzing
 
-  The same `rapid` model is wrapped as a native Go fuzz target with
-  `rapid.MakeFuzz`, so Go's coverage-guided fuzzer steers the generated sequences
-  toward rare branches that uniform random sampling under-reaches. Examples are an
-  epoch bump at a nonzero sequence or a fork sub-offset overshoot. A committed
-  corpus of seeds, including four branch-verified fixtures, runs on every pull
-  request, and a nightly job runs the fuzzer for a fixed time.
+  The same `rapid` model is wrapped as a native Go fuzz target with `rapid.MakeFuzz`,
+  so Go's coverage-guided fuzzer steers the generated sequences toward rare branches
+  that uniform random sampling under-reaches, e.g. an epoch bump at a nonzero
+  sequence or a fork sub-offset overshoot. A committed corpus of seeds, including
+  four branch-verified fixtures, runs on every pull request. A nightly job runs the
+  fuzzer for a fixed time.
 
   This gives you a search that reaches branches random sampling keeps missing. The
   downside is that fuzzing finds crashers and divergences but proves nothing. It is
@@ -166,15 +160,23 @@ import Table from "../components/Table.astro";
   `porcupine` takes a recorded concurrent history and a sequential model and decides
   whether the history has a valid sequential order. Chronicle uses it for the lease
   fence, the owner-epoch slot fence, the stream data plane of append, read, and
-  close, and a composed model that carries both fences at once.
+  close, and a composed model that carries both fences at once. It gives you a
+  guarantee that concurrent operations behaved as if they ran one at a time, the
+  correctness condition Herlihy and Wing defined. A torn read, a lost append, or a
+  reordering has no valid order, and the checker prints the witness.
 
-  This gives you a guarantee that concurrent operations behaved as if they ran one
-  at a time, which is the correctness condition Herlihy and Wing defined. A torn
-  read, a lost append, or a reordering has no valid order and the checker prints the
-  witness. The downside is that the search is NP-hard, which means the time it takes
-  can grow very fast as the history grows. So it runs over bounded histories and a
-  small number of workers, and a too-large history can return Unknown, which is
-  counted as a failure.
+  <Complexity
+    time="NP-hard in the history length"
+    space="bounded history, small worker count"
+    why="Deciding whether a concurrent history has a valid sequential order is NP-hard, so Chronicle runs it over bounded histories; a history that is too large returns Unknown, which counts as a failure."
+    label="Cost of the linearizability check"
+  />
+
+  <Aside label="Downside" summary="The search is NP-hard, so it runs over bounded histories">
+    Because the search is NP-hard, Chronicle runs it over bounded histories and a
+    small number of workers. A history that is too large returns Unknown, which counts
+    as a failure.
+  </Aside>
 
   Where: [`jepsen/checker/model_fence.go`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_fence.go),
   [`jepsen/checker/model_shard.go`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_shard.go),
@@ -183,18 +185,18 @@ import Table from "../components/Table.astro";
 
   ### 7. Fault injection and the failover nemesis
 
-  A nemesis crashes origin pods and Redis on a `k3d` cluster while load runs. A
-  Redis failover nemesis kills the primary and promotes a replica. A nemesis is a
-  process that injects faults on purpose. The checks assert that every subscription
+  One nemesis crashes origin pods and Redis on a `k3d` cluster while load runs. A
+  Redis failover nemesis kills the primary and promotes a replica. The checks assert
+  that every subscription
   cursor reaches its stream tail within a settle window and that a deposed worker's
-  late acknowledgement is fenced. The failover check asserts the load-bearing safety
+  late acknowledgement is fenced. The failover check asserts the central safety
   property. An acknowledged write that is lost on failover degrades only to
   at-least-once delivery, deduplicated by the consumer's monotone offset, and never
   to a safety violation.
 
   This gives you end-to-end evidence under real crashes. The downside is that the
-  full multi-node run under load needs a managed cluster, so the local run covers
-  single-node failover and the multi-node verdict is pending a cloud run.
+  full multi-node run under load needs a managed cluster. The local run covers
+  single-node failover, and the multi-node verdict is pending a cloud run.
 
   Where: [`jepsen/checker/nemesis.go`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/nemesis.go),
   [`jepsen/checker/scenario_failover.go`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/scenario_failover.go),
@@ -203,12 +205,10 @@ import Table from "../components/Table.astro";
   ### 8. Black-box conformance
 
   A vendored suite of about 330 tests, with `fast-check` property fuzzing, drives a
-  live server over HTTP and checks it against the Durable Streams protocol. It
-  covers idempotent producers, closure, forks, JSON mode, server-sent events, and
-  the subscription APIs.
-
-  This gives you protocol compliance independent of the implementation. The downside
-  is that it sees only the HTTP surface, not the internal state.
+  live server over HTTP and checks it against the Durable Streams protocol. It covers
+  idempotent producers, closure, forks, JSON mode, server-sent events, and the
+  subscription APIs. The downside is that it sees only the HTTP surface, not the
+  internal state.
 
   Where: [`test/conformance/conformance.test.ts`](https://github.com/adityavkk/chronicle/blob/main/test/conformance/conformance.test.ts).
   Run: `make conformance`, which needs Redis and a built server.
@@ -216,21 +216,24 @@ import Table from "../components/Table.astro";
   ### 9. Machine-checked proofs in Lean 4
 
   The pure cores are transcribed into Lean and proven correct for every input,
-  checked by Lean's kernel. The proofs cover the producer state machine, which
-  means its totality, determinism, epoch monotonicity, and idempotency. They cover
-  the offset order, which is a strict total order, and the lexical-equals-numeric
-  property below `10^16`. They cover cursor progression. They include a parametric
-  lemma that a monotone token implies a single holder, instantiated for both the
-  generation fence and the owner-epoch fence. The proofs rest only on the standard
-  axioms `propext`, `Classical.choice`, and `Quot.sound`, with no `sorry` and no
-  `native_decide`.
+  checked by Lean's kernel. The proofs cover the producer state machine, meaning its
+  totality, determinism, epoch monotonicity, and idempotency. They cover the offset
+  order, which is a strict total order, and the lexical-equals-numeric property below
+  `10^16`. They cover cursor progression. They include a parametric lemma that a
+  monotone token implies a single holder, instantiated for both the generation fence
+  and the owner-epoch fence. The proofs rest only on the standard axioms `propext`,
+  `Classical.choice`, and `Quot.sound`, with no `sorry` and no `native_decide`.
 
-  This gives you correctness for every input, not for a sampled list. The proof is
-  tied to the running code in two ways. The same `Stream-Seq` and producer rules are
-  checked by the differential tests, and the Lean model is compiled to C and run as
-  the third differential oracle, so the proof and the Go code are pinned to one
-  statement. The downside is that a proof covers the Lean model, not the Go code
-  directly. The differential oracle is what closes that gap.
+  This gives you correctness for every input, not for a sampled list. The downside is
+  that a proof covers the Lean model, not the Go code directly. The differential
+  oracle closes that gap.
+
+  <Aside label="How it ties to the code" summary="A proof covers the Lean model, not the Go code directly">
+    The proof is tied to the running code in two ways. The differential tests check
+    the same <code>Stream-Seq</code> and producer rules, and the Lean model is
+    compiled to C and run as the third differential oracle, so the proof and the Go
+    code are pinned to one statement.
+  </Aside>
 
   Where: [`lean/`](https://github.com/adityavkk/chronicle/blob/main/lean). Run:
   `cd lean && lake build`.
@@ -240,19 +243,22 @@ import Table from "../components/Table.astro";
   The concurrent subscription protocol is specified in TLA+ and checked by TLC over
   every interleaving of workers, crashes, and lease expiries, up to a bounded size.
   The specs cover the wake, claim, acknowledge, and release fence, the owner-epoch
-  layering, and liveness. The safety properties checked are single-holder,
-  generation monotonicity, stale-operation inertness, the soundness of treating a
-  fenced operation as a no-op, and forward-only cursors. The liveness properties are
-  that pending work eventually issues a wake and that an expired lease is eventually
+  layering, and liveness. The safety properties checked are single-holder, generation
+  monotonicity, stale-operation inertness, the soundness of treating a fenced
+  operation as a no-op, and forward-only cursors. The liveness properties are that
+  pending work eventually issues a wake and that an expired lease is eventually
   reclaimed.
 
   This gives you safety and liveness over every interleaving up to the size checked.
-  Trace validation binds the spec to the code. The running engine emits a log of its
-  fence transitions, and TLC checks that each real trace is a behavior the spec
-  allows. A tampered trace is rejected, which shows the check is not vacuous. The
-  downside is that TLC explores a bounded number of workers, so a passing run is
-  evidence up to that size, not a proof for all sizes. Apalache removes that caveat
-  for the central property.
+  The downside is that TLC explores a bounded number of workers, so a passing run is
+  evidence up to that size, not a proof for all sizes. Apalache removes that limit for
+  the central property.
+
+  <Aside label="Trace validation" summary="What binds the TLA+ spec to the running code">
+    The running engine emits a log of its fence transitions, and TLC checks that each
+    real trace is a behavior the spec allows. A tampered trace is rejected, which
+    shows the check is not vacuous.
+  </Aside>
 
   Where: [`formal/tla/`](https://github.com/adityavkk/chronicle/blob/main/formal/tla).
   Run: `cd formal/tla && make tlc`, then `make trace-validate`.
@@ -266,7 +272,7 @@ import Table from "../components/Table.astro";
   unsound lease expiry breaks the invariant, so the proof is not vacuous.
 
   This gives you the single-holder property for all sizes. The downside is that
-  finding the inductive strengthening is manual work and the proof is scoped to the
+  finding the inductive strengthening is manual work, and the proof is scoped to the
   fence core, not the whole engine.
 
   Where: [`formal/tla/FenceCore.tla`](https://github.com/adityavkk/chronicle/blob/main/formal/tla/FenceCore.tla).
@@ -277,10 +283,10 @@ import Table from "../components/Table.astro";
   Alloy checks relational invariants over every configuration up to a scope. A scope
   is a fixed upper bound on the number of objects of each kind. The fan-out index
   equals the projection of the canonical links, so reconciliation never invents
-  membership. The slot-homing scatter set equals the reference set, so there is no
-  cross-subscriber leakage. The slot-homing model also shows, formally, that never
-  clearing the occupied-slots bit on de-index is a correctness requirement and not
-  just an optimization.
+  membership. The slot-homing scatter set equals the reference set, so no subscriber
+  reads another's data. The slot-homing model also shows, formally, that never
+  clearing the occupied-slots bit on de-index is a correctness requirement, not an
+  optimization.
 
   This gives you an exhaustive check over every configuration within the scope. The
   downside is that Alloy is exhaustive only up to the scope it is given.
@@ -289,14 +295,11 @@ import Table from "../components/Table.astro";
 
   ### 13. Load, stress, and scale
 
-  The load generator and the GKE rig measure throughput and latency, and sweep the
-  subscription recovery sweep to tens of thousands of subscriptions on managed
-  Redis. The full results are written up on the <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/load-testing`}>load and
-  stress page</a>.
-
-  This gives you throughput and latency numbers under real load at scale. The
-  downside is cost. The rig runs on cloud infrastructure and must be torn down after
-  each run.
+  The load generator and the GKE rig measure throughput and latency, and sweep
+  subscription recovery to tens of thousands of subscriptions on managed Redis. The
+  full results are on the <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/load-testing`}>load and stress page</a>.
+  The downside is cost. The rig runs on cloud infrastructure and must be torn down
+  after each run.
 
   Where: [`loadgen/`](https://github.com/adityavkk/chronicle/blob/main/loadgen)
   and [`loadtest/`](https://github.com/adityavkk/chronicle/blob/main/loadtest).
@@ -305,72 +308,50 @@ import Table from "../components/Table.astro";
 <section class="block" id="line">
   <SectionHead num="03" label="The line" title="Proven, sampled, or <em>not provable</em>" />
 
-  The line between what is proven, what is only sampled, and what cannot be proven
-  is set by what Redis guarantees. The three groups below say which kind of test
-  carries each claim, so a reader can tell a proof from a sample and a sample from
-  an honest gap.
+  What Redis guarantees sets the line between what is proven, what is only sampled,
+  and what cannot be proven. The three groups below say which kind of test carries
+  each claim, so you can tell a proof from a sample and a sample from an honest gap.
 
   <Table wide>
     | Class | What is in it | How it is established |
     | --- | --- | --- |
-    | Proven or checked exhaustively | the pure-core function properties; the single-holder fence for all sizes; per-stream linearizability of the data plane; generation monotonicity; forward-only cursors | Lean proofs; Apalache induction; Porcupine over the single Lua commit point |
+    | Proven or checked exhaustively | the pure-core function properties; the single-holder fence for all sizes; per-stream linearizability of the data plane[^linz]; generation monotonicity; forward-only cursors | Lean proofs; Apalache induction; Porcupine over the single Lua commit point |
     | Sampled | the property and fuzz tests, which cover many reachable states but not all of them; the TLA+ runs, which cover a bounded number of workers | `rapid`, Go fuzzing, TLC up to a bounded size |
-    | Not provable | durability of an acknowledged write across a failover | tested with the failover nemesis and documented, not proven |
+    | Not provable | durability of an acknowledged write across a failover[^durab] | tested with the failover nemesis and documented, not proven |
   </Table>
 
-  Per-stream linearizability is in the proven group for a specific reason. Every
-  mutation is a single Lua script over keys in one hash-tag slot, so writes to a
-  stream are totally ordered and serialized on the Redis primary. That single commit
-  point is the one place the order is decided, which is what makes the
-  linearizability claim hold.
-
-  Durability across a failover is the one thing that cannot be proven. Redis
-  replication is asynchronous, and `WAIT` and `WAITAOF` do not make it strongly
-  consistent, so an acknowledged write can be lost on a primary failure. The design
-  is correct anyway because durability is separated from safety. A lost write
-  degrades to at-least-once delivery, never to a safety violation, since safety
-  rests only on the monotone fence. This is tested with the failover nemesis, not
-  proven, and it is stated as a durability-honest property.
+  Durability across a failover is separated from safety, so a lost write degrades to
+  at-least-once delivery and never to a safety violation.
 
   <Callout icon="alert" label="Read a green check for exactly what it proves">
     A passing TLA+ run is evidence up to the number of workers TLC explored, not a
-    proof for all sizes. A passing property run sampled the space, it did not cover
+    proof for all sizes. A passing property run sampled the space. It did not cover
     it. A passing failover run is evidence under the crashes it injected, not a
-    durability proof. The proofs in the first group are the only claims that hold
-    for every input or every size.
+    durability proof. The proofs in the first group are the only claims that hold for
+    every input or every size.
   </Callout>
 </section>
 
 <section class="block" id="bugs">
   <SectionHead num="04" label="Bugs" title="Three bugs the <em>formal work</em> found" />
 
-  The property and differential tests found real defects that example tests had
-  missed. Each is tracked with the `found-by-formal-methods` label, which names the
-  method that found it and the intended fix. There are three.
+  The property and differential tests found three real defects that example tests
+  had missed. Each is tracked with the `found-by-formal-methods` label, which names
+  the method that found it and the intended fix.
 
   <Table wide>
     | Issue | The defect | Found by | State |
     | --- | --- | --- | --- |
-    | [#47](https://github.com/adityavkk/chronicle/issues/47) | a producer sequence gap with a value at or above `10^14` makes the Redis backend error while parsing its own reply, instead of returning a clean 409 | the producer differential property | client reachable |
+    | [#47](https://github.com/adityavkk/chronicle/issues/47) | a producer sequence gap with a value at or above `10^14` makes the Redis backend error while parsing its own reply, instead of returning a clean 409 | the producer differential property | client reachable, so it is the most serious of the three |
     | [#46](https://github.com/adityavkk/chronicle/issues/46) | the offset string format uses a minimum width, so lexical order inverts against numeric order at or above `10^16` | the offset property | the fix is a format migration, so it is deferred |
-    | [#48](https://github.com/adityavkk/chronicle/issues/48) | the in-memory read compares only the byte offset while Redis compares the full offset string, so they will diverge once log rotation makes the read sequence nonzero | the property test | armed with a failing test that fires when the code changes |
+    | [#48](https://github.com/adityavkk/chronicle/issues/48) | the in-memory read compares only the byte offset while Redis compares the full offset string, so they will diverge once log rotation makes the read sequence nonzero | the property test | [armed with a failing test](https://github.com/adityavkk/chronicle/blob/main/store/readseq_divergence_test.go) that fires when the code changes |
   </Table>
-
-  Issue #47 is client reachable, which means a real client can trigger it, so it is
-  the most serious of the three. Issue #46 needs a value at or above `10^16`, which
-  is far beyond any value seen in practice today, and the fix is a format migration,
-  so it is deferred rather than fixed now. Issue #48 cannot happen until log
-  rotation makes the read sequence nonzero. It is held in place by a test that will
-  fail the moment the code changes in a way that would trigger it, so it cannot
-  regress silently.
 </section>
 
 <section class="block" id="run">
   <SectionHead num="05" label="Run" title="How to run <em>everything</em>" />
 
-  The commands below run each layer in turn, from the pure cores that need no
-  infrastructure up to the proofs and the model checks. Each line names what it
-  runs.
+  Run each layer in turn:
 
   ```bash title="run every layer"
   make test-unit                 # pure cores, no infrastructure
@@ -390,7 +371,10 @@ import Table from "../components/Table.astro";
   The formal-methods strategy, the invariant catalog, and the prior-art research are
   under
   [`docs/specs/formal-verification/`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/formal-verification/README.md).
-  For the philosophy behind the suite, read the <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/testing`}>testing page</a>.
-  For how each invariant maps to its method, read the <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/formal-verification`}>verification
-  page</a>.
+  For the reasoning behind the suite, read the <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/testing`}>testing page</a>.
+  For how each invariant maps to its method, read the <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/formal-verification`}>verification page</a>.
 </section>
+
+[^linz]: Every mutation is a single Lua script over keys in one hash-tag slot, so writes to a stream are totally ordered and serialized on the Redis primary. That single commit point is the one place the order is decided, which makes the linearizability claim hold.
+
+[^durab]: Redis replication is asynchronous, and `WAIT` and `WAITAOF` do not make it strongly consistent, so an acknowledged write can be lost on a primary failure. Safety rests only on the monotone fence, so the lost write degrades to at-least-once delivery rather than a safety violation.

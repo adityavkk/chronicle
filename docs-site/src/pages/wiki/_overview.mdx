@@ -1,9 +1,9 @@
 ---
 title: "The codebase, <em>from the edge inward</em>"
-summary: "A source-grounded walkthrough of chronicle: how the HTTP edge, the pure protocol core, the store contract, the Redis backend, and the subscription plane fit together — with every claim cited to a file and line."
+summary: "A source-grounded walkthrough of chronicle. It shows how the HTTP edge, the pure protocol core, the store contract, the Redis backend, and the subscription plane fit together. Every claim cites a file and line."
 eyebrow: "Code Wiki"
 meta: "Overview"
-deck: "Chronicle is about six thousand lines of Go over Redis. This wiki walks the code the way a request moves through it: in at the HTTP edge, down through a pure decision core to the store, and out to Redis. Start here for the shape; the <strong>Modules</strong> and <strong>Tracer bullets</strong> pages go deeper."
+deck: "Chronicle is about six thousand lines of Go over Redis. This wiki walks the code the way a request moves through it. A request enters at the HTTP edge, drops through a pure decision core to the store, and goes out to Redis. Start here for the shape. The <strong>Modules</strong> and <strong>Tracer bullets</strong> pages go deeper."
 byline:
   - label: "Reading"
     value: "source at main"
@@ -18,85 +18,30 @@ import SectionHead from "../../components/SectionHead.astro";
 import Diagram from "../../components/Diagram.astro";
 import Callout from "../../components/Callout.astro";
 import Table from "../../components/Table.astro";
+import Step from "../../components/Step.astro";
+import Aside from "../../components/Aside.astro";
 
 <Tldr>
   <ul>
     <li><strong>One handler, one switch.</strong> Every request lands in <code>Handler.ServeHTTP</code> and dispatches on the HTTP method to one of five handlers. That switch is the whole router.</li>
-    <li><strong>Decisions are pure; effects are not.</strong> Everything decidable without I/O — header grammar, offset math, the producer state machine — lives in the <code>protocol</code> and <code>store</code> packages as plain functions. The handler and the Redis backend only carry data to and from those decisions.</li>
-    <li><strong>The store is an interface.</strong> The handler talks to <code>store.Store</code>, an 11-method contract. A Redis backend and an in-memory backend implement it; the handler can't tell them apart.</li>
+    <li><strong>Decisions are pure. Effects are not.</strong> Everything you can decide without I/O lives in the <code>protocol</code> and <code>store</code> packages as plain functions, e.g. header grammar, offset math, and the producer state machine. The handler and the Redis backend only carry data to and from those decisions.</li>
+    <li><strong>The store is an interface.</strong> The handler talks to <code>store.Store</code>, an 11-method contract. A Redis backend and an in-memory backend implement it. The handler cannot tell them apart.</li>
     <li><strong>Every mutation is one Lua script.</strong> Create, append, close, and delete each compile to a single <code>EVALSHA</code> call, so validation, write, and wakeup happen atomically inside Redis.</li>
-    <li><strong>Subscriptions hang off a hook.</strong> A durable append fires <code>onStreamAppend</code>; the webhook manager turns that into a signed wake or a pull-wake event, fenced so a crash can't lose or double-deliver it.</li>
+    <li><strong>Subscriptions run from a callback.</strong> A durable append fires <code>onStreamAppend</code>. The webhook manager turns that into a signed wake or a pull-wake event, fenced so a crash cannot lose or double-deliver it.</li>
   </ul>
 </Tldr>
 
 <section class="block" id="what">
-  <SectionHead num="01" label="Orientation" title="What this wiki <em>covers</em>" />
+  <SectionHead num="01" label="Orientation" title="Every package, <em>and its one job</em>" />
 
-  Chronicle implements the [Durable Streams protocol](./../): a stream is a URL,
+  Chronicle implements the [Durable Streams protocol](./../). A stream is a URL,
   and ordinary HTTP verbs create it, append to it, read it, and tail it. The
   [Overview](./../) explains the protocol and the performance envelope. This
-  wiki is the other half — the source. It answers a different question: *if you
-  opened the repository, where would you look, and what would each piece be
-  doing?*
+  wiki covers the source. It answers a different question. If you opened the
+  repository, where would you look, and what would each piece be doing?
 
-  It is organized the way the code is layered:
-
-  - **This page** sketches the architecture and maps every package to its job.
-  - **[Modules](./modules)** walks each package in turn — the imperative shell,
-    the pure core, the store contract, the Redis backend, and the subscription
-    plane — with the load-bearing function and a snippet from each.
-  - **[Tracer bullets](./tracers)** follow three real requests end to end,
-    function by function, from the HTTP edge down to Redis and back.
-
-  Every code reference links to the exact lines on GitHub. Nothing here is
-  paraphrased from memory; it was read out of the tree at `main`.
-</section>
-
-<section class="block" id="architecture">
-  <SectionHead num="02" label="Architecture" title="A request's <em>path through the layers</em>" />
-
-  The server is a functional core wrapped in an imperative shell. The shell —
-  the HTTP handler — owns everything that touches the network: parsing requests,
-  writing responses, and deciding which store call a verb maps to. The core —
-  the `protocol` and `store` packages — is plain functions over immutable
-  inputs, with no I/O to mock. The store backend executes the effects the core
-  decided on.
-
-  <Diagram name="wiki-arch" label="System architecture" caption="A request enters the <strong>imperative shell</strong> (<code>Handler.ServeHTTP</code>), consults the <strong>pure core</strong> for parsing and validation decisions, and calls the <strong>store.Store</strong> interface. The Redis backend turns each mutation into one Lua script; a durable append also fires the subscription hook into the webhook manager." />
-
-  Read the diagram left-to-right as control flow. A client request hits the
-  handler. The handler asks the pure core to parse headers and offsets and to
-  rule on producer sequencing, then calls one method on the `store.Store`
-  interface. The Redis backend behind that interface runs a Lua script against
-  Redis 8 — atomic per stream — and, for live readers, waits on a pub/sub
-  channel. A durable append also trips the `OnStreamAppend` hook, which is where
-  the subscription plane picks up.
-</section>
-
-<section class="block" id="shell-core">
-  <SectionHead num="03" label="Design" title="Why the <em>shell is thin</em>" />
-
-  The split is deliberate, and it shows up everywhere in the source. The handler
-  never decides protocol questions; it gathers bytes and headers, hands them to
-  a pure function, and acts on the answer. The producer-idempotency rules are
-  the clearest case: spec section 5.2.1 is transcribed once, into
-  `ValidateProducer`, a function that maps a producer's stored state and an
-  incoming epoch/sequence pair to one of five outcomes. The handler calls it.
-  The Lua script that enforces the same rules inside Redis mirrors it line for
-  line, with the Go function as its test oracle.
-
-  The payoff is testability and parity. The core is tested without a running
-  Redis. The backend is swappable — the same handler runs against an in-memory
-  store in unit tests and Redis in production. The cost is indirection: to
-  follow a single append you cross four files, which is exactly what the
-  [tracer bullets](./tracers) are for.
-</section>
-
-<section class="block" id="modules-map">
-  <SectionHead num="04" label="Module map" title="Every package, <em>and its one job</em>" />
-
-  Five packages plus the command. Each row is a directory or file; the entry
-  point is where to start reading.
+  Five packages plus the command. Each row is a directory or file, with the one
+  function to open first. Every reference links to the exact lines on GitHub.
 
   <Table>
     | Package | Job | Start at |
@@ -104,34 +49,102 @@ import Table from "../../components/Table.astro";
     | [`handler.go`](https://github.com/adityavkk/chronicle/blob/main/handler.go) · [`mount.go`](https://github.com/adityavkk/chronicle/blob/main/mount.go) | The imperative shell: route by method, parse, respond | [`Handler.ServeHTTP`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L83) |
     | [`protocol/`](https://github.com/adityavkk/chronicle/tree/main/protocol) | Pure core: header grammar, cursor math, SSE framing | [`ParseTTL`](https://github.com/adityavkk/chronicle/blob/main/protocol/parse.go#L27) |
     | [`store/`](https://github.com/adityavkk/chronicle/tree/main/store) | The storage contract + offset type + producer rules | [`store.Store`](https://github.com/adityavkk/chronicle/blob/main/store/store.go#L98) |
-    | [`store/redis/`](https://github.com/adityavkk/chronicle/tree/main/store/redis) | The Redis backend: Lua mutations, key schema, pub/sub | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L459) |
-    | [`webhook/`](https://github.com/adityavkk/chronicle/tree/main/webhook) | Subscriptions: wakes, leases, signed delivery, recovery | [`Manager.OnStreamAppend`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L214) |
+    | [`store/redis/`](https://github.com/adityavkk/chronicle/tree/main/store/redis) | The Redis backend: Lua mutations, key schema, pub/sub | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L523) |
+    | [`webhook/`](https://github.com/adityavkk/chronicle/tree/main/webhook) | Subscriptions: wakes, leases, signed delivery, recovery | [`Manager.OnStreamAppend`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L359) |
     | [`cmd/chronicle/`](https://github.com/adityavkk/chronicle/tree/main/cmd/chronicle) | The binary: flags, wiring, the listener | `main` |
   </Table>
 
-  Two of these — `protocol` and `store` — are the pure core; the rest is shell
-  and effects. The boundary between them is the `store.Store` interface, and the
-  fact that there are two implementations of it (Redis, and an in-memory store
-  used in tests) is what keeps the boundary honest.
+  Two of these are the core, `protocol` and `store`. The rest is shell and
+  effects. The boundary between them is the `store.Store` interface. There are
+  two implementations of it, Redis and an in-memory store used in tests, and
+  that second implementation is what keeps the boundary honest.
+
+  - **[Modules](./modules)** walks each package in turn, with its main function
+    and a snippet.
+  - **[Tracer bullets](./tracers)** follow three real requests end to end, from
+    the HTTP edge down to Redis and back.
 
   <Callout icon="info" label="Parity">
-    The package names and shapes are not arbitrary. Chronicle mirrors the
-    protocol's reference Caddy plugin — same interface, same error variables,
-    same handler structure — pinned to a recorded upstream commit, so porting an
-    upstream change is a file diff rather than a redesign.[^caddy]
+    The package names and shapes follow the protocol's reference Caddy plugin.
+    Chronicle keeps the same interface, the same error variables, and the same
+    handler structure, pinned to a recorded upstream commit. Porting an upstream
+    change is a file diff, not a redesign.[^caddy]
+  </Callout>
+</section>
+
+<section class="block" id="architecture">
+  <SectionHead num="02" label="Architecture" title="A request's <em>path through the layers</em>" />
+
+  The server splits into two parts. The shell is the HTTP handler. It owns
+  everything that touches the network: it parses requests, writes responses, and
+  decides which store call each verb maps to. The core is the `protocol` and
+  `store` packages. It is plain functions over immutable inputs, with no I/O to
+  mock. The store backend runs the effects the core decided on.
+
+  <Diagram name="wiki-arch" label="System architecture" caption="A request enters the <strong>shell</strong> (<code>Handler.ServeHTTP</code>), consults the <strong>core</strong> for parsing and validation decisions, and calls the <strong>store.Store</strong> interface. The Redis backend turns each mutation into one Lua script. A durable append also fires the subscription hook into the webhook manager." />
+
+  The diagram reads left to right as control flow. A durable append also fires
+  the `OnStreamAppend` hook, which is where the subscription plane picks up.
+
+  <Aside label="Live readers" summary="How a tailing read waits for the next append">
+    For a live read the Redis backend, after running the read script, waits on a
+    per-stream pub/sub channel. A durable append publishes to that channel inside
+    the same Lua script that writes the message, so the wake cannot race the
+    write. The default long-poll timeout is 30 seconds (`config.go`).
+  </Aside>
+</section>
+
+<section class="block" id="shell-core">
+  <SectionHead num="03" label="Design" title="Why the <em>shell is thin</em>" />
+
+  The handler never decides protocol questions. It gathers bytes and headers,
+  hands them to a pure function, and acts on the answer. The producer idempotency
+  rules from spec section 5.2.1 are the clearest case.
+
+<Step n={1} fn="Handler.ServeHTTP" loc="handler.go:124" role="One switch on the HTTP method routes every request to one of five handlers. No protocol decisions happen here.">
+```go title="handler.go"
+switch r.Method {
+case http.MethodPut:
+	err = h.handleCreate(w, r, streamPath)
+case http.MethodHead:
+	err = h.handleHead(w, r, streamPath)
+case http.MethodGet:
+	err = h.handleRead(w, r, streamPath)
+case http.MethodPost:
+	err = h.handleAppend(w, r, streamPath)
+case http.MethodDelete:
+	err = h.handleDelete(w, r, streamPath)
+}
+```
+</Step>
+
+<Step n={2} fn="ValidateProducer" loc="store/producer.go:17" role="A pure function maps the stored producer state and an incoming epoch and seq to one of five outcomes. The handler and the Lua script both call this, and the Go function is the oracle.">
+```go title="store/producer.go"
+func ValidateProducer(state *ProducerState, epoch, seq, nowUnix int64) (AppendResult, *ProducerState, error) {
+	// nil state, stale epoch, new epoch, duplicate, gap:
+	// one of five outcomes, no I/O.
+}
+```
+</Step>
+
+  <Callout icon="alert" label="The cost">
+    The split buys testability and a swappable backend, and it costs indirection.
+    To follow one append you cross four files: handler, protocol, store contract,
+    Redis backend. The [tracer bullets](./tracers) exist to walk that path in one
+    read.
   </Callout>
 </section>
 
 <section class="block" id="next">
-  <SectionHead num="05" label="Next" title="Where to <em>go from here</em>" />
+  <SectionHead num="04" label="Next" title="Where to <em>go from here</em>" />
 
-  - **[Modules &rarr;](./modules)** — the package-by-package walkthrough: each
-    layer's responsibility, its load-bearing function, and a snippet.
-  - **[Tracer bullets &rarr;](./tracers)** — a write, a tailing read, and a
+  - **[Modules &rarr;](./modules)** is the package by package walkthrough. Each
+    layer gets its responsibility, its main function, and a snippet.
+  - **[Tracer bullets &rarr;](./tracers)** follow a write, a tailing read, and a
     subscription wake, each traced through the call stack.
-  - **[Endpoints &amp; Redis](./../endpoints)** — the same operations from the
-    wire side: one endpoint at a time, with the exact Redis commands.
-  - **[Subscriptions](./../subscriptions)** — the reserved `__ds` API in depth,
+  - **[Endpoints &amp; Redis](./../endpoints)** is the same operations from the
+    wire side, one endpoint at a time, with the exact Redis commands.
+  - **[Subscriptions](./../subscriptions)** is the reserved `__ds` API in depth,
     including the fencing and recovery design the wake tracer only sketches.
 
   [^caddy]: The reference implementation: [durable-streams/packages/caddy-plugin](https://github.com/durable-streams/durable-streams/tree/main/packages/caddy-plugin). Chronicle's `handler.go` records the pinned upstream commit it was ported from in its package comment.
