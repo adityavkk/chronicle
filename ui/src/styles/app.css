@@ -458,6 +458,12 @@
 	/* Fill the rail, but grow past it when content is tall so the region scrolls
 	   instead of clipping the lower sections. */
 	min-block-size: 100%;
+	/* The rail (.dsui-region--nav) is itself a flex column that scrolls. Without
+	   this, .dsui-nav (a flex child) keeps the default flex-shrink:1 and gets
+	   clamped to the rail height instead of growing — forcing its own overflow
+	   onto the only shrinkable section (the Playground), whose buttons then spill
+	   over Subscriptions. flex-shrink:0 lets the rail scroll as a whole instead. */
+	flex-shrink: 0;
 }
 
 /* Connected-server header: name · url · live reachability dot. */
@@ -2951,9 +2957,20 @@
 .dsui-publish__status.is-error {
 	color: var(--danger);
 }
+.dsui-publish__schemahint {
+	font-size: var(--text-2xs);
+	line-height: 1.5;
+	color: var(--fg-subtle);
+	margin-block-end: var(--space-2);
+}
+.dsui-publish__schemahint code {
+	font-size: var(--text-2xs);
+	background: var(--code-bg);
+}
 .dsui-publish__tools {
 	display: flex;
 	justify-content: flex-end;
+	gap: var(--space-2);
 }
 .dsui-publish__foot {
 	display: flex;
@@ -2997,6 +3014,10 @@
 
 /* ---- Playground ----------------------------------------------------- */
 .dsui-playground {
+	/* Size to content like every other rail section (streams/subs/metrics are all
+	   flex: 0 0 auto); the rail owns the scroll. Without this the section keeps the
+	   default flex-shrink:1 and is the lone section that compresses under pressure. */
+	flex: 0 0 auto;
 	gap: var(--space-2);
 	padding: 0 0 var(--space-2);
 	border-block-start: 1px solid var(--border-subtle);
