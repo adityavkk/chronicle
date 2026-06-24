@@ -1,9 +1,9 @@
 ---
 title: "Every endpoint, <em>down to the Redis command</em>"
-summary: "A walk through each Durable Streams endpoint Chronicle serves — PUT, POST, GET, HEAD, DELETE — with a request example, a sequence diagram, and the exact Redis commands the Lua script runs, explained one at a time."
+summary: "Each Durable Streams endpoint Chronicle serves: PUT, POST, GET, HEAD, DELETE. For each one a request example, a sequence diagram, and the exact Redis commands the Lua script runs, explained one at a time."
 eyebrow: "Reference"
 meta: "Endpoints & Redis"
-deck: "Chronicle maps the <strong>Durable Streams</strong> protocol onto five HTTP verbs, and every mutation onto a single Lua script that runs inside Redis atomically. This page takes each endpoint in turn: a request you can run, the path it travels, and what each Redis command does — in execution order, with the source line."
+deck: "Chronicle maps the <strong>Durable Streams</strong> protocol onto five HTTP verbs, and every mutation onto a single Lua script that runs inside Redis atomically. Each section takes one endpoint: a request you can run, the path it travels, and what each Redis command does, in execution order, with the source line."
 byline:
   - label: "Verbs"
     value: "PUT · POST · GET · HEAD · DELETE"
@@ -20,43 +20,42 @@ import Table from "../components/Table.astro";
 import Diagram from "../components/Diagram.astro";
 import RedisTrace from "../components/RedisTrace.astro";
 import Complexity from "../components/Complexity.astro";
+import Aside from "../components/Aside.astro";
 
 <Tldr>
   <ul>
-    <li><strong>Five verbs, one script each.</strong> <code>PUT</code> creates, <code>POST</code> appends or closes, <code>GET</code> reads, <code>HEAD</code> probes, <code>DELETE</code> removes. Every write is a single Lua script — validation, write, tail update, and wakeup land together or not at all.</li>
-    <li><strong>The same four lifelines every time.</strong> The HTTP handler parses the request, the Go store frames the bytes and calls the script, Redis executes it. Decisions live in the script; the handler only maps the reply to a status code.</li>
+    <li><strong>Five verbs, one script each.</strong> <code>PUT</code> creates, <code>POST</code> appends or closes, <code>GET</code> reads, <code>HEAD</code> probes, <code>DELETE</code> removes. Every write is a single Lua script. Validation, write, tail update, and wakeup land together or not at all.</li>
+    <li><strong>The same four parts every time.</strong> The HTTP handler parses the request, the Go store frames the bytes and calls the script, and Redis runs it. Decisions live in the script. The handler only maps the reply to a status code.</li>
     <li><strong>Reads are one <code>ZRANGEBYLEX</code>.</strong> Frames are stored as <code>"&lt;offset&gt;|&lt;bytes&gt;"</code> members in a sorted set, zero-padded so byte order equals stream order. A read is a single lexicographic range from the cursor.</li>
     <li><strong>Live tailing is pub/sub plus a re-read.</strong> A long-poll subscribes to the stream's notify channel, then re-reads before blocking, so an append that lands in the gap is never missed.</li>
-    <li><strong>One operation has no script.</strong> <code>HEAD</code> is two pipelined reads and no write — the only client-facing path that does not touch a Lua script or slide the TTL.</li>
+    <li><strong>One operation has no script.</strong> <code>HEAD</code> is two pipelined reads and no write. It is the only client-facing path that does not touch a Lua script or slide the TTL.</li>
   </ul>
 </Tldr>
 
 <section class="block" id="how-to-read">
   <SectionHead num="00" label="Orientation" title="How to read <em>this page</em>" />
 
-  Every section below has the same four parts: a request you can `curl`, a
-  sequence diagram of the path that request travels, the Redis command
-  sequence the script runs, and a sentence on each command. The machinery
-  that repeats across endpoints is defined once here, so each section can
-  skip it.
+  Every section below has the same four parts. A request you can `curl`, a
+  sequence diagram, the Redis command sequence the script runs, and a sentence
+  on each command.
 
-  ### Four <em>lifelines</em>
+  ### Four <em>parts</em>
 
-  A request crosses the same boundaries on every endpoint. Naming them once:
+  A request crosses the same four boundaries on every endpoint.
 
   <Table>
-    | Lifeline | Is | Does |
+    | Part | Is | Does |
     | --- | --- | --- |
     | **Client** | `curl`, a browser, an official client library | Sends an HTTP request, stores one offset string to resume |
     | **Handler** | `handler.go` (Go) | Parses headers and query, calls the store, maps store errors to HTTP status codes |
     | **Store** | `store/redis/store.go` (Go) | Frames bytes into messages, snapshots the tail, runs the Lua script, decodes its reply |
-    | **Redis** | Redis 8 | Executes one Lua script per mutation, atomically and serialized per stream |
+    | **Redis** | Redis 8 | Runs one Lua script per mutation, atomically and serialized per stream |
   </Table>
 
   ### Keys and the <em>notify channel</em>
 
-  Each stream at path `p` is four Redis keys sharing a `{p}` hash tag (so
-  they occupy one cluster slot) and one pub/sub channel:
+  Each stream at path `p` is four Redis keys that share a `{p}` hash tag, so
+  they occupy one cluster slot, plus one pub/sub channel.
 
   <Table>
     | Key | Type | Holds |
@@ -68,92 +67,55 @@ import Complexity from "../components/Complexity.astro";
     | `ds:notify:{p}` | pub/sub | wakes long-poll and SSE waiters: `a` append, `c` close, `d` delete |
   </Table>
 
-  ### Offsets and <em>frames</em>
+  <Aside label="Encoding" summary="How offsets and frames are laid out for lexicographic reads">
+    An offset is two unsigned 64-bit numbers, `ReadSeq_ByteOffset`, each
+    zero-padded to 16 digits. A fresh tail is
+    `0000000000000000_0000000000000000`.[^offset] `ReadSeq` is reserved for
+    future log rotation and stays `0`. `ByteOffset` counts payload bytes, not
+    framing. A frame is one sorted-set member holding the message end offset,
+    a `|`, then the raw payload, e.g. `0_13|{"tok":"The"}`.[^frame] Because
+    the prefix is fixed-width and zero-padded, bytewise order equals stream
+    order, so a read is a single `ZRANGEBYLEX` from an exclusive lower bound.
+    This page abbreviates offsets to their significant digits (`0_0`, `0_13`,
+    `0_29`). On the wire both halves are full width.
+  </Aside>
 
-  An offset is two unsigned 64-bit numbers, `ReadSeq_ByteOffset`, each
-  zero-padded to 16 digits: a fresh stream's tail is
-  `0000000000000000_0000000000000000`.[^offset] `ReadSeq` is reserved for
-  future log rotation and stays `0`; `ByteOffset` counts payload bytes, not
-  framing. This page abbreviates offsets to their significant digits —
-  `0_0`, `0_13`, `0_29` — but on the wire both halves are full width.
+  <Aside label="Shared machinery" summary="Three things that recur inside the mutation scripts">
+    <ul>
+      <li><strong>Lazy expiry.</strong> The first script to touch an expired stream runs <code>expire_cleanup</code> (a <code>DEL</code>, or a soft-delete if forks still reference it) and reports not found. Expiry is checked on access. There is no sweeper.</li>
+      <li><strong>The sliding-TTL touch.</strong> A read or an append writes <code>HSET …:meta accessedAtNs &lt;now&gt;</code>, moving the idle window forward. A bare <code>Get</code>, a <code>HEAD</code>, and a close deliberately do not.</li>
+      <li><strong>The TTL backstop.</strong> <code>refresh_backstop</code> arms a key TTL of <code>ttl × 1000 + 60000</code> ms via <code>PEXPIRE</code>, a 60-second grace over the logical TTL. A fork-referenced or soft-deleted stream gets <code>PERSIST</code> instead.</li>
+    </ul>
+    Every mutation reply is a fixed nine-field string array so int64 values
+    survive Lua's double round-trip.[^reply]
+  </Aside>
 
-  A frame is one sorted-set member: the message's **end** offset, a `|`
-  separator, then the raw payload — `0_13|{"tok":"The"}`.[^frame] Because the
-  offset prefix is fixed-width and zero-padded, bytewise lexicographic order
-  of members equals stream order, and the prefix makes every member unique.
-  A read is therefore a single `ZRANGEBYLEX` from an exclusive lower bound.
-
-  ### Machinery that <em>runs in most scripts</em>
-
-  Three things recur inside the mutation scripts; rather than repeat them in
-  every section, here is what they do:
-
-  - **Lazy expiry.** `is_expired(meta)` checks whether the absolute
-    `expAtNs` has passed, or `accessedAtNs + ttl` has. The first script to
-    touch an expired stream runs `expire_cleanup` — a `DEL` of all keys, or
-    a soft-delete if forks still reference it — and then reports the stream
-    as not found. Expiry is evaluated on access; there is no sweeper.
-  - **The sliding-TTL touch.** A read or an append writes
-    `HSET …:meta accessedAtNs <now>`, sliding the idle window forward. A
-    bare `Get`, a `HEAD`, and a close deliberately do **not**.
-  - **The TTL backstop.** `refresh_backstop` arms a Redis key TTL of
-    `ttl × 1000 + 60000` ms — a 60-second grace over the logical TTL — via
-    `PEXPIRE`, so a stream nobody ever touches again is still reaped. A
-    fork-referenced or soft-deleted stream gets `PERSIST` instead and never
-    carries a key TTL.
-
-  Every mutation reply is a fixed nine-field array of strings —
-  `{status, tail, producerResult, currentEpoch, expectedSeq, receivedSeq,
-  lastSeq, closed, alreadyClosed}` — so int64 values survive Lua's double
-  round-trip.[^reply] The sections show the `status` that matters and skip
-  the rest.
-
-  ### What the operations <em>cost</em>
-
-  The cost of every endpoint falls out of the Redis structure it touches.
-  Three structures carry the work:
-
-  - **The `:msg` sorted set** is the only one whose size grows without bound.
-    Every frame is a member `"<offset>|<bytes>"` at score `0`; equal scores
-    make Redis order members lexicographically, and the fixed-width offset
-    prefix makes that order the stream order. Past Redis's listpack threshold
-    the set is a skiplist, so an insert is `O(log N)` and a lexicographic
-    range is `O(log N + M)`.[^zset]
-  - **The `:meta` and `:prod` hashes** are bounded-field hash tables — every
-    field read or write is `O(1)`.
-  - **The `:forks` set** is `O(1)` to add or remove, and the **notify**
-    channel is `O(S)` to publish to `S` subscribers.
-
-  ```text title="Why a read is O(log N + M) and an append is O(log N)"
-  # :msg is a skiplist ordered by member (every score is 0).
-  ZADD :msg 0 "<offset>|<bytes>"      # seek the insert point     O(log N)
-                                      # splice the tower          O(1)   => O(log N)
-  ZRANGEBYLEX :msg "(<off>\xff" "+"   # descend to the cursor     O(log N)
-                                      # walk the M frames past it  O(M)  => O(log N + M)
-  ```
-
-  Throughout: **N** = frames already in the stream, **M** = frames the call
-  touches (returns or frees), **k** = messages in one batch, **b** = bytes in
-  that batch, **S** = subscribers on the stream's channel, **P** = producers
-  tracked, **d** = fork-chain depth.
+  <Aside label="Cost model" summary="Why each endpoint costs what it costs: three Redis structures carry the work">
+    The `:msg` sorted set is the only structure that grows without bound. Past
+    Redis's listpack threshold it is a skiplist, so an insert is `O(log N)`
+    and a lexicographic range is `O(log N + M)`.[^zset] The `:meta` and
+    `:prod` hashes are `O(1)` per field. The `:forks` set is `O(1)` to add or
+    remove, and a notify publish is `O(S)` in subscribers. Throughout:
+    **N** frames in the stream, **M** frames the call touches, **k** messages
+    per batch, **b** bytes per batch, **S** subscribers, **P** producers,
+    **d** fork-chain depth.
+  </Aside>
 
   <Callout icon="arrow" label="Subscriptions">
     This page covers the stream operations: five verbs, one Lua script each.
     The protocol's reserved subscription API (`__ds` webhook and pull-wake
-    delivery) is implemented too, on a separate plane with its own durability
-    story, on [its own page](../subscriptions).
+    delivery) is also implemented, on a separate plane with its own
+    durability story, on [its own page](../subscriptions).
   </Callout>
 </section>
 
 <section class="block" id="put-create">
   <SectionHead num="01" label="PUT" title="Create a stream" />
 
-  `PUT {stream-url}` creates a stream, idempotently. A repeated `PUT` with
-  matching configuration returns `200` instead of `201`; a `PUT` whose
-  content type, TTL, or closed status differs from the existing stream
-  returns `409`.[^create] The body, if any, becomes the stream's initial
-  content. Everything happens in one script, `create.lua`, which touches
-  only the new stream's own four keys.
+  `PUT {stream-url}` creates a stream, and it is idempotent. A repeated `PUT`
+  with matching configuration returns `200` instead of `201`. A `PUT` whose
+  content type, TTL, or closed status differs returns `409`.[^create] The body,
+  if any, becomes the stream's initial content.
 
   ```http title="Create a JSON stream"
   PUT /v1/stream/chat HTTP/1.1
@@ -166,45 +128,40 @@ import Complexity from "../components/Complexity.astro";
   Stream-Next-Offset: 0000000000000000_0000000000000000
   ```
 
-  The store does an existence pre-check before the script — the same check
-  `create.lua` repeats atomically inside — so an idempotent match returns
-  before any fork validation or body parsing, mirroring the reference
-  implementation's precedence.
-
   <Diagram
     name="seq-create"
-    label="PUT — create"
-    caption="The pre-check (step 3) and the script's own existence check (inside step 4) are the same logic run twice: once to honor upstream's error precedence, once atomically."
+    label="PUT, create"
+    caption="The pre-check (step 3) and the script's own existence check (inside step 4) run the same logic twice. Once to honor upstream's error precedence, once atomically."
   />
 
   <RedisTrace
     script="create.lua"
     source="store/redis/scripts/create.lua"
     steps={[
-      { cmd: "HGETALL", key: "ds:{p}:meta", does: "Load the meta hash. An empty reply means the path is free, so creation continues. A present hash short-circuits: matching config returns <code>MATCHED</code> (the handler answers <strong>200</strong>), a mismatch returns <code>MISMATCH</code> (<strong>409</strong>), and a soft-deleted or still-referenced expired stream returns <code>EXISTS</code> (<strong>409</strong>).", loc: "create.lua:40" },
-      { cmd: "DEL", key: "ds:{p}:meta · :msg · :prod · :forks", does: "Defensive. If this same script reaped an expired stream a few lines up, this clears the residue before the fresh write; on a truly new path it is a no-op.", loc: "create.lua:57" },
+      { cmd: "HGETALL", key: "ds:{p}:meta", does: "Load the meta hash. An empty reply means the path is free, so creation continues. A present hash short-circuits. Matching config returns <code>MATCHED</code> (the handler answers <strong>200</strong>), a mismatch returns <code>MISMATCH</code> (<strong>409</strong>), and a soft-deleted or still-referenced expired stream returns <code>EXISTS</code> (<strong>409</strong>).", loc: "create.lua:40" },
+      { cmd: "DEL", key: "ds:{p}:meta · :msg · :prod · :forks", does: "Defensive. If this same script reaped an expired stream a few lines up, this clears the residue before the fresh write. On a truly new path it is a no-op.", loc: "create.lua:57" },
       { cmd: "HSET", key: "ds:{p}:meta", does: "Write all metadata in one call: <code>ct</code>, <code>tail = 0_0</code>, <code>createdAtNs</code>, <code>accessedAtNs</code>, and <code>ttl</code> or <code>expAtNs</code> when supplied.", loc: "create.lua:62" },
       { cmd: "ZADD", key: "ds:{p}:msg", when: "only with a body", does: "Add each initial frame at score <code>0</code>, chunked 1000 members at a time. Members sort by their zero-padded offset prefix, so insertion order is stream order.", loc: "create.lua:69" },
       { cmd: "PUBLISH", key: "ds:notify:{p}", when: "only with a body", does: "Send <code>a</code> to wake any reader already long-polling the new path.", loc: "create.lua:77" },
-      { cmd: "PEXPIRE", key: "ds:{p}:*", does: "<code>refresh_backstop</code> arms the GC key TTL — <code>ttl × 1000 + 60000</code> ms — on all four keys, or <code>PERSIST</code>s them when the stream has no TTL.", loc: "create.lua:81" },
+      { cmd: "PEXPIRE", key: "ds:{p}:*", does: "<code>refresh_backstop</code> arms the GC key TTL of <code>ttl × 1000 + 60000</code> ms on all four keys, or runs <code>PERSIST</code> on them when the stream has no TTL.", loc: "create.lua:81" },
     ]}
-    caption="Every command runs inside one EVALSHA, so a concurrent reader can never observe a half-built stream — meta without frames, or frames without a tail."
+    caption="Every command runs inside one EVALSHA, so a concurrent reader can never observe a half-built stream: meta without frames, or frames without a tail."
   />
 
   <Complexity
     time="O(1) empty · O(k log k) with a k-message body"
     space="O(1) · O(b) for a b-byte body"
-    why="An empty create is a handful of O(1) hash writes plus a constant set of TTL commands. A create with a body inserts each of the k initial messages into a <em>fresh</em> <code>:msg</code> skiplist — k × O(log k) — and stores the b payload bytes. The existence pre-check reads only the bounded meta hash, so it stays O(1)."
+    why="An empty create is a few O(1) hash writes plus a constant set of TTL commands. A create with a body inserts each of the k initial messages into a <em>fresh</em> <code>:msg</code> skiplist, which is k × O(log k), and stores the b payload bytes. The existence pre-check reads only the bounded meta hash, so it stays O(1)."
   />
 
   ### Forking: <em>two streams, two slots</em>
 
-  A `PUT` carrying `Stream-Forked-From` creates a fork: a new stream that
-  inherits the source's data up to a fork offset without copying it.[^fork]
-  This is the one operation that is not a single atomic step. The fork's
-  keys and the source's keys live in different cluster slots, so the store
-  runs two scripts: `incr_ref.lua` takes a reference on the source, then
-  `create.lua` builds the child.
+  A `PUT` carrying `Stream-Forked-From` creates a fork. A fork is a new
+  stream that inherits the source's data up to a fork offset without copying
+  it.[^fork] This is the one operation that is not a single atomic step,
+  because the fork's keys and the source's keys live in different cluster
+  slots. The store runs two scripts: `incr_ref.lua` takes a reference on the
+  source, then `create.lua` builds the child.
 
   ```http title="Fork an existing stream at offset 0_13"
   PUT /v1/stream/branch HTTP/1.1
@@ -217,43 +174,36 @@ import Complexity from "../components/Complexity.astro";
 
   <Diagram
     name="seq-fork"
-    label="PUT — fork"
-    caption="Reads on the fork below forkOff are stitched from the source in Go (a ZRANGEBYLEX against the source's :msg in its own slot, capped at the fork point); the fork's own appends extend it past forkOff."
+    label="PUT, fork"
+    caption="Reads on the fork below forkOff are served from the source in Go (a ZRANGEBYLEX against the source's :msg in its own slot, capped at the fork point). The fork's own appends extend it past forkOff."
   />
 
   <RedisTrace
     script="incr_ref.lua"
     source="store/redis/scripts/incr_ref.lua"
     steps={[
-      { cmd: "HGETALL", key: "source:meta", does: "Re-validate the source atomically — Go checked a snapshot first. Absent → <code>NOTFOUND</code> (<strong>404</strong>), soft-deleted → <code>SOFTDEL</code> (<strong>409</strong>), expired → cleanup then <code>NOTFOUND</code>.", loc: "incr_ref.lua:13" },
+      { cmd: "HGETALL", key: "source:meta", does: "Re-validate the source atomically. Go checked a snapshot first. Absent → <code>NOTFOUND</code> (<strong>404</strong>), soft-deleted → <code>SOFTDEL</code> (<strong>409</strong>), expired → cleanup then <code>NOTFOUND</code>.", loc: "incr_ref.lua:13" },
       { cmd: "HINCRBY", key: "source:meta refCount 1", does: "Record that one more fork depends on this source's inherited prefix. The refcount is what blocks a plain delete and forces a soft-delete instead.", loc: "incr_ref.lua:23" },
-      { cmd: "SADD", key: "source:forks /v1/stream/branch", does: "Register the child path in the source's fork set, so the lineage is walkable for garbage collection.", loc: "incr_ref.lua:24" },
-      { cmd: "PERSIST", key: "source:*", does: "Strip the TTL backstop from all four source keys: a stream a fork reads through must not be reaped while the fork lives.", loc: "incr_ref.lua:25" },
+      { cmd: "SADD", key: "source:forks /v1/stream/branch", does: "Register the child path in the source's fork set, so the lineage can be walked for garbage collection.", loc: "incr_ref.lua:24" },
+      { cmd: "PERSIST", key: "source:*", does: "Strip the TTL backstop from all four source keys. A stream a fork reads through must not be reaped while the fork lives.", loc: "incr_ref.lua:25" },
     ]}
     caption="Then create.lua runs as in §01, except the child's meta records forkedFrom and the resolved forkOff."
   />
 
   <Complexity
-    label="Complexity — the payoff of forking"
+    label="Complexity, what forking saves"
     time="O(1)"
-    space="O(1) — no data copied"
-    why="Forking copies nothing, however long the source. <code>incr_ref</code> bumps a refcount, registers the child, and persists the source keys; <code>create</code> writes the fork's own meta — all O(1). The inherited prefix stays in the source's skiplist and is range-scanned in place on a read. A <code>Stream-Fork-Sub-Offset</code> adds one O(log N + M) read of the source to resolve the boundary byte."
+    space="O(1), no data copied"
+    why="Forking copies nothing, however long the source. <code>incr_ref</code> bumps a refcount, registers the child, and persists the source keys, and <code>create</code> writes the fork's own meta, all O(1). The inherited prefix stays in the source's skiplist and is range-scanned in place on a read. A <code>Stream-Fork-Sub-Offset</code> adds one O(log N + M) read of the source to resolve the boundary byte."
   />
-
-  ```text title="A fork is O(1) — the source skiplist is shared, not copied"
-  source.refCount += 1               # HINCRBY :meta   O(1)
-  source.forks.add(fork_path)        # SADD :forks     O(1)
-  fork.meta = { forkedFrom, forkOff } # HSET :meta     O(1)
-  # a read on the fork below forkOff range-scans source:msg in place,
-  # capped at forkOff — the inherited frames are never duplicated.
-  ```
 
   <Callout icon="alert" label="Non-atomic across the pair">
     Because the two scripts span two slots, a crash between `incr_ref.lua`
-    and `create.lua` leaks one reference on the source — reaped only later
-    by delete-cascade arithmetic, never by a dangling read. A concurrent
-    identical fork is resolved by rolling our extra reference back. This
-    window is documented; everything within a single stream stays atomic.
+    and `create.lua` leaks one reference on the source. That reference is
+    reaped later by delete-cascade arithmetic, never by a dangling read. A
+    concurrent identical fork is resolved by rolling our extra reference
+    back. This window is documented. Everything within a single stream
+    stays atomic.
   </Callout>
 </section>
 
@@ -261,12 +211,11 @@ import Complexity from "../components/Complexity.astro";
   <SectionHead num="02" label="POST" title="Append to a stream" />
 
   `POST {stream-url}` with a body appends one batch. In JSON mode the body
-  is a JSON array, flattened one level into individual messages; otherwise
-  the whole body is one message.[^append] The store frames the bytes
-  against a snapshot of the tail, then runs `append.lua`, which re-validates
-  and writes in one atomic step. If another writer advanced the tail between
-  the snapshot and the script, the script returns `RETRY` and the store
-  re-frames — up to 64 times before giving up.
+  is a JSON array, flattened one level into individual messages. Otherwise
+  the whole body is one message.[^append] The store frames the bytes against a
+  tail snapshot, then runs `append.lua`, which re-validates and writes in one
+  atomic step. A concurrent append that moved the tail returns `RETRY`, and the
+  store re-frames up to 64 times before giving up.
 
   ```http title="Append two JSON messages"
   POST /v1/stream/chat HTTP/1.1
@@ -278,15 +227,14 @@ import Complexity from "../components/Complexity.astro";
   Stream-Next-Offset: 0000000000000000_0000000000000029
   ```
 
-  The batch flattens to two messages, `{"tok":"The"}` (13 bytes) and
-  `{"tok":"answer"}` (16 bytes). Their end offsets are `0_13` and `0_29`, so
-  the stored frames are `0_13|{"tok":"The"}` and `0_29|{"tok":"answer"}`,
-  and the tail advances to `0_29`.
+  The batch flattens to `{"tok":"The"}` (13 bytes) and `{"tok":"answer"}`
+  (16 bytes), with end offsets `0_13` and `0_29`, so the tail advances to
+  `0_29`.
 
   <Diagram
     name="seq-append"
-    label="POST — append"
-    caption="On RETRY the store loops back to the HMGET snapshot and re-frames against the new tail. The loop is contention back-off; the script itself is always atomic."
+    label="POST, append"
+    caption="On RETRY the store loops back to the HMGET snapshot and re-frames against the new tail. The loop is contention back-off. The script itself is always atomic."
   />
 
   <RedisTrace
@@ -297,7 +245,7 @@ import Complexity from "../components/Complexity.astro";
       { cmd: "is_expired?", does: "Soft-deleted → <code>SOFTDEL</code> (<strong>410</strong>), checked before expiry to match the memory store's order. Then lazy expiry: past <code>expAtNs</code> or <code>accessedAtNs + ttl</code> → cleanup and <code>NOTFOUND</code>.", loc: "append.lua:39", kind: "flow" },
       { cmd: "HSET", key: "ds:{p}:meta accessedAtNs", does: "The sliding-TTL touch. Upstream touches before the closed check, so even an append about to be rejected slides the idle window forward.", loc: "append.lua:50" },
       { cmd: "PEXPIRE", key: "ds:{p}:*", does: "Re-arm the backstop against the new <code>accessedAtNs</code>.", loc: "append.lua:51" },
-      { cmd: "validate", does: "In spec precedence: closed stream → <code>CLOSED</code> (<strong>409</strong> + <code>Stream-Closed</code>) unless the body duplicates the closing producer tuple; content-type mismatch → <code>CTMISMATCH</code> (<strong>409</strong>); <code>Stream-Seq ≤ lastSeq</code> → <code>SEQCONFLICT</code> (<strong>409</strong>).", loc: "append.lua:55", kind: "flow" },
+      { cmd: "validate", does: "In spec precedence: closed stream → <code>CLOSED</code> (<strong>409</strong> + <code>Stream-Closed</code>) unless the body duplicates the closing producer tuple, then content-type mismatch → <code>CTMISMATCH</code> (<strong>409</strong>), then <code>Stream-Seq ≤ lastSeq</code> → <code>SEQCONFLICT</code> (<strong>409</strong>).", loc: "append.lua:55", kind: "flow" },
       { cmd: "tail == expected?", does: "The optimistic check. Go framed the bytes against a tail snapshot; if a concurrent append moved the tail, return <code>RETRY</code> and let Go re-frame.", loc: "append.lua:93", kind: "flow" },
       { cmd: "ZADD", key: "ds:{p}:msg", does: "Write each frame <code>\"&lt;endOffset&gt;|&lt;bytes&gt;\"</code> at score <code>0</code>, chunked 1000 at a time (Lua's <code>unpack</code> is C-stack bounded).", loc: "append.lua:104" },
       { cmd: "HSET", key: "ds:{p}:meta tail", does: "Advance the tail to the new end offset, in the same script as the frame writes.", loc: "append.lua:108" },
@@ -308,22 +256,14 @@ import Complexity from "../components/Complexity.astro";
   <Complexity
     time="O(k log N)"
     space="O(b)"
-    why="Each of the k messages in the batch is one skiplist insert into a <code>:msg</code> of current size N — O(log N) apiece. The tail update, the producer fence (<code>HGET</code>/<code>HSET</code> on <code>:prod</code>), and the wakeup are O(1); the publish is O(S) in subscribers. Space grows by the b appended bytes. The optimistic retry loop multiplies the <em>number</em> of attempts under contention, not the cost of one."
+    why="Each of the k messages in the batch is one skiplist insert into a <code>:msg</code> of current size N, which is O(log N) apiece. The tail update, the producer fence (<code>HGET</code>/<code>HSET</code> on <code>:prod</code>), and the wakeup are O(1), and the publish is O(S) in subscribers. Space grows by the b appended bytes. The optimistic retry loop multiplies the <em>number</em> of attempts under contention, not the cost of one."
   />
-
-  ```text title="Appending a k-message batch — k skiplist inserts"
-  for msg in batch:                        # k messages
-      member = f"{end_off:016}_..|{msg}"
-      ZADD :msg 0 member                   # O(log N) each  => O(k log N)
-  HSET :meta tail <new>                     # O(1)
-  PUBLISH ds:notify:{p} a                   # O(S)
-  ```
 
   ### With an <em>idempotent producer</em>
 
-  Three optional headers — `Producer-Id`, `Producer-Epoch`, `Producer-Seq`
-  — turn an append into a fire-and-forget write that deduplicates on retry,
-  Kafka-style.[^producer] They must all be present or all absent. Producer
+  Three optional headers, `Producer-Id`, `Producer-Epoch`, and
+  `Producer-Seq`, turn an append into a write that the server deduplicates on
+  retry.[^producer] They must all be present or all absent. Producer
   validation runs **before** the `Stream-Seq` check, so a retry deduplicates
   even when its sequence would otherwise conflict, and a duplicate returns
   with **no write**.
@@ -345,47 +285,42 @@ import Complexity from "../components/Complexity.astro";
 
   <RedisTrace
     label="The producer branch, step by step"
-    script="append.lua — producer branch"
+    script="append.lua, producer branch"
     source="store/redis/scripts/append.lua"
     steps={[
       { cmd: "HGET", key: "ds:{p}:prod writer-1", does: "Read this producer's stored <code>\"epoch:lastSeq:lastUpdated\"</code>, or nil on first contact.", loc: "append.lua:71" },
-      { cmd: "validate_producer", does: "The spec's §5.2.1 state machine, transcribed: <code>seq ≤ lastSeq</code> → <em>Duplicate</em> (no write); <code>epoch &lt; stored</code> → <em>StaleEpoch</em>; <code>epoch &gt; stored</code> with <code>seq ≠ 0</code> → <em>EpochSeq</em>; <code>seq &gt; lastSeq + 1</code> → <em>SeqGap</em>; otherwise <em>Accept</em>.", loc: "common.lua:89", kind: "flow" },
+      { cmd: "validate_producer", does: "The spec's §5.2.1 state machine, transcribed. <code>seq ≤ lastSeq</code> → <em>Duplicate</em> (no write), then <code>epoch &lt; stored</code> → <em>StaleEpoch</em>, then <code>epoch &gt; stored</code> with <code>seq ≠ 0</code> → <em>EpochSeq</em>, then <code>seq &gt; lastSeq + 1</code> → <em>SeqGap</em>, otherwise <em>Accept</em>.", loc: "common.lua:89", kind: "flow" },
       { cmd: "ZADD · HSET", key: "ds:{p}:msg · :meta", does: "On <em>Accept</em> only, the frame and tail writes happen exactly as in the plain path. A <em>Duplicate</em> skips straight to the reply.", loc: "append.lua:96", kind: "write" },
-      { cmd: "HSET", key: "ds:{p}:prod writer-1", does: "Advance the fence to <code>\"0:7:&lt;unixSec&gt;\"</code> — the tuple the next sequence is validated against.", loc: "append.lua:132" },
+      { cmd: "HSET", key: "ds:{p}:prod writer-1", does: "Advance the fence to <code>\"0:7:&lt;unixSec&gt;\"</code>, the tuple the next sequence is validated against.", loc: "append.lua:132" },
       { cmd: "PUBLISH", key: "ds:notify:{p}", does: "Send <code>a</code> on an accepted write.", loc: "append.lua:139" },
     ]}
   />
-
-  The five verdicts map to five HTTP responses. The store never writes
-  frames on anything but Accept:
 
   <Table>
     | Verdict | Condition | HTTP | Extra headers |
     | --- | --- | --- | --- |
     | **Accept** | new `(epoch, seq)` in order | `200 OK` | `Producer-Epoch`, `Producer-Seq` |
     | **Duplicate** | `seq ≤ lastSeq` | `204 No Content` | echoes the stored `Producer-Seq` |
-    | **StaleEpoch** | `epoch < stored` (a fenced zombie) | `403 Forbidden` | `Producer-Epoch: <current>` |
+    | **StaleEpoch** | `epoch < stored` (a producer fenced by a newer epoch) | `403 Forbidden` | `Producer-Epoch: <current>` |
     | **SeqGap** | `seq > lastSeq + 1` | `409 Conflict` | `Producer-Expected-Seq`, `Producer-Received-Seq` |
-    | **EpochSeq** | new epoch not starting at `seq 0` | `400 Bad Request` | — |
+    | **EpochSeq** | new epoch not starting at `seq 0` | `400 Bad Request` | none |
   </Table>
 
   ### Append <em>and close</em>
 
   Add `Stream-Closed: true` to an append with a body and the same
-  `append.lua` writes the final frame and flips the closed flag in one step:
-  it adds `HSET …:meta closed 1` (plus the closing producer tuple
-  `cbId`/`cbEpoch`/`cbSeq` when producer headers are present) and publishes
-  `c` instead of `a`. Readers see the last bytes and the EOF together.
+  `append.lua` writes the final frame, flips the closed flag, and publishes
+  `c` instead of `a` in one step. Readers see the last bytes and the EOF
+  together.
 </section>
 
 <section class="block" id="post-close">
   <SectionHead num="03" label="POST" title="Close a stream" />
 
   `POST {stream-url}` with `Stream-Closed: true` and an empty body closes a
-  stream without appending. Closure is durable and monotonic — once closed,
-  a stream stays closed, and every later append returns `409`.[^close] The
-  close-only path is its own script, `close.lua`, which (matching the memory
-  store) does **not** slide the TTL and does **not** check soft-deletion.
+  stream without appending. Closure is durable and monotonic. Once closed, a
+  stream stays closed, and every later append returns `409`.[^close] The
+  close-only path is its own script, `close.lua`.
 
   ```http title="Close-only"
   POST /v1/stream/chat HTTP/1.1
@@ -398,8 +333,8 @@ import Complexity from "../components/Complexity.astro";
 
   <Diagram
     name="seq-close"
-    label="POST — close"
-    caption="The tail does not move — close appends nothing. A close with producer headers takes the CloseStreamWithProducer path, which records the closing tuple for dedup."
+    label="POST, close"
+    caption="The tail does not move, because close appends nothing. A close with producer headers takes the CloseStreamWithProducer path, which records the closing tuple for dedup."
   />
 
   <RedisTrace
@@ -407,31 +342,28 @@ import Complexity from "../components/Complexity.astro";
     source="store/redis/scripts/close.lua"
     steps={[
       { cmd: "HGETALL", key: "ds:{p}:meta", does: "Load meta. Absent → <code>NOTFOUND</code> (<strong>404</strong>).", loc: "close.lua:19" },
-      { cmd: "is_expired?", does: "Expired → cleanup and <code>NOTFOUND</code>. Note what is <em>missing</em>: no sliding-TTL touch and no soft-delete check — close is deliberately not access.", loc: "close.lua:22", kind: "flow" },
-      { cmd: "already closed?", does: "Idempotent. A plain re-close still publishes <code>c</code> and returns <code>OK</code> with <code>alreadyClosed = 1</code>. A producer re-close matching the recorded closing tuple is a dedup success; a different tuple → <code>CLOSED</code> (<strong>409</strong>).", loc: "close.lua:27", kind: "flow" },
+      { cmd: "is_expired?", does: "Expired → cleanup and <code>NOTFOUND</code>. Note what is <em>missing</em>. There is no sliding-TTL touch and no soft-delete check, because close is deliberately not access.", loc: "close.lua:22", kind: "flow" },
+      { cmd: "already closed?", does: "Idempotent. A plain re-close still publishes <code>c</code> and returns <code>OK</code> with <code>alreadyClosed = 1</code>. A producer re-close matching the recorded closing tuple is a dedup success. A different tuple → <code>CLOSED</code> (<strong>409</strong>).", loc: "close.lua:27", kind: "flow" },
       { cmd: "HSET", key: "ds:{p}:meta closed 1", does: "Flip the terminal, monotonic closed flag. Every subsequent append now returns <strong>409</strong> with <code>Stream-Closed: true</code>.", loc: "close.lua:64" },
       { cmd: "PUBLISH", key: "ds:notify:{p}", does: "Send <code>c</code> so every parked reader observes EOF immediately instead of hanging to the long-poll timeout.", loc: "close.lua:65" },
     ]}
-    caption="A producer close adds two writes before the publish: HSET :prod to advance the producer fence, and the cbId/cbEpoch/cbSeq fields on :meta so a duplicate close request can be recognized."
+    caption="A producer close adds two writes before the publish. HSET :prod advances the producer fence, and the cbId/cbEpoch/cbSeq fields on :meta let a duplicate close request be recognized."
   />
 
   <Complexity
     time="O(1)"
     space="O(1)"
-    why="Close flips one hash field (<code>HSET closed 1</code>) and publishes a wakeup: O(1), plus O(S) to notify the S parked readers. No frames are read or written, and the tail does not move."
+    why="Close flips one hash field (<code>HSET closed 1</code>) and publishes a wakeup, which is O(1), plus O(S) to notify the S parked readers. No frames are read or written, and the tail does not move."
   />
 </section>
 
 <section class="block" id="get-catchup">
-  <SectionHead num="04" label="GET" title="Read — catch-up" />
+  <SectionHead num="04" label="GET" title="Read, catch-up" />
 
   `GET {stream-url}?offset=<offset>` returns every message past the offset,
   up to a server chunk limit. `offset=-1` (or an absent offset) starts from
-  the beginning; `offset=now` resolves to the current tail.[^read] The read
-  is one `ZRANGEBYLEX` inside `read.lua`. The handler brackets it with two
-  metadata fetches: one before, to turn a missing or soft-deleted stream
-  into the right status, and one after, to decide whether the client has
-  caught up to the tail.
+  the beginning, and `offset=now` resolves to the current tail.[^read] The
+  read is one `ZRANGEBYLEX` inside `read.lua`.
 
   ```http title="Read from the beginning"
   GET /v1/stream/chat?offset=-1 HTTP/1.1
@@ -447,8 +379,8 @@ import Complexity from "../components/Complexity.astro";
 
   <Diagram
     name="seq-read"
-    label="GET — catch-up read"
-    caption="ETag is the next offset, so a conditional re-read at the same position answers 304. A read behind the tail is cacheable for 60 s; a read at the tail is not."
+    label="GET, catch-up read"
+    caption="ETag is the next offset, so a conditional re-read at the same position answers 304. A read behind the tail is cacheable for 60 s. A read at the tail is not."
   />
 
   <RedisTrace
@@ -457,50 +389,39 @@ import Complexity from "../components/Complexity.astro";
     steps={[
       { cmd: "HGETALL", key: "ds:{p}:meta", does: "Load meta. Absent → <code>NOTFOUND</code> (<strong>404</strong>).", loc: "read.lua:12" },
       { cmd: "is_expired?", does: "Expired → cleanup and <code>NOTFOUND</code>.", loc: "read.lua:15", kind: "flow" },
-      { cmd: "softDel?", does: "Soft-deleted → <code>SOFTDEL</code>. The handler maps Read's <code>SOFTDEL</code> to <strong>404</strong> — it is <code>Get</code>/<code>HEAD</code> that surface the <strong>410</strong>.", loc: "read.lua:20", kind: "flow" },
-      { cmd: "HSET", key: "ds:{p}:meta accessedAtNs", does: "A Read counts as access and slides the TTL. (A bare <code>Get</code> or <code>HEAD</code> does not — this is the one place a read mutates a key.)", loc: "read.lua:23" },
+      { cmd: "softDel?", does: "Soft-deleted → <code>SOFTDEL</code>. The handler maps Read's <code>SOFTDEL</code> to <strong>404</strong>. It is <code>Get</code> and <code>HEAD</code> that surface the <strong>410</strong>.", loc: "read.lua:20", kind: "flow" },
+      { cmd: "HSET", key: "ds:{p}:meta accessedAtNs", does: "A Read counts as access and slides the TTL. (A bare <code>Get</code> or <code>HEAD</code> does not. This is the one place a read mutates a key.)", loc: "read.lua:23" },
       { cmd: "PEXPIRE", key: "ds:{p}:*", does: "Re-arm the backstop against the refreshed <code>accessedAtNs</code>.", loc: "read.lua:25" },
-      { cmd: "ZRANGEBYLEX", key: "ds:{p}:msg", does: "The read itself: <code>\"(&lt;offset&gt;\\xff\"</code> → <code>\"+\"</code>. The bound excludes a frame whose end offset equals the cursor — its next byte is <code>|</code> (<code>0x7C</code>) &lt; <code>0xFF</code> — and includes every higher offset, so the client gets exactly the frames it has not seen.", loc: "read.lua:27" },
+      { cmd: "ZRANGEBYLEX", key: "ds:{p}:msg", does: "The read itself: <code>\"(&lt;offset&gt;\\xff\"</code> → <code>\"+\"</code>. The bound excludes a frame whose end offset equals the cursor, because its next byte is <code>|</code> (<code>0x7C</code>) &lt; <code>0xFF</code>, and includes every higher offset, so the client gets exactly the frames it has not seen.", loc: "read.lua:27" },
       { cmd: "HGETALL", key: "ds:{p}:meta", does: "Return the fresh meta alongside the frames so the handler can compute the next offset and whether the client is up to date.", loc: "read.lua:28" },
     ]}
-    caption="A fork read adds a second ZRANGEBYLEX, in Go, against the source's :msg in its own slot, capped at the fork offset — so the inherited prefix is stitched ahead of the fork's own frames, and post-fork source appends stay invisible."
+    caption="A fork read adds a second ZRANGEBYLEX, in Go, against the source's :msg in its own slot, capped at the fork offset, so the inherited prefix comes back ahead of the fork's own frames, and post-fork source appends stay invisible."
   />
 
   <Complexity
     time="O(log N + M)"
-    space="O(M) — the frames returned"
-    why="<code>ZRANGEBYLEX</code> descends the skiplist to the cursor in O(log N), then walks the M frames at or past it; the two bounded <code>HGETALL</code>s on meta are O(1). A fork read repeats the seek-and-walk on each source up the chain — O(d · (log N + M)) for chain depth d — and the server caps M at a chunk limit, so one response stays bounded."
+    space="O(M), the frames returned"
+    why="<code>ZRANGEBYLEX</code> descends the skiplist to the cursor in O(log N), then walks the M frames at or past it, and the two bounded <code>HGETALL</code>s on meta are O(1). A fork read repeats the seek-and-walk on each source up the chain, which is O(d · (log N + M)) for chain depth d, and the server caps M at a chunk limit, so one response stays bounded."
   />
 
-  ```text title="The read is a skiplist seek, then a linear walk"
-  node = skiplist.seek_gt(":msg", "(<offset>\xff")   # O(log N)
-  out = []
-  while node and len(out) < CHUNK_LIMIT:             # walk forward
-      out.append(node.member)                        # O(M)
-      node = node.forward[0]                          # bottom-level next
-  # N = frames in the stream, M = frames returned (<= chunk limit)
-  ```
-
-  <Callout icon="info" label="Why the bound looks strange">
+  <Callout icon="info" label="Why the bound looks the way it does">
     The lower bound `"(<offset>\xff"` is exclusive and ends in the byte
     `0xFF`. Frames sharing the requested offset prefix have `|` (`0x7C`) as
-    their next byte, which sorts below `0xFF`, so they are excluded — the
-    client already has those bytes. Any frame with a greater offset prefix
-    sorts above the bound and is included. Payload bytes never enter the
-    comparison; the fixed-width prefix decides first.[^lex]
+    their next byte, which sorts below `0xFF`, so they are excluded, because
+    the client already has those bytes. Any frame with a greater offset
+    prefix sorts above the bound and is included. Payload bytes never enter
+    the comparison. The fixed-width prefix decides first.[^lex]
   </Callout>
 </section>
 
 <section class="block" id="get-longpoll">
-  <SectionHead num="05" label="GET" title="Read — live, long-poll" />
+  <SectionHead num="05" label="GET" title="Read, live, long-poll" />
 
   `GET {stream-url}?offset=<offset>&live=long-poll` holds the request open
   until data arrives past the offset, the stream closes, or a 30-second
-  timeout returns `204`.[^longpoll] The waiting is orchestrated in Go
-  (`WaitForMessages`), not in a script: the store reads first, subscribes to
-  the stream's notify channel, then re-reads before blocking. That re-read
-  is the load-bearing step — it closes the window where an append could land
-  between the first read and the subscribe.
+  timeout returns `204`.[^longpoll] The waiting runs in Go
+  (`WaitForMessages`), not in a script, and it re-reads before blocking so an
+  append that lands in the gap is never missed.
 
   ```http title="Long-poll from the tail"
   GET /v1/stream/chat?offset=now&live=long-poll HTTP/1.1
@@ -516,8 +437,8 @@ import Complexity from "../components/Complexity.astro";
 
   <Diagram
     name="seq-longpoll"
-    label="GET — long-poll"
-    caption="The waiter never publishes; the wake is some other request's PUBLISH inside append.lua or close.lua. A 1-second defensive poll recovers any wakeup dropped by pub/sub's fire-and-forget delivery."
+    label="GET, long-poll"
+    caption="The waiter never publishes. The wake is some other request's PUBLISH inside append.lua or close.lua. A 1-second defensive poll recovers any wakeup dropped by pub/sub delivery, which does not guarantee delivery."
   />
 
   <RedisTrace
@@ -527,7 +448,7 @@ import Complexity from "../components/Complexity.astro";
     steps={[
       { cmd: "EVAL read.lua", key: "fast path", does: "If frames already sit past the offset, respond <strong>200</strong> now and skip the subscribe entirely. Most caught-up polls that race an append end here.", loc: "notify.go:33", kind: "read" },
       { cmd: "SUBSCRIBE", key: "ds:notify:{p}", does: "Open a dedicated pub/sub connection to the stream's channel and confirm it before waiting.", loc: "notify.go:48", kind: "read" },
-      { cmd: "EVAL read.lua", key: "re-check", does: "Re-read <em>before</em> blocking. An append that landed between the fast-path read and the SUBSCRIBE would otherwise be lost until the timeout; this re-read closes that race.", loc: "notify.go:57", kind: "read" },
+      { cmd: "EVAL read.lua", key: "re-check", does: "Re-read <em>before</em> blocking. An append that landed between the fast-path read and the SUBSCRIBE would otherwise be lost until the timeout. This re-read closes that race.", loc: "notify.go:57", kind: "read" },
       { cmd: "block", does: "Wait on three timers: a channel message (<code>a</code> append, <code>c</code> close, <code>d</code> delete), a 1 s defensive poll, or the 30 s timeout → <strong>204</strong>.", loc: "notify.go:66", kind: "flow" },
       { cmd: "EVAL read.lua", key: "on wake", does: "Re-read on every wake. A spurious wakeup with nothing new just loops back to <code>block</code>.", loc: "notify.go:95", kind: "read" },
     ]}
@@ -544,19 +465,17 @@ import Complexity from "../components/Complexity.astro";
   <Complexity
     time="O(log N + M) per read"
     space="O(M) returned + O(1) subscription"
-    why="Every read is the same skiplist seek-and-walk. The <code>SUBSCRIBE</code> is O(1), and the block costs no compute while idle. One request does the fast-path read, the re-check read, and one read per wakeup — a small constant number of reads, independent of how long it waits."
+    why="Every read is the same skiplist seek-and-walk. The <code>SUBSCRIBE</code> is O(1), and the block costs no compute while idle. One request does the fast-path read, the re-check read, and one read per wakeup, which is a small constant number of reads, independent of how long it waits."
   />
 </section>
 
 <section class="block" id="get-sse">
-  <SectionHead num="06" label="GET" title="Read — live, SSE" />
+  <SectionHead num="06" label="GET" title="Read, live, SSE" />
 
   `GET {stream-url}?offset=<offset>&live=sse` keeps a Server-Sent Events
   stream open and pushes each batch as it arrives.[^sse] The handler flushes
-  the SSE headers, then loops: read with `read.lua`, emit an `event: data`
-  and an `event: control`, wait ~100 ms for a wakeup, repeat. Every 60
-  seconds it cycles the connection so a CDN can collapse concurrent tails;
-  the client reconnects from the last `streamNextOffset`.
+  the SSE headers, then loops over `read.lua`, and every 60 seconds it cycles
+  the connection so a CDN can collapse concurrent tails.
 
   ```http title="SSE tail"
   GET /v1/stream/chat?offset=now&live=sse HTTP/1.1
@@ -573,8 +492,8 @@ import Complexity from "../components/Complexity.astro";
 
   <Diagram
     name="seq-sse"
-    label="GET — SSE"
-    caption="The data event carries the bytes; the control event after it carries the next offset and a cursor. A closed stream gets a final control with streamClosed:true, then the connection ends — clients must not reconnect."
+    label="GET, SSE"
+    caption="The data event carries the bytes. The control event after it carries the next offset and a cursor. A closed stream gets a final control with streamClosed:true, then the connection ends, and clients must not reconnect."
   />
 
   <RedisTrace
@@ -584,7 +503,7 @@ import Complexity from "../components/Complexity.astro";
     steps={[
       { cmd: "EVAL read.lua", key: "each iteration", does: "Read frames past the current offset. Non-empty → emit an <code>event: data</code>, then an <code>event: control</code> with <code>streamNextOffset</code> and a cursor.", loc: "handler_sse.go:64", kind: "read" },
       { cmd: "re-fetch meta", does: "Check closed state. A closed stream with the client at the tail emits a final control with <code>streamClosed: true</code> and closes the connection.", loc: "handler_sse.go:70", kind: "flow" },
-      { cmd: "SUBSCRIBE", key: "ds:notify:{p}", does: "<code>WaitForMessages</code> blocks in 100 ms quanta; each quantum opens a <em>fresh</em> subscription — the benchmarked wakeup latency floor (see the overview's §05).", loc: "handler_sse.go:187", kind: "read" },
+      { cmd: "SUBSCRIBE", key: "ds:notify:{p}", does: "<code>WaitForMessages</code> blocks in 100 ms quanta, and each quantum opens a <em>fresh</em> subscription. This sets the benchmarked wakeup latency floor (see the overview's §05).", loc: "handler_sse.go:187", kind: "read" },
       { cmd: "every 60 s, return", does: "Cycle the connection so a CDN can collapse concurrent tails; the client reconnects from the last <code>streamNextOffset</code>.", loc: "handler_sse.go:59", kind: "flow" },
     ]}
   />
@@ -592,7 +511,7 @@ import Complexity from "../components/Complexity.astro";
   <Callout icon="info" label="Binary streams">
     For a stream whose content type is neither `text/*` nor
     `application/json`, the server base64-encodes each `data` event and sets
-    `stream-sse-data-encoding: base64`; the `control` events stay JSON. The
+    `stream-sse-data-encoding: base64`. The `control` events stay JSON. The
     handler picks the encoding from the stream's media type at connect
     time.[^binary]
   </Callout>
@@ -608,11 +527,9 @@ import Complexity from "../components/Complexity.astro";
   <SectionHead num="07" label="HEAD" title="Read metadata" />
 
   `HEAD {stream-url}` returns the tail offset, content type, TTL/expiry, and
-  closed status with no body.[^head] It is the canonical way to learn a
-  stream's tail and whether it is closed without transferring data. This is
-  the only client-facing operation with no Lua script: the store reads the
-  two hashes in one pipeline and checks soft-deletion and expiry in Go. A
-  metadata probe is not access, so — unlike a read or an append — it does
+  closed status with no body.[^head] This is the only client-facing operation
+  with no Lua script. The store reads the two hashes in one pipeline and checks
+  soft-deletion and expiry in Go. A metadata probe is not access, so it does
   not slide the TTL.
 
   ```http title="Probe a stream"
@@ -627,24 +544,24 @@ import Complexity from "../components/Complexity.astro";
 
   <Diagram
     name="seq-head"
-    label="HEAD — metadata"
+    label="HEAD, metadata"
     caption="Two reads in one round trip, no key mutated. Cache-Control: no-store keeps a stale tail offset or closed flag from ever being cached."
   />
 
   <RedisTrace
-    script="—  no Lua: a pipelined read"
+    script="—  no Lua, a pipelined read"
     source="store/redis/store.go"
     steps={[
-      { cmd: "HGETALL", key: "ds:{p}:meta", does: "The whole metadata hash. The <code>tail</code> field is the existence marker — its absence means the stream does not exist, so <strong>404</strong>.", loc: "store.go:132", kind: "read" },
+      { cmd: "HGETALL", key: "ds:{p}:meta", does: "The whole metadata hash. The <code>tail</code> field is the existence marker. Its absence means the stream does not exist, so <strong>404</strong>.", loc: "store.go:132", kind: "read" },
       { cmd: "HGETALL", key: "ds:{p}:prod", does: "Fetched in the same pipeline round trip. HEAD returns metadata only, but <code>Get</code>'s contract attaches producer state, so both hashes come back together.", loc: "store.go:133", kind: "read" },
-      { cmd: "in Go: classify", does: "Soft-deleted → <strong>410</strong>, expired → <strong>404</strong>. HEAD evaluates expiry but, unlike Read and Append, does <em>not</em> write <code>accessedAtNs</code> — the idle window keeps counting.", loc: "store.go:144", kind: "flow" },
+      { cmd: "in Go: classify", does: "Soft-deleted → <strong>410</strong>, expired → <strong>404</strong>. HEAD checks expiry but, unlike Read and Append, does <em>not</em> write <code>accessedAtNs</code>, so the idle window keeps counting.", loc: "store.go:144", kind: "flow" },
     ]}
   />
 
   <Complexity
     time="O(P)"
-    space="O(1) — no body"
-    why="HEAD reads the bounded meta hash and the producer hash — O(P) for P tracked producers, effectively O(1) — and classifies in Go. No frames are touched, no key is mutated, and no body crosses the wire."
+    space="O(1), no body"
+    why="HEAD reads the bounded meta hash and the producer hash, which is O(P) for P tracked producers and effectively O(1), then classifies in Go. No frames are touched, no key is mutated, and no body crosses the wire."
   />
 </section>
 
@@ -652,12 +569,10 @@ import Complexity from "../components/Complexity.astro";
   <SectionHead num="08" label="DELETE" title="Delete a stream" />
 
   `DELETE {stream-url}` removes a stream and its data. If forks still
-  reference it, the stream cannot vanish — its data is needed for their
-  inherited prefix — so `delete.lua` soft-deletes instead: the URL answers
-  `410` to clients while the data stays for fork reads.[^delete] When the
-  last fork detaches, garbage collection cascades up the fork chain. The
-  delete of one stream is atomic; the cascade across the chain spans cluster
-  slots and is orchestrated in Go.
+  reference it, the stream cannot be removed, because its data is needed for
+  their inherited prefix. So `delete.lua` soft-deletes instead. The URL
+  answers `410` to clients while the data stays for fork reads.[^delete] When
+  the last fork detaches, garbage collection cascades up the fork chain.
 
   ```http title="Delete a fork"
   DELETE /v1/stream/branch HTTP/1.1
@@ -667,21 +582,21 @@ import Complexity from "../components/Complexity.astro";
 
   <Diagram
     name="seq-delete"
-    label="DELETE — with fork cascade"
-    caption="If the parent was soft-deleted and its refcount just hit zero, decr_ref.lua hard-deletes it and returns CASCADE with the grandparent's path, and Go walks one step further up."
+    label="DELETE, with fork cascade"
+    caption="If the parent was soft-deleted and its refcount just reached zero, decr_ref.lua hard-deletes it and returns CASCADE with the grandparent's path, and Go walks one step further up."
   />
 
   <RedisTrace
     script="delete.lua"
     source="store/redis/scripts/delete.lua"
     steps={[
-      { cmd: "HGETALL", key: "ds:{p}:meta", does: "Load meta. Absent → <code>NOTFOUND</code> (<strong>404</strong>). Delete has no expiry check — an expired-but-present stream is just deleted.", loc: "delete.lua:12", kind: "read" },
+      { cmd: "HGETALL", key: "ds:{p}:meta", does: "Load meta. Absent → <code>NOTFOUND</code> (<strong>404</strong>). Delete has no expiry check. An expired-but-present stream is just deleted.", loc: "delete.lua:12", kind: "read" },
       { cmd: "softDel?", does: "Already soft-deleted → <code>SOFTDEL</code> (<strong>410</strong>), consistent with every other direct operation on a soft-deleted URL.", loc: "delete.lua:18", kind: "flow" },
       { cmd: "refCount > 0?", does: "If forks still reference this stream, take the soft path below instead of deleting.", loc: "delete.lua:20", kind: "flow" },
       { cmd: "DEL", key: "ds:{p}:meta · :msg · :prod · :forks", does: "The hard path: remove every key for the stream in one call.", loc: "delete.lua:30", kind: "write" },
       { cmd: "PUBLISH", key: "ds:notify:{p}", does: "Send <code>d</code>. Any waiter wakes, re-reads, finds the stream gone, and its request ends.", loc: "delete.lua:31", kind: "pub" },
     ]}
-    caption="The soft path instead runs HSET :meta softDel 1 and PERSIST on all four keys — retaining the data and dropping the TTL backstop so a fork can keep reading the inherited prefix."
+    caption="The soft path instead runs HSET :meta softDel 1 and PERSIST on all four keys. It keeps the data and drops the TTL backstop so a fork can keep reading the inherited prefix."
   />
 
   <RedisTrace
@@ -699,47 +614,41 @@ import Complexity from "../components/Complexity.astro";
 
   <Callout icon="alert" label="The cascade is not atomic across slots">
     `delete.lua` and each `decr_ref.lua` are individually atomic, but they
-    run against different streams in different cluster slots, stitched
-    together by Go (`releaseRef`). A crash mid-cascade leaves a parent's
-    refcount one too high until another delete re-walks the chain — a
-    documented window, the same trade made by fork creation.[^cascade]
+    run against different streams in different cluster slots, joined by Go
+    (`releaseRef`). A crash mid-cascade leaves a parent's refcount one too
+    high until another delete re-walks the chain. This is a documented
+    window, the same trade made by fork creation.[^cascade]
   </Callout>
 
   <Complexity
     time="O(M) hard delete · O(1) soft delete"
     space="frees O(M)"
-    why="A hard delete frees the whole <code>:msg</code> skiplist — O(M) for M frames — plus the bounded hashes; <code>DEL</code> of a collection is linear in its size. A soft delete (forks still reference it) only sets a flag and drops TTLs: O(1). The cascade runs one O(1) <code>decr_ref</code> per ancestor and frees each hard-deleted ancestor's frames, so a chain of depth d costs O(d) scripts plus the frames reclaimed."
+    why="A hard delete frees the whole <code>:msg</code> skiplist, which is O(M) for M frames, plus the bounded hashes, because <code>DEL</code> of a collection is linear in its size. A soft delete (forks still reference it) only sets a flag and drops TTLs, so it is O(1). The cascade runs one O(1) <code>decr_ref</code> per ancestor and frees each hard-deleted ancestor's frames, so a chain of depth d costs O(d) scripts plus the frames reclaimed."
   />
 
-  ```text title="DEL frees every frame node — O(M)"
-  DEL :msg                   # free all M skiplist nodes       O(M)
-  DEL :meta :prod :forks     # bounded hashes + set            O(1)
-  PUBLISH ds:notify:{p} d    # wake the waiters                O(S)
-  # soft path instead: HSET :meta softDel 1 ; PERSIST x4    => O(1)
-  ```
 </section>
 
 <section class="block" id="further">
   <SectionHead num="09" label="Further reading" title="Where this <em>comes from</em>" />
 
-  Every command above is taken verbatim from the source; the locators are
+  Every command above is taken verbatim from the source. The locators are
   `file:line` into the repository at the time of writing.
 
-  - [Overview](../) — the data model, design, performance, and conformance posture
-  - [store/redis/scripts/](https://github.com/adityavkk/chronicle/tree/main/store/redis/scripts) — the eight Lua scripts, one per mutation
-  - [docs/spec/PROTOCOL.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md) — the vendored protocol specification
-  - [docs/PLAN.md](https://github.com/adityavkk/chronicle/blob/main/docs/PLAN.md) — the Redis data model and its decision log
+  - [Overview](../). The data model, design, performance, and conformance posture.
+  - [store/redis/scripts/](https://github.com/adityavkk/chronicle/tree/main/store/redis/scripts). The eight Lua scripts, one per mutation.
+  - [docs/spec/PROTOCOL.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md). The vendored protocol specification.
+  - [docs/PLAN.md](https://github.com/adityavkk/chronicle/blob/main/docs/PLAN.md). The Redis data model and its decision log.
 </section>
 
-[^offset]: Offset format and parsing: [`store/offset.go`](https://github.com/adityavkk/chronicle/blob/main/store/offset.go) — `"%016d_%016d"`, lexicographically sortable, with `-1` → start and `now` → tail.
-[^frame]: Frame encoding: [`store/redis/keys.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go) — `encodeFrame`, the `"<offset>|<data>"` ZSET member at score `0`.
+[^offset]: Offset format and parsing: [`store/offset.go`](https://github.com/adityavkk/chronicle/blob/main/store/offset.go). The format is `"%016d_%016d"`, lexicographically sortable, with `-1` → start and `now` → tail.
+[^frame]: Frame encoding: [`store/redis/keys.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go). The `encodeFrame` function writes the `"<offset>|<data>"` ZSET member at score `0`.
 [^reply]: The fixed nine-field reply and its decoding: [`store/redis/scripts.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/scripts.go), `scriptReply` / `make_reply` in [`common.lua`](https://github.com/adityavkk/chronicle/blob/main/store/redis/scripts/common.lua).
-[^zset]: Redis sorted-set complexity: [`ZADD`](https://redis.io/docs/latest/commands/zadd/) is `O(log(N))` per member; [`ZRANGEBYLEX`](https://redis.io/docs/latest/commands/zrangebylex/) is `O(log(N) + M)`. `ZRANGEBYLEX` is only well-defined when every member shares one score — here all scores are `0`. Small sets use a listpack (`zset-max-listpack-entries`, default 128) and convert to the skiplist past it.
+[^zset]: Redis sorted-set complexity: [`ZADD`](https://redis.io/docs/latest/commands/zadd/) is `O(log(N))` per member, and [`ZRANGEBYLEX`](https://redis.io/docs/latest/commands/zrangebylex/) is `O(log(N) + M)`. `ZRANGEBYLEX` is only well-defined when every member shares one score, and here all scores are `0`. Small sets use a listpack (`zset-max-listpack-entries`, default 128) and convert to the skiplist past it.
 [^create]: Create semantics and idempotent-match rules: PROTOCOL.md §5.1.
 [^fork]: Stream forking, fork offsets, and the soft-delete lifecycle: PROTOCOL.md §4.2.
 [^append]: Append, JSON flattening, and `Stream-Seq`: PROTOCOL.md §5.2; JSON processing in [`store/json.go`](https://github.com/adityavkk/chronicle/blob/main/store/json.go).
 [^producer]: Idempotent producers (the epoch/sequence state machine): PROTOCOL.md §5.2.1; `validate_producer` in [`common.lua`](https://github.com/adityavkk/chronicle/blob/main/store/redis/scripts/common.lua).
-[^close]: Stream closure — durable, monotonic, idempotent: PROTOCOL.md §4.1 and §5.3.
+[^close]: Stream closure, durable, monotonic, and idempotent: PROTOCOL.md §4.1 and §5.3.
 [^read]: Catch-up reads, `Stream-Up-To-Date`, and EOF signaling: PROTOCOL.md §5.6.
 [^lex]: The exclusive lower bound and why payload bytes never enter the comparison: `lexLowerBound` in [`store/redis/keys.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go).
 [^longpoll]: Long-poll mode, timeout, and closed-stream behavior: PROTOCOL.md §5.7; the wake protocol in [`store/redis/notify.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go).
