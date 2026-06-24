@@ -19,6 +19,7 @@
 import { useComputed, useSignal, useSignalEffect } from "@preact/signals";
 import type { JSX } from "preact";
 import { useId } from "preact/hooks";
+import { parseSchema, skeletonBatchText } from "../lib/schema";
 import {
 	isProducerValid,
 	previewAppendOperation,
@@ -30,13 +31,17 @@ import type { AppendOptions, ProducerIdentity, StreamContentType, StreamKind } f
 import {
 	activeConnection,
 	appendMessages,
+	clearStreamSchema,
 	composerOpen,
 	operationInFlight,
 	producerSeqHint,
 	selectedStream,
+	selectedStreamSchema,
 	setComposerOpen,
 	setProducerIdentity,
 	setProducerSeqHint,
+	setStreamSchema,
+	streamSchemas,
 } from "../state/store";
 import { CurlPreview } from "./CurlPreview";
 import { IconLoader, IconSend } from "./icons";
@@ -57,6 +62,80 @@ function decodeBase64(text: string): Uint8Array | null {
 
 /** A placeholder JSON batch shown the first time a JSON composer opens. */
 const JSON_PLACEHOLDER = '[\n  { "id": 1, "event": "created" }\n]';
+
+/** A placeholder JSON Schema shown in the (empty) schema editor. */
+const SCHEMA_PLACEHOLDER =
+	'{\n  "type": "object",\n  "properties": {\n    "id": { "type": "integer" },\n    "event": { "type": "string" }\n  }\n}';
+
+/**
+ * The per-stream message-schema editor. Keyed by stream path by the caller so it
+ * remounts (and reloads its draft from the store) when the stream changes. Saving
+ * stores the schema client-side; the composer then offers "Insert skeleton". The
+ * schema is a local authoring aid — never sent to the server (the API is frozen).
+ */
+function SchemaEditor(props: { path: string }): JSX.Element {
+	const { path } = props;
+	const saved = streamSchemas.value[path] ?? "";
+	const draft = useSignal(saved);
+	const idBase = useId();
+	const parsed = useComputed(() => parseSchema(draft.value));
+	const empty = draft.value.trim() === "";
+	const dirty = draft.value.trim() !== saved.trim();
+
+	return (
+		<details class="dsui-disclose">
+			<summary class="dsui-disclose__summary">
+				Message schema (JSON Schema, optional){saved !== "" ? " · set" : ""}
+			</summary>
+			<div class="dsui-disclose__body">
+				<p class="dsui-publish__schemahint">
+					Saved in this browser for <code>{path}</code> — a local authoring aid (the server stores
+					no schema). Describe ONE message; the batch wraps it in an array. Save it, then{" "}
+					<strong>Insert skeleton</strong> pre-fills the editor.
+				</p>
+				<textarea
+					id={`${idBase}-schema`}
+					class="dsui-textarea dsui-textarea--mono"
+					rows={6}
+					placeholder={SCHEMA_PLACEHOLDER}
+					spellcheck={false}
+					value={draft.value}
+					onInput={(e) => {
+						draft.value = e.currentTarget.value;
+					}}
+				/>
+				<p class={`dsui-publish__status${!parsed.value.ok && !empty ? " is-error" : ""}`}>
+					{empty
+						? "No schema set."
+						: parsed.value.ok
+							? `Valid · ${parsed.value.summary}`
+							: parsed.value.error}
+				</p>
+				<div class="dsui-publish__tools">
+					<button
+						type="button"
+						class="dsui-btn dsui-btn--xs dsui-btn--primary"
+						disabled={!parsed.value.ok || !dirty}
+						onClick={() => setStreamSchema(path, draft.value)}
+					>
+						Save schema
+					</button>
+					<button
+						type="button"
+						class="dsui-btn dsui-btn--xs"
+						disabled={saved === ""}
+						onClick={() => {
+							clearStreamSchema(path);
+							draft.value = "";
+						}}
+					>
+						Clear
+					</button>
+				</div>
+			</div>
+		</details>
+	);
+}
 
 export function PublishComposer(): JSX.Element | null {
 	const stream = selectedStream.value;
@@ -132,6 +211,19 @@ export function PublishComposer(): JSX.Element | null {
 
 	const valid = useComputed(() => bodyState.value.ok && producerOk.value);
 
+	// Auto-populate an empty JSON editor with a skeleton built from the stream's
+	// saved schema, so appending "just fills the shape". Reads signals directly
+	// (not render-scope vars) so it re-runs on stream/schema change; guards on an
+	// empty editor (via peek, untracked) so it never clobbers what you've typed.
+	useSignalEffect(() => {
+		const st = selectedStream.value;
+		if (st === null || st.kind !== "json") return;
+		const sc = selectedStreamSchema.value;
+		if (sc === null || text.peek() !== "") return;
+		const skeleton = skeletonBatchText(sc);
+		if (skeleton !== null) text.value = skeleton;
+	});
+
 	function currentProducer(): ProducerIdentity | undefined {
 		if (!useProducer.value) return undefined;
 		const id = toProducerIdentity({
@@ -171,7 +263,11 @@ export function PublishComposer(): JSX.Element | null {
 			...(stream.contentType !== null ? { contentType: stream.contentType } : {}),
 		}).then((ok) => {
 			if (ok) {
-				text.value = "";
+				// Reset to a fresh skeleton when a schema is set (so the next message is
+				// pre-filled too), otherwise clear the editor.
+				const sc = selectedStreamSchema.value;
+				const skeleton = sc !== null && stream.kind === "json" ? skeletonBatchText(sc) : null;
+				text.value = skeleton ?? "";
 				showErrors.value = false;
 				// Pull the advanced seq back into the field for the next publish.
 				const next = currentProducer();
@@ -278,9 +374,26 @@ export function PublishComposer(): JSX.Element | null {
 							>
 								Format JSON
 							</button>
+							{selectedStreamSchema.value !== null ? (
+								<button
+									type="button"
+									class="dsui-btn dsui-btn--xs"
+									title="Replace the editor with an empty instance of this stream's schema"
+									onClick={() => {
+										const sc = selectedStreamSchema.value;
+										if (sc === null) return;
+										const skeleton = skeletonBatchText(sc);
+										if (skeleton !== null) text.value = skeleton;
+									}}
+								>
+									Insert skeleton
+								</button>
+							) : null}
 						</div>
 					) : null}
 				</div>
+
+				{kind === "json" ? <SchemaEditor key={stream.path} path={stream.path} /> : null}
 
 				<details class="dsui-disclose">
 					<summary class="dsui-disclose__summary">Idempotent producer (optional)</summary>
