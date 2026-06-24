@@ -1,0 +1,125 @@
+---
+// Switch.astro — tabbed examples with zero JS, using the CSS radio-tab pattern.
+//
+// One hidden radio input per tab plus a label drives which panel shows; the
+// :checked sibling selector reveals the matching panel. No client script, no
+// hydration. Use it to switch between variants of the SAME example, e.g.
+// long-poll versus SSE, the memory backend versus the redis backend, or a
+// curl request versus the equivalent client-library call. For a single big
+// operation map use OpMap; this is the lightweight inline switcher.
+//
+// Markup contract: pass `tabs` (the labels in order), then a default slot that
+// contains one element per tab in the SAME order, each tagged
+// data-panel="0", data-panel="1", and so on. Example below the styles.
+interface Props {
+  /** Tab labels in order. The panel slots must match this order. */
+  tabs: string[];
+  /** Optional mono micro-label in the header. */
+  label?: string;
+  /** Unique name so multiple Switches on one page do not share radio state. */
+  name: string;
+}
+const { tabs, label, name } = Astro.props;
+---
+
+<figure class="sw">
+  {label && <div class="sw-label mono">{label}</div>}
+  <div class="sw-tabs">
+    {tabs.map((t, i) => (
+      <Fragment>
+        <input
+          type="radio"
+          name={name}
+          id={`${name}-${i}`}
+          class="sw-radio"
+          checked={i === 0}
+        />
+        <label class="sw-tab mono" for={`${name}-${i}`} style={`--idx:${i}`}>{t}</label>
+      </Fragment>
+    ))}
+    <div class="sw-panels"><slot /></div>
+  </div>
+</figure>
+
+<style lang="scss">
+  .sw {
+    margin: 24px 0 0 var(--rail-indent);
+    max-width: var(--prose-max);
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .sw-label {
+    padding: 13px 22px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .sw-tabs { padding: 14px 22px 18px; }
+  // Radios are visually hidden but still focusable for keyboard users.
+  .sw-radio {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .sw-tab {
+    display: inline-block;
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    padding: 6px 11px;
+    margin: 0 6px 12px 0;
+    border-radius: 6px;
+    border: 1px solid var(--rule);
+    background: var(--card);
+    color: var(--ink-mute);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+    &:hover { border-color: var(--accent); color: var(--accent); }
+  }
+  // Each checked radio lights its own label (the immediately following sibling)
+  // and reveals the panel with the matching index.
+  .sw-radio:checked + .sw-tab {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .sw-radio:focus-visible + .sw-tab { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  // Panels: hide all, then reveal by nth-of-type matching the checked radio's
+  // index. The slotted children are tagged data-panel="N".
+  .sw-panels :global([data-panel]) { display: none; }
+  .sw-radio:nth-of-type(1):checked ~ .sw-panels :global([data-panel="0"]) { display: block; }
+  .sw-radio:nth-of-type(2):checked ~ .sw-panels :global([data-panel="1"]) { display: block; }
+  .sw-radio:nth-of-type(3):checked ~ .sw-panels :global([data-panel="2"]) { display: block; }
+  .sw-radio:nth-of-type(4):checked ~ .sw-panels :global([data-panel="3"]) { display: block; }
+  .sw-radio:nth-of-type(5):checked ~ .sw-panels :global([data-panel="4"]) { display: block; }
+
+  .sw-panels :global([data-panel] > :first-child) { margin-top: 0; }
+  .sw-panels :global(.expressive-code) { margin: 0; max-width: none; }
+  .sw-panels :global(p) {
+    margin: 12px 0 0;
+    max-width: var(--prose-measure);
+    font-size: 14.5px;
+    line-height: 1.6;
+    color: var(--ink);
+  }
+  .sw-panels :global(code) {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--tint);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--accent-deep);
+  }
+
+  @media (max-width: 840px) {
+    .sw { margin-left: 0; max-width: none; }
+  }
+</style>

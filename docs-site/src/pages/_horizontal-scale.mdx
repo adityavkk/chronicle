@@ -1,9 +1,9 @@
 ---
 title: "Scaling subscriptions <em>across replicas</em>"
-summary: "Chronicle's subscription control plane lives in one Redis slot and sweeps in full on every replica, so adding replicas scales serving but not subscriptions. Option A keeps the single binary and shards the state across S slots and the background work by a leased per-slot owner — with the full sweep kept as the liveness floor. A step-by-step walk of the design, end to end."
+summary: "Chronicle's subscription control plane lives in one Redis slot and sweeps in full on every replica, so adding replicas scales serving but not subscriptions. Option A keeps the single binary, shards the state across S slots, and shards the background work by a leased per-slot owner. The full sweep stays as the liveness floor. This page walks that design from end to end."
 eyebrow: "Design"
 meta: "Horizontal scale · Option A"
-deck: "Chronicle runs as one stateless binary doing two jobs: serving durable streams, and running the <code>__ds</code> subscription control plane. Adding replicas scales the serving and not the control plane — the control plane lives in a single Redis slot, and its recovery sweep runs in full on every replica, so N replicas do N times the same work. <strong>Option A</strong> keeps the single binary and fixes both halves: it shards subscription state across <code>S</code> slots, shards the background work by a leased per-slot owner, and keeps the full sweep as the liveness floor under it. This page walks that design end to end."
+deck: "Chronicle runs as one stateless binary doing two jobs. It serves durable streams, and it runs the <code>__ds</code> subscription control plane. Adding replicas scales the serving and not the control plane. The control plane lives in a single Redis slot, and its recovery sweep runs in full on every replica, so N replicas do N times the same work. <strong>Option A</strong> keeps the single binary and fixes both halves. It shards subscription state across <code>S</code> slots, shards the background work by a leased per-slot owner, and keeps the full sweep as the liveness floor under it. This page walks that design from end to end."
 byline:
   - label: "Decision"
     value: "Option A · one binary"
@@ -21,101 +21,106 @@ import Table from "../components/Table.astro";
 import Diagram from "../components/Diagram.astro";
 import RedisTrace from "../components/RedisTrace.astro";
 import Complexity from "../components/Complexity.astro";
+import Step from "../components/Step.astro";
+import Aside from "../components/Aside.astro";
 
 <Callout icon="alert" label="A design, not shipped code">
   Everything else on this site documents code that runs. This page documents a
   *plan*. The single-slot control plane, the recovery sweep, and the generation
-  fence below are built and tested; **slot-homing, the due-set, and leased slot
-  ownership are proposed** — Option A from the [horizontal-scale
+  fence below are built and tested. **Slot-homing, the due-set, and leased slot
+  ownership are proposed.** They are Option A from the [horizontal-scale
   research](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md).
-  The load-bearing numbers are not yet measured; §10 says which, and why they
-  gate the build.
+  The numbers the design rests on are not yet measured. §10 says which numbers,
+  and why they gate the build.
 </Callout>
 
 <Tldr>
   <ul>
-    <li><strong>The control plane is pinned to one Redis slot.</strong> Every subscription key shares the fixed <code>{"{__ds}"}</code> hash tag, so all of it lands on one cluster slot. State capacity stops scaling there, no matter how many replicas serve traffic.</li>
-    <li><strong>Delivery is event-driven; the sweep only backstops crashes.</strong> A webhook fires the instant a matching append lands (in-process, at append latency) — not on a timer. The ~2s recovery sweep delivers nothing in steady state; it exists to re-derive a wake a crash dropped. But it runs on every replica over every subscription, so its redundant <code>O(N·K)</code> "ask" — not the wakes — is the cost. Adding replicas multiplies that ask; it does not divide it.</li>
-    <li><strong>Option A keeps one binary and shards two things.</strong> Slot-home each subscription's keys under <code>{"{__ds:h}"}</code> with <code>h = hash(id) % S</code> (state), and shard the background work by a leased per-slot owner (work). Capacity scales with S; total sweep work drops to <code>O(owed)</code>.</li>
-    <li><strong>A load test found a third axis Option A doesn't touch.</strong> The agents runtime registers one subscription per entity <em>type</em>, so all of a type's entities and every replica contend for <em>one</em> single-holder lease. At 12 replicas that fence-stormed while every tier sat at ≤12% CPU — a contention collapse, not a capacity or sweep limit. Slot-homing distributes <em>different</em> subscriptions; it never splits a hot one's lease. The fix is finer claim granularity, and it sequences first.</li>
-    <li><strong>The fence is safety, not liveness.</strong> The generation fence makes a duplicate wake harmless; it does nothing for a <em>coverage gap</em> when a slot is briefly owned by nobody. So the full sweep stays — demoted to a backstop that covers every slot, never deleted.</li>
-    <li><strong>Don't split the binary yet.</strong> Splitting serving from the control plane is Option B, deferred until measurements force it. The one binary held at K=10k; the fork is a later question, not a starting one.</li>
+    <li><strong>The control plane sits on one Redis slot.</strong> Every subscription key shares the fixed <code>{"{__ds}"}</code> hash tag, so all of it lands on one cluster slot. State capacity stops scaling there, no matter how many replicas serve traffic.</li>
+    <li><strong>Delivery is event-driven. The sweep only backstops crashes.</strong> A webhook fires the instant a matching append lands, in process, at append latency. It does not fire on a timer. The ~2s recovery sweep delivers nothing in steady state. It exists to re-derive a wake a crash dropped. It runs on every replica over every subscription, so the cost is its redundant <code>O(N·K)</code> read, not the wakes. Adding replicas multiplies that read instead of dividing it.</li>
+    <li><strong>Option A keeps one binary and shards two things.</strong> Slot-home each subscription's keys under <code>{"{__ds:h}"}</code> with <code>h = hash(id) % S</code> for state, and shard the background work by a leased per-slot owner for work. Capacity scales with S, and total sweep work drops to <code>O(owed)</code>.</li>
+    <li><strong>A load test found a third limit Option A does not touch.</strong> The agents runtime registers one subscription per entity <em>type</em>, so all of a type's entities and every replica contend for <em>one</em> single-holder lease. At 12 replicas that collapsed into fence rejections while every tier sat at ≤12% CPU. It was a contention collapse, not a capacity or sweep limit, and the fix sequences first. §01 says why.</li>
+    <li><strong>The fence is safety, not liveness, so the sweep stays.</strong> The generation fence makes a duplicate wake harmless. It does nothing for a <em>coverage gap</em> when a slot is briefly owned by nobody, so the full sweep stays as a backstop, demoted but never deleted. Splitting the binary is Option B, deferred until measurements force it. The one binary held at K=10k.</li>
   </ul>
 </Tldr>
 
 <section class="block" id="ceiling">
   <SectionHead num="01" label="The ceiling" title="Where one binary <em>stops scaling</em>" />
 
-  Chronicle is one Go binary. It serves the durable-streams API — append, read,
-  long-poll, SSE — and it runs the subscription control plane: the recovery
-  sweep, the lease worker, and the retry worker that together keep a durable
-  cursor delivered.[^subs] Put more replicas behind the load balancer and the
-  serving path scales: each replica handles its share of appends and reads
-  against the per-stream log, which is already sharded across the cluster by each
-  stream's own hash tag.
+  Chronicle is one Go binary. It serves the durable-streams API of append, read,
+  long-poll, and SSE, and it runs the subscription control plane. The control
+  plane is the recovery sweep, the lease worker, and the retry worker that
+  together keep a durable cursor delivered.[^subs] Put more replicas behind the
+  load balancer and the serving path scales. Each replica handles its share of
+  appends and reads against the per-stream log, which is already sharded across
+  the cluster by each stream's own hash tag.
 
-  The control plane does not scale the same way, for three separate reasons — two
-  structural, and a third a later load test forced.
+  The control plane does not scale the same way, for three reasons. Two are
+  structural. A later load test forced the third.
 
-  First, **all of it lives in one slot.** Every subscription key — the config
-  hash, the cursor hash, the lease and retry schedules, the fan-out index —
-  shares the fixed `{__ds}` hash tag,[^slot] so Redis Cluster routes every one to
-  the same slot on the same node. That co-location is deliberate: it lets the
-  multi-key Lua scripts (`ack.lua` touches 4 keys, `delete_sub.lua` 5) run as
-  single-slot atomic scripts. But it also means subscription *state capacity* —
-  memory, and the write throughput of one primary — is fixed at one node's worth,
-  and no number of serving replicas moves it.
+  First, **all of it lives in one slot.** Every subscription key shares the
+  fixed `{__ds}` hash tag.[^slot] That covers the config hash, the cursor hash,
+  the lease and retry schedules, and the fan-out index. Redis Cluster routes
+  every one to the same slot on the same node. This co-location is deliberate. It
+  lets the multi-key Lua scripts run as single-slot atomic scripts, e.g.
+  `ack.lua` touches 4 keys and `delete_sub.lua` touches 5. It also fixes
+  subscription *state capacity*, meaning memory and the write throughput of one
+  primary, at one node's worth. No number of serving replicas moves it.
 
   Second, **every replica sweeps everything.** The recovery sweep is the
-  durability backstop: every ~2s it walks all K subscriptions, re-derives pending
-  work from each durable cursor, and re-fires any wake a crash dropped. Correct,
-  and necessary. But every replica runs the same sweep over the same K
-  subscriptions against the same slot, so the cost is `O(N·K)` for N replicas —
-  redundant work that grows with the cluster instead of being divided by it.
+  durability backstop. Every ~2s it walks all K subscriptions, re-derives pending
+  work from each durable cursor, and re-fires any wake a crash dropped. It is
+  correct and necessary. But every replica runs the same sweep over the same K
+  subscriptions against the same slot, so the cost is `O(N·K)` for N replicas.
+  That is redundant work that grows with the cluster instead of being divided by
+  it.
 
   <Diagram
     name="seq-hs-ceiling"
     label="The O(N·K) sweep"
-    caption="Three replicas, each sweeping all K subscriptions every ~2s against the single {__ds} slot. The reads are redundant — every replica re-derives the same owed work — and they all converge on one node. Scaling out the fleet scales the load on that one slot up, not down."
+    caption="Three replicas, each sweeping all K subscriptions every ~2s against the single {__ds} slot. The reads are redundant, because every replica re-derives the same owed work, and they all converge on one node. Scaling out the fleet scales the load on that one slot up, not down."
   />
 
-  Third, **a single hot subscription serializes on one lease.** This one a later
-  load test forced — the Electric agents runtime driven against chronicle as its
-  Durable-Streams backend. The runtime registers one subscription per entity
+  Third, **a single hot subscription serializes on one lease.** A later load test
+  forced this one. The test ran the Electric agents runtime against Chronicle as
+  its Durable-Streams backend. The runtime registers one subscription per entity
   *type* (`"<type>-handler"`), so every entity of that type, on every replica,
-  shares **one** single-holder lease. At 6 replicas the wake path was clean; at 12
-  it **collapsed** into a fence storm — claims taken over from late heartbeats,
-  in-flight acks rejected `FENCED` — while every tier sat at ≤12% CPU. Nothing was
-  saturated; it was lock contention on one lease, and 2.5× the CPU made it worse.
+  shares **one** single-holder lease. At 6 replicas the wake path was clean. At 12
+  it **collapsed**. Claims were taken over from late heartbeats, in-flight acks
+  were rejected `FENCED`, and every tier sat at ≤12% CPU. Nothing was saturated.
+  It was lock contention on one lease, and 2.5× the CPU made it worse.
 
   <Callout icon="alert" label="Slot-homing does not fix this">
-    `h = hash(id) % S` distributes *different* subscriptions across slots — but a
-    single hot `"<type>-handler"` is still one id, one slot, one lease, for any S.
-    Moves 1–3 below shard **keyspace and ownership**; they do not refine **claim
-    granularity**, which is what collapsed. The fix is a finer claim unit
-    (per-entity or per-shard-of-type leases), and because the collapse was on the
-    hot path it sequences *before* the sweep and state shards — see the
+    `h = hash(id) % S` distributes *different* subscriptions across slots, but a
+    single hot `"<type>-handler"` is still one id, one slot, and one lease, for
+    any S. Moves 1 to 3 below shard **keyspace and ownership**. They do not refine
+    **claim granularity**, which is what collapsed. The fix is a finer claim unit,
+    e.g. per-entity or per-shard-of-type leases. Because the collapse was on the
+    hot path it sequences *before* the sweep and state shards. See the
     [third-axis section](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#a-third-axis-per-type-claim-contention-from-the-load-test)
     of the research.
   </Callout>
 
-  Batching the sweep's reads pushed this cliff out — pipelining the per-tick
-  reads moved it from a few thousand subscriptions to past 10k on one
-  replica[^batch] — but it moved the cliff, it did not remove it. The first two
-  limits are structural: one slot for state, `O(N·K)` for work — and Option A
-  addresses both while keeping the single binary. The **third — per-type claim
-  contention — is the one Option A does *not* fix**, and it is what actually
-  collapsed the system under load; it needs a finer claim granularity, sequenced
-  before the rest.
+  The first two limits are structural: one slot for state, and `O(N·K)` for work.
+  Option A addresses both while keeping the single binary. The **third, per-type
+  claim contention, is the one Option A does *not* fix**, and it is what actually
+  collapsed the system under load.
+
+  <Aside label="Detail" summary="Why batching pushed the sweep limit out but could not remove it">
+    Pipelining the per-tick reads moved the sweep limit from a few thousand
+    subscriptions to past 10k on one replica.[^batch] It moved the limit, it did
+    not remove it. The third limit, per-type claim contention, needs a finer claim
+    granularity, sequenced before the rest.
+  </Aside>
 </section>
 
 <section class="block" id="eventflow">
   <SectionHead num="02" label="Event flow" title="The happy path is <em>already event-driven</em>" />
 
-  Before sharding anything, be precise about what the sweep is *for* — because it
-  is easy to read §01 and conclude that wakes are delivered by the sweep, in
-  ~2-second bursts. They are not. On the happy path a webhook fires the instant a
-  matching append lands; the sweep delivers nothing.
+  Before sharding anything, be precise about what the sweep is *for*. It is easy
+  to read §01 and conclude that the sweep delivers wakes, in ~2-second bursts. It
+  does not. On the happy path a webhook fires the instant a matching append lands,
+  and the sweep delivers nothing.
 
   An append is atomic with its wake signal. `append.lua` writes the durable frame,
   advances the tail, and `PUBLISH`es the stream's notify channel in one
@@ -129,12 +134,10 @@ import Complexity from "../components/Complexity.astro";
   ```
 
   That `PUBLISH` wakes long-poll and SSE readers. Subscriptions wake through a
-  parallel, synchronous hook: after a successful append the HTTP handler calls
-  `OnStreamAppend`, which reads the stream's subscribers from the fan-out index and
-  arms-and-delivers each idle one immediately. No poll, no timer — the wake rides
-  the same request that committed the append.
+  separate synchronous hook on the same request that committed the append.
 
-  ```go title="webhook/manager.go:237 — the append-time hook, in-process on the appending origin"
+  <Step n={1} fn="Manager.OnStreamAppend" loc="webhook/manager.go:359" role="After a durable append the handler reads the stream's subscribers from the fan-out index and arms and delivers each idle one in process. No poll, no timer.">
+  ```go title="webhook/manager.go"
   func (m *Manager) OnStreamAppend(path string) {
       ids, _ := m.store.StreamSubscribers(path) // the fan-out index for this stream
       for _, id := range ids {
@@ -142,48 +145,40 @@ import Complexity from "../components/Complexity.astro";
       }
   }
   ```
+  </Step>
 
-  **A durable outbox already ships — for pull-wake.** A webhook is delivered
-  in-process and forgotten; a pull-wake is delivered through a durable record. The
-  server appends a `{"type":"wake"}` event to the subscription's `wake_stream` (an
-  ordinary durable stream), and a pool of workers tails it and claims. That wake
-  event *is* a transactional outbox: a durable entry that says "this subscription
-  owes a wake," written on the append, drained by whichever worker reads next, and
-  marked sent so it is not re-emitted.
-
-  ```go title="webhook/manager.go:302 — pull-wake writes the durable wake event, then marks it sent"
+  <Step n={2} fn="Manager.issueWake (pull-wake)" loc="webhook/manager.go:478-490" role="Pull-wake delivers through a durable record. The wake event is a transactional outbox. It writes a wake-typed event to the subscription's wake_stream, then records the emit fenced on (generation, wake_id) so the sweep never re-emits a delivered wake.">
+  ```go title="webhook/manager.go"
   if err := m.streams.AppendWakeEvent(sub.Config.WakeStream, data); err != nil {
       // Leave wake_event_sent_ns at 0 so the recovery sweep re-emits it.
       return
   }
-  // Record the durable emit, fenced on (generation, wake_id), so the sweep
-  // does not re-emit a wake that was already delivered.
   m.store.RecordWakeEventSent(sub.ID, generation, wakeID, time.Now())
   ```
+  </Step>
 
   <Diagram
     name="seq-hs-eventflow"
     label="The event-driven happy path (pull-wake)"
-    caption="The append commits the frame and the wake signal in one atomic script. The append-time hook writes a durable wake event to the wake_stream — the outbox — and a worker drains it. The recovery sweep fires nothing on this path; it exists only to re-emit a wake a crash left unsent."
+    caption="The append commits the frame and the wake signal in one atomic script. The append-time hook writes a durable wake event to the wake_stream, the outbox, and a worker drains it. The recovery sweep fires nothing on this path. It exists only to re-emit a wake a crash left unsent."
   />
 
-  So where does the ~2s sweep come in? **Only on failure.** The webhook hook runs
-  on the appending origin alone, in process. If that origin crashes between the
-  durable append and the delivery, the wake is lost and nothing else knows it was
-  owed, so the sweep re-derives it from the durable cursor. In steady state, with
-  no crashes, the sweep walks the subscriptions, finds every cursor already at its
-  tail, and fires nothing — but it still pays `O(K)` every tick to *ask*, on every
-  replica. That redundant question, not the wakes, is the `O(N·K)` cost §01 named,
-  and removing it is what Move 2's due-set is for.
+  So where does the ~2s sweep come in? **Only on failure.** If the appending
+  origin crashes between the durable append and the delivery, the wake is lost and
+  nothing else knows it was owed, so the sweep re-derives it from the durable
+  cursor. In steady state the sweep finds every cursor already at its tail and
+  fires nothing, yet still pays `O(K)` every tick to *check*, on every replica.
+  That redundant check, not the wakes, is the `O(N·K)` cost §01 named. Removing it
+  is what Move 2's due-set is for.
 
-  <Callout icon="info" label="Sweep, not outbox — for the webhook path, for now">
-    The webhook path has no durable outbox today: its recovery is the sweep, a
-    deliberate trade of one re-derivation pass for a dedicated delivery queue and
-    worker — the cost is recovery at sweep latency for a post-crash event. The
+  <Callout icon="info" label="Sweep, not outbox, for the webhook path for now">
+    The webhook path has no durable outbox today. Its recovery is the sweep. This
+    is a deliberate trade of one re-derivation pass for a dedicated delivery queue
+    and worker. The cost is recovery at sweep latency for a post-crash event. The
     pull-wake `wake_stream` above is the durable-outbox shape already in the
-    codebase, and the [due-set](#move2) (§05) is what carries that shape onto the
-    work-sharded webhook path, so the periodic sweep can stop being the only thing
-    that finds owed work and shrink toward a pure crash backstop.
+    codebase, and the [due-set](#move2) (§05) carries that shape onto the
+    work-sharded webhook path. The periodic sweep can then stop being the only
+    thing that finds owed work and shrink toward a pure crash backstop.
   </Callout>
 </section>
 
@@ -191,10 +186,9 @@ import Complexity from "../components/Complexity.astro";
   <SectionHead num="03" label="The shape" title="Partition, own, <em>no coordinator</em>" />
 
   Redis Cluster, Kafka, NATS JetStream, Pulsar, and Orleans all reach horizontal
-  scale the same way: **partition the keyspace, give each partition exactly one
+  scale the same way. **Partition the keyspace, give each partition exactly one
   owner, and keep no central coordinator in the request path.**[^priorart] The
-  two limits from §01 map cleanly onto the two halves of that move, because they
-  are two different problems wearing one symptom.
+  two limits from §01 map onto the two halves of that move.
 
   <Table>
     | Limit | What it caps | The move |
@@ -209,102 +203,96 @@ import Complexity from "../components/Complexity.astro";
   per-subscription *due-set*, so a worker fires owed subscriptions directly
   instead of scanning all K. **Move 3** leases each slot to one replica, so the
   background work for a slot runs on exactly one node. A short glossary, used
-  throughout:
+  throughout the page:
 
   <Table>
     | Symbol | Is |
     | --- | --- |
     | `N` | serving replicas (Chronicle processes) |
     | `K` | subscriptions |
-    | `S` | virtual slots — fixed at **256**, independent of N |
+    | `S` | virtual slots, fixed at **256**, independent of N |
     | `h` | one slot index, `h = hash(id) % S` |
     | `F` | subscriptions a single stream wakes |
   </Table>
 
-  The thread that runs through all three moves, and the reason the design is safe
-  to build incrementally: **none of the moves is a correctness dependency.** Each
-  is an optimization layered over the existing, still-correct full sweep. §07 is
-  where that claim is paid for; the three moves come first.
+  **None of the moves is a correctness dependency.** Each is an optimization
+  layered over the existing, still-correct full sweep. §07 is where that claim is
+  paid for. The three moves come first.
 </section>
 
 <section class="block" id="move1">
   <SectionHead num="04" label="Move 1" title="Slot-home <em>whole</em> subscriptions" />
 
   The single `{__ds}` tag becomes `S` tags of the form `{__ds:h}`, with `h =
-  fnv32a(id) % S`. Every key one subscription touches — its config hash, its
-  cursor hash, its lease and retry schedules, its due-set, its fan-out membership
-  — takes the *same* `h`. The whole subscription homes in one slot; no
-  subscription is ever split across two.
+  fnv32a(id) % S`. Every key one subscription touches takes the *same* `h`. That
+  covers its config hash, its cursor hash, its lease and retry schedules, its
+  due-set, and its fan-out membership. The whole subscription homes in one slot,
+  and no subscription is ever split across two.
 
-  That "whole subscription, one slot" rule is the load-bearing constraint, and it
-  exists to keep the atomic scripts atomic. `ack.lua` and `delete_sub.lua` are
-  multi-key Lua. Redis refuses a multi-key script whose keys span slots with a
-  `CROSSSLOT` error, so the moment one subscription's keys land in different
-  slots, those scripts stop running. Co-tagging every key for a subscription
-  keeps them byte-for-byte single-slot: sharding becomes "compute the tag," not
-  "rewrite the atomicity contract."
+  This "whole subscription, one slot" rule is the constraint the rest of the move
+  rests on, and it exists to keep the atomic scripts atomic. `ack.lua` and
+  `delete_sub.lua` are multi-key Lua. Redis refuses a multi-key script whose keys
+  span slots with a `CROSSSLOT` error, so the moment one subscription's keys land
+  in different slots, those scripts stop running. Co-tagging every key for a
+  subscription keeps them all on one slot. Sharding then means computing the tag,
+  not changing what each script can do atomically.
 
   <Callout icon="alert" label="Use your own hash, not Redis CRC16">
-    `h` MUST come from an application hash — `hash/fnv` FNV-1a — and MUST NOT be
-    Redis's CRC16. The client already CRC16-hashes the `{…}` tag to pick a
-    cluster slot; if `h` were also CRC16, two subscriptions you meant for
+    `h` MUST come from an application hash, namely `hash/fnv` FNV-1a, and MUST NOT
+    be Redis's CRC16. The client already CRC16-hashes the `{…}` tag to pick a
+    cluster slot. If `h` were also CRC16, two subscriptions you meant for
     different `h` could collide onto one cluster slot, and the tag would stop
     being the stable, application-chosen value the whole scheme depends on.
   </Callout>
 
-  `S` is fixed at **256** — a compile-time constant, not a function of the replica
-  count. It is chosen once and never changed in place: because `h` is `hash(id) %
-  S`, a different `S` re-tags every key, so changing it is a dual-write migration,
-  not a config edit. 256 comfortably exceeds any realistic replica count and is
-  the upper bound the fan-out experiment in §10 measures.
+  `S` is fixed at **256**. It is a compile-time constant, not a function of the
+  replica count. It is chosen once and never changed in place. Because `h` is
+  `hash(id) % S`, a different `S` re-tags every key, so changing it is a
+  dual-write migration, not a config edit. 256 is well above any realistic
+  replica count and is the upper bound the fan-out experiment in §10 measures.
 
   <Table>
     | Key | Type | Holds |
     | --- | --- | --- |
     | `ds:{__ds:h}:sub:<id>` | hash | config + runtime: `generation`, `wake_id`, `phase`, lease state |
-    | `ds:{__ds:h}:sub:<id>:links` | hash | the durable cursors — `path → "<type>:<acked_offset>"` |
+    | `ds:{__ds:h}:sub:<id>:links` | hash | the durable cursors, `path → "<type>:<acked_offset>"` |
     | `ds:{__ds:h}:subs` | set | the ids homed in slot h, for the sweep |
     | `ds:{__ds:h}:stream:<path>` | set | which subscriptions a stream wakes, in slot h |
-    | `ds:{__ds:h}:sched:lease` | zset | `sub → lease_expiry_ns` — the liveness lease |
-    | `ds:{__ds:h}:sched:retry` | zset | `sub → next_attempt_ns` — the webhook backoff |
-    | `ds:{__ds:h}:due` | zset | `sub → now_ns` — the outbox of owed wakes (Move 2) |
+    | `ds:{__ds:h}:sched:lease` | zset | `sub → lease_expiry_ns`, the liveness lease |
+    | `ds:{__ds:h}:sched:retry` | zset | `sub → next_attempt_ns`, the webhook backoff |
+    | `ds:{__ds:h}:due` | zset | `sub → now_ns`, the outbox of owed wakes (Move 2) |
   </Table>
 
   State capacity now scales with S across the cluster's nodes, because the
   schedules shard *with* the subscriptions rather than staying one global ZSET.
   The cost lands on one operation. `OnStreamAppend` could read the subscribers of
-  a stream with a single `SMEMBERS`; once subscriptions scatter across slots, the
-  fan-out membership scatters too, so an append must read up to `S` per-slot sets.
-  Issued as one pipeline, that is `S` reads grouped by the nodes they land on —
-  about one round trip per node, not `S` serial trips, but a real and measurable
-  regression. The mitigation is a per-stream "occupied-slots" bitmap so an append
-  probes only the slots that actually hold a subscriber; §10 measures the cost
-  with and without it.
+  a stream with a single `SMEMBERS`. Once subscriptions spread across slots, the
+  fan-out membership spreads too, so an append must read up to `S` per-slot sets.
+  The mitigation is a per-stream "occupied-slots" bitmap so an append reads only
+  the slots that actually hold a subscriber. §10 measures the cost with and
+  without it.
 
   <Complexity
-    label="Complexity — Move 1"
+    label="Complexity, Move 1"
     time="O(1) per single-subscription op · ~1 round trip per node to fan one append out"
     space="O(K) state, now spread across S slots"
-    why="Every per-subscription script stays single-slot O(1) hash work plus an O(log L) schedule touch — unchanged, because the keys co-tag. The one regression is <code>OnStreamAppend</code>: reading a stream's subscribers becomes S pipelined <code>SMEMBERS</code> instead of one, bounded by the occupied-slots bitmap to the slots that actually hold a subscriber rather than all S."
+    why="Every per-subscription script stays single-slot O(1) hash work plus an O(log L) schedule touch, unchanged because the keys co-tag. The one regression is <code>OnStreamAppend</code>: reading a stream's subscribers becomes S pipelined <code>SMEMBERS</code> instead of one, bounded by the occupied-slots bitmap to the slots that actually hold a subscriber rather than all S."
   />
 </section>
 
 <section class="block" id="move2">
   <SectionHead num="05" label="Move 2" title="A due-set <em>instead of a scan</em>" />
 
-  Move 1 shards the schedules but does not change how owed work is found: the
+  Move 1 shards the schedules but does not change how owed work is found. The
   sweep still walks all K. Move 2 removes the scan from the hot path by adding a
-  per-slot *due-set* — `ds:{__ds:h}:due`, a sorted set that names exactly the
+  per-slot *due-set*: `ds:{__ds:h}:due`, a sorted set that names exactly the
   subscriptions that owe a wake.
 
   The due-set is an outbox. When an append arms a wake, the same atomic
   `arm_wake.lua` that bumps the generation also `ZADD`s the subscription into its
   slot's due-set, scored at `now_ns`. When the work is acked, the same atomic
   `ack.lua` that advances the cursor also `ZREM`s it. A per-slot *due-worker*
-  then reads what is due and fires it — `O(owed)` work, not `O(K)`. The score is
-  `now_ns` and nothing cleverer: the due-set answers "which subscriptions need a
-  wake," and the lease schedule already answers "which in-flight wakes have timed
-  out," so the due-set is a pure owed-list, not a second deadline queue.
+  then reads what is due and fires it. That is `O(owed)` work, not `O(K)`.
 
   ```lua title="Proposed: the due ZADD/ZREM fold into scripts that are already atomic"
   -- arm_wake.lua, ARMED branch — add one line (now takes the due ZSET as a key):
@@ -314,33 +302,33 @@ import Complexity from "../components/Complexity.astro";
   redis.call('ZREM', KEYS[n], ARGV[1])                      -- clear the owed mark
   ```
 
-  Because the `ZADD` rides inside the script that already flips the phase, the
+  Because the `ZADD` runs inside the script that already flips the phase, the
   owed-mark and the phase transition land together or not at all. There is no new
-  window between them for a crash to fall into.
+  window between them where a crash can lose one but not the other.
 
   <RedisTrace
     script="claim_due.lua"
     source="webhook/scripts/claim_due.lua"
-    caption="The due-worker reuses claim_due.lua unchanged — one key, run once per owned slot. It claims by re-scoring forward, never ZREM, so a worker that dies after claiming leaves the item to fall due again on the next owner. The same machinery already drains the lease and retry schedules today."
+    caption="The due-worker reuses claim_due.lua unchanged, with one key, run once per owned slot. It claims by re-scoring forward and never <code>ZREM</code>, so a worker that dies after claiming leaves the item to fall due again on the next owner. The same code already drains the lease and retry schedules today."
     steps={[
-      { cmd: "ZRANGEBYSCORE", key: "ds:{__ds:h}:due 0 now", does: "Take the subscriptions whose owed-deadline has passed — everything in the outbox that has not been acked away.", loc: "claim_due.lua:10", kind: "read" },
-      { cmd: "ZADD", key: "ds:{__ds:h}:due now+visibility", does: "Re-score each claimed member forward, never <code>ZREM</code>. If this origin dies mid-delivery, the owed mark simply falls due again and another owner re-fires it — at-least-once by construction.", loc: "claim_due.lua:13", kind: "write" },
+      { cmd: "ZRANGEBYSCORE", key: "ds:{__ds:h}:due 0 now", does: "Take the subscriptions whose owed-deadline has passed, meaning everything in the outbox that has not been acked away.", loc: "claim_due.lua:10", kind: "read" },
+      { cmd: "ZADD", key: "ds:{__ds:h}:due now+visibility", does: "Re-score each claimed member forward, never <code>ZREM</code>. If this origin dies mid-delivery, the owed mark falls due again and another owner re-fires it, so delivery is at-least-once by construction.", loc: "claim_due.lua:13", kind: "write" },
     ]}
   />
 
-  The honesty here is that Move 2 *relocates* a dual write rather than removing
-  one. The existing arm-then-emit-then-record sequence already writes twice; the
-  due-set adds a `ZADD` on arm and a `ZREM` on ack to the hot path. That is write
-  amplification on append and ack, paid for a recovery-latency win: an owed wake
-  fires at the next due-worker tick instead of waiting for the next full sweep.
-  §10 measures the amplification. And the full sweep does not go away — it demotes
-  to a backstop, for the reason §07 makes precise.
+  To be honest, Move 2 *relocates* a dual write rather than removing one. The
+  existing arm-then-emit-then-record sequence already writes twice. The due-set
+  adds a `ZADD` on arm and a `ZREM` on ack to the hot path. That is write
+  amplification on append and ack, paid for a faster recovery. An owed wake fires
+  at the next due-worker tick instead of waiting for the next full sweep. §10
+  measures the amplification. The full sweep does not go away. It is demoted to a
+  backstop, for the reason §07 makes precise.
 
   <Complexity
-    label="Complexity — Move 2"
+    label="Complexity, Move 2"
     time="O(owed) per due-worker tick, vs O(K) per sweep"
     space="O(owed) entries in the due-set per slot"
-    why="A due-worker reads only the subscriptions that owe a wake — <code>ZRANGEBYSCORE</code> over the due-set, O(log L + owed) — instead of the sweep's O(K) walk over every subscription. The cost is one extra O(log L) <code>ZADD</code> on arm and <code>ZREM</code> on ack, folded into scripts that already run atomically."
+    why="A due-worker reads only the subscriptions that owe a wake, using <code>ZRANGEBYSCORE</code> over the due-set at O(log L + owed), instead of the sweep's O(K) walk over every subscription. The cost is one extra O(log L) <code>ZADD</code> on arm and <code>ZREM</code> on ack, folded into scripts that already run atomically."
   />
 </section>
 
@@ -348,31 +336,33 @@ import Complexity from "../components/Complexity.astro";
   <SectionHead num="06" label="Move 3" title="Lease <em>one owner</em> per slot" />
 
   Moves 1 and 2 shard the state and give each slot its own outbox, but every
-  replica would still run a due-worker over every slot — the `O(N·K)` redundancy,
-  relocated. Move 3 removes it: each slot is *leased* to exactly one replica, and
-  a replica runs the due, lease, and retry workers only for the slots it owns.
+  replica would still run a due-worker over every slot. That is the `O(N·K)`
+  redundancy, relocated. Move 3 removes it. Each slot is *leased* to exactly one
+  replica, and a replica runs the due, lease, and retry workers only for the
+  slots it owns.
 
   Ownership is a Redis-backed membership protocol, separate from Redis Cluster's
   own membership. It has four parts.
 
-  **Membership.** Each replica has a stable `replica_id` for its process lifetime
-  — the pod name plus a per-start nonce, so a restarted pod reusing a name is a
-  distinct incarnation. Every replica heartbeats by `ZADD`-ing its `replica_id`
-  into a `ds:{ownership}:members` ZSET scored at `now + memberLeaseTTL`, and evicts
-  expired members with `ZREMRANGEBYSCORE`. This ZSET is the live set: Kubernetes
-  decides who gets HTTP traffic, this decides who is eligible to own slots.
+  **Membership.** Each replica has a stable `replica_id` for its process lifetime.
+  It is the pod name plus a per-start nonce, so a restarted pod reusing a name is
+  a distinct process. Every replica heartbeats by `ZADD`-ing its `replica_id` into
+  a `ds:{ownership}:members` ZSET scored at `now + memberLeaseTTL`, and evicts
+  expired members with `ZREMRANGEBYSCORE`. This ZSET is the live set. Kubernetes
+  decides who gets HTTP traffic, and this decides who is eligible to own slots.
 
   **Assignment.** From the live set, every replica computes the same owner for
-  each slot by rendezvous (highest-random-weight) hashing: `score(r, h) =
-  fnv64a(r + ":" + h)`, and the owner of `h` is the replica with the top score,
-  ties broken by the greatest `replica_id`. Adding or removing one replica
-  reassigns only ~`1/N` of slots, so a join or leave is not a full reshuffle.
+  each slot by rendezvous hashing, also called highest-random-weight hashing:
+  `score(r, h) = fnv64a(r + ":" + h)`. The owner of `h` is the replica with the
+  top score, with ties broken by the greatest `replica_id`. Adding or removing one
+  replica reassigns only ~`1/N` of slots, so a join or leave is not a full
+  reshuffle.
 
-  **The lease, as a real compare-and-set.** Computing the same owner is not enough
-  — two replicas reading the member set a moment apart could disagree. So the
-  target owner *claims* the slot with `claim_shard.lua`, a CAS that grants the
-  lease only when the slot is unowned, expired, or already the caller's, and
-  bumps an `owner_epoch` on every transfer:
+  **The lease, as a compare-and-set.** Computing the same owner is not enough,
+  because two replicas reading the member set a moment apart could disagree. So the
+  target owner *claims* the slot with `claim_shard.lua`, a CAS that grants the lease
+  only when the slot is unowned, expired, or already the caller's, and bumps an
+  `owner_epoch` on every transfer:
 
   ```lua title="Proposed: claim_shard.lua — the slot-ownership CAS"
   -- KEYS: 1=slot (ds:{ownership}:slot:<h>)   ARGV: 1=replica_id 2=now_ns 3=lease_ttl_ms
@@ -396,13 +386,13 @@ import Complexity from "../components/Complexity.astro";
   ```
 
   The single-threaded Redis serializes the script, so exactly one of two racing
-  replicas wins the slot. The loser reads `BUSY`. This is the same shape as the
-  per-subscription lease CAS in `claim.lua`, lifted to slot granularity.[^kleppmann]
+  replicas wins the slot. The loser reads `BUSY`. This is the same form as the
+  per-subscription lease CAS in `claim.lua`, applied at slot granularity.[^kleppmann]
 
-  **The owner-epoch fence.** A replica that was deposed during a GC pause and then
-  resumes still believes it owns the slot. `check_owner.lua` fences its writes: a
-  background worker checks `(owner_id, owner_epoch)` before an external side
-  effect, and a stale epoch returns `FENCED`.
+  **The owner-epoch fence.** A replica that lost the slot during a GC pause and
+  then resumes still believes it owns the slot. `check_owner.lua` checks
+  `(owner_id, owner_epoch)` before an external side effect, and a stale epoch
+  returns `FENCED`.
 
   ```lua title="Proposed: check_owner.lua — fence a deposed-but-resumed owner"
   -- KEYS: 1=slot   ARGV: 1=replica_id 2=expected_epoch   Reply: OWNER | FENCED | UNOWNED
@@ -416,18 +406,18 @@ import Complexity from "../components/Complexity.astro";
 
   <Callout icon="info" label="Two fences, one boundary">
     The owner-epoch fence sits *above* the per-subscription `(generation,
-    wake_id)` fence that subscriptions already use. They do different jobs: the
-    owner-epoch fence suppresses a deposed owner's *wasted work*, while the
-    `(generation, wake_id)` fence is the actual *safety boundary* — it makes any
-    duplicate that slips through harmless. Schedule and due-set writes inline the
-    owner check inside their atomic script rather than calling `check_owner`
-    first, because a separate check-then-write leaves a GC pause's worth of gap
-    between the two; the standalone `check_owner` is only for the external webhook
-    POST, where an atomic inline check is impossible anyway.
+    wake_id)` fence that subscriptions already use. They do different jobs. The
+    owner-epoch fence stops a former owner from doing *wasted work*. The
+    `(generation, wake_id)` fence is the actual *safety boundary*, because it
+    makes any duplicate that gets through harmless. Schedule and due-set writes
+    put the owner check inside their atomic script rather than calling
+    `check_owner` first, because a separate check-then-write leaves a GC pause's
+    worth of gap between the two. The standalone `check_owner` is only for the
+    external webhook POST, where an atomic inline check is impossible anyway.
   </Callout>
 
   <Complexity
-    label="Complexity — Move 3"
+    label="Complexity, Move 3"
     time="O(S/N) slots owned per replica · O(1) claim_shard CAS"
     space="O(S) slot records + O(N) member entries"
     why="Each replica owns ~S/N slots and runs the due/lease/retry workers only for those, so total background work across the fleet is O(owed), not O(N·K). A claim is one O(1) hash CAS; a rebalance on join/leave moves ~1/N of slots, each one a single <code>claim_shard</code>."
@@ -437,55 +427,56 @@ import Complexity from "../components/Complexity.astro";
 <section class="block" id="liveness">
   <SectionHead num="07" label="Liveness" title="Why the sweep <em>can't be deleted</em>" />
 
-  Move 3 introduces a window the earlier moves did not have: during a rebalance,
-  a slot can briefly be owned by *nobody* — the old owner has stopped, the new
-  owner has not yet claimed. The natural instinct is to lean on the generation
-  fence to cover it. That instinct is wrong, and the reason is the safety/liveness
-  distinction.
+  Move 3 introduces a window the earlier moves did not have. During a rebalance,
+  a slot can briefly be owned by *nobody*. The old owner has stopped, and the new
+  owner has not yet claimed. The instinct is to lean on the generation fence to
+  cover it. That is wrong, and the reason is the difference between safety and
+  liveness.
 
-  The generation fence is a **safety** mechanism: it guarantees nothing bad
-  happens — a duplicate or stale wake loses the comparison and is rejected. It
-  says nothing about **liveness** — that something good eventually happens. An
-  unowned slot is precisely a liveness gap: a wake that is owed but that no
-  worker is currently responsible for firing. The fence makes a *duplicate* wake
-  harmless; it does nothing for a *missing* one. Work-sharding must therefore
+  The generation fence is a **safety** mechanism. It guarantees nothing bad
+  happens, because a duplicate or stale wake loses the comparison and is rejected.
+  It says nothing about **liveness**, which is the guarantee that something good
+  eventually happens. An unowned slot is a liveness gap. A wake is owed, but no
+  worker is currently responsible for firing it. The fence makes a *duplicate*
+  wake harmless. It does nothing for a *missing* one. Work-sharding must therefore
   supply liveness separately, and it does so by leaning on a mechanism that was
   never sharded: the full sweep.
 
-  **A cursor reconcile stays — but triggered, not perpetual.** The reconcile
-  re-derives owed work from the durable cursors and re-fires anything behind,
-  carrying no owner guard because it issues only fence-safe wakes (race a real
-  owner's wake and both bump the generation, one supersedes, the stale one is
-  fenced). The question is *when* it runs. Most recovery cases announce
-  themselves, and for those it runs at the event, not on a clock: a rebalance
-  coverage gap closes when the new owner claims the slot and reconciles it; a
-  failover, a reconnect, a boot, an append error each trigger their own reconcile.
-  A split-brain slot with two owners is safe regardless — the double wake
+  **A cursor reconcile stays, but triggered, not perpetual.** The reconcile
+  re-derives owed work from the durable cursors and re-fires anything behind. It
+  carries no owner guard because it issues only fence-safe wakes. If it races a
+  real owner's wake, both bump the generation, one supersedes, and the stale one
+  is fenced. The question is *when* it runs. Most recovery cases announce
+  themselves, and for those it runs at the event, not on a clock. A rebalance
+  coverage gap closes when the new owner claims the slot and reconciles it. A
+  failover, a reconnect, a boot, and an append error each trigger their own
+  reconcile. A slot with two owners is safe in any case, because the double wake
   coalesces.
 
   <Callout icon="info" label="The 2s timer is a floor, not a guarantee">
-    Exactly one case has no trigger: an owed-mark dropped on a slot that is
-    unowned (mid-rebalance) *and* quiet (no later append), eventless because the
-    cross-slot gap means no durable owed-mark was written atomically with the
-    append. Only a periodic cursor re-derivation finds it. Because that
-    conjunction is rare and not latency-sensitive, the periodic floor belongs in
-    the seconds-to-minutes band — alongside the 30s index reconcile — *not* at 2s.
-    The 2s `sweepInterval` was a catch-all cadence; once the detectable cases are
-    event-triggered, it is a tunable latency floor for one narrow case, never a
-    correctness requirement.[^bound]
+    Exactly one case has no trigger. An owed-mark is dropped on a slot that is
+    unowned, meaning mid-rebalance, *and* quiet, meaning no later append. It has
+    no event because the cross-slot gap means no durable owed-mark was written
+    atomically with the append. Only a periodic cursor re-derivation finds it.
+    Because that pair of conditions is rare and not latency-sensitive, the
+    periodic floor belongs in the seconds-to-minutes band, alongside the 30s index
+    reconcile, *not* at 2s. The 2s `sweepInterval` was a catch-all cadence. Once
+    the detectable cases are event-triggered, it is a tunable latency floor for
+    one narrow case, never a correctness requirement.[^bound]
   </Callout>
 
-  There is a second reason the sweep cannot be deleted, and it is about
-  durability, not rebalancing. **Only the sweep re-derives owed work from the
-  durable cursor.** Suppose a failover loses a subscription's lease-ZSET tail but
-  keeps its config hash: the lease worker cannot recover it, because its schedule
-  entry is gone, but the sweep can, because it computes pending work from the
-  cursor versus the stream tail rather than from any schedule. So the sweep is
-  *demoted* — from the hot path to a rare backstop — but not *retired*. "Remove
-  the `O(K)` scan" is true for the steady state and false for the recovery path.
+  <Aside label="Second reason" summary="The sweep also recovers state a failover dropped from a schedule">
+    Only the sweep re-derives owed work from the durable cursor. If a failover
+    loses a subscription's lease-ZSET tail but keeps its config hash, the lease
+    worker cannot recover it, because its schedule entry is gone. The sweep can,
+    because it computes pending work from the cursor against the stream tail rather
+    than from any schedule. So the sweep is demoted from the hot path to a rare
+    backstop, not retired. "Remove the `O(K)` scan" is true for the steady state
+    and false for the recovery path.
+  </Aside>
 
   This is the whole argument that makes Option A safe to build one slice at a
-  time: **every shard-and-own optimization sits over a still-correct full sweep.**
+  time. **Every shard-and-own optimization sits over a still-correct full sweep.**
   Turn off slot ownership and the sweep still delivers everything, slower. That is
   what lets the migration land leased ownership, then the due-set, then the slot
   shard, each behind the same intact baseline.
@@ -495,66 +486,68 @@ import Complexity from "../components/Complexity.astro";
   <SectionHead num="08" label="End to end" title="One append, <em>all the way through</em>" />
 
   Put the three moves together and follow a single append across a three-replica
-  cluster. A webhook subscription `sub-1` matches `events/*`; its keys home in
-  slot `h`; Origin B currently holds slot `h`'s lease.
+  cluster. A webhook subscription `sub-1` matches `events/*`. Its keys home in
+  slot `h`. Origin B currently holds slot `h`'s lease.
 
   <Diagram
     name="seq-hs-e2e"
-    label="Steady state — append to delivery"
-    caption="The appending origin (A) computes the slot, arms the wake into slot h's due-set, and delivers on the fast path — one signed POST, unchanged from today except for the slot tag. The owner (B) finds the due-set already cleared by the ack, so it does no redundant work. Ownership matters for the recovery path, not the happy one."
+    label="Steady state, append to delivery"
+    caption="The appending origin (A) computes the slot, arms the wake into slot h's due-set, and delivers on the fast path with one signed POST, unchanged from today except for the slot tag. The owner (B) finds the due-set already cleared by the ack, so it does no redundant work. Ownership matters for the recovery path, not the happy one."
   />
 
-  Walking it step by step:
+  Step by step:
 
   1. **The append commits.** A client `POST`s to `events/abc` on Origin A. A runs
-     `append.lua`, the byte is durable, and the client gets its `204` — earned at
-     the durable write, on its own clock. Everything below rides a different clock.
+     `append.lua`, the byte is durable, and the client gets its `204`. That `204`
+     is returned at the durable write. Everything below runs after the client has
+     its response.
   2. **The fan-out finds the subscriber.** A's `OnStreamAppend` reads the
      subscribers of `events/abc`. Under slot-homing that is `S` pipelined
      `SMEMBERS`, narrowed by the occupied-slots bitmap to the slots that hold a
-     subscriber; it finds `sub-1` in slot `h`.
-  3. **The wake arms into the slot.** A runs `arm_wake.lua` on `{__ds:h}`: bump
-     the generation, mint a `wake_id`, and — Move 2 — `ZADD sub-1` into
-     `{__ds:h}:due` at `now_ns`, all in one atomic script.
+     subscriber. It finds `sub-1` in slot `h`.
+  3. **The wake arms into the slot.** A runs `arm_wake.lua` on `{__ds:h}`. It
+     bumps the generation, mints a `wake_id`, and, for Move 2, `ZADD`s `sub-1`
+     into `{__ds:h}:due` at `now_ns`, all in one atomic script.
   4. **The fast path delivers.** Because A handled the append, A signs and POSTs
      the wake immediately. One origin handled this append, so this delivery is not
-     redundant across the fleet — ownership is not needed for a single, fence-safe
+     redundant across the fleet. Ownership is not needed for a single fence-safe
      POST.
   5. **The ack clears the owed mark.** The receiver returns `{done:true}`. A runs
-     `ack.lua`: advance the cursor forward-only, release the lease, and `ZREM
-     sub-1` from `{__ds:h}:due`. The subscription is idle and owes nothing.
+     `ack.lua`. It advances the cursor forward-only, releases the lease, and
+     `ZREM`s `sub-1` from `{__ds:h}:due`. The subscription is idle and owes
+     nothing.
   6. **The owner does nothing.** Origin B's due-worker, ticking over the slots it
      owns including `h`, reads `{__ds:h}:due` and finds `sub-1` already gone. The
      happy path cost the owner nothing.
 
-  The owner earns its keep only when the fast path does not finish. Say Origin A
-  crashes between step 3 and step 4 — armed the wake, never delivered. The owed
-  mark is still in `{__ds:h}:due`. Origin B's due-worker claims it, checks it
-  still owns `h`, and delivers the wake A dropped. Exactly one replica does this,
-  because exactly one owns slot `h`.
-
   <Diagram
     name="seq-hs-takeover"
-    label="Recovery — owner death, takeover, and the floor"
-    caption="Origin A dies mid-delivery and Origin B's due-worker covers it. Then B dies too: rendezvous hashing points slot h at Origin C, which claim_shards it — the CAS bumps owner_epoch (fencing a resumed zombie B), and the new owner runs an eager reconcile that re-derives slot h's owed work from the durable cursors. The takeover event, not a timer, closes the gap; the periodic floor only backstops the one eventless case."
+    label="Recovery, owner death, takeover, and the floor"
+    caption="Origin A dies mid-delivery and Origin B's due-worker covers it. Then B dies too. Rendezvous hashing points slot h at Origin C, which claim_shards it. The CAS bumps owner_epoch, which fences a resumed B, and the new owner runs an eager reconcile that re-derives slot h's owed work from the durable cursors. The takeover event, not a timer, closes the gap. The periodic floor only backstops the one eventless case."
   />
 
-  Now kill Origin B too. Its member lease and its `slot:h` lease expire after their
-  TTL (~9s), and rendezvous hashing points slot `h` at Origin C. C `claim_shard`s
-  the slot: the CAS bumps `owner_epoch` — so if the old owner B ever resumes from a
-  pause and tries to write, `check_owner` returns `FENCED` — and the new owner
-  immediately runs an **eager reconcile** that re-derives `sub-1`'s owed wake from
-  its durable cursor and re-fires it. Recovery rides the *takeover event*, not a
-  timer. The periodic floor (seconds-to-minutes) exists only for the eventless case
-  where no crash, ownership change, or later append signals the debt. Liveness is
-  covered by the reconcile, safety by the epoch fence. Neither depends on the other.
+  <Aside label="Recovery path" summary="What the owner does when the fast path does not finish">
+    Say Origin A crashes between step 3 and step 4. It armed the wake and never
+    delivered, so the owed mark is still in `{__ds:h}:due`. Origin B's due-worker
+    claims it, confirms it still owns `h`, and delivers the wake A dropped. Exactly
+    one replica does this, because exactly one owns slot `h`. Now kill Origin B too.
+    Its member lease and its `slot:h` lease expire after their TTL (~9s), and
+    rendezvous hashing points slot `h` at Origin C. C `claim_shard`s the slot. The
+    CAS bumps `owner_epoch`, so if the old owner B ever resumes from a pause and
+    tries to write, `check_owner` returns `FENCED`. The new owner then runs an eager
+    reconcile that re-derives `sub-1`'s owed wake from its durable cursor and
+    re-fires it. Recovery runs on the takeover event, not a timer. The periodic
+    floor (seconds-to-minutes) exists only for the eventless case where no crash,
+    ownership change, or later append signals the owed wake. Liveness is covered by
+    the reconcile, and safety by the epoch fence. Neither depends on the other.
+  </Aside>
 </section>
 
 <section class="block" id="code">
   <SectionHead num="09" label="In the code" title="What actually <em>changes</em>" />
 
   The design maps onto specific changes in `webhook/`. None of the per-request
-  scripts changes shape; the background loops gain a slot dimension, and two new
+  scripts changes shape. The background loops gain a slot dimension, and two new
   scripts join the dozen already in `webhook/scripts/`.
 
   <Table wide>
@@ -562,32 +555,36 @@ import Complexity from "../components/Complexity.astro";
     | --- | --- | --- |
     | `leaseWorker` | one global lease ZSET | for each owned slot: `DueLeases(h)` → `ExpireLease`, which inlines the owner+epoch check |
     | `retryWorker` | one global retry ZSET | for each owned slot: `DueRetries(h)`; deliver only after `check_owner` returns `OWNER` |
-    | `dueWorker` *(new)* | — | for each owned slot: `claim_due` over `{__ds:h}:due` → `maybeWake` |
-    | `recoverySweeper` · `sweepOnce` | `List()` over one slot | iterate **all** `h ∈ [0,S)`, owned or not — the unowned-slot backstop, no owner guard |
+    | `dueWorker` *(new)* | none | for each owned slot: `claim_due` over `{__ds:h}:due` → `maybeWake` |
+    | `recoverySweeper` · `sweepOnce` | `List()` over one slot | iterate **all** `h ∈ [0,S)`, owned or not, the unowned-slot backstop, no owner guard |
     | `OnStreamAppend` | one `SMEMBERS` | `S` pipelined `SMEMBERS` over the occupied slots |
     | `issueWake` · `maybeWake` | as-is | unchanged but for deriving keys from `slotTag(id)` |
   </Table>
 
   `ownedSlots()` is recomputed each reconcile tick from the rendezvous result
-  intersected with the slot leases the replica actually holds. The new tunables —
-  the member-lease TTL, the heartbeat interval, the slot-lease TTL, and the
-  slot-reconcile interval — join `ManagerOptions` beside the existing worker-tick,
-  sweep, and reconcile intervals:
+  intersected with the slot leases the replica actually holds. Four new tunables
+  join `ManagerOptions` beside the existing worker-tick, sweep, and reconcile
+  intervals: the member-lease TTL, the heartbeat interval, the slot-lease TTL, and
+  the slot-reconcile interval. These are the ownership leases, and they are
+  unrelated to the per-subscription webhook `lease_ttl_ms` already in a
+  subscription's config.
 
-  <Table>
-    | Tunable | Default | Holds the invariant |
-    | --- | --- | --- |
-    | `memberLeaseTTL` | 9s | a missed heartbeat past this drops the replica |
-    | `heartbeatInterval` | 3s | `heartbeat < memberLeaseTTL / 2` — renew with headroom |
-    | `slotLeaseTTL` | 9s | `claim_shard` lease on a slot record |
-    | `slotReconcileInterval` | 3s | `slotReconcile ≤ heartbeat` — reclaim before a peer's lease lapses |
-  </Table>
+  <Aside label="Tunables" summary="The four ownership-lease tunables and their invariants">
+    <Table>
+      | Tunable | Default | Holds the invariant |
+      | --- | --- | --- |
+      | `memberLeaseTTL` | 9s | a missed heartbeat past this drops the replica |
+      | `heartbeatInterval` | 3s | `heartbeat < memberLeaseTTL / 2`, renew with headroom |
+      | `slotLeaseTTL` | 9s | `claim_shard` lease on a slot record |
+      | `slotReconcileInterval` | 3s | `slotReconcile ≤ heartbeat`, reclaim before a peer's lease lapses |
+    </Table>
+  </Aside>
 
-  These are the ownership leases, and they are unrelated to the per-subscription
-  webhook `lease_ttl_ms` already in a subscription's config. The full set —
-  keyspace, both Lua contracts, the rendezvous spec, and the metrics each gating
-  experiment reads — is the build spec in [research doc
+  The full set is the
+  build spec in [research doc
   05](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#option-a--build-spec-everything-an-implementer-needs).
+  It covers the keyspace, both Lua contracts, the rendezvous spec, and the metrics
+  each gating experiment reads.
 </section>
 
 <section class="block" id="measure">
@@ -595,36 +592,37 @@ import Complexity from "../components/Complexity.astro";
 
   This design rests on numbers that are not yet measured. The honest order is to
   measure them before building, because some of them can fail the premise. The
-  load-test rig runs experiment 1 today; **experiment 6 already ran — it reproduced
-  the collapse this page's third ceiling describes** (per-type claim contention), so
-  characterize it first. The rest need the foundation in place or new tooling, so
-  they are sequenced against the build, not all run up front.[^gke]
+  load-test rig runs experiment 1 today. **Experiment 6 already ran, and it
+  reproduced the collapse this page's third limit describes** (per-type claim
+  contention), so characterize that first. The rest need the foundation in place
+  or new tooling, so they are sequenced against the build, not all run up
+  front.[^gke]
 
   <Table wide>
     | # | Experiment | Gates | Runnable |
     | --- | --- | --- | --- |
-    | 1 | Ramp replicas 1→4 at K=10k, read managed-Redis CPU | the premise — does the sweep multiply? | now, plus a CPU reader |
+    | 1 | Ramp replicas 1→4 at K=10k, read managed-Redis CPU | the premise: does the sweep multiply? | now, plus a CPU reader |
     | 2 | append→wake p99 at 1 vs S parallel `SMEMBERS`, S=2/4/8/256 | **whether slot-homing is viable at all** | after the slot shard |
     | 3 | due-set `ZADD`/`ZREM` QPS on append/ack | the cost of Move 2 | after the due-set |
     | 4 | kill a slot owner; coverage-gap latency, lost/double wakes | the liveness claim (recovers at the takeover trigger, ≤ TTL + RTT) | after leased ownership |
     | 5 | drop a lease-ZSET tail mid-lease; only the reconciler recovers it | the durability claim | after the fence, on HA Redis |
-    | 6 | ramp agents-server replicas 6→12+ against **one hot per-type subscription**; read `ALREADY_CLAIMED`/`FENCED`/lease-lapse rates and per-busy-agent throughput | **the actual collapse** — claim contention, not sweep or capacity | now, on the Electric rig — reproduces the 12-replica fence storm |
+    | 6 | ramp agents-server replicas 6→12+ against **one hot per-type subscription**; read `ALREADY_CLAIMED`/`FENCED`/lease-lapse rates and per-busy-agent throughput | **the actual collapse**: claim contention, not sweep or capacity | now, on the Electric rig; reproduces the 12-replica collapse |
   </Table>
 
   Experiment 2 is the one that can sink the design. Slot-homing trades a single
-  `SMEMBERS` per append for up to `S` of them; if that fan-out regresses
+  `SMEMBERS` per append for up to `S` of them. If that fan-out regresses
   append→wake p99 past budget on a real cluster, even with the occupied-slots
-  bitmap, the state shard is not worth its cost and the work-sharding (Moves 2-3)
-  has to stand on the single slot. That is why the order is measure, then build —
-  not build, then measure.
+  bitmap, the state shard is not worth its cost and the work-sharding (Moves 2 and
+  3) has to stand on the single slot. That is why the order is measure, then
+  build, not build, then measure.
 
   <Callout icon="alert" label="The standing cost">
-    Slot-homing makes the common path — one append fanning out — *more* expensive
-    in exchange for raising the capacity ceiling. The current single-slot design
-    is cheaper per append and adequate up to the point where one slot's memory or
-    one primary's write throughput is the bottleneck. Option A is the right trade
-    only past that point, and only if experiment 2 says the fan-out cost is
-    affordable. A design that raises a ceiling you have not hit is premature.
+    Slot-homing makes the common path, one append fanning out, *more* expensive in
+    exchange for raising the capacity ceiling. The current single-slot design is
+    cheaper per append and adequate up to the point where one slot's memory or one
+    primary's write throughput is the bottleneck. Option A is the right trade only
+    past that point, and only if experiment 2 says the fan-out cost is affordable.
+    A design that raises a ceiling you have not hit is premature.
   </Callout>
 </section>
 
@@ -633,50 +631,51 @@ import Complexity from "../components/Complexity.astro";
 
   Option A keeps one binary. The alternative, Option B, splits serving from the
   control plane into two tiers and makes each subscription an actor owned by a
-  coordinator — and it is deliberately **not** chosen, only deferred. It buys
-  three things Option A cannot: a cross-instance fast wake (today the append-time
-  hook is in-process, so only the appending replica fires it), CPU isolation
-  between serving and the control plane, and independent scaling of the two.
+  coordinator. It is deliberately **not** chosen, only deferred. It buys three
+  things Option A cannot. First, a cross-instance fast wake. Today the append-time
+  hook is in process, so only the appending replica fires it. Second, CPU
+  isolation between serving and the control plane. Third, independent scaling of
+  the two.
 
   The reason to defer it is that none of those three is known to be needed. The
   single binary held at K=10k, the fast path is already adequate for an
   append-then-deliver on the same origin, and a split adds a deployable, a
-  pub/sub wake channel, and a second failure surface. Option A's substrate —
-  slot-homing, the due-set, the `claim_shard` CAS — is exactly what Option B would
-  build on, so nothing done now is wasted if the fork is later taken. The trigger
-  is a measurement, not an intuition: build Option B only when experiments show
-  Option A cannot deliver the cross-instance wake, the isolation, or the
-  independent scaling.[^optionb]
+  pub/sub wake channel, and a second failure surface. The parts Option A builds,
+  namely slot-homing, the due-set, and the `claim_shard` CAS, are exactly what
+  Option B would build on, so nothing done now is wasted if the split is later
+  taken. The trigger is a measurement, not an intuition. Build Option B only when
+  experiments show Option A cannot deliver the cross-instance wake, the isolation,
+  or the independent scaling.[^optionb]
 </section>
 
 <section class="block" id="further">
   <SectionHead num="12" label="Further reading" title="Where this <em>comes from</em>" />
 
   This page is the readable form of the horizontal-scale research. The research
-  docs carry the full keyspace, the adversarial review that hardened the design,
+  docs carry the full keyspace, the adversarial review that tested the design,
   and the verification plan.
 
-  - [Subscriptions](./subscriptions) — the control plane this scales: durable cursors, the fence, the sweep
-  - [research/README](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/README.md) — the question, the prior art, and the headline findings
-  - [research/05 — proposed architecture](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md) — Option A's full build spec, plus Option B
-  - [research/06 — adversarial review](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/06-adversarial-review.md) — which claims survived scrutiny, and the corrections
-  - [research/07 — verification plan](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/07-jepsen-style-verification.md) — the Jepsen-style safety and liveness tests, as acceptance gates
-  - [webhook/](https://github.com/adityavkk/chronicle/tree/main/webhook) — the subscription layer the design extends: store, Lua scripts, manager, routes
+  - [Subscriptions](./subscriptions). The control plane this scales: durable cursors, the fence, and the sweep.
+  - [research/README](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/README.md). The question, the prior art, and the headline findings.
+  - [research/05, proposed architecture](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md). Option A's full build spec, plus Option B.
+  - [research/06, adversarial review](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/06-adversarial-review.md). Which claims survived scrutiny, and the corrections.
+  - [research/07, verification plan](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/07-jepsen-style-verification.md). The Jepsen-style safety and liveness tests, as acceptance gates.
+  - [webhook/](https://github.com/adityavkk/chronicle/tree/main/webhook). The subscription layer the design extends: store, Lua scripts, manager, and routes.
 
 </section>
 
-[^subs]: The subscription control plane — durable cursors, generation fencing, the recovery sweep, and the lease/retry workers — is documented in full on the [Subscriptions](./subscriptions) page and implemented in [`webhook/`](https://github.com/adityavkk/chronicle/tree/main/webhook).
+[^subs]: The subscription control plane, namely durable cursors, generation fencing, the recovery sweep, and the lease and retry workers, is documented in full on the [Subscriptions](./subscriptions) page and implemented in [`webhook/`](https://github.com/adityavkk/chronicle/tree/main/webhook).
 
-[^slot]: The single fixed `{__ds}` hash tag is `dsTag` in [`webhook/keys.go`](https://github.com/adityavkk/chronicle/blob/main/webhook/keys.go); the decision to centralize the low-cardinality control plane under one slot is [`docs/research/09`](https://github.com/adityavkk/chronicle/blob/main/docs/research/09-subscription-implementation-plan.md) §2.
+[^slot]: The single fixed `{__ds}` hash tag is `dsTag` in [`webhook/keys.go`](https://github.com/adityavkk/chronicle/blob/main/webhook/keys.go). The decision to put the low-cardinality control plane under one slot is [`docs/research/09`](https://github.com/adityavkk/chronicle/blob/main/docs/research/09-subscription-implementation-plan.md) §2.
 
-[^batch]: The batched sweep and its measured speed-ups (87×–354× over the per-link form) are on the [Subscriptions](./subscriptions) page, §10; the open `O(N·K)` edge it leaves is §11.
+[^batch]: The batched sweep and its measured speed-ups (87× to 354× over the per-link form) are on the [Subscriptions](./subscriptions) page, §10. The open `O(N·K)` case it leaves is §11.
 
-[^priorart]: The convergent pattern across Redis Cluster, Kafka, NATS, Pulsar, Orleans, and Akka — partition, one owner per partition, no central coordinator — is surveyed in [`research/03`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/03-prior-art-redis-and-beyond.md), and Orleans' Redis-backed grain directory is the managed-Redis-friendly precedent for owning placement in Redis.
+[^priorart]: The repeated pattern across Redis Cluster, Kafka, NATS, Pulsar, Orleans, and Akka, namely partition, one owner per partition, and no central coordinator, is surveyed in [`research/03`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/03-prior-art-redis-and-beyond.md). Orleans' Redis-backed grain directory is the managed-Redis precedent for owning placement in Redis.
 
-[^kleppmann]: A Redis TTL lease alone cannot fence a stalled process (Kleppmann's fencing-token result); correctness comes from the monotonic `owner_epoch` enforced by compare-and-set and reject-if-stale, exactly as the per-subscription `(generation, wake_id)` fence works today. [`research/06`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/06-adversarial-review.md) §"Tunable consistency, corrected".
+[^kleppmann]: A Redis TTL lease alone cannot fence a stalled process (Kleppmann's fencing-token result). Correctness comes from the monotonic `owner_epoch` enforced by compare-and-set and reject-if-stale, exactly as the per-subscription `(generation, wake_id)` fence works today. [`research/06`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/06-adversarial-review.md) §"Tunable consistency, corrected".
 
-[^bound]: The recovery model is in [`research/05`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#recovery-triggered-not-perpetual-refines-07-honest-gap-4) and asserted by tests L2/L3 in [`research/07`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/07-jepsen-style-verification.md): the detectable cases recover at their trigger (the new owner's `claim_shard` + eager reconcile), and a coarse periodic floor — seconds-to-minutes, not 2s — bounds only the eventless unowned-and-quiet case.
+[^bound]: The recovery model is in [`research/05`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#recovery-triggered-not-perpetual-refines-07-honest-gap-4) and asserted by tests L2/L3 in [`research/07`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/07-jepsen-style-verification.md). The detectable cases recover at their trigger, namely the new owner's `claim_shard` plus eager reconcile, and a coarse periodic floor of seconds-to-minutes, not 2s, bounds only the eventless unowned-and-quiet case.
 
 [^gke]: The gating experiments and what the load-test rig measures today are in [`research/05`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#measure-before-building-the-gating-experiments) and [`loadtest/RESULTS-gke.md`](https://github.com/adityavkk/chronicle/blob/main/loadtest/RESULTS-gke.md).
 
-[^optionb]: Option B's components, fast-wake design, and the home-region-per-shard DR path are in [`research/05`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#option-b--the-deferred-fallback-split-the-tiers-only-if-measured); it is kept as the documented escape hatch, not a recommendation.
+[^optionb]: Option B's components, fast-wake design, and the home-region-per-shard DR path are in [`research/05`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#option-b--the-deferred-fallback-split-the-tiers-only-if-measured). It is kept as the documented fallback, not a recommendation.
