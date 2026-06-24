@@ -480,13 +480,21 @@ export function MessagesWorkspace(): JSX.Element {
 	const filter = useSignal("");
 	const compiled = useComputed(() => compileQuery(filter.value));
 	const visibleRows = useComputed(() => {
+		// Read lastRead INSIDE the computed so it stays reactive. The read lands
+		// asynchronously after mount, so closing over the render-scoped `read` const
+		// would freeze this computed to the mount-time (null/empty) value — the grid
+		// would then show "no rows match" forever once a read actually arrived.
+		const current = lastRead.value;
 		const q = compiled.value;
-		const rows = read?.rows ?? [];
+		const rows = current?.rows ?? [];
 		return q.active ? rows.filter((r) => matchCompiled(r, q)) : rows;
 	});
 
 	// Show the Time column only when at least one row in the batch has a time.
-	const showTime = useComputed(() => (read === null ? false : batchHasTimes(read.rows)));
+	const showTime = useComputed(() => {
+		const current = lastRead.value;
+		return current === null ? false : batchHasTimes(current.rows);
+	});
 
 	/** Capture the scroll element's geometry into the windowing signals. */
 	function syncMetrics(el: HTMLDivElement): void {

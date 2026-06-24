@@ -73,8 +73,8 @@ const SCHEMA_PLACEHOLDER =
  * stores the schema client-side; the composer then offers "Insert skeleton". The
  * schema is a local authoring aid — never sent to the server (the API is frozen).
  */
-function SchemaEditor(props: { path: string }): JSX.Element {
-	const { path } = props;
+function SchemaEditor(props: { path: string; onInsert: (text: string) => void }): JSX.Element {
+	const { path, onInsert } = props;
 	const saved = streamSchemas.value[path] ?? "";
 	const draft = useSignal(saved);
 	const idBase = useId();
@@ -90,8 +90,9 @@ function SchemaEditor(props: { path: string }): JSX.Element {
 			<div class="dsui-disclose__body">
 				<p class="dsui-publish__schemahint">
 					Saved in this browser for <code>{path}</code> — a local authoring aid (the server stores
-					no schema). Describe ONE message; the batch wraps it in an array. Save it, then{" "}
-					<strong>Insert skeleton</strong> pre-fills the editor.
+					no schema). Describe ONE message; the batch wraps it in an array.{" "}
+					<strong>Insert skeleton</strong> drops an empty instance into the batch editor above. Save
+					to keep the schema, and it pre-fills the empty editor automatically next time.
 				</p>
 				<textarea
 					id={`${idBase}-schema`}
@@ -115,6 +116,18 @@ function SchemaEditor(props: { path: string }): JSX.Element {
 					<button
 						type="button"
 						class="dsui-btn dsui-btn--xs dsui-btn--primary"
+						title="Drop an empty instance of this schema into the batch editor"
+						disabled={!parsed.value.ok}
+						onClick={() => {
+							const skeleton = skeletonBatchText(draft.value);
+							if (skeleton !== null) onInsert(skeleton);
+						}}
+					>
+						Insert skeleton
+					</button>
+					<button
+						type="button"
+						class="dsui-btn dsui-btn--xs"
 						disabled={!parsed.value.ok || !dirty}
 						onClick={() => setStreamSchema(path, draft.value)}
 					>
@@ -393,7 +406,15 @@ export function PublishComposer(): JSX.Element | null {
 					) : null}
 				</div>
 
-				{kind === "json" ? <SchemaEditor key={stream.path} path={stream.path} /> : null}
+				{kind === "json" ? (
+					<SchemaEditor
+						key={stream.path}
+						path={stream.path}
+						onInsert={(t) => {
+							text.value = t;
+						}}
+					/>
+				) : null}
 
 				<details class="dsui-disclose">
 					<summary class="dsui-disclose__summary">Idempotent producer (optional)</summary>
