@@ -280,7 +280,7 @@ client exactly as each screen needs."
 Two more things follow. First, every live query is itself a collection, so you can query the result
 of a query. A query that filters or aggregates a collection becomes a derived collection that other
 queries can read, the way a database view builds on a table. Second, the reason these queries can be
-recomputed on every change without being slow is the engine in Part 5.
+recomputed on every change without being slow is the engine in Part 6.
 
 ### Optimistic mutations
 
@@ -317,7 +317,7 @@ There is one rule you must follow, and it is the most common source of bugs: **a
 not finish until the server's change has synced back into the collection.** If it finishes early, the
 optimistic row is removed before the confirmed row arrives, and the row flickers out and back in. How
 you wait depends on the collection type. A `queryCollection` refetches after the handler. An
-`electricCollection` waits for a transaction id, which Part 6 explains.
+`electricCollection` waits for a transaction id, which Part 7 explains.
 
 ### How this differs from TanStack Query, a Redux store, and a local database
 
@@ -357,7 +357,115 @@ are combined, not chosen between.
 
 ---
 
-## 5. Differential dataflow and d2ts: why live queries are fast
+## 5. Why a join is not a simple fold
+
+You may be thinking that building state from events is simple, because folding is simple. You are
+right, for one of the two jobs that both get called "building state from events." Separating them
+here explains why a plain fold is not enough for a live query, and why the engine in Part 6 exists.
+
+### The simple fold: one entity's state
+
+Take one account and its events:
+
+```
+account-123:  Deposited(100),  Withdrew(30),  Deposited(50)
+balance  =  0  ->  100  ->  70  ->  120
+```
+
+This is `events.reduce(apply, 0)`. One stream, one accumulator, and each event updates it. Nothing
+more is needed. It stays simple even across many entities when each event touches exactly one row.
+"Current balance per account" is a `Map<accountId, balance>` where each event updates its own
+account's row, which is many independent simple folds.
+
+This simple fold is the **write model**. It is the current state of one entity, used to make a
+decision. That is the aggregate, and it is genuinely simple.
+
+### The hard case: a view across many entities
+
+The hard job is the **read model**. It is a view shaped for a query, built by combining and
+aggregating across many entities. Two things make it stop being a simple fold: joins, and aggregates
+over data that can change.
+
+Take two collections:
+
+```
+orders:                                  customers:
+  o1: { customerId: c1, total: 50 }        c1: { name: "Ana", region: "West" }
+  o2: { customerId: c1, total: 20 }        c2: { name: "Ben", region: "East" }
+  o3: { customerId: c2, total: 99 }
+```
+
+The view you want is each order with its customer's name and region attached:
+
+```
+(o1, Ana, West, 50)
+(o2, Ana, West, 20)
+(o3, Ben, East, 99)
+```
+
+There is no single stream to fold here. The output depends on both streams, and a change in either
+one can change it. Watch what happens when Ana moves from West to East. Nothing in the orders stream
+changed, but two output rows must update:
+
+```
+(o1, Ana, East, 50)   changed
+(o2, Ana, East, 20)   changed
+(o3, Ben, East, 99)
+```
+
+A single change on the customers side changed many rows of the output. A fold over the orders stream
+cannot catch this, because it only watches orders. To get it right, the join must hold state on both
+sides: customers indexed by id, and orders indexed by customerId. When a customer change arrives, it
+looks up that customer's orders and updates exactly those. That index, the remembered contents of
+both streams, is the "state across entities" a simple fold does not have.
+
+### The retraction: why deletes and changes break a plain fold
+
+Now put a count on top: orders per region.
+
+```
+Before Ana moves:   West: 2 (o1, o2)     East: 1 (o3)
+After Ana moves:    West: 0              East: 3 (o1, o2, o3)
+```
+
+To go from before to after, West must go down by 2 and East up by 2. A fold that only adds, the
+natural "increment the counter when an event arrives" version, cannot express "take the old
+contribution back." West would stay at 2 forever, which is wrong. The correct update has to
+**retract** the old value and then assert the new one:
+
+```
+West:  retract 2,  assert 0
+East:  retract 1,  assert 3
+```
+
+This is the reason for the `+1` and `-1` weights in the next part. The moment data can change, move
+between groups, or be deleted, every aggregate and join has to be able to take something back, not
+just add. If events were purely append-only and nothing ever changed or was deleted, you would never
+need retractions and folding would be enough. Real read models are full of changes and deletes, so
+retractions are everywhere.
+
+### So why not just fold
+
+For "keep this joined, grouped view correct as data changes," there are three options.
+
+- **Refold.** Recompute the whole query over all the data on every change. Correct and easy to write.
+  The cost is that the work scales with the whole dataset, not the change, so it gets slow as data
+  grows.
+- **Hand-write the incremental version.** Write the update logic yourself: on a new order do this, on
+  a customer change find their orders and do that, on a delete retract. This is what traditional
+  server-side projections do. It is fine for one event mapping to one row, and it gets hard and
+  error-prone exactly at joins and aggregates with deletes.
+- **Incremental dataflow.** Declare the view as a query, and let the engine derive and run the
+  incremental version for you, including the retractions and the updates to all affected rows. You
+  write the query once and get change-sized updates. This is what d2ts does, and Part 6 explains how.
+
+A rule of thumb: if you can write your view as a fold over one entity, fold it and move on. If your
+view joins two streams, or groups and counts across entities, or has to react to updates and deletes,
+that is when it stops being a simple fold and incremental dataflow is the right tool.
+
+---
+
+## 6. Differential dataflow and d2ts: why live queries are fast
 
 This is the part most people have not seen before, so it starts from zero.
 
@@ -464,7 +572,7 @@ and one laptop, so it varies with query shape, data size, and hardware.
 
 ---
 
-## 6. The end-to-end flow: a write travels the whole stack
+## 7. The end-to-end flow: a write travels the whole stack
 
 Now put the pieces together and follow a single write from a click to every other client's screen.
 The path depends on the collection type, so here is the sync-engine path, which is the one that
@@ -505,7 +613,7 @@ states that clients must not rely on transaction semantics unless the server doc
 
 ---
 
-## 7. How this connects to Chronicle, and what it does not solve
+## 8. How this connects to Chronicle, and what it does not solve
 
 Lay the stack next to Chronicle and the division of labor is clean.
 
@@ -536,7 +644,7 @@ entity. The companion documents in this folder cover that choice.
 
 ---
 
-## 8. Glossary
+## 9. Glossary
 
 - **Durable Stream**: a URL-addressable, append-only, ordered byte stream you can resume from an
   offset. The base log. Chronicle implements it.
@@ -562,7 +670,7 @@ entity. The companion documents in this folder cover that choice.
 - **txid**: an optional transaction id used to confirm that a write came back through the feed. A
   confirmation token, not a version.
 
-## 9. Sources
+## 10. Sources
 
 - TanStack DB overview, collections, live queries, mutations:
   [tanstack.com/db](https://tanstack.com/db/latest/docs/overview),
