@@ -4,11 +4,15 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -58,19 +62,47 @@ func newStore(cfg chronicle.Config, logger *slog.Logger) (store.Store, *redissto
 // creates a ClusterClient that speaks the Redis Cluster protocol (required for
 // Memorystore for Redis Cluster, which shards keys across nodes — gate #2).
 func newRedisClient(rawURL string) (goredis.UniversalClient, error) {
-	if strings.HasPrefix(rawURL, "redis+cluster://") {
-		addrs := strings.TrimPrefix(rawURL, "redis+cluster://")
-		// Strip any /db suffix — cluster mode ignores DB selection.
-		if i := strings.LastIndex(addrs, "/"); i >= 0 {
-			addrs = addrs[:i]
+	// rediss+cluster:// = Redis Cluster over TLS; redis+cluster:// = plaintext.
+	useTLS := strings.HasPrefix(rawURL, "rediss+cluster://")
+	if useTLS || strings.HasPrefix(rawURL, "redis+cluster://") {
+		rest := strings.TrimPrefix(strings.TrimPrefix(rawURL, "rediss+cluster://"), "redis+cluster://")
+		// Optional user:pass@ credentials precede the comma-separated seed list.
+		// Managed Redis Cluster (e.g. the squiggly ms-df-redis cluster) requires
+		// AUTH; the standalone path gets creds via ParseURL, so parse them here too.
+		var username, password string
+		if at := strings.LastIndex(rest, "@"); at >= 0 {
+			cred := rest[:at]
+			rest = rest[at+1:]
+			if c := strings.IndexByte(cred, ':'); c >= 0 {
+				username = cred[:c]
+				if pw, err := url.QueryUnescape(cred[c+1:]); err == nil {
+					password = pw
+				} else {
+					password = cred[c+1:]
+				}
+			} else {
+				username = cred
+			}
 		}
-		seeds := strings.Split(addrs, ",")
+		// Strip any /db suffix — cluster mode ignores DB selection.
+		if i := strings.LastIndex(rest, "/"); i >= 0 {
+			rest = rest[:i]
+		}
+		seeds := strings.Split(rest, ",")
 		for i := range seeds {
 			seeds[i] = strings.TrimSpace(seeds[i])
 		}
-		return goredis.NewClusterClient(&goredis.ClusterOptions{
-			Addrs: seeds,
-		}), nil
+		opts := &goredis.ClusterOptions{
+			Addrs:    seeds,
+			Username: username,
+			Password: password,
+		}
+		if useTLS {
+			// ms-df-redis requires TLS. Cluster node addrs come from CLUSTER SLOTS
+			// and won't match the cert SAN, so skip hostname verification.
+			opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true} // #nosec G402
+		}
+		return goredis.NewClusterClient(opts), nil
 	}
 	opt, err := goredis.ParseURL(rawURL)
 	if err != nil {
@@ -101,6 +133,8 @@ func run() error {
 	flag.DurationVar(&cfg.SSEReconnectInterval, "sse-reconnect-interval", cfg.SSEReconnectInterval, "SSE connection reconnect interval")
 	flag.StringVar(&cfg.PublicBaseURL, "public-url", cfg.PublicBaseURL, "externally reachable origin for webhook callback/JWKS URLs")
 	flag.BoolVar(&cfg.Subscriptions, "subscriptions", cfg.Subscriptions, "enable the reserved __ds subscription APIs (redis backend only)")
+	flag.BoolVar(&cfg.UI, "ui", cfg.UI, "serve the embedded dsui console alongside the API (false = backend API only)")
+	flag.StringVar(&cfg.UIServer, "ui-server", cfg.UIServer, "server URL the served console prefills (empty = same-origin)")
 	flag.BoolVar(&cfg.WebhookAllowPrivate, "webhook-allow-private", cfg.WebhookAllowPrivate, "accept webhook URLs on private/RFC1918 addresses (trusted networks only)")
 	flag.DurationVar(&cfg.SweepInterval, "sweep-interval", cfg.SweepInterval, "recovery sweep interval (subscriptions)")
 	flag.DurationVar(&cfg.ReconcileInterval, "reconcile-interval", cfg.ReconcileInterval, "slow reconcile loop interval (subscriptions)")
@@ -187,14 +221,20 @@ func run() error {
 		logger.Info("subscriptions enabled", "stream_root_url", streamRootURL)
 	}
 
-	mux, err := chronicle.Mount(cfg.StreamRoot, handler)
+	api, err := chronicle.Mount(cfg.StreamRoot, handler)
 	if err != nil {
 		return err
 	}
+	// Optionally serve the embedded dsui console alongside the API so chronicle is
+	// a single binary + single origin (no separate UI service, no CORS). API paths
+	// under the stream root win; everything else is the SPA. uiEnabled is false
+	// when -ui=false (backend-only) or the UI was not built into this binary — the
+	// UI is fully optional and decoupled from the backend.
+	root, uiEnabled := withUI(cfg.StreamRoot, api, cfg.UI, cfg.UIServer, logger)
 
 	srv := &http.Server{
 		Addr:    cfg.Listen,
-		Handler: mux,
+		Handler: root,
 		// No WriteTimeout: long-poll and SSE responses are open-ended.
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
@@ -212,6 +252,7 @@ func run() error {
 		"root", cfg.StreamRoot,
 		"store", cfg.StoreBackend,
 		"subscriptions", subscriptionsEnabled,
+		"ui", uiEnabled,
 		"long_poll_timeout", cfg.LongPollTimeout,
 		"sse_reconnect_interval", cfg.SSEReconnectInterval)
 
@@ -233,4 +274,69 @@ func run() error {
 		return srv.Close()
 	}
 	return nil
+}
+
+// withUI wraps the Durable Streams API handler so chronicle also serves the
+// embedded dsui console from the same binary and origin. Requests under
+// streamRoot go to the API; everything else is the single-page app. The SPA
+// fetches /dsui-config.json, which reports the request's own origin as the
+// server, so the browser drives this same chronicle instance (same-origin, no
+// CORS, no separate UI deployment). When the UI was not built into the binary
+// (no embedded/index.html), the API handler is returned unchanged (uiEnabled
+// false) so an API-only build still works.
+func withUI(streamRoot string, api http.Handler, enabled bool, serverOverride string, logger *slog.Logger) (http.Handler, bool) {
+	if !enabled {
+		logger.Info("UI serving disabled (-ui=false); serving API only")
+		return api, false
+	}
+	webRoot, err := fs.Sub(embeddedFS, "embedded")
+	if err != nil {
+		logger.Warn("embedded UI unavailable, serving API only", "error", err)
+		return api, false
+	}
+	if _, err := fs.Stat(webRoot, "index.html"); err != nil {
+		logger.Info("embedded UI not built in, serving API only")
+		return api, false
+	}
+	fileServer := http.FileServer(http.FS(webRoot))
+	serveIndex := func(w http.ResponseWriter, r *http.Request) {
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/"
+		fileServer.ServeHTTP(w, r2)
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle(streamRoot, api) // /v1/stream/* -> Durable Streams API
+
+	// Runtime config the SPA fetches on load. defaultServer = the request's own
+	// origin so the console talks to this same server; captureBase is null (the
+	// webhook-capture relay is a dsui-only dev convenience, not served here).
+	mux.HandleFunc("/dsui-config.json", func(w http.ResponseWriter, r *http.Request) {
+		scheme := "http"
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+		server := serverOverride
+		if server == "" && r.Host != "" {
+			server = scheme + "://" + r.Host
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"defaultServer": server, "captureBase": nil})
+	})
+
+	// Embedded assets, with a single-page-app fallback to index.html for any
+	// path that is not a real asset (client-side routes).
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/")
+		if p == "" {
+			serveIndex(w, r)
+			return
+		}
+		if _, statErr := fs.Stat(webRoot, p); statErr != nil {
+			serveIndex(w, r)
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+	return mux, true
 }
