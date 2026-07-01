@@ -37,7 +37,7 @@ import Aside from "../components/Aside.astro";
 <Tldr>
   <ul>
     <li><strong>The control plane sits on one Redis slot.</strong> Every subscription key shares the fixed <code>{"{__ds}"}</code> hash tag, so all of it lands on one cluster slot. State capacity stops scaling there, no matter how many replicas serve traffic.</li>
-    <li><strong>Delivery is event-driven. The sweep only backstops crashes.</strong> A webhook fires the instant a matching append lands, in process, at append latency. It does not fire on a timer. The ~2s recovery sweep delivers nothing in steady state. It exists to re-derive a wake a crash dropped. It runs on every replica over every subscription, so the cost is its redundant <code>O(N·K)</code> read, not the wakes. Adding replicas multiplies that read instead of dividing it.</li>
+    <li><strong>Delivery is event-driven. The sweep only backstops crashes.</strong> A webhook fires the instant a matching append lands, in process, at append latency. It does not fire on a timer. The ~30s recovery sweep delivers nothing in steady state. It exists to re-derive a wake a crash dropped. It runs on every replica over every subscription, so the cost is its redundant <code>O(N·K)</code> read, not the wakes. Adding replicas multiplies that read instead of dividing it.</li>
     <li><strong>Option A keeps one binary and shards two things.</strong> Slot-home each subscription's keys under <code>{"{__ds:h}"}</code> with <code>h = hash(id) % S</code> for state, and shard the background work by a leased per-slot owner for work. Capacity scales with S, and total sweep work drops to <code>O(owed)</code>.</li>
     <li><strong>A load test found a third limit Option A does not touch.</strong> The agents runtime registers one subscription per entity <em>type</em>, so all of a type's entities and every replica contend for <em>one</em> single-holder lease. At 12 replicas that collapsed into fence rejections while every tier sat at ≤12% CPU. It was a contention collapse, not a capacity or sweep limit, and the fix sequences first. §01 says why.</li>
     <li><strong>The fence is safety, not liveness, so the sweep stays.</strong> The generation fence makes a duplicate wake harmless. It does nothing for a <em>coverage gap</em> when a slot is briefly owned by nobody, so the full sweep stays as a backstop, demoted but never deleted. Splitting the binary is Option B, deferred until measurements force it. The one binary held at K=10k.</li>
@@ -68,7 +68,7 @@ import Aside from "../components/Aside.astro";
   primary, at one node's worth. No number of serving replicas moves it.
 
   Second, **every replica sweeps everything.** The recovery sweep is the
-  durability backstop. Every ~2s it walks all K subscriptions, re-derives pending
+  durability backstop. Every ~30s it walks all K subscriptions, re-derives pending
   work from each durable cursor, and re-fires any wake a crash dropped. It is
   correct and necessary. But every replica runs the same sweep over the same K
   subscriptions against the same slot, so the cost is `O(N·K)` for N replicas.
@@ -78,7 +78,7 @@ import Aside from "../components/Aside.astro";
   <Diagram
     name="seq-hs-ceiling"
     label="The O(N·K) sweep"
-    caption="Three replicas, each sweeping all K subscriptions every ~2s against the single {__ds} slot. The reads are redundant, because every replica re-derives the same owed work, and they all converge on one node. Scaling out the fleet scales the load on that one slot up, not down."
+    caption="Three replicas, each sweeping all K subscriptions every ~30s against the single {__ds} slot. The reads are redundant, because every replica re-derives the same owed work, and they all converge on one node. Scaling out the fleet scales the load on that one slot up, not down."
   />
 
   Third, **a single hot subscription serializes on one lease.** A later load test
@@ -118,7 +118,7 @@ import Aside from "../components/Aside.astro";
   <SectionHead num="02" label="Event flow" title="The happy path is <em>already event-driven</em>" />
 
   Before sharding anything, be precise about what the sweep is *for*. It is easy
-  to read §01 and conclude that the sweep delivers wakes, in ~2-second bursts. It
+  to read §01 and conclude that the sweep delivers wakes, in ~30-second bursts. It
   does not. On the happy path a webhook fires the instant a matching append lands,
   and the sweep delivers nothing.
 
@@ -163,7 +163,7 @@ import Aside from "../components/Aside.astro";
     caption="The append commits the frame and the wake signal in one atomic script. The append-time hook writes a durable wake event to the wake_stream, the outbox, and a worker drains it. The recovery sweep fires nothing on this path. It exists only to re-emit a wake a crash left unsent."
   />
 
-  So where does the ~2s sweep come in? **Only on failure.** If the appending
+  So where does the ~30s sweep come in? **Only on failure.** If the appending
   origin crashes between the durable append and the delivery, the wake is lost and
   nothing else knows it was owed, so the sweep re-derives it from the durable
   cursor. In steady state the sweep finds every cursor already at its tail and
@@ -453,7 +453,7 @@ import Aside from "../components/Aside.astro";
   reconcile. A slot with two owners is safe in any case, because the double wake
   coalesces.
 
-  <Callout icon="info" label="The 2s timer is a floor, not a guarantee">
+  <Callout icon="info" label="The 30s timer is a floor, not a guarantee">
     Exactly one case has no trigger. An owed-mark is dropped on a slot that is
     unowned, meaning mid-rebalance, *and* quiet, meaning no later append. It has
     no event because the cross-slot gap means no durable owed-mark was written
