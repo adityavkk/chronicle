@@ -6,7 +6,7 @@ meta: "Test catalog"
 deck: "This page lists <strong>every kind of test and proof</strong> Chronicle runs. Each one states what the test is, what it gives you, where it lives in the code, and its <strong>downside</strong>. It then sets out what is <strong>proven</strong>, what is only <strong>sampled</strong>, and what <strong>cannot be proven</strong> at all, names the three bugs the formal work found, and shows how to run everything. It mirrors the in-repo catalog at <code>docs/TESTING.md</code>."
 byline:
   - label: "Kinds"
-    value: "13 — proofs · property · linearizability · fault injection"
+    value: "13, across proofs · property · linearizability · fault injection"
   - label: "Tools"
     value: "Lean · TLA+ · Apalache · Alloy · rapid · porcupine"
   - label: "Source"
@@ -267,8 +267,8 @@ import Complexity from "../components/Complexity.astro";
 
   Apalache proves single-holder as an inductive invariant by symbolic reasoning
   rather than enumeration. It shows the invariant holds in the initial state and is
-  preserved by every action. This establishes single-holder for all sizes, not just
-  the bounded number of workers TLC explores. A negative control confirms that an
+  preserved by every action. This establishes single-holder for all sizes, rather
+  than only the bounded number of workers TLC explores. A negative control confirms that an
   unsound lease expiry breaks the invariant, so the proof is not vacuous.
 
   This gives you the single-holder property for all sizes. The downside is that

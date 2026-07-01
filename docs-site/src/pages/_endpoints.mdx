@@ -90,7 +90,7 @@ import Aside from "../components/Aside.astro";
     survive Lua's double round-trip.[^reply]
   </Aside>
 
-  <Aside label="Cost model" summary="Why each endpoint costs what it costs: three Redis structures carry the work">
+  <Aside label="Cost model" summary="Why each endpoint costs what it costs. Three Redis structures carry the work">
     The `:msg` sorted set is the only structure that grows without bound. Past
     Redis's listpack threshold it is a skiplist, so an insert is `O(log N)`
     and a lexicographic range is `O(log N + M)`.[^zset] The `:meta` and

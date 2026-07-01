@@ -27,7 +27,7 @@ import Aside from "../components/Aside.astro";
 
 <Tldr>
   <ul>
-    <li><strong>The protocol is plain HTTP.</strong> A stream is a URL: <code>PUT</code> creates it, <code>POST</code> appends, <code>GET</code> reads from any offset; long-poll and SSE serve live tails.</li>
+    <li><strong>The protocol is plain HTTP.</strong> A stream is a URL. <code>PUT</code> creates it, <code>POST</code> appends, and <code>GET</code> reads from any offset. Long-poll and SSE serve live tails.</li>
     <li><strong>Redis is the only dependency.</strong> Chronicle is one Go binary; stream data, producer state, and reader wakeups live in Redis 8.</li>
     <li><strong>Every mutation is one Lua script.</strong> Validation, write, tail update, and notification run atomically and serialized per stream. No partial appends and no lost wakeups.</li>
     <li><strong>It tracks the reference implementation.</strong> The store contract and handler mirror the upstream Caddy plugin, and ~330 official conformance tests gate every change.</li>

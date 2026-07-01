@@ -30,8 +30,8 @@ import Switch from "../components/Switch.astro";
     <li><strong>The failure that motivated this was at 12 replicas.</strong> When the agents runtime drove Chronicle as its backend, the wake path failed at 12 replicas while chronicle sat at 4 percent CPU, Redis at 4 percent, and Postgres at 12 percent. The cause was lock contention on one per-type subscription lease, not saturated hardware. Giving chronicle 2.5 times the CPU made it worse.</li>
     <li><strong>The headline result is a flat fan-out curve.</strong> On the cloud rig the append-to-wake p99 held at 12.5 milliseconds plus or minus 0.1 across 1, 2, 4, and 8 replicas, with zero append errors at every count. The flatness is the signal, not the absolute value, because the measurement includes about 10 milliseconds of port-forward round-trip time.</li>
     <li><strong>The recovery sweep stays inside budget at 10,000 subscriptions.</strong> At a fair node size the sweep tick p99 was 1019 milliseconds against a 1500 millisecond limit, with 5 links per subscription. An earlier run failed at 2037.8 milliseconds, but that run had been shrunk to 1 CPU to save money. The sweep is CPU-bound, so the failure was a sizing artifact and not a regression.</li>
-    <li><strong>The single-holder claim stayed linearizable under contention.</strong> The claim lease was linearizable at 4 and at 16 concurrent claim workers, measured on the post-epic binary that already carries the finer-grained per-(subId,g) claim. That finer-grained design is built and passes locally. The contention suite C1 to C3 and doc-05 gate #6 pass on a real Chronicle plus Redis stack: at G=16 per-worker throughput holds near 27 while aggregate scales 158 to 336 to 650, so the point where G=1 fails moved past the whole G=16 ramp. The cloud measurement here is the single-lease G=1 contention point on one healthy node, not the cloud re-proof of that point moving under scale.</li>
-    <li><strong>The run found a real recovery bug, and it was fixed.</strong> The recovery sweep did not re-emit pull-wake wakes after an origin crash, so a subscription cursor got stuck while the stream tail moved on. The fix re-emits the same fenced wake on recovery, and a re-run passed with 6 of 6 streams reaching their tail. Two numbers stayed unmeasured because GCP returned insufficient project quota: the 12 replica point itself, and the multi-shard cross-node fan-out latency, so the no-fence-rejection verdict rests on a flat 1 to 8 trend, not on a passing 12 replica run.</li>
+    <li><strong>The single-holder claim stayed linearizable under contention.</strong> The claim lease was linearizable at 4 and at 16 concurrent claim workers, measured on the post-epic binary that already carries the finer-grained per-(subId,g) claim. That finer-grained design is built and passes locally. The contention suite C1 to C3 and doc-05 gate #6 pass on a real Chronicle plus Redis stack. At G=16 per-worker throughput holds near 27 while aggregate scales 158 to 336 to 650, so the point where G=1 fails moved past the whole G=16 ramp. The cloud measurement here is the single-lease G=1 contention point on one healthy node, not the cloud re-proof of that point moving under scale.</li>
+    <li><strong>The run found a real recovery bug, and it was fixed.</strong> The recovery sweep did not re-emit pull-wake wakes after an origin crash, so a subscription cursor got stuck while the stream tail moved on. The fix re-emits the same fenced wake on recovery, and a re-run passed with 6 of 6 streams reaching their tail. Two numbers stayed unmeasured because GCP returned insufficient project quota. Those were the 12 replica point itself and the multi-shard cross-node fan-out latency, so the no-fence-rejection verdict rests on a flat 1 to 8 trend, not on a passing 12 replica run.</li>
   </ul>
 </Tldr>
 
@@ -424,9 +424,9 @@ import Switch from "../components/Switch.astro";
 
   Two of the numbers this campaign set out to measure were never measured,
   because the GCP project ran out of quota. These are measurement gaps, things
-  that did not run, not observed defects. They bound the claim. The plain
-  statement is that the no-fence-rejection verdict rests on a flat trend through
-  8 replicas, not on a passing run at the replica count that originally failed.
+  that did not run, not observed defects. They bound the claim. The
+  no-fence-rejection verdict rests on a flat trend through 8 replicas, not on a
+  passing run at the replica count that originally failed.
 
   <Table wide>
     | Gap | What was blocked | Why | What it bounds |

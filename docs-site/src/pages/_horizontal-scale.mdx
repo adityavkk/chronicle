@@ -3,7 +3,7 @@ title: "Scaling subscriptions <em>across replicas</em>"
 summary: "Chronicle's subscription control plane lives in one Redis slot and sweeps in full on every replica, so adding replicas scales serving but not subscriptions. Option A keeps the single binary, shards the state across S slots, and shards the background work by a leased per-slot owner. The full sweep stays as the liveness floor. This page walks that design from end to end."
 eyebrow: "Design"
 meta: "Horizontal scale · Option A"
-deck: "Chronicle runs as one stateless binary doing two jobs. It serves durable streams, and it runs the <code>__ds</code> subscription control plane. Adding replicas scales the serving and not the control plane. The control plane lives in a single Redis slot, and its recovery sweep runs in full on every replica, so N replicas do N times the same work. <strong>Option A</strong> keeps the single binary and fixes both halves. It shards subscription state across <code>S</code> slots, shards the background work by a leased per-slot owner, and keeps the full sweep as the liveness floor under it. This page walks that design from end to end."
+deck: "Chronicle runs as one stateless binary doing two jobs. It serves durable streams, and it runs the <code>__ds</code> subscription control plane. Adding replicas scales the serving and not the control plane. The control plane lives in a single Redis slot. Its recovery sweep runs in full on every replica, so N replicas do N times the same work. <strong>Option A</strong> keeps the single binary and fixes both halves. It shards subscription state across <code>S</code> slots, shards the background work by a leased per-slot owner, and keeps the full sweep as the liveness floor under it. This page walks that design from end to end."
 byline:
   - label: "Decision"
     value: "Option A · one binary"
@@ -420,7 +420,7 @@ import Aside from "../components/Aside.astro";
     label="Complexity, Move 3"
     time="O(S/N) slots owned per replica · O(1) claim_shard CAS"
     space="O(S) slot records + O(N) member entries"
-    why="Each replica owns ~S/N slots and runs the due/lease/retry workers only for those, so total background work across the fleet is O(owed), not O(N·K). A claim is one O(1) hash CAS; a rebalance on join/leave moves ~1/N of slots, each one a single <code>claim_shard</code>."
+    why="Each replica owns ~S/N slots and runs the due/lease/retry workers only for those, so total background work across the fleet is O(owed), not O(N·K). A claim is one O(1) hash CAS. A rebalance on join/leave moves ~1/N of slots, each one a single <code>claim_shard</code>."
   />
 </section>
 
@@ -439,7 +439,7 @@ import Aside from "../components/Aside.astro";
   eventually happens. An unowned slot is a liveness gap. A wake is owed, but no
   worker is currently responsible for firing it. The fence makes a *duplicate*
   wake harmless. It does nothing for a *missing* one. Work-sharding must therefore
-  supply liveness separately, and it does so by leaning on a mechanism that was
+  supply liveness separately. It does so by leaning on a mechanism that was
   never sharded: the full sweep.
 
   **A cursor reconcile stays, but triggered, not perpetual.** The reconcile
@@ -492,7 +492,7 @@ import Aside from "../components/Aside.astro";
   <Diagram
     name="seq-hs-e2e"
     label="Steady state, append to delivery"
-    caption="The appending origin (A) computes the slot, arms the wake into slot h's due-set, and delivers on the fast path with one signed POST, unchanged from today except for the slot tag. The owner (B) finds the due-set already cleared by the ack, so it does no redundant work. Ownership matters for the recovery path, not the happy one."
+    caption="The appending origin (A) computes the slot, arms the wake into slot h's due-set, and delivers on the fast path with one signed POST, unchanged from today except for the slot tag. The owner (B) finds the due-set already cleared by the ack, so it does no redundant work. Ownership is needed for the recovery path, not the happy one."
   />
 
   Step by step:
@@ -638,9 +638,9 @@ import Aside from "../components/Aside.astro";
   the two.
 
   The reason to defer it is that none of those three is known to be needed. The
-  single binary held at K=10k, the fast path is already adequate for an
-  append-then-deliver on the same origin, and a split adds a deployable, a
-  pub/sub wake channel, and a second failure surface. The parts Option A builds,
+  single binary held at K=10k, and the fast path is already adequate for an
+  append-then-deliver on the same origin. A split adds a deployable, a pub/sub
+  wake channel, and a second failure surface. The parts Option A builds,
   namely slot-homing, the due-set, and the `claim_shard` CAS, are exactly what
   Option B would build on, so nothing done now is wasted if the split is later
   taken. The trigger is a measurement, not an intuition. Build Option B only when

@@ -1,9 +1,9 @@
 ---
 title: "Correct by <em>proof</em>"
-summary: "How Chronicle is formally verified, now built and merged on main: model-based property testing against the MemoryStore oracle, generative differential testing, porcupine linearizability of the log, Lean 4 proofs of the pure cores, a TLA+ model of the subscription fence with trace validation and an Apalache inductive proof, and Alloy for fork lineage. Each method is matched to the exact invariant it pins and what it is worth."
+summary: "How Chronicle is formally verified, now built and merged on main: model-based property testing against the MemoryStore oracle, generative differential testing, porcupine linearizability of the log, Lean 4 proofs of the pure cores, a TLA+ model of the subscription fence with trace validation and an Apalache inductive proof, and Alloy for fork lineage. Each method is matched to the exact invariant it pins and to what it is worth."
 eyebrow: "Built and verified"
 meta: "Formal verification"
-deck: "This page is the reasoning behind the formal-verification epic, <a href=\"https://github.com/adityavkk/chronicle/issues/25\">#25</a>, now built and merged on <code>main</code>. Everything inside one Redis primary and all the pure logic is proven or exhaustively checked; cross-failover durability is the one ceiling, chaos-tested and never proven."
+deck: "This page is the reasoning behind the formal-verification epic, <a href=\"https://github.com/adityavkk/chronicle/issues/25\">#25</a>, now built and merged on <code>main</code>. Everything inside one Redis primary and all the pure logic is proven or exhaustively checked. Cross-failover durability is the one ceiling, chaos-tested and never proven."
 byline:
   - label: "Status"
     value: "built · verified · merged to main"
@@ -46,10 +46,11 @@ import Aside from "../components/Aside.astro";
     | A failure you have to reproduce | The **smallest counterexample**, already reduced for you |
   </Table>
 
-  It pays the most where Chronicle already invested, e.g. the producer fence, the
+  It pays the most where Chronicle already invested, in the producer fence, the
   offset order, the generation fence, and the cursor. These are small, total, and
-  central. That is the profile that rewards a proof. It is small enough to model
-  faithfully and important enough that a single missed case is a correctness bug.
+  central. That is the profile that rewards a proof. Each one is small enough to
+  model faithfully and important enough that a single missed case is a correctness
+  bug.
 </section>
 
 <section class="block" id="ladder">
@@ -93,7 +94,7 @@ import Aside from "../components/Aside.astro";
   prefix followed by the fork's own data[^fn-fork]. For byte streams, one batch of
   N bytes and the same N bytes split into several batches read back the same.
 
-  <Aside label="Why the oracle is free" summary="The expensive part of property testing is <em>writing the model</em>; Chronicle already paid it">
+  <Aside label="Why the oracle is free" summary="The expensive part of property testing is <em>writing the model</em>, and Chronicle already paid it">
     <code>MemoryStore</code> is a complete, pure, in-process implementation of the
     same <code>Store</code> contract the Redis backend serves. Pointing a generator
     at both and checking they agree turns the model Chronicle already maintains
@@ -232,7 +233,7 @@ PendingWorkEventuallyDelivered == [](HasPendingWork ~> (cursor = tail))
   It completes the porcupine model, which is time-free and safety-only by design,
   with the lease clock and the liveness properties[^t-porcupine].
 
-  No, it is not too late to model a built system.
+  Modeling a system that already ships is not too late.
 
   <Aside label="Why not too late" summary="<code>TLC</code> still finds design bugs, and <strong>trace validation</strong> binds the spec to the running Go">
     Trace validation instruments Chronicle (or the jepsen harness) to emit
@@ -293,7 +294,7 @@ PendingWorkEventuallyDelivered == [](HasPendingWork ~> (cursor = tail))
     | **Is it too late for TLA+?** | No. `TLC` and `Apalache` still find protocol design bugs, and **trace validation** binds the spec to the running Go. The spec doubles as precise documentation. |
     | **Lean vs Dafny vs TLA+ for the cores?** | **Lean** for the pure, sequential, total functions, a value-level proof over all inputs. Dafny is strong when the proof must discharge against imperative code, but Chronicle's cores are already pure and the Go is the oracle, so a Lean model plus differential PBT has less friction. TLA+ is the wrong tool for value functions and the right one for the concurrent protocol. |
     | **Which Go property library?** | **`rapid`**, for its built-in stateful state-machine testing and integrated shrinking. `gopter` is heavier and `testing/quick` has no shrinking. Native Go fuzzing complements it for the byte-level parsers. |
-    | **What is provable vs only chaos-testable?** | Everything inside one Redis primary and all the pure logic is provable or exhaustively checkable, e.g. per-stream serialization, the fences, and the orders. **Cross-failover durability is not.** Async replication can lose an acked write. That is documented honestly and exercised by the pod and Redis kill nemesis, never proven. |
+    | **What is provable vs only chaos-testable?** | Everything inside one Redis primary and all the pure logic is provable or exhaustively checkable, such as per-stream serialization, the fences, and the orders. **Cross-failover durability is not.** Async replication can lose an acked write. That is documented honestly and exercised by the pod and Redis kill nemesis, never proven. |
   </Table>
 </section>
 
