@@ -76,7 +76,7 @@ import Aside from "../../components/Aside.astro";
   <SectionHead num="02" label="Architecture" title="A request's <em>path through the layers</em>" />
 
   The server splits into two parts. The shell is the HTTP handler. It owns
-  everything that touches the network: it parses requests, writes responses, and
+  everything that touches the network. It parses requests, writes responses, and
   decides which store call each verb maps to. The core is the `protocol` and
   `store` packages. It is plain functions over immutable inputs, with no I/O to
   mock. The store backend runs the effects the core decided on.

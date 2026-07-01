@@ -142,12 +142,13 @@ func ValidateProducer(state *ProducerState, epoch, seq, nowUnix int64) (AppendRe
 	}
 ```
 
-Three more branches follow in the same shape. An **epoch bump**: a higher epoch
-must restart at `seq=0`, which fences out a writer that came back from a stale
-epoch. A **duplicate**: `seq ≤ lastSeq` returns idempotent success so a retried
-append never writes twice. A **gap**: `seq > lastSeq+1` is rejected with the
-expected and received sequence numbers. The function returns a new state value
-instead of changing its argument. The caller decides whether to persist it.
+Three more branches follow in the same shape. An **epoch bump** is a higher epoch,
+and it must restart at `seq=0`, which fences out a writer that came back from a
+stale epoch. A **duplicate** is a `seq ≤ lastSeq`, and it returns idempotent
+success so a retried append never writes twice. A **gap** is a `seq > lastSeq+1`,
+and it is rejected with the expected and received sequence numbers. The function
+returns a new state value instead of changing its argument. The caller decides
+whether to persist it.
 
   </Step>
 </section>

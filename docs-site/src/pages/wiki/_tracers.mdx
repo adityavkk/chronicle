@@ -3,7 +3,7 @@ title: "Three requests, <em>followed end to end</em>"
 summary: "Code walkthroughs of three chronicle requests: a write, a long-polling read, and a subscription wake. Each one is followed function by function from the HTTP edge through the store to Redis and back, with the real source lines at every step."
 eyebrow: "Code Wiki"
 meta: "Request walkthroughs"
-deck: "Each walkthrough follows one request all the way down. Three of them: a <strong>write</strong> that lands, a <strong>read</strong> that blocks for the next write, and a <strong>subscription wake</strong> that delivers a durable append to a worker. Each step is the real function, the real lines, and what it passes to the next."
+deck: "Each walkthrough follows one request all the way down. There are three. A <strong>write</strong> that lands, a <strong>read</strong> that blocks for the next write, and a <strong>subscription wake</strong> that delivers a durable append to a worker. Each step is the real function, the real lines, and what it passes to the next."
 byline:
   - label: "Reading"
     value: "source at main"
@@ -23,8 +23,8 @@ import Switch from "../../components/Switch.astro";
 <Tldr>
   <ul>
     <li><strong>A write crosses five files and is decided once.</strong> <code>ServeHTTP</code> routes <code>POST</code> to <code>handleAppend</code>, the backend snapshots the tail and sends one <code>EVALSHA</code>, and <code>append.lua</code> commits or returns <code>RETRY</code> if the live tail moved.</li>
-    <li><strong>A long-poll reads, then subscribes, then re-reads.</strong> The fast-path read finds nothing, the waiter <code>SUBSCRIBE</code>s before re-reading, and that order is the whole missed-wakeup argument: an append in the gap is caught by the re-read or the <code>PUBLISH</code>.</li>
-    <li><strong>A durable append wakes a subscriber, fenced.</strong> <code>onStreamAppend</code> hands off to the webhook manager, which signs a webhook or arms a pull-wake, and a <code>generation</code> counter fences every ack so a crash costs latency, not correctness.</li>
+    <li><strong>A long-poll reads, then subscribes, then re-reads.</strong> The fast-path read finds nothing, and the waiter <code>SUBSCRIBE</code>s before re-reading. That order is the whole missed-wakeup argument. An append in the gap is caught by the re-read or the <code>PUBLISH</code>.</li>
+    <li><strong>A durable append wakes a subscriber, fenced.</strong> <code>onStreamAppend</code> hands off to the webhook manager, which signs a webhook or arms a pull-wake. A <code>generation</code> counter fences every ack, so a crash costs latency and not correctness.</li>
   </ul>
 </Tldr>
 

@@ -29,7 +29,7 @@ import Step from "../components/Step.astro";
     <li><strong>A subscription is a durable cursor per stream.</strong> When a linked stream's tail moves past its <code>acked_offset</code>, the subscription has pending work and the server wakes a worker.</li>
     <li><strong>Two delivery modes share one model.</strong> <code>webhook</code> signs and POSTs a notification to your URL. <code>pull-wake</code> writes a wake event to a stream your workers poll and claim. Both use the same cursor, generation, lease, and stream membership.</li>
     <li><strong>The generation fence keeps duplicates safe.</strong> Every wake carries a monotonic <code>generation</code> and a single-use <code>wake_id</code>. A stale callback gets <code>409 FENCED</code>. Delivery is at-least-once, and the fence makes a duplicate harmless.</li>
-    <li><strong>All state is in Redis, under one hash tag.</strong> The reference engines keep cursors, leases, and retry schedules in an in-memory map that a restart loses. Chronicle persists them under <code>{"{__ds}"}</code> so they survive a restart. It also runs a recovery sweep, because a durable cursor for an idle subscription is never re-checked on its own after a crash.</li>
+    <li><strong>All state is in Redis, under one hash tag.</strong> The reference engines keep cursors, leases, and retry schedules in an in-memory map that a restart loses. Chronicle persists them under <code>{"{__ds}"}</code> so they survive a restart. It also runs a recovery sweep, because after a crash a durable cursor for an idle subscription is never re-checked on its own.</li>
     <li><strong>Checked under fault injection.</strong> A Jepsen-style suite kills origins and Redis mid-flight on Kubernetes. Every durably appended message still reaches its cursor.</li>
   </ul>
 </Tldr>
@@ -63,8 +63,8 @@ import Step from "../components/Step.astro";
 
   <Aside label="Durability gap" summary="Why both reference servers lose subscription state on restart">
     The protocol calls subscriptions <em>durable cursors</em> and requires their
-    state, the cursor, the retry schedule, and the lease, to survive a server
-    restart.[^research] Both reference implementations, the TypeScript dev server
+    state to survive a server restart, meaning the cursor, the retry schedule, and
+    the lease.[^research] Both reference implementations, the TypeScript dev server
     and the Go Caddy plugin, keep all of it in an in-memory map and lose it on
     restart. The log already persists to Redis. Chronicle persists the
     subscription layer there too, and a sweep re-evaluates what is owed.
@@ -181,7 +181,7 @@ import Step from "../components/Step.astro";
 
   A duplicate or late callback loses the comparison and is rejected, which is what
   makes at-least-once safe. A wake may be delivered more than once, by a lease
-  reclaim, a retry, or a sweep, and the second delivery is harmless.
+  reclaim, by a retry, or by a sweep, and the second delivery is harmless.
 
   ```http title="Ack a wake, then watch a replay get fenced"
   POST /v1/stream/__ds/subscriptions/sub-1/callback HTTP/1.1
@@ -361,7 +361,7 @@ import Step from "../components/Step.astro";
   ```
   </Step>
 
-  <Step n={3} fn="HasPendingWorkFrom · issueWake" loc="webhook/manager.go:1207" role="In Go, compare each durable cursor against its stream's tail. The tail lives in the stream's own slot, so this cannot be a {__ds} Lua script. For an idle subscription that is behind, re-issue the wake. It is idempotent under the fence: if it races a real append's wake, both bump generation, one supersedes the other, and the stale one is fenced.">
+  <Step n={3} fn="HasPendingWorkFrom · issueWake" loc="webhook/manager.go:1207" role="In Go, compare each durable cursor against its stream's tail. The tail lives in the stream's own slot, so this cannot be a {__ds} Lua script. For an idle subscription that is behind, re-issue the wake. It is idempotent under the fence. If it races a real append's wake, both bump generation, one supersedes the other, and the stale one is fenced.">
   ```go title="manager.go"
   if sub.Phase == PhaseIdle && HasPendingWorkFrom(sub.Links, tails) {
       m.issueWake(sub, "")   // arm_wake.lua under the fence
