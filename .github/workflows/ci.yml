@@ -310,6 +310,8 @@ jobs:
             fi
           done
           exit $fail
+      - name: Token-refresh liveness (#77) — leads-to + witness + negative control
+        run: make token-refresh
 
   # TLA+ model-check of the Ownership module + the fence-on/fence-off layering
   # proof + the liveness/fairness encoding (issue #38). Its own job, parallel to
