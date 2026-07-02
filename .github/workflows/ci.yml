@@ -370,3 +370,14 @@ jobs:
         run: npm run lint
       - name: Unit tests (vitest)
         run: npm test
+
+  # Spec-provenance drift guard (issue #98). Fails if SPEC_VERSION.md and
+  # test/conformance/package.json disagree on the conformance-suite version;
+  # additionally emits a (non-fatal) warning when upstream durable-streams has
+  # moved PROTOCOL.md past the pinned commit — a nudge to re-run the sync audit.
+  spec-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check SPEC_VERSION.md consistency + upstream drift
+        run: ./scripts/spec-version-check.sh

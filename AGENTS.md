@@ -45,13 +45,20 @@ the cheat sheets, and how to pick up the open work. For *using* chronicle see
 make redis-up && make run     # local server on :4437
 make test                     # unit + integration (-race; integration needs redis)
 make test-unit                # pure-core only, <1s
-make lint                     # golangci-lint — CI gates on this
-make conformance              # ~330 black-box protocol tests vs live redis
+make lint                     # golangci-lint (version-pinned; built with go.mod's toolchain) — CI gates on this
+make conformance              # 332/332 black-box protocol tests vs live redis (pinned; see SPEC_VERSION.md)
+make spec-check               # SPEC_VERSION.md consistency + upstream-spec-drift guard
 ```
 
 Run `go test ./...` **without** a global `REDIS_URL` override: the webhook (db14)
 and store/redis (db15) packages default to different dbs; pointing both at one db
 makes their parallel `FlushDB`s wipe each other (a confusing false failure).
+
+CI also gates the **dsui** front-end (`ui/` — `typecheck` + `biome` + `vitest`,
+see `ui/AGENTS.md`) and the spec provenance (the `spec-version` job runs
+`make spec-check`). `make lint` is version-pinned and built with the module's Go
+toolchain, so it runs against the `go 1.26` target locally without the
+"linter built with an older Go" refusal.
 
 ## The load-test rig (the open scaling work)
 
