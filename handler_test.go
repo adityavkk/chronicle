@@ -426,6 +426,50 @@ func TestAppendProducerFlow(t *testing.T) {
 	}
 }
 
+// countingHooks records how often each stream lifecycle hook fires so a test can
+// assert that a wake did or did not happen.
+type countingHooks struct {
+	created, appended, deleted int
+}
+
+func (c *countingHooks) OnStreamCreated(string) { c.created++ }
+func (c *countingHooks) OnStreamAppend(string)  { c.appended++ }
+func (c *countingHooks) OnStreamDeleted(string) { c.deleted++ }
+
+// TestAppendDuplicateDoesNotWake pins the fix for #76: a deduplicated producer
+// retry wrote no new data, so it must not wake subscribers; only a genuinely new
+// append fires OnStreamAppend.
+func TestAppendDuplicateDoesNotWake(t *testing.T) {
+	h := testHandler(time.Second, time.Second)
+	hooks := &countingHooks{}
+	h.SubHooks = hooks
+	mustCreate(t, h, "/test", "text/plain", nil)
+
+	// New producer write: wakes subscribers.
+	if rec := do(h, http.MethodPost, "/test", producerHeaders("p1", "1", "0"), []byte("a")); rec.Code != http.StatusOK {
+		t.Fatalf("new append: status = %d, want 200", rec.Code)
+	}
+	if hooks.appended != 1 {
+		t.Fatalf("after new append: OnStreamAppend fired %d times, want 1", hooks.appended)
+	}
+
+	// Duplicate retry of the same seq: 204, no new data, must NOT wake.
+	if rec := do(h, http.MethodPost, "/test", producerHeaders("p1", "1", "0"), []byte("a")); rec.Code != http.StatusNoContent {
+		t.Fatalf("duplicate: status = %d, want 204", rec.Code)
+	}
+	if hooks.appended != 1 {
+		t.Errorf("after duplicate: OnStreamAppend fired %d times, want still 1", hooks.appended)
+	}
+
+	// A second genuinely new append wakes again.
+	if rec := do(h, http.MethodPost, "/test", producerHeaders("p1", "1", "1"), []byte("b")); rec.Code != http.StatusOK {
+		t.Fatalf("second append: status = %d, want 200", rec.Code)
+	}
+	if hooks.appended != 2 {
+		t.Errorf("after second append: OnStreamAppend fired %d times, want 2", hooks.appended)
+	}
+}
+
 func TestAppendProducerStaleEpoch(t *testing.T) {
 	h := testHandler(time.Second, time.Second)
 	mustCreate(t, h, "/test", "text/plain", nil)
