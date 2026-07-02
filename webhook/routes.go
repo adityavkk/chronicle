@@ -100,12 +100,12 @@ func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string
 	}
 	cfg, reason := ParseCreateConfig(body)
 	if reason != "" {
-		writeErrMsg(w, http.StatusBadRequest, ErrCodeInvalidRequest, reason)
+		writeErrMsg(w, ErrCodeInvalidRequest, reason)
 		return
 	}
 	if cfg.Type == DispatchWebhook {
 		if reason := rt.mgr.validateWebhookURL(cfg.WebhookURL); reason != "" {
-			writeErrMsg(w, http.StatusBadRequest, ErrCodeWebhookURLRejected, reason)
+			writeErrMsg(w, ErrCodeWebhookURLRejected, reason)
 			return
 		}
 	}
@@ -199,7 +199,9 @@ func (rt *Routes) handleRemoveStream(w http.ResponseWriter, id, path string) {
 
 // handleAckLike serves both the webhook callback and the pull-wake ack: both are
 // Bearer-authenticated, fence on (generation, wake_id), and return
-// {ok, next_wake} or 409 FENCED (PROTOCOL §7.1, §7.2).
+// {ok, next_wake}. A body missing the fenced fields is 400 INVALID_REQUEST; a
+// subscription that no longer exists is 410 SUBSCRIPTION_GONE; a present-but-
+// stale (generation, wake_id) is 409 FENCED (PROTOCOL §7.1, §7.2).
 func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id string) {
 	token, ok := bearerToken(r)
 	if !ok {
@@ -212,8 +214,13 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	var req CallbackRequest
-	if err := decodeJSON(r, &req); err != nil {
+	body, err := readJSON(r, &req)
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, ErrCodeInvalidRequest)
+		return
+	}
+	if missing := missingField(body, "generation", "wake_id"); missing != "" {
+		writeErrMsg(w, ErrCodeInvalidRequest, "missing required field: "+missing)
 		return
 	}
 	fenced, gone, nextWake, err := rt.mgr.applyAck(id, req, tv.Generation)
@@ -221,7 +228,11 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if fenced || gone {
+	if gone {
+		writeErr(w, http.StatusGone, ErrCodeSubscriptionGone)
+		return
+	}
+	if fenced {
 		writeErr(w, http.StatusConflict, ErrCodeFenced)
 		return
 	}
@@ -291,8 +302,13 @@ func (rt *Routes) handleRelease(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	var req ReleaseRequest
-	if err := decodeJSON(r, &req); err != nil {
+	body, err := readJSON(r, &req)
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, ErrCodeInvalidRequest)
+		return
+	}
+	if missing := missingField(body, "generation", "wake_id"); missing != "" {
+		writeErrMsg(w, ErrCodeInvalidRequest, "missing required field: "+missing)
 		return
 	}
 	fenced, gone, err := rt.mgr.applyRelease(id, req, tv.Generation)
@@ -300,7 +316,11 @@ func (rt *Routes) handleRelease(w http.ResponseWriter, r *http.Request, id strin
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if fenced || gone {
+	if gone {
+		writeErr(w, http.StatusGone, ErrCodeSubscriptionGone)
+		return
+	}
+	if fenced {
 		writeErr(w, http.StatusConflict, ErrCodeFenced)
 		return
 	}
@@ -327,14 +347,40 @@ func bearerToken(r *http.Request) (string, bool) {
 }
 
 func decodeJSON(r *http.Request, v any) error {
+	_, err := readJSON(r, v)
+	return err
+}
+
+// readJSON reads the bounded request body and unmarshals it into v, also
+// returning the raw bytes so callers can check field presence (an absent fenced
+// field is a 400, distinct from a present-but-zero one that fails the fence as a
+// 409). An empty body leaves v at its zero value and returns nil bytes.
+func readJSON(r *http.Request, v any) ([]byte, error) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(body) == 0 {
-		return nil
+		return nil, nil
 	}
-	return json.Unmarshal(body, v)
+	return body, json.Unmarshal(body, v)
+}
+
+// missingField reports the first of keys absent from the JSON object in body, or
+// "" when all are present. Presence — not zero-value — is what separates a
+// malformed control-plane request (400 INVALID_REQUEST) from a well-formed but
+// stale one (409 FENCED): {"generation":0,"wake_id":""} is present-but-zero.
+func missingField(body []byte, keys ...string) string {
+	var obj map[string]json.RawMessage
+	if len(body) > 0 {
+		_ = json.Unmarshal(body, &obj)
+	}
+	for _, k := range keys {
+		if _, ok := obj[k]; !ok {
+			return k
+		}
+	}
+	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -347,6 +393,9 @@ func writeErr(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, errBody(code))
 }
 
-func writeErrMsg(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, ErrorBody{Error: ErrorDetail{Code: code, Message: msg}})
+// writeErrMsg writes a 400 error envelope with a human-readable message. Every
+// control-plane use of a message-bearing error is a client-request fault, so the
+// status is fixed at 400 (bare-code errors with other statuses use writeErr).
+func writeErrMsg(w http.ResponseWriter, code, msg string) {
+	writeJSON(w, http.StatusBadRequest, ErrorBody{Error: ErrorDetail{Code: code, Message: msg}})
 }
