@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 4 · Runtime Internals — Electric Agents, Explained</title>
+<meta name="description" content="Inside @electric-ax/agents-runtime: the wake webhook, StreamDB materialization, HandlerContext construction, the model runner, context management and sandboxes.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink" href="index.html">Start</a>
+  <a class="navlink" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink active" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink" href="server.html">5 · Server Internals</a>
+  <a class="navlink" href="qa.html">6 · Q&amp;A</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">On this page</p>
+  <a href="#overview">The wake, end to end</a>
+  <a href="#webhook">1 · Webhook arrives</a>
+  <a href="#materialize">2 · Materialize</a>
+  <a href="#ctx">3 · Build the ctx</a>
+  <a href="#modelrunner">4 · The model runner</a>
+  <a href="#context">5 · Context management</a>
+  <a href="#sandbox">6 · Sandboxes</a>
+  <a href="#signals">7 · Signals</a>
+  <a href="#done">8 · Done → idle</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">Part 4 of 6</p>
+  <h1>Inside the runtime</h1>
+  <p class="lead">
+    <code>@electric-ax/agents-runtime</code> is the half that lives in your app. Its whole job is to make one function
+    call — <code>handler(ctx, wake)</code> — feel like the entity has always been alive. This part traces a single
+    wake through the machinery: webhook in, events out. (The runtime package ships readable declarations and bundles;
+    the sibling <code>agents-server</code> ships full TypeScript source — file references below name the actual
+    modules.)
+  </p>
+</header>
+
+<section id="overview">
+  <h2><span class="kicker-num">§</span>The wake, end to end</h2>
+  <div class="diagram-shell">
+    <div class="diagram-title">Anatomy of one wake inside the runtime</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+flowchart TD
+    A["POST serveEndpoint<br/><small>wake webhook from server<br/>Ed25519 signature verified vs JWKS</small>"] --> B["resolve entity type in registry<br/>parse wake notification:<br/>entity · streams+offsets · claim token"]
+    B --> C["createEntityStreamDB(streamUrl)<br/><small>catch-up read → apply state events →<br/>20 built-in + custom collections</small>"]
+    C --> D["createHandlerContext<br/><small>state proxies · actions · spawn/observe/send<br/>sandbox · signal · electricTools · wake shape</small>"]
+    D --> E{"handler(ctx, wake)"}
+    E -->|"ctx.sleep()"| H["flush writes<br/>callback: done"]
+    E -->|"imperative work"| F["state actions → change events<br/>spawn/send/observe → server API calls"] --> H
+    E -->|"ctx.useAgent + agent.run()"| G["model runner loop<br/><small>timeline → messages → LLM →<br/>events appended live per token</small>"] --> H
+    H --> I["entity → idle<br/>compute exits · claim released"]
+    style A fill:var(--node-b),stroke:var(--accent-2)
+    style G fill:var(--node-a),stroke:var(--accent)
+    style I fill:var(--node-c),stroke:var(--accent-3)
+      </pre>
+    </div>
+  </div>
+</section>
+
+<section id="webhook">
+  <h2><span class="kicker-num">1</span>The webhook arrives</h2>
+  <p>
+    <code>createRuntimeHandler({ baseUrl, serveEndpoint, registry })</code> produces the webhook host. It exposes a few
+    adapters over one core: <code>handleWebhookRequest(request)</code> (fetch-native), <code>onEnter(req, res)</code>
+    (Node http), and <code>drainWakes()</code> (graceful shutdown: wait for in-flight wakes). At startup,
+    <code>registerTypes()</code> POSTs each defined type — description, creation/inbox/state schemas, permission grants,
+    and crucially the <code>serveEndpoint</code> — to the server's <code>/_electric/entity-types</code> API.
+  </p>
+  <p>The wake notification body tells the runtime everything it needs to be stateless:</p>
+  <ul>
+    <li><strong>who</strong>: the entity (type, URL, status, tags, spawn args, sandbox profile) and the acting principal,</li>
+    <li><strong>what</strong>: the trigger (<code>message_received</code>, child finished, observed change, cron, timeout) plus the streams and <strong>offsets</strong> covering the new events,</li>
+    <li><strong>how to respond</strong>: a callback URL and a <strong>claim token</strong> — the short-lived credential this wake must present to write to the entity's stream.</li>
+  </ul>
+  <p>
+    Payloads are Ed25519-signed by the server (<code>webhook-signature</code> header, verified against the server's
+    JWKS at <code>/__ds/jwks.json</code>), so a public serve endpoint can't be fed forged wakes.
+  </p>
+</section>
+
+<section id="materialize">
+  <h2><span class="kicker-num">2</span>Materialize: log → collections</h2>
+  <p>
+    Before your code runs, the runtime rebuilds the entity's world. <code>createEntityStreamDB(streamUrl, customState)</code>
+    (in <code>entity-stream-db</code>) is StreamDB from Part 2 with the entity schema pre-merged: your declared
+    collections plus the 20 built-ins (<code>runs</code>, <code>steps</code>, <code>texts</code>,
+    <code>textDeltas</code>, <code>toolCalls</code>, <code>reasoning</code>, <code>inbox</code>, <code>wakes</code>,
+    <code>manifests</code>, …). Each stream event is validated against the entity state schema (real Zod schemas —
+    e.g. a <code>text_delta</code> event must carry <code>{text_id, run_id, delta}</code>) and applied to its
+    collection. Two bookkeeping fields get stamped on every row:
+  </p>
+  <ul>
+    <li><code>_seq</code> — global monotonic insertion order across all collections;</li>
+    <li><code>_timeline_order</code> — a lexicographic <code>stream:&lt;offset&gt;:&lt;subOffset&gt;</code> token, so
+      "the timeline" is just an ORDER BY, stable across replays.</li>
+  </ul>
+  <p>
+    Two details make this cheap in practice. Reads are <strong>offset-resumable</strong> — a warm runtime that has seen
+    this entity before only reads the delta. And writes go out through a shared <strong>idempotent producer</strong>
+    (<code>writeEvent</code>/<code>flushWrites</code>), so retried webhooks can't double-append.
+  </p>
+  <p>
+    The <code>manifests</code> collection deserves a note: it's the entity's <em>resource table</em> — one row per
+    durable attachment of the entity to the world (<code>kind: child | source | shared-state | schedule | effect |
+    attachment | context | goal</code>). When you <code>ctx.spawn()</code>, a <code>child</code> manifest row is what
+    makes the relationship durable; when you <code>observe()</code>, a <code>source</code> row records it plus a
+    <code>replayWatermarks</code> row tracking how far you've consumed it. "What is this entity connected to?" is a
+    query, not tribal knowledge.
+  </p>
+</section>
+
+<section id="ctx">
+  <h2><span class="kicker-num">3</span>Build the HandlerContext</h2>
+  <p>
+    <code>createHandlerContext</code> assembles the <code>ctx</code> object — and it's worth seeing it as three layers
+    wired to different backends:
+  </p>
+  <div class="card-grid">
+    <div class="ve-card accent-c">
+      <div class="card-title">Local, synchronous — the DB</div>
+      <div class="card-body"><code>ctx.db.collections</code> (reads), <code>ctx.state.&lt;coll&gt;</code> proxies
+      (<code>get/toArray/insert/update/delete</code>), <code>ctx.db.actions.&lt;coll&gt;_*</code>, custom
+      <code>ctx.actions</code>. Writes append change events via the producer — nothing talks to the server
+      synchronously.</div>
+    </div>
+    <div class="ve-card accent-a">
+      <div class="card-title">Remote, async — coordination</div>
+      <div class="card-body"><code>spawn</code> / <code>fork</code> / <code>forkSelf</code> / <code>observe</code> /
+      <code>unobserve</code> / <code>send</code> / <code>mkdb</code> / <code>setTag</code> — each is an HTTP call to
+      the server's control plane, authenticated as this entity, recorded as a manifest row.</div>
+    </div>
+    <div class="ve-card accent-d">
+      <div class="card-title">Wake-scoped — the session</div>
+      <div class="card-body"><code>ctx.wake</code> (normalized), <code>ctx.firstWake</code>, <code>ctx.signal</code>
+      (AbortSignal), <code>ctx.sandbox</code>, <code>ctx.attachments</code>, <code>ctx.electricTools</code>, goal and
+      context-entry APIs, <code>recordRun()</code> / <code>replyText()</code> / <code>sleep()</code>.</div>
+    </div>
+  </div>
+  <p>
+    The raw <code>WakeEvent</code> (<code>{source, type, fromOffset, toOffset, eventCount, payload}</code>) is
+    normalized into the two-case <code>ctx.wake</code> your handler switches on. Then the runtime simply calls your
+    <code>handler(ctx, wake)</code> and awaits it.
+  </p>
+</section>
+
+<section id="modelrunner">
+  <h2><span class="kicker-num">4</span>The model runner — <code>agent.run()</code> mechanically</h2>
+  <p>
+    The LLM loop is built on <strong>pi</strong> (<code>@mariozechner/pi-agent-core</code> + <code>pi-ai</code>) — a
+    provider-agnostic agent core (Anthropic by default when <code>model</code> is a string; OpenAI, DeepSeek, Moonshot
+    and others detectable). The runtime's contribution is the <em>adapter on each side</em> of that loop:
+  </p>
+  <ol class="flow-steps">
+    <li><strong>Input adapter — <code>timelineToMessages(db)</code>.</strong> Walks the materialized collections
+      (inbox, runs, texts + assembled deltas, tool calls with results, reasoning) in <code>_timeline_order</code> and
+      emits standard LLM history: <code>user</code>, <code>assistant</code> (text + toolCall blocks),
+      <code>toolResult</code> messages. Attachments are hydrated into content blocks. <em>The prompt is a projection
+      of the log.</em></li>
+    <li><strong>The loop.</strong> pi streams a completion; tool calls are executed (each
+      <code>AgentTool.execute(id, args)</code>, sandbox-backed where relevant), results are appended to history, and
+      the loop continues until the model stops or a tool returns <code>terminate: true</code>. Oversized tool results
+      are truncated at 10k tokens with a visible placeholder. Timeouts, retries, and a
+      <code>ModelProviderError</code> taxonomy (timeout / unreachable / auth / rate-limited) wrap the provider call.</li>
+    <li><strong>Output adapter — the outbound bridge.</strong> Every streaming event maps to a typed stream append,
+      live: <code>message_start → steps</code> row; <code>text_delta → texts + textDeltas</code>;
+      thinking → <code>reasoning(+Deltas)</code>; tool call lifecycle → <code>toolCalls</code>
+      (started → args_complete → executing → completed/failed, with args, result, duration); errors → <code>errors</code>;
+      run brackets → <code>runs</code>. Per-step token usage (input / cached / output, context window) lands in
+      <code>steps</code>.</li>
+  </ol>
+  <div class="callout good">
+    <div class="callout-title">✓ Why this shape is the payoff</div>
+    <p>Persistence, UI streaming, observability, and child-completion signaling are <strong>one write path</strong>.
+    The <code>runs</code> row flipping to <code>completed</code> <em>is</em> the durable record, <em>is</em> what the
+    UI renders, <em>is</em> the event that triggers a parent's <code>runFinished</code> wake. Nothing to keep in sync,
+    because there's only one thing.</p>
+  </div>
+  <p>
+    (One honest caveat from the reference docs: <code>AgentRunResult.writes/toolCalls/usage</code> returned by
+    <code>run()</code> are currently placeholders — read outcomes from the collections, which are authoritative.)
+  </p>
+</section>
+
+<section id="context">
+  <h2><span class="kicker-num">5</span>Context management: budgets and compaction</h2>
+  <p>
+    Long-lived entities accumulate long logs, so the runtime manages the projection into finite context windows:
+  </p>
+  <ul>
+    <li><strong><code>ctx.useContext()</code></strong> replaces the default whole-timeline projection with a
+      <em>budgeted composition</em>: named sources with token budgets and cache tiers (pinned / stable /
+      slow-changing / volatile), plus auto-registered tools (<code>loadTimelineRange</code>,
+      <code>loadSourceRange</code>, <code>loadContextHistory</code>) so the model can page in history on demand rather
+      than carrying it all.</li>
+    <li><strong>Durable context entries</strong> — <code>ctx.insertContext / removeContext / setGoal / markGoalComplete</code>
+      write <code>contextInserted</code>/<code>contextRemoved</code> events, versioning the working context in the log
+      itself.</li>
+    <li><strong>Compaction thresholds</strong> — usage notices from 25% of the window; <em>background</em> compaction
+      (checkpoint summarization) starts at 85%; a synchronous hard ceiling at 90%. Budget accounting counts
+      <code>uncachedInput + output</code>, so provider-cached warm turns aren't double-counted.</li>
+  </ul>
+</section>
+
+<section id="sandbox">
+  <h2><span class="kicker-num">6</span>Sandboxes: where tool side-effects live</h2>
+  <p>
+    <code>ctx.sandbox</code> isolates what the <em>LLM</em> does (bash, file reads/writes/edits, <code>fetch_url</code>)
+    from what <em>your handler</em> does. Three adapters: <code>unrestricted</code> (host FS — the trusted single-tenant
+    dev default, explicitly <em>not</em> a boundary), <code>docker</code> (workdir <code>/work</code> in a digest-pinned
+    container; cpu/memory/pid limits; optional gVisor runtime; network policy allow-all / deny-all / allowlist), and
+    <code>remote</code> (e2b microVMs). Selection is per-spawn via profiles, with orthogonal knobs for scope
+    (per-entity vs per-wake), persistence across idles, and ownership; sandboxes are lazily materialized, reused across
+    an entity's queued wakes, and reaped/reattached by key. Write paths are containment-checked on every adapter.
+  </p>
+  <p>
+    This maps to the serverless-agents blog's "execution ladder": agent <em>logic</em> runs in the cheapest possible
+    compute (your function), and full computers are summoned only for the tool calls that need one.
+  </p>
+</section>
+
+<section id="signals">
+  <h2><span class="kicker-num">7</span>Signals: interrupting a durable thing</h2>
+  <p>
+    Because entities aren't processes, "kill -9" needs a protocol. <code>POST /_electric/entities/:type/:id/signal</code>
+    delivers POSIX-flavored signals; the runtime surfaces them mid-wake: <code>SIGINT</code> trips
+    <code>ctx.signal</code> (the AbortSignal threaded into LLM calls, fetches, subprocesses) and aborts the current
+    handler invocation; <code>SIGHUP/SIGTERM/SIGUSR</code> are delivered to <code>ctx.onSignal(…)</code> handlers;
+    <code>SIGSTOP/SIGCONT</code> pause and resume wake processing (messages still queue); <code>SIGKILL</code>
+    unregisters wakes and closes the entity's streams. Signals are themselves events — the <code>signals</code>
+    collection records each delivery, outcome, and state transition.
+  </p>
+</section>
+
+<section id="done">
+  <h2><span class="kicker-num">8</span>Done → idle → (maybe never again)</h2>
+  <p>
+    When the handler returns, the runtime flushes pending stream writes, then calls the wake's callback URL with
+    <code>done</code> — releasing the claim and letting the server flip the entity to <code>idle</code>. The Node
+    process (or lambda) that hosted the wake holds nothing the system needs: warm caches are an optimization, the log
+    is the truth. The entity might be woken again in a millisecond, a month, or never — and the cost of "never" is a
+    few kilobytes of storage.
+  </p>
+  <p>
+    What decides that next wake — and everything else on the other side of the webhook — is the server.
+  </p>
+</section>
+
+<div class="pager">
+  <a href="howto.html"><span class="dir">Previous</span><span class="label">← Part 3 — How to Do Things</span></a>
+  <a class="next" href="server.html"><span class="dir">Next</span><span class="label">Part 5 — Server Internals →</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · Part 4 of 6 · sources: @electric-ax/agents-runtime declarations &amp; bundles, reference docs
+</footer>
+
+</body>
+</html>
