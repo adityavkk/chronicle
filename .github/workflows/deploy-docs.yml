@@ -2,9 +2,7 @@ name: Deploy docs to GitHub Pages
 
 on:
   push:
-    # NOTE: the claude/* branch entry is temporary — it lets the explainer
-    # branch deploy for preview; drop it when merging to main.
-    branches: [main, claude/electric-agent-explainer-8upwpg]
+    branches: [main]
     paths:
       - "docs-site/**"
       - ".github/workflows/deploy-docs.yml"
