@@ -100,12 +100,12 @@ func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string
 	}
 	cfg, reason := ParseCreateConfig(body)
 	if reason != "" {
-		writeErrMsg(w, http.StatusBadRequest, ErrCodeInvalidRequest, reason)
+		writeErrMsg(w, ErrCodeInvalidRequest, reason)
 		return
 	}
 	if cfg.Type == DispatchWebhook {
 		if reason := rt.mgr.validateWebhookURL(cfg.WebhookURL); reason != "" {
-			writeErrMsg(w, http.StatusBadRequest, ErrCodeWebhookURLRejected, reason)
+			writeErrMsg(w, ErrCodeWebhookURLRejected, reason)
 			return
 		}
 	}
@@ -220,7 +220,7 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	if missing := missingField(body, "generation", "wake_id"); missing != "" {
-		writeErrMsg(w, http.StatusBadRequest, ErrCodeInvalidRequest, "missing required field: "+missing)
+		writeErrMsg(w, ErrCodeInvalidRequest, "missing required field: "+missing)
 		return
 	}
 	fenced, gone, nextWake, err := rt.mgr.applyAck(id, req, tv.Generation)
@@ -308,7 +308,7 @@ func (rt *Routes) handleRelease(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	if missing := missingField(body, "generation", "wake_id"); missing != "" {
-		writeErrMsg(w, http.StatusBadRequest, ErrCodeInvalidRequest, "missing required field: "+missing)
+		writeErrMsg(w, ErrCodeInvalidRequest, "missing required field: "+missing)
 		return
 	}
 	fenced, gone, err := rt.mgr.applyRelease(id, req, tv.Generation)
@@ -393,6 +393,9 @@ func writeErr(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, errBody(code))
 }
 
-func writeErrMsg(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, ErrorBody{Error: ErrorDetail{Code: code, Message: msg}})
+// writeErrMsg writes a 400 error envelope with a human-readable message. Every
+// control-plane use of a message-bearing error is a client-request fault, so the
+// status is fixed at 400 (bare-code errors with other statuses use writeErr).
+func writeErrMsg(w http.ResponseWriter, code, msg string) {
+	writeJSON(w, http.StatusBadRequest, ErrorBody{Error: ErrorDetail{Code: code, Message: msg}})
 }
