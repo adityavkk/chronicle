@@ -12,7 +12,7 @@ GO        ?= go
 BINARY    := bin/chronicle
 REDIS_URL ?= redis://localhost:6379
 
-.PHONY: all build run test test-unit test-integration conformance lint fmt tidy redis-up redis-down clean
+.PHONY: all build run test test-unit test-integration conformance lint fmt tidy redis-up redis-down clean spec-check
 
 all: build
 
@@ -53,6 +53,11 @@ GO_TOOLCHAIN := $(shell awk '/^go /{print "go" $$2; exit}' go.mod)
 
 lint:
 	GOTOOLCHAIN=$(GO_TOOLCHAIN) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
+
+# Verify SPEC_VERSION.md is consistent with the conformance pin and flag upstream
+# spec drift (issue #98). CI runs this in the `spec-version` job.
+spec-check:
+	./scripts/spec-version-check.sh
 
 fmt:
 	gofumpt -l -w .
