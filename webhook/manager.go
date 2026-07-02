@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -83,7 +84,9 @@ const (
 // defaults; StreamRootURL is required to build absolute callback and JWKS URLs.
 type ManagerOptions struct {
 	// StreamRootURL is the public URL the protocol is served under, including
-	// scheme and host, ending in "/" (e.g. "http://localhost:4437/v1/stream/").
+	// scheme and host (e.g. "http://localhost:4437/v1/stream/"). NewManager
+	// normalizes it to end in exactly one "/", so a missing or doubled trailing
+	// slash still yields correct callback and JWKS URLs.
 	StreamRootURL string
 	Lister        StreamLister
 	Resolver      IPResolver
@@ -146,7 +149,7 @@ type Manager struct {
 	store             Store
 	streams           Streams
 	lister            StreamLister
-	streamRootURL     string
+	streamRootURL     string // normalized in NewManager to end in exactly one "/"
 	client            *http.Client
 	resolver          IPResolver
 	signing           SigningKey
@@ -202,7 +205,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		store:                 store,
 		streams:               streams,
 		lister:                opts.Lister,
-		streamRootURL:         opts.StreamRootURL,
+		streamRootURL:         normalizeStreamRootURL(opts.StreamRootURL),
 		client:                opts.HTTPClient,
 		resolver:              opts.Resolver,
 		signing:               signing,
@@ -304,6 +307,15 @@ func defaultResolver(host string) ([]net.IP, error) {
 }
 
 func (m *Manager) tailOf(path string) (string, bool) { return m.streams.TailOffset(path) }
+
+// normalizeStreamRootURL forces the stream root to end in exactly one "/" so
+// callbackURL and JWKSURL join cleanly regardless of how the caller configured
+// --stream-root (missing, single, or doubled trailing slash). The URLs are
+// handed to external webhook receivers, so a stray "stream__ds/..." must never
+// escape.
+func normalizeStreamRootURL(root string) string {
+	return strings.TrimRight(root, "/") + "/"
+}
 
 func (m *Manager) callbackURL(id string) string {
 	return m.streamRootURL + "__ds/subscriptions/" + id + "/callback"
