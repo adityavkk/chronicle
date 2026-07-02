@@ -1795,6 +1795,34 @@ export async function removeSubscriptionStream(id: string, path: string): Promis
  * claim so the controls reset. Like the other ops they never throw.
  * ------------------------------------------------------------------------- */
 
+/**
+ * Adopt a refreshed Bearer token onto the active claim, when the server rolled
+ * one (a 2xx near-expiry rotation, or the retry token on a 401 TOKEN_EXPIRED).
+ * A no-op when there is no fresh token or no active claim, so ack/release/
+ * heartbeat all use the current token instead of an expiring one.
+ */
+function adoptRefreshedToken(refreshedToken: string | null): void {
+	if (refreshedToken === null) return;
+	const claim = activeClaim.value;
+	if (claim === null || claim.token === refreshedToken) return;
+	activeClaim.value = { ...claim, token: refreshedToken };
+}
+
+/**
+ * Handle a 410 SUBSCRIPTION_GONE: the subscription was deleted, so it is
+ * terminal for the worker. Stop the loop by clearing the active claim, forget
+ * the id locally, and surface a clear "no longer exists" error toast.
+ */
+function handleSubscriptionGone(id: string): void {
+	activeClaim.value = null;
+	forgetSubscriptionId(id);
+	addToast({
+		kind: "error",
+		title: "Subscription gone",
+		message: `${id} no longer exists (410) — the worker was stopped.`,
+	});
+}
+
 /** Claim a pull-wake lease (POST …/claim) as the given worker. */
 export async function claimWake(id: string, worker: string): Promise<boolean> {
 	const client = activeClient.value;
@@ -1836,6 +1864,7 @@ export async function ackWake(
 	id: string,
 	acks: readonly OffsetAck[],
 	done: boolean,
+	retried = false,
 ): Promise<boolean> {
 	const client = activeClient.value;
 	const claim = activeClaim.value;
@@ -1850,6 +1879,9 @@ export async function ackWake(
 		});
 		lastOperation.value = result.operation;
 		lastExchange.value = result.exchange;
+		// Adopt a rolled token (2xx near-expiry rotation, or a 401 TOKEN_EXPIRED
+		// retry token) so later heartbeats/release/acks use the fresh one.
+		adoptRefreshedToken(result.refreshedToken);
 		if (result.ok) {
 			if (done) {
 				activeClaim.value = null;
@@ -1862,6 +1894,12 @@ export async function ackWake(
 				addToast({ kind: "info", title: "Lease extended", message: "Heartbeat acked." });
 			}
 			await getSubscription(id);
+		} else if (result.gone) {
+			handleSubscriptionGone(id);
+		} else if (result.errorCode === "TOKEN_EXPIRED" && result.refreshedToken !== null && !retried) {
+			// The fresh token was adopted above; retry the ack once with it.
+			claimInFlight.value = false;
+			return await ackWake(id, acks, done, true);
 		} else if (result.fenced) {
 			activeClaim.value = null;
 			addToast({
@@ -1891,10 +1929,13 @@ export async function releaseWake(id: string): Promise<boolean> {
 		});
 		lastOperation.value = result.operation;
 		lastExchange.value = result.exchange;
+		adoptRefreshedToken(result.refreshedToken);
 		if (result.ok) {
 			activeClaim.value = null;
 			addToast({ kind: "success", title: "Lease released", message: id });
 			await getSubscription(id);
+		} else if (result.gone) {
+			handleSubscriptionGone(id);
 		} else if (result.fenced) {
 			activeClaim.value = null;
 			addToast({
@@ -2072,7 +2113,12 @@ export async function callbackAck(
 	if (client === null) return false;
 	claimInFlight.value = true;
 	try {
-		const result = await client.callbackWake(id, token, req);
+		let result = await client.callbackWake(id, token, req);
+		// On a 401 TOKEN_EXPIRED the server returns a fresh token to retry with:
+		// adopt it and re-issue the callback once rather than failing opaquely.
+		if (!result.ok && result.errorCode === "TOKEN_EXPIRED" && result.refreshedToken !== null) {
+			result = await client.callbackWake(id, result.refreshedToken, req);
+		}
 		lastOperation.value = result.operation;
 		lastExchange.value = result.exchange;
 		if (result.ok) {
@@ -2082,6 +2128,8 @@ export async function callbackAck(
 				message: result.value?.nextWake === true ? "Another wake is due." : id,
 			});
 			await getSubscription(id);
+		} else if (result.gone) {
+			handleSubscriptionGone(id);
 		} else if (result.fenced) {
 			addToast({
 				kind: "warning",
