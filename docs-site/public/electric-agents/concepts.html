@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 1 · The Nouns — Electric Agents, Explained</title>
+<meta name="description" content="The core concepts of Electric Agents: entities, streams, wakes, handlers, agents, collections, the runtime and the server.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink" href="index.html">Start</a>
+  <a class="navlink active" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink" href="server.html">5 · Server Internals</a>
+  <a class="navlink" href="qa.html">6 · Q&amp;A</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">The nouns</p>
+  <a href="#entity">Entity</a>
+  <a href="#stream">Stream</a>
+  <a href="#wake">Wake</a>
+  <a href="#handler">Handler</a>
+  <a href="#agent">Agent</a>
+  <a href="#collections">Collections &amp; state</a>
+  <a href="#types">Entity types &amp; registry</a>
+  <a href="#principal">Principal</a>
+  <a href="#runtime-server">Runtime vs. Server</a>
+  <a href="#lifecycle">Entity lifecycle</a>
+  <a href="#recap">Recap</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">Part 1 of 6</p>
+  <h1>The Nouns</h1>
+  <p class="lead">
+    Before any code: what exists in an Electric Agents system, and what each thing <em>is</em>. Every later part
+    builds strictly on these definitions. The order is deliberate — each noun is defined only in terms of the ones
+    before it.
+  </p>
+</header>
+
+<section id="entity">
+  <h2><span class="kicker-num">1</span>Entity — the unit of existence</h2>
+  <p>
+    An <strong>entity</strong> is a durable, addressable <em>thing</em> in the system. Its identity is a URL path:
+  </p>
+  <pre><code>/{type}/{instanceId}        e.g.  /assistant/support-42   /judge/debate-7</code></pre>
+  <p>Every entity has exactly three anatomical parts:</p>
+  <div class="card-grid">
+    <div class="ve-card accent-c">
+      <div class="card-title">An event stream</div>
+      <div class="card-body">One append-only log at <code>/{type}/{id}/main</code> holding everything that ever
+      happened to this entity. This <em>is</em> the entity's memory — there is no other.</div>
+    </div>
+    <div class="ve-card accent-d">
+      <div class="card-title">A handler</div>
+      <div class="card-body">The function for its <em>type</em>, run each time the entity wakes. The handler is code
+      you deploy; the entity is data that outlives any deployment.</div>
+    </div>
+    <div class="ve-card accent-a">
+      <div class="card-title">A registry row</div>
+      <div class="card-body">A control-plane record (in the server's Postgres) tracking its type, status
+      (<code>spawning · running · idle · paused · stopping · stopped · killed</code>), parent, tags, and creator.</div>
+    </div>
+  </div>
+  <p>
+    Crucially, an entity is <strong>not a process</strong>. Between wakes, nothing about it is in memory anywhere.
+    It "exists" the way a row in a database exists. An agent is just the most interesting kind of entity — one whose
+    handler runs an LLM loop. But an entity with no LLM at all (a counter, a state machine, an outbox) is equally
+    valid, which is why the docs say <em>entity</em> when talking about the machinery and <em>agent</em> when talking
+    about the behavior.
+  </p>
+  <div class="callout">
+    <div class="callout-title">💡 One sentence to remember</div>
+    <p>An entity is <strong>a URL, a log, and a function</strong> — identity, memory, behavior — with all three
+    decoupled from any running process.</p>
+  </div>
+</section>
+
+<section id="stream">
+  <h2><span class="kicker-num">2</span>Stream — the unit of memory</h2>
+  <p>
+    A <strong>durable stream</strong> is an append-only byte/message log addressed as an HTTP resource. Create it with
+    <code>PUT</code>, append with <code>POST</code>, read with <code>GET ?offset=…</code> — including catching up from
+    any historical offset and then live-tailing via long-poll or SSE. Every read returns a
+    <code>Stream-Next-Offset</code> header; hand it back and you resume exactly where you left off.
+  </p>
+  <p>
+    Electric Agents gives each entity <strong>one main stream</strong>: <code>/{type}/{id}/main</code>. Everything is
+    an event on that one log — inbound messages, LLM run boundaries, streamed text tokens, tool calls, state changes,
+    signals, tags. (Attachments get sibling streams at <code>/{type}/{id}/attachments/{attachmentId}</code>, and shared
+    state lives in its own streams — both covered later.)
+  </p>
+  <div class="diagram-shell">
+    <div class="diagram-title">One entity = one log</div>
+    <div class="diagram-sub">A slice of an assistant's main stream. Every event type shown becomes a row in a typed collection (§6).</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+flowchart LR
+    A["entity_created<br/><small>type: assistant</small>"] --> B["inbox<br/><small>'Hi, can you…'</small>"]
+    B --> C["run<br/><small>status: started</small>"]
+    C --> D["text_delta ×N<br/><small>streamed tokens</small>"]
+    D --> E["tool_call<br/><small>web_search</small>"]
+    E --> F["run<br/><small>status: completed</small>"]
+    F --> G["state:status<br/><small>update → 'idle'</small>"]
+    style A fill:var(--node-d),stroke:var(--accent-4)
+    style B fill:var(--node-b),stroke:var(--accent-2)
+    style C fill:var(--node-a),stroke:var(--accent)
+    style D fill:var(--node-a),stroke:var(--accent)
+    style E fill:var(--node-a),stroke:var(--accent)
+    style F fill:var(--node-a),stroke:var(--accent)
+    style G fill:var(--node-c),stroke:var(--accent-3)
+      </pre>
+    </div>
+  </div>
+  <p>Why a log, and not a database row or KV entry? Three properties do all the work:</p>
+  <ul>
+    <li><strong>It's a total order.</strong> Concurrent writers are serialized by the server; every consumer sees the
+      same history in the same order. Coordination comes for free.</li>
+    <li><strong>It's resumable.</strong> Offsets make consumption stateless — a crashed consumer, a new UI tab, or a
+      freshly woken handler all catch up from wherever they were, then go live in the same request.</li>
+    <li><strong>It's the transport <em>and</em> the storage.</strong> Streaming LLM tokens to a UI and durably
+      persisting them is the <em>same write</em>. There is no separate "save to DB" step to forget or to race.</li>
+  </ul>
+  <div class="callout chronicle">
+    <div class="callout-title">🔗 Chronicle note</div>
+    <p>This layer is precisely what Chronicle implements: the Durable Streams protocol — <code>PUT</code>/<code>POST</code>/<code>GET</code>
+    with <code>Stream-Next-Offset</code>, long-poll and SSE live modes, idempotent producers, TTLs and closure — backed
+    by Redis instead of the reference server's LMDB. Everything in this explainer above the stream layer is
+    protocol-agnostic about the backend. <a href="streams.html">Part 2</a> goes deep on the protocol itself.</p>
+  </div>
+</section>
+
+<section id="wake">
+  <h2><span class="kicker-num">3</span>Wake — the unit of execution</h2>
+  <p>
+    Entities spend their lives asleep. A <strong>wake</strong> is the event "something you care about happened", and it
+    is the <em>only</em> reason handler code ever runs. Each wake carries what happened and which stream offsets it
+    covers, so a handler processes a well-defined window of new events.
+  </p>
+  <p>Four things can produce a wake:</p>
+  <div class="card-grid">
+    <div class="ve-card accent-b">
+      <div class="card-title">📬 An inbox message</div>
+      <div class="card-body">Someone — a user, another entity, a webhook source — appended a message to this entity's
+      inbox. Arrives as <code>wake.type === 'inbox'</code>.</div>
+    </div>
+    <div class="ve-card accent-a">
+      <div class="card-title">👶 A child finishing</div>
+      <div class="card-body">A spawned child's run completed or failed, and the parent asked to be woken
+      (<code>wake: { on: 'runFinished' }</code>). Payload carries <code>finished_child</code> with the response.</div>
+    </div>
+    <div class="ve-card accent-c">
+      <div class="card-title">👁 An observed change</div>
+      <div class="card-body">A stream this entity observes — another entity, a shared DB, a Postgres table, a webhook
+      source — changed (<code>wake: { on: 'change', collections?, ops? }</code>). Payload lists the changes.</div>
+    </div>
+    <div class="ve-card accent-d">
+      <div class="card-title">⏰ Time</div>
+      <div class="card-body">A cron schedule ticked, a delayed <code>send(…, { afterMs })</code> came due, or a wake
+      registration's <code>timeoutMs</code> expired with nothing happening.</div>
+    </div>
+  </div>
+  <p>
+    Inside the handler these normalize to just two shapes: <code>wake.type === 'inbox'</code> (a message, with
+    payload and sender) and <code>wake.type === 'wake'</code> (everything else, with a payload describing
+    <code>changes</code>, an optional <code>finished_child</code>, and sibling status in <code>other_children</code>).
+    Wake registrations support <code>debounceMs</code> (coalesce bursts), <code>timeoutMs</code>, <code>oneShot</code>,
+    and <code>includeResponse</code> (inline the child's final text).
+  </p>
+  <div class="callout warn">
+    <div class="callout-title">⚠ The inversion that matters</div>
+    <p>In a process-agent, the agent <em>polls or blocks</em> waiting for input. Here the direction is reversed: the
+    <strong>data wakes the compute</strong>. That's what lets an agent be a serverless function and scale to zero —
+    and it's why "waiting for five children to finish" costs nothing while waiting.</p>
+  </div>
+</section>
+
+<section id="handler">
+  <h2><span class="kicker-num">4</span>Handler — the unit of behavior</h2>
+  <p>
+    A <strong>handler</strong> is the single function you write per entity type. It receives a fully hydrated context
+    and the wake that triggered it:
+  </p>
+  <pre><code>registry.define('judge', {
+  description: 'Coordinates a three-phase debate',
+  state: { debate: { schema: passthrough&lt;Debate&gt;(), primaryKey: 'key' } },
+
+  async handler(ctx, wake) {
+    // 1. look at the wake and your durable state
+    // 2. decide: run the LLM? spawn children? update state? just sleep?
+  }
+})</code></pre>
+  <p>
+    The handler is where <strong>deterministic control flow</strong> lives. A well-designed handler is a gate in front
+    of the LLM: it reads <code>wake</code> and <code>ctx.state</code>, handles the cases that need no intelligence
+    imperatively (record an argument, forward a rebuttal, <code>ctx.sleep()</code>), and only invokes the LLM for the
+    steps that need judgment. The official walkthrough calls this <em>hybrid control flow</em>, and it is the
+    framework's central design idiom — <a href="howto.html#hybrid">Part 3 §6</a> builds it up step by step.
+  </p>
+  <p>
+    Handlers must be safe to re-run: wake delivery is at-least-once, so the guard-then-act shape
+    (<code>if (ctx.state.debate.get('current')) return ctx.sleep()</code>) is idiomatic, not defensive paranoia.
+  </p>
+</section>
+
+<section id="agent">
+  <h2><span class="kicker-num">5</span>Agent — the LLM loop, as a capability</h2>
+  <p>
+    In this stack, "agent" is not a class you instantiate — it's a <strong>capability a handler opts into for the
+    duration of one wake</strong>:
+  </p>
+  <pre><code>ctx.useAgent({
+  systemPrompt: 'You are a fair, concise judge…',
+  model: 'claude-sonnet-4-6',
+  tools: [createStartDebateTool(ctx), ...ctx.electricTools],
+})
+await ctx.agent.run()</code></pre>
+  <p>What <code>agent.run()</code> does, conceptually (mechanically in <a href="runtime.html#modelrunner">Part 4</a>):</p>
+  <ol class="flow-steps">
+    <li><strong>Rebuilds the conversation from the stream.</strong> The entity's timeline — past inbox messages, runs,
+    texts, tool calls — is projected into LLM messages. No hidden session memory; context <em>is</em> the log.</li>
+    <li><strong>Runs the standard tool-use loop.</strong> Model streams a response; tool calls are executed (in the
+    entity's sandbox where relevant) and results fed back; repeat until the model stops.</li>
+    <li><strong>Appends every step back onto the stream as it happens.</strong> Run boundaries, token deltas, reasoning,
+    tool calls with results, token usage — each as a typed event. UIs watching the stream render tokens live; the
+    entity's memory and the user's screen are the same data.</li>
+  </ol>
+  <p>
+    If a handler never calls <code>useAgent()</code>, no LLM runs for that wake. An entity might use the LLM on one
+    wake and pure imperative logic on the next — the judge in the walkthrough does exactly that (LLM for briefs and
+    verdict, plain code for the phases in between).
+  </p>
+</section>
+
+<section id="collections">
+  <h2><span class="kicker-num">6</span>Collections — state as a view of the stream</h2>
+  <p>
+    Raw logs are miserable to program against. So the runtime <strong>materializes</strong> each entity's stream into
+    typed <strong>TanStack DB collections</strong> — an embedded, reactive client database — on every wake. Events of
+    type <code>run</code> become rows in <code>ctx.db.collections.runs</code>; <code>inbox</code> events become rows in
+    <code>inbox</code>; your own declared state events become rows in your collections.
+  </p>
+  <div class="diagram-shell">
+    <div class="diagram-title">The state protocol: log → database</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+flowchart LR
+    subgraph log["Entity stream (append-only)"]
+      E1["{type:'inbox', key:'m1', …}"]
+      E2["{type:'run', key:'r1',<br/>value:{status:'started'}}"]
+      E3["{type:'state:debate', key:'current',<br/>op:'insert', value:{phase:'arguing'}}"]
+      E4["{type:'state:debate', key:'current',<br/>op:'update', value:{phase:'critiquing'}}"]
+    end
+    M["materializer<br/><small>apply in stream order,<br/>last-write-wins per key</small>"]
+    subgraph dbv["TanStack DB (typed, queryable, reactive)"]
+      C1["collections.inbox<br/><small>1 row</small>"]
+      C2["collections.runs<br/><small>1 row</small>"]
+      C3["collections.debate<br/><small>key 'current' →<br/>phase: 'critiquing'</small>"]
+    end
+    E1 --> M
+    E2 --> M
+    E3 --> M
+    E4 --> M
+    M --> C1
+    M --> C2
+    M --> C3
+    style M fill:var(--node-b),stroke:var(--accent-2)
+      </pre>
+    </div>
+  </div>
+  <p>Two kinds of collections:</p>
+  <ul>
+    <li><strong>Built-ins (20 of them, every entity):</strong> <code>runs</code>, <code>steps</code>, <code>texts</code>,
+      <code>textDeltas</code>, <code>toolCalls</code>, <code>reasoning</code>, <code>reasoningDeltas</code>,
+      <code>errors</code>, <code>inbox</code>, <code>wakes</code>, <code>signals</code>, <code>tags</code>,
+      <code>childStatus</code>, <code>entityCreated</code>, <code>entityStopped</code>, <code>slashCommands</code>,
+      <code>manifests</code>, <code>contextInserted</code>, <code>contextRemoved</code>, <code>replayWatermarks</code>.
+      These are the LLM loop and lifecycle, made queryable.</li>
+    <li><strong>Yours, declared per type:</strong> the <code>state:</code> block of the entity definition. Each entry
+      gets a schema (Zod / TypeBox / any Standard Schema), a primary key, and auto-generated writer actions —
+      <code>ctx.state.debate.insert / update / delete</code> — which don't mutate anything directly: they
+      <em>append change events to the stream</em>, which the materializer then applies. Reads and writes both go
+      through the log.</li>
+    </ul>
+  <p>
+    Because collections are TanStack DB, they're not just maps — they support <strong>live queries</strong> (joins,
+    filters, aggregates that update incrementally as events arrive), which is how UIs, observers, and parents watch an
+    entity in real time. <a href="qa.html#q3">Q&amp;A #3</a> examines why this layer exists instead of hand-rolled
+    event folding.
+  </p>
+</section>
+
+<section id="types">
+  <h2><span class="kicker-num">7</span>Entity types &amp; the registry</h2>
+  <p>
+    An <strong>entity type</strong> is the "class": a name plus a definition — description, <code>creationSchema</code>
+    (validated spawn args), <code>inboxSchemas</code> (validated message payloads by type), <code>state</code>
+    collections, permission grants, and the handler. You declare types in an <strong>EntityRegistry</strong> in your
+    app:
+  </p>
+  <pre><code>const registry = createEntityRegistry()
+registry.define('assistant', { description, state, handler })
+registry.define('judge',     { description, state, handler })
+
+const runtime = createRuntimeHandler({ baseUrl, serveEndpoint, registry })
+await runtime.registerTypes()   // ← tells the server these types exist, and where</code></pre>
+  <p>
+    <code>registerTypes()</code> uploads each type's metadata — including your app's <code>serveEndpoint</code>, the
+    webhook URL the server will POST wakes to. From that moment the server can mint instances of your types
+    (<code>PUT /_electric/entities/judge/debate-7</code>) and knows exactly which URL to hit when one needs to run.
+    The type is the <em>contract</em>; the server owns instances; your app owns behavior.
+  </p>
+</section>
+
+<section id="principal">
+  <h2><span class="kicker-num">8</span>Principal — who is acting</h2>
+  <p>
+    Every request into the system carries a <strong>principal</strong>: <code>&lt;kind&gt;:&lt;id&gt;</code> where kind
+    is <code>user</code>, <code>agent</code>, <code>service</code>, or <code>system</code> — e.g.
+    <code>user:alice</code>, or an agent entity acting as <code>agent:/judge/debate-7</code>. Principals are themselves
+    addressable as entities (<code>/principal/&lt;key&gt;</code>), and every permission — read, write, spawn, signal,
+    fork, schedule, manage — is granted <em>to</em> a principal (or a whole kind) <em>on</em> an entity or type.
+    Creators get full rights on what they create; everything else is explicit grants. The full model, including how
+    you plug in real authentication, is in <a href="qa.html#q5">Q&amp;A #5</a>.
+  </p>
+</section>
+
+<section id="runtime-server">
+  <h2><span class="kicker-num">9</span>The Runtime and the Server — two halves, one seam</h2>
+  <p>
+    The names are confusingly similar; the split is the most load-bearing fact in the architecture.
+  </p>
+  <div class="compare">
+    <div class="ve-card accent-a">
+      <div class="card-title"><span class="pill a">yours</span> @electric-ax/agents-runtime</div>
+      <div class="card-body">
+        <p><strong>A library inside your app.</strong> Ephemeral by design.</p>
+        <ul>
+          <li>Holds the <code>EntityRegistry</code> — your handlers</li>
+          <li>Receives wake webhooks at your <code>serveEndpoint</code></li>
+          <li>Materializes the entity's stream → <code>ctx</code></li>
+          <li>Runs your handler and its LLM loop</li>
+          <li>Appends resulting events back via the server</li>
+        </ul>
+        <p>Runs anywhere TypeScript runs: a Hono/Next/Express server, an edge function, a container. Holds
+        <strong>no durable state</strong>.</p>
+      </div>
+    </div>
+    <div class="ve-card accent-d">
+      <div class="card-title"><span class="pill d">infra</span> @electric-ax/agents-server</div>
+      <div class="card-body">
+        <p><strong>The always-on control plane.</strong> Durable by design.</p>
+        <ul>
+          <li>Stores/proxies all durable streams</li>
+          <li>Registry of entities, types, grants (Postgres)</li>
+          <li>Watches streams; evaluates wake conditions</li>
+          <li>Dispatches wakes: webhook push or runner pull</li>
+          <li>Enforces permissions, write tokens, tenancy</li>
+          <li>Serves the observability UI + live Electric sync</li>
+        </ul>
+        <p>One Docker container in dev (<code>electric-ax agents start</code>, port 4437); Electric Cloud or
+        self-hosted in prod.</p>
+      </div>
+    </div>
+  </div>
+  <p>
+    The seam between them is plain HTTP in both directions: your runtime calls the server's API (register types,
+    spawn, send, append, observe); the server calls your runtime's one webhook endpoint (wake). That narrow,
+    stateless seam is what makes the deployment story flexible — <a href="qa.html#q4">Q&amp;A #4</a> maps the
+    topologies.
+  </p>
+</section>
+
+<section id="lifecycle">
+  <h2><span class="kicker-num">10</span>The lifecycle, end to end</h2>
+  <p>All the nouns in motion — one user message to a judge entity with two child assistants:</p>
+  <div class="diagram-shell">
+    <div class="diagram-title">A wake, from append to sleep</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    participant U as User / UI
+    participant S as Agents server<br/>(streams + wake registry)
+    participant R as Your app<br/>(agents-runtime)
+    participant L as LLM API
+
+    U->>S: POST send → append inbox event to /judge/d7/main
+    S->>S: evaluate wake conditions → judge has pending work
+    S->>R: POST serveEndpoint (wake webhook: entity, streams, offsets, claim)
+    R->>S: GET /judge/d7/main?offset=… (catch up)
+    R->>R: materialize → collections · build ctx · run handler(ctx, wake)
+    R->>L: ctx.agent.run() — timeline → messages, stream completion
+    L-->>R: tokens, tool calls
+    R->>S: append run/text_delta/tool_call events (live)
+    S-->>U: UI tailing the stream renders tokens as they land
+    R->>S: ctx.spawn('assistant', …) ×2 (+ wake-on-runFinished registrations)
+    R->>S: wake callback: done → release claim, entity → idle
+    Note over S,R: …later: child finishes → its run event → server wakes judge again
+      </pre>
+    </div>
+  </div>
+</section>
+
+<section id="recap">
+  <h2><span class="kicker-num">§</span>Recap — the vocabulary card</h2>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Noun</th><th>Is</th><th>Lives in</th><th>Analogy</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Entity</strong></td><td>Addressable identity: URL + log + handler</td><td>Server registry + streams</td><td>A row that can act</td></tr>
+      <tr><td><strong>Stream</strong></td><td>Append-only event log over HTTP</td><td>Stream storage (LMDB/Redis/…)</td><td>Write-ahead log as API</td></tr>
+      <tr><td><strong>Wake</strong></td><td>"Something happened" + the event window</td><td>Delivered as a webhook / claim</td><td>Interrupt, not poll</td></tr>
+      <tr><td><strong>Handler</strong></td><td>Your <code>async (ctx, wake)</code> per type</td><td>Your app</td><td>Reducer with side effects</td></tr>
+      <tr><td><strong>Agent</strong></td><td>Opt-in LLM loop within a wake</td><td><code>ctx.useAgent / agent.run</code></td><td>Behavior, not identity</td></tr>
+      <tr><td><strong>Collection</strong></td><td>Typed materialized view of the stream</td><td>TanStack DB, rebuilt per wake</td><td>SELECT over the log</td></tr>
+      <tr><td><strong>Type / Registry</strong></td><td>Contract: schemas + handler + webhook URL</td><td>Defined in app, registered on server</td><td>Class vs. instances</td></tr>
+      <tr><td><strong>Principal</strong></td><td>Actor identity for every request</td><td><code>Electric-Principal</code> + grants</td><td>Subject in ACLs</td></tr>
+      <tr><td><strong>Runtime</strong></td><td>Library that hosts handlers</td><td>Your app (ephemeral)</td><td>The worker</td></tr>
+      <tr><td><strong>Server</strong></td><td>Streams + registry + wake dispatch</td><td>Infra (always on)</td><td>The kernel</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<div class="pager">
+  <a href="index.html"><span class="dir">Previous</span><span class="label">← Start Here</span></a>
+  <a class="next" href="streams.html"><span class="dir">Next</span><span class="label">Part 2 — Durable Streams →</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · Part 1 of 6 · sources: electric-sql/electric &amp; durable-streams packages
+</footer>
+
+</body>
+</html>

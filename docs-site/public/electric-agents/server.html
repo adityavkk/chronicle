@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 5 · Server Internals — Electric Agents, Explained</title>
+<meta name="description" content="Inside @electric-ax/agents-server: routers, the wake registry, dispatch policies, claims and leases, the Postgres/streams two-plane design, and multi-tenancy.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink" href="index.html">Start</a>
+  <a class="navlink" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink active" href="server.html">5 · Server Internals</a>
+  <a class="navlink" href="qa.html">6 · Q&amp;A</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">On this page</p>
+  <a href="#what">What it is</a>
+  <a href="#planes">The two data planes</a>
+  <a href="#surface">The HTTP surface</a>
+  <a href="#append">Life of an append</a>
+  <a href="#dispatch">Wake dispatch: push &amp; pull</a>
+  <a href="#claims">Claims, leases, exactly-once</a>
+  <a href="#outbox">The tag outbox</a>
+  <a href="#electric">The Electric proxy &amp; pg-sync</a>
+  <a href="#tenancy">Multi-tenancy &amp; scale-out</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">Part 5 of 6</p>
+  <h1>Inside the agent server</h1>
+  <p class="lead">
+    <code>@electric-ax/agents-server</code> ships its full TypeScript source in the npm package, so this part is
+    grounded in the actual modules (<code>src/server.ts</code>, <code>src/routing/*</code>, <code>src/wake-registry.ts</code>, …).
+    It is the always-on piece: one Node process that fronts the streams, owns the registry, and decides who wakes when.
+  </p>
+</header>
+
+<section id="what">
+  <h2><span class="kicker-num">1</span>What the server is (and isn't)</h2>
+  <p>
+    The server is the <strong>entity control plane</strong>. It is <em>not</em> where agent code runs — no LLM loop, no
+    handlers (except a mock chat agent for tests). Its responsibilities: store or proxy durable streams, validate and
+    authorize every read and write, project stream events into a queryable registry, evaluate wake conditions, dispatch
+    wakes to runtimes, run schedules, and serve the observability UI plus live sync.
+  </p>
+  <p>Bootstrap (<code>server.ts</code>, <code>entrypoint-lib.ts</code>): run Postgres migrations → start the runtime
+  workers (wake registry, scheduler, projector, outbox drainer, bridges) → serve HTTP on <code>:4437</code>. Streams
+  storage is either <strong>embedded</strong> (an LMDB-backed Durable Streams server with webhooks enabled — the dev
+  default) or an <strong>external</strong> Durable Streams server via <code>DURABLE_STREAMS_URL</code>.</p>
+  <div class="callout chronicle">
+    <div class="callout-title">🔗 Chronicle note</div>
+    <p>That <code>DURABLE_STREAMS_URL</code> seam is exactly where a protocol-conformant server like Chronicle sits:
+    the agents server treats the streams backend as a black box speaking the Durable Streams protocol — create, append,
+    read, subscriptions, producer semantics. (The one extension the dispatch pipeline leans on is the backend's
+    <em>subscription webhook</em> support — the <code>webhooks: true</code> flag in the embedded reference server —
+    which is how "stream has pending events" becomes a callback.)</p>
+  </div>
+</section>
+
+<section id="planes">
+  <h2><span class="kicker-num">2</span>The two data planes</h2>
+  <p>The most clarifying fact about the server: it manages <strong>two different kinds of truth</strong>.</p>
+  <div class="compare">
+    <div class="ve-card accent-c">
+      <div class="card-title"><span class="pill c">plane 1</span> Durable Streams — the event log</div>
+      <div class="card-body">
+        <p>Every entity event: inbox, runs, tokens, tool calls, state changes, tags. Append-only, replayable,
+        streamed to UIs and handlers. <strong>This is the source of truth for what happened.</strong></p>
+        <p>Backed by LMDB / files / any conformant server.</p>
+      </div>
+    </div>
+    <div class="ve-card accent-d">
+      <div class="card-title"><span class="pill d">plane 2</span> Postgres — the control-plane registry</div>
+      <div class="card-body">
+        <p>Queryable <em>current</em> state: <code>entities</code> (status, parent, tags), <code>entity_types</code>,
+        permission grants, runners, wake registrations, consumer claims, schedules, subscription webhooks, outboxes.
+        <strong>This is the source of truth for what exists and who may do what.</strong></p>
+        <p>Drizzle ORM; migrations on boot.</p>
+      </div>
+    </div>
+  </div>
+  <p>
+    The planes are stitched together in both directions. Stream events are <em>projected into</em> Postgres rows
+    (an <code>EntityProjector</code> keeps <code>entities.status</code> etc. current), and Postgres tables are
+    <em>streamed back out</em> via Electric sync — the server tails its own <code>wake_registrations</code> and
+    <code>entities</code> tables through Electric <code>ShapeStream</code>s to keep in-memory caches and membership
+    streams live. Postgres for queryable now; streams for replayable history; Electric to make the Postgres side
+    reactive too.
+  </p>
+</section>
+
+<section id="surface">
+  <h2><span class="kicker-num">3</span>The HTTP surface</h2>
+  <p>
+    Routing is layered (itty-router): an OSS wrapper (UI, mock agent) → a <strong>global router</strong> → either the
+    <strong>internal control plane</strong> (<code>/_electric/*</code>) or the <strong>Durable Streams catch-all</strong>
+    (every other path is a stream). Per-request middleware builds a <code>TenantContext</code> (principal, managers,
+    stream client, signer) — request handling itself is stateless.
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Router (src/routing/)</th><th>Mount</th><th>Owns</th></tr></thead>
+    <tbody>
+      <tr><td><code>entities-router</code></td><td><code>/_electric/entities</code></td><td>Spawn (<code>PUT /:type/:id</code>), get/list/kill, <code>send</code> (immediate/queued/steer, <code>afterMs</code>), <code>signal</code>, collection writes, attachments (multipart), <code>fork</code>, tags, schedules (cron / future_send), webhook-source subscriptions, permission grants. Every route gated by per-permission checks.</td></tr>
+      <tr><td><code>entity-types-router</code></td><td><code>/_electric/entity-types</code></td><td>Type registration (incl. serve-endpoint discovery: the server PUTs your endpoint and reads back a manifest), schema amendment, type-level spawn/manage grants.</td></tr>
+      <tr><td><code>runners-router</code></td><td><code>/_electric/runners</code></td><td>Pull-model workers: register (gets a wake stream), heartbeat (liveness lease), claim (long-poll for work), enable/disable, health.</td></tr>
+      <tr><td><code>internal-router</code></td><td><code>/_electric</code></td><td>Health, wake register/unregister, <strong><code>subscription-webhooks/:id</code></strong> (streams backend → server: "stream has pending events"), <strong><code>wake-callbacks/:consumerId</code></strong> (runtime → server: claim / heartbeat / ack / done).</td></tr>
+      <tr><td><code>observations-router</code></td><td><code>/_electric/observations</code></td><td>Ensure membership streams for tag sets and cron tick streams.</td></tr>
+      <tr><td><code>pg-sync-router</code></td><td><code>/_electric/pg-sync</code></td><td>Register external Postgres tables as observable sources.</td></tr>
+      <tr><td><code>electric-proxy-router</code></td><td><code>/_electric/electric</code></td><td>Scoped proxy to Electric's shape API (§8).</td></tr>
+      <tr><td><code>durable-streams-router</code> + <code>stream-append</code></td><td><code>*</code></td><td>The streams plane: authorized reads (long-poll/SSE pass-through), authorized+validated appends, subscription control (<code>/__ds/*</code>), JWKS.</td></tr>
+      <tr><td><code>agent-ui-router</code></td><td><code>/__agent_ui</code></td><td>The bundled observability SPA.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="append">
+  <h2><span class="kicker-num">4</span>Life of an append — where everything meets</h2>
+  <p>
+    The densest code path is <code>POST</code> to an entity stream (<code>routing/stream-append.ts</code>). Every write
+    to an entity's log — from a runtime mid-wake, a UI sending a message via collection write, anything — passes
+    through:
+  </p>
+  <ol class="flow-steps">
+    <li><strong>Resolve &amp; guard.</strong> Map the stream path to its entity; reject if stopped or fork-locked.</li>
+    <li><strong>Authenticate the writer.</strong> Validate the <strong>write token</strong>
+      (<code>electric-claim-token</code>) — minted when a wake was claimed or an entity spawned, released on
+      <code>done</code>. Only the current claim holder may write. This is how "one active wake at a time" is enforced
+      at the data layer, not by convention.</li>
+    <li><strong>Validate the event.</strong> Against the entity type's schemas (inbox types, state collections,
+      <code>externallyWritable</code> allow-lists).</li>
+    <li><strong>Forward to the backend</strong>, tenant-prefixing the path (<code>tenant-stream-paths.ts</code>).</li>
+    <li><strong>Evaluate consequences.</strong> <code>evaluateWakePayload</code> — does this event match anyone's wake
+      registration? <code>checkRunFinished</code> — did a run just complete (parents with <code>runFinished</code>
+      wakes care)? Sync any manifest-declared wakes, sources, and schedules the event implies.</li>
+  </ol>
+  <p>Step 5 is the heart of the reactive machinery: <strong>appends are what cause wakes</strong>.</p>
+</section>
+
+<section id="dispatch">
+  <h2><span class="kicker-num">5</span>Wake dispatch: one abstraction, push and pull</h2>
+  <p>
+    The <code>WakeRegistry</code> (<code>wake-registry.ts</code>) holds every wake registration (conditions:
+    <code>runFinished</code> or <code>{on:'change', collections, ops}</code>, plus <code>debounceMs</code> /
+    <code>timeoutMs</code> / <code>oneShot</code>) in Postgres, mirrored in memory and kept live across nodes via an
+    Electric shape on the table itself. When an event matches, the entity has pending work — and its
+    <strong>dispatch policy</strong> decides how compute finds out. Exactly one target, two kinds:
+  </p>
+  <div class="compare">
+    <div class="ve-card accent-b">
+      <div class="card-title">Webhook target — push</div>
+      <div class="card-body">
+        <p><code>{ type: 'webhook', url }</code> — derived automatically from the type's <code>serveEndpoint</code>.
+        The entity's main stream joins a streams-backend subscription whose callback is
+        <code>/_electric/subscription-webhooks/:id</code>; on pending events the server marks the entity
+        <code>running</code>, enriches the notification (entity, streams+offsets, claim, principal), signs it, and
+        POSTs it to your app.</p>
+        <p><strong>Fits:</strong> serverless / scale-to-zero. Compute exists only while handling.</p>
+      </div>
+    </div>
+    <div class="ve-card accent-a">
+      <div class="card-title">Runner target — pull</div>
+      <div class="card-body">
+        <p><code>{ type: 'runner', runnerId }</code> — the entity's stream joins a <em>pull-wake</em> subscription tied
+        to the runner's own wake stream. A registered runner long-polls <code>POST /runners/:id/claim</code>, receives
+        the same notification shape, heartbeats a liveness lease while working.</p>
+        <p><strong>Fits:</strong> long-lived workers, private networks where the server can't reach in, the built-in
+        Horton/worker agents, sandboxed fleets.</p>
+      </div>
+    </div>
+  </div>
+  <p>
+    Policy resolution: explicit per-entity → inherited from parent → the type's default. Both models converge on the
+    same notification and the same callback protocol, so a handler never knows which way it was delivered.
+  </p>
+</section>
+
+<section id="claims">
+  <h2><span class="kicker-num">6</span>Claims, leases, and at-least-once made safe</h2>
+  <p>Delivery is at-least-once end to end; three mechanisms make that safe:</p>
+  <ul>
+    <li><strong>Claims serialize execution.</strong> <code>consumer_claims</code> +
+      <code>entity_dispatch_state</code> (active consumer, epoch, outstanding wake, pending source streams) ensure one
+      active wake per entity; competing claims get benign 409s. Claims carry lease expiries; a dispatch-recovery loop
+      reclaims stale ones, and epochs fence zombies — a <code>done</code> from a superseded consumer can't clobber a
+      newer claim's state.</li>
+    <li><strong>Write tokens scope mutation.</strong> Only the claim holder can append (§4), so a timed-out handler
+      that limps back to life can't corrupt the log after its successor started.</li>
+    <li><strong>Idempotency everywhere.</strong> Stream appends ride idempotent producers; control-plane upserts are
+      <code>onConflictDoNothing/Update</code>; wake notifications track
+      <code>delivery_status (queued/delivered/failed/superseded)</code> and <code>claim_status</code>. Re-delivery is
+      an expected event, not an error path — which is also why <em>your handlers</em> must be re-entrant
+      (Part 3 §3).</li>
+  </ul>
+</section>
+
+<section id="outbox">
+  <h2><span class="kicker-num">7</span>Case study: the tag outbox</h2>
+  <p>
+    A small module that teaches the server's whole philosophy. Entity tags live in Postgres (queryable) <em>and</em>
+    on the entity's stream (replayable, observable). Updating both atomically across two systems is the classic
+    dual-write problem — solved the classic way, a <strong>transactional outbox</strong>
+    (<code>tag-stream-outbox-drainer.ts</code>): the tag mutation and an outbox row commit in one Postgres transaction;
+    a drainer polls every 500ms, claims rows with a worker lease, and appends each as a tag change event to the
+    entity's main stream. Each row gets its own producer identity (<code>tag-outbox-&lt;rowId&gt;</code>, epoch 0,
+    seq 0), so retries dedupe into exactly-once appends; ten failures dead-letters the row.
+  </p>
+  <p>
+    Pattern to notice: <strong>Postgres transactions where atomicity is needed, streams as the fan-out, idempotent
+    producers as the bridge.</strong> The wake pipeline, the scheduler (cron ticks deduped by unique constraint,
+    claim-based firing), and the bridges all rhyme with it.
+  </p>
+</section>
+
+<section id="electric">
+  <h2><span class="kicker-num">8</span>The Electric proxy and pg-sync — where "Electric" earns the name</h2>
+  <p>Two features close the loop with ElectricSQL's Postgres sync engine:</p>
+  <ul>
+    <li><strong>The Electric proxy</strong> (<code>electric-proxy-router.ts</code>): UIs need live <em>lists</em> —
+      "all entities of type judge that I can see", updating as things spawn and die. That's a Postgres query, synced.
+      The proxy forwards <code>GET /_electric/electric/v1/shape</code> to Electric, but rewrites it defensively: one
+      table per request from an allow-list, fixed column lists, client <code>where</code> clauses checked for SQL
+      breakout, and an enforced scoping clause ANDed in — tenant + the requesting principal's readable-entities filter
+      derived from the grants tables. Row-level security applied at the proxy, so the browser can hold a live,
+      permission-correct view of the registry.</li>
+    <li><strong>pg-sync</strong> (<code>pg-sync-router.ts</code>, bridge manager): the reverse — register any external
+      Postgres table (URL, table, columns, where) as an observation source. The bridge tails it via an Electric shape
+      and re-publishes changes into a durable stream entities can <code>observe(pgSync(…))</code>. Your production
+      database becomes a wake source: "wake me when a row lands in <code>orders</code>."</li>
+  </ul>
+</section>
+
+<section id="tenancy">
+  <h2><span class="kicker-num">9</span>Multi-tenancy, scale-out, production posture</h2>
+  <ul>
+    <li><strong>Tenancy</strong>: every Postgres table is keyed by <code>tenant_id</code>; every backend stream path is
+      tenant-prefixed at the proxy boundary. One standalone server = one tenant; the embeddable <code>AgentsHost</code>
+      runs many tenants in one process with shared background workers — the shape of Electric Cloud's hosted offering.</li>
+    <li><strong>Scale-out</strong>: server nodes are stateless per request; Postgres is the coordination point (claims,
+      leases, unique constraints), the streams backend is shared, and in-memory caches stay coherent by subscribing to
+      their own tables via Electric shapes. Schedulers and drainers use claim columns + instance IDs so N nodes don't
+      double-fire.</li>
+    <li><strong>Production auth posture</strong>: the <code>Electric-Principal</code> header is trusted input — the
+      server expects an <code>authenticateRequest</code> hook (verify the JWT/session, return the principal) and an
+      optional <code>authorizeRequest</code> policy hook (external ABAC, cached with expiry) to be wired in, or a
+      gateway in front. Dev fallback (<code>system:dev-local</code>) only engages when insecure/dev conditions hold.
+      Outbound webhooks are Ed25519-signed; inbound streams-backend webhooks are verified against JWKS.
+      More in <a href="qa.html#q5">Q&amp;A #5</a>.</li>
+  </ul>
+  <div class="diagram-shell">
+    <div class="diagram-title">Server internals — the moving parts</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+flowchart TD
+    subgraph node["Agents server node (stateless per request)"]
+      GR["global router<br/><small>principal · tenant ctx · CORS · otel</small>"]
+      IR["internal router<br/><small>/_electric/*</small>"]
+      DSR["streams router + append pipeline<br/><small>write tokens · schema validation</small>"]
+      WRg["WakeRegistry<br/><small>conditions, debounce, timeouts</small>"]
+      SCH["Scheduler<br/><small>cron + future sends</small>"]
+      OBX["Tag outbox drainer"]
+      PRJ["EntityProjector +<br/>bridges (entities, pg-sync)"]
+    end
+    PG[("Postgres<br/><small>registry · grants · claims ·<br/>wake registrations · schedules</small>")]
+    DS[("Durable Streams backend<br/><small>embedded LMDB or external<br/>(Chronicle-shaped)</small>")]
+    EL["Electric sync<br/><small>shapes over Postgres</small>"]
+    APP["Your runtime(s)<br/><small>webhook push</small>"]
+    RUN["Runners<br/><small>claim pull</small>"]
+
+    GR --> IR
+    GR --> DSR
+    DSR -->|"append"| DS
+    DSR -->|"evaluate"| WRg
+    WRg -->|"dispatch"| APP
+    RUN -->|"long-poll claim"| IR
+    WRg --> PG
+    SCH --> PG
+    OBX --> PG
+    OBX -->|"idempotent append"| DS
+    PRJ --> PG
+    EL --> PG
+    WRg -.->|"shape: wake_registrations"| EL
+    PRJ -.->|"shape: entities"| EL
+    style DS fill:var(--node-c),stroke:var(--accent-3)
+    style PG fill:var(--node-d),stroke:var(--accent-4)
+      </pre>
+    </div>
+  </div>
+</section>
+
+<div class="pager">
+  <a href="runtime.html"><span class="dir">Previous</span><span class="label">← Part 4 — Runtime Internals</span></a>
+  <a class="next" href="qa.html"><span class="dir">Next</span><span class="label">Part 6 — Your Questions, Answered →</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · Part 5 of 6 · source: @electric-ax/agents-server src/ (ships in the npm package)
+</footer>
+
+</body>
+</html>
