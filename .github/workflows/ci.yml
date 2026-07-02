@@ -339,3 +339,27 @@ jobs:
           key: tla2tools-v1.7.4
       - name: Ownership + 1-slot layering proof + liveness (fast subset; the heavy 2x2 runs in formal-nightly)
         run: make tlc38-fast
+
+  # dsui front-end gate (issue #96): typecheck + biome + vitest for ui/. dsui
+  # ships to users, is a first-class control-plane client (claim/ack/release,
+  # webhook callback), and had no CI coverage — so a dsui change, or a server
+  # change that shifts a response shape dsui parses, could regress unnoticed.
+  # Runs on every PR (not path-filtered) precisely because of that server<->client
+  # wire coupling.
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+      - name: Lint (biome)
+        run: npm run lint
+      - name: Unit tests (vitest)
+        run: npm test
