@@ -136,10 +136,15 @@ type CallbackRequest struct {
 	Done       *bool  `json:"done"`
 }
 
-// AckResponse is the success body for a callback or ack (PROTOCOL §7.1).
+// AckResponse is the success body for a callback or ack (PROTOCOL §7.1). Token is
+// the in-band refreshed callback token (issue #77): it is set ONLY when a
+// successful callback re-mints a near-expiry token, and `omitempty` keeps the
+// no-refresh response byte-identical to {ok,next_wake} — the shape the conformance
+// suite deep-equals.
 type AckResponse struct {
-	OK       bool `json:"ok"`
-	NextWake bool `json:"next_wake"`
+	OK       bool   `json:"ok"`
+	NextWake bool   `json:"next_wake"`
+	Token    string `json:"token,omitempty"`
 }
 
 // ClaimRequest is the pull-wake claim body (PROTOCOL §7.2).
@@ -184,9 +189,13 @@ func NewWakeEvent(subID, stream string, generation int64, now time.Time) ([]byte
 	})
 }
 
-// ErrorBody is the standard error envelope (PROTOCOL §6.2, §7).
+// ErrorBody is the standard error envelope (PROTOCOL §6.2, §7). Token carries a
+// freshly minted token alongside a TOKEN_EXPIRED 401 (issue #77) so a worker whose
+// callback/claim token lapsed can retry immediately rather than stall a lease
+// window; `omitempty` keeps every other error body byte-identical to before.
 type ErrorBody struct {
 	Error ErrorDetail `json:"error"`
+	Token string      `json:"token,omitempty"`
 }
 
 // ErrorDetail carries the error code plus the optional fields used by specific

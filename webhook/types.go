@@ -173,4 +173,9 @@ const (
 	ErrCodeNotFound           = "NOT_FOUND"
 	ErrCodeTokenInvalid       = "TOKEN_INVALID"
 	ErrCodeSubscriptionGone   = "SUBSCRIPTION_GONE"
+	// ErrCodeTokenExpired is a distinct 401 for a token that is ours and
+	// well-formed but past expiry (issue #77): unlike TOKEN_INVALID it is retryable,
+	// and its response body carries a freshly minted token so a heartbeating
+	// pull-wake worker can retry at once instead of stalling a lease window.
+	ErrCodeTokenExpired = "TOKEN_EXPIRED"
 )
