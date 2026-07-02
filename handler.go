@@ -770,10 +770,6 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 		return err
 	}
 
-	// Wake subscribers off the durable append (best-effort; the recovery sweep
-	// is the backstop if this is lost to a crash).
-	h.onStreamAppend(path)
-
 	w.Header().Set(protocol.HeaderStreamNextOffset, result.Offset.String())
 
 	// Include Stream-Closed header if stream was closed
@@ -793,6 +789,12 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 		w.WriteHeader(http.StatusNoContent)
 		return nil
 	}
+
+	// Wake subscribers off the durable append (best-effort; the recovery sweep
+	// is the backstop if this is lost to a crash). This fires only for a
+	// genuinely new append — a deduplicated producer retry wrote no new data,
+	// so waking subscribers for it would be spurious.
+	h.onStreamAppend(path)
 
 	// For non-producer appends, return 204 No Content
 	// For producer appends (new writes), return 200 OK to distinguish from duplicates
