@@ -645,6 +645,15 @@ export interface SubscriptionResult<T> {
 	readonly value: T | null;
 	/** True when the op was rejected by fencing (409 FENCED / ALREADY_CLAIMED). */
 	readonly fenced: boolean;
+	/** True when the subscription no longer exists (410 SUBSCRIPTION_GONE) — terminal. */
+	readonly gone: boolean;
+	/**
+	 * A fresh token the server rolled, when present: the `token` field of a 2xx
+	 * ack/callback body (near-expiry rotation) or the retry token returned with a
+	 * 401 TOKEN_EXPIRED. Null when the server sent none. The store adopts it so
+	 * subsequent heartbeats/acks/release use the current token instead of locking out.
+	 */
+	readonly refreshedToken: string | null;
 	/** The wire error code from an {"error":{"code":…}} body, when present. */
 	readonly errorCode: string | null;
 	/** A short human error, present when ok is false. */
