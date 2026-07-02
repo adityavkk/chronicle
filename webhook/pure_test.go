@@ -464,3 +464,25 @@ func TestMergeAcksForwardOnly(t *testing.T) {
 		t.Error("forward ack must advance the cursor")
 	}
 }
+
+func TestStreamRootURLNormalization(t *testing.T) {
+	// A misconfigured --stream-root must never leak a malformed URL like
+	// ".../v1/stream__ds/jwks.json" to an external webhook receiver (issue #78):
+	// callbackURL and JWKSURL must join to exactly one slash for a base with a
+	// missing, single, or doubled trailing slash.
+	const wantCallback = "http://h/v1/stream/__ds/subscriptions/sub-1/callback"
+	const wantJWKS = "http://h/v1/stream/__ds/jwks.json"
+	for _, base := range []string{
+		"http://h/v1/stream",   // missing trailing slash
+		"http://h/v1/stream/",  // single trailing slash
+		"http://h/v1/stream//", // doubled trailing slash
+	} {
+		m := &Manager{streamRootURL: normalizeStreamRootURL(base)}
+		if got := m.callbackURL("sub-1"); got != wantCallback {
+			t.Errorf("callbackURL for base %q = %q, want %q", base, got, wantCallback)
+		}
+		if got := m.JWKSURL(); got != wantJWKS {
+			t.Errorf("JWKSURL for base %q = %q, want %q", base, got, wantJWKS)
+		}
+	}
+}
