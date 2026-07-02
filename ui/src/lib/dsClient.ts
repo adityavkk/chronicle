@@ -22,6 +22,7 @@ import {
 	buildCreateBody,
 	parseAckResult,
 	parseErrorCode,
+	parseRefreshedToken,
 	parseSubscription,
 	parseWakeClaim,
 } from "./subscriptions";
@@ -507,6 +508,8 @@ export function createClient(connection: Connection): DsClient {
 				ok: false,
 				value: null,
 				fenced: false,
+				gone: false,
+				refreshedToken: null,
 				errorCode: null,
 				error: exchange.error ?? "network request failed",
 				operation,
@@ -515,25 +518,39 @@ export function createClient(connection: Connection): DsClient {
 		}
 		const text = await safeText(response);
 		if (response.ok) {
+			// A 2xx ack/callback body may carry a rolled `token` (near-expiry
+			// rotation); surface it so the store can adopt it for later calls.
 			return {
 				ok: true,
 				value: parse(text),
 				fenced: false,
+				gone: false,
+				refreshedToken: parseRefreshedToken(jsonOrNull(text)),
 				errorCode: null,
 				error: null,
 				operation,
 				exchange,
 			};
 		}
-		const errorCode = parseErrorCode(jsonOrNull(text));
+		const errorBody = jsonOrNull(text);
+		const errorCode = parseErrorCode(errorBody);
 		// A 409 with FENCED (ack/release/callback) or ALREADY_CLAIMED (claim) is the
 		// protocol's fencing signal; surface it typed rather than as a flat failure.
 		const fenced =
 			response.status === 409 && (errorCode === "FENCED" || errorCode === "ALREADY_CLAIMED");
+		// A 410 SUBSCRIPTION_GONE is terminal (the subscription was deleted).
+		const gone = response.status === 410 && errorCode === "SUBSCRIPTION_GONE";
+		// A 401 TOKEN_EXPIRED returns a fresh token to retry with; adopt it upstream.
+		const refreshedToken =
+			response.status === 401 && errorCode === "TOKEN_EXPIRED"
+				? parseRefreshedToken(errorBody)
+				: null;
 		return {
 			ok: false,
 			value: null,
 			fenced,
+			gone,
+			refreshedToken,
 			errorCode,
 			error: writeErrorLabel(response.status, response.statusText),
 			operation,

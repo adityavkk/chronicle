@@ -4,6 +4,7 @@ import {
 	buildCreateBody,
 	parseAckResult,
 	parseErrorCode,
+	parseRefreshedToken,
 	parseStreamLink,
 	parseSubscription,
 	parseWakeClaim,
@@ -182,6 +183,29 @@ describe("parseAckResult", () => {
 	it("defaults a non-object / missing fields safely", () => {
 		expect(parseAckResult(null)).toEqual({ ok: true, nextWake: false });
 		expect(parseAckResult({})).toEqual({ ok: true, nextWake: false });
+	});
+
+	it("ignores a refreshed token on the body (surfaced via SubscriptionResult, not AckResult)", () => {
+		// The common ack response yields exactly {ok, nextWake}; the token channel
+		// is SubscriptionResult.refreshedToken, kept separate from AckResult.
+		expect(parseAckResult({ ok: true, next_wake: false, token: "fresh" })).toEqual({
+			ok: true,
+			nextWake: false,
+		});
+	});
+});
+
+describe("parseRefreshedToken", () => {
+	it("reads a rolled token from a 2xx ack/callback body or a 401 error body", () => {
+		expect(parseRefreshedToken({ ok: true, next_wake: false, token: "fresh" })).toBe("fresh");
+		expect(parseRefreshedToken({ error: { code: "TOKEN_EXPIRED" }, token: "retry" })).toBe("retry");
+	});
+
+	it("returns null when no token is present", () => {
+		expect(parseRefreshedToken({ ok: true, next_wake: true })).toBeNull();
+		expect(parseRefreshedToken({ token: "" })).toBeNull();
+		expect(parseRefreshedToken(null)).toBeNull();
+		expect(parseRefreshedToken("nope")).toBeNull();
 	});
 });
 

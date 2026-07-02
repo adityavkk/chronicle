@@ -937,6 +937,79 @@ describe("claimWake / ackWake / releaseWake", () => {
 		expect(result.errorCode).toBe("FENCED");
 	});
 
+	it("captures a rolled token from a 2xx ack body (refreshedToken), value still {ok,nextWake}", async () => {
+		stubFetch({
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ ok: true, next_wake: false, token: "fresh-tok" }),
+		});
+		const result = await createClient(CONN).ackWake(
+			"s",
+			"tok",
+			{ wakeId: "w", generation: 1, acks: [], done: false },
+			undefined,
+		);
+		expect(result.ok).toBe(true);
+		expect(result.refreshedToken).toBe("fresh-tok");
+		expect(result.gone).toBe(false);
+		expect(result.value).toEqual({ ok: true, nextWake: false });
+	});
+
+	it("leaves refreshedToken null for the common non-refresh ack", async () => {
+		stubFetch({
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ ok: true, next_wake: false }),
+		});
+		const result = await createClient(CONN).ackWake(
+			"s",
+			"tok",
+			{ wakeId: "w", generation: 1, acks: [], done: false },
+			undefined,
+		);
+		expect(result.ok).toBe(true);
+		expect(result.refreshedToken).toBeNull();
+	});
+
+	it("surfaces the retry token on a 401 TOKEN_EXPIRED ack", async () => {
+		stubFetch({
+			status: 401,
+			statusText: "Unauthorized",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ error: { code: "TOKEN_EXPIRED" }, token: "retry-tok" }),
+		});
+		const result = await createClient(CONN).ackWake(
+			"s",
+			"stale",
+			{ wakeId: "w", generation: 1, acks: [] },
+			undefined,
+		);
+		expect(result.ok).toBe(false);
+		expect(result.fenced).toBe(false);
+		expect(result.gone).toBe(false);
+		expect(result.errorCode).toBe("TOKEN_EXPIRED");
+		expect(result.refreshedToken).toBe("retry-tok");
+	});
+
+	it("sets gone on a 410 SUBSCRIPTION_GONE ack", async () => {
+		stubFetch({
+			status: 410,
+			statusText: "Gone",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ error: { code: "SUBSCRIPTION_GONE" } }),
+		});
+		const result = await createClient(CONN).ackWake(
+			"s",
+			"tok",
+			{ wakeId: "w", generation: 1, acks: [] },
+			undefined,
+		);
+		expect(result.ok).toBe(false);
+		expect(result.gone).toBe(true);
+		expect(result.errorCode).toBe("SUBSCRIPTION_GONE");
+		expect(result.refreshedToken).toBeNull();
+	});
+
 	it("releases with the Bearer token on 204", async () => {
 		const fetchFn = stubFetch({ status: 204 });
 		const result = await createClient(CONN).releaseWake(

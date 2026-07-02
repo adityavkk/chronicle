@@ -8,8 +8,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Connection, Toast } from "../lib/types";
+import type { Connection, Toast, WakeClaim } from "../lib/types";
 import {
+	ackWake,
+	activeClaim,
 	activeConnectionId,
 	appendMessages,
 	closeStream,
@@ -21,10 +23,12 @@ import {
 	forkStream,
 	producerSeqHint,
 	protocolOpen,
+	releaseWake,
 	selectStream,
 	selectedStreamPath,
 	setComposerOpen,
 	streams,
+	subscriptionIds,
 	toasts,
 } from "./store";
 
@@ -260,5 +264,122 @@ describe("auto-open the composer on empty / new streams", () => {
 		setComposerOpen(false);
 		expect(composerOpen.value).toBe(false);
 		expect(composerOpenPref.value).toBe(false);
+	});
+});
+
+/* ----------------------------------------------------------------------------
+ * Pull-wake worker: in-band token refresh + 410 SUBSCRIPTION_GONE (#89, #90)
+ *
+ * The server may roll a fresh token on a 2xx ack (near-expiry rotation) or hand
+ * one back with a 401 TOKEN_EXPIRED; a deleted subscription answers 410
+ * SUBSCRIPTION_GONE. The worker must ADOPT the fresh token (so later
+ * heartbeats/release use it), RETRY the ack once on TOKEN_EXPIRED, and treat
+ * GONE as terminal — never lock itself out or fail opaquely.
+ * ------------------------------------------------------------------------- */
+describe("pull-wake worker token refresh + gone handling", () => {
+	const SUB = "orders-pull";
+
+	function claim(token: string): WakeClaim {
+		return { wakeId: "w1", generation: 3, token, streams: [], leaseTtlMs: 30_000 };
+	}
+
+	function ackCalls(fn: ReturnType<typeof vi.fn>): unknown[][] {
+		return fn.mock.calls.filter((c) => String(c[0]).endsWith("/ack"));
+	}
+
+	beforeEach(() => {
+		activeClaim.value = null;
+		subscriptionIds.value = [];
+	});
+
+	afterEach(() => {
+		activeClaim.value = null;
+		subscriptionIds.value = [];
+	});
+
+	it("adopts a rolled token from a 2xx heartbeat so later calls use the fresh one", async () => {
+		activeClaim.value = claim("tok-old");
+		stubFetch(
+			{
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ ok: true, next_wake: false, token: "tok-fresh" }),
+			},
+			{ status: 200 }, // the getSubscription refresh that follows a successful ack
+		);
+		const ok = await ackWake(SUB, [], false);
+		expect(ok).toBe(true);
+		expect(activeClaim.value?.token).toBe("tok-fresh");
+	});
+
+	it("leaves the token untouched for the common non-refresh heartbeat", async () => {
+		activeClaim.value = claim("tok-old");
+		stubFetch(
+			{
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ ok: true, next_wake: false }),
+			},
+			{ status: 200 },
+		);
+		await ackWake(SUB, [], false);
+		expect(activeClaim.value?.token).toBe("tok-old");
+	});
+
+	it("adopts the retry token on a 401 TOKEN_EXPIRED and retries the ack once", async () => {
+		activeClaim.value = claim("tok-stale");
+		const fetchMock = stubFetch(
+			{
+				status: 401,
+				statusText: "Unauthorized",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ error: { code: "TOKEN_EXPIRED" }, token: "tok-retry" }),
+			},
+			{
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ ok: true, next_wake: false }),
+			},
+			{ status: 200 }, // getSubscription refresh
+		);
+		const ok = await ackWake(SUB, [], false);
+		expect(ok).toBe(true);
+		const acks = ackCalls(fetchMock);
+		expect(acks).toHaveLength(2);
+		const retryInit = acks[1]?.[1] as RequestInit;
+		expect((retryInit.headers as Record<string, string>).Authorization).toBe("Bearer tok-retry");
+		expect(activeClaim.value?.token).toBe("tok-retry");
+	});
+
+	it("treats a 410 SUBSCRIPTION_GONE as terminal: stops the worker + forgets the id", async () => {
+		activeClaim.value = claim("tok");
+		subscriptionIds.value = [SUB];
+		stubFetch({
+			status: 410,
+			statusText: "Gone",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ error: { code: "SUBSCRIPTION_GONE" } }),
+		});
+		const ok = await ackWake(SUB, [{ stream: "events/a", offset: "o" }], true);
+		expect(ok).toBe(false);
+		expect(activeClaim.value).toBeNull();
+		expect(subscriptionIds.value).not.toContain(SUB);
+		expect(lastToast()?.kind).toBe("error");
+		expect(lastToast()?.title).toBe("Subscription gone");
+	});
+
+	it("keeps the existing 409 FENCED behavior (clears the claim, warns) unchanged", async () => {
+		activeClaim.value = claim("tok");
+		stubFetch({
+			status: 409,
+			statusText: "Conflict",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ error: { code: "FENCED" } }),
+		});
+		const ok = await releaseWake(SUB);
+		expect(ok).toBe(false);
+		expect(activeClaim.value).toBeNull();
+		expect(lastToast()?.kind).toBe("warning");
+		expect(lastToast()?.title).toBe("Fenced (409)");
 	});
 });
