@@ -247,6 +247,18 @@ export function parseErrorCode(raw: unknown): string | null {
 	return isNonEmptyString(err.code) ? err.code : null;
 }
 
+/**
+ * Extract a refreshed Bearer token from an ack/callback response body, or null
+ * when absent. The server puts a rolled token at the top-level `token` field of
+ * a 2xx ack/callback body (near-expiry rotation) and alongside a 401
+ * TOKEN_EXPIRED error envelope (a fresh token to retry with). Tolerant of any
+ * other shape, like the sibling guards.
+ */
+export function parseRefreshedToken(raw: unknown): string | null {
+	if (!isRecord(raw)) return null;
+	return isNonEmptyString(raw.token) ? raw.token : null;
+}
+
 /* ----------------------------------------------------------------------------
  * Outbound body builders (request shapes the client + curl preview send)
  * ------------------------------------------------------------------------- */
