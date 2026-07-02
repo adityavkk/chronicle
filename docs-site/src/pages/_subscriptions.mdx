@@ -199,6 +199,36 @@ import Step from "../components/Step.astro";
   {"error":{"code":"FENCED"}}
   ```
 
+  Not every rejection is a fence. A callback, ack, or release can also fail these
+  ways, each with a distinct code so a client can tell a stale replay from a bad
+  request, an aged-out token, or a subscription that no longer exists:
+
+  <Table>
+    | Status | Code | When |
+    | --- | --- | --- |
+    | `400` | `INVALID_REQUEST` | the body is missing `generation` or `wake_id` (an explicit `0`/`""` is not missing — it reaches the fence and loses as `409`) |
+    | `401` | `TOKEN_EXPIRED` | the Bearer token has expired — the response body carries a **fresh** token; retry with it |
+    | `409` | `FENCED` | the token/request `generation` or `wake_id` no longer matches (the fence above) |
+    | `409` | `ALREADY_CLAIMED` | a pull-wake `claim` while the lease is already held |
+    | `410` | `SUBSCRIPTION_GONE` | the subscription was deleted |
+  </Table>
+
+  A long-lived worker never has to re-claim just because its token aged out. On a
+  successful ack whose token is within the refresh window the server **rolls the
+  token forward in-band**, returning it as an optional `token` on the `{"ok":…}`
+  body — adopt it for the next call. If a token does expire first, the
+  `401 TOKEN_EXPIRED` body carries a fresh one, so the worker recovers on the spot
+  instead of stalling until its lease lapses.
+
+  ```http title="A refreshing ack returns the next token; an expired one hands back a fresh token"
+  HTTP/1.1 200 OK
+  {"ok":true,"next_wake":false,"token":"eyJ...new"}
+
+  ← when the presented token had already expired:
+  HTTP/1.1 401 Unauthorized
+  {"error":{"code":"TOKEN_EXPIRED"},"token":"eyJ...fresh"}
+  ```
+
   <Diagram
     name="seq-sub-fence"
     label="Fence: the replay loses"
