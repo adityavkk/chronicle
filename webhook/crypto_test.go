@@ -86,6 +86,61 @@ func TestTokenRoundTrip(t *testing.T) {
 	}
 }
 
+// TestTokenExpiredBoundary pins the pure expiry predicate to ValidateToken's
+// boundary: valid while now <= exp, expired once now > exp (issue #77).
+func TestTokenExpiredBoundary(t *testing.T) {
+	const exp = 1000
+	cases := []struct {
+		name string
+		now  int64
+		want bool
+	}{
+		{"well before", 500, false},
+		{"one before", 999, false},
+		{"exactly at exp", 1000, false},
+		{"one after", 1001, true},
+		{"long after", 5000, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := TokenExpired(exp, tc.now); got != tc.want {
+				t.Fatalf("TokenExpired(%d, %d) = %v, want %v", exp, tc.now, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestShouldRefreshToken table-tests the pure in-band refresh decision (issue
+// #77): refresh a still-valid token only when it is within the threshold of
+// expiry; never refresh a comfortably-valid or an already-expired token.
+func TestShouldRefreshToken(t *testing.T) {
+	const (
+		exp       = 10_000
+		threshold = 300 * time.Second
+	)
+	cases := []struct {
+		name string
+		now  int64
+		want bool
+	}{
+		{"comfortably valid (1h out)", exp - 3600, false},
+		{"just outside threshold", exp - 301, false},
+		{"exactly at threshold", exp - 300, true},
+		{"inside threshold", exp - 60, true},
+		{"one second to expiry", exp - 1, true},
+		{"exactly at exp (still valid)", exp, true},
+		{"one past exp (expired)", exp + 1, false},
+		{"long expired", exp + 5000, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ShouldRefreshToken(exp, tc.now, threshold); got != tc.want {
+				t.Fatalf("ShouldRefreshToken(%d, %d, %s) = %v, want %v", exp, tc.now, threshold, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWakeIDFormat(t *testing.T) {
 	id, err := GenerateWakeID(rand.Reader)
 	if err != nil {

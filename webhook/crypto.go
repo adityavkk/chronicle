@@ -130,11 +130,40 @@ func GenerateToken(tokenKey []byte, subID string, generation int64, now time.Tim
 	return body + "." + hmacSig(tokenKey, body), nil
 }
 
-// TokenValidation is the outcome of validating a callback/claim token.
+// tokenRefreshThreshold is how close to expiry a presented (still-valid)
+// callback/claim token must be before a successful callback re-mints it in-band,
+// so a long-lived heartbeating pull-wake worker is never locked out by an expiry
+// it cannot recover from (issue #77). 300s matches the reference
+// tokenRefreshThreshold.
+const tokenRefreshThreshold = 300 * time.Second
+
+// TokenValidation is the outcome of validating a callback/claim token. Exp is the
+// token's expiry (unix seconds) whenever the token is well-formed and ours (Valid
+// or Expired), so the shell can drive the in-band refresh decision (issue #77).
 type TokenValidation struct {
 	Valid      bool
 	Expired    bool
 	Generation int64
+	Exp        int64
+}
+
+// TokenExpired reports whether a token expiring at exp (unix seconds) is expired
+// at now (unix seconds). Pure: it is the exact expiry predicate ValidateToken
+// applies, factored out so the refresh math and its tests share one boundary
+// (valid while now <= exp; expired once now > exp).
+func TokenExpired(exp, now int64) bool { return now > exp }
+
+// ShouldRefreshToken reports whether a still-valid token expiring at exp (unix
+// seconds) should be re-minted in-band at now because it is within threshold of
+// expiry (issue #77). Pure: the callback shell passes the validated token's exp
+// and the wall clock, so the "should refresh?" decision is unit-testable without
+// a clock or Redis. An already-expired token returns false — it is handled by the
+// distinct TOKEN_EXPIRED retry path, not the success-response refresh.
+func ShouldRefreshToken(exp, now int64, threshold time.Duration) bool {
+	if TokenExpired(exp, now) {
+		return false
+	}
+	return exp-now <= int64(threshold.Seconds())
 }
 
 // ValidateToken verifies an HMAC token for a subscription. It checks the
@@ -156,10 +185,10 @@ func ValidateToken(tokenKey []byte, token, subID string, now time.Time) TokenVal
 	if err := json.Unmarshal(raw, &p); err != nil || p.Sub != subID {
 		return TokenValidation{}
 	}
-	if now.Unix() > p.Exp {
-		return TokenValidation{Expired: true, Generation: p.Generation}
+	if TokenExpired(p.Exp, now.Unix()) {
+		return TokenValidation{Expired: true, Generation: p.Generation, Exp: p.Exp}
 	}
-	return TokenValidation{Valid: true, Generation: p.Generation}
+	return TokenValidation{Valid: true, Generation: p.Generation, Exp: p.Exp}
 }
 
 func hmacSig(key []byte, body string) string {
