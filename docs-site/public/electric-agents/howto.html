@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 3 · How to Do Things — Electric Agents, Explained</title>
+<meta name="description" content="The Electric Agents developer surface, scaffolded: define entities, run agents, handle wakes, manage state, spawn and coordinate, hybrid control flow, and the seven multi-agent patterns.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink" href="index.html">Start</a>
+  <a class="navlink" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink active" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink" href="server.html">5 · Server Internals</a>
+  <a class="navlink" href="qa.html">6 · Q&amp;A</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">On this page</p>
+  <a href="#setup">0 · Wire up an app</a>
+  <a href="#define">1 · Define an entity</a>
+  <a href="#llm">2 · Give it an LLM</a>
+  <a href="#wakes">3 · Route on wakes</a>
+  <a href="#state">4 · Keep durable state</a>
+  <a href="#coordinate">5 · Spawn &amp; coordinate</a>
+  <a href="#hybrid">6 · Hybrid control flow</a>
+  <a href="#patterns">7 · The seven patterns</a>
+  <a href="#tools">8 · Tools, MCP, sandbox</a>
+  <a href="#ui">9 · Build the UI</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">Part 3 of 6</p>
+  <h1>How to Do Things</h1>
+  <p class="lead">
+    The developer surface, in the order you'd actually use it. Sections 0–2 get one agent chatting; 3–5 add the
+    coordination primitives; 6 is the design idiom that makes multi-agent systems reliable; 7–9 round out the toolkit.
+    Code follows the official walkthrough and quickstart, condensed.
+  </p>
+</header>
+
+<section id="setup">
+  <h2><span class="kicker-num">0</span>Wire up an app</h2>
+  <p>
+    Dev infrastructure is one command — it runs Postgres, Electric, and the agents server (with an embedded Durable
+    Streams server and web UI) in Docker on port <code>4437</code>:
+  </p>
+  <pre><code>pnpx electric-ax@latest agents start     # clean runtime, define your own types
+# or: agents quickstart                  # includes built-in horton + worker agents</code></pre>
+  <p>Your app needs four things — a registry, a runtime handler, a webhook route, and a one-time type registration:</p>
+  <div class="code-label">src/index.ts — any TS framework (Hono shown)</div>
+  <pre><code>import { createEntityRegistry, createRuntimeHandler } from '@electric-ax/agents-runtime'
+
+const registry = createEntityRegistry()
+// … registry.define(…) — next section …
+
+const runtime = createRuntimeHandler({
+  baseUrl: 'http://localhost:4437',                    // the agents server
+  serveEndpoint: 'http://localhost:3000/electric-agents', // ← where IT calls YOU
+  registry,
+})
+
+app.post('/electric-agents', (c) => runtime.handleWebhookRequest(c.req.raw))
+
+serve({ fetch: app.fetch, port: 3000 }, () => {
+  runtime.registerTypes().catch(console.error)         // announce types + webhook URL
+})</code></pre>
+  <p>
+    That's the entire integration seam. Everything else in this part happens inside <code>registry.define()</code>.
+  </p>
+</section>
+
+<section id="define">
+  <h2><span class="kicker-num">1</span>Define an entity type</h2>
+  <pre><code>registry.define('assistant', {
+  description: 'A general-purpose AI assistant',
+
+  // optional contracts, validated by the server on spawn / send:
+  creationSchema: z.object({ systemPrompt: z.string().optional() }),
+  inboxSchemas: { 'pr-opened': z.object({ diff: z.string() }) },
+
+  async handler(ctx) {
+    ctx.useAgent({
+      systemPrompt: ctx.args.systemPrompt ?? 'You are a helpful assistant.',
+      model: 'claude-sonnet-4-6',
+      tools: [],
+    })
+    await ctx.agent.run()
+  },
+})</code></pre>
+  <p>
+    Spawn instances from anywhere — the web UI, the CLI (<code>electric-ax agents spawn assistant a1</code>), the HTTP
+    API (<code>PUT /_electric/entities/assistant/a1</code>), or another entity (<code>ctx.spawn</code>). Message it and
+    the handler wakes.
+  </p>
+</section>
+
+<section id="llm">
+  <h2><span class="kicker-num">2</span>Give it an LLM — and real tools</h2>
+  <p>
+    <code>useAgent</code> + <code>agent.run()</code> is the whole LLM story (§5 of Part 1). Tools are plain objects:
+    a TypeBox/Zod parameter schema and an <code>execute</code> function. The convention worth internalizing: tools that
+    change the world should <em>also record what they did in durable state</em> — that's what makes them auditable and
+    makes control flow possible later.
+  </p>
+  <pre><code>function createSpawnAssistantTool(ctx) {
+  return {
+    name: 'spawn_assistant',
+    description: 'Spawn an assistant sub-agent to perform a task.',
+    parameters: Type.Object({ task: Type.String() }),
+    execute: async (_id, { task }) => {
+      const { entityUrl } = await ctx.spawn('assistant', genId(), {},
+        { initialMessage: task, wake: { on: 'runFinished', includeResponse: true } })
+      return {
+        content: [{ type: 'text', text: `Assistant dispatched at ${entityUrl}.` }],
+        details: { entityUrl },
+        terminate: true,      // end this run after the tool call — child will wake us
+      }
+    },
+  }
+}</code></pre>
+  <div class="callout">
+    <div class="callout-title">💡 Why spawn inside a tool call, not in handler code?</div>
+    <p>The walkthrough demonstrates this beautifully: spawn imperatively in the handler and the LLM later has no idea
+    the child exists — the spawn never entered its context. Spawn via a tool call and it's on the timeline, so the
+    model can reason about it ("who reversed this message? — I spawned an assistant to do it"). Rule of thumb:
+    <strong>actions the LLM should know about must happen as tool calls; actions it must not screw up should happen in
+    handler code.</strong></p>
+  </div>
+</section>
+
+<section id="wakes">
+  <h2><span class="kicker-num">3</span>Route on wakes</h2>
+  <p>Every handler's first job is a small dispatch on what woke it:</p>
+  <pre><code>async handler(ctx, wake) {
+  if (wake.type === 'inbox') {
+    // a message: from a user, another entity, or a webhook source
+    // wake.payload — validated against inboxSchemas if declared
+  } else {                        // wake.type === 'wake'
+    const p = wake.payload
+    if (p?.finished_child) { /* a spawned child completed/failed — p.finished_child.response */ }
+    if (p?.changes?.length) { /* observed collections changed — [{collection, kind, key}] */ }
+    if (p?.timeout)         { /* a wake registration's timeoutMs elapsed with no event */ }
+    // cron ticks arrive here too; scheduled future_sends arrive as 'inbox'
+  }
+}</code></pre>
+  <p>
+    Handlers end three ways: <code>await ctx.agent.run()</code> (the LLM's reply is the outcome),
+    <code>ctx.replyText('…')</code> (a synthetic reply without an LLM), or <code>ctx.sleep()</code> (this wake needs
+    nothing — extremely common, and free). Not reacting is a first-class outcome.
+  </p>
+</section>
+
+<section id="state">
+  <h2><span class="kicker-num">4</span>Keep durable state</h2>
+  <p>Declare collections on the type; get typed reads and log-backed writes on <code>ctx.state</code>:</p>
+  <pre><code>registry.define('judge', {
+  state: {
+    debate: { schema: passthrough&lt;Debate&gt;(), primaryKey: 'key' },
+  },
+  async handler(ctx, wake) {
+    ctx.state.debate.insert({ key: 'current', phase: 'arguing', arguments: {} })
+    ctx.state.debate.update('current', d => { d.phase = 'critiquing' })  // Immer-style draft
+    const debate = ctx.state.debate.get('current')
+    ctx.state.debate.delete('current')
+  },
+})</code></pre>
+  <p>Remember what these writes are (Part 2 §7): <strong>change events appended to the entity's stream</strong>. Which buys you:</p>
+  <ul>
+    <li><strong>Durability</strong> — state survives crashes, redeploys, months of sleep;</li>
+    <li><strong>History</strong> — every state the entity has ever been in is in the log;</li>
+    <li><strong>Observability</strong> — any other entity or UI can watch this state live, with no API on your part.</li>
+  </ul>
+  <p>
+    For state <em>shared between</em> entities, one entity creates a standalone stream-backed DB and others attach to
+    it — the blackboard:
+  </p>
+  <pre><code>if (ctx.firstWake) ctx.mkdb('board-1', boardSchema)        // create (throws if exists)
+const board = await ctx.observe(db('board-1', boardSchema)) // attach — any entity, any wake
+board.findings.insert({ key: 'f-1', domain: 'security', finding: 'XSS found' })</code></pre>
+</section>
+
+<section id="coordinate">
+  <h2><span class="kicker-num">5</span>Spawn, send, observe</h2>
+  <p>The complete inter-entity vocabulary is three verbs (plus <code>fork</code>):</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Verb</th><th>Signature</th><th>Semantics</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>spawn</strong></td>
+        <td><code>ctx.spawn(type, id, args?, opts?)</code></td>
+        <td>Create a child entity. <code>opts.initialMessage</code> seeds its inbox; <code>opts.wake</code> registers
+        when to wake <em>me</em> about it — <code>{ on: 'runFinished', includeResponse: true }</code> or
+        <code>{ on: 'change', collections?, ops?, debounceMs? }</code>. Returns an <code>EntityHandle</code>
+        (url, status, its db).</td>
+      </tr>
+      <tr>
+        <td><strong>send</strong></td>
+        <td><code>ctx.send(entityUrl, payload, opts?)</code></td>
+        <td>Append a message to any entity's inbox by URL. <code>opts.afterMs</code> delays delivery (durable timer).
+        Fire-and-forget; delivery modes (immediate/queued/steer) are the receiver's policy.</td>
+      </tr>
+      <tr>
+        <td><strong>observe</strong></td>
+        <td><code>ctx.observe(entity(url) | db(id, schema) | …, opts?)</code></td>
+        <td>Attach to a stream you didn't create: another entity, a shared DB, a webhook source, or a synced Postgres
+        table. Returns a handle whose <code>.db.collections</code> you can query; <code>opts.wake</code> subscribes you
+        to its changes.</td>
+      </tr>
+      <tr>
+        <td><strong>fork</strong></td>
+        <td><code>ctx.fork(url, id)</code> / <code>ctx.forkSelf(id)</code></td>
+        <td>Branch a new entity from an existing one's history at a point — cheap what-if copies of a whole
+        agent (streams fork without rewriting).</td>
+      </tr>
+    </tbody>
+  </table></div>
+  <div class="callout warn">
+    <div class="callout-title">⚠ The one thing you can't do</div>
+    <p>There is deliberately <strong>no "spawn and await the result in the same wake"</strong>. You spawn, you return
+    (sleep), and the child's completion arrives as a <em>new wake</em> with <code>finished_child</code> in the payload.
+    This is the price — and the point — of scale-to-zero: no compute anywhere is blocked waiting. Any "wait for N
+    children" logic is durable state + a gate (next section).</p>
+  </div>
+  <p>
+    <code>observe</code> deserves emphasis. Because every entity's state is a readable stream, agents don't need to
+    define APIs for each other. A parent doesn't ask the judge "are you done?" — it reads the judge's
+    <code>debate</code> collection directly:
+  </p>
+  <pre><code>const judge = await ctx.observe(entity(finishedChild.url))
+const debate = judge.db.collections.debate.get('current')
+if (debate?.phase !== 'done') return ctx.sleep()</code></pre>
+</section>
+
+<section id="hybrid">
+  <h2><span class="kicker-num">6</span>Hybrid control flow — the design idiom</h2>
+  <p>
+    The walkthrough's arc: a judge agent coordinating a two-phase debate <em>by prompt alone</em> ("wait for both
+    arguments… don't hallucinate…") works, mostly. Then it doesn't — the model responds to partial results or invents
+    the debate. The fix isn't a better prompt; it's moving the <strong>control flow into durable state</strong> and
+    keeping the LLM for the <strong>judgment calls</strong>:
+  </p>
+  <div class="diagram-shell">
+    <div class="diagram-title">The judge as a state machine — LLM only where marked 🧠</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+flowchart TD
+    W0["inbox wake<br/><small>debate topic arrives</small>"] --> G0{"debate<br/>exists?"}
+    G0 -- yes --> S0["sleep"]
+    G0 -- no --> L1["🧠 LLM writes the two briefs<br/>calls start_debate tool<br/><small>spawns A + B · inserts state {phase:'arguing'}</small>"]
+    W1["wake: child finished"] --> G1{"phase?"}
+    G1 -- arguing --> R1["record argument<br/><small>state.update</small>"] --> G2{"both<br/>arguments in?"}
+    G2 -- no --> S1["sleep"]
+    G2 -- yes --> F1["send each side the other's argument<br/>phase → critiquing<br/><small>pure code — no LLM</small>"] --> S2["sleep"]
+    G1 -- critiquing --> R2["record rebuttal"] --> G3{"both<br/>rebuttals in?"}
+    G3 -- no --> S3["sleep"]
+    G3 -- yes --> L2["🧠 LLM writes the verdict<br/>phase → done"]
+    style L1 fill:var(--node-a),stroke:var(--accent)
+    style L2 fill:var(--node-a),stroke:var(--accent)
+    style F1 fill:var(--node-c),stroke:var(--accent-3)
+    style R1 fill:var(--node-c),stroke:var(--accent-3)
+    style R2 fill:var(--node-c),stroke:var(--accent-3)
+      </pre>
+    </div>
+  </div>
+  <p>Over a full debate the judge is woken five times and runs the LLM <strong>twice</strong>:</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>#</th><th>Wake</th><th>Gate decision</th><th>LLM runs?</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>inbox (topic)</td><td>no debate yet → set up</td><td><strong>yes</strong> — write briefs, <code>start_debate</code></td></tr>
+      <tr><td>2</td><td>A's argument</td><td><code>arguments.b</code> missing → sleep</td><td>no</td></tr>
+      <tr><td>3</td><td>B's argument</td><td>both in → forward rebuttals imperatively</td><td>no</td></tr>
+      <tr><td>4</td><td>A's rebuttal</td><td><code>rebuttals.b</code> missing → sleep</td><td>no</td></tr>
+      <tr><td>5</td><td>B's rebuttal</td><td>both in → verdict</td><td><strong>yes</strong> — write the verdict</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    The debate <em>cannot</em> finish early, the model <em>cannot</em> hallucinate the results, and three of five wakes
+    cost no tokens at all. In the official framing: <em>let the LLM interpret, decide and be creative when it needs to;
+    use durable state to make the control flow deterministic when you can.</em> Everything else in this part is
+    machinery for expressing that split well.
+  </p>
+</section>
+
+<section id="patterns">
+  <h2><span class="kicker-num">7</span>The seven coordination patterns</h2>
+  <p>
+    The runtime ships a design skill (<code>skills/designing-entities</code>) cataloguing seven topologies, with
+    trigger phrases for choosing. Compressed:
+  </p>
+  <div class="card-grid">
+    <div class="ve-card accent-a">
+      <div class="card-title">1 · Single agent</div>
+      <div class="card-body">One entity, one LLM loop, tools, optional state. No spawn/observe/send at all. The default
+      until a coordination signal appears.</div>
+    </div>
+    <div class="ve-card accent-b">
+      <div class="card-title">2 · Manager–worker</div>
+      <div class="card-body">Parent spawns a <em>fixed, named</em> set of specialists in parallel, gates on all
+      <code>finished_child</code> wakes arriving, then synthesizes. "Give me economic, political and social takes."</div>
+    </div>
+    <div class="ve-card accent-c">
+      <div class="card-title">3 · Dispatcher</div>
+      <div class="card-body">Classify each incoming request (LLM decides), route to the right specialist <em>type</em>,
+      spawn on demand. A router with durable continuations.</div>
+    </div>
+    <div class="ve-card accent-d">
+      <div class="card-title">4 · Pipeline</div>
+      <div class="card-body">Known sequential stages; a state-machine <code>transition()</code> advances one stage per
+      child completion, passing output forward as the next <code>initialMessage</code>.</div>
+    </div>
+    <div class="ve-card accent-b">
+      <div class="card-title">5 · Map-reduce</div>
+      <div class="card-body">Split input into N chunks (N varies per input), spawn all workers in one loop, gate on all
+      done, reduce. Fan-out without blocking anything.</div>
+    </div>
+    <div class="ve-card accent-c">
+      <div class="card-title">6 · Blackboard</div>
+      <div class="card-body">Participants coordinate through a shared StreamDB (<code>mkdb</code> +
+      <code>observe(db(…))</code>) instead of messages — collaborative docs, debates, research boards. React with
+      <code>wake: { on: 'change' }</code>.</div>
+    </div>
+    <div class="ve-card accent-a">
+      <div class="card-title">7 · Reactive observers</div>
+      <div class="card-body">An entity that never spawns — it watches another entity's stream
+      (<code>observe(entity(url))</code>) and reacts: monitors, summarizers, alerting, dashboards.</div>
+    </div>
+  </div>
+  <p>
+    They compose: a blackboard under a manager-worker; a dispatcher whose specialists are pipelines. The topology is
+    always the same three verbs plus state gates — the patterns are shapes, not APIs.
+  </p>
+</section>
+
+<section id="tools">
+  <h2><span class="kicker-num">8</span>Tools, MCP, sandboxing, schedules, webhooks</h2>
+  <ul>
+    <li><strong>Built-in tool factories</strong> (runtime): <code>bash</code>, <code>read</code>/<code>write</code>/<code>edit</code>
+      (all sandbox-backed), <code>web_search</code>, <code>fetch_url</code>, <code>send</code> (message another entity),
+      schedule tools (cron + delayed sends), webhook-source tools. Pass <code>...ctx.electricTools</code> for whatever
+      the host wired in.</li>
+    <li><strong>MCP</strong>: <code>@electric-ax/agents-mcp</code> provides a registry, transports and OAuth bridges so
+      agents can consume Model Context Protocol servers as tool sources.</li>
+    <li><strong>Sandboxes</strong>: each wake gets <code>ctx.sandbox</code> — <code>unrestricted</code> (host, trusted
+      dev default), <code>docker</code> (digest-pinned image, resource limits, optional gVisor, network policy), or
+      <code>remote</code> (e2b microVMs). Selected per spawn via profiles; write-paths are containment-checked on every
+      provider. LLM tool calls (<code>bash</code>, file ops, <code>fetch_url</code>) execute inside it.</li>
+    <li><strong>Schedules</strong>: entities can hold durable cron schedules and one-shot future sends
+      (<code>PUT /_electric/entities/:type/:id/schedules/:sid</code>, or the schedule tools) — the server's scheduler
+      wakes them; no process anywhere holds a timer.</li>
+    <li><strong>Webhook sources</strong>: register external webhooks (GitHub, Stripe, …) as observable sources; events
+      land as wakes with <code>payload.type === 'webhook_source_wake'</code>.</li>
+    <li><strong>Signals</strong>: POSIX-flavored lifecycle control per entity — <code>SIGINT</code> abort current wake,
+      <code>SIGSTOP</code>/<code>SIGCONT</code> pause/resume, <code>SIGTERM</code> graceful stop, <code>SIGKILL</code>
+      hard kill. <code>electric-ax agents signal /judge/d7 SIGINT</code>.</li>
+  </ul>
+</section>
+
+<section id="ui">
+  <h2><span class="kicker-num">9</span>Build the UI</h2>
+  <p>
+    The UI story is the same story: <strong>subscribe to the entity's stream, materialize, render</strong>. No
+    chat-completion endpoints, no bespoke websocket protocol:
+  </p>
+  <pre><code>const client = createAgentsClient({ baseUrl })
+const db = await client.observe(entity('/assistant/a1'))   // SSE-tailed StreamDB
+
+function Chat() {
+  const chat = useChat(db)          // assembles textDeltas → messages, live
+  return chat.runs.map(run =>
+    run.texts.map(t => &lt;MessageBubble text={t.text} /&gt;))
+  // chat.state === 'working' → show the streaming cursor
+}</code></pre>
+  <p>
+    Sending a message is an HTTP POST (<code>/_electric/entities/assistant/a1/send</code>). Token streaming falls out
+    of <code>textDeltas</code> arriving as events. And because it's TanStack DB underneath, arbitrary live queries over
+    the timeline — filter tool calls, join runs to steps for token accounting, watch a custom collection — are
+    ordinary <code>useLiveQuery</code> calls. The bundled web UI (<code>localhost:4437</code>) is exactly this,
+    generalized: spawn any type, watch any entity's timeline, expand child trees.
+  </p>
+</section>
+
+<div class="pager">
+  <a href="streams.html"><span class="dir">Previous</span><span class="label">← Part 2 — Durable Streams</span></a>
+  <a class="next" href="runtime.html"><span class="dir">Next</span><span class="label">Part 4 — Runtime Internals →</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · Part 3 of 6 · sources: official walkthrough &amp; usage docs, designing-entities skill
+</footer>
+
+</body>
+</html>

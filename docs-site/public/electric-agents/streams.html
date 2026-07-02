@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 2 · Durable Streams — Electric Agents, Explained</title>
+<meta name="description" content="The substrate of Electric Agents: the Durable Streams protocol, offsets and resumability, idempotent producers, and the state protocol that turns logs into databases.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink" href="index.html">Start</a>
+  <a class="navlink" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink active" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink" href="server.html">5 · Server Internals</a>
+  <a class="navlink" href="qa.html">6 · Q&amp;A</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">On this page</p>
+  <a href="#why">Why start here</a>
+  <a href="#protocol">The wire protocol</a>
+  <a href="#offsets">Offsets &amp; resumability</a>
+  <a href="#live">Live modes</a>
+  <a href="#producers">Writers &amp; exactly-once</a>
+  <a href="#cdn">The CDN trick</a>
+  <a href="#state">The state protocol</a>
+  <a href="#streamdb">StreamDB</a>
+  <a href="#recap">Recap</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">Part 2 of 6</p>
+  <h1>Durable Streams — the substrate</h1>
+  <p class="lead">
+    Everything in Electric Agents — messages, LLM tokens, state, coordination — is ultimately an append to, or a read
+    from, a durable stream. This part explains the protocol itself, then the <strong>state protocol</strong> layered on
+    it that turns a byte log into a typed, syncable database. Once you have these two layers, the agent framework is
+    "merely" a disciplined way of using them.
+  </p>
+</header>
+
+<section id="why">
+  <h2><span class="kicker-num">1</span>Why the stack starts with a log</h2>
+  <p>
+    The Electric team's blog post <em>"Durable streams: the data primitive for the agent loop"</em> (April 2026) makes
+    the case: agent sessions are <em>long-lived, streaming, multi-consumer, interruption-prone</em> workloads. A plain
+    HTTP response can't survive a disconnect. A websocket can't be resumed or cached. A database row loses the
+    history and the ordering. A queue delivers once and forgets. What the agent loop actually needs is a primitive
+    that is simultaneously:
+  </p>
+  <ul>
+    <li><strong>a transport</strong> — you can stream tokens through it in real time,</li>
+    <li><strong>a store</strong> — everything streamed is durably kept, in order,</li>
+    <li><strong>a subscription</strong> — any number of consumers can tail it live,</li>
+    <li><strong>a checkpoint</strong> — any consumer can resume from any point, statelessly.</li>
+  </ul>
+  <p>
+    That primitive is an <strong>append-only log addressed as an HTTP resource</strong>. It's Kafka's core idea with
+    the operational model of a web server: no client libraries required, no partitions to manage, no consumer-group
+    protocol — just URLs, methods, and headers.
+  </p>
+</section>
+
+<section id="protocol">
+  <h2><span class="kicker-num">2</span>The wire protocol in one table</h2>
+  <p>A stream is a URL, e.g. <code>/judge/debate-7/main</code>. The full lifecycle is five HTTP methods:</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Request</th><th>Meaning</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>PUT /path</code></td><td>Create the stream</td><td><code>201</code> new / <code>200</code> idempotent re-create. Sets <code>Content-Type</code> for life; optional <code>Stream-TTL</code> or <code>Stream-Expires-At</code>; optional initial body.</td></tr>
+      <tr><td><code>POST /path</code></td><td>Append a batch</td><td>One request = one batch. <code>204</code> plain / <code>200</code> producer append. <code>Stream-Closed: true</code> closes (EOF).</td></tr>
+      <tr><td><code>GET /path?offset=…</code></td><td>Read from an offset</td><td><code>offset=-1</code> start · <code>now</code> tail · or a returned offset. Optional <code>live=long-poll|sse</code>.</td></tr>
+      <tr><td><code>HEAD /path</code></td><td>Metadata</td><td><code>Stream-Next-Offset</code>, content type, closed flag, TTL — without the body.</td></tr>
+      <tr><td><code>DELETE /path</code></td><td>Delete</td><td><code>410 Gone</code> afterwards.</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    Every read response carries <code>Stream-Next-Offset</code> (where to resume), possibly <code>Stream-Up-To-Date</code>
+    (you've reached the head) and <code>Stream-Closed</code> (no more will ever come). Streams are hierarchical paths,
+    so namespacing — per tenant, per entity — is just URL structure.
+  </p>
+</section>
+
+<section id="offsets">
+  <h2><span class="kicker-num">3</span>Offsets: durable consumption without a coordinator</h2>
+  <p>
+    Offsets are <strong>opaque tokens</strong> — the spec is emphatic: <em>"clients MUST NOT interpret the format"</em>.
+    (Internally they're <code>&lt;read-seq&gt;_&lt;byte-offset&gt;</code>, but that's the server's business.) The
+    contract is a loop:
+  </p>
+  <pre><code>const res = await stream({ url, offset: savedOffset, live: true })
+res.subscribeJson(async (batch) => {
+  for (const item of batch.items) process(item)
+  saveOffset(batch.offset)          // ← the only consumer state that exists
+})</code></pre>
+  <p>
+    This is what "durable" means operationally: <strong>consumer position is client-held data</strong>, not server-side
+    session state. A crashed handler, a redeployed app, a laptop waking from sleep, a second browser tab — all recover
+    identically: present your last offset, catch up, go live. Kafka needs a consumer-group coordinator for this;
+    here it's a query parameter.
+  </p>
+  <div class="callout">
+    <div class="callout-title">💡 Where the agent framework leans on this</div>
+    <p>The runtime's wake webhook includes the streams and offsets to read from; the entity's own
+    <code>replayWatermarks</code> collection records how far each observed source has been consumed. A woken handler
+    is just another stateless consumer catching up from a watermark.</p>
+  </div>
+</section>
+
+<section id="live">
+  <h2><span class="kicker-num">4</span>Three read modes, one request shape</h2>
+  <div class="card-grid">
+    <div class="ve-card accent-a">
+      <div class="card-title">Catch-up</div>
+      <div class="card-body">No <code>live</code> param. Returns what exists from your offset; <code>Stream-Up-To-Date</code>
+      when you've reached the head. Plain, cacheable GET.</div>
+    </div>
+    <div class="ve-card accent-b">
+      <div class="card-title">Long-poll</div>
+      <div class="card-body"><code>live=long-poll</code>. If you're at the head, the server holds the request (default
+      ≤30s); new data returns immediately, else <code>204</code> + fresh cursor and you re-poll. CDN-collapsible.</div>
+    </div>
+    <div class="ve-card accent-c">
+      <div class="card-title">SSE</div>
+      <div class="card-body"><code>live=sse</code>. <code>text/event-stream</code> with <code>data</code> frames per
+      message and <code>control</code> frames carrying <code>{streamNextOffset, streamCursor, upToDate}</code>. What the
+      agents UI uses.</div>
+    </div>
+  </div>
+  <p>
+    The crucial property: <strong>catch-up and live are the same request</strong>. A consumer never has to stitch
+    "load history" and "subscribe to updates" together (and handle the gap between them) — the protocol does it.
+  </p>
+</section>
+
+<section id="producers">
+  <h2><span class="kicker-num">5</span>Writers: ordering guards and exactly-once</h2>
+  <p>Two write disciplines, matching two levels of paranoia:</p>
+  <ul>
+    <li><strong><code>Stream-Seq</code></strong> — a monotonic, lexicographic sequence string per writer
+      (<code>"writer-1-000001"</code>). Appending with a lower seq than the last → <code>409 Conflict</code>. A cheap
+      ordering guard for cooperative writers.</li>
+    <li><strong>Idempotent producers</strong> — Kafka's exactly-once design, verbatim, over HTTP headers:
+      <code>Producer-Id</code> / <code>Producer-Epoch</code> / <code>Producer-Seq</code>. The server dedupes on the
+      <code>(producerId, epoch, seq)</code> triple: retried batches return <code>204</code> harmlessly; a stale epoch is
+      rejected <code>403</code> (<em>zombie fencing</em> — a crashed-and-replaced producer can't corrupt the log); a
+      sequence gap is <code>409</code> with the expected/received seqs.</li>
+  </ul>
+  <pre><code>const producer = new IdempotentProducer(stream, 'judge-writer', { autoClaim: true })
+producer.append(event)     // fire-and-forget; batched (~5ms linger), retried, deduped
+await producer.flush()</code></pre>
+  <p>
+    The agents layer builds directly on this: every runtime append of entity events goes through an idempotent
+    producer, and the server's tag outbox drainer (Part 5) gives each outbox row its own producer identity so
+    at-least-once retries become exactly-once appends.
+  </p>
+  <div class="callout chronicle">
+    <div class="callout-title">🔗 Chronicle note</div>
+    <p>All of §2–§5 is the surface Chronicle certifies against (332/332 conformance at suite 0.3.5): offsets, long-poll
+    and SSE, producer fencing and gap detection, TTL/expiry, closure, forking. If you want to see a second, independent
+    implementation of everything on this page, it's your own <code>handler.go</code>.</p>
+  </div>
+</section>
+
+<section id="cdn">
+  <h2><span class="kicker-num">6</span>The CDN trick (inherited from Electric sync)</h2>
+  <p>
+    Because a read at a given offset always returns the same bytes, <strong>offset-parameterized GETs are immutable and
+    cacheable</strong>. This is the same insight that lets ElectricSQL serve Postgres sync through CDNs, applied to
+    streams: <em>"10,000 viewers at the same offset become one upstream request."</em> Two refinements make it safe:
+  </p>
+  <ul>
+    <li><strong>ETags + conditional GET</strong> on historical reads (<code>304 Not Modified</code>).</li>
+    <li><strong><code>Stream-Cursor</code></strong> — a time-bucketed, monotonically advancing token echoed on
+      long-polls, so cached <code>204</code>s can't trap a client in a stale-response loop.</li>
+  </ul>
+  <p>
+    Volatile responses (<code>HEAD</code>, <code>offset=now</code>) are marked <code>Cache-Control: no-store</code>.
+    The upshot for agents: fan-out — many users, dashboards, and observer entities watching one agent — is a caching
+    problem, not a broker-scaling problem.
+  </p>
+</section>
+
+<section id="state">
+  <h2><span class="kicker-num">7</span>The state protocol: giving events a schema</h2>
+  <p>
+    Raw streams carry bytes. <code>@durable-streams/state</code> defines a small event vocabulary that makes a JSON
+    stream mean <em>state changes</em>. Two message families:
+  </p>
+  <pre><code>// Change message — a mutation of one keyed row of one type
+{
+  "type": "user",                      // routes to a collection
+  "key": "user:123",                   // primary key
+  "value": { "name": "Alice", … },     // required for insert/update
+  "old_value": { … },                  // optional (audit / conflict detection)
+  "headers": { "operation": "insert",  // insert | update | delete (+upsert in impl)
+               "txid": "…", "timestamp": "…" }
+}
+
+// Control message — stream management, no data
+{ "headers": { "control": "snapshot-start" | "snapshot-end" | "reset", "offset": "…" } }</code></pre>
+  <p>
+    Materialization is deliberately boring: <em>"apply change messages sequentially in stream order"</em>, last write
+    wins per <code>(type, key)</code>. <code>reset</code> tells consumers to clear and rebuild (schema migrations);
+    snapshot markers delimit point-in-time dumps. That's the whole spec — simple enough that any client on any
+    platform can implement it, strong enough to carry a database.
+  </p>
+  <p>
+    <strong>This is the format of every event on an entity's main stream.</strong> An LLM token is
+    <code>{type:'text_delta', key:'…', value:{delta:'…'}}</code>; your judge's phase change is
+    <code>{type:'state:debate', key:'current', headers:{operation:'update'}}</code>. One vocabulary, one log,
+    everything replayable.
+  </p>
+</section>
+
+<section id="streamdb">
+  <h2><span class="kicker-num">8</span>StreamDB: the log, presented as a database</h2>
+  <p>
+    <code>createStreamDB</code> (from <code>@durable-streams/state/db</code>) binds a schema to a stream URL and gives
+    back <strong>TanStack DB collections</strong> — one per declared type — plus lifecycle and write helpers:
+  </p>
+  <ol class="flow-steps">
+    <li><strong>Declare</strong>: <code>createStateSchema({ users: { schema: userSchema, type: 'user', primaryKey: 'id' } })</code>.
+      Any Standard Schema validator works (Zod, TypeBox, Valibot…).</li>
+    <li><strong>Preload</strong>: <code>db.preload()</code> consumes the stream from the beginning; writes are buffered
+      and committed per batch, and the promise resolves at the first <code>Stream-Up-To-Date</code> — you get a
+      snapshot-consistent database, then it stays live on the same subscription.</li>
+    <li><strong>Read</strong>: <code>db.collections.users.get('123')</code>, or differential-dataflow
+      <strong>live queries</strong> — joins, filters, groupBy that update incrementally per event.</li>
+    <li><strong>Write</strong>: actions built on <code>createOptimisticAction</code> — apply the change to the local
+      collection instantly (<code>onMutate</code>), append the change event with a <code>txid</code>, then
+      <code>await db.utils.awaitTxId(txid)</code>: the write is confirmed when it <em>comes back through the stream</em>.
+      The log stays the single source of truth; the UI never waits for it to feel fast.</li>
+  </ol>
+  <div class="diagram-shell">
+    <div class="diagram-title">The write loop: optimistic, but log-authoritative</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    participant App as App code / handler
+    participant TDB as TanStack DB (local)
+    participant DS as Durable stream
+
+    App->>TDB: onMutate — insert row (optimistic, instant)
+    App->>DS: append change event {txid}
+    DS-->>TDB: event arrives via live subscription
+    TDB->>TDB: reconcile: optimistic row ⇄ authoritative row
+    DS-->>App: awaitTxId(txid) resolves — confirmed
+    Note over TDB,DS: every other consumer of the stream<br/>materializes the same row the same way
+      </pre>
+    </div>
+  </div>
+  <p>
+    The agents runtime wraps exactly this machinery for every entity (<code>createEntityStreamDB</code> = StreamDB with
+    the 20 built-in collections merged with your <code>state</code> block), and <code>ctx.mkdb()</code> /
+    <code>observe(db(…))</code> expose it directly for shared blackboard state between entities.
+  </p>
+</section>
+
+<section id="recap">
+  <h2><span class="kicker-num">§</span>Recap</h2>
+  <ul>
+    <li>A durable stream is an <strong>append-only log as an HTTP resource</strong>: PUT/POST/GET/HEAD/DELETE, offsets in, <code>Stream-Next-Offset</code> out.</li>
+    <li><strong>Consumer state is one offset</strong>, held by the consumer — resumability without coordination.</li>
+    <li>Catch-up and live tail are <strong>one request</strong>; long-poll and SSE are the live modes; offset-immutability makes it all CDN-friendly.</li>
+    <li><strong>Idempotent producers</strong> (id/epoch/seq + fencing) give exactly-once appends over at-least-once HTTP.</li>
+    <li>The <strong>state protocol</strong> (insert/update/delete change events + control messages) turns a JSON stream into replayable state; <strong>StreamDB</strong> materializes it into TanStack DB collections with live queries and optimistic, txid-confirmed writes.</li>
+    <li>Electric Agents = this substrate + an entity discipline on top. Which is Part 3.</li>
+  </ul>
+</section>
+
+<div class="pager">
+  <a href="concepts.html"><span class="dir">Previous</span><span class="label">← Part 1 — The Nouns</span></a>
+  <a class="next" href="howto.html"><span class="dir">Next</span><span class="label">Part 3 — How to Do Things →</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · Part 2 of 6 · sources: @durable-streams/client, server, state (STATE-PROTOCOL.md)
+</footer>
+
+</body>
+</html>

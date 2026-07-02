@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Electric Agents, Explained — Start Here</title>
+<meta name="description" content="A scaffolded, pedagogical explainer of the Electric Agents runtime and server: entities, durable streams, wakes, handlers, and the serverless agent architecture.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink active" href="index.html">Start</a>
+  <a class="navlink" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink" href="server.html">5 · Server Internals</a>
+  <a class="navlink" href="qa.html">6 · Q&amp;A</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">On this page</p>
+  <a href="#what">What this is</a>
+  <a href="#shift">The mental-model shift</a>
+  <a href="#nouns">The nouns at a glance</a>
+  <a href="#architecture">The whole system</a>
+  <a href="#path">Reading path</a>
+  <a href="#sources">Sources &amp; provenance</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">A guided tour of the agent runtime &amp; agent server</p>
+  <h1>Electric Agents, explained from the nouns up</h1>
+  <p class="lead">
+    Electric Agents is a <strong>durable runtime for long-lived, collaborative agents</strong> built by the
+    ElectricSQL team. Instead of an agent being a process that must stay alive, an agent is an
+    <strong>entity</strong>: an addressable, append-only <strong>stream of events</strong> plus a
+    <strong>handler function</strong> that is woken when something it cares about happens.
+    This site walks that idea from first concepts down to the implementation, in order.
+  </p>
+  <div class="hero-sub">
+    <span class="pill a">@electric-ax/agents-runtime</span>
+    <span class="pill b">@electric-ax/agents-server</span>
+    <span class="pill c">@durable-streams/*</span>
+    <span class="pill d">TanStack DB</span>
+  </div>
+</header>
+
+<section id="what">
+  <h2><span class="kicker-num">§</span>What this is</h2>
+  <p>
+    This is a <strong>pedagogical explainer</strong>, not a rewrite of the official docs. It is organized the way you
+    learn a new system well: <em>nouns first</em> (what exists), then <em>verbs</em> (how you do things), then
+    <em>internals</em> (how it actually works), each layer building on the last. It ends with a
+    <a href="qa.html">Q&amp;A page</a> that answers a set of deeper architectural questions — agent vs. actor,
+    streams vs. shared KV, the role of TanStack DB, deployment topology, and authn/authz.
+  </p>
+  <div class="callout chronicle">
+    <div class="callout-title">🔗 Why this pairs well with Chronicle</div>
+    <p>
+      This explainer lives in the <a href="https://github.com/adityavkk/chronicle">chronicle</a> repo — a Go + Redis
+      server for the <strong>Durable Streams protocol</strong>. Chronicle implements exactly the substrate layer that
+      Electric Agents is built on (Part 2). Everything above that layer — the entity model, the wake pipeline, the
+      agent server — is what this site explains. Look for <span class="pill b">Chronicle note</span> callouts that
+      connect concepts back to the protocol server you already know.
+    </p>
+  </div>
+</section>
+
+<section id="shift">
+  <h2><span class="kicker-num">§</span>The mental-model shift</h2>
+  <p>
+    Most agent frameworks model an agent as a <strong>process</strong>: an object in memory running an LLM loop,
+    holding conversation state, alive for as long as the agent "exists". That model fights the web's architecture —
+    processes die, redeploys wipe memory, serverless functions time out, and two replicas can't share a heap.
+  </p>
+  <p>Electric Agents inverts it. The framework's own phrase for this is <em>"turning the agent inside out"</em>:</p>
+  <div class="compare">
+    <div class="ve-card accent-b">
+      <div class="card-title">Process-centric agent</div>
+      <div class="card-body">
+        <ul>
+          <li>State lives in the process heap</li>
+          <li>Identity = a running object / actor</li>
+          <li>Messaging = RPC into the process</li>
+          <li>Crash / redeploy ⇒ amnesia</li>
+          <li>Must stay resident to "exist"</li>
+        </ul>
+      </div>
+    </div>
+    <div class="ve-card accent-a">
+      <div class="card-title">Electric agent (data-centric)</div>
+      <div class="card-body">
+        <ul>
+          <li>State lives in a <strong>durable stream</strong> (append-only log)</li>
+          <li>Identity = a <strong>URL</strong>: <code>/{type}/{id}</code></li>
+          <li>Messaging = <strong>append an event</strong> to a stream</li>
+          <li>Crash / redeploy ⇒ replay the log, carry on</li>
+          <li>Sleeps between wakes ⇒ <strong>scales to zero</strong></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <p>
+    The agent is the <strong>data</strong>. The compute — your handler function and its LLM loop — is stateless,
+    disposable, and only runs for the duration of a <strong>wake</strong>. On every wake the runtime rebuilds the
+    agent's world from its stream, runs your handler, appends whatever happened back onto the stream, and lets the
+    compute die. That one idea explains almost every design decision in the stack.
+  </p>
+</section>
+
+<section id="nouns">
+  <h2><span class="kicker-num">§</span>The nouns at a glance</h2>
+  <p>
+    Eight nouns carry the whole system. <a href="concepts.html">Part 1</a> treats each one properly; here is the map.
+  </p>
+  <div class="card-grid">
+    <div class="ve-card accent-a">
+      <div class="card-title">Entity</div>
+      <div class="card-body">The unit of existence. An addressable identity (<code>/{type}/{id}</code>) that owns an
+      append-only event stream and has a handler. Agents, workers, judges — all entities.</div>
+    </div>
+    <div class="ve-card accent-c">
+      <div class="card-title">Stream</div>
+      <div class="card-body">A durable, append-only log over plain HTTP. Each entity has one main stream
+      (<code>/{type}/{id}/main</code>) carrying every event of its life: messages, LLM steps, state changes.</div>
+    </div>
+    <div class="ve-card accent-b">
+      <div class="card-title">Wake</div>
+      <div class="card-body">The unit of execution. "Something happened that you care about" — an inbox message, a
+      child finishing, a state change, a timer. Each wake invokes the handler once.</div>
+    </div>
+    <div class="ve-card accent-d">
+      <div class="card-title">Handler</div>
+      <div class="card-body">Your code: <code>async handler(ctx, wake)</code>. Deterministic control flow that decides
+      what this wake means — run the LLM, spawn children, update state, or go back to sleep.</div>
+    </div>
+    <div class="ve-card accent-a">
+      <div class="card-title">Agent (the LLM loop)</div>
+      <div class="card-body">An optional behavior <em>inside</em> a wake: <code>ctx.useAgent({...})</code> +
+      <code>await ctx.agent.run()</code>. Context is assembled from the stream; every step is appended back to it.</div>
+    </div>
+    <div class="ve-card accent-c">
+      <div class="card-title">Collection (state)</div>
+      <div class="card-body">Typed, queryable state materialized <em>from</em> the stream via TanStack DB. Built-ins
+      (inbox, runs, steps…) plus your own declared collections with insert/update/delete actions.</div>
+    </div>
+    <div class="ve-card accent-b">
+      <div class="card-title">Runtime</div>
+      <div class="card-body"><code>@electric-ax/agents-runtime</code> — the library in <em>your</em> app. Registers
+      entity types, receives wake webhooks, materializes streams into <code>ctx</code>, runs handlers.</div>
+    </div>
+    <div class="ve-card accent-d">
+      <div class="card-title">Server</div>
+      <div class="card-body"><code>@electric-ax/agents-server</code> — the always-on control plane. Stores streams,
+      watches them, decides who to wake, enforces permissions, serves the UI and live sync.</div>
+    </div>
+  </div>
+</section>
+
+<section id="architecture">
+  <h2><span class="kicker-num">§</span>The whole system on one diagram</h2>
+  <p>
+    Keep this picture in mind throughout. There are two long-lived pieces (the agents server and its storage) and one
+    ephemeral piece (your app's handlers, which can be serverless functions).
+  </p>
+  <div class="diagram-shell">
+    <div class="diagram-title">Electric Agents — system topology</div>
+    <div class="diagram-sub">Solid arrows: HTTP requests. The webhook arrow is what makes handlers ephemeral.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+flowchart TD
+    subgraph clients["Clients"]
+      UI["Web / mobile app<br/>(TanStack DB live queries)"]
+      CLI["electric-ax CLI"]
+    end
+
+    subgraph server["Electric Agents server (always on) — port 4437"]
+      API["Control plane API<br/><code>/_electric/*</code> — entities, types,<br/>wakes, signals, grants"]
+      DS["Durable Streams<br/>server / proxy<br/>(append-only logs)"]
+      WR["Wake registry +<br/>dispatch policies"]
+      PGX["Electric sync proxy<br/><code>/_electric/electric/*</code>"]
+    end
+
+    subgraph storage["Storage"]
+      PG[("Postgres<br/>control-plane registry:<br/>entities, types, grants,<br/>claims, schedules")]
+      LOG[("Stream storage<br/>(LMDB / files / Redis —<br/>e.g. Chronicle)")]
+    end
+
+    subgraph app["Your app (ephemeral / serverless OK)"]
+      RT["agents-runtime<br/>RuntimeHandler"]
+      H1["entity handlers<br/>assistant · manager · judge"]
+      LLM["LLM APIs<br/>(Anthropic, …)"]
+    end
+
+    UI -->|"read streams (long-poll / SSE)"| DS
+    UI -->|"live entity lists (shapes)"| PGX
+    CLI --> API
+    UI -->|"send message = append"| API
+    API --> PG
+    PGX --> PG
+    DS --> LOG
+    WR -->|"wake webhook POST<br/>serve_endpoint"| RT
+    RT --> H1
+    H1 -->|"ctx.agent.run()"| LLM
+    RT -->|"append events,<br/>spawn, send, observe"| API
+    API --> DS
+    DS -->|"new events trigger<br/>wake evaluation"| WR
+      </pre>
+    </div>
+  </div>
+  <p>
+    Read it as a loop: a message is <strong>appended</strong> to an entity's stream → the server's wake machinery
+    notices → it <strong>POSTs a webhook</strong> to your app → the runtime <strong>materializes</strong> the stream
+    into typed state and runs your handler → the handler's effects (LLM steps, replies, spawns, state updates) are
+    <strong>appended back</strong> → which may wake other entities. Nothing in the loop requires your code to be
+    resident between wakes.
+  </p>
+</section>
+
+<section id="path">
+  <h2><span class="kicker-num">§</span>Reading path</h2>
+  <ol class="flow-steps">
+    <li><a href="concepts.html"><strong>Part 1 — The Nouns.</strong></a> Every concept, one at a time, with the shapes
+    of the actual types. Read this even if you skim everything else.</li>
+    <li><a href="streams.html"><strong>Part 2 — Durable Streams.</strong></a> The substrate: the wire protocol, offsets
+    and resumability, idempotent producers, and the state protocol that turns a byte log into a database.</li>
+    <li><a href="howto.html"><strong>Part 3 — How to Do Things.</strong></a> The developer surface, scaffolded: define
+    an entity → give it an LLM → handle wakes → keep state → spawn and coordinate → hybrid control flow → the seven
+    multi-agent patterns.</li>
+    <li><a href="runtime.html"><strong>Part 4 — Runtime Internals.</strong></a> A single wake, end to end, inside
+    <code>@electric-ax/agents-runtime</code>: webhook → StreamDB materialization → HandlerContext → model runner →
+    events appended → sleep.</li>
+    <li><a href="server.html"><strong>Part 5 — Server Internals.</strong></a> Inside <code>@electric-ax/agents-server</code>:
+    the routers, the wake registry, dispatch policies (push webhooks vs. pull runners), claims and leases, the
+    Postgres/streams two-plane design, and multi-tenancy.</li>
+    <li><a href="qa.html"><strong>Part 6 — Q&amp;A.</strong></a> Five deeper questions, answered with the machinery
+    from parts 1–5: agent vs. actor+LLM, streams vs. shared KV, TanStack DB's role, deployment topology, authn/authz.</li>
+  </ol>
+</section>
+
+<section id="sources">
+  <h2><span class="kicker-num">§</span>Sources &amp; provenance</h2>
+  <p>
+    Everything here was derived from primary sources as of <strong>July 2026</strong> (package versions
+    <code>@electric-ax/*@0.6.3</code>, <code>@durable-streams/state@0.3.1</code>):
+  </p>
+  <ul>
+    <li>The published source and type declarations of <code>@electric-ax/agents-runtime</code>,
+      <code>@electric-ax/agents-server</code> (full TypeScript source ships in the npm package),
+      <code>@electric-ax/agents</code>, and <code>electric-ax</code>.</li>
+    <li>The <code>@durable-streams/client</code> / <code>server</code> / <code>state</code> packages, including
+      <code>STATE-PROTOCOL.md</code> and the protocol constants.</li>
+    <li>The official Electric Agents documentation and walkthrough in the
+      <a href="https://github.com/electric-sql/electric/tree/main/website/docs/agents">electric-sql/electric</a> monorepo,
+      including the usage guides, reference pages, and the design-pattern skills that ship inside the runtime package.</li>
+    <li>The Electric blog posts <em>“Durable streams: the data primitive for the agent loop”</em> (2026-04-08) and
+      <em>“Serverless agents”</em> (2026-06-04).</li>
+  </ul>
+  <p>
+    Where this site paraphrases, it stays faithful to those sources; where behavior was inferred from code rather than
+    documented, the text says so.
+  </p>
+</section>
+
+<div class="pager">
+  <span></span>
+  <a class="next" href="concepts.html"><span class="dir">Next</span><span class="label">Part 1 — The Nouns →</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · built for <a href="https://github.com/adityavkk">@adityavkk</a> ·
+  sources: electric-sql/electric &amp; durable-streams packages · part of the
+  <a href="../">Chronicle docs site</a>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 6 · Your Questions, Answered — Electric Agents, Explained</title>
+<meta name="description" content="Deep answers: electric agents vs actors with LLM loops, streams vs shared KV, TanStack DB's role, deployment topology, and authn/authz.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink" href="index.html">Start</a>
+  <a class="navlink" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink" href="server.html">5 · Server Internals</a>
+  <a class="navlink active" href="qa.html">6 · Q&amp;A</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">The questions</p>
+  <a href="#q1">1 · Agent vs. actor + LLM</a>
+  <a href="#q2">2 · Streams vs. shared KV</a>
+  <a href="#q3">3 · What TanStack DB is for</a>
+  <a href="#q4">4 · Deployment topology</a>
+  <a href="#q5">5 · Authn / authz</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">Part 6 of 6</p>
+  <h1>Your questions, answered</h1>
+  <p class="lead">
+    Five architectural questions, answered with the machinery from Parts 1–5. Each answer opens with the short version,
+    then earns it.
+  </p>
+</header>
+
+<!-- ================================================================ Q1 -->
+<section id="q1">
+  <div class="qa-question">
+    <div class="qa-label">Question 1</div>
+    <div class="qa-text">What attributes does an electric agent have that differentiate it from an actor with an LLM
+    loop inside it?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    An actor is <strong>compute that owns hidden state</strong>; an electric agent is <strong>state that summons
+    compute</strong>. Concretely, an electric agent ≈ a virtual actor + event sourcing + durable pub/sub +
+    time-travel, collapsed into one HTTP-addressable primitive — and that collapse, not any single feature, is the
+    differentiator.
+  </div>
+
+  <p>
+    The comparison is apt — the surface vocabulary is nearly identical: identity, spawn, send, mailbox-ish inbox,
+    supervision-ish parents. If you built "an actor with an LLM loop inside" (Akka/Erlang style, or a Cloudflare
+    Durable Object, or an Orleans grain), you'd have something that demos the same. The differences are structural:
+  </p>
+
+  <div class="table-scroll"><table>
+    <thead><tr><th>Dimension</th><th>Actor + LLM loop</th><th>Electric agent (entity)</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Where state lives</strong></td>
+        <td>Private, in-memory, behind the actor. Persistence (event sourcing, grain storage) is an add-on you
+        implement per actor.</td>
+        <td><em>Externalized by construction.</em> The entity's only memory is its durable stream. There is no private
+        state to lose, snapshot, or forget to persist — the LLM tokens themselves land in the log as they stream.</td>
+      </tr>
+      <tr>
+        <td><strong>Relationship to compute</strong></td>
+        <td>Bound to a process/runtime node. Even "virtual actors" (Orleans) activate <em>somewhere</em> and pin state
+        to that activation; the runtime that hosts actors must itself be deployed and kept alive.</td>
+        <td>No residency at all. Between wakes an agent is rows and log entries. Any stateless function anywhere that
+        can speak HTTP to the server can host the next wake. Redeploys, crashes, and region moves are non-events.</td>
+      </tr>
+      <tr>
+        <td><strong>Introspection</strong></td>
+        <td>Opaque. To know what an actor is doing you must define messages for asking, or bolt on telemetry. Its
+        history is gone unless you logged it.</td>
+        <td><em>Transparent by default.</em> Any authorized party — a parent, a monitor entity, a dashboard, you with
+        <code>curl</code> — can <code>observe()</code> the agent's stream and materialize its full timeline: every
+        token, tool call, state transition, forever. No API had to be designed for this.</td>
+      </tr>
+      <tr>
+        <td><strong>Messaging semantics</strong></td>
+        <td>Mailbox: typically at-most-once, consumed-once, unordered across senders unless you work for it. A message
+        processed is a message gone.</td>
+        <td>Log: durable, totally ordered, <em>multi-consumer</em>. The same inbox event is simultaneously the
+        delivery, the audit record, and part of the LLM's future context. Exactly-once appends via producer fencing.</td>
+      </tr>
+      <tr>
+        <td><strong>Waiting</strong></td>
+        <td>An actor awaiting five children holds resources (or you hand-roll persistent timers/reminders).</td>
+        <td>Waiting is free and declarative: wake conditions (<code>runFinished</code>, collection changes, cron,
+        timeouts) are <em>data in the server</em>. A judge "waiting" for rebuttals is zero compute.</td>
+      </tr>
+      <tr>
+        <td><strong>History operations</strong></td>
+        <td>None inherent. Replaying or branching an actor's past is a research project.</td>
+        <td>Native: replay any entity from offset zero; <code>fork()</code> an agent — its whole history — at a point
+        and explore an alternative timeline; audit by reading.</td>
+      </tr>
+      <tr>
+        <td><strong>Reach</strong></td>
+        <td>Actor refs are meaningful inside the actor system. Browsers, CLIs, other stacks need gateways.</td>
+        <td>The address <em>is</em> a URL and the protocol <em>is</em> HTTP. A browser tab is a first-class peer of the
+        agent — same stream, same offsets, CDN-cacheable fan-out.</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <p>
+    Two of these deserve emphasis because they specifically matter <em>for LLM agents</em>:
+  </p>
+  <ul>
+    <li><strong>The context problem is the persistence problem.</strong> An LLM agent's "state" is largely its
+      conversation history — which is exactly what must be rebuilt after any interruption, streamed to users, audited
+      later, and fed back as context. In the actor model those are four different mechanisms (state, transport,
+      logging, prompt assembly). Here they are one log with four readers. <code>timelineToMessages(db)</code> —
+      the prompt is literally a query over the same data the UI renders (Part 4 §4).</li>
+    <li><strong>Dynamic topology without interface design.</strong> The serverless-agents post's Kleppmann-inspired
+      point ("turning the agent inside out"): actor coordination requires <em>predefined message protocols</em> between
+      parties. Electric agents coordinate by <em>observing each other's externalized state</em> — the walkthrough's
+      manager doesn't ask the judge for status via a message type someone designed; it reads
+      <code>judge.db.collections.debate.get('current').phase</code>. New observers join without anyone's code
+      changing.</li>
+  </ul>
+
+  <div class="callout">
+    <div class="callout-title">⚖ To be fair to actors</div>
+    <p>Mature actor systems can assemble most single rows of that table: Orleans gives activation-on-demand,
+    Akka gives event sourcing, Durable Objects give a persistent mailbox. What none of them give is the
+    <em>unification</em> — one primitive that is simultaneously the state store, the transport, the subscription, the
+    audit log, and the UI feed, addressable from a browser. The cost side of the trade: latency (every hop is HTTP +
+    log append, not an in-memory enqueue — fine for LLM-paced work, wrong for microsecond actor workloads) and losing
+    in-process locality. Electric Agents bets that agent workloads are I/O-bound and observation-hungry, so the trade
+    is worth it.</p>
+  </div>
+</section>
+
+<!-- ================================================================ Q2 -->
+<section id="q2">
+  <div class="qa-question">
+    <div class="qa-label">Question 2</div>
+    <div class="qa-text">Why not just use a shared KV store to share data between agents instead of these stream
+    entities?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    Because a KV store answers only "what is the value now?" — and almost everything agents need from shared data is
+    something else: <em>what changed, in what order, since when, who should react, and what happened before</em>.
+    A stream answers all of those, and gives you the KV view for free as its last-write-wins projection. The reverse
+    is not true: a KV store upgraded to answer them <em>becomes</em> a stream.
+  </div>
+
+  <p>Walk through what shared agent state actually has to do, using the debate blackboard as the running example:</p>
+
+  <ol class="flow-steps">
+    <li><strong>Notify, don't get polled.</strong> The judge must <em>react</em> when a debater writes an argument.
+      With KV, someone polls (<code>GET argument-a</code> in a loop — compute while waiting, latency floor, rate
+      limits). With streams, wake conditions are declarative server-side data: <code>wake: { on: 'change',
+      collections: ['arguments'] }</code> — zero compute until the change arrives. The moment you add a "changefeed"
+      to your KV store to fix this, you have started building the log.</li>
+    <li><strong>Order concurrent writers.</strong> Two debaters finish near-simultaneously; the judge's logic
+      ("when <em>both</em> arguments are in, advance the phase") needs a consistent view of the sequence, and its own
+      phase transition must not race with itself on redelivered wakes. A KV store gives per-key last-write-wins with no
+      cross-key ordering; you end up bolting on versions, CAS loops, or locks. A stream is a <em>total order</em> —
+      every consumer sees the same history in the same sequence, and idempotent producers + write tokens fence
+      duplicate/zombie writers at the door (Parts 2 §5, 5 §6).</li>
+    <li><strong>Resume after dying.</strong> Every participant here is ephemeral compute. A KV consumer that restarts
+      knows only "current values" — it can't tell what it already processed. A stream consumer holds one offset and
+      resumes exactly; the runtime's <code>replayWatermarks</code> collection is precisely this, per observed source.</li>
+    <li><strong>Carry the in-between.</strong> Agent data isn't only end states — it's streams of tokens, sequences of
+      tool calls, progressions of phases. KV overwrites destroy the middle (write token-by-token and each write
+      obliterates the last; write-at-end and you've lost streaming). The log <em>is</em> the middle: transport and
+      storage in one write (Part 1 §2).</li>
+    <li><strong>Remember.</strong> Why did the judge rule this way? What did debater B's first draft say? Who set
+      <code>phase='done'</code> and when? KV: gone, overwritten. Log: <code>GET ?offset=-1</code>. Audit, debugging,
+      evals, and <code>fork()</code> (branch the whole debate and re-run it differently) all fall out of retained
+      history.</li>
+    <li><strong>Fan out cheaply.</strong> A thousand dashboards watching one agent would hammer a KV store with polls.
+      Offset-immutable stream reads collapse in CDNs — "10,000 viewers at the same offset become one upstream
+      request" (Part 2 §6).</li>
+  </ol>
+
+  <p>
+    And here is the kicker that makes the question dissolve: <strong>the KV store is still there.</strong> The state
+    protocol's materialization rule — apply change events in order, last write wins per <code>(type, key)</code> —
+    means <code>ctx.state.debate.get('current')</code> <em>is</em> a KV read. It's just a KV whose value is derived
+    from, and always consistent with, an ordered, subscribable, replayable history. You write
+    <code>board.findings.insert(…)</code> and read <code>board.findings.get(key)</code> exactly as you would with
+    Redis — the stream underneath is what makes the other five requirements free rather than five more systems.
+  </p>
+
+  <div class="callout warn">
+    <div class="callout-title">⚠ When KV genuinely is enough</div>
+    <p>Ephemeral, unordered, single-writer, nobody-reacts data — a rate-limit counter, a cache of embeddings — doesn't
+    need a log, and nothing stops an agent's tools from using Redis for it. The framework's claim is narrower than
+    "streams beat KV": it's that <em>coordination state between agents</em> — the state that drives wakes, gates, and
+    UIs — is exactly the state that needs ordering, history, and subscriptions.</p>
+  </div>
+</section>
+
+<!-- ================================================================ Q3 -->
+<section id="q3">
+  <div class="qa-question">
+    <div class="qa-label">Question 3</div>
+    <div class="qa-text">What role is TanStack DB playing here? Show me examples. And why not just fold over the
+    events?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    A fold gives you <em>state</em>; TanStack DB gives you <em>a database over the fold</em> — incremental live
+    queries, reactive subscriptions, typed collections, and an optimistic write path with confirmation. The fold is
+    still in there (it's literally the sync layer), but folding is the easy 20%. TanStack DB is the other 80% you'd
+    otherwise hand-roll: <em>query maintenance</em>, not state maintenance.
+  </div>
+
+  <h3>The role, precisely</h3>
+  <p>
+    TanStack DB is an embedded, reactive client database built on differential dataflow (its engine is d2ts —
+    also an ElectricSQL project). In this stack it appears in <strong>three places doing one job</strong> —
+    materializing streams into something programmable:
+  </p>
+  <ul>
+    <li><strong>In the handler</strong>: <code>ctx.db.collections.*</code> / <code>ctx.state.*</code> — the entity's
+      log as typed collections (Part 4 §2).</li>
+    <li><strong>In the browser</strong>: <code>client.observe(entity(url))</code> → the same collections, live over
+      SSE, driving <code>useChat</code> and any custom UI.</li>
+    <li><strong>Between entities</strong>: shared StreamDBs (<code>mkdb</code>/<code>observe(db(…))</code>) and
+      observed handles — one entity querying another's state.</li>
+  </ul>
+  <p>Same schema, same query language, same reactivity model in all three. That uniformity is itself part of the answer.</p>
+
+  <h3>Examples</h3>
+  <p><strong>1. A gate in a handler — point read of materialized state</strong> (the walkthrough's manager, deciding
+  whether the judge's debate is actually finished):</p>
+  <pre><code>const judge = await ctx.observe(entity(finishedChild.url))
+const debate = judge.db.collections.debate.get('current')
+if (debate?.phase !== 'done') return ctx.sleep()   // not yet — costs nothing</code></pre>
+
+  <p><strong>2. A real query — "did I already spawn this child?"</strong> (from the runtime's own query skill; the
+  manifests collection is the entity's durable resource table):</p>
+  <pre><code>import { manifestChildKey } from '@electric-ax/agents-runtime'
+import { eq, queryOnce } from '@durable-streams/state/db'
+
+const child = await queryOnce((q) =>
+  q.from({ manifests: ctx.db.collections.manifests })
+   .where(({ manifests }) => eq(manifests.key, manifestChildKey('worker', 'child-1')))
+   .findOne()
+)
+if (child?.kind === 'child') ctx.send(child.entity_url, payload)
+else await ctx.spawn('worker', 'child-1', args)</code></pre>
+
+  <p><strong>3. A live UI — the chat timeline as an incrementally-maintained join:</strong></p>
+  <pre><code>const db = await client.observe(entity('/assistant/a1'))   // SSE-tailed
+
+// useChat is sugar over a live query joining runs + inbox + wakes + entities,
+// assembling textDeltas into texts, ordered by _timeline_order:
+const chat = useChat(db)
+chat.runs[0].texts[0].text      // grows token-by-token as delta events arrive
+chat.state === 'working'        // drives the streaming cursor
+
+// or roll your own live view — e.g. a tool-call audit panel:
+const q = useLiveQuery((q) =>
+  q.from({ calls: db.collections.toolCalls })
+   .where(({ calls }) => eq(calls.status, 'failed')))</code></pre>
+
+  <p><strong>4. The write path — optimistic, log-confirmed</strong> (what <code>ctx.state.*.insert</code> and UI
+  actions compile down to):</p>
+  <pre><code>addFinding: {
+  onMutate: (f) => db.collections.findings.insert(f),        // instant, local
+  mutationFn: async (f) => {
+    const txid = crypto.randomUUID()
+    await stream.append(schema.findings.insert({ value: f, headers: { txid } }))
+    await db.utils.awaitTxId(txid)   // confirmed when it round-trips the log
+  },
+}</code></pre>
+
+  <h3>OK — but why not just fold?</h3>
+  <p>
+    You absolutely can fold — <code>@durable-streams/state</code> ships the fold as <code>MaterializedState</code>:
+    ~a hundred lines, <code>Map&lt;type, Map&lt;key, value&gt;&gt;</code>, apply events in order. If all you needed
+    were example 1, the fold would do. The gap appears at examples 2–4, and it's the gap between <em>state</em> and
+    <em>queries over state</em>:
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Need</th><th>Hand-rolled fold</th><th>TanStack DB collections</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Derived views that stay fresh</strong> (timeline join, "failed tool calls", per-run token totals)</td>
+        <td>Recompute the derivation on every event — O(data) per event — or maintain each view incrementally by hand,
+        which means writing a bespoke delta-propagation engine per view (and getting deletes, updates and join
+        re-evaluation right).</td>
+        <td>Differential dataflow maintains registered queries in O(change). The chat UI does not re-scan the log per
+        token; the delta flows through the join.</td>
+      </tr>
+      <tr>
+        <td><strong>Reactivity</strong> (something changed → exactly the affected subscribers re-render/re-evaluate)</td>
+        <td>You invent a listener/emitter layer, per-key vs per-type granularity, batching so a burst of 200 deltas
+        doesn't cause 200 renders…</td>
+        <td>Native: collections are subscribable; the stream dispatcher commits <em>per batch</em>, so consumers see
+        snapshot-consistent transitions at <code>upToDate</code> boundaries.</td>
+      </tr>
+      <tr>
+        <td><strong>Writes</strong></td>
+        <td>A fold is read-only by definition. The write path — optimistic apply, append with txid, reconcile when the
+        authoritative event returns, roll back on failure, dedupe replays (the runtime downgrades re-delivered inserts
+        to updates so reconnects don't crash on duplicate keys) — is a second system you now design.</td>
+        <td><code>createOptimisticAction</code> + <code>awaitTxId</code> is exactly that system, already correct.</td>
+      </tr>
+      <tr>
+        <td><strong>Types &amp; validation</strong></td>
+        <td>A <code>Map&lt;string, unknown&gt;</code>; schema enforcement and key derivation are on you.</td>
+        <td>Standard Schema (Zod/TypeBox) per collection; rows are typed end-to-end from handler to React.</td>
+      </tr>
+      <tr>
+        <td><strong>One model everywhere</strong></td>
+        <td>Your server fold and your UI state layer diverge; "what the agent sees" ≠ "what the user sees".</td>
+        <td>Handler, browser, observer entity all materialize the same schema the same way. <code>useChat</code> and
+        <code>timelineToMessages</code> are queries over the <em>same collections</em>.</td>
+      </tr>
+    </tbody>
+  </table></div>
+  <p>
+    So the honest formulation: <strong>the fold is the sync config; TanStack DB is the database that makes the folded
+    result worth having.</strong> The framework folds events into collections (that's the state protocol), then
+    TanStack DB provides what folding alone never gives you — incremental queries, reactive subscriptions, and a
+    principled optimistic write loop — uniformly across agents, UIs, and observers. Given that agent UX is
+    fundamentally "many live views over one fast-moving log", that's not a convenience; it's the load-bearing layer.
+  </p>
+</section>
+
+<!-- ================================================================ Q4 -->
+<section id="q4">
+  <div class="qa-question">
+    <div class="qa-label">Question 4</div>
+    <div class="qa-text">What does the deployment topology look like? Where do my agent handlers get deployed? Is this
+    a serverless runtime?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    Your handlers deploy <strong>inside your own app</strong> — they're routes behind one webhook endpoint, so they go
+    wherever your app goes: a Node server, a container, or serverless/edge functions. The always-on part is the
+    <strong>agents server + its storage</strong> (Postgres, Electric, a streams backend), run via Docker in dev,
+    self-hosted or Electric Cloud in prod. It's "serverless-<em>ready</em>" rather than a serverless runtime: the
+    architecture is specifically designed so agent loops <em>can</em> be stateless functions that scale to zero — but a
+    plain long-lived server works identically, and a pull-based "runner" mode exists for compute the server can't
+    reach.
+  </div>
+
+  <h3>The pieces and where they run</h3>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Component</th><th>What it is</th><th>Where it runs</th><th>Lifetime</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Your app + agents-runtime</strong></td><td>Your web/API app with <code>registry.define(…)</code>
+        and one webhook route. <em>This is where handlers and LLM calls execute; your LLM API keys live here.</em></td>
+        <td>Anywhere TypeScript serves HTTP: Node/Bun server, K8s pod, Vercel/Cloudflare/Lambda function, Hono/Next/
+        TanStack/Expo backend.</td><td>Ephemeral OK — only alive during wakes.</td></tr>
+      <tr><td><strong>Agents server</strong></td><td><code>@electric-ax/agents-server</code> — control plane, wake
+        dispatch, permissions, UI (Part 5).</td><td>A container/VM you run, or Electric Cloud (managed, multi-tenant
+        via <code>AgentsHost</code>).</td><td>Always on.</td></tr>
+      <tr><td><strong>Postgres</strong></td><td>Control-plane registry (entities, grants, claims, schedules).</td>
+        <td>Alongside the agents server; any managed Postgres.</td><td>Always on.</td></tr>
+      <tr><td><strong>Streams backend</strong></td><td>Durable Streams storage. Embedded LMDB in dev; external
+        conformant server in prod (Electric's, or Chronicle-shaped).</td><td>With the server, or separate — it's just
+        HTTP.</td><td>Always on.</td></tr>
+      <tr><td><strong>Electric</strong></td><td>Postgres→shapes sync engine, proxied for live registry views.</td>
+        <td>Container next to Postgres.</td><td>Always on.</td></tr>
+      <tr><td><strong>Runners</strong> (optional)</td><td>Pull-model workers (host the built-in Horton/worker agents,
+        or your own).</td><td>Anywhere <em>outbound-only</em> — laptops, private VPCs, GPU boxes behind NAT.</td>
+        <td>Long-lived while enabled.</td></tr>
+      <tr><td><strong>Tool sandboxes</strong> (optional)</td><td>Docker containers / e2b microVMs for LLM tool
+        execution.</td><td>Docker host or e2b cloud, summoned per entity/wake.</td><td>Ephemeral, reap-able.</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>In dev, <code>pnpx electric-ax agents start</code> collapses the middle column into one Docker Compose project on
+  <code>localhost:4437</code>, and your app runs on <code>localhost:3000</code> with <code>tsx watch</code>.</p>
+
+  <div class="diagram-shell">
+    <div class="diagram-title">Production topology — push (serverless) and pull (runner) side by side</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+flowchart TD
+    subgraph users["Users"]
+      B["Browsers / mobile<br/><small>streams via CDN · live registry shapes</small>"]
+    end
+    CDN["CDN<br/><small>offset-immutable reads collapse here</small>"]
+    subgraph plane["Always-on plane (self-hosted or Electric Cloud)"]
+      AS["Agents server(s)<br/><small>stateless nodes, N replicas</small>"]
+      PG[("Postgres")]
+      EL["Electric sync"]
+      DS[("Streams backend<br/><small>LMDB · files · Chronicle/Redis</small>")]
+    end
+    subgraph appA["Your app — push model"]
+      FN["Serverless / edge functions<br/>or plain Node service<br/><small>handlers + LLM calls · scale to zero</small>"]
+    end
+    subgraph appB["Private compute — pull model"]
+      RN["Runner in your VPC / laptop / GPU box<br/><small>outbound long-poll claims only</small>"]
+    end
+    LLM["LLM providers"]
+
+    B --> CDN --> AS
+    AS --> PG
+    AS --> DS
+    EL --> PG
+    AS --> EL
+    AS ==>|"wake webhook (signed)"| FN
+    FN -->|"appends · spawn · send · observe"| AS
+    FN --> LLM
+    RN -->|"POST /runners/:id/claim (long-poll)"| AS
+    RN --> LLM
+    style FN fill:var(--node-a),stroke:var(--accent)
+    style RN fill:var(--node-b),stroke:var(--accent-2)
+      </pre>
+    </div>
+  </div>
+
+  <h3>"Is this a serverless runtime?"</h3>
+  <p>Three precise statements instead of one fuzzy yes:</p>
+  <ul>
+    <li><strong>The programming model is serverless-shaped.</strong> Handlers are stateless, webhook-invoked, and
+      forbidden from blocking across wakes (no "await the child in-process"). All durability lives behind the API.
+      That's exactly the contract FaaS platforms need — the serverless-agents post is explicit that this is the point:
+      <em>agents as data, loops as stateless functions, scale to zero</em>, with the ~5ms/2MB economics of function
+      invocation rather than the ~125ms/128MB of resurrecting a sandbox VM per agent.</li>
+    <li><strong>It is not <em>only</em> serverless.</strong> The same code runs in a boring long-lived Node service
+      (the walkthrough's Hono app is one), and the runner model exists precisely for compute that can't accept inbound
+      webhooks. Push vs. pull is a per-entity-type dispatch policy, not an architecture commitment.</li>
+    <li><strong>The platform itself is not serverless.</strong> Somebody runs the always-on plane — you (a compose
+      file's worth of containers) or Electric Cloud. "Serverless" here describes <em>your</em> half of the system.</li>
+  </ul>
+  <div class="callout warn">
+    <div class="callout-title">⚠ Serverless fine print</div>
+    <p>Wakes that run LLM loops are long-lived HTTP handlers — minutes, sometimes. On FaaS that means: configure
+    generous function timeouts, remember interrupted wakes are re-dispatched (claims expire, delivery is
+    at-least-once — your idempotent handler absorbs this), and note the blog's own edge-deployment framing
+    (<em>"deploy your agents as serverless functions"</em>) assumes the loop's I/O-bound profile. For very long tool
+    executions, push them into sandboxes or runners rather than holding the function open.</p>
+  </div>
+</section>
+
+<!-- ================================================================ Q5 -->
+<section id="q5">
+  <div class="qa-question">
+    <div class="qa-label">Question 5</div>
+    <div class="qa-text">How can authn/authz be handled?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    <strong>Authn is pluggable and yours; authz is built in and layered.</strong> Every request acts as a
+    <em>principal</em> (<code>user:</code> / <code>agent:</code> / <code>service:</code> / <code>system:</code>).
+    You establish who that is — via an <code>authenticateRequest</code> hook or a trusted gateway setting the
+    <code>Electric-Principal</code> header. From there the server enforces: creator rights + explicit
+    <em>permission grants</em> on entities and types (8 verbs, propagation, expiry), an optional external
+    <em>policy hook</em> for ABAC, claim-scoped <em>write tokens</em> on the stream plane, signed webhooks on the
+    dispatch plane, row-level scoping on the sync plane, and tenant isolation underneath it all.
+  </div>
+
+  <h3>Authentication — establishing the principal</h3>
+  <p>Identity is a string key <code>&lt;kind&gt;:&lt;id&gt;</code>, canonicalized to an addressable entity URL
+  (<code>user:sam</code> → <code>/principal/user%3Asam</code>). Three ways it enters a request, in trust order:</p>
+  <ol class="flow-steps">
+    <li><strong>An <code>authenticateRequest</code> hook</strong> injected into the server: receives the raw request,
+      verifies your real credential (JWT, session cookie, API key), returns the principal. The right place in
+      self-hosted production.</li>
+    <li><strong>A trusted gateway</strong> that terminates auth and sets <code>Electric-Principal</code> before
+      forwarding. Important: the server treats that header as <em>trusted input</em> — it must never be reachable with
+      client-controlled headers, and CORS is wide open by default, so a fronting proxy is part of the production
+      design, not an option.</li>
+    <li><strong>Dev fallback</strong> — <code>system:dev-local</code> when running insecure/dev/embedded; production
+      conditions (external streams, <code>NODE_ENV=production</code>, no <code>ELECTRIC_INSECURE</code>) hard-require a
+      principal (401 otherwise).</li>
+  </ol>
+  <p>
+    Agents are principals too: a wake executes <em>as</em> its entity (<code>agent:/judge/debate-7</code>), so
+    agent-to-agent calls (spawn, send, observe) flow through exactly the same authz as user calls — there is no
+    privileged "inside the framework" path. (Except the explicit one: <code>system:*</code> principals used by internal
+    machinery bypass checks.)
+  </p>
+
+  <h3>Authorization — five layers</h3>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Layer</th><th>Mechanism</th><th>Protects</th></tr></thead>
+    <tbody>
+      <tr><td><strong>1 · Grants</strong></td>
+        <td>Creator gets full rights; everything else is explicit rows: entity-level verbs
+        <code>read · write · delete · signal · fork · schedule · spawn · manage</code>, type-level
+        <code>spawn · manage</code>. Grants target a principal or a whole kind, can propagate
+        (<code>self</code>/<code>descendants</code>, <code>copy_to_children</code> — so a whole agent subtree inherits
+        access), and can carry <code>expires_at</code>. Declared statically on entity types
+        (<code>permissionGrants</code>) or managed at runtime (<code>POST /:type/:id/grants</code>). The UI's
+        view/chat/manage roles are bundles of these.</td>
+        <td>The control plane: who may see, message, spawn, signal, or administer each entity.</td></tr>
+      <tr><td><strong>2 · Policy hook</strong></td>
+        <td>Optional <code>authorizeRequest</code> callback consulted on decisions — plug in OPA/ABAC/your rules;
+        allow/deny results cached per (tenant, principal, verb, resource) with expiry.</td>
+        <td>Organization-specific rules the grant tables can't express.</td></tr>
+      <tr><td><strong>3 · Write tokens</strong></td>
+        <td>Raw stream appends require a claim-scoped token (<code>electric-claim-token</code>), minted per wake/spawn,
+        released on <code>done</code>. Collection writes from outside additionally require the collection to be
+        declared <code>externallyWritable</code> with an <code>operations</code> allow-list.</td>
+        <td>The data plane: only the entity's current claim holder can write its log; UIs can't forge agent events.</td></tr>
+      <tr><td><strong>4 · Signed webhooks</strong></td>
+        <td>Ed25519 signatures on wake payloads, verified by the runtime against the server's JWKS (on by default).</td>
+        <td>The dispatch plane: your public serve endpoint can't be fed forged wakes.</td></tr>
+      <tr><td><strong>5 · Scoped sync + tenancy</strong></td>
+        <td>The Electric proxy rewrites every shape request: table allow-list, fixed columns, injected
+        <code>where</code> deriving from the caller's grants + tenant. All storage is tenant-keyed; stream paths are
+        tenant-prefixed at the backend boundary.</td>
+        <td>The read plane: live queries only ever see rows the principal could read; tenants can't see each other at
+        all.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>A concrete production recipe</h3>
+  <pre><code>// 1. Front the agents server; verify your real auth there.
+const server = new ElectricAgentsServer({
+  authenticateRequest: async (req) => {
+    const claims = await verifyJwt(req.headers.get('authorization'))
+    return { key: `user:${claims.sub}` }        // → the acting principal
+  },
+  authorizeRequest: opaPolicyHook,               // optional ABAC layer
+})
+
+// 2. Let entity types declare their own access on registration:
+registry.define('support-agent', {
+  permissionGrants: [
+    { subject_kind: 'principal_kind', subject_value: 'user', permission: 'spawn' },
+  ],
+  // support tickets: creator (the user) chats; ops team gets visibility via
+  // runtime grants with propagation to descendants (the agent's sub-workers)
+  …
+})
+
+// 3. Users hit YOUR app; your app talks to the agents server as them.
+//    Agents talk to each other as themselves. Secrets never enter prompts
+//    or spawn args (they're persisted in the log forever) — keep credentials
+//    in handler/tool closures, which live only in your deployment.</code></pre>
+
+  <p>
+    That last parenthetical is the one <em>cultural</em> rule the docs insist on alongside the mechanisms: the log is
+    durable and observable by design, so <strong>anything written to it — prompts, args, messages — should be treated
+    as visible to everyone who can ever read the entity</strong>. Capability secrets belong in your app code (tools),
+    not in entity data.
+  </p>
+</section>
+
+<div class="pager">
+  <a href="server.html"><span class="dir">Previous</span><span class="label">← Part 5 — Server Internals</span></a>
+  <a class="next" href="index.html"><span class="dir">Back to</span><span class="label">Start Here ⤴</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · Part 6 of 6 · answers grounded in the agents-server source, runtime declarations, official docs &amp; blog posts
+</footer>
+
+</body>
+</html>
