@@ -8,3 +8,5 @@ Copied from https://github.com/durable-streams/durable-streams at commit 82f9963
 - IMPLEMENTATION_TESTING.md — how to run the conformance suites
 - CHRONICLE-NOTES.md — Chronicle's own annotations on the spec above, kept
   out of PROTOCOL.md so vendoring stays pristine
+
+See [`/SPEC_VERSION.md`](../../SPEC_VERSION.md) for the pinned upstream commit, conformance suite version, and certified pass count.
