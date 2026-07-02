@@ -106,8 +106,10 @@ informed it is under [docs/research/](docs/research/).
 
 Chronicle is tested against the official
 [`@durable-streams/server-conformance-tests`](https://www.npmjs.com/package/@durable-streams/server-conformance-tests)
-suite — ~330 black-box protocol tests including idempotent producers, stream
-closure, forks, JSON mode, SSE, and property-based fuzzing:
+suite — hundreds of black-box protocol tests including idempotent producers, stream
+closure, forks, JSON mode, SSE, and property-based fuzzing. The exact certified
+result (currently **332/332 at `0.3.5`**) and the pinned spec commit are recorded
+in [`SPEC_VERSION.md`](SPEC_VERSION.md):
 
 ```bash
 make conformance                                   # full suite vs live Redis
