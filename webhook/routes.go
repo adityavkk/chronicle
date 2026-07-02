@@ -208,9 +208,10 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
 		return
 	}
-	tv := ValidateToken(rt.mgr.tokenKey, token, id, time.Now())
+	now := time.Now()
+	tv := ValidateToken(rt.mgr.tokenKey, token, id, now)
 	if !tv.Valid {
-		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
+		rt.writeTokenRejected(w, id, tv, now)
 		return
 	}
 	var req CallbackRequest
@@ -236,7 +237,17 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 		writeErr(w, http.StatusConflict, ErrCodeFenced)
 		return
 	}
-	writeJSON(w, http.StatusOK, AckResponse{OK: true, NextWake: nextWake})
+	resp := AckResponse{OK: true, NextWake: nextWake}
+	// In-band refresh (issue #77): a successful callback whose token is within the
+	// refresh threshold of expiry re-mints it and returns it in the "token" field.
+	// When not refreshing, Token stays empty and `omitempty` keeps the body
+	// byte-identical to {ok,next_wake} — the shape the conformance suite deep-equals.
+	if ShouldRefreshToken(tv.Exp, now.Unix(), tokenRefreshThreshold) {
+		if fresh, ok := rt.mgr.mintToken(id, tv.Generation, now); ok {
+			resp.Token = fresh
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string) {
@@ -296,9 +307,10 @@ func (rt *Routes) handleRelease(w http.ResponseWriter, r *http.Request, id strin
 		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
 		return
 	}
-	tv := ValidateToken(rt.mgr.tokenKey, token, id, time.Now())
+	now := time.Now()
+	tv := ValidateToken(rt.mgr.tokenKey, token, id, now)
 	if !tv.Valid {
-		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
+		rt.writeTokenRejected(w, id, tv, now)
 		return
 	}
 	var req ReleaseRequest
@@ -391,6 +403,23 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeErr(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, errBody(code))
+}
+
+// writeTokenRejected turns a failed token validation into its 401. A token that
+// is ours and well-formed but past expiry (issue #77) gets the distinct,
+// retryable TOKEN_EXPIRED plus a freshly minted token in the body, so a
+// heartbeating pull-wake worker can retry at once instead of stalling a lease
+// window; a genuinely malformed or foreign token stays a bare TOKEN_INVALID.
+func (rt *Routes) writeTokenRejected(w http.ResponseWriter, id string, tv TokenValidation, now time.Time) {
+	if !tv.Expired {
+		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
+		return
+	}
+	body := errBody(ErrCodeTokenExpired)
+	if fresh, ok := rt.mgr.mintToken(id, tv.Generation, now); ok {
+		body.Token = fresh
+	}
+	writeJSON(w, http.StatusUnauthorized, body)
 }
 
 // writeErrMsg writes a 400 error envelope with a human-readable message. Every

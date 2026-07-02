@@ -26,10 +26,39 @@ SANY               = $(JAVA) -cp $(JAR) tla2sany.SANY
         parse-trace trace-validate trace-negative \
         tlc40 parse40 membership-safety membership-convergence membership-nofair \
         membership-witness leasetail leasetail-witness alloy \
-        tlc41 apalache
+        tlc41 apalache \
+        token-refresh parse-token-refresh token-refresh-live token-refresh-witness token-refresh-norecover
 
 # The CI target (issue #37): parse, then both faithful safety configs.
 tlc: jar parse tlc-1x1 tlc-2x2
+
+# --- issue #77: in-band callback-token refresh liveness -----------------------
+#
+# TokenRefresh.tla proves the property the #77 fix exists for:
+#   ExpiredLeadsToUsable == [](Expired ~> Usable)  under WF(Ack)
+# — an expired callback token always self-heals to a usable one, so a heartbeating
+# pull-wake worker is never permanently locked out. The witness shows Expired is
+# reachable (the leads-to is not vacuous) and the no-recover negative control
+# (BrokenSpec, the pre-#77 behaviour) MUST fail the same leads-to. The pure
+# ack-decision arithmetic is pinned from the Go side by the rapid suite in
+# webhook/token_refresh_property_test.go.
+token-refresh: jar parse-token-refresh token-refresh-live token-refresh-witness token-refresh-norecover
+
+parse-token-refresh: jar
+	$(SANY) TokenRefresh.tla
+
+token-refresh-live: jar
+	$(TLC) -config TokenRefresh.cfg TokenRefresh.tla
+
+# Non-vacuity: the Expired state MUST be reachable (NeverExpired MUST be violated).
+token-refresh-witness: jar
+	@! $(TLC) -config TokenRefresh_Witness.cfg TokenRefresh.tla 2>&1 | tee /dev/stderr | grep -q 'No error has been found' \
+		|| (echo "FAIL: Expired state not reachable — the leads-to run is vacuous" && exit 1)
+
+# Negative control: WITHOUT the expired self-heal the leads-to MUST FAIL.
+token-refresh-norecover: jar
+	@! $(TLC) -config TokenRefresh_NoRecover.cfg TokenRefresh.tla 2>&1 | tee /dev/stderr | grep -q 'No error has been found' \
+		|| (echo "FAIL: recovery held WITHOUT the self-heal — the property is trivial" && exit 1)
 
 # The issue #38 CI target: the standalone Ownership module, the fence-on/
 # fence-off layering proof (1 slot + scaled 2/2/2), and the liveness/fairness

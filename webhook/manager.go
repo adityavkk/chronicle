@@ -622,6 +622,23 @@ func (m *Manager) tokenTTL(sub Subscription) time.Duration {
 	return time.Duration(sub.Config.LeaseTTLMs)*time.Millisecond + time.Hour
 }
 
+// mintToken mints a fresh callback/claim token for a subscription at the given
+// generation, TTL'd off the sub's lease (tokenTTL). It is the imperative-shell
+// step the in-band token refresh and the expired-token retry path share (issue
+// #77); ok is false when the sub is gone or minting fails, so the caller falls
+// back to the plain response.
+func (m *Manager) mintToken(id string, generation int64, now time.Time) (string, bool) {
+	sub, ok, err := m.store.Get(id)
+	if err != nil || !ok {
+		return "", false
+	}
+	tok, err := GenerateToken(m.tokenKey, id, generation, now, m.tokenTTL(sub), randReader)
+	if err != nil {
+		return "", false
+	}
+	return tok, true
+}
+
 // rewakeIfPending re-issues a wake when work remains after a release or a done
 // ack (PROTOCOL §7.2/§7.3). Returns whether a re-wake was issued (the next_wake
 // flag).
