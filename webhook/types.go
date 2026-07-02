@@ -172,4 +172,5 @@ const (
 	ErrCodeConfigConflict     = "CONFIG_CONFLICT"
 	ErrCodeNotFound           = "NOT_FOUND"
 	ErrCodeTokenInvalid       = "TOKEN_INVALID"
+	ErrCodeSubscriptionGone   = "SUBSCRIPTION_GONE"
 )
