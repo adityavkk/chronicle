@@ -1,0 +1,21 @@
+name: docs-site build (PR gate)
+
+# Build the docs-site on PRs that touch it, so a broken MDX / failed astro build
+# is caught before it lands (issue #99). deploy-docs.yml only builds on push to
+# main, i.e. after the fact; this is the pre-merge gate. Build-only, no deploy.
+on:
+  pull_request:
+    paths:
+      - "docs-site/**"
+      - ".github/workflows/docs-build.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: withastro/action@v6
+        with:
+          path: ./docs-site
+          # package manager is auto-detected from docs-site/bun.lock, matching
+          # the build step in deploy-docs.yml.
