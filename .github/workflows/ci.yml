@@ -14,6 +14,13 @@ jobs:
         with:
           go-version: "1.26"
       - uses: golangci/golangci-lint-action@v8
+        with:
+          # Pin the linter (issue #97). The action otherwise resolves the latest
+          # release at run time, so an upstream bump can newly flag pre-existing
+          # code and redden main with no code change (a unparam tightening in
+          # v2.12.2 did exactly this). Keep this in lockstep with the Makefile's
+          # GOLANGCI_LINT_VERSION.
+          version: v2.12.2
 
   # The containerized-Redis PBT job: `go test ./...` against a live Redis 8.
   # Besides the MemoryStore-vs-Redis equivalence harness (#26) and the producer
