@@ -13,17 +13,34 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"time"
 )
 
+func envOr(key, def string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	return def
+}
+
+func envBool(key string, def bool) bool {
+	if v, ok := os.LookupEnv(key); ok {
+		return v == "true" || v == "1"
+	}
+	return def
+}
+
 func main() {
-	listen := flag.String("listen", ":4438", "address for the dsui web server")
-	server := flag.String("server", "", "default Durable Streams server URL to prefill (e.g. http://localhost:4437)")
-	captureBase := flag.String("capture-base", "", "base URL the chronicle server uses to reach this binary's webhook-capture endpoint (default derived from --listen, e.g. http://localhost:4438)")
-	open := flag.Bool("open", true, "open the UI in a browser on start")
+	// Flags default from env vars (DSUI_*) so the binary works under WCNP's
+	// env-driven helm chart as well as from the command line.
+	listen := flag.String("listen", envOr("DSUI_LISTEN", ":4438"), "address for the dsui web server")
+	server := flag.String("server", envOr("DSUI_SERVER", ""), "default Durable Streams server URL to prefill (e.g. http://localhost:4437)")
+	captureBase := flag.String("capture-base", envOr("DSUI_CAPTURE_BASE", ""), "base URL the chronicle server uses to reach this binary's webhook-capture endpoint (default derived from --listen, e.g. http://localhost:4438)")
+	open := flag.Bool("open", envBool("DSUI_OPEN", true), "open the UI in a browser on start")
 	flag.Parse()
 
 	webRoot, err := fs.Sub(embeddedFS, "embedded")
