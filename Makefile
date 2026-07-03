@@ -12,7 +12,7 @@ GO        ?= go
 BINARY    := bin/chronicle
 REDIS_URL ?= redis://localhost:6379
 
-.PHONY: all build run test test-unit test-integration conformance lint fmt tidy redis-up redis-down clean spec-check backlog-check
+.PHONY: all build run test test-unit test-integration conformance lint fmt tidy redis-up redis-down clean spec-check backlog-check backlog-autofix
 
 all: build
 
@@ -64,6 +64,11 @@ spec-check:
 # `backlog-drift` job.
 backlog-check:
 	./scripts/backlog-check.sh
+
+# Remove backlog rows for issues that are no longer open and renumber ranks
+# (the mechanical half of drift repair; run by the backlog-autofix workflow).
+backlog-autofix:
+	./scripts/backlog-autofix.sh
 
 fmt:
 	gofumpt -l -w .

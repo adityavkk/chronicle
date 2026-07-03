@@ -15,7 +15,9 @@ the order rather than appending it.
 > PR/push, on every issue open/close/reopen event, and nightly as a backstop)
 > fails the moment the ranked table below stops being exactly the set of open
 > issues — a PR that closes an issue must delete its row, and newly filed work
-> must be slotted into the order.
+> must be slotted into the order. Repairs arrive as bot PRs a human merges:
+> row deletions from the deterministic backlog-autofix workflow, slot
+> proposals for new issues from the backlog-slot agent workflow.
 
 The ordering rule: client-reachable defects first, then cheap CI protection of
 verification work that already shipped, then production-cutover insurance, then
