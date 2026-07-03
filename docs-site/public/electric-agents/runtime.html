@@ -177,8 +177,8 @@ flowchart TD
     <li><strong>Input adapter — <code>timelineToMessages(db)</code>.</strong> Walks the materialized collections
       (inbox, runs, texts + assembled deltas, tool calls with results, reasoning) in <code>_timeline_order</code> and
       emits standard LLM history: <code>user</code>, <code>assistant</code> (text + toolCall blocks),
-      <code>toolResult</code> messages. Attachments are hydrated into content blocks. <em>The prompt is a projection
-      of the log.</em></li>
+      <code>toolResult</code> messages. Attachments are hydrated into content blocks (the two-phase mechanism is
+      detailed just below). <em>The prompt is a projection of the log.</em></li>
     <li><strong>The loop.</strong> pi streams a completion; tool calls are executed (each
       <code>AgentTool.execute(id, args)</code>, sandbox-backed where relevant), results are appended to history, and
       the loop continues until the model stops or a tool returns <code>terminate: true</code>. Oversized tool results
@@ -201,6 +201,47 @@ flowchart TD
   <p>
     (One honest caveat from the reference docs: <code>AgentRunResult.writes/toolCalls/usage</code> returned by
     <code>run()</code> are currently placeholders — read outcomes from the collections, which are authoritative.)
+  </p>
+
+  <h3>How attachments become content blocks</h3>
+  <p>
+    "Hydrated into content blocks" compresses a two-phase design. The phases are separate on purpose: the first is
+    pure and synchronous, the second does I/O and enforces budgets.
+  </p>
+  <ol class="flow-steps">
+    <li><strong>Phase 1: reference injection, inside the pure projection.</strong>
+      <code>timelineToMessages</code> first builds a map from inbox message keys to attachment manifest rows,
+      keeping only rows with <code>kind: 'attachment'</code>, <code>role: 'input'</code>,
+      <code>status: 'complete'</code>, and <code>subject.type: 'inbox'</code>. Each projected user message then
+      gains one <code>{ type: 'attachment', id }</code> block per matching row. No bytes are fetched. Note the
+      association direction: the inbox event carries no attachment ids. The attachment's manifest row points at
+      the message through its <code>subject</code> field.</li>
+    <li><strong>Phase 2: byte hydration, just before the model call.</strong> Inside <code>agent.run()</code> the
+      messages pass through an async hydration step. It walks messages newest first and selects only completed
+      attachments whose MIME type starts with <code>image/</code>, stopping at 4 images or 10 MiB total (budgeted
+      by the manifest's recorded byte length). Selected references are replaced with
+      <code>{ type: 'image', data: &lt;base64&gt;, mimeType }</code> blocks, fetched from the attachment stream
+      through the server. Everything else degrades to a visible text placeholder: a missing manifest becomes
+      <code>[attachment missing: id=…]</code>, and a non-image or incomplete attachment becomes a placeholder
+      naming the file. The model always sees <em>something</em> where the attachment was.</li>
+  </ol>
+  <p>
+    The content-block union the model runner works with is
+    <code>{type:'text'} | {type:'image'} | {type:'attachment'}</code>. The limits are constants today
+    (<code>MAX_HYDRATED_IMAGE_ATTACHMENTS = 4</code>, <code>MAX_HYDRATED_IMAGE_ATTACHMENT_BYTES = 10 MiB</code>),
+    and uploads are capped separately at 25 MiB by the server. Two costs to know about. First, only images ever
+    reach the model inline. A PDF or CSV arrives as a placeholder, so a handler that wants the model to read one
+    must extract text itself, e.g. through a tool. Second, the runtime does not cache hydrated bytes, so the
+    selected images are fetched again on every run. The GET response carries an immutable cache-control header,
+    which helps browsers, but the runtime client does not currently exploit it.
+  </p>
+  <p>
+    Creation is the mirror image. <code>ctx.attachments</code> has four methods: <code>list</code> and
+    <code>get</code> read the locally materialized manifest rows synchronously, while <code>read</code> and
+    <code>create</code> call the server. A create computes a sha256, writes the bytes as a closed, write-once
+    sibling stream (see the namespace catalog in Part 1), and then upserts the manifest row with
+    <code>status: 'complete'</code>. UIs upload the same way, with multipart POST before the message send, and the
+    upload's <code>subject.key</code> ties the file to the message that follows.
   </p>
 </section>
 
