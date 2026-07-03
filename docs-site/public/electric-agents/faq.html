@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FAQ — Electric Agents, Explained</title>
-<meta name="description" content="Further architectural questions: Temporal comparison, concurrency and races, delivery semantics, unbounded logs vs finite context, the failure model, latency and cost, schema evolution.">
+<meta name="description" content="Further architectural questions: Temporal comparison, concurrency and races, delivery semantics, unbounded logs vs finite context, the failure model, latency and cost, schema evolution, and the actor-model (Erlang/OTP) argument — supervision trees, let-it-crash, and where Electric Agents stands.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
@@ -38,6 +38,9 @@
   <a href="#f5">5 · The failure model</a>
   <a href="#f6">6 · Latency &amp; cost</a>
   <a href="#f7">7 · Schema evolution</a>
+  <a href="#f8">8 · The Erlang/OTP argument</a>
+  <a href="#f9">9 · Where are the supervision trees?</a>
+  <a href="#f10">10 · The runtime-level 30%</a>
 </nav>
 
 <div class="main">
@@ -46,7 +49,7 @@
   <p class="kicker">Appendix</p>
   <h1>FAQ — the next questions</h1>
   <p class="lead">
-    Seven more questions at the same altitude as <a href="qa.html">Part 6</a> — the ones this architecture invites
+    Ten more questions at the same altitude as <a href="qa.html">Part 6</a> — the ones this architecture invites
     once the first five are answered. Same format: the short version first, then the machinery.
   </p>
 </header>
@@ -369,6 +372,200 @@
       <code>reviewer-v2</code> alongside <code>reviewer</code> when semantics genuinely break — dispatchers make the
       cutover a routing decision rather than a migration.</li>
   </ul>
+</section>
+
+<!-- ================================================================ F8 -->
+<section id="f8">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 8</div>
+    <div class="qa-text">The "agents are actors" argument: Erlang solved all of this in 1986 — supervision trees,
+    mailboxes, let-it-crash. Is Electric Agents just relearning BEAM lessons?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    The argument, made sharpest by George Guimarães: <strong>the actor model Erlang shipped in 1986 is the agent
+    model AI is rediscovering</strong> — and today's frameworks are rebuilding it without the runtime that made it
+    work. He's substantially right, and the cleanest way to see this architecture is as <strong>an actor with a
+    durable mailbox</strong>. But the two traditions attack opposite halves of the problem: OTP nailed
+    <em>process-level fault tolerance</em> and concedes durability to a persistence layer; Electric Agents nailed
+    <em>durability</em> and leaves supervision policy to you (FAQ 9). Each one's headline feature is the other's
+    confessed gap.
+  </div>
+
+  <p>
+    The primary source is Guimarães's
+    <a href="https://georgeguimaraes.com/your-agent-orchestrator-is-just-a-bad-clone-of-elixir/">"Your Agent
+    Orchestrator Is Just a Bad Clone of Elixir"</a> (expanding an
+    <a href="https://georgeguimaraes.com/ai-agentic-frameworks-are-building-their-own-erlang-elixir/">earlier
+    note</a>; see also the <a href="https://news.ycombinator.com/item?id=47067395">Hacker News thread</a> and his
+    <a href="https://georgeguimaraes.com/what-the-critics-got-right-about-elixir-and-ai-agents/">follow-up conceding
+    the fair criticisms</a>). The thesis in one line: <em>"the actor model that Erlang introduced in 1986 is the
+    agent model that AI is rediscovering in 2026."</em> His case:
+  </p>
+  <ul>
+    <li><strong>Agent sessions are telecom calls.</strong> Long-lived, stateful, concurrent conversations that must
+      fail independently — the exact workload the BEAM was designed for, which is why its answers (2KB isolated
+      processes, preemptive scheduling, per-process GC, supervision) fit so uncannily.</li>
+    <li><strong>The frameworks are converging on actors without naming the destination.</strong> Langroid's README
+      cites the actor model outright; AutoGen was rebuilt in v0.4 as an "event-driven actor framework." But it's
+      actors on single-threaded asyncio: no preemption, no per-agent GC, no supervision hierarchy, no real fault
+      isolation — <em>"you're rebuilding telecom infrastructure in a language that wasn't designed for it."</em></li>
+    <li><strong>The last mile is runtime-level.</strong> His estimate: ~70% of the actor model can be rebuilt in
+      Python or TypeScript with enough engineering; the remaining 30% (preemptive scheduling, per-process GC, hot
+      code swapping, true isolation) needs the VM. Akka and Orleans are his evidence for how much engineering
+      "approximate the BEAM" costs (FAQ 10 takes this head-on).</li>
+    <li><strong>And the concession that matters here:</strong> after HN pushback he agreed that supervision restores
+      a <em>clean</em> state, not <em>your</em> state — "if the whole cluster goes down or you redeploy, that
+      in-memory state evaporates… you still need a persistence layer," i.e. an append-only event log. Process-level
+      fault tolerance and execution-level durability are different problems.</li>
+  </ul>
+
+  <p>Read this architecture against that vocabulary and the correspondence is almost line-for-line:</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Actor-model concept (BEAM)</th><th>Electric Agents equivalent</th></tr></thead>
+    <tbody>
+      <tr><td>Process with an isolated heap</td><td>Entity with private streams + materialized state (Part 1, Part 4)</td></tr>
+      <tr><td>Mailbox — in-memory, unbounded, dies with the process</td><td>Inbox stream — durable, totally ordered,
+        offset-addressed; survives crashes, redeploys, and <code>kill&nbsp;-9</code> (Part 2)</td></tr>
+      <tr><td><code>send</code> / <code>receive</code> loop</td><td><code>send()</code> / wake handler — FAQ 2's
+        "one reducer, ordered input, at-least-once invocation"</td></tr>
+      <tr><td>Pid + process registry</td><td>Entity URL — globally addressable, no cluster membership required</td></tr>
+      <tr><td>Links &amp; monitors</td><td><code>observe()</code> + <code>runFinished</code> wakes — coordination as
+        observation (FAQ 1)</td></tr>
+      <tr><td>Supervision tree</td><td><strong>The gap</strong> — a pattern you write, not a feature you inherit (FAQ 9)</td></tr>
+      <tr><td>Hot code reload</td><td>No-replay redeploys — new code simply serves the next wake (FAQ 7)</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>
+    The deep difference is what a failure costs. OTP restarts in <em>microseconds</em> into a <em>clean</em> state —
+    which for an agent means the conversation, the tool results, and the tokens you paid for are gone (the sharpest
+    HN critique of let-it-crash for agents: "clean state = lost conversation context"). Electric re-enters in
+    <em>tens of milliseconds</em> into <em>durable</em> state — everything the dead run appended is still there, and
+    guards keep it from being redone (FAQ 5). Where OTP treats the process as the unit of truth and forgets, this
+    treats the log as the unit of truth and remembers. That ordering of priorities — durability first, supervision
+    policy second — is the whole design bet, and Guimarães's essay is the strongest case for why the second half
+    still deserves to be stolen deliberately rather than rediscovered accidentally.
+  </p>
+</section>
+
+<!-- ================================================================ F9 -->
+<section id="f9">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 9</div>
+    <div class="qa-text">OTP's killer feature is the supervision tree: declarative restart strategies, restart
+    budgets, escalation, linked lifecycles. What's the equivalent here — and what's honestly missing?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    There is a built-in <em>flat</em> supervisor — lease expiry + wake re-dispatch restarts every crashed handler
+    against durable state (FAQ 5) — and <code>observe()</code> makes <em>supervisor entities</em> an ordinary
+    pattern to write. What there isn't is OTP's declarative layer: restart strategies
+    (<code>one_for_one</code> / <code>one_for_all</code> / <code>rest_for_one</code>), restart-intensity budgets
+    with automatic escalation, and linked lifecycles for entity teams. Today those are handler code you write, not
+    policy the platform enforces.
+  </div>
+
+  <p>What exists, mapped onto the supervisor's three jobs:</p>
+  <ul>
+    <li><strong>Restart the worker.</strong> Automatic and universal: a crashed or timed-out wake's claim lease
+      expires, the recovery loop re-dispatches, fencing stops the corpse from writing (FAQ 5). This is OTP's
+      restart-the-child, with one upgrade — the child comes back <em>remembering</em>, because its state was never
+      in the process.</li>
+    <li><strong>Notice the failure.</strong> Failed runs are data, not exceptions: <code>run_status: 'failed'</code>
+      and <code>errors</code> events wake any parent observing <code>runFinished</code>. That's a monitor, and it
+      composes across machines for free.</li>
+    <li><strong>Intervene.</strong> The operator layer — <code>SIGINT</code> / <code>SIGSTOP</code> /
+      <code>SIGKILL</code>, plus <code>fork()</code>-and-retire recovery (FAQ 5) — covers the "human in the
+      supervision tree" case OTP handles with <code>:observer</code> and prayers.</li>
+  </ul>
+
+  <p>The gaps, called out plainly:</p>
+  <ul>
+    <li><strong>No declarative restart policy.</strong> A parent that wants "restart this child up to three times
+      with backoff, then escalate to me" writes that as guard-state logic in its own handler. OTP expresses it in
+      one tuple.</li>
+    <li><strong>No restart-intensity circuit breaker.</strong> Nothing documented bounds the lease-expire →
+      re-dispatch loop, so a <em>poison wake</em> — a handler that crashes deterministically on the same input —
+      keeps being re-offered (burning invocations, and tokens if the crash is late) until an operator
+      <code>SIGSTOP</code>s the entity or ships a fix. OTP's <code>max_restarts</code>/<code>max_seconds</code>
+      escalates automatically: the supervisor itself dies upward. There is no automatic "give up and tell my
+      parent" here yet.</li>
+    <li><strong>No linked lifecycles.</strong> Killing a debate's judge does not kill the debaters — there is no
+      <code>one_for_all</code> for an entity team, and no subtree kill. Tearing down a topology is explicit
+      iteration (or per-stream TTL), and a child orphaned by its parent's demise just sleeps forever, costing
+      kilobytes.</li>
+    <li><strong>Semantic supervision exists nowhere</strong> — including OTP, as Guimarães's follow-up concedes:
+      restarting fixes crashed processes, not bad LLM output, so a supervisor that inspects <em>why</em> (garbage
+      response vs. rate limit vs. real crash) and chooses different strategies is application logic in every
+      runtime today. The natural home for it here is a <strong>supervisor entity</strong>: it observes children's
+      <code>errors</code>/<code>runFinished</code>, keeps restart budgets in its own durable state, and every
+      decision it takes is an audited event. The primitives are arguably <em>better</em> than OTP's (a BEAM
+      supervisor's restart counters die with it; a supervisor entity's survive) — but the packaged, declarative
+      library on top of them is not written yet.</li>
+  </ul>
+
+  <p>
+    So: supervision here is a pattern, not yet a feature. If you build one, the shape falls out of the existing
+    idioms — spawn with deterministic child IDs (Q&amp;A #3), observe <code>runFinished</code>, hold the restart
+    budget in durable state, escalate by messaging <em>your</em> parent — a supervision tree where every node
+    remembers. The missing piece is exactly the thing OTP proved valuable: making that policy declarative so teams
+    stop hand-rolling it.
+  </p>
+</section>
+
+<!-- ================================================================ F10 -->
+<section id="f10">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 10</div>
+    <div class="qa-text">The strongest form of the BEAM argument: the last 30% — preemptive scheduling, per-process
+    GC, hot code reload, true isolation — needs runtime support you can't bolt on. Does Electric Agents have an
+    answer, or is it stuck in the 70%?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    It <strong>sidesteps rather than solves</strong>: isolation and inter-agent fairness are delegated to
+    process/invocation boundaries (coarser than BEAM processes, with FAQ 6's latency tax, but real); hot reload's
+    <em>outcome</em> falls out of the no-replay design; distribution is URLs + offsets instead of transparent pids.
+    What is genuinely unanswered: BEAM-style fairness <em>inside</em> one runtime process — a CPU-hogging handler
+    blocks its event loop, and no architecture choice here changes that.
+  </div>
+
+  <ul>
+    <li><strong>Isolation.</strong> The BEAM isolates with per-process heaps inside one VM; here each wake is its own
+      invocation (its own process or sandbox), and — the stronger property — <em>state isn't in process memory at
+      all</em>. One agent's crash, leak, or bloat can't corrupt another's state because the state of record is the
+      log (Part 2), not a heap. The grain is coarser and each hop costs tens of milliseconds instead of a
+      microsecond message send (FAQ 6); that's the price of isolation you didn't have to build.</li>
+    <li><strong>Preemptive scheduling &amp; per-process GC.</strong> The honest gap. BEAM preempts every ~4,000
+      reductions and collects garbage per-process; Node and Python are cooperative, so within a single runtime
+      process a CPU-heavy handler (giant JSON parse, embedding math) starves its neighbors. The mitigation is
+      architectural, not runtime: fairness <em>between entities</em> comes from one-invocation-per-wake dispatch,
+      and CPU-heavy work belongs in the model call, a tool, or a sandbox. If you do heavy compute inside a shared
+      handler process, you will starve it — the runtime will not save you.</li>
+    <li><strong>Hot code reload.</strong> The BEAM swaps bytecode under live processes because a phone switch can't
+      stop. Here the same <em>outcome</em> for agents comes free from no-replay (FAQ 1, FAQ 7): deploy, and every
+      subsequent wake — including for entities spawned months ago — runs new code against old state; in-flight runs
+      finish on the code they started with. What you can't do is retarget a 30-second run mid-flight; the idiom for
+      that is steering it with a message (FAQ 2), not swapping its code.</li>
+    <li><strong>Distribution.</strong> Distributed Erlang gives transparent pids inside a cluster you operate —
+      with cluster membership, netsplits, and cookies as your problem. Here location transparency is the entity
+      URL: streams are plain HTTP (CDN-shaped reads, Part 2), and a handler can run on anything that can receive a
+      webhook. Coarser and slower than a pid send, but it's internet-grade rather than cluster-grade — no
+      membership protocol to babysit.</li>
+  </ul>
+
+  <p>
+    Scoreboard, honestly kept: mailbox durability, crash recovery, and code evolution — answered, and for
+    agent-paced workloads (seconds per turn, tokens as the real cost) arguably answered <em>better</em>, because
+    recovery preserves context instead of discarding it. Declarative supervision (FAQ 9) and intra-process fairness
+    — not answered: the first is buildable as a pattern and should eventually be a library; the second is a real
+    limit you design around by keeping handlers I/O-shaped. Which lands on Guimarães's own closing point: runtimes
+    shape systems. This one just picked the append-only log, rather than the VM, as the component that never lies.
+  </p>
 </section>
 
 <div class="pager">
