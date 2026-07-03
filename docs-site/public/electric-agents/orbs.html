@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Case Study: Amp's Orbs on Durable Streams</title>
+<meta name="description" content="A case study: what Amp's orbs are and how the local-to-orb session handoff behaves per Amp's public pages, the prior art on session portability, a requirement-to-primitive mapping onto Electric Agents, a proposed Amp-on-Electric architecture with two handoff journeys, and the tradeoffs of a log-backed design.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink" href="index.html">Start</a>
+  <a class="navlink" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink" href="server.html">5 · Server Internals</a>
+  <a class="navlink" href="qa.html">6 · Q&amp;A</a>
+  <a class="navlink" href="faq.html">FAQ</a>
+  <a class="navlink" href="journeys.html">Journeys</a>
+  <a class="navlink active" href="orbs.html">Orbs</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">On this page</p>
+  <a href="#amp">1 · What Amp documents</a>
+  <a href="#handoff">2 · The documented handoff</a>
+  <a href="#prior">3 · Prior art</a>
+  <a href="#mapping">4 · Mapping to primitives</a>
+  <a href="#arch">5 · Amp on Electric</a>
+  <a href="#j-push">6 · Journey: laptop to orb</a>
+  <a href="#j-pull">7 · Journey: orb to laptop</a>
+  <a href="#tradeoffs">8 · What the log wins and loses</a>
+  <a href="#sources">Sources &amp; tiers</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">Case study</p>
+  <h1>Case Study: Amp's Orbs on Durable Streams</h1>
+  <p class="lead">
+    On June 30, 2026, Amp shipped <a href="https://ampcode.com/news/agents-in-orbs">orbs</a>. An orb is a remote
+    machine that runs one agent thread, and you can control it from the same interface as your local agents.
+    This page does three things. It reports what Amp actually documents about orbs and the local to orb handoff,
+    with quotes and links. It compresses the prior art on session portability into one table. It then asks a
+    design question: if you built an orbs-like product on the Electric Agents stack this wiki describes, which
+    primitives would carry the load, where would the mapping strain, and what would you have to build.
+  </p>
+  <div class="hero-sub">
+    <span class="pill a">primary sources quoted</span>
+    <span class="pill b">inferences labeled</span>
+    <span class="pill c">gaps named</span>
+    <span class="pill d">the build list is honest</span>
+  </div>
+</header>
+
+<div class="callout warn">
+  <div class="callout-title">⚠ This page is analysis, not documentation of Amp</div>
+  <p>
+    Amp has not published its internals. Sections 1 and 2 report only what Amp's public pages say, and every claim
+    there links to its source. Everything from section 4 onward is a design exercise on the Electric Agents
+    primitives from Parts 1 to 5 of this wiki. It describes how <em>we</em> would build an orbs-like system, not how
+    Amp built theirs. Where a claim is an inference it carries an <span class="pill b">inferred</span> label. Where
+    the evidence does not exist it carries a <span class="pill c">gap</span> label.
+  </p>
+</div>
+
+<!-- ================================================================ amp -->
+<section id="amp">
+  <h2><span class="kicker-num">§</span>What Amp documents</h2>
+  <p>
+    The launch post defines the product in two sentences: <em>"Orbs are machines where agents can run without
+    supervision. When you create a new thread you get a fresh orb that contains your code, plugins, and tools the
+    agent might need"</em> (<a href="https://ampcode.com/news/agents-in-orbs">Agents in Orbs</a>). The
+    <a href="https://ampcode.com/manual/orbs">manual</a> adds the isolation boundary: <em>"Each Amp thread started
+    from ampcode.com in an orb gets its own orb."</em> One thread maps to one machine.
+  </p>
+  <p>
+    The machine is concrete. An orb runs Debian 12 with 32&nbsp;GB of memory and 16 cores, and Amp says resource
+    customization will come later. It costs $1.66 per hour, or $2.48 per hour for enterprise workspaces, billed by
+    the minute. A paused orb costs nothing. The base image ships authenticated <code>gh</code> and <code>amp</code>,
+    Git and SSH, PostgreSQL 17 and Redis, tmux, ripgrep, Node.js, Python, and more, and the Amp system prompt tells
+    the agent it is inside an orb and that <em>"nearly everything is an apt-get install away"</em>
+    (<a href="https://ampcode.com/notes/putting-an-agent-in-an-orb">Putting an Agent in an Orb</a>).
+    The <a href="https://ampcode.com/security">security page</a> says <em>"e2b provides ephemeral compute instances
+    for Amp sandboxes."</em> That line uses the word sandboxes, not orbs. Thorsten Ball's note calls the orb
+    "the sandbox" when describing snapshotting, so reading the e2b line as the orb substrate is well supported, but
+    it is still our reading. <span class="pill b">inferred</span>
+  </p>
+  <p>
+    The session object is the <strong>thread</strong>, and a thread is the same thing as a session. The CLI's
+    stream-json output reports the thread ID, shaped <code>T-&lt;uuid&gt;</code>, as the
+    <code>session_id</code> (<a href="https://ampcode.com/news/streaming-json">streaming JSON post</a>). The
+    security page enumerates what a thread contains: <em>"user messages, LLM responses, snippets of or entire code
+    files used as context for the LLM requests, tool call results, and attachments."</em> The server is the source of
+    truth for it: <em>"Amp Server stores these conversations in its PostgreSQL database in Google Cloud
+    Platform"</em> (<a href="https://ampcode.com/security">security page</a>). The client keeps a local thread
+    history as well.
+  </p>
+  <p>
+    Two kinds of state are explicitly <strong>not</strong> in the thread. File edits are workspace state. The Neo
+    rebuild removed rollback because <em>"if the agent wrote and ran code that generated files, we didn't keep track
+    of that without elaborate snapshotting"</em> (<a href="https://ampcode.com/news/neo">Neo, "What's Gone"</a>).
+    Terminal state is environment state. The orb terminal <em>"is running in a tmux session, so your agent can see
+    what you see in the terminal"</em> (<a href="https://ampcode.com/manual/orbs">manual</a>). The codebase is also
+    excluded: <em>"The Amp Client and Amp Server do not see, store, clone, or index the entire codebase."</em>
+    The orb clones the repo itself with the authenticated GitHub CLI.
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Lifecycle phase</th><th>What Amp documents</th><th>Source</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Create</strong></td>
+        <td>Starting a thread in an orb <em>"will spawn a new orb, clone your repository, and start the agent in
+        it."</em> Amp then runs the repo's committed <code>.agents/setup</code> script from the repo root.</td>
+        <td><a href="https://ampcode.com/manual/orbs">manual/orbs</a> <span class="pill a">primary</span></td></tr>
+      <tr><td><strong>Snapshot</strong></td>
+        <td><em>"After Amp runs .agents/setup it snapshots the sandbox and reuses that snapshot for up to 24 hours
+        for new orbs."</em> The snapshot is a creation-time template, not a resume mechanism.</td>
+        <td><a href="https://ampcode.com/notes/putting-an-agent-in-an-orb">orb note</a> <span class="pill a">primary</span></td></tr>
+      <tr><td><strong>Sleep</strong></td>
+        <td>Orbs <em>"pause automatically when inactive."</em> Archiving a thread pauses its orb immediately.
+        A paused orb costs nothing.</td>
+        <td><a href="https://ampcode.com/manual/orbs">manual/orbs</a> <span class="pill a">primary</span></td></tr>
+      <tr><td><strong>Wake</strong></td>
+        <td>Orbs <em>"wake up as soon as there's work to do again."</em> On every resume Amp runs
+        <code>.agents/resume</code> and blocks at most 10 seconds. The hook exists for <em>"fast, idempotent
+        reconnect or repair steps such as restarting tunnels."</em> That phrasing implies processes and connections
+        die across sleep while disk state persists, which is our reading, not Amp's statement.
+        <span class="pill b">inferred</span></td>
+        <td><a href="https://ampcode.com/manual/orbs">manual/orbs</a> <span class="pill a">primary</span></td></tr>
+      <tr><td><strong>Destroy</strong></td>
+        <td>Not documented. Amp does not say when, or whether, a paused orb is deleted.</td>
+        <td>absence <span class="pill c">gap</span></td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    Per-repo configuration lives in a <strong>project</strong>: <em>"A project connects a repository to its orb
+    settings, secrets, environment variables, and related threads"</em>
+    (<a href="https://ampcode.com/manual/orbs">manual/orbs</a>). Secrets and environment variables reach the orb
+    through project settings on ampcode.com, not through the thread.
+  </p>
+</section>
+
+<!-- ================================================================ handoff -->
+<section id="handoff">
+  <h2><span class="kicker-num">§</span>The local to orb handoff, exactly as documented</h2>
+  <p>
+    Amp documents three moves between a laptop and an orb. None of them migrates a live execution environment.
+    Each move transfers a different thing.
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Move</th><th>Surface</th><th>What travels</th><th>What stays behind</th></tr></thead>
+    <tbody>
+      <tr><td><strong>1 · Start a new thread in an orb, from local</strong></td>
+        <td><code>amp -ox "prompt"</code>, the TUI project picker, or ampcode.com</td>
+        <td>Nothing from the laptop. <em>"Each orb starts with a fresh clone of your repository"</em>
+        (<a href="https://ampcode.com/manual/orbs">manual/orbs</a>), plus project env vars and secrets.</td>
+        <td>Uncommitted local changes, local processes, anything not pushed to the git remote.</td></tr>
+      <tr><td><strong>2 · Mirror orb changes down to the laptop</strong></td>
+        <td><code>amp sync &lt;thread-id&gt;</code></td>
+        <td>File changes only: <em>"mirror an orb thread's changes into your local checkout while the agent keeps
+        working remotely"</em> (<a href="https://ampcode.com/manual/orbs">manual/orbs</a>). The transport is not
+        documented. <span class="pill c">gap</span></td>
+        <td>The orb's processes, its tmux sessions, its PostgreSQL and Redis contents, installed packages. The agent
+        and the thread stay in the orb.</td></tr>
+      <tr><td><strong>3 · Control any thread from any device</strong></td>
+        <td>Remote control on web, mobile, and the CLI sidebar</td>
+        <td>Control and a live view. <em>"Remote control lets you continue a running Amp CLI thread from
+        ampcode.com"</em> (<a href="https://ampcode.com/manual">manual</a>), with live updates, queue, dequeue, and
+        cancel.</td>
+        <td>The execution environment. A local thread keeps executing on the laptop, and an orb thread keeps
+        executing in the orb.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="callout warn">
+    <div class="callout-title">⚠ The move people assume exists is not documented</div>
+    <p>
+      The phrase "start locally and push to orb" appears in no primary source we could find, and no Amp page
+      describes migrating an existing thread's execution environment between a laptop and an orb, in either
+      direction. What moves in the documented product is control and file diffs. What stays is the environment.
+      What resumes is the server-held thread. <span class="pill c">gap</span>
+    </p>
+  </div>
+
+  <p>
+    The architecture that makes the control handoff cheap is stated plainly. Amp Server, not the client, drives the
+    loop: the client <em>"communicates with and executes tools as requested by Amp Server"</em>
+    (<a href="https://ampcode.com/security">security page</a>). Four weeks before orbs, Amp wrote that
+    <em>"Amp is now a distributed system with durable execution for the agent loop"</em>
+    (<a href="https://ampcode.com/news/agents-everywhere">Agents, Everywhere</a>). The documented transport is
+    WebSockets: the firewall allowlist names <code>production.ampworkers.com</code> <em>"for secure WebSocket
+    connections used by the Amp Client."</em> Beyond that, the public record only hints. A dev setup script names
+    <code>THREAD_ACTORS_SERVICE_SECRET</code> and <code>THREAD_ACTORS_WEBSOCKET_JWT_SECRET</code>, and the repo has
+    <code>lib/thread-client</code> and <code>lib/thread-protocol</code> directories. Per-thread actor processes
+    reached over authenticated WebSockets would fit those names, but Amp has not said so.
+    <span class="pill b">inferred</span>
+  </p>
+</section>
+
+<!-- ================================================================ prior -->
+<section id="prior">
+  <h2><span class="kicker-num">§</span>Prior art: four ways to move a session</h2>
+  <p>
+    We surveyed twelve systems that move, or refuse to move, a running session: tmux, mosh, Jupyter, VS&nbsp;Code
+    Live Share, GitHub Codespaces, Claude Code (teleport and remote control), OpenAI Codex cloud tasks, Devin,
+    Cloudflare Durable Objects, Fly.io suspend, Erlang/OTP, and CRDT systems (Automerge, Yjs). Four strategies
+    cover all of them. The taxonomy is our synthesis of those primary sources, so treat the grouping as analysis.
+    <span class="pill b">inferred</span>
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Strategy</th><th>Systems</th><th>What moves</th><th>What it keeps</th><th>What it gives up</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Re-attach</strong>. State stays pinned to one runtime. Clients disconnect and reconnect a
+        view.</td>
+        <td>tmux, <a href="https://mosh.org/">mosh</a>, Jupyter frontends,
+        <a href="https://learn.microsoft.com/en-us/visualstudio/liveshare/faq">Live Share</a>,
+        <a href="https://code.claude.com/docs/en/remote-control">Claude Code remote control</a></td>
+        <td>Only the viewport.</td>
+        <td>Everything: memory, open sockets, GPU state. Nothing moves, so nothing breaks.</td>
+        <td>The host is a single point of failure. When the host process dies, the session dies.</td></tr>
+      <tr><td><strong>Snapshot the runtime image</strong>. Serialize the machine's disk or memory.</td>
+        <td><a href="https://fly.io/docs/reference/suspend-resume/">Fly suspend</a>, Codespaces stop and resume,
+        Devin machine snapshots, Codespaces prebuilds</td>
+        <td>A disk or memory image, mostly in place.</td>
+        <td>The only strategy that preserves live memory. Fly captures CPU registers, memory, and open file
+        handles.</td>
+        <td>The least portable. Fly snapshots die on deploy and on host migration, exclude GPUs, and resume into
+        dead TCP connections and skewed clocks.</td></tr>
+      <tr><td><strong>Externalize and rehydrate</strong>. Durable storage is the session. Compute is disposable and
+        rebuilt from it.</td>
+        <td><a href="https://developers.cloudflare.com/durable-objects/">Durable Objects</a>,
+        <a href="https://www.erlang.org/doc/system/distributed_applications.html">BEAM failover and takeover</a></td>
+        <td>Nothing. A new instance reloads from storage.</td>
+        <td>Survives instance death by construction.</td>
+        <td>Loses anything not written down. Durable Objects state that in-memory state does not survive eviction.</td></tr>
+      <tr><td><strong>Log and replay</strong>. The session is an ordered record. Any host reconstructs state by
+        reading it.</td>
+        <td><a href="https://docs.temporal.io/workflows">Temporal</a>,
+        <a href="https://code.claude.com/docs/en/claude-code-on-the-web">Claude Code teleport</a>, Codex diffs,
+        CRDT change histories, notebooks</td>
+        <td>An ordered record of inputs and results.</td>
+        <td>Resume at any offset, cheap fork, many readers, a full audit trail.</td>
+        <td>No live memory, no open sockets, no unrecorded side effects. The log grows and needs compaction.
+        Temporal caps history at 51,200 events or 50&nbsp;MB.</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    The convergence across shipping agent products is the useful finding. Claude Code, Codex, and Devin all split
+    the session the same way: the conversation moves as a log, the code moves as git, and the environment never
+    moves. Each product rebuilds the environment from templates and setup scripts. No surveyed system migrates the
+    live agent process. Amp's documented behavior matches this split exactly: the thread lives on the server, the
+    code reaches the orb as a fresh clone, and <code>amp sync</code> brings back file changes rather than a machine.
+  </p>
+</section>
+
+<!-- ================================================================ mapping -->
+<section id="mapping">
+  <h2><span class="kicker-num">§</span>Mapping an orb onto Electric Agents primitives</h2>
+  <p>
+    From here on this page is design work, not reporting. The question: which requirements of an orbs-like product
+    does the stack from Parts 1 to 5 already satisfy, and which does it not. The table states each requirement, the
+    primitive that carries it, and an honest status.
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Requirement</th><th>Electric Agents primitive</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Session identity that survives a host move</td>
+        <td>The entity URL <code>/{type}/{id}</code> plus its registry row. Identity, memory, and behavior are
+        decoupled from any running process (<a href="concepts.html">Part 1 §1</a>).</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td>Session state that both hosts can read</td>
+        <td>The main log, attachment streams for file artifacts, shared boards via <code>ctx.mkdb()</code>, and the
+        <code>manifests</code> collection as the resource table (<a href="concepts.html">Part 1 §2</a>,
+        <a href="runtime.html">Part 4 §2</a>).</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td>A cloud host</td>
+        <td>The webhook push target, derived from the type's <code>serveEndpoint</code>
+        (<a href="server.html">Part 5 §5</a>).</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td>A laptop host behind NAT</td>
+        <td>The runner pull target: register at <code>/_electric/runners</code>, long-poll
+        <code>POST /runners/:id/claim</code>, heartbeat a lease. Part 5 names laptops explicitly. Both targets
+        receive the same notification shape, so handler code does not know which host it is on.</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td>At most one active brain, with zombie fencing</td>
+        <td>Claims serialize execution. Leases detect death. Epochs and claim-scoped write tokens reject a
+        superseded host's late appends with 403 (<a href="server.html">Part 5 §4, §6</a>).</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td>The handoff lever itself</td>
+        <td>The per-entity dispatch policy. Resolution is explicit per entity, then inherited from the parent, then
+        the type's default (<a href="server.html">Part 5 §5</a>). The data model holds a per-entity target, but no
+        documented route mutates a live entity's policy.</td>
+        <td><span class="pill d">build</span></td></tr>
+      <tr><td>Catch-up on the arriving host</td>
+        <td>Offset resume. A woken handler is a stateless consumer catching up from a watermark. A cold host reads
+        the full log. A warm host reads only the delta (<a href="streams.html">Part 2 §3, §4</a>).</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td>Live spectating from the other host, or a phone</td>
+        <td><code>observe(entity(url))</code>: an authorized catch-up read, then an SSE tail. Consumer position is
+        client-held, so disconnects need no protocol. Offset reads collapse on a CDN
+        (<a href="journeys.html#j-observe">watching journey</a>).</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td>Divergence, e.g. a local experiment off the cloud session</td>
+        <td><code>fork()</code> branches a full entity from the history at a point
+        (<a href="journeys.html#j-fork">forking journey</a>). There is no merge. Reconvergence means adopting the
+        branch and retiring the ancestor.</td>
+        <td><span class="pill a">shipped</span>, no merge</td></tr>
+      <tr><td>Triggers that survive the move</td>
+        <td>Wake registrations, cron schedules, future sends, and webhook sources are durable server-side data. No
+        process anywhere holds a timer (<a href="howto.html">Part 3 §8</a>).</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td>The warm workspace (checkout, build cache)</td>
+        <td>Deliberately not state. Sandboxes are leased per wake. Durable artifacts go to attachment streams. The
+        cache rule from the <a href="index.html#anatomy">anatomy section</a> governs the rest. Rehydration of a warm
+        volume keyed to a log position is named by <a href="faq.html#f13">FAQ 13</a> as something you build.</td>
+        <td><span class="pill d">build</span></td></tr>
+      <tr><td>A model call in flight at handoff time</td>
+        <td>It cannot migrate. <a href="faq.html#f10">FAQ 10</a>: you cannot retarget a 30-second run mid-flight.
+        You hand off at a turn boundary for zero loss, or abort with SIGINT and re-enter on the new host, paying the
+        interrupted step's tokens again.</td>
+        <td><span class="pill b">partial</span></td></tr>
+      <tr><td>Credentials on each host</td>
+        <td>Keys never enter the log by design. LLM keys live in the host runtime, tool secrets live in handler
+        closures and OAuth bridges (<a href="qa.html#q4">Q&amp;A 4, 5</a>). Authority travels as grants and
+        claim-scoped write tokens. Key material does not travel at all.</td>
+        <td><span class="pill a">shipped</span> as posture, parity is yours</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>
+    Where the mapping is exact: identity, state, dual hosting, fencing, catch-up, spectating, fork, and durable
+    triggers. Notice that every failure-recovery mechanism in the <a href="journeys.html#j-crash">crash journey</a>,
+    which is lease expiry, re-dispatch, re-materialize, and guard, is also the handoff mechanism. A handoff is a
+    deliberate, quiesced run of the path the system already exercises on every crash. That is why the safety half of
+    the orb costs no new code.
+  </p>
+  <p>
+    Where it strains, you build. In rough dependency order:
+  </p>
+  <ol class="flow-steps">
+    <li><strong>A per-entity dispatch re-point API.</strong> The resolution chain admits an explicit per-entity
+      target, but no documented route mutates a live entity's policy. Re-registering the type's
+      <code>serveEndpoint</code> is the wrong lever, because registration is per type and would move every instance.
+      The conflict semantics of two runtimes registering one type with different endpoints are also undocumented.</li>
+    <li><strong>The move choreography.</strong> Quiesce, either by waiting for the done callback or by signal, then
+      flip the dispatch target, then nudge a wake on the new host. The rails exist. The verb and its UX do not.</li>
+    <li><strong>Warm workspace rehydration.</strong> A volume cache keyed to a log position, on both hosts, with the
+      repo ref and patch series in state of record. Without it every handoff pays checkout and build warm-up
+      again.</li>
+    <li><strong>A mid-run handoff policy.</strong> Default to turn-boundary handoff. For forced moves, abort and
+      re-enter with per-step checkpoint state to bound the tokens you pay twice. A streaming completion cannot be
+      migrated on these primitives, or on any surveyed system.</li>
+    <li><strong>Runner failover.</strong> The wiki does not say what happens to an entity whose standing target is a
+      dead runner. <span class="pill c">gap</span> An orb needs a rule such as: after N missed heartbeats, dispatch
+      falls back to the type's cloud webhook.</li>
+    <li><strong>A host capability parity check.</strong> Credentials cannot travel, so nothing verifies the target
+      host holds the LLM keys, tools, and sandbox profiles the session needs before you re-point it. Build a host
+      manifest handshake.</li>
+    <li><strong>Subtree handoff.</strong> Dispatch policy inherits from the parent, but whether inheritance is
+      evaluated at spawn time or at dispatch time is undocumented, and there are no linked lifecycles
+      (<a href="faq.html#f9">FAQ 9</a>). Moving a session with children is explicit iteration.
+      <span class="pill c">gap</span></li>
+    <li><strong>Merge after divergence.</strong> <code>fork()</code> gives branches. Grafting a local experiment
+      back into the mainline is unbuilt. The documented idiom is fork and retire.</li>
+    <li><strong>Offline operation.</strong> Out of scope. One always-on plane mediates every read and write
+      (<a href="faq.html#f12">FAQ 12</a>). A disconnected laptop can neither append nor be woken. True local-first
+      would need a second plane and cross-plane sync, which is a different project.</li>
+  </ol>
+</section>
+
+<!-- ================================================================ arch -->
+<section id="arch">
+  <h2><span class="kicker-num">§</span>Amp on Electric: the proposed topology</h2>
+  <p>
+    The design decisions, stated once. A thread is an entity, <code>/thread/T-42</code>, and its main log holds the
+    conversation, tool results, run boundaries, and state changes. The orb is not the session. It is a disposable
+    host: a handler runtime plus a leased sandbox that holds a fresh clone, reachable as a webhook target or as a
+    registered runner. The laptop is a registered runner that long-polls for claims, which works behind NAT with
+    outbound-only traffic. Workspace truth travels through the git remote and through attachment streams, never
+    through the control plane, which matches what Amp documents about its own client and server not storing the
+    codebase. Each host holds its own credentials. The dispatch policy on the entity decides which host the next
+    wake reaches, and flipping that policy is the handoff.
+  </p>
+  <div class="diagram-shell">
+    <div class="diagram-title">Amp on Electric: one thread, two hosts, one log</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed arrows are wake delivery. The dispatch policy in Postgres decides which dashed arrow fires. Both hosts append through the same server path.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+flowchart TD
+    subgraph plane["Always-on control plane"]
+      AS["Agents server<br/>authn, authz, wake dispatch"]
+      PG[("Postgres registry<br/>entities, claims, schedules,<br/>per-entity dispatch policy")]
+      DS[("Durable streams<br/>/thread/T-42/main +<br/>attachment streams")]
+    end
+
+    subgraph laptop["Laptop, pull host"]
+      LR["Runner<br/>long-polls /runners/laptop-1/claim"]
+      LH["Handler runtime +<br/>local checkout (working state)"]
+    end
+
+    subgraph orb["Orb, push or pull host"]
+      OR["Webhook endpoint or runner"]
+      OH["Handler runtime +<br/>fresh clone + scratch sandbox"]
+    end
+
+    GIT[("Git remote<br/>workspace truth")]
+    UI["Browser or phone<br/>observe() spectator"]
+    LLM["Model provider"]
+
+    AS -.->|"wake, when the policy<br/>targets laptop-1"| LR
+    AS -.->|"wake, when the policy<br/>targets the orb"| OR
+    LR --> LH
+    OR --> OH
+    LH -->|"appends, claim write token"| AS
+    OH -->|"appends, claim write token"| AS
+    AS --> PG
+    AS --> DS
+    LH --> LLM
+    OH --> LLM
+    LH <-->|"push / fetch branches"| GIT
+    OH <-->|"push / fetch branches"| GIT
+    UI -->|"observe: catch-up GET,<br/>then live SSE"| AS
+      </pre>
+    </div>
+  </div>
+  <div class="callout chronicle">
+    <div class="callout-title">🔗 Chronicle note</div>
+    <p>
+      The durable streams box is the substrate <a href="https://github.com/adityavkk/chronicle">Chronicle</a>
+      implements (<a href="streams.html">Part 2</a>). Nothing on this page asks anything new of it. The orb design
+      leans on properties the protocol already has: offset-resumable reads for catch-up, idempotent producers and
+      epoch fencing for the two-hosts race, and fork without rewriting for divergence.
+    </p>
+  </div>
+  <p>
+    The Amp features map onto this without new nouns. Starting a thread in an orb is spawning the entity with a
+    dispatch policy that targets an orb host, then letting the host clone and run the setup hook.
+    <code>amp sync</code> is a git fetch of the orb's pushed branch plus an <code>observe()</code> tail. Remote
+    control is <code>observe()</code> plus queued sends, which coalesce into the next wake. The 24-hour setup
+    snapshot is a creation-time template for new sandboxes, which the platform does not ship and does not preclude.
+    The limitation to state plainly: this topology has one always-on plane, so the laptop participates only while
+    it can reach the server. Amp has the same shape, since a thread lives on Amp Server.
+  </p>
+</section>
+
+<!-- ================================================================ j-push -->
+<section id="j-push">
+  <h2><span class="kicker-num">§</span>Journey: laptop to orb, pushing a session away</h2>
+  <p>
+    The developer has been driving <code>/thread/T-42</code> from the laptop and wants it to keep running after the
+    lid closes. This is the move Amp does not document for existing threads, built from the primitives in
+    <a href="server.html">Part 5</a>. The safety half is free, because it is the
+    <a href="journeys.html#j-crash">crash journey</a> entered on purpose. The product half is steps 2, 5, and 7,
+    which are the choreography, the re-point API, and host provisioning from the build list.
+  </p>
+  <div class="diagram-shell">
+    <div class="diagram-title">Laptop to orb: quiesce, re-point, wake cold</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed arrows are asynchronous delivery. Watch the epoch: the laptop's producer is fenced the moment the orb's claim exists.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant DEV as Developer (laptop CLI)
+    box Control plane
+        participant AS as Agents server (authn/authz + control plane)
+        participant PG as Postgres (registry)
+    end
+    participant DS as Durable streams (chronicle)
+    participant LH as Laptop runner (handler runtime)
+    participant OH as Orb host (handler runtime)
+
+    Note over DEV,LH: /thread/T-42 runs on the laptop. Its dispatch policy is the runner target laptop-1
+    DEV->>AS: request the move. The choreography waits for the turn boundary
+    LH->>AS: done callback. The claim is released, the entity goes idle
+    Note over DS: at a turn boundary nothing exists anywhere in the system but the log
+    DEV->>DEV: git push the working branch. Workspace truth travels through the git remote, not the plane
+    DEV->>AS: flip the entity dispatch policy to the orb target (the re-point API you must build)
+    AS->>PG: update the entity row. Wake registrations, schedules and grants are untouched
+    AS->>OH: provision the orb host. Clone the repo, run the setup hook, hold its own credentials
+    DEV->>AS: nudge. An ordinary send lands on /thread/T-42/main
+    AS->>PG: claim the wake. Epoch N+1, fresh claim-scoped write token
+    AS-->>OH: wake webhook (Ed25519-signed) with streams and offsets
+    OH->>AS: cold catch-up read from offset -1. The full log, then materialize
+    OH->>AS: append run events with the epoch N+1 producer
+    LH--xAS: a late append still carries epoch N and the retired token. Rejected with 403
+    DEV->>AS: observe(entity(url)). The laptop is now a spectator on the same log
+    Note over AS,OH: the move used no new safety machinery. It is the crash-recovery path, entered on purpose
+      </pre>
+    </div>
+  </div>
+  <ul>
+    <li><strong>Step 2 is the whole product decision.</strong> Waiting for the done callback makes the handoff
+      lossless, because at a turn boundary the log is the entire session
+      (<a href="index.html#anatomy">anatomy</a>). If the developer will not wait, SIGINT aborts the current wake,
+      everything appended before the abort is already durable, and the orb re-enters against that partial work. The
+      interrupted model step's tokens are paid again.</li>
+    <li><strong>Step 4 is not optional.</strong> The log holds truth, not the working tree. An uncommitted local
+      change that never reaches the git remote or an attachment stream does not exist for the orb. Amp has the same
+      rule: the orb sees a fresh clone.</li>
+    <li><strong>Step 11 is the cost of a cold host.</strong> The orb reads the full log and rebuilds the checkout.
+      Truth is never lost. Time is always spent. The rehydrating volume cache from the build list is what would
+      shrink this.</li>
+    <li><strong>Steps 12 and 13 are why the race is safe.</strong> Claims allow one active wake, and the laptop's
+      stale epoch and retired write token are rejected at the data layer, not by convention
+      (<a href="server.html">Part 5 §6</a>). A laptop that limps back after the lid opens cannot corrupt the
+      thread.</li>
+  </ul>
+</section>
+
+<!-- ================================================================ j-pull -->
+<section id="j-pull">
+  <h2><span class="kicker-num">§</span>Journey: orb to laptop, pulling a session home</h2>
+  <p>
+    The reverse move. The thread has been running in the orb overnight, and the developer wants to iterate on it
+    locally. The laptop is a warm host here, because it held the thread before and kept its watermarks, so catch-up
+    is a delta read rather than a full replay. The workspace comes down the same way Amp's
+    <code>amp sync</code> brings changes down, through git, except that here the dispatch target moves too and the
+    agent itself continues on the laptop.
+  </p>
+  <div class="diagram-shell">
+    <div class="diagram-title">Orb to laptop: spectate, quiesce, re-point, wake warm</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed arrows are asynchronous delivery. The laptop reads only the delta since it last held the thread. The workspace warm-up is the one cost that never goes away.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant DEV as Developer (laptop CLI)
+    box Control plane
+        participant AS as Agents server (authn/authz + control plane)
+        participant PG as Postgres (registry)
+    end
+    participant DS as Durable streams (chronicle)
+    participant OH as Orb host (handler runtime)
+    participant LH as Laptop runner (handler runtime)
+    participant LLM as Model provider
+
+    Note over OH: /thread/T-42 runs in the orb. The laptop already watches it over observe()
+    OH->>LLM: the current run streams
+    OH->>AS: token deltas and tool results land on /thread/T-42/main as they happen
+    DEV->>AS: queued send, bring the work to me. It waits its turn and coalesces into the next wake
+    OH->>AS: done callback at the turn boundary. Claim released
+    OH->>OH: push the orb branch to the git remote. File artifacts already sit on attachment streams
+    DEV->>AS: flip the dispatch policy to the runner target laptop-1
+    AS->>PG: update the entity row. The reactive surface survives untouched
+    LH->>AS: the runner long-polls POST /runners/laptop-1/claim and receives the pending wake
+    LH->>AS: warm catch-up from its replayWatermarks. It reads only the delta since it last held the thread
+    LH->>LH: rehydrate the workspace. git fetch the orb branch. Time is paid again, truth is not
+    LH->>LLM: the next run continues on the laptop
+    LH->>AS: appends carry the new claim write token. The orb epoch is fenced out
+    Note over OH: pause the orb. Disable its runner, discard the sandbox. Nothing on it was state of record
+      </pre>
+    </div>
+  </div>
+  <ul>
+    <li><strong>Spectating precedes the move.</strong> Before the developer pulls the session home, the laptop is an
+      ordinary <code>observe()</code> consumer with a client-held offset. A queued send from the spectator lands on
+      the log and coalesces into the next wake (<a href="faq.html#f2">FAQ 2</a>). Most of Amp's remote-control
+      surface is this step alone, with no host move at all.</li>
+    <li><strong>Step 9 is the pull model.</strong> No inbound connection reaches the laptop. The runner long-polls
+      and heartbeats a lease, which is why a laptop behind NAT can be a first-class host
+      (<a href="server.html">Part 5 §3</a>).</li>
+    <li><strong>Step 10 is the warm-host payoff.</strong> The laptop kept watermarks from when it last held the
+      thread, so it replays only the overnight delta. The same move to a fresh machine would be the cold path from
+      the previous journey.</li>
+    <li><strong>Step 14 is the orb's whole teardown.</strong> Because nothing on the orb was state of record, the
+      teardown is discard, not migration. What the orb's tmux session, databases, and installed packages held is
+      gone, exactly as Amp documents for <code>amp sync</code>. If the runner were to die instead of being disabled,
+      the failover rule from the build list has to decide where the next wake goes.
+      <span class="pill c">gap</span></li>
+  </ul>
+</section>
+
+<!-- ================================================================ tradeoffs -->
+<section id="tradeoffs">
+  <h2><span class="kicker-num">§</span>What the log-backed orb wins, and what it cannot carry</h2>
+  <p>
+    The log and replay strategy from section 3 is the most portable representation of a session, and it is also the
+    most partial one. Both halves show up in the journeys above.
+  </p>
+  <div class="compare">
+    <div class="ve-card accent-a">
+      <div class="card-title">Wins</div>
+      <div class="card-body">
+        <ul>
+          <li><strong>Resume anywhere.</strong> Any host with credentials materializes the session from an offset.
+            Cold hosts pay a full read, warm hosts pay a delta.</li>
+          <li><strong>Spectate from anything.</strong> Many readers can watch one writer. Offsets are client-held,
+            and reads at an offset are cacheable, so fan-out collapses on a CDN. Late joiners replay the same
+            log.</li>
+          <li><strong>Fork.</strong> Branch the history at a point and the branch is a full session. No export, no
+            import. Neither re-attach nor snapshots offer this cheaply.</li>
+          <li><strong>Audit.</strong> The session record and the debugging record are the same bytes, including
+            every intervention and every handoff.</li>
+          <li><strong>Handoff is crash recovery on purpose.</strong> One mechanism, exercised on every failure, so
+            the rare path is the tested path.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="ve-card accent-b">
+      <div class="card-title">Cannot carry</div>
+      <div class="card-body">
+        <ul>
+          <li><strong>Warm sandbox state.</strong> The checkout, the build cache, the running Postgres in the orb.
+            Every move pays warm-up time again unless you build the keyed volume cache.</li>
+          <li><strong>In-flight model calls.</strong> A streaming completion dies with its host. Hand off at turn
+            boundaries, or abort and pay the step's tokens twice.</li>
+          <li><strong>Credentials.</strong> By design they never enter the log, so each host is provisioned
+            separately and the two hosts can lawfully have different capabilities. Nothing checks parity before a
+            move.</li>
+          <li><strong>Open connections.</strong> Tunnels and sockets die across the move, the same reason Amp's
+            resume hook exists to restart tunnels.</li>
+          <li><strong>An offline laptop.</strong> One plane mediates everything. No connectivity, no session.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="callout">
+    <div class="callout-title">💡 The cache rule, applied to orbs</div>
+    <p>
+      The <a href="index.html#anatomy">anatomy section</a> states the rule this whole page keeps applying: a derived
+      store is legitimate exactly insofar as it stays working state, where deleting it costs time, not truth. An
+      orb is a clean instance of the rule. Its disk is legitimate while everything on it rehydrates from the log, the git
+      remote, and the attachment streams, which is why the teardown in the second journey is a discard. The moment
+      an orb's disk holds truth the log cannot reconstruct, e.g. a hand-edited database row that no event records,
+      the session has a second source of record, and handoff, fork, and audit silently break for exactly that
+      state. <a href="faq.html#f13">FAQ 13</a> concedes the honest cost: for coding agents with large warm
+      checkouts, rebuilding per move is expensive, and the rehydrating volume cache is something you build, not
+      something the platform ships.
+    </p>
+  </div>
+</section>
+
+<!-- ================================================================ sources -->
+<section id="sources">
+  <h2><span class="kicker-num">§</span>Sources and evidence tiers</h2>
+  <p>
+    Three tiers appear on this page. <span class="pill a">primary</span> means a direct quote or fact from a source
+    the claim links to. <span class="pill b">inferred</span> means our reading of primary evidence, stated as such.
+    <span class="pill c">gap</span> means the evidence does not exist publicly. One reception note for
+    completeness: the orbs launch drew almost no public discussion, and the Hacker News submission
+    (<a href="https://hn.algolia.com/api/v1/items/48734211">item 48734211</a>) received 2 points and no comments.
+  </p>
+  <ul>
+    <li><strong>Amp, primary:</strong>
+      <a href="https://ampcode.com/news/agents-in-orbs">Agents in Orbs</a> ·
+      <a href="https://ampcode.com/manual/orbs">manual/orbs</a> ·
+      <a href="https://ampcode.com/manual">manual</a> ·
+      <a href="https://ampcode.com/notes/putting-an-agent-in-an-orb">Putting an Agent in an Orb</a> ·
+      <a href="https://ampcode.com/security">security page</a> ·
+      <a href="https://ampcode.com/news/neo">Neo</a> ·
+      <a href="https://ampcode.com/news/agents-everywhere">Agents, Everywhere</a> ·
+      <a href="https://ampcode.com/news/streaming-json">streaming JSON</a></li>
+    <li><strong>Prior art, primary:</strong>
+      <a href="https://code.claude.com/docs/en/claude-code-on-the-web">Claude Code on the web</a> ·
+      <a href="https://code.claude.com/docs/en/remote-control">Claude Code remote control</a> ·
+      <a href="https://developers.openai.com/codex/cloud/environments">Codex cloud environments</a> ·
+      <a href="https://docs.devin.ai/release-notes/2024">Devin release notes</a> ·
+      <a href="https://docs.github.com/en/codespaces/about-codespaces/deep-dive">Codespaces deep dive</a> ·
+      <a href="https://learn.microsoft.com/en-us/visualstudio/liveshare/faq">Live Share FAQ</a> ·
+      <a href="https://jupyter-client.readthedocs.io/en/latest/messaging.html">Jupyter messaging</a> ·
+      <a href="https://man.openbsd.org/tmux.1">tmux(1)</a> ·
+      <a href="https://mosh.org/">mosh</a> ·
+      <a href="https://developers.cloudflare.com/durable-objects/">Durable Objects</a> ·
+      <a href="https://fly.io/docs/reference/suspend-resume/">Fly suspend and resume</a> ·
+      <a href="https://docs.temporal.io/workflows">Temporal workflows</a> ·
+      <a href="https://www.erlang.org/doc/system/distributed_applications.html">Erlang distributed applications</a> ·
+      <a href="https://automerge.org/docs/hello/">Automerge</a> ·
+      <a href="https://docs.yjs.dev/">Yjs</a></li>
+    <li><strong>This wiki:</strong> <a href="concepts.html">Part 1</a>, <a href="streams.html">Part 2</a>,
+      <a href="howto.html">Part 3</a>, <a href="runtime.html">Part 4</a>, <a href="server.html">Part 5</a>,
+      <a href="qa.html">Q&amp;A</a>, <a href="faq.html">FAQ</a>, <a href="journeys.html">Journeys</a>. Sections 4
+      to 8 of this page are synthesis over these, and the four-strategy taxonomy in section 3 is synthesis over the
+      prior-art sources.</li>
+  </ul>
+</section>
+
+<div class="pager">
+  <a href="journeys.html"><span class="dir">Previous</span><span class="label">← Interaction journeys</span></a>
+  <a class="next" href="index.html"><span class="dir">Back to</span><span class="label">Start Here ⤴</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · Case study: Amp's orbs on durable streams · Amp facts quoted from ampcode.com, the build is analysis
+</footer>
+
+</body>
+</html>
