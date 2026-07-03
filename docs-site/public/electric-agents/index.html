@@ -122,39 +122,44 @@
   </p>
 
   <div class="callout deep">
-    <div class="callout-title">⚛ The actor-model thesis — and where the 1:1 fit breaks</div>
+    <div class="callout-title">⚛ The actor lineage — and what agents actually change</div>
     <p>
       George Guimarães's essay
       <a href="https://georgeguimaraes.com/your-agent-orchestrator-is-just-a-bad-clone-of-elixir/">"Your Agent
       Orchestrator Is Just a Bad Clone of Elixir"</a> makes the sharpest version of an argument you will keep
       meeting: <strong>the actor model Erlang shipped in 1986 — isolated state, message passing, supervision,
       fault recovery — is the agent model AI is rediscovering</strong>, and today's frameworks are rebuilding it in
-      runtimes that can't deliver it. This architecture agrees with the diagnosis but not the prescription,
-      because the actor's core assumption — <em>a thing exists by being a running process</em> — is itself the
-      mismatch. The POV this stack takes, point by point:
+      runtimes that can't deliver it. This stack is best read as the <em>next step in that lineage</em>, not a
+      departure from it. Each generation relaxed one assumption:
     </p>
     <ul>
-      <li><strong>An actor exists by running; an agent mostly waits.</strong> Agents spend hours or days parked on
-        humans, tools, timers, and other agents. A million idle actors still occupy heaps and a scheduler; a
-        million idle entities are kilobytes of log. Making the <em>log</em> the unit of existence — not the
-        process — is what buys scale-to-zero.</li>
-      <li><strong>A mailbox is read once, by one consumer; an agent's history is read forever, by many.</strong>
-        The same events are the LLM's context, the user's streaming UI, a parent's monitor, and the audit trail —
-        so the "mailbox" must be a durable, offset-addressed, multi-reader stream, not process-private memory
-        that vanishes on exit.</li>
-      <li><strong>Let-it-crash restarts are cheap for phone switches, expensive for agents.</strong> A clean
-        state costs the conversation and the tokens that paid for it — and agent failures are often
-        <em>semantic</em> (bad output from a healthy process), which no restart fixes. Recovery here is re-entry
-        into remembered state, with guards instead of amnesia (FAQ 5).</li>
-      <li><strong>Agents live on the web, not in a cluster.</strong> Identity is a URL, messaging is an HTTP
-        append, and a handler runs on anything that can receive a webhook — internet-grade addressing instead of
-        pids inside a VM whose membership you operate.</li>
+      <li><strong>Erlang bound existence to a running process — and virtual actors already cut that cord.</strong>
+        In classic actor runtimes a million idle actors really do hold heaps and a scheduler; but
+        <a href="https://learn.microsoft.com/en-us/dotnet/orleans/overview">Orleans's virtual actors</a> (2011)
+        made actors "purely logical entities that <em>always</em> exist, virtually" — activated on demand,
+        deactivated under pressure, always addressable, state persisted between activations. Virtual existence is
+        a solved problem in actor-land; it is not what's new here.</li>
+      <li><strong>What agents change is <em>what persists, and who gets to read it</em>.</strong> A virtual actor
+        persists a state <em>snapshot</em> with one access pattern: load on activation, save on write, private to
+        the actor. An agent persists a <strong>journal</strong> — the append-only, offset-addressed record of
+        everything it said, saw, and did — and the journal is the <em>product</em>, with many readers and many
+        access patterns: the LLM's context is a projection of it, the UI streams it live, parents and observers
+        watch it, audits read it whole, and <code>fork()</code> <strong>branches it</strong> — "copy this agent's
+        timeline at event N and let both continue" has no snapshot equivalent. Recovery falls out for free:
+        re-entry into the journal rather than restart into cleanliness, which also matches how agents actually
+        fail — the process is usually healthy; the <em>output</em> is what went wrong.</li>
+      <li><strong>And agents change where identity lives: the web, not a cluster.</strong> A grain is always
+        addressable <em>inside its cluster</em>; an entity's address is a URL — messaging is an HTTP append, and a
+        handler runs on anything that can receive a webhook. Though not every agent should be externalized: a
+        flock of ephemeral sub-agents has no business holding public addresses, and neither tradition has
+        formalized that internal/external split yet (<a href="faq.html#f11">FAQ 11</a>).</li>
     </ul>
     <p>
-      So the stack keeps the actor's <em>discipline</em> — single-threaded, message-driven, isolated — and swaps
-      its <em>ontology</em>: the actor is the process; the agent is the log. What OTP still does better —
-      declarative supervision — is a real gap, owned honestly in <a href="faq.html#f9">FAQ 9</a>; the full
-      argument and the line-for-line mapping live in <a href="faq.html#f8">FAQ 8–10</a>.
+      Same discipline — single-threaded, message-driven, isolated — extended one more step:
+      <em>process actors → virtual actors → journaled, web-addressed agents.</em> The open threads this lineage
+      still owes us: declarative supervision (<a href="faq.html#f9">FAQ 9</a>) and the internal/external agent
+      distinction (<a href="faq.html#f11">FAQ 11</a>); the full argument and line-for-line mapping live in
+      <a href="faq.html#f8">FAQ 8–10</a>.
     </p>
   </div>
 </section>
