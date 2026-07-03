@@ -84,7 +84,9 @@
     supervision. When you create a new thread you get a fresh orb that contains your code, plugins, and tools the
     agent might need"</em> (<a href="https://ampcode.com/news/agents-in-orbs">Agents in Orbs</a>). The
     <a href="https://ampcode.com/manual/orbs">manual</a> adds the isolation boundary: <em>"Each Amp thread started
-    from ampcode.com in an orb gets its own orb."</em> One thread maps to one machine.
+    from ampcode.com in an orb gets its own orb."</em> One thread maps to one machine. (Citation caveat: the manual
+    page moved behind a login after we captured that sentence on 2026-07-03. The publicly fetchable wording today
+    says only that orbs are remote machines that run Amp threads.)
   </p>
   <p>
     The machine is concrete. An orb runs Debian 12 with 32&nbsp;GB of memory and 16 cores, and Amp says resource
@@ -213,9 +215,11 @@
 <section id="prior">
   <h2><span class="kicker-num">§</span>Prior art: four ways to move a session</h2>
   <p>
-    We surveyed twelve systems that move, or refuse to move, a running session: tmux, mosh, Jupyter, VS&nbsp;Code
-    Live Share, GitHub Codespaces, Claude Code (teleport and remote control), OpenAI Codex cloud tasks, Devin,
-    Cloudflare Durable Objects, Fly.io suspend, Erlang/OTP, and CRDT systems (Automerge, Yjs). Four strategies
+    We surveyed twenty-two systems that move, or refuse to move, a running session: tmux, mosh, Jupyter,
+    VS&nbsp;Code Live Share and Remote Tunnels, JetBrains Remote Development, GitHub Codespaces, Claude Code
+    (teleport and remote control), OpenAI Codex cloud tasks, Cursor cloud agents, Devin, GitHub Copilot's coding
+    agent, Google Jules, Cloudflare Durable Objects, Fly.io suspend, Erlang/OTP, CRDT systems (Automerge, Yjs),
+    and the local-first sync engines (Linear, Replicache and Zero, LiveStore, Google Docs, Figma). Four strategies
     cover all of them. The taxonomy is our synthesis of those primary sources, so treat the grouping as analysis.
     <span class="pill b">inferred</span>
   </p>
@@ -257,11 +261,56 @@
     </tbody>
   </table></div>
   <p>
-    The convergence across shipping agent products is the useful finding. Claude Code, Codex, and Devin all split
-    the session the same way: the conversation moves as a log, the code moves as git, and the environment never
-    moves. Each product rebuilds the environment from templates and setup scripts. No surveyed system migrates the
-    live agent process. Amp's documented behavior matches this split exactly: the thread lives on the server, the
-    code reaches the orb as a fresh clone, and <code>amp sync</code> brings back file changes rather than a machine.
+    The convergence across shipping agent products is the useful finding. Claude Code, Codex, Cursor, Devin, and
+    Jules all split the session the same way: the conversation moves as a log, the code moves as git, and the
+    environment never moves. Each product rebuilds the environment from templates and setup scripts. No surveyed
+    system migrates the live agent process. Amp's documented behavior matches this split exactly: the thread lives
+    on the server, the code reaches the orb as a fresh clone, and <code>amp sync</code> brings back file changes
+    rather than a machine. Two footnotes keep the split honest. Uncommitted work does travel in two documented
+    cases: Devin's <code>/handoff</code> says <em>"your work-in-progress diff carries over,"</em> and Claude's
+    bundle fallback for non-GitHub repos uploads uncommitted changes to tracked files. Cursor states the opposite
+    rule plainly: <em>"'Move to Cloud' does not snapshot your local uncommitted changes."</em> And GitHub Copilot
+    is the counterexample that proves the boundary: it keeps no thread at all, the draft pull request is the
+    continuity object, and its sessions are Actions runs capped at 59 minutes whose environment is then discarded.
+  </p>
+
+  <h3>The sync-engine lineage: the same architecture, a decade earlier</h3>
+  <p>
+    The strongest prior art for the log-and-replay strategy is not an agent product. Local-first sync engines
+    converged on exactly this architecture for ordinary application state years before agent threads existed: an
+    authoritative, server-ordered record, client views that are materializations of it, a cheap resume token, and
+    a rebase step for speculative local writes. The resume token is the same object in every one of them.
+    Linear's <code>lastSyncId</code> is described by its own engineers as the database version number for the
+    whole system. Replicache calls it a cookie. Google Docs calls it a revision number. Chronicle calls it
+    <code>Stream-Next-Offset</code>. Each means: give me everything after N.
+  </p>
+  <p>
+    The rebase move is also shared. Replicache rewinds the client view, applies the server patch, and replays
+    pending mutations. Linear rebases pending transactions against newer server state. LiveStore pulls remote
+    events, rebases unpushed local events on top, then pushes. Operational transform does the same job for Docs.
+    LiveStore states the general principle in one sentence: the client database is <em>"a projection of this
+    eventlog."</em> That is this wiki's cache rule, written independently by a sync-engine project. The lineage
+    also supplies mechanisms this page's build list needs: Linear's tiered bootstrap (full, partial, or
+    local-from-cache) is the cold-versus-warm host distinction already productionized, and Zero's refusal of
+    offline writes (after long divergence <em>"there is no way that any software algorithm can automatically
+    resolve their conflict"</em>) is the honest justification for keeping offline operation out of scope for
+    agent threads, where turns are billed, side-effectful, and must be advanced by exactly one writer.
+  </p>
+  <p>
+    One company closes the loop between the lineages. ElectricSQL built Postgres sync for local-first apps, then
+    became Electric, whose repository describes itself as the first agent platform built on sync. Its agent pitch
+    is sync-engine language applied to threads: sessions resumable across devices, observable across teams,
+    forkable for review. The bet this page analyzes is that company's founding thesis: an agent session is a
+    durable synced log, and every surface (CLI, web, IDE, another agent) is a materialization of it.
+  </p>
+  <p>
+    One more pattern from the survey is worth naming because the journeys below design against it:
+    <strong>direction asymmetry</strong>. Pushing a local thread to the cloud is common (Cursor's Move to Cloud,
+    Devin's <code>/handoff</code>, Claude Desktop's Continue-in menu). Pulling a cloud thread's conversation back
+    into a local loop is documented only for Claude's teleport, which fetches the branch and <em>"loads the full
+    conversation history into your terminal."</em> Every other product returns artifacts: diffs, branches, pull
+    requests. The orb-to-laptop journey in section 7 designs a move that almost nobody ships. On a shared log it
+    is the same operation as the push, which is the point of building on one.
   </p>
 </section>
 
