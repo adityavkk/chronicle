@@ -42,6 +42,7 @@
   <a href="#f9">9 · Where are the supervision trees?</a>
   <a href="#f10">10 · The runtime-level 30%</a>
   <a href="#f11">11 · Internal vs. external agents</a>
+  <a href="#f12">12 · The log or the server?</a>
 </nav>
 
 <div class="main">
@@ -50,7 +51,7 @@
   <p class="kicker">Appendix</p>
   <h1>FAQ — the next questions</h1>
   <p class="lead">
-    Eleven more questions at the same altitude as <a href="qa.html">Part 6</a> — the ones this architecture invites
+    Twelve more questions at the same altitude as <a href="qa.html">Part 6</a> — the ones this architecture invites
     once the first five are answered. Same format: the short version first, then the machinery.
   </p>
 </header>
@@ -429,7 +430,12 @@
       <tr><td>Process with an isolated heap</td><td>Entity with private streams + materialized state (Part 1, Part 4)</td></tr>
       <tr><td>Virtual actor (Orleans grain) — "always exists, virtually"; activated on demand; a state
         <em>snapshot</em> persisted between activations</td><td>Same virtual existence — but what persists is the
-        <strong>journal</strong>, not a snapshot: public, multi-reader, offset-addressed, forkable</td></tr>
+        <strong>log</strong>, not a snapshot: public, multi-reader, offset-addressed, forkable</td></tr>
+      <tr><td>Event-sourced actor (<a href="https://doc.akka.io/libraries/akka-core/current/typed/persistence.html">Akka
+        Persistence</a>, <a href="https://learn.microsoft.com/en-us/dotnet/orleans/grains/event-sourcing/">Orleans
+        JournaledGrain</a>) — a log kept <em>for recovery</em>: private, replayed by its own actor, one consumer</td>
+        <td>The log <em>as the interface</em>: the write path, the read path, the context projection, the UI feed,
+        the monitor, and the fork point are all the same log</td></tr>
       <tr><td>Mailbox — in-memory, unbounded, dies with the process</td><td>Inbox stream — durable, totally ordered,
         offset-addressed; survives crashes, redeploys, and <code>kill&nbsp;-9</code> (Part 2)</td></tr>
       <tr><td><code>send</code> / <code>receive</code> loop</td><td><code>send()</code> / wake handler — FAQ 2's
@@ -448,9 +454,11 @@
     <em>always</em> exist, virtually… always addressable" — <a
     href="https://learn.microsoft.com/en-us/dotnet/orleans/overview">Orleans docs</a>), with activation on demand
     and state persisted between activations. So sleeping cheaply is not the novelty. Read this stack as the next
-    relaxation in the same lineage: what changed is the <em>state model</em> — snapshot → journal, private →
-    public, load/save → append/observe/<code>fork()</code> — and the addressing — cluster → web (FAQ 11 for where
-    that one gets complicated).
+    relaxation in the same lineage. And since event-sourced actors exist too, the honest statement of the
+    differentiator is not "log vs. snapshot" but <em>who the log is for</em>: event-sourcing as a private recovery
+    mechanism versus event-sourcing as the public product — one log serving writes, reads, context, UIs, monitors,
+    audits, and <code>fork()</code> — plus the addressing move from cluster to web (FAQ 11 for where that one gets
+    complicated, FAQ 12 for how it's mediated).
   </p>
   <p>
     The deep difference is what a failure costs. OTP restarts in <em>microseconds</em> into a <em>clean</em> state —
@@ -596,16 +604,54 @@
     Actor systems have addressability <em>scopes</em> but no first-class internal/external distinction. Electric
     makes the opposite simplification: <strong>every entity is externalized</strong> — a URL with durable streams —
     and the only "internal agents" are whatever lives inside a single wake's in-process loop. The middle tier —
-    <em>journaled but unaddressed, agentic but private, lifecycle-bound to a parent</em> — is unformalized in both
+    <em>logged but unaddressed, agentic but private, lifecycle-bound to a parent</em> — is unformalized in both
     traditions. This answer is partly an editorial flag: that tier is worth formalizing, and nobody has.
   </div>
 
-  <p><strong>What actors have: scopes, not semantics.</strong> An Erlang pid is anonymous until you register it
-  (locally or globally); Akka separates local actors from cluster-sharded ones; an Orleans grain is always
-  addressable — but only <em>within its cluster</em>, with web exposure a separate frontend concern. So the
-  machinery for "reachable by whom?" exists everywhere, but it's an operational scope, not a modeling concept:
-  nothing in the actor contract says <em>this actor is an internal implementation detail; that one is a public
-  commitment</em>.</p>
+  <p><strong>What actors have: scopes, not semantics.</strong> Forty years of actor systems produced a rich
+  toolbox for "reachable by whom, under what name?" — worth knowing, because each mechanism was built to solve a
+  specific problem:</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>System &amp; mechanism</th><th>Scope model</th><th>What it solves</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Erlang/OTP</strong> — anonymous pids by default; <code>register/2</code> local names;
+        the <a href="https://www.erlang.org/doc/apps/kernel/global.html"><code>global</code></a> cluster registry;
+        <code>pg</code> process groups</td>
+        <td>Reachability as capability: an unregistered pid can only be messaged by whoever was handed it.
+        Registration is opt-in publication, at node or cluster scope.</td>
+        <td>Decoupling names from lifecycles: a supervisor restart yields a new pid but the registered name
+        repoints, so senders survive their target's death — the naming layer is part of the fault-tolerance
+        story.</td></tr>
+      <tr><td><strong>Akka</strong> — hierarchical
+        <a href="https://doc.akka.io/libraries/akka-core/current/general/addressing.html">actor paths</a>
+        (<code>akka://sys/user/parent/child</code>); Receptionist discovery;
+        <a href="https://doc.akka.io/libraries/akka-core/current/typed/cluster-sharding.html">Cluster
+        Sharding</a> of entity IDs</td>
+        <td>The address <em>is</em> the supervision tree — a path names a position in the hierarchy, not a
+        process. Sharding adds logical entity IDs routed to whichever node currently hosts them.</td>
+        <td>Location transparency plus placement: senders hold stable logical addresses while the runtime moves,
+        rebalances, and passivates the actors behind them.</td></tr>
+      <tr><td><strong>Orleans</strong> — no registration at all: grain identity = (type, key), resolved by the
+        runtime's <a href="https://learn.microsoft.com/en-us/dotnet/orleans/overview">grain directory</a></td>
+        <td>Universal in-cluster addressability: every possible identity "always exists, virtually" and can be
+        messaged at any time; the directory maps identity to a live activation, creating one if needed.</td>
+        <td>Eliminating discovery and lifecycle races by construction — there is no "is it started yet?", no
+        registration ceremony, no dangling refs.</td></tr>
+      <tr><td><strong>Cloudflare Durable Objects</strong> — IDs, not URLs: a DO is reachable
+        <a href="https://developers.cloudflare.com/durable-objects/">only through Worker code</a> you deploy in
+        front of it</td>
+        <td>Mandatory mediation: the platform gives objects identity but no public surface; every access flows
+        through your code, which is therefore your authn/authz layer.</td>
+        <td>Making exposure a policy decision rather than a topology accident — the closest existing answer to
+        "everything is addressable, but who may actually reach it?"</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    Notice what all four have in common: they are <em>operational</em> scopes — capability, hierarchy, directory,
+    mediation — not modeling concepts. Nothing in any actor contract says <em>this actor is an internal
+    implementation detail; that one is a public commitment</em>. The distinction the agent world needs is
+    semantic, and it isn't in the toolbox.
+  </p>
 
   <p><strong>What Electric has: externalization by construction.</strong> Identity <em>is</em> a URL
   (<code>/{type}/{id}</code>); a <code>spawn()</code>ed child is a full entity with streams, an authz surface, and
@@ -614,11 +660,15 @@
   <em>because</em> nothing is hidden inside a process. But it also bills every ephemeral helper the full contract:
   an address you must authorize, storage you must TTL, an orphan you must remember to end (FAQ 9's linked-lifecycle
   gap). At the other extreme, the tool loop inside <code>ctx.agent.run()</code> is fully internal — no address, no
-  journal beyond what the handler chooses to append. Between "full public entity" and "invisible in-process loop"
-  there is nothing.</p>
+  log of its own beyond what the handler chooses to append. Between "full public entity" and "invisible in-process loop"
+  there is nothing — <em>structurally</em>. What there is instead is policy: a URL here is <strong>identity, not
+  exposure</strong>. Every read and write passes through the agent server's authn/authz gate (FAQ 12), so "private
+  sub-agent" is expressible today as an authorization rule — only the parent's principal may send to or observe the
+  child. That is real access control, in the Durable Objects spirit of mandatory mediation; what it isn't is a
+  packaged semantics with defaults, which is where the rest of this answer goes.</p>
 
   <p><strong>The unformalized middle tier.</strong> A researcher entity that fans out twelve extraction
-  sub-agents wants them journaled (debuggability, audit, fork-to-retry) but not <em>addressed</em>: no inbound
+  sub-agents wants them logged (debuggability, audit, fork-to-retry) but not <em>addressed</em>: no inbound
   contract, invisible to the public routing surface, reachable only through the parent, and torn down with it.
   A formalization would probably be a spawn-time property, not a new noun: <em>visibility</em> (private streams,
   capability-scoped to the parent rather than the public surface), <em>lifecycle linkage</em> (die/TTL with the
@@ -634,6 +684,59 @@
     everything uniformly cluster-addressable, and Electric made everything uniformly web-addressable. Agents —
     which spawn agents, which spawn agents — are the first workload where the internal/external split is doing
     real architectural work, and it's this explainer's nomination for the next concept the actor lineage owes us.
+  </p>
+</section>
+
+<!-- ================================================================ F12 -->
+<section id="f12">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 12</div>
+    <div class="qa-text">The durable stream gives an agent its URL — but is that how you actually talk to it? Do
+    clients write directly into the stream, or go through the agent server?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    <strong>Through the server.</strong> The stream gives the agent its identity and its persistence; the agent
+    server is the front door. It <em>stores or proxies</em> the durable streams and <strong>validates and
+    authorizes every read and write</strong> (Part 5) — sends, spawns, observe feeds, and appends all pass through
+    its HTTP surface under a principal. Clients never need to reach the streams backend directly, and production
+    designs put a fronting proxy in front of even the server.
+  </div>
+
+  <p><strong>Why the front door exists.</strong> The server manages two kinds of truth (Part 5 §2): the durable
+  streams — the append-only log of what happened — and the Postgres control-plane registry — entities, wake
+  registrations, claims, schedules. A bare streams backend can serialize appends and serve offsets, but it cannot
+  validate an inbox message against <code>inboxSchemas</code>, evaluate wake conditions, enforce claims and write
+  tokens, or decide <em>who may do any of this</em>. The entity URL therefore names a resource the <em>server</em>
+  serves; the stream behind it is an internal tier.</p>
+
+  <p><strong>Life of a send.</strong> A request arrives carrying a principal — the server expects an
+  <code>authenticateRequest</code> hook (verify the JWT/session, return the principal) and an optional
+  <code>authorizeRequest</code> policy hook (external ABAC, cached with expiry), or a gateway wired in front
+  (Q&amp;A #5). The payload is validated against the entity's declared schemas, appended to the inbox stream
+  through the runtime's idempotent producer (the exactly-once hop of FAQ 3), projected into the registry, and
+  evaluated against wake registrations — which is what turns a write into a running agent. <code>ctx.send(entityUrl,
+  payload)</code> from another entity rides exactly the same path: <em>agents are principals too</em>, so
+  agent-to-agent messages clear the same authorization gate as user traffic.</p>
+
+  <p><strong>Reads are the same story.</strong> A browser tab observing an agent (<code>observe()</code>, the
+  live UI in Part 3) tails the log through the server's sync surface — SSE, offset-resumable, CDN-cacheable
+  fan-out. The "browser is a first-class peer of the agent" property (Q&amp;A #1) is a property of this
+  <em>mediated</em> surface: peer means same log and same offsets, not unmediated storage access.</p>
+
+  <p><strong>The trust boundary, stated plainly.</strong> The streams backend (chronicle, or any conformant
+  server) sits behind the agent server, which stores or proxies it; inbound streams-backend webhooks are verified
+  against JWKS, outbound webhooks are Ed25519-signed. The server treats its principal header as trusted input and
+  ships with CORS wide open — so it must never be reachable with client-controlled headers, and a fronting proxy
+  is part of the production design, not an option (Part 5 §9, Q&amp;A #5). Dev mode falls back to a
+  <code>system:dev-local</code> principal; production conditions hard-require a real one (401 otherwise).</p>
+
+  <p>
+    This closes the loop on FAQ 11: actor systems scope reachability <em>topologically</em> — you cannot message
+    what you cannot name or route to. Here everything is nameable, and reachability is <em>policy at a mediated
+    surface</em>: what a principal may do to a name. That is the web's own answer to addressing — universal names,
+    gated access — which is fitting for agents whose addresses are URLs in the first place.
   </p>
 </section>
 
