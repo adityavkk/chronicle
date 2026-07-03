@@ -8,6 +8,14 @@ and acceptance detail; this document holds only the ordering and the reasons for
 it. When an issue closes, delete its row. When new work is filed, slot it into
 the order rather than appending it.
 
+> **Provenance.** Triaged 2026-07-03 against `main` @ cf750eb — one vet plus one
+> adversarial verification per issue; the per-issue evidence lives in each closed
+> issue's closing comment and each kept issue's rescoped body.
+> **Drift guard:** `make backlog-check` (CI: the `backlog-drift` job on every
+> PR/push and in the formal nightly) fails the moment the ranked table below
+> stops being exactly the set of open issues — a PR that closes an issue must
+> delete its row, and newly filed work must be slotted into the order.
+
 The ordering rule: client-reachable defects first, then cheap CI protection of
 verification work that already shipped, then production-cutover insurance, then
 the paid cloud validation batched into a single rig session, then low-urgency

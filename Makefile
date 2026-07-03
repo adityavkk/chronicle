@@ -12,7 +12,7 @@ GO        ?= go
 BINARY    := bin/chronicle
 REDIS_URL ?= redis://localhost:6379
 
-.PHONY: all build run test test-unit test-integration conformance lint fmt tidy redis-up redis-down clean spec-check
+.PHONY: all build run test test-unit test-integration conformance lint fmt tidy redis-up redis-down clean spec-check backlog-check
 
 all: build
 
@@ -58,6 +58,12 @@ lint:
 # spec drift (issue #98). CI runs this in the `spec-version` job.
 spec-check:
 	./scripts/spec-version-check.sh
+
+# Verify docs/BACKLOG.md still mirrors the set of open issues (drift guard;
+# provenance contract stated at the top of the doc). CI runs this in the
+# `backlog-drift` job.
+backlog-check:
+	./scripts/backlog-check.sh
 
 fmt:
 	gofumpt -l -w .
