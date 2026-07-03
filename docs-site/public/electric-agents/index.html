@@ -34,6 +34,7 @@
   <p class="toc-title">On this page</p>
   <a href="#what">What this is</a>
   <a href="#shift">The mental-model shift</a>
+  <a href="#anatomy">An agent's anatomy</a>
   <a href="#nouns">The nouns at a glance</a>
   <a href="#architecture">The whole system</a>
   <a href="#path">Reading path</a>
@@ -164,6 +165,133 @@
       <a href="faq.html#f8">FAQ 8–10</a>.
     </p>
   </div>
+</section>
+
+<section id="anatomy">
+  <h2><span class="kicker-num">§</span>An agent's anatomy — properties, not slogans</h2>
+  <p>
+    "The agent is the data" is <strong>Electric's framing</strong>, and as pedagogy it earns its keep: one sentence,
+    one inversion, and half the stack's design decisions follow. But it is an <em>identity</em> claim, and identity
+    claims end arguments. This site's preferred framing — worth stating separately, because it is doing different
+    work — is a <em>design</em> claim: <strong>an agent is whatever satisfies four sets of required
+    properties.</strong> Design claims stay useful when the implementation varies: they let you evaluate what
+    Electric chose, what <a href="faq.html#f8">the actor lineage</a> chose, and what a coding agent with a
+    persistent volume chooses differently — by checking properties, not allegiance.
+  </p>
+
+  <div class="table-scroll"><table>
+    <thead><tr><th>Organ</th><th>What it is</th><th>The properties that matter</th></tr></thead>
+    <tbody>
+      <tr><td><strong>The log</strong></td>
+        <td>The agent's own memory and identity — the state of record. In Electric: the entity's streams
+        (Part 2).</td>
+        <td><strong>Append-only</strong> (audit, replay, fork points, cacheable reads) ·
+        <strong>totally ordered</strong> (races become boring — FAQ 2) ·
+        <strong>offset-addressable</strong> (resume without coordination) ·
+        <strong>multi-consumer with an <em>open</em> set of readers</strong> — UIs, sub-agents, memory systems,
+        evals; you don't know today who reads tomorrow ·
+        <strong>forkable</strong> (branch a timeline at an offset — FAQ 4, FAQ 5) ·
+        <strong>appends cheap enough to carry individual token deltas</strong>, so the log doubles as the live
+        feed · named, permissioned, lifecycle-managed (TTL — FAQ 4)</td></tr>
+      <tr><td><strong>The brain</strong></td>
+        <td>Harness + model. The <em>harness</em> is the <strong>fixed, pre-determined control flow</strong> —
+        context construction, guardrails, gates — authored before the agent ever runs (Part 3 §6); the
+        <em>model</em> adds the <strong>dynamic, runtime decision-making that can't be pre-determined</strong>.
+        In Electric: your handler + <code>ctx.agent.run()</code>.</td>
+        <td><strong>Holds no state of record</strong> — stateless <em>across turns</em>, richly stateful within
+        one (the context window is state, but state reconstructible by projecting the log) · killable at any
+        instant with zero loss (FAQ 5) · its context is a <em>budgeted projection</em> of the log, not the log
+        (Part 4 §4, FAQ 4)</td></tr>
+      <tr><td><strong>The hands</strong></td>
+        <td>The action space — tools, sandboxes, side effects. In Electric: <code>ctx.sandbox</code> +
+        tool sources (Part 3).</td>
+        <td><strong>Leased per wake, not owned</strong> · <strong>blast-radius-tiered</strong> (host → docker →
+        microVM, per-spawn — FAQ 13) · <strong>capability-scoped</strong> — tools allowlisted by the host,
+        every action executed as a principal, credentials never ambient (FAQ 13) ·
+        <strong>journaled</strong> — tool calls and results land on the log · the one place exactly-once honestly
+        ends (FAQ 3), so external effects carry idempotency keys derived from durable identifiers</td></tr>
+      <tr><td><strong>The nervous system</strong></td>
+        <td>The binding between log and brain — something must notice the log moved and summon compute. In
+        Electric: the agents server (Part 5).</td>
+        <td>Watches the log, evaluates wake conditions, dispatches · <strong>at-most-one active brain per
+        agent</strong> (claims, leases) with zombie fencing (epochs, write tokens — FAQ 5) · at-least-once
+        delivery with coalescing (FAQ 2) · <strong>gates every read and write</strong> behind authn/authz
+        (FAQ 12)</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>
+    Two of those terms carry weight and deserve definitions. A <strong>turn</strong> is one wake-to-sleep
+    execution: the nervous system summons the brain, the brain rebuilds its world from the log, harness and model
+    act, everything that happened lands back on the log as it happens, and the compute dies. A
+    <strong>session</strong> is the agent's whole recorded lifetime — the log across all of its turns (Anthropic's
+    Managed Agents literally names its log "the session"). <em>Stateless across turns</em> then has a precise
+    meaning: at a turn boundary, nothing exists anywhere in the system but the log. And the harness/model split is
+    Part 3 §6's hybrid-control-flow idiom stated as anatomy: the branches you could write before the agent ran
+    belong to the harness; the judgment you couldn't belongs to the model.
+  </p>
+  <p>
+    <strong>State of record</strong> deserves its own definition, because the whole anatomy hangs on it. It is the
+    copy that settles disagreements — and three tests identify it, any one sufficing: losing it loses
+    <em>truth</em>, not time; someone who is not you may later demand it (an audit, a parent's join, a billing
+    dispute); and a <code>fork()</code> must carry it for the branch to be the same agent. Everything failing all
+    three is <strong>working state</strong> — reconstructible from the state of record at some cost in time: the
+    context window, a materialized collection, a warm checkout. The discipline in one line: <em>the brain and
+    hands may hold arbitrary working state; only the log holds state of record.</em>
+  </p>
+  <p>
+    The log is the agent's <em>own</em> state — but agents also touch state they don't own, and the framing has to
+    say where each kind lives:
+  </p>
+  <ul>
+    <li><strong>Own</strong> — the entity's streams: private by default, permissioned, everything above.</li>
+    <li><strong>Shared</strong> — blackboards: stream-backed DBs no single agent owns
+      (<code>ctx.mkdb()</code> / <code>observe(db(…))</code>, Part 3 §4), materialized by every participant. Same
+      log properties, joint ownership — the coordination patterns favor these over conversational ping-pong
+      between entities (Part 3 §7).</li>
+    <li><strong>Observed</strong> — other agents' logs, read-only (<code>observe(entity(url))</code>):
+      coordination as observation (FAQ 1).</li>
+    <li><strong>External</strong> — the world's systems of record (repos, databases, SaaS), reached through the
+      hands. <em>Not</em> derived from the log: the log records what the agent <em>did</em> to them — the effect
+      journal — not what they contain.</li>
+    <li><strong>Derived</strong> — projections and caches over the log: TanStack DB collections (Part 2 §8), a
+      file-system view over streams, a sandbox's warm disk. The rule that keeps this tier honest:
+      <strong>a derived store is legitimate exactly insofar as it stays working state — deleting it costs time,
+      not truth.</strong> A
+      coding agent's checkout on a persistent volume is fine while it rehydrates from a log position (repo ref +
+      patch series); the moment the volume holds truth the log can't reconstruct, a second source of record
+      exists — and forkability and audit are silently lost for exactly that state. Electric enforces this rule
+      structurally: sandboxes are leased per wake (scratch disks only), and durable file-like artifacts go to
+      attachment streams under the entity instead of volumes (FAQ 13).</li>
+  </ul>
+
+  <div class="callout deep">
+    <div class="callout-title">⚖ Convergence check: Anthropic cut the same joints</div>
+    <p>
+      Anthropic's <a href="https://www.anthropic.com/engineering/managed-agents">"Scaling Managed Agents:
+      Decoupling the brain from the hands"</a> arrived at this anatomy from the opposite direction — not web
+      architecture but the ops pain of running an agent fleet: <em>"We virtualized the components of an agent: a
+      session (the append-only log of everything that happened), a harness (the loop that calls Claude and routes
+      Claude's tool calls to the relevant infrastructure), and a sandbox (an execution environment where Claude
+      can run code and edit files)."</em> Their coupled first design — session, harness, and sandbox in one
+      container — produced a <em>pet</em>: lose the container, lose the session. The fix was this page's anatomy:
+      decouple the <em>brain</em> from the <em>hands</em> and the <em>session log</em>, so that <em>"nothing in
+      the harness needs to survive a crash"</em> — a dead harness is rebooted with <code>wake(sessionId)</code>
+      and resumes from the log; the session becomes a context object the brain queries by
+      <em>positional slices</em> (<code>getEvents()</code>) rather than something it must carry; and credentials
+      live where the sandbox can never reach them. Log, stateless brain, leased hands, a wake verb. When two
+      teams starting from opposite ends — Electric from the web's architecture, Anthropic from operating a fleet —
+      cut the agent at the same joints, the joints are probably real.
+    </p>
+  </div>
+
+  <p>
+    Read the rest of this site as the property lists made concrete: <a href="streams.html">Part 2</a> is the
+    log's properties as a wire protocol, <a href="howto.html">Part 3</a> is the brain's idioms,
+    <a href="server.html">Part 5</a> is the nervous system, and the
+    <a href="journeys.html">journeys</a> are all six organs moving at once. The actor callout above is this same
+    framing applied to history.
+  </p>
 </section>
 
 <section id="nouns">
