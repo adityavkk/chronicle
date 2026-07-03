@@ -120,6 +120,22 @@
     agent's world from its stream, runs your handler, appends whatever happened back onto the stream, and lets the
     compute die. That one idea explains almost every design decision in the stack.
   </p>
+
+  <div class="callout deep">
+    <div class="callout-title">⚛ The actor-model thesis, in four sentences</div>
+    <p>
+      George Guimarães's essay
+      <a href="https://georgeguimaraes.com/your-agent-orchestrator-is-just-a-bad-clone-of-elixir/">"Your Agent
+      Orchestrator Is Just a Bad Clone of Elixir"</a> makes the sharpest version of an argument you will keep
+      meeting: <strong>the actor model Erlang shipped in 1986 — isolated state, message passing, supervision,
+      fault recovery — is the agent model AI is rediscovering</strong>, and today's frameworks are rebuilding it in
+      runtimes that can't deliver it. This architecture agrees with the diagnosis and changes one load-bearing
+      word: an entity is an actor whose mailbox is <em>durable</em>. OTP restarts in microseconds and forgets;
+      a crashed entity re-enters and remembers. What OTP still does better — declarative supervision — is a real
+      gap, owned honestly in <a href="faq.html#f9">FAQ 9</a>; the full argument and the line-for-line mapping live
+      in <a href="faq.html#f8">FAQ 8–10</a>.
+    </p>
+  </div>
 </section>
 
 <section id="nouns">
