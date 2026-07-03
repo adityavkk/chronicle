@@ -385,8 +385,9 @@ jobs:
   # docs/BACKLOG.md contracts that its ranked table is exactly the set of open
   # issues. This fails the moment they diverge: a PR that closes an issue must
   # also delete its backlog row, and newly filed work must be slotted into the
-  # order. State-only drift (issues closed/opened with no push) is caught by
-  # the same check in formal-nightly.yml.
+  # order. State-only drift (issues closed/opened with no push) is caught the
+  # moment it happens by backlog-drift.yml (issue-event trigger), with
+  # formal-nightly.yml as the backstop.
   backlog-drift:
     runs-on: ubuntu-latest
     steps:
