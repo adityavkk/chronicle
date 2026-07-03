@@ -90,6 +90,42 @@ Redis 7.2). The project standardizes on the managed Redis 8 offering; target it
 for production-representative numbers. `maxmemory-policy noeviction` is the hard
 requirement — any eviction silently truncates streams (chronicle warns at boot).
 
+## The public ↔ internal mirror (Copybara)
+
+**This repo is the source of truth for all code.** An internal deploy mirror is
+derived from it by a one-way [Google Copybara](https://github.com/google/copybara)
+sync, run by the maintainer from their machine (not CI). How it works:
+
+- Each sync imports public `main` into the mirror as **one squashed commit** whose
+  message lists the public commits it carries; a `GitOrigin-RevId:` trailer pins
+  the exact public SHA. That label is the sync's only state — the mirror is
+  append-only, never force-pushed.
+- Sync commits are re-authored to the maintainer's internal identity, and
+  `Co-Authored-By` trailers are stripped (consistent with the Hard rules below).
+- Repo/docs URLs are rewritten to their internal equivalents in **doc files only**
+  (`*.md`, `*.mdx`, `*.astro`, `*.mjs`, `*.html`) — never in code. The Go module
+  path (`go.mod` and every import) is deliberately **identical on both sides**;
+  do not "fix" it to a `github.com/...` path.
+- The internal-only deploy paths reserved in `.gitignore` (`kitt*.yml`,
+  `.looper.yml`, `Dockerfile.chronicle`, `Dockerfile.dsui`, `deploy/`, `sr.yaml`,
+  `testburst.properties`) exist only on the mirror. **Never commit them here** —
+  they carry internal infrastructure config.
+- Internal-first code fixes flow back the other way as `backport/from-gec` PRs
+  (re-authored to the public identity, URL rewrites reversed, leak-scanned before
+  the push). A backport must merge here **before the next sync**, or the sync
+  reverts it on the mirror — public wins by design.
+- The sync tooling (`copy.bara.sky`, the `chronicle-sync.sh` driver, its runbook)
+  is deliberately **untracked**: it lives in `.copybara/` on the maintainer's
+  machine, kept out of git via `.git/info/exclude` so neither the files nor their
+  names appear in any repo. If your checkout has a `.copybara/` directory, treat
+  it as read-only ops tooling and see `.copybara/RUNBOOK.md` for operations
+  (sync, backport, drift check, rollback).
+
+For agents working in this repo: never create the reserved deploy paths, never
+edit anything under `.copybara/` unless explicitly asked, and treat
+`cmd/chronicle/embedded/` as build output (gitignored here; the mirror commits
+its own built copy).
+
 ## Hard rules
 
 - **Lua mirrors Go — edit both sides together.** Each `store/redis/scripts/*.lua`
@@ -107,6 +143,9 @@ requirement — any eviction silently truncates streams (chronicle warns at boot
   be *authored or committed by* Claude/an agent identity — author and committer
   are `Aditya Kumarakrishnan <adityavkk@users.noreply.github.com>`. Strip any of
   these if a tool injects them before pushing.
+- **Never commit the internal deploy paths** reserved in `.gitignore`
+  (kitt/looper/Dockerfile.chronicle|dsui/deploy//sr.yaml/testburst.properties)
+  or anything under `.copybara/` — see "The public ↔ internal mirror" above.
 - `golangci-lint` must pass — CI gates on lint, test, and conformance.
 - Subscriptions require the redis backend; the `{__ds}` control plane lives in a
   single hash-tag slot (cluster-safe by construction).
