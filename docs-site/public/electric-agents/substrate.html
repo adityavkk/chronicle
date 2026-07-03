@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Substrate vs Electric Agents: Extend, Fork, or Hybrid</title>
+<meta name="description" content="An evaluation of Google's Agent Substrate against Electric Agents, with evidence tiers: what checkpointed compute buys, what the log buys, a concrete borrow list for a durable-streams stack, and why chronicle should extend Durable Streams rather than fork it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink" href="index.html">Start</a>
+  <a class="navlink" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink" href="server.html">5 · Server Internals</a>
+  <a class="navlink" href="qa.html">6 · Q&amp;A</a>
+  <a class="navlink" href="faq.html">FAQ</a>
+  <a class="navlink" href="journeys.html">Journeys</a>
+  <a class="navlink" href="orbs.html">Orbs</a>
+  <a class="navlink active" href="substrate.html">Substrate</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">On this page</p>
+  <a href="#verdict">1 · The verdict up front</a>
+  <a href="#substrate">2 · What Agent Substrate is</a>
+  <a href="#lifecycle">3 · Two answers to one question</a>
+  <a href="#value">4 · What the snapshot carries</a>
+  <a href="#gaps">5 · What Substrate lacks</a>
+  <a href="#hybrid">6 · The borrow list</a>
+  <a href="#extend">7 · Extend or fork</a>
+  <a href="#actions">8 · Actions</a>
+  <a href="#sources">Sources &amp; tiers</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">Evaluation</p>
+  <h1>Agent Substrate, evaluated against the log</h1>
+  <p class="lead">
+    In May 2026 Google published <a href="https://github.com/agent-substrate/substrate">Agent Substrate</a>, a
+    Kubernetes runtime that suspends an idle agent by checkpointing its running sandbox and resumes it on any warm
+    pod. It is the opposite bet from the one this wiki describes. Electric Agents makes the log durable and treats
+    compute as disposable. Substrate makes the compute state durable and does not have a log at all. This page
+    reports what Substrate actually is, tests the two lifecycle models against each other, extracts the ideas worth
+    taking, and answers the question that motivated the comparison. Can chronicle extend the Durable Streams stack
+    with these ideas, or does it need a fork? The answer is extend, and the evidence is in section 7.
+  </p>
+  <div class="hero-sub">
+    <span class="pill a">primary sources quoted</span>
+    <span class="pill b">inferences labeled</span>
+    <span class="pill c">gaps named</span>
+    <span class="pill d">targets labeled as targets</span>
+  </div>
+</header>
+
+<div class="callout warn">
+  <div class="callout-title">⚠ This page compares a shipped stack to a v0.0.0 project</div>
+  <p>
+    Electric Agents is pre-1.0 but validated end to end, including against
+    <a href="https://github.com/adityavkk/chronicle">chronicle</a>. Agent Substrate's only release tag is v0.0.0, its
+    README says it is <em>"not ready for production use"</em>, and its own architecture doc opens with
+    <em>"Much of this architecture is aspirational, and is not yet implemented!"</em>
+    (<a href="https://github.com/agent-substrate/substrate/blob/main/docs/architecture.md">architecture.md</a>).
+    Every Substrate capability on this page should be read with that status attached. Claims from sources carry a
+    <span class="pill a">primary</span> label, our readings carry <span class="pill b">inferred</span>, and missing
+    evidence carries <span class="pill c">gap</span>.
+  </p>
+</div>
+
+<!-- ================================================================ verdict -->
+<section id="verdict">
+  <h2><span class="kicker-num">§</span>The verdict up front</h2>
+  <p>
+    Three questions drove this evaluation. Here are the answers, with the evidence in the sections that follow.
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Question</th><th>Answer</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Extend Durable Streams, or fork it?</strong></td>
+        <td><strong>Extend.</strong> The protocol's own extensibility section requires extensions to be pure
+        supersets and the conformance suite tolerates them. Everything chronicle needs is additive, and the one
+        capability the base protocol lacks is already built in chronicle as an additive change, with mechanical
+        follow-ups documented. The honest fork
+        pressure is governance, not licensing or mechanics, and it only binds if chronicle ever needs to change base
+        wire semantics. It does not.</td>
+        <td><a href="#extend">§7</a></td></tr>
+      <tr><td><strong>What is Agent Substrate uniquely good at?</strong></td>
+        <td>Keeping the volatile state of a running sandbox alive across idleness. RAM, the process tree, terminal
+        sessions, and the writable filesystem survive suspend and resume, and a warm pool plus golden snapshots make
+        wakes cheap. That is the heart of the list the <a href="orbs.html#tradeoffs">orbs page</a> concluded a log
+        cannot carry. Substrate has no log, no schedules, and no fork, so it solves the log's blind spot and nothing
+        else.</td>
+        <td><a href="#value">§4</a>, <a href="#gaps">§5</a></td></tr>
+      <tr><td><strong>Is a hybrid coherent?</strong></td>
+        <td>Yes, and the two halves do not overlap. A suspended Substrate actor can only be woken by an inbound HTTP
+        request or an explicit RPC. Electric ships seven wake sources and owns none of the compute. The natural
+        joint is a durable-streams control plane whose wakes drive a checkpointing sandbox tier. Google's own stack
+        already has this shape, since its log runtime AX deploys on top of Substrate. The integration work is real
+        and Substrate is not mature enough to adopt today, so the near-term move is to borrow its ideas, not its
+        machinery.</td>
+        <td><a href="#hybrid">§6</a></td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    One placement note. This evaluation lives as a page of the existing wiki rather than a new site or subdomain,
+    because every argument on it leans on machinery the wiki already explains, from the
+    <a href="index.html#anatomy">anatomy properties</a> to the <a href="orbs.html">orbs build list</a> to
+    <a href="faq.html#f13">FAQ 13</a>. A separate site would have to restate all of that or link back here anyway.
+    The cost of this choice is that the site's title says Electric Agents while this page evaluates a Google
+    project, and that the shared top navigation is hand-edited in every page.
+  </p>
+</section>
+
+<!-- ================================================================ substrate -->
+<section id="substrate">
+  <h2><span class="kicker-num">§</span>What Agent Substrate is, per its own documents</h2>
+  <p>
+    Agent Substrate is an Apache-2.0 project in its own GitHub org, announced by Google Cloud in the same post that
+    took GKE Agent Sandbox to general availability
+    (<a href="https://cloud.google.com/blog/products/containers-kubernetes/bringing-you-agent-sandbox-on-gke-and-agent-substrate">GCP blog</a>).
+    The README states the core idea in one sentence: it <em>"maps a larger set of 'actors'... onto a smaller set of
+    ready 'workers' (Kubernetes Pods), relying on the fact that agent-like applications tend to be idle most of the
+    time to achieve heavy multiplexing"</em>
+    (<a href="https://github.com/agent-substrate/substrate">README</a>). It is not an agent SDK and it does not run
+    an agent loop. It manages standard OCI containers at the sandbox level and hosts any harness, with demos
+    multiplexing Claude Code sessions. <span class="pill a">primary</span>
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Noun</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Actor</strong></td>
+        <td>One suspendable instance, the unit of lifecycle. <em>"It is the unit that is suspended and resumed"</em>
+        (<a href="https://github.com/agent-substrate/substrate/blob/main/docs/glossary.md">glossary</a>).</td></tr>
+      <tr><td><strong>ActorTemplate</strong></td>
+        <td>The immutable class definition, a Kubernetes CRD. Creating one boots a temporary golden pod, waits for
+        readiness, and snapshots it once. Every actor of that template then starts from the shared golden snapshot,
+        so expensive init such as model loading runs once per template version rather than once per actor.</td></tr>
+      <tr><td><strong>WorkerPool / Worker</strong></td>
+        <td>A CRD declaring warm pod capacity, and the record of one such pod. A worker hosts at most one actor at a
+        time. <em>"Many Actors are multiplexed across a pool over time"</em> (glossary).</td></tr>
+      <tr><td><strong>Snapshot</strong></td>
+        <td>The durable artifact. Full scope captures process memory plus the rootfs writable layer. Data scope
+        captures only declared volumes, and the actor cold-boots on resume. Snapshots stream zstd-compressed to GCS
+        or S3.</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    The suspend mechanism is checkpoint and restore of the running sandbox, not anything Kubernetes-native. The
+    default sandbox class checkpoints a gVisor process tree with <code>runsc</code>, which today requires a build
+    flag to work around a bug in networking resumption. A second class snapshots a Kata Containers micro-VM on Cloud
+    Hypervisor and restores it with demand paging
+    (<a href="https://github.com/agent-substrate/substrate/blob/main/docs/architecture.md">architecture.md</a>).
+    The wake path is traffic itself. An Envoy router intercepts requests to
+    <code>&lt;actor-id&gt;.actors.resources.substrate.ate.dev</code>, holds the request, asks the control plane
+    where the actor is, triggers a resume if it is suspended, and then forwards the held request to the worker's
+    pod IP. <span class="pill a">primary</span>
+  </p>
+  <p>
+    The control plane is split in a way worth noticing. Slow-changing configuration stays in Kubernetes CRDs.
+    High-frequency actor and worker records live in Redis or Valkey behind a stateless gRPC server called ateapi,
+    explicitly because <em>"achieving 100ms resumption requires low-latency state lookups and atomic worker
+    assignments that bypass the eventual consistency and variable latency of standard Kubernetes API servers"</em>
+    (architecture.md). Every lifecycle transition is a step workflow guarded by a per-actor Redis lock with a 30
+    second TTL (<a href="https://learn.agentsubstrate.dev/components/ateapi/">learn.agentsubstrate.dev</a>).
+    Substrate also distinguishes <strong>Pause</strong>, a short-term checkpoint kept on the node with resume
+    prioritized to that node, from <strong>Suspend</strong>, a checkpoint uploaded to object storage that can resume
+    anywhere. <span class="pill a">primary</span>
+  </p>
+  <p>
+    The numbers attached to all this are targets, not measurements. The stated north stars are 100ms p95 activation,
+    one billion registered actors per cluster, and 1000 wakes per second. The public demo shows about 250 stateful
+    sessions multiplexed onto 8 pods with sub-second activation. No benchmark under load has been published by
+    anyone, and the roadmap lists representative-workload benchmarking as future work.
+    <span class="pill c">gap</span> The layer below is further along. GKE Agent Sandbox is GA and documents 300
+    sandbox allocations per second per cluster with 90% completing in 200ms
+    (<a href="https://cloud.google.com/blog/products/containers-kubernetes/bringing-you-agent-sandbox-on-gke-and-agent-substrate">GCP blog</a>).
+    <span class="pill a">primary</span>
+  </p>
+  <p>
+    Kubernetes is required and GKE is not. The quickstart runs on a local kind cluster with Valkey and an
+    S3-compatible store. The practical catch is that pod certificates, which Substrate requires for its internal
+    mTLS, sit behind Kubernetes feature gates that default off as of 1.36 and that some managed services do not
+    expose (<a href="https://www.cloudnativedeepdive.com/agent-substrate-the-agentic-ai-isolation-layer-on-k8s/">cloudnativedeepdive</a>).
+    Governance is a draft document, the README says it is not an officially supported Google product, and the
+    strongest external signal is that Solo.io abandoned open-sourcing its own equivalent system, with measured 50ms
+    and 200ms resumes on Bubblewrap and Firecracker, to contribute to Substrate instead
+    (<a href="https://www.solo.io/blog/agent-substrate-powers-kubernetes-agents-with-kagent">Solo.io</a>).
+    <span class="pill a">primary</span>
+  </p>
+</section>
+
+<!-- ================================================================ lifecycle -->
+<section id="lifecycle">
+  <h2><span class="kicker-num">§</span>Two answers to one question</h2>
+  <p>
+    Both systems start from the same observation. An agent is idle most of the time, so an agent must not cost a
+    machine while idle. They differ in what they choose as the state of record, and every other difference follows
+    from that choice.
+  </p>
+  <p>
+    The framing that motivated this page was that Substrate connects the compute lifecycle to the agent lifecycle,
+    while Electric defines a standalone agent lifecycle and matches compute to it. The evidence supports the second
+    half and refines the first. Substrate does not bind the agent to a pod. It binds the agent to a
+    <strong>machine image</strong>, the checkpoint of its RAM and disk, and then deliberately decouples that image
+    from any particular pod. Its docs call this out by name: <em>"Decoupling the Actor Lifecycle from Pods"</em>,
+    with resumes landing <em>"possibly on a different worker"</em> each time (architecture.md). So both systems
+    treat compute as fungible. The real difference is what survives idleness. In Electric, the log survives and the
+    machine does not. In Substrate, the machine survives, frozen, and there is no log.
+    <span class="pill b">inferred</span>
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th></th><th>Electric Agents</th><th>Agent Substrate</th></tr></thead>
+    <tbody>
+      <tr><td><strong>State of record</strong></td>
+        <td>The entity's durable streams. <em>"The agent is the durable stream"</em>
+        (<a href="https://electric.ax/blog/2026/04/29/introducing-electric-agents">Electric blog</a>).</td>
+        <td>The snapshot: exact RAM plus the rootfs writable layer, in object storage.</td></tr>
+      <tr><td><strong>Identity</strong></td>
+        <td>The stream path <code>/{type}/{id}</code>. No separate entity id exists.</td>
+        <td>The actor id, minted by the control plane, delivered to the workload as a bind-mounted file so the
+        golden snapshot does not freeze it into every clone.</td></tr>
+      <tr><td><strong>What a wake costs</strong></td>
+        <td>A handler invocation plus a catch-up read from the last offset. A cold host replays the full log.</td>
+        <td>A snapshot restore onto a warm pod. Target 100ms p95, demonstrated sub-second, unmeasured under load.
+        <span class="pill c">gap</span></td></tr>
+      <tr><td><strong>Wake sources</strong></td>
+        <td>Seven: inbox message, child completion, observed entity change, shared state change, schedules, webhook
+        sources, and Postgres sync
+        (<a href="https://electric.ax/docs/agents/usage/waking-entities">waking-entities</a>).</td>
+        <td>Two: an inbound HTTP request held at the gateway, or an explicit ResumeActor RPC. No timers, no cron, no
+        queues. <span class="pill a">primary</span></td></tr>
+      <tr><td><strong>What survives suspend</strong></td>
+        <td>Everything written to streams. Nothing in process memory, by design: <em>"no process, no memory, no
+        running handler"</em> between wakes.</td>
+        <td>Process memory, the process tree, terminal sessions, and files. Open external TCP connections still die,
+        as they do everywhere.</td></tr>
+      <tr><td><strong>What a crash loses</strong></td>
+        <td>Nothing durable. Replay reconstructs state. In-flight model calls are re-entered at a turn boundary.</td>
+        <td>Work since the last checkpoint. Between checkpoints the running machine is the only copy.
+        <span class="pill b">inferred</span></td></tr>
+      <tr><td><strong>Fork / audit / spectate</strong></td>
+        <td>Native. Fork at an offset, replay for audit, many readers per log.</td>
+        <td>None. Forking and cloning are roadmap items. A snapshot is opaque bytes.</td></tr>
+      <tr><td><strong>Isolation</strong></td>
+        <td>Delegated. Handlers run in your process. Sandboxes are named profiles backed by Docker or E2B, and
+        <a href="faq.html#f13">FAQ 13</a> covers the containment dials.</td>
+        <td>Native. Every actor runs under gVisor or a micro-VM, with default-deny networking at the pool
+        boundary.</td></tr>
+      <tr><td><strong>Maturity</strong></td>
+        <td>Pre-1.0, weekly releases, breaking changes documented in release notes, open reliability issues on the
+        wake plane.</td>
+        <td>v0.0.0, self-described as aspirational, snapshot garbage collection unimplemented.</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    The <a href="orbs.html#prior">orbs page's prior-art taxonomy</a> places both cleanly. Electric is the log-and-replay
+    strategy. Substrate is the strategy that taxonomy calls "snapshot the runtime
+    image", industrialized. It is the same family as Fly suspend and Codespaces stop, but the snapshot is portable
+    across a pool instead of pinned to one machine. The
+    taxonomy's costs transfer unchanged. Logs cannot carry live memory. Snapshots cannot fork, cannot be audited,
+    and resume into dead TCP connections. <span class="pill b">inferred</span>
+  </p>
+</section>
+
+<!-- ================================================================ value -->
+<section id="value">
+  <h2><span class="kicker-num">§</span>What the snapshot carries that the log cannot</h2>
+  <p>
+    The orbs case study ended with an honest list of what a log-backed session
+    <a href="orbs.html#tradeoffs">cannot carry</a>: warm sandbox state, in-flight model calls, credentials, open
+    connections, and an offline laptop. Substrate's entire reason to exist is the first item and the running
+    processes inside it. Item by item:
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>The log's blind spot (after orbs §8)</th><th>Does Substrate solve it?</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Warm sandbox state.</strong> The checkout, the build cache, the running database. Every host
+        move pays warm-up again unless you build a keyed volume cache.</td>
+        <td><strong>Yes, natively.</strong> The snapshot is the warm state. The README claims <em>"persistent
+        working memory (volatile RAM) and filesystem state preserved perfectly across hibernation cycles"</em>, and
+        markets exactly the coding agent case: environments that <em>"preserve terminal and filesystem state across
+        sessions"</em>. The orbs build-list item "warm workspace rehydration" is this, shipped as the core
+        primitive. <span class="pill a">primary</span></td></tr>
+      <tr><td><strong>Running processes.</strong> A tmux session, a REPL, a dev server, a browser. The log records
+        none of it, so a move discards it.</td>
+        <td><strong>Yes, with caveats.</strong> gVisor checkpoints the process tree, so processes resume where they
+        stopped. The caveats are real: external TCP connections are terminated on restore, the gVisor path today
+        needs a build carrying a bug workaround, and GKE's own pod snapshot docs require the restore target to match machine
+        series, gVisor kernel version, and GPU driver version
+        (<a href="https://docs.cloud.google.com/kubernetes-engine/docs/concepts/pod-snapshots">pod-snapshots</a>).
+        <span class="pill a">primary</span></td></tr>
+      <tr><td><strong>In-flight model calls.</strong> A streaming completion dies with its host.</td>
+        <td><strong>No.</strong> A checkpoint taken mid-call resumes into a dead socket like everyone else. Turn
+        boundaries remain the honest handoff point in both architectures.
+        <span class="pill b">inferred</span></td></tr>
+      <tr><td><strong>Credentials and open connections.</strong></td>
+        <td><strong>No, and one wrinkle is worse.</strong> Environment variables, secrets included, are resolved
+        when the golden snapshot is taken and frozen into it. <span class="pill a">primary</span> The practical
+        consequence, that rotating a secret means rebuilding the template or restarting actors, is our reading of
+        that mechanism. <span class="pill b">inferred</span> Electric's posture, where keys live in host runtimes
+        and never enter the log, has no Substrate equivalent yet.</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    Two more capabilities have no counterpart in the log world at all. Golden snapshots amortize cold init across a
+    fleet: boot one pod per template version, snapshot it after readiness, and every subsequent actor starts from
+    that image instead of re-running setup. And the pause tier keeps short-idle checkpoints on the node they were
+    taken on, resuming locally without an object-storage round trip. Both are placement economics, and placement
+    economics is the discipline the Electric stack does not practice, because it owns no compute.
+  </p>
+  <p>
+    The costs are stated nowhere and should be assumed until measured. A full-fidelity snapshot of a coding agent is
+    potentially gigabytes of RAM per suspend cycle flowing to object storage, many times a day, versus a log whose
+    increments are kilobytes. Nobody, including Google, has published that comparison.
+    <span class="pill c">gap</span> And Substrate's own roadmap carries an unresolved question with quiet
+    consequences: a gVisor upgrade can invalidate memory snapshots, so checkpointed memory is best treated as a
+    cache over some other state of record, not as the state of record itself. Substrate does not say what that
+    other state of record should be. A log is a reasonable answer. <span class="pill b">inferred</span>
+  </p>
+</section>
+
+<!-- ================================================================ gaps -->
+<section id="gaps">
+  <h2><span class="kicker-num">§</span>What Substrate lacks, and why the stacks are complements</h2>
+  <p>
+    Read from the other direction, the gaps are just as sharp. Substrate has no durable messaging of any kind. It
+    has no stream, no inbox, no queue, and no event log. Input is a synchronous HTTP request or a lifecycle RPC, and if nothing
+    calls a suspended actor, it sleeps forever. There are no schedules, no observed-state triggers, and no
+    self-sends. There is no fork, no replay, no audit trail, and no way for a second consumer to watch what an actor
+    is doing except to ask it over HTTP. Multi-agent coordination, the thing
+    <a href="howto.html">Part 3</a> of this wiki spends most of its pages on, has no primitive here.
+    <span class="pill a">primary</span>
+  </p>
+  <p>
+    Google's own stack concedes this by construction. Agent Executor, the runtime Google recommends deploying on top
+    of Substrate, is an event-log system: single-writer sessions, durable execution state, client catch-up by last
+    seen sequence number (<a href="https://github.com/google/ax">google/ax</a>). Semantically that is the Electric
+    Agents shape. Substantively it is not a seam chronicle can plug into: AX's log is an embedded SQLite file behind
+    a Go interface, not a networked log service, so substituting a Durable Streams server for it would be
+    unsupported surgery rather than configuration. The ecosystems do not interoperate today. The lesson is that when
+    the company that built the compute layer needed agent semantics, it reached for a log. <span class="pill a">primary</span>
+  </p>
+  <p>
+    One fairness note, because Electric's marketing invites a misreading. Electric's essay against this
+    architecture, <em>"Managed agents don't belong in sandboxes. They belong in functions"</em>
+    (<a href="https://electric.ax/blog/2026/06/04/serverless-agents">serverless agents</a>), is a position about
+    where the <strong>agent loop</strong> runs. It is not a rejection of sandboxes. In June 2026 Electric shipped persistent Docker and E2B
+    sandboxes that reattach by key, and its runners already give entities long-lived hosts.
+    The genuine disagreement between the stacks is narrow: Electric keeps the loop in a stateless function and
+    delegates stateful tools to sandboxes it does not manage, while Substrate makes the stateful machine itself the
+    thing that sleeps and wakes. Everything else is layering. <span class="pill a">primary</span>
+  </p>
+  <p>
+    What remains genuinely unshipped on the Electric side is the fleet half of compute: worker pools, ordered
+    dispatch fallback, and live handoff are deferred in the runners RFC, and v1 dispatch policy is exactly one
+    target, immutable after spawn
+    (<a href="https://github.com/electric-sql/electric/issues/4299">RFC #4299</a>). That deferred list is precisely
+    where Substrate is strongest, which is what makes the hybrid interesting rather than redundant.
+    <span class="pill a">primary</span>
+  </p>
+</section>
+
+<!-- ================================================================ hybrid -->
+<section id="hybrid">
+  <h2><span class="kicker-num">§</span>The borrow list: Substrate ideas on durable-streams rails</h2>
+  <p>
+    The two systems join along a clean line because each one's wake story is the other's gap. Electric has seven
+    wake sources and no compute. Substrate has compute and two wake sources. A durable-streams control plane that
+    drives a checkpointing sandbox tier uses each side for the thing it owns. The table ranks the ideas by what they
+    cost to adopt.
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Substrate idea</th><th>On the Electric / chronicle stack</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Low-latency placement state outside the config plane.</strong> Actor and worker records in
+        Redis with per-actor TTL locks, because the config store is too slow for the hot path.</td>
+        <td>Already the shape of chronicle's subscription control plane: claims, leases, and generation fences in
+        Redis, with the same lesson learned from the other direction during the
+        <a href="../horizontal-scale">horizontal-scale work</a>.</td>
+        <td><span class="pill a">have</span></td></tr>
+      <tr><td><strong>Hold the request while the target wakes.</strong> The Envoy gateway parks an inbound request,
+        resumes the actor, then forwards.</td>
+        <td>Chronicle already parks readers in long-polls and holds subscription deliveries through claim and ack.
+        The pattern extends to holding a wake until a sandbox reports ready.</td>
+        <td><span class="pill a">have</span>, partial</td></tr>
+      <tr><td><strong>Golden snapshots.</strong> Run setup once per template version, snapshot after readiness,
+        start every instance from the image.</td>
+        <td>The same move as Amp's 24-hour setup snapshot in the <a href="orbs.html#amp">orbs case study</a>. Adopt
+        it in whatever provisions sandboxes for entities: a base image keyed to the entity type, cut after
+        <code>.agents/setup</code>, refreshed per template version.</td>
+        <td><span class="pill d">build</span></td></tr>
+      <tr><td><strong>Two-tier pause and suspend.</strong> Short-idle snapshots stay on the node and resume locally.
+        Long-idle snapshots go to object storage and resume anywhere.</td>
+        <td>This is the missing design for the orbs build-list item "warm workspace rehydration", with the tier
+        decision keyed to how long an entity has been idle. A lease-holding runner keeps its workspace on short
+        idle and archives it on long idle.</td>
+        <td><span class="pill d">build</span></td></tr>
+      <tr><td><strong>Identity by bind mount, not env var.</strong> Anything frozen into a base image must not
+        include instance identity or secrets.</td>
+        <td>A posture rule for any golden-image scheme above. Amp's resume hook and Electric's
+        credentials-never-in-the-log rule already point the same way.</td>
+        <td><span class="pill b">note</span></td></tr>
+      <tr><td><strong>A checkpointing sandbox tier as the entity's hands.</strong> Entities keep their log, loop,
+        and wake sources. The sandbox an entity leases is a Substrate-class actor whose warm state survives
+        wakes.</td>
+        <td>Integration is mechanical on the Electric side: a named sandbox profile whose factory resolves to the
+        pool, or a runner fronting it. A chronicle wake becomes a ResumeActor call. But Substrate today has no
+        fork, unimplemented snapshot GC, restores pinned to matching kernel versions, and no measured latency under load, so
+        this tier is a spike to prototype, not a dependency to take.</td>
+        <td><span class="pill c">wait</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="diagram-shell">
+    <div class="diagram-title">The hybrid: log-owned lifecycle, snapshot-owned warmth</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed arrows are wake delivery. The log stays the state of record. The snapshot tier is a cache of warmth, discarded without loss of truth.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+flowchart TD
+    subgraph plane["Control plane (shipped today)"]
+      AS["Agents server<br/>wake dispatch, claims"]
+      PG[("Postgres registry")]
+      CH[("chronicle<br/>durable streams + __ds subscriptions")]
+    end
+
+    subgraph sources["Wake sources (Electric's seven)"]
+      W["inbox · child done · observe ·<br/>shared state · schedules ·<br/>webhook sources · pg sync"]
+    end
+
+    subgraph pool["Checkpointing sandbox tier (the Substrate idea)"]
+      GA["Adapter<br/>webhook target / runner"]
+      SB["Warm pool: leased sandbox per entity<br/>golden image + pause/suspend snapshots"]
+      OS[("Object storage<br/>snapshots, cache not truth")]
+    end
+
+    H["Handler runtime<br/>stateless agent loop"]
+    LLM["Model provider"]
+
+    W --> AS
+    AS --> PG
+    AS <--> CH
+    CH -.->|"signed webhook wake"| GA
+    GA -->|"resume if suspended,<br/>then forward"| SB
+    SB --> H
+    H -->|"appends, fenced by claim"| CH
+    H --> LLM
+    SB <--> OS
+      </pre>
+    </div>
+  </div>
+
+  <div class="callout chronicle">
+    <div class="callout-title">🔗 Chronicle note</div>
+    <p>
+      The hybrid asks chronicle for nothing new. The wake that resumes a sandbox is an ordinary §6 to §7
+      subscription delivery, signed and fenced exactly as today, pointed at an adapter instead of directly at a
+      handler. Chronicle's claim, lease, and generation machinery already provides what Substrate's ateapi built
+      from scratch on Redis: single-holder wakes with fencing against stale holders. What the hybrid adds is
+      entirely on the compute side, and the log's cache rule from the <a href="index.html#anatomy">anatomy
+      section</a> governs it cleanly. A snapshot is legitimate exactly while deleting it costs time, not truth.
+      Substrate's own unresolved snapshot-invalidation question says the same thing from the other side.
+    </p>
+  </div>
+</section>
+
+<!-- ================================================================ extend -->
+<section id="extend">
+  <h2><span class="kicker-num">§</span>Extend or fork, mechanically</h2>
+  <p>
+    The question splits across three layers, and the answer is the same at each one, for different reasons.
+  </p>
+  <p>
+    <strong>The Durable Streams protocol invites supersets.</strong> The spec's extensibility section is explicit:
+    <em>"Extensions SHOULD be pure supersets of the base protocol... Implementations MAY extend the protocol with
+    additional query parameters, headers, or response fields... Extensions MUST NOT break base protocol
+    semantics"</em>
+    (<a href="https://github.com/durable-streams/durable-streams/blob/main/PROTOCOL.md">PROTOCOL.md §11</a>).
+    Authentication is explicitly out of scope, which makes it a sanctioned extension point, and URL structure
+    outside the reserved <code>__ds</code> prefix is implementation-defined. The conformance suite enforces the same
+    posture from the outside. It is a black-box runner pointed at a base URL, it contains no test that rejects
+    supersets, and it actively requires servers to ignore unknown query parameters. Chronicle passes it at 332 of
+    332 with subscriptions enabled. A fork would forfeit that claim and the ten client SDKs that talk to any
+    conforming server by URL alone. <span class="pill a">primary</span>
+  </p>
+  <p>
+    <strong>Chronicle's own history is the proof.</strong> The one agent-scale capability the base protocol lacks,
+    claim granularity finer than one lease per subscription, is the thing that collapsed the load test at 12
+    replicas while every tier sat under 12% CPU. Chronicle built it as a pure superset: sharded claims exist in the
+    store layer, shard zero is byte-identical to the unsharded path, and a client can get the benefit today with no
+    chronicle change at all by registering sharded subscription ids. Mechanical follow-ups remain documented, since
+    the recovery sweep and subscription deletion do not yet cover the extra shards, but the safety half is complete
+    and gated. No fork was needed for the hardest extension the project has yet required. The upstream invitation goes the same direction. The protocol authors wrote that
+    they want <em>"a spec with many implementations, not a single codebase"</em>, named Go among the languages and
+    Redis among the storage backends they want, and offered to link third-party implementations from the main repo
+    (<a href="https://electric.ax/blog/2025/12/09/announcing-durable-streams">announcement</a>). AnyCable's
+    independent read-only Go implementation is already linked from the upstream README, so the precedent exists.
+    <span class="pill a">primary</span>
+  </p>
+  <p>
+    <strong>The agents layer is extended at wire contracts, not by patching its code.</strong> Electric's runtime
+    swaps its Durable Streams backend by environment variable, which is how chronicle became its backend with
+    configuration only. Its sanctioned extension points are the entity-type registration call, the wake notification
+    shape, dispatch policies, sandbox profiles, and tools. Forking the TypeScript itself would mean re-tracking a
+    codebase that went from 0.4.0 to 0.6.3 in ten days with publicly removed APIs. The wire contracts are the stable
+    surface. The package internals are not. <span class="pill a">primary</span>
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Capability chronicle may want</th><th>Path without a fork</th></tr></thead>
+    <tbody>
+      <tr><td>Finer claim granularity on the wire (a shard field on claim/ack)</td>
+        <td>Ship as a §11 superset now. Propose upstream as an optional extension in parallel. The client-side
+        sharded-id convention already works with zero protocol change.</td></tr>
+      <tr><td>The agents runtime registering finer subscriptions (the client half of the fence-storm fix)</td>
+        <td>A configuration-level change in Electric's runtime. The tracking issue drafted in chronicle's design
+        doc was never filed upstream, so this is an open action, not a blocked one.</td></tr>
+      <tr><td>Sandbox-tier wakes (the hybrid's adapter)</td>
+        <td>An ordinary webhook subscription target. No protocol change of any kind.</td></tr>
+      <tr><td>Auth, quotas, tenancy</td>
+        <td>Explicitly out of protocol scope, so implementation-defined by design.</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    The honest fork pressure is governance, and it should be stated rather than waved at. The spec is a draft
+    authored and copyrighted by ElectricSQL. The repo has no governance document, no contributing guide, and no
+    CLA, and roughly 98% of commits come from Electric staff and their coding agents. There is no process by which
+    anyone outside Electric can force a spec change, and the promised third-party server registry page currently
+    returns a 404. Chronicle appears nowhere upstream. If chronicle ever needed a change to base wire semantics,
+    it would land at Electric's discretion or not at all, and that is the scenario in which a fork becomes a real
+    conversation. Nothing on chronicle's roadmap is in that category. Everything it needs is additive, and
+    everything additive is sanctioned. <span class="pill a">primary</span>
+  </p>
+  <div class="callout">
+    <div class="callout-title">💡 The verdict, restated once</div>
+    <p>
+      Extend. The protocol sanctions supersets, the conformance suite tolerates them, the licenses are permissive
+      throughout, the upstream authors invite exactly this implementation, and chronicle's hardest extension to date
+      was already delivered additively. Keep the fork triggers written down and check them on each upstream release:
+      a base wire-semantics change chronicle cannot absorb, a license change, or upstream rejection of superset
+      conformance claims. None has occurred. The cost of this position is real but bounded: chronicle tracks a spec
+      it does not control, on Electric's timetable, with a §6 to §7 subscription layer that upstream's own servers
+      implement unevenly. That last point cuts both ways, since full subscription coverage is chronicle's
+      differentiator.
+    </p>
+  </div>
+</section>
+
+<!-- ================================================================ actions -->
+<section id="actions">
+  <h2><span class="kicker-num">§</span>Actions this evaluation produces</h2>
+  <ol class="flow-steps">
+    <li><strong>File the claim-granularity issue upstream.</strong> The fence-storm finding and the client-half fix
+      drafted in chronicle's design docs have zero upstream visibility today. Searches for chronicle in both
+      Electric repos return nothing. Until that issue exists, no extend-vs-fork judgment about upstream
+      receptiveness has actually been tested.</li>
+    <li><strong>Ask for the README link.</strong> Chronicle passes the full conformance suite including
+      subscriptions. The upstream blog offered to link implementations, and AnyCable got its link for a read-only
+      server. This is a Discord message and a small PR.</li>
+    <li><strong>Propose the shard field as a spec extension.</strong> A short PROTOCOL.md §11 superset proposal, an
+      optional integer on claim and ack. Acceptance is nice. Rejection costs nothing, since the superset and the
+      client-side convention both work regardless.</li>
+    <li><strong>Adopt the free ideas now.</strong> Golden images per entity type and two-tier idle for runner
+      workspaces need no new dependencies and directly shrink the orbs build list.</li>
+    <li><strong>Prototype the Substrate tier as a spike, behind the adapter.</strong> One entity type whose sandbox
+      profile resolves to a checkpointing pool, woken by an ordinary chronicle webhook. Measure activation latency
+      and snapshot cost yourself, because nobody has published either. Treat snapshots as cache, since a runtime
+      upgrade can invalidate them. Do not take Substrate as a dependency before it has garbage collection, a
+      ratified governance doc, and measured latencies.</li>
+    <li><strong>Watch AX for a networked log seam.</strong> If Agent Executor ever accepts a pluggable event-log
+      backend, a Durable Streams server becomes a candidate implementation of it, and the two ecosystems would meet
+      at a real interface instead of an analogy.</li>
+  </ol>
+</section>
+
+<!-- ================================================================ sources -->
+<section id="sources">
+  <h2><span class="kicker-num">§</span>Sources and evidence tiers</h2>
+  <p>
+    <span class="pill a">primary</span> marks a direct quote or fact from a linked source.
+    <span class="pill b">inferred</span> marks our reading of primary evidence.
+    <span class="pill c">gap</span> marks evidence that does not exist publicly, including every Substrate
+    performance number, which is a target or a demo claim rather than a measurement. Research for this page was done
+    on 2026-07-03 against the sources below, with load-bearing claims adversarially re-verified against the primary
+    documents. Substrate and Electric both change weekly, so expect drift.
+  </p>
+  <ul>
+    <li><strong>Agent Substrate, primary:</strong>
+      <a href="https://github.com/agent-substrate/substrate">repo</a> ·
+      <a href="https://github.com/agent-substrate/substrate/blob/main/docs/architecture.md">architecture.md</a> ·
+      <a href="https://github.com/agent-substrate/substrate/blob/main/docs/glossary.md">glossary.md</a> ·
+      <a href="https://github.com/agent-substrate/substrate/blob/main/docs/api-guide.md">api-guide.md</a> ·
+      <a href="https://github.com/agent-substrate/substrate/blob/main/docs/roadmap.md">roadmap.md</a> ·
+      <a href="https://learn.agentsubstrate.dev/">learn.agentsubstrate.dev</a> ·
+      <a href="https://cloud.google.com/blog/products/containers-kubernetes/bringing-you-agent-sandbox-on-gke-and-agent-substrate">GCP: Agent Sandbox GA + Substrate</a> ·
+      <a href="https://docs.cloud.google.com/kubernetes-engine/docs/concepts/pod-snapshots">GKE pod snapshots</a> ·
+      <a href="https://kubernetes.io/blog/2026/03/20/running-agents-on-kubernetes-with-agent-sandbox/">Kubernetes blog: Agent Sandbox</a></li>
+    <li><strong>Adjacent stack, primary:</strong>
+      <a href="https://github.com/google/ax">google/ax</a> ·
+      <a href="https://cloud.google.com/blog/products/ai-machine-learning/agent-executor-googles-distributed-agent-runtime">GCP: Agent Executor</a> ·
+      <a href="http://kagent.dev/docs/kagent/concepts/agent-substrate">kagent: Agent Substrate</a> ·
+      <a href="https://www.solo.io/blog/agent-substrate-powers-kubernetes-agents-with-kagent">Solo.io on merging efforts</a> ·
+      <a href="https://www.solo.io/topics/ai-infrastructure/agent-substrates-networking-layer-is-built-on-envoy-and-why-thats-not-enough">Solo.io on atenet</a> ·
+      <a href="https://www.cloudnativedeepdive.com/agent-substrate-the-agentic-ai-isolation-layer-on-k8s/">cloudnativedeepdive</a></li>
+    <li><strong>Electric, primary:</strong>
+      <a href="https://electric.ax/agents/">electric.ax/agents</a> ·
+      <a href="https://electric.ax/docs/agents/usage/waking-entities">waking entities</a> ·
+      <a href="https://electric.ax/docs/agents/usage/sandboxing">sandboxing</a> ·
+      <a href="https://electric.ax/blog/2025/12/09/announcing-durable-streams">announcing Durable Streams</a> ·
+      <a href="https://electric.ax/blog/2026/04/08/data-primitive-agent-loop">the data primitive</a> ·
+      <a href="https://electric.ax/blog/2026/04/29/introducing-electric-agents">introducing Electric Agents</a> ·
+      <a href="https://electric.ax/blog/2026/06/04/serverless-agents">serverless agents</a> ·
+      <a href="https://electric.ax/blog/2026/06/16/electric-agents-0-6-from-runtime-to-app">Electric Agents 0.6</a> ·
+      <a href="https://github.com/electric-sql/electric/issues/4299">RFC #4299</a></li>
+    <li><strong>Protocol &amp; conformance, primary:</strong>
+      <a href="https://github.com/durable-streams/durable-streams/blob/main/PROTOCOL.md">PROTOCOL.md</a> (§6, §7,
+      §11, §12.1) ·
+      <a href="https://github.com/durable-streams/durable-streams/blob/main/packages/server-conformance-tests/src/index.ts">conformance suite source</a> ·
+      <a href="https://github.com/durable-streams/durable-streams/blob/main/docs/building-a-server.md">building a server</a> ·
+      <a href="https://docs.anycable.io/anycable-go/durable_streams">AnyCable's implementation</a></li>
+    <li><strong>Chronicle, primary:</strong> the repo's
+      <a href="https://github.com/adityavkk/chronicle">README</a> (332/332 conformance, Caddy lockstep policy),
+      <code>docs/ELECTRIC-AGENTS.md</code> (the validated integration), the horizontal-scale research series
+      (the 12-replica fence storm, design doc 08 on claim granularity), and <code>webhook/</code> (the shipped
+      sharded-claim store).</li>
+    <li><strong>This wiki:</strong> <a href="index.html#anatomy">the anatomy</a>, <a href="orbs.html">the orbs case
+      study</a> whose build list and "cannot carry" table this page extends, <a href="faq.html#f13">FAQ 13</a>, and
+      <a href="faq.html#f15">FAQ 15</a>. Sections 3, 4, and 6 are synthesis over these plus the primary sources
+      above.</li>
+  </ul>
+</section>
+
+<div class="pager">
+  <a href="orbs.html"><span class="dir">Previous</span><span class="label">← Case study: Amp's orbs</span></a>
+  <a class="next" href="index.html"><span class="dir">Back to</span><span class="label">Start Here ⤴</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · Agent Substrate evaluated against the log · Substrate facts quoted from its repo and Google Cloud, the verdicts are analysis
+</footer>
+
+</body>
+</html>
