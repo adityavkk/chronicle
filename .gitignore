@@ -18,3 +18,16 @@ docs-site/.astro/
 # regression seeds live alongside their tests (e.g.
 # store/redis/testdata/equivalence_seeds/), not in these auto dirs.
 **/testdata/rapid/
+
+# WCNP/squiggly deploy config is GEC-INTERNAL ONLY — it carries internal Walmart
+# infra (cluster IDs, Akeyless paths, *.walmart.net hosts) and must never land in
+# this public repo. The canonical copies live on the internal GEC deploy repo's
+# main branch. Ignored here so `git add -A` in the public tree can't leak them.
+/kitt.yml
+/kitt-dsui.yml
+/Dockerfile.chronicle
+/Dockerfile.dsui
+/.looper.yml
+/deploy/
+/sr.yaml
+/testburst.properties
