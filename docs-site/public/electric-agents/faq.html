@@ -44,6 +44,7 @@
   <a href="#f10">10 · The runtime-level 30%</a>
   <a href="#f11">11 · Internal vs. external agents</a>
   <a href="#f12">12 · The log or the server?</a>
+  <a href="#f13">13 · How contained are the hands?</a>
 </nav>
 
 <div class="main">
@@ -52,7 +53,7 @@
   <p class="kicker">Appendix</p>
   <h1>FAQ — the next questions</h1>
   <p class="lead">
-    Twelve more questions at the same altitude as <a href="qa.html">Part 6</a> — the ones this architecture invites
+    Thirteen more questions at the same altitude as <a href="qa.html">Part 6</a> — the ones this architecture invites
     once the first five are answered. Same format: the short version first, then the machinery.
   </p>
 </header>
@@ -739,6 +740,91 @@
     surface</em>: what a principal may do to a name. That is the web's own answer to addressing — universal names,
     gated access — which is fitting for agents whose addresses are URLs in the first place. Every hop described
     here is drawn, system by system, on the <a href="journeys.html">Interaction journeys</a> page.
+  </p>
+</section>
+
+<!-- ================================================================ F13 -->
+<section id="f13">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 13</div>
+    <div class="qa-text">The hands are where the agent touches the world. How contained are they — what bounds the
+    blast radius of a bad action, and what bounds which actions are possible at all?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    Two orthogonal dials. <strong>Blast radius</strong> bounds <em>where effects can land</em>: every wake's
+    <code>ctx.sandbox</code> is one of three tiers — unrestricted host, docker (digest-pinned image, resource
+    limits, optional gVisor, network policy), or remote e2b microVMs — selected per spawn via profiles, with
+    write-paths containment-checked on every provider. <strong>Capability scope</strong> bounds <em>what may be
+    invoked</em>: tools are host-wired allowlists, MCP credentials live in OAuth bridges rather than prompts, and
+    every agent action executes as a principal through the same permission grants that gate users — there is no
+    privileged "inside the framework" path.
+  </div>
+
+  <p><strong>Dial one: blast radius — execution containment, chosen per spawn.</strong> LLM tool calls
+  (<code>bash</code>, file ops, <code>fetch_url</code>) execute inside <code>ctx.sandbox</code> (Part 3 §8):</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Tier</th><th>What it is</th><th>When it fits</th></tr></thead>
+    <tbody>
+      <tr><td><code>unrestricted</code></td><td>The host itself — no containment.</td>
+        <td>Trusted dev default; code you wrote acting on your own machine.</td></tr>
+      <tr><td><code>docker</code></td><td>Digest-pinned image, resource limits, optional gVisor, network
+        policy.</td><td>Untrusted-ish work with known dependencies — reproducible, throttled, network-shaped.</td></tr>
+      <tr><td><code>remote</code></td><td>e2b microVMs — off-host entirely.</td>
+        <td>Genuinely untrusted code, or isolation the host cannot provide.</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    The tier is a <strong>spawn-time profile</strong>, not a global setting — a researcher type that runs
+    model-generated code can live in microVMs while a trusted formatter runs on host, in the same system. And
+    write-paths are containment-checked on <em>every</em> provider, including unrestricted — the floor is never
+    zero.
+  </p>
+
+  <p><strong>Dial two: capability scope — brokered authority.</strong> Which actions exist at all is decided
+  outside the model:</p>
+  <ul>
+    <li><strong>Tools are an allowlist the host wires.</strong> The built-in factories are sandbox-backed by
+      construction; everything else arrives via <code>...ctx.electricTools</code> — the host decides what the
+      type gets, the model chooses only among what it was handed (Part 3 §8).</li>
+    <li><strong>MCP credentials never enter the loop.</strong> <code>@electric-ax/agents-mcp</code> brokers Model
+      Context Protocol servers through a registry, transports, and OAuth bridges — the token lives in the bridge,
+      not in a prompt, an env var, or the sandbox.</li>
+    <li><strong>Agents are principals.</strong> A wake executes as its entity (<code>agent:/judge/debate-7</code>),
+      so <code>spawn</code>/<code>send</code>/<code>observe</code> clear exactly the authz users clear: creator
+      rights plus explicit permission grants (8 verbs, propagation, expiry), the optional ABAC hook, claim-scoped
+      write tokens on the stream plane (Q&amp;A #5). A sub-agent's reach is whatever its grants say — which is
+      how FAQ 11's "private sub-agent" is expressible today.</li>
+  </ul>
+
+  <p>
+    Anthropic's <a href="https://www.anthropic.com/engineering/managed-agents">Managed Agents post</a> lands on
+    the same two dials from fleet-ops pain, and its credential story is worth quoting as the design target:
+    tokens must be <em>"never reachable from the sandbox where Claude's generated code runs"</em> — auth is either
+    bundled with a resource at sandbox init (the repo token wired into the git remote, so <code>push</code> works
+    without the agent ever seeing it) or held in a vault behind an MCP proxy, and <em>"the harness is never made
+    aware of any credentials."</em> Narrow scoping beats trusting the model not to look: prompt injection can
+    convince a model to read its environment; it cannot convince a vault it is the proxy.
+  </p>
+
+  <p><strong>And state <em>in</em> the VM?</strong> Electric's opinion is structural rather than stated: the
+  sandbox is leased — <em>each wake gets</em> <code>ctx.sandbox</code> (Part 3 §8) — so its disk is scratch by
+  construction, and nothing in the documented surface mounts a volume that outlives the wake. What must survive
+  goes the other way: durable file-like artifacts become <strong>attachment streams</strong> under the entity
+  (<code>/{type}/{id}/attachments/{attachmentId}</code>, multipart via the server), so files inherit the log's
+  addressing, permissioning, and lifecycle instead of living on a disk — "the log wants events, not gigabytes;
+  pass references, keep blobs out of the timeline" (FAQ 6). That is the start page's cache rule enforced by
+  architecture: the VM can only ever hold working state, because it is never given anywhere durable to put
+  anything else. The honest asterisk: for coding agents whose working set is a large warm checkout, rebuilding
+  per wake has real cost, and a rehydrating volume-cache story (a disk keyed to a log position) is something
+  you'd build, not something the platform ships today.</p>
+
+  <p>
+    In the anatomy's terms (<a href="index.html#anatomy">start page</a>): blast radius bounds the <em>cost</em> of
+    a bad action, capability scope bounds the <em>set</em> of possible actions, and the log's effect journal makes
+    whatever happens <em>attributable</em>. Bound, scope, attribute — in that order, because the first two fail
+    open the moment a model gets creative, and the third is what lets you find out.
   </p>
 </section>
 
