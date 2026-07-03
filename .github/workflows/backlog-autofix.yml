@@ -1,0 +1,62 @@
+name: Backlog autofix
+
+# When an issue is closed, deleted, or transferred, its docs/BACKLOG.md row is
+# stale. Removing a row is mechanical, so no agent is involved: this runs the
+# deterministic autofix script, re-validates with the drift guard against the
+# live tracker, and opens (or updates) one rolling bot PR for a human to
+# merge. Rank judgment is never exercised here — additions are proposed by
+# backlog-slot.yml instead.
+#
+# Caveat: checks do not auto-run on PRs pushed with GITHUB_TOKEN (GitHub's
+# recursion guard). The creating run has already passed backlog-check against
+# the live tracker; close/reopen the PR to force checks if wanted.
+on:
+  issues:
+    types: [closed, deleted, transferred]
+  workflow_dispatch:
+
+concurrency:
+  group: backlog-autofix
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove stale rows
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/backlog-autofix.sh
+
+      - name: Validate and open the fix PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet -- docs/BACKLOG.md; then
+            echo "nothing to fix"
+            exit 0
+          fi
+          # Green means the edited table matches the live tracker exactly.
+          GITHUB_TOKEN="$GH_TOKEN" ./scripts/backlog-check.sh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c bot/backlog-autofix
+          git add docs/BACKLOG.md
+          git commit -m "docs(backlog): drop rows for closed issues (autofix)"
+          git push -f origin bot/backlog-autofix
+          existing=$(gh pr list --head bot/backlog-autofix --state open --json number --jq '.[0].number')
+          if [ -z "$existing" ]; then
+            gh pr create \
+              --title "docs(backlog): drop rows for closed issues (autofix)" \
+              --body "Automated removal of backlog rows whose issues are no longer open, with ranks renumbered. \`scripts/backlog-check.sh\` passed against the live tracker in the creating run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          else
+            echo "updated existing autofix PR #$existing"
+          fi
