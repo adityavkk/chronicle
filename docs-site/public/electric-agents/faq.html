@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FAQ — Electric Agents, Explained</title>
+<meta name="description" content="Further architectural questions: Temporal comparison, concurrency and races, delivery semantics, unbounded logs vs finite context, the failure model, latency and cost, schema evolution.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink" href="index.html">Start</a>
+  <a class="navlink" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink" href="server.html">5 · Server Internals</a>
+  <a class="navlink" href="qa.html">6 · Q&amp;A</a>
+  <a class="navlink active" href="faq.html">FAQ</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">The questions</p>
+  <a href="#f1">1 · Isn't this just Temporal?</a>
+  <a href="#f2">2 · Concurrent wakes &amp; races</a>
+  <a href="#f3">3 · Delivery semantics</a>
+  <a href="#f4">4 · Infinite log, finite context</a>
+  <a href="#f5">5 · The failure model</a>
+  <a href="#f6">6 · Latency &amp; cost</a>
+  <a href="#f7">7 · Schema evolution</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">Appendix</p>
+  <h1>FAQ — the next questions</h1>
+  <p class="lead">
+    Seven more questions at the same altitude as <a href="qa.html">Part 6</a> — the ones this architecture invites
+    once the first five are answered. Same format: the short version first, then the machinery.
+  </p>
+</header>
+
+<!-- ================================================================ F1 -->
+<section id="f1">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 1</div>
+    <div class="qa-text">Isn't this just Temporal (or LangGraph) for agents? How does it differ from durable-execution
+    engines?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    Temporal makes <strong>code</strong> durable by replaying it deterministically; Electric Agents makes
+    <strong>state</strong> durable and lets code be ordinary. That inversion removes Temporal's determinism
+    constraints, makes the session <em>observable data</em> rather than engine-internal history, and treats streaming
+    and UIs as first-class — at the cost of Temporal's "write it like a normal function" linear control flow.
+    LangGraph sits a level below both: an in-process orchestration library, not a durability substrate.
+  </div>
+
+  <p>
+    Temporal (and Restate, Azure Durable Functions, etc.) achieves durability by <strong>event-sourcing the
+    execution</strong>: every side effect a workflow performs is recorded, and on failure the engine <em>re-runs your
+    workflow function from the top</em>, replaying recorded results until it catches up. That gives you an amazing
+    property — durable code that reads like linear code (<code>const a = await activity1(); const b = await
+    activity2(a)</code>) — but the price is strict: workflow code must be <strong>deterministic</strong> (no bare
+    randomness, clocks, or I/O outside activities), the event history is an engine-internal format, and versioning
+    running workflows is notoriously delicate because old histories must replay against new code.
+  </p>
+  <p>Electric Agents takes the other fork. Nothing is ever replayed through your code:</p>
+  <ul>
+    <li><strong>The unit of resumption is the wake, not the statement.</strong> On every wake the runtime rebuilds the
+      world by <em>materializing data</em> (Part 4 §2), not by re-executing your handler's past. Your handler can be as
+      non-deterministic as it likes — it contains an LLM, after all, the least deterministic component in software.
+      There is no versioning trap: new code simply handles the next wake against the same state.</li>
+    <li><strong>The history is a public data structure.</strong> Temporal's event history exists to drive replay; you
+      inspect it through Temporal's UI. An entity's log <em>is</em> the product: the same events feed the LLM's
+      context, the user's live UI, observer entities, and audits (Q&amp;A #1). Streaming tokens to a browser through a
+      workflow engine is possible but foreign to the model; here it's the default write path.</li>
+    <li><strong>Coordination is observation, not orchestration.</strong> A Temporal workflow coordinates children it
+      started, through signals and futures it holds. Electric entities coordinate by watching each other's state
+      (<code>observe()</code>), so topologies can form dynamically without a parent workflow owning the whole graph.</li>
+  </ul>
+  <p>
+    What you give up: Temporal's linear "durable function" ergonomics. An Electric handler is a state machine you
+    re-enter (guard on <code>ctx.state</code>, act, sleep — Part 3 §6); a five-step sequence is five wakes with
+    explicit gates, not five awaits in a row. For deterministic back-office sagas — payments, provisioning — Temporal's
+    model is genuinely better. For agent sessions — streaming, observable, human-in-the-loop, LLM-driven — the
+    data-first inversion pays for itself. (LangGraph, for contrast, is a graph library <em>inside</em> one process
+    whose checkpointer bolts persistence onto an in-memory model — it answers "how do I structure a loop?", not "how
+    does the loop survive, scale to zero, and get observed?")
+  </p>
+</section>
+
+<!-- ================================================================ F2 -->
+<section id="f2">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 2</div>
+    <div class="qa-text">What happens when things race — two messages arrive at once, or a wake fires while the entity
+    is already running?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    An entity is <strong>single-threaded by construction</strong>: the append-only log serializes all inputs, and the
+    server's claim system guarantees at most one active wake per entity. Events that arrive mid-wake don't interrupt —
+    they queue and coalesce into the <em>next</em> wake. So handlers never need locks; the concurrency model is
+    "one reducer, ordered input, at-least-once invocation."
+  </div>
+
+  <p>Three mechanisms stack to make races boring:</p>
+  <ol class="flow-steps">
+    <li><strong>The log orders writers.</strong> Two users messaging the same entity simultaneously both append to
+      <code>/{type}/{id}/main</code>; the streams backend serializes them into a total order (Part 2). There is no
+      "same time" by the time anything reads.</li>
+    <li><strong>Claims serialize execution.</strong> The server's <code>entity_dispatch_state</code> tracks one active
+      consumer, epoch, and outstanding wake per entity (Part 5 §6). A second wake condition firing while a handler is
+      running doesn't spawn a second handler — the pending events wait; competing claims get benign 409s; a
+      lease-expired claim is fenced by epoch so a zombie can't act after its successor starts.</li>
+    <li><strong>Wakes coalesce.</strong> A wake covers a window (<code>fromOffset → toOffset</code>,
+      <code>eventCount</code>), so five messages that arrived during a run become <em>one</em> re-invocation whose
+      materialized inbox already contains all five. <code>debounceMs</code> on wake registrations lets you widen the
+      coalescing deliberately for chatty observed sources.</li>
+  </ol>
+  <p>
+    The remaining knob is <em>what a message means when it lands mid-run</em>, and that's the sender's choice via
+    <code>send</code> modes: <strong>queued</strong> (default shape — wait your turn), <strong>steer</strong> (inject
+    into the currently running agent's loop — "actually, stop and do X"), and paused delivery for entities under
+    <code>SIGSTOP</code>. Cross-entity races (two children finishing "at once") reduce to the same story: two wakes,
+    delivered one at a time, each seeing durable state — which is exactly why the judge's "have both arguments
+    arrived?" gate in Part 3 §6 is race-free without any locking.
+  </p>
+</section>
+
+<!-- ================================================================ F3 -->
+<section id="f3">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 3</div>
+    <div class="qa-text">What are the delivery semantics, end to end? Where exactly is it exactly-once, and what must
+    my handler guarantee?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    <strong>Appends are exactly-once; invocations are at-least-once; the contract that joins them is handler
+    idempotency.</strong> Writes dedupe via idempotent producers, so retries never double-append. Wake delivery can
+    repeat, so your handler must be safe to re-run — which the guard-on-durable-state idiom gives you for free.
+  </div>
+
+  <div class="table-scroll"><table>
+    <thead><tr><th>Hop</th><th>Semantics</th><th>Mechanism</th></tr></thead>
+    <tbody>
+      <tr><td>Client/handler → stream (append)</td><td><strong>Exactly-once</strong></td>
+        <td>Idempotent producer headers: server dedupes on <code>(producerId, epoch, seq)</code>; retried batches
+        return 204; stale epochs are fenced with 403 (Part 2 §5). The runtime routes all entity writes through one.</td></tr>
+      <tr><td>Server → handler (wake)</td><td><strong>At-least-once</strong></td>
+        <td>Webhook delivery retries; expired claims re-dispatch; <code>wake_notifications</code> tracks
+        queued/delivered/failed/superseded (Part 5 §6). Duplicates and re-deliveries are expected events.</td></tr>
+      <tr><td>Handler execution</td><td><strong>At-most-one live at a time</strong></td>
+        <td>Claims + write tokens: only the current claim holder can append, so a re-delivered or zombie invocation
+        can't corrupt the log even if it runs (Part 5 §4, §6).</td></tr>
+      <tr><td>State materialization</td><td><strong>Deterministic replay</strong></td>
+        <td>Apply-in-order, last-write-wins; re-delivered inserts are downgraded to updates by the dispatcher, so
+        reconnects don't trip duplicate keys (Part 2 §8).</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>So the whole burden that lands on <em>you</em> is one rule: <strong>a wake handler must be re-entrant.</strong>
+  Concretely:</p>
+  <ul>
+    <li>Guard effects on durable state, not on "this is the first time I've run" intuition:
+      <code>if (ctx.state.debate.get('current')) return ctx.sleep()</code>. Spawn-once = deterministic child IDs +
+      a manifest/state check before spawning (the <code>manifestChildKey</code> query in Q&amp;A #3).</li>
+    <li>External side effects (Stripe charge, email) are where at-least-once actually bites — same as every queue
+      system. Put your own idempotency key, derived from durable identifiers (entity URL + state key), on the outbound
+      call, or bracket it with <code>recordRun()</code> state so a re-run sees it happened.</li>
+    <li>State writes themselves are safe to repeat by construction — they flow through the exactly-once append path.</li>
+  </ul>
+  <p>
+    Note the philosophical alignment with Kafka: the framework doesn't pretend to give you exactly-once
+    <em>processing</em> (nothing distributed honestly can, once arbitrary side effects are involved); it gives you
+    exactly-once <em>logging</em> plus fencing, which is the strongest buildable foundation, and makes the remaining
+    idempotency your handler's visible, testable responsibility.
+  </p>
+</section>
+
+<!-- ================================================================ F4 -->
+<section id="f4">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 4</div>
+    <div class="qa-text">The log grows forever but the context window doesn't. How does a long-lived entity not drown
+    in its own history — in the LLM, and on disk?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    Three different growth problems, three different answers. <strong>LLM context</strong>: budgeted projection +
+    automatic compaction (background summarization at 85% of the window, hard ceiling at 90%). <strong>Materialized
+    state</strong>: last-write-wins keeps collections proportional to <em>live keys</em>, not events.
+    <strong>Storage</strong>: honestly, the base protocol never compacts — logs are append-only until TTL'd, deleted,
+    or forked; the bet is that kilobytes are cheap and history is valuable.
+  </div>
+
+  <ul>
+    <li><strong>The context window (the real constraint).</strong> The prompt is a <em>projection</em> of the log, not
+      the log (Part 4 §4) — so the fix lives in the projection. By default the runtime tracks usage
+      (<code>uncachedInput + output</code>, so provider caching isn't double-counted), warns the model from 25%,
+      starts <em>background compaction</em> — checkpoint summaries written back to the stream — at 85%, and forces
+      synchronous compaction at a 90% hard ceiling. Beyond the defaults, <code>ctx.useContext()</code> makes the
+      projection explicit: named sources with token budgets and cache tiers (pinned / stable / slow-changing /
+      volatile), plus auto-registered tools (<code>loadTimelineRange</code>, <code>loadSourceRange</code>) so the model
+      pages history in on demand instead of carrying it. The log stays complete; the window carries a working set.</li>
+    <li><strong>Materialized collections.</strong> A million <code>state:debate</code> update events still materialize
+      to one row per key — last-write-wins means memory tracks the entity's <em>live state size</em>, not its age.
+      The bulky built-ins (<code>textDeltas</code>) matter for warm runtimes, which is why reads are offset-resumable:
+      a warm consumer only ever applies the delta.</li>
+    <li><strong>Storage.</strong> The base protocol deliberately has no log compaction (Part 2): reclamation is
+      <code>Stream-TTL</code>/expiry, explicit <code>DELETE</code>, and <code>fork()</code> — branch a fresh entity
+      from a point and let the ancestor age out — plus advisory <code>snapshot-start/end</code> and <code>reset</code>
+      control events at the state layer for consumers that want to re-baseline. This is a real trade: an entity that
+      streams tokens for a year accumulates a year of tokens. The design bet is that agent history is audit trail,
+      training data, and debuggability — worth its kilobytes — and that lifecycle policy (TTL per stream, fork +
+      retire) belongs to you, not to a compactor that silently rewrites the past.</li>
+  </ul>
+</section>
+
+<!-- ================================================================ F5 -->
+<section id="f5">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 5</div>
+    <div class="qa-text">What's the failure model? My handler crashes mid-wake, the LLM times out, the agents server
+    restarts — what actually happens?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    Every failure reduces to the same recovery: <strong>the claim lease expires, the wake re-dispatches, the handler
+    re-runs against durable state, and fencing guarantees the dead attempt can't write after its successor starts.</strong>
+    Work completed before the crash isn't lost (it was appended as it happened) and isn't redone (guards see it).
+    The server itself is stateless per request, so its restarts are only a dispatch pause.
+  </div>
+
+  <div class="table-scroll"><table>
+    <thead><tr><th>Failure</th><th>What happens</th><th>Why it's safe</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Handler crashes mid-wake</strong> (or the lambda times out)</td>
+        <td>No <code>done</code> callback arrives; the claim's lease expires; the dispatch-recovery loop reclaims it
+        and re-dispatches the wake to a fresh invocation.</td>
+        <td>Everything the dead run appended (tokens, tool calls, state) is already durable; the re-run's guards see
+        it. The dead run's write token is superseded — if the "crashed" process limps back, its appends are rejected.</td></tr>
+      <tr><td><strong>LLM call fails</strong> (timeout / rate limit / 5xx)</td>
+        <td>The model runner retries within the wake (<code>modelMaxRetries</code>, <code>modelTimeoutMs</code>);
+        classified <code>ModelProviderError</code>s land as <code>errors</code> events and end the run as failed.</td>
+        <td>The failed run is visible data — parents woken on <code>runFinished</code> see
+        <code>run_status: 'failed'</code> and can retry, reroute, or escalate as ordinary handler logic.</td></tr>
+      <tr><td><strong>Agents server restarts</strong></td>
+        <td>In-flight webhook deliveries get 503s (graceful shutdown refuses new dispatch); on boot it reloads wake
+        registrations, claims, and schedules from Postgres and resumes evaluating from the streams.</td>
+        <td>All coordination state is in Postgres + streams, none in process memory (Part 5 §2, §9). Undelivered wakes
+        are still queued rows; nothing depends on the process that died.</td></tr>
+      <tr><td><strong>Streams backend down</strong></td>
+        <td>Appends fail → handlers error → wakes retry later. Readers resume from their offsets when it returns.</td>
+        <td>Offsets make every consumer recovery-free (Part 2 §3); idempotent producers make every retried append
+        dedupe.</td></tr>
+      <tr><td><strong>A stuck or runaway agent</strong> (not crashed — <em>wrong</em>)</td>
+        <td>Operator intervention is a first-class API: <code>SIGINT</code> aborts the current wake through
+        <code>ctx.signal</code>; <code>SIGSTOP</code> quarantines (messages queue); <code>SIGKILL</code> closes the
+        streams. All recorded as <code>signals</code> events.</td>
+        <td>Because the entity's whole state is its log, you can also <code>fork()</code> the pre-wedged history into
+        a fresh entity and retire the stuck one — recovery by branching rather than surgery.</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>
+    The deeper point: there is no separate "recovery mode." Re-materialize, re-run, guard — the failure path <em>is</em>
+    the normal path (every wake already works that way), which is why it's trustworthy. Systems with a distinct
+    recovery codepath fail in recovery; this one recovers the same way it runs.
+  </p>
+</section>
+
+<!-- ================================================================ F6 -->
+<section id="f6">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 6</div>
+    <div class="qa-text">What does this architecture cost in latency and money versus an in-process agent loop — and
+    when is it the wrong choice?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    The overhead sits at <strong>coordination boundaries</strong> (wake dispatch, cross-entity hops — tens of ms of
+    HTTP + append), not inside the LLM loop (which runs in-process once woken, exactly like any harness). Since agent
+    turns are seconds and LLM tokens are ~all of the money, the tax is noise for agent-paced work — and the
+    architecture actively <em>saves</em> money by making waiting free and no-op wakes token-free. It's the wrong tool
+    when you need sub-millisecond loops, single-machine shared memory, or when your whole product is one ephemeral
+    chat box.
+  </div>
+
+  <p><strong>Where the latency actually goes.</strong> A wake costs: webhook dispatch (network hop) + catch-up read
+  (offset-resumable — small for warm entities) + handler start. Call it tens of milliseconds. <em>Inside</em>
+  <code>ctx.agent.run()</code>, the tool loop is ordinary in-process code; stream appends are pipelined writes that
+  don't block token generation. So a 30-second research turn pays the same LLM 30 seconds it would anywhere, plus
+  ~1% overhead at the edges. The places to watch are chatty cross-entity designs — every <code>send</code> →
+  wake → reply cycle is a full coordination round-trip, which is why the patterns (Part 3 §7) favor batching state
+  into blackboards and gates over conversational ping-pong between entities.</p>
+  <p><strong>Where the money goes — and doesn't.</strong> Tokens dominate agent economics, and the hybrid-control-flow
+  idiom is directly a cost optimization: the walkthrough's judge handles five wakes with only two LLM runs — the
+  gate wakes are pure JavaScript, ~free (Part 3 §6). Waiting costs zero compute (Q&amp;A #1); idle entities cost
+  kilobytes; read fan-out (dashboards, observers) is CDN-cacheable rather than compute. The standing costs are the
+  always-on plane — the agents server, Postgres, streams storage — which is a fixed ops cost amortized over every
+  agent, versus per-agent sandbox-hours in the resident-agent model (the 5ms/2MB-vs-125ms/128MB comparison from the
+  serverless-agents post).</p>
+  <p><strong>When it's honestly the wrong choice:</strong></p>
+  <ul>
+    <li><em>Tight loops.</em> Agents reacting to each other at sub-millisecond cadence (trading, game AI, robotics
+      control) — the per-hop coordination cost is the workload. Use actors or shared memory.</li>
+    <li><em>Single ephemeral sessions.</em> A stateless "ask one question" chat with no history, no coordination, no
+      observers — a plain streaming HTTP response is simpler; you'd be running a control plane for nothing.</li>
+    <li><em>Huge artifacts through the log.</em> The log wants events, not gigabytes; that's what the attachments
+      streams and sandboxes are for — pass references, keep blobs out of the timeline.</li>
+  </ul>
+</section>
+
+<!-- ================================================================ F7 -->
+<section id="f7">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 7</div>
+    <div class="qa-text">How do I evolve an entity type — change its state schema or handler logic — when instances
+    with old-format history are still alive?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    Code evolves freely — handlers aren't replayed, so new code just serves the next wake (the advantage over
+    durable-execution engines, FAQ 1). Data evolves like an event-sourced system: <strong>events are forever</strong>,
+    so grow schemas additively, re-register types on deploy, and reach for the escape hatches — <code>reset</code>
+    to re-baseline a stream, <code>fork()</code> to migrate an entity onto new history — when additive isn't enough.
+  </div>
+
+  <ul>
+    <li><strong>Handler logic: trivially.</strong> There's no recorded execution to stay compatible with. Deploy new
+      code, <code>registerTypes()</code> re-registers on startup, and every subsequent wake — including for entities
+      spawned months ago — runs the new handler against materialized state. Your only obligation is the one you
+      already have: handle the state shapes that exist.</li>
+    <li><strong>Schemas: additively, by default.</strong> Old events in the log were validated by old schemas and will
+      be materialized again; a new schema that rejects them breaks your own history. So evolve like protobuf: add
+      optional fields, tolerate absence in the handler (<code>debate.rebuttals ?? {}</code>), never repurpose a field.
+      Type registration supports amendment (<code>PATCH /_electric/entity-types/:name/schemas</code>) for adding inbox
+      message types and state collections to a live type; adding a whole new collection is clean — old entities simply
+      have zero rows in it.</li>
+    <li><strong>Breaking changes: use the escape hatches.</strong> The state protocol ships <code>reset</code>
+      (consumers clear and rematerialize from a given offset — the designed hook for "the stream's schema changed")
+      and snapshot markers to delimit a re-baseline written in the new format. At the entity level, the idiomatic
+      big-bang migration is a <strong>fork-and-retire</strong>: <code>fork()</code> the entity, write a migration
+      wake that reads old-shape state and writes new-shape state, point traffic at the fork, TTL the ancestor.
+      History is preserved, the migration itself is an audited event, and rollback is "keep using the original."</li>
+    <li><strong>Contracts with others.</strong> <code>inboxSchemas</code> and <code>creationSchema</code> are validated
+      server-side at send/spawn time, so they version like any public API: additive within a type name, or introduce
+      <code>reviewer-v2</code> alongside <code>reviewer</code> when semantics genuinely break — dispatchers make the
+      cutover a routing decision rather than a migration.</li>
+  </ul>
+</section>
+
+<div class="pager">
+  <a href="qa.html"><span class="dir">Previous</span><span class="label">← Part 6 — Your Questions, Answered</span></a>
+  <a class="next" href="index.html"><span class="dir">Back to</span><span class="label">Start Here ⤴</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · FAQ appendix · answers grounded in the agents-server source, runtime declarations, official docs &amp; blog posts
+</footer>
+
+</body>
+</html>
