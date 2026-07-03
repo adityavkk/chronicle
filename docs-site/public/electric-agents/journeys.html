@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interaction Journeys — Electric Agents, Explained</title>
+<meta name="description" content="Sequence diagrams for the six core user journeys — messaging an agent, delegation, forking, live observation, crash recovery, and mid-run intervention — with every system involved: UI, agents server, Postgres registry, durable streams, handler runtime, model provider.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink" href="index.html">Start</a>
+  <a class="navlink" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink" href="server.html">5 · Server Internals</a>
+  <a class="navlink" href="qa.html">6 · Q&amp;A</a>
+  <a class="navlink" href="faq.html">FAQ</a>
+  <a class="navlink active" href="journeys.html">Journeys</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">The journeys</p>
+  <a href="#j-message">1 · Messaging an agent</a>
+  <a href="#j-delegate">2 · Spawning and joining sub-agents</a>
+  <a href="#j-fork">3 · Forking an entity</a>
+  <a href="#j-observe">4 · Watching an agent live</a>
+  <a href="#j-crash">5 · A handler crashes mid-wake</a>
+  <a href="#j-steer">6 · Intervening in a running agent</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">Appendix</p>
+  <h1>Interaction journeys — every hop, drawn</h1>
+  <p class="lead">
+    Six sequence diagrams for the journeys everything else in this site describes in prose — with every system on
+    the page: the browser, the agents server's authn/authz gate, the Postgres registry, the durable streams
+    backend, the ephemeral handler invocation, and the model provider. Read them after
+    <a href="faq.html#f12">FAQ 12</a> (who you actually talk to) and alongside
+    <a href="server.html">Part 5</a> (what each hop is made of). Same conventions throughout: solid arrows are
+    requests, dashed are async delivery — webhooks, streams, SSE.
+  </p>
+</header>
+
+<!-- ================================================================ j-message -->
+<section id="j-message">
+  <h2><span class="kicker-num">§</span>Messaging an agent — from send to streamed answer</h2>
+  <p>The canonical happy path — the journey every other one specializes. A user messages an agent and watches the answer stream in: the message enters through the server's front door, never the streams backend directly (<a href="faq.html#f12">FAQ 12</a>), where it is authenticated, authorized, and schema-validated before becoming an exactly-once append on the entity's log (<a href="server.html#append">Part 5 §4</a>, <a href="faq.html#f3">FAQ 3</a>). That single append does everything downstream: it projects into the registry, matches a wake registration, and becomes an Ed25519-signed webhook to your handler (<a href="server.html#dispatch">Part 5 §5</a>) — whose LLM loop appends token deltas back onto the same log <em>as the run happens</em> (<a href="runtime.html#modelrunner">Part 4 §4</a>). The UI, meanwhile, is not waiting on a response body: it tails the log over <code>observe()</code>/SSE the entire time, so persisting the answer and streaming it to the screen are the same write (Part 1 §5).</p>
+  <div class="diagram-shell">
+    <div class="diagram-title">From send to streamed answer</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed are async delivery or streams — watch the par block: the UI's SSE tail and the handler's run proceed concurrently over the same log.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant UI as Browser / UI (TanStack DB)
+    box Control plane
+        participant AS as Agents server (authn/authz + control plane)
+        participant PG as Postgres (registry)
+    end
+    participant DS as Durable streams (chronicle)
+    participant RT as Handler invocation (ephemeral runtime)
+    participant LLM as Model provider
+
+    Note over UI,AS: Production: a fronting gateway terminates real credentials and sets Electric-Principal — the server never sees client-controlled headers (Part 6 Q5)
+    UI->>AS: POST send — chat message for /assistant/a1
+    AS->>AS: authenticateRequest hook → principal user:sam
+    AS->>AS: authorizeRequest policy hook (ABAC, cached) + permission grants
+    AS->>AS: validate payload against the type's inboxSchemas
+    opt Delayed send — opts.afterMs
+        AS->>PG: persist a future_send schedule — a durable timer the scheduler fires later
+        Note over AS,PG: when the timer fires, the flow below resumes unchanged
+    end
+    AS->>DS: append inbox event via idempotent producer (producerId, epoch, seq)
+    DS-->>AS: offset committed — retries dedupe, stale epochs fenced with 403
+    AS->>PG: project event into the registry (EntityProjector) + evaluate wake registrations
+    AS-->>UI: send accepted
+    par UI tails the log — the whole time
+        UI->>AS: observe() — GET main stream from last offset (SSE live tail)
+        AS-->>UI: catch-up events, then live deltas as they land
+    and Wake dispatch → handler run
+        DS-->>AS: subscription webhook — stream has pending events
+        AS->>PG: create claim (entity_dispatch_state, lease + epoch) — entity marked running
+        AS->>+RT: POST serveEndpoint — Ed25519-signed wake (entity, streams + offsets, claim token)
+        RT->>RT: verify signature against the server's JWKS
+        RT->>AS: catch-up read from the entity's last seen offset
+        AS-->>RT: new events → materialize typed collections (StreamDB)
+        RT->>LLM: agent.run() — timelineToMessages(db), stream the completion
+        LLM-->>RT: token deltas, tool calls
+        RT->>AS: append run, text_delta, toolCall events live — claim write token required
+        AS->>DS: validated append, tenant-prefixed — same exactly-once path as step 6
+        Note over DS,UI: one write path — the append is the persistence, the UI's feed, and the LLM's future context
+        RT->>-AS: wake callback — done (writes flushed, claim released)
+        AS->>PG: release claim → entity idle
+    end
+      </pre>
+    </div>
+  </div>
+  <ul>
+<li><strong>The server is the front door.</strong> <code>authenticateRequest</code> establishes the principal, <code>authorizeRequest</code> applies external policy (cached with expiry), and <code>inboxSchemas</code> validate the payload before anything touches the log — clients never write to the streams backend directly (FAQ 12, Part 6 Q5).</li>
+<li><strong>Two semantics, one contract.</strong> Steps 6–7 are exactly-once (idempotent-producer dedupe on <code>producerId/epoch/seq</code>); steps 12–14 are at-least-once (retries, lease-expiry re-dispatch). The claim plus its claim-scoped write token (step 20) is what makes the second safe against the first (FAQ 3, Part 5 §6).</li>
+<li><strong>The par block is the payoff.</strong> The UI's SSE tail (steps 10–11) is live before the handler even wakes; every token delta appended in steps 20–21 arrives on that same offset-resumable connection. No push channel, no post-hoc save — the run's writes are simultaneously the durable record, the UI's feed, and the model's future context (Part 4 §4).</li>
+<li><strong>Kept deliberately generic:</strong> the wiki describes the <code>EntityProjector</code> as a background worker while wake evaluation runs inline in the append path — step 8 shows both as one registry hop rather than inventing their exact interleaving.</li>
+</ul>
+</section>
+<!-- ================================================================ j-delegate -->
+<section id="j-delegate">
+  <h2><span class="kicker-num">§</span>Spawning and joining sub-agents — delegation</h2>
+  <p>Delegation is the coordination move the rest of Part 3 builds toward: a parent wakes, fans work out to child entities, and joins their results — with no process anywhere blocked on the answer. This journey follows one fan-out end to end: the spawn-once guard against redelivered wakes (<a href="qa.html#q3">Q&amp;A #3</a>), <code>ctx.spawn</code> minting each child as a full public entity (<a href="faq.html#f11">FAQ 11</a>) while registering a <code>runFinished</code> observation on the way in, and the parent's gate-on-durable-state join — the hybrid control-flow idiom of <a href="howto.html#hybrid">Part 3 §6</a>. Watch what the parent never does: await. It spawns, it sleeps, and each child's completion arrives later as a fresh wake carrying <code>finished_child</code> in its payload (<a href="howto.html#coordinate">Part 3 §5</a>).</p>
+  <div class="diagram-shell">
+    <div class="diagram-title">Spawning and joining sub-agents — fan out, sleep, gate, synthesize</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed are async deliveries (signed wake webhooks, streamed tokens) — the parent's activation bars show it holds compute only during its three short wakes.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant P as Parent entity (handler in ephemeral runtime)
+    box Control plane
+        participant AS as Agents server (authn/authz + control plane)
+        participant PG as Postgres (registry)
+        participant DS as Durable streams (chronicle)
+    end
+    participant CA as Child A (handler in ephemeral runtime)
+    participant CB as Child B (handler in ephemeral runtime)
+    participant LLM as Model provider
+
+    AS-->>+P: wake webhook (Ed25519-signed) — the task<br/>to delegate arrives as an inbox event
+    Note over P: spawn-once guard (Part 6 Q3) — deterministic child IDs,<br/>queryOnce over ctx.db.collections.manifests.<br/>Row already there? ctx.send instead — a redelivered<br/>wake must never spawn twice
+    P->>AS: ctx.spawn('worker', 'child-a', args, { initialMessage,<br/>wake: { on: 'runFinished', includeResponse: true } })
+    AS->>DS: create child-a's streams — append the creation event<br/>(validated against creationSchema) + initialMessage
+    AS->>PG: register child-a + record the parent's runFinished<br/>registration in the WakeRegistry
+    Note over AS,DS: the child is a FULL entity — its own streams, URL, authz<br/>surface — observable and forkable like its parent (FAQ 11)
+    P->>-AS: ctx.spawn('worker', 'child-b', …) — same dance
+    Note over P: handler returns — ctx.sleep(). There is deliberately no<br/>spawn-and-await: the join lives in durable state,<br/>not in a blocked process (Part 3 §5)
+    par child A works
+        AS-->>+CA: first wake — signed webhook, claim + write token minted
+        CA->>LLM: ctx.agent.run() on the initialMessage
+        LLM-->>CA: tokens stream back
+        CA->>-AS: append textDeltas, tool calls, runFinished —<br/>all to child-a's OWN log (write-token fenced)
+        AS->>DS: persist — the append path runs checkRunFinished:<br/>the parent's registration matches
+    and child B works
+        AS-->>+CB: first wake (same shape)
+        CB->>LLM: ctx.agent.run()
+        CB->>-AS: appends + runFinished to child-b's own log
+    end
+    AS->>PG: claim the parent — entity_dispatch_state, at most one<br/>active wake per entity, epoch-fenced (Part 5 §6)
+    AS-->>+P: wake — payload.finished_child for child-a,<br/>response inline (includeResponse)
+    P->>-AS: append a state write — record child-a's result
+    Note over P: gate on durable state — have ALL children reported?<br/>No, child-b is outstanding → ctx.sleep(), zero compute
+    AS-->>+P: next wake — child-b's finished_child. Two finishes<br/>'at once' are still two serialized wakes (FAQ 2)
+    P->>AS: append — record child-b's result
+    alt gate passes — every child's result is in durable state
+        P->>LLM: one synthesis run over the joined results
+        P->>-AS: append the combined outcome — run finishes,<br/>claim released on done
+    else any child still outstanding
+        Note over P: ctx.sleep() — re-gate on the next wake<br/>(the hybrid control-flow idiom, Part 3 §6)
+    end
+      </pre>
+    </div>
+  </div>
+  <ul>
+<li><strong>The guard exists because delivery is at-least-once.</strong> Deterministic child IDs plus the <code>manifests</code> check (<a href="qa.html#q3">Q&amp;A #3</a>) make a redelivered wake find the existing child and <code>send</code> rather than spawn a duplicate — spawn-idempotency lives in durable state, not in memory.</li>
+<li><strong>Children are not lightweight tasks.</strong> Each spawn creates a full entity — its own streams, URL, authz surface, and lifecycle (<a href="faq.html#f11">FAQ 11</a>) — so results reach the parent not as return values but as <code>finished_child</code> wakes feeding its own durable state.</li>
+<li><strong>The par block is concurrency with no coordinator running.</strong> Between arrows 5 and 15 the parent is rows and log entries; when both children finish near-simultaneously, claims (Part 5 §6) serialize the finishes into two orderly wakes (<a href="faq.html#f2">FAQ 2</a>) — which is what makes the have-all-children-reported gate race-free without locks.</li>
+<li><strong>Token economics of the gate.</strong> Of the parent's three wakes only the last runs a model call — the middle one is a pure durable-state check that sleeps for free, the same shape as the judge's five-wakes-two-LLM-runs table in <a href="howto.html#hybrid">Part 3 §6</a>.</li>
+</ul>
+</section>
+<!-- ================================================================ j-fork -->
+<section id="j-fork">
+  <h2><span class="kicker-num">§</span>Forking an entity — branching a timeline</h2>
+  <p>Everywhere else in this wiki the log is the entity's memory; <code>fork()</code> treats it as a <strong>branch point</strong>. Because an entity's whole state is its history, copying the log at a point copies the agent — <code>ctx.fork(url, id)</code> / <code>ctx.forkSelf(id)</code> branch a new entity from an existing one's history, and streams fork without rewriting (<a href="howto.html#coordinate">Part 3 §5</a>). The recurring triggers: retry from a known-good point or what-if exploration — replay any entity, branch its timeline, explore the alternative (<a href="qa.html#q1">Q&amp;A #1</a>); recovering a wedged agent — "recovery by branching rather than surgery" (<a href="faq.html#f5">FAQ 5</a>); and the fork-and-retire schema migration, where you point traffic at the fork and TTL the ancestor (<a href="faq.html#f7">FAQ 7</a>, <a href="faq.html#f4">FAQ 4</a>). The fork call itself is one gated control-plane request; the structure worth diagramming sits before it (why you branch) and after it (two live timelines diverging).</p>
+  <div class="diagram-shell">
+    <div class="diagram-title">Forking an entity — one history, two futures</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed are async returns/deliveries — the fork hop itself is deliberately generic (one request in, one new entity URL out); the payoff is the par block where the timelines diverge.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant OP as Operator / parent handler (ctx.fork)
+    box Control plane
+        participant AS as Agents server (authn/authz + control plane)
+        participant PG as Postgres (registry)
+    end
+    box Durable streams (chronicle)
+        participant ANC as Ancestor log /assistant/support-42/main
+        participant FRK as Forked log /assistant/support-42-v2/main
+    end
+    participant RT as Handler invocation (ephemeral runtime)
+    Note over OP,ANC: BEFORE - why branch. The entity's whole state is its log, so copying the history at a point copies the agent
+    alt Wedged agent - recover by branching, not surgery (FAQ 5)
+        OP->>AS: signal SIGSTOP /assistant/support-42 - quarantine, messages queue
+        AS->>ANC: append signals event - the intervention is itself durable history
+    else What-if / retry from a known-good point (Part 6 Q1)
+        OP->>AS: GET main?offset=... - read the timeline, pick the branch point
+        AS-->>OP: history up to the chosen offset
+    else Schema migration - fork-and-retire (FAQ 7)
+        Note over OP: events are forever - when additive schema change is not enough, migrate onto new history
+    end
+    OP->>+AS: fork - source /assistant/support-42, new id support-42-v2
+    Note over AS,PG: authenticateRequest resolves the principal - fork is an entity-level permission verb, gated like every route (Part 6 Q5)
+    AS->>FRK: new stream shares history up to the fork offset - streams fork without rewriting (Part 3 §5)
+    AS->>PG: new registry row - the fork is a full entity with its own status, grants, lifecycle
+    AS-->>-OP: new entity URL /assistant/support-42-v2
+    Note over ANC,FRK: AFTER - two live timelines, identical up to the fork offset, independent after it
+    par ancestor timeline continues
+        OP->>AS: send to /assistant/support-42
+        AS->>ANC: append inbox event - wakes and appends proceed as before
+    and forked timeline diverges
+        OP->>AS: send to /assistant/support-42-v2 - point traffic at the fork (FAQ 7)
+        AS->>FRK: append inbox event
+        AS-->>RT: wake webhook (Ed25519-signed) - catch-up read from the fork's own offsets, offset-resumable (FAQ 6)
+        RT->>FRK: append run events via idempotent producer - e.g. the migration wake writing new-shape state
+    end
+    opt Retire the ancestor (FAQ 4, FAQ 7)
+        OP->>AS: TTL the ancestor - let the old timeline age out
+        Note over ANC: history preserved until expiry - rollback is keep using the original
+    end
+      </pre>
+    </div>
+  </div>
+  <ul><li>The <code>alt</code> block is the whole case for forks: wedge recovery, what-if retry, and big-bang migration all reduce to the <em>same single call</em>, because branching the log is branching the agent — there is no separate export/import of "state" (<a href="faq.html#f5">FAQ 5</a>).</li><li><code>fork</code> is an ordinary entity-level permission verb alongside <code>read</code> / <code>write</code> / <code>signal</code> (<a href="qa.html#q5">Q&amp;A #5</a>), served by the entities-router with every other gated route (Part 5 §3); when a handler calls <code>ctx.fork()</code> it is an authenticated control-plane HTTP call recorded as a manifest row (Part 4).</li><li>The wiki does not document the server's internal fork mechanics — the fork hop (arrows 5–8) stays generic by design: one gated request, the shared-history stream, its registry row, the new URL. The only visible trace is the append guard, which rejects writes to <em>stopped or fork-locked</em> entities (Part 5 §4).</li><li>The fork is a full entity — its own registry row, grants, offsets, lifecycle — which is exactly why migration rollback is trivial: "keep using the original" until the ancestor's TTL fires (<a href="faq.html#f7">FAQ 7</a>).</li></ul>
+</section>
+<!-- ================================================================ j-observe -->
+<section id="j-observe">
+  <h2><span class="kicker-num">§</span>Watching an agent live — observe, disconnect, resume</h2>
+  <p>An agent's session is not a response you await — it is a log you watch. This journey follows a browser tab attaching to a live agent with <code>observe(entity(url))</code>: an authorized catch-up read through the agents server's sync surface (<a href="faq.html">FAQ 12</a>), incremental materialization into TanStack DB collections via the state protocol (<a href="streams.html">Part 2 §7–8</a>), then a live SSE tail — until the network drops mid-run, and the tab resumes at the cost of exactly one request. The punchline is what is <em>absent</em>: no reconnection protocol, no server-side session, no consumer group — the only recovery state is the <code>Stream-Next-Offset</code> the consumer already holds (<a href="streams.html">Part 2 §3</a>).</p>
+  <div class="diagram-shell">
+    <div class="diagram-title">Watching an agent live: observe, disconnect, resume</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed are async or streamed delivery — watch the offset: the only consumer state that exists, and it travels with the browser, not the server.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant UI as Browser / UI (TanStack DB)
+    participant AS as Agents server (authn/authz + control plane)
+    participant DS as Durable streams (chronicle)
+    participant RT as Handler invocation (ephemeral runtime)
+
+    Note over UI,AS: in production a fronting proxy sits on this hop — auth terminates there and the server sees a verified principal (FAQ 12)
+
+    UI->>+AS: observe(entity(url)) — catch-up GET from offset=-1 (first visit) or a stored offset
+    AS->>AS: authenticateRequest → principal, optional authorizeRequest ABAC — every read is gated
+    AS->>+DS: authorized read on the tenant-prefixed stream (store-or-proxy)
+    DS-->>-AS: state-protocol events + Stream-Next-Offset, Stream-Up-To-Date at the head
+    AS-->>-UI: catch-up batches stream back
+    UI->>UI: materialize sequentially in stream order — last write wins per (type, key)
+    Note over UI: preload() resolves at the first Stream-Up-To-Date — a snapshot-consistent TanStack DB, live queries run from here
+
+    UI->>AS: same request shape, now live — GET from the returned offset with live=sse
+    activate AS
+    AS-->>UI: text/event-stream opens (SSE pass-through)
+
+    Note over RT,DS: meanwhile the agent is mid-run, streaming tokens into its log
+    RT->>AS: append text_delta / state events (write token + idempotent producer)
+    AS->>DS: validate against schemas, forward — deduped, exactly-once
+    DS-->>AS: new events flow to the live subscription
+    AS-->>UI: SSE data frames + control frames {streamNextOffset, streamCursor, upToDate}
+    UI->>UI: incremental commit — live queries update per event, tokens render as they arrive
+
+    Note over UI,AS: the network drops mid-run. No recovery protocol fires because none exists — the UI already holds its offset, the log already holds everything else
+    deactivate AS
+
+    UI->>+AS: resume = one ordinary catch-up GET from the held offset
+    Note over UI,AS: offset-parameterized reads are immutable — ETag + 304, CDN-collapsible: 10,000 viewers at one offset become one upstream request
+    AS->>+DS: read from the held offset
+    DS-->>-AS: the missed events + a fresh Stream-Next-Offset
+    AS-->>-UI: the gap replays — the local DB catches up in order, no reset, no rebuild
+    UI->>AS: re-enter the live tail — live=sse from the new offset
+    AS-->>UI: SSE resumes — catch-up and live were one request all along
+
+    Note over UI,RT: contrast — an entity watching an entity calls the same observe(entity(url)) with a wake registration instead: no held socket, the observer is invoked when matching events land (Part 3 §7, reactive observers)
+      </pre>
+    </div>
+  </div>
+  <ul>
+<li><strong>The disconnect is a non-event.</strong> Consumer position is client-held data, not server-side session state (Part 2 §3) — the tab recovers exactly the way a crashed handler or a second browser tab would: present the last offset, catch up, go live.</li>
+<li><strong>Catch-up and live are one request shape</strong> (Part 2 §4): messages 1 and 7 differ only by <code>live=sse</code>, so the UI never stitches "load history" onto "subscribe" or handles the gap between them — the protocol does it.</li>
+<li><strong>Resumability is what makes fan-out a caching problem</strong>: reads at a given offset always return the same bytes, hence ETags + conditional GET and <code>Stream-Cursor</code> against stale long-poll loops (Part 2 §6); only volatile reads (<code>offset=now</code>, <code>HEAD</code>) are <code>no-store</code>.</li>
+<li><strong>Same verb, two consumers</strong>: an entity observes another entity with the same <code>observe(entity(url))</code> plus <code>opts.wake</code> — invoked when matching events land rather than holding a socket (Part 3 §5, §7). One drawn simplification: the wiki describes the server's SSE surface only as a pass-through to the streams backend (Part 5 §3), so the internal delivery hop (messages 11–12) is kept generic rather than inventing mechanics.</li>
+</ul>
+</section>
+<!-- ================================================================ j-crash -->
+<section id="j-crash">
+  <h2><span class="kicker-num">§</span>A handler crashes mid-wake — recovery and fencing</h2>
+  <p><p>This journey plays the first row of FAQ 5's failure table as a film: a handler dies mid-wake — process crash or lambda timeout — after streaming part of its work into the log. Nothing that follows is a special mode. The partial work was durable the moment it was appended, through the exactly-once producer path (<a href="streams.html#producers">Part 2 §5</a>); the claim's lease is the only failure detector (<a href="server.html#claims">Part 5 §6</a>); and the re-dispatched invocation simply does what every invocation does — re-materialize, re-run, guard (<a href="faq.html#f5">FAQ 5</a>). The one genuinely new event is the zombie limping back to append, and that is answered with a 403, not a data race.</p></p>
+  <div class="diagram-shell">
+    <div class="diagram-title">A handler crashes mid-wake — lease expiry, re-dispatch, epoch fencing</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed are async delivery and returns — watch epoch N become N+1 at step 9, and what happens to epoch-N writes after that.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    box Control plane
+        participant AS as Agents server (authn/authz + control plane)
+        participant PG as Postgres (registry)
+    end
+    participant DS as Durable streams (chronicle)
+    participant RTA as Handler invocation A (doomed, then zombie)
+    participant RTB as Handler invocation B (fresh)
+    participant LLM as Model provider
+
+    Note over AS,DS: an append matched a wake registration — the entity has pending work (Part 5 §4)
+    AS->>PG: claim the wake — entity_dispatch_state gets epoch N, a lease expiry, a write token (Part 5 §6)
+    AS-->>RTA: wake webhook, Ed25519-signed — entity, streams + offsets, claim (at-least-once)
+    activate RTA
+    RTA->>AS: authorized catch-up read from the delivered offsets
+    AS-->>RTA: events to materialize — the handler re-enters against durable state
+    RTA->>LLM: run the agent loop
+    LLM-->>RTA: tokens stream back
+    RTA->>AS: append partial work — text deltas, a tool result (idempotent producer, epoch N, write token)
+    AS->>DS: validate token + schemas, forward — dedupe on (producerId, epoch, seq), already durable
+    Note over RTA: crashes mid-wake — the process dies or the lambda times out.<br/>No done callback will ever arrive.
+    deactivate RTA
+    Note over AS,PG: nothing reacts instantly — the claim lease is the timer
+    AS->>PG: dispatch-recovery loop reclaims the expired lease — epoch N+1, fresh write token, old notification superseded (wake_notifications)
+    AS-->>RTB: re-dispatch the same wake to a fresh invocation
+    activate RTB
+    RTB->>AS: catch-up read from the same offsets
+    AS-->>RTB: durable history including A's partial work — the tokens and the tool result are already there
+    Note over RTB: guards on durable state see the partial work —<br/>nothing lost (appended as it happened), nothing redone (FAQ 3)
+    par invocation B finishes the wake
+        RTB->>LLM: continue the run
+        LLM-->>RTB: completion
+        RTB->>AS: append the remaining events (idempotent producer, epoch N+1)
+        AS->>DS: validated append — epoch N+1 is current
+    and the zombie limps back
+        RTA->>AS: late append with the epoch-N producer and the superseded write token
+        AS-->>RTA: 403 — stale epoch fenced, not the claim holder (Part 2 §5, Part 5 §4)
+    end
+    RTB->>AS: done callback — wake complete
+    deactivate RTB
+    AS->>PG: release the claim and the write token — entity idle
+    Note over AS,RTB: there is no separate recovery mode — re-materialize, re-run, guard is how every wake already works (FAQ 5)
+      </pre>
+    </div>
+  </div>
+  <ul>
+<li><strong>The crash is detected by silence, not by a signal.</strong> Nothing supervises invocation A's process — the only failure detector is the claim's lease expiring and the dispatch-recovery loop reclaiming it (Part 5 §6). A hung lambda and a dead one look identical, and are handled identically.</li>
+<li><strong>Steps 7–8 are why nothing is lost.</strong> The partial tokens and the tool result became durable as they were appended — exactly-once via the idempotent producer, so even a retried batch from the dying run couldn't double-append (Part 2 §5).</li>
+<li><strong>Step 12 plus the guard note are why nothing is redone.</strong> Invocation B gets no clean slate — it materializes a world that already contains A's work, and the same guard-on-durable-state idiom every wake uses (FAQ 3) skips what's done. What "continue the run" means at step 13 is ordinary handler logic — the wiki specifies the contract (at-least-once delivery, re-entrant handlers), not a resumption mechanism.</li>
+<li><strong>The zombie is rejected twice over.</strong> Its write token was superseded at reclaim — only the current claim holder may append (Part 5 §4) — and its producer epoch is stale, fenced with a 403 (Part 2 §5). One-active-wake is enforced at the data layer, not by convention.</li>
+</ul>
+</section>
+<!-- ================================================================ j-steer -->
+<section id="j-steer">
+  <h2><span class="kicker-num">§</span>Intervening in a running agent — steer, queue, signals</h2>
+  <p>An entity is single-threaded by construction — the log orders all writers, claims guarantee at most one active wake, and wakes coalesce (<a href="faq.html#f2">FAQ 2</a>) — so input that arrives mid-run never interrupts by accident. Whether it interrupts <em>on purpose</em> is the sender's choice: <a href="howto.html#coordinate">send modes</a> decide if a message waits its turn (<code>queued</code>, the default) or is injected into the loop already in flight (<code>steer</code> — "actually, stop and do X"), while the <a href="runtime.html#signals">signal API</a> (Part 4 §7) gives operators POSIX-flavored control — abort, quarantine, kill — over a thing that isn't a process. This journey follows <code>/assistant/a1</code> through a long <code>agent.run()</code> loop as each kind of intervention lands, ending with the recovery move for an agent that is wedged rather than crashed: <code>fork()</code> the pre-wedged history and retire the original (<a href="faq.html#f5">FAQ 5</a>).</p>
+  <div class="diagram-shell">
+    <div class="diagram-title">Intervening in a running agent — queued, steer, and the signal API</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed are async delivery — watch how every intervention, signals included, is itself recorded as events on the log.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant OP as Operator (browser / CLI)
+    box Control plane
+      participant AS as Agents server (authn/authz + control plane)
+      participant PG as Postgres (registry)
+    end
+    participant DS as Durable streams (chronicle)
+    participant RT as Handler invocation (ephemeral runtime)
+    participant LLM as Model provider
+
+    Note over RT,LLM: /assistant/a1 is mid-wake — claim held in entity_dispatch_state,<br/>epoch fenced, write token minted (Part 5 §6)
+    RT->>+LLM: agent.run() — a long tool loop is in flight
+    LLM-->>-RT: token stream
+    RT-->>DS: pipelined appends — textDeltas, tool calls, state<br/>(write token checked on every append)
+
+    alt queued mode (default) — wait your turn
+        OP->>AS: POST /_electric/entities/assistant/a1/send (queued)
+        Note over OP,AS: fronting proxy in production — authenticateRequest → principal,<br/>optional authorizeRequest ABAC
+        AS->>DS: validated append to /assistant/a1/main (idempotent producer)
+        DS-->>AS: serialized into the total order, behind the in-flight window
+        AS->>PG: evaluate wake — claim already active, pending events wait
+        RT->>AS: done callback — claim released, write token retired
+        AS-->>RT: next wake, one coalesced window (fromOffset → toOffset, eventCount)<br/>debounceMs widens the window deliberately
+    else steer mode — 'actually, stop and do X'
+        OP->>AS: POST .../send with mode steer
+        AS->>DS: same validated append path — the steer lands on the log too
+        AS-->>RT: injected into the currently running agent loop
+        RT->>LLM: the run continues, now carrying the new instruction
+    end
+
+    alt SIGINT — abort the current wake
+        OP->>AS: POST /_electric/entities/assistant/a1/signal (SIGINT)
+        AS->>DS: recorded as a signals event
+        AS-->>RT: surfaced mid-wake
+        RT->>RT: ctx.signal (AbortSignal) trips — LLM call, fetches, subprocesses abort
+        Note over DS,RT: everything appended before the abort is already durable —<br/>the next wake's guards see it (FAQ 5)
+    else SIGSTOP — quarantine
+        OP->>AS: signal (SIGSTOP)
+        AS->>DS: signals event — wake processing paused
+        Note over AS,DS: messages still queue on the log, delivery is paused —<br/>SIGCONT resumes wake processing
+    else SIGKILL — close the streams
+        OP->>AS: signal (SIGKILL)
+        AS->>PG: unregister wake registrations
+        AS->>DS: signals event recorded — close the entity's streams
+    end
+
+    opt wedged, not crashed — recovery by branching
+        OP->>AS: fork /assistant/a1 at a pre-wedge point
+        AS->>DS: branch the history into a fresh entity — streams fork without rewriting
+        Note over AS,DS: point traffic at the fork, retire the stuck original —<br/>recovery by branching rather than surgery (FAQ 5)
+    end
+      </pre>
+    </div>
+  </div>
+  <ul><li><strong>"Queued" is not a separate queue.</strong> The message is an ordinary validated append (Part 5 §4); the queuing behavior emerges from claims (at most one active wake per entity) plus coalescing — five messages landing mid-run become one re-invocation whose window (arrows 4–9) already contains all five.</li><li><strong>Steer shares the whole append pipeline.</strong> The send itself (arrows 10–11) goes through the same authn/validation/idempotent-producer path as any send; the wiki specifies the <em>semantics</em> — injection into the currently running loop — but is silent on the wire mechanics of delivery into a live invocation, so arrow 12 is deliberately generic.</li><li><strong>SIGINT aborts through <code>ctx.signal</code></strong> — the AbortSignal threaded into LLM calls, fetches, and subprocesses (Part 4 §7). Because every append before the abort was already durable, an abort loses nothing written so far.</li><li><strong><code>fork()</code> is the escape hatch beyond signals:</strong> the entity's whole state is its log, so branching the pre-wedge history is branching the whole agent — recovery by branching rather than surgery (FAQ 5).</li></ul>
+</section>
+
+<div class="pager">
+  <a href="faq.html"><span class="dir">Previous</span><span class="label">← FAQ — the next questions</span></a>
+  <a class="next" href="index.html"><span class="dir">Back to</span><span class="label">Start Here ⤴</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · Interaction journeys · diagrams grounded in Parts 2–5, the Q&amp;A, and the FAQ
+</footer>
+
+</body>
+</html>
