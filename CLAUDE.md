@@ -1,7 +1,11 @@
 # CLAUDE.md
 
 Read `AGENTS.md` first — it is the orientation doc for this repo (map, cheat
-sheets, dev loop, hard rules) and everything in it applies here.
+sheets, dev loop, hard rules) and everything in it applies here. In particular,
+see its "The public ↔ internal mirror (Copybara)" section: **this repo is the
+source of truth**; an internal deploy mirror is synced from it, the internal
+deploy paths reserved in `.gitignore` must never be committed here, and the
+untracked `.copybara/` directory (if present) is the sync's ops tooling.
 
 ## Commit policy (hard rule)
 
