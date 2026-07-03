@@ -38,3 +38,15 @@ jobs:
           key: tla2tools-v1.7.4
       - name: TLA+ heavy — scaled 2/2/2 layering proof (#38) + membership/HRW convergence (#40)
         run: make tlc38-heavy tlc40
+
+  # The push-triggered backlog-drift check in ci.yml cannot see issue-state
+  # changes that happen without a push (an issue closed or filed by hand), so
+  # the same guard also runs here nightly.
+  backlog-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/BACKLOG.md against the open issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/backlog-check.sh
