@@ -18,6 +18,8 @@ const (
 	EnvSSEReconnectInterval = "CHRONICLE_SSE_RECONNECT_INTERVAL"
 	EnvPublicURL            = "CHRONICLE_PUBLIC_URL"
 	EnvSubscriptions        = "CHRONICLE_SUBSCRIPTIONS"
+	EnvUI                   = "CHRONICLE_UI"
+	EnvUIServer             = "CHRONICLE_UI_SERVER"
 	EnvWebhookAllowPrivate  = "CHRONICLE_WEBHOOK_ALLOW_PRIVATE"
 	EnvSweepInterval        = "CHRONICLE_SWEEP_INTERVAL"
 	EnvReconcileInterval    = "CHRONICLE_RECONCILE_INTERVAL"
@@ -65,6 +67,17 @@ type Config struct {
 	// Subscriptions enables the reserved __ds subscription APIs. Requires the
 	// redis backend (the subscription layer is Redis-backed).
 	Subscriptions bool
+
+	// UI serves the embedded dsui console (and its /dsui-config.json) alongside
+	// the API. Default true, but only takes effect if the UI was built into the
+	// binary; set false (CHRONICLE_UI=false) to run the backend API-only from the
+	// same binary — the UI stays fully decoupled and optional.
+	UI bool
+
+	// UIServer overrides the server URL the served console prefills. Empty (the
+	// default) means same-origin: the console drives whatever chronicle served it.
+	// Set it to point the console at a different chronicle instance.
+	UIServer string
 
 	// WebhookAllowPrivate relaxes webhook-URL SSRF validation to accept any
 	// http(s) target, including RFC1918 cluster-internal receivers. Off by
@@ -126,6 +139,7 @@ func DefaultConfig() Config {
 		SSEReconnectInterval: 60 * time.Second,
 		PublicBaseURL:        "http://localhost:4437",
 		Subscriptions:        true,
+		UI:                   true,
 		SweepInterval:        30 * time.Second, // coarse recovery floor (issue #13); recovery is event-triggered, not a 2s sweep
 		ReconcileInterval:    30 * time.Second,
 		Consistency:          webhook.TierA, // no WAIT by default — best latency, at-least-once
@@ -165,6 +179,12 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvSubscriptions); ok {
 		c.Subscriptions = v == "1" || v == "true"
+	}
+	if v, ok := lookup(EnvUI); ok {
+		c.UI = v == "1" || v == "true"
+	}
+	if v, ok := lookup(EnvUIServer); ok {
+		c.UIServer = v
 	}
 	if v, ok := lookup(EnvWebhookAllowPrivate); ok {
 		c.WebhookAllowPrivate = v == "1" || v == "true"
