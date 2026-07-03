@@ -34,6 +34,8 @@
   <p class="toc-title">The nouns</p>
   <a href="#entity">Entity</a>
   <a href="#stream">Stream</a>
+  <a href="#namespace">The namespace</a>
+  <a href="#cast">The cast</a>
   <a href="#wake">Wake</a>
   <a href="#handler">Handler</a>
   <a href="#agent">Agent</a>
@@ -147,6 +149,155 @@ flowchart LR
     by Redis instead of the reference server's LMDB. Everything in this explainer above the stream layer is
     protocol-agnostic about the backend. <a href="streams.html">Part 2</a> goes deep on the protocol itself.</p>
   </div>
+</section>
+
+<section id="namespace">
+  <h2><span class="kicker-num">§</span>The namespace — every stream, by name</h2>
+  <p>
+    The pages above talk about "the entity's log" as if it were one stream. It is one main stream plus a set of
+    auxiliary streams with fixed naming conventions. The streams protocol itself has no hierarchy. A path is just
+    a name, and the protocol only defines the HTTP methods that apply to any stream URL. The structure below is a
+    convention that the agents server enforces through its routing and permission checks, not something the
+    storage layer knows about. This table is the canonical catalog. Other pages describe individual rows in more
+    detail and link back here.
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Path</th><th>What it is</th><th>Created by</th><th>Read by</th></tr></thead>
+    <tbody>
+      <tr><td><code>/{type}/{id}/main</code></td>
+        <td>The entity's log. Every event lands here: <code>entity_created</code>, inbox messages, run and step
+        boundaries, token deltas, tool calls, state changes, signals, tags, and manifest rows. The append path is
+        an idempotent producer whose id embeds the entity URL.</td>
+        <td>The agents server at spawn. Creation is transactional with the Postgres registry row. If registration
+        fails, the server deletes the stream.</td>
+        <td>The runtime on wake, UIs over <code>observe()</code> and SSE, observer entities, and the wake
+        pipeline.</td></tr>
+      <tr><td><code>/{type}/{id}/attachments/{attachmentId}</code></td>
+        <td>One file. A write-once byte stream created already closed, with the file's own MIME type as its
+        content type. The default size cap is 25 MiB (<code>ELECTRIC_AGENTS_MAX_ATTACHMENT_BYTES</code>). The
+        main log references it through a manifest row that records the stream path, a sha256, and a status.</td>
+        <td>The agents server on multipart upload, or <code>ctx.attachments.create()</code> from a handler.</td>
+        <td><code>ctx.attachments.read()</code>, the hydration pass before a model call (Part 4), and UIs over an
+        authorized GET. Reads require the owning entity's read permission.</td></tr>
+      <tr><td><code>/_electric/shared-state/{id}</code></td>
+        <td>A shared board (Part 3 §4). A bare stream that several entities materialize into the same collections.
+        The id space is global and app-chosen, so upstream examples derive ids from the creator, e.g.
+        <code>debate-${ctx.entityUrl}</code>.</td>
+        <td><code>ctx.mkdb(id, schema)</code>, exactly once. The creating request carries an owner-entity header,
+        and the server records an ownership link it later uses for authorization.</td>
+        <td>Any entity that passes the shared-state access check, via <code>observe(db(id, schema))</code>.
+        Browsers and other clients can read it over the same HTTP surface.</td></tr>
+      <tr><td><code>/_cron/{expression}/{timezone}</code></td>
+        <td>A shared tick stream for one cron expression. Entities with cron schedules are woken from it. No
+        process holds a timer for any single entity.</td>
+        <td>The agents server, on demand, when the first schedule for that expression appears.</td>
+        <td>The wake pipeline, on behalf of every entity scheduled on that expression.</td></tr>
+      <tr><td><code>/_webhooks/{endpointKey}/{bucket}</code></td>
+        <td>A shared feed of external webhook deliveries (GitHub, Stripe, CI). One stream per endpoint and
+        bucket, shared by all subscribers.</td>
+        <td>The agents server when deliveries arrive.</td>
+        <td>Entities subscribed via <code>observe(webhook(…))</code>; the subscription lives on the subscriber's
+        manifest.</td></tr>
+      <tr><td><code>/principal/{encoded-key}/main</code></td>
+        <td>A principal, materialized as an entity. <code>user:sam</code> becomes
+        <code>/principal/user%3Asam</code>. This exists so identity is addressable and grantable. No handler or
+        wake behavior is documented for principals.</td>
+        <td>The agents server the first time a principal acts.</td>
+        <td>The permission system and anything granted read on it.</td></tr>
+      <tr><td>Bridge streams</td>
+        <td>Streams the server maintains so other things become observable: tag-set membership streams (backing
+        <code>observe(entities({tags}))</code>), pg-sync bridge streams (a Postgres table tailed via an
+        Electric shape and republished), and one wake stream per registered pull runner.</td>
+        <td>The agents server.</td>
+        <td>The observing entities and runners.</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    Three rules hold across the catalog. First, everything under <code>/{type}/{id}/</code> belongs to one entity,
+    and the server authorizes access to the whole prefix through that entity's grants. Second, everything under
+    <code>/_electric/</code>, <code>/_cron/</code>, and <code>/_webhooks/</code> is shared infrastructure with its
+    own access rules. Third, a fork copies the namespace, not just the log: forking an entity forks each
+    attachment stream to the fork's own path and rewrites the manifest rows, and it forks any shared boards the
+    entity created at their current head under a new board id. The fork relationship itself is a protocol
+    feature. A fork is a <code>PUT</code> with a <code>Stream-Forked-From</code> header, the source keeps a
+    reference count, and a deleted source with live forks is soft-deleted rather than removed (Part 2).
+  </p>
+</section>
+
+<section id="cast">
+  <h2><span class="kicker-num">§</span>The cast — everything durable, and what each thing is</h2>
+  <p>
+    Entities are not the only durable things in the system. This section lists every kind of durable thing the
+    platform relies on, what each one can and cannot do, and how they refer to each other. The test for each row
+    is the same five questions: does it have an address, does it have a log, can it be woken, can it act as a
+    principal, and what ends it.
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Kind</th><th>Address</th><th>Log</th><th>Woken?</th><th>Acts?</th><th>Ends how?</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Entity</strong> (any registered type)</td>
+        <td>URL <code>/{type}/{id}</code></td><td>Own main stream + attachment siblings</td>
+        <td>Yes. The handler runs once per wake.</td>
+        <td>Yes. A wake executes as <code>agent:/type/id</code> and clears the same authorization as users.</td>
+        <td><code>SIGKILL</code> marks it killed and closes the main stream. The URL is retired forever
+        (see FAQ 14).</td></tr>
+      <tr><td><strong>Built-in entity types</strong></td>
+        <td colspan="5">Four ship with the platform: <code>horton</code>, the dev-server assistant that chats,
+        edits files, runs shell commands, and dispatches workers; <code>worker</code>, a sandboxed subagent
+        spawned with a narrowed prompt and a curated tool subset, deliberately given no
+        <code>electricTools</code> so it cannot reach the control plane; <code>chat</code>, the server's mock
+        test agent; and <code>principal</code>, described below. The first two run on the built-in runner
+        runtime (<code>electric agents start-builtin</code>). All four are ordinary entities by the five
+        questions above.</td></tr>
+      <tr><td><strong>Principal</strong></td>
+        <td><code>/principal/{key}</code></td><td>Own main stream</td>
+        <td>Not documented.</td>
+        <td>It is the identity others act as: <code>user:</code>, <code>agent:</code>, <code>service:</code>,
+        <code>system:</code>. Note <code>system:*</code> principals bypass permission checks in code, which the
+        official docs do not mention.</td>
+        <td>Nothing documented deletes one.</td></tr>
+      <tr><td><strong>Shared board</strong> (mkdb)</td>
+        <td>A stream path, not an entity URL</td><td>It is a log</td>
+        <td>No. It wakes its <em>observers</em> on change.</td>
+        <td>No. Writers act under their own entity principals through per-writer idempotent producers.</td>
+        <td>Nobody, automatically. There is no TTL, no cascade when the creator dies, and no public delete API.
+        This is the least-finished corner of the platform (see FAQ 14).</td></tr>
+      <tr><td><strong>Webhook source</strong></td>
+        <td>A shared bucket stream</td><td>It is a log of deliveries</td>
+        <td>No. Subscribers are woken.</td><td>No.</td>
+        <td>Subscriptions end per entity via the manifest. The bucket stream persists.</td></tr>
+      <tr><td><strong>Schedule</strong></td>
+        <td>None. A sub-resource of its entity.</td><td>Manifest rows + a Postgres row</td>
+        <td>No. It wakes its <em>owner</em>: a cron fire arrives as a wake, a delayed send arrives as an inbox
+        message.</td><td>No.</td>
+        <td>Idempotent upsert and delete through the schedules API. Killing the owner stops firing but does not
+        delete the rows.</td></tr>
+      <tr><td><strong>Attachment</strong></td>
+        <td>Its stream path, reached through the owning entity</td><td>One closed byte stream</td>
+        <td>No.</td><td>No.</td>
+        <td>An explicit delete API removes the stream. Killing the owner does not.</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    The glue between all of these is the <strong>manifests collection</strong>: the entity's resource table, one
+    row per durable connection from the entity to the world. Nine row kinds exist. <code>child</code> records a
+    spawn and enables the spawn-once guard. <code>source</code> records an observation and pairs with a
+    <code>replayWatermarks</code> row that stores how far the entity has consumed that source. <code>shared-state</code>
+    records board membership, with mode <code>create</code> or <code>connect</code>. <code>schedule</code> has two
+    subtypes, cron and future send. <code>effect</code> registers a named side effect function that the runtime
+    re-establishes across wakes; this kind is schema-documented but has no usage docs upstream yet.
+    <code>attachment</code> records a file, its stream path, its hash, and its status. <code>context</code> and
+    <code>goal</code> record durable working context and the entity's active objective, which the projection
+    composes into the model's window. The server reads manifests back on every append and reconciles wake
+    registrations, sources, and schedules against them, so the manifest is not bookkeeping. It is the source of
+    truth the control plane converges on.
+  </p>
+  <p>
+    Above the durable kinds sit the <strong>role archetypes</strong> from the coordination patterns (Part 3 §7):
+    manager, worker, dispatcher, pipeline coordinator, map-reduce parent, blackboard participant, and reactive
+    observer. Those are not kinds of things. Every one is an ordinary entity whose handler follows a pattern, and
+    the platform neither knows nor cares which role an entity plays.
+  </p>
 </section>
 
 <section id="wake">

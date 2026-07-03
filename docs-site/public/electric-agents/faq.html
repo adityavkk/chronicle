@@ -45,6 +45,8 @@
   <a href="#f11">11 · Internal vs. external agents</a>
   <a href="#f12">12 · The log or the server?</a>
   <a href="#f13">13 · How contained are the hands?</a>
+  <a href="#f14">14 · How do entities die?</a>
+  <a href="#f15">15 · Deploying handlers at scale</a>
 </nav>
 
 <div class="main">
@@ -53,7 +55,7 @@
   <p class="kicker">Appendix</p>
   <h1>FAQ — the next questions</h1>
   <p class="lead">
-    Thirteen more questions at the same altitude as <a href="qa.html">Part 6</a> — the ones this architecture invites
+    Fifteen more questions at the same altitude as <a href="qa.html">Part 6</a> — the ones this architecture invites
     once the first five are answered. Same format: the short version first, then the machinery.
   </p>
 </header>
@@ -282,7 +284,7 @@
       <tr><td><strong>A stuck or runaway agent</strong> (not crashed — <em>wrong</em>)</td>
         <td>Operator intervention is a first-class API: <code>SIGINT</code> aborts the current wake through
         <code>ctx.signal</code>; <code>SIGSTOP</code> quarantines (messages queue); <code>SIGKILL</code> closes the
-        streams. All recorded as <code>signals</code> events.</td>
+        main stream (attachment and shared streams stay open — FAQ 14). All recorded as <code>signals</code> events.</td>
         <td>Because the entity's whole state is its log, you can also <code>fork()</code> the pre-wedged history into
         a fresh entity and retire the stuck one — recovery by branching rather than surgery.</td></tr>
     </tbody>
@@ -813,7 +815,9 @@
   construction, and nothing in the documented surface mounts a volume that outlives the wake. What must survive
   goes the other way: durable file-like artifacts become <strong>attachment streams</strong> under the entity
   (<code>/{type}/{id}/attachments/{attachmentId}</code>, multipart via the server), so files inherit the log's
-  addressing, permissioning, and lifecycle instead of living on a disk — "the log wants events, not gigabytes;
+  addressing, permissioning, and lifecycle instead of living on a disk (the full stream catalog is in
+  <a href="concepts.html#namespace">Part 1's namespace section</a>, and the model-side hydration mechanics are in
+  <a href="runtime.html#modelrunner">Part 4 §4</a>) — "the log wants events, not gigabytes;
   pass references, keep blobs out of the timeline" (FAQ 6). That is the start page's cache rule enforced by
   architecture: the VM can only ever hold working state, because it is never given anywhere durable to put
   anything else. The honest asterisk: for coding agents whose working set is a large warm checkout, rebuilding
@@ -825,6 +829,166 @@
     a bad action, capability scope bounds the <em>set</em> of possible actions, and the log's effect journal makes
     whatever happens <em>attributable</em>. Bound, scope, attribute — in that order, because the first two fail
     open the moment a model gets creative, and the third is what lets you find out.
+  </p>
+</section>
+
+<!-- ================================================================ F14 -->
+<section id="f14">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 14</div>
+    <div class="qa-text">How do entities die? What does kill actually delete, what does it keep, and what is the
+    teardown discipline for everything an entity leaves behind?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    Electric's shipped opinion: teardown is state marking plus quiescence, never erasure. Kill flips the status,
+    closes the main stream, stops all waking, and fences in-flight writers. It deletes nothing, and the URL can
+    never be reused. Storage reclamation lives a layer down, in the streams protocol (TTL, delete, soft delete
+    with fork reference counting). The honest gaps: the entity API exposes no TTL knob, boards have no deletion
+    story at all, and nothing cleans up after a dead parent's children.
+  </div>
+
+  <p><strong>What kill is.</strong> Kill equals <code>SIGKILL</code>. The CLI command, the client's
+  <code>deleteEntity</code>, and the HTTP route all send the same terminal signal. There is no separate harder
+  delete for entities. On SIGKILL the server:</p>
+  <ul>
+    <li>appends the signal event to the main stream and <strong>closes that one stream</strong>. Attachment
+      streams, shared boards, and collection streams stay open. The data persists and remains readable. A
+      conformance test verifies the log survives kill.</li>
+    <li>unregisters the entity's wakes in <strong>both directions</strong>: it stops waking, and it stops waking
+      others.</li>
+    <li>unlinks dispatch subscriptions and invalidates outstanding write tokens, so an in-flight handler cannot
+      append after the kill lands.</li>
+    <li>flips the registry row to <code>killed</code>. The row, the grants, the manifests, and the schedules all
+      persist as data. Cron entries stop firing only because the wakes are gone; the rows remain. Whether a
+      pending delayed send is actively cancelled is not documented, so treat that as an open edge.</li>
+  </ul>
+  <p>
+    One consequence deserves emphasis: <strong>the URL is retired forever.</strong> A spawn at the same
+    <code>/type/id</code> after a kill fails with a 409, deliberately. If your ids are meaningful (a per-customer
+    assistant, say), plan the id scheme so retirement does not strand a name you need.
+  </p>
+
+  <p><strong>Where reclamation actually lives.</strong> The agents layer marks; the streams layer reclaims. The
+  protocol gives three levers, and the wiki's Part 2 covers the mechanics:</p>
+  <ul>
+    <li><code>Stream-TTL</code>: a sliding idle window. Any read or write that reaches the origin resets it, a
+      HEAD does not, and CDN-served reads do not. An actively observed stream therefore never expires, which is
+      what you want.</li>
+    <li><code>Stream-Expires-At</code>: an absolute deadline. The protocol rejects supplying both.</li>
+    <li><code>DELETE</code>: removes the stream. Afterward the path returns 410 and should not be re-created. If
+      live forks reference the stream, it is soft deleted instead: direct operations return 410, but fork readers
+      still stitch through it, and when the last fork dies the source is garbage collected, cascading up the fork
+      chain.</li>
+  </ul>
+  <p>
+    The catch, found by comparing the shipped API against the wiki's own advice: <strong>the agents layer neither
+    sets nor exposes stream TTLs.</strong> The server creates entity streams with no TTL, and no entity-level API
+    accepts one. So the fork-and-retire recipe's "TTL the ancestor" step (FAQ 7) is only reachable by calling the
+    streams API directly against the entity's stream paths. That works, and the namespace catalog in Part 1 tells
+    you the paths, but it is a layer violation you should wrap in tooling rather than do by hand.
+  </p>
+
+  <p><strong>The discipline, stated as rules.</strong> Since the platform ships no lifecycle page (a documented
+  gap: no docs page upstream covers retention, GC, or lifecycle end), the working rules are:</p>
+  <ul>
+    <li>Kill means quiesce, not reclaim. Budget storage accordingly: a killed entity costs what its log weighs,
+      forever, until someone deletes the streams.</li>
+    <li>Parents own their children's ends. Nothing cascades. Killing a coordinator leaves its workers alive and
+      sleeping, at kilobyte cost, invisible to any reaper because none exists. The spawn-once manifest rows tell
+      you exactly which children exist, so teardown is an enumerate-and-kill loop over
+      <code>ctx.db.collections.manifests</code>.</li>
+    <li>Boards outlive everyone. A shared board has no TTL, no cascade, and no public delete API today. If board
+      ids embed the creator (<code>debate-${ctx.entityUrl}</code>), an operator can at least find and delete the
+      backing streams directly.</li>
+    <li>Attachments have a real delete API. Use it: killing the owner does not touch them.</li>
+    <li>For history you want gone rather than closed, delete the streams and accept the 410-forever contract, or
+      fork what you want to keep first and delete the source. The reference counting handles shared history
+      correctly.</li>
+  </ul>
+</section>
+
+<!-- ================================================================ F15 -->
+<section id="f15">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 15</div>
+    <div class="qa-text">What are the solid options for deploying handlers at large scale, and what does Electric
+    recommend?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    Handlers are a library in your app behind one webhook URL, so the honest question is where to run that URL.
+    Four options: a long-lived service fleet (the best default today, and the shape the shipped code assumes),
+    serverless functions (Electric's stated architectural direction, with a real caveat about holding the
+    invocation open), pull-mode runners for private networks, and the announced-but-not-shipped managed offering.
+    Capacity comes from the claim system, not the runtime: one URL serves every instance of a type, replicas are
+    safe by construction, and there is no official deployment guide yet.
+  </div>
+
+  <p><strong>What the contract requires of any host.</strong> The server POSTs an Ed25519-signed wake to the
+  type's registered <code>serveEndpoint</code>. The host must be reachable from the server, must tolerate
+  at-least-once delivery, and must keep the process alive while the wake runs, heartbeating its claim. The
+  runtime acknowledges the webhook with a 200 <em>before</em> the handler finishes and runs the wake in the
+  background. That last fact drives most of the deployment tradeoffs below.</p>
+
+  <div class="table-scroll"><table>
+    <thead><tr><th>Option</th><th>Fit</th><th>The catch</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Long-lived service fleet</strong> (Node/Bun processes, containers, Kubernetes) behind one
+        load-balanced URL</td>
+        <td>Matches the shipped code's design exactly: background wakes after the 200 ack, no invocation time
+        limits for minutes-long runs, <code>drainWakes()</code> on SIGTERM for graceful deploys, warm processes
+        that read only the offset delta on each wake. The best default for a large fleet today.</td>
+        <td>You pay for idle between wakes and you own the autoscaling. Wakes are I/O-bound, so one process
+        multiplexes many, but a CPU-heavy handler starves its neighbors (FAQ 10).</td></tr>
+      <tr><td><strong>Serverless functions</strong> (Lambda, Cloud Run, Vercel, edge runtimes)</td>
+        <td>Electric's stated architectural direction. Their serverless-agents post argues agents belong "in
+        functions, with stateless agent logic, durability in the data layer and tool execution in backend
+        systems", and quotes the isolate economics: a V8 isolate cold-starts under 5 ms at 2 MB, against roughly
+        125 ms and 128 MB for a microVM. The walkthrough scaffolds a Hono app precisely because Hono deploys to
+        these runtimes.</td>
+        <td>No platform adapter ships. Because the runtime acks before the handler finishes, a platform that
+        freezes after the response would strand the wake. Today you must hold the invocation open for the whole
+        run (and set generous timeouts, minutes not seconds) or wire the pending work into the platform's
+        <code>waitUntil</code> yourself. Cold starts also add catch-up latency for cold entities.</td></tr>
+      <tr><td><strong>Pull-mode runners</strong> (<code>{ type: 'runner' }</code> dispatch policy)</td>
+        <td>For hosts the server cannot reach: laptops, private VPCs, GPU boxes behind NAT. The runner long-polls
+        a claim endpoint, outbound only, and receives the same notification shape as the webhook path, so the
+        handler code does not change. Dispatch policy resolves per entity, then parent, then type default, so
+        push and pull coexist in one system.</td>
+        <td>You run the runner and watch its liveness lease (30 seconds by default). A dead runner's entities
+        wait until the lease expires and dispatch recovers.</td></tr>
+      <tr><td><strong>Managed</strong> (Electric Cloud)</td>
+        <td>The multi-tenant embedding exists in the codebase as <code>AgentsHost</code>: one process, many
+        tenants, shared background workers. This is the shape of the hosted offering.</td>
+        <td>Announced, not shipped: "we'll be offering a managed agent runtime service soon." Today Electric
+        Cloud is the managed data plane, not a managed agent runtime. Do not plan a launch around it.</td></tr>
+    </tbody>
+  </table></div>
+
+  <p><strong>How capacity actually scales.</strong> Three facts carry the whole story:</p>
+  <ul>
+    <li><strong>One URL serves every instance.</strong> An entity has no residency between wakes, so a single
+      <code>serveEndpoint</code> serves ten entities or ten million. There is no per-runtime entity limit, and
+      also no built-in cap on concurrent in-flight wakes per process, so the process's event loop is the budget
+      you manage.</li>
+    <li><strong>Replicas are safe by construction, behind one URL.</strong> The type record stores exactly one
+      <code>serve_endpoint</code>, and registration is last-writer-wins, so N replicas must share a load-balanced
+      URL rather than register themselves individually. Safety does not depend on the replicas: claims, epochs,
+      and leases in Postgres guarantee at most one live wake per entity, competing claims get 409s, and a stale
+      done from a superseded epoch is fenced. A dispatch-recovery loop re-offers work whose lease expired.</li>
+    <li><strong>The always-on plane scales separately.</strong> Server nodes are stateless per request and run as
+      replicas with Postgres as the coordination point; schedulers and drainers use claim columns so N nodes do
+      not double-fire; every table and stream path is tenant-scoped. The plane is a fixed cost amortized over the
+      whole fleet, which is the economics FAQ 6 describes.</li>
+  </ul>
+  <p>
+    The documented gap, so you are not surprised: upstream has no deployment, production, or scaling guide. The
+    guidance above is assembled from the topology page (Part 6, Q4), the shipped code's behavior, and two blog
+    posts. If you are sizing something serious, prototype the wake path on your target platform first, and treat
+    the serverless option in particular as a design direction rather than a paved road.
   </p>
 </section>
 
