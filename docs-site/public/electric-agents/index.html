@@ -139,15 +139,16 @@
         made actors "purely logical entities that <em>always</em> exist, virtually" — activated on demand,
         deactivated under pressure, always addressable, state persisted between activations. Virtual existence is
         a solved problem in actor-land; it is not what's new here.</li>
-      <li><strong>What agents change is <em>what persists, and who gets to read it</em>.</strong> A virtual actor
-        persists a state <em>snapshot</em> with one access pattern: load on activation, save on write, private to
-        the actor. An agent persists a <strong>journal</strong> — the append-only, offset-addressed record of
-        everything it said, saw, and did — and the journal is the <em>product</em>, with many readers and many
-        access patterns: the LLM's context is a projection of it, the UI streams it live, parents and observers
-        watch it, audits read it whole, and <code>fork()</code> <strong>branches it</strong> — "copy this agent's
-        timeline at event N and let both continue" has no snapshot equivalent. Recovery falls out for free:
-        re-entry into the journal rather than restart into cleanliness, which also matches how agents actually
-        fail — the process is usually healthy; the <em>output</em> is what went wrong.</li>
+      <li><strong>What agents change is <em>who the log is for</em>.</strong> Actor systems already event-source
+        when they need durability — Akka Persistence and Orleans JournaledGrains keep a log too. But theirs is a
+        <em>recovery mechanism</em>: private to the actor, replayed by the actor, one consumer, one access
+        pattern. Here the <strong>log is the interface</strong>: the same append-only, offset-addressed record of
+        everything the agent said, saw, and did <em>is</em> the write path, the read path, the LLM's context (a
+        projection of it), the UI's live feed, the parent's monitor, the audit trail — and <code>fork()</code>
+        <strong>branches it</strong>: "copy this agent's timeline at event N and let both continue" has no
+        equivalent when the log is a persistence detail. Recovery falls out for free: re-entry into the log
+        rather than restart into cleanliness, which also matches how agents actually fail — the process is
+        usually healthy; the <em>output</em> is what went wrong.</li>
       <li><strong>And agents change where identity lives: the web, not a cluster.</strong> A grain is always
         addressable <em>inside its cluster</em>; an entity's address is a URL — messaging is an HTTP append, and a
         handler runs on anything that can receive a webhook. Though not every agent should be externalized: a
@@ -156,7 +157,7 @@
     </ul>
     <p>
       Same discipline — single-threaded, message-driven, isolated — extended one more step:
-      <em>process actors → virtual actors → journaled, web-addressed agents.</em> The open threads this lineage
+      <em>process actors → virtual actors → logged, web-addressed agents.</em> The open threads this lineage
       still owes us: declarative supervision (<a href="faq.html#f9">FAQ 9</a>) and the internal/external agent
       distinction (<a href="faq.html#f11">FAQ 11</a>); the full argument and line-for-line mapping live in
       <a href="faq.html#f8">FAQ 8–10</a>.
