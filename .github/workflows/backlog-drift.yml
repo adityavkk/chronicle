@@ -1,0 +1,26 @@
+name: Backlog drift
+
+# The backlog-drift job in ci.yml runs on every PR/push, which catches the
+# "closing PR forgot to delete its row" case before merge. This workflow
+# catches the other direction — issue state changing with no push at all (an
+# issue opened, closed, reopened, deleted, or transferred by hand) — the
+# moment it happens, instead of waiting for the nightly backstop in
+# formal-nightly.yml. A red run here means docs/BACKLOG.md needs a row
+# slotted in or deleted.
+#
+# Kept as its own workflow rather than an `issues:` trigger on ci.yml so an
+# issue click runs this one 5-second check, not the whole suite.
+on:
+  issues:
+    types: [opened, reopened, closed, deleted, transferred]
+  workflow_dispatch:
+
+jobs:
+  backlog-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/BACKLOG.md against the open issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/backlog-check.sh
