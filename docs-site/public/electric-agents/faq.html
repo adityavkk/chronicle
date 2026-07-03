@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FAQ — Electric Agents, Explained</title>
-<meta name="description" content="Further architectural questions: Temporal comparison, concurrency and races, delivery semantics, unbounded logs vs finite context, the failure model, latency and cost, schema evolution, and the actor-model (Erlang/OTP) argument — supervision trees, let-it-crash, and where Electric Agents stands.">
+<meta name="description" content="Further architectural questions: Temporal comparison, concurrency and races, delivery semantics, unbounded logs vs finite context, the failure model, latency and cost, schema evolution, and the actor-model (Erlang/OTP) argument — supervision trees, let-it-crash, virtual actors, the internal/external agent split, and where Electric Agents stands.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
@@ -41,6 +41,7 @@
   <a href="#f8">8 · The Erlang/OTP argument</a>
   <a href="#f9">9 · Where are the supervision trees?</a>
   <a href="#f10">10 · The runtime-level 30%</a>
+  <a href="#f11">11 · Internal vs. external agents</a>
 </nav>
 
 <div class="main">
@@ -49,7 +50,7 @@
   <p class="kicker">Appendix</p>
   <h1>FAQ — the next questions</h1>
   <p class="lead">
-    Ten more questions at the same altitude as <a href="qa.html">Part 6</a> — the ones this architecture invites
+    Eleven more questions at the same altitude as <a href="qa.html">Part 6</a> — the ones this architecture invites
     once the first five are answered. Same format: the short version first, then the machinery.
   </p>
 </header>
@@ -426,6 +427,9 @@
     <thead><tr><th>Actor-model concept (BEAM)</th><th>Electric Agents equivalent</th></tr></thead>
     <tbody>
       <tr><td>Process with an isolated heap</td><td>Entity with private streams + materialized state (Part 1, Part 4)</td></tr>
+      <tr><td>Virtual actor (Orleans grain) — "always exists, virtually"; activated on demand; a state
+        <em>snapshot</em> persisted between activations</td><td>Same virtual existence — but what persists is the
+        <strong>journal</strong>, not a snapshot: public, multi-reader, offset-addressed, forkable</td></tr>
       <tr><td>Mailbox — in-memory, unbounded, dies with the process</td><td>Inbox stream — durable, totally ordered,
         offset-addressed; survives crashes, redeploys, and <code>kill&nbsp;-9</code> (Part 2)</td></tr>
       <tr><td><code>send</code> / <code>receive</code> loop</td><td><code>send()</code> / wake handler — FAQ 2's
@@ -438,6 +442,16 @@
     </tbody>
   </table></div>
 
+  <p>
+    One refinement the one-line thesis needs — and the reason "departure from actors" would overstate it: Orleans's
+    virtual actors <em>already</em> decoupled existence from residency ("actors are purely logical entities that
+    <em>always</em> exist, virtually… always addressable" — <a
+    href="https://learn.microsoft.com/en-us/dotnet/orleans/overview">Orleans docs</a>), with activation on demand
+    and state persisted between activations. So sleeping cheaply is not the novelty. Read this stack as the next
+    relaxation in the same lineage: what changed is the <em>state model</em> — snapshot → journal, private →
+    public, load/save → append/observe/<code>fork()</code> — and the addressing — cluster → web (FAQ 11 for where
+    that one gets complicated).
+  </p>
   <p>
     The deep difference is what a failure costs. OTP restarts in <em>microseconds</em> into a <em>clean</em> state —
     which for an agent means the conversation, the tool results, and the tokens you paid for are gone (the sharpest
@@ -565,6 +579,61 @@
     — not answered: the first is buildable as a pattern and should eventually be a library; the second is a real
     limit you design around by keeping handlers I/O-shaped. Which lands on Guimarães's own closing point: runtimes
     shape systems. This one just picked the append-only log, rather than the VM, as the component that never lies.
+  </p>
+</section>
+
+<!-- ================================================================ F11 -->
+<section id="f11">
+  <div class="qa-question">
+    <div class="qa-label">FAQ 11</div>
+    <div class="qa-text">Not every agent seems to need a public address: one agent may spawn a flock of ephemeral
+    sub-agents, while another is a standing contract with the outside world. Do actor systems distinguish internal
+    from external agents? Does Electric?</div>
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    Actor systems have addressability <em>scopes</em> but no first-class internal/external distinction. Electric
+    makes the opposite simplification: <strong>every entity is externalized</strong> — a URL with durable streams —
+    and the only "internal agents" are whatever lives inside a single wake's in-process loop. The middle tier —
+    <em>journaled but unaddressed, agentic but private, lifecycle-bound to a parent</em> — is unformalized in both
+    traditions. This answer is partly an editorial flag: that tier is worth formalizing, and nobody has.
+  </div>
+
+  <p><strong>What actors have: scopes, not semantics.</strong> An Erlang pid is anonymous until you register it
+  (locally or globally); Akka separates local actors from cluster-sharded ones; an Orleans grain is always
+  addressable — but only <em>within its cluster</em>, with web exposure a separate frontend concern. So the
+  machinery for "reachable by whom?" exists everywhere, but it's an operational scope, not a modeling concept:
+  nothing in the actor contract says <em>this actor is an internal implementation detail; that one is a public
+  commitment</em>.</p>
+
+  <p><strong>What Electric has: externalization by construction.</strong> Identity <em>is</em> a URL
+  (<code>/{type}/{id}</code>); a <code>spawn()</code>ed child is a full entity with streams, an authz surface, and
+  a lifecycle, identical in kind to its parent. That default buys the properties this wiki keeps advertising —
+  any agent can be observed, audited, streamed to a UI, signaled by an operator, <code>fork()</code>ed — precisely
+  <em>because</em> nothing is hidden inside a process. But it also bills every ephemeral helper the full contract:
+  an address you must authorize, storage you must TTL, an orphan you must remember to end (FAQ 9's linked-lifecycle
+  gap). At the other extreme, the tool loop inside <code>ctx.agent.run()</code> is fully internal — no address, no
+  journal beyond what the handler chooses to append. Between "full public entity" and "invisible in-process loop"
+  there is nothing.</p>
+
+  <p><strong>The unformalized middle tier.</strong> A researcher entity that fans out twelve extraction
+  sub-agents wants them journaled (debuggability, audit, fork-to-retry) but not <em>addressed</em>: no inbound
+  contract, invisible to the public routing surface, reachable only through the parent, and torn down with it.
+  A formalization would probably be a spawn-time property, not a new noun: <em>visibility</em> (private streams,
+  capability-scoped to the parent rather than the public surface), <em>lifecycle linkage</em> (die/TTL with the
+  parent — the same missing "process group" concept as FAQ 9's <code>one_for_all</code>, which suggests one
+  mechanism solves both), and <em>contract exclusion</em> (no <code>inboxSchemas</code> obligations to version).
+  Until something like that exists, the working rule: externalize an agent iff someone who is <em>not its
+  parent</em> must message, observe, or audit it — and before minting a URL at all, check whether the "sub-agent"
+  is really just handler code (the hybrid control-flow idiom, Part 3 §6).</p>
+
+  <p>
+    Worth saying plainly: this is the one question in this appendix answered by neither the source material nor
+    the shipped system. OTP never needed the distinction (all pids are cheap and die with the app), Orleans made
+    everything uniformly cluster-addressable, and Electric made everything uniformly web-addressable. Agents —
+    which spawn agents, which spawn agents — are the first workload where the internal/external split is doing
+    real architectural work, and it's this explainer's nomination for the next concept the actor lineage owes us.
   </p>
 </section>
 
