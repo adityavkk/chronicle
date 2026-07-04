@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Identity: Cryptographic Entities and an Egress Policy Proxy</title>
+<meta name="description" content="How to give each Electric Agents entity a verifiable cryptographic identity and enforce rich egress policy outside the agent, with no tokens in the agent process: what Electric ships today, what clawpatrol actually verifies, the prior art, and a concrete design anchored on chronicle's signed wakes.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/mermaid.min.js"></script>
+<script src="assets/app.js"></script>
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="brand" href="index.html"><span class="bolt">⚡</span> Electric Agents, Explained</a>
+  <a class="navlink" href="index.html">Start</a>
+  <a class="navlink" href="concepts.html">1 · The Nouns</a>
+  <a class="navlink" href="streams.html">2 · Durable Streams</a>
+  <a class="navlink" href="howto.html">3 · How to Do Things</a>
+  <a class="navlink" href="runtime.html">4 · Runtime Internals</a>
+  <a class="navlink" href="server.html">5 · Server Internals</a>
+  <a class="navlink" href="qa.html">6 · Q&amp;A</a>
+  <a class="navlink" href="faq.html">FAQ</a>
+  <a class="navlink" href="journeys.html">Journeys</a>
+  <a class="navlink" href="orbs.html">Orbs</a>
+  <a class="navlink" href="substrate.html">Substrate</a>
+  <a class="navlink active" href="identity.html">Identity</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" type="button">☾ dark</button>
+</nav>
+
+<div class="wrap">
+<nav class="toc">
+  <p class="toc-title">On this page</p>
+  <a href="#verdict">1 · The verdict up front</a>
+  <a href="#electric">2 · What Electric ships today</a>
+  <a href="#clawpatrol">3 · What clawpatrol verifies</a>
+  <a href="#priorart">4 · The prior art in one map</a>
+  <a href="#design">5 · The design: attested wakes</a>
+  <a href="#graph">6 · The Graph worked example</a>
+  <a href="#costs">7 · Costs and open questions</a>
+  <a href="#actions">8 · Actions</a>
+  <a href="#sources">Sources &amp; tiers</a>
+</nav>
+
+<div class="main">
+
+<header class="hero">
+  <p class="kicker">Evaluation &amp; design</p>
+  <h1>Agent identity, decided at the egress boundary</h1>
+  <p class="lead">
+    An Electric agent is a stream path. It has no keypair, no certificate, and no attestable identity of its own,
+    and today every secret it uses to call the outside world lives with the host process: environment variables, a
+    machine-wide token file, or the OS keychain. This page answers three questions, and the design corollary they
+    force. What identity and authorization machinery does Electric Agents actually ship,
+    and what does it tell you to do? Does a forward proxy in the clawpatrol shape verify who is calling it, or only
+    where the bytes came from? And how do you give every agent entity a verifiable cryptographic identity so that a
+    policy layer outside the agent can inspect each request, judge it with rules and a model, inject the real
+    credentials itself, and leave the agent holding no tokens at all? The design in section 5 anchors that identity
+    on machinery chronicle already ships: the Ed25519-signed wake.
+  </p>
+  <div class="hero-sub">
+    <span class="pill a">primary sources quoted</span>
+    <span class="pill b">inferences labeled</span>
+    <span class="pill c">gaps named</span>
+    <span class="pill d">preview features flagged</span>
+  </div>
+</header>
+
+<div class="callout warn">
+  <div class="callout-title">⚠ This field is weeks old and moving</div>
+  <p>
+    Research date is 2026-07-03. Clawpatrol had its first commit on 2026-04-28. Microsoft's Entra Agent ID went GA
+    in stages through 2026 and the pieces this page needs from it are still marked preview. The transaction-tokens
+    draft finished working-group last call in April 2026 and is not an RFC. Every claim below carries a tier:
+    <span class="pill a">primary</span> for quoted sources and verified file:line reads,
+    <span class="pill b">inferred</span> for our reading, <span class="pill c">gap</span> for evidence that does not
+    publicly exist. Load-bearing claims were adversarially re-verified against the primary documents; corrections
+    from that pass are already folded in.
+  </p>
+</div>
+
+<!-- ================================================================ verdict -->
+<section id="verdict">
+  <h2><span class="kicker-num">§</span>The verdict up front</h2>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Question</th><th>Answer</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td><strong>What does Electric Agents already do about identity?</strong></td>
+        <td>It names identities but does not prove them. There is a real principal model with <code>agent</code> as
+        a first-class kind and a real, enforced grant system for who may touch an entity. But the principal arrives
+        as a plain unauthenticated HTTP header, authentication is delegated to a hook you must write, and on the
+        outbound side there is no per-entity credential concept at all: model keys, tool keys, and MCP OAuth tokens
+        are process-global. Electric's own docs tell you to put an authenticating proxy in front. The gap you
+        suspected is real, and it is documented as yours to fill.</td>
+        <td><a href="#electric">§2</a></td></tr>
+      <tr><td><strong>Does clawpatrol verify the identity of the agent?</strong></td>
+        <td>Half yes, and the half matters. In its remote modes it cryptographically verifies the <em>device</em>
+        (a WireGuard peer or Tailscale node minted at human-approved onboarding) and refuses to trust anything the agent asserts. But the
+        subject is never an agent entity, rules cannot reference caller identity in conditions, and its identity
+        granularity recently moved coarser, to one daemon per host. One process hosting a thousand entities is a
+        single indistinguishable peer. The shape is right. The subject is wrong.</td>
+        <td><a href="#clawpatrol">§3</a></td></tr>
+      <tr><td><strong>Can "no tokens with the agent" work per entity?</strong></td>
+        <td>Yes, and every piece has shipped prior art: platform-attested identity with local token vending (cloud
+        IMDS), gateway-side credential injection (clawpatrol, Google's Agent Gateway), request-body policy with
+        header injection (Envoy ext_authz), and a model verdict in the blocking path (Cloudflare's guardrails at
+        roughly 500ms). What has not shipped anywhere we could find in public documentation is the granularity you
+        need: a distinct verifiable credential per agent <em>entity</em>, finer than the process. That layer is the
+        thing to build, and it is small, because chronicle already signs a per-wake statement that names the
+        entity.</td>
+        <td><a href="#priorart">§4</a>, <a href="#design">§5</a></td></tr>
+      <tr><td><strong>What should chronicle itself take on?</strong></td>
+        <td>Wake attestation and nothing more. Chronicle should sign short-lived, audience-bound statements that a
+        specific entity was legitimately woken at a specific generation, as a pure §11 superset of the protocol. It
+        should not become an OAuth authorization server: it has no model of scopes, consent, or external audiences,
+        and the spec deliberately keeps authentication out of scope. Verification, token custody, exchange, and
+        policy belong in the egress gateway.</td>
+        <td><a href="#design">§5</a></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ================================================================ electric -->
+<section id="electric">
+  <h2><span class="kicker-num">§</span>What Electric Agents ships today, and what it recommends</h2>
+  <p>
+    The findings below come from the source at commit <code>5af7ab52</code> (2026-06-30), with file and line
+    references into <code>packages/agents-server</code> and <code>packages/agents-runtime</code>.
+    <span class="pill a">primary</span>
+  </p>
+  <p>
+    <strong>The principal model is real.</strong> A principal is <code>kind:id</code> where kind is
+    <code>user</code>, <code>agent</code>, <code>service</code>, or <code>system</code>
+    (<code>principal.ts:3</code>), canonicalized to a URL <code>/principal/&lt;kind&gt;:&lt;id&gt;</code>. The
+    authorization layer is also real: DB-backed per-entity grants (read, write, delete, signal, fork, schedule,
+    spawn, manage) plus entity-type grants, checked on every request, with expiry and propagation to descendants
+    (<code>permissions.ts:29-197</code>). Agent-to-agent messages carry a <code>from_agent</code> field that the
+    server checks against the authenticated agent principal (<code>entities-router.ts:1319</code>). The identity
+    schema even carries optional <code>auth_provider</code>, <code>auth_subject</code>, and <code>claims</code>
+    fields, a linkage shape for an external identity provider that nothing in the open-source codebase populates or
+    verifies.
+  </p>
+  <p>
+    <strong>The authentication of that principal is a header.</strong> The server resolves the caller from an
+    optional <code>authenticateRequest</code> hook that you supply; when the hook is absent it parses the plain
+    <code>Electric-Principal</code> HTTP header verbatim (<code>server.ts:406-427</code>,
+    <code>principal.ts:64-68</code>). No JWT, no signature, no API key exists anywhere in the inbound path. Three
+    built-in system principals (<code>framework</code>, <code>auth-sync</code>, <code>dev-local</code>) bypass every
+    permission check, so the header <code>electric-principal: system:framework</code> is, by itself, full access.
+    Header-less requests get the all-powerful dev principal whenever <code>NODE_ENV</code> is not production, an
+    embedded test stream server is set, or <code>ELECTRIC_INSECURE=true</code> (<code>server.ts:381-390</code>). The
+    runtime, for its part, authenticates to the server with operator-supplied static headers and echoes back
+    whatever principal key arrived in the wake notification. The docs are explicit that this is by design:
+    production deployments <em>"should authenticate requests and provide an explicit Electric-Principal header for
+    every request"</em>, and Electric's sync guides canonize the same posture as proxy auth and gatekeeper auth.
+    The gatekeeper you are imagining is the deployment model they assume. <span class="pill a">primary</span>
+  </p>
+  <p>
+    <strong>Outbound, there is no identity at all.</strong> Model keys are process-wide environment variables or a
+    machine-wide Codex token file, with an optional <code>getApiKey(provider)</code> hook whose signature does not
+    include the entity (<code>model-runner.ts:44-75</code>, <code>types.ts:959-961</code>). Tool keys come from
+    <code>process.env</code>. MCP servers configured with OAuth persist their tokens in the OS keychain and the
+    docs state the resulting tools become available <em>"to every entity at the next wake"</em>, so one user's
+    grant is shared by every entity the process hosts. The word "credential" appears exactly once in the two
+    packages' source, in an error message. There is no forward-proxy support: zero matches for
+    <code>HTTPS_PROXY</code> or any proxy agent across the packages. Two seams do exist and matter later: MCP HTTP
+    transports have first-class per-destination token injection, and host-side fetches flow through undici's
+    composable global dispatcher, which Electric's own desktop app already uses to inject its cloud auth. But there
+    is no per-entity anything on the way out. <span class="pill a">primary</span>
+  </p>
+  <p>
+    <strong>Sandboxes bound egress, not identity.</strong> Network policy on the Docker sandbox is only a hard
+    boundary at deny-all; the docs say the allowlist mode is <em>"only a surface protection on docker, NOT a
+    boundary"</em>, because exec has direct bridge egress. The E2B adapter maps allowlists to VM-level filtering
+    that appears to match on Host and SNI, which raw-IP or non-HTTP traffic may bypass; we did not verify E2B's
+    enforcement depth. <span class="pill b">inferred</span> Sandboxes receive secrets as static profile environment
+    variables. And the one piece of cryptography in the whole system points the other way: the agents-server signs
+    outbound wake webhooks with an Ed25519 key and publishes a JWKS, and the runtime verifies those signatures with
+    a 300-second replay window (<code>webhook-signing.ts</code>, <code>webhook-signature.ts:38-90</code>). The
+    server proves itself to the runtime. Nothing proves the agent to anyone. <span class="pill a">primary</span>
+  </p>
+  <p>
+    <strong>The roadmap says this is deliberate.</strong> The runners RFC
+    (<a href="https://github.com/electric-sql/electric/issues/4299">issue #4299</a>) states <em>"This RFC does not
+    try to solve authorization in a general sense"</em>, ships runner identity as a named row with a same-user
+    check, and defers both <em>"runner-specific cryptography or device credentials"</em> and <em>"delegated
+    credentials if needed by runner apps"</em> to future work. The nearest thing to a per-entity secret that exists
+    today is the per-wake claim and write token pair: random UUIDs minted at wake time, scoped to one entity's
+    stream and one claim epoch. The protocol spec says such tokens SHOULD be signed; the shipped implementation does
+    not sign them. That per-wake capability is the seed the design in section 5 grows.
+    <span class="pill a">primary</span>
+  </p>
+</section>
+
+<!-- ================================================================ clawpatrol -->
+<section id="clawpatrol">
+  <h2><span class="kicker-num">§</span>What clawpatrol is, and what it actually verifies</h2>
+  <p>
+    Clawpatrol is <a href="https://github.com/denoland/clawpatrol">denoland/clawpatrol</a>, Deno Land's MIT-licensed
+    <em>"security firewall for agents"</em>: a single self-hosted Go binary that terminates agent egress. It is
+    young and fast-moving: first commit 2026-04-28, roughly 900 stars, 24 releases between mid-May and late June,
+    pre-1.0 with a written security model that its own issue tracker admits the implementation still trails.
+    <span class="pill a">primary</span>
+  </p>
+  <p>
+    Its architecture is worth describing precisely because section 5 borrows most of it. Agent machines join the
+    gateway over WireGuard or Tailscale at layer 3, so there is no <code>HTTPS_PROXY</code> variable and no CONNECT:
+    the gateway sees every flow's original destination, peeks TLS SNI, and man-in-the-middles matched hosts with a
+    per-gateway CA installed in the agent's trust store at onboarding. Beyond HTTPS, it natively intercepts Postgres, ClickHouse,
+    Kubernetes, and SSH. Credentials live gateway-side in SQLite; agents receive
+    shape-valid placeholders (<code>GH_TOKEN=ghp_clawpatrol_placeholder_do_not_use</code>) and the gateway swaps the
+    real secret into the protocol's auth slot at egress, including stripping and re-signing AWS SigV4 requests and
+    completing SSH and Postgres handshakes itself. Response-side auth artifacts (Set-Cookie, WWW-Authenticate) are
+    stripped so the agent cannot harvest session tokens from what comes back. Policy is HCL rules with CEL
+    (Common Expression Language) conditions over per-protocol wire facts, including parsed JSON request bodies up
+    to 1&nbsp;MiB, with first-match priority, fail-closed evaluation errors (though the no-match default is allow,
+    and the docs recommend a low-priority deny catch-all), a built-in LLM approver that judges the request against an
+    operator-written policy prompt with a deny-when-ambiguous system prompt, and human approval over Slack, the
+    dashboard, or a webhook that times out closed. Its security model is honest about containment: interception is
+    best-effort, and the guarantee is only that <em>"a flow that escapes interception is therefore uncredentialed —
+    an anonymous client holding only placeholders…"</em> Tokens and policy share one chokepoint, so escaping the
+    proxy costs the agent its credentials. That coupling is exactly the property you asked for.
+    <span class="pill a">primary</span>
+  </p>
+  <p>
+    Now the identity question. Your suspicion was half right, and the refinement matters. Clawpatrol does verify an
+    identity, and refuses to trust anything the agent claims: <em>"The originating registration is identified from
+    the channel the request arrived on... not from anything the agent can claim"</em> (security-model.md). In remote
+    modes that channel identity is cryptographic, a WireGuard peer key or a persistent Tailscale node minted at
+    human-approved onboarding and mapped to a credential profile. In local mode it is UNIX-user channel separation,
+    not cryptography. But the subject is always a <em>device</em>. The schema comments say the owner concept is
+    <em>"intentionally absent"</em>; rule conditions expose only protocol facts (<code>http.*</code>,
+    <code>sql.*</code>, <code>k8s.*</code>, <code>ssh.*</code>) and no caller-identity variable exists; identity can
+    select which rules apply, via profiles and per-device blocks, but can never be tested inside a condition. And
+    the granularity has moved coarser, not finer: per-run ephemeral WireGuard peers were added and then removed when
+    both transports were unified into one per-host daemon, so today every process on a device, and every entity
+    inside every process, is one indistinguishable peer. The open roadmap items (community RFC #709 for
+    Kubernetes-attested dynamic peers, maintainer PR #753 for OIDC ephemeral enrollment) are both enrollment-time
+    and workload-grade, not per-entity and not per-request. Per-entity policy is not expressible in clawpatrol
+    today, and nothing public suggests it will be soon. One more practical gap for your use case: there is no
+    Microsoft Graph or Entra OAuth credential plugin, so Graph would ride a generic static bearer with no refresh
+    handling, or a custom plugin. <span class="pill a">primary</span>
+  </p>
+</section>
+
+<!-- ================================================================ priorart -->
+<section id="priorart">
+  <h2><span class="kicker-num">§</span>The prior art in one map</h2>
+  <p>
+    Everything the target architecture needs exists somewhere, shipped or drafted. What does not exist, anywhere we
+    could find in public documentation, is the combination at entity granularity. The consistent pattern across
+    every serious system is two layers: a strongly attested workload identity for the process or pod, and a cheap,
+    short-lived credential minted per finer-grained subject on top of it. No system we found issues certificates
+    per entity at million-entity scale; every system we examined switches to short-lived signed tokens at that
+    layer.
+    <span class="pill b">inferred</span>
+  </p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Prior art</th><th>What it gives this design</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td><strong>SPIFFE / SPIRE</strong></td>
+        <td>Workload identity with no bootstrap secret: the platform attests the process and issues X.509 or JWT
+        SVIDs. The identity subject is the workload. Static registration per entity is the wrong tool: the official
+        sizing guidance tops out at 10,000 workloads and a 700k-entry performance test reported timeouts (since
+        mitigated, with the mitigations still opt-in). The incubating SPIFFE Broker API is the project's own answer for
+        finer-grained subjects: a trusted broker fetches SVIDs on behalf of control-plane objects.</td>
+        <td><span class="pill a">shipped</span> core, <span class="pill c">incubating</span> broker</td></tr>
+      <tr><td><strong>IETF WIMSE + transaction tokens</strong></td>
+        <td>The standards track is converging on exactly this shape. The WIMSE architecture defines an
+        <em>Identity Proxy</em> that may inspect, replace, or augment workload identity and carry added context as a
+        transaction token. Transaction tokens (draft-08, WG last call ended 2026-04-10) are short-lived,
+        purpose-scoped JWTs minted by one logical service per trust domain, with a self-signed path for
+        internally-initiated work such as cron. That is a per-wake credential in all but name. None of it is an RFC
+        yet.</td>
+        <td><span class="pill c">draft</span></td></tr>
+      <tr><td><strong>Proof-of-possession per request</strong></td>
+        <td>DPoP (RFC 9449) and HTTP Message Signatures (RFC 9421) let a caller sign each request against a held
+        key so a verifier gets per-request provenance. Biscuit tokens add offline attenuation with public-key
+        verification: a holder can mint a strictly narrower token per task without an issuer round trip. These are
+        the upgrade path once a bearer wake token is not enough.</td>
+        <td><span class="pill a">shipped</span> RFCs</td></tr>
+      <tr><td><strong>Cloud IMDS pattern</strong></td>
+        <td>All three clouds vend short-lived tokens from a link-local endpoint to workloads whose identity the
+        platform attests. It is the canonical "ambient identity, no stored secret" shape, and its granularity limit
+        is the VM, which is precisely the gap an entity layer must close.</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td><strong>Secretless brokers</strong></td>
+        <td>CyberArk's Secretless Broker proved connection-level credential injection where the app never sees the
+        secret. Vault Agent, notably, is not this: its template mode hands the app real secrets. Clawpatrol is the
+        modern agent-flavored version with placeholders and protocol-aware injection.</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td><strong>Envoy ext_authz / ext_proc</strong></td>
+        <td>The enforcement chassis. ext_authz sends the buffered request body to your gRPC policy server and lets
+        an allow verdict inject or overwrite request headers, including Authorization, with an explicit fail-open or
+        fail-closed switch. ext_proc adds streaming inspection and mutation of request and response bodies. Istio's
+        docs supply the enforcement caveat: an egress gateway with no network-level default-deny is advisory.</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td><strong>AI gateways</strong></td>
+        <td>Proof the three capabilities compose in one proxy: Cloudflare AI Gateway vaults provider keys, inspects
+        both directions, and runs Llama Guard in the blocking path at a documented ~500ms with a fail-closed mode
+        for blocking categories and no streaming support. LiteLLM adds ~2-8ms p95 proxy overhead with judge hooks
+        that dominate latency. Kong ships regex and embedding classifiers in-path. These gate model traffic, not
+        arbitrary egress, and none knows who the caller is beyond an API key.</td>
+        <td><span class="pill a">shipped</span></td></tr>
+      <tr><td><strong>MCP and tool-call gateways</strong></td>
+        <td>agentgateway (Linux Foundation) authorizes individual MCP tool calls with CEL over JWT claims, the
+        closest shipped thing to per-caller, per-call policy. The MCP authorization spec itself identifies client
+        software and users, not agent instances, and its newest revision concedes its client-identity mechanism
+        cannot prevent impersonation without additional attestation.</td>
+        <td><span class="pill a">shipped</span> gateway, <span class="pill c">spec caveats</span></td></tr>
+      <tr><td><strong>Microsoft Entra Agent ID</strong></td>
+        <td>Microsoft's productization of agent-as-directory-object: credential-less agent identities minted from a
+        credential-holding blueprint, with an on-behalf-of exchange whose tokens carry the user as subject and the
+        agent as actor. The core is documented GA, but the pieces this design would lean on (blueprint wizard,
+        <code>fmi_path</code> exchange, agent Conditional Access) are preview-gated, the exchange parameter is
+        proprietary, and third-party platforms using app-only Graph calls cap at 250 identities per blueprint.
+        Treat it as the direction of travel, not a dependency.</td>
+        <td><span class="pill b">preview-gated</span></td></tr>
+      <tr><td><strong>Google Agent Identity + Agent Gateway</strong></td>
+        <td>The closest shipped instance of agent-holds-no-token: per-agent SPIFFE X.509 identity, DPoP-bound
+        tokens, and end-user credentials encrypted by an auth manager and decrypted only at the gateway. But
+        "per-agent" means per deployed reasoning-engine resource, it works only on Google-hosted surfaces (the
+        agent platform runtime and Gemini Enterprise), and the entire auth-manager component, the piece that
+        provides the no-token property, is preview. Agent Substrate's SessionIdentity design (see the
+        <a href="substrate.html">Substrate page</a>) is the same two-layer pattern as a published design with an
+        aspirational disclaimer.</td>
+        <td><span class="pill b">preview</span></td></tr>
+      <tr><td><strong>Auth0 / Okta for agents</strong></td>
+        <td>Auth0's Token Vault (GA) brokers third-party tokens but returns the raw token to the agent at call
+        time, which fails the no-tokens goal. Its CIBA async-authorization flow is good prior art for the human
+        approval leg. Okta's Cross App Access is beta and rate-limited. Cisco's AGNTCY issues W3C verifiable
+        credentials per agent at alpha maturity.</td>
+        <td><span class="pill a">shipped</span> with caveats</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    Two conclusions fall out of the map. First, the egress-proxy shape you want is not exotic: the WIMSE
+    architecture names it, clawpatrol and Google's gateway implement variants of it, and OWASP's agentic top-10
+    lists identity and privilege abuse as a first-class threat it addresses. Second, the entity-granularity layer is
+    genuinely yours to build. Every attestation in the map stops at the process, pod, device, or deployed-agent
+    resource. An Electric entity is finer than all of those, and the only party that can honestly attest which
+    entity is acting is the system that woke it. That is chronicle. <span class="pill b">inferred</span>
+  </p>
+</section>
+
+<!-- ================================================================ design -->
+<section id="design">
+  <h2><span class="kicker-num">§</span>The design: the wake carries the identity</h2>
+  <p>
+    Start from what already exists. Every webhook wake chronicle delivers is Ed25519-signed over the exact body plus
+    a timestamp, verifiable against a JWKS chronicle publishes, and that signed body already binds the
+    subscription id, a monotonic generation, a random wake id, the linked stream paths (which in the Electric
+    integration means the entity), and the exact offset window. Generation fencing makes the triple (subscription,
+    generation, wake id) unique and non-reusable on chronicle's side: claims, acks, and callbacks are rejected
+    unless all fence components match, and a lease takeover rotates the fence. In other words, chronicle already
+    produces a cryptographically verifiable statement: <em>entity E was legitimately woken at generation G for
+    offsets A to T at time t</em>. What it lacks to function as a credential a third party can accept is small: no
+    audience, no explicit expiry, no replay tracking at the verifier, and the raw signed body embeds a live callback
+    bearer token you must not forward. The pull-wake path has no asymmetric artifact at all today; its tokens are
+    HMAC that only chronicle can verify. <span class="pill a">primary</span>
+  </p>
+  <p>
+    So the chronicle-side work is one additive extension, legal as a pure superset under §11.1's allowance for
+    additional response fields, with §12.1 explicitly inviting authentication extensions: an optional
+    <code>wake_token</code> field on the wake notification and on the claim response. It is a compact signed token
+    over the existing JWKS keys carrying issuer, the entity stream path as subject, the egress gateway as audience,
+    an expiry on the order of the lease TTL, and the generation and wake id as the replay key. The conformance
+    suite reads both target shapes field by field (its strict deep-equal binds on the ack response, which is why
+    chronicle's earlier in-band token-refresh field shipped as optional), so the extension is conformance-safe;
+    chronicle has shipped exactly this pattern before. Two operational prerequisites come first, and they are prerequisites,
+    not niceties: the Ed25519 private key currently lives base64-encoded in the shared data-plane Redis, where
+    anything with Redis read access holds the signing capability, and no key-rotation code path exists even though
+    the schema models one. Move the key to a KMS or dedicated secret and implement rotation before this key gates
+    anyone's email. <span class="pill a">primary</span>
+  </p>
+  <p>
+    The identity is then two layers, matching the pattern every system in section 4 converged on. The
+    <strong>workload layer</strong> authenticates the runtime host to the gateway: mTLS client certificates, a
+    WireGuard peer, or a SPIFFE SVID, whichever fits the deployment; this is device-grade and cheap. The
+    <strong>entity layer</strong> rides each request: the runtime attaches the current wake token to every outbound
+    call it makes on behalf of that entity, in a request header. The gateway verifies the workload channel, then
+    verifies the wake token against chronicle's JWKS (cacheable, five-minute TTL), checks expiry, and checks a
+    replay cache keyed on (subscription, generation, wake id). Only then does the request have an identity:
+    <em>this specific entity, in this specific wake</em>. Policy can finally be per-entity because the policy
+    engine finally knows the entity. <span class="pill b">inferred</span>
+  </p>
+  <p>
+    Honesty about the chain: it is only as strong as its first link, and the first link today is the unauthenticated
+    <code>Electric-Principal</code> header. Chronicle attests that a subscription was woken; the binding from
+    subscription to entity is Electric's convention, established when the agents-server creates a per-entity
+    dispatch subscription. A spoofed or compromised agents-server could mint subscriptions for arbitrary entities.
+    So the design requires hardening entity and subscription creation first: implement
+    <code>authenticateRequest</code> with real verification, disable the dev-principal fallback in production, and
+    restrict who can create entities and subscriptions. Without that, per-entity egress identity is theater.
+    <span class="pill b">inferred</span>
+  </p>
+  <div class="diagram-shell">
+    <div class="diagram-title">The gateway: verify, judge, inject</div>
+    <div class="diagram-sub">Solid arrows are requests. Dashed arrows are wake delivery and trust relationships. Upstream credentials exist only to the right of the policy verdict.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+flowchart TD
+    CH[("chronicle<br/>signs wakes + wake_token<br/>publishes JWKS")]
+    subgraph host["Runtime host (deny-all egress; only the gateway is reachable)"]
+      RT["Agents runtime<br/>handler per entity"]
+    end
+    subgraph gw["Egress gateway"]
+      V["Verify<br/>workload channel + wake_token<br/>JWKS · exp · replay cache"]
+      P["Policy<br/>CEL rules over method/host/body<br/>LLM judge · human approval"]
+      B["Token custody<br/>vaulted refresh tokens<br/>OBO exchange, KMS-backed"]
+    end
+    ENTRA["Microsoft Entra<br/>(broker app, one-time user consent)"]
+    G["Microsoft Graph<br/>sendMail"]
+    X["Other APIs / MCP servers"]
+
+    CH -.->|"signed wake + wake_token"| RT
+    RT -->|"request + wake_token<br/>(placeholder auth)"| V
+    V --> P
+    P -->|"allow"| B
+    B -->|"Authorization: Bearer (injected)"| G
+    B --> X
+    B <-->|"refresh / on-behalf-of"| ENTRA
+    V -.->|"fetch JWKS"| CH
+      </pre>
+    </div>
+  </div>
+  <p>
+    <strong>The gateway chassis.</strong> Three options, in order of how much you build. First, run clawpatrol
+    unchanged: you get vaulting, rules, the LLM judge, and human approval today, at device granularity, which is a
+    real improvement over env vars and is the right tool for workstation agents immediately. Its limits for the
+    fleet are structural: policy cannot see caller identity, there is no Graph OAuth plugin, and it is a
+    workstation-first project nine weeks old. Second, extend clawpatrol: teach it to accept the wake token as a
+    trusted request fact and expose identity in CEL. Upstream's own plugin discussions point this direction, but you
+    would be tracking a fast-moving pre-1.0 codebase with a coarsening identity model. Third, build the gateway on
+    Envoy: ext_authz with body buffering gives verdict-plus-header-injection in one shipped filter, fail-closed by
+    default, and the custom gRPC policy server is where the chronicle-specific logic (JWKS verify, replay cache,
+    CEL or Cedar rules, judge calls, token broker) lives in a few hundred lines of Go you own. For a server-side
+    fleet we recommend the third, with clawpatrol kept as the model you are consciously reimplementing at a
+    different trust boundary, and as the workstation tool. The judge and approval semantics to copy are its:
+    deny-when-ambiguous prompts, approvals that time out closed, and replayable policy tests in CI.
+    <span class="pill b">inferred</span>
+  </p>
+  <p>
+    <strong>How requests reach the gateway.</strong> The CONNECT problem has three shipped resolutions: MITM with a
+    distributed CA (clawpatrol's choice; breaks pinned clients, requires trust-store management), a
+    TLS-terminating explicit proxy the client knowingly speaks plaintext-to-proxy with, or base-URL substitution
+    where the agent calls the gateway <em>as</em> the API host (every shipped AI gateway's choice; zero CA
+    distribution). Because you control the tool layer in an Electric runtime, base-URL substitution is the cheap
+    and reliable start: tools and MCP transports point at the gateway, and the deny-all network policy makes the
+    bypass path fail rather than leak. Transparent MITM is the later hardening for tools you do not control.
+    <span class="pill b">inferred</span>
+  </p>
+  <div class="callout chronicle">
+    <div class="callout-title">🔗 Chronicle note</div>
+    <p>
+      The division of labor keeps chronicle small. Chronicle's only new job is to attest wakes it already performs
+      and sign tokens with keys it already publishes; the extension is optional fields, additive, and
+      conformance-safe. Chronicle should decline the rest: it has no scopes, no consent screens, no audiences, and
+      the protocol's own text says callback tokens <em>"are not service JWTs."</em> The gateway owns verification,
+      custody, exchange, policy, and audit. If the gateway is down, wakes still deliver and handlers still run;
+      what stops is egress, which is exactly the fail-closed you want from a security boundary.
+    </p>
+  </div>
+</section>
+
+<!-- ================================================================ graph -->
+<section id="graph">
+  <h2><span class="kicker-num">§</span>The worked example: send mail as me, hold nothing</h2>
+  <p>
+    Microsoft Graph is the sharpest test because Microsoft documents every constraint. The wiring below is the
+    standard on-behalf-of (OBO) pattern; each step cites the mechanism that makes it work.
+  </p>
+  <ol class="flow-steps">
+    <li><strong>Register the gateway's broker as one confidential client.</strong> The user consents once, to the
+      broker, for delegated <code>Mail.Send</code> plus <code>offline_access</code>. The consent prompt is the
+      standard Entra "Send mail as you" screen, and scopes can be added incrementally later without re-consenting
+      what was already granted. Delegated <code>Mail.Send</code> is confined to what that user can already send;
+      there is no tenant-wide blast radius to scope down.</li>
+    <li><strong>The broker keeps the refresh token; nothing else does.</strong> The response to the user's sign-in
+      includes a refresh token bound to (user, broker client). Default lifetime is 90 days sliding; every use
+      returns a replacement and the old one is not auto-revoked, so the broker must rotate-and-delete on each use.
+      Store it encrypted under KMS keys, per tenant.</li>
+    <li><strong>A wake arrives; the entity asks for egress.</strong> The handler calls
+      <code>POST /v1.0/me/sendMail</code> against the gateway with placeholder auth and its wake token. The gateway
+      verifies workload channel, wake token, expiry, and replay, then runs policy: recipient and domain rules in
+      CEL, size and rate limits, then the LLM judge over the parsed body with a deny-when-ambiguous prompt, then
+      human approval if the rule says so.</li>
+    <li><strong>On allow, the broker mints the real credential.</strong> It redeems the stored refresh token for a
+      roughly one-hour delegated Graph token scoped to <code>Mail.Send</code> and injects
+      <code>Authorization: Bearer</code> on the forwarded request. Graph returns 202. The OBO documentation's own
+      warning matches the design: never send middle-tier tokens anywhere but their intended audience, which here
+      means tokens terminate at the gateway. The broker can itself authenticate to Entra without a stored secret
+      via workload identity federation (an external JWT such as a SPIFFE JWT-SVID, matched by a federated identity
+      credential), with two caveats: classic federated credentials cap at 20 per app, so per-entity federation is
+      out, and the flexible claims-matching variant is preview. A certificate credential in KMS is the boring
+      default.</li>
+    <li><strong>Revocation runs on two clocks, and the fast one is yours.</strong> The gateway is the instant kill:
+      flip the entity's policy to deny and the next request dies at the verdict, with no Microsoft latency
+      involved. The Entra kill is slower and coarser: disabling the broker's service principal or revoking the
+      user's refresh tokens propagates to Graph within about 15 minutes under Continuous Access Evaluation (declare
+      the <code>cp1</code> client capability and honor claims challenges), and a plain bearer token otherwise lives
+      out its hour. One documented wrinkle: revoking the consent grant itself is not in CAE's critical-event list,
+      so treat SP disable and refresh-token revocation as the hard levers. If you ever use app-only
+      <code>Mail.Send</code> (send as anyone), scope it with Exchange RBAC for Applications; its predecessor,
+      Application Access Policies, is officially legacy.</li>
+    <li><strong>Audit every verdict.</strong> Log (entity, wake id, generation, request digest, matched rule, judge
+      verdict, approver, Graph message id) per call. This is the record that makes "which entities can act as me,
+      and what did they do" a query instead of a forensic project, and it is the record Entra cannot give you,
+      since its audit logs show the broker's service principal, not your entities.</li>
+  </ol>
+  <p>
+    The user experience this buys: one consent screen ever, approvals in Slack only when a rule asks for them,
+    per-entity revocation that takes effect on the next request, and an agent that can be prompt-injected into
+    <em>asking</em> for anything but can only ever <em>send</em> what the policy layer, which inspects the request
+    up to its configured body limits, allows. Size caps are themselves policy: reject what you cannot inspect. What it does not buy is protection from an approved-channel exfiltration: an email the
+    policy allows can still carry data an injected agent chose to put there. That is a policy-content problem
+    (recipient allowlists, judge prompts tuned for exfiltration shapes, volume anomaly limits), not an identity
+    problem, and no identity design solves it. <span class="pill b">inferred</span>
+  </p>
+</section>
+
+<!-- ================================================================ costs -->
+<section id="costs">
+  <h2><span class="kicker-num">§</span>What it costs, and what stays open</h2>
+  <p>
+    <strong>Latency.</strong> The rule tier is cheap: sub-millisecond policy evaluation is documented for Cedar and
+    LiteLLM measures single-digit-millisecond proxy overhead at its p95. The judge tier is not: Cloudflare's ~500ms
+    is the only published number for a model verdict in a blocking path, nobody publishes per-verdict cost, and
+    Envoy's ext_proc streaming overhead is unmeasured in public sources. Design accordingly: rules always run, the
+    judge runs on the calls a rule escalates, and the end-to-end p50/p99 gets measured in the first spike, not
+    estimated. An OBO exchange adds an Entra round trip on token-cache miss; per-wake exchange rates will meet
+    Entra throttling at fleet scale, so cache tokens for their lifetime keyed by (user, scope), not per wake.
+    <span class="pill c">gap</span>
+  </p>
+  <p>
+    <strong>Model traffic.</strong> The highest-volume egress an agent makes is to its model provider, it is
+    latency-sensitive, and streaming responses break buffered judges (Cloudflare's guardrails do not support
+    streaming). The pragmatic split: model calls go through the gateway for credential injection and rules (so
+    model keys leave the agent process too) but skip the judge tier, while tool calls get the full treatment.
+    Judging model traffic is its own project with its own products. <span class="pill b">inferred</span>
+  </p>
+  <p>
+    <strong>Enforcement.</strong> Istio's egress documentation states the general truth: a gateway nothing forces
+    traffic through is advisory. The design stands on deny-all egress at the sandbox or network layer with the
+    gateway as the only route, and on clawpatrol's trust story, that an escaped flow holds only placeholders.
+    Electric's default sandbox is unrestricted and its Docker allowlist mode is documented as not a boundary, so
+    this is a deployment posture you must set, not a default you inherit. <span class="pill a">primary</span>
+  </p>
+  <p>
+    <strong>The gateway concentrates the most valuable secrets.</strong> It holds refresh tokens for every user,
+    the wake trust root, and, if you MITM, a CA key. That concentration is the price of the no-tokens-with-agent property;
+    pay it deliberately: KMS-held keys, per-tenant encryption of vaulted tokens, no plaintext export path, its own
+    audit stream, and an HA story before it gates anything that matters. Compare the alternative being replaced:
+    the same secrets scattered as environment variables across every runtime host, with no policy and no audit.
+    Concentration plus custody beats scatter. <span class="pill b">inferred</span>
+  </p>
+  <p>
+    <strong>Human approval versus the lease clock.</strong> A Slack approval can take an hour; a wake lease
+    defaults to 30 seconds and the wake token's expiry rides the lease. Do not hold the request open. On
+    escalation, the gateway should deny-with-pending, record the approval request, and deliver the outcome as a new
+    message to the entity's inbox, waking it to retry through the normal path with a fresh wake token. That is the
+    CIBA shape from Auth0's async authorization, and it composes with chronicle's fencing instead of fighting it.
+    <span class="pill b">inferred</span>
+  </p>
+  <p>
+    <strong>The judge sees everything.</strong> Sending email bodies to a third-party model API for adjudication is
+    itself sensitive egress. Decide its data-handling posture explicitly: a local classifier, a provider with a
+    no-retention contract, or judge prompts that receive redacted bodies. And the judge can be evaded by encoding
+    and chunking; treat it as one tier, backed by rules the attacker cannot argue with.
+    <span class="pill b">inferred</span>
+  </p>
+  <p>
+    <strong>Local development.</strong> The stack must degrade gracefully to a laptop: a permissive gateway mode
+    with shadow-logged verdicts, a dev signing key chronicle already mints on boot, base-URL substitution so no CA
+    ever enters a dev trust store, and a test tenant for Graph consent. Clawpatrol's replayable policy tests
+    (<code>clawpatrol test</code> against recorded fixtures) are the CI pattern to copy for rules and judge prompts
+    alike. <span class="pill b">inferred</span>
+  </p>
+</section>
+
+<!-- ================================================================ actions -->
+<section id="actions">
+  <h2><span class="kicker-num">§</span>Actions this design produces</h2>
+  <ol class="flow-steps">
+    <li><strong>Harden the first link.</strong> Implement <code>authenticateRequest</code> with real verification in
+      the agents-server deployment, disable the dev-principal fallback outside development, and restrict entity and
+      subscription creation. Every downstream identity claim inherits this link's strength.</li>
+    <li><strong>Fix key custody before keys gate egress.</strong> Move chronicle's Ed25519 signing key out of the
+      shared data-plane Redis into a KMS or dedicated secret, and implement the rotation path the schema already
+      models (active and retiring statuses exist; no code mints or retires a key today).</li>
+    <li><strong>Ship the wake-token superset behind a flag.</strong> Optional <code>wake_token</code> on the wake
+      notification and claim response: audience, expiry, entity path, generation and wake id as the replay key,
+      signed with the existing JWKS keys. Additive and conformance-safe. Propose it upstream as a §11 extension in
+      the same message as the still-unfiled claim-granularity issue from the
+      <a href="substrate.html#actions">Substrate page's action list</a>.</li>
+    <li><strong>Spike the gateway.</strong> Envoy ext_authz plus a small Go policy server: JWKS verification, replay
+      cache, CEL rules, header injection, deny by default. Measure added p50/p99 with rules only, then with the
+      judge tier. Run it in shadow mode against real traffic before it enforces anything.</li>
+    <li><strong>Wire the Graph broker.</strong> One confidential client, delegated <code>Mail.Send</code> +
+      <code>offline_access</code>, <code>cp1</code> declared, refresh tokens rotated on use and stored under KMS,
+      tokens cached by (user, scope). Write the revocation runbook: policy kill at the gateway, SP disable and
+      refresh-token revocation at Entra.</li>
+    <li><strong>Use clawpatrol where it fits today.</strong> Workstation and local-dev agents get it unchanged for
+      vaulting, rules, and the judge. Watch its dynamic-peer RFC (#709) and OIDC enrollment PR (#753); if identity
+      facts ever land in its rule conditions, the extend-clawpatrol option for the fleet reopens.</li>
+    <li><strong>Define the audit record now.</strong> (entity, wake id, generation, request digest, matched rule,
+      judge verdict, approver, upstream result id), emitted per decision, kept tamper-evident. Retrofitting audit
+      after an incident is the expensive order.</li>
+  </ol>
+</section>
+
+<!-- ================================================================ sources -->
+<section id="sources">
+  <h2><span class="kicker-num">§</span>Sources and evidence tiers</h2>
+  <p>
+    <span class="pill a">primary</span> marks a direct quote or a verified file:line read.
+    <span class="pill b">inferred</span> marks our reading or design synthesis.
+    <span class="pill c">gap</span> marks evidence that does not publicly exist. In the section 4 table, pills mark
+    maturity (shipped, preview, draft, incubating) rather than evidence tier. Research date 2026-07-03;
+    load-bearing claims were adversarially re-verified against primary documents, and this page uses the corrected
+    versions. Electric, clawpatrol, and the Microsoft agent stack all change weekly, so expect drift.
+  </p>
+  <ul>
+    <li><strong>Electric Agents, primary (commit 5af7ab52, 2026-06-30):</strong>
+      <code>agents-server/src/principal.ts</code>, <code>permissions.ts</code>, <code>server.ts</code>,
+      <code>entities-router.ts</code>, <code>claim-write-token-store.ts</code>, <code>webhook-signing.ts</code> ·
+      <code>agents-runtime/src/model-runner.ts</code>, <code>types.ts</code>, <code>webhook-signature.ts</code>,
+      <code>sandbox/types.ts</code>, <code>sandbox/default.ts</code> ·
+      <a href="https://electric.ax/docs/agents/usage/permissions-and-principals">permissions and principals</a> ·
+      <a href="https://electric.ax/docs/agents/usage/mcp-servers">MCP servers</a> ·
+      <a href="https://electric.ax/docs/agents/usage/sandboxing">sandboxing</a> ·
+      <a href="https://electric.ax/docs/guides/auth">sync auth guide (proxy and gatekeeper patterns)</a> ·
+      <a href="https://github.com/electric-sql/electric/issues/4299">RFC #4299</a> (an issue, not a discussion)</li>
+    <li><strong>Clawpatrol, primary:</strong>
+      <a href="https://github.com/denoland/clawpatrol">repo</a> ·
+      <a href="https://clawpatrol.dev/docs/architecture/">architecture</a> ·
+      <a href="https://clawpatrol.dev/docs/security-model/">security model</a> ·
+      <a href="https://clawpatrol.dev/docs/credentials/">credentials</a> ·
+      <a href="https://clawpatrol.dev/docs/rules/">rules</a> ·
+      <a href="https://github.com/denoland/clawpatrol/issues/709">RFC #709 dynamic peers</a> ·
+      <a href="https://github.com/denoland/clawpatrol/pull/753">PR #753 OIDC enrollment</a> ·
+      <a href="https://github.com/denoland/clawpatrol/issues/622">#622 ACL design</a></li>
+    <li><strong>Chronicle and the protocol, primary:</strong>
+      <code>webhook/crypto.go</code>, <code>manager.go</code>, <code>routes.go</code>, <code>keys.go</code>,
+      <code>wire.go</code>, <code>scripts/arm_wake.lua</code>, <code>scripts/claim.lua</code>,
+      <code>scripts/common.lua</code> at origin/main ·
+      <a href="https://github.com/durable-streams/durable-streams/blob/main/PROTOCOL.md">PROTOCOL.md</a>
+      (§6.5 key rotation, §7.1 signatures, §7.3 fencing, §11 extensions, §12.1 auth out of scope, §12.9 token
+      guidance) · the hardening series <code>docs/research/10</code> and <code>11</code></li>
+    <li><strong>Workload identity, primary:</strong>
+      <a href="https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md">SPIFFE Workload API</a> ·
+      <a href="https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Broker_API.md">SPIFFE Broker API (incubating)</a> ·
+      <a href="https://spiffe.io/docs/latest/planning/scaling_spire/">scaling SPIRE</a> ·
+      <a href="https://github.com/spiffe/spire/issues/4488">SPIRE #4488</a> ·
+      <a href="https://datatracker.ietf.org/doc/draft-ietf-wimse-arch/">WIMSE architecture</a> ·
+      <a href="https://datatracker.ietf.org/doc/draft-ietf-oauth-transaction-tokens/">transaction tokens draft</a> ·
+      <a href="https://www.rfc-editor.org/rfc/rfc8693.html">RFC 8693</a> ·
+      <a href="https://www.rfc-editor.org/rfc/rfc9449.html">RFC 9449 DPoP</a> ·
+      <a href="https://www.rfc-editor.org/rfc/rfc9421.html">RFC 9421</a> ·
+      <a href="https://www.biscuitsec.org/">Biscuit</a> ·
+      <a href="https://github.com/kubernetes/enhancements/blob/master/keps/sig-auth/4317-pod-certificates/README.md">KEP-4317 PodCertificate</a></li>
+    <li><strong>Egress and policy, primary:</strong>
+      <a href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_authz_filter">Envoy ext_authz</a> ·
+      <a href="https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter.html">Envoy ext_proc</a> ·
+      <a href="https://istio.io/latest/docs/tasks/traffic-management/egress/egress-gateway/">Istio egress caveat</a> ·
+      <a href="https://developers.cloudflare.com/ai-gateway/features/guardrails/usage-considerations/index.md">Cloudflare guardrails latency and fail modes</a> ·
+      <a href="https://docs.litellm.ai/docs/benchmarks">LiteLLM benchmarks</a> ·
+      <a href="https://github.com/cyberark/secretless-broker">Secretless Broker</a> ·
+      <a href="https://agentgateway.dev/docs/standalone/latest/mcp/mcp-authz/">agentgateway MCP authz</a> ·
+      <a href="https://github.com/stripe/smokescreen">Smokescreen</a> ·
+      <a href="https://docs.mitmproxy.org/stable/concepts/certificates/">mitmproxy on pinning</a></li>
+    <li><strong>Microsoft Graph and Entra, primary:</strong>
+      <a href="https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-on-behalf-of-flow">on-behalf-of flow</a> ·
+      <a href="https://learn.microsoft.com/en-us/entra/identity-platform/refresh-tokens">refresh tokens</a> ·
+      <a href="https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation">workload identity federation</a> ·
+      <a href="https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-continuous-access-evaluation">CAE</a> ·
+      <a href="https://learn.microsoft.com/en-us/entra/agent-id/agent-identities">Entra Agent ID</a> ·
+      <a href="https://learn.microsoft.com/en-us/entra/agent-id/faq">Agent ID limits (250 per blueprint)</a> ·
+      <a href="https://learn.microsoft.com/en-us/graph/api/user-sendmail">sendMail permissions</a> ·
+      <a href="https://learn.microsoft.com/en-us/exchange/permissions-exo/application-rbac">Exchange RBAC for Applications</a></li>
+    <li><strong>Agent-identity landscape, primary:</strong>
+      <a href="https://docs.cloud.google.com/iam/docs/agent-identity-overview">Google Agent Identity</a> ·
+      <a href="https://auth0.com/ai/docs/intro/token-vault">Auth0 Token Vault</a> ·
+      <a href="https://auth0.com/ai/docs/intro/asynchronous-authorization">Auth0 async authorization (CIBA)</a> ·
+      <a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization">MCP authorization</a> ·
+      <a href="https://a2a-protocol.org/v1.0.0/specification/">A2A</a> ·
+      <a href="https://docs.agntcy.org/identity/identity/">AGNTCY identity</a> ·
+      <a href="https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/">OWASP agentic top 10</a> ·
+      <a href="https://riptides.io/solutions/tool-call-security/">Riptides</a></li>
+    <li><strong>This wiki:</strong> the <a href="substrate.html">Substrate evaluation</a> (SessionIdentity and
+      PodCertificate context), <a href="streams.html">Part 2</a> on the subscription machinery this page extends,
+      and <a href="faq.html#f13">FAQ 13</a> on sandbox containment dials.</li>
+  </ul>
+</section>
+
+<div class="pager">
+  <a href="substrate.html"><span class="dir">Previous</span><span class="label">← Agent Substrate, evaluated</span></a>
+  <a class="next" href="index.html"><span class="dir">Back to</span><span class="label">Start Here ⤴</span></a>
+</div>
+
+</div>
+</div>
+
+<footer class="site-footer">
+  Electric Agents, Explained · Agent identity at the egress boundary · Sources quoted and tiered, the design is analysis
+</footer>
+
+</body>
+</html>
