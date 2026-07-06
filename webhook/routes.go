@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 )
 
 // Routes is the HTTP surface of the reserved subscription APIs (PROTOCOL §6–7).
@@ -286,7 +288,17 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		// Re-read links for a fresh snapshot (tails may have advanced).
 		fresh, _, _ := rt.mgr.store.Get(id)
 		snap, _ := Snapshot(fresh.Links, rt.mgr.tailOf)
-		token, err := GenerateToken(rt.mgr.tokenKey, id, res.Generation, time.Now(), rt.mgr.tokenTTL(sub), randReader)
+		now := time.Now()
+		token, err := GenerateToken(rt.mgr.tokenKey, id, res.Generation, now, rt.mgr.tokenTTL(sub), randReader)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		// The claim is where the write capability is born (issue #126): scope
+		// it to exactly the claimed streams, expiring on the same lease-derived
+		// TTL as the claim token, so it never outlives the claim by more than
+		// the lease band.
+		writeToken, err := GenerateWriteToken(rt.mgr.tokenKey, id, res.Generation, writeScope(snap), now, rt.mgr.tokenTTL(sub), randReader)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -295,6 +307,7 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 			WakeID:     res.WakeID,
 			Generation: res.Generation,
 			Token:      token,
+			WriteToken: writeToken,
 			Streams:    snap,
 			LeaseTTLMs: sub.Config.LeaseTTLMs,
 		})
@@ -337,6 +350,19 @@ func (rt *Routes) handleRelease(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeScope maps a claim's stream snapshot to the normalized paths its write
+// token is scoped to. A link that fails normalization is dropped: a path we
+// cannot normalize can never be granted (fail closed).
+func writeScope(snap []StreamSnapshot) []auth.StreamPath {
+	out := make([]auth.StreamPath, 0, len(snap))
+	for _, s := range snap {
+		if p, err := auth.NormalizeStreamPath(s.Path); err == nil {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // signingViewFor returns the signing block for webhook subscriptions, nil for

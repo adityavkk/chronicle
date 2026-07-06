@@ -69,6 +69,7 @@ Flags take precedence over environment variables; both over defaults.
 | `--subscriptions` | `CHRONICLE_SUBSCRIPTIONS` | `true` | Enable the reserved `__ds` subscription APIs (requires the redis backend) |
 | `--public-url` | `CHRONICLE_PUBLIC_URL` | _(listen addr)_ | Externally reachable origin used in webhook `callback_url` / `jwks_url` |
 | `--webhook-allow-private` | `CHRONICLE_WEBHOOK_ALLOW_PRIVATE` | `false` | Allow webhook delivery to private/loopback addresses (trusted networks / local dev) |
+| _(env only)_ | `CHRONICLE_AUTH_MODE` | `insecure` | Stream authn/authz enforcement ([#126](https://github.com/adityavkk/chronicle/issues/126)): `insecure` evaluates decisions as telemetry only (base clients unaffected); `enforce` fails closed — appends require a claim-scoped write token (`electric-claim-token` or `Authorization: Bearer`) minted on pull-wake claim |
 
 ### Redis requirements
 
