@@ -35,6 +35,32 @@ func (m *Manager) verifyCaller(token string, now time.Time) (VerifiedCaller, err
 	return ValidateCallerToken(token, m.streamRootURL, keyFor, now)
 }
 
+// authenticateCaller extracts and verifies the control-plane caller
+// credential from the request. The error is operator-facing and carries no
+// token material; the zero VerifiedCaller accompanies every error.
+func (rt *Routes) authenticateCaller(r *http.Request) (VerifiedCaller, error) {
+	token, ok := bearerToken(r)
+	if !ok {
+		return VerifiedCaller{}, errors.New("missing caller credential")
+	}
+	return rt.mgr.verifyCaller(token, time.Now())
+}
+
+// controlDeny applies AuthMode to a control-plane denial on op/id: in
+// enforce mode it writes the error envelope and reports stop (false); in the
+// insecure default it records the would-be denial as telemetry and reports
+// proceed (true), keeping the base contract byte-identical.
+func (rt *Routes) controlDeny(w http.ResponseWriter, op, id string, status int, code, reason string) bool {
+	if rt.mgr.authMode == auth.ModeEnforce {
+		rt.mgr.log.Warn(op+" denied", "subscription", id, "reason", reason)
+		writeErr(w, status, code)
+		return false
+	}
+	rt.mgr.log.Info("authz telemetry: "+op+" would be denied",
+		"subscription", id, "reason", reason)
+	return true
+}
+
 // authorizeClaim is the TB2 gate: it reports whether handleClaim may
 // proceed. It runs before any store access, so a denied claim reads nothing
 // and mints nothing. In enforce mode a missing or unverifiable credential

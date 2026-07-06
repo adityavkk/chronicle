@@ -19,6 +19,12 @@ type Store interface {
 	// at their current tail.
 	CreateOrConfirm(id string, cfg Config, links []StreamLink, now time.Time) (CreateStatus, error)
 
+	// CreateOrConfirmOwned is CreateOrConfirm with the #126 owner stamp: the
+	// verified caller subject recorded once at create, immutable after. The
+	// returned string is the STORED owner ('' when ownerless), read in the
+	// same atomic step so the ownership gate has no TOCTOU window.
+	CreateOrConfirmOwned(id string, cfg Config, links []StreamLink, now time.Time, owner string) (CreateStatus, string, error)
+
 	// Get returns a subscription with its Links hydrated, and whether it exists.
 	Get(id string) (Subscription, bool, error)
 

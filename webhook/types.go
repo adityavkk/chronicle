@@ -110,6 +110,16 @@ type Subscription struct {
 	CfgHash   string
 	CreatedAt time.Time
 
+	// OwnerSubject is the verified caller subject that created the
+	// subscription (issue #126 TB3), stamped once at create and immutable.
+	// Empty means the subscription was created without a credential (the
+	// insecure mode / pre-enforcement migration posture): namespace-authorized
+	// authenticated callers may operate on it, and enforcement of ownership
+	// begins with the first subscription created under a credential. Owner is
+	// identity, not config: it never participates in the config hash, so an
+	// idempotent re-confirm cannot be turned into an ownership transfer.
+	OwnerSubject string
+
 	Status     Status
 	Phase      Phase
 	Generation int64

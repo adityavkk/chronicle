@@ -12,6 +12,31 @@ func GlobMatch(pattern, path string) bool {
 	return matchParts(patternParts, 0, pathParts, 0)
 }
 
+// GlobLiteralPrefix returns the pattern's leading literal segments — the
+// fixed path prefix every possible match of the pattern lies under — and
+// whether the pattern has any. Only the exact segments "*" and "**" are
+// wildcards (PROTOCOL §6.2); every other segment matches literally, with
+// %2A/%2a decoding to a literal "*". A pattern that opens with a wildcard
+// segment ("*", "**/x") has no literal prefix: its matches are unbounded, so
+// ok is false. This bound is what makes namespace authorization of a pattern
+// sound (issue #126 TB3): covering the prefix covers every match.
+func GlobLiteralPrefix(pattern string) (prefix string, ok bool) {
+	parts := splitPath(pattern)
+	lits := make([]string, 0, len(parts))
+	for _, seg := range parts {
+		if seg == "*" || seg == "**" {
+			break
+		}
+		decoded := strings.ReplaceAll(seg, "%2A", "*")
+		decoded = strings.ReplaceAll(decoded, "%2a", "*")
+		lits = append(lits, decoded)
+	}
+	if len(lits) == 0 {
+		return "", false
+	}
+	return strings.Join(lits, "/"), true
+}
+
 func splitPath(p string) []string {
 	p = strings.TrimLeft(p, "/")
 	p = strings.TrimRight(p, "/")
