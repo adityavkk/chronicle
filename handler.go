@@ -67,6 +67,22 @@ type Handler struct {
 	// trusted-backend topology behind the Electric agents-server. Nil
 	// disables service auth.
 	ServiceAuth *ServiceAuth
+
+	// ReadAuth authorizes data-plane reads with the chronicle
+	// read-capability JWS (issue #126 TB5). Nil means no capability
+	// verifier is available: in ModeEnforce a read without another accepted
+	// credential is denied (fail closed).
+	ReadAuth ReadAuthorizer
+
+	// CallerAuth authorizes namespace-scoped creates/deletes with the
+	// chronicle caller token (issue #126 TB5, completing the data-plane
+	// action matrix). Nil fails closed the same way.
+	CallerAuth CallerAuthorizer
+
+	// UserAuth verifies IdP (PingFed) access tokens into user principals
+	// (issue #126 TB5, the multi-issuer widening). Nil disables the OIDC
+	// issuer route.
+	UserAuth *OIDCUserAuth
 }
 
 // subStreamPath maps a store path ("/events/abc") to the stream-root-relative
@@ -164,6 +180,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // handleCreate handles PUT requests to create a stream
 func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path string) error {
+	// The create gate runs before any parsing or store access (issue #126
+	// TB5): a denied create neither reads nor writes stream state.
+	if err := h.authorizeMutate(r, path, auth.ActionCreate); err != nil {
+		return err
+	}
+
 	// Parse headers
 	contentType := r.Header.Get("Content-Type")
 	ttlStr := r.Header.Get(protocol.HeaderStreamTTL)
@@ -327,6 +349,13 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 
 // handleHead handles HEAD requests for stream metadata
 func (h *Handler) handleHead(w http.ResponseWriter, r *http.Request, path string) error {
+	// The read gate runs before the store lookup: a 401 must not reveal
+	// whether the stream exists (issue #126 TB5, §12.2). HEAD responses are
+	// already no-store, so the private posture needs no extra handling here.
+	if _, err := h.authorizeRead(r, path); err != nil {
+		return err
+	}
+
 	meta, err := h.Store.Get(path)
 	if err != nil {
 		if errors.Is(err, store.ErrStreamNotFound) {
@@ -360,6 +389,18 @@ func (h *Handler) handleHead(w http.ResponseWriter, r *http.Request, path string
 
 // handleRead handles GET requests to read from a stream
 func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string) error {
+	// The read gate runs before the store lookup (401 never leaks stream
+	// existence, §12.2) and covers every read mode — plain, long-poll, and
+	// SSE all dispatch below this point. authorizedPrivate is the Q3 cache
+	// posture: a credentialed read is answered Cache-Control: private with
+	// no ETag, so no shared cache can serve one principal's bytes to
+	// another; uncredentialed reads (the insecure default for base clients)
+	// keep today's headers byte for byte.
+	authorizedPrivate, err := h.authorizeRead(r, path)
+	if err != nil {
+		return err
+	}
+
 	// Check if stream exists
 	meta, err := h.Store.Get(path)
 	if err != nil {
@@ -571,20 +612,29 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		w.Header().Set(protocol.HeaderStreamCursor, responseCursor)
 	}
 
-	// Set ETag for caching
-	w.Header().Set("ETag", fmt.Sprintf(`"%s"`, nextOffset.String()))
+	// Cache posture (issue #126, the Q3 decision): a credentialed read is
+	// never shared-cacheable — Cache-Control: private, no ETag, and no
+	// conditional handling (nothing to revalidate against) — so the §12.7
+	// credential-keying problem cannot arise. Uncredentialed reads keep the
+	// base protocol's caching headers unchanged.
+	if authorizedPrivate {
+		w.Header().Set("Cache-Control", "private")
+	} else {
+		// Set ETag for caching
+		w.Header().Set("ETag", fmt.Sprintf(`"%s"`, nextOffset.String()))
 
-	// Set caching headers for historical reads
-	if !upToDate && len(messages) > 0 {
-		w.Header().Set("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
-	}
+		// Set caching headers for historical reads
+		if !upToDate && len(messages) > 0 {
+			w.Header().Set("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+		}
 
-	// Check If-None-Match for 304
-	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" {
-		expectedETag := fmt.Sprintf(`"%s"`, nextOffset.String())
-		if ifNoneMatch == expectedETag {
-			w.WriteHeader(http.StatusNotModified)
-			return nil
+		// Check If-None-Match for 304
+		if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" {
+			expectedETag := fmt.Sprintf(`"%s"`, nextOffset.String())
+			if ifNoneMatch == expectedETag {
+				w.WriteHeader(http.StatusNotModified)
+				return nil
+			}
 		}
 	}
 
@@ -836,6 +886,12 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 
 // handleDelete handles DELETE requests to delete a stream
 func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request, path string) error {
+	// The delete gate runs before the store call (issue #126 TB5): a denied
+	// delete removes nothing and never fires the deletion hooks.
+	if err := h.authorizeMutate(r, path, auth.ActionDelete); err != nil {
+		return err
+	}
+
 	err := h.Store.Delete(path)
 	if err != nil {
 		if errors.Is(err, store.ErrStreamNotFound) {

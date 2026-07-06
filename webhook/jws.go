@@ -56,6 +56,42 @@ func SignCompactJWS(key SigningKey, typ string, payload []byte) (string, error) 
 	return signingInput + "." + jwsB64.EncodeToString(sig), nil
 }
 
+// resolverForKeys adapts a signing-key slice to a KidResolver.
+func resolverForKeys(keys []SigningKey) KidResolver {
+	return func(kid string) (ed25519.PublicKey, bool) {
+		for _, k := range keys {
+			if k.Kid == kid {
+				return k.Public, true
+			}
+		}
+		return nil, false
+	}
+}
+
+// PeekIssuer reads the iss claim of a compact JWS WITHOUT any verification.
+// It exists solely to route a bearer to the right verifier (chronicle's own
+// EdDSA family vs a configured OIDC issuer) — the returned value carries no
+// trust whatsoever, and every verifier re-checks iss after signature
+// verification. Returns false for anything that does not even parse as a
+// three-segment JWS with a JSON payload (e.g. the opaque HMAC write token).
+func PeekIssuer(token string) (string, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", false
+	}
+	payload, err := base64.RawURLEncoding.Strict().DecodeString(parts[1])
+	if err != nil {
+		return "", false
+	}
+	var claims struct {
+		Iss string `json:"iss"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.Iss == "" {
+		return "", false
+	}
+	return claims.Iss, true
+}
+
 // KidResolver returns the verifying public key for a kid, or false when the
 // kid is unknown, retired, or denylisted. The resolver is the verifier's only
 // trust source — an attacker-supplied kid resolves to nothing, so a token can

@@ -44,8 +44,9 @@ func (k PrincipalKind) String() string {
 // principal). A non-anonymous Principal in hand is proof its credential
 // verified — raw header strings never reach an authorization decision.
 type Principal struct {
-	kind    PrincipalKind
-	subject string
+	kind       PrincipalKind
+	subject    string
+	namespaces []StreamPath
 }
 
 // Kind is the principal's category (anonymous/agent/user/service/system).
@@ -57,6 +58,22 @@ func (p Principal) Subject() string { return p.subject }
 
 // IsAnonymous reports whether no identity was verified.
 func (p Principal) IsAnonymous() bool { return p.kind == KindAnonymous }
+
+// Namespaces returns the normalized namespace prefixes the principal was
+// granted (user principals carry them from the IdP's namespace claim), as a
+// defensive copy. Service principals carry none — they are pre-authorized at
+// the gate, not namespace-scoped.
+func (p Principal) Namespaces() []StreamPath {
+	out := make([]StreamPath, len(p.namespaces))
+	copy(out, p.namespaces)
+	return out
+}
+
+// NamespaceCovers reports whether the principal's namespace grant covers
+// path (whole-segment prefix semantics, PathWithinPrefixes).
+func (p Principal) NamespaceCovers(path StreamPath) bool {
+	return PathWithinPrefixes(path, p.namespaces)
+}
 
 // Authorizer is the single authorization decision point (issue #126): may p
 // perform a on the stream at path? Implementations must fail closed — any
