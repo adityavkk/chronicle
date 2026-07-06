@@ -58,14 +58,14 @@ func (rt *Routes) handleSubscription(w http.ResponseWriter, r *http.Request, res
 		case http.MethodGet:
 			rt.handleGet(w, id)
 		case http.MethodDelete:
-			rt.handleDelete(w, id)
+			rt.handleDelete(w, r, id)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	case action == "streams" && r.Method == http.MethodPost:
 		rt.handleAddStreams(w, r, id)
 	case strings.HasPrefix(action, "streams/") && r.Method == http.MethodDelete:
-		rt.handleRemoveStream(w, id, strings.TrimPrefix(action, "streams/"))
+		rt.handleRemoveStream(w, r, id, strings.TrimPrefix(action, "streams/"))
 	case action == "callback" && r.Method == http.MethodPost:
 		rt.handleAckLike(w, r, id)
 	case action == "ack" && r.Method == http.MethodPost:
@@ -95,6 +95,17 @@ func (rt *Routes) handleJWKS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string) {
+	// Authentication runs before the body is even read (issue #126 TB3): an
+	// unauthenticated probe learns nothing about body validation, SSRF rules,
+	// or subscription existence. Authorization of the parsed paths follows
+	// the 400 parse step but still precedes the SSRF check and every store
+	// mutation — the ordering the #126 grounding pass called out.
+	caller, authnErr := rt.authenticateCaller(r)
+	if authnErr != nil {
+		if !rt.controlDeny(w, "create", id, http.StatusUnauthorized, ErrCodeUnauthenticated, authnErr.Error()) {
+			return
+		}
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, ErrCodeInvalidRequest)
@@ -105,6 +116,13 @@ func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string
 		writeErrMsg(w, ErrCodeInvalidRequest, reason)
 		return
 	}
+	if authnErr == nil {
+		if reason := linkAuthz(caller, cfg); reason != "" {
+			if !rt.controlDeny(w, "create", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+				return
+			}
+		}
+	}
 	if cfg.Type == DispatchWebhook {
 		if reason := rt.mgr.validateWebhookURL(cfg.WebhookURL); reason != "" {
 			writeErrMsg(w, ErrCodeWebhookURLRejected, reason)
@@ -112,10 +130,29 @@ func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string
 		}
 	}
 	links := rt.mgr.seedLinks(cfg)
-	status, err := rt.mgr.store.CreateOrConfirm(id, cfg, links, time.Now())
+	// The owner stamp is the verified caller subject, empty without a
+	// credential (insecure mode): ownership begins with the first owned
+	// create and is immutable after (see Subscription.OwnerSubject).
+	ownerStamp := ""
+	if authnErr == nil {
+		ownerStamp = caller.Subject()
+	}
+	status, storedOwner, err := rt.mgr.store.CreateOrConfirmOwned(id, cfg, links, time.Now(), ownerStamp)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	// Ownership gate on a pre-existing subscription. Safe after the store
+	// call: MATCHED and CONFLICT mutate nothing and the stored owner is read
+	// in the same atomic script step. A stranger probing an owned id gets
+	// 403 for both the matched and the conflicting config, so the response
+	// does not reveal whether their config matched the owner's.
+	if status != CreateCreated && authnErr == nil {
+		if reason := ownershipAuthz(storedOwner, caller.Subject()); reason != "" {
+			if !rt.controlDeny(w, "create", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+				return
+			}
+		}
 	}
 	switch status {
 	case CreateConflict:
@@ -151,7 +188,31 @@ func (rt *Routes) handleGet(w http.ResponseWriter, id string) {
 	writeJSON(w, http.StatusOK, BuildSubscriptionView(sub, rt.mgr.signingViewFor(sub)))
 }
 
-func (rt *Routes) handleDelete(w http.ResponseWriter, id string) {
+func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string) {
+	// Same ownership seam as create/add-streams (issue #126 TB3): deleting a
+	// subscription is as destructive as re-pointing it. Idempotent-delete
+	// semantics are preserved: a missing subscription stays 204 in both
+	// modes, so a stranger cannot use delete as an existence probe.
+	caller, authnErr := rt.authenticateCaller(r)
+	if authnErr != nil {
+		if !rt.controlDeny(w, "delete", id, http.StatusUnauthorized, ErrCodeUnauthenticated, authnErr.Error()) {
+			return
+		}
+	}
+	if authnErr == nil {
+		sub, ok, err := rt.mgr.store.Get(id)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if ok {
+			if reason := ownershipAuthz(sub.OwnerSubject, caller.Subject()); reason != "" {
+				if !rt.controlDeny(w, "delete", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+					return
+				}
+			}
+		}
+	}
 	if err := rt.mgr.store.Delete(id); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -160,12 +221,44 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, id string) {
 }
 
 func (rt *Routes) handleAddStreams(w http.ResponseWriter, r *http.Request, id string) {
+	caller, authnErr := rt.authenticateCaller(r)
+	if authnErr != nil {
+		if !rt.controlDeny(w, "add-streams", id, http.StatusUnauthorized, ErrCodeUnauthenticated, authnErr.Error()) {
+			return
+		}
+	}
 	var body struct {
 		Streams []string `json:"streams"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, ErrCodeInvalidRequest)
 		return
+	}
+	if authnErr == nil {
+		if reason := linkPathsAuthz(caller, body.Streams); reason != "" {
+			if !rt.controlDeny(w, "add-streams", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+				return
+			}
+		}
+		// Subscription ownership (issue #126 TB3): extending someone else's
+		// subscription is the confused-deputy this bullet closes. The read is
+		// authorization-only; in enforce mode a missing subscription is 404
+		// (today's blind-link behavior is preserved in insecure mode).
+		sub, ok, err := rt.mgr.store.Get(id)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			if rt.mgr.authMode == auth.ModeEnforce {
+				writeErr(w, http.StatusNotFound, ErrCodeNotFound)
+				return
+			}
+		} else if reason := ownershipAuthz(sub.OwnerSubject, caller.Subject()); reason != "" {
+			if !rt.controlDeny(w, "add-streams", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+				return
+			}
+		}
 	}
 	for _, path := range body.Streams {
 		path = strings.Trim(path, "/")
@@ -184,12 +277,25 @@ func (rt *Routes) handleAddStreams(w http.ResponseWriter, r *http.Request, id st
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (rt *Routes) handleRemoveStream(w http.ResponseWriter, id, path string) {
+func (rt *Routes) handleRemoveStream(w http.ResponseWriter, r *http.Request, id, path string) {
+	caller, authnErr := rt.authenticateCaller(r)
+	if authnErr != nil {
+		if !rt.controlDeny(w, "remove-stream", id, http.StatusUnauthorized, ErrCodeUnauthenticated, authnErr.Error()) {
+			return
+		}
+	}
 	path = strings.Trim(path, "/")
 	sub, ok, err := rt.mgr.store.Get(id)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	if ok && authnErr == nil {
+		if reason := ownershipAuthz(sub.OwnerSubject, caller.Subject()); reason != "" {
+			if !rt.controlDeny(w, "remove-stream", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+				return
+			}
+		}
 	}
 	stillGlob := ok && sub.Config.Pattern != "" && GlobMatch(sub.Config.Pattern, path)
 	if err := rt.mgr.store.Unlink(id, path, stillGlob); err != nil {

@@ -79,6 +79,26 @@ func (c VerifiedCaller) MayLink(path auth.StreamPath) bool {
 	return false
 }
 
+// MayLinkPattern reports whether every stream the glob pattern can ever
+// match falls inside the caller's namespaces. Sound by construction: the
+// pattern's literal prefix bounds all its matches, so a namespace covering
+// the prefix covers every match (property-tested against GlobMatch). A
+// pattern with no literal prefix ("*", "**/x") can match outside any
+// namespace and is never authorized — there is no match-all namespace grant;
+// a root grant would be an explicit future extension, never an accident of
+// pattern syntax (fail closed).
+func (c VerifiedCaller) MayLinkPattern(pattern string) bool {
+	prefix, ok := GlobLiteralPrefix(pattern)
+	if !ok {
+		return false
+	}
+	p, err := auth.NormalizeStreamPath(prefix)
+	if err != nil {
+		return false
+	}
+	return c.MayLink(p)
+}
+
 // GenerateCallerToken mints a caller token for sub, scoped to the given
 // namespace prefixes (normalized stream-path prefixes), issued by iss and
 // expiring at now+ttl. Ops and tests mint with the active signing key; the
