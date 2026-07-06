@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
@@ -29,6 +30,8 @@ const (
 	EnvConsistencyTier = "CHRONICLE_CONSISTENCY_TIER" // A (default) | B | C
 	EnvWaitReplicas    = "CHRONICLE_WAIT_REPLICAS"    // Tier B WAITAOF numreplicas (1 on STANDARD_HA, 0 on a single Redis)
 	EnvWaitTimeoutMs   = "CHRONICLE_WAIT_TIMEOUT_MS"  // Tier B WAIT/WAITAOF server-side block bound
+	// Stream authn/authz enforcement (issue #126): insecure (default) | enforce.
+	EnvAuthMode = "CHRONICLE_AUTH_MODE"
 )
 
 // Config holds the chronicle server configuration. LongPollTimeout and
@@ -124,6 +127,13 @@ type Config struct {
 	// WaitTimeoutMs bounds the Tier B WAIT/WAITAOF server-side block; on timeout the
 	// achieved-ack count is checked and a short reply is surfaced as an error.
 	WaitTimeoutMs int
+
+	// AuthMode selects stream authn/authz enforcement (issue #126). The default
+	// auth.ModeInsecure evaluates decisions for telemetry only, so a base
+	// protocol client keeps working and a deploy sync can never auto-enforce;
+	// auth.ModeEnforce fails closed (401/403 before any store access). Flipped
+	// per-stage at the deployment layer, not in code.
+	AuthMode auth.Mode
 }
 
 // DefaultConfig returns the defaults: port 4437 (the IANA-assigned Durable
@@ -145,6 +155,7 @@ func DefaultConfig() Config {
 		Consistency:          webhook.TierA, // no WAIT by default — best latency, at-least-once
 		WaitReplicas:         1,             // the realistic Redis Software HA ceiling (06:70), used only by Tier B
 		WaitTimeoutMs:        1000,
+		AuthMode:             auth.ModeInsecure, // telemetry-first: enforcement is an explicit per-stage opt-in (issue #126)
 	}
 }
 
@@ -233,6 +244,13 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvWaitTimeoutMs, err)
 		}
 		c.WaitTimeoutMs = n
+	}
+	if v, ok := lookup(EnvAuthMode); ok {
+		mode, err := auth.ParseMode(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvAuthMode, err)
+		}
+		c.AuthMode = mode
 	}
 	return nil
 }

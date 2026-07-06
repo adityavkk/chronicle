@@ -160,6 +160,7 @@ func run() error {
 		LongPollTimeout:      cfg.LongPollTimeout,
 		SSEReconnectInterval: cfg.SSEReconnectInterval,
 		Logger:               logger,
+		AuthMode:             cfg.AuthMode,
 	}
 
 	// Observability surface (/metrics, /healthz, /readyz). Created independently
@@ -206,12 +207,16 @@ func run() error {
 			WaitReplicas:      cfg.WaitReplicas,
 			WaitTimeoutMs:     cfg.WaitTimeoutMs,
 		}
-		router, service, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)
+		router, service, appendAuth, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)
 		if err != nil {
 			return fmt.Errorf("subscriptions: %w", err)
 		}
 		handler.Subscriptions = router
 		handler.SubHooks = service
+		// The append gate shares the subscription layer's persisted token key,
+		// so claim-minted write tokens validate across restarts and replicas
+		// (issue #126).
+		handler.AppendAuth = appendAuth
 		// Start runs the boot reconcile synchronously before launching its loops, so
 		// anything owed is re-fired before serving (issue #13 — the boot recovery
 		// event closes the restart gap; no separate RunSweep is needed).
@@ -253,6 +258,7 @@ func run() error {
 		"store", cfg.StoreBackend,
 		"subscriptions", subscriptionsEnabled,
 		"ui", uiEnabled,
+		"auth_mode", cfg.AuthMode.String(),
 		"long_poll_timeout", cfg.LongPollTimeout,
 		"sse_reconnect_interval", cfg.SSEReconnectInterval)
 
