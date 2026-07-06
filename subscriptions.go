@@ -62,6 +62,16 @@ type SubscriptionTuning struct {
 	// create/add-streams) follow the same telemetry-default posture as the
 	// data plane. One mode, never a second flag.
 	AuthMode auth.Mode
+
+	// ---- key custody (issues #123/#126) ----
+	// KeysFile, when non-empty, loads the Ed25519 signing key(s) and the HMAC
+	// token key from a mounted secrets file (the Akeyless /etc/secrets
+	// pattern) instead of generating-and-persisting them in Redis. On a shared
+	// data-plane Redis the persisted form means Redis read access can forge
+	// webhook signatures and tokens; the file mount is what breaks that.
+	// Empty keeps the Redis custody (dev default). A configured-but-unloadable
+	// file refuses startup — fail closed, never fall back to Redis keys.
+	KeysFile string
 }
 
 // storePath maps a stream-root-relative subscription path ("events/abc") to the
@@ -202,6 +212,18 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 	}
 	if rs != nil {
 		opts.Lister = redisLister{rs: rs}
+	}
+	if tuning.KeysFile != "" {
+		src, err := webhook.LoadFileKeySource(tuning.KeysFile)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		for _, w := range src.Warnings() {
+			logger.Warn(w)
+		}
+		logger.Info("subscription keys loaded from file (Redis custody disabled)",
+			"path", tuning.KeysFile, "kids", src.Kids())
+		opts.Keys = src
 	}
 	// Tier B (issue #16) arms the WAITAOF durability barrier on the fence-minting
 	// writes; TierA/C leave the store on the no-WAIT default. WithConsistency is a

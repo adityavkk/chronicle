@@ -122,6 +122,11 @@ type ManagerOptions struct {
 	// Metrics receives sweep/delivery/worker observations. Nil defaults to a
 	// no-op recorder, so instrumentation is opt-in.
 	Metrics Metrics
+	// Keys overrides where key material comes from (issues #123/#126 custody):
+	// nil keeps the store as the source (generate-and-persist in Redis, the dev
+	// default); a FileKeySource reads a mounted secrets file so key material
+	// never touches the shared data-plane Redis.
+	Keys KeySource
 
 	// ---- leased slot ownership (issue #14) ----
 
@@ -155,6 +160,7 @@ type ManagerOptions struct {
 // durable Store.
 type Manager struct {
 	store             Store
+	keys              KeySource // key custody source (the store unless ManagerOptions.Keys overrides)
 	streams           Streams
 	lister            StreamLister
 	streamRootURL     string // normalized in NewManager to end in exactly one "/"
@@ -200,20 +206,28 @@ type Manager struct {
 	wg   sync.WaitGroup
 }
 
-// NewManager builds a Manager and loads (or installs) the persisted signing and
-// token keys, so the kid is stable and tokens validate across restarts.
+// NewManager builds a Manager and loads the signing and token keys from the
+// configured KeySource — the store (which installs persisted keys, so the kid
+// is stable and tokens validate across restarts) unless opts.Keys overrides
+// custody with a mounted secrets file (#123/#126: then nothing here writes
+// key material to Redis).
 func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, error) {
 	now := time.Now()
-	signing, err := store.LoadSigningKey(now)
+	keys := opts.Keys
+	if keys == nil {
+		keys = store
+	}
+	signing, err := keys.LoadSigningKey(now)
 	if err != nil {
 		return nil, err
 	}
-	tokenKey, err := store.LoadTokenKey()
+	tokenKey, err := keys.LoadTokenKey()
 	if err != nil {
 		return nil, err
 	}
 	m := &Manager{
 		store:                 store,
+		keys:                  keys,
 		streams:               streams,
 		lister:                opts.Lister,
 		streamRootURL:         normalizeStreamRootURL(opts.StreamRootURL),
@@ -341,9 +355,11 @@ func (m *Manager) signingView() *SigningView {
 	return &SigningView{Alg: "ed25519", Kid: m.signing.Kid, JWKSURL: m.JWKSURL()}
 }
 
-// JWKS returns the active key set served at __ds/jwks.json.
+// JWKS returns the active key set served at __ds/jwks.json, read from the
+// same custody source the signing key came from — a file-sourced deployment
+// serves exactly the file's keys and never consults Redis.
 func (m *Manager) JWKS() (JWKS, error) {
-	keys, err := m.store.SigningKeys()
+	keys, err := m.keys.SigningKeys()
 	if err != nil {
 		return JWKS{}, err
 	}

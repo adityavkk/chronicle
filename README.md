@@ -72,6 +72,7 @@ Flags take precedence over environment variables; both over defaults.
 | _(env only)_ | `CHRONICLE_AUTH_MODE` | `insecure` | Stream authn/authz enforcement ([#126](https://github.com/adityavkk/chronicle/issues/126)): `insecure` evaluates decisions as telemetry only (base clients unaffected); `enforce` fails closed — appends require a claim-scoped write token (`electric-claim-token` or `Authorization: Bearer`) minted on pull-wake claim |
 | _(env only)_ | `CHRONICLE_SERVICE_BEARER` | _(unset)_ | Trusted-backend service credential(s) ([#126](https://github.com/adityavkk/chronicle/issues/126) TB4): `token` or `name:token`, comma-separated for rotation overlap. Set the Electric agents-server's `DURABLE_STREAMS_BEARER` to a listed token; its requests are then served pre-authorized |
 | _(env only)_ | `CHRONICLE_TRUSTED_SPIFFE_IDS` | _(unset)_ | In-mesh service allowlist: comma-separated `spiffe://` URIs matched against the sidecar-injected `X-Forwarded-Client-Cert` URI SAN (last element only). Configure only when a sanitizing sidecar fronts chronicle |
+| _(env only)_ | `CHRONICLE_KEYS_FILE` | _(unset — keys live in Redis)_ | Load the Ed25519 signing key(s) + HMAC token key from a mounted secrets file ([#123](https://github.com/adityavkk/chronicle/issues/123)/[#126](https://github.com/adityavkk/chronicle/issues/126) custody): key material never touches Redis; a configured-but-unloadable file refuses startup |
 
 ### Redis requirements
 
