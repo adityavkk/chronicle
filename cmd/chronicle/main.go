@@ -175,6 +175,17 @@ func run() error {
 			"trusted_spiffe_ids", len(cfg.TrustedSPIFFEIDs))
 	}
 
+	// OIDC user principals (issue #126 TB5): the multi-issuer route for
+	// PingFed-verified users. Only the issuer is logged — never tokens.
+	if cfg.OIDC.Issuer != "" {
+		userAuth, err := chronicle.NewOIDCUserAuth(cfg.OIDC, nil, logger)
+		if err != nil {
+			return fmt.Errorf("oidc: %w", err)
+		}
+		handler.UserAuth = userAuth
+		logger.Info("oidc user auth enabled", "issuer", cfg.OIDC.Issuer)
+	}
+
 	// Observability surface (/metrics, /healthz, /readyz). Created independently
 	// of subscriptions so Go/process/health metrics are exposed either way; the
 	// recorder is handed to the subscription Manager when subscriptions are on.
@@ -222,16 +233,18 @@ func run() error {
 			AuthMode:          cfg.AuthMode,
 			KeysFile:          cfg.KeysFile,
 		}
-		router, service, appendAuth, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)
+		router, service, authz, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)
 		if err != nil {
 			return fmt.Errorf("subscriptions: %w", err)
 		}
 		handler.Subscriptions = router
 		handler.SubHooks = service
-		// The append gate shares the subscription layer's persisted token key,
-		// so claim-minted write tokens validate across restarts and replicas
-		// (issue #126).
-		handler.AppendAuth = appendAuth
+		// The token gates share the subscription layer's persisted keys, so
+		// claim-minted write tokens, read capabilities, and caller tokens all
+		// validate across restarts and replicas (issue #126).
+		handler.AppendAuth = authz.Append
+		handler.ReadAuth = authz.Read
+		handler.CallerAuth = authz.Caller
 		// Start runs the boot reconcile synchronously before launching its loops, so
 		// anything owed is re-fired before serving (issue #13 — the boot recovery
 		// event closes the restart gap; no separate RunSweep is needed).

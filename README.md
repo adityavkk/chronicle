@@ -73,6 +73,9 @@ Flags take precedence over environment variables; both over defaults.
 | _(env only)_ | `CHRONICLE_SERVICE_BEARER` | _(unset)_ | Trusted-backend service credential(s) ([#126](https://github.com/adityavkk/chronicle/issues/126) TB4): `token` or `name:token`, comma-separated for rotation overlap. Set the Electric agents-server's `DURABLE_STREAMS_BEARER` to a listed token; its requests are then served pre-authorized |
 | _(env only)_ | `CHRONICLE_TRUSTED_SPIFFE_IDS` | _(unset)_ | In-mesh service allowlist: comma-separated `spiffe://` URIs matched against the sidecar-injected `X-Forwarded-Client-Cert` URI SAN (last element only). Configure only when a sanitizing sidecar fronts chronicle |
 | _(env only)_ | `CHRONICLE_KEYS_FILE` | _(unset — keys live in Redis)_ | Load the Ed25519 signing key(s) + HMAC token key from a mounted secrets file ([#123](https://github.com/adityavkk/chronicle/issues/123)/[#126](https://github.com/adityavkk/chronicle/issues/126) custody): key material never touches Redis; a configured-but-unloadable file refuses startup |
+| _(env only)_ | `CHRONICLE_OIDC_ISSUER` | _(unset)_ | OIDC issuer for user principals ([#126](https://github.com/adityavkk/chronicle/issues/126) TB5): PingFed RS256/ES256 access tokens verified via discovery-fetched JWKS become namespace-scoped read/create/delete principals. Requires the other two OIDC vars |
+| _(env only)_ | `CHRONICLE_OIDC_AUDIENCE` | _(unset)_ | Audience the OIDC token's `aud` must carry |
+| _(env only)_ | `CHRONICLE_OIDC_NS_CLAIM` | _(unset)_ | Claim name holding the caller's namespace prefixes (string or array); the claim→scope mapping is IdP-side deploy config |
 
 ### Redis requirements
 

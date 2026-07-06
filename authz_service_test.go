@@ -39,7 +39,7 @@ func serviceHandler(t *testing.T, key []byte) (*Handler, *hookRecorder) {
 func TestServiceBearerAppendServedPreAuthorized(t *testing.T) {
 	key := testAuthKey(t)
 	h, hooks := serviceHandler(t, key)
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 
 	// No claim token at all — the service credential alone authorizes.
 	rec := do(h, http.MethodPost, "/events/a", map[string]string{
@@ -60,7 +60,7 @@ func TestServiceBearerAppendServedPreAuthorized(t *testing.T) {
 func TestServiceBearerClaimTokenPassthrough(t *testing.T) {
 	key := testAuthKey(t)
 	h, _ := serviceHandler(t, key)
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 
 	rec := do(h, http.MethodPost, "/events/a", map[string]string{
 		"Content-Type":   "application/json",
@@ -75,7 +75,7 @@ func TestServiceBearerClaimTokenPassthrough(t *testing.T) {
 func TestUnauthenticatedPeerRejectedInBackendMode(t *testing.T) {
 	key := testAuthKey(t)
 	h, hooks := serviceHandler(t, key)
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 	before := tailOf(t, h, "/events/a")
 
 	cases := map[string]map[string]string{
@@ -106,7 +106,7 @@ func TestUnauthenticatedPeerRejectedInBackendMode(t *testing.T) {
 func TestServiceBearerDoesNotShadowClaimTokens(t *testing.T) {
 	key := testAuthKey(t)
 	h, _ := serviceHandler(t, key)
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 	tok := mintWriteToken(t, key, "events/a")
 
 	rec := do(h, http.MethodPost, "/events/a", map[string]string{
@@ -121,7 +121,7 @@ func TestServiceBearerDoesNotShadowClaimTokens(t *testing.T) {
 func TestXFCCServicePrincipal(t *testing.T) {
 	key := testAuthKey(t)
 	h, _ := serviceHandler(t, key)
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 
 	// Allowlisted mesh peer, no other credential → served.
 	rec := do(h, http.MethodPost, "/events/a", map[string]string{
@@ -163,7 +163,7 @@ func TestXFCCIgnoredWhenNotConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.ServiceAuth = &ServiceAuth{Credentials: creds} // no TrustedSPIFFEIDs
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 
 	rec := do(h, http.MethodPost, "/events/a", map[string]string{
 		"Content-Type": "application/json",
@@ -186,7 +186,7 @@ func TestServiceAuthWithoutAppendAuthorizer(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.ServiceAuth = &ServiceAuth{Credentials: creds}
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 
 	rec := do(h, http.MethodPost, "/events/a", map[string]string{
 		"Content-Type":  "application/json",
