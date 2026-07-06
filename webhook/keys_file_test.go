@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -46,9 +47,16 @@ func validKeysFile() string {
 	return fmt.Sprintf(`{
 		"token_key": %q,
 		"signing_keys": [
-			{"seed": %q, "created_at": "2026-07-01T00:00:00Z", "status": "active", "purpose": "webhook"}
+			{"seed": %q, "created_at": "2026-07-01T00:00:00Z", "status": "active", "purpose": "webhook"},
+			{"seed": %q, "created_at": "2026-07-01T00:00:00Z", "status": "active", "purpose": "wake"}
 		]
-	}`, b64TokenKey(32), b64Seed(1))
+	}`, b64TokenKey(32), b64Seed(1), b64Seed(9))
+}
+
+// wakeEntry is the wake-family active key every otherwise-focused fixture
+// needs (both families are required since the rotation slice).
+func wakeEntry() string {
+	return fmt.Sprintf(`{"seed": %q, "created_at": "2026-07-01T00:00:00Z", "status": "active", "purpose": "wake"}`, b64Seed(9))
 }
 
 func TestLoadFileKeySourceValid(t *testing.T) {
@@ -78,6 +86,13 @@ func TestLoadFileKeySourceValid(t *testing.T) {
 	if err != nil || len(keys) != 1 || keys[0].Kid != active.Kid {
 		t.Fatalf("SigningKeys = %v (err %v)", keys, err)
 	}
+	wake, err := src.LoadWakeKey(time.Now())
+	if err != nil || wake.Kid == active.Kid || wake.Kid == "" {
+		t.Fatalf("wake key = %q (err %v); must be a distinct kid", wake.Kid, err)
+	}
+	if deny, err := src.DenylistedKids(); err != nil || len(deny) != 0 {
+		t.Fatalf("denylist = %v (err %v)", deny, err)
+	}
 	if len(src.Warnings()) != 0 {
 		t.Fatalf("0600 file must warn nothing, got %v", src.Warnings())
 	}
@@ -93,10 +108,11 @@ func TestLoadFileKeySourceActivePlusRetiring(t *testing.T) {
 	content := fmt.Sprintf(`{
 		"token_key": %q,
 		"signing_keys": [
-			{"seed": %q, "created_at": "2026-01-01T00:00:00Z", "status": "retiring", "purpose": "webhook"},
-			{"seed": %q, "created_at": "2026-07-01T00:00:00Z", "status": "active", "purpose": "webhook"}
+			{"seed": %q, "created_at": "2026-01-01T00:00:00Z", "status": "retiring", "purpose": "webhook", "retire_after": "2026-12-01T00:00:00Z"},
+			{"seed": %q, "created_at": "2026-07-01T00:00:00Z", "status": "active", "purpose": "webhook"},
+			%s
 		]
-	}`, b64TokenKey(32), b64Seed(2), b64Seed(3))
+	}`, b64TokenKey(32), b64Seed(2), b64Seed(3), wakeEntry())
 	src, err := LoadFileKeySource(writeKeysFile(t, content))
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +128,7 @@ func TestLoadFileKeySourceActivePlusRetiring(t *testing.T) {
 	if active.Kid != keys[0].Kid {
 		t.Fatal("LoadSigningKey must return the active key")
 	}
-	if len(src.Kids()) != 2 || !strings.Contains(src.Kids()[0], "(active)") {
+	if len(src.Kids()) != 3 || !strings.Contains(src.Kids()[0], "webhook:") || !strings.Contains(src.Kids()[0], "(active)") {
 		t.Fatalf("Kids() = %v", src.Kids())
 	}
 }
@@ -123,7 +139,7 @@ func TestLoadFileKeySourceRejects(t *testing.T) {
 		return fmt.Sprintf(`{"seed": %q, "created_at": "2026-07-01T00:00:00Z", "status": %q, "purpose": %q}`, seed, status, purpose)
 	}
 	doc := func(tokenKey, entries string) string {
-		return fmt.Sprintf(`{"token_key": %q, "signing_keys": [%s]}`, tokenKey, entries)
+		return fmt.Sprintf(`{"token_key": %q, "signing_keys": [%s, %s]}`, tokenKey, entries, wakeEntry())
 	}
 
 	cases := map[string]string{
@@ -135,14 +151,21 @@ func TestLoadFileKeySourceRejects(t *testing.T) {
 		"short token key":   doc(b64TokenKey(16), entry(seed, "active", "webhook")),
 		"bad token base64":  doc("!!nope!!", entry(seed, "active", "webhook")),
 		"missing token key": fmt.Sprintf(`{"signing_keys": [%s]}`, entry(seed, "active", "webhook")),
-		"unknown purpose":   doc(tok, entry(seed, "active", "wake")),
-		"unknown status":    doc(tok, entry(seed, "revoked", "webhook")),
-		"bad created_at":    doc(tok, `{"seed": "`+seed+`", "created_at": "yesterday", "status": "active", "purpose": "webhook"}`),
-		"empty keys":        doc(tok, ""),
-		"unknown top field": `{"token_key": "` + tok + `", "signing_keys": [` + entry(seed, "active", "webhook") + `], "kid": "ds_x"}`,
-		"unknown key field": doc(tok, `{"seed": "`+seed+`", "created_at": "2026-07-01T00:00:00Z", "status": "active", "purpose": "webhook", "kid": "ds_x"}`),
-		"trailing garbage":  doc(tok, entry(seed, "active", "webhook")) + `{"more": true}`,
-		"not json":          `token_key=abc`,
+		"unknown purpose":   doc(tok, entry(seed, "active", "caller")),
+		"no wake family": fmt.Sprintf(`{"token_key": %q, "signing_keys": [%s]}`,
+			tok, entry(seed, "active", "webhook")),
+		"same key both purposes": fmt.Sprintf(`{"token_key": %q, "signing_keys": [%s, %s]}`, tok,
+			entry(b64Seed(7), "active", "webhook"),
+			`{"seed": "`+b64Seed(7)+`", "created_at": "2026-07-01T00:00:00Z", "status": "active", "purpose": "wake"}`),
+		"retire_after on active": doc(tok, `{"seed": "`+seed+`", "created_at": "2026-07-01T00:00:00Z", "status": "active", "purpose": "webhook", "retire_after": "2026-08-01T00:00:00Z"}`),
+		"bad retire_after":       doc(tok, `{"seed": "`+seed+`", "created_at": "2026-07-01T00:00:00Z", "status": "retiring", "purpose": "webhook", "retire_after": "soon"}`+","+entry(b64Seed(8), "active", "webhook")),
+		"unknown status":         doc(tok, entry(seed, "revoked", "webhook")),
+		"bad created_at":         doc(tok, `{"seed": "`+seed+`", "created_at": "yesterday", "status": "active", "purpose": "webhook"}`),
+		"empty keys":             doc(tok, ""),
+		"unknown top field":      `{"token_key": "` + tok + `", "signing_keys": [` + entry(seed, "active", "webhook") + `], "kid": "ds_x"}`,
+		"unknown key field":      doc(tok, `{"seed": "`+seed+`", "created_at": "2026-07-01T00:00:00Z", "status": "active", "purpose": "webhook", "kid": "ds_x"}`),
+		"trailing garbage":       doc(tok, entry(seed, "active", "webhook")) + `{"more": true}`,
+		"not json":               `token_key=abc`,
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -191,20 +214,29 @@ func TestFileKeySourceProperty(t *testing.T) {
 		tokenLen := rapid.IntRange(32, 64).Draw(t, "tokenLen")
 
 		tokenKey := rapid.SliceOfN(rapid.Byte(), tokenLen, tokenLen).Draw(t, "tokenKey")
-		entries := make([]map[string]string, 0, nRetiring+1)
-		mk := func(status string, seed []byte) map[string]string {
-			return map[string]string{
+		entries := make([]map[string]string, 0, nRetiring+2)
+		mk := func(status, purpose string, seed []byte) map[string]string {
+			e := map[string]string{
 				"seed":       base64.RawURLEncoding.EncodeToString(seed),
 				"created_at": time.Unix(rapid.Int64Range(0, 1<<32).Draw(t, "at"), 0).UTC().Format(time.RFC3339),
 				"status":     status,
-				"purpose":    "webhook",
+				"purpose":    purpose,
 			}
+			if status == keyStatusRetiring {
+				e["retire_after"] = time.Unix(rapid.Int64Range(1<<32, 1<<33).Draw(t, "retireAt"), 0).UTC().Format(time.RFC3339)
+			}
+			return e
 		}
 		activeSeed := rapid.SliceOfN(rapid.Byte(), 32, 32).Draw(t, "activeSeed")
-		entries = append(entries, mk("active", activeSeed))
+		wakeSeed := rapid.SliceOfN(rapid.Byte(), 32, 32).Draw(t, "wakeSeed")
+		if bytes.Equal(wakeSeed, activeSeed) {
+			wakeSeed[0] ^= 0x01 // the two families may never share a key
+		}
+		entries = append(entries, mk("active", "webhook", activeSeed))
+		entries = append(entries, mk("active", "wake", wakeSeed))
 		for i := 0; i < nRetiring; i++ {
 			seed := rapid.SliceOfN(rapid.Byte(), 32, 32).Draw(t, fmt.Sprintf("seed%d", i))
-			entries = append(entries, mk("retiring", seed))
+			entries = append(entries, mk("retiring", "webhook", seed))
 		}
 
 		docBytes, err := json.Marshal(map[string]any{
@@ -237,6 +269,11 @@ func TestFileKeySourceProperty(t *testing.T) {
 		k2, _ := src2.LoadSigningKey(time.Now())
 		if k1.Kid != k2.Kid {
 			t.Fatalf("kid unstable: %q vs %q", k1.Kid, k2.Kid)
+		}
+		w1, _ := src1.LoadWakeKey(time.Now())
+		w2, _ := src2.LoadWakeKey(time.Now())
+		if w1.Kid != w2.Kid || w1.Kid == k1.Kid {
+			t.Fatalf("wake kid unstable or conflated: %q vs %q (webhook %q)", w1.Kid, w2.Kid, k1.Kid)
 		}
 
 		// HMAC token key round-trips through the real token machinery.
@@ -285,17 +322,16 @@ func TestManagerWithFileKeySource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// JWKS: the webhook-envelope family is exactly the file's kid — no
-	// Redis-persisted webhook key may appear when a file is the custody
-	// source. The wake-token family (#123/TB6a) is a separate key that still
-	// persists in Redis until its file custody lands with the Wave-2 rotation
-	// work, so the set is exactly {file webhook kid, wake kid}.
+	fileWakeKid := func() string { k, _ := src.LoadWakeKey(time.Now()); return k.Kid }()
+
+	// JWKS: BOTH families come from the file — exactly {file webhook kid,
+	// file wake kid}, nothing Redis-installed.
 	jwks, err := mgr.JWKS()
 	if err != nil || len(jwks.Keys) != 2 || jwks.Keys[0].Kid != fileKid {
-		t.Fatalf("JWKS = %+v (err %v), want [%s, <wake kid>]", jwks, err, fileKid)
+		t.Fatalf("JWKS = %+v (err %v), want [%s, %s]", jwks, err, fileKid, fileWakeKid)
 	}
-	if jwks.Keys[1].Kid != mgr.wakeKey.Kid || jwks.Keys[1].Kid == fileKid {
-		t.Fatalf("JWKS second key = %s, want the distinct wake kid %s", jwks.Keys[1].Kid, mgr.wakeKey.Kid)
+	if jwks.Keys[1].Kid != fileWakeKid || jwks.Keys[1].Kid == fileKid {
+		t.Fatalf("JWKS second key = %s, want the file wake kid %s", jwks.Keys[1].Kid, fileWakeKid)
 	}
 
 	// The claim/callback and write-token paths run on the file's HMAC key:
@@ -319,8 +355,9 @@ func TestManagerWithFileKeySource(t *testing.T) {
 		t.Fatal("callback token must not authorize appends (cross-family)")
 	}
 
-	// Custody proof: booting from the file wrote NOTHING to Redis.
-	n, err := client.Exists(t.Context(), jwksKey, activeKidKey, tokenKeyKey).Result()
+	// Custody proof: booting from the file wrote NOTHING to Redis — neither
+	// the webhook family, nor the wake family, nor the token key.
+	n, err := client.Exists(t.Context(), jwksKey, activeKidKey, tokenKeyKey, wakeKeysKey, wakeActiveKidKey).Result()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -916,6 +916,76 @@ func (s *RedisStore) WakeSigningKeys() ([]SigningKey, error) {
 	return s.keyFamily(wakeKeysKey, wakeActiveKidKey)
 }
 
+// familyRedisKeys maps a key purpose to its (hash, active-kid) Redis keys.
+func familyRedisKeys(purpose KeyPurpose) (hashKey, activeKey string, err error) {
+	switch purpose {
+	case KeyPurposeWebhook:
+		return jwksKey, activeKidKey, nil
+	case KeyPurposeWake:
+		return wakeKeysKey, wakeActiveKidKey, nil
+	default:
+		return "", "", fmt.Errorf("webhook: unknown key purpose %q", purpose)
+	}
+}
+
+// RotateKey executes the rotation transition atomically (rotate_key.lua):
+// iff the family's active kid still equals expectedActiveKid, the successor
+// is installed active, the pointer flips, and the predecessor is re-marked
+// retiring until retireAfter. rotated=false means another writer won the
+// race (the #123 exactly-one-successor guarantee).
+func (s *RedisStore) RotateKey(purpose KeyPurpose, expectedActiveKid string, successor SigningKey, retireAfter time.Time) (bool, error) {
+	hashKey, activeKey, err := familyRedisKeys(purpose)
+	if err != nil {
+		return false, err
+	}
+	reply, err := s.evalStrings(rotateKeyScript, []string{hashKey, activeKey},
+		expectedActiveKid, successor.Kid, marshalKeyMaterial(successor),
+		strconv.FormatInt(retireAfter.Unix(), 10))
+	if err != nil {
+		return false, err
+	}
+	return len(reply) > 0 && reply[0] == "rotated", nil
+}
+
+// DenylistKid persists an emergency kid revocation (#123): SADD into the
+// {__ds}-slot denylist set every replica's reload sweep consults.
+func (s *RedisStore) DenylistKid(kid string) error {
+	return s.client.SAdd(s.ctx(), kidDenylistKey, kid).Err()
+}
+
+// DenylistedKids returns the emergency-revoked kids.
+func (s *RedisStore) DenylistedKids() ([]string, error) {
+	return s.client.SMembers(s.ctx(), kidDenylistKey).Result()
+}
+
+// ReapRetiredKeys physically removes retiring keys whose overlap window has
+// lapsed from both family hashes, making their JWKS/verification removal
+// permanent (#123: a removed key's forged tokens are rejected forever, not
+// until the next process restart re-lists the hash). Idempotent; any replica
+// may reap. A plain HDEL after re-reading the material is safe: rotation
+// never resurrects an old kid, so the worst race is two replicas deleting
+// the same field.
+func (s *RedisStore) ReapRetiredKeys(now time.Time) error {
+	for _, hashKey := range []string{jwksKey, wakeKeysKey} {
+		all, err := s.client.HGetAll(s.ctx(), hashKey).Result()
+		if err != nil {
+			return err
+		}
+		for kid, material := range all {
+			k, err := unmarshalKeyMaterial(kid, material)
+			if err != nil {
+				continue // never let one malformed entry block the sweep
+			}
+			if k.Status == keyStatusRetiring && !k.RetireAfter.IsZero() && !now.Before(k.RetireAfter) {
+				if err := s.client.HDel(s.ctx(), hashKey, kid).Err(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // keyFamily lists one signing-key family (its kid->material hash plus its
 // active-kid pointer), active key first.
 func (s *RedisStore) keyFamily(hashKey, activeKey string) ([]SigningKey, error) {
@@ -964,19 +1034,25 @@ func (s *RedisStore) LoadTokenKey() ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(stored)
 }
 
-// marshalKeyMaterial encodes a signing key as "<priv_b64url>:<created_unix>:<status>".
-// The public half is recovered from the private key.
+// marshalKeyMaterial encodes a signing key as
+// "<priv_b64url>:<created_unix>:<status>[:<retire_after_unix>]" — the fourth
+// field is present only on retiring keys rotation has stamped (#123), so
+// pre-rotation material round-trips byte-identically.
 func marshalKeyMaterial(k SigningKey) string {
-	return strings.Join([]string{
+	parts := []string{
 		base64.RawURLEncoding.EncodeToString(k.Private),
 		strconv.FormatInt(k.CreatedAt.Unix(), 10),
 		k.Status,
-	}, ":")
+	}
+	if !k.RetireAfter.IsZero() {
+		parts = append(parts, strconv.FormatInt(k.RetireAfter.Unix(), 10))
+	}
+	return strings.Join(parts, ":")
 }
 
 func unmarshalKeyMaterial(kid, material string) (SigningKey, error) {
-	parts := strings.SplitN(material, ":", 3)
-	if len(parts) != 3 {
+	parts := strings.Split(material, ":")
+	if len(parts) != 3 && len(parts) != 4 {
 		return SigningKey{}, fmt.Errorf("webhook: malformed key material for %q", kid)
 	}
 	priv, err := base64.RawURLEncoding.DecodeString(parts[0])
@@ -988,13 +1064,21 @@ func unmarshalKeyMaterial(kid, material string) (SigningKey, error) {
 	}
 	created, _ := strconv.ParseInt(parts[1], 10, 64)
 	pk := ed25519.PrivateKey(priv)
-	return SigningKey{
+	k := SigningKey{
 		Kid:       kid,
 		Private:   pk,
 		Public:    pk.Public().(ed25519.PublicKey),
 		CreatedAt: time.Unix(created, 0),
 		Status:    parts[2],
-	}, nil
+	}
+	if len(parts) == 4 {
+		retire, err := strconv.ParseInt(parts[3], 10, 64)
+		if err != nil {
+			return SigningKey{}, fmt.Errorf("webhook: malformed retire_after for %q", kid)
+		}
+		k.RetireAfter = time.Unix(retire, 0)
+	}
+	return k, nil
 }
 
 // parseLeaseUntilNs reads the lease deadline from the sub hash. arm_wake/claim/ack

@@ -76,6 +76,7 @@ Flags take precedence over environment variables; both over defaults.
 | _(env only)_ | `CHRONICLE_OIDC_ISSUER` | _(unset)_ | OIDC issuer for user principals ([#126](https://github.com/adityavkk/chronicle/issues/126) TB5): PingFed RS256/ES256 access tokens verified via discovery-fetched JWKS become namespace-scoped read/create/delete principals. Requires the other two OIDC vars |
 | _(env only)_ | `CHRONICLE_OIDC_AUDIENCE` | _(unset)_ | Audience the OIDC token's `aud` must carry |
 | _(env only)_ | `CHRONICLE_OIDC_NS_CLAIM` | _(unset)_ | Claim name holding the caller's namespace prefixes (string or array); the claim→scope mapping is IdP-side deploy config |
+| _(env only)_ | `CHRONICLE_KEY_ROTATION_OVERLAP` | _(per-family defaults)_ | Rotation overlap window for both Ed25519 key families ([#123](https://github.com/adityavkk/chronicle/issues/123)): how long a retiring kid keeps verifying after its successor takes over; defaults derive from each family's max token lifetime |
 
 ### Redis requirements
 

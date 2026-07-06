@@ -222,16 +222,17 @@ func run() error {
 		}
 		streamRootURL := strings.TrimSuffix(cfg.PublicBaseURL, "/") + cfg.StreamRoot
 		tuning := chronicle.SubscriptionTuning{
-			SweepInterval:     cfg.SweepInterval,
-			ReconcileInterval: cfg.ReconcileInterval,
-			SweepBatch:        cfg.SweepBatch,
-			Metrics:           subMetrics,
-			WakeTokenAudience: cfg.WakeTokenAudience,
-			Consistency:       cfg.Consistency,
-			WaitReplicas:      cfg.WaitReplicas,
-			WaitTimeoutMs:     cfg.WaitTimeoutMs,
-			AuthMode:          cfg.AuthMode,
-			KeysFile:          cfg.KeysFile,
+			SweepInterval:      cfg.SweepInterval,
+			ReconcileInterval:  cfg.ReconcileInterval,
+			SweepBatch:         cfg.SweepBatch,
+			Metrics:            subMetrics,
+			WakeTokenAudience:  cfg.WakeTokenAudience,
+			Consistency:        cfg.Consistency,
+			WaitReplicas:       cfg.WaitReplicas,
+			WaitTimeoutMs:      cfg.WaitTimeoutMs,
+			AuthMode:           cfg.AuthMode,
+			KeysFile:           cfg.KeysFile,
+			KeyRotationOverlap: cfg.KeyRotationOverlap,
 		}
 		router, service, authz, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)
 		if err != nil {
