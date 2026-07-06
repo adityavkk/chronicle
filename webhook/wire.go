@@ -152,11 +152,16 @@ type ClaimRequest struct {
 	Worker string `json:"worker"`
 }
 
-// ClaimResponse is a successful pull-wake claim (PROTOCOL §7.2).
+// ClaimResponse is a successful pull-wake claim (PROTOCOL §7.2). WriteToken is
+// the claim-scoped write token (issue #126): the append capability for exactly
+// the claimed streams, presented on appends via the electric-claim-token
+// header (fallback Authorization: Bearer). Additive per §11.2 — the
+// conformance suite reads individual claim fields, never the whole shape.
 type ClaimResponse struct {
 	WakeID     string           `json:"wake_id"`
 	Generation int64            `json:"generation"`
 	Token      string           `json:"token"`
+	WriteToken string           `json:"write_token,omitempty"`
 	Streams    []StreamSnapshot `json:"streams"`
 	LeaseTTLMs int64            `json:"lease_ttl_ms"`
 }
