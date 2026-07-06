@@ -35,6 +35,9 @@ const (
 	// Trusted service principals (issue #126 TB4, trusted-backend mode).
 	EnvServiceBearer = "CHRONICLE_SERVICE_BEARER"     // "token" or "name:token[,name:token...]"
 	EnvTrustedSPIFFE = "CHRONICLE_TRUSTED_SPIFFE_IDS" // comma-separated spiffe:// allowlist (mesh add-on)
+	// Key custody (issues #123/#126): path to a mounted secrets file holding the
+	// Ed25519 signing key(s) + HMAC token key. Unset = keys live in Redis.
+	EnvKeysFile = "CHRONICLE_KEYS_FILE"
 )
 
 // Config holds the chronicle server configuration. LongPollTimeout and
@@ -130,6 +133,11 @@ type Config struct {
 	// WaitTimeoutMs bounds the Tier B WAIT/WAITAOF server-side block; on timeout the
 	// achieved-ack count is checked and a short reply is surfaced as an error.
 	WaitTimeoutMs int
+
+	// KeysFile, when non-empty, loads the subscription layer's key material
+	// (Ed25519 signing key(s) + HMAC token key) from a mounted secrets file
+	// instead of Redis (issues #123/#126 custody). Empty keeps Redis custody.
+	KeysFile string
 
 	// AuthMode selects stream authn/authz enforcement (issue #126). The default
 	// auth.ModeInsecure evaluates decisions for telemetry only, so a base
@@ -259,6 +267,9 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvWaitTimeoutMs, err)
 		}
 		c.WaitTimeoutMs = n
+	}
+	if v, ok := lookup(EnvKeysFile); ok {
+		c.KeysFile = v
 	}
 	if v, ok := lookup(EnvAuthMode); ok {
 		mode, err := auth.ParseMode(v)

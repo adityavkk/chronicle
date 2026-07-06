@@ -219,6 +219,7 @@ func run() error {
 			WaitReplicas:      cfg.WaitReplicas,
 			WaitTimeoutMs:     cfg.WaitTimeoutMs,
 			AuthMode:          cfg.AuthMode,
+			KeysFile:          cfg.KeysFile,
 		}
 		router, service, appendAuth, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)
 		if err != nil {
