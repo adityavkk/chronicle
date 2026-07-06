@@ -1,6 +1,7 @@
 package chronicle
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 	"time"
@@ -94,6 +95,29 @@ type ServiceAuth struct {
 	// SPIFFE allowlist. Configuring it asserts a sidecar fronts chronicle
 	// and sanitizes inbound XFCC; leave it empty otherwise.
 	TrustedSPIFFEIDs []string
+
+	// SidecarMarkerName / SidecarMarkerValue, when Name is non-empty, add a
+	// required-header gate in front of XFCC trust (issue #126 hardening,
+	// defense in depth against an XFCC-passthrough misconfiguration): an XFCC
+	// mesh identity is honored only when the request also carries this header
+	// with this exact value. The operator configures the sidecar to inject it
+	// on mTLS-verified traffic AND to strip any client-supplied copy, so an
+	// external peer that forges XFCC cannot also produce the marker. Empty
+	// Name leaves XFCC trust resting on the documented sidecar-sanitization
+	// requirement alone.
+	SidecarMarkerName  string
+	SidecarMarkerValue string
+}
+
+// xfccGatePasses reports whether the sidecar-marker precondition for honoring
+// an XFCC mesh identity is met: trivially true when no marker is configured,
+// otherwise a constant-time match of the configured marker header.
+func (s *ServiceAuth) xfccGatePasses(r *http.Request) bool {
+	if s.SidecarMarkerName == "" {
+		return true
+	}
+	got := r.Header.Get(s.SidecarMarkerName)
+	return subtle.ConstantTimeCompare([]byte(got), []byte(s.SidecarMarkerValue)) == 1
 }
 
 // resolvePrincipal extracts the verified caller principal from a request, or
@@ -110,8 +134,20 @@ func (h *Handler) resolvePrincipal(r *http.Request) auth.Principal {
 	if p, ok := auth.VerifyServiceBearer(bearerFromRequest(r), h.ServiceAuth.Credentials); ok {
 		return p
 	}
-	if p, ok := auth.VerifyXFCC(r.Header.Get(xfccHeader), h.ServiceAuth.TrustedSPIFFEIDs); ok {
-		return p
+	// Mesh identity (XFCC) is trusted only on the operator's assertion that a
+	// sidecar fronts chronicle and sanitizes inbound XFCC. Two hardenings make
+	// that assertion less fragile. First, join ALL X-Forwarded-Client-Cert
+	// header lines before VerifyXFCC selects the last element: HTTP treats
+	// repeated headers as one comma-joined value and Envoy appends its
+	// attested element last, so a client that injects its own XFCC line can
+	// never make its element the last one — whereas Header.Get (first line
+	// only) would let that injection win. Second, the optional sidecar-marker
+	// gate above must pass.
+	if h.ServiceAuth.xfccGatePasses(r) {
+		joined := strings.Join(r.Header.Values(xfccHeader), ",")
+		if p, ok := auth.VerifyXFCC(joined, h.ServiceAuth.TrustedSPIFFEIDs); ok {
+			return p
+		}
 	}
 	return auth.Principal{}
 }
@@ -181,7 +217,15 @@ func (h *Handler) authorizeAppend(r *http.Request, rawPath string) error {
 // trusted-backend-only deployment (no subscription layer) still serves its
 // service while denying everyone else.
 func (h *Handler) appendDecision(r *http.Request, rawPath string) auth.Decision {
-	path, err := auth.NormalizeStreamPath(subStreamPath(rawPath))
+	// Normalize the EXACT store path (rawPath), not subStreamPath(rawPath):
+	// subStreamPath strips one leading slash and NormalizeStreamPath strips
+	// another, so the pair would double-strip and silently accept a
+	// key-colliding spelling like "//events/a" (authorized as "events/a" while
+	// the store operates on "//events/a" — an authorize-A-operate-on-B bypass).
+	// NormalizeStreamPath alone strips exactly one leading slash and rejects
+	// the empty segment, so the authorized path and the store key are the same
+	// string (§12.2).
+	path, err := auth.NormalizeStreamPath(rawPath)
 	if err != nil {
 		return auth.Deny(auth.ReasonForbidden, "invalid stream path")
 	}
@@ -246,7 +290,7 @@ func (h *Handler) authorizeRead(r *http.Request, rawPath string) (private bool, 
 // token is append-only — it is never consulted here, and presented as a
 // Bearer it fails JWS verification (401), never grants a read.
 func (h *Handler) readDecision(r *http.Request, rawPath string) auth.Decision {
-	path, err := auth.NormalizeStreamPath(subStreamPath(rawPath))
+	path, err := auth.NormalizeStreamPath(rawPath)
 	if err != nil {
 		return auth.Deny(auth.ReasonForbidden, "invalid stream path")
 	}
@@ -339,7 +383,7 @@ func (h *Handler) authorizeMutate(r *http.Request, rawPath string, action auth.A
 // is no agent arm here — a wake-typed bearer falls through to the caller
 // verifier and fails its typ pin (401).
 func (h *Handler) mutateDecision(r *http.Request, rawPath string) auth.Decision {
-	path, err := auth.NormalizeStreamPath(subStreamPath(rawPath))
+	path, err := auth.NormalizeStreamPath(rawPath)
 	if err != nil {
 		return auth.Deny(auth.ReasonForbidden, "invalid stream path")
 	}

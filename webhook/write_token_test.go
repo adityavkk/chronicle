@@ -147,7 +147,10 @@ func TestWriteAndCallbackTokensNotInterchangeable(t *testing.T) {
 // under exactly its key, and any single-byte corruption invalidates it.
 func TestWriteTokenProperties(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		key := rapid.SliceOfN(rapid.Byte(), 16, 64).Draw(t, "key")
+		// >= minTokenKeyBytes: a degenerate short key is rejected by design
+		// (fail-closed root of trust); TestWriteTokenEmptyKeyFailsClosed pins
+		// that. This property exercises the healthy-key range.
+		key := rapid.SliceOfN(rapid.Byte(), minTokenKeyBytes, 64).Draw(t, "key")
 		subID := rapid.StringMatching(`[a-z0-9-]{1,16}`).Draw(t, "sub")
 		gen := rapid.Int64Range(0, 1<<40).Draw(t, "gen")
 		rawPaths := rapid.SliceOfNDistinct(

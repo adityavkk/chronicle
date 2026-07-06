@@ -1,10 +1,8 @@
 package webhook
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -114,24 +112,33 @@ func LoadFileKeySource(path string) (*FileKeySource, error) {
 	if err != nil {
 		return nil, fmt.Errorf("keys file: %w", err)
 	}
+	// Fail closed on broad permissions (issue #126 hardening): the file holds
+	// the Ed25519 signing keys and the HMAC token key, so anyone who can read
+	// it can forge every webhook signature and token — filesystem custody is
+	// only as strong as the mount's permissions. World access (other r/w/x)
+	// and group-write are refused outright; group-read is a warning, since a
+	// deliberately shared-group secret mount is a defensible if looser posture.
+	// Set the mount to 0400/0600 (Kubernetes: secret volume defaultMode 0400).
 	var warnings []string
-	if info.Mode().Perm()&0o077 != 0 {
+	perm := info.Mode().Perm()
+	if perm&0o007 != 0 {
+		return nil, fmt.Errorf("keys file %s is world-accessible (mode %04o); it must not be readable, writable, or executable by other — set the mount to 0400 or 0600", path, perm)
+	}
+	if perm&0o020 != 0 {
+		return nil, fmt.Errorf("keys file %s is group-writable (mode %04o); it must not be writable by group — set the mount to 0400 or 0600", path, perm)
+	}
+	if perm&0o040 != 0 {
 		warnings = append(warnings,
-			fmt.Sprintf("keys file %s is group- or world-accessible (mode %04o); restrict it to 0600", path, info.Mode().Perm()))
+			fmt.Sprintf("keys file %s is group-readable (mode %04o); restrict it to 0400 or 0600 unless a shared-group secret mount is intended", path, perm))
 	}
 	raw, err := os.ReadFile(path) // #nosec G304 -- the operator-configured secrets mount path
 	if err != nil {
 		return nil, fmt.Errorf("keys file: %w", err)
 	}
 
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
 	var doc keysFileDoc
-	if err := dec.Decode(&doc); err != nil {
+	if err := strictJSONUnmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("keys file %s: %w", path, err)
-	}
-	if dec.More() {
-		return nil, fmt.Errorf("keys file %s: trailing data after the document", path)
 	}
 
 	tokenKey, err := base64.RawURLEncoding.DecodeString(doc.TokenKey)
@@ -232,25 +239,45 @@ func parseKeysFileEntry(e keysFileEntry) (KeyPurpose, SigningKey, error) {
 	}, nil
 }
 
+// cloneSigningKey deep-copies the key's Public/Private byte slices, so a
+// returned SigningKey never aliases the FileKeySource's loaded material —
+// copying the struct alone would share the backing arrays (issue #126
+// hardening: the accessors below promise defensive copies, and this makes
+// that true, so a caller that mutates a returned key cannot corrupt the
+// source or a later reader).
+func cloneSigningKey(k SigningKey) SigningKey {
+	k.Public = append(ed25519.PublicKey(nil), k.Public...)
+	k.Private = append(ed25519.PrivateKey(nil), k.Private...)
+	return k
+}
+
+func cloneSigningKeys(ks []SigningKey) []SigningKey {
+	out := make([]SigningKey, len(ks))
+	for i, k := range ks {
+		out[i] = cloneSigningKey(k)
+	}
+	return out
+}
+
 // LoadSigningKey returns the file's active webhook-envelope key. now is
 // unused: the file, not the clock, decides which key is active.
 func (s *FileKeySource) LoadSigningKey(time.Time) (SigningKey, error) {
-	return s.families[KeyPurposeWebhook].active, nil
+	return cloneSigningKey(s.families[KeyPurposeWebhook].active), nil
 }
 
 // SigningKeys returns the webhook-envelope family, active first.
 func (s *FileKeySource) SigningKeys() ([]SigningKey, error) {
-	return append([]SigningKey(nil), s.families[KeyPurposeWebhook].all...), nil
+	return cloneSigningKeys(s.families[KeyPurposeWebhook].all), nil
 }
 
 // LoadWakeKey returns the file's active wake-token key (#123).
 func (s *FileKeySource) LoadWakeKey(time.Time) (SigningKey, error) {
-	return s.families[KeyPurposeWake].active, nil
+	return cloneSigningKey(s.families[KeyPurposeWake].active), nil
 }
 
 // WakeSigningKeys returns the wake-token family, active first.
 func (s *FileKeySource) WakeSigningKeys() ([]SigningKey, error) {
-	return append([]SigningKey(nil), s.families[KeyPurposeWake].all...), nil
+	return cloneSigningKeys(s.families[KeyPurposeWake].all), nil
 }
 
 // LoadTokenKey returns a copy of the file's HMAC token key.

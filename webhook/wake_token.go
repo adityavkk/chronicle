@@ -1,7 +1,6 @@
 package webhook
 
 import (
-	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -88,13 +87,8 @@ func ValidateWakeToken(token string, keyFor KidResolver, expectedAud string, now
 		return WakeTokenClaims{}, err
 	}
 	var c WakeTokenClaims
-	dec := json.NewDecoder(bytes.NewReader(payload))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&c); err != nil {
+	if err := strictJSONUnmarshal(payload, &c); err != nil {
 		return WakeTokenClaims{}, fmt.Errorf("wake token claims: %w", err)
-	}
-	if dec.More() {
-		return WakeTokenClaims{}, errors.New("wake token claims: trailing data")
 	}
 	if c.Iss == "" || c.Sub == "" || c.Jti == "" || c.WakeID == "" {
 		return WakeTokenClaims{}, errors.New("wake token claims: required claim missing")
@@ -177,23 +171,27 @@ const wakeGateClockSkew = 5 * time.Second
 // implements chronicle's EntityAuthorizer seam; keys is called per decision
 // so wake-key rotation is honored without restart.
 type WakeTokenAuthorizer struct {
-	aud  string
-	keys func() ([]SigningKey, error)
+	aud      string
+	resolver func(now time.Time) KidResolver
 }
 
 // NewWakeTokenAuthorizer builds an authorizer accepting wake_tokens minted
 // for aud (empty accepts only audience-less mints — ValidateWakeToken's
-// exact-aud rule), verified against the wake key family the source returns.
-func NewWakeTokenAuthorizer(aud string, keys func() ([]SigningKey, error)) WakeTokenAuthorizer {
-	return WakeTokenAuthorizer{aud: aud, keys: keys}
+// exact-aud rule), verified against the wake key family the resolver returns
+// at the decision time.
+func NewWakeTokenAuthorizer(aud string, resolver func(now time.Time) KidResolver) WakeTokenAuthorizer {
+	return WakeTokenAuthorizer{aud: aud, resolver: resolver}
 }
 
-// EntityAuthorizer exposes the Manager's wake key family and configured
-// audience as the entity authorizer the HTTP handler enforces with — the
-// same aud the mint stamps, so a deployment's mint and gate agree by
-// construction (one CHRONICLE_WAKE_TOKEN_AUD on both sides of the loop).
+// EntityAuthorizer exposes the Manager's custody-source-fed wake key snapshot
+// and configured audience as the entity authorizer the HTTP handler enforces
+// with — the same aud the mint stamps (one CHRONICLE_WAKE_TOKEN_AUD on both
+// sides of the loop) and the same rotation- and denylist-aware wake trust set
+// the JWKS publishes, so file custody and an emergency kid revocation are
+// honored on the entity data plane too (issue #126 hardening: this previously
+// verified against m.store, bypassing both).
 func (m *Manager) EntityAuthorizer() WakeTokenAuthorizer {
-	return NewWakeTokenAuthorizer(m.wakeTokenAud, m.store.WakeSigningKeys)
+	return NewWakeTokenAuthorizer(m.wakeTokenAud, m.WakeKidResolver)
 }
 
 // AuthorizeEntity maps a presented wake_token to the Decision for an action
@@ -208,11 +206,7 @@ func (a WakeTokenAuthorizer) AuthorizeEntity(token string, path auth.StreamPath,
 	if token == "" {
 		return auth.Deny(auth.ReasonUnauthenticated, "missing wake token")
 	}
-	keys, err := a.keys()
-	if err != nil {
-		return auth.Deny(auth.ReasonUnauthenticated, "wake key set unavailable")
-	}
-	claims, err := ValidateWakeToken(token, resolverForKeys(keys), a.aud, now, wakeGateClockSkew)
+	claims, err := ValidateWakeToken(token, a.resolver(now), a.aud, now, wakeGateClockSkew)
 	if err != nil {
 		return auth.Deny(auth.ReasonUnauthenticated, "invalid wake token")
 	}
