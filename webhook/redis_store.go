@@ -223,10 +223,10 @@ func (s *RedisStore) CreateOrConfirmOwned(id string, cfg Config, links []StreamL
 	for _, l := range links {
 		args = append(args, l.Path, string(l.LinkType), l.AckedOffset)
 	}
-	// h once per id: the sub hash, its id-set, and its links share one {__ds:h}
-	// slot, so create_sub.lua stays single-slot.
+	// h once per id: the sub hash, its id-set, links, and incarnation counter share
+	// one {__ds:h} slot, so create_sub.lua stays single-slot.
 	h := slotOf(id)
-	reply, err := s.evalStrings(createSubScript, []string{subKey(id), subsKey(h), linksKey(id)}, args...)
+	reply, err := s.evalStrings(createSubScript, []string{subKey(id), subsKey(h), linksKey(id), subIncarnationKey(id)}, args...)
 	if err != nil {
 		return 0, "", err
 	}
@@ -325,7 +325,7 @@ func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 
 // Delete removes the subscription and de-indexes its streams. Links are read
 // first so the fan-out entries can be cleaned up. h once per id keeps delete_sub.lua
-// (5 keys) single-slot.
+// single-slot.
 func (s *RedisStore) Delete(id string) error {
 	links, err := s.client.HKeys(s.ctx(), linksKey(id)).Result()
 	if err != nil {
@@ -333,7 +333,7 @@ func (s *RedisStore) Delete(id string) error {
 	}
 	h := slotOf(id)
 	if _, err := s.evalStrings(deleteSubScript,
-		[]string{subKey(id), subsKey(h), linksKey(id), leaseZKey(h), retryZKey(h)}, id); err != nil {
+		[]string{subKey(id), subsKey(h), linksKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), subShardRegistryKey(id)}, id); err != nil {
 		return err
 	}
 	for _, path := range links {
@@ -556,11 +556,11 @@ func (s *RedisStore) Claim(id, worker, wakeID string, now time.Time, leaseTTLMs 
 // == 0 is the bare per-type lease (== Claim), byte-for-byte today.
 func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
 	// h from the BASE id (slotOf strips the g-suffix), so the config hash, the
-	// per-(id,g) shard hash, and the lease ZSET all share the sub's one slot —
-	// claim.lua stays single-slot for any g.
+	// per-(id,g) shard hash, incarnation counter, registry, and lease ZSET all
+	// share the sub's one slot — claim.lua stays single-slot for any g.
 	h := slotOf(id)
-	reply, err := s.evalStrings(claimScript, []string{subKey(id), subShardKey(id, g), leaseZKey(h)},
-		shardMember(id, g), worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID)
+	reply, err := s.evalStrings(claimScript, []string{subKey(id), subShardKey(id, g), leaseZKey(h), subIncarnationKey(id), subShardRegistryKey(id)},
+		shardMember(id, g), worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID, strconv.Itoa(g))
 	if err != nil {
 		return ClaimResult{}, err
 	}
@@ -646,10 +646,11 @@ func (s *RedisStore) AckShard(id string, g int, reqGeneration int64, reqWakeID s
 	// replica_id, expected_epoch are the trailing pair ack.lua reads via #ARGV
 	// (after the variable-length acks) for the owner-epoch fence (issue #14).
 	args = append(args, me, epoch)
-	// h from the base id: the shard fence hash, the shared cursor hash, all three
-	// schedule ZSETs, and the due outbox share one slot — ack.lua stays single-slot.
+	// h from the base id: the shard fence hash, parent config hash, the shared cursor
+	// hash, all three schedule ZSETs, and the due outbox share one slot — ack.lua
+	// stays single-slot.
 	h := slotOf(id)
-	reply, err := s.evalStrings(ackScript, []string{subShardKey(id, g), linksKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), sk}, args...)
+	reply, err := s.evalStrings(ackScript, []string{subShardKey(id, g), linksKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), sk, subKey(id)}, args...)
 	if err != nil {
 		return "", err
 	}

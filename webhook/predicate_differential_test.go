@@ -387,6 +387,7 @@ func TestSlotHomingMirror(t *testing.T) {
 		keys := []string{
 			subKey(id), linksKey(id),
 			subShardKey(id, 0), subShardKey(id, 1),
+			subShardRegistryKey(id), subIncarnationKey(id),
 			leaseZKey(h), retryZKey(h), dueZKey(h), subsKey(h),
 			streamSubsKey(h, "events/a"),
 		}

@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -111,5 +112,52 @@ func TestShardZeroIsByteIdenticalToClaim(t *testing.T) {
 	// ...and AckShard(id,0) with the bare claim's token acks OK.
 	if st, _ := s.AckShard(id, 0, r.Generation, r.WakeID, r.Generation, true, nil, now, 30000); st != "OK" {
 		t.Fatalf("AckShard(id,0) with bare-Claim token = %q; want OK", st)
+	}
+}
+
+// TestShardDeleteRecreateFencesStaleAck is the issue #142 regression: a g>0
+// shard claim from a deleted incarnation must not be able to ack the recreated
+// subscription's links. Delete removes registered shard state; the incarnation
+// stamp is the backstop for shard hashes left by older versions.
+func TestShardDeleteRecreateFencesStaleAck(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	const id = "agent-handler-delete-recreate"
+	const path = "/p"
+	initial := "0000000000000000_0000000000000000"
+	tail := "0000000000000001_0000000000000000"
+	links := []StreamLink{{Path: path, LinkType: LinkExplicit, AckedOffset: initial}}
+	if _, err := s.CreateOrConfirm(id, pullWakeShardCfg(), links, now); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	claim, err := s.ClaimShard(id, 1, "worker-old", "wake-old", now, 30000)
+	if err != nil || !claim.Claimed {
+		t.Fatalf("claim shard 1 = %+v, %v; want CLAIMED", claim, err)
+	}
+	if err := s.Delete(id); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if exists, err := client.Exists(context.Background(), subShardKey(id, 1)).Result(); err != nil || exists != 0 {
+		t.Fatalf("delete must remove shard hash: exists=%d err=%v", exists, err)
+	}
+
+	if _, err := s.CreateOrConfirm(id, pullWakeShardCfg(), links, now.Add(time.Second)); err != nil {
+		t.Fatalf("recreate: %v", err)
+	}
+	st, err := s.AckShard(id, 1, claim.Generation, claim.WakeID, claim.Generation, true,
+		[]Ack{{Stream: path, Offset: tail}}, now.Add(2*time.Second), 30000)
+	if err != nil {
+		t.Fatalf("stale ack: %v", err)
+	}
+	if st != "NOSUB" && st != "FENCED" {
+		t.Fatalf("stale shard ack after delete/recreate = %q; want NOSUB or FENCED", st)
+	}
+	sub, ok, err := s.Get(id)
+	if err != nil || !ok {
+		t.Fatalf("get recreated sub: ok=%v err=%v", ok, err)
+	}
+	if len(sub.Links) != 1 || sub.Links[0].AckedOffset != initial {
+		t.Fatalf("stale ack moved recreated cursor: links=%+v want offset %q", sub.Links, initial)
 	}
 }

@@ -49,8 +49,8 @@ func fnv32aMod(s string, m int) int {
 // TestSlotHomingGuard is the T5 STATIC PRECONDITION (issue #15 guard test): every
 // key a single subscription touches — its config/runtime hash, links hash, each
 // claim-granularity shard hash (#11), and its per-slot lease/retry/due/id-set/fan-out
-// keys — resolves to ONE Redis cluster slot, so ack.lua (4-5 keys), delete_sub.lua
-// (5 keys), arm_wake, and claim stay byte-for-byte single-slot. It also proves the
+// keys — resolves to ONE Redis cluster slot, so ack.lua, delete_sub.lua,
+// arm_wake, and claim stay byte-for-byte single-slot. It also proves the
 // slot index is FNV-1a (NOT CRC16), that a g>0 shard member resolves back to its
 // shard hash, and that a deliberately mis-tagged sub is DETECTED (lands in a
 // different cluster slot — CROSSSLOT, not silent).
@@ -69,16 +69,18 @@ func TestSlotHomingGuard(t *testing.T) {
 
 	// Every per-sub key for one id resolves to the SAME cluster slot.
 	keyset := map[string]string{
-		"subKey":          subKey(id),
-		"linksKey":        linksKey(id),
-		"subShardKey(0)":  subShardKey(id, 0),
-		"subShardKey(1)":  subShardKey(id, 1),
-		"subShardKey(16)": subShardKey(id, 16),
-		"leaseZKey":       leaseZKey(h),
-		"retryZKey":       retryZKey(h),
-		"dueZKey":         dueZKey(h),
-		"subsKey":         subsKey(h),
-		"streamSubs":      streamSubsKey(h, "events/a"),
+		"subKey":              subKey(id),
+		"linksKey":            linksKey(id),
+		"subShardKey(0)":      subShardKey(id, 0),
+		"subShardKey(1)":      subShardKey(id, 1),
+		"subShardKey(16)":     subShardKey(id, 16),
+		"subShardRegistryKey": subShardRegistryKey(id),
+		"subIncarnationKey":   subIncarnationKey(id),
+		"leaseZKey":           leaseZKey(h),
+		"retryZKey":           retryZKey(h),
+		"dueZKey":             dueZKey(h),
+		"subsKey":             subsKey(h),
+		"streamSubs":          streamSubsKey(h, "events/a"),
 	}
 	wantSlot := clusterSlot(subKey(id))
 	wantTag := slotTagAt(h)
