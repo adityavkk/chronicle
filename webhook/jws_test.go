@@ -178,3 +178,50 @@ func TestJWSHeaderIsExactlyMinted(t *testing.T) {
 		t.Fatalf("header = %v, want %v", hdr, want)
 	}
 }
+
+// TestJWSRejectsNonCanonicalBase64 pins the malleability fix the CI tamper
+// property caught: a signature (or payload) segment whose final character
+// differs only in the discarded trailing padding bits decodes to the very
+// same bytes under lenient base64url, yielding a DIFFERENT token string that
+// still verifies. Strict decoding rejects the non-canonical spelling, so one
+// signature has exactly one token string.
+func TestJWSRejectsNonCanonicalBase64(t *testing.T) {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	key := testJWSKey(t)
+	tok, err := SignCompactJWS(key, testTyp, []byte(`{"v":0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := 0
+	for _, segIdx := range []int{1, 2} { // payload, signature
+		parts := strings.Split(tok, ".")
+		seg := parts[segIdx]
+		spare := len(seg)*6 - len(seg)/4*3*8 - map[int]int{0: 0, 2: 8, 3: 16}[len(seg)%4]
+		if spare == 0 {
+			continue // segment length leaves no discarded bits to flip
+		}
+		last := seg[len(seg)-1]
+		v := strings.IndexByte(alphabet, last)
+		if v < 0 {
+			t.Fatalf("segment %d does not end in a base64url char: %q", segIdx, last)
+		}
+		// Flip the lowest discarded bit: same decoded bytes under lenient
+		// decoding, different token string.
+		alt := alphabet[v^(1<<(spare-1))]
+		if alt == last {
+			t.Fatalf("segment %d: mutation did not change the character", segIdx)
+		}
+		parts[segIdx] = seg[:len(seg)-1] + string(alt)
+		bad := strings.Join(parts, ".")
+		if bad == tok {
+			t.Fatal("mutation produced an identical token")
+		}
+		if _, err := VerifyCompactJWS(bad, testTyp, resolverFor(key)); err == nil {
+			t.Fatalf("segment %d: non-canonical spelling accepted", segIdx)
+		}
+		mutated++
+	}
+	if mutated == 0 {
+		t.Fatal("no segment had discarded bits; test exercised nothing")
+	}
+}
