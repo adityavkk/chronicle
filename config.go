@@ -38,6 +38,11 @@ const (
 	// Key custody (issues #123/#126): path to a mounted secrets file holding the
 	// Ed25519 signing key(s) + HMAC token key. Unset = keys live in Redis.
 	EnvKeysFile = "CHRONICLE_KEYS_FILE"
+	// Key rotation (#123): override for BOTH Ed25519 families' overlap window —
+	// how long a retiring kid keeps verifying after its successor takes over.
+	// Unset keeps the per-family defaults derived from each family's maximum
+	// token lifetime (wake: 60s cap + skew; webhook envelope/caller: 1h + skew).
+	EnvKeyRotationOverlap = "CHRONICLE_KEY_ROTATION_OVERLAP"
 	// wake_token audience (#123/#126 TB6a): the egress gateway aud claim.
 	EnvWakeTokenAud = "CHRONICLE_WAKE_TOKEN_AUD"
 	// OIDC user principals (issue #126 TB5, multi-issuer verify). All three
@@ -146,6 +151,10 @@ type Config struct {
 	// (Ed25519 signing key(s) + HMAC token key) from a mounted secrets file
 	// instead of Redis (issues #123/#126 custody). Empty keeps Redis custody.
 	KeysFile string
+
+	// KeyRotationOverlap, when non-zero, overrides both Ed25519 families'
+	// rotation overlap window (#123). Zero keeps the per-family defaults.
+	KeyRotationOverlap time.Duration
 
 	// AuthMode selects stream authn/authz enforcement (issue #126). The default
 	// auth.ModeInsecure evaluates decisions for telemetry only, so a base
@@ -289,6 +298,13 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvKeysFile); ok {
 		c.KeysFile = v
+	}
+	if v, ok := lookup(EnvKeyRotationOverlap); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvKeyRotationOverlap, err)
+		}
+		c.KeyRotationOverlap = d
 	}
 	if v, ok := lookup(EnvAuthMode); ok {
 		mode, err := auth.ParseMode(v)

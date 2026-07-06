@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
@@ -135,6 +136,16 @@ type ManagerOptions struct {
 	// once a deployment configures it (CHRONICLE_WAKE_TOKEN_AUD).
 	WakeTokenAudience string
 
+	// KeysReloadInterval bounds how stale this replica's key snapshot may be:
+	// rotations, denylist entries, and keys-file replacements land within one
+	// interval (#123 rotation). Zero defaults to 15s.
+	KeysReloadInterval time.Duration
+	// KeyRotationOverlap overrides BOTH families' rotation overlap window —
+	// how long a retiring key keeps verifying after its successor takes over.
+	// Zero keeps the per-family defaults derived from each family's max token
+	// lifetime (see rotationOverlap).
+	KeyRotationOverlap time.Duration
+
 	// ---- leased slot ownership (issue #14) ----
 
 	// ReplicaID is this process's stable membership identity for its pod lifetime
@@ -166,25 +177,32 @@ type ManagerOptions struct {
 // (docs/research/07 §8). It is the imperative shell over the pure core and the
 // durable Store.
 type Manager struct {
-	store             Store
-	keys              KeySource // key custody source (the store unless ManagerOptions.Keys overrides)
-	streams           Streams
-	lister            StreamLister
-	streamRootURL     string // normalized in NewManager to end in exactly one "/"
-	client            *http.Client
-	resolver          IPResolver
-	signing           SigningKey
-	wakeKey           SigningKey // wake_token mint key (#123) — never the webhook signing key
-	wakeTokenAud      string
-	tokenKey          []byte
-	log               *slog.Logger
-	workerTick        time.Duration
-	sweepInterval     time.Duration
-	reconcileInterval time.Duration
-	sweepBatch        int
-	sweepCursor       int // rolling start index when sweepBatch caps a tick
-	allowPrivate      bool
-	metrics           Metrics
+	store         Store
+	streams       Streams
+	lister        StreamLister
+	streamRootURL string // normalized in NewManager to end in exactly one "/"
+	client        *http.Client
+	resolver      IPResolver
+	wakeTokenAud  string
+	tokenKey      []byte
+
+	// keySnap is the atomically-swapped view of both Ed25519 families + the
+	// kid denylist (#123 rotation): every mint, verification, and JWKS read
+	// goes through it, and keysReloadLoop refreshes it, so no key is ever
+	// cached past one reload interval. Never nil after NewManager.
+	keySnap            atomic.Pointer[keyState]
+	keys               KeySource // custody source (the store unless ManagerOptions.Keys overrides)
+	custodyIsStore     bool      // rotation/denylist write through the store only
+	keysReloadInterval time.Duration
+	keyRotationOverlap time.Duration
+	log                *slog.Logger
+	workerTick         time.Duration
+	sweepInterval      time.Duration
+	reconcileInterval  time.Duration
+	sweepBatch         int
+	sweepCursor        int // rolling start index when sweepBatch caps a tick
+	allowPrivate       bool
+	metrics            Metrics
 
 	// authMode is the shared #126 enforcement toggle (see ManagerOptions).
 	authMode auth.Mode
@@ -226,6 +244,9 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 	if keys == nil {
 		keys = store
 	}
+	// Load-or-install both families up front (for Redis custody this is what
+	// persists a fresh deployment's keys); the equal-kid conflation check
+	// (#123, RFC 8725 §2.8) re-runs on every snapshot build after this.
 	signing, err := keys.LoadSigningKey(now)
 	if err != nil {
 		return nil, err
@@ -234,27 +255,24 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 	if err != nil {
 		return nil, err
 	}
-	wakeKey, err := store.LoadWakeKey(now)
+	wakeKey, err := keys.LoadWakeKey(now)
 	if err != nil {
 		return nil, err
 	}
 	if wakeKey.Kid == signing.Kid {
-		// The wake_token key MUST be purpose-separate from the webhook-envelope
-		// key (#123, RFC 8725 §2.8): one key signing both grammars is one
-		// refactor away from cross-protocol confusion. Loading ever returning
-		// the same kid means the store families were conflated — refuse to run.
 		return nil, fmt.Errorf("webhook: wake-token key equals the envelope signing key (kid %s)", wakeKey.Kid)
 	}
 	m := &Manager{
 		store:                 store,
 		keys:                  keys,
+		custodyIsStore:        opts.Keys == nil,
+		keysReloadInterval:    opts.KeysReloadInterval,
+		keyRotationOverlap:    opts.KeyRotationOverlap,
 		streams:               streams,
 		lister:                opts.Lister,
 		streamRootURL:         normalizeStreamRootURL(opts.StreamRootURL),
 		client:                opts.HTTPClient,
 		resolver:              opts.Resolver,
-		signing:               signing,
-		wakeKey:               wakeKey,
 		wakeTokenAud:          opts.WakeTokenAudience,
 		tokenKey:              tokenKey,
 		log:                   opts.Logger,
@@ -293,6 +311,15 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 	}
 	if m.reconcileInterval == 0 {
 		m.reconcileInterval = defaultReconcileInterval
+	}
+	if m.keysReloadInterval == 0 {
+		m.keysReloadInterval = defaultKeysReloadInterval
+	}
+	// The initial snapshot must build — a custody source that cannot produce
+	// a coherent key state refuses startup (fail closed); after this, reload
+	// failures keep the last good snapshot instead.
+	if err := m.ReloadKeys(); err != nil {
+		return nil, err
 	}
 	if err := m.initOwnership(opts); err != nil {
 		return nil, err
@@ -374,7 +401,7 @@ func (m *Manager) JWKSURL() string { return m.streamRootURL + "__ds/jwks.json" }
 
 // SigningView returns the signing metadata block for a subscription response.
 func (m *Manager) signingView() *SigningView {
-	return &SigningView{Alg: "ed25519", Kid: m.signing.Kid, JWKSURL: m.JWKSURL()}
+	return &SigningView{Alg: "ed25519", Kid: m.keySnapshot().webhook.active.Kid, JWKSURL: m.JWKSURL()}
 }
 
 // JWKS returns the key set served at __ds/jwks.json: the webhook-envelope
@@ -386,21 +413,11 @@ func (m *Manager) signingView() *SigningView {
 // named in Webhook-Signature, a gateway picks the kid named in a wake_token's
 // JOSE header — so publishing both families in one document is additive.
 func (m *Manager) JWKS() (JWKS, error) {
-	keys, err := m.keys.SigningKeys()
-	if err != nil {
-		return JWKS{}, err
-	}
-	if len(keys) == 0 {
-		keys = []SigningKey{m.signing}
-	}
-	wakeKeys, err := m.store.WakeSigningKeys()
-	if err != nil {
-		return JWKS{}, err
-	}
-	if len(wakeKeys) == 0 {
-		wakeKeys = []SigningKey{m.wakeKey}
-	}
-	return BuildJWKS(append(keys, wakeKeys...)), nil
+	st := m.keySnapshot()
+	keys := make([]SigningKey, 0, len(st.webhook.verify)+len(st.wake.verify))
+	keys = append(keys, st.webhook.verify...)
+	keys = append(keys, st.wake.verify...)
+	return BuildJWKS(keys), nil
 }
 
 // mintWakeTokenOnAck re-reads the subscription and mints the heartbeat
@@ -438,7 +455,14 @@ func (m *Manager) mintWakeTokenFor(sub Subscription, generation int64, wakeID st
 		m.log.Warn("webhook: wake token claims", "sub", sub.ID, "error", err)
 		return "", false
 	}
-	tok, err := MintWakeToken(m.wakeKey, claims)
+	wakeKey := m.keySnapshot().wake.active
+	if wakeKey.Kid == "" {
+		// Emergency stop: the active wake kid is denylisted and no successor
+		// has been rotated in. Minting a wrong assertion is worse than none.
+		m.log.Warn("webhook: wake-token key unavailable (denylisted); not minting", "sub", sub.ID)
+		return "", false
+	}
+	tok, err := MintWakeToken(wakeKey, claims)
 	if err != nil {
 		m.log.Warn("webhook: mint wake token", "sub", sub.ID, "error", err)
 		return "", false
@@ -666,7 +690,16 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Webhook-Signature", SignWebhookPayload(m.signing, body, time.Now()))
+	signing := m.keySnapshot().webhook.active
+	if signing.Kid == "" {
+		// Emergency stop (#123): the active envelope kid is denylisted with no
+		// successor. An unsigned or mis-signed wake must not go out; the retry
+		// worker re-attempts after rotation restores a mint key.
+		m.log.Error("webhook: envelope signing key unavailable (denylisted); delivery deferred", "sub", id)
+		m.recordFailure(id, owner...)
+		return
+	}
+	req.Header.Set("Webhook-Signature", SignWebhookPayload(signing, body, time.Now()))
 
 	postStart := time.Now()
 	resp, err := m.client.Do(req)
@@ -857,7 +890,8 @@ func (m *Manager) Start() {
 		m.log.Warn("webhook: initial heartbeat", "replica", m.replicaID, "error", err)
 	}
 	m.slotReconcileOnce()
-	m.wg.Add(7)
+	m.wg.Add(8)
+	go m.keysReloadLoop()
 	go m.leaseWorker()
 	go m.retryWorker()
 	go m.dueWorker()
