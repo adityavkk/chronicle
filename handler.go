@@ -12,6 +12,7 @@ package chronicle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,8 +22,10 @@ import (
 	"strings"
 	"time"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
+	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
 // Handler serves the Durable Streams protocol over HTTP.
@@ -46,6 +49,18 @@ type Handler struct {
 	// SubHooks, when set, receives stream lifecycle events so the subscription
 	// layer can wake subscribers after a durable write. Nil disables the hooks.
 	SubHooks SubscriptionHooks
+
+	// AuthMode selects authorization enforcement (issue #126). The zero value
+	// ModeInsecure evaluates decisions for telemetry only, so a base-protocol
+	// client is never broken by default; ModeEnforce fails closed with a
+	// 401/403 before any store access.
+	AuthMode auth.Mode
+
+	// AppendAuth authorizes data-plane appends with the claim-scoped write
+	// token (issue #126). Nil means no authorizer is available, which in
+	// ModeEnforce denies every append (fail closed) and in ModeInsecure only
+	// logs.
+	AppendAuth AppendAuthorizer
 }
 
 // subStreamPath maps a store path ("/events/abc") to the stream-root-relative
@@ -84,7 +99,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Set CORS headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, HEAD, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Stream-Seq, Stream-TTL, Stream-Expires-At, Stream-Closed, If-None-Match, Producer-Id, Producer-Epoch, Producer-Seq, Stream-Forked-From, Stream-Fork-Offset, Stream-Fork-Sub-Offset, Authorization")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Stream-Seq, Stream-TTL, Stream-Expires-At, Stream-Closed, If-None-Match, Producer-Id, Producer-Epoch, Producer-Seq, Stream-Forked-From, Stream-Fork-Offset, Stream-Fork-Sub-Offset, Authorization, electric-claim-token")
 	w.Header().Set("Access-Control-Expose-Headers", "Stream-Next-Offset, Stream-Cursor, Stream-Up-To-Date, Stream-Closed, ETag, Location, Producer-Epoch, Producer-Seq, Producer-Expected-Seq, Producer-Received-Seq")
 
 	// Browser security headers (Protocol Section 10.7)
@@ -580,6 +595,13 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 
 // handleAppend handles POST requests to append to a stream
 func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path string) error {
+	// The authorization gate runs before any store access (issue #126): a
+	// denied append neither reads stream state (a 401 does not leak stream
+	// existence, §12.2) nor mutates it.
+	if err := h.authorizeAppend(r, path); err != nil {
+		return err
+	}
+
 	// Check if stream exists
 	meta, err := h.Store.Get(path)
 	if err != nil {
@@ -857,6 +879,23 @@ func newHTTPError(status int, message string) *httpError {
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, err error) {
+	// Authorization denials use the JSON error envelope shared with the
+	// control plane (issue #126) rather than the base protocol's plaintext
+	// errors: they are an extension surface, so their shape is ours to pin.
+	var authErr *authError
+	if errors.As(err, &authErr) {
+		if authErr.status == http.StatusUnauthorized {
+			// RFC 6750 §3: challenge the client for a Bearer credential.
+			w.Header().Set("WWW-Authenticate", `Bearer realm="chronicle"`)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(authErr.status)
+		_ = json.NewEncoder(w).Encode(webhook.ErrorBody{
+			Error: webhook.ErrorDetail{Code: authErr.code, Message: authErr.msg},
+		})
+		return
+	}
+
 	var httpErr *httpError
 	if errors.As(err, &httpErr) {
 		http.Error(w, httpErr.message, httpErr.status)

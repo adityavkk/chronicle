@@ -169,12 +169,15 @@ func (l redisLister) ListStreams() ([]webhook.StreamMeta, error) {
 }
 
 // NewSubscriptions builds the Redis-backed __ds subscription stack: the HTTP
-// router and the Manager whose background loops (lease, retry, recovery sweep)
-// the caller starts with Manager.Start(). streamRootURL is the public URL the
-// protocol is served under (scheme+host+root, trailing slash), used to build
-// callback and JWKS URLs. rs may be nil to disable pattern backfill of existing
-// streams (new streams are still linked as they are created).
-func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs *redisstore.Store, streamRootURL string, allowPrivateWebhooks bool, tuning SubscriptionTuning, logger *slog.Logger) (SubscriptionRouter, SubscriptionService, error) {
+// router, the Manager whose background loops (lease, retry, recovery sweep)
+// the caller starts with Manager.Start(), and the append authorizer wired to
+// the same persisted HMAC token key the claim mint uses (issue #126) — hand
+// it to Handler.AppendAuth so the claim-scoped write token gate and the mint
+// can never disagree. streamRootURL is the public URL the protocol is served
+// under (scheme+host+root, trailing slash), used to build callback and JWKS
+// URLs. rs may be nil to disable pattern backfill of existing streams (new
+// streams are still linked as they are created).
+func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs *redisstore.Store, streamRootURL string, allowPrivateWebhooks bool, tuning SubscriptionTuning, logger *slog.Logger) (SubscriptionRouter, SubscriptionService, AppendAuthorizer, error) {
 	opts := webhook.ManagerOptions{
 		StreamRootURL:              streamRootURL,
 		Logger:                     logger,
@@ -205,11 +208,11 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 	// durability path against a non-AOF Redis would prove nothing, so refuse to
 	// start rather than silently expose the RPO the tier exists to bound.
 	if err := store.AssertAOFEnabled(tuning.Consistency, tuning.WaitReplicas); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	mgr, err := webhook.NewManager(store, streamAdapter{st: streamStore, rs: rs}, opts)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return webhook.NewRoutes(mgr), mgr, nil
+	return webhook.NewRoutes(mgr), mgr, mgr.WriteAuthorizer(), nil
 }

@@ -11,6 +11,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 )
 
 // This file holds the webhook signing and token primitives. They are pure given
@@ -195,6 +197,118 @@ func hmacSig(key []byte, body string) string {
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(body))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// writeTokenDomain domain-separates the claim-scoped write token's MAC from
+// the callback/claim token's (which signs the bare body). The same tokenKey
+// signs both, but neither token can ever validate as the other: presenting a
+// write token to ValidateToken (or a callback token to ValidateWriteToken)
+// fails the MAC before any payload field is even read.
+const writeTokenDomain = "ds-write-v1"
+
+// writeTokenTyp pins the payload shape as defense in depth alongside the
+// MAC domain separation.
+const writeTokenTyp = "write"
+
+// writeTokenPayload is the decoded body of a claim-scoped write token — the
+// append capability minted on an authorized pull-wake claim (issue #126,
+// Electric's electric-claim-token contract). Streams is the explicit
+// allow-list of normalized stream paths the holder may append to for the life
+// of the claim; Sub/Generation bind it to the claim that minted it.
+type writeTokenPayload struct {
+	Typ        string   `json:"typ"`
+	Sub        string   `json:"sub"`
+	Generation int64    `json:"gen"`
+	Exp        int64    `json:"exp"`
+	Jti        string   `json:"jti"`
+	Streams    []string `json:"streams"`
+}
+
+// GenerateWriteToken mints the claim-scoped write token for a claim on subID
+// at generation, scoped to exactly streams, expiring at now+ttl (the lease
+// band — the token never outlives the claim by more than the lease). The
+// token is opaque to clients, matching Electric's electric-claim-token.
+func GenerateWriteToken(tokenKey []byte, subID string, generation int64, streams []auth.StreamPath, now time.Time, ttl time.Duration, rand io.Reader) (string, error) {
+	jti := make([]byte, 8)
+	if _, err := io.ReadFull(rand, jti); err != nil {
+		return "", fmt.Errorf("write token jti: %w", err)
+	}
+	paths := make([]string, len(streams))
+	for i, s := range streams {
+		paths[i] = s.String()
+	}
+	payload := writeTokenPayload{
+		Typ:        writeTokenTyp,
+		Sub:        subID,
+		Generation: generation,
+		Exp:        now.Add(ttl).Unix(),
+		Jti:        hex.EncodeToString(jti),
+		Streams:    paths,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	body := base64.RawURLEncoding.EncodeToString(raw)
+	return body + "." + hmacSig(tokenKey, writeTokenDomain+"."+body), nil
+}
+
+// WriteTokenStatus classifies a write-token validation outcome. The shell
+// maps it to HTTP: Invalid and Expired are a 401 (no usable credential),
+// WrongPath is a 403 (a real credential that does not grant this stream).
+type WriteTokenStatus int
+
+const (
+	// WriteTokenInvalid is a malformed token, a foreign MAC, or a payload that
+	// is not a write token. The zero value: any unproven token is invalid.
+	WriteTokenInvalid WriteTokenStatus = iota
+	// WriteTokenExpired is ours and well-formed, but past exp.
+	WriteTokenExpired
+	// WriteTokenWrongPath is ours and unexpired, but the checked path is
+	// outside the token's stream scope.
+	WriteTokenWrongPath
+	// WriteTokenValid authorizes an append at the checked path.
+	WriteTokenValid
+)
+
+// WriteTokenValidation is the outcome of ValidateWriteToken. SubID and
+// Generation are set whenever the MAC proved the token ours (Expired,
+// WrongPath, Valid) so the shell can log attribution without re-parsing.
+type WriteTokenValidation struct {
+	Status     WriteTokenStatus
+	SubID      string
+	Generation int64
+}
+
+// ValidateWriteToken verifies a claim-scoped write token for an append at
+// path. The constant-time MAC check runs first, then shape, expiry, and the
+// path scope — a caller who could not have minted the token learns nothing
+// about its scope from the response.
+func ValidateWriteToken(tokenKey []byte, token string, path auth.StreamPath, now time.Time) WriteTokenValidation {
+	body, sig, ok := strings.Cut(token, ".")
+	if !ok {
+		return WriteTokenValidation{}
+	}
+	if !hmac.Equal([]byte(sig), []byte(hmacSig(tokenKey, writeTokenDomain+"."+body))) {
+		return WriteTokenValidation{}
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(body)
+	if err != nil {
+		return WriteTokenValidation{}
+	}
+	var p writeTokenPayload
+	if err := json.Unmarshal(raw, &p); err != nil || p.Typ != writeTokenTyp {
+		return WriteTokenValidation{}
+	}
+	if TokenExpired(p.Exp, now.Unix()) {
+		return WriteTokenValidation{Status: WriteTokenExpired, SubID: p.Sub, Generation: p.Generation}
+	}
+	for _, s := range p.Streams {
+		if s == path.String() {
+			return WriteTokenValidation{Status: WriteTokenValid, SubID: p.Sub, Generation: p.Generation}
+		}
+	}
+	return WriteTokenValidation{Status: WriteTokenWrongPath, SubID: p.Sub, Generation: p.Generation}
 }
 
 // GenerateWakeID returns a unique wake id "w_<hex>" (PROTOCOL §7).
