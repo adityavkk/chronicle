@@ -19,9 +19,12 @@ import (
 // Sequence (on the STANDARD_HA substrate; standard-ha-failover.sh drives it):
 //
 //   1. Seed K pull-wake subscriptions over linked streams and drive the
-//      claim/ack loop to a known cursor == tail (the pre-failover steady state).
+//      claim/ack loop to a known cursor == tail (the pre-failover steady state),
+//      then append one more message per stream so recovery has real pending work.
 //   2. Worker A claims one subscription and STALLS (never acks) — A holds the
-//      pre-failover (generation, wake_id) fence, the deposed-worker case.
+//      pre-failover (generation, wake_id) fence, the deposed-worker case. The
+//      harness then tries to surgically remove that target fence from the would-be
+//      promoted replica; without this, a run is PASS-NoLoss/Inconclusive only.
 //   3. Inject a REAL failover via the redisFailover nemesis: kill the primary,
 //      REPLICAOF NO ONE on the AOF replica, flip the stable `redis` endpoint.
 //      Some fence-minting writes in the async-replication RPO window are dropped.
@@ -40,67 +43,88 @@ import (
 // The verdict is a pure function (failoverVerdict) over frozen inputs, so the
 // PASS/FAIL logic + the RPO/RTO framing are unit-tested without a cluster; the
 // chaos run stays an on-demand job. This scenario makes NO strong-consistency
-// claim: it demonstrates the at-least-once DEGRADATION, exactly what the proofs
-// and model-checks structurally cannot reach.
+// claim. It credits the at-least-once degradation only when the target fence loss
+// is proven; zero-RPO and unrelated positive-RPO runs are smoke only.
 
 // failoverResult is the machine-readable verdict of one failover run. It is
 // emitted on stdout as a single PASS/FAIL line plus the durability-honest tiers, so
 // standard-ha-failover.sh can grep it and the orchestrator can record it.
 type failoverResult struct {
 	pass            bool
+	verdict         string
 	gaps            []deliveryGap // streams that did NOT reach tail (a real L1 violation)
 	deposedFenced   bool          // worker A's late ack returned 409 FENCED
 	deposedStatus   int           // the actual late-ack HTTP status (for the report)
 	deposedCode     string        // the actual late-ack error code
 	rpoBytes        int64         // empirical RPO: replication bytes the failover dropped (>=0; -1 = injection failed)
+	targetLostFence bool          // the targeted (generation,wake_id) was absent on the promoted dataset
 	rto             time.Duration // empirical RTO: kill -> endpoint flip -> reconnect/reconcile -> ready
 	streamsAtTail   int
 	streamsExpected int
 }
 
-// failoverVerdict is the PURE decision over a completed failover run: it is a PASS
-// iff (a) the failover injection succeeded (rpoBytes >= 0), (b) every linked stream
-// reached its tail (no L1 gap — the dropped write re-fired and was deduped), and
-// (c) the deposed worker's late ack was FENCED (the at-least-once re-delivery never
-// became a double-grant / cursor regression). A positive rpoBytes is NOT a failure
-// — it is the durability-honest signal that the failover really did drop writes,
-// and the run proves those losses degraded only to at-least-once. The function
-// reads NO WAIT/WAITAOF count or lease TTL to reach its verdict; safety rests only
-// on the FENCED check over the monotone (gen, wake_id) fence (correction #3).
-func failoverVerdict(gaps []deliveryGap, deposedStatus int, deposedCode string, rpoBytes int64, rto time.Duration, streamsExpected int) failoverResult {
+const (
+	failoverFail                   = "FAIL"
+	failoverPassLostTargetFence    = "PASS-LostTargetFence"
+	failoverPassNoLossInconclusive = "PASS-NoLoss/Inconclusive"
+)
+
+// failoverVerdict is the PURE decision over a completed failover run. It FAILs if
+// the injection failed, a linked stream never reached tail, or the deposed worker's
+// late ack was not FENCED. A clean run then splits in two: PASS-LostTargetFence
+// only when the harness proved the target (generation,wake_id) was absent on the
+// promoted dataset; otherwise PASS-NoLoss/Inconclusive, a smoke result that does
+// not claim the lost-write degradation was exercised. RPO bytes alone are not
+// enough: rpoBytes > 0 can be unrelated bytes, and rpoBytes == 0 is no-loss smoke.
+func failoverVerdict(gaps []deliveryGap, deposedStatus int, deposedCode string, rpoBytes int64, targetLostFence bool, rto time.Duration, streamsExpected int) failoverResult {
 	fenced := deposedStatus == http.StatusConflict && deposedCode == "FENCED"
 	injectionOK := rpoBytes >= 0
 	r := failoverResult{
+		verdict:         failoverFail,
 		gaps:            gaps,
 		deposedFenced:   fenced,
 		deposedStatus:   deposedStatus,
 		deposedCode:     deposedCode,
 		rpoBytes:        rpoBytes,
+		targetLostFence: targetLostFence,
 		rto:             rto,
 		streamsExpected: streamsExpected,
 		streamsAtTail:   streamsExpected - len(gaps),
 	}
-	r.pass = injectionOK && len(gaps) == 0 && fenced
+	if injectionOK && len(gaps) == 0 && fenced {
+		r.pass = true
+		if targetLostFence {
+			r.verdict = failoverPassLostTargetFence
+		} else {
+			r.verdict = failoverPassNoLossInconclusive
+		}
+	}
 	return r
 }
 
 // String renders the durability-honest verdict block, including the explicit
 // at-least-once framing (NOT a strong-consistency claim) and the RPO/RTO tiers.
 func (r failoverResult) String() string {
-	verdict := "FAIL"
-	if r.pass {
-		verdict = "PASS"
-	}
 	rpo := fmt.Sprintf("%d bytes", r.rpoBytes)
 	if r.rpoBytes < 0 {
 		rpo = "n/a (failover injection failed)"
 	}
-	s := fmt.Sprintf("GATE5-FAILOVER-VERDICT: %s\n", verdict)
-	s += fmt.Sprintf("  streams at tail:      %d/%d (at-least-once: a dropped fence-write re-fired and was deduped by the monotone cursor)\n", r.streamsAtTail, r.streamsExpected)
+	s := fmt.Sprintf("GATE5-FAILOVER-VERDICT: %s\n", r.verdict)
+	streamNote := "at-least-once smoke: all linked streams reached tail"
+	if r.targetLostFence {
+		streamNote = "at-least-once: the targeted lost fence was re-fired and deduped by the monotone cursor"
+	}
+	s += fmt.Sprintf("  streams at tail:      %d/%d (%s)\n", r.streamsAtTail, r.streamsExpected, streamNote)
 	s += fmt.Sprintf("  deposed late-ack:     %d %s (want 409 FENCED — the fence survived the promotion; no double-grant, no cursor regression)\n", r.deposedStatus, r.deposedCode)
 	s += fmt.Sprintf("  empirical RPO:        %s (Tier B WAITAOF 1 1 shrinks this to the replica-fsync ack; Tier A = full async lag)\n", rpo)
+	s += fmt.Sprintf("  targeted fence lost:  %v (must be true for the lost-write degradation claim; RPO bytes alone are not proof)\n", r.targetLostFence)
 	s += fmt.Sprintf("  empirical RTO:        %s (promotion + endpoint flip + reconnect + boot reconcile)\n", r.rto)
-	s += "  CLAIM: a lost acked write degraded ONLY to at-least-once delivery (deduped downstream), NEVER to a safety violation. This is NOT a strong-consistency claim.\n"
+	switch r.verdict {
+	case failoverPassLostTargetFence:
+		s += "  CLAIM: the targeted lost generation/wake degraded ONLY to at-least-once delivery (deduped downstream), NEVER to a safety violation. This is NOT a strong-consistency claim.\n"
+	case failoverPassNoLossInconclusive:
+		s += "  CLAIM: no targeted fence loss was proven; this is a no-loss smoke run only, not evidence for the lost-write degradation. This is NOT a strong-consistency claim.\n"
+	}
 	return s
 }
 
@@ -142,6 +166,14 @@ func runFailover(c config, nem *nemesis) error {
 	if err := drainToTail(c, subID, expected, 30*time.Second); err != nil {
 		fmt.Printf("note: pre-failover drain did not fully reach tail (%v); the post-failover assertion still holds the bar\n", err)
 	}
+	for _, stream := range sortedKeys(expected) {
+		tail, err := appendOne(c.base, stream, c.msgs)
+		if err != nil {
+			return fmt.Errorf("seed post-drain pending message on %s: %w", stream, err)
+		}
+		expected[stream] = tail
+	}
+	fmt.Printf("seeded one post-drain pending message on each linked stream; target tail now set for a real re-delivery check\n")
 
 	// 2. Worker A claims and STALLS — it holds the pre-failover fence and never acks.
 	//    Its late ack across the promotion must be FENCED.
@@ -150,6 +182,12 @@ func runFailover(c config, nem *nemesis) error {
 		return fmt.Errorf("worker A claim: %w", err)
 	}
 	fmt.Printf("worker A claimed: generation=%d wake_id=%s (holds the pre-failover fence; will be deposed by the failover)\n", a.Generation, short(a.WakeID))
+	targetLostFence, err := nem.dropTargetFenceOnReplica(subID, a.Generation, a.WakeID)
+	if err != nil {
+		fmt.Printf("note: targeted fence-loss failpoint was not applied (%v); this run can only be PASS-NoLoss/Inconclusive if safety holds\n", err)
+	} else if targetLostFence {
+		fmt.Printf("nemesis: surgically dropped worker A's target fence from the would-be promoted replica before endpoint flip\n")
+	}
 
 	// 3. Inject the REAL failover and bracket it for RTO.
 	fmt.Println("nemesis: injecting a REAL primary failover (kill primary -> REPLICAOF NO ONE -> flip endpoint)...")
@@ -169,7 +207,7 @@ func runFailover(c config, nem *nemesis) error {
 	if err := waitReady(c.base, 120*time.Second); err != nil {
 		rto := time.Since(t0)
 		// Even if readiness times out, emit an honest verdict block rather than just erroring.
-		res := failoverVerdict([]deliveryGap{{path: "(all)", want: "tail", got: "unreachable"}}, 0, "", rpoBytes, rto, nstreams)
+		res := failoverVerdict([]deliveryGap{{path: "(all)", want: "tail", got: "unreachable"}}, 0, "", rpoBytes, targetLostFence, rto, nstreams)
 		fmt.Print(res.String())
 		return fmt.Errorf("chronicle did not recover after the failover within 120s: %w", err)
 	}
@@ -188,7 +226,7 @@ func runFailover(c config, nem *nemesis) error {
 	}
 	exp := make([]deliveryExpectation, 0, len(expected))
 	for _, s := range sortedKeys(expected) {
-		exp = append(exp, deliveryExpectation{path: s, tail: expected[s], msgs: c.msgs})
+		exp = append(exp, deliveryExpectation{path: s, tail: expected[s], msgs: c.msgs + 1})
 	}
 	gaps := CheckAtLeastOnce(exp, acked)
 
@@ -203,7 +241,7 @@ func runFailover(c config, nem *nemesis) error {
 	}
 
 	// 7. Build and emit the pure verdict.
-	res := failoverVerdict(gaps, deposedStatus, deposedCode, rpoBytes, rto, nstreams)
+	res := failoverVerdict(gaps, deposedStatus, deposedCode, rpoBytes, targetLostFence, rto, nstreams)
 
 	fmt.Println("---- result ----")
 	fmt.Printf("scenario:           %s\n", c.scenario)
@@ -225,7 +263,11 @@ func runFailover(c config, nem *nemesis) error {
 			return fmt.Errorf("gate #5 failover: FAIL")
 		}
 	}
-	fmt.Println("PASS: gate #5 real failover — a lost fence-write degraded only to at-least-once (deduped by the monotone cursor); the deposed ack was FENCED; safety survived a REAL promotion (not AOF replay)")
+	if res.verdict == failoverPassLostTargetFence {
+		fmt.Println("PASS: gate #5 real failover — the targeted lost fence-write degraded only to at-least-once (deduped by the monotone cursor); the deposed ack was FENCED; safety survived a REAL promotion (not AOF replay)")
+	} else {
+		fmt.Println("PASS: gate #5 no-loss smoke — safety held, but no targeted fence loss was proven; do not credit this run as the lost-write degradation proof")
+	}
 	return nil
 }
 
