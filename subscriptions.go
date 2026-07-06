@@ -265,6 +265,7 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		Append: mgr.WriteAuthorizer(),
 		Read:   mgr.ReadAuthorizer(),
 		Caller: mgr.CallerAuthorizer(),
+		Entity: mgr.EntityAuthorizer(),
 	}
 	return webhook.NewRoutes(mgr), mgr, authz, nil
 }
