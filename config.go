@@ -32,6 +32,9 @@ const (
 	EnvWaitTimeoutMs   = "CHRONICLE_WAIT_TIMEOUT_MS"  // Tier B WAIT/WAITAOF server-side block bound
 	// Stream authn/authz enforcement (issue #126): insecure (default) | enforce.
 	EnvAuthMode = "CHRONICLE_AUTH_MODE"
+	// Trusted service principals (issue #126 TB4, trusted-backend mode).
+	EnvServiceBearer = "CHRONICLE_SERVICE_BEARER"     // "token" or "name:token[,name:token...]"
+	EnvTrustedSPIFFE = "CHRONICLE_TRUSTED_SPIFFE_IDS" // comma-separated spiffe:// allowlist (mesh add-on)
 )
 
 // Config holds the chronicle server configuration. LongPollTimeout and
@@ -134,6 +137,18 @@ type Config struct {
 	// auth.ModeEnforce fails closed (401/403 before any store access). Flipped
 	// per-stage at the deployment layer, not in code.
 	AuthMode auth.Mode
+
+	// ServiceCredentials are the trusted-backend static bearer identities
+	// (issue #126 TB4): the Electric agents-server's DURABLE_STREAMS_BEARER,
+	// with comma-separated entries for rotation overlap. Empty disables the
+	// bearer path.
+	ServiceCredentials []auth.ServiceCredential
+
+	// TrustedSPIFFEIDs is the in-mesh service allowlist matched against the
+	// sidecar-injected X-Forwarded-Client-Cert URI SAN (issue #126 TB4).
+	// Configure it only when a sidecar fronts chronicle and sanitizes
+	// inbound XFCC. Empty disables the mesh path.
+	TrustedSPIFFEIDs []string
 }
 
 // DefaultConfig returns the defaults: port 4437 (the IANA-assigned Durable
@@ -251,6 +266,20 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvAuthMode, err)
 		}
 		c.AuthMode = mode
+	}
+	if v, ok := lookup(EnvServiceBearer); ok {
+		creds, err := auth.ParseServiceBearerConfig(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvServiceBearer, err)
+		}
+		c.ServiceCredentials = creds
+	}
+	if v, ok := lookup(EnvTrustedSPIFFE); ok {
+		ids, err := auth.ParseTrustedSPIFFEIDs(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvTrustedSPIFFE, err)
+		}
+		c.TrustedSPIFFEIDs = ids
 	}
 	return nil
 }
