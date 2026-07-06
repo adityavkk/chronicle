@@ -18,7 +18,7 @@ import (
 
 func callerFor(t *testing.T, mgr *Manager, subject string, ns ...string) string {
 	t.Helper()
-	tok, err := GenerateCallerToken(mgr.signing, mgr.streamRootURL, subject, ns, time.Now(), time.Hour, rand.Reader)
+	tok, err := GenerateCallerToken(mgr.activeSigningKey(), mgr.streamRootURL, subject, ns, time.Now(), time.Hour, rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -47,12 +47,12 @@ func TestClaimEnforceRequiresCaller(t *testing.T) {
 	now := time.Now()
 
 	// Credentials for the deny matrix.
-	expired, err := GenerateCallerToken(mgr.signing, mgr.streamRootURL, "u:1", nil,
+	expired, err := GenerateCallerToken(mgr.activeSigningKey(), mgr.streamRootURL, "u:1", nil,
 		now.Add(-2*time.Hour), time.Minute, rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrongTyp, err := SignCompactJWS(mgr.signing, "application/wake+jwt", []byte(`{}`))
+	wrongTyp, err := SignCompactJWS(mgr.activeSigningKey(), "application/wake+jwt", []byte(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestClaimEnforceRequiresCaller(t *testing.T) {
 
 	// The allow path: a valid caller token claims, and the returned write
 	// token authorizes the TB1 append gate for exactly the claimed stream.
-	caller, err := GenerateCallerToken(mgr.signing, mgr.streamRootURL, "u:1", []string{"events"},
+	caller, err := GenerateCallerToken(mgr.activeSigningKey(), mgr.streamRootURL, "u:1", []string{"events"},
 		now, time.Hour, rand.Reader)
 	if err != nil {
 		t.Fatal(err)

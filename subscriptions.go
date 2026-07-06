@@ -75,7 +75,18 @@ type SubscriptionTuning struct {
 	// webhook signatures and tokens; the file mount is what breaks that.
 	// Empty keeps the Redis custody (dev default). A configured-but-unloadable
 	// file refuses startup — fail closed, never fall back to Redis keys.
+	// After boot the file is watched: replacing the mounted secret rotates
+	// keys live (#123 rotation); an invalid replacement keeps the last good
+	// state and logs.
 	KeysFile string
+	// KeysReloadInterval bounds how stale a replica's key snapshot may be
+	// (rotations, denylist entries, keys-file replacements land within one
+	// interval). Zero defaults to 15s.
+	KeysReloadInterval time.Duration
+	// KeyRotationOverlap overrides both families' rotation overlap window
+	// (how long a retiring key keeps verifying). Zero keeps the per-family
+	// defaults derived from each family's maximum token lifetime.
+	KeyRotationOverlap time.Duration
 }
 
 // storePath maps a stream-root-relative subscription path ("events/abc") to the
@@ -218,7 +229,7 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		opts.Lister = redisLister{rs: rs}
 	}
 	if tuning.KeysFile != "" {
-		src, err := webhook.LoadFileKeySource(tuning.KeysFile)
+		src, err := webhook.NewFileKeyWatcher(tuning.KeysFile, logger)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -229,6 +240,8 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 			"path", tuning.KeysFile, "kids", src.Kids())
 		opts.Keys = src
 	}
+	opts.KeysReloadInterval = tuning.KeysReloadInterval
+	opts.KeyRotationOverlap = tuning.KeyRotationOverlap
 	// Tier B (issue #16) arms the WAITAOF durability barrier on the fence-minting
 	// writes; TierA/C leave the store on the no-WAIT default. WithConsistency is a
 	// no-op for the zero (TierA) value, so a deployment that never sets the tier is

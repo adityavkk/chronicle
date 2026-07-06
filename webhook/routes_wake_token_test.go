@@ -84,18 +84,18 @@ func TestClaimMintsWakeToken(t *testing.T) {
 
 	// Separate kid: the wake_token's kid is not the webhook signing kid, and a
 	// verifier holding only the webhook key rejects the token.
-	if mgr.wakeKey.Kid == mgr.signing.Kid {
+	if mgr.activeWakeKey().Kid == mgr.activeSigningKey().Kid {
 		t.Fatal("wake key kid equals webhook signing kid")
 	}
-	if _, err := ValidateWakeToken(cr.WakeToken, resolverFor(mgr.signing), "", time.Now(), 5*time.Second); err == nil {
+	if _, err := ValidateWakeToken(cr.WakeToken, resolverFor(mgr.activeSigningKey()), "", time.Now(), 5*time.Second); err == nil {
 		t.Fatal("webhook-key-only verifier accepted the wake_token")
 	}
 
 	// Both kids are published in the JWKS (kid-selective consumers).
 	var haveSigning, haveWake bool
 	for _, k := range jwks.Keys {
-		haveSigning = haveSigning || k.Kid == mgr.signing.Kid
-		haveWake = haveWake || k.Kid == mgr.wakeKey.Kid
+		haveSigning = haveSigning || k.Kid == mgr.activeSigningKey().Kid
+		haveWake = haveWake || k.Kid == mgr.activeWakeKey().Kid
 	}
 	if !haveSigning || !haveWake {
 		t.Fatalf("JWKS missing a family: signing=%v wake=%v", haveSigning, haveWake)
