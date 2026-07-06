@@ -157,6 +157,14 @@ type Store interface {
 
 	// LoadTokenKey adopts or installs the persisted HMAC token key.
 	LoadTokenKey() ([]byte, error)
+
+	// LoadWakeKey adopts or installs the persisted wake-token signing key —
+	// the purpose-separate Ed25519 key wake_tokens are minted under (#123),
+	// never the webhook-envelope key.
+	LoadWakeKey(now time.Time) (SigningKey, error)
+
+	// WakeSigningKeys returns all persisted wake-token keys for the JWKS.
+	WakeSigningKeys() ([]SigningKey, error)
 }
 
 // CreateStatus is the outcome of CreateOrConfirm.

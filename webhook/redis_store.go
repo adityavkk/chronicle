@@ -870,11 +870,40 @@ func (s *RedisStore) LoadSigningKey(now time.Time) (SigningKey, error) {
 
 // SigningKeys returns all persisted keys (active first) for the JWKS.
 func (s *RedisStore) SigningKeys() ([]SigningKey, error) {
-	all, err := s.client.HGetAll(s.ctx(), jwksKey).Result()
+	return s.keyFamily(jwksKey, activeKidKey)
+}
+
+// LoadWakeKey adopts or installs the persisted wake-token signing key (#123):
+// the purpose-separate Ed25519 key wake_tokens are minted under, never the
+// webhook-envelope key. Same atomic first-writer-wins adoption as
+// LoadSigningKey, against its own key family.
+func (s *RedisStore) LoadWakeKey(now time.Time) (SigningKey, error) {
+	cand, err := GenerateSigningKey(rand.Reader, now)
+	if err != nil {
+		return SigningKey{}, err
+	}
+	reply, err := s.evalStrings(getOrCreateKeyScript, []string{wakeKeysKey, wakeActiveKidKey},
+		cand.Kid, marshalKeyMaterial(cand))
+	if err != nil {
+		return SigningKey{}, err
+	}
+	return unmarshalKeyMaterial(reply[0], reply[1])
+}
+
+// WakeSigningKeys returns all persisted wake-token keys (active first) so the
+// JWKS publishes their public halves for gateway-side verification.
+func (s *RedisStore) WakeSigningKeys() ([]SigningKey, error) {
+	return s.keyFamily(wakeKeysKey, wakeActiveKidKey)
+}
+
+// keyFamily lists one signing-key family (its kid->material hash plus its
+// active-kid pointer), active key first.
+func (s *RedisStore) keyFamily(hashKey, activeKey string) ([]SigningKey, error) {
+	all, err := s.client.HGetAll(s.ctx(), hashKey).Result()
 	if err != nil {
 		return nil, err
 	}
-	activeKid, _ := s.client.Get(s.ctx(), activeKidKey).Result()
+	activeKid, _ := s.client.Get(s.ctx(), activeKey).Result()
 	keys := make([]SigningKey, 0, len(all))
 	for kid, material := range all {
 		k, err := unmarshalKeyMaterial(kid, material)
