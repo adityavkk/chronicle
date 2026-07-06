@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 )
 
 // This file is the pure core of the wake_token mint (issues #123/#126 TB6a):
@@ -161,3 +163,68 @@ func WakeEntityPath(links []StreamLink) (string, bool) {
 // Ed25519 sign is microseconds. The conformance suite only ever acks with
 // done:true, so the {ok,next_wake} body it deep-equals never gains a field.
 func ShouldRefreshWakeToken(done bool) bool { return !done }
+
+// wakeGateClockSkew bounds clock drift when chronicle's own data-plane gate
+// verifies a wake_token it minted (issue #126 TB6b). Deliberately tight —
+// mint and gate run in the same fleet, and a wake_token's whole point is a
+// short attestable life (WakeTokenTTL caps it at 60s); the model-wide 60s
+// caller-token skew would double that life at the gate.
+const wakeGateClockSkew = 5 * time.Second
+
+// WakeTokenAuthorizer authorizes data-plane actions by a woken entity
+// presenting its wake_token (issue #126 TB6b): the verified token becomes an
+// agent principal whose scope is exactly its own entity subtree. It
+// implements chronicle's EntityAuthorizer seam; keys is called per decision
+// so wake-key rotation is honored without restart.
+type WakeTokenAuthorizer struct {
+	aud  string
+	keys func() ([]SigningKey, error)
+}
+
+// NewWakeTokenAuthorizer builds an authorizer accepting wake_tokens minted
+// for aud (empty accepts only audience-less mints — ValidateWakeToken's
+// exact-aud rule), verified against the wake key family the source returns.
+func NewWakeTokenAuthorizer(aud string, keys func() ([]SigningKey, error)) WakeTokenAuthorizer {
+	return WakeTokenAuthorizer{aud: aud, keys: keys}
+}
+
+// EntityAuthorizer exposes the Manager's wake key family and configured
+// audience as the entity authorizer the HTTP handler enforces with — the
+// same aud the mint stamps, so a deployment's mint and gate agree by
+// construction (one CHRONICLE_WAKE_TOKEN_AUD on both sides of the loop).
+func (m *Manager) EntityAuthorizer() WakeTokenAuthorizer {
+	return NewWakeTokenAuthorizer(m.wakeTokenAud, m.store.WakeSigningKeys)
+}
+
+// AuthorizeEntity maps a presented wake_token to the Decision for an action
+// at path. Fail-closed: a key-set error denies, an unverifiable token denies
+// (401-class), and a verified entity acting outside its own subtree is
+// forbidden (403-class). The token is an identity assertion, not a liveness
+// one (#123): this gate deliberately does NOT consult the live fence — a
+// deposed-but-unexpired token still names its entity, bounded by the
+// half-lease/60s TTL. That residual is the documented trade of keeping a
+// Redis fence read off the data-plane hot path.
+func (a WakeTokenAuthorizer) AuthorizeEntity(token string, path auth.StreamPath, now time.Time) auth.Decision {
+	if token == "" {
+		return auth.Deny(auth.ReasonUnauthenticated, "missing wake token")
+	}
+	keys, err := a.keys()
+	if err != nil {
+		return auth.Deny(auth.ReasonUnauthenticated, "wake key set unavailable")
+	}
+	claims, err := ValidateWakeToken(token, resolverForKeys(keys), a.aud, now, wakeGateClockSkew)
+	if err != nil {
+		return auth.Deny(auth.ReasonUnauthenticated, "invalid wake token")
+	}
+	entity, err := auth.NormalizeStreamPath(claims.Sub)
+	if err != nil {
+		return auth.Deny(auth.ReasonUnauthenticated, "invalid wake token subject")
+	}
+	// The agent's data-plane scope is its own entity subtree: the entity
+	// path and everything under it, the same whole-segment predicate every
+	// other scope in the model uses.
+	if !auth.PathWithinPrefixes(path, []auth.StreamPath{entity}) {
+		return auth.Deny(auth.ReasonForbidden, "wake token entity does not cover this stream")
+	}
+	return auth.Allow()
+}

@@ -83,6 +83,12 @@ type Handler struct {
 	// (issue #126 TB5, the multi-issuer widening). Nil disables the OIDC
 	// issuer route.
 	UserAuth *OIDCUserAuth
+
+	// EntityAuth authorizes a woken entity acting as itself with its
+	// wake_token (issue #126 TB6b): reads and appends within its own entity
+	// subtree, never creates or deletes. Nil fails closed for wake-typed
+	// bearers.
+	EntityAuth EntityAuthorizer
 }
 
 // subStreamPath maps a store path ("/events/abc") to the stream-root-relative
