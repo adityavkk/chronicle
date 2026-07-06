@@ -43,12 +43,19 @@ type CallerAuthorizer interface {
 	AuthorizeCaller(token string, path auth.StreamPath, now time.Time) auth.Decision
 }
 
+// EntityAuthorizer authorizes a woken entity acting as itself with its
+// wake_token (issue #126 TB6b). webhook.WakeTokenAuthorizer implements it.
+type EntityAuthorizer interface {
+	AuthorizeEntity(token string, path auth.StreamPath, now time.Time) auth.Decision
+}
+
 // Authorizers bundles the webhook-layer token authorizers the handler
 // enforces with, all sharing the subscription layer's persisted keys.
 type Authorizers struct {
 	Append AppendAuthorizer
 	Read   ReadAuthorizer
 	Caller CallerAuthorizer
+	Entity EntityAuthorizer
 }
 
 // claimTokenFromRequest extracts the presented write credential:
@@ -181,6 +188,16 @@ func (h *Handler) appendDecision(r *http.Request, rawPath string) auth.Decision 
 	if p := h.resolvePrincipal(r); p.Kind() == auth.KindService {
 		return auth.Allow()
 	}
+	// A woken entity acting as itself appends on its wake_token alone — no
+	// claim needed (issue #126 TB6b); the claim-token path below remains the
+	// producer contract. Routed by JOSE typ from the Bearer only: a wake
+	// token on the electric-claim-token header is not a write token and
+	// fails the HMAC path (pinned by test).
+	if bearer := bearerFromRequest(r); bearer != "" {
+		if d, routed := h.agentDecision(bearer, path); routed {
+			return d
+		}
+	}
 	if h.AppendAuth == nil {
 		return auth.Deny(auth.ReasonUnauthenticated, "no append authorizer configured")
 	}
@@ -243,6 +260,9 @@ func (h *Handler) readDecision(r *http.Request, rawPath string) auth.Decision {
 	if d, routed := h.userDecision(bearer, path); routed {
 		return d
 	}
+	if d, routed := h.agentDecision(bearer, path); routed {
+		return d
+	}
 	if h.ReadAuth == nil {
 		return auth.Deny(auth.ReasonUnauthenticated, "no read authorizer configured")
 	}
@@ -272,6 +292,23 @@ func (h *Handler) userDecision(bearer string, path auth.StreamPath) (d auth.Deci
 	return auth.Allow(), true
 }
 
+// agentDecision routes a bearer to the entity arm when its (unverified,
+// routing-only) JOSE typ is the wake_token's, and evaluates the verified
+// entity's subtree scope against the path. routed=false means the bearer is
+// not wake-typed and the caller should try the next family — never that the
+// token was acceptable. Full verification happens inside AuthorizeEntity;
+// the peek grants nothing.
+func (h *Handler) agentDecision(bearer string, path auth.StreamPath) (d auth.Decision, routed bool) {
+	typ, ok := webhook.PeekTyp(bearer)
+	if !ok || typ != webhook.WakeTokenTyp {
+		return auth.Decision{}, false
+	}
+	if h.EntityAuth == nil {
+		return auth.Deny(auth.ReasonUnauthenticated, "no entity authorizer configured"), true
+	}
+	return h.EntityAuth.AuthorizeEntity(bearer, path, time.Now()), true
+}
+
 // authorizeMutate runs the create/delete gate (the seam-completion slice:
 // with it, every data-plane action — read, append, create, delete — passes
 // one enforcement seam). Same telemetry/enforce split as the other gates;
@@ -296,7 +333,11 @@ func (h *Handler) authorizeMutate(r *http.Request, rawPath string, action auth.A
 // path; otherwise the bearer must be a chronicle caller token whose
 // namespaces cover the path — the same credential that authorizes linking
 // (TB3), because creating or deleting a stream is the same namespace-scoped
-// authority. Read capabilities and write tokens never authorize a mutation.
+// authority. Read capabilities and write tokens never authorize a mutation,
+// and neither does a wake_token (issue #126 TB6b, deliberate): an entity
+// acts within its subtree but does not create or destroy entities, so there
+// is no agent arm here — a wake-typed bearer falls through to the caller
+// verifier and fails its typ pin (401).
 func (h *Handler) mutateDecision(r *http.Request, rawPath string) auth.Decision {
 	path, err := auth.NormalizeStreamPath(subStreamPath(rawPath))
 	if err != nil {
