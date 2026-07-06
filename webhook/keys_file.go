@@ -101,26 +101,21 @@ type keyFamilyFile struct {
 	all    []SigningKey // active first
 }
 
-// LoadFileKeySource reads and strictly parses a keys file. Everything is
-// fail-closed: a missing file, unknown field, short seed or token key, an
-// unknown status or purpose, a retire_after on an active key, or a purpose
-// without exactly one active key — each refuses to load rather than
-// guessing. Error messages name fields and reasons but never echo key
-// material.
-func LoadFileKeySource(path string) (*FileKeySource, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("keys file: %w", err)
-	}
-	// Fail closed on broad permissions (issue #126 hardening): the file holds
-	// the Ed25519 signing keys and the HMAC token key, so anyone who can read
-	// it can forge every webhook signature and token — filesystem custody is
-	// only as strong as the mount's permissions. World access (other r/w/x)
-	// and group-write are refused outright; group-read is a warning, since a
-	// deliberately shared-group secret mount is a defensible if looser posture.
-	// Set the mount to 0400/0600 (Kubernetes: secret volume defaultMode 0400).
-	var warnings []string
-	perm := info.Mode().Perm()
+// checkKeysFilePerms enforces fail-closed custody on the mounted secrets
+// file's mode (issue #126 hardening, #131): the file holds the Ed25519 signing
+// keys and the HMAC token key, so anyone who can read it can forge every
+// webhook signature and token — filesystem custody is only as strong as the
+// mount's permissions.
+//
+// World access (other r/w/x) and any group-write bit are refused outright:
+// never defensible. Group-READ is also refused by default — on a shared group
+// it is read-to-forge — UNLESS allowGroupRead is set, the one documented
+// exception: a non-root container reading a root-owned Kubernetes secret
+// through a dedicated fsGroup, where the file is root:<fsGroup> and 0400 would
+// be unreadable by the process (0440 is the minimum that works). Even under
+// the exception it is a warning, never silent. Set the mount to 0400/0600
+// otherwise (Kubernetes: secret volume defaultMode 0400).
+func checkKeysFilePerms(path string, perm os.FileMode, allowGroupRead bool) ([]string, error) {
 	if perm&0o007 != 0 {
 		return nil, fmt.Errorf("keys file %s is world-accessible (mode %04o); it must not be readable, writable, or executable by other — set the mount to 0400 or 0600", path, perm)
 	}
@@ -128,8 +123,30 @@ func LoadFileKeySource(path string) (*FileKeySource, error) {
 		return nil, fmt.Errorf("keys file %s is group-writable (mode %04o); it must not be writable by group — set the mount to 0400 or 0600", path, perm)
 	}
 	if perm&0o040 != 0 {
-		warnings = append(warnings,
-			fmt.Sprintf("keys file %s is group-readable (mode %04o); restrict it to 0400 or 0600 unless a shared-group secret mount is intended", path, perm))
+		if !allowGroupRead {
+			return nil, fmt.Errorf("keys file %s is group-readable (mode %04o); it holds signing and token key material, so on a shared group this is read-to-forge — set the mount to 0400 or 0600, or set CHRONICLE_KEYS_FILE_ALLOW_GROUP_READ=true only if a non-root container reads it via a dedicated fsGroup", path, perm)
+		}
+		return []string{fmt.Sprintf("keys file %s is group-readable (mode %04o); permitted by CHRONICLE_KEYS_FILE_ALLOW_GROUP_READ — ensure the group is a dedicated single-reader fsGroup, never a shared login group", path, perm)}, nil
+	}
+	return nil, nil
+}
+
+// LoadFileKeySource reads and strictly parses a keys file. Everything is
+// fail-closed: a missing file, unknown field, short seed or token key, an
+// unknown status or purpose, a retire_after on an active key, or a purpose
+// without exactly one active key — each refuses to load rather than
+// guessing. Error messages name fields and reasons but never echo key
+// material. allowGroupRead opts into the group-readable exception (see
+// checkKeysFilePerms); the strict default (false) refuses any group/world
+// readability.
+func LoadFileKeySource(path string, allowGroupRead bool) (*FileKeySource, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("keys file: %w", err)
+	}
+	warnings, err := checkKeysFilePerms(path, info.Mode().Perm(), allowGroupRead)
+	if err != nil {
+		return nil, err
 	}
 	raw, err := os.ReadFile(path) // #nosec G304 -- the operator-configured secrets mount path
 	if err != nil {
@@ -318,8 +335,9 @@ func (s *FileKeySource) Kids() []string {
 // (availability posture: a half-written mount update must not wipe a serving
 // key set); a bad file at boot still refuses startup in NewFileKeyWatcher.
 type FileKeyWatcher struct {
-	path string
-	log  *slog.Logger
+	path           string
+	allowGroupRead bool
+	log            *slog.Logger
 
 	mu    sync.RWMutex
 	cur   *FileKeySource
@@ -328,16 +346,17 @@ type FileKeyWatcher struct {
 }
 
 // NewFileKeyWatcher loads the file (fail-closed: a bad file at boot is an
-// error) and arms the watcher.
-func NewFileKeyWatcher(path string, logger *slog.Logger) (*FileKeyWatcher, error) {
-	src, err := LoadFileKeySource(path)
+// error) and arms the watcher. allowGroupRead threads the #131 group-read
+// exception through to every (re)load, including Refresh.
+func NewFileKeyWatcher(path string, allowGroupRead bool, logger *slog.Logger) (*FileKeyWatcher, error) {
+	src, err := LoadFileKeySource(path, allowGroupRead)
 	if err != nil {
 		return nil, err
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	w := &FileKeyWatcher{path: path, log: logger, cur: src}
+	w := &FileKeyWatcher{path: path, allowGroupRead: allowGroupRead, log: logger, cur: src}
 	if info, err := os.Stat(path); err == nil {
 		w.mtime, w.size = info.ModTime(), info.Size()
 	}
@@ -358,7 +377,7 @@ func (w *FileKeyWatcher) Refresh(time.Time) {
 	if unchanged {
 		return
 	}
-	src, err := LoadFileKeySource(w.path)
+	src, err := LoadFileKeySource(w.path, w.allowGroupRead)
 	if err != nil {
 		w.log.Error("replaced keys file is invalid; keeping last good key state", "path", w.path, "error", err)
 		return

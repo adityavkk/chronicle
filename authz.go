@@ -102,22 +102,41 @@ type ServiceAuth struct {
 	// mesh identity is honored only when the request also carries this header
 	// with this exact value. The operator configures the sidecar to inject it
 	// on mTLS-verified traffic AND to strip any client-supplied copy, so an
-	// external peer that forges XFCC cannot also produce the marker. Empty
-	// Name leaves XFCC trust resting on the documented sidecar-sanitization
-	// requirement alone.
+	// external peer that forges XFCC cannot also produce the marker.
 	SidecarMarkerName  string
 	SidecarMarkerValue string
+
+	// AllowXFCCWithoutMarker is the explicit, deliberate opt-out that lets XFCC
+	// trust rest on the sidecar-sanitization requirement alone, with no marker
+	// gate (issue #126 hardening, re-review of #130). It exists ONLY so an
+	// operator can consciously accept the marker-less posture; it is never the
+	// default. When TrustedSPIFFEIDs is set but no marker is configured, XFCC is
+	// trusted only if this is true — otherwise xfccGatePasses fails closed and
+	// raw client XFCC never authenticates. Set it via
+	// CHRONICLE_XFCC_TRUST_WITHOUT_MARKER, and only when the sidecar provably
+	// strips inbound XFCC (Envoy forward_client_cert_details: SANITIZE_SET).
+	AllowXFCCWithoutMarker bool
 }
 
-// xfccGatePasses reports whether the sidecar-marker precondition for honoring
-// an XFCC mesh identity is met: trivially true when no marker is configured,
-// otherwise a constant-time match of the configured marker header.
+// xfccGatePasses reports whether the precondition for honoring an XFCC mesh
+// identity is met. Fail-closed by default (issue #126 hardening, #130): a
+// configured marker must match (constant time); with no marker, XFCC is
+// honored only when the operator explicitly opted into the marker-less posture
+// via AllowXFCCWithoutMarker — otherwise raw client XFCC is never trusted, so a
+// TrustedSPIFFEIDs-only config behind a non-sanitizing ingress cannot be
+// spoofed into minting a service principal.
 func (s *ServiceAuth) xfccGatePasses(r *http.Request) bool {
-	if s.SidecarMarkerName == "" {
-		return true
+	// A marker counts only when BOTH name and value are non-empty: an
+	// empty-value marker can't be checked (Header.Get can't distinguish an
+	// absent header from a present-empty one), so it must not stand in for a
+	// real gate — fall through to the explicit opt-in instead of silently
+	// passing. Config parsing rejects an empty value; this guards direct
+	// construction too (#130).
+	if s.SidecarMarkerName != "" && s.SidecarMarkerValue != "" {
+		got := r.Header.Get(s.SidecarMarkerName)
+		return subtle.ConstantTimeCompare([]byte(got), []byte(s.SidecarMarkerValue)) == 1
 	}
-	got := r.Header.Get(s.SidecarMarkerName)
-	return subtle.ConstantTimeCompare([]byte(got), []byte(s.SidecarMarkerValue)) == 1
+	return s.AllowXFCCWithoutMarker
 }
 
 // resolvePrincipal extracts the verified caller principal from a request, or
@@ -141,8 +160,9 @@ func (h *Handler) resolvePrincipal(r *http.Request) auth.Principal {
 	// repeated headers as one comma-joined value and Envoy appends its
 	// attested element last, so a client that injects its own XFCC line can
 	// never make its element the last one — whereas Header.Get (first line
-	// only) would let that injection win. Second, the optional sidecar-marker
-	// gate above must pass.
+	// only) would let that injection win. Second, xfccGatePasses fails closed:
+	// without either a matching sidecar marker or an explicit
+	// AllowXFCCWithoutMarker opt-in, raw client XFCC is never trusted (#130).
 	if h.ServiceAuth.xfccGatePasses(r) {
 		joined := strings.Join(r.Header.Values(xfccHeader), ",")
 		if p, ok := auth.VerifyXFCC(joined, h.ServiceAuth.TrustedSPIFFEIDs); ok {

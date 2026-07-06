@@ -167,22 +167,23 @@ func run() error {
 	// log — credential material must never reach a log line.
 	if len(cfg.ServiceCredentials) > 0 || len(cfg.TrustedSPIFFEIDs) > 0 {
 		handler.ServiceAuth = &chronicle.ServiceAuth{
-			Credentials:        cfg.ServiceCredentials,
-			TrustedSPIFFEIDs:   cfg.TrustedSPIFFEIDs,
-			SidecarMarkerName:  cfg.XFCCMarkerName,
-			SidecarMarkerValue: cfg.XFCCMarkerValue,
+			Credentials:            cfg.ServiceCredentials,
+			TrustedSPIFFEIDs:       cfg.TrustedSPIFFEIDs,
+			SidecarMarkerName:      cfg.XFCCMarkerName,
+			SidecarMarkerValue:     cfg.XFCCMarkerValue,
+			AllowXFCCWithoutMarker: cfg.AllowXFCCWithoutMarker,
 		}
 		logger.Info("service principal auth enabled",
 			"bearer_credentials", len(cfg.ServiceCredentials),
 			"trusted_spiffe_ids", len(cfg.TrustedSPIFFEIDs),
 			"xfcc_marker", cfg.XFCCMarkerName != "")
-		// XFCC trust rests on the mesh: chronicle cannot cryptographically
-		// prove a request arrived through the sidecar. Without the marker gate,
-		// the only thing between an external peer and a forged mesh identity is
-		// the sidecar sanitizing inbound XFCC — make that requirement loud so
-		// it is never left implicit (issue #126 hardening).
+		// LoadEnv already fails closed on a SPIFFE allowlist with neither a
+		// marker nor the explicit opt-in (#130), so reaching here without a
+		// marker means the operator consciously accepted the marker-less
+		// posture — surface it loudly, since XFCC trust then rests entirely on
+		// the sidecar sanitizing inbound XFCC (issue #126 hardening).
 		if len(cfg.TrustedSPIFFEIDs) > 0 && cfg.XFCCMarkerName == "" {
-			logger.Warn("XFCC mesh identity trusted without a sidecar marker: the sidecar MUST strip client-supplied X-Forwarded-Client-Cert (Envoy forward_client_cert_details SANITIZE_SET), else an external client can forge a service principal; set CHRONICLE_XFCC_REQUIRED_HEADER for defense in depth")
+			logger.Warn("XFCC mesh identity trusted WITHOUT a sidecar marker (CHRONICLE_XFCC_TRUST_WITHOUT_MARKER set): the sidecar MUST strip client-supplied X-Forwarded-Client-Cert (Envoy forward_client_cert_details SANITIZE_SET), else an external client can forge a service principal; set CHRONICLE_XFCC_REQUIRED_HEADER for defense in depth")
 		}
 	}
 
@@ -233,17 +234,18 @@ func run() error {
 		}
 		streamRootURL := strings.TrimSuffix(cfg.PublicBaseURL, "/") + cfg.StreamRoot
 		tuning := chronicle.SubscriptionTuning{
-			SweepInterval:      cfg.SweepInterval,
-			ReconcileInterval:  cfg.ReconcileInterval,
-			SweepBatch:         cfg.SweepBatch,
-			Metrics:            subMetrics,
-			WakeTokenAudience:  cfg.WakeTokenAudience,
-			Consistency:        cfg.Consistency,
-			WaitReplicas:       cfg.WaitReplicas,
-			WaitTimeoutMs:      cfg.WaitTimeoutMs,
-			AuthMode:           cfg.AuthMode,
-			KeysFile:           cfg.KeysFile,
-			KeyRotationOverlap: cfg.KeyRotationOverlap,
+			SweepInterval:          cfg.SweepInterval,
+			ReconcileInterval:      cfg.ReconcileInterval,
+			SweepBatch:             cfg.SweepBatch,
+			Metrics:                subMetrics,
+			WakeTokenAudience:      cfg.WakeTokenAudience,
+			Consistency:            cfg.Consistency,
+			WaitReplicas:           cfg.WaitReplicas,
+			WaitTimeoutMs:          cfg.WaitTimeoutMs,
+			AuthMode:               cfg.AuthMode,
+			KeysFile:               cfg.KeysFile,
+			KeysFileAllowGroupRead: cfg.KeysFileAllowGroupRead,
+			KeyRotationOverlap:     cfg.KeyRotationOverlap,
 		}
 		router, service, authz, err := chronicle.NewSubscriptions(client, st, rs, streamRootURL, cfg.WebhookAllowPrivate, tuning, logger)
 		if err != nil {
