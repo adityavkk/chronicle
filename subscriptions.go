@@ -79,6 +79,11 @@ type SubscriptionTuning struct {
 	// keys live (#123 rotation); an invalid replacement keeps the last good
 	// state and logs.
 	KeysFile string
+	// KeysFileAllowGroupRead opts into loading a group-readable keys file
+	// (#131 fail-closed custody exception): the default refuses any group/world
+	// readability, but a non-root container reading a root-owned secret via a
+	// dedicated Kubernetes fsGroup legitimately needs the group-read bit.
+	KeysFileAllowGroupRead bool
 	// KeysReloadInterval bounds how stale a replica's key snapshot may be
 	// (rotations, denylist entries, keys-file replacements land within one
 	// interval). Zero defaults to 15s.
@@ -229,7 +234,7 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		opts.Lister = redisLister{rs: rs}
 	}
 	if tuning.KeysFile != "" {
-		src, err := webhook.NewFileKeyWatcher(tuning.KeysFile, logger)
+		src, err := webhook.NewFileKeyWatcher(tuning.KeysFile, tuning.KeysFileAllowGroupRead, logger)
 		if err != nil {
 			return nil, nil, nil, err
 		}

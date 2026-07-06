@@ -130,7 +130,7 @@ func TestFileKeySourceReturnsDeepCopies(t *testing.T) {
 	if err := os.Chmod(path, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	src, err := LoadFileKeySource(path)
+	src, err := LoadFileKeySource(path, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestKeysFileRejectsTrailingBrace(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadFileKeySource(path); err == nil {
+	if _, err := LoadFileKeySource(path, false); err == nil {
 		t.Fatal("a keys file with a trailing '}' must be refused")
 	}
 }

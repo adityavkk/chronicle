@@ -60,7 +60,7 @@ func wakeEntry() string {
 }
 
 func TestLoadFileKeySourceValid(t *testing.T) {
-	src, err := LoadFileKeySource(writeKeysFile(t, validKeysFile()))
+	src, err := LoadFileKeySource(writeKeysFile(t, validKeysFile()), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestLoadFileKeySourceActivePlusRetiring(t *testing.T) {
 			%s
 		]
 	}`, b64TokenKey(32), b64Seed(2), b64Seed(3), wakeEntry())
-	src, err := LoadFileKeySource(writeKeysFile(t, content))
+	src, err := LoadFileKeySource(writeKeysFile(t, content), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestLoadFileKeySourceRejects(t *testing.T) {
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := LoadFileKeySource(writeKeysFile(t, content))
+			_, err := LoadFileKeySource(writeKeysFile(t, content), false)
 			if err == nil {
 				t.Fatal("loaded; want fail-closed error")
 			}
@@ -180,16 +180,19 @@ func TestLoadFileKeySourceRejects(t *testing.T) {
 		})
 	}
 
-	if _, err := LoadFileKeySource(filepath.Join(t.TempDir(), "absent.json")); err == nil {
+	if _, err := LoadFileKeySource(filepath.Join(t.TempDir(), "absent.json"), false); err == nil {
 		t.Fatal("missing file must fail")
 	}
 }
 
 // TestLoadFileKeySourcePermissions pins the fail-closed permission posture
-// (issue #126 hardening): a world-accessible (e.g. 0644) or group-writable
-// key file refuses to load; a group-readable (0640) file loads with a
-// warning; a 0600 file loads clean. The key material never appears in the
-// error or the warning.
+// (issue #126 hardening, re-review #131). By default (allowGroupRead=false)
+// ANY group- or world-readability refuses to load: world-access, group-write,
+// and now group-READ (0640) — the last because on a shared group it is
+// read-to-forge. The group-read exception loads (with a warning) only when the
+// caller explicitly opts in, the documented Kubernetes fsGroup case. World and
+// write bits are refused even under the opt-in. Key material never appears in
+// an error or a warning.
 func TestLoadFileKeySourcePermissions(t *testing.T) {
 	leaks := func(t *testing.T, s string) {
 		t.Helper()
@@ -197,54 +200,62 @@ func TestLoadFileKeySourcePermissions(t *testing.T) {
 			t.Fatalf("message leaks key material: %q", s)
 		}
 	}
-
-	// World-readable (0644): refuse.
-	path := writeKeysFile(t, validKeysFile())
-	if err := os.Chmod(path, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, err := LoadFileKeySource(path)
-	if err == nil {
-		t.Fatal("0644 keys file must be refused (world-readable)")
-	}
-	leaks(t, err.Error())
-
-	// Group-writable (0620): refuse.
-	path = writeKeysFile(t, validKeysFile())
-	if err := os.Chmod(path, 0o620); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadFileKeySource(path); err == nil {
-		t.Fatal("0620 keys file must be refused (group-writable)")
+	// chmodTo writes a fresh valid file and sets its mode.
+	chmodTo := func(t *testing.T, mode os.FileMode) string {
+		t.Helper()
+		path := writeKeysFile(t, validKeysFile())
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		return path
 	}
 
-	// Group-readable (0640): load with a warning.
-	path = writeKeysFile(t, validKeysFile())
-	if err := os.Chmod(path, 0o640); err != nil {
-		t.Fatal(err)
+	// Refused regardless of the group-read opt-in: world-readable (0644),
+	// world-writable (0642), group-writable (0620) — none is ever defensible.
+	for _, mode := range []os.FileMode{0o644, 0o642, 0o620} {
+		for _, allowGroupRead := range []bool{false, true} {
+			path := chmodTo(t, mode)
+			_, err := LoadFileKeySource(path, allowGroupRead)
+			if err == nil {
+				t.Fatalf("mode %04o (allowGroupRead=%v) must be refused", mode, allowGroupRead)
+			}
+			leaks(t, err.Error())
+		}
 	}
-	src, err := LoadFileKeySource(path)
+
+	// Group-readable (0640): the #131 fix — refused by DEFAULT (fail closed),
+	// not merely warned.
+	path := chmodTo(t, 0o640)
+	if _, err := LoadFileKeySource(path, false); err == nil {
+		t.Fatal("0640 keys file must be REFUSED by default (group-read is read-to-forge on a shared group)")
+	} else {
+		leaks(t, err.Error())
+	}
+
+	// Group-readable (0640) WITH the explicit opt-in: loads, with a warning.
+	path = chmodTo(t, 0o640)
+	src, err := LoadFileKeySource(path, true)
 	if err != nil {
-		t.Fatalf("0640 keys file must load (group-read is a warning): %v", err)
+		t.Fatalf("0640 keys file with allowGroupRead must load: %v", err)
 	}
 	if len(src.Warnings()) == 0 {
-		t.Fatal("0640 keys file must produce a permissions warning")
+		t.Fatal("0640 keys file under the opt-in must still produce a permissions warning")
 	}
 	for _, w := range src.Warnings() {
 		leaks(t, w)
 	}
 
-	// Owner-only (0600): load clean, no warning.
-	path = writeKeysFile(t, validKeysFile())
-	if err := os.Chmod(path, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	src, err = LoadFileKeySource(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(src.Warnings()) != 0 {
-		t.Fatalf("0600 keys file must warn nothing, got %v", src.Warnings())
+	// Owner-only (0600) and owner-read-only (0400): load clean, no warning,
+	// with or without the opt-in.
+	for _, mode := range []os.FileMode{0o600, 0o400} {
+		path := chmodTo(t, mode)
+		src, err := LoadFileKeySource(path, false)
+		if err != nil {
+			t.Fatalf("mode %04o must load: %v", mode, err)
+		}
+		if len(src.Warnings()) != 0 {
+			t.Fatalf("mode %04o must warn nothing, got %v", mode, src.Warnings())
+		}
 	}
 }
 
@@ -301,11 +312,11 @@ func TestFileKeySourceProperty(t *testing.T) {
 		}
 		f.Close()
 
-		src1, err := LoadFileKeySource(f.Name())
+		src1, err := LoadFileKeySource(f.Name(), false)
 		if err != nil {
 			t.Fatalf("valid doc rejected: %v", err)
 		}
-		src2, err := LoadFileKeySource(f.Name())
+		src2, err := LoadFileKeySource(f.Name(), false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -353,7 +364,7 @@ func TestFileKeySourceProperty(t *testing.T) {
 func TestManagerWithFileKeySource(t *testing.T) {
 	store, client := newTestStore(t)
 	path := writeKeysFile(t, validKeysFile())
-	src, err := LoadFileKeySource(path)
+	src, err := LoadFileKeySource(path, false)
 	if err != nil {
 		t.Fatal(err)
 	}
