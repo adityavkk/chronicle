@@ -36,9 +36,8 @@ func tb5Handler(t *testing.T) (*Handler, webhook.SigningKey, []byte) {
 	h := testHandler(time.Second, time.Second)
 	h.AuthMode = auth.ModeEnforce
 	h.AppendAuth = webhook.NewWriteTokenAuthorizer(tokenKey)
-	keys := func() ([]webhook.SigningKey, error) { return []webhook.SigningKey{sk}, nil }
-	h.ReadAuth = webhook.NewReadCapabilityAuthorizer(tb5Iss, keys)
-	h.CallerAuth = webhook.NewCallerTokenAuthorizer(tb5Iss, keys)
+	h.ReadAuth = webhook.NewReadCapabilityAuthorizer(tb5Iss, webhook.StaticKidResolver(sk))
+	h.CallerAuth = webhook.NewCallerTokenAuthorizer(tb5Iss, webhook.StaticKidResolver(sk))
 	return h, sk, tokenKey
 }
 

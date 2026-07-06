@@ -3,6 +3,7 @@ package chronicle
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
@@ -33,8 +34,9 @@ const (
 	// Stream authn/authz enforcement (issue #126): insecure (default) | enforce.
 	EnvAuthMode = "CHRONICLE_AUTH_MODE"
 	// Trusted service principals (issue #126 TB4, trusted-backend mode).
-	EnvServiceBearer = "CHRONICLE_SERVICE_BEARER"     // "token" or "name:token[,name:token...]"
-	EnvTrustedSPIFFE = "CHRONICLE_TRUSTED_SPIFFE_IDS" // comma-separated spiffe:// allowlist (mesh add-on)
+	EnvServiceBearer      = "CHRONICLE_SERVICE_BEARER"       // "token" or "name:token[,name:token...]"
+	EnvTrustedSPIFFE      = "CHRONICLE_TRUSTED_SPIFFE_IDS"   // comma-separated spiffe:// allowlist (mesh add-on)
+	EnvXFCCRequiredHeader = "CHRONICLE_XFCC_REQUIRED_HEADER" // optional "Name: value" sidecar marker gating XFCC trust
 	// Key custody (issues #123/#126): path to a mounted secrets file holding the
 	// Ed25519 signing key(s) + HMAC token key. Unset = keys live in Redis.
 	EnvKeysFile = "CHRONICLE_KEYS_FILE"
@@ -174,6 +176,15 @@ type Config struct {
 	// Configure it only when a sidecar fronts chronicle and sanitizes
 	// inbound XFCC. Empty disables the mesh path.
 	TrustedSPIFFEIDs []string
+
+	// XFCCMarkerName / XFCCMarkerValue are the optional sidecar-marker gate
+	// (issue #126 hardening): when Name is set, an XFCC mesh identity is
+	// honored only if the request also carries this header with this exact
+	// value — a header the sidecar injects on mTLS-verified traffic and strips
+	// from inbound requests, so an external peer that forges XFCC cannot also
+	// produce it. Parsed from CHRONICLE_XFCC_REQUIRED_HEADER ("Name: value").
+	XFCCMarkerName  string
+	XFCCMarkerValue string
 
 	// WakeTokenAudience is the aud claim minted into wake_tokens (#123/#126
 	// TB6a): the egress gateway the token is intended for. Empty (the
@@ -326,6 +337,15 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvTrustedSPIFFE, err)
 		}
 		c.TrustedSPIFFEIDs = ids
+	}
+	if v, ok := lookup(EnvXFCCRequiredHeader); ok {
+		name, value, found := strings.Cut(v, ":")
+		name = strings.TrimSpace(name)
+		if !found || name == "" {
+			return fmt.Errorf("%s: want \"Name: value\", got %q", EnvXFCCRequiredHeader, v)
+		}
+		c.XFCCMarkerName = name
+		c.XFCCMarkerValue = strings.TrimSpace(value)
 	}
 	if v, ok := lookup(EnvWakeTokenAud); ok {
 		c.WakeTokenAudience = v

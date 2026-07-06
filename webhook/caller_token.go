@@ -1,7 +1,6 @@
 package webhook
 
 import (
-	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -135,14 +134,9 @@ func ValidateCallerToken(token, expectedIss string, keyFor KidResolver, now time
 	if err != nil {
 		return VerifiedCaller{}, err
 	}
-	dec := json.NewDecoder(bytes.NewReader(payload))
-	dec.DisallowUnknownFields()
 	var claims callerClaims
-	if err := dec.Decode(&claims); err != nil {
+	if err := strictJSONUnmarshal(payload, &claims); err != nil {
 		return VerifiedCaller{}, fmt.Errorf("caller token: claims: %w", err)
-	}
-	if dec.More() {
-		return VerifiedCaller{}, errors.New("caller token: claims: trailing data")
 	}
 	if claims.Iss != expectedIss {
 		return VerifiedCaller{}, errors.New("caller token: issuer not accepted")
@@ -172,35 +166,35 @@ func ValidateCallerToken(token, expectedIss string, keyFor KidResolver, now time
 // whole-segment prefix predicate the control-plane link gate enforces
 // (issue #126 TB5). It implements chronicle's CallerAuthorizer seam.
 type CallerTokenAuthorizer struct {
-	iss  string
-	keys func() ([]SigningKey, error)
+	iss      string
+	resolver func(now time.Time) KidResolver
 }
 
 // NewCallerTokenAuthorizer builds an authorizer for caller tokens issued by
-// iss, verifying against the keys the source currently returns.
-func NewCallerTokenAuthorizer(iss string, keys func() ([]SigningKey, error)) CallerTokenAuthorizer {
-	return CallerTokenAuthorizer{iss: iss, keys: keys}
+// iss, verifying against the resolver's trust set at the decision time.
+func NewCallerTokenAuthorizer(iss string, resolver func(now time.Time) KidResolver) CallerTokenAuthorizer {
+	return CallerTokenAuthorizer{iss: iss, resolver: resolver}
 }
 
-// CallerAuthorizer exposes the Manager's key set and issuer as the
-// create/delete authorizer the HTTP handler enforces with.
+// CallerAuthorizer exposes the Manager's custody-source-fed key snapshot as
+// the create/delete authorizer the HTTP handler enforces with — the same
+// rotation- and denylist-aware trust set the control-plane caller gate uses,
+// so file custody and an emergency kid revocation are honored on the
+// create/delete data plane too (issue #126 hardening: this previously
+// verified against m.store, bypassing both).
 func (m *Manager) CallerAuthorizer() CallerTokenAuthorizer {
-	return NewCallerTokenAuthorizer(m.streamRootURL, m.store.SigningKeys)
+	return NewCallerTokenAuthorizer(m.streamRootURL, m.callerKidResolver)
 }
 
 // AuthorizeCaller maps a presented (possibly absent) caller credential to
-// the Decision for a mutation at path. Fail-closed: a key-set error denies,
-// an unverifiable token denies (401-class), and a verified caller whose
-// namespaces do not cover the path is forbidden (403-class).
+// the Decision for a mutation at path. Fail-closed: an unverifiable token
+// denies (401-class), and a verified caller whose namespaces do not cover the
+// path is forbidden (403-class).
 func (a CallerTokenAuthorizer) AuthorizeCaller(token string, path auth.StreamPath, now time.Time) auth.Decision {
 	if token == "" {
 		return auth.Deny(auth.ReasonUnauthenticated, "missing caller credential")
 	}
-	keys, err := a.keys()
-	if err != nil {
-		return auth.Deny(auth.ReasonUnauthenticated, "caller key set unavailable")
-	}
-	caller, err := ValidateCallerToken(token, a.iss, resolverForKeys(keys), now)
+	caller, err := ValidateCallerToken(token, a.iss, a.resolver(now), now)
 	if err != nil {
 		return auth.Deny(auth.ReasonUnauthenticated, "invalid caller credential")
 	}

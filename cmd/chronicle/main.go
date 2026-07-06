@@ -167,12 +167,23 @@ func run() error {
 	// log — credential material must never reach a log line.
 	if len(cfg.ServiceCredentials) > 0 || len(cfg.TrustedSPIFFEIDs) > 0 {
 		handler.ServiceAuth = &chronicle.ServiceAuth{
-			Credentials:      cfg.ServiceCredentials,
-			TrustedSPIFFEIDs: cfg.TrustedSPIFFEIDs,
+			Credentials:        cfg.ServiceCredentials,
+			TrustedSPIFFEIDs:   cfg.TrustedSPIFFEIDs,
+			SidecarMarkerName:  cfg.XFCCMarkerName,
+			SidecarMarkerValue: cfg.XFCCMarkerValue,
 		}
 		logger.Info("service principal auth enabled",
 			"bearer_credentials", len(cfg.ServiceCredentials),
-			"trusted_spiffe_ids", len(cfg.TrustedSPIFFEIDs))
+			"trusted_spiffe_ids", len(cfg.TrustedSPIFFEIDs),
+			"xfcc_marker", cfg.XFCCMarkerName != "")
+		// XFCC trust rests on the mesh: chronicle cannot cryptographically
+		// prove a request arrived through the sidecar. Without the marker gate,
+		// the only thing between an external peer and a forged mesh identity is
+		// the sidecar sanitizing inbound XFCC — make that requirement loud so
+		// it is never left implicit (issue #126 hardening).
+		if len(cfg.TrustedSPIFFEIDs) > 0 && cfg.XFCCMarkerName == "" {
+			logger.Warn("XFCC mesh identity trusted without a sidecar marker: the sidecar MUST strip client-supplied X-Forwarded-Client-Cert (Envoy forward_client_cert_details SANITIZE_SET), else an external client can forge a service principal; set CHRONICLE_XFCC_REQUIRED_HEADER for defense in depth")
+		}
 	}
 
 	// OIDC user principals (issue #126 TB5): the multi-issuer route for
