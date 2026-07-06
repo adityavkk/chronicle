@@ -1,7 +1,6 @@
 package webhook
 
 import (
-	"crypto/ed25519"
 	"errors"
 	"net/http"
 	"time"
@@ -17,22 +16,11 @@ import (
 // operator opts in.
 
 // verifyCaller authenticates a control-plane caller credential against the
-// signing keys the JWKS currently publishes — the same trust set webhook
-// receivers verify against. A store error fails closed (no keys, no entry).
+// webhook-family verification set in the current key snapshot — the same
+// custody-source-fed set the JWKS serves (rotation overlap and the kid
+// denylist apply here by construction, #123).
 func (m *Manager) verifyCaller(token string, now time.Time) (VerifiedCaller, error) {
-	keys, err := m.store.SigningKeys()
-	if err != nil {
-		return VerifiedCaller{}, errors.New("caller token: key set unavailable")
-	}
-	keyFor := func(kid string) (ed25519.PublicKey, bool) {
-		for _, k := range keys {
-			if k.Kid == kid {
-				return k.Public, true
-			}
-		}
-		return nil, false
-	}
-	return ValidateCallerToken(token, m.streamRootURL, keyFor, now)
+	return ValidateCallerToken(token, m.streamRootURL, m.callerKidResolver(now), now)
 }
 
 // authenticateCaller extracts and verifies the control-plane caller

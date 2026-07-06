@@ -28,6 +28,10 @@ type SigningKey struct {
 	Private   ed25519.PrivateKey
 	CreatedAt time.Time
 	Status    string // "active" or "retiring"
+	// RetireAfter is when a retiring key leaves the JWKS and every
+	// verification set (#123 rotation overlap window). Zero on active keys,
+	// and on retiring keys from before rotation stamped them.
+	RetireAfter time.Time
 }
 
 // GenerateSigningKey creates a fresh Ed25519 signing key. The kid is the JWK

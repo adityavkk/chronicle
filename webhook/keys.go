@@ -219,6 +219,7 @@ const (
 	// and a wake-key rotation never touches webhook delivery.
 	wakeKeysKey      = keyPrefix + ":wakekeys"        // HASH kid -> key material
 	wakeActiveKidKey = keyPrefix + ":wake_active_kid" // STRING current wake-token kid
+	kidDenylistKey   = keyPrefix + ":kid_denylist"    // SET emergency-revoked kids (#123 rotation)
 )
 
 // ---- {ownership} keyspace (issue #14, work-sharded leased slot ownership) ----
