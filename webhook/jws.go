@@ -30,6 +30,14 @@ type joseHeader struct {
 
 const jwsAlgEdDSA = "EdDSA"
 
+// jwsB64 is strict unpadded base64url: decoding rejects non-zero trailing
+// padding bits. The lenient default would let an attacker flip the discarded
+// bits of a segment's final character and mint a *different token string*
+// that still decodes to the same signature bytes — token malleability that
+// breaks any string-keyed dedup/denylist and violates JWS canonicality
+// (RFC 7515 base64url; caught by the tamper property in CI).
+var jwsB64 = base64.RawURLEncoding.Strict()
+
 // SignCompactJWS signs payload as a compact EdDSA JWS under key, stamping
 // the given typ (RFC 8725 §3.11 explicit typing).
 func SignCompactJWS(key SigningKey, typ string, payload []byte) (string, error) {
@@ -43,9 +51,9 @@ func SignCompactJWS(key SigningKey, typ string, payload []byte) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	signingInput := base64.RawURLEncoding.EncodeToString(hdr) + "." + base64.RawURLEncoding.EncodeToString(payload)
+	signingInput := jwsB64.EncodeToString(hdr) + "." + jwsB64.EncodeToString(payload)
 	sig := ed25519.Sign(key.Private, []byte(signingInput))
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+	return signingInput + "." + jwsB64.EncodeToString(sig), nil
 }
 
 // KidResolver returns the verifying public key for a kid, or false when the
@@ -69,7 +77,7 @@ func VerifyCompactJWS(token, expectedTyp string, keyFor KidResolver) ([]byte, er
 	if len(parts) != 3 {
 		return nil, errors.New("jws: not a compact JWS")
 	}
-	hdrRaw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	hdrRaw, err := jwsB64.DecodeString(parts[0])
 	if err != nil {
 		return nil, fmt.Errorf("jws: header: %w", err)
 	}
@@ -95,7 +103,7 @@ func VerifyCompactJWS(token, expectedTyp string, keyFor KidResolver) ([]byte, er
 	if !ok || len(pub) != ed25519.PublicKeySize {
 		return nil, errors.New("jws: unknown kid")
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+	sig, err := jwsB64.DecodeString(parts[2])
 	if err != nil {
 		return nil, fmt.Errorf("jws: signature: %w", err)
 	}
@@ -103,7 +111,7 @@ func VerifyCompactJWS(token, expectedTyp string, keyFor KidResolver) ([]byte, er
 	if !ed25519.Verify(pub, []byte(signingInput), sig) {
 		return nil, errors.New("jws: signature invalid")
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	payload, err := jwsB64.DecodeString(parts[1])
 	if err != nil {
 		return nil, fmt.Errorf("jws: payload: %w", err)
 	}
