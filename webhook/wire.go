@@ -117,7 +117,11 @@ func linkViews(links []StreamLink) []StreamLinkView {
 	return out
 }
 
-// WakeNotification is the signed body POSTed to a webhook receiver (PROTOCOL §7.1).
+// WakeNotification is the signed body POSTed to a webhook receiver (PROTOCOL
+// §7.1). WakeToken is the optional entity-identity assertion (#123/#126): an
+// EdDSA JWS (typ=application/wake+jwt) under the wake-token key, present only
+// when the subscription names a single entity. Additive per §11.1 — receivers
+// read fields, and the envelope signature covers the marshaled body.
 type WakeNotification struct {
 	SubscriptionID string           `json:"subscription_id"`
 	WakeID         string           `json:"wake_id"`
@@ -125,6 +129,7 @@ type WakeNotification struct {
 	Streams        []StreamSnapshot `json:"streams"`
 	CallbackURL    string           `json:"callback_url"`
 	CallbackToken  string           `json:"callback_token"`
+	WakeToken      string           `json:"wake_token,omitempty"`
 }
 
 // CallbackRequest is the body of a webhook callback or a pull-wake ack
@@ -140,11 +145,15 @@ type CallbackRequest struct {
 // the in-band refreshed callback token (issue #77): it is set ONLY when a
 // successful callback re-mints a near-expiry token, and `omitempty` keeps the
 // no-refresh response byte-identical to {ok,next_wake} — the shape the conformance
-// suite deep-equals.
+// suite deep-equals. WakeToken is the heartbeat-refreshed entity-identity
+// assertion (#123/#126): set only on a successful non-done ack of a
+// single-entity subscription (ShouldRefreshWakeToken), so a done ack — the
+// only kind the conformance suite sends — never gains a field.
 type AckResponse struct {
-	OK       bool   `json:"ok"`
-	NextWake bool   `json:"next_wake"`
-	Token    string `json:"token,omitempty"`
+	OK        bool   `json:"ok"`
+	NextWake  bool   `json:"next_wake"`
+	Token     string `json:"token,omitempty"`
+	WakeToken string `json:"wake_token,omitempty"`
 }
 
 // ClaimRequest is the pull-wake claim body (PROTOCOL §7.2).
@@ -155,13 +164,17 @@ type ClaimRequest struct {
 // ClaimResponse is a successful pull-wake claim (PROTOCOL §7.2). WriteToken is
 // the claim-scoped write token (issue #126): the append capability for exactly
 // the claimed streams, presented on appends via the electric-claim-token
-// header (fallback Authorization: Bearer). Additive per §11.2 — the
-// conformance suite reads individual claim fields, never the whole shape.
+// header (fallback Authorization: Bearer). WakeToken is the entity-identity
+// assertion (#123/#126): an EdDSA JWS (typ=application/wake+jwt) under the
+// wake-token key, present only when the subscription names a single entity.
+// Both are additive per §11.2 — the conformance suite reads individual claim
+// fields, never the whole shape.
 type ClaimResponse struct {
 	WakeID     string           `json:"wake_id"`
 	Generation int64            `json:"generation"`
 	Token      string           `json:"token"`
 	WriteToken string           `json:"write_token,omitempty"`
+	WakeToken  string           `json:"wake_token,omitempty"`
 	Streams    []StreamSnapshot `json:"streams"`
 	LeaseTTLMs int64            `json:"lease_ttl_ms"`
 }

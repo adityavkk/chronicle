@@ -212,6 +212,13 @@ const (
 	jwksKey      = keyPrefix + ":jwks"       // HASH kid -> key material
 	activeKidKey = keyPrefix + ":active_kid" // STRING current signing kid
 	tokenKeyKey  = keyPrefix + ":tokenkey"   // STRING HMAC token key
+
+	// The wake_token signing-key family (#123/#126 TB6a) is stored apart from
+	// the webhook-envelope family above: purpose-separate keys, separately
+	// rotatable, so an envelope signature can never validate as a wake_token
+	// and a wake-key rotation never touches webhook delivery.
+	wakeKeysKey      = keyPrefix + ":wakekeys"        // HASH kid -> key material
+	wakeActiveKidKey = keyPrefix + ":wake_active_kid" // STRING current wake-token kid
 )
 
 // ---- {ownership} keyspace (issue #14, work-sharded leased slot ownership) ----

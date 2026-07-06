@@ -150,7 +150,11 @@ func TestClaimInsecureDefaultUnchanged(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"wake_id", "generation", "token", "write_token", "streams", "lease_ttl_ms"}
+	// wake_token joined the set with TB6a: the single-entity fixture mints the
+	// entity-identity assertion in both modes (an additive §11.2 field; the
+	// conformance suite field-reads claim responses, so the pin here is that
+	// nothing is REMOVED or renamed in the insecure default).
+	want := []string{"wake_id", "generation", "token", "write_token", "wake_token", "streams", "lease_ttl_ms"}
 	if len(got) != len(want) {
 		t.Fatalf("claim response keys = %d, want %d: %v", len(got), len(want), got)
 	}
