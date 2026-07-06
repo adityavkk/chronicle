@@ -163,6 +163,18 @@ func run() error {
 		AuthMode:             cfg.AuthMode,
 	}
 
+	// Trusted-backend service principals (issue #126 TB4). Counts only in the
+	// log — credential material must never reach a log line.
+	if len(cfg.ServiceCredentials) > 0 || len(cfg.TrustedSPIFFEIDs) > 0 {
+		handler.ServiceAuth = &chronicle.ServiceAuth{
+			Credentials:      cfg.ServiceCredentials,
+			TrustedSPIFFEIDs: cfg.TrustedSPIFFEIDs,
+		}
+		logger.Info("service principal auth enabled",
+			"bearer_credentials", len(cfg.ServiceCredentials),
+			"trusted_spiffe_ids", len(cfg.TrustedSPIFFEIDs))
+	}
+
 	// Observability surface (/metrics, /healthz, /readyz). Created independently
 	// of subscriptions so Go/process/health metrics are exposed either way; the
 	// recorder is handed to the subscription Manager when subscriptions are on.

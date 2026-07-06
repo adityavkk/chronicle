@@ -61,6 +61,12 @@ type Handler struct {
 	// ModeEnforce denies every append (fail closed) and in ModeInsecure only
 	// logs.
 	AppendAuth AppendAuthorizer
+
+	// ServiceAuth authenticates trusted service principals (issue #126 TB4):
+	// a verified service request is served pre-authorized — the
+	// trusted-backend topology behind the Electric agents-server. Nil
+	// disables service auth.
+	ServiceAuth *ServiceAuth
 }
 
 // subStreamPath maps a store path ("/events/abc") to the stream-root-relative
