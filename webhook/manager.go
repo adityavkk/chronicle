@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 )
 
 // Streams is the seam over the durable stream store the subscription Manager
@@ -138,6 +140,12 @@ type ManagerOptions struct {
 	HeartbeatInterval     time.Duration
 	SlotLeaseTTL          time.Duration
 	SlotReconcileInterval time.Duration
+
+	// AuthMode selects control-plane authorization enforcement (issue #126).
+	// The zero value (insecure) evaluates gates as telemetry only; enforce
+	// fails closed before any store access. One mode shared with the data
+	// plane — never a second flag.
+	AuthMode auth.Mode
 }
 
 // Manager orchestrates the subscription control plane: stream hooks, webhook
@@ -162,6 +170,9 @@ type Manager struct {
 	sweepCursor       int // rolling start index when sweepBatch caps a tick
 	allowPrivate      bool
 	metrics           Metrics
+
+	// authMode is the shared #126 enforcement toggle (see ManagerOptions).
+	authMode auth.Mode
 
 	// ---- leased slot ownership (issue #14) ----
 	replicaID             ReplicaID
@@ -217,6 +228,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		sweepBatch:            opts.SweepBatch,
 		allowPrivate:          opts.AllowPrivateWebhookTargets,
 		metrics:               opts.Metrics,
+		authMode:              opts.AuthMode,
 		memberLeaseTTL:        opts.MemberLeaseTTL,
 		heartbeatInterval:     opts.HeartbeatInterval,
 		slotLeaseTTL:          opts.SlotLeaseTTL,
