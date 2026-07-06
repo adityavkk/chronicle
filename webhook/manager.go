@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
@@ -128,6 +129,12 @@ type ManagerOptions struct {
 	// never touches the shared data-plane Redis.
 	Keys KeySource
 
+	// WakeTokenAudience is the aud claim minted into wake_tokens (#123): the
+	// egress gateway the token is intended for. Empty (the default) mints
+	// tokens without an aud claim; the gateway-side audience check activates
+	// once a deployment configures it (CHRONICLE_WAKE_TOKEN_AUD).
+	WakeTokenAudience string
+
 	// ---- leased slot ownership (issue #14) ----
 
 	// ReplicaID is this process's stable membership identity for its pod lifetime
@@ -167,6 +174,8 @@ type Manager struct {
 	client            *http.Client
 	resolver          IPResolver
 	signing           SigningKey
+	wakeKey           SigningKey // wake_token mint key (#123) — never the webhook signing key
+	wakeTokenAud      string
 	tokenKey          []byte
 	log               *slog.Logger
 	workerTick        time.Duration
@@ -225,6 +234,17 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 	if err != nil {
 		return nil, err
 	}
+	wakeKey, err := store.LoadWakeKey(now)
+	if err != nil {
+		return nil, err
+	}
+	if wakeKey.Kid == signing.Kid {
+		// The wake_token key MUST be purpose-separate from the webhook-envelope
+		// key (#123, RFC 8725 §2.8): one key signing both grammars is one
+		// refactor away from cross-protocol confusion. Loading ever returning
+		// the same kid means the store families were conflated — refuse to run.
+		return nil, fmt.Errorf("webhook: wake-token key equals the envelope signing key (kid %s)", wakeKey.Kid)
+	}
 	m := &Manager{
 		store:                 store,
 		keys:                  keys,
@@ -234,6 +254,8 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		client:                opts.HTTPClient,
 		resolver:              opts.Resolver,
 		signing:               signing,
+		wakeKey:               wakeKey,
+		wakeTokenAud:          opts.WakeTokenAudience,
 		tokenKey:              tokenKey,
 		log:                   opts.Logger,
 		workerTick:            opts.WorkerTick,
@@ -355,9 +377,14 @@ func (m *Manager) signingView() *SigningView {
 	return &SigningView{Alg: "ed25519", Kid: m.signing.Kid, JWKSURL: m.JWKSURL()}
 }
 
-// JWKS returns the active key set served at __ds/jwks.json, read from the
-// same custody source the signing key came from — a file-sourced deployment
-// serves exactly the file's keys and never consults Redis.
+// JWKS returns the key set served at __ds/jwks.json: the webhook-envelope
+// family (active first) read from the same custody source the signing key
+// came from — a file-sourced deployment serves exactly the file's keys and
+// never consults Redis for them — followed by the wake-token family (#123;
+// file custody for it lands with the Wave-2 rotation work). The set is
+// kid-selective for every consumer — the conformance receiver picks the kid
+// named in Webhook-Signature, a gateway picks the kid named in a wake_token's
+// JOSE header — so publishing both families in one document is additive.
 func (m *Manager) JWKS() (JWKS, error) {
 	keys, err := m.keys.SigningKeys()
 	if err != nil {
@@ -366,7 +393,57 @@ func (m *Manager) JWKS() (JWKS, error) {
 	if len(keys) == 0 {
 		keys = []SigningKey{m.signing}
 	}
-	return BuildJWKS(keys), nil
+	wakeKeys, err := m.store.WakeSigningKeys()
+	if err != nil {
+		return JWKS{}, err
+	}
+	if len(wakeKeys) == 0 {
+		wakeKeys = []SigningKey{m.wakeKey}
+	}
+	return BuildJWKS(append(keys, wakeKeys...)), nil
+}
+
+// mintWakeTokenOnAck re-reads the subscription and mints the heartbeat
+// refresh wake_token (ShouldRefreshWakeToken): the ack already passed the
+// (generation, wake_id) fence, so the request's fence pair is the one bound
+// into the fresh token. ok is false when no token should ride the response.
+func (m *Manager) mintWakeTokenOnAck(id string, generation int64, wakeID string, done bool, now time.Time) (string, bool) {
+	if !ShouldRefreshWakeToken(done) {
+		return "", false
+	}
+	sub, ok, err := m.store.Get(id)
+	if err != nil || !ok {
+		return "", false
+	}
+	return m.mintWakeTokenFor(sub, generation, wakeID, now)
+}
+
+// mintWakeTokenFor mints the wake_token for a wake on sub at (generation,
+// wakeID), applying the honest single-entity rule: only a single-link
+// subscription names an entity (WakeEntityPath), and the token lives
+// strictly under one lease (WakeTokenTTL). ok is false — mint nothing,
+// never a wrong assertion — for multi-link subscriptions, non-positive
+// TTLs, or a mint error.
+func (m *Manager) mintWakeTokenFor(sub Subscription, generation int64, wakeID string, now time.Time) (string, bool) {
+	entity, ok := WakeEntityPath(sub.Links)
+	if !ok {
+		return "", false
+	}
+	ttl := WakeTokenTTL(sub.Config.LeaseTTLMs)
+	if ttl <= 0 {
+		return "", false
+	}
+	claims, err := NewWakeTokenClaims(m.streamRootURL, entity, m.wakeTokenAud, generation, wakeID, now, ttl, randReader)
+	if err != nil {
+		m.log.Warn("webhook: wake token claims", "sub", sub.ID, "error", err)
+		return "", false
+	}
+	tok, err := MintWakeToken(m.wakeKey, claims)
+	if err != nil {
+		m.log.Warn("webhook: mint wake token", "sub", sub.ID, "error", err)
+		return "", false
+	}
+	return tok, true
 }
 
 // ---- stream hooks (called by the chronicle handler after a durable write) ----
@@ -571,6 +648,13 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		Streams:        snapshot,
 		CallbackURL:    m.callbackURL(id),
 		CallbackToken:  token,
+	}
+	// wake_token (#123/#126 TB6a): the entity-identity assertion rides the
+	// signed notification when the subscription names a single entity.
+	// Additive — receivers read fields, and the envelope signature covers
+	// whatever body is marshaled.
+	if wt, ok := m.mintWakeTokenFor(sub, generation, wakeID, time.Now()); ok {
+		notif.WakeToken = wt
 	}
 	body, err := json.Marshal(notif)
 	if err != nil {

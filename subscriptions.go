@@ -31,6 +31,10 @@ type SubscriptionTuning struct {
 	// Manager. Nil leaves the Manager on its no-op recorder.
 	Metrics webhook.Metrics
 
+	// WakeTokenAudience is the aud claim minted into wake_tokens (#123/#126
+	// TB6a). Empty mints wake_tokens without an aud claim.
+	WakeTokenAudience string
+
 	// ---- leased slot ownership (issue #14) ----
 	// ReplicaID is this process's membership identity; empty makes the Manager
 	// generate it (POD_NAME + a crypto/rand nonce). MemberLeaseTTL /
@@ -203,6 +207,7 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		ReconcileInterval:          tuning.ReconcileInterval,
 		SweepBatch:                 tuning.SweepBatch,
 		Metrics:                    tuning.Metrics,
+		WakeTokenAudience:          tuning.WakeTokenAudience,
 		ReplicaID:                  tuning.ReplicaID,
 		MemberLeaseTTL:             tuning.MemberLeaseTTL,
 		HeartbeatInterval:          tuning.HeartbeatInterval,
