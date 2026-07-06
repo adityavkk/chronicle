@@ -1031,7 +1031,19 @@ func (s *RedisStore) LoadTokenKey() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return base64.RawURLEncoding.DecodeString(stored)
+	key, err := base64.RawURLEncoding.DecodeString(stored)
+	if err != nil {
+		return nil, err
+	}
+	// Fail closed on a degenerate persisted key (issue #126 hardening): a
+	// tampered or truncated ds:{__ds}:tokenkey that decoded to fewer than 32
+	// bytes would make every HMAC token forgeable, so refuse to adopt it
+	// rather than boot with a publicly-forgeable boundary. The keys-file
+	// custody source already enforces the same floor.
+	if len(key) < minTokenKeyBytes {
+		return nil, fmt.Errorf("persisted token key is %d bytes, need at least %d", len(key), minTokenKeyBytes)
+	}
+	return key, nil
 }
 
 // marshalKeyMaterial encodes a signing key as

@@ -176,6 +176,15 @@ func ShouldRefreshToken(exp, now int64, threshold time.Duration) bool {
 // signature in constant time, the subject binding, and expiry, and returns the
 // token's generation for the fence comparison.
 func ValidateToken(tokenKey []byte, token, subID string, now time.Time) TokenValidation {
+	// Fail closed on an unusable key: an empty or short HMAC key makes every
+	// signature forgeable by anyone who knows the key is degenerate, so no
+	// token may validate against it (issue #126 hardening — the root of trust
+	// fails closed). A healthy key is >= 32 bytes (RedisStore.LoadTokenKey and
+	// the keys-file loader both enforce this at load; this is the last-line
+	// guard for a direct or misconfigured constructor).
+	if len(tokenKey) < minTokenKeyBytes {
+		return TokenValidation{}
+	}
 	body, sig, ok := strings.Cut(token, ".")
 	if !ok {
 		return TokenValidation{}
@@ -289,6 +298,14 @@ type WriteTokenValidation struct {
 // path scope — a caller who could not have minted the token learns nothing
 // about its scope from the response.
 func ValidateWriteToken(tokenKey []byte, token string, path auth.StreamPath, now time.Time) WriteTokenValidation {
+	// Fail closed on an unusable key (issue #126 hardening): an empty or short
+	// HMAC key is publicly forgeable, so it must authorize nothing rather than
+	// everything. This is the enforcement chokepoint — it makes even
+	// NewWriteTokenAuthorizer(nil) deny every append, independent of how the
+	// key was (mis)configured.
+	if len(tokenKey) < minTokenKeyBytes {
+		return WriteTokenValidation{}
+	}
 	body, sig, ok := strings.Cut(token, ".")
 	if !ok {
 		return WriteTokenValidation{}
