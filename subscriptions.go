@@ -9,6 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
@@ -55,6 +56,12 @@ type SubscriptionTuning struct {
 	Consistency   webhook.ConsistencyTier
 	WaitReplicas  int
 	WaitTimeoutMs int
+
+	// AuthMode is the shared #126 enforcement toggle, threaded into the
+	// subscription Manager so the control-plane gates (claim, and later
+	// create/add-streams) follow the same telemetry-default posture as the
+	// data plane. One mode, never a second flag.
+	AuthMode auth.Mode
 }
 
 // storePath maps a stream-root-relative subscription path ("events/abc") to the
@@ -191,6 +198,7 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		HeartbeatInterval:          tuning.HeartbeatInterval,
 		SlotLeaseTTL:               tuning.SlotLeaseTTL,
 		SlotReconcileInterval:      tuning.SlotReconcileInterval,
+		AuthMode:                   tuning.AuthMode,
 	}
 	if rs != nil {
 		opts.Lister = redisLister{rs: rs}
