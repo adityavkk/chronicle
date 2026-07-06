@@ -246,6 +246,7 @@ func run() error {
 		handler.AppendAuth = authz.Append
 		handler.ReadAuth = authz.Read
 		handler.CallerAuth = authz.Caller
+		handler.EntityAuth = authz.Entity
 		// Start runs the boot reconcile synchronously before launching its loops, so
 		// anything owed is re-fired before serving (issue #13 — the boot recovery
 		// event closes the restart gap; no separate RunSweep is needed).

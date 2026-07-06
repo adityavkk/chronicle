@@ -92,6 +92,30 @@ func PeekIssuer(token string) (string, bool) {
 	return claims.Iss, true
 }
 
+// PeekTyp reads the JOSE typ of a compact JWS header WITHOUT any
+// verification. Like PeekIssuer it exists solely to route a bearer to the
+// right verifier family — the returned value carries no trust, and the
+// routed-to verifier re-pins typ (and everything else) after signature
+// verification. Returns false for anything that does not parse as a
+// three-segment JWS with a JSON header.
+func PeekTyp(token string) (string, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", false
+	}
+	hdrRaw, err := base64.RawURLEncoding.Strict().DecodeString(parts[0])
+	if err != nil {
+		return "", false
+	}
+	var hdr struct {
+		Typ string `json:"typ"`
+	}
+	if err := json.Unmarshal(hdrRaw, &hdr); err != nil || hdr.Typ == "" {
+		return "", false
+	}
+	return hdr.Typ, true
+}
+
 // KidResolver returns the verifying public key for a kid, or false when the
 // kid is unknown, retired, or denylisted. The resolver is the verifier's only
 // trust source — an attacker-supplied kid resolves to nothing, so a token can
