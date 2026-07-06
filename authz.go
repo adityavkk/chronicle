@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
 // This file is the data-plane authorization seam (issue #126): the one place
@@ -26,6 +27,28 @@ const ClaimTokenHeader = "electric-claim-token"
 // internals.
 type AppendAuthorizer interface {
 	AuthorizeAppend(token string, path auth.StreamPath, now time.Time) auth.Decision
+}
+
+// ReadAuthorizer authorizes a data-plane read with a chronicle
+// read-capability JWS (issue #126 TB5). webhook.ReadCapabilityAuthorizer
+// implements it.
+type ReadAuthorizer interface {
+	AuthorizeRead(token string, path auth.StreamPath, now time.Time) auth.Decision
+}
+
+// CallerAuthorizer authorizes a namespace-scoped mutation (create/delete)
+// with a chronicle caller token — the same control-plane credential TB2/TB3
+// gate claim and linking on. webhook.CallerTokenAuthorizer implements it.
+type CallerAuthorizer interface {
+	AuthorizeCaller(token string, path auth.StreamPath, now time.Time) auth.Decision
+}
+
+// Authorizers bundles the webhook-layer token authorizers the handler
+// enforces with, all sharing the subscription layer's persisted keys.
+type Authorizers struct {
+	Append AppendAuthorizer
+	Read   ReadAuthorizer
+	Caller CallerAuthorizer
 }
 
 // claimTokenFromRequest extracts the presented write credential:
@@ -162,4 +185,135 @@ func (h *Handler) appendDecision(r *http.Request, rawPath string) auth.Decision 
 		return auth.Deny(auth.ReasonUnauthenticated, "no append authorizer configured")
 	}
 	return h.AppendAuth.AuthorizeAppend(claimTokenFromRequest(r), path, time.Now())
+}
+
+// credentialPresented reports whether the request carries any read/mutate
+// credential (a Bearer, a mesh identity, or a claim token). It drives the
+// Q3 cache posture: a response to a credentialed request is never shared-
+// cacheable, mode-independent — while uncredentialed insecure-mode responses
+// keep today's headers byte for byte.
+func (h *Handler) credentialPresented(r *http.Request) bool {
+	return bearerFromRequest(r) != "" ||
+		r.Header.Get(ClaimTokenHeader) != "" ||
+		r.Header.Get(xfccHeader) != ""
+}
+
+// authorizeRead runs the read gate for GET/HEAD (long-poll and SSE
+// included): compute the decision, enforce in ModeEnforce, log as telemetry
+// in ModeInsecure. Called before any store access, so a 401 never leaks
+// stream existence (§12.2). The returned private flag is the Q3 answer: the
+// response to a credentialed read carries Cache-Control: private with no
+// ETag, so no shared cache stores it and the credential-keying problem of
+// §12.7 never arises.
+func (h *Handler) authorizeRead(r *http.Request, rawPath string) (private bool, err error) {
+	d := h.readDecision(r, rawPath)
+	private = h.credentialPresented(r)
+	if d.Allowed() {
+		return private, nil
+	}
+	if h.AuthMode == auth.ModeEnforce {
+		h.logger().Warn("read denied",
+			"path", rawPath, "reason", d.Reason().String(), "detail", d.Detail())
+		return private, denyError(d)
+	}
+	h.logger().Info("authz telemetry: read would be denied",
+		"path", rawPath, "reason", d.Reason().String(), "detail", d.Detail())
+	return private, nil
+}
+
+// readDecision evaluates read authorization with no side effects. The order
+// mirrors the trust chain: a verified service principal is pre-authorized;
+// a token routed to the configured OIDC issuer becomes a user principal
+// whose namespace grant must cover the path; anything else must be a
+// chronicle read-capability JWS scoped to the path. The claim-scoped write
+// token is append-only — it is never consulted here, and presented as a
+// Bearer it fails JWS verification (401), never grants a read.
+func (h *Handler) readDecision(r *http.Request, rawPath string) auth.Decision {
+	path, err := auth.NormalizeStreamPath(subStreamPath(rawPath))
+	if err != nil {
+		return auth.Deny(auth.ReasonForbidden, "invalid stream path")
+	}
+	if p := h.resolvePrincipal(r); p.Kind() == auth.KindService {
+		return auth.Allow()
+	}
+	bearer := bearerFromRequest(r)
+	if bearer == "" {
+		return auth.Deny(auth.ReasonUnauthenticated, "missing read credential")
+	}
+	if d, routed := h.userDecision(bearer, path); routed {
+		return d
+	}
+	if h.ReadAuth == nil {
+		return auth.Deny(auth.ReasonUnauthenticated, "no read authorizer configured")
+	}
+	return h.ReadAuth.AuthorizeRead(bearer, path, time.Now())
+}
+
+// userDecision routes a bearer to the configured OIDC issuer when its
+// (unverified, routing-only) iss claim names it, and evaluates the verified
+// user's namespace grant against the path. routed=false means the token is
+// not an OIDC-issuer token and the caller should try the chronicle-family
+// verifier instead — never that the token was acceptable.
+func (h *Handler) userDecision(bearer string, path auth.StreamPath) (d auth.Decision, routed bool) {
+	if h.UserAuth == nil {
+		return auth.Decision{}, false
+	}
+	iss, ok := webhook.PeekIssuer(bearer)
+	if !ok || iss != h.UserAuth.Issuer() {
+		return auth.Decision{}, false
+	}
+	p, err := h.UserAuth.VerifyUser(bearer, time.Now())
+	if err != nil {
+		return auth.Deny(auth.ReasonUnauthenticated, "invalid identity token"), true
+	}
+	if !p.NamespaceCovers(path) {
+		return auth.Deny(auth.ReasonForbidden, "namespace grant does not cover this stream"), true
+	}
+	return auth.Allow(), true
+}
+
+// authorizeMutate runs the create/delete gate (the seam-completion slice:
+// with it, every data-plane action — read, append, create, delete — passes
+// one enforcement seam). Same telemetry/enforce split as the other gates;
+// runs before any store access.
+func (h *Handler) authorizeMutate(r *http.Request, rawPath string, action auth.Action) error {
+	d := h.mutateDecision(r, rawPath)
+	if d.Allowed() {
+		return nil
+	}
+	if h.AuthMode == auth.ModeEnforce {
+		h.logger().Warn(action.String()+" denied",
+			"path", rawPath, "reason", d.Reason().String(), "detail", d.Detail())
+		return denyError(d)
+	}
+	h.logger().Info("authz telemetry: "+action.String()+" would be denied",
+		"path", rawPath, "reason", d.Reason().String(), "detail", d.Detail())
+	return nil
+}
+
+// mutateDecision evaluates create/delete authorization: a verified service
+// principal is pre-authorized; an OIDC user's namespace grant must cover the
+// path; otherwise the bearer must be a chronicle caller token whose
+// namespaces cover the path — the same credential that authorizes linking
+// (TB3), because creating or deleting a stream is the same namespace-scoped
+// authority. Read capabilities and write tokens never authorize a mutation.
+func (h *Handler) mutateDecision(r *http.Request, rawPath string) auth.Decision {
+	path, err := auth.NormalizeStreamPath(subStreamPath(rawPath))
+	if err != nil {
+		return auth.Deny(auth.ReasonForbidden, "invalid stream path")
+	}
+	if p := h.resolvePrincipal(r); p.Kind() == auth.KindService {
+		return auth.Allow()
+	}
+	bearer := bearerFromRequest(r)
+	if bearer == "" {
+		return auth.Deny(auth.ReasonUnauthenticated, "missing caller credential")
+	}
+	if d, routed := h.userDecision(bearer, path); routed {
+		return d
+	}
+	if h.CallerAuth == nil {
+		return auth.Deny(auth.ReasonUnauthenticated, "no caller authorizer configured")
+	}
+	return h.CallerAuth.AuthorizeCaller(bearer, path, time.Now())
 }

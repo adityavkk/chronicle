@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
@@ -65,18 +64,11 @@ func (c VerifiedCaller) Namespaces() []auth.StreamPath {
 }
 
 // MayLink reports whether path falls under one of the caller's namespace
-// prefixes. Prefix matching is whole-segment: namespace "events" covers
-// "events/a" and "events" itself, never "eventsx". This is the (principal,
-// path) predicate TB3's link-time authorization enforces.
+// prefixes — the (principal, path) predicate TB3's link-time authorization
+// enforces, evaluated through the shared auth.PathWithinPrefixes so every
+// scope check in the authz model has one implementation.
 func (c VerifiedCaller) MayLink(path auth.StreamPath) bool {
-	p := path.String()
-	for _, ns := range c.namespaces {
-		n := ns.String()
-		if p == n || strings.HasPrefix(p, n+"/") {
-			return true
-		}
-	}
-	return false
+	return auth.PathWithinPrefixes(path, c.namespaces)
 }
 
 // MayLinkPattern reports whether every stream the glob pattern can ever
@@ -173,4 +165,47 @@ func ValidateCallerToken(token, expectedIss string, keyFor KidResolver, now time
 		ns[i] = p
 	}
 	return VerifiedCaller{subject: claims.Sub, namespaces: ns}, nil
+}
+
+// CallerTokenAuthorizer authorizes namespace-scoped data-plane mutations
+// (create/delete) with the caller token — the same credential and the same
+// whole-segment prefix predicate the control-plane link gate enforces
+// (issue #126 TB5). It implements chronicle's CallerAuthorizer seam.
+type CallerTokenAuthorizer struct {
+	iss  string
+	keys func() ([]SigningKey, error)
+}
+
+// NewCallerTokenAuthorizer builds an authorizer for caller tokens issued by
+// iss, verifying against the keys the source currently returns.
+func NewCallerTokenAuthorizer(iss string, keys func() ([]SigningKey, error)) CallerTokenAuthorizer {
+	return CallerTokenAuthorizer{iss: iss, keys: keys}
+}
+
+// CallerAuthorizer exposes the Manager's key set and issuer as the
+// create/delete authorizer the HTTP handler enforces with.
+func (m *Manager) CallerAuthorizer() CallerTokenAuthorizer {
+	return NewCallerTokenAuthorizer(m.streamRootURL, m.store.SigningKeys)
+}
+
+// AuthorizeCaller maps a presented (possibly absent) caller credential to
+// the Decision for a mutation at path. Fail-closed: a key-set error denies,
+// an unverifiable token denies (401-class), and a verified caller whose
+// namespaces do not cover the path is forbidden (403-class).
+func (a CallerTokenAuthorizer) AuthorizeCaller(token string, path auth.StreamPath, now time.Time) auth.Decision {
+	if token == "" {
+		return auth.Deny(auth.ReasonUnauthenticated, "missing caller credential")
+	}
+	keys, err := a.keys()
+	if err != nil {
+		return auth.Deny(auth.ReasonUnauthenticated, "caller key set unavailable")
+	}
+	caller, err := ValidateCallerToken(token, a.iss, resolverForKeys(keys), now)
+	if err != nil {
+		return auth.Deny(auth.ReasonUnauthenticated, "invalid caller credential")
+	}
+	if !caller.MayLink(path) {
+		return auth.Deny(auth.ReasonForbidden, "caller namespaces do not cover this stream")
+	}
+	return auth.Allow()
 }

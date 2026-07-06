@@ -40,6 +40,12 @@ const (
 	EnvKeysFile = "CHRONICLE_KEYS_FILE"
 	// wake_token audience (#123/#126 TB6a): the egress gateway aud claim.
 	EnvWakeTokenAud = "CHRONICLE_WAKE_TOKEN_AUD"
+	// OIDC user principals (issue #126 TB5, multi-issuer verify). All three
+	// are required together; the namespace claim's value→scope mapping is
+	// IdP-side deployment configuration (the Q1 decision).
+	EnvOIDCIssuer   = "CHRONICLE_OIDC_ISSUER"
+	EnvOIDCAudience = "CHRONICLE_OIDC_AUDIENCE"
+	EnvOIDCNSClaim  = "CHRONICLE_OIDC_NS_CLAIM"
 )
 
 // Config holds the chronicle server configuration. LongPollTimeout and
@@ -164,6 +170,12 @@ type Config struct {
 	// TB6a): the egress gateway the token is intended for. Empty (the
 	// default) mints wake_tokens without an aud claim.
 	WakeTokenAudience string
+
+	// OIDC configures the IdP issuer route (issue #126 TB5): a PingFed
+	// access token carrying the configured audience and namespace claim
+	// becomes a user principal. The zero value disables the route; a
+	// partially set config fails startup (LoadEnv validates completeness).
+	OIDC auth.OIDCConfig
 }
 
 // DefaultConfig returns the defaults: port 4437 (the IANA-assigned Durable
@@ -301,6 +313,26 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvWakeTokenAud); ok {
 		c.WakeTokenAudience = v
+	}
+	oidcSet := false
+	if v, ok := lookup(EnvOIDCIssuer); ok {
+		c.OIDC.Issuer = v
+		oidcSet = true
+	}
+	if v, ok := lookup(EnvOIDCAudience); ok {
+		c.OIDC.Audience = v
+		oidcSet = true
+	}
+	if v, ok := lookup(EnvOIDCNSClaim); ok {
+		c.OIDC.NamespaceClaim = v
+		oidcSet = true
+	}
+	if oidcSet {
+		// All-or-nothing: a partially configured issuer must refuse startup
+		// rather than run a weaker verification than the operator intended.
+		if err := c.OIDC.Validate(); err != nil {
+			return fmt.Errorf("%s/%s/%s: %w", EnvOIDCIssuer, EnvOIDCAudience, EnvOIDCNSClaim, err)
+		}
 	}
 	return nil
 }
