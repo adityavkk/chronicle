@@ -195,14 +195,29 @@ func replyInt(v any) int {
 }
 
 // CreateOrConfirm seeds the create_sub script with the config fields and the
-// explicit links at their current tails.
+// explicit links at their current tails, with no owner stamp — the legacy /
+// internal path (backfill harnesses, pre-#126 callers). The HTTP create route
+// uses CreateOrConfirmOwned.
 func (s *RedisStore) CreateOrConfirm(id string, cfg Config, links []StreamLink, now time.Time) (CreateStatus, error) {
+	status, _, err := s.CreateOrConfirmOwned(id, cfg, links, now, "")
+	return status, err
+}
+
+// CreateOrConfirmOwned creates a subscription stamped with the verified
+// caller subject that owns it (issue #126 TB3), or re-confirms an existing
+// one. The returned owner is the STORED owner subject (” when ownerless),
+// read in the same atomic script step: MATCHED/CONFLICT did not mutate, and
+// the owner is immutable once set, so the route can apply the ownership gate
+// on this reply without a TOCTOU window.
+func (s *RedisStore) CreateOrConfirmOwned(id string, cfg Config, links []StreamLink, now time.Time, owner string) (CreateStatus, string, error) {
 	cfg = NormalizeConfig(cfg)
-	args := make([]any, 0, 10+3*len(links))
-	args = append(args,
+	args := make([]any, 0, 11+3*len(links))
+	args = append(
+		args,
 		id, ConfigHash(cfg), nsArg(now),
 		string(cfg.Type), cfg.Pattern, cfg.WebhookURL, cfg.WakeStream,
 		strconv.FormatInt(cfg.LeaseTTLMs, 10), cfg.Description,
+		owner,
 		strconv.Itoa(len(links)),
 	)
 	for _, l := range links {
@@ -213,22 +228,26 @@ func (s *RedisStore) CreateOrConfirm(id string, cfg Config, links []StreamLink, 
 	h := slotOf(id)
 	reply, err := s.evalStrings(createSubScript, []string{subKey(id), subsKey(h), linksKey(id)}, args...)
 	if err != nil {
-		return 0, err
+		return 0, "", err
+	}
+	storedOwner := ""
+	if len(reply) > 1 {
+		storedOwner = reply[1]
 	}
 	switch reply[0] {
 	case "CREATED":
 		for _, l := range links {
 			if err := s.indexStream(l.Path, id); err != nil {
-				return 0, err
+				return 0, "", err
 			}
 		}
-		return CreateCreated, nil
+		return CreateCreated, storedOwner, nil
 	case "MATCHED":
-		return CreateMatched, nil
+		return CreateMatched, storedOwner, nil
 	case "CONFLICT":
-		return CreateConflict, nil
+		return CreateConflict, storedOwner, nil
 	default:
-		return 0, fmt.Errorf("create_sub: unexpected status %q", reply[0])
+		return 0, "", fmt.Errorf("create_sub: unexpected status %q", reply[0])
 	}
 }
 
@@ -616,7 +635,8 @@ func (s *RedisStore) AckShard(id string, g int, reqGeneration int64, reqWakeID s
 	}
 	sk, me, epoch := firstOwnerScope(owner)
 	args := make([]any, 0, 10+2*len(acks))
-	args = append(args,
+	args = append(
+		args,
 		shardMember(id, g), strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10),
 		doneArg, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), strconv.Itoa(len(acks)),
 	)
@@ -1026,6 +1046,7 @@ func subscriptionFromHash(id string, f map[string]string, linkFields map[string]
 		Phase:           Phase(f["phase"]),
 		Generation:      atoi("generation"),
 		WakeID:          f["wake_id"],
+		OwnerSubject:    f["owner"],
 		Holder:          f["holder"] == "1",
 		HolderWorker:    f["holder_worker"],
 		LeaseUntilNs:    parseLeaseUntilNs(f["lease_until_ns"]),
