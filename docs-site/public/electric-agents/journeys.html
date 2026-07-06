@@ -41,6 +41,8 @@
   <a href="#j-observe">4 · Watching an agent live</a>
   <a href="#j-crash">5 · A handler crashes mid-wake</a>
   <a href="#j-steer">6 · Intervening in a running agent</a>
+  <a href="#j-authz">7 · Authenticating and authorizing a send</a>
+  <a href="#j-identity">8 · Agent identity and attribution</a>
 </nav>
 
 <div class="main">
@@ -49,12 +51,15 @@
   <p class="kicker">Appendix</p>
   <h1>Interaction journeys — every hop, drawn</h1>
   <p class="lead">
-    Six sequence diagrams for the journeys everything else in this site describes in prose — with every system on
+    Eight sequence diagrams for the journeys everything else in this site describes in prose — with every system on
     the page: the browser, the agents server's authn/authz gate, the Postgres registry, the durable streams
     backend, the ephemeral handler invocation, and the model provider. Read them after
     <a href="faq.html#f12">FAQ 12</a> (who you actually talk to) and alongside
     <a href="server.html">Part 5</a> (what each hop is made of). Same conventions throughout: solid arrows are
-    requests, dashed are async delivery — webhooks, streams, SSE.
+    requests, dashed are async delivery — webhooks, streams, SSE. The last two stop the clock on the identity gate
+    the others pass through in a step or two: how a request is authenticated and authorized (§7), and how an agent
+    proves who it is when it writes (§8). Both are grounded in the source, and the <a href="identity.html">Identity</a>
+    page is the evaluation and design those mechanics lead to.
   </p>
 </header>
 
@@ -422,6 +427,105 @@ sequenceDiagram
     </div>
   </div>
   <ul><li><strong>"Queued" is not a separate queue.</strong> The message is an ordinary validated append (Part 5 §4); the queuing behavior emerges from claims (at most one active wake per entity) plus coalescing — five messages landing mid-run become one re-invocation whose window (arrows 4–9) already contains all five.</li><li><strong>Steer shares the whole append pipeline.</strong> The send itself (arrows 10–11) goes through the same authn/validation/idempotent-producer path as any send; the wiki specifies the <em>semantics</em> — injection into the currently running loop — but is silent on the wire mechanics of delivery into a live invocation, so arrow 12 is deliberately generic.</li><li><strong>SIGINT aborts through <code>ctx.signal</code></strong> — the AbortSignal threaded into LLM calls, fetches, and subprocesses (Part 4 §7). Because every append before the abort was already durable, an abort loses nothing written so far.</li><li><strong><code>fork()</code> is the escape hatch beyond signals:</strong> the entity's whole state is its log, so branching the pre-wedge history is branching the whole agent — recovery by branching rather than surgery (FAQ 5).</li></ul>
+</section>
+<!-- ================================================================ j-authz -->
+<section id="j-authz">
+  <h2><span class="kicker-num">§</span>Authenticating and authorizing a send — the front-door gate</h2>
+  <p>The messaging journey (§1) clears its identity check in three quick steps; this one stops the clock on them, because it is where every request's fate is actually decided. Two things happen at the front door, and the first is blunter than it looks: the caller's identity is <em>asserted, not proved</em>. The agents server reads a principal from a plain <code>Electric-Principal</code> header and trusts it — no JWT, no signature, no API key anywhere in the inbound path (<a href="identity.html#electric">Identity §2</a>, <code>server.ts:406</code>, <code>principal.ts:64</code>). Authenticating the human or service is the fronting gateway's job (<a href="faq.html#f12">FAQ 12</a>); the server's job is authorization, enforced as DB-backed grants on every request (<code>permissions.ts:29-197</code>). This diagram traces one <code>POST send</code> through both, including the two branches that bite in production: the dev fallback that mints a full-access <code>system:dev-local</code> for header-less requests, and the built-in <code>system:</code> principals that skip permission checks entirely.</p>
+  <div class="diagram-shell">
+    <div class="diagram-title">A send, from header to authorized append</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed are responses. The three-way branch after step 5 is the whole authentication decision; the branch after step 9 is authorization. Everything to the right of an <code>allow</code> is what a denied request never reaches.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant CL as Caller (browser, CLI, or peer entity)
+    participant GW as Fronting gateway (production)
+    box Control plane
+        participant AS as Agents server (authn/authz + control plane)
+        participant PG as Postgres (registry + grants)
+    end
+    participant DS as Durable streams (chronicle)
+
+    CL->>GW: message /assistant/a1 — carries the real user session
+    GW->>GW: authenticate the human, set Electric-Principal: user:sam,<br/>strip any client-supplied copy
+    GW->>AS: POST /assistant/a1/send — Electric-Principal: user:sam
+    Note over CL,AS: no gateway in dev — the caller sets the header itself,<br/>and a missing one may fall through (see the branch below)
+    AS->>AS: resolve principal — authenticateRequest hook, else parse the<br/>Electric-Principal header verbatim (server.ts:406, principal.ts:64)
+    alt principal resolved from header or hook
+        Note over AS: principal = user:sam — kind is user, agent, service, or system
+    else no principal, dev fallback on
+        AS->>AS: principal = system:dev-local (server.ts:381, 419)
+        Note over AS: fallback fires when NODE_ENV is not production,<br/>ELECTRIC_INSECURE is set, or an embedded streams server is<br/>configured — and every system:* principal bypasses the check below
+    else no principal, production
+        AS-->>CL: 401 Missing Electric-Principal
+    end
+    Note over AS,PG: authorize the write — order: system bypass, then created_by,<br/>then a non-expired write or manage grant, then the optional<br/>authorizeRequest hook (cached, fail-closed on throw)
+    AS->>PG: canAccessEntity(/assistant/a1, write) — permissions.ts:29
+    PG-->>AS: creator, matching grant, or neither
+    alt authorized
+        AS->>AS: validate payload against the type's inboxSchemas
+        AS->>DS: append the inbox event via idempotent producer — the send lands
+        AS-->>CL: 202 accepted
+    else not authorized
+        Note over AS: default is deny — a fresh entity is reachable only by its creator
+        AS-->>CL: 401 Principal is not allowed to write /assistant/a1
+    end
+      </pre>
+    </div>
+  </div>
+  <ul>
+<li><strong>Identity is a header, not a proof.</strong> Inbound there is no JWT, signature, or API key; the server trusts whatever <code>Electric-Principal</code> says (<code>server.ts:406</code>, <code>principal.ts:64</code>). What makes that safe is the gateway in step 2, which authenticates the real caller, sets the header itself, and strips any client-supplied copy. Without a gateway, the header is whatever the client typed.</li>
+<li><strong>Two branches are the production traps.</strong> The dev fallback (step 7) mints the all-powerful <code>system:dev-local</code> whenever <code>NODE_ENV</code> is not <code>production</code>, <code>ELECTRIC_INSECURE</code> is set, or an embedded streams server is configured; and any <code>system:</code> principal bypasses authorization entirely, so <code>electric-principal: system:framework</code> is, by itself, full access. Both close the same way: front the server with an authenticating, header-stripping proxy and set <code>NODE_ENV=production</code> (<a href="identity.html#electric">Identity §2</a>).</li>
+<li><strong><code>write</code> is the permission that gates messaging.</strong> <code>canAccessEntity(entity, "write")</code> resolves in a fixed order — <code>system</code> bypass, then <code>created_by</code>, then a non-expired <code>write</code> or <code>manage</code> grant, then the optional external hook (<code>permissions.ts:29-52</code>). With no grants declared, an entity is creator-only. The default is deny, not open.</li>
+<li><strong>Only the authorized path reaches the log.</strong> Schema validation (<a href="server.html#append">Part 5 §4</a>) and the idempotent-producer append happen after the verdict, so a denied request never touches the entity's stream — the same front door the streams backend sits behind, never in front of (<a href="faq.html#f12">FAQ 12</a>).</li>
+</ul>
+</section>
+<!-- ================================================================ j-identity -->
+<section id="j-identity">
+  <h2><span class="kicker-num">§</span>Agent identity and attribution — acting as your creator, proving it wrote</h2>
+  <p>Agents are entities, not accounts: <code>/assistant/a1</code> has no key, no password, and no principal of its own (<a href="identity.html#electric">Identity §2</a>). So when it acts, whose authority does it carry, and how does anyone tell its writes from a human's? Two mechanisms answer that, and this journey traces both. The wake delivers the principal that <em>created</em> the entity, and the runtime acts as that principal for the whole wake — an agent inherits its creator's reach and can never exceed it (<code>process-wake.ts:491</code>, <code>runtime-server-client.ts:302</code>). And every write carries a per-wake claim token that proves which running invocation is speaking, so an agent-authored message is stamped with both the human it acts for (<code>from_principal</code>) and the machine that wrote it (<code>from_agent</code>) — the second of which the server refuses to accept unforged (<code>entities-router.ts:1289-1334</code>). The signed wake this rides on is chronicle's (<a href="server.html#dispatch">Part 5 §5</a>).</p>
+  <div class="diagram-shell">
+    <div class="diagram-title">An agent messages a peer — inherited principal, proven authorship</div>
+    <div class="diagram-sub">Solid arrows are requests, dashed are async delivery or responses. The activation bar on the handler is the one wake it holds compute for; every check on the agents server is server-stamped, not client-trusted.</div>
+    <div class="diagram-canvas">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    box Control plane
+        participant AS as Agents server (authn/authz + control plane)
+        participant PG as Postgres (registry + grants)
+    end
+    participant DS as Durable streams (chronicle)
+    participant RT as Handler for /assistant/a1 (ephemeral)
+
+    Note over AS,DS: /assistant/a1 was created_by user:sam —<br/>the agent holds no key and no principal of its own
+    DS-->>AS: subscription webhook — a1's log has pending events
+    AS->>PG: claim the wake (lease + epoch) and mint a per-wake write token —<br/>one active holder per stream (claim-write-token-store)
+    AS->>+RT: Ed25519-signed wake — payload.principal = user:sam<br/>(principalFromCreatedBy), claim token, offsets
+    RT->>RT: verify the signature against the server's JWKS
+    Note over RT: the handler acts AS user:sam for the whole wake — it inherits<br/>the creator's grants, nothing more (runtime-server-client.ts:302<br/>sets Electric-Principal: user:sam)
+    RT->>AS: ctx.send(/reviewer/r1, …) — from_principal=user:sam,<br/>from_agent=/assistant/a1, claim token attached
+    AS->>AS: from and from_principal must equal the authenticated<br/>principal, else 400 (entities-router.ts:1289)
+    AS->>AS: from_agent accepted only with a matching agent principal<br/>or a valid claim write token, else 400 (entities-router.ts:1306)
+    AS->>PG: canAccessEntity(/reviewer/r1, write) for user:sam
+    alt authorized — user:sam created r1 or holds a grant
+        AS->>DS: append the inbox event — stamped from_principal=user:sam,<br/>from_agent=/assistant/a1
+        Note over AS,DS: dual attribution — the human it acts for<br/>AND the machine that wrote it
+    else not authorized
+        AS-->>RT: 401 — the agent reaches exactly as far as user:sam, no further
+    end
+    Note over RT,DS: a raw POST straight to a1's own stream still needs the claim<br/>token — else 401 Invalid write token (stream-append)
+    RT->>-AS: wake callback — done, claim and write token released
+      </pre>
+    </div>
+  </div>
+  <ul>
+<li><strong>No credential of its own.</strong> The wake payload's principal is <code>principalFromCreatedBy(entity.created_by)</code>, and the runtime sets <code>Electric-Principal</code> to it on every callback (<code>process-wake.ts:491</code>, <code>runtime-server-client.ts:302</code>). For the length of the wake, <code>/assistant/a1</code> <em>is</em> <code>user:sam</code> — the <code>agent</code> principal kind exists in the model, but the open-source server never mints one for a running entity.</li>
+<li><strong>Dual attribution, one unforgeable half.</strong> <code>from</code> and <code>from_principal</code> must equal the authenticated principal or the send is a 400; <code>from_agent</code> is accepted only with a matching <code>agent</code> principal or a valid claim write token (<code>entities-router.ts:1289-1334</code>). So "which agent wrote this" is provable at the API layer, not merely claimed — the message carries the human it acts for and the machine that authored it.</li>
+<li><strong>Reach is bounded by the creator.</strong> The same <code>write</code> check from §7 runs for the agent's own sends, so an agent can message exactly what <code>user:sam</code> could and no more. Deny-by-default applies transitively — a compromised or prompt-injected handler cannot escalate past the principal it inherited.</li>
+<li><strong>The write token is per-wake and stream-scoped.</strong> Minted at claim time as one active holder per stream, it fences at-least-once wake delivery against the exactly-once log and is released on <code>done</code> (<a href="faq.html#f3">FAQ 3</a>, <a href="server.html#append">Part 5 §6</a>). A raw append to the entity's own stream without it is <code>401 Invalid write token</code>. This per-wake capability is the seed the <a href="identity.html#design">Identity page's design</a> grows into a cross-service, per-entity credential.</li>
+</ul>
 </section>
 
 <div class="pager">
