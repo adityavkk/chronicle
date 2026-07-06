@@ -285,10 +285,17 @@ func TestManagerWithFileKeySource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// JWKS serves exactly the file's kid.
+	// JWKS: the webhook-envelope family is exactly the file's kid — no
+	// Redis-persisted webhook key may appear when a file is the custody
+	// source. The wake-token family (#123/TB6a) is a separate key that still
+	// persists in Redis until its file custody lands with the Wave-2 rotation
+	// work, so the set is exactly {file webhook kid, wake kid}.
 	jwks, err := mgr.JWKS()
-	if err != nil || len(jwks.Keys) != 1 || jwks.Keys[0].Kid != fileKid {
-		t.Fatalf("JWKS = %+v (err %v), want exactly %s", jwks, err, fileKid)
+	if err != nil || len(jwks.Keys) != 2 || jwks.Keys[0].Kid != fileKid {
+		t.Fatalf("JWKS = %+v (err %v), want [%s, <wake kid>]", jwks, err, fileKid)
+	}
+	if jwks.Keys[1].Kid != mgr.wakeKey.Kid || jwks.Keys[1].Kid == fileKid {
+		t.Fatalf("JWKS second key = %s, want the distinct wake kid %s", jwks.Keys[1].Kid, mgr.wakeKey.Kid)
 	}
 
 	// The claim/callback and write-token paths run on the file's HMAC key:
@@ -331,7 +338,7 @@ func TestManagerWithFileKeySource(t *testing.T) {
 		t.Fatal("pre-restart token must validate after restart")
 	}
 	jwks2, _ := mgr2.JWKS()
-	if len(jwks2.Keys) != 1 || jwks2.Keys[0].Kid != fileKid {
+	if len(jwks2.Keys) != 2 || jwks2.Keys[0].Kid != fileKid {
 		t.Fatal("kid must be stable across restart")
 	}
 
@@ -343,7 +350,7 @@ func TestManagerWithFileKeySource(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacyJWKS, _ := legacy.JWKS()
-	if len(legacyJWKS.Keys) != 1 || legacyJWKS.Keys[0].Kid == fileKid {
+	if len(legacyJWKS.Keys) != 2 || legacyJWKS.Keys[0].Kid == fileKid {
 		t.Fatalf("legacy manager JWKS = %+v; must be a distinct Redis-installed kid", legacyJWKS)
 	}
 	beforeHash, _ := client.HGetAll(t.Context(), jwksKey).Result()
@@ -354,7 +361,7 @@ func TestManagerWithFileKeySource(t *testing.T) {
 		t.Fatal(err)
 	}
 	jwks3, _ := mgr3.JWKS()
-	if len(jwks3.Keys) != 1 || jwks3.Keys[0].Kid != fileKid {
+	if len(jwks3.Keys) != 2 || jwks3.Keys[0].Kid != fileKid {
 		t.Fatalf("file source must win over legacy Redis keys, got %+v", jwks3)
 	}
 	afterHash, _ := client.HGetAll(t.Context(), jwksKey).Result()

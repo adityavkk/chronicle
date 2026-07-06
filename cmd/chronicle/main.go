@@ -215,6 +215,7 @@ func run() error {
 			ReconcileInterval: cfg.ReconcileInterval,
 			SweepBatch:        cfg.SweepBatch,
 			Metrics:           subMetrics,
+			WakeTokenAudience: cfg.WakeTokenAudience,
 			Consistency:       cfg.Consistency,
 			WaitReplicas:      cfg.WaitReplicas,
 			WaitTimeoutMs:     cfg.WaitTimeoutMs,

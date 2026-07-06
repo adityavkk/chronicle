@@ -38,6 +38,8 @@ const (
 	// Key custody (issues #123/#126): path to a mounted secrets file holding the
 	// Ed25519 signing key(s) + HMAC token key. Unset = keys live in Redis.
 	EnvKeysFile = "CHRONICLE_KEYS_FILE"
+	// wake_token audience (#123/#126 TB6a): the egress gateway aud claim.
+	EnvWakeTokenAud = "CHRONICLE_WAKE_TOKEN_AUD"
 )
 
 // Config holds the chronicle server configuration. LongPollTimeout and
@@ -157,6 +159,11 @@ type Config struct {
 	// Configure it only when a sidecar fronts chronicle and sanitizes
 	// inbound XFCC. Empty disables the mesh path.
 	TrustedSPIFFEIDs []string
+
+	// WakeTokenAudience is the aud claim minted into wake_tokens (#123/#126
+	// TB6a): the egress gateway the token is intended for. Empty (the
+	// default) mints wake_tokens without an aud claim.
+	WakeTokenAudience string
 }
 
 // DefaultConfig returns the defaults: port 4437 (the IANA-assigned Durable
@@ -291,6 +298,9 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvTrustedSPIFFE, err)
 		}
 		c.TrustedSPIFFEIDs = ids
+	}
+	if v, ok := lookup(EnvWakeTokenAud); ok {
+		c.WakeTokenAudience = v
 	}
 	return nil
 }

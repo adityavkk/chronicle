@@ -249,6 +249,14 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 			resp.Token = fresh
 		}
 	}
+	// wake_token heartbeat refresh (#123/#126 TB6a): every successful non-done
+	// ack of a single-entity subscription re-mints the entity-identity
+	// assertion for the fenced (generation, wake_id). Done acks never do, so
+	// the conformance flow's ack body shape is untouched.
+	done := req.Done != nil && *req.Done
+	if wt, ok := rt.mgr.mintWakeTokenOnAck(id, req.Generation, req.WakeID, done, now); ok {
+		resp.WakeToken = wt
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -309,14 +317,24 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, ClaimResponse{
+		resp := ClaimResponse{
 			WakeID:     res.WakeID,
 			Generation: res.Generation,
 			Token:      token,
 			WriteToken: writeToken,
 			Streams:    snap,
 			LeaseTTLMs: sub.Config.LeaseTTLMs,
-		})
+		}
+		// wake_token (#123/#126 TB6a): the woken entity's identity assertion,
+		// minted only when the subscription names a single entity.
+		wakeSub := sub
+		if fresh.ID != "" {
+			wakeSub = fresh
+		}
+		if wt, ok := rt.mgr.mintWakeTokenFor(wakeSub, res.Generation, res.WakeID, now); ok {
+			resp.WakeToken = wt
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
