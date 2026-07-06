@@ -35,5 +35,22 @@ func NormalizeStreamPath(raw string) (StreamPath, error) {
 
 func (p StreamPath) String() string { return p.s }
 
+// PathWithinPrefixes reports whether path falls under one of the given
+// namespace prefixes. Matching is whole-segment: prefix "events" covers
+// "events/a" and "events" itself, never "eventsx". This is the single
+// (principal, path) scope predicate — the control-plane link check, the
+// read capability, and the OIDC user namespaces all evaluate through it,
+// so their semantics can never drift apart.
+func PathWithinPrefixes(path StreamPath, prefixes []StreamPath) bool {
+	p := path.String()
+	for _, pre := range prefixes {
+		n := pre.String()
+		if p == n || strings.HasPrefix(p, n+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // IsZero reports whether p was never built by NormalizeStreamPath.
 func (p StreamPath) IsZero() bool { return p.s == "" }

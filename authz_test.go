@@ -79,6 +79,16 @@ func mintWriteToken(t *testing.T, key []byte, paths ...string) string {
 	return tok
 }
 
+// createDirect seeds a stream through the store, bypassing the HTTP gates an
+// enforce-mode test is exercising (TB5 gates create, so an uncredentialed
+// PUT can no longer seed fixtures).
+func createDirect(t *testing.T, h *Handler, path, contentType string) {
+	t.Helper()
+	if _, _, err := h.Store.Create(path, store.CreateOptions{ContentType: contentType}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func tailOf(t *testing.T, h *Handler, path string) store.Offset {
 	t.Helper()
 	meta, err := h.Store.Get(path)
@@ -103,7 +113,7 @@ func decodeEnvelope(t *testing.T, rec *httptest.ResponseRecorder) webhook.ErrorB
 func TestAppendAllowedWithClaimToken(t *testing.T) {
 	key := testAuthKey(t)
 	h, hooks := enforcedHandler(t, key)
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 	tok := mintWriteToken(t, key, "events/a")
 
 	rec := do(h, http.MethodPost, "/events/a",
@@ -123,7 +133,7 @@ func TestAppendAllowedWithClaimToken(t *testing.T) {
 func TestAppendAllowedWithBearerFallback(t *testing.T) {
 	key := testAuthKey(t)
 	h, _ := enforcedHandler(t, key)
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 	tok := mintWriteToken(t, key, "events/a")
 
 	rec := do(h, http.MethodPost, "/events/a",
@@ -140,7 +150,7 @@ func TestAppendAllowedWithBearerFallback(t *testing.T) {
 func TestAppendClaimHeaderPreferredOverBearer(t *testing.T) {
 	key := testAuthKey(t)
 	h, _ := enforcedHandler(t, key)
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 	tok := mintWriteToken(t, key, "events/a")
 
 	rec := do(h, http.MethodPost, "/events/a", map[string]string{
@@ -179,7 +189,7 @@ func TestAppendDeniedFailClosed(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			h, hooks := enforcedHandler(t, key)
-			mustCreate(t, h, "/events/a", "application/json", nil)
+			createDirect(t, h, "/events/a", "application/json")
 			before := tailOf(t, h, "/events/a")
 
 			headers := map[string]string{"Content-Type": "application/json"}
@@ -221,7 +231,7 @@ func TestAppendDeniedFailClosed(t *testing.T) {
 func TestAppendDenyDoesNotLeakExistence(t *testing.T) {
 	key := testAuthKey(t)
 	h, _ := enforcedHandler(t, key)
-	mustCreate(t, h, "/events/exists", "application/json", nil)
+	createDirect(t, h, "/events/exists", "application/json")
 
 	for _, path := range []string{"/events/exists", "/events/missing"} {
 		rec := do(h, http.MethodPost, path,
@@ -237,7 +247,7 @@ func TestAppendDenyDoesNotLeakExistence(t *testing.T) {
 func TestCloseOnlyAppendGated(t *testing.T) {
 	key := testAuthKey(t)
 	h, _ := enforcedHandler(t, key)
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 
 	rec := do(h, http.MethodPost, "/events/a",
 		map[string]string{"Stream-Closed": "true"}, nil)
@@ -264,7 +274,7 @@ func TestCloseOnlyAppendGated(t *testing.T) {
 func TestAppendProducerHeadersComposeWithGate(t *testing.T) {
 	key := testAuthKey(t)
 	h, _ := enforcedHandler(t, key)
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 	tok := mintWriteToken(t, key, "events/a")
 
 	rec := do(h, http.MethodPost, "/events/a", map[string]string{
@@ -309,7 +319,7 @@ func TestAppendZeroValueHandlerUnchanged(t *testing.T) {
 func TestAppendEnforceWithoutAuthorizerFailsClosed(t *testing.T) {
 	h := testHandler(time.Second, time.Second)
 	h.AuthMode = auth.ModeEnforce
-	mustCreate(t, h, "/events/a", "application/json", nil)
+	createDirect(t, h, "/events/a", "application/json")
 
 	rec := do(h, http.MethodPost, "/events/a",
 		map[string]string{"Content-Type": "application/json"}, []byte(`{"n":1}`))
@@ -333,20 +343,6 @@ func TestAppendTraversalPathDenied(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("traversal path = %d, want 403", rec.Code)
-	}
-}
-
-// TestReadAndCreateUngatedInTB1 pins TB1's scope: only appends are gated; a
-// base client can still create and read while later bullets land read/create
-// enforcement.
-func TestReadAndCreateUngatedInTB1(t *testing.T) {
-	key := testAuthKey(t)
-	h, _ := enforcedHandler(t, key)
-	mustCreate(t, h, "/events/a", "application/json", nil)
-
-	rec := do(h, http.MethodGet, "/events/a", nil, nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("read = %d, want 200 (read gating is TB5)", rec.Code)
 	}
 }
 

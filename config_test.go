@@ -38,3 +38,37 @@ func TestLoadEnvAuthMode(t *testing.T) {
 		t.Fatal("invalid CHRONICLE_AUTH_MODE must fail startup, not default")
 	}
 }
+
+// TestLoadEnvOIDC pins the all-or-nothing OIDC surface: a complete triple
+// configures the issuer route; a partial one refuses startup rather than
+// verifying more weakly than the operator intended.
+func TestLoadEnvOIDC(t *testing.T) {
+	env := func(vars map[string]string) func(string) (string, bool) {
+		return func(k string) (string, bool) {
+			v, ok := vars[k]
+			return v, ok
+		}
+	}
+
+	c := DefaultConfig()
+	if err := c.LoadEnv(env(map[string]string{
+		EnvOIDCIssuer:   "https://idp.example.com",
+		EnvOIDCAudience: "chronicle",
+		EnvOIDCNSClaim:  "ds_namespaces",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if c.OIDC.Issuer != "https://idp.example.com" {
+		t.Fatalf("issuer = %q", c.OIDC.Issuer)
+	}
+
+	c = DefaultConfig()
+	if err := c.LoadEnv(env(map[string]string{EnvOIDCIssuer: "https://idp.example.com"})); err == nil {
+		t.Fatal("partial OIDC config must fail startup")
+	}
+
+	c = DefaultConfig()
+	if err := c.LoadEnv(env(nil)); err != nil || c.OIDC.Issuer != "" {
+		t.Fatalf("unset OIDC must stay disabled: err=%v issuer=%q", err, c.OIDC.Issuer)
+	}
+}

@@ -191,14 +191,13 @@ func (l redisLister) ListStreams() ([]webhook.StreamMeta, error) {
 
 // NewSubscriptions builds the Redis-backed __ds subscription stack: the HTTP
 // router, the Manager whose background loops (lease, retry, recovery sweep)
-// the caller starts with Manager.Start(), and the append authorizer wired to
-// the same persisted HMAC token key the claim mint uses (issue #126) — hand
-// it to Handler.AppendAuth so the claim-scoped write token gate and the mint
-// can never disagree. streamRootURL is the public URL the protocol is served
+// the caller starts with Manager.Start(), and the authorizer bundle wired to
+// the same persisted keys the mints use (issue #126) — hand it to the
+// Handler so the token gates and the mints can never disagree. streamRootURL is the public URL the protocol is served
 // under (scheme+host+root, trailing slash), used to build callback and JWKS
 // URLs. rs may be nil to disable pattern backfill of existing streams (new
 // streams are still linked as they are created).
-func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs *redisstore.Store, streamRootURL string, allowPrivateWebhooks bool, tuning SubscriptionTuning, logger *slog.Logger) (SubscriptionRouter, SubscriptionService, AppendAuthorizer, error) {
+func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs *redisstore.Store, streamRootURL string, allowPrivateWebhooks bool, tuning SubscriptionTuning, logger *slog.Logger) (SubscriptionRouter, SubscriptionService, *Authorizers, error) {
 	opts := webhook.ManagerOptions{
 		StreamRootURL:              streamRootURL,
 		Logger:                     logger,
@@ -249,5 +248,10 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return webhook.NewRoutes(mgr), mgr, mgr.WriteAuthorizer(), nil
+	authz := &Authorizers{
+		Append: mgr.WriteAuthorizer(),
+		Read:   mgr.ReadAuthorizer(),
+		Caller: mgr.CallerAuthorizer(),
+	}
+	return webhook.NewRoutes(mgr), mgr, authz, nil
 }
