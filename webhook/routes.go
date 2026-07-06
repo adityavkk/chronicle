@@ -253,6 +253,12 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 }
 
 func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string) {
+	// The claim is where the callback and write capabilities are minted, so it
+	// requires an authenticated caller before any store access (issue #126,
+	// TB2 — closes the free-minting hole). Insecure mode is telemetry-only.
+	if !rt.authorizeClaim(w, r, id) {
+		return
+	}
 	var req ClaimRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, ErrCodeInvalidRequest)

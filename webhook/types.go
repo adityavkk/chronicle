@@ -178,4 +178,9 @@ const (
 	// and its response body carries a freshly minted token so a heartbeating
 	// pull-wake worker can retry at once instead of stalling a lease window.
 	ErrCodeTokenExpired = "TOKEN_EXPIRED"
+	// Authorization codes (issue #126), matching the data-plane envelope: a
+	// missing or unverifiable caller credential is UNAUTHENTICATED (401); a
+	// verified caller outside its granted scope is FORBIDDEN (403).
+	ErrCodeUnauthenticated = "UNAUTHENTICATED"
+	ErrCodeForbidden       = "FORBIDDEN"
 )
