@@ -34,12 +34,19 @@ const (
 	// Stream authn/authz enforcement (issue #126): insecure (default) | enforce.
 	EnvAuthMode = "CHRONICLE_AUTH_MODE"
 	// Trusted service principals (issue #126 TB4, trusted-backend mode).
-	EnvServiceBearer      = "CHRONICLE_SERVICE_BEARER"       // "token" or "name:token[,name:token...]"
-	EnvTrustedSPIFFE      = "CHRONICLE_TRUSTED_SPIFFE_IDS"   // comma-separated spiffe:// allowlist (mesh add-on)
-	EnvXFCCRequiredHeader = "CHRONICLE_XFCC_REQUIRED_HEADER" // optional "Name: value" sidecar marker gating XFCC trust
+	EnvServiceBearer          = "CHRONICLE_SERVICE_BEARER"            // "token" or "name:token[,name:token...]"
+	EnvTrustedSPIFFE          = "CHRONICLE_TRUSTED_SPIFFE_IDS"        // comma-separated spiffe:// allowlist (mesh add-on)
+	EnvXFCCRequiredHeader     = "CHRONICLE_XFCC_REQUIRED_HEADER"      // optional "Name: value" sidecar marker gating XFCC trust
+	EnvXFCCTrustWithoutMarker = "CHRONICLE_XFCC_TRUST_WITHOUT_MARKER" // explicit opt-in to trust XFCC with no marker (#130): fail-closed default requires it when TrustedSPIFFE is set without a marker
 	// Key custody (issues #123/#126): path to a mounted secrets file holding the
 	// Ed25519 signing key(s) + HMAC token key. Unset = keys live in Redis.
 	EnvKeysFile = "CHRONICLE_KEYS_FILE"
+	// EnvKeysFileAllowGroupRead is the explicit opt-in to load a group-readable
+	// (never group-writable, never world-anything) keys file (#131): the
+	// fail-closed default refuses group-read since on a shared group it is
+	// read-to-forge, but a non-root container reading a root-owned secret via a
+	// dedicated Kubernetes fsGroup legitimately needs the group-read bit.
+	EnvKeysFileAllowGroupRead = "CHRONICLE_KEYS_FILE_ALLOW_GROUP_READ"
 	// Key rotation (#123): override for BOTH Ed25519 families' overlap window —
 	// how long a retiring kid keeps verifying after its successor takes over.
 	// Unset keeps the per-family defaults derived from each family's maximum
@@ -154,6 +161,15 @@ type Config struct {
 	// instead of Redis (issues #123/#126 custody). Empty keeps Redis custody.
 	KeysFile string
 
+	// KeysFileAllowGroupRead is the explicit opt-in to load a group-readable
+	// keys file (issue #126 hardening, #131). The default is fail closed:
+	// group-read (like world-access and any write bit) refuses to load, because
+	// on a shared group it is read-to-forge. Set it only for the documented
+	// Kubernetes fsGroup exception — a non-root container reading a root-owned
+	// secret through the group bit — where 0400 would be unreadable and 0440 is
+	// the minimum that works. Parsed from CHRONICLE_KEYS_FILE_ALLOW_GROUP_READ.
+	KeysFileAllowGroupRead bool
+
 	// KeyRotationOverlap, when non-zero, overrides both Ed25519 families'
 	// rotation overlap window (#123). Zero keeps the per-family defaults.
 	KeyRotationOverlap time.Duration
@@ -185,6 +201,15 @@ type Config struct {
 	// produce it. Parsed from CHRONICLE_XFCC_REQUIRED_HEADER ("Name: value").
 	XFCCMarkerName  string
 	XFCCMarkerValue string
+
+	// AllowXFCCWithoutMarker is the explicit opt-in to trust XFCC mesh identity
+	// with no marker gate (issue #126 hardening, #130). The default is fail
+	// closed: when TrustedSPIFFEIDs is set but no marker is configured, XFCC is
+	// NOT trusted and LoadEnv refuses startup — an operator must either set a
+	// marker (CHRONICLE_XFCC_REQUIRED_HEADER) or consciously accept the
+	// marker-less posture here (CHRONICLE_XFCC_TRUST_WITHOUT_MARKER), which is
+	// only safe behind a sidecar that strips inbound XFCC (SANITIZE_SET).
+	AllowXFCCWithoutMarker bool
 
 	// WakeTokenAudience is the aud claim minted into wake_tokens (#123/#126
 	// TB6a): the egress gateway the token is intended for. Empty (the
@@ -341,11 +366,31 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	if v, ok := lookup(EnvXFCCRequiredHeader); ok {
 		name, value, found := strings.Cut(v, ":")
 		name = strings.TrimSpace(name)
-		if !found || name == "" {
-			return fmt.Errorf("%s: want \"Name: value\", got %q", EnvXFCCRequiredHeader, v)
+		value = strings.TrimSpace(value)
+		// An empty value is a fail-open trap: Header.Get can't tell "present
+		// and empty" from "absent", so an empty-value marker would pass the
+		// gate for any request that simply omits the header — no security at
+		// all. Require a non-empty value (#130).
+		if !found || name == "" || value == "" {
+			return fmt.Errorf("%s: want \"Name: value\" with a non-empty value, got %q", EnvXFCCRequiredHeader, v)
 		}
 		c.XFCCMarkerName = name
-		c.XFCCMarkerValue = strings.TrimSpace(value)
+		c.XFCCMarkerValue = value
+	}
+	if v, ok := lookup(EnvXFCCTrustWithoutMarker); ok {
+		c.AllowXFCCWithoutMarker = v == "1" || v == "true"
+	}
+	if v, ok := lookup(EnvKeysFileAllowGroupRead); ok {
+		c.KeysFileAllowGroupRead = v == "1" || v == "true"
+	}
+	// Fail closed on the XFCC-spoof misconfiguration (issue #126 hardening,
+	// #130): a SPIFFE allowlist with no marker gate means raw client XFCC would
+	// be trusted if the sidecar ever failed to strip it. Refuse startup unless
+	// the operator either configures a marker or consciously accepts the
+	// marker-less posture — never silently default to trusting raw XFCC.
+	if len(c.TrustedSPIFFEIDs) > 0 && c.XFCCMarkerName == "" && !c.AllowXFCCWithoutMarker {
+		return fmt.Errorf("%s is set without %s: XFCC mesh identity would rest on raw client input — set %s to gate it, or set %s=true only if the sidecar provably strips inbound XFCC (Envoy forward_client_cert_details: SANITIZE_SET)",
+			EnvTrustedSPIFFE, EnvXFCCRequiredHeader, EnvXFCCRequiredHeader, EnvXFCCTrustWithoutMarker)
 	}
 	if v, ok := lookup(EnvWakeTokenAud); ok {
 		c.WakeTokenAudience = v

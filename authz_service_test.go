@@ -21,7 +21,10 @@ const (
 )
 
 // serviceHandler is an enforce-mode handler trusting tb4SvcBearer and
-// tb4AgentsID, with the TB1 claim-token authorizer wired under key.
+// tb4AgentsID, with the TB1 claim-token authorizer wired under key. It sets
+// AllowXFCCWithoutMarker so the XFCC-matching tests exercise the allowlist
+// path directly; the fail-closed default (no marker, no opt-in) is pinned
+// separately by TestXFCCFailsClosedWithoutMarkerOrOptIn (#130).
 func serviceHandler(t *testing.T, key []byte) (*Handler, *hookRecorder) {
 	t.Helper()
 	h, rec := enforcedHandler(t, key)
@@ -30,8 +33,9 @@ func serviceHandler(t *testing.T, key []byte) (*Handler, *hookRecorder) {
 		t.Fatal(err)
 	}
 	h.ServiceAuth = &ServiceAuth{
-		Credentials:      creds,
-		TrustedSPIFFEIDs: []string{tb4AgentsID},
+		Credentials:            creds,
+		TrustedSPIFFEIDs:       []string{tb4AgentsID},
+		AllowXFCCWithoutMarker: true,
 	}
 	return h, rec
 }
@@ -171,6 +175,54 @@ func TestXFCCIgnoredWhenNotConfigured(t *testing.T) {
 	}, []byte(`{"n":1}`))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("XFCC without allowlist = %d, want 401", rec.Code)
+	}
+}
+
+// TestXFCCFailsClosedWithoutMarkerOrOptIn is the #130 re-review fix: with a
+// SPIFFE allowlist configured but NO sidecar marker and NO explicit
+// AllowXFCCWithoutMarker opt-in, raw client XFCC must never authenticate — the
+// gate fails closed rather than defaulting to trusting the header. Otherwise
+// an external peer behind a non-sanitizing ingress could forge a service
+// principal just by sending an allowlisted SPIFFE id in X-Forwarded-Client-Cert.
+func TestXFCCFailsClosedWithoutMarkerOrOptIn(t *testing.T) {
+	key := testAuthKey(t)
+	h, hooks := enforcedHandler(t, key)
+	creds, err := auth.ParseServiceBearerConfig("agents-server:" + tb4SvcBearer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Allowlist set, but neither a marker nor the explicit opt-in: fail closed.
+	h.ServiceAuth = &ServiceAuth{
+		Credentials:      creds,
+		TrustedSPIFFEIDs: []string{tb4AgentsID},
+	}
+	createDirect(t, h, "/events/a", "application/json")
+	before := tailOf(t, h, "/events/a")
+
+	// The exact header that authenticates under serviceHandler (which opts in)
+	// must be denied here.
+	rec := do(h, http.MethodPost, "/events/a", map[string]string{
+		"Content-Type": "application/json",
+		tb4XFCCHdr:     `By=spiffe://cluster.local/ns/chronicle/sa/chronicle;Hash=abcd;URI=` + tb4AgentsID,
+	}, []byte(`{"n":1}`))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("allowlisted XFCC with no marker/opt-in = %d, want 401 (fail closed)", rec.Code)
+	}
+	if after := tailOf(t, h, "/events/a"); !after.Equal(before) {
+		t.Fatal("store mutated on a denied XFCC append")
+	}
+	if hooks.appendCount() != 0 {
+		t.Fatal("append hook fired on a denied XFCC append")
+	}
+
+	// The still-valid service bearer proves the handler itself is functional —
+	// only the raw-XFCC path is closed.
+	rec = do(h, http.MethodPost, "/events/a", map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer " + tb4SvcBearer,
+	}, []byte(`{"n":1}`))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("service bearer append = %d, want 204 (bearer path unaffected)", rec.Code)
 	}
 }
 

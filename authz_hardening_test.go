@@ -3,6 +3,7 @@ package chronicle
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -133,10 +134,15 @@ func TestXFCCSidecarMarkerGate(t *testing.T) {
 	const markerName, markerValue = "X-Chronicle-Sidecar", "verified"
 	key := testAuthKey(t)
 
-	newHandler := func(t *testing.T) (*Handler, *hookRecorder) {
+	// allowNoMarker flips ServiceAuth.AllowXFCCWithoutMarker so each case runs
+	// both ways: a configured marker must take precedence and behave
+	// identically whether or not the marker-less opt-in is also set (#130). A
+	// set marker is REQUIRED even when the opt-in is on.
+	newHandler := func(t *testing.T, allowNoMarker bool) (*Handler, *hookRecorder) {
 		h, rec := serviceHandler(t, key)
 		h.ServiceAuth.SidecarMarkerName = markerName
 		h.ServiceAuth.SidecarMarkerValue = markerValue
+		h.ServiceAuth.AllowXFCCWithoutMarker = allowNoMarker
 		return h, rec
 	}
 
@@ -151,20 +157,22 @@ func TestXFCCSidecarMarkerGate(t *testing.T) {
 		{"wrong marker → denied", "nope", true, http.StatusUnauthorized},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			h, _ := newHandler(t)
-			createDirect(t, h, "/events/a", "application/json")
-			headers := map[string]string{
-				"Content-Type": "application/json",
-				tb4XFCCHdr:     "URI=" + tb4AgentsID, // a trusted mesh identity
-			}
-			if c.setMarker {
-				headers[markerName] = c.marker
-			}
-			rec := do(h, http.MethodPost, "/events/a", headers, []byte(`{"n":1}`))
-			if rec.Code != c.wantStatus {
-				t.Fatalf("status = %d, want %d", rec.Code, c.wantStatus)
-			}
-		})
+		for _, allowNoMarker := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s (opt-in=%v)", c.name, allowNoMarker), func(t *testing.T) {
+				h, _ := newHandler(t, allowNoMarker)
+				createDirect(t, h, "/events/a", "application/json")
+				headers := map[string]string{
+					"Content-Type": "application/json",
+					tb4XFCCHdr:     "URI=" + tb4AgentsID, // a trusted mesh identity
+				}
+				if c.setMarker {
+					headers[markerName] = c.marker
+				}
+				rec := do(h, http.MethodPost, "/events/a", headers, []byte(`{"n":1}`))
+				if rec.Code != c.wantStatus {
+					t.Fatalf("status = %d, want %d (opt-in=%v: a set marker must govern)", rec.Code, c.wantStatus, allowNoMarker)
+				}
+			})
+		}
 	}
 }

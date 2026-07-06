@@ -514,7 +514,7 @@ func TestFileWatcherRotation(t *testing.T) {
 	fs := &fakeStreams{tails: map[string]string{}}
 
 	path := writeKeysFile(t, validKeysFile())
-	watcher, err := NewFileKeyWatcher(path, nil)
+	watcher, err := NewFileKeyWatcher(path, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
