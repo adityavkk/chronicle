@@ -2,7 +2,6 @@ package webhook
 
 import (
 	"crypto/rand"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -13,10 +12,6 @@ import (
 )
 
 const testReadIss = "http://x/v1/stream/"
-
-func fixedKeys(keys ...SigningKey) func() ([]SigningKey, error) {
-	return func() ([]SigningKey, error) { return keys, nil }
-}
 
 func TestReadCapabilityRoundTrip(t *testing.T) {
 	key := testJWSKey(t)
@@ -133,7 +128,7 @@ func TestReadCapabilityCrossFamilyRejection(t *testing.T) {
 func TestReadCapabilityAuthorizerMapping(t *testing.T) {
 	key := testJWSKey(t)
 	now := time.Unix(10_000, 0)
-	az := NewReadCapabilityAuthorizer(testReadIss, fixedKeys(key))
+	az := NewReadCapabilityAuthorizer(testReadIss, StaticKidResolver(key))
 
 	tok, err := GenerateReadCapability(key, testReadIss, "r", []string{"events"}, now, time.Hour, rand.Reader)
 	if err != nil {
@@ -162,9 +157,7 @@ func TestReadCapabilityAuthorizerMapping(t *testing.T) {
 	}
 
 	// A key-source failure denies (fail closed), never errors open.
-	broken := NewReadCapabilityAuthorizer(testReadIss, func() ([]SigningKey, error) {
-		return nil, errors.New("store down")
-	})
+	broken := NewReadCapabilityAuthorizer(testReadIss, StaticKidResolver())
 	if d := broken.AuthorizeRead(tok, mustPath(t, "events/a"), now); d.Allowed() {
 		t.Fatal("key-source failure must deny")
 	}

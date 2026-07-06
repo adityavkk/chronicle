@@ -41,12 +41,9 @@ func tb6bHandler(t *testing.T, aud string) (*Handler, webhook.SigningKey, []byte
 	h := testHandler(time.Second, time.Second)
 	h.AuthMode = auth.ModeEnforce
 	h.AppendAuth = webhook.NewWriteTokenAuthorizer(tokenKey)
-	keys := func() ([]webhook.SigningKey, error) { return []webhook.SigningKey{signKey}, nil }
-	h.ReadAuth = webhook.NewReadCapabilityAuthorizer(tb5Iss, keys)
-	h.CallerAuth = webhook.NewCallerTokenAuthorizer(tb5Iss, keys)
-	h.EntityAuth = webhook.NewWakeTokenAuthorizer(aud, func() ([]webhook.SigningKey, error) {
-		return []webhook.SigningKey{wakeKey}, nil
-	})
+	h.ReadAuth = webhook.NewReadCapabilityAuthorizer(tb5Iss, webhook.StaticKidResolver(signKey))
+	h.CallerAuth = webhook.NewCallerTokenAuthorizer(tb5Iss, webhook.StaticKidResolver(signKey))
+	h.EntityAuth = webhook.NewWakeTokenAuthorizer(aud, webhook.StaticKidResolver(wakeKey))
 	rec := &hookRecorder{}
 	h.SubHooks = rec
 	return h, wakeKey, tokenKey, rec

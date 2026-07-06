@@ -1,7 +1,6 @@
 package webhook
 
 import (
-	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -97,14 +96,9 @@ func ValidateReadCapability(token, expectedIss string, keyFor KidResolver, now t
 	if err != nil {
 		return VerifiedReadCapability{}, err
 	}
-	dec := json.NewDecoder(bytes.NewReader(payload))
-	dec.DisallowUnknownFields()
 	var claims readCapClaims
-	if err := dec.Decode(&claims); err != nil {
+	if err := strictJSONUnmarshal(payload, &claims); err != nil {
 		return VerifiedReadCapability{}, fmt.Errorf("read capability: claims: %w", err)
-	}
-	if dec.More() {
-		return VerifiedReadCapability{}, errors.New("read capability: claims: trailing data")
 	}
 	if claims.Iss != expectedIss {
 		return VerifiedReadCapability{}, errors.New("read capability: issuer not accepted")
@@ -133,40 +127,41 @@ func ValidateReadCapability(token, expectedIss string, keyFor KidResolver, now t
 }
 
 // ReadCapabilityAuthorizer authorizes data-plane reads with a chronicle
-// read-capability JWS. It implements chronicle's ReadAuthorizer seam; keys
-// is called per decision so key rotation is honored without restart.
+// read-capability JWS. It implements chronicle's ReadAuthorizer seam;
+// resolver is called per decision so key rotation, the overlap window, and
+// the kid denylist are all honored without restart.
 type ReadCapabilityAuthorizer struct {
-	iss  string
-	keys func() ([]SigningKey, error)
+	iss      string
+	resolver func(now time.Time) KidResolver
 }
 
 // NewReadCapabilityAuthorizer builds an authorizer for tokens issued by iss,
-// verifying against the keys the source currently returns. Tests supply a
-// fixed set; production wires Manager.ReadAuthorizer().
-func NewReadCapabilityAuthorizer(iss string, keys func() ([]SigningKey, error)) ReadCapabilityAuthorizer {
-	return ReadCapabilityAuthorizer{iss: iss, keys: keys}
+// verifying against the resolver's trust set at the decision time. Tests
+// supply a fixed set (StaticKidResolver); production wires
+// Manager.ReadAuthorizer().
+func NewReadCapabilityAuthorizer(iss string, resolver func(now time.Time) KidResolver) ReadCapabilityAuthorizer {
+	return ReadCapabilityAuthorizer{iss: iss, resolver: resolver}
 }
 
-// ReadAuthorizer exposes the Manager's key set and issuer as the read
-// authorizer the HTTP handler enforces with — the same trust set the JWKS
-// publishes and the caller-token gate verifies against.
+// ReadAuthorizer exposes the Manager's custody-source-fed key snapshot as the
+// read authorizer the HTTP handler enforces with — the SAME rotation- and
+// denylist-aware trust set the JWKS publishes and the control-plane caller
+// gate verifies against, so file custody is honored and an emergency kid
+// revocation takes effect on the data plane too (issue #126 hardening: read
+// capabilities previously verified against m.store, which bypassed both).
 func (m *Manager) ReadAuthorizer() ReadCapabilityAuthorizer {
-	return NewReadCapabilityAuthorizer(m.streamRootURL, m.store.SigningKeys)
+	return NewReadCapabilityAuthorizer(m.streamRootURL, m.callerKidResolver)
 }
 
 // AuthorizeRead maps a presented (possibly absent) read credential to the
-// Decision for a read at path. Fail-closed: a key-set error denies, an
-// unverifiable token denies (401-class), and a verified grant that does not
-// cover the path is forbidden (403-class).
+// Decision for a read at path. Fail-closed: an unverifiable token denies
+// (401-class), and a verified grant that does not cover the path is forbidden
+// (403-class).
 func (a ReadCapabilityAuthorizer) AuthorizeRead(token string, path auth.StreamPath, now time.Time) auth.Decision {
 	if token == "" {
 		return auth.Deny(auth.ReasonUnauthenticated, "missing read credential")
 	}
-	keys, err := a.keys()
-	if err != nil {
-		return auth.Deny(auth.ReasonUnauthenticated, "read key set unavailable")
-	}
-	cap, err := ValidateReadCapability(token, a.iss, resolverForKeys(keys), now)
+	cap, err := ValidateReadCapability(token, a.iss, a.resolver(now), now)
 	if err != nil {
 		return auth.Deny(auth.ReasonUnauthenticated, "invalid read capability")
 	}

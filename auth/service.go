@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
 	"strings"
@@ -71,15 +72,23 @@ func ParseServiceBearerConfig(s string) ([]ServiceCredential, error) {
 }
 
 // VerifyServiceBearer checks a presented bearer against the configured
-// service credentials in constant time per candidate. Only an exact byte
-// match yields a Principal; an empty presentation or empty credential set
-// never authenticates.
+// service credentials. Only an exact match yields a Principal; an empty
+// presentation or empty credential set never authenticates.
+//
+// The comparison hashes both sides to a fixed 32-byte SHA-256 digest before
+// the constant-time compare, so it leaks neither the configured token's
+// length (subtle.ConstantTimeCompare short-circuits on differing lengths) nor
+// any prefix-match information — the digests are always equal width and
+// unrelated to the plaintext bytes. SHA-256 preimage resistance means the
+// digest compare accepts exactly the same inputs as a raw compare would.
 func VerifyServiceBearer(presented string, creds []ServiceCredential) (Principal, bool) {
 	if presented == "" {
 		return Principal{}, false
 	}
+	presentedHash := sha256.Sum256([]byte(presented))
 	for _, c := range creds {
-		if subtle.ConstantTimeCompare([]byte(presented), []byte(c.token)) == 1 {
+		credHash := sha256.Sum256([]byte(c.token))
+		if subtle.ConstantTimeCompare(presentedHash[:], credHash[:]) == 1 {
 			return Principal{kind: KindService, subject: c.name}, true
 		}
 	}

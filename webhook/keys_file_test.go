@@ -185,22 +185,66 @@ func TestLoadFileKeySourceRejects(t *testing.T) {
 	}
 }
 
-func TestLoadFileKeySourceWarnsOnBroadPermissions(t *testing.T) {
+// TestLoadFileKeySourcePermissions pins the fail-closed permission posture
+// (issue #126 hardening): a world-accessible (e.g. 0644) or group-writable
+// key file refuses to load; a group-readable (0640) file loads with a
+// warning; a 0600 file loads clean. The key material never appears in the
+// error or the warning.
+func TestLoadFileKeySourcePermissions(t *testing.T) {
+	leaks := func(t *testing.T, s string) {
+		t.Helper()
+		if strings.Contains(s, b64Seed(1)) || strings.Contains(s, b64TokenKey(32)) {
+			t.Fatalf("message leaks key material: %q", s)
+		}
+	}
+
+	// World-readable (0644): refuse.
 	path := writeKeysFile(t, validKeysFile())
 	if err := os.Chmod(path, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	_, err := LoadFileKeySource(path)
+	if err == nil {
+		t.Fatal("0644 keys file must be refused (world-readable)")
+	}
+	leaks(t, err.Error())
+
+	// Group-writable (0620): refuse.
+	path = writeKeysFile(t, validKeysFile())
+	if err := os.Chmod(path, 0o620); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFileKeySource(path); err == nil {
+		t.Fatal("0620 keys file must be refused (group-writable)")
+	}
+
+	// Group-readable (0640): load with a warning.
+	path = writeKeysFile(t, validKeysFile())
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
 	src, err := LoadFileKeySource(path)
+	if err != nil {
+		t.Fatalf("0640 keys file must load (group-read is a warning): %v", err)
+	}
+	if len(src.Warnings()) == 0 {
+		t.Fatal("0640 keys file must produce a permissions warning")
+	}
+	for _, w := range src.Warnings() {
+		leaks(t, w)
+	}
+
+	// Owner-only (0600): load clean, no warning.
+	path = writeKeysFile(t, validKeysFile())
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	src, err = LoadFileKeySource(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(src.Warnings()) == 0 {
-		t.Fatal("0644 keys file must produce a permissions warning")
-	}
-	for _, w := range src.Warnings() {
-		if strings.Contains(w, b64Seed(1)) || strings.Contains(w, b64TokenKey(32)) {
-			t.Fatalf("warning leaks material: %q", w)
-		}
+	if len(src.Warnings()) != 0 {
+		t.Fatalf("0600 keys file must warn nothing, got %v", src.Warnings())
 	}
 }
 

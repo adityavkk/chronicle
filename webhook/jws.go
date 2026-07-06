@@ -1,13 +1,13 @@
 package webhook
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // This file is the minimal compact-JWS layer for chronicle-minted EdDSA
@@ -66,6 +66,16 @@ func resolverForKeys(keys []SigningKey) KidResolver {
 		}
 		return nil, false
 	}
+}
+
+// StaticKidResolver builds a time-independent resolver provider over a fixed
+// key set — for tests and simple single-key deployments that do not rotate.
+// Production wires the Manager's snapshot resolver (m.callerKidResolver /
+// m.WakeKidResolver) instead, which additionally honors the rotation overlap
+// window and the kid denylist at each decision's clock.
+func StaticKidResolver(keys ...SigningKey) func(now time.Time) KidResolver {
+	r := resolverForKeys(keys)
+	return func(time.Time) KidResolver { return r }
 }
 
 // PeekIssuer reads the iss claim of a compact JWS WITHOUT any verification.
@@ -142,13 +152,8 @@ func VerifyCompactJWS(token, expectedTyp string, keyFor KidResolver) ([]byte, er
 		return nil, fmt.Errorf("jws: header: %w", err)
 	}
 	var hdr joseHeader
-	dec := json.NewDecoder(bytes.NewReader(hdrRaw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&hdr); err != nil {
+	if err := strictJSONUnmarshal(hdrRaw, &hdr); err != nil {
 		return nil, fmt.Errorf("jws: header: %w", err)
-	}
-	if dec.More() {
-		return nil, errors.New("jws: header: trailing data")
 	}
 	if hdr.Alg != jwsAlgEdDSA {
 		return nil, errors.New("jws: algorithm not accepted")

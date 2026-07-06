@@ -2,7 +2,6 @@ package webhook
 
 import (
 	"crypto/rand"
-	"errors"
 	"testing"
 	"time"
 
@@ -30,7 +29,7 @@ func mintWake(t *testing.T, key SigningKey, sub, aud string, now time.Time, ttl 
 func TestAuthorizeEntitySubtreeScope(t *testing.T) {
 	wakeKey := testJWSKey(t)
 	now := time.Unix(50_000, 0)
-	az := NewWakeTokenAuthorizer("", fixedKeys(wakeKey))
+	az := NewWakeTokenAuthorizer("", StaticKidResolver(wakeKey))
 	tok := mintWake(t, wakeKey, "agents/a", "", now, time.Minute)
 
 	covers := map[string]bool{
@@ -60,7 +59,7 @@ func TestAuthorizeEntityRejections(t *testing.T) {
 	webhookKey := testJWSKey(t)
 	now := time.Unix(50_000, 0)
 	path := mustPath(t, "agents/a/inbox")
-	az := NewWakeTokenAuthorizer("", fixedKeys(wakeKey))
+	az := NewWakeTokenAuthorizer("", StaticKidResolver(wakeKey))
 
 	good := mintWake(t, wakeKey, "agents/a", "", now, time.Minute)
 
@@ -75,11 +74,9 @@ func TestAuthorizeEntityRejections(t *testing.T) {
 		"expired past skew":     {az, good, now.Add(time.Minute + 6*time.Second)},
 		"webhook-key mint":      {az, mintWake(t, webhookKey, "agents/a", "", now, time.Minute), now},
 		"aud minted, gate bare": {az, mintWake(t, wakeKey, "agents/a", "https://gw", now, time.Minute), now},
-		"bare minted, gate aud": {NewWakeTokenAuthorizer("https://gw", fixedKeys(wakeKey)), good, now},
+		"bare minted, gate aud": {NewWakeTokenAuthorizer("https://gw", StaticKidResolver(wakeKey)), good, now},
 		"traversal subject":     {az, mintWake(t, wakeKey, "../evil", "", now, time.Minute), now},
-		"keys unavailable": {NewWakeTokenAuthorizer("", func() ([]SigningKey, error) {
-			return nil, errors.New("store down")
-		}), good, now},
+		"empty trust set":       {NewWakeTokenAuthorizer("", StaticKidResolver()), good, now},
 	}
 	for name, c := range cases {
 		d := c.az.AuthorizeEntity(c.tok, path, c.at)
@@ -98,7 +95,7 @@ func TestAuthorizeEntityRejections(t *testing.T) {
 	}
 
 	// The matching-audience control for the aud cases above.
-	gw := NewWakeTokenAuthorizer("https://gw", fixedKeys(wakeKey))
+	gw := NewWakeTokenAuthorizer("https://gw", StaticKidResolver(wakeKey))
 	if d := gw.AuthorizeEntity(mintWake(t, wakeKey, "agents/a", "https://gw", now, time.Minute), path, now); !d.Allowed() {
 		t.Fatalf("matching audience denied: %s", d.Detail())
 	}
@@ -111,7 +108,7 @@ func TestAuthorizeEntityCrossFamily(t *testing.T) {
 	signKey := testJWSKey(t)
 	now := time.Unix(50_000, 0)
 	path := mustPath(t, "agents/a/inbox")
-	az := NewWakeTokenAuthorizer("", fixedKeys(wakeKey))
+	az := NewWakeTokenAuthorizer("", StaticKidResolver(wakeKey))
 
 	readCap, err := GenerateReadCapability(signKey, testReadIss, "r", []string{"agents/a"}, now, time.Hour, rand.Reader)
 	if err != nil {
@@ -172,7 +169,7 @@ func TestPeekTyp(t *testing.T) {
 func TestEntitySubtreeProperty(t *testing.T) {
 	wakeKey := testJWSKey(t)
 	now := time.Unix(50_000, 0)
-	az := NewWakeTokenAuthorizer("", fixedKeys(wakeKey))
+	az := NewWakeTokenAuthorizer("", StaticKidResolver(wakeKey))
 	rapid.Check(t, func(t *rapid.T) {
 		entity := rapid.StringMatching(`[a-z0-9]{1,8}(/[a-z0-9]{1,8}){0,2}`).Draw(t, "entity")
 		tok := mintWake2(t, wakeKey, entity, now)
