@@ -615,12 +615,13 @@ func (s *RedisStore) recordContention(status, id string) {
 
 // recordInlineFence reports an inlined owner-epoch fence firing (issue #14). The
 // store is the single place a schedule/due script's reply is observed, so every
-// owner-scoped script (arm_wake/ack/expire_lease/schedule_retry/release) records
-// OwnerFenced("inline") here uniformly. It fires ONLY when the caller presented an
-// active owner scope (a non-empty expected epoch) AND the reply is FENCED — so on
-// the load-balanced external path (epoch "") it is a no-op, and for ack/release a
-// FENCED with an active scope is the owner fence (it is the script's first gate,
-// above the still-byte-for-byte (gen,wake_id) fence).
+// owner-scoped script (arm_wake/ack/expire_lease/schedule_retry/release and
+// record_success) records OwnerFenced("inline") here uniformly. It fires ONLY when
+// the caller presented an active owner scope (a non-empty expected epoch) AND the
+// reply is FENCED — so on the load-balanced external path (epoch "") it is a
+// no-op, and for ack/release/record_success a FENCED with an active scope is the
+// owner fence (it is the script's first gate, above the still-byte-for-byte
+// (gen,wake_id) fence).
 func (s *RedisStore) recordInlineFence(epoch, status string) {
 	if s.metrics == nil || epoch == "" || status != "FENCED" {
 		return
@@ -841,42 +842,63 @@ func (s *RedisStore) ClearDue(id string) error {
 	return s.client.ZRem(s.ctx(), dueZKey(slotOf(id)), id).Err()
 }
 
-// ScheduleRetryUnscoped records a webhook failure and persists next_attempt;
-// returns the new retry count.
-func (s *RedisStore) ScheduleRetryUnscoped(id string, now, nextAttempt time.Time) (int, error) {
-	return s.scheduleRetry(id, now, nextAttempt, unscopedOwnerArgs())
+// ScheduleRetryUnscoped records a webhook failure and persists next_attempt if
+// the wake is still current; returns the new retry count.
+func (s *RedisStore) ScheduleRetryUnscoped(id string, generation int64, wakeID string, now, nextAttempt time.Time) (int, error) {
+	return s.scheduleRetry(id, generation, wakeID, now, nextAttempt, unscopedOwnerArgs())
 }
 
 // ScheduleRetryOwned is ScheduleRetryUnscoped plus the inline owner-epoch fence.
-func (s *RedisStore) ScheduleRetryOwned(scope OwnerScope, id string, now, nextAttempt time.Time) (int, error) {
+func (s *RedisStore) ScheduleRetryOwned(scope OwnerScope, id string, generation int64, wakeID string, now, nextAttempt time.Time) (int, error) {
 	owner, err := scopedOwnerArgs(scope)
 	if err != nil {
 		return 0, err
 	}
-	return s.scheduleRetry(id, now, nextAttempt, owner)
+	return s.scheduleRetry(id, generation, wakeID, now, nextAttempt, owner)
 }
 
-func (s *RedisStore) scheduleRetry(id string, now, nextAttempt time.Time, owner ownerScriptArgs) (int, error) {
+func (s *RedisStore) scheduleRetry(id string, generation int64, wakeID string, now, nextAttempt time.Time, owner ownerScriptArgs) (int, error) {
 	h := slotOf(id)
 	reply, err := s.evalStrings(scheduleRetryScript, []string{subKey(id), retryZKey(h), owner.slotKey},
-		id, nsArg(now), nsArg(nextAttempt), owner.replicaID, owner.epoch)
+		id, nsArg(now), nsArg(nextAttempt), strconv.FormatInt(generation, 10), wakeID, owner.replicaID, owner.epoch)
 	if err != nil {
 		return 0, err
 	}
 	s.recordInlineFence(owner.epoch, reply[0])
-	// NOSUB (gone) and FENCED (a deposed owner-scoped scheduler) both schedule
-	// nothing; the caller treats a non-OK as "no retry recorded".
-	if reply[0] == "NOSUB" || reply[0] == "FENCED" {
+	// NOSUB (gone), STALE (superseded wake), and FENCED (a deposed owner-scoped
+	// scheduler) schedule nothing; the caller treats a non-OK as "no retry
+	// recorded".
+	if reply[0] == "NOSUB" || reply[0] == "STALE" || reply[0] == "FENCED" {
 		return 0, nil
 	}
 	n, _ := strconv.Atoi(reply[1])
 	return n, nil
 }
 
-// RecordSuccess clears webhook failure bookkeeping after an accepted delivery.
-func (s *RedisStore) RecordSuccess(id string) error {
-	_, err := s.evalStrings(recordSuccessScript, []string{subKey(id), retryZKey(slotOf(id))}, id)
-	return err
+// RecordSuccessUnscoped clears webhook failure bookkeeping after an accepted
+// delivery if the wake is still current.
+func (s *RedisStore) RecordSuccessUnscoped(id string, generation int64, wakeID string) (string, error) {
+	return s.recordSuccess(id, generation, wakeID, unscopedOwnerArgs())
+}
+
+// RecordSuccessOwned is RecordSuccessUnscoped plus the inline owner-epoch fence.
+func (s *RedisStore) RecordSuccessOwned(scope OwnerScope, id string, generation int64, wakeID string) (string, error) {
+	owner, err := scopedOwnerArgs(scope)
+	if err != nil {
+		return "", err
+	}
+	return s.recordSuccess(id, generation, wakeID, owner)
+}
+
+func (s *RedisStore) recordSuccess(id string, generation int64, wakeID string, owner ownerScriptArgs) (string, error) {
+	h := slotOf(id)
+	reply, err := s.evalStrings(recordSuccessScript, []string{subKey(id), retryZKey(h), owner.slotKey},
+		id, strconv.FormatInt(generation, 10), wakeID, owner.replicaID, owner.epoch)
+	if err != nil {
+		return "", err
+	}
+	s.recordInlineFence(owner.epoch, reply[0])
+	return reply[0], nil
 }
 
 // RecordWakeEventSent marks the current pull-wake event as durably emitted,

@@ -224,7 +224,7 @@ func TestManagerRetryPathFencedInline(t *testing.T) {
 
 	// Control: an UNSCOPED recordFailure (the append path) schedules a retry — the
 	// sub is schedulable, so a later non-advance is the fence, not a no-op.
-	m.recordFailure("s1", nil)
+	m.recordFailure("s1", arm.Generation, arm.WakeID, nil)
 	if sub, _, _ := s.Get("s1"); sub.RetryCount != 1 {
 		t.Fatalf("unscoped recordFailure should schedule a retry (count=1), got %d", sub.RetryCount)
 	}
@@ -239,7 +239,7 @@ func TestManagerRetryPathFencedInline(t *testing.T) {
 	// recordFailure with the deposed scope: schedule_retry is FENCED inline, so the
 	// retry count does NOT advance and an inline fence is recorded.
 	before := fm.ownerFences("inline")
-	m.recordFailure("s1", &scope)
+	m.recordFailure("s1", arm.Generation, arm.WakeID, &scope)
 	if sub, _, _ := s.Get("s1"); sub.RetryCount != 1 {
 		t.Fatalf("deposed recordFailure must schedule nothing (count stays 1), got %d", sub.RetryCount)
 	}
