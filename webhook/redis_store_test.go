@@ -137,7 +137,7 @@ func TestRecordSuccessFencesStaleWake(t *testing.T) {
 	if err != nil || !gen2.Armed || gen2.Generation == gen1.Generation {
 		t.Fatalf("arm gen2 = %+v err=%v", gen2, err)
 	}
-	if n, err := s.ScheduleRetryUnscoped("s1", now.Add(4*time.Second), now.Add(time.Minute)); err != nil || n != 1 {
+	if n, err := s.ScheduleRetryUnscoped("s1", gen2.Generation, gen2.WakeID, now.Add(4*time.Second), now.Add(time.Minute)); err != nil || n != 1 {
 		t.Fatalf("schedule retry = %d/%v, want 1", n, err)
 	}
 

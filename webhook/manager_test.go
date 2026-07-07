@@ -656,7 +656,7 @@ func TestOwnedRecordSuccessFencesAfterNetworkTakeover(t *testing.T) {
 	if err != nil || !arm.Armed {
 		t.Fatalf("owned arm = %+v err=%v", arm, err)
 	}
-	if n, err := base.ScheduleRetryUnscoped("s1", now, now.Add(time.Minute)); err != nil || n != 1 {
+	if n, err := base.ScheduleRetryUnscoped("s1", arm.Generation, arm.WakeID, now, now.Add(time.Minute)); err != nil || n != 1 {
 		t.Fatalf("schedule retry = %d/%v, want 1", n, err)
 	}
 
@@ -699,6 +699,76 @@ func TestOwnedRecordSuccessFencesAfterNetworkTakeover(t *testing.T) {
 	sub, _, _ := base.Get("s1")
 	if sub.Status != StatusFailed || sub.RetryCount != 1 || sub.NextAttemptNs == 0 {
 		t.Fatalf("stale success cleared retry state: status=%s retry=%d next=%d", sub.Status, sub.RetryCount, sub.NextAttemptNs)
+	}
+}
+
+func TestRecordFailureFencesAfterSuccessAck(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		owned bool
+	}{
+		{name: "unscoped"},
+		{name: "owned", owned: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base, client := newTestStore(t)
+			now := time.Now()
+			_, _ = base.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+
+			var owner *OwnerScope
+			var arm ArmResult
+			if tc.owned {
+				h := slotOf("s1")
+				claim, err := base.ClaimSlot(slotKey(h), "A", time.Unix(1_700_000_000, 0), slotTTL)
+				if err != nil || !claim.Granted() {
+					t.Fatalf("claim = %+v err=%v", claim, err)
+				}
+				scope := OwnerScope{SlotKey: slotKey(h), ReplicaID: "A", Epoch: claim.Epoch.String()}
+				owner = &scope
+				arm, err = base.ArmWakeOwned(scope, "s1", now, 60000, true, "wk-1")
+				if err != nil || !arm.Armed {
+					t.Fatalf("owned arm = %+v err=%v", arm, err)
+				}
+				if n, err := base.ScheduleRetryOwned(scope, "s1", arm.Generation, arm.WakeID, now, now.Add(time.Minute)); err != nil || n != 1 {
+					t.Fatalf("owned schedule retry = %d/%v, want 1", n, err)
+				}
+				if status, err := base.RecordSuccessOwned(scope, "s1", arm.Generation, arm.WakeID); err != nil || status != "OK" {
+					t.Fatalf("owned record success = %q/%v, want OK", status, err)
+				}
+				if status, err := base.AckOwned(scope, "s1", arm.Generation, arm.WakeID, arm.Generation, true, nil, now, 60000); err != nil || status != "OK" {
+					t.Fatalf("owned ack done = %q/%v, want OK", status, err)
+				}
+			} else {
+				var err error
+				arm, err = base.ArmWakeUnscoped("s1", now, 60000, true, "wk-1")
+				if err != nil || !arm.Armed {
+					t.Fatalf("unscoped arm = %+v err=%v", arm, err)
+				}
+				if n, err := base.ScheduleRetryUnscoped("s1", arm.Generation, arm.WakeID, now, now.Add(time.Minute)); err != nil || n != 1 {
+					t.Fatalf("unscoped schedule retry = %d/%v, want 1", n, err)
+				}
+				if status, err := base.RecordSuccessUnscoped("s1", arm.Generation, arm.WakeID); err != nil || status != "OK" {
+					t.Fatalf("unscoped record success = %q/%v, want OK", status, err)
+				}
+				if status, err := base.AckUnscoped("s1", arm.Generation, arm.WakeID, arm.Generation, true, nil, now, 60000); err != nil || status != "OK" {
+					t.Fatalf("unscoped ack done = %q/%v, want OK", status, err)
+				}
+			}
+
+			mgr, err := NewManager(base, &fakeStreams{tails: map[string]string{}}, ManagerOptions{StreamRootURL: "http://x/v1/stream/"})
+			if err != nil {
+				t.Fatalf("new manager: %v", err)
+			}
+			mgr.recordFailure("s1", arm.Generation, arm.WakeID, owner)
+
+			sub, _, _ := base.Get("s1")
+			if sub.Phase != PhaseIdle || sub.Status != StatusActive || sub.RetryCount != 0 || sub.NextAttemptNs != 0 {
+				t.Fatalf("stale failure resurrected retry state: phase=%s status=%s retry=%d next=%d", sub.Phase, sub.Status, sub.RetryCount, sub.NextAttemptNs)
+			}
+			if n, err := client.ZCard(context.Background(), retryZKey(slotOf("s1"))).Result(); err != nil || n != 0 {
+				t.Fatalf("stale failure re-added retry zset member: card=%d err=%v", n, err)
+			}
+		})
 	}
 }
 

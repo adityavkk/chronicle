@@ -723,7 +723,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, sub.Config.WebhookURL, bytes.NewReader(body))
 	if err != nil {
-		m.recordFailure(id, owner)
+		m.recordFailure(id, generation, wakeID, owner)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -733,7 +733,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		// successor. An unsigned or mis-signed wake must not go out; the retry
 		// worker re-attempts after rotation restores a mint key.
 		m.log.Error("webhook: envelope signing key unavailable (denylisted); delivery deferred", "sub", id)
-		m.recordFailure(id, owner)
+		m.recordFailure(id, generation, wakeID, owner)
 		return
 	}
 	req.Header.Set("Webhook-Signature", SignWebhookPayload(signing, body, time.Now()))
@@ -742,13 +742,13 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	resp, err := m.client.Do(req)
 	if err != nil {
 		m.metrics.WakeDelivery(time.Since(postStart), "error")
-		m.recordFailure(id, owner)
+		m.recordFailure(id, generation, wakeID, owner)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		m.metrics.WakeDelivery(time.Since(postStart), "failed")
-		m.recordFailure(id, owner)
+		m.recordFailure(id, generation, wakeID, owner)
 		return
 	}
 	m.metrics.WakeDelivery(time.Since(postStart), "ok")
@@ -796,7 +796,7 @@ func (m *Manager) recordSuccessWithOwner(owner *OwnerScope, id string, generatio
 	return m.store.RecordSuccessUnscoped(id, generation, wakeID)
 }
 
-func (m *Manager) recordFailure(id string, owner *OwnerScope) {
+func (m *Manager) recordFailure(id string, generation int64, wakeID string, owner *OwnerScope) {
 	sub, ok, err := m.store.Get(id)
 	if err != nil || !ok {
 		return
@@ -809,13 +809,15 @@ func (m *Manager) recordFailure(id string, owner *OwnerScope) {
 	next := time.Now().Add(RetryDelay(sub.RetryCount+1, jitterFraction()))
 	// The retry worker drives this for a slot it owns, so it carries the owner
 	// scope: schedule_retry inlines the owner-epoch fence and a deposed owner
-	// schedules nothing (no phantom retry on a slot it lost) — closing the retry
-	// path's TOCTOU. The append-path caller passes no scope (unfenced).
+	// schedules nothing (no phantom retry on a slot it lost). It also carries the
+	// delivery's (generation, wakeID), so a duplicate failure cannot resurrect retry
+	// state after a concurrent success/ack has cleared the wake. The append-path
+	// caller passes no scope (unfenced).
 	var schedErr error
 	if owner != nil {
-		_, schedErr = m.store.ScheduleRetryOwned(*owner, id, time.Now(), next)
+		_, schedErr = m.store.ScheduleRetryOwned(*owner, id, generation, wakeID, time.Now(), next)
 	} else {
-		_, schedErr = m.store.ScheduleRetryUnscoped(id, time.Now(), next)
+		_, schedErr = m.store.ScheduleRetryUnscoped(id, generation, wakeID, time.Now(), next)
 	}
 	if schedErr != nil {
 		m.log.Warn("webhook: schedule retry", "sub", id, "error", schedErr)

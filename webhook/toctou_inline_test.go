@@ -150,15 +150,19 @@ func TestInlineFence_ScheduleRetry(t *testing.T) {
 	}
 	stale, live := ownedAndDeposed(t, s)
 	now := time.Now()
+	arm, err := s.ArmWakeUnscoped("s1", now, 60000, true, "wk-1")
+	if err != nil || !arm.Armed {
+		t.Fatalf("arm = %+v err=%v", arm, err)
+	}
 
 	// Current owner schedules a retry (count advances).
-	n, err := s.ScheduleRetryOwned(live, "s1", now, now.Add(time.Minute))
+	n, err := s.ScheduleRetryOwned(live, "s1", arm.Generation, arm.WakeID, now, now.Add(time.Minute))
 	if err != nil || n < 1 {
 		t.Fatalf("live-owner schedule_retry = %d/%v, want count>=1", n, err)
 	}
 	// Deposed owner: FENCED inline → schedules nothing (count 0) while the sub still
 	// exists (so 0 is the fence, not NOSUB).
-	n, err = s.ScheduleRetryOwned(stale, "s1", now, now.Add(time.Minute))
+	n, err = s.ScheduleRetryOwned(stale, "s1", arm.Generation, arm.WakeID, now, now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +182,7 @@ func TestInlineFence_RecordSuccessAboveGenFence(t *testing.T) {
 	if err != nil || !arm.Armed {
 		t.Fatalf("arm = %+v err=%v", arm, err)
 	}
-	if n, err := s.ScheduleRetryUnscoped("s1", now, now.Add(time.Minute)); err != nil || n != 1 {
+	if n, err := s.ScheduleRetryUnscoped("s1", arm.Generation, arm.WakeID, now, now.Add(time.Minute)); err != nil || n != 1 {
 		t.Fatalf("schedule retry = %d/%v, want 1", n, err)
 	}
 
@@ -195,7 +199,7 @@ func TestInlineFence_RecordSuccessAboveGenFence(t *testing.T) {
 		t.Fatalf("live-owner success did not clear retry state: %+v", sub)
 	}
 
-	if n, err := s.ScheduleRetryUnscoped("s1", now, now.Add(time.Minute)); err != nil || n != 1 {
+	if n, err := s.ScheduleRetryUnscoped("s1", arm.Generation, arm.WakeID, now, now.Add(time.Minute)); err != nil || n != 1 {
 		t.Fatalf("reschedule retry = %d/%v, want 1", n, err)
 	}
 	status, err = s.RecordSuccessOwned(stale, "s1", arm.Generation, arm.WakeID)

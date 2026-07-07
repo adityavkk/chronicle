@@ -842,32 +842,33 @@ func (s *RedisStore) ClearDue(id string) error {
 	return s.client.ZRem(s.ctx(), dueZKey(slotOf(id)), id).Err()
 }
 
-// ScheduleRetryUnscoped records a webhook failure and persists next_attempt;
-// returns the new retry count.
-func (s *RedisStore) ScheduleRetryUnscoped(id string, now, nextAttempt time.Time) (int, error) {
-	return s.scheduleRetry(id, now, nextAttempt, unscopedOwnerArgs())
+// ScheduleRetryUnscoped records a webhook failure and persists next_attempt if
+// the wake is still current; returns the new retry count.
+func (s *RedisStore) ScheduleRetryUnscoped(id string, generation int64, wakeID string, now, nextAttempt time.Time) (int, error) {
+	return s.scheduleRetry(id, generation, wakeID, now, nextAttempt, unscopedOwnerArgs())
 }
 
 // ScheduleRetryOwned is ScheduleRetryUnscoped plus the inline owner-epoch fence.
-func (s *RedisStore) ScheduleRetryOwned(scope OwnerScope, id string, now, nextAttempt time.Time) (int, error) {
+func (s *RedisStore) ScheduleRetryOwned(scope OwnerScope, id string, generation int64, wakeID string, now, nextAttempt time.Time) (int, error) {
 	owner, err := scopedOwnerArgs(scope)
 	if err != nil {
 		return 0, err
 	}
-	return s.scheduleRetry(id, now, nextAttempt, owner)
+	return s.scheduleRetry(id, generation, wakeID, now, nextAttempt, owner)
 }
 
-func (s *RedisStore) scheduleRetry(id string, now, nextAttempt time.Time, owner ownerScriptArgs) (int, error) {
+func (s *RedisStore) scheduleRetry(id string, generation int64, wakeID string, now, nextAttempt time.Time, owner ownerScriptArgs) (int, error) {
 	h := slotOf(id)
 	reply, err := s.evalStrings(scheduleRetryScript, []string{subKey(id), retryZKey(h), owner.slotKey},
-		id, nsArg(now), nsArg(nextAttempt), owner.replicaID, owner.epoch)
+		id, nsArg(now), nsArg(nextAttempt), strconv.FormatInt(generation, 10), wakeID, owner.replicaID, owner.epoch)
 	if err != nil {
 		return 0, err
 	}
 	s.recordInlineFence(owner.epoch, reply[0])
-	// NOSUB (gone) and FENCED (a deposed owner-scoped scheduler) both schedule
-	// nothing; the caller treats a non-OK as "no retry recorded".
-	if reply[0] == "NOSUB" || reply[0] == "FENCED" {
+	// NOSUB (gone), STALE (superseded wake), and FENCED (a deposed owner-scoped
+	// scheduler) schedule nothing; the caller treats a non-OK as "no retry
+	// recorded".
+	if reply[0] == "NOSUB" || reply[0] == "STALE" || reply[0] == "FENCED" {
 		return 0, nil
 	}
 	n, _ := strconv.Atoi(reply[1])
