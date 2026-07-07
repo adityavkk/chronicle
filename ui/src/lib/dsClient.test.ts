@@ -298,7 +298,7 @@ describe("readStream", () => {
 		const result = await createClient(CONN).readStream("orders/created", "cursor-9");
 
 		const calledUrl = fetchFn.mock.calls[0]?.[0] as string;
-		expect(calledUrl).toBe(streamUrl(CONN, "orders/created", "cursor-9"));
+		expect(calledUrl).toBe(`${streamUrl(CONN, "orders/created", "cursor-9")}&envelope=1`);
 		expect(result.exchange.method).toBe("GET");
 		expect(result.exchange.url).toBe(calledUrl);
 		expect(result.exchange.status).toBe(200);
@@ -306,6 +306,20 @@ describe("readStream", () => {
 		expect(result.exchange.requestHeaders).toEqual({ Accept: "*/*" });
 		// An empty array body produces no rows, but the exchange is still captured.
 		expect(result.rows).toEqual([]);
+	});
+
+	it("decodes an enveloped response into rows carrying per-element offsets", async () => {
+		stubFetch({
+			status: 200,
+			headers: { "Content-Type": "application/json", "Stream-Envelope": "offsets" },
+			body: '[{"offset":"0000000000000000_0000000000000005","data":{"a":1}},{"offset":"0000000000000000_0000000000000011","data":"hi"}]',
+		});
+		const result = await createClient(CONN).readStream("orders/created", "-1");
+		expect(result.rows).toHaveLength(2);
+		expect(result.rows[0]?.offset).toBe("0000000000000000_0000000000000005");
+		expect(result.rows[0]?.value).toEqual({ a: 1 });
+		expect(result.rows[1]?.offset).toBe("0000000000000000_0000000000000011");
+		expect(result.rows[1]?.value).toBe("hi");
 	});
 
 	it("interprets Stream-Closed / Stream-Up-To-Date booleans loosely", async () => {

@@ -103,8 +103,8 @@ function MetaBlock(props: { row: GridRow; read: ReadResult | null }): JSX.Elemen
 	const fullTime = formatTimeFull(ts);
 	return (
 		<dl class="dsui-meta" aria-label="Message metadata">
-			<MetaRow label="Element index">
-				<code>{String(row.index)}</code>
+			<MetaRow label={row.offset ? "Offset" : "Element index"}>
+				<code title={row.offset}>{row.offset ? shortCursor(row.offset) : String(row.index)}</code>
 			</MetaRow>
 			<MetaRow label="Size">{formatBytes(row.byteSize)}</MetaRow>
 			<MetaRow label="Kind">
@@ -124,10 +124,17 @@ function MetaBlock(props: { row: GridRow; read: ReadResult | null }): JSX.Elemen
 					</span>
 				</MetaRow>
 			) : null}
-			<p class="dsui-meta__note">
-				The protocol returns a batch plus a single <code>Stream-Next-Offset</code>, not a
-				per-element offset — so this element is identified by its index within the batch above.
-			</p>
+			{row.offset ? (
+				<p class="dsui-meta__note">
+					The element's own durable-stream offset (a byte position), surfaced by the{" "}
+					<code>?envelope=1</code> read. The batch range is shown above.
+				</p>
+			) : (
+				<p class="dsui-meta__note">
+					This read returned a bare batch (no per-element offset), so the element is identified by
+					its index within the batch above.
+				</p>
+			)}
 		</dl>
 	);
 }

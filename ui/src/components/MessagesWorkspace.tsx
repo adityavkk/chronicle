@@ -355,7 +355,7 @@ function Row(props: {
 	const ts = row.kind === "json" ? extractTimestamp(row.value) : null;
 	const time = formatTime(ts);
 	const rowClass = `dsui-row${showTime ? " dsui-row--timed" : ""}${active ? " is-active" : ""}`;
-	const label = `Message ${row.index}, ${formatBytes(row.byteSize)}: ${row.preview}`;
+	const label = `Message ${row.offset ?? row.index}, ${formatBytes(row.byteSize)}: ${row.preview}`;
 	// The message list is a single-select listbox driving the inspector. Each row
 	// is one role="option"; a roving tabindex (exactly one tab stop) plus
 	// ArrowUp/Down/Home/End give inter-row navigation matching the streams tree,
@@ -376,7 +376,7 @@ function Row(props: {
 		>
 			<span class="dsui-row__index">
 				{active ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
-				<span>{row.index}</span>
+				<span title={row.offset}>{row.offset ? shortCursor(row.offset) : row.index}</span>
 			</span>
 			<span class="dsui-row__size">{formatBytes(row.byteSize)}</span>
 			{showTime ? (
@@ -723,7 +723,7 @@ export function MessagesWorkspace(): JSX.Element {
 							class={`dsui-grid__header${showTimeCol ? " dsui-grid__header--timed" : ""}`}
 							aria-hidden="true"
 						>
-							<span>#</span>
+							<span>Offset</span>
 							<span>Size</span>
 							{showTimeCol ? (
 								<span class="dsui-grid__timehead">
