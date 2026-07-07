@@ -4,12 +4,13 @@
 -- member leaves it to fall due again and be reclaimed — at-least-once by
 -- construction. Single-threaded Redis makes this the leaderless claim: exactly
 -- one replica's re-score wins a given member per tick.
--- KEYS: 1=zset
--- ARGV: 1=now_ns 2=limit 3=visibility_ns
--- Reply: array of member ids now leased to the caller
-local due = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, tonumber(ARGV[2]))
-local vis = tonumber(ARGV[1]) + tonumber(ARGV[3])
+local k_zset = KEYS[1]
+local a_now_ns = ARGV[1]
+local a_limit = ARGV[2]
+local a_visibility_ns = ARGV[3]
+local due = redis.call('ZRANGEBYSCORE', k_zset, '-inf', a_now_ns, 'LIMIT', 0, tonumber(a_limit))
+local vis = tonumber(a_now_ns) + tonumber(a_visibility_ns)
 for _, m in ipairs(due) do
-  redis.call('ZADD', KEYS[1], vis, m)
+  redis.call('ZADD', k_zset, vis, m)
 end
 return due

@@ -1,17 +1,18 @@
 -- link_stream.lua — link a stream to a subscription at the given offset if it is
 -- not already linked; an explicit link upgrades an existing glob link (explicit
 -- takes precedence, PROTOCOL §6.1), preserving the cursor.
--- KEYS: 1=links
--- ARGV: 1=path 2=link_type 3=offset
--- Reply: {status} ; LINKED | UPGRADED | EXISTS
-local cur = redis.call('HGET', KEYS[1], ARGV[1])
+local k_links = KEYS[1]
+local a_path = ARGV[1]
+local a_link_type = ARGV[2]
+local a_offset = ARGV[3]
+local cur = redis.call('HGET', k_links, a_path)
 if cur == false then
-  redis.call('HSET', KEYS[1], ARGV[1], ARGV[2] .. ':' .. ARGV[3])
+  redis.call('HSET', k_links, a_path, a_link_type .. ':' .. a_offset)
   return { 'LINKED' }
 end
-if ARGV[2] == 'explicit' then
+if a_link_type == 'explicit' then
   local _, off = split_link(cur)
-  redis.call('HSET', KEYS[1], ARGV[1], 'explicit:' .. off)
+  redis.call('HSET', k_links, a_path, 'explicit:' .. off)
   return { 'UPGRADED' }
 end
 return { 'EXISTS' }

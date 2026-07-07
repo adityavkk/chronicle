@@ -5,14 +5,17 @@
 -- ("<priv>:<created>:retiring:<retire_after_unix>"); the successor is
 -- installed and the active pointer flipped, all in one script in the {__ds}
 -- slot (ADR-0001).
--- KEYS: 1=family_hash 2=active_kid
--- ARGV: 1=expected_active_kid 2=new_kid 3=new_material 4=retire_after_unix
--- Reply: {'rotated', new_kid} | {'conflict', current_kid_or_empty}
-local cur = redis.call('GET', KEYS[2])
-if not cur or cur ~= ARGV[1] then
+local k_family_hash = KEYS[1]
+local k_active_kid = KEYS[2]
+local a_expected_active_kid = ARGV[1]
+local a_new_kid = ARGV[2]
+local a_new_material = ARGV[3]
+local a_retire_after_unix = ARGV[4]
+local cur = redis.call('GET', k_active_kid)
+if not cur or cur ~= a_expected_active_kid then
   return { 'conflict', cur or '' }
 end
-local old = redis.call('HGET', KEYS[1], cur)
+local old = redis.call('HGET', k_family_hash, cur)
 if not old then
   return { 'conflict', '' }
 end
@@ -20,7 +23,7 @@ local priv, created = string.match(old, '^([^:]+):([^:]+):')
 if not priv then
   return { 'conflict', '' }
 end
-redis.call('HSET', KEYS[1], cur, priv .. ':' .. created .. ':retiring:' .. ARGV[4])
-redis.call('HSET', KEYS[1], ARGV[2], ARGV[3])
-redis.call('SET', KEYS[2], ARGV[2])
-return { 'rotated', ARGV[2] }
+redis.call('HSET', k_family_hash, cur, priv .. ':' .. created .. ':retiring:' .. a_retire_after_unix)
+redis.call('HSET', k_family_hash, a_new_kid, a_new_material)
+redis.call('SET', k_active_kid, a_new_kid)
+return { 'rotated', a_new_kid }

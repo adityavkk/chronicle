@@ -174,8 +174,9 @@ func (c SlotClaim) Granted() bool { return c.Status == SlotClaimed || c.Status =
 // on. RENEWED is not a transfer.
 func (c SlotClaim) Transferred() bool { return c.Status == SlotClaimed }
 
-// parseSlotClaim decodes the {status, owner_id, owner_epoch, lease_expiry_ns}
-// reply. Pure over the string slice evalStrings already produced.
+// parseSlotClaim decodes the legacy test form of the
+// {status, owner_id, owner_epoch, lease_expiry_ns} reply. Production Redis
+// replies are decoded by the typed script ABI before reaching callers.
 func parseSlotClaim(reply []string) (SlotClaim, error) {
 	if len(reply) == 0 {
 		return SlotClaim{}, fmt.Errorf("webhook: empty claim_shard reply")

@@ -4,39 +4,48 @@
 -- lease — is the correctness mechanism: a stale wake/generation is rejected and
 -- cannot advance a cursor.
 --
--- Claim granularity (the third axis, design 08): KEYS[1] is the per-(subId,g)
+-- Claim granularity (the third axis, design 08): k_shardstate is the per-(subId,g)
 -- SHARDSTATE hash whose (generation, wake_id) fence this ack checks and whose
--- idle/lease fields the done/heartbeat branches write; ARGV[1] is the per-shard
--- schedule MEMBER for the lease/retry ZREM/ZADD. The cursor hash (KEYS[2]) is
+-- idle/lease fields the done/heartbeat branches write; a_member is the per-shard
+-- schedule MEMBER for the lease/retry ZREM/ZADD. The cursor hash (k_links) is
 -- shared across a subscription's shards — cursors are forward-only watermarks, so
 -- an ack only ever advances the streams it names, fenced by its own shard's
--- register. At G=1 / shard 0, KEYS[1]==sub hash and ARGV[1]==id (today). The
--- due-set ZREM in the done branch (Move 2, KEYS[5]) uses this same ARGV[1] member,
+-- register. At G=1 / shard 0, k_shardstate==sub hash and a_member==id (today). The
+-- due-set ZREM in the done branch (Move 2, k_due_zset) uses this same a_member member,
 -- so a per-shard due mark is cleared by its own shard's ack.
--- KEYS: 1=shardstate 2=links 3=lease_zset 4=retry_zset 5=due_zset 6=sub(config)
---       [7=slot (ds:{__ds:h}:ownership:slot:<h>) when owned]
--- ARGV: 1=member 2=req_gen 3=req_wake 4=token_gen 5=done('0'/'1') 6=now_ns
---       7=lease_ttl_ms 8=num_acks then (path, offset)* then
---       replica_id, expected_epoch (the trailing pair; epoch '' => skip the check)
--- Reply: {status} ; OK | FENCED | NOSUB
-local sub = KEYS[1]
+local k_shardstate = KEYS[1]
+local k_links = KEYS[2]
+local k_lease_zset = KEYS[3]
+local k_retry_zset = KEYS[4]
+local k_due_zset = KEYS[5]
+local k_sub_config = KEYS[6]
+local k_slot = KEYS[7]
+local a_member = ARGV[1]
+local a_req_gen = ARGV[2]
+local a_req_wake = ARGV[3]
+local a_token_gen = ARGV[4]
+local a_done = ARGV[5]
+local a_now_ns = ARGV[6]
+local a_lease_ttl_ms = ARGV[7]
+local a_num_acks = ARGV[8]
+local sub = k_shardstate
 -- Owner-epoch fence (issue #14, TOCTOU): the replica_id/expected_epoch are the
 -- LAST two ARGV (after the variable-length acks). For the load-balanced external
 -- ack path epoch is '' and this is a no-op — the (gen,wake_id) fence below is the
 -- guard. A reused-as-FENCED reply is indistinguishable from the gen fence on the
 -- wire, which is fine: both grant and mutate nothing.
-if owner_fenced(KEYS[7], ARGV[#ARGV - 1], ARGV[#ARGV]) then
+if owner_fenced(k_slot, ARGV[#ARGV - 1], ARGV[#ARGV]) then
   return { 'FENCED' }
 end
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
 end
-if redis.call('EXISTS', KEYS[6]) == 0 then
+if redis.call('EXISTS', k_sub_config) == 0 then
   return { 'NOSUB' }
 end
-local cfg_inc = redis.call('HGET', KEYS[6], 'incarnation')
+local cfg_inc = redis.call('HGET', k_sub_config, 'incarnation')
 local shard_inc = redis.call('HGET', sub, 'incarnation')
-if KEYS[1] ~= KEYS[6] then
+if k_shardstate ~= k_sub_config then
   if cfg_inc == false or cfg_inc == '' or shard_inc == false or shard_inc == '' or shard_inc ~= cfg_inc then
     return { 'FENCED' }
   end
@@ -47,33 +56,33 @@ else
 end
 local gen = redis.call('HGET', sub, 'generation')
 local wake = redis.call('HGET', sub, 'wake_id')
-if fenced(gen, wake, ARGV[2], ARGV[3], ARGV[4]) then
+if fenced(gen, wake, a_req_gen, a_req_wake, a_token_gen) then
   return { 'FENCED' }
 end
-local n = tonumber(ARGV[8])
+local n = tonumber(a_num_acks)
 local i = 9
 for _ = 1, n do
   local path = ARGV[i]
   local off = ARGV[i + 1]
-  local cur = redis.call('HGET', KEYS[2], path)
+  local cur = redis.call('HGET', k_links, path)
   if cur ~= false then
     local lt, curoff = split_link(cur)
     if offset_greater(off, curoff) then
-      redis.call('HSET', KEYS[2], path, lt .. ':' .. off)
+      redis.call('HSET', k_links, path, lt .. ':' .. off)
     end
   end
   i = i + 2
 end
-if ARGV[5] == '1' then
+if a_done == '1' then
   redis.call('HSET', sub, 'phase', 'idle', 'holder', '0', 'holder_worker', '',
     'wake_id', '', 'lease_until_ns', '0', 'status', 'active',
     'retry_count', '0', 'first_fail_ns', '0', 'next_attempt_ns', '0')
-  redis.call('ZREM', KEYS[3], ARGV[1])
-  redis.call('ZREM', KEYS[4], ARGV[1])
-  redis.call('ZREM', KEYS[5], ARGV[1]) -- clear the due-set wake mark (Move 2)
+  redis.call('ZREM', k_lease_zset, a_member)
+  redis.call('ZREM', k_retry_zset, a_member)
+  redis.call('ZREM', k_due_zset, a_member) -- clear the due-set wake mark (Move 2)
 else
-  local until_ns = tonumber(ARGV[6]) + tonumber(ARGV[7]) * 1000000
+  local until_ns = tonumber(a_now_ns) + tonumber(a_lease_ttl_ms) * 1000000
   redis.call('HSET', sub, 'lease_until_ns', tostring(until_ns), 'phase', 'live')
-  redis.call('ZADD', KEYS[3], until_ns, ARGV[1])
+  redis.call('ZADD', k_lease_zset, until_ns, a_member)
 end
 return { 'OK' }

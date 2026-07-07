@@ -10,12 +10,12 @@
 -- returned ack stays the real safety boundary that makes any leaked duplicate
 -- harmless. It reads owner_id/owner_epoch only, never the lease clock, so its
 -- OWNER verdict is time-free and exact (model_shard.go checks it strictly).
--- KEYS: 1=slot (ds:{__ds:h}:ownership:slot:<h>)
--- ARGV: 1=replica_id 2=expected_epoch
--- Reply: {status} ; OWNER | FENCED | UNOWNED
-local owner = redis.call('HGET', KEYS[1], 'owner_id')
+local k_slot = KEYS[1]
+local a_replica_id = ARGV[1]
+local a_expected_epoch = ARGV[2]
+local owner = redis.call('HGET', k_slot, 'owner_id')
 if owner == false then return { 'UNOWNED' } end
-if owner ~= ARGV[1] or redis.call('HGET', KEYS[1], 'owner_epoch') ~= ARGV[2] then
+if owner ~= a_replica_id or redis.call('HGET', k_slot, 'owner_epoch') ~= a_expected_epoch then
   return { 'FENCED' }
 end
 return { 'OWNER' }

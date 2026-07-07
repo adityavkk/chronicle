@@ -3,23 +3,27 @@
 -- callback/ack/release requests then fence (the record is gone) and cannot
 -- advance cursors. The Go caller removes the per-stream fan-out index entries
 -- (read before deletion) separately, since those keys are reconciled by the sweep.
--- KEYS: 1=sub 2=subs_set 3=links 4=lease_zset 5=retry_zset 6=due_zset
---       7=shard_registry
--- ARGV: 1=id
--- Reply: {status} ; OK
-redis.call('DEL', KEYS[1])
-redis.call('DEL', KEYS[3])
-redis.call('SREM', KEYS[2], ARGV[1])
-redis.call('ZREM', KEYS[4], ARGV[1])
-redis.call('ZREM', KEYS[5], ARGV[1])
-redis.call('ZREM', KEYS[6], ARGV[1])
-local shards = redis.call('SMEMBERS', KEYS[7])
+local k_sub = KEYS[1]
+local k_subs_set = KEYS[2]
+local k_links = KEYS[3]
+local k_lease_zset = KEYS[4]
+local k_retry_zset = KEYS[5]
+local k_due_zset = KEYS[6]
+local k_shard_registry = KEYS[7]
+local a_id = ARGV[1]
+redis.call('DEL', k_sub)
+redis.call('DEL', k_links)
+redis.call('SREM', k_subs_set, a_id)
+redis.call('ZREM', k_lease_zset, a_id)
+redis.call('ZREM', k_retry_zset, a_id)
+redis.call('ZREM', k_due_zset, a_id)
+local shards = redis.call('SMEMBERS', k_shard_registry)
 for _, g in ipairs(shards) do
-  local member = ARGV[1] .. ':g:' .. g
-  redis.call('DEL', KEYS[1] .. ':g:' .. g)
-  redis.call('ZREM', KEYS[4], member)
-  redis.call('ZREM', KEYS[5], member)
-  redis.call('ZREM', KEYS[6], member)
+  local member = a_id .. ':g:' .. g
+  redis.call('DEL', k_sub .. ':g:' .. g)
+  redis.call('ZREM', k_lease_zset, member)
+  redis.call('ZREM', k_retry_zset, member)
+  redis.call('ZREM', k_due_zset, member)
 end
-redis.call('DEL', KEYS[7])
+redis.call('DEL', k_shard_registry)
 return { 'OK' }

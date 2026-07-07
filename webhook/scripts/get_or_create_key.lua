@@ -2,13 +2,14 @@
 -- install the caller's candidate as the active key (PROTOCOL §6.5: private keys
 -- SHOULD persist across restarts so the kid stays stable). The first server to
 -- run this wins; all others adopt the stored key.
--- KEYS: 1=jwks_hash 2=active_kid
--- ARGV: 1=candidate_kid 2=candidate_material
--- Reply: {kid, material}
-local active = redis.call('GET', KEYS[2])
-if active and redis.call('HEXISTS', KEYS[1], active) == 1 then
-  return { active, redis.call('HGET', KEYS[1], active) }
+local k_jwks_hash = KEYS[1]
+local k_active_kid = KEYS[2]
+local a_candidate_kid = ARGV[1]
+local a_candidate_material = ARGV[2]
+local active = redis.call('GET', k_active_kid)
+if active and redis.call('HEXISTS', k_jwks_hash, active) == 1 then
+  return { active, redis.call('HGET', k_jwks_hash, active) }
 end
-redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
-redis.call('SET', KEYS[2], ARGV[1])
-return { ARGV[1], ARGV[2] }
+redis.call('HSET', k_jwks_hash, a_candidate_kid, a_candidate_material)
+redis.call('SET', k_active_kid, a_candidate_kid)
+return { a_candidate_kid, a_candidate_material }

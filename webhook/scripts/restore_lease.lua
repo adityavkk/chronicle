@@ -15,19 +15,22 @@
 -- is leaked back into the schedule (which claim_due would then churn forever). A
 -- re-ZADD of an entry still present is idempotent (it rewrites the same score), so
 -- the pass is fence-safe to run on every recovery event.
--- KEYS: 1=sub 2=lease_zset 3=due_zset
--- ARGV: 1=id 2=now_ns 3=owed('0'/'1')
--- Reply: {status} ; RESTORED | INTACT | NOSUB
-local sub = KEYS[1]
+local k_sub = KEYS[1]
+local k_lease_zset = KEYS[2]
+local k_due_zset = KEYS[3]
+local a_id = ARGV[1]
+local a_now_ns = ARGV[2]
+local a_owed = ARGV[3]
+local sub = k_sub
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
 end
 local phase = redis.call('HGET', sub, 'phase')
 local lease_until = tonumber(redis.call('HGET', sub, 'lease_until_ns')) or 0
 if (phase == 'live' or phase == 'waking') and lease_until > 0 then
-  redis.call('ZADD', KEYS[2], lease_until, ARGV[1])
-  if ARGV[3] == '1' then
-    redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1])
+  redis.call('ZADD', k_lease_zset, lease_until, a_id)
+  if a_owed == '1' then
+    redis.call('ZADD', k_due_zset, a_now_ns, a_id)
   end
   return { 'RESTORED' }
 end
