@@ -81,6 +81,7 @@ func TestScriptKeyVectorsAreClusterSingleSlot(t *testing.T) {
 		"record_wake_sent":      {subKey(id)},
 		"claim_shard":           {slotKey(h)},
 		"check_owner":           {slotKey(h)},
+		"reserve_legacy_slot":   {legacyOwnershipSlotKey(h)},
 		"get_or_create_webhook": {jwksKey, activeKidKey},
 		"get_or_create_wake":    {wakeKeysKey, wakeActiveKidKey},
 		"rotate_key_webhook":    {jwksKey, activeKidKey},

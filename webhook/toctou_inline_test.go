@@ -177,7 +177,7 @@ func TestInlineFence_RecordSuccessAboveGenFence(t *testing.T) {
 	if _, err := s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	stale, live := ownedAndDeposed(t, s)
+	stale, live := ownedAndDeposed(t, s, "s1")
 	now := time.Now()
 	arm, err := s.ArmWakeUnscoped("s1", now, 60000, true, "wk-1")
 	if err != nil || !arm.Armed {

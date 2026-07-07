@@ -237,7 +237,7 @@ cmd_gate4() {
   # specifically (the killSlotOwner nemesis: read owner_id, map to its pod, kill it),
   # forcing a takeover (a new-owner claim_shard CAS + eager reconcile).
   sleep 45
-  owner="$(kubectl -n "$NS" exec deploy/chronicle -- sh -c "redis-cli -u redis://${redis_host}:6379/0 hget 'ds:{ownership}:slot:0' owner_id" 2>/dev/null | tr -d '\r')"
+  owner="$(kubectl -n "$NS" exec deploy/chronicle -- sh -c "redis-cli -u redis://${redis_host}:6379/0 hget 'ds:{__ds:0}:ownership:slot:0' owner_id" 2>/dev/null | tr -d '\r')"
   pod="${owner%-*}" # replica_id is "<podName>-<32hex nonce>"
   if [ -n "$pod" ] && kubectl -n "$NS" get pod "$pod" >/dev/null 2>&1; then
     log "gate #4: slot-0 owner is $owner; force-deleting its pod $pod"

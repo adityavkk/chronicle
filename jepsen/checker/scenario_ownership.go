@@ -16,7 +16,7 @@ import (
 // 44), the acceptance gate for #14's claim_shard.lua / check_owner.lua. It is the
 // imperative shell over the pure model_shard.go oracle: N concurrent claimants
 // (each a distinct replica id) race claim_shard / check_owner over a shared set of
-// ds:{ownership} slots, with an in-process gcPause nemesis forcing intra-slot
+// co-homed ownership slots, with an in-process gcPause nemesis forcing intra-slot
 // takeovers, and the recorded history is checked for linearizability against the
 // porcupine shardModel — Unknown counts as FAIL (a too-concurrent history proves
 // nothing). A PASS proves claim_shard is a real single-holder CAS, not a
@@ -44,7 +44,7 @@ func runOwnershipExclusivity(c config) error {
 		workers = 2 // exclusivity needs at least two contenders per slot
 	}
 	// A short ownership lease so a gcPause reliably outlives it and a peer takes
-	// over (rotating the slot's owner_epoch). This is the {ownership} slotLeaseTTL,
+	// over (rotating the slot's owner_epoch). This is the ownership slotLeaseTTL,
 	// a different layer from the per-subscription webhook lease_ttl_ms.
 	slotTTL := 250 * time.Millisecond
 	// Bound the run so each slot partition stays in porcupine's tractable range (07
@@ -62,7 +62,7 @@ func runOwnershipExclusivity(c config) error {
 	slotKeys := make([]string, slots)
 	slotIDs := make([]string, slots)
 	for h := 0; h < slots; h++ {
-		slotKeys[h] = fmt.Sprintf("ds:{ownership}:slot:t3-%d-%d", runTag, h)
+		slotKeys[h] = fmt.Sprintf("ds:{__ds:%d}:ownership:slot:t3-%d-%d", h%dsSubSlots, runTag, h)
 		slotIDs[h] = fmt.Sprintf("h%d", h)
 	}
 	defer func() {

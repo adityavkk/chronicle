@@ -253,8 +253,40 @@ const ownershipTag = "{ownership}"
 // are eligible to own subscription slots.
 const membersKey = "ds:" + ownershipTag + ":members"
 
-// slotKey is the HASH holding ownership slot h's CAS record
+// OwnershipSlotKey is the HASH holding ownership slot h's CAS record
 // {owner_id, owner_epoch, lease_expiry_ns}, claimed/renewed by claim_shard.lua and
 // read by check_owner.lua. It lives in {__ds:h}, not {ownership}, so inline
-// owner-scoped schedule writes can include it without CROSSSLOT.
-func slotKey(h int) string { return "ds:" + slotTagAt(h) + ":ownership:slot:" + strconv.Itoa(h) }
+// owner-scoped schedule writes can include it without CROSSSLOT. Exported for the
+// Jepsen kill-slot-owner nemesis so the fault target cannot drift from the manager.
+func OwnershipSlotKey(h int) string {
+	return "ds:" + slotTagAt(h) + ":ownership:slot:" + strconv.Itoa(h)
+}
+
+func slotKey(h int) string { return OwnershipSlotKey(h) }
+
+// legacyOwnershipSlotKey is the pre-#146 slot ownership record. New claims bridge
+// it during rollout so old pods either see a live new owner and fence, or new pods
+// defer to a live old owner until its lease expires.
+func legacyOwnershipSlotKey(h int) string { return "ds:" + ownershipTag + ":slot:" + strconv.Itoa(h) }
+
+func ownershipSlotIndex(key string) (int, bool) {
+	const prefix = "ds:{__ds:"
+	const mid = "}:ownership:slot:"
+	if !strings.HasPrefix(key, prefix) {
+		return 0, false
+	}
+	rest := strings.TrimPrefix(key, prefix)
+	i := strings.Index(rest, mid)
+	if i <= 0 {
+		return 0, false
+	}
+	tagH, err := strconv.Atoi(rest[:i])
+	if err != nil || tagH < 0 || tagH >= subSlots {
+		return 0, false
+	}
+	bodyH, err := strconv.Atoi(rest[i+len(mid):])
+	if err != nil || bodyH != tagH {
+		return 0, false
+	}
+	return tagH, true
+}

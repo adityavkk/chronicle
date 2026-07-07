@@ -365,7 +365,7 @@ import Aside from "../components/Aside.astro";
   `owner_epoch` on every transfer:
 
   ```lua title="Proposed: claim_shard.lua — the slot-ownership CAS"
-  -- KEYS: 1=slot (ds:{ownership}:slot:<h>)   ARGV: 1=replica_id 2=now_ns 3=lease_ttl_ms
+  -- KEYS: 1=slot (ds:{__ds:h}:ownership:slot:<h>)   ARGV: 1=replica_id 2=now_ns 3=lease_ttl_ms
   -- Reply: {status, owner_id, owner_epoch, lease_expiry_ns} ; CLAIMED | RENEWED | BUSY
   local slot, me = KEYS[1], ARGV[1]
   local now = tonumber(ARGV[2])

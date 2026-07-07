@@ -51,6 +51,9 @@ var (
 	// (#11) — slot ownership shards which replica runs background work.
 	claimShardScript = loadScript("claim_shard.lua")
 	checkOwnerScript = loadScript("check_owner.lua")
+	// Rollout guard for the pre-#146 owner key. It keeps mixed old/new pods from
+	// owning the same logical slot through different hashes during deployment.
+	reserveLegacySlotScript = loadScript("reserve_legacy_slot.lua")
 	// Key rotation (#123/#126 TBrot): the atomic successor-mint + active_kid
 	// CAS in the {__ds} slot.
 	rotateKeyScript = loadScript("rotate_key.lua")

@@ -71,7 +71,7 @@ type config struct {
 	// adds the G=1-vs-G differential.
 	redisURL   string
 	gShards    int
-	slots      int // ownership-exclusivity (T3): number of ds:{ownership} slots contended
+	slots      int // ownership-exclusivity (T3): number of ownership slots contended
 	leaseTTLMs int
 	holdMs     int
 	thinkMs    int
@@ -110,7 +110,7 @@ func main() {
 	flag.StringVar(&c.ramp, "ramp", "6,12,24", "contention: comma-separated claimant ramp")
 	flag.BoolVar(&c.c3, "c3", false, "contention: also run the G=1 baseline and assert C3 (the knee moves ~Gx; gate #6)")
 	flag.BoolVar(&c.sharded, "sharded", false, "contention/shard-linz: use the chronicle per-(subId,g) capability (ClaimShard) rather than client-side G subscriptions")
-	flag.IntVar(&c.slots, "slots", 4, "ownership-exclusivity (T3): number of ds:{ownership} slots concurrent claimants contend over")
+	flag.IntVar(&c.slots, "slots", 4, "ownership-exclusivity (T3): number of ownership slots concurrent claimants contend over")
 	flag.Parse()
 
 	r := newReceiver()
