@@ -912,7 +912,12 @@ export async function readSelected(offset: string): Promise<void> {
 	readLoading.value = true;
 	errorMessage.value = null;
 	try {
-		const result = await client.readStream(path, offset);
+		// Send the grid's row cap as the server-side batch limit so a catch-up
+		// read returns one batch (chronicle sets Stream-Next-Offset mid-stream and
+		// omits Stream-Up-To-Date), which is what makes "Read next batch" page
+		// forward instead of jumping to the tail. The client-side slice below
+		// stays as a defensive cap.
+		const result = await client.readStream(path, offset, clampRowCap(rowCap.value));
 		// If the user switched stream (or connection) while this read was in
 		// flight, drop its result: the captured path no longer matches the
 		// selection, so writing lastRead/readHistory here would contaminate the

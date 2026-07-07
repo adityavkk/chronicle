@@ -44,6 +44,7 @@ import {
 	formatTime,
 	matchCompiled,
 	resolveOffset,
+	shortCursor,
 } from "../lib/messages";
 import { offsetChipLabel } from "../lib/readHistory";
 import { describeTailMode, isLiveMode } from "../lib/tail";
@@ -658,14 +659,14 @@ export function MessagesWorkspace(): JSX.Element {
 					{!live && read !== null ? (
 						<div class="dsui-ws__offsets" title="Honest batch offset range (no per-element offset)">
 							batch&nbsp;
-							<code>{read.requestedOffset}</code>
+							<code title={read.requestedOffset}>{shortCursor(read.requestedOffset)}</code>
 							<CopyButton
 								text={read.requestedOffset}
 								label="Copy this batch's start cursor"
 								copyKey="offset-from"
 							/>
 							&nbsp;→&nbsp;
-							<code>{read.nextOffset ?? "—"}</code>
+							<code title={read.nextOffset ?? undefined}>{shortCursor(read.nextOffset)}</code>
 							{read.nextOffset !== null ? (
 								<CopyButton
 									text={read.nextOffset}
@@ -849,17 +850,28 @@ export function MessagesWorkspace(): JSX.Element {
 									type="button"
 									class="dsui-btn dsui-btn--ghost"
 									title={
-										read?.nextOffset != null
-											? `Resume from Stream-Next-Offset ${read.nextOffset}`
-											: "No further offset — you are at the tail"
+										read?.upToDate
+											? "You are at the tail — nothing more to read yet"
+											: read?.nextOffset != null
+												? `Resume from Stream-Next-Offset ${read.nextOffset}`
+												: "No further offset — you are at the tail"
 									}
-									disabled={read?.nextOffset === null || read?.nextOffset === undefined || loading}
+									disabled={
+										read?.upToDate ||
+										read?.nextOffset === null ||
+										read?.nextOffset === undefined ||
+										loading
+									}
 									onClick={() => void readNext()}
 								>
 									<IconCornerDownRight size={14} />
 									<span>Read next batch</span>
-									{read?.nextOffset !== null && read?.nextOffset !== undefined ? (
-										<code class="dsui-ws__nextoffset">{read.nextOffset}</code>
+									{!read?.upToDate &&
+									read?.nextOffset !== null &&
+									read?.nextOffset !== undefined ? (
+										<code class="dsui-ws__nextoffset" title={read.nextOffset}>
+											{shortCursor(read.nextOffset)}
+										</code>
 									) : null}
 								</button>
 							</div>

@@ -440,6 +440,20 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		return newHTTPError(http.StatusBadRequest, "invalid offset")
 	}
 
+	// Optional read batch limit — the concrete lever behind §5.6's
+	// "server-defined maximum chunk size". A positive ?limit caps a catch-up
+	// read to N messages (framed/JSON streams only); the response then omits
+	// Stream-Up-To-Date and its Stream-Next-Offset lands mid-stream, so a
+	// client pages forward by re-reading from that cursor. Absent, empty, or
+	// non-positive means unlimited (the historical behaviour), so no existing
+	// client or conformance test is affected — the cap is strictly opt-in.
+	limit := 0
+	if v := query.Get("limit"); v != "" {
+		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+			limit = n
+		}
+	}
+
 	// Check for live mode
 	liveMode := query.Get("live")
 	cursor := query.Get("cursor")
@@ -508,6 +522,17 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	messages, _, err := h.Store.Read(path, effectiveOffset)
 	if err != nil {
 		return err
+	}
+
+	// Apply the opt-in read batch limit to framed (JSON) streams only. Cutting
+	// by message count is meaningful only where messages are discrete; unframed
+	// streams have no persisted boundaries (a read is one concatenated blob), so
+	// they keep unlimited behaviour. Slicing here — before the next-offset
+	// calculation below — is all that's needed: nextOffset falls to the last
+	// kept message's offset, so upToDate computes false (we're short of the
+	// tail) and the ETag/caching headers describe this exact batch.
+	if limit > 0 && len(messages) > limit && store.IsJSONContentType(meta.ContentType) {
+		messages = messages[:limit]
 	}
 
 	// Calculate next offset

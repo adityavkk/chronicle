@@ -14,24 +14,24 @@ import type { ReadHistoryEntry } from "./types";
 /**
  * Append a visited read position to the capped history, newest last.
  *
- * An immediate re-read of the same cursor (e.g. pressing Refresh, or clicking
- * the chip you are already on) collapses into the latest entry rather than
- * adding a duplicate chip, so the strip stays a trail of distinct positions.
- * When the history would exceed `cap`, the oldest entries are dropped.
+ * Re-reading a cursor already in the trail — pressing Refresh, or clicking any
+ * chip (the current one or an older one) — collapses onto that position rather
+ * than adding a duplicate: the prior occurrence for the same (path, offset) is
+ * dropped and the fresh visit re-appended as newest. So the strip stays a trail
+ * of DISTINCT positions in most-recently-visited order, and clicking a chip
+ * navigates to it instead of growing the strip. When the history would exceed
+ * `cap`, the oldest entries are dropped.
  */
 export function appendReadHistory(
 	history: readonly ReadHistoryEntry[],
 	entry: ReadHistoryEntry,
 	cap: number,
 ): readonly ReadHistoryEntry[] {
-	const last = history[history.length - 1];
-	const isRepeat =
-		last !== undefined &&
-		last.path === entry.path &&
-		last.requestedOffset === entry.requestedOffset;
-	const base = isRepeat ? history.slice(0, -1) : history;
-	const next = [...base, entry];
 	if (cap <= 0) return [];
+	const base = history.filter(
+		(h) => !(h.path === entry.path && h.requestedOffset === entry.requestedOffset),
+	);
+	const next = [...base, entry];
 	return next.length > cap ? next.slice(next.length - cap) : next;
 }
 

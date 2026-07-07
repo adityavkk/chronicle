@@ -26,7 +26,7 @@
 import { signal } from "@preact/signals";
 import type { JSX } from "preact";
 import { useId, useRef } from "preact/hooks";
-import { extractTimestamp, formatBytes, formatTimeFull } from "../lib/messages";
+import { extractTimestamp, formatBytes, formatTimeFull, shortCursor } from "../lib/messages";
 import { isSignificantHeader, partitionHeaders } from "../lib/protocol";
 import type { GridRow, ReadResult } from "../lib/types";
 import { lastRead, selectedRow, toggleInspector } from "../state/store";
@@ -118,9 +118,9 @@ function MetaBlock(props: { row: GridRow; read: ReadResult | null }): JSX.Elemen
 			{read !== null ? (
 				<MetaRow label="Batch offset">
 					<span class="dsui-meta__range">
-						<code>{read.requestedOffset}</code>
+						<code title={read.requestedOffset}>{shortCursor(read.requestedOffset)}</code>
 						<span class="dsui-meta__arrow">→</span>
-						<code>{read.nextOffset ?? "—"}</code>
+						<code title={read.nextOffset ?? undefined}>{shortCursor(read.nextOffset)}</code>
 					</span>
 				</MetaRow>
 			) : null}
