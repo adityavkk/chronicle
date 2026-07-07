@@ -16,6 +16,7 @@ const (
 	HeaderStreamExpiresAt       = "Stream-Expires-At"
 	HeaderStreamClosed          = "Stream-Closed"
 	HeaderStreamSSEDataEncoding = "Stream-SSE-Data-Encoding"
+	HeaderStreamEnvelope        = "Stream-Envelope"
 
 	// Idempotent producer headers
 	HeaderProducerId          = "Producer-Id"
