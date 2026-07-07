@@ -36,8 +36,14 @@ if redis.call('EXISTS', KEYS[7]) == 0 then
 end
 local cfg_inc = redis.call('HGET', KEYS[7], 'incarnation')
 local shard_inc = redis.call('HGET', sub, 'incarnation')
-if cfg_inc ~= false and cfg_inc ~= '' and shard_inc ~= cfg_inc then
-  return { 'FENCED' }
+if KEYS[1] ~= KEYS[7] then
+  if cfg_inc == false or cfg_inc == '' or shard_inc == false or shard_inc == '' or shard_inc ~= cfg_inc then
+    return { 'FENCED' }
+  end
+else
+  if cfg_inc ~= false and cfg_inc ~= '' and shard_inc ~= cfg_inc then
+    return { 'FENCED' }
+  end
 end
 local gen = redis.call('HGET', sub, 'generation')
 local wake = redis.call('HGET', sub, 'wake_id')

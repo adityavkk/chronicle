@@ -161,3 +161,50 @@ func TestShardDeleteRecreateFencesStaleAck(t *testing.T) {
 		t.Fatalf("stale ack moved recreated cursor: links=%+v want offset %q", sub.Links, initial)
 	}
 }
+
+// TestShardLegacyMissingIncarnationFencesStaleAck seeds the pre-fix final state:
+// delete/recreate already happened before incarnation stamps existed, so both the
+// recreated parent and the orphan g>0 shard lack incarnation fields. A stale shard
+// ack must still fence and leave the recreated cursor untouched.
+func TestShardLegacyMissingIncarnationFencesStaleAck(t *testing.T) {
+	s, client := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	const id = "agent-handler-legacy-orphan"
+	const path = "/p"
+	initial := "0000000000000000_0000000000000000"
+	tail := "0000000000000001_0000000000000000"
+	links := []StreamLink{{Path: path, LinkType: LinkExplicit, AckedOffset: initial}}
+	if _, err := s.CreateOrConfirm(id, pullWakeShardCfg(), links, now); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := client.HDel(ctx, subKey(id), "incarnation").Err(); err != nil {
+		t.Fatalf("strip parent incarnation: %v", err)
+	}
+	if err := client.HSet(ctx, subShardKey(id, 1),
+		"generation", "1",
+		"wake_id", "wake-legacy",
+		"phase", "live",
+		"holder", "1",
+		"holder_worker", "worker-old",
+		"lease_until_ns", nsArg(now.Add(time.Minute)),
+	).Err(); err != nil {
+		t.Fatalf("seed legacy orphan shard: %v", err)
+	}
+
+	st, err := s.AckShard(id, 1, 1, "wake-legacy", 1, true,
+		[]Ack{{Stream: path, Offset: tail}}, now.Add(time.Second), 30000)
+	if err != nil {
+		t.Fatalf("stale ack: %v", err)
+	}
+	if st != "FENCED" {
+		t.Fatalf("legacy stale shard ack = %q; want FENCED", st)
+	}
+	sub, ok, err := s.Get(id)
+	if err != nil || !ok {
+		t.Fatalf("get recreated sub: ok=%v err=%v", ok, err)
+	}
+	if len(sub.Links) != 1 || sub.Links[0].AckedOffset != initial {
+		t.Fatalf("legacy stale ack moved recreated cursor: links=%+v want offset %q", sub.Links, initial)
+	}
+}
