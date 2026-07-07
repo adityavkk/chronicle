@@ -3,7 +3,8 @@
 -- a re-wake can be issued if pending work remains. Pull-wake "waking" with no
 -- lease (lease_until_ns=0) is left untouched — its wake event is already in the
 -- wake stream for workers to claim.
--- KEYS: 1=sub 2=lease_zset 3=due_zset 4=slot (ds:{ownership}:slot:<h>)
+-- KEYS: 1=sub 2=lease_zset 3=due_zset
+--       [4=slot (ds:{__ds:h}:ownership:slot:<h>) when owned]
 -- ARGV: 1=id 2=now_ns 3=replica_id 4=expected_epoch (epoch '' => skip the check)
 -- Reply: {status} ; EXPIRED | ACTIVE | NOSUB | FENCED
 local sub = KEYS[1]

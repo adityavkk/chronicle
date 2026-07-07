@@ -81,6 +81,7 @@ func TestSlotHomingGuard(t *testing.T) {
 		"dueZKey":             dueZKey(h),
 		"subsKey":             subsKey(h),
 		"streamSubs":          streamSubsKey(h, "events/a"),
+		"slotKey":             slotKey(h),
 	}
 	wantSlot := clusterSlot(subKey(id))
 	wantTag := slotTagAt(h)

@@ -8,7 +8,7 @@ sequenceDiagram
     OA->>R: arm_wake.lua on {__ds:h} — generation++ · ZADD {__ds:h}:due now
     Note over OA: Origin A crashes before its fast-path delivery completes
     Note over OB: Origin B's due-worker drains {__ds:h}:due for the slots it owns
-    OB->>R: claim_due {__ds:h}:due · check_owner {ownership}:slot:h → OWNER
+    OB->>R: claim_due {__ds:h}:due · check_owner {__ds:h}:ownership:slot:h → OWNER
     OB->>Recv: POST signed wake — delivered after Origin A is gone
     Recv-->>OB: 200 {done:true}
     OB->>R: ack.lua — cursor → tail · ZREM {__ds:h}:due

@@ -18,11 +18,12 @@ import (
 // the current owner is NOT fenced (the control), confirming the gate is the epoch,
 // not merely "a scope was passed".
 
-// ownedAndDeposed sets up slot 0 owned by A (epoch e1), then taken over by B
-// (epoch e2 > e1 after expiry). It returns A's now-stale scope and B's live scope.
-func ownedAndDeposed(t *testing.T, s *RedisStore) (stale, live OwnerScope) {
+// ownedAndDeposed sets up id's home slot owned by A (epoch e1), then taken over
+// by B (epoch e2 > e1 after expiry). It returns A's now-stale scope and B's live
+// scope.
+func ownedAndDeposed(t *testing.T, s *RedisStore, id string) (stale, live OwnerScope) {
 	t.Helper()
-	key := slotKey(0)
+	key := slotKey(slotOf(id))
 	t0 := time.Unix(1_700_000_000, 0)
 	a, err := s.ClaimSlot(key, "A", t0, slotTTL)
 	if err != nil {
@@ -44,7 +45,7 @@ func TestInlineFence_ArmWake(t *testing.T) {
 	if _, err := s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	stale, live := ownedAndDeposed(t, s)
+	stale, live := ownedAndDeposed(t, s, "s1")
 
 	// Current owner (B) is not fenced: a fresh idle sub arms.
 	res, err := s.ArmWakeOwned(live, "s1", time.Now(), 1000, true, "wk-1")
@@ -69,7 +70,7 @@ func TestInlineFence_AckAboveGenFence(t *testing.T) {
 	if _, err := s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	stale, live := ownedAndDeposed(t, s)
+	stale, live := ownedAndDeposed(t, s, "s1")
 
 	now := time.Now()
 	arm, err := s.ArmWakeUnscoped("s1", now, 60000, true, "wk-1") // webhook: lease armed; gen/wake minted
@@ -101,7 +102,7 @@ func TestInlineFence_ReleaseAboveGenFence(t *testing.T) {
 	if _, err := s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	stale, live := ownedAndDeposed(t, s)
+	stale, live := ownedAndDeposed(t, s, "s1")
 
 	now := time.Now()
 	arm, _ := s.ArmWakeUnscoped("s1", now, 60000, true, "wk-1")
@@ -125,7 +126,7 @@ func TestInlineFence_ExpireLease(t *testing.T) {
 	if _, err := s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	stale, live := ownedAndDeposed(t, s)
+	stale, live := ownedAndDeposed(t, s, "s1")
 	now := time.Now()
 	s.ArmWakeUnscoped("s1", now, 60000, true, "wk-1") // lease armed, not yet expired
 
@@ -148,7 +149,7 @@ func TestInlineFence_ScheduleRetry(t *testing.T) {
 	if _, err := s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	stale, live := ownedAndDeposed(t, s)
+	stale, live := ownedAndDeposed(t, s, "s1")
 	now := time.Now()
 	arm, err := s.ArmWakeUnscoped("s1", now, 60000, true, "wk-1")
 	if err != nil || !arm.Armed {
@@ -176,7 +177,7 @@ func TestInlineFence_RecordSuccessAboveGenFence(t *testing.T) {
 	if _, err := s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	stale, live := ownedAndDeposed(t, s)
+	stale, live := ownedAndDeposed(t, s, "s1")
 	now := time.Now()
 	arm, err := s.ArmWakeUnscoped("s1", now, 60000, true, "wk-1")
 	if err != nil || !arm.Armed {
@@ -223,7 +224,7 @@ func TestInlineFence_NoScopeSkipsCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A foreign replica owns the slot.
-	if _, err := s.ClaimSlot(slotKey(0), "stranger", time.Unix(1_700_000_000, 0), slotTTL); err != nil {
+	if _, err := s.ClaimSlot(slotKey(slotOf("s1")), "stranger", time.Unix(1_700_000_000, 0), slotTTL); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()

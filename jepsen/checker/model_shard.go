@@ -14,12 +14,12 @@ import (
 // (model_shard_test.go).
 //
 // SHIPPED. The mechanism it models — claim_shard.lua / check_owner.lua and the
-// ds:{ownership}:slot:<h> record — landed in #14 and is live in webhook/. This
+// ds:{__ds:h}:ownership:slot:<h> record — landed in #14 and is live in webhook/. This
 // model is the PURE ORACLE for that mechanism, and it is exercised against the
 // shipped Lua by the live driver runOwnershipExclusivity in scenario_ownership.go
 // (the -scenario ownership-exclusivity gate): N concurrent claimants race
 // webhook.RedisStore.ClaimSlot (-> claim_shard.lua) / CheckOwner (-> check_owner.lua)
-// over real ds:{ownership} slot hashes with a gcPause nemesis, and the recorded
+// over real ownership slot hashes with a gcPause nemesis, and the recorded
 // history is checked against shardModel() with Unknown counted as FAIL. So
 // INV-OWNER-01/02 are validated against the shipped Redis, not just the model
 // agreeing with itself. The unit tests in model_shard_test.go are the oracle's

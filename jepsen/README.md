@@ -145,7 +145,7 @@ they gate have shipped — `claim_shard.lua` / `check_owner.lua` / `ds:{ownershi
 (`scenario_ownership.go`, not the orthogonal per-`(subId,g)` `scenario_shard.go`)
 drives N concurrent claimants against `webhook.RedisStore.ClaimSlot`
 (→ `claim_shard.lua`) / `CheckOwner` (→ `check_owner.lua`) over the real
-`ds:{ownership}:slot:<h>` hash with a `gcPause` nemesis, records the history, and
+`ds:{__ds:h}:ownership:slot:<h>` hash with a `gcPause` nemesis, records the history, and
 checks it against the porcupine `shardModel()` with Unknown counted as FAIL —
 reporting `PASS: T3 ownership exclusivity linearizable`. This is the binding of the
 oracle to the shipped Lua, so `INV-OWNER-01/02` are validated against real Redis,

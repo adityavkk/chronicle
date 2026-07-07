@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -120,6 +121,52 @@ func TestCheckOwnerStates(t *testing.T) {
 	// FENCED: wrong owner, even at the live epoch.
 	if chk, _ := s.CheckOwner(key, "C", c.Epoch.String()); chk != OwnerCheckFenced {
 		t.Fatalf("foreign check = %v, want FENCED", chk)
+	}
+}
+
+func TestClaimSlotDefersToLiveLegacyOwnerDuringRollout(t *testing.T) {
+	s, client := newTestStore(t)
+	key := slotKey(7)
+	legacyKey := legacyOwnershipSlotKey(7)
+	t0 := time.Unix(1_700_000_000, 0)
+	expires := t0.Add(slotTTL).UnixNano()
+	if err := client.HSet(s.ctx(), legacyKey,
+		"owner_id", "old-pod", "owner_epoch", "41", "lease_expiry_ns", strconv.FormatInt(expires, 10),
+	).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := s.ClaimSlot(key, "new-pod", t0, slotTTL)
+	if err != nil {
+		t.Fatalf("claim with live legacy owner: %v", err)
+	}
+	if c.Status != SlotBusy || c.Owner.String() != "old-pod" || c.Epoch.String() != "41" {
+		t.Fatalf("claim = %+v, want BUSY on old-pod epoch 41", c)
+	}
+	if n, err := client.Exists(s.ctx(), key).Result(); err != nil || n != 0 {
+		t.Fatalf("new key must not be claimed while legacy owner is live: exists=%d err=%v", n, err)
+	}
+}
+
+func TestClaimSlotMirrorsLegacyKeyToBlockOldPodsDuringRollout(t *testing.T) {
+	s, _ := newTestStore(t)
+	key := slotKey(9)
+	legacyKey := legacyOwnershipSlotKey(9)
+	t0 := time.Unix(1_700_000_000, 0)
+
+	c, err := s.ClaimSlot(key, "new-pod", t0, slotTTL)
+	if err != nil || !c.Granted() {
+		t.Fatalf("new claim = %+v err=%v, want grant", c, err)
+	}
+	old, err := s.ClaimSlot(legacyKey, "old-pod", t0.Add(100*time.Millisecond), slotTTL)
+	if err != nil {
+		t.Fatalf("old claim against mirrored legacy key: %v", err)
+	}
+	if old.Status != SlotBusy || old.Owner.String() != "new-pod" || old.Epoch.String() != c.Epoch.String() {
+		t.Fatalf("old claim = %+v, want BUSY on mirrored new-pod epoch %s", old, c.Epoch.String())
+	}
+	if chk, err := s.CheckOwner(legacyKey, "old-pod", "1"); err != nil || chk != OwnerCheckFenced {
+		t.Fatalf("old owner check = %v/%v, want FENCED by mirrored legacy key", chk, err)
 	}
 }
 

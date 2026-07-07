@@ -46,11 +46,14 @@ var (
 	recordWakeSentScript = loadScript("record_wake_sent.lua")
 	deleteSubScript      = loadScript("delete_sub.lua")
 	getOrCreateKeyScript = loadScript("get_or_create_key.lua")
-	// Work-sharded leased slot ownership (issue #14): the {ownership}-tagged CAS
-	// and its owner-epoch fence. Orthogonal to the per-(subId,g) claim granularity
-	// above (#11) — slot ownership shards which replica runs background work.
+	// Work-sharded leased slot ownership (issue #14): the co-homed slot CAS and its
+	// owner-epoch fence. Orthogonal to the per-(subId,g) claim granularity above
+	// (#11) — slot ownership shards which replica runs background work.
 	claimShardScript = loadScript("claim_shard.lua")
 	checkOwnerScript = loadScript("check_owner.lua")
+	// Rollout guard for the pre-#146 owner key. It keeps mixed old/new pods from
+	// owning the same logical slot through different hashes during deployment.
+	reserveLegacySlotScript = loadScript("reserve_legacy_slot.lua")
 	// Key rotation (#123/#126 TBrot): the atomic successor-mint + active_kid
 	// CAS in the {__ds} slot.
 	rotateKeyScript = loadScript("rotate_key.lua")

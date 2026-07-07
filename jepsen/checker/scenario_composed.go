@@ -60,7 +60,7 @@ func runComposedFences(c config) error {
 	}
 	// Short leases on BOTH layers so a single gcPause reliably outlives them and a
 	// peer takes over, rotating the generation and/or the epoch. The subscription
-	// lease_ttl_ms (inner) and the {ownership} slotLeaseTTL (outer) are INDEPENDENT,
+	// lease_ttl_ms (inner) and the ownership slotLeaseTTL (outer) are INDEPENDENT,
 	// and the slot lease is deliberately SHORTER so ownership churns more often than
 	// the inner lease — a deposed-on-the-outer-layer worker is the optimization case
 	// the composition tests, distinct from the inner-fence takeover.
@@ -82,7 +82,7 @@ func runComposedFences(c config) error {
 	// fence, unowned slot). Both are cleaned up on exit.
 	runTag := time.Now().UnixNano()
 	subID := fmt.Sprintf("composed-%d", runTag)
-	slotKey := fmt.Sprintf("ds:{ownership}:slot:composed-%d", runTag)
+	slotKey := webhook.OwnershipSlotKey(webhook.SlotOf(subID))
 	const subLabel = "S" // the model's partition sub-key (one subscription)
 	const slotLabel = "h0"
 

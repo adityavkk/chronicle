@@ -3,7 +3,7 @@
 -- lease is held). Coalescing falls out of the phase check. For webhook delivery
 -- the lease is armed here (arm_lease='1'); for pull-wake it is not (the lease
 -- starts at claim, PROTOCOL §7.3).
--- KEYS: 1=sub 2=lease_zset 3=due_zset 4=slot (ds:{ownership}:slot:<h>)
+-- KEYS: 1=sub 2=lease_zset 3=due_zset [4=slot (ds:{__ds:h}:ownership:slot:<h>) when owned]
 -- ARGV: 1=id 2=now_ns 3=lease_ttl_ms 4=arm_lease('0'/'1') 5=new_wake_id
 --       6=replica_id 7=expected_epoch (epoch '' on the load-balanced path => skip)
 -- Reply: {status, generation, wake_id} ; ARMED | BUSY | NOSUB | FENCED

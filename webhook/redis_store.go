@@ -519,8 +519,11 @@ func (s *RedisStore) armWake(id string, now time.Time, leaseTTLMs int64, armLeas
 	if armLease {
 		arm = "1"
 	}
-	h := slotOf(id)
-	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey(h), dueZKey(h), owner.slotKey},
+	keys, err := armWakeKeys(id, owner)
+	if err != nil {
+		return ArmResult{}, err
+	}
+	reply, err := s.evalStrings(armWakeScript, keys,
 		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID, owner.replicaID, owner.epoch)
 	if err != nil {
 		return ArmResult{}, err
@@ -680,10 +683,13 @@ func (s *RedisStore) ackShard(id string, g int, reqGeneration int64, reqWakeID s
 	// (after the variable-length acks) for the owner-epoch fence (issue #14).
 	args = append(args, owner.replicaID, owner.epoch)
 	// h from the base id: the shard fence hash, parent config hash, the shared cursor
-	// hash, all three schedule ZSETs, and the due outbox share one slot — ack.lua
-	// stays single-slot.
-	h := slotOf(id)
-	reply, err := s.evalStrings(ackScript, []string{subShardKey(id, g), linksKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), owner.slotKey, subKey(id)}, args...)
+	// hash, all three schedule ZSETs, the due outbox, and any owner slot key share
+	// one slot — ack.lua stays single-slot.
+	keys, err := ackKeys(id, g, owner)
+	if err != nil {
+		return "", err
+	}
+	reply, err := s.evalStrings(ackScript, keys, args...)
 	if err != nil {
 		return "", err
 	}
@@ -709,8 +715,11 @@ func (s *RedisStore) ReleaseOwned(scope OwnerScope, id string, reqGeneration int
 }
 
 func (s *RedisStore) release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, owner ownerScriptArgs) (string, error) {
-	h := slotOf(id)
-	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), owner.slotKey},
+	keys, err := releaseKeys(id, owner)
+	if err != nil {
+		return "", err
+	}
+	reply, err := s.evalStrings(releaseScript, keys,
 		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10), owner.replicaID, owner.epoch)
 	if err != nil {
 		return "", err
@@ -754,8 +763,11 @@ func (s *RedisStore) ExpireLeaseOwned(scope OwnerScope, id string, now time.Time
 }
 
 func (s *RedisStore) expireLease(id string, now time.Time, owner ownerScriptArgs) (string, error) {
-	h := slotOf(id)
-	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(id), leaseZKey(h), dueZKey(h), owner.slotKey}, id, nsArg(now), owner.replicaID, owner.epoch)
+	keys, err := expireLeaseKeys(id, owner)
+	if err != nil {
+		return "", err
+	}
+	reply, err := s.evalStrings(expireLeaseScript, keys, id, nsArg(now), owner.replicaID, owner.epoch)
 	if err != nil {
 		return "", err
 	}
@@ -858,8 +870,11 @@ func (s *RedisStore) ScheduleRetryOwned(scope OwnerScope, id string, generation 
 }
 
 func (s *RedisStore) scheduleRetry(id string, generation int64, wakeID string, now, nextAttempt time.Time, owner ownerScriptArgs) (int, error) {
-	h := slotOf(id)
-	reply, err := s.evalStrings(scheduleRetryScript, []string{subKey(id), retryZKey(h), owner.slotKey},
+	keys, err := scheduleRetryKeys(id, owner)
+	if err != nil {
+		return 0, err
+	}
+	reply, err := s.evalStrings(scheduleRetryScript, keys,
 		id, nsArg(now), nsArg(nextAttempt), strconv.FormatInt(generation, 10), wakeID, owner.replicaID, owner.epoch)
 	if err != nil {
 		return 0, err
@@ -891,8 +906,11 @@ func (s *RedisStore) RecordSuccessOwned(scope OwnerScope, id string, generation 
 }
 
 func (s *RedisStore) recordSuccess(id string, generation int64, wakeID string, owner ownerScriptArgs) (string, error) {
-	h := slotOf(id)
-	reply, err := s.evalStrings(recordSuccessScript, []string{subKey(id), retryZKey(h), owner.slotKey},
+	keys, err := recordSuccessKeys(id, owner)
+	if err != nil {
+		return "", err
+	}
+	reply, err := s.evalStrings(recordSuccessScript, keys,
 		id, strconv.FormatInt(generation, 10), wakeID, owner.replicaID, owner.epoch)
 	if err != nil {
 		return "", err
@@ -911,19 +929,88 @@ func (s *RedisStore) RecordWakeEventSent(id string, generation int64, wakeID str
 
 // ---- leased slot ownership (issue #14) ----
 
-// ClaimSlot runs claim_shard.lua, the {ownership}-tagged CAS that grants slot
-// ownership only when the current owner is expired, missing, or the caller, and
+// ClaimSlot runs claim_shard.lua, the co-homed CAS that grants slot ownership
+// only when the current owner is expired, missing, or the caller, and
 // bumps owner_epoch on transfer only. It is a thin wrapper: the SlotOwnership /
 // OwnerFenced metrics are recorded by the Manager's slot-reconcile loop, which
 // holds the SlotID and the held-lease context. slotLeaseTTL is the ownership
 // lease TTL, a DIFFERENT layer from the per-subscription webhook lease_ttl_ms.
 func (s *RedisStore) ClaimSlot(slotKey, replicaID string, now time.Time, slotLeaseTTL time.Duration) (SlotClaim, error) {
+	if h, ok := ownershipSlotIndex(slotKey); ok {
+		return s.claimSlotWithLegacyGuard(h, slotKey, replicaID, now, slotLeaseTTL)
+	}
 	reply, err := s.evalStrings(claimShardScript, []string{slotKey},
 		replicaID, nsArg(now), strconv.FormatInt(slotLeaseTTL.Milliseconds(), 10))
 	if err != nil {
 		return SlotClaim{}, err
 	}
 	return parseSlotClaim(reply)
+}
+
+func (s *RedisStore) claimSlotWithLegacyGuard(h int, key, replicaID string, now time.Time, slotLeaseTTL time.Duration) (SlotClaim, error) {
+	legacyKey := legacyOwnershipSlotKey(h)
+	reserved, legacy, err := s.reserveLegacySlot(legacyKey, replicaID, now, slotLeaseTTL)
+	if err != nil || !reserved {
+		return legacy, err
+	}
+
+	reply, err := s.evalStrings(claimShardScript, []string{key},
+		replicaID, nsArg(now), strconv.FormatInt(slotLeaseTTL.Milliseconds(), 10))
+	if err != nil {
+		s.releaseLegacySlotReservation(legacyKey, replicaID, legacy.ExpiryNs)
+		return SlotClaim{}, err
+	}
+	claim, err := parseSlotClaim(reply)
+	if err != nil {
+		s.releaseLegacySlotReservation(legacyKey, replicaID, legacy.ExpiryNs)
+		return SlotClaim{}, err
+	}
+	if !claim.Granted() {
+		s.releaseLegacySlotReservation(legacyKey, replicaID, legacy.ExpiryNs)
+		return claim, nil
+	}
+	if err := s.syncLegacySlot(legacyKey, claim); err != nil {
+		return SlotClaim{}, err
+	}
+	return claim, nil
+}
+
+func (s *RedisStore) reserveLegacySlot(key, replicaID string, now time.Time, slotLeaseTTL time.Duration) (bool, SlotClaim, error) {
+	reply, err := s.evalStrings(reserveLegacySlotScript, []string{key},
+		replicaID, nsArg(now), strconv.FormatInt(slotLeaseTTL.Milliseconds(), 10))
+	if err != nil {
+		return false, SlotClaim{}, err
+	}
+	if len(reply) == 0 {
+		return false, SlotClaim{}, fmt.Errorf("webhook: empty reserve_legacy_slot reply")
+	}
+	status := reply[0]
+	if status == "RESERVED" {
+		claim, err := parseSlotClaim(append([]string{"RENEWED"}, reply[1:]...))
+		return true, claim, err
+	}
+	if status == "BUSY" {
+		claim, err := parseSlotClaim(reply)
+		return false, claim, err
+	}
+	return false, SlotClaim{}, fmt.Errorf("webhook: unexpected reserve_legacy_slot status %q", status)
+}
+
+func (s *RedisStore) releaseLegacySlotReservation(key, replicaID string, expiryNs int64) {
+	ctx := s.ctx()
+	fields, err := s.client.HMGet(ctx, key, "owner_id", "lease_expiry_ns").Result()
+	if err != nil || len(fields) != 2 || fields[0] != replicaID || parseLeaseUntilNs(fmt.Sprint(fields[1])) != expiryNs {
+		return
+	}
+	_ = s.client.Del(ctx, key).Err()
+}
+
+func (s *RedisStore) syncLegacySlot(key string, claim SlotClaim) error {
+	return s.client.HSet(s.ctx(), key,
+		"owner_id", claim.Owner.String(),
+		"owner_epoch", claim.Epoch.String(),
+		"lease_expiry_ns", strconv.FormatInt(claim.ExpiryNs, 10),
+	).Err()
 }
 
 // CheckOwner runs check_owner.lua — the owner-epoch fence for the external

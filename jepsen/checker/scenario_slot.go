@@ -88,8 +88,8 @@ func runSlotIsolation(c config) error {
 		len(allSubs), nStreams, len(spanned), dsSubSlots)
 
 	// Ownership-slot churn nemesis: concurrent claim_shard takeovers on a set of
-	// ds:{ownership} slots, orthogonal to the {__ds:h} keyspace, running for the whole
-	// verification. If the fan-out result moves under it, the two axes are not isolated.
+	// ownership hashes, orthogonal to subscription and fan-out keys, running for the
+	// whole verification. If the fan-out result moves under it, the two axes are not isolated.
 	stopChurn := make(chan struct{})
 	var churnWG sync.WaitGroup
 	churnWG.Add(1)
@@ -172,14 +172,15 @@ func t5BruteForceFanout(ctx context.Context, client redis.UniversalClient, path 
 	return out
 }
 
-// t5OwnershipChurn races claim_shard takeovers on a small set of ds:{ownership} slots
+// t5OwnershipChurn races claim_shard takeovers on a small set of ownership slots
 // with a short lease and rotating replica ids, bumping owner_epoch — the "slot-owner
-// churn during the S-parallel fan-out" T5 nemesis (07). It writes ONLY the
-// {ownership} keyspace, never {__ds:h}, so a correct fan-out is unaffected.
+// churn during the S-parallel fan-out" T5 nemesis (07). The hashes use co-homed
+// {__ds:h} tags but distinct ownership names, never subscription or fan-out keys,
+// so a correct fan-out is unaffected.
 func t5OwnershipChurn(store *webhook.RedisStore, runTag int64, stop <-chan struct{}) {
 	slotKeys := make([]string, 8)
 	for h := range slotKeys {
-		slotKeys[h] = fmt.Sprintf("ds:{ownership}:slot:t5-%d-%d", runTag, h)
+		slotKeys[h] = fmt.Sprintf("ds:{__ds:%d}:ownership:slot:t5-%d-%d", h, runTag, h)
 	}
 	ttl := 60 * time.Millisecond
 	i := 0
@@ -209,7 +210,7 @@ func t5Cleanup(client redis.UniversalClient, store *webhook.RedisStore, subs, pa
 		}
 	}
 	for h := 0; h < 8; h++ {
-		client.Del(ctx, fmt.Sprintf("ds:{ownership}:slot:t5-%d-%d", runTag, h))
+		client.Del(ctx, fmt.Sprintf("ds:{__ds:%d}:ownership:slot:t5-%d-%d", h, runTag, h))
 	}
 }
 
