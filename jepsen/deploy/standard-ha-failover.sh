@@ -143,11 +143,17 @@ verdict_rc=$?
 set -e
 echo "$verdict_out"
 echo "$verdict_out" | grep -E '^GATE5-FAILOVER-VERDICT|empirical RPO|empirical RTO|CLAIM:' || true
+if [ "$verdict_rc" -eq 0 ] && ! echo "$verdict_out" | grep -q '^GATE5-FAILOVER-VERDICT: PASS-LostTargetFence$'; then
+  echo "gate #5d inconclusive: asserting failover requires PASS-LostTargetFence" >&2
+  verdict_rc=1
+fi
 
 echo "==> gate #5 PASS criteria: gate #5a/#5b/#5c lease-tail-drop runs exit 0 (the stranded"
 echo "    sub is recovered ONLY by the cursor-reading eager reconcile and the deposed ack is"
-echo "    409 FENCED across a real promotion), AND gate #5d prints GATE5-FAILOVER-VERDICT: PASS"
-echo "    (every linked stream reached tail = at-least-once; the deposed ack was FENCED; the"
+echo "    409 FENCED across a real promotion), AND gate #5d prints"
+echo "    GATE5-FAILOVER-VERDICT: PASS-LostTargetFence (every linked stream reached tail ="
+echo "    at-least-once; the deposed ack was FENCED; the targeted lost fence was proven; the"
 echo "    empirical RPO/RTO are recorded as durability-honest tiers, NOT a strong-consistency"
-echo "    claim). Teardown runs on exit (STOP THE METER)."
+echo "    claim). PASS-NoLoss/Inconclusive is smoke only and fails this asserting gate."
+echo "    Teardown runs on exit (STOP THE METER)."
 exit $verdict_rc

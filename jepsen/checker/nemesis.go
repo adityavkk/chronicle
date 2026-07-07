@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -67,11 +68,10 @@ func (n *nemesis) churn(stop <-chan struct{}, rng *rand.Rand, min, max time.Dura
 
 // ---- dropLeaseTail: the exact L3 fault ----
 
-// leaseSchedZKey is the global lease schedule ZSET on today's single-{__ds}-slot
-// code (webhook/keys.go leaseZKey). The harness stays self-contained — it mirrors
-// the key literal rather than importing the webhook package, the same way
-// deleteStreamIndex mirrors the fan-out index key.
-const leaseSchedZKey = "ds:{__ds}:sched:lease"
+// leaseSchedZKey is the slot-homed lease schedule ZSET for subID. The harness
+// stays self-contained — dsSlotOf/dsLeaseKey mirror webhook/keys.go without
+// importing the webhook package.
+func leaseSchedZKey(subID string) string { return dsLeaseKey(dsSlotOf(subID)) }
 
 // dropLeaseTail ZREMs a subscription's lease-schedule entry while leaving its sub
 // hash intact — the exact L3 fault (07 line 60): a failover that lost the
@@ -81,9 +81,34 @@ const leaseSchedZKey = "ds:{__ds}:sched:lease"
 // reconciler re-derived the tail from the durable cursor, not the schedule. (The
 // per-subscription due ZSET is #12; on today's code the lease ZSET is the only
 // schedule entry to drop.)
-func (n *nemesis) dropLeaseTail(subID string) {
-	_, _ = n.redisCLI("zrem", leaseSchedZKey, subID)
+func (n *nemesis) dropLeaseTail(subID string) error {
+	out, err := n.redisCLI("zrem", leaseSchedZKey(subID), subID)
+	if err != nil {
+		n.record("drop-lease-tail-failed")
+		return fmt.Errorf("zrem lease tail for %s: %w", subID, err)
+	}
+	nrem, ok := parseRedisIntegerReply(out)
+	if !ok {
+		n.record("drop-lease-tail-failed")
+		return fmt.Errorf("zrem lease tail for %s returned non-integer %q", subID, strings.TrimSpace(string(out)))
+	}
+	if nrem != 1 {
+		n.record("drop-lease-tail-missed")
+		return fmt.Errorf("zrem lease tail for %s removed %d members, want 1", subID, nrem)
+	}
 	n.record("drop-lease-tail")
+	return nil
+}
+
+// parseRedisIntegerReply accepts redis-cli's raw "1" and decorated "(integer) 1"
+// forms. The last token must be a base-10 integer.
+func parseRedisIntegerReply(out []byte) (int64, bool) {
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) == 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(fields[len(fields)-1], 10, 64)
+	return n, err == nil
 }
 
 // ---- killSlotOwner: read the slot owner, kill that pod ----
@@ -215,6 +240,65 @@ func (n *nemesis) replicaCLI(args ...string) ([]byte, error) {
 func (n *nemesis) primaryCLI(args ...string) ([]byte, error) {
 	full := append([]string{"exec", "deploy/redis-primary", "--", "redis-cli", "-n", "0"}, args...)
 	return n.kubectl(full...)
+}
+
+// dropTargetFenceOnReplica is the target-loss failpoint for the failover scenario:
+// before the endpoint flip, detach the would-be promoted replica. If the target
+// fence is already absent there, freeze that natural loss; if it is present,
+// surgically erase it. Either way, the verdict is driven by the target fence, not
+// by an unrelated positive RPO byte count.
+func (n *nemesis) dropTargetFenceOnReplica(subID string, generation int64, wakeID string) (bool, error) {
+	if generation <= 0 || wakeID == "" {
+		n.record("target-fence-drop-missed")
+		return false, fmt.Errorf("target fence for %s is empty", subID)
+	}
+	key := dsSubKey(subID)
+	genOut, err := n.replicaCLI("--raw", "HGET", key, "generation")
+	if err != nil {
+		n.record("target-fence-drop-failed")
+		return false, fmt.Errorf("read replica generation for %s: %w", subID, err)
+	}
+	wakeOut, err := n.replicaCLI("--raw", "HGET", key, "wake_id")
+	if err != nil {
+		n.record("target-fence-drop-failed")
+		return false, fmt.Errorf("read replica wake_id for %s: %w", subID, err)
+	}
+	gotGen := strings.TrimSpace(string(genOut))
+	gotWake := strings.TrimSpace(string(wakeOut))
+	if gotGen != strconv.FormatInt(generation, 10) || gotWake != wakeID {
+		gotGenN, parseErr := strconv.ParseInt(gotGen, 10, 64)
+		if parseErr != nil || gotGenN > generation {
+			n.record("target-fence-drop-missed")
+			return false, fmt.Errorf("replica target fence for %s = (%s,%s), want (%d,%s)", subID, gotGen, short(gotWake), generation, short(wakeID))
+		}
+		if _, err := n.replicaCLI(promoteReplicaCmd()...); err != nil {
+			n.record("target-fence-drop-failed")
+			return false, fmt.Errorf("detach replica with naturally missing target fence: %w", err)
+		}
+		n.record("target-fence-missing-replica")
+		return true, nil
+	}
+	if _, err := n.replicaCLI(promoteReplicaCmd()...); err != nil {
+		n.record("target-fence-drop-failed")
+		return false, fmt.Errorf("detach replica for targeted fence drop: %w", err)
+	}
+	oldGen := strconv.FormatInt(generation-1, 10)
+	if _, err := n.replicaCLI("HSET", key,
+		"generation", oldGen,
+		"wake_id", "",
+		"phase", "idle",
+		"holder", "0",
+		"holder_worker", "",
+		"lease_until_ns", "0"); err != nil {
+		n.record("target-fence-drop-failed")
+		return false, fmt.Errorf("drop target fence on replica: %w", err)
+	}
+	if _, err := n.replicaCLI("ZREM", dsLeaseKey(dsSlotOf(subID)), subID); err != nil {
+		n.record("target-fence-drop-failed")
+		return false, fmt.Errorf("drop target lease on replica: %w", err)
+	}
+	n.record("target-fence-drop-replica")
+	return true, nil
 }
 
 // redisFailover injects a real primary loss + replica promotion on the

@@ -69,7 +69,9 @@ func runLeaseTailDrop(c config, nem *nemesis) error {
 	// The L3 fault: drop A's lease-schedule entry, leaving the sub hash intact. The
 	// lease worker is now blind to this lease; only a cursor-reading reconciler can
 	// recover it.
-	nem.dropLeaseTail(subID)
+	if err := nem.dropLeaseTail(subID); err != nil {
+		return fmt.Errorf("drop lease tail: %w", err)
+	}
 	fmt.Printf("nemesis: dropped the lease-schedule tail for %s (sub hash intact)\n", subID)
 
 	// Optional extra faults to widen the window (off unless flagged): a clock skew
