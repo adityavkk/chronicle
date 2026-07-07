@@ -90,7 +90,7 @@ func TestEnumStrings(t *testing.T) {
 		}
 	}
 	reasons := map[DenyReason]string{
-		ReasonNone: "none", ReasonUnauthenticated: "unauthenticated", ReasonForbidden: "forbidden",
+		ReasonNone: "none", ReasonUnauthenticated: "unauthenticated", ReasonForbidden: "forbidden", ReasonFenced: "fenced",
 	}
 	for r, want := range reasons {
 		if r.String() != want {

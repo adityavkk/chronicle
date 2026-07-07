@@ -105,6 +105,20 @@ func claimKeys(id string, g int) claimKeyVec {
 	return claimKeyVec{SubConfig: subKey(id), ShardState: subShardKey(id, g), LeaseZSet: leaseZKey(h), IncarnationCounter: subIncarnationKey(id), ShardRegistry: subShardRegistryKey(id)}
 }
 
+type writeFenceKeyVec struct {
+	ShardState string
+	SubConfig  string
+}
+
+func (k writeFenceKeyVec) redisKeys() []string { return []string{k.ShardState, k.SubConfig} }
+func (k writeFenceKeyVec) keyRoles() []scriptKeyRole {
+	return []scriptKeyRole{"shardstate", "sub_config"}
+}
+
+func newWriteFenceKeys(id string, g int) writeFenceKeyVec {
+	return writeFenceKeyVec{ShardState: subShardKey(id, g), SubConfig: subKey(id)}
+}
+
 type ackKeyVec struct {
 	ShardState string
 	Links      string

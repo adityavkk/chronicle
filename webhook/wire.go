@@ -150,10 +150,11 @@ type CallbackRequest struct {
 // single-entity subscription (ShouldRefreshWakeToken), so a done ack — the
 // only kind the conformance suite sends — never gains a field.
 type AckResponse struct {
-	OK        bool   `json:"ok"`
-	NextWake  bool   `json:"next_wake"`
-	Token     string `json:"token,omitempty"`
-	WakeToken string `json:"wake_token,omitempty"`
+	OK         bool   `json:"ok"`
+	NextWake   bool   `json:"next_wake"`
+	Token      string `json:"token,omitempty"`
+	WriteToken string `json:"write_token,omitempty"`
+	WakeToken  string `json:"wake_token,omitempty"`
 }
 
 // ClaimRequest is the pull-wake claim body (PROTOCOL §7.2).

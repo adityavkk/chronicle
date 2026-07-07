@@ -516,6 +516,36 @@ func TestClaimExpiredLeaseRotatesFence(t *testing.T) {
 	}
 }
 
+func TestWriteFenceLiveState(t *testing.T) {
+	s, _ := newTestStore(t)
+	base := time.Now()
+	_, _ = s.CreateOrConfirm("s1", pullWakeCfg(), nil, base)
+	a, err := s.Claim("s1", "worker-A", "w_a", base, 1000)
+	if err != nil || !a.Claimed {
+		t.Fatalf("claim A = %+v err=%v", a, err)
+	}
+	if st, err := s.CheckWriteFence("s1", 0, a.Generation, a.WakeID, a.Holder, base.Add(100*time.Millisecond)); err != nil || st != "OK" {
+		t.Fatalf("current holder write fence = %q err=%v, want OK", st, err)
+	}
+	if st, _ := s.CheckWriteFence("s1", 0, a.Generation, a.WakeID, "other", base.Add(100*time.Millisecond)); st != "FENCED" {
+		t.Fatalf("wrong holder write fence = %q, want FENCED", st)
+	}
+	after := base.Add(1500 * time.Millisecond)
+	if st, _ := s.CheckWriteFence("s1", 0, a.Generation, a.WakeID, a.Holder, after); st != "FENCED" {
+		t.Fatalf("expired lease write fence = %q, want FENCED", st)
+	}
+	b, err := s.Claim("s1", "worker-B", "w_b", after, 1000)
+	if err != nil || !b.Claimed || b.Generation == a.Generation {
+		t.Fatalf("claim B = %+v err=%v", b, err)
+	}
+	if st, _ := s.CheckWriteFence("s1", 0, a.Generation, a.WakeID, a.Holder, after.Add(100*time.Millisecond)); st != "FENCED" {
+		t.Fatalf("deposed holder write fence = %q, want FENCED", st)
+	}
+	if st, _ := s.CheckWriteFence("s1", 0, b.Generation, b.WakeID, b.Holder, after.Add(100*time.Millisecond)); st != "OK" {
+		t.Fatalf("new holder write fence = %q, want OK", st)
+	}
+}
+
 // TestClaimUnexpiredLeaseStillBusy confirms the rotation change did not regress
 // the BUSY path: a claim against an unexpired live lease is still rejected.
 func TestClaimUnexpiredLeaseStillBusy(t *testing.T) {

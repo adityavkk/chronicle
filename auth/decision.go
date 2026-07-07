@@ -48,7 +48,8 @@ func (a Action) String() string {
 // DenyReason classifies a denial and picks its HTTP mapping: a missing,
 // malformed, or expired credential is ReasonUnauthenticated (401
 // UNAUTHENTICATED); a verified credential whose scope does not cover the
-// (path, action) is ReasonForbidden (403 FORBIDDEN).
+// (path, action) is ReasonForbidden (403 FORBIDDEN); a verified but deposed
+// claim holder is ReasonFenced (409 FENCED).
 type DenyReason int
 
 const (
@@ -59,6 +60,9 @@ const (
 	// ReasonForbidden maps to 403: the credential verified but does not grant
 	// this (path, action).
 	ReasonForbidden
+	// ReasonFenced maps to 409: the credential verified, but no longer matches
+	// the live monotonic claim state.
+	ReasonFenced
 )
 
 func (r DenyReason) String() string {
@@ -69,6 +73,8 @@ func (r DenyReason) String() string {
 		return "unauthenticated"
 	case ReasonForbidden:
 		return "forbidden"
+	case ReasonFenced:
+		return "fenced"
 	default:
 		return "unknown"
 	}

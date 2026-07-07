@@ -73,6 +73,12 @@ type Store interface {
 	// Claim is the pull-wake compare-and-set claim (PROTOCOL §7.2).
 	Claim(id, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error)
 
+	// CheckWriteFence verifies that a claim-scoped write token still names the
+	// live holder at append authorization time. It reads the current shard state
+	// atomically in Redis and returns OK only when phase=live, generation+wake and
+	// holder all match, and the lease has not expired.
+	CheckWriteFence(id string, shard int, generation int64, wakeID, holder string, now time.Time) (string, error)
+
 	// AckUnscoped fences then applies acks forward-only; done releases the lease,
 	// else it extends the lease as a heartbeat (PROTOCOL §7.1, §7.2). This is the
 	// external callback/pull-ack API.
