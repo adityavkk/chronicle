@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -93,19 +94,18 @@ func TestScriptReplyDecodersKeepValidPayloads(t *testing.T) {
 }
 
 func TestScriptABIRejectsWrongCallArity(t *testing.T) {
-	if err := armWakeScript.abi.validateCall(armWakeKeyVec{newScriptKeys([]string{"sub", "lease", "due"}, "sub", "lease_zset", "due_zset")}, []any{"id", "1700000000", "1000", "1", "wake", "replica", "1"}); err != nil {
+	validArmKeys := armWakeKeyVec{Sub: "sub", LeaseZSet: "lease", DueZSet: "due"}
+	if err := armWakeScript.abi.validateCall(validArmKeys, []any{"id", "1700000000", "1000", "1", "wake", "replica", "1"}); err != nil {
 		t.Fatalf("valid arm_wake call rejected: %v", err)
 	}
-	if err := armWakeScript.abi.validateCall(armWakeKeyVec{newScriptKeys([]string{"sub", "lease"}, "sub", "lease_zset")}, []any{"id", "1700000000", "1000", "1", "wake", "replica", "1"}); err == nil {
-		t.Fatal("arm_wake with too few KEYS accepted")
+	if err := armWakeScript.abi.validateCall(armWakeKeyVec{Sub: "sub", LeaseZSet: "lease"}, []any{"id", "1700000000", "1000", "1", "wake", "replica", "1"}); err == nil {
+		t.Fatal("arm_wake with missing due key accepted")
 	}
-	if err := armWakeScript.abi.validateCall(armWakeKeyVec{newScriptKeys([]string{"sub", "due", "lease"}, "sub", "due_zset", "lease_zset")}, []any{"id", "1700000000", "1000", "1", "wake", "replica", "1"}); err == nil {
-		t.Fatal("arm_wake with swapped key roles accepted")
-	}
-	if err := armWakeScript.abi.validateCall(armWakeKeyVec{newScriptKeys([]string{"sub", "lease", "due"}, "sub", "lease_zset", "due_zset")}, []any{"id", "1700000000"}); err == nil {
+	if err := armWakeScript.abi.validateCall(validArmKeys, []any{"id", "1700000000"}); err == nil {
 		t.Fatal("arm_wake with too few ARGV accepted")
 	}
-	if err := ackScript.abi.validateCall(ackKeyVec{newScriptKeys([]string{"shard", "links", "lease", "retry", "due", "sub"}, "shardstate", "links", "lease_zset", "retry_zset", "due_zset", "sub_config")}, []any{"member", "1", "wake", "1", "1", "1700000000", "1000", "1", "path-only", "replica", "1"}); err == nil {
+	ackKeys := ackKeyVec{ShardState: "shard", Links: "links", LeaseZSet: "lease", RetryZSet: "retry", DueZSet: "due", SubConfig: "sub"}
+	if err := ackScript.abi.validateCall(ackKeys, []any{"member", "1", "wake", "1", "1", "1700000000", "1000", "1", "path-only", "replica", "1"}); err == nil {
 		t.Fatal("ack with incomplete variadic ack pair accepted")
 	}
 }
@@ -149,6 +149,7 @@ func TestRegisteredScriptABIMatchesLuaReferences(t *testing.T) {
 			if got, want := argAliases(body), declaredArgAliases(abi.Args); !reflect.DeepEqual(got, want) {
 				t.Fatalf("Lua argv aliases = %v, registry args = %v", got, want)
 			}
+			assertVariadicLayout(t, body, abi.Args)
 			if got := maxIndexedReference(body, "ARGV"); got > maxDeclaredArgReference(abi.Args) {
 				t.Fatalf("ARGV max reference = %d exceeds registry declaration %d", got, maxDeclaredArgReference(abi.Args))
 			}
@@ -219,6 +220,63 @@ func argAliases(lua string) []string {
 		out[n-1] = m[1]
 	}
 	return out
+}
+
+func assertVariadicLayout(t *testing.T, lua string, schema scriptArgSchema) {
+	t.Helper()
+	if schema.Variadic == nil {
+		return
+	}
+	baseRe := regexp.MustCompile(`(?m)^local i = (\d+)$`)
+	m := baseRe.FindStringSubmatch(lua)
+	if len(m) != 2 {
+		t.Fatalf("variadic script has no checked base index")
+	}
+	base, err := strconv.Atoi(m[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := schema.Variadic.AfterFixed + 1; base != want {
+		t.Fatalf("variadic base = %d, want %d", base, want)
+	}
+	gotOffsets := variadicOffsets(lua)
+	wantOffsets := make([]int, len(schema.Variadic.Group))
+	for i := range wantOffsets {
+		wantOffsets[i] = i
+	}
+	if !reflect.DeepEqual(gotOffsets, wantOffsets) {
+		t.Fatalf("variadic ARGV offsets = %v, want %v", gotOffsets, wantOffsets)
+	}
+	if got, want := trailingARGVRefs(lua), len(schema.Variadic.Trailing); got != want {
+		t.Fatalf("trailing #ARGV refs = %d, want %d", got, want)
+	}
+}
+
+func variadicOffsets(lua string) []int {
+	re := regexp.MustCompile(`ARGV\[i(?: \+ (\d+))?\]`)
+	seen := map[int]struct{}{}
+	for _, m := range re.FindAllStringSubmatch(lua, -1) {
+		off := 0
+		if m[1] != "" {
+			var err error
+			off, err = strconv.Atoi(m[1])
+			if err != nil {
+				testPanic(err)
+			}
+		}
+		seen[off] = struct{}{}
+	}
+	out := make([]int, 0, len(seen))
+	for off := range seen {
+		out = append(out, off)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func trailingARGVRefs(lua string) int {
+	re := regexp.MustCompile(`ARGV\[#ARGV(?: - \d+)?\]`)
+	return len(re.FindAllString(lua, -1))
 }
 
 func maxDeclaredArgReference(schema scriptArgSchema) int {

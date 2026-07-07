@@ -70,14 +70,6 @@ type scriptKeyVector interface {
 	keyRoles() []scriptKeyRole
 }
 
-type scriptKeys struct {
-	values []string
-	roles  []scriptKeyRole
-}
-
-func (k scriptKeys) redisKeys() []string       { return k.values }
-func (k scriptKeys) keyRoles() []scriptKeyRole { return k.roles }
-
 type replyFieldKind string
 
 const (
@@ -141,6 +133,11 @@ func (a scriptABI) validateCall(keys scriptKeyVector, args []any) error {
 	roles := keys.keyRoles()
 	if len(values) != len(roles) {
 		return fmt.Errorf("%s: key vector has %d values and %d roles", a.Name, len(values), len(roles))
+	}
+	for i, key := range values {
+		if key == "" {
+			return fmt.Errorf("%s: empty key for role %s", a.Name, roles[i])
+		}
 	}
 	keyOK := false
 	for _, schema := range a.Keys {
