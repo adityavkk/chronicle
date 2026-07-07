@@ -211,7 +211,7 @@ func composedWorker(store *webhook.RedisStore, subID, slotKey, subLabel, slotLab
 		// (inner). A worker deposed on EITHER layer during the pause is FENCED; a live
 		// worker is OK. Recorded as the inner op, carrying the presented epoch.
 		callNs = rec.now()
-		st, aerr := store.AckShard(subID, 0, res.Generation, res.WakeID, res.Generation, true, nil, time.Now(), leaseTTLMs, owner)
+		st, aerr := store.AckShardOwned(owner, subID, 0, res.Generation, res.WakeID, res.Generation, true, nil, time.Now(), leaseTTLMs)
 		if aerr != nil {
 			sleep(backoff)
 			continue

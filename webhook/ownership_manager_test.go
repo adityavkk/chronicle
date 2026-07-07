@@ -183,7 +183,7 @@ func TestManagerDeposedOwnerExpireFencedInline(t *testing.T) {
 
 	// rA's lease worker would expire a due lease using its stale scope: FENCED
 	// inline, recorded as an inline owner fence (its wasted work suppressed).
-	status, err := m.expireLease("s1", time.Now(), scope)
+	status, err := m.expireLeaseOwned(scope, "s1", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,14 +217,14 @@ func TestManagerRetryPathFencedInline(t *testing.T) {
 		t.Fatal("rA should hold s1's slot")
 	}
 	now := time.Now()
-	arm, err := s.ArmWake("s1", now, 60000, true, "wk-1") // valid gen/wake for the ack test
+	arm, err := s.ArmWakeUnscoped("s1", now, 60000, true, "wk-1") // valid gen/wake for the ack test
 	if err != nil || !arm.Armed {
 		t.Fatalf("arm = %+v err=%v", arm, err)
 	}
 
 	// Control: an UNSCOPED recordFailure (the append path) schedules a retry — the
 	// sub is schedulable, so a later non-advance is the fence, not a no-op.
-	m.recordFailure("s1")
+	m.recordFailure("s1", nil)
 	if sub, _, _ := s.Get("s1"); sub.RetryCount != 1 {
 		t.Fatalf("unscoped recordFailure should schedule a retry (count=1), got %d", sub.RetryCount)
 	}
@@ -239,7 +239,7 @@ func TestManagerRetryPathFencedInline(t *testing.T) {
 	// recordFailure with the deposed scope: schedule_retry is FENCED inline, so the
 	// retry count does NOT advance and an inline fence is recorded.
 	before := fm.ownerFences("inline")
-	m.recordFailure("s1", scope)
+	m.recordFailure("s1", &scope)
 	if sub, _, _ := s.Get("s1"); sub.RetryCount != 1 {
 		t.Fatalf("deposed recordFailure must schedule nothing (count stays 1), got %d", sub.RetryCount)
 	}
@@ -251,7 +251,7 @@ func TestManagerRetryPathFencedInline(t *testing.T) {
 	// (gen,wake_id) fence would pass), yet FENCED — proving the owner-epoch fence is
 	// exercised on the retry-path ack, above the gen fence.
 	before = fm.ownerFences("inline")
-	status, err := m.ack("s1", arm.Generation, arm.WakeID, arm.Generation, true, nil, time.Now(), 60000, scope)
+	status, err := m.ackOwned(scope, "s1", arm.Generation, arm.WakeID, arm.Generation, true, nil, time.Now(), 60000)
 	if err != nil {
 		t.Fatal(err)
 	}

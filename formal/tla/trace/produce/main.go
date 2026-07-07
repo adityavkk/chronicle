@@ -100,7 +100,7 @@ func run(outPath, addr string) error {
 	if err != nil {
 		return err
 	}
-	arm, err := st.ArmWake(s1, now, leaseTTLMs, false, "w-"+s1+"-1")
+	arm, err := st.ArmWakeUnscoped(s1, now, leaseTTLMs, false, "w-"+s1+"-1")
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func run(outPath, addr string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := st.Ack(s1, c1.Generation, c1.WakeID, c1.Generation, true, nil, now, leaseTTLMs); err != nil {
+	if _, err := st.AckUnscoped(s1, c1.Generation, c1.WakeID, c1.Generation, true, nil, now, leaseTTLMs); err != nil {
 		return err
 	}
 
@@ -122,7 +122,7 @@ func run(outPath, addr string) error {
 	if err != nil {
 		return err
 	}
-	a2, err := st.ArmWake(s2, now, leaseTTLMs, false, "w-"+s2+"-1")
+	a2, err := st.ArmWakeUnscoped(s2, now, leaseTTLMs, false, "w-"+s2+"-1")
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func run(outPath, addr string) error {
 	if _, err := st.Claim(s2, "B", "w-"+s2+"-B", now, leaseTTLMs); err != nil { // expect BUSY
 		return err
 	}
-	if _, err := st.Ack(s2, ca.Generation, ca.WakeID, ca.Generation, true, nil, now, leaseTTLMs); err != nil {
+	if _, err := st.AckUnscoped(s2, ca.Generation, ca.WakeID, ca.Generation, true, nil, now, leaseTTLMs); err != nil {
 		return err
 	}
 
@@ -146,7 +146,7 @@ func run(outPath, addr string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := st.ArmWake(s3, now, leaseTTLMs, false, "w-"+s3+"-1"); err != nil {
+	if _, err := st.ArmWakeUnscoped(s3, now, leaseTTLMs, false, "w-"+s3+"-1"); err != nil {
 		return err
 	}
 	ta, err := st.Claim(s3, "A", "w-"+s3+"-A", now, leaseTTLMs)
@@ -160,11 +160,11 @@ func run(outPath, addr string) error {
 		return err
 	}
 	// A's late ack: old generation/wake -> FENCED (no-op). Deposed-but-resumed.
-	if _, err := st.Ack(s3, ta.Generation, ta.WakeID, ta.Generation, true, nil, later, leaseTTLMs); err != nil {
+	if _, err := st.AckUnscoped(s3, ta.Generation, ta.WakeID, ta.Generation, true, nil, later, leaseTTLMs); err != nil {
 		return err
 	}
 	// B acks done with its rotated token -> OK.
-	if _, err := st.Ack(s3, tb.Generation, tb.WakeID, tb.Generation, true, nil, later, leaseTTLMs); err != nil {
+	if _, err := st.AckUnscoped(s3, tb.Generation, tb.WakeID, tb.Generation, true, nil, later, leaseTTLMs); err != nil {
 		return err
 	}
 
@@ -173,17 +173,17 @@ func run(outPath, addr string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := st.ArmWake(s4, now, leaseTTLMs, false, "w-"+s4+"-1"); err != nil {
+	if _, err := st.ArmWakeUnscoped(s4, now, leaseTTLMs, false, "w-"+s4+"-1"); err != nil {
 		return err
 	}
 	c4, err := st.Claim(s4, "A", "w-"+s4+"-A", now, leaseTTLMs)
 	if err != nil {
 		return err
 	}
-	if _, err := st.Ack(s4, c4.Generation, c4.WakeID, c4.Generation, false, nil, now, leaseTTLMs); err != nil { // heartbeat
+	if _, err := st.AckUnscoped(s4, c4.Generation, c4.WakeID, c4.Generation, false, nil, now, leaseTTLMs); err != nil { // heartbeat
 		return err
 	}
-	if _, err := st.Ack(s4, c4.Generation, c4.WakeID, c4.Generation, true, nil, now, leaseTTLMs); err != nil { // done
+	if _, err := st.AckUnscoped(s4, c4.Generation, c4.WakeID, c4.Generation, true, nil, now, leaseTTLMs); err != nil { // done
 		return err
 	}
 
@@ -192,14 +192,14 @@ func run(outPath, addr string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := st.ArmWake(s5, now, leaseTTLMs, false, "w-"+s5+"-1"); err != nil {
+	if _, err := st.ArmWakeUnscoped(s5, now, leaseTTLMs, false, "w-"+s5+"-1"); err != nil {
 		return err
 	}
 	c5, err := st.Claim(s5, "A", "w-"+s5+"-A", now, leaseTTLMs)
 	if err != nil {
 		return err
 	}
-	if _, err := st.Release(s5, c5.Generation, c5.WakeID, c5.Generation); err != nil {
+	if _, err := st.ReleaseUnscoped(s5, c5.Generation, c5.WakeID, c5.Generation); err != nil {
 		return err
 	}
 
@@ -210,14 +210,14 @@ func run(outPath, addr string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := st.ArmWake(s6, now, leaseTTLMs, true, "w-"+s6+"-1"); err != nil {
+	if _, err := st.ArmWakeUnscoped(s6, now, leaseTTLMs, true, "w-"+s6+"-1"); err != nil {
 		return err
 	}
 	exLater := now.Add(time.Duration(leaseTTLMs+10) * time.Millisecond)
-	if _, err := st.ExpireLease(s6, exLater); err != nil {
+	if _, err := st.ExpireLeaseUnscoped(s6, exLater); err != nil {
 		return err
 	}
-	if _, err := st.ArmWake(s6, exLater, leaseTTLMs, true, "w-"+s6+"-2"); err != nil {
+	if _, err := st.ArmWakeUnscoped(s6, exLater, leaseTTLMs, true, "w-"+s6+"-2"); err != nil {
 		return err
 	}
 

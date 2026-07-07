@@ -580,20 +580,20 @@ func (m *Manager) maybeWake(id, triggerStream string) {
 // issueWake arms a new wake generation and delivers it (webhook POST or pull-wake
 // event). For webhook the lease is armed at issue; for pull-wake the lease waits
 // for a claim (PROTOCOL §7.3).
-func (m *Manager) issueWake(sub Subscription, triggerStream string) {
+func (m *Manager) issueWake(sub Subscription, triggerStream string) bool {
 	wakeID, err := GenerateWakeID(rand.Reader)
 	if err != nil {
 		m.log.Warn("webhook: generate wake id", "error", err)
-		return
+		return false
 	}
 	armLease := sub.Config.Type == DispatchWebhook
-	res, err := m.armWake(sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID)
+	res, err := m.armWakeUnscoped(sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID)
 	if err != nil {
 		m.log.Warn("webhook: arm wake", "sub", sub.ID, "error", err)
-		return
+		return false
 	}
 	if !res.Armed {
-		return // already in flight (coalesced) or gone
+		return false // already in flight (coalesced) or gone
 	}
 	// The arm→emit surgical window (07 honest-gap #2): the fence is minted but the
 	// wake is not yet emitted. A no-op in production; a test failpoint can crash/stall
@@ -601,10 +601,39 @@ func (m *Manager) issueWake(sub Subscription, triggerStream string) {
 	failpoint(fpArmedBeforeEmit)
 	switch sub.Config.Type {
 	case DispatchWebhook:
-		go m.deliverWebhook(sub.ID, res.Generation, res.WakeID)
+		go m.deliverWebhookUnscoped(sub.ID, res.Generation, res.WakeID)
 	case DispatchPullWake:
 		m.writeWakeEvent(sub, triggerStream, res.Generation, res.WakeID)
 	}
+	return true
+}
+
+// issueWakeOwned is issueWake for owner-driven background workers. The arm_wake
+// write carries the slot owner scope, so a GC-paused/deposed owner cannot mint a
+// fresh generation or due mark after takeover.
+func (m *Manager) issueWakeOwned(scope OwnerScope, sub Subscription, triggerStream string) bool {
+	wakeID, err := GenerateWakeID(rand.Reader)
+	if err != nil {
+		m.log.Warn("webhook: generate wake id", "error", err)
+		return false
+	}
+	armLease := sub.Config.Type == DispatchWebhook
+	res, err := m.armWakeOwned(scope, sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID)
+	if err != nil {
+		m.log.Warn("webhook: arm wake", "sub", sub.ID, "error", err)
+		return false
+	}
+	if !res.Armed {
+		return false
+	}
+	failpoint(fpArmedBeforeEmit)
+	switch sub.Config.Type {
+	case DispatchWebhook:
+		go m.deliverWebhookOwned(scope, sub.ID, res.Generation, res.WakeID)
+	case DispatchPullWake:
+		m.writeWakeEvent(sub, triggerStream, res.Generation, res.WakeID)
+	}
+	return true
 }
 
 func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generation int64, wakeID string) {
@@ -633,19 +662,27 @@ func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generat
 	}
 }
 
+func (m *Manager) deliverWebhookUnscoped(id string, generation int64, wakeID string) {
+	m.deliverWebhook(id, generation, wakeID, nil)
+}
+
+func (m *Manager) deliverWebhookOwned(scope OwnerScope, id string, generation int64, wakeID string) {
+	m.deliverWebhook(id, generation, wakeID, &scope)
+}
+
 // deliverWebhook signs and POSTs a wake notification, then handles the response:
 // a 2xx {done:true} auto-acks the snapshot and releases; any other 2xx clears
 // the failure state and leaves the wake in flight for an async callback; a
 // non-2xx or transport error schedules a retry (PROTOCOL §7.1).
-func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, owner ...OwnerScope) {
+func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, owner *OwnerScope) {
 	// Owner-epoch fence for the EXTERNAL POST (issue #14): the retry worker drives
 	// this for a slot it owns, so verify ownership via check_owner immediately
 	// before the POST — the one schedule write that cannot inline the check, since
 	// the side effect crosses the network. The append-path caller (issueWake)
 	// passes no scope and proceeds: the (gen,wake_id) fence on the returned ack is
 	// the guard and a duplicate POST coalesces (a double-wake is safe).
-	if len(owner) > 0 && owner[0].active() {
-		chk, cerr := m.store.CheckOwner(owner[0].SlotKey, owner[0].ReplicaID, owner[0].Epoch)
+	if owner != nil {
+		chk, cerr := m.store.CheckOwner(owner.SlotKey, owner.ReplicaID, owner.Epoch)
 		if cerr != nil {
 			m.log.Warn("webhook: check owner before delivery", "sub", id, "error", cerr)
 			return
@@ -686,7 +723,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, sub.Config.WebhookURL, bytes.NewReader(body))
 	if err != nil {
-		m.recordFailure(id, owner...)
+		m.recordFailure(id, owner)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -696,7 +733,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		// successor. An unsigned or mis-signed wake must not go out; the retry
 		// worker re-attempts after rotation restores a mint key.
 		m.log.Error("webhook: envelope signing key unavailable (denylisted); delivery deferred", "sub", id)
-		m.recordFailure(id, owner...)
+		m.recordFailure(id, owner)
 		return
 	}
 	req.Header.Set("Webhook-Signature", SignWebhookPayload(signing, body, time.Now()))
@@ -705,13 +742,13 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	resp, err := m.client.Do(req)
 	if err != nil {
 		m.metrics.WakeDelivery(time.Since(postStart), "error")
-		m.recordFailure(id, owner...)
+		m.recordFailure(id, owner)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		m.metrics.WakeDelivery(time.Since(postStart), "failed")
-		m.recordFailure(id, owner...)
+		m.recordFailure(id, owner)
 		return
 	}
 	m.metrics.WakeDelivery(time.Since(postStart), "ok")
@@ -730,18 +767,22 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		// a slot it no longer owns) is FENCED inline, atomically with the write — the
 		// same TOCTOU resolution the expire path uses. The append-path caller passes
 		// no scope, so its auto-ack stays unfenced (the (gen,wake_id) fence guards it).
-		status, err := m.ack(id, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs, owner...)
+		status, err := m.ackWithOwner(owner, id, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs)
 		if err != nil {
 			m.log.Warn("webhook: auto-ack done", "sub", id, "error", err)
 			return
 		}
 		if status == "OK" {
-			m.rewakeIfPending(id)
+			if owner != nil {
+				m.rewakeIfPendingOwned(*owner, id)
+			} else {
+				m.rewakeIfPendingUnscoped(id)
+			}
 		}
 	}
 }
 
-func (m *Manager) recordFailure(id string, owner ...OwnerScope) {
+func (m *Manager) recordFailure(id string, owner *OwnerScope) {
 	sub, ok, err := m.store.Get(id)
 	if err != nil || !ok {
 		return
@@ -756,8 +797,14 @@ func (m *Manager) recordFailure(id string, owner ...OwnerScope) {
 	// scope: schedule_retry inlines the owner-epoch fence and a deposed owner
 	// schedules nothing (no phantom retry on a slot it lost) — closing the retry
 	// path's TOCTOU. The append-path caller passes no scope (unfenced).
-	if _, err := m.store.ScheduleRetry(id, time.Now(), next, owner...); err != nil {
-		m.log.Warn("webhook: schedule retry", "sub", id, "error", err)
+	var schedErr error
+	if owner != nil {
+		_, schedErr = m.store.ScheduleRetryOwned(*owner, id, time.Now(), next)
+	} else {
+		_, schedErr = m.store.ScheduleRetryUnscoped(id, time.Now(), next)
+	}
+	if schedErr != nil {
+		m.log.Warn("webhook: schedule retry", "sub", id, "error", schedErr)
 	}
 }
 
@@ -784,10 +831,23 @@ func (m *Manager) mintToken(id string, generation int64, now time.Time) (string,
 	return tok, true
 }
 
-// rewakeIfPending re-issues a wake when work remains after a release or a done
-// ack (PROTOCOL §7.2/§7.3). Returns whether a re-wake was issued (the next_wake
-// flag).
-func (m *Manager) rewakeIfPending(id string) bool {
+// rewakeIfPendingUnscoped re-issues a wake when work remains after an external
+// callback/release (PROTOCOL §7.2/§7.3). Returns whether a re-wake was issued
+// (the next_wake flag).
+func (m *Manager) rewakeIfPendingUnscoped(id string) bool {
+	return m.rewakeIfPending(id, m.issueWake)
+}
+
+// rewakeIfPendingOwned is rewakeIfPendingUnscoped plus the owner-epoch fence for
+// owner-driven auto-acks. A deposed retry worker must not silently fall back to
+// the external/unscoped arm path while re-waking post-ack work.
+func (m *Manager) rewakeIfPendingOwned(scope OwnerScope, id string) bool {
+	return m.rewakeIfPending(id, func(sub Subscription, triggerStream string) bool {
+		return m.issueWakeOwned(scope, sub, triggerStream)
+	})
+}
+
+func (m *Manager) rewakeIfPending(id string, issue func(Subscription, string) bool) bool {
 	sub, ok, err := m.store.Get(id)
 	if err != nil || !ok {
 		return false
@@ -795,8 +855,7 @@ func (m *Manager) rewakeIfPending(id string) bool {
 	if sub.Phase != PhaseIdle || !HasPendingWork(sub.Links, m.tailOf) {
 		return false
 	}
-	m.issueWake(sub, "")
-	return true
+	return issue(sub, "")
 }
 
 func acksFromSnapshot(snap []StreamSnapshot) []Ack {
@@ -827,46 +886,74 @@ func jitterFraction() float64 {
 // stays free of the Metrics seam. Each is the sole entry point its callers use,
 // so a mutation cannot escape unrecorded.
 
-// armWake arms a wake (arm_wake): the ARMED branch ZADDs the due mark.
-func (m *Manager) armWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error) {
-	res, err := m.store.ArmWake(id, now, leaseTTLMs, armLease, wakeID)
+// armWakeUnscoped arms a wake (arm_wake): the ARMED branch ZADDs the due mark.
+func (m *Manager) armWakeUnscoped(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error) {
+	res, err := m.store.ArmWakeUnscoped(id, now, leaseTTLMs, armLease, wakeID)
 	if err == nil && res.Armed {
 		m.metrics.DueSetMutation("arm")
 	}
 	return res, err
 }
 
-// ack fences and acks (ack): the done branch ZREMs the due mark; a heartbeat
-// (done=false) does not, so only a done-ack records the mutation. An optional
-// OwnerScope makes ack inline the owner-epoch fence (issue #14) for the
-// owner-driven retry-worker auto-ack; the store records the inline fence on FENCED.
-func (m *Manager) ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, owner ...OwnerScope) (string, error) {
-	status, err := m.store.Ack(id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs, owner...)
+// armWakeOwned is armWakeUnscoped plus the owner-epoch fence for dueWorker.
+func (m *Manager) armWakeOwned(scope OwnerScope, id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error) {
+	res, err := m.store.ArmWakeOwned(scope, id, now, leaseTTLMs, armLease, wakeID)
+	if err == nil && res.Armed {
+		m.metrics.DueSetMutation("arm")
+	}
+	return res, err
+}
+
+// ackUnscoped fences and acks (ack): the done branch ZREMs the due mark; a
+// heartbeat (done=false) does not, so only a done-ack records the mutation.
+func (m *Manager) ackUnscoped(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+	status, err := m.store.AckUnscoped(id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs)
 	if err == nil && done && status == "OK" {
 		m.metrics.DueSetMutation("ack")
 	}
 	return status, err
 }
 
+// ackOwned is ackUnscoped plus the owner-epoch fence for owner-driven auto-acks.
+func (m *Manager) ackOwned(scope OwnerScope, id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+	status, err := m.store.AckOwned(scope, id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs)
+	if err == nil && done && status == "OK" {
+		m.metrics.DueSetMutation("ack")
+	}
+	return status, err
+}
+
+func (m *Manager) ackWithOwner(owner *OwnerScope, id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+	if owner != nil {
+		return m.ackOwned(*owner, id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs)
+	}
+	return m.ackUnscoped(id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs)
+}
+
 // release voluntarily releases the lease (release): the idle-reset branch ZREMs
 // the due mark (GAP3).
 func (m *Manager) release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error) {
-	status, err := m.store.Release(id, reqGeneration, reqWakeID, tokenGeneration)
+	status, err := m.store.ReleaseUnscoped(id, reqGeneration, reqWakeID, tokenGeneration)
 	if err == nil && status == "OK" {
 		m.metrics.DueSetMutation("release")
 	}
 	return status, err
 }
 
-// expireLease clears an expired lease (expire_lease): the EXPIRED branch re-owes
-// (ZADDs) the due mark so the dueWorker re-fires it. An optional OwnerScope makes
-// the script inline the owner-epoch fence (issue #14); a FENCED result is a
-// deposed owner's expiry suppressed atomically. The inline fence is recorded by
-// the store (the single place the Lua reply is observed), so every owner-scoped
-// script records OwnerFenced("inline") uniformly — not just the ones with a
-// manager wrapper.
-func (m *Manager) expireLease(id string, now time.Time, owner ...OwnerScope) (string, error) {
-	status, err := m.store.ExpireLease(id, now, owner...)
+// expireLeaseUnscoped clears an expired lease (expire_lease): the EXPIRED branch
+// re-owes (ZADDs) the due mark so the dueWorker re-fires it.
+func (m *Manager) expireLeaseUnscoped(id string, now time.Time) (string, error) {
+	status, err := m.store.ExpireLeaseUnscoped(id, now)
+	if err == nil && status == "EXPIRED" {
+		m.metrics.DueSetMutation("expire")
+	}
+	return status, err
+}
+
+// expireLeaseOwned is expireLeaseUnscoped plus the owner-epoch fence; a FENCED
+// result is a deposed owner's expiry suppressed atomically.
+func (m *Manager) expireLeaseOwned(scope OwnerScope, id string, now time.Time) (string, error) {
+	status, err := m.store.ExpireLeaseOwned(scope, id, now)
 	if err == nil && status == "EXPIRED" {
 		m.metrics.DueSetMutation("expire")
 	}
@@ -943,7 +1030,7 @@ func (m *Manager) leaseWorker() {
 					m.metrics.WorkerTick("lease", len(ids))
 				}
 				for _, id := range ids {
-					_, _ = m.expireLease(id, now, scope) // EXPIRED re-owes the due-set; dueWorker re-fires
+					_, _ = m.expireLeaseOwned(scope, id, now) // EXPIRED re-owes the due-set; dueWorker re-fires
 				}
 			}
 		}
@@ -970,7 +1057,11 @@ func (m *Manager) dueWorker() {
 			// (issue #14, real S slots — #15). The directly-invokable drainDue
 			// (RunDueWorker, tests) stays ungated, sweeping every slot.
 			for _, h := range m.ownedSlots() {
-				m.drainDue(h.Index())
+				scope, ok := m.ownerScope(h)
+				if !ok {
+					continue
+				}
+				m.drainDueOwned(h.Index(), scope)
 			}
 		}
 	}
@@ -982,6 +1073,14 @@ func (m *Manager) dueWorker() {
 // histogram reflects real work rather than idle ticks. Returns the number of wakes
 // fired.
 func (m *Manager) drainDue(h int) int {
+	return m.drainDueWithFire(h, m.fireDue)
+}
+
+func (m *Manager) drainDueOwned(h int, scope OwnerScope) int {
+	return m.drainDueWithFire(h, func(id string) bool { return m.fireDueOwned(scope, id) })
+}
+
+func (m *Manager) drainDueWithFire(h int, fire func(string) bool) int {
 	start := time.Now()
 	ids, err := m.store.ClaimDue(h, start, dueClaimLimit, m.workerTick*2)
 	if err != nil || len(ids) == 0 {
@@ -989,7 +1088,7 @@ func (m *Manager) drainDue(h int) int {
 	}
 	fired := 0
 	for _, id := range ids {
-		if m.fireDue(id) {
+		if fire(id) {
 			fired++
 		}
 	}
@@ -1015,14 +1114,21 @@ func (m *Manager) RunDueWorker() int {
 // retained full sweep — the due-set is an optimization over a still-correct
 // baseline (epic #9, correction #1). Returns whether a wake was issued.
 func (m *Manager) fireDue(id string) bool {
+	return m.fireDueWithIssue(id, m.issueWake)
+}
+
+func (m *Manager) fireDueOwned(scope OwnerScope, id string) bool {
+	return m.fireDueWithIssue(id, func(sub Subscription, triggerStream string) bool { return m.issueWakeOwned(scope, sub, triggerStream) })
+}
+
+func (m *Manager) fireDueWithIssue(id string, issue func(Subscription, string) bool) bool {
 	sub, ok, err := m.store.Get(id)
 	if err != nil {
 		return false
 	}
 	switch DecideDue(ok, sub.Phase, ok && HasPendingWork(sub.Links, m.tailOf)) {
 	case DueFire:
-		m.issueWake(sub, "")
-		return true
+		return issue(sub, "")
 	case DueClear:
 		if err := m.store.ClearDue(id); err != nil {
 			m.log.Warn("webhook: clear due mark", "sub", id, "error", err)
@@ -1066,7 +1172,7 @@ func (m *Manager) retryWorker() {
 					}
 					// deliverWebhook gates the external POST on check_owner OWNER (the one
 					// write that cannot inline the check — it crosses the network).
-					m.deliverWebhook(id, sub.Generation, sub.WakeID, scope)
+					m.deliverWebhookOwned(scope, id, sub.Generation, sub.WakeID)
 				}
 			}
 		}
@@ -1375,20 +1481,21 @@ func (m *Manager) sweepOnce() {
 			continue
 		}
 		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
-			if status, err := m.expireLease(sub.ID, now); err == nil && status == "EXPIRED" {
+			if status, err := m.expireLeaseUnscoped(sub.ID, now); err == nil && status == "EXPIRED" {
 				sub.Phase = PhaseIdle
 			}
 		}
 		if sub.Phase == PhaseIdle && HasPendingWorkFrom(sub.Links, tails) {
-			m.issueWake(sub, "")
-			// A backstop wake the UNGUARDED full sweep issued — the append-time/owner
-			// wake was lost (e.g. a rebalance coverage gap where the sub's slot was
-			// unowned). This is the coverage-gap sample gate #4 reads: when a non-owner
-			// replica's sweep has to re-fire a wake the owned fast path missed. At S=1
-			// the slot's subs are the whole keyspace; #15 refines this to deliver−append
-			// for the subs whose slot was specifically unowned at append.
-			m.metrics.CoverageGap(time.Since(start))
-			wakes++
+			if m.issueWake(sub, "") {
+				// A backstop wake the UNGUARDED full sweep issued — the append-time/owner
+				// wake was lost (e.g. a rebalance coverage gap where the sub's slot was
+				// unowned). This is the coverage-gap sample gate #4 reads: when a non-owner
+				// replica's sweep has to re-fire a wake the owned fast path missed. At S=1
+				// the slot's subs are the whole keyspace; #15 refines this to deliver−append
+				// for the subs whose slot was specifically unowned at append.
+				m.metrics.CoverageGap(time.Since(start))
+				wakes++
+			}
 		}
 	}
 	m.metrics.SweepTick(time.Since(start), len(subs), len(paths), wakes)
@@ -1638,7 +1745,7 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 		return false, true, false, nil
 	}
 	done := req.Done != nil && *req.Done
-	status, aerr := m.ack(id, req.Generation, req.WakeID, tokenGeneration, done, req.Acks, time.Now(), sub.Config.LeaseTTLMs)
+	status, aerr := m.ackUnscoped(id, req.Generation, req.WakeID, tokenGeneration, done, req.Acks, time.Now(), sub.Config.LeaseTTLMs)
 	if aerr != nil {
 		return false, false, false, aerr
 	}
@@ -1649,7 +1756,7 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 		return false, true, false, nil
 	}
 	if done {
-		nextWake = m.rewakeIfPending(id)
+		nextWake = m.rewakeIfPendingUnscoped(id)
 	}
 	return false, false, nextWake, nil
 }
@@ -1666,6 +1773,6 @@ func (m *Manager) applyRelease(id string, req ReleaseRequest, tokenGeneration in
 	case "NOSUB":
 		return false, true, nil
 	}
-	m.rewakeIfPending(id)
+	m.rewakeIfPendingUnscoped(id)
 	return false, false, nil
 }

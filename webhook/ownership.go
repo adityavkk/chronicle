@@ -319,33 +319,44 @@ func OwnedSlots(targeted, held map[SlotID]struct{}) []SlotID {
 // OwnerScope carries the slot-ownership identity a background worker presents so a
 // schedule/due-mutating script can inline the owner-epoch fence ATOMICALLY with
 // its write (the TOCTOU resolution, 05:372-385): a separate check_owner round-trip
-// could not fence a GC pause between the check and the write. The zero value
-// (Epoch == "") means "not slot-scoped" — the load-balanced external/hot-path
-// callers pass it, and the script skips the check, leaving the (gen,wake_id) fence
-// as the guard. A non-empty Epoch makes the script verify the caller is SlotKey's
-// current owner at that epoch before its write, FENCING a deposed owner. Layered
-// ABOVE the (gen,wake_id) fence, never replacing it.
+// could not fence a GC pause between the check and the write. OwnerScope is only
+// accepted by the explicit Owned store APIs; external/hot-path callers use the
+// matching Unscoped API, which passes an empty epoch to Lua deliberately. A valid
+// OwnerScope makes the script verify the caller is SlotKey's current owner at that
+// epoch before its write, FENCING a deposed owner. Layered ABOVE the (gen,wake_id)
+// fence, never replacing it.
 type OwnerScope struct {
 	SlotKey   string // ds:{ownership}:slot:<h>
 	ReplicaID string // me
-	Epoch     string // the epoch I hold (OwnerEpoch.String form); "" = skip the check
+	Epoch     string // the epoch I hold (OwnerEpoch.String form); must be non-empty
 }
 
-// active reports whether this scope enforces the owner-epoch fence (a non-empty
-// expected epoch). A non-active scope is the external/hot-path no-op.
-func (o OwnerScope) active() bool { return o.Epoch != "" }
+// active reports whether this scope is complete enough to enforce the owner-epoch
+// fence. The zero value is invalid for Owned APIs; it is no longer an implicit
+// "skip the fence" sentinel.
+func (o OwnerScope) active() bool { return o.SlotKey != "" && o.ReplicaID != "" && o.Epoch != "" }
 
-// firstOwnerScope resolves the variadic owner argument the schedule/due store
-// methods take into the (slotKey, replicaID, epoch) ARGV/KEY triple. With no
-// active scope it returns slot 0's key and an empty epoch, so the script's
-// owner_fenced short-circuits without reading the slot — today's behavior on the
-// external path, byte-for-byte. (On a single-node Redis declaring the extra key is
-// harmless; see keys.go on the {ownership} tag.)
-func firstOwnerScope(owner []OwnerScope) (slotKeyStr, replicaID, epoch string) {
-	if len(owner) > 0 && owner[0].active() {
-		return owner[0].SlotKey, owner[0].ReplicaID, owner[0].Epoch
+type ownerScriptArgs struct {
+	slotKey   string
+	replicaID string
+	epoch     string
+}
+
+// unscopedOwnerArgs is the deliberate external/hot-path shape: Lua sees an empty
+// expected epoch and short-circuits owner_fenced without reading the ownership
+// slot. The extra key is slot 0's owner key so Redis key declarations stay stable.
+func unscopedOwnerArgs() ownerScriptArgs {
+	return ownerScriptArgs{slotKey: slotKey(0)}
+}
+
+// scopedOwnerArgs validates the explicit Owned API's scope before a script write.
+// A missing field is a programmer error; returning it as an ordinary error keeps a
+// bad owned call from silently degrading to the external/unscoped path.
+func scopedOwnerArgs(scope OwnerScope) (ownerScriptArgs, error) {
+	if !scope.active() {
+		return ownerScriptArgs{}, fmt.Errorf("webhook: empty owner scope")
 	}
-	return slotKey(0), "", ""
+	return ownerScriptArgs{slotKey: scope.SlotKey, replicaID: scope.ReplicaID, epoch: scope.Epoch}, nil
 }
 
 // CheckOwnershipConfig enforces the two membership invariants (05:507-508):

@@ -83,7 +83,7 @@ func (c *shardedSubClaimer) claim(g int, worker, wakeID string, now time.Time) (
 }
 
 func (c *shardedSubClaimer) ack(g int, gen int64, wakeID string, done bool, now time.Time) (string, error) {
-	return c.store.AckShard(c.id, g, gen, wakeID, gen, done, nil, now, c.ttl)
+	return c.store.AckShardUnscoped(c.id, g, gen, wakeID, gen, done, nil, now, c.ttl)
 }
 
 // ---- T1 per (subId, g) ----
@@ -193,7 +193,7 @@ func shardLeaseWorker(store *webhook.RedisStore, id string, G, workerID int, ttl
 			sleep(gcPause(time.Duration(ttlMs) * time.Millisecond))
 		}
 		callNs = rec.now()
-		st, aerr := store.AckShard(id, g, res.Generation, res.WakeID, res.Generation, true, nil, time.Now(), ttlMs)
+		st, aerr := store.AckShardUnscoped(id, g, res.Generation, res.WakeID, res.Generation, true, nil, time.Now(), ttlMs)
 		if aerr != nil {
 			continue
 		}
