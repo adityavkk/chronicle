@@ -12,35 +12,43 @@
 --     cannot disturb the new holder's lease (the single-holder invariant).
 --
 -- Claim granularity (the third axis, design 08): a claim NAMES a shard. The fence
--- lives in the per-(subId,g) shardstate hash (KEYS[2]); NOSUB is decided by the
--- subscription's CONFIG hash (KEYS[1]) existing, so a fresh never-claimed g>0
+-- lives in the per-(subId,g) shardstate hash (k_shardstate); NOSUB is decided by the
+-- subscription's CONFIG hash (k_sub_config) existing, so a fresh never-claimed g>0
 -- shard is grantable (its fence starts idle, minted here) rather than NOSUB. The
--- lease member (ARGV[1]) is the per-shard schedule member. At G=1 / shard 0,
--- KEYS[1]==KEYS[2]==sub hash and ARGV[1]==id, so this is byte-for-byte the
+-- lease member (a_member) is the per-shard schedule member. At G=1 / shard 0,
+-- k_sub_config==k_shardstate==sub hash and a_member==id, so this is byte-for-byte the
 -- single-holder claim — the split is purely additive (08 §4).
--- KEYS: 1=sub(config) 2=shardstate 3=lease_zset 4=incarnation_counter 5=shard_registry
--- ARGV: 1=member 2=worker 3=now_ns 4=lease_ttl_ms 5=new_wake_id 6=shard_index
--- Reply: {status, generation, wake_id, holder} ; CLAIMED | BUSY | NOSUB
-local cfg = KEYS[1]
-local sub = KEYS[2]
+local k_sub_config = KEYS[1]
+local k_shardstate = KEYS[2]
+local k_lease_zset = KEYS[3]
+local k_incarnation_counter = KEYS[4]
+local k_shard_registry = KEYS[5]
+local a_member = ARGV[1]
+local a_worker = ARGV[2]
+local a_now_ns = ARGV[3]
+local a_lease_ttl_ms = ARGV[4]
+local a_new_wake_id = ARGV[5]
+local a_shard_index = ARGV[6]
+local cfg = k_sub_config
+local sub = k_shardstate
 if redis.call('EXISTS', cfg) == 0 then
   return { 'NOSUB' }
 end
 local cfg_inc = redis.call('HGET', cfg, 'incarnation')
 local shard_inc = redis.call('HGET', sub, 'incarnation')
-if KEYS[1] ~= KEYS[2] and cfg_inc ~= false and cfg_inc ~= '' and shard_inc ~= cfg_inc then
+if k_sub_config ~= k_shardstate and cfg_inc ~= false and cfg_inc ~= '' and shard_inc ~= cfg_inc then
   redis.call('DEL', sub)
 end
 local phase = redis.call('HGET', sub, 'phase')
 local holder = redis.call('HGET', sub, 'holder')
 local lease_until = tonumber(redis.call('HGET', sub, 'lease_until_ns')) or 0
-local now = tonumber(ARGV[3])
+local now = tonumber(a_now_ns)
 if phase == 'live' and holder == '1' and lease_until > now then
   return { 'BUSY', redis.call('HGET', sub, 'generation'), '', redis.call('HGET', sub, 'holder_worker') }
 end
 local incarnation = redis.call('HGET', cfg, 'incarnation')
 if incarnation == false or incarnation == '' then
-  incarnation = tostring(redis.call('INCR', KEYS[4]))
+  incarnation = tostring(redis.call('INCR', k_incarnation_counter))
   redis.call('HSET', cfg, 'incarnation', incarnation)
 end
 local gen = redis.call('HGET', sub, 'generation')
@@ -49,13 +57,13 @@ local wake = redis.call('HGET', sub, 'wake_id')
 -- above already returned for an unexpired live lease), so that case rotates too.
 if not (phase == 'waking' and wake ~= '') then
   gen = tostring(redis.call('HINCRBY', sub, 'generation', 1))
-  wake = ARGV[5]
+  wake = a_new_wake_id
   redis.call('HSET', sub, 'wake_id', wake)
 end
-local until_ns = now + tonumber(ARGV[4]) * 1000000
-redis.call('HSET', sub, 'phase', 'live', 'holder', '1', 'holder_worker', ARGV[2], 'lease_until_ns', tostring(until_ns), 'incarnation', incarnation)
-if KEYS[1] ~= KEYS[2] then
-  redis.call('SADD', KEYS[5], ARGV[6])
+local until_ns = now + tonumber(a_lease_ttl_ms) * 1000000
+redis.call('HSET', sub, 'phase', 'live', 'holder', '1', 'holder_worker', a_worker, 'lease_until_ns', tostring(until_ns), 'incarnation', incarnation)
+if k_sub_config ~= k_shardstate then
+  redis.call('SADD', k_shard_registry, a_shard_index)
 end
-redis.call('ZADD', KEYS[3], until_ns, ARGV[1])
-return { 'CLAIMED', gen, wake, ARGV[2] }
+redis.call('ZADD', k_lease_zset, until_ns, a_member)
+return { 'CLAIMED', gen, wake, a_worker }

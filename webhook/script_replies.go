@@ -19,8 +19,16 @@ func (createSubCreated) status() string   { return "CREATED" }
 func (createSubMatched) status() string   { return "MATCHED" }
 func (createSubConflict) status() string  { return "CONFLICT" }
 
+var createSubReplyVariants = []replyVariant{
+	{Status: "CREATED", Fields: []replyFieldKind{replyString}},
+	{Status: "MATCHED", Fields: []replyFieldKind{replyString}},
+	{Status: "CONFLICT", Fields: []replyFieldKind{replyString}},
+}
+
+var createSubDecoder = scriptDecoder[createSubReply]{Variants: createSubReplyVariants, Decode: decodeCreateSubReply}
+
 func decodeCreateSubReply(r scriptReply) (createSubReply, error) {
-	st, err := decodeStatus(r, "CREATED", "MATCHED", "CONFLICT")
+	st, err := decodeStatus(r, createSubReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +77,17 @@ func (armWakeBusy) status() string   { return "BUSY" }
 func (armWakeNoSub) status() string  { return "NOSUB" }
 func (armWakeFenced) status() string { return "FENCED" }
 
+var armWakeReplyVariants = []replyVariant{
+	{Status: "ARMED", Fields: []replyFieldKind{replyInteger, replyString}},
+	{Status: "BUSY", Fields: []replyFieldKind{replyInteger, replyString}},
+	{Status: "NOSUB"},
+	{Status: "FENCED"},
+}
+
+var armWakeDecoder = scriptDecoder[armWakeReply]{Variants: armWakeReplyVariants, Decode: decodeArmWakeReply}
+
 func decodeArmWakeReply(r scriptReply) (armWakeReply, error) {
-	st, err := decodeStatus(r, "ARMED", "BUSY", "NOSUB", "FENCED")
+	st, err := decodeStatus(r, armWakeReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -137,8 +154,16 @@ func (claimClaimed) status() string { return "CLAIMED" }
 func (claimBusy) status() string    { return "BUSY" }
 func (claimNoSub) status() string   { return "NOSUB" }
 
+var claimReplyVariants = []replyVariant{
+	{Status: "CLAIMED", Fields: []replyFieldKind{replyInteger, replyString, replyString}},
+	{Status: "BUSY", Fields: []replyFieldKind{replyInteger, replyString, replyString}},
+	{Status: "NOSUB"},
+}
+
+var claimDecoder = scriptDecoder[claimReply]{Variants: claimReplyVariants, Decode: decodeClaimReply}
+
 func decodeClaimReply(r scriptReply) (claimReply, error) {
-	st, err := decodeStatus(r, "CLAIMED", "BUSY", "NOSUB")
+	st, err := decodeStatus(r, claimReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -210,8 +235,17 @@ func (scheduleRetryNoSub) status() string       { return "NOSUB" }
 func (scheduleRetryStale) status() string       { return "STALE" }
 func (scheduleRetryFenced) status() string      { return "FENCED" }
 
+var scheduleRetryReplyVariants = []replyVariant{
+	{Status: "OK", Fields: []replyFieldKind{replyInteger, replyNS}},
+	{Status: "NOSUB"},
+	{Status: "STALE"},
+	{Status: "FENCED"},
+}
+
+var scheduleRetryDecoder = scriptDecoder[scheduleRetryReply]{Variants: scheduleRetryReplyVariants, Decode: decodeScheduleRetryReply}
+
 func decodeScheduleRetryReply(r scriptReply) (scheduleRetryReply, error) {
-	st, err := decodeStatus(r, "OK", "NOSUB", "STALE", "FENCED")
+	st, err := decodeStatus(r, scheduleRetryReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -251,6 +285,8 @@ func decodeScheduleRetryReply(r scriptReply) (scheduleRetryReply, error) {
 
 type stringListReply []string
 
+var stringListDecoder = scriptDecoder[stringListReply]{Decode: decodeStringListReply}
+
 func decodeStringListReply(r scriptReply) (stringListReply, error) {
 	out := make([]string, len(r))
 	for i := range r {
@@ -264,6 +300,11 @@ func decodeStringListReply(r scriptReply) (stringListReply, error) {
 }
 
 type keyMaterialReply struct{ Kid, Material string }
+
+var keyMaterialDecoder = scriptDecoder[keyMaterialReply]{
+	Variants: []replyVariant{{Status: "<key-material>", Fields: []replyFieldKind{replyString, replyString}}},
+	Decode:   decodeKeyMaterialReply,
+}
 
 func decodeKeyMaterialReply(r scriptReply) (keyMaterialReply, error) {
 	if err := r.wantArity(2); err != nil {
@@ -294,8 +335,15 @@ func (rotateKeyConflict) rotateKeyReply() {}
 func (rotateKeyRotated) status() string   { return "rotated" }
 func (rotateKeyConflict) status() string  { return "conflict" }
 
+var rotateKeyReplyVariants = []replyVariant{
+	{Status: "rotated", Fields: []replyFieldKind{replyString}},
+	{Status: "conflict", Fields: []replyFieldKind{replyString}},
+}
+
+var rotateKeyDecoder = scriptDecoder[rotateKeyReply]{Variants: rotateKeyReplyVariants, Decode: decodeRotateKeyReply}
+
 func decodeRotateKeyReply(r scriptReply) (rotateKeyReply, error) {
-	st, err := decodeStatus(r, "rotated", "conflict")
+	st, err := decodeStatus(r, rotateKeyReplyVariants)
 	if err != nil {
 		return nil, err
 	}

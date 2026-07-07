@@ -2,8 +2,8 @@ package webhook
 
 import "fmt"
 
-func decodeUnitStatus(r scriptReply, statuses ...string) (string, error) {
-	st, err := decodeStatus(r, statuses...)
+func decodeUnitStatus(r scriptReply, variants []replyVariant) (string, error) {
+	st, err := decodeStatus(r, variants)
 	if err != nil {
 		return "", err
 	}
@@ -29,8 +29,14 @@ func (linkStreamExists) linkStreamReply()   {}
 func (linkStreamLinked) status() string     { return "LINKED" }
 func (linkStreamUpgraded) status() string   { return "UPGRADED" }
 func (linkStreamExists) status() string     { return "EXISTS" }
+
+var (
+	linkStreamReplyVariants = []replyVariant{{Status: "LINKED"}, {Status: "UPGRADED"}, {Status: "EXISTS"}}
+	linkStreamDecoder       = scriptDecoder[linkStreamReply]{Variants: linkStreamReplyVariants, Decode: decodeLinkStreamReply}
+)
+
 func decodeLinkStreamReply(r scriptReply) (linkStreamReply, error) {
-	st, err := decodeUnitStatus(r, "LINKED", "UPGRADED", "EXISTS")
+	st, err := decodeUnitStatus(r, linkStreamReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -62,8 +68,14 @@ func (unlinkStreamGone) unlinkStreamReply()    {}
 func (unlinkStreamRemoved) status() string     { return "REMOVED" }
 func (unlinkStreamGlob) status() string        { return "GLOB" }
 func (unlinkStreamGone) status() string        { return "GONE" }
+
+var (
+	unlinkStreamReplyVariants = []replyVariant{{Status: "REMOVED"}, {Status: "GLOB"}, {Status: "GONE"}}
+	unlinkStreamDecoder       = scriptDecoder[unlinkStreamReply]{Variants: unlinkStreamReplyVariants, Decode: decodeUnlinkStreamReply}
+)
+
 func decodeUnlinkStreamReply(r scriptReply) (unlinkStreamReply, error) {
-	st, err := decodeUnitStatus(r, "REMOVED", "GLOB", "GONE")
+	st, err := decodeUnitStatus(r, unlinkStreamReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -95,8 +107,14 @@ func (ackNoSub) ackReply()       {}
 func (ackOK) status() string     { return "OK" }
 func (ackFenced) status() string { return "FENCED" }
 func (ackNoSub) status() string  { return "NOSUB" }
+
+var (
+	ackReplyVariants = []replyVariant{{Status: "OK"}, {Status: "FENCED"}, {Status: "NOSUB"}}
+	ackDecoder       = scriptDecoder[ackReply]{Variants: ackReplyVariants, Decode: decodeAckReply}
+)
+
 func decodeAckReply(r scriptReply) (ackReply, error) {
-	st, err := decodeUnitStatus(r, "OK", "FENCED", "NOSUB")
+	st, err := decodeUnitStatus(r, ackReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -128,8 +146,14 @@ func (releaseNoSub) releaseReply()   {}
 func (releaseOK) status() string     { return "OK" }
 func (releaseFenced) status() string { return "FENCED" }
 func (releaseNoSub) status() string  { return "NOSUB" }
+
+var (
+	releaseReplyVariants = []replyVariant{{Status: "OK"}, {Status: "FENCED"}, {Status: "NOSUB"}}
+	releaseDecoder       = scriptDecoder[releaseReply]{Variants: releaseReplyVariants, Decode: decodeReleaseReply}
+)
+
 func decodeReleaseReply(r scriptReply) (releaseReply, error) {
-	st, err := decodeUnitStatus(r, "OK", "FENCED", "NOSUB")
+	st, err := decodeUnitStatus(r, releaseReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -164,8 +188,14 @@ func (expireLeaseExpired) status() string    { return "EXPIRED" }
 func (expireLeaseActive) status() string     { return "ACTIVE" }
 func (expireLeaseNoSub) status() string      { return "NOSUB" }
 func (expireLeaseFenced) status() string     { return "FENCED" }
+
+var (
+	expireLeaseReplyVariants = []replyVariant{{Status: "EXPIRED"}, {Status: "ACTIVE"}, {Status: "NOSUB"}, {Status: "FENCED"}}
+	expireLeaseDecoder       = scriptDecoder[expireLeaseReply]{Variants: expireLeaseReplyVariants, Decode: decodeExpireLeaseReply}
+)
+
 func decodeExpireLeaseReply(r scriptReply) (expireLeaseReply, error) {
-	st, err := decodeUnitStatus(r, "EXPIRED", "ACTIVE", "NOSUB", "FENCED")
+	st, err := decodeUnitStatus(r, expireLeaseReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -199,8 +229,14 @@ func (restoreLeaseNoSub) restoreLeaseReply()    {}
 func (restoreLeaseRestored) status() string     { return "RESTORED" }
 func (restoreLeaseIntact) status() string       { return "INTACT" }
 func (restoreLeaseNoSub) status() string        { return "NOSUB" }
+
+var (
+	restoreLeaseReplyVariants = []replyVariant{{Status: "RESTORED"}, {Status: "INTACT"}, {Status: "NOSUB"}}
+	restoreLeaseDecoder       = scriptDecoder[restoreLeaseReply]{Variants: restoreLeaseReplyVariants, Decode: decodeRestoreLeaseReply}
+)
+
 func decodeRestoreLeaseReply(r scriptReply) (restoreLeaseReply, error) {
-	st, err := decodeUnitStatus(r, "RESTORED", "INTACT", "NOSUB")
+	st, err := decodeUnitStatus(r, restoreLeaseReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +271,14 @@ func (recordSuccessOK) status() string          { return "OK" }
 func (recordSuccessStale) status() string       { return "STALE" }
 func (recordSuccessFenced) status() string      { return "FENCED" }
 func (recordSuccessNoSub) status() string       { return "NOSUB" }
+
+var (
+	recordSuccessReplyVariants = []replyVariant{{Status: "OK"}, {Status: "STALE"}, {Status: "FENCED"}, {Status: "NOSUB"}}
+	recordSuccessDecoder       = scriptDecoder[recordSuccessReply]{Variants: recordSuccessReplyVariants, Decode: decodeRecordSuccessReply}
+)
+
 func decodeRecordSuccessReply(r scriptReply) (recordSuccessReply, error) {
-	st, err := decodeUnitStatus(r, "OK", "STALE", "FENCED", "NOSUB")
+	st, err := decodeUnitStatus(r, recordSuccessReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -270,8 +312,14 @@ func (recordWakeSentNoSub) recordWakeSentReply() {}
 func (recordWakeSentOK) status() string          { return "OK" }
 func (recordWakeSentStale) status() string       { return "STALE" }
 func (recordWakeSentNoSub) status() string       { return "NOSUB" }
+
+var (
+	recordWakeSentReplyVariants = []replyVariant{{Status: "OK"}, {Status: "STALE"}, {Status: "NOSUB"}}
+	recordWakeSentDecoder       = scriptDecoder[recordWakeSentReply]{Variants: recordWakeSentReplyVariants, Decode: decodeRecordWakeSentReply}
+)
+
 func decodeRecordWakeSentReply(r scriptReply) (recordWakeSentReply, error) {
-	st, err := decodeUnitStatus(r, "OK", "STALE", "NOSUB")
+	st, err := decodeUnitStatus(r, recordWakeSentReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -295,8 +343,14 @@ type deleteSubOK struct{}
 
 func (deleteSubOK) deleteSubReply() {}
 func (deleteSubOK) status() string  { return "OK" }
+
+var (
+	deleteSubReplyVariants = []replyVariant{{Status: "OK"}}
+	deleteSubDecoder       = scriptDecoder[deleteSubReply]{Variants: deleteSubReplyVariants, Decode: decodeDeleteSubReply}
+)
+
 func decodeDeleteSubReply(r scriptReply) (deleteSubReply, error) {
-	if _, err := decodeUnitStatus(r, "OK"); err != nil {
+	if _, err := decodeUnitStatus(r, deleteSubReplyVariants); err != nil {
 		return nil, err
 	}
 	return deleteSubOK{}, nil

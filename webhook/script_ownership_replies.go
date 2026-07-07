@@ -41,8 +41,16 @@ func (r slotClaimBusy) toSlotClaim() SlotClaim {
 	return SlotClaim{Status: SlotBusy, Owner: r.Owner, Epoch: r.Epoch, ExpiryNs: r.ExpiryNs}
 }
 
+var slotClaimReplyVariants = []replyVariant{
+	{Status: "CLAIMED", Fields: []replyFieldKind{replyString, replyInteger, replyNS}},
+	{Status: "RENEWED", Fields: []replyFieldKind{replyString, replyInteger, replyNS}},
+	{Status: "BUSY", Fields: []replyFieldKind{replyString, replyInteger, replyNS}},
+}
+
+var slotClaimDecoder = scriptDecoder[slotClaimReply]{Variants: slotClaimReplyVariants, Decode: decodeSlotClaimReply}
+
 func decodeSlotClaimReply(r scriptReply) (slotClaimReply, error) {
-	st, err := decodeStatus(r, "CLAIMED", "RENEWED", "BUSY")
+	st, err := decodeStatus(r, slotClaimReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -106,8 +114,15 @@ func (r reserveLegacySlotBusy) toSlotClaim() SlotClaim {
 	return SlotClaim{Status: SlotBusy, Owner: r.Owner, Epoch: r.Epoch, ExpiryNs: r.ExpiryNs}
 }
 
+var reserveLegacySlotReplyVariants = []replyVariant{
+	{Status: "RESERVED", Fields: []replyFieldKind{replyString, replyInteger, replyNS}},
+	{Status: "BUSY", Fields: []replyFieldKind{replyString, replyInteger, replyNS}},
+}
+
+var reserveLegacySlotDecoder = scriptDecoder[reserveLegacySlotReply]{Variants: reserveLegacySlotReplyVariants, Decode: decodeReserveLegacySlotReply}
+
 func decodeReserveLegacySlotReply(r scriptReply) (reserveLegacySlotReply, error) {
-	st, err := decodeStatus(r, "RESERVED", "BUSY")
+	st, err := decodeStatus(r, reserveLegacySlotReplyVariants)
 	if err != nil {
 		return nil, err
 	}
@@ -162,8 +177,13 @@ func (ownerCheckOwner) toOwnerCheck() OwnerCheck   { return OwnerCheckOwner }
 func (ownerCheckFenced) toOwnerCheck() OwnerCheck  { return OwnerCheckFenced }
 func (ownerCheckUnowned) toOwnerCheck() OwnerCheck { return OwnerCheckUnowned }
 
+var (
+	ownerCheckReplyVariants = []replyVariant{{Status: "OWNER"}, {Status: "FENCED"}, {Status: "UNOWNED"}}
+	ownerCheckDecoder       = scriptDecoder[ownerCheckReply]{Variants: ownerCheckReplyVariants, Decode: decodeOwnerCheckReply}
+)
+
 func decodeOwnerCheckReply(r scriptReply) (ownerCheckReply, error) {
-	st, err := decodeStatus(r, "OWNER", "FENCED", "UNOWNED")
+	st, err := decodeStatus(r, ownerCheckReplyVariants)
 	if err != nil {
 		return nil, err
 	}

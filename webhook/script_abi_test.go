@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"fmt"
 	"io/fs"
 	"reflect"
 	"regexp"
@@ -92,24 +93,27 @@ func TestScriptReplyDecodersKeepValidPayloads(t *testing.T) {
 }
 
 func TestScriptABIRejectsWrongCallArity(t *testing.T) {
-	if err := armWakeScript.abi.validateCall([]string{"sub", "lease", "due"}, []any{"id", "1700000000", "1000", "1", "wake", "replica", "1"}); err != nil {
+	if err := armWakeScript.abi.validateCall(armWakeKeyVec{newScriptKeys([]string{"sub", "lease", "due"}, "sub", "lease_zset", "due_zset")}, []any{"id", "1700000000", "1000", "1", "wake", "replica", "1"}); err != nil {
 		t.Fatalf("valid arm_wake call rejected: %v", err)
 	}
-	if err := armWakeScript.abi.validateCall([]string{"sub", "lease"}, []any{"id", "1700000000", "1000", "1", "wake", "replica", "1"}); err == nil {
+	if err := armWakeScript.abi.validateCall(armWakeKeyVec{newScriptKeys([]string{"sub", "lease"}, "sub", "lease_zset")}, []any{"id", "1700000000", "1000", "1", "wake", "replica", "1"}); err == nil {
 		t.Fatal("arm_wake with too few KEYS accepted")
 	}
-	if err := armWakeScript.abi.validateCall([]string{"sub", "lease", "due"}, []any{"id", "1700000000"}); err == nil {
+	if err := armWakeScript.abi.validateCall(armWakeKeyVec{newScriptKeys([]string{"sub", "due", "lease"}, "sub", "due_zset", "lease_zset")}, []any{"id", "1700000000", "1000", "1", "wake", "replica", "1"}); err == nil {
+		t.Fatal("arm_wake with swapped key roles accepted")
+	}
+	if err := armWakeScript.abi.validateCall(armWakeKeyVec{newScriptKeys([]string{"sub", "lease", "due"}, "sub", "lease_zset", "due_zset")}, []any{"id", "1700000000"}); err == nil {
 		t.Fatal("arm_wake with too few ARGV accepted")
 	}
-	if err := ackScript.abi.validateCall([]string{"shard", "links", "lease", "retry", "due", "sub"}, []any{"member", "1", "wake", "1", "1", "1700000000", "1000", "1", "path-only", "replica", "1"}); err == nil {
+	if err := ackScript.abi.validateCall(ackKeyVec{newScriptKeys([]string{"shard", "links", "lease", "retry", "due", "sub"}, "shardstate", "links", "lease_zset", "retry_zset", "due_zset", "sub_config")}, []any{"member", "1", "wake", "1", "1", "1700000000", "1000", "1", "path-only", "replica", "1"}); err == nil {
 		t.Fatal("ack with incomplete variadic ack pair accepted")
 	}
 }
 
 func TestAllProductionLuaScriptsAreRegistered(t *testing.T) {
 	registered := map[string]struct{}{}
-	for _, abi := range registeredScripts {
-		registered[abi.File] = struct{}{}
+	for _, reg := range registeredScripts {
+		registered[reg.abi.File] = struct{}{}
 	}
 	if err := fs.WalkDir(scriptFS, "scripts", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".lua") {
@@ -130,7 +134,8 @@ func TestAllProductionLuaScriptsAreRegistered(t *testing.T) {
 }
 
 func TestRegisteredScriptABIMatchesLuaReferences(t *testing.T) {
-	for _, abi := range registeredScripts {
+	for _, reg := range registeredScripts {
+		abi := reg.abi
 		t.Run(abi.Name, func(t *testing.T) {
 			bodyBytes, err := scriptFS.ReadFile("scripts/" + abi.File)
 			if err != nil {
@@ -138,30 +143,82 @@ func TestRegisteredScriptABIMatchesLuaReferences(t *testing.T) {
 			}
 			body := string(bodyBytes)
 
-			if got, want := maxIndexedReference(body, "KEYS"), maxKeyArity(abi.Keys); got != want {
-				t.Fatalf("KEYS max reference = %d, registry max arity = %d", got, want)
+			if got, want := keyRoleAliases(body), maxKeyRoles(abi.Keys); !reflect.DeepEqual(got, want) {
+				t.Fatalf("Lua key role aliases = %v, registry roles = %v", got, want)
+			}
+			if got, want := argAliases(body), declaredArgAliases(abi.Args); !reflect.DeepEqual(got, want) {
+				t.Fatalf("Lua argv aliases = %v, registry args = %v", got, want)
 			}
 			if got := maxIndexedReference(body, "ARGV"); got > maxDeclaredArgReference(abi.Args) {
 				t.Fatalf("ARGV max reference = %d exceeds registry declaration %d", got, maxDeclaredArgReference(abi.Args))
 			}
 
 			gotStatuses := returnedStatusSet(body)
-			wantStatuses := setOf(abi.Statuses)
+			wantStatuses := variantStatusSet(reg.variants)
 			if !reflect.DeepEqual(gotStatuses, wantStatuses) {
-				t.Fatalf("returned statuses = %v, registry statuses = %v", gotStatuses, wantStatuses)
+				t.Fatalf("returned statuses = %v, declared statuses = %v", gotStatuses, wantStatuses)
+			}
+			if len(wantStatuses) > 0 {
+				gotShapes := returnedPayloadShapes(body)
+				wantShapes := variantPayloadShapes(reg.variants)
+				if !reflect.DeepEqual(gotShapes, wantShapes) {
+					t.Fatalf("returned payload shapes = %v, declared shapes = %v", gotShapes, wantShapes)
+				}
 			}
 		})
 	}
 }
 
-func maxKeyArity(schemas []scriptKeySchema) int {
-	max := 0
+func maxKeyRoles(schemas []scriptKeySchema) []scriptKeyRole {
+	var out []scriptKeyRole
 	for _, schema := range schemas {
-		if len(schema.Roles) > max {
-			max = len(schema.Roles)
+		if len(schema.Roles) > len(out) {
+			out = schema.Roles
 		}
 	}
-	return max
+	return out
+}
+
+func keyRoleAliases(lua string) []scriptKeyRole {
+	re := regexp.MustCompile(`(?m)^local k_([a-z0-9_]+) = KEYS\[(\d+)\]$`)
+	matches := re.FindAllStringSubmatch(lua, -1)
+	out := make([]scriptKeyRole, len(matches))
+	for _, m := range matches {
+		n, err := strconv.Atoi(m[2])
+		if err != nil {
+			testPanic(err)
+		}
+		if n < 1 || n > len(out) {
+			testPanic(fmt.Errorf("key alias index %d outside 1..%d", n, len(out)))
+		}
+		out[n-1] = scriptKeyRole(m[1])
+	}
+	return out
+}
+
+func declaredArgAliases(schema scriptArgSchema) []string {
+	out := make([]string, len(schema.Args))
+	for i, arg := range schema.Args {
+		out[i] = arg.Name
+	}
+	return out
+}
+
+func argAliases(lua string) []string {
+	re := regexp.MustCompile(`(?m)^local a_([a-z0-9_]+) = ARGV\[(\d+)\]$`)
+	matches := re.FindAllStringSubmatch(lua, -1)
+	out := make([]string, len(matches))
+	for _, m := range matches {
+		n, err := strconv.Atoi(m[2])
+		if err != nil {
+			testPanic(err)
+		}
+		if n < 1 || n > len(out) {
+			testPanic(fmt.Errorf("argv alias index %d outside 1..%d", n, len(out)))
+		}
+		out[n-1] = m[1]
+	}
+	return out
 }
 
 func maxDeclaredArgReference(schema scriptArgSchema) int {
@@ -206,10 +263,93 @@ func returnedStatusSet(lua string) map[string]struct{} {
 	return out
 }
 
-func setOf(values []string) map[string]struct{} {
+func returnedPayloadShapes(lua string) map[string][]replyFieldKind {
+	out := map[string][]replyFieldKind{}
+	returnRe := regexp.MustCompile(`return\s*\{([^\n}]*)\}`)
+	quoteRe := regexp.MustCompile(`'([^']*)'`)
+	for _, ret := range returnRe.FindAllStringSubmatch(lua, -1) {
+		parts := splitLuaReturn(ret[1])
+		if len(parts) == 0 {
+			continue
+		}
+		statuses := quoteRe.FindAllStringSubmatch(parts[0], -1)
+		if len(statuses) == 0 {
+			continue
+		}
+		shape := make([]replyFieldKind, 0, len(parts)-1)
+		for _, part := range parts[1:] {
+			shape = append(shape, luaReplyFieldKind(part))
+		}
+		for _, st := range statuses {
+			out[st[1]] = shape
+		}
+	}
+	return out
+}
+
+func splitLuaReturn(s string) []string {
+	var out []string
+	depth := 0
+	start := 0
+	inQuote := false
+	for i, r := range s {
+		switch r {
+		case '\'':
+			inQuote = !inQuote
+		case '(':
+			if !inQuote {
+				depth++
+			}
+		case ')':
+			if !inQuote && depth > 0 {
+				depth--
+			}
+		case ',':
+			if !inQuote && depth == 0 {
+				out = append(out, strings.TrimSpace(s[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	out = append(out, strings.TrimSpace(s[start:]))
+	return out
+}
+
+func luaReplyFieldKind(expr string) replyFieldKind {
+	expr = strings.TrimSpace(expr)
+	if strings.HasPrefix(expr, "tonumber(") {
+		return replyInteger
+	}
+	if strings.Contains(expr, "lease_expiry_ns") || strings.Contains(expr, "until_ns") || strings.Contains(expr, "first") {
+		return replyNS
+	}
+	if strings.Contains(expr, "gen") || strings.Contains(expr, "generation") || strings.Contains(expr, "retry_count") || strings.Contains(expr, "owner_epoch") || strings.Contains(expr, "epoch") {
+		return replyInteger
+	}
+	return replyString
+}
+
+func variantPayloadShapes(variants []replyVariant) map[string][]replyFieldKind {
+	out := map[string][]replyFieldKind{}
+	for _, v := range variants {
+		if strings.HasPrefix(v.Status, "<") {
+			continue
+		}
+		out[v.Status] = append([]replyFieldKind(nil), v.Fields...)
+		if out[v.Status] == nil {
+			out[v.Status] = []replyFieldKind{}
+		}
+	}
+	return out
+}
+
+func variantStatusSet(variants []replyVariant) map[string]struct{} {
 	out := map[string]struct{}{}
-	for _, v := range values {
-		out[v] = struct{}{}
+	for _, v := range variants {
+		if strings.HasPrefix(v.Status, "<") {
+			continue
+		}
+		out[v.Status] = struct{}{}
 	}
 	return out
 }

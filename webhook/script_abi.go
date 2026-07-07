@@ -11,11 +11,10 @@ import (
 // scriptABI is the Go-owned Lua ABI. Lua comments are documentation only; this
 // registry is the contract the Redis boundary validates before and after EVAL.
 type scriptABI struct {
-	Name     string
-	File     string
-	Keys     []scriptKeySchema
-	Args     scriptArgSchema
-	Statuses []string
+	Name string
+	File string
+	Keys []scriptKeySchema
+	Args scriptArgSchema
 }
 
 type scriptKeySchema struct {
@@ -66,23 +65,63 @@ func variadicArgs(fixed []scriptArg, group []scriptArg, trailing []scriptArg) sc
 
 func arg(name string, kind scriptArgKind) scriptArg { return scriptArg{Name: name, Kind: kind} }
 
+type scriptKeyVector interface {
+	redisKeys() []string
+	keyRoles() []scriptKeyRole
+}
+
+type scriptKeys struct {
+	values []string
+	roles  []scriptKeyRole
+}
+
+func (k scriptKeys) redisKeys() []string       { return k.values }
+func (k scriptKeys) keyRoles() []scriptKeyRole { return k.roles }
+
+type replyFieldKind string
+
+const (
+	replyString  replyFieldKind = "string"
+	replyInteger replyFieldKind = "int"
+	replyNS      replyFieldKind = "unix_ns"
+)
+
+type replyVariant struct {
+	Status string
+	Fields []replyFieldKind
+}
+
+type scriptDecoder[R any] struct {
+	Variants []replyVariant
+	Decode   func(scriptReply) (R, error)
+}
+
+type registeredScript struct {
+	abi      scriptABI
+	variants []replyVariant
+}
+
 // typedScript couples a redis.Script with its ABI and sole raw-reply decoder.
-type typedScript[R any] struct {
-	abi    scriptABI
-	script *redis.Script
-	decode func(scriptReply) (R, error)
+type typedScript[K scriptKeyVector, R any] struct {
+	abi     scriptABI
+	script  *redis.Script
+	decoder scriptDecoder[R]
 }
 
-func newTypedScript[R any](abi scriptABI, decode func(scriptReply) (R, error)) typedScript[R] {
-	return typedScript[R]{abi: abi, script: loadScript(abi.File), decode: decode}
+func newTypedScript[K scriptKeyVector, R any](abi scriptABI, decoder scriptDecoder[R]) typedScript[K, R] {
+	return typedScript[K, R]{abi: abi, script: loadScript(abi.File), decoder: decoder}
 }
 
-func (s typedScript[R]) run(ctx context.Context, c redis.Scripter, keys []string, args ...any) (R, error) {
+func (s typedScript[K, R]) registration() registeredScript {
+	return registeredScript{abi: s.abi, variants: s.decoder.Variants}
+}
+
+func (s typedScript[K, R]) run(ctx context.Context, c redis.Scripter, keys K, args ...any) (R, error) {
 	var zero R
 	if err := s.abi.validateCall(keys, args); err != nil {
 		return zero, err
 	}
-	raw, err := s.script.Run(ctx, c, keys, args...).Result()
+	raw, err := s.script.Run(ctx, c, keys.redisKeys(), args...).Result()
 	if err != nil {
 		return zero, err
 	}
@@ -90,28 +129,45 @@ func (s typedScript[R]) run(ctx context.Context, c redis.Scripter, keys []string
 	if err != nil {
 		return zero, err
 	}
-	out, err := s.decode(reply)
+	out, err := s.decoder.Decode(reply)
 	if err != nil {
 		return zero, fmt.Errorf("%s: %w", s.abi.Name, err)
 	}
 	return out, nil
 }
 
-func (a scriptABI) validateCall(keys []string, args []any) error {
+func (a scriptABI) validateCall(keys scriptKeyVector, args []any) error {
+	values := keys.redisKeys()
+	roles := keys.keyRoles()
+	if len(values) != len(roles) {
+		return fmt.Errorf("%s: key vector has %d values and %d roles", a.Name, len(values), len(roles))
+	}
 	keyOK := false
 	for _, schema := range a.Keys {
-		if len(keys) == len(schema.Roles) {
+		if equalRoles(roles, schema.Roles) {
 			keyOK = true
 			break
 		}
 	}
 	if !keyOK {
-		return fmt.Errorf("%s: wrong key arity %d", a.Name, len(keys))
+		return fmt.Errorf("%s: wrong key roles %v", a.Name, roles)
 	}
 	if err := a.Args.validate(a.Name, args); err != nil {
 		return err
 	}
 	return nil
+}
+
+func equalRoles(a, b []scriptKeyRole) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s scriptArgSchema) validate(name string, args []any) error {
@@ -292,7 +348,7 @@ func (r scriptReply) nsAt(i int) (int64, error) {
 	}
 }
 
-func decodeStatus(r scriptReply, statuses ...string) (string, error) {
+func decodeStatus(r scriptReply, variants []replyVariant) (string, error) {
 	if len(r) == 0 {
 		return "", fmt.Errorf("empty reply")
 	}
@@ -300,8 +356,8 @@ func decodeStatus(r scriptReply, statuses ...string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, allowed := range statuses {
-		if st == allowed {
+	for _, allowed := range variants {
+		if st == allowed.Status {
 			return st, nil
 		}
 	}
