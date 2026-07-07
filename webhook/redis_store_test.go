@@ -93,12 +93,12 @@ func TestStoreArmWakeSurvivesRestart(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	res, err := s.ArmWake("s1", now, 1000, true, "w_first")
+	res, err := s.ArmWakeUnscoped("s1", now, 1000, true, "w_first")
 	if err != nil || !res.Armed || res.Generation != 1 || res.WakeID != "w_first" {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
 	// Coalesce: a second arm while in flight is BUSY, not a new generation.
-	if busy, _ := s.ArmWake("s1", now, 1000, true, "w_second"); !busy.Busy || busy.Generation != 1 {
+	if busy, _ := s.ArmWakeUnscoped("s1", now, 1000, true, "w_second"); !busy.Busy || busy.Generation != 1 {
 		t.Fatalf("second arm should be BUSY at gen 1, got %+v", busy)
 	}
 
@@ -139,12 +139,12 @@ func TestStoreClaimCASAckFence(t *testing.T) {
 		t.Fatalf("claim2 should be BUSY held by worker-1, got %+v", c2)
 	}
 	// Stale-generation ack is fenced.
-	if st, _ := s.Ack("s1", c1.Generation+9, c1.WakeID, c1.Generation+9, true, nil, now, 1000); st != "FENCED" {
+	if st, _ := s.AckUnscoped("s1", c1.Generation+9, c1.WakeID, c1.Generation+9, true, nil, now, 1000); st != "FENCED" {
 		t.Fatalf("stale ack should FENCE, got %q", st)
 	}
 	// Correct ack advances the cursor forward-only and releases.
 	acks := []Ack{{Stream: "events/a", Offset: "0000000000000001_0000000000000050"}}
-	if st, _ := s.Ack("s1", c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000); st != "OK" {
+	if st, _ := s.AckUnscoped("s1", c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000); st != "OK" {
 		t.Fatalf("valid ack = %q, want OK", st)
 	}
 	sub, _, _ := s.Get("s1")
@@ -152,7 +152,7 @@ func TestStoreClaimCASAckFence(t *testing.T) {
 		t.Fatalf("ack(done) must release and advance cursor: %+v", sub)
 	}
 	// A replayed ack on the now-cleared wake is fenced (cursor not advanced twice).
-	if st, _ := s.Ack("s1", c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000); st != "FENCED" {
+	if st, _ := s.AckUnscoped("s1", c1.Generation, c1.WakeID, c1.Generation, true, acks, now, 1000); st != "FENCED" {
 		t.Fatalf("replayed ack should FENCE, got %q", st)
 	}
 }
@@ -162,15 +162,15 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	base := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, base)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
-	_, _ = s.ArmWake("s1", base, 1000, true, "w_a")
+	_, _ = s.ArmWakeUnscoped("s1", base, 1000, true, "w_a")
 
 	// Before the deadline: not expired.
-	if st, _ := s.ExpireLease("s1", base); st != "ACTIVE" {
+	if st, _ := s.ExpireLeaseUnscoped("s1", base); st != "ACTIVE" {
 		t.Fatalf("lease not yet due should be ACTIVE, got %q", st)
 	}
 	// After the deadline: expired, back to idle.
 	after := base.Add(2 * time.Second)
-	if st, _ := s.ExpireLease("s1", after); st != "EXPIRED" {
+	if st, _ := s.ExpireLeaseUnscoped("s1", after); st != "EXPIRED" {
 		t.Fatalf("expired lease should be EXPIRED, got %q", st)
 	}
 	sub, _, _ := s.Get("s1")
@@ -180,7 +180,7 @@ func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 
 	// Due claim re-scores forward, it does not remove (research 07 §6.1): a
 	// crashed worker's item must recur.
-	_, _ = s.ArmWake("s1", after, 1000, true, "w_b")
+	_, _ = s.ArmWakeUnscoped("s1", after, 1000, true, "w_b")
 	due, err := s.DueLeases(slotOf("s1"), after.Add(2*time.Second), 16, 30*time.Second)
 	if err != nil || len(due) != 1 || due[0] != "s1" {
 		t.Fatalf("due = %v err=%v, want [s1]", due, err)
@@ -226,7 +226,7 @@ func TestRestoreLeaseReDerivesDroppedTail(t *testing.T) {
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
 	// Arm a webhook wake: phase=waking, lease ZADDed, due ZADDed (the arm outbox).
-	res, err := s.ArmWake("s1", now, 1000, true, "w_a")
+	res, err := s.ArmWakeUnscoped("s1", now, 1000, true, "w_a")
 	if err != nil || !res.Armed {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
@@ -270,7 +270,7 @@ func TestRestoreLeaseReDerivesDroppedTail(t *testing.T) {
 
 	// An idle sub is never stranded: RestoreLease must leave the schedule untouched
 	// (else a stale entry would churn the lease ZSET forever via claim_due).
-	if st, _ := s.Release("s1", res.Generation, res.WakeID, res.Generation); st != "OK" {
+	if st, _ := s.ReleaseUnscoped("s1", res.Generation, res.WakeID, res.Generation); st != "OK" {
 		t.Fatalf("release to idle = %q, want OK", st)
 	}
 	if ids, _ := s.LeasedIDs(); len(ids) != 0 {
@@ -293,7 +293,7 @@ func TestDueSetArmOutboxesAndAckClears(t *testing.T) {
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	res, err := s.ArmWake("s1", now, 1000, true, "w_a")
+	res, err := s.ArmWakeUnscoped("s1", now, 1000, true, "w_a")
 	if err != nil || !res.Armed {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
@@ -301,14 +301,14 @@ func TestDueSetArmOutboxesAndAckClears(t *testing.T) {
 		t.Fatalf("ARMED branch must ZADD the due mark, got card %d", n)
 	}
 	// Coalesce: a BUSY re-arm must not touch the due-set (no second mark).
-	if busy, _ := s.ArmWake("s1", now, 1000, true, "w_b"); !busy.Busy {
+	if busy, _ := s.ArmWakeUnscoped("s1", now, 1000, true, "w_b"); !busy.Busy {
 		t.Fatalf("second arm should be BUSY, got %+v", busy)
 	}
 	if n := dueCard(t, client); n != 1 {
 		t.Fatalf("BUSY (coalesced) re-arm must not add a due mark, got card %d", n)
 	}
 	// ack(done=1) clears the mark alongside the lease/retry ZREMs.
-	if st, _ := s.Ack("s1", res.Generation, res.WakeID, res.Generation, true, nil, now, 1000); st != "OK" {
+	if st, _ := s.AckUnscoped("s1", res.Generation, res.WakeID, res.Generation, true, nil, now, 1000); st != "OK" {
 		t.Fatalf("ack(done) = %q, want OK", st)
 	}
 	if n := dueCard(t, client); n != 0 {
@@ -323,9 +323,9 @@ func TestDueSetAckHeartbeatLeavesMark(t *testing.T) {
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
-	res, _ := s.ArmWake("s1", now, 1000, true, "w_a")
+	res, _ := s.ArmWakeUnscoped("s1", now, 1000, true, "w_a")
 
-	if st, _ := s.Ack("s1", res.Generation, res.WakeID, res.Generation, false, nil, now, 1000); st != "OK" {
+	if st, _ := s.AckUnscoped("s1", res.Generation, res.WakeID, res.Generation, false, nil, now, 1000); st != "OK" {
 		t.Fatalf("heartbeat ack = %q, want OK", st)
 	}
 	if n := dueCard(t, client); n != 1 {
@@ -340,7 +340,7 @@ func TestDueSetExpireLeaseReOwes(t *testing.T) {
 	base := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, base)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
-	_, _ = s.ArmWake("s1", base, 1000, true, "w_a")
+	_, _ = s.ArmWakeUnscoped("s1", base, 1000, true, "w_a")
 
 	armScore, err := client.ZScore(context.Background(), dueZKey(slotOf("s1")), "s1").Result()
 	if err != nil {
@@ -348,7 +348,7 @@ func TestDueSetExpireLeaseReOwes(t *testing.T) {
 	}
 	// After the deadline: EXPIRED re-owes at the new now_ns.
 	after := base.Add(2 * time.Second)
-	if st, _ := s.ExpireLease("s1", after); st != "EXPIRED" {
+	if st, _ := s.ExpireLeaseUnscoped("s1", after); st != "EXPIRED" {
 		t.Fatalf("expired lease = %q, want EXPIRED", st)
 	}
 	if n := dueCard(t, client); n != 1 {
@@ -368,11 +368,11 @@ func TestDueSetReleaseClearsPhantom(t *testing.T) {
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
-	res, _ := s.ArmWake("s1", now, 1000, true, "w_a")
+	res, _ := s.ArmWakeUnscoped("s1", now, 1000, true, "w_a")
 	if n := dueCard(t, client); n != 1 {
 		t.Fatalf("precondition: arm should outbox one due mark, got %d", n)
 	}
-	if st, _ := s.Release("s1", res.Generation, res.WakeID, res.Generation); st != "OK" {
+	if st, _ := s.ReleaseUnscoped("s1", res.Generation, res.WakeID, res.Generation); st != "OK" {
 		t.Fatalf("release = %q, want OK", st)
 	}
 	if n := dueCard(t, client); n != 0 {
@@ -388,7 +388,7 @@ func TestDueSetClaimDueReScoresForward(t *testing.T) {
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
-	_, _ = s.ArmWake("s1", now, 1000, true, "w_a")
+	_, _ = s.ArmWakeUnscoped("s1", now, 1000, true, "w_a")
 
 	due, err := s.ClaimDue(slotOf("s1"), now.Add(time.Millisecond), 16, 30*time.Second)
 	if err != nil || len(due) != 1 || due[0] != "s1" {
@@ -456,11 +456,11 @@ func TestClaimExpiredLeaseRotatesFence(t *testing.T) {
 			a.Generation, a.WakeID, b.Generation, b.WakeID)
 	}
 	// The deposed worker A can no longer ack — its old generation/wake is fenced.
-	if st, _ := s.Ack("s1", a.Generation, a.WakeID, a.Generation, true, nil, after, 1000); st != "FENCED" {
+	if st, _ := s.AckUnscoped("s1", a.Generation, a.WakeID, a.Generation, true, nil, after, 1000); st != "FENCED" {
 		t.Fatalf("deposed worker A ack should FENCE, got %q", st)
 	}
 	// The current holder B acks successfully.
-	if st, _ := s.Ack("s1", b.Generation, b.WakeID, b.Generation, true, nil, after, 1000); st != "OK" {
+	if st, _ := s.AckUnscoped("s1", b.Generation, b.WakeID, b.Generation, true, nil, after, 1000); st != "OK" {
 		t.Fatalf("current holder B ack should be OK, got %q", st)
 	}
 }

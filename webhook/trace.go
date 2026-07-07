@@ -153,20 +153,35 @@ func (t *TracingStore) snap(id string) TraceState {
 	}
 }
 
-// ArmWake records arm_wake.lua.
-func (t *TracingStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, owner ...OwnerScope) (ArmResult, error) {
+// ArmWakeUnscoped records arm_wake.lua.
+func (t *TracingStore) ArmWakeUnscoped(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error) {
 	pre := t.snap(id)
-	res, err := t.Store.ArmWake(id, now, leaseTTLMs, armLease, wakeID, owner...)
+	res, err := t.Store.ArmWakeUnscoped(id, now, leaseTTLMs, armLease, wakeID)
 	if err != nil {
 		return res, err
 	}
+	t.recordArm(id, armLease, wakeID, pre, res)
+	return res, nil
+}
+
+// ArmWakeOwned records owner-scoped arm_wake.lua.
+func (t *TracingStore) ArmWakeOwned(scope OwnerScope, id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error) {
+	pre := t.snap(id)
+	res, err := t.Store.ArmWakeOwned(scope, id, now, leaseTTLMs, armLease, wakeID)
+	if err != nil {
+		return res, err
+	}
+	t.recordArm(id, armLease, wakeID, pre, res)
+	return res, nil
+}
+
+func (t *TracingStore) recordArm(id string, armLease bool, wakeID string, pre TraceState, res ArmResult) {
 	post := t.snap(id)
 	t.rec.emit(TraceRecord{
 		Sub: id, Op: "arm", LuaStatus: armStatus(res),
 		Args:     TraceArgs{ArmLease: armLease, WakeID: wakeID},
 		PreState: pre, PostState: post,
 	})
-	return res, nil
 }
 
 func armStatus(r ArmResult) string {
@@ -213,51 +228,96 @@ func claimStatus(r ClaimResult) string {
 	}
 }
 
-// Ack records ack.lua.
-func (t *TracingStore) Ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, owner ...OwnerScope) (string, error) {
+// AckUnscoped records ack.lua.
+func (t *TracingStore) AckUnscoped(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
 	pre := t.snap(id)
-	status, err := t.Store.Ack(id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs, owner...)
+	status, err := t.Store.AckUnscoped(id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs)
 	if err != nil {
 		return status, err
 	}
+	t.recordAck(id, reqGeneration, reqWakeID, tokenGeneration, done, pre, status)
+	return status, nil
+}
+
+// AckOwned records owner-scoped ack.lua.
+func (t *TracingStore) AckOwned(scope OwnerScope, id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+	pre := t.snap(id)
+	status, err := t.Store.AckOwned(scope, id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs)
+	if err != nil {
+		return status, err
+	}
+	t.recordAck(id, reqGeneration, reqWakeID, tokenGeneration, done, pre, status)
+	return status, nil
+}
+
+func (t *TracingStore) recordAck(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, pre TraceState, status string) {
 	post := t.snap(id)
 	t.rec.emit(TraceRecord{
 		Sub: id, Op: "ack", LuaStatus: status,
 		Args:     TraceArgs{ReqGen: reqGeneration, ReqWake: reqWakeID, TokenGen: tokenGeneration, Done: done},
 		PreState: pre, PostState: post,
 	})
-	return status, nil
 }
 
-// Release records release.lua.
-func (t *TracingStore) Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, owner ...OwnerScope) (string, error) {
+// ReleaseUnscoped records release.lua.
+func (t *TracingStore) ReleaseUnscoped(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error) {
 	pre := t.snap(id)
-	status, err := t.Store.Release(id, reqGeneration, reqWakeID, tokenGeneration, owner...)
+	status, err := t.Store.ReleaseUnscoped(id, reqGeneration, reqWakeID, tokenGeneration)
 	if err != nil {
 		return status, err
 	}
+	t.recordRelease(id, reqGeneration, reqWakeID, tokenGeneration, pre, status)
+	return status, nil
+}
+
+// ReleaseOwned records owner-scoped release.lua.
+func (t *TracingStore) ReleaseOwned(scope OwnerScope, id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error) {
+	pre := t.snap(id)
+	status, err := t.Store.ReleaseOwned(scope, id, reqGeneration, reqWakeID, tokenGeneration)
+	if err != nil {
+		return status, err
+	}
+	t.recordRelease(id, reqGeneration, reqWakeID, tokenGeneration, pre, status)
+	return status, nil
+}
+
+func (t *TracingStore) recordRelease(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, pre TraceState, status string) {
 	post := t.snap(id)
 	t.rec.emit(TraceRecord{
 		Sub: id, Op: "release", LuaStatus: status,
 		Args:     TraceArgs{ReqGen: reqGeneration, ReqWake: reqWakeID, TokenGen: tokenGeneration},
 		PreState: pre, PostState: post,
 	})
-	return status, nil
 }
 
-// ExpireLease records expire_lease.lua (a server step, no client op).
-func (t *TracingStore) ExpireLease(id string, now time.Time, owner ...OwnerScope) (string, error) {
+// ExpireLeaseUnscoped records expire_lease.lua (a server step, no client op).
+func (t *TracingStore) ExpireLeaseUnscoped(id string, now time.Time) (string, error) {
 	pre := t.snap(id)
-	status, err := t.Store.ExpireLease(id, now, owner...)
+	status, err := t.Store.ExpireLeaseUnscoped(id, now)
 	if err != nil {
 		return status, err
 	}
+	t.recordExpire(id, pre, status)
+	return status, nil
+}
+
+// ExpireLeaseOwned records owner-scoped expire_lease.lua.
+func (t *TracingStore) ExpireLeaseOwned(scope OwnerScope, id string, now time.Time) (string, error) {
+	pre := t.snap(id)
+	status, err := t.Store.ExpireLeaseOwned(scope, id, now)
+	if err != nil {
+		return status, err
+	}
+	t.recordExpire(id, pre, status)
+	return status, nil
+}
+
+func (t *TracingStore) recordExpire(id string, pre TraceState, status string) {
 	post := t.snap(id)
 	t.rec.emit(TraceRecord{
 		Sub: id, Op: "expire", LuaStatus: status,
 		PreState: pre, PostState: post,
 	})
-	return status, nil
 }
 
 // RecordWakeEventSent records record_wake_sent.lua (the stamp half of the
