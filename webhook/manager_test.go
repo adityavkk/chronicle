@@ -2,6 +2,9 @@ package webhook
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -37,6 +40,53 @@ func (f *fakeStreams) TailOffsets(paths []string) map[string]string {
 }
 
 func (f *fakeStreams) BeginningOffset() string { return "0000000000000000_0000000000000000" }
+
+type doneTransport struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (t *doneTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	t.calls++
+	t.mu.Unlock()
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(`{"done":true}`)),
+	}, nil
+}
+
+func (t *doneTransport) count() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.calls
+}
+
+type takeoverAfterAckStore struct {
+	Store
+	fs         *fakeStreams
+	stream     string
+	nextTail   string
+	slotKey    string
+	takeoverAt time.Time
+	ttl        time.Duration
+	claim      SlotClaim
+	claimed    bool
+}
+
+func (s *takeoverAfterAckStore) AckOwned(scope OwnerScope, id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+	status, err := s.Store.AckOwned(scope, id, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs)
+	if err != nil || status != "OK" || s.claimed {
+		return status, err
+	}
+	s.fs.mu.Lock()
+	s.fs.tails[s.stream] = s.nextTail
+	s.fs.mu.Unlock()
+	s.claim, err = s.ClaimSlot(s.slotKey, "B", s.takeoverAt, s.ttl)
+	s.claimed = true
+	return status, err
+}
 
 func (f *fakeStreams) AppendWakeEvent(wakeStream string, data []byte) error {
 	f.mu.Lock()
@@ -485,6 +535,73 @@ func TestDueWorkerArmOwnedFencesAfterTakeover(t *testing.T) {
 	sub, _, _ := store.Get("s1")
 	if sub.Phase != PhaseIdle || sub.Generation != 0 {
 		t.Fatalf("fenced arm must leave sub idle/generation 0, got phase=%s gen=%d", sub.Phase, sub.Generation)
+	}
+}
+
+// TestOwnedAutoAckRewakeFencesAfterTakeover covers the one-call-later #144 leak:
+// an owner-driven webhook delivery auto-acks done successfully, new work appears,
+// then the owner loses the slot before the post-ack re-wake. The re-wake must use
+// ArmWakeOwned, return FENCED, and emit no second webhook POST.
+func TestOwnedAutoAckRewakeFencesAfterTakeover(t *testing.T) {
+	base, client := newTestStore(t)
+	fm := &fakeMetrics{}
+	base.WithMetrics(fm)
+	now := time.Now()
+	begin := "0000000000000000_0000000000000000"
+	oldTail := "0000000000000001_0000000000000000"
+	newTail := "0000000000000002_0000000000000000"
+	fs := &fakeStreams{tails: map[string]string{"events/a": oldTail}}
+	post := &doneTransport{}
+
+	_, _ = base.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+	_ = base.Link("s1", "events/a", LinkGlob, begin)
+	h := slotOf("s1")
+	key := slotKey(h)
+	t0 := time.Unix(1_700_000_000, 0)
+	a, err := base.ClaimSlot(key, "A", t0, slotTTL)
+	if err != nil || !a.Granted() {
+		t.Fatalf("claim A = %+v err=%v", a, err)
+	}
+	scope := OwnerScope{SlotKey: key, ReplicaID: "A", Epoch: a.Epoch.String()}
+	arm, err := base.ArmWakeOwned(scope, "s1", now, 60000, true, "wk-1")
+	if err != nil || !arm.Armed {
+		t.Fatalf("owned arm = %+v err=%v", arm, err)
+	}
+
+	store := &takeoverAfterAckStore{
+		Store:      base,
+		fs:         fs,
+		stream:     "events/a",
+		nextTail:   newTail,
+		slotKey:    key,
+		takeoverAt: t0.Add(slotTTL + time.Second),
+		ttl:        slotTTL,
+	}
+	mgr, err := NewManager(store, fs, ManagerOptions{
+		StreamRootURL: "http://x/v1/stream/",
+		HTTPClient:    &http.Client{Transport: post},
+		Metrics:       fm,
+	})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	mgr.deliverWebhookOwned(scope, "s1", arm.Generation, arm.WakeID)
+	if !store.claimed || !store.claim.Transferred() {
+		t.Fatalf("test takeover did not transfer ownership: claimed=%v claim=%+v", store.claimed, store.claim)
+	}
+	if got := post.count(); got != 1 {
+		t.Fatalf("stale owned re-wake must not emit a second webhook POST, got %d", got)
+	}
+	if got := fm.ownerFences("inline"); got != 1 {
+		t.Fatalf("stale owned re-wake must hit inline owner fence once, got %d", got)
+	}
+	sub, _, _ := base.Get("s1")
+	if sub.Phase != PhaseIdle || sub.Generation != arm.Generation {
+		t.Fatalf("fenced re-wake must leave sub idle at gen %d, got phase=%s gen=%d", arm.Generation, sub.Phase, sub.Generation)
+	}
+	if n := dueCard(t, client); n != 0 {
+		t.Fatalf("fenced re-wake must not ZADD due, got card %d", n)
 	}
 }
 

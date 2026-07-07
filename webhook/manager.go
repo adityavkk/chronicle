@@ -773,7 +773,11 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 			return
 		}
 		if status == "OK" {
-			m.rewakeIfPending(id)
+			if owner != nil {
+				m.rewakeIfPendingOwned(*owner, id)
+			} else {
+				m.rewakeIfPendingUnscoped(id)
+			}
 		}
 	}
 }
@@ -827,10 +831,23 @@ func (m *Manager) mintToken(id string, generation int64, now time.Time) (string,
 	return tok, true
 }
 
-// rewakeIfPending re-issues a wake when work remains after a release or a done
-// ack (PROTOCOL §7.2/§7.3). Returns whether a re-wake was issued (the next_wake
-// flag).
-func (m *Manager) rewakeIfPending(id string) bool {
+// rewakeIfPendingUnscoped re-issues a wake when work remains after an external
+// callback/release (PROTOCOL §7.2/§7.3). Returns whether a re-wake was issued
+// (the next_wake flag).
+func (m *Manager) rewakeIfPendingUnscoped(id string) bool {
+	return m.rewakeIfPending(id, m.issueWake)
+}
+
+// rewakeIfPendingOwned is rewakeIfPendingUnscoped plus the owner-epoch fence for
+// owner-driven auto-acks. A deposed retry worker must not silently fall back to
+// the external/unscoped arm path while re-waking post-ack work.
+func (m *Manager) rewakeIfPendingOwned(scope OwnerScope, id string) bool {
+	return m.rewakeIfPending(id, func(sub Subscription, triggerStream string) bool {
+		return m.issueWakeOwned(scope, sub, triggerStream)
+	})
+}
+
+func (m *Manager) rewakeIfPending(id string, issue func(Subscription, string) bool) bool {
 	sub, ok, err := m.store.Get(id)
 	if err != nil || !ok {
 		return false
@@ -838,7 +855,7 @@ func (m *Manager) rewakeIfPending(id string) bool {
 	if sub.Phase != PhaseIdle || !HasPendingWork(sub.Links, m.tailOf) {
 		return false
 	}
-	return m.issueWake(sub, "")
+	return issue(sub, "")
 }
 
 func acksFromSnapshot(snap []StreamSnapshot) []Ack {
@@ -1739,7 +1756,7 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 		return false, true, false, nil
 	}
 	if done {
-		nextWake = m.rewakeIfPending(id)
+		nextWake = m.rewakeIfPendingUnscoped(id)
 	}
 	return false, false, nextWake, nil
 }
@@ -1756,6 +1773,6 @@ func (m *Manager) applyRelease(id string, req ReleaseRequest, tokenGeneration in
 	case "NOSUB":
 		return false, true, nil
 	}
-	m.rewakeIfPending(id)
+	m.rewakeIfPendingUnscoped(id)
 	return false, false, nil
 }
