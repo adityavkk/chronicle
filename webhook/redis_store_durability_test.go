@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,6 +15,212 @@ import (
 // rest of redis_store_test.go. The Tier B WAITAOF barrier needs an AOF server, so
 // they skip when appendonly is off. They assert the correction-#3 separation
 // directly: WAITAOF is durability, the (gen,wake_id) fence is exclusivity.
+
+type fakeDurabilityClient struct {
+	goredis.UniversalClient
+	mint           *fakeDurabilityConn
+	other          *fakeDurabilityConn
+	poolBarrier    string
+	poolBarrierOff int64
+	poolDoCalls    int
+	slots          []goredis.ClusterSlot
+	nodes          map[string]*fakeDurabilityConn
+	lastPinnedAddr string
+}
+
+func newFakeDurabilityClient(reply []any) *fakeDurabilityClient {
+	return &fakeDurabilityClient{
+		mint:  &fakeDurabilityConn{name: "mint", offset: 40, reply: reply},
+		other: &fakeDurabilityConn{name: "other", offset: 7, reply: reply},
+	}
+}
+
+func (f *fakeDurabilityClient) PinnedConnForKeys(_ context.Context, keys []string) (pinnedRedisConn, error) {
+	if len(f.slots) == 0 {
+		return f.mint, nil
+	}
+	addr, err := clusterMasterAddrForKey(f.slots, keys[0])
+	if err != nil {
+		return nil, err
+	}
+	f.lastPinnedAddr = addr
+	conn := f.nodes[addr]
+	if conn == nil {
+		return nil, fmt.Errorf("missing fake node %s", addr)
+	}
+	return conn, nil
+}
+
+func (f *fakeDurabilityClient) Eval(_ context.Context, _ string, _ []string, _ ...interface{}) *goredis.Cmd {
+	return f.mint.eval()
+}
+
+func (f *fakeDurabilityClient) EvalSha(_ context.Context, _ string, _ []string, _ ...interface{}) *goredis.Cmd {
+	return f.mint.eval()
+}
+
+func (f *fakeDurabilityClient) EvalRO(context.Context, string, []string, ...interface{}) *goredis.Cmd {
+	return f.mint.eval()
+}
+
+func (f *fakeDurabilityClient) EvalShaRO(context.Context, string, []string, ...interface{}) *goredis.Cmd {
+	return f.mint.eval()
+}
+
+func (f *fakeDurabilityClient) ScriptExists(context.Context, ...string) *goredis.BoolSliceCmd {
+	return goredis.NewBoolSliceResult(nil, nil)
+}
+
+func (f *fakeDurabilityClient) ScriptLoad(context.Context, string) *goredis.StringCmd {
+	return goredis.NewStringResult("", nil)
+}
+
+func (f *fakeDurabilityClient) Do(_ context.Context, args ...interface{}) *goredis.Cmd {
+	f.poolDoCalls++
+	f.poolBarrier = fmt.Sprint(args[0])
+	f.poolBarrierOff = f.other.offset
+	return f.other.Do(context.Background(), args...)
+}
+
+type fakeDurabilityConn struct {
+	name           string
+	offset         int64
+	postEvalOffset int64
+	barrierOffset  int64
+	barrierCommand string
+	barrierCalls   int
+	closed         bool
+	reply          []any
+}
+
+func (c *fakeDurabilityConn) eval() *goredis.Cmd {
+	c.offset += 10
+	c.postEvalOffset = c.offset
+	return goredis.NewCmdResult(c.reply, nil)
+}
+
+func (c *fakeDurabilityConn) Eval(context.Context, string, []string, ...interface{}) *goredis.Cmd {
+	return c.eval()
+}
+
+func (c *fakeDurabilityConn) EvalSha(context.Context, string, []string, ...interface{}) *goredis.Cmd {
+	return c.eval()
+}
+
+func (c *fakeDurabilityConn) EvalRO(context.Context, string, []string, ...interface{}) *goredis.Cmd {
+	return c.eval()
+}
+
+func (c *fakeDurabilityConn) EvalShaRO(context.Context, string, []string, ...interface{}) *goredis.Cmd {
+	return c.eval()
+}
+
+func (c *fakeDurabilityConn) ScriptExists(context.Context, ...string) *goredis.BoolSliceCmd {
+	return goredis.NewBoolSliceResult(nil, nil)
+}
+
+func (c *fakeDurabilityConn) ScriptLoad(context.Context, string) *goredis.StringCmd {
+	return goredis.NewStringResult("", nil)
+}
+
+func (c *fakeDurabilityConn) Do(_ context.Context, args ...interface{}) *goredis.Cmd {
+	c.barrierCalls++
+	c.barrierCommand = fmt.Sprint(args[0])
+	c.barrierOffset = c.offset
+	switch c.barrierCommand {
+	case "WAITAOF":
+		return goredis.NewCmdResult([]any{int64(1), int64(1)}, nil)
+	case "WAIT":
+		return goredis.NewCmdResult(int64(1), nil)
+	default:
+		return goredis.NewCmdResult(nil, fmt.Errorf("unexpected command %s", c.barrierCommand))
+	}
+}
+
+func (c *fakeDurabilityConn) Close() error {
+	c.closed = true
+	return nil
+}
+
+func TestTierBDurabilityBarrierPinnedToMintConnection(t *testing.T) {
+	tests := []struct {
+		name  string
+		reply []any
+		run   func(*RedisStore) error
+	}{
+		{
+			name:  "arm wake",
+			reply: []any{"ARMED", int64(7), "wake-a"},
+			run: func(s *RedisStore) error {
+				_, err := s.ArmWakeUnscoped("s1", time.Now(), 1000, true, "wake-a")
+				return err
+			},
+		},
+		{
+			name:  "claim shard",
+			reply: []any{"CLAIMED", int64(8), "wake-c", "worker-1"},
+			run: func(s *RedisStore) error {
+				_, err := s.ClaimShard("s1", 0, "worker-1", "wake-c", time.Now(), 1000)
+				return err
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newFakeDurabilityClient(tc.reply)
+			s := (&RedisStore{client: client, metrics: NopMetrics{}}).WithConsistency(TierB, 1, 1000)
+			if err := tc.run(s); err != nil {
+				t.Fatalf("operation failed: %v", err)
+			}
+			if client.poolDoCalls != 0 {
+				t.Fatalf("barrier used pooled client %d times; want pinned mint connection", client.poolDoCalls)
+			}
+			if client.mint.barrierCalls != 1 || client.mint.barrierCommand != "WAITAOF" {
+				t.Fatalf("mint conn barrier = %d %q, want one WAITAOF", client.mint.barrierCalls, client.mint.barrierCommand)
+			}
+			if client.mint.barrierOffset < client.mint.postEvalOffset {
+				t.Fatalf("barrier observed offset %d before mint offset %d", client.mint.barrierOffset, client.mint.postEvalOffset)
+			}
+			if !client.mint.closed {
+				t.Fatal("pinned connection was not closed")
+			}
+		})
+	}
+}
+
+func TestTierBClusterPinnedConnTargetsMintSlotOwner(t *testing.T) {
+	key := subKey("cluster-sub")
+	slot := redisClusterSlot(key)
+	slots := make([]goredis.ClusterSlot, 0, 3)
+	if slot > 0 {
+		slots = append(slots, goredis.ClusterSlot{Start: 0, End: slot - 1, Nodes: []goredis.ClusterNode{{Addr: "node-a:6379"}}})
+	}
+	slots = append(slots, goredis.ClusterSlot{Start: slot, End: slot, Nodes: []goredis.ClusterNode{{Addr: "node-b:6379"}}})
+	if slot < 16383 {
+		slots = append(slots, goredis.ClusterSlot{Start: slot + 1, End: 16383, Nodes: []goredis.ClusterNode{{Addr: "node-c:6379"}}})
+	}
+	reply := []any{"ARMED", int64(7), "wake-a"}
+	client := newFakeDurabilityClient(reply)
+	client.slots = slots
+	client.nodes = map[string]*fakeDurabilityConn{
+		"node-a:6379": {name: "node-a", offset: 100, reply: reply},
+		"node-b:6379": {name: "node-b", offset: 200, reply: reply},
+		"node-c:6379": {name: "node-c", offset: 300, reply: reply},
+	}
+	s := (&RedisStore{client: client, metrics: NopMetrics{}}).WithConsistency(TierB, 1, 1000)
+	if _, err := s.ArmWakeUnscoped("cluster-sub", time.Now(), 1000, true, "wake-a"); err != nil {
+		t.Fatalf("ArmWakeUnscoped: %v", err)
+	}
+	if client.lastPinnedAddr != "node-b:6379" {
+		t.Fatalf("pinned addr = %q, want mint slot owner node-b:6379", client.lastPinnedAddr)
+	}
+	if got := client.nodes["node-b:6379"].barrierCalls; got != 1 {
+		t.Fatalf("slot owner barrier calls = %d, want 1", got)
+	}
+	if got := client.nodes["node-a:6379"].barrierCalls + client.nodes["node-c:6379"].barrierCalls; got != 0 {
+		t.Fatalf("non-owner barrier calls = %d, want 0", got)
+	}
+}
 
 // requireAOF skips when the test Redis is not running with appendonly yes —
 // WAITAOF errors without AOF and the Tier B path is only meaningful against one.
@@ -35,7 +242,7 @@ func requireAOF(t *testing.T, client goredis.UniversalClient) {
 func TestStoreTierBArmDurableLocalFsync(t *testing.T) {
 	base, client := newTestStore(t)
 	requireAOF(t, client)
-	s := base.WithConsistency(TierB, 0, 1000) // local AOF fsync only
+	s := base.WithConsistency(TierB, 0, 3000) // local AOF fsync only; appendfsync everysec can straddle 1s
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	res, err := s.ArmWakeUnscoped("s1", now, 1000, true, "w_a")
@@ -150,7 +357,7 @@ func TestRecordDurabilityShortIncrementsMetric(t *testing.T) {
 func TestStoreTierBClaimDurable(t *testing.T) {
 	base, client := newTestStore(t)
 	requireAOF(t, client)
-	s := base.WithConsistency(TierB, 0, 1000)
+	s := base.WithConsistency(TierB, 0, 3000)
 	now := time.Now()
 	cfg := webhookCfg("https://w.example/h")
 	cfg.Type = DispatchPullWake

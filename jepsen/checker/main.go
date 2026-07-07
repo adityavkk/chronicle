@@ -91,7 +91,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|failover|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|failover|durable-externalize|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
@@ -203,6 +203,15 @@ func run(c config, r *receiver) error {
 	if c.scenario == "failover" {
 		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
 		return runFailover(c, nem)
+	}
+
+	// durable-externalize (#140) reuses the real Redis failover nemesis but adds a
+	// Tier-B-only clause: a wake/claim externalized after awaitDurable() must not be
+	// absent on the promoted dataset. This catches false durability barriers in the
+	// Redis IO shell (connection routing), which the pure model cannot observe.
+	if c.scenario == "durable-externalize" {
+		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		return runDurableExternalize(c, nem)
 	}
 
 	// ownership-exclusivity (T3) is now LIVE (#14 landed claim_shard.lua /

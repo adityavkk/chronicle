@@ -15,6 +15,7 @@ import (
 const (
 	EnvListen               = "CHRONICLE_LISTEN"
 	EnvRedisURL             = "CHRONICLE_REDIS_URL"
+	EnvRedisPoolSize        = "CHRONICLE_REDIS_POOL_SIZE"
 	EnvStore                = "CHRONICLE_STORE"
 	EnvLongPollTimeout      = "CHRONICLE_LONG_POLL_TIMEOUT"
 	EnvSSEReconnectInterval = "CHRONICLE_SSE_RECONNECT_INTERVAL"
@@ -77,6 +78,8 @@ type Config struct {
 
 	// RedisURL is the Redis connection URL for the redis backend.
 	RedisURL string
+	// RedisPoolSize overrides go-redis' per-node connection pool size when >0.
+	RedisPoolSize int
 
 	// StoreBackend selects the storage backend: "redis" or "memory".
 	StoreBackend string
@@ -231,6 +234,7 @@ func DefaultConfig() Config {
 		Listen:               ":4437",
 		StreamRoot:           "/v1/stream/",
 		RedisURL:             "redis://localhost:6379",
+		RedisPoolSize:        0, // go-redis default
 		StoreBackend:         "redis",
 		LongPollTimeout:      30 * time.Second,
 		SSEReconnectInterval: 60 * time.Second,
@@ -254,6 +258,13 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvRedisURL); ok {
 		c.RedisURL = v
+	}
+	if v, ok := lookup(EnvRedisPoolSize); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvRedisPoolSize, err)
+		}
+		c.RedisPoolSize = n
 	}
 	if v, ok := lookup(EnvStore); ok {
 		c.StoreBackend = v

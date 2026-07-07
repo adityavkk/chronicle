@@ -19,6 +19,9 @@ import (
 // store (chronicle uses one Redis), and does not own it: Close is a no-op.
 type RedisStore struct {
 	client redis.UniversalClient
+	// openPinnedConn is a test seam for the Tier-B durability shell. Production
+	// leaves it nil and uses openPinnedRedisConn below.
+	openPinnedConn func(context.Context, redis.UniversalClient, []string) (pinnedRedisConn, error)
 	// metrics records claim/ack lease outcomes at the call sites (gate #6, the
 	// per-type claim-contention SLIs). Defaults to NopMetrics so the store stays
 	// usable without instrumentation; the binary wires the Prometheus recorder via
@@ -33,6 +36,20 @@ type RedisStore struct {
 }
 
 var _ Store = (*RedisStore)(nil)
+
+type pinnedRedisConn interface {
+	redis.Scripter
+	Do(context.Context, ...interface{}) *redis.Cmd
+	Close() error
+}
+
+type pinnedConnProvider interface {
+	PinnedConnForKeys(context.Context, []string) (pinnedRedisConn, error)
+}
+
+type durabilityDoer interface {
+	Do(context.Context, ...interface{}) *redis.Cmd
+}
 
 // NewRedisStore wraps a go-redis client as a subscription Store.
 func NewRedisStore(client redis.UniversalClient) *RedisStore {
@@ -70,6 +87,15 @@ func nsArg(t time.Time) string { return strconv.FormatInt(t.UnixNano(), 10) }
 // fixed reply shape of every subscription script.
 func (s *RedisStore) evalStrings(script *redis.Script, keys []string, args ...any) ([]string, error) {
 	raw, err := script.Run(s.ctx(), s.client, keys, args...).Result()
+	return decodeScriptStrings(raw, err)
+}
+
+func evalStringsOn(ctx context.Context, c redis.Scripter, script *redis.Script, keys []string, args ...any) ([]string, error) {
+	raw, err := script.Run(ctx, c, keys, args...).Result()
+	return decodeScriptStrings(raw, err)
+}
+
+func decodeScriptStrings(raw any, err error) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -93,36 +119,148 @@ func (s *RedisStore) evalStrings(script *redis.Script, keys []string, args ...an
 	return out, nil
 }
 
-// awaitDurable issues the tier's WAIT/WAITAOF barrier on the fence-minting write
-// that just completed on this store's client and reduces the reply to a DURABILITY
-// verdict (Tier B; a no-op for Tier A/C). It is the thin IO shell over the pure
-// InterpretWaitAOF/InterpretWait core (FCIS).
+func (s *RedisStore) evalStringsMaybePinned(script *redis.Script, keys []string, args ...any) ([]string, pinnedRedisConn, error) {
+	if !s.durPlan.Wait {
+		reply, err := s.evalStrings(script, keys, args...)
+		return reply, nil, err
+	}
+	conn, err := s.pinnedConn(keys)
+	if err != nil {
+		return nil, nil, err
+	}
+	reply, err := evalStringsOn(s.ctx(), conn, script, keys, args...)
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+	return reply, conn, nil
+}
+
+func (s *RedisStore) pinnedConn(keys []string) (pinnedRedisConn, error) {
+	if s.openPinnedConn != nil {
+		return s.openPinnedConn(s.ctx(), s.client, keys)
+	}
+	if p, ok := s.client.(pinnedConnProvider); ok {
+		return p.PinnedConnForKeys(s.ctx(), keys)
+	}
+	return openPinnedRedisConn(s.ctx(), s.client, keys)
+}
+
+func openPinnedRedisConn(ctx context.Context, client redis.UniversalClient, keys []string) (pinnedRedisConn, error) {
+	if len(keys) == 0 || keys[0] == "" {
+		return nil, errors.New("webhook: Tier B durability needs a keyed mint script")
+	}
+	switch c := client.(type) {
+	case *redis.Client:
+		return c.Conn(), nil
+	case *redis.ClusterClient:
+		return openPinnedClusterConn(ctx, c, keys[0])
+	default:
+		return nil, fmt.Errorf("webhook: Tier B durability requires a pinned Redis connection, got %T", client)
+	}
+}
+
+func openPinnedClusterConn(ctx context.Context, c *redis.ClusterClient, key string) (pinnedRedisConn, error) {
+	// CLUSTER SLOTS is deprecated in Redis 7 in favor of CLUSTER SHARDS, but
+	// chronicle still supports Redis 6. Use the Redis-6-compatible topology command
+	// here; this is control-plane routing, not a hot data path.
+	slots, err := c.ClusterSlots(ctx).Result() //nolint:staticcheck
+	if err != nil {
+		return nil, fmt.Errorf("webhook: cluster slots for Tier B durability: %w", err)
+	}
+	addr, err := clusterMasterAddrForKey(slots, key)
+	if err != nil {
+		return nil, err
+	}
+	var out *redis.Client
+	err = c.ForEachMaster(ctx, func(_ context.Context, node *redis.Client) error {
+		if redisAddrEqual(node.Options().Addr, addr) {
+			out = node
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("webhook: find cluster slot owner for Tier B durability: %w", err)
+	}
+	if out == nil {
+		return nil, fmt.Errorf("webhook: cluster slot owner %q for key %q not found", addr, key)
+	}
+	return out.Conn(), nil
+}
+
+func clusterMasterAddrForKey(slots []redis.ClusterSlot, key string) (string, error) {
+	slot := redisClusterSlot(key)
+	for _, s := range slots {
+		if slot >= s.Start && slot <= s.End {
+			if len(s.Nodes) == 0 || s.Nodes[0].Addr == "" {
+				return "", fmt.Errorf("webhook: cluster slot %d has no master", slot)
+			}
+			return s.Nodes[0].Addr, nil
+		}
+	}
+	return "", fmt.Errorf("webhook: no cluster master for key %q slot %d", key, slot)
+}
+
+func redisAddrEqual(a, b string) bool {
+	return strings.TrimSpace(a) == strings.TrimSpace(b)
+}
+
+// redisClusterSlot is the Redis Cluster hash slot for a key. It mirrors the
+// table-free CCITT/XMODEM CRC16 guard in the tests, but lives in production so the
+// Tier-B shell can pin ClusterClient barriers to the mint key's slot owner.
+func redisClusterSlot(key string) int {
+	if i := strings.IndexByte(key, '{'); i >= 0 {
+		if j := strings.IndexByte(key[i+1:], '}'); j > 0 {
+			key = key[i+1 : i+1+j]
+		}
+	}
+	return int(redisClusterCRC16(key) % 16384)
+}
+
+func redisClusterCRC16(s string) uint16 {
+	var crc uint16
+	for i := 0; i < len(s); i++ {
+		crc ^= uint16(s[i]) << 8
+		for b := 0; b < 8; b++ {
+			if crc&0x8000 != 0 {
+				crc = (crc << 1) ^ 0x1021
+			} else {
+				crc <<= 1
+			}
+		}
+	}
+	return crc
+}
+
+// awaitDurableOn issues the tier's WAIT/WAITAOF barrier on the exact physical
+// Redis connection that just ran the fence-minting EVAL and reduces the reply to
+// a DURABILITY verdict (Tier B; a no-op for Tier A/C). This is the IO-shell
+// precondition the pure consistency core and formal model assume: the barrier
+// must observe an offset at or past THIS mint, not a different pooled connection's
+// last-seen offset. On ClusterClient the pinned connection is opened on the mint
+// key's slot owner, so no keyless WAIT can route to another node.
 //
-// WAIT/WAITAOF block until the master's CURRENT replication/AOF offset is
-// acknowledged, and that offset is monotonic, so issuing the barrier immediately
-// after the EVAL is a correct (conservative) durability gate even though go-redis
-// may route it on a different pooled connection — it can only over-wait, never
-// under-wait, for our write. go-redis types WaitAOF as an IntCmd and cannot parse
-// the [numlocal, numreplicas] array, so the store issues both via Do().
+// go-redis types WaitAOF as an IntCmd and cannot parse the [numlocal,
+// numreplicas] array, so the store issues both barriers via Do().
 //
 // CRITICAL (correction #3): the returned count flows ONLY into the pure
 // interpreters, whose sole output is durability. It never feeds the fence /
 // exclusivity decision — the Lua reply already made that. A short reply is
 // surfaced as an error, never swallowed and never read as "I hold the lease".
-func (s *RedisStore) awaitDurable() error {
+func (s *RedisStore) awaitDurableOn(conn durabilityDoer) error {
 	plan := s.durPlan
 	if !plan.Wait {
 		return nil
 	}
 	if plan.UseAOF {
-		raw, err := s.client.Do(s.ctx(), "WAITAOF", plan.NumLocal, plan.NumReplicas, plan.TimeoutMs).Slice()
+		raw, err := conn.Do(s.ctx(), "WAITAOF", plan.NumLocal, plan.NumReplicas, plan.TimeoutMs).Slice()
 		if err != nil {
 			return fmt.Errorf("webhook: WAITAOF: %w", err)
 		}
 		gotLocal, gotReplicas := waitAOFCounts(raw)
 		return s.recordDurabilityShort(InterpretWaitAOF(plan, gotLocal, gotReplicas), "WAITAOF")
 	}
-	n, err := s.client.Do(s.ctx(), "WAIT", plan.NumReplicas, plan.TimeoutMs).Int()
+	n, err := conn.Do(s.ctx(), "WAIT", plan.NumReplicas, plan.TimeoutMs).Int()
 	if err != nil {
 		return fmt.Errorf("webhook: WAIT: %w", err)
 	}
@@ -523,10 +661,13 @@ func (s *RedisStore) armWake(id string, now time.Time, leaseTTLMs int64, armLeas
 	if err != nil {
 		return ArmResult{}, err
 	}
-	reply, err := s.evalStrings(armWakeScript, keys,
+	reply, conn, err := s.evalStringsMaybePinned(armWakeScript, keys,
 		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID, owner.replicaID, owner.epoch)
 	if err != nil {
 		return ArmResult{}, err
+	}
+	if conn != nil {
+		defer func() { _ = conn.Close() }()
 	}
 	s.recordInlineFence(owner.epoch, reply[0])
 	switch reply[0] {
@@ -541,8 +682,13 @@ func (s *RedisStore) armWake(id string, now time.Time, leaseTTLMs int64, armLeas
 		// the wake after lease expiry), never swallowed. The result is returned
 		// alongside it as the truthful primary fence state. BUSY/NOSUB/FENCED mint no
 		// fence, so they need no barrier.
-		if err := s.awaitDurable(); err != nil {
-			return res, err
+		if conn == nil && s.durPlan.Wait {
+			return res, errors.New("webhook: Tier B durability missing pinned Redis connection")
+		}
+		if conn != nil {
+			if err := s.awaitDurableOn(conn); err != nil {
+				return res, err
+			}
 		}
 		return res, nil
 	case "BUSY":
@@ -573,10 +719,13 @@ func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now tim
 	// per-(id,g) shard hash, incarnation counter, registry, and lease ZSET all
 	// share the sub's one slot — claim.lua stays single-slot for any g.
 	h := slotOf(id)
-	reply, err := s.evalStrings(claimScript, []string{subKey(id), subShardKey(id, g), leaseZKey(h), subIncarnationKey(id), subShardRegistryKey(id)},
+	reply, conn, err := s.evalStringsMaybePinned(claimScript, []string{subKey(id), subShardKey(id, g), leaseZKey(h), subIncarnationKey(id), subShardRegistryKey(id)},
 		shardMember(id, g), worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID, strconv.Itoa(g))
 	if err != nil {
 		return ClaimResult{}, err
+	}
+	if conn != nil {
+		defer func() { _ = conn.Close() }()
 	}
 	switch reply[0] {
 	case "CLAIMED":
@@ -589,8 +738,13 @@ func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now tim
 		// non-durable claim does not silently process — the lease self-heals via
 		// expiry + takeover. Durability only; the (gen,wake_id) fence still governs
 		// who may ack. BUSY/NOSUB hold no new grant, so they need no barrier.
-		if err := s.awaitDurable(); err != nil {
-			return res, err
+		if conn == nil && s.durPlan.Wait {
+			return res, errors.New("webhook: Tier B durability missing pinned Redis connection")
+		}
+		if conn != nil {
+			if err := s.awaitDurableOn(conn); err != nil {
+				return res, err
+			}
 		}
 		return res, nil
 	case "BUSY":

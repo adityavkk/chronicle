@@ -159,6 +159,7 @@ spec:
           args: ["--listen", ":4437"]
           env:
             - { name: CHRONICLE_REDIS_URL, value: "redis://redis:6379/0" } # the STABLE endpoint
+            - { name: CHRONICLE_REDIS_POOL_SIZE, value: "64" } # make pooled-connection routing bugs observable under load
             - { name: CHRONICLE_SUBSCRIPTIONS, value: "true" }
             - { name: CHRONICLE_WEBHOOK_ALLOW_PRIVATE, value: "true" }
             - { name: CHRONICLE_PUBLIC_URL, value: "http://chronicle:4437" }
