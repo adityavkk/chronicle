@@ -62,9 +62,9 @@ config normalizers, the `Stream-Seq` comparison, and the JSON flatten path each
 have a differential test.
 
 This gives you confidence that the three copies of a rule have not drifted apart.
-A differential test found the `10^14` producer-reply bug (issue #47): the Lua
-reply rendered large sequence numbers in scientific notation, which the Go reply
-parser rejected. The downside is that a differential test only catches a
+A differential test found the fixed `10^14` producer-reply bug (issue #47): the
+Lua reply rendered large sequence numbers in scientific notation, which the Go
+reply parser rejected. The downside is that a differential test only catches a
 disagreement; if all three copies share the same wrong assumption, they agree and
 the test passes. That residual gap is covered by the independent properties and
 the proofs.
@@ -249,9 +249,10 @@ The property and differential tests found real defects that example tests had
 missed. Each is tracked with the `found-by-formal-methods` label, naming the
 method and the intended fix.
 
-- Issue #47: a producer sequence gap with a value at or above `10^14` makes the
-  Redis backend error while parsing its own reply, instead of returning a clean
-  409. Found by the producer differential property. Client reachable.
+- Issue #47: a producer sequence gap with a value at or above `10^14` used to
+  make the Redis backend error while parsing its own reply, instead of returning
+  a clean 409. Fixed by forwarding producer integers as decimal strings in Lua;
+  the producer differential property keeps the boundary covered.
 - Issue #46: the offset string format uses a minimum width, so lexical order
   inverts against numeric order at or above `10^16`. Found by the offset property.
   The fix is a format migration, so it is deferred.

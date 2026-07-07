@@ -13,8 +13,8 @@ local now = tonumber(ARGV[1])
 local channel = ARGV[2]
 local has_producer = ARGV[3] == '1'
 local producer_id = ARGV[4]
-local p_epoch = tonumber(ARGV[5])
-local p_seq = tonumber(ARGV[6])
+local p_epoch = ARGV[5]
+local p_seq = ARGV[6]
 
 local m = meta_map(KEYS[1])
 if m == nil then return make_reply('NOTFOUND') end

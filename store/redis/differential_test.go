@@ -20,8 +20,8 @@ import (
 // seed corpus of the generalized rapid property TestDifferentialProducerProperty
 // (differential_producer_test.go): both share assertProducerDifferential, so the
 // boundary generator strictly subsumes these rungs while these stay readable,
-// deterministic regression rows. Every case here uses tiny values well inside
-// the proven-exact < 10^14 domain, so the three oracles must agree exactly.
+// deterministic regression rows. Every case here uses tiny values; the
+// generalized property covers the former Lua precision boundaries too.
 // [INV-PROD-08]
 func TestDifferentialProducerTable(t *testing.T) {
 	s := newTestStore(t)
@@ -50,9 +50,6 @@ func TestDifferentialProducerTable(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if luaUnsafe(tt.state, tt.epoch, tt.seq) {
-				t.Fatalf("corpus row %q unexpectedly outside the < 10^14 reply-exact safe domain", tt.name)
-			}
 			assertProducerDifferential(t, s, ctx, now, tt.producerCase)
 		})
 	}

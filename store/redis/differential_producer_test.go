@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,7 +17,8 @@ import (
 // differential_producer_test.go generalizes the fixed 10-row producer table
 // (TestDifferentialProducerTable, kept below as a covered subset / seed corpus)
 // into a rapid generator over (ProducerState, epoch, seq) concentrated near the
-// 2^53 and 2^63 precision boundaries. For each generated case the property
+// old Lua-number precision boundaries and the int64 ends. For each generated
+// case the property
 // seeds the producer state directly, drives Store.Append against live Redis
 // (which runs the Lua mirror validate_producer in common.lua), and asserts the
 // FULL reply tuple (ProducerResult, CurrentEpoch, ExpectedSeq, ReceivedSeq,
@@ -33,70 +33,20 @@ import (
 // reply encoding survives the Lua double round-trip with no truncation across
 // the full int64 range. [INV-REPLY-01]
 
-// The Lua producer mirror has TWO distinct precision boundaries, and the tighter
-// one — surfaced by this property as a Go/Lua divergence — is NOT the 2^53 one
-// the prelude documents. Both are pinned here so a future contract change trips a
-// test rather than silently corrupting a reply.
-//
-//   - luaDoubleCompareBound = 2^53. validate_producer (common.lua) does
-//     tonumber(s_epoch_s)/tonumber(s_seq_s) and then integer comparisons
-//     (epoch < s_epoch, seq == s_seq + 1). A double represents every integer
-//     exactly up to 2^53, so the COMPARISONS (which branch fires: accept / dup /
-//     gap / stale / epoch-bump) are exact only below 2^53. common.lua documents
-//     this verbatim ("producer epoch/seq comparisons are exact only below 2^53").
-//     This is INV-PROD-08's stated domain.
-//
-//   - luaReplyExactBound = 10^14. This is TIGHTER and is the real first point of
-//     divergence. The SEQ_GAP reply detail fields are built as tostring(seq) and
-//     tostring(s_seq + 1) over Lua NUMBERS (common.lua validate_producer). Redis
-//     Lua is 5.1, whose number->string format is "%.14g": at 10^14 and above a
-//     value renders in 14-significant-digit scientific notation
-//     (tonumber("100000000000000") -> "1e+14"; 2^53-4 -> "9.007199254741e+15"),
-//     which strconv.ParseInt in decodeScriptReply (scripts.go) then rejects. So
-//     the ExpectedSeq/ReceivedSeq reply fields lose int64 fidelity at >= 10^14 —
-//     an order of magnitude below 2^53 — even though the gap was detected
-//     correctly. See the FINDING in TestDifferentialProducerReplyTostringLB and
-//     the committed reproducer fixture. (The STALE_EPOCH CurrentEpoch field is
-//     SAFE at any magnitude: it returns the original matched string s_epoch_s,
-//     not a re-rendered number; and make_reply itself never calls tonumber, so
-//     the focused INV-REPLY-01 round-trip below is exact across the full int64
-//     range — the loss is specifically validate_producer's tostring of detail
-//     fields, not the reply envelope.)
-//
-// The proven SAFE domain on which the Go core, the live Lua, and the Lean oracle
-// agree EXACTLY on the full reply tuple + persist decision is therefore the
-// conservative magnitude < 10^14 for every producer integer the case touches.
+// common.lua compares producer integers as decimal strings and forwards reply
+// details as strings, so the Go core, live Lua, and Lean oracle agree across the
+// full int64 domain. The former failure boundaries are still sampled so the
+// property proves they stay fixed: 10^14 used to render via Lua tostring as
+// scientific notation, and 2^53+1 used to collide with 2^53 under tonumber.
 const (
-	luaDoubleCompareBound = int64(1) << 53 // 2^53 = 9_007_199_254_740_992 (comparison limit)
-	luaReplyExactBound    = int64(1e14)    // 10^14 (the %.14g tostring rendering limit; the tighter, real boundary)
+	luaDoubleCompareBound = int64(1) << 53 // 2^53 = 9_007_199_254_740_992 (former tonumber comparison limit)
+	luaReplyTostringBound = int64(1e14)    // 10^14 (former %.14g tostring rendering limit)
 )
 
-// luaUnsafe reports whether any producer integer a generated case depends on
-// falls outside the proven exact domain (magnitude < 10^14). When true the case
-// is OUTSIDE the agree-exactly region and Go-vs-Lua tuple agreement is NOT
-// asserted (the boundaries are pinned by dedicated tests, not by the agreement);
-// when false the three oracles must agree exactly. The bound used is the TIGHTER
-// reply-rendering one (10^14), because a case that detects the right branch but
-// renders a mangled detail field is still a divergence.
-func luaUnsafe(state *store.ProducerState, epoch, seq int64) bool {
-	beyond := func(v int64) bool {
-		if v < 0 {
-			return true // negatives are non-protocol and unsafe by construction
-		}
-		return v >= luaReplyExactBound
-	}
-	if beyond(epoch) || beyond(seq) {
-		return true
-	}
-	if state != nil && (beyond(state.Epoch) || beyond(state.LastSeq)) {
-		return true
-	}
-	return false
-}
-
 // boundaryInt64 draws an int64 concentrated near every precision boundary that
-// matters: the 10^14 reply-rendering bound, the 2^53 comparison bound, and the
-// 2^63 int64 ceiling. It mixes a full-range uniform draw with explicit edge
+// used to matter: the 10^14 reply-rendering bound, the 2^53 comparison bound,
+// and the 2^63 int64 ceiling. It mixes a full-range uniform draw with explicit
+// edge
 // clusters at each bound ± k plus the small anchors {0, 1, 2} so the
 // accept / dup / gap / epoch-bump branches all fire on, just below, and just
 // above each boundary rather than relying on uniform luck across the int64 space.
@@ -104,7 +54,7 @@ func boundaryInt64() *rapid.Generator[int64] {
 	const k = 4
 	edges := []int64{0, 1, 2}
 	for d := int64(-k); d <= k; d++ {
-		edges = append(edges, luaReplyExactBound+d)    // 10^14 ± k (the tostring rendering bound)
+		edges = append(edges, luaReplyTostringBound+d) // 10^14 ± k (former tostring rendering bound)
 		edges = append(edges, luaDoubleCompareBound+d) // 2^53 ± k (the comparison bound)
 	}
 	// The int64 ceiling is 2^63 - 1 (math.MaxInt64); cluster just below it. d=0
@@ -113,7 +63,7 @@ func boundaryInt64() *rapid.Generator[int64] {
 	for d := int64(0); d <= k; d++ {
 		edges = append(edges, math.MaxInt64-d) // 2^63 - (1..k+1)
 	}
-	edges = append(edges, math.MinInt64) // the negative extreme (always unsafe)
+	edges = append(edges, math.MinInt64) // the negative extreme
 	return rapid.OneOf(
 		rapid.Int64(),
 		rapid.SampledFrom(edges),
@@ -205,14 +155,13 @@ func epochsNear(e int64) []int64 {
 
 // TestDifferentialProducerProperty is the generalized producer differential
 // (INV-PROD-08 / INV-DIFF-01). It replaces the fixed 10-row table with a rapid
-// generator concentrated near the 10^14, 2^53, and 2^63 boundaries and asserts,
-// for every case inside the proven-exact < 10^14 domain, that the live Lua
-// mirror and the pure-Go oracle (and, under -tags leanoracle, the proven Lean
-// model) agree on the full reply tuple, the error class, the persist decision,
-// and the tail-advances-exactly-on-accept property. Cases at or beyond 10^14 are
-// SKIPPED for Go-vs-Lua agreement and pinned separately as the documented domain
-// limit (TestDifferentialProducerReplyTostringLB) — the boundary is
-// machine-pinned, not the agreement. See luaReplyExactBound / luaDoubleCompareBound.
+// generator concentrated near the former 10^14 tostring boundary, the former
+// 2^53 Lua-double comparison boundary, and the int64 ends. For every generated
+// case, the live Lua mirror and the pure-Go oracle (and, under -tags
+// leanoracle, the proven Lean model) must agree on the full reply tuple, the
+// error class, the persist decision, and the tail-advances-exactly-on-accept
+// property. No unsafe-domain skip remains: the Lua mirror now compares producer
+// ints as decimal strings.
 //
 // Skipped under -short and when Redis is unreachable (newTestStore handles both).
 func TestDifferentialProducerProperty(t *testing.T) {
@@ -222,19 +171,6 @@ func TestDifferentialProducerProperty(t *testing.T) {
 
 	rapid.Check(t, func(t *rapid.T) {
 		c := producerCaseGen(now).Draw(t, "case")
-
-		if luaUnsafe(c.state, c.epoch, c.seq) {
-			// DOCUMENTED DOMAIN LIMIT, not a silent gap. Outside the < 10^14
-			// proven-exact domain the Lua mirror either re-renders a detail
-			// field via tostring (>= 10^14, the real first divergence) or loses
-			// comparison precision (>= 2^53). Go-vs-Lua tuple agreement is not a
-			// theorem here, so it is NOT asserted; the boundaries are pinned by
-			// TestDifferentialProducerReplyTostringLB and the committed
-			// reproducer fixture instead. See luaReplyExactBound /
-			// luaDoubleCompareBound. [INV-PROD-08 / INV-REPLY-01 boundary]
-			t.Skip("outside the < 10^14 Lua reply-exact domain (documented limit)")
-		}
-
 		assertProducerDifferential(t, s, ctx, now, c)
 	})
 }
@@ -249,7 +185,7 @@ func boundaryBand(v int64) string {
 		return "near2^63"
 	case absWithin(v, luaDoubleCompareBound, 8):
 		return "near2^53"
-	case absWithin(v, luaReplyExactBound, 8):
+	case absWithin(v, luaReplyTostringBound, 8):
 		return "near10^14"
 	case v >= 0 && v <= 2:
 		return "small"
@@ -274,14 +210,13 @@ func absWithin(v, center, d int64) bool {
 
 // TestDifferentialProducerGeneratorCoverage is the coverage assertion required
 // by INV-PROD-08: it confirms the (state, epoch, seq) generator demonstrably
-// concentrates draws near BOTH the 2^53 and the 2^63 boundary, rather than
-// relying on uniform luck across the int64 space. It is a pure generator probe
-// (no Redis), so it runs on every build including -short. It also asserts the
-// generator actually produces both first-contact (nil state) and seeded-state
-// cases, and that the unsafe [2^53, 2^63) window IS reached (so the documented
-// domain limit is exercised, not dead).
+// concentrates draws near the former 10^14/2^53 Lua boundaries and the 2^63
+// int64 boundary, rather than relying on uniform luck across the int64 space.
+// It is a pure generator probe (no Redis), so it runs on every build including
+// -short. It also asserts the generator actually produces both first-contact
+// (nil state) and seeded-state cases.
 func TestDifferentialProducerGeneratorCoverage(t *testing.T) {
-	var near14, near53, near63, seeded, firstContact, unsafe int
+	var near14, near53, near63, seeded, firstContact int
 	tally := func(v int64) {
 		switch boundaryBand(v) {
 		case "near10^14":
@@ -305,9 +240,6 @@ func TestDifferentialProducerGeneratorCoverage(t *testing.T) {
 			tally(c.state.Epoch)
 			tally(c.state.LastSeq)
 		}
-		if luaUnsafe(c.state, c.epoch, c.seq) {
-			unsafe++
-		}
 	})
 	if near14 == 0 {
 		t.Error("generator never drew near the 10^14 reply-rendering boundary")
@@ -324,11 +256,8 @@ func TestDifferentialProducerGeneratorCoverage(t *testing.T) {
 	if seeded == 0 {
 		t.Error("generator never drew a seeded-state case")
 	}
-	if unsafe == 0 {
-		t.Error("generator never reached the >= 10^14 documented-limit window")
-	}
-	t.Logf("coverage: near10^14=%d near2^53=%d near2^63=%d firstContact=%d seeded=%d unsafe=%d",
-		near14, near53, near63, firstContact, seeded, unsafe)
+	t.Logf("coverage: near10^14=%d near2^53=%d near2^63=%d firstContact=%d seeded=%d",
+		near14, near53, near63, firstContact, seeded)
 }
 
 // assertProducerDifferential seeds one producer case directly, drives Append
@@ -436,12 +365,10 @@ type require interface {
 // range (concentrated near 2^53 and 2^63) and asserts sent == decoded for every
 // numeric field.
 //
-// It is the encoding counterpart to the domain note above: a value > 2^53 loses
-// precision in validate_producer's tonumber() COMPARISON, but make_reply never
-// calls tonumber() on these — it formats the already-string argument straight
-// into the reply — so the WIRE round-trip is exact across the ENTIRE int64 range
-// (this is why every reply numeric is a string, not a Lua number). Skipped under
-// -short and when Redis is unreachable.
+// It is the encoding counterpart to validate_producer's decimal-string compare:
+// make_reply never turns producer ints into Lua numbers, so the WIRE round-trip
+// is exact across the ENTIRE int64 range (this is why every reply numeric is a
+// string, not a Lua number). Skipped under -short and when Redis is unreachable.
 func TestDifferentialReplyInt64RoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
@@ -496,41 +423,18 @@ return make_reply('OK', '', ARGV[1], ARGV[2], ARGV[3], ARGV[4], ARGV[5], '0', '0
 	})
 }
 
-// TestDifferentialProducerReplyTostringLB is the committed regression fixture
-// for the FINDING this issue's generalized generator surfaced: the producer
-// reply DIVERGES between Go and live Lua at >= 10^14, an order of magnitude
-// BELOW the 2^53 comparison bound common.lua documents.
-//
-// Root cause: validate_producer (common.lua) builds the SEQ_GAP detail fields as
-// tostring(seq) and tostring(s_seq + 1) over Lua NUMBERS. Redis ships Lua 5.1,
-// whose number->string format is "%.14g", so a value with >= 15 significant
-// decimal digits renders in scientific notation: tonumber("100000000000000")
-// stringifies to "1e+14". decodeScriptReply (scripts.go) parses reply numerics
-// with strconv.ParseInt(_, 10, 64), which rejects "1e+14". So a first-contact
-// gap (or same-epoch gap) whose ReceivedSeq/ExpectedSeq is >= 10^14 fails to
-// decode — the Go core returns a clean ErrProducerSeqGap with the exact
-// ReceivedSeq, while the Redis backend errors out parsing the mangled reply.
-//
-// This is NOT the documented 2^53 limit; it is tighter and it bites the REPLY
-// rendering, not the branch decision (the gap is detected correctly). It is a
-// Go/Lua divergence to REPORT, per the issue's mirror rule — NOT to silence by
-// editing one side. The fix (have validate_producer FORWARD the original seq
-// strings into the SEQ_GAP detail fields instead of tostring-ing a re-derived
-// number, or format with string.format('%d', ...) / '%.0f') is a Lua change
-// tracked as a follow-up; it is deliberately not made here.
-//
-// This fixture pins the KNOWN divergence so it can never silently regress and so
-// CI stays green: it asserts the boundary is SHARP (10^14-1 round-trips cleanly
-// on both backends; 10^14 diverges) rather than asserting agreement at 10^14.
-// Skipped under -short and when Redis is unreachable.
-func TestDifferentialProducerReplyTostringLB(t *testing.T) {
+// TestDifferentialProducerLargeIntegerBoundaries pins the former producer Lua
+// number hazards as fixed: SEQ_GAP details at 10^14 stay decimal strings, and
+// the full differential property covers the 2^53 comparison boundary. Skipped
+// under -short and when Redis is unreachable.
+func TestDifferentialProducerLargeIntegerBoundaries(t *testing.T) {
 	s := newTestStore(t)
 	now := time.Now().Unix()
 
 	// firstContactGap drives a first-contact append at the given seq (state nil,
 	// so the oracle returns ErrProducerSeqGap with ExpectedSeq 0, ReceivedSeq
-	// seq) and returns (oracle ReceivedSeq, the live-Redis error).
-	firstContactGap := func(seq int64) (wantReceived int64, redisErr error) {
+	// seq) and returns the oracle ReceivedSeq plus the live-Redis result/error.
+	firstContactGap := func(seq int64) (wantReceived int64, got store.AppendResult, redisErr error) {
 		wantRes, _, wantErr := store.ValidateProducer(nil, 0, seq, now)
 		if !errors.Is(wantErr, store.ErrProducerSeqGap) {
 			t.Fatalf("seq %d: oracle did not return a gap: %v", seq, wantErr)
@@ -540,41 +444,31 @@ func TestDifferentialProducerReplyTostringLB(t *testing.T) {
 			t.Fatalf("Create: %v", err)
 		}
 		e, q := int64(0), seq
-		_, gotErr := s.Append(path, []byte("payload"), store.AppendOptions{
+		got, gotErr := s.Append(path, []byte("payload"), store.AppendOptions{
 			ProducerId: "p", ProducerEpoch: &e, ProducerSeq: &q,
 		})
-		return wantRes.ReceivedSeq, gotErr
+		return wantRes.ReceivedSeq, got, gotErr
 	}
 
 	t.Run("10^14-1 round-trips cleanly on both backends", func(t *testing.T) {
-		seq := luaReplyExactBound - 1 // 99999999999999, 14 digits — exact under %.14g
-		wantReceived, gotErr := firstContactGap(seq)
+		seq := luaReplyTostringBound - 1
+		wantReceived, got, gotErr := firstContactGap(seq)
 		if !errors.Is(gotErr, store.ErrProducerSeqGap) {
 			t.Fatalf("seq %d (10^14-1) should round-trip to a clean gap, got: %v", seq, gotErr)
 		}
-		if wantReceived != seq {
-			t.Fatalf("oracle ReceivedSeq = %d, want %d", wantReceived, seq)
+		if wantReceived != seq || got.ReceivedSeq != seq {
+			t.Fatalf("ReceivedSeq oracle=%d redis=%d, want %d", wantReceived, got.ReceivedSeq, seq)
 		}
 	})
 
-	t.Run("10^14 diverges: live Lua mangles the ReceivedSeq detail field", func(t *testing.T) {
-		seq := luaReplyExactBound // 100000000000000 -> Lua tostring "1e+14"
-		_, gotErr := firstContactGap(seq)
-		// The DOCUMENTED divergence: the Go oracle would report a clean gap with
-		// ReceivedSeq == 10^14, but the Redis backend cannot decode the
-		// scientific-notation reply field. If this ever STOPS diverging (e.g.
-		// the Lua mirror is fixed to forward the original string), this fixture
-		// must be updated intentionally — the divergence is the assertion.
-		if errors.Is(gotErr, store.ErrProducerSeqGap) || gotErr == nil {
-			t.Fatalf("expected the 10^14 reply-rendering divergence (a decode error), "+
-				"but Append returned %v — has validate_producer's tostring been fixed to "+
-				"forward the original seq string? this fixture must be updated intentionally", gotErr)
+	t.Run("10^14 no longer renders as scientific notation", func(t *testing.T) {
+		seq := luaReplyTostringBound
+		wantReceived, got, gotErr := firstContactGap(seq)
+		if !errors.Is(gotErr, store.ErrProducerSeqGap) {
+			t.Fatalf("seq %d should round-trip to a clean gap, got: %v", seq, gotErr)
 		}
-		// Pin the exact shape of the divergence: a ParseInt failure on the
-		// scientific-notation rendering of the detail field.
-		if !strings.Contains(gotErr.Error(), "1e+14") && !strings.Contains(gotErr.Error(), "ParseInt") {
-			t.Fatalf("10^14 divergence took an unexpected form: %v", gotErr)
+		if wantReceived != seq || got.ReceivedSeq != seq {
+			t.Fatalf("ReceivedSeq oracle=%d redis=%d, want %d", wantReceived, got.ReceivedSeq, seq)
 		}
-		t.Logf("FINDING pinned: first-contact gap seq=10^14 -> live-Lua reply decode error: %v", gotErr)
 	})
 }

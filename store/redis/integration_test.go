@@ -498,3 +498,41 @@ func TestIntegrationProducerSequencing(t *testing.T) {
 		t.Errorf("producer state: %+v", ps2)
 	}
 }
+
+func TestIntegrationProducerEpochPrecisionRegression(t *testing.T) {
+	s := newTestStore(t)
+	path := testPath("producer-epoch-precision")
+	mustCreate(t, s, path, store.CreateOptions{})
+
+	producerAppend := func(epoch, seq int64, data string) (store.AppendResult, error) {
+		e, q := epoch, seq
+		return s.Append(path, []byte(data), store.AppendOptions{
+			ProducerId:    "p",
+			ProducerEpoch: &e,
+			ProducerSeq:   &q,
+		})
+	}
+
+	high := int64(9007199254740993) // 2^53+1: rounds to 2^53 as a Lua double.
+	low := int64(9007199254740992)  // 2^53.
+	if r, err := producerAppend(high, 0, "a"); err != nil || r.ProducerResult != store.ProducerResultAccepted {
+		t.Fatalf("setup high epoch append: %+v err=%v", r, err)
+	}
+
+	r, err := producerAppend(low, 1, "b")
+	if !errors.Is(err, store.ErrStaleEpoch) || r.CurrentEpoch != high {
+		t.Fatalf("lower epoch after 2^53+1 must be stale: %+v err=%v", r, err)
+	}
+
+	meta, err := s.Get(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := meta.Producers["p"]
+	if ps == nil || ps.Epoch != high || ps.LastSeq != 0 {
+		t.Fatalf("producer state regressed: %+v", ps)
+	}
+	if got := meta.CurrentOffset.ByteOffset; got != 1 {
+		t.Fatalf("stale lower epoch appended data: tail byte offset=%d, want 1", got)
+	}
+}

@@ -2,9 +2,9 @@
 -- scripts.go. Convention: KEYS[1]=meta HASH, KEYS[2]=msg ZSET,
 -- KEYS[3]=prod HASH, KEYS[4]=forks SET (extra script-specific keys follow).
 --
--- Lua numbers are doubles: producer epoch/seq comparisons are exact only
--- below 2^53 (documented limit, far beyond practical values), and UnixNano
--- timestamps carry ~256ns rounding (irrelevant at ms-granularity expiry).
+-- Lua numbers are doubles, so producer epoch/seq values are kept as decimal
+-- strings and compared with the helpers below. UnixNano timestamps still use
+-- numbers and carry ~256ns rounding (irrelevant at ms-granularity expiry).
 
 -- meta_map loads the meta HASH into a table, or nil if the stream is absent.
 local function meta_map(key)
@@ -78,6 +78,78 @@ local function make_reply(status, tail, presult, cur_epoch, exp_seq, rcv_seq, la
     exp_seq or '0', rcv_seq or '0', last_seq or '0', closed or '0', already or '0' }
 end
 
+local function int_parts(s)
+  local neg = string.sub(s, 1, 1) == '-'
+  if neg then s = string.sub(s, 2) end
+  s = string.gsub(s, '^0+', '')
+  if s == '' then return false, '0' end
+  return neg, s
+end
+
+local function int_cmp(a, b)
+  local an, ad = int_parts(a)
+  local bn, bd = int_parts(b)
+  if an and not bn then return -1 end
+  if not an and bn then return 1 end
+
+  local c = 0
+  if #ad < #bd then c = -1 elseif #ad > #bd then c = 1
+  elseif ad < bd then c = -1 elseif ad > bd then c = 1 end
+  if an and bn then return -c end
+  return c
+end
+
+local function int_is_zero(s)
+  local _, d = int_parts(s)
+  return d == '0'
+end
+
+local function abs_add_one(d)
+  local carry = 1
+  local out = {}
+  for i = #d, 1, -1 do
+    local n = string.byte(d, i) - 48 + carry
+    if n == 10 then
+      out[#out + 1] = '0'
+      carry = 1
+    else
+      out[#out + 1] = string.char(48 + n)
+      carry = 0
+    end
+  end
+  if carry == 1 then out[#out + 1] = '1' end
+  local s = ''
+  for i = #out, 1, -1 do s = s .. out[i] end
+  return s
+end
+
+local function abs_sub_one(d)
+  local borrow = 1
+  local out = {}
+  for i = #d, 1, -1 do
+    local n = string.byte(d, i) - 48 - borrow
+    if n < 0 then
+      out[#out + 1] = '9'
+      borrow = 1
+    else
+      out[#out + 1] = string.char(48 + n)
+      borrow = 0
+    end
+  end
+  local s = ''
+  for i = #out, 1, -1 do s = s .. out[i] end
+  s = string.gsub(s, '^0+', '')
+  if s == '' then return '0' end
+  return s
+end
+
+local function int_add_one(s)
+  local neg, d = int_parts(s)
+  if not neg then return abs_add_one(d) end
+  if d == '1' then return '0' end
+  return '-' .. abs_sub_one(d)
+end
+
 -- validate_producer mirrors store.ValidateProducer exactly. state_str is the
 -- prod HASH value ("epoch:lastSeq:lastUpdated") or false/nil on first
 -- contact. Returns (outcome, detail1, detail2):
@@ -88,17 +160,18 @@ end
 --   'SEQ_GAP'    — detail1 = expected seq string, detail2 = received seq string
 local function validate_producer(state_str, epoch, seq)
   if not state_str then
-    if seq ~= 0 then return 'SEQ_GAP', '0', tostring(seq) end
+    if not int_is_zero(seq) then return 'SEQ_GAP', '0', seq end
     return 'ACCEPT'
   end
   local s_epoch_s, s_seq_s = string.match(state_str, '^(-?%d+):(-?%d+):')
-  local s_epoch, s_seq = tonumber(s_epoch_s), tonumber(s_seq_s)
-  if epoch < s_epoch then return 'STALE_EPOCH', s_epoch_s end
-  if epoch > s_epoch then
-    if seq ~= 0 then return 'EPOCH_SEQ' end
+  local epoch_cmp = int_cmp(epoch, s_epoch_s)
+  if epoch_cmp < 0 then return 'STALE_EPOCH', s_epoch_s end
+  if epoch_cmp > 0 then
+    if not int_is_zero(seq) then return 'EPOCH_SEQ' end
     return 'ACCEPT'
   end
-  if seq <= s_seq then return 'DUP', s_seq_s end
-  if seq == s_seq + 1 then return 'ACCEPT' end
-  return 'SEQ_GAP', tostring(s_seq + 1), tostring(seq)
+  if int_cmp(seq, s_seq_s) <= 0 then return 'DUP', s_seq_s end
+  local expected = int_add_one(s_seq_s)
+  if seq == expected then return 'ACCEPT' end
+  return 'SEQ_GAP', expected, seq
 end
