@@ -82,6 +82,20 @@ export function describeStartMode(mode: StartMode, customOffset: string): string
 	}
 }
 
+/**
+ * Abbreviate a long opaque offset cursor for display. Chronicle's cursors are
+ * zero-padded (e.g. "0000000000000000_0000000000064887"), so the head is noise
+ * and the tail carries the position — show a short head…tail with an ellipsis.
+ * Short sentinels ("-1", "now", "") and already-short cursors pass through
+ * unchanged. Callers keep the full value available via a title/copy affordance.
+ */
+export function shortCursor(offset: string | null | undefined): string {
+	if (offset === null || offset === undefined) return "—";
+	const s = offset.trim();
+	if (s.length <= 16) return s;
+	return `${s.slice(0, 4)}…${s.slice(-8)}`;
+}
+
 /** Field names commonly carrying a record's event time, in priority order. */
 const TIME_FIELDS: readonly string[] = [
 	"timestamp",
