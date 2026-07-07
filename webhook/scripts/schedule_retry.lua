@@ -3,7 +3,7 @@
 -- be persisted across ... eviction"). status flips to failed (PROTOCOL §6.3),
 -- but only if the failed wake is still current. A stale failure from a duplicate
 -- delivery must not resurrect retry state already cleared by a success/ack.
--- KEYS: 1=sub 2=retry_zset 3=slot (ds:{ownership}:slot:<h>)
+-- KEYS: 1=sub 2=retry_zset [3=slot (ds:{__ds:h}:ownership:slot:<h>) when owned]
 -- ARGV: 1=id 2=now_ns 3=next_attempt_ns 4=generation 5=wake_id
 --       6=replica_id 7=expected_epoch
 -- Reply: {status, retry_count, first_fail_ns} ; OK | NOSUB | STALE | FENCED

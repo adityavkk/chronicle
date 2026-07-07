@@ -115,7 +115,7 @@ cd loadtest
 `gate4` renders [`spec/sweep-10k-churn.yaml`](spec/sweep-10k-churn.yaml) at
 `replicas: 2`, launches the SLO-gated `sweepscale` Job, sleeps ~45 s for the
 workload to warm up and ownership to settle, then reads `owner_id` from
-`ds:{ownership}:slot:0` and force-deletes that owner's pod (the `killSlotOwner`
+`ds:{__ds:0}:ownership:slot:0` and force-deletes that owner's pod (the `killSlotOwner`
 nemesis; falls back to the coarse `chaos` pod-kill if the owner pod cannot be
 resolved). After the job completes it scrapes the ownership metrics from a
 surviving pod's `/metrics`.

@@ -15,7 +15,7 @@ import (
 //
 // These are the oracle's OWN spec, NOT the binding to the shipped Lua. The
 // real-Lua binding — the proof that claim_shard.lua / check_owner.lua and the
-// ds:{ownership}:slot:<h> hash agree with this model under live concurrency — is
+// ds:{__ds:h}:ownership:slot:<h> hash agree with this model under live concurrency — is
 // the -scenario ownership-exclusivity gate (runOwnershipExclusivity in
 // scenario_ownership.go), which drives webhook.RedisStore against a containerized
 // Redis and checks the recorded history against shardModel(). The negative-control

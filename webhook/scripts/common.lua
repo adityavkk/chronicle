@@ -1,20 +1,15 @@
 -- common.lua — shared prelude for the __ds subscription scripts.
 --
--- Every subscription-control key shares the {__ds} hash tag, so all of these
--- scripts touch a single slot and are cluster-safe. The per-stream fan-out
--- index (ds:{__ds}:stream:<path>) is maintained from Go as a best-effort index
--- reconciled by the recovery sweep, so it is never touched here.
+-- Every subscription-control key shares a {__ds:h} hash tag, so all multi-key
+-- scripts touch a single Redis Cluster slot. The per-stream fan-out index is
+-- maintained from Go as a best-effort index reconciled by the recovery sweep, so
+-- it is never touched here.
 --
--- ONE EXCEPTION (issue #14): the schedule/retry/due-mutating scripts (arm_wake,
--- ack, expire_lease, schedule_retry, record_success, release) also take the
--- {ownership} slot key as an extra KEY to inline the owner-epoch fence
--- (owner_fenced below). That key carries
--- the literal {ownership} tag, a DIFFERENT cluster slot, so those EVALs are
--- single-slot only on a single-node Redis (the deploy/test substrate); the
--- ownership keyspace is deliberately not slot-homed (05:311), and co-locating it
--- for a real cluster is out of scope here (state shard #15, DR #16). The slot key
--- is read ONLY when the caller is acting as a slot owner (epoch ~= ''), so the
--- load-balanced external paths that pass epoch '' never touch the second slot.
+-- Owner-scoped schedule/due-mutating scripts (arm_wake, ack, expire_lease,
+-- schedule_retry, record_success, release) may also take slotKey(h) as an extra
+-- KEY to inline the owner-epoch fence (owner_fenced below). slotKey(h) is
+-- co-homed under {__ds:h}, so the atomic composition is cluster-safe.
+-- Load-balanced external paths pass an empty epoch and declare no owner key at all.
 
 -- offset_greater reports a > b for opaque, fixed-width, lexicographically
 -- sortable offsets (PROTOCOL §8), treating the "-1"/"" beginning sentinel as

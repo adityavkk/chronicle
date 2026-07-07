@@ -1,7 +1,7 @@
 -- record_success.lua — clear webhook failure bookkeeping after a delivery is
 -- accepted, but only if the completed wake is still current. A stale success from
 -- a superseded generation must not erase the current retry state.
--- KEYS: 1=sub 2=retry_zset 3=slot (ds:{ownership}:slot:<h>)
+-- KEYS: 1=sub 2=retry_zset [3=slot (ds:{__ds:h}:ownership:slot:<h>) when owned]
 -- ARGV: 1=id 2=generation 3=wake_id 4=replica_id 5=expected_epoch
 -- Reply: {status} ; OK | STALE | FENCED | NOSUB
 local sub = KEYS[1]

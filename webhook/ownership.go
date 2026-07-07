@@ -20,15 +20,15 @@ import (
 // (shard.go). #11 splits ONE subscription's single-holder lease into G fences so
 // concurrent claimants on different entity-shards do not serialize on one lease.
 // THIS layer shards which REPLICA runs the background loops for a slot of the
-// keyspace. They share only the word "shard": different keys (ds:{ownership}:slot
-// vs the per-(subId,g) fence hash), different types, the owner-epoch fence here vs
-// the (gen,wake_id) fence there. Do not conflate them.
+// keyspace. They share only the word "shard": different keys (the co-homed
+// ownership slot hash vs the per-(subId,g) fence hash), different types, the
+// owner-epoch fence here vs the (gen,wake_id) fence there. Do not conflate them.
 //
 // Like state.go and shard.go these are total, I/O-free functions over plain
 // values: the HRW assignment, the CAS-reply interpretation, and the OwnedSlots set
 // math carry no Redis and no clock. The membership/heartbeat/reconcile IO is the
-// thin shell in manager.go; the slot records live in Redis under the {ownership}
-// tag (keys.go).
+// thin shell in manager.go; the slot records live in Redis under the same {__ds:h}
+// tag as the subscription slot they fence (keys.go).
 //
 // THE OWNER-EPOCH FENCE IS LAYERED ABOVE THE (gen,wake_id) FENCE, NEVER REPLACING
 // IT (06 correction #1): it only SUPPRESSES a deposed owner's wasted work; the
@@ -326,7 +326,7 @@ func OwnedSlots(targeted, held map[SlotID]struct{}) []SlotID {
 // epoch before its write, FENCING a deposed owner. Layered ABOVE the (gen,wake_id)
 // fence, never replacing it.
 type OwnerScope struct {
-	SlotKey   string // ds:{ownership}:slot:<h>
+	SlotKey   string // ds:{__ds:h}:ownership:slot:<h>
 	ReplicaID string // me
 	Epoch     string // the epoch I hold (OwnerEpoch.String form); must be non-empty
 }
@@ -343,10 +343,11 @@ type ownerScriptArgs struct {
 }
 
 // unscopedOwnerArgs is the deliberate external/hot-path shape: Lua sees an empty
-// expected epoch and short-circuits owner_fenced without reading the ownership
-// slot. The extra key is slot 0's owner key so Redis key declarations stay stable.
+// expected epoch and short-circuits owner_fenced without reading an ownership
+// slot. It deliberately declares NO ownership key, keeping no-scope scripts in the
+// subscription's {__ds:h} slot on Redis Cluster.
 func unscopedOwnerArgs() ownerScriptArgs {
-	return ownerScriptArgs{slotKey: slotKey(0)}
+	return ownerScriptArgs{}
 }
 
 // scopedOwnerArgs validates the explicit Owned API's scope before a script write.

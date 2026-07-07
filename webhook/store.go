@@ -158,7 +158,7 @@ type Store interface {
 	// replacing it. This axis is orthogonal to #11's per-(subId,g) claim
 	// granularity.
 
-	// ClaimSlot runs the {ownership}-tagged CAS (claim_shard.lua) against the slot
+	// ClaimSlot runs the slot-ownership CAS (claim_shard.lua) against the co-homed
 	// HASH at slotKey: it grants the lease only when the current owner is expired,
 	// missing, or the caller, bumping owner_epoch on transfer only. The returned
 	// SlotClaim is a sealed sum (CLAIMED|RENEWED|BUSY), never a bool, so a

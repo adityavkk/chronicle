@@ -38,7 +38,7 @@ import Switch from "../components/Switch.astro";
 <Callout icon="alert" label="What this proves, and what it does not">
   The slot-homed, work-sharded design is built and passes locally. PR #18 landed
   the whole horizontal-scale epic on main. Subscriptions are slot-homed into 256
-  `{__ds:h}` slots, ownership is leased over a `{ownership}` keyspace, and the
+  `{__ds:h}` slots, ownership uses co-homed slot records plus `{ownership}` membership, and the
   claim is split per `(subId, g)`. Its safety and liveness suite passes on a real
   Chronicle plus Redis stack: T1 to T5 GREEN, L1 and L3 GREEN, and the contention
   suite C1 to C3 with doc-05 gate #6 GREEN. The cloud rig deployed that same
@@ -484,4 +484,4 @@ import Switch from "../components/Switch.astro";
 [^apis]: Provisioning enables six GCP APIs first: container, redis, artifactregistry, cloudbuild, servicenetworking, and networkconnectivity (`run-gate2.sh` lines 172 to 178). The images build for `linux/amd64` through Cloud Build because the development machine is an ARM Mac with no cross-architecture emulation.
 [^drivers]: `fanoutscale` exists because the earlier `sweepscale` driver seeded subscriptions but drove no appends, so `chronicle_fanout_seconds` stayed at a count of zero and the fan-out latency had no value ([loadgen/cmd/fanoutscale/main.go](https://github.com/adityavkk/chronicle/blob/main/loadgen/cmd/fanoutscale/main.go) lines 4 to 7). `fanoutscale` then creates one sentinel stream, seeds the subscriptions linked to it with 32-way concurrency, and reports fan-out p50, p99, and p999 in milliseconds.
 [^c16]: On a real Chronicle plus Redis stack the `contention` scenario (jepsen/checker `scenario_contention.go`) shows that at G=16 per-worker throughput holds near 27 while aggregate scales 158 to 336 to 650, while G=1 fails (`docs/jepsen/results.md` lines 214 to 234).
-[^gates]: Gates #3, #4, and #5 cover the due-set outbox, leased slot ownership over the `{ownership}` keyspace, and the failover-fence drill, all merged by PR #18 and green in the local suite. Each needs at least two replicas plus chaos on a clean multi-node rig, and the same quota that blocked the cluster blocked that rig. Gate #4's ownership exclusivity (T3) is linearizable on a real Redis, and the L3 failover recovery is proven in-process.
+[^gates]: Gates #3, #4, and #5 cover the due-set outbox, leased slot ownership over co-homed owner records plus `{ownership}` membership, and the failover-fence drill, all merged by PR #18 and green in the local suite. Each needs at least two replicas plus chaos on a clean multi-node rig, and the same quota that blocked the cluster blocked that rig. Gate #4's ownership exclusivity (T3) is linearizable on a real Redis, and the L3 failover recovery is proven in-process.

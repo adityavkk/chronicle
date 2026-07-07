@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
 // nemesis.go enriches the kubectl/redis-cli nemesis in main.go with the
@@ -113,15 +115,15 @@ func parseRedisIntegerReply(out []byte) (int64, bool) {
 
 // ---- killSlotOwner: read the slot owner, kill that pod ----
 
-// ownershipSlotKey is the ownership CAS record for slot h (doc-05 keyspace). It
-// has its own {ownership} hash tag, deliberately not slot-homed.
-func ownershipSlotKey(slot int) string { return fmt.Sprintf("ds:{ownership}:slot:%d", slot) }
+// ownershipSlotKey is the manager's ownership CAS record for slot h. It reuses
+// webhook.OwnershipSlotKey so the kill-slot-owner nemesis cannot drift from the
+// live manager keyspace again.
+func ownershipSlotKey(slot int) string { return webhook.OwnershipSlotKey(slot) }
 
-// killSlotOwner reads owner_id from ds:{ownership}:slot:<h> and force-deletes that
-// pod — the L2/L4 fault (07 line 59). On today's code the ownership record does
-// not exist yet (claim_shard.lua lands in #14), so an empty owner is a clean
-// no-op rather than an error: the primitive is the executable spec the #14 driver
-// reuses.
+// killSlotOwner reads owner_id from ds:{__ds:h}:ownership:slot:<h> and
+// force-deletes that pod — the L2/L4 fault (07 line 59). An empty owner is a
+// clean no-op: the slot is currently uncovered, which the recovery assertions
+// observe as part of the churn window.
 func (n *nemesis) killSlotOwner(slot int) {
 	out, err := n.redisCLI("hget", ownershipSlotKey(slot), "owner_id")
 	owner := strings.TrimSpace(string(out))

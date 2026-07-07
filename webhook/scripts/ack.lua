@@ -13,8 +13,8 @@
 -- register. At G=1 / shard 0, KEYS[1]==sub hash and ARGV[1]==id (today). The
 -- due-set ZREM in the done branch (Move 2, KEYS[5]) uses this same ARGV[1] member,
 -- so a per-shard due mark is cleared by its own shard's ack.
--- KEYS: 1=shardstate 2=links 3=lease_zset 4=retry_zset 5=due_zset
---       6=slot (ds:{ownership}:slot:<h>) 7=sub(config)
+-- KEYS: 1=shardstate 2=links 3=lease_zset 4=retry_zset 5=due_zset 6=sub(config)
+--       [7=slot (ds:{__ds:h}:ownership:slot:<h>) when owned]
 -- ARGV: 1=member 2=req_gen 3=req_wake 4=token_gen 5=done('0'/'1') 6=now_ns
 --       7=lease_ttl_ms 8=num_acks then (path, offset)* then
 --       replica_id, expected_epoch (the trailing pair; epoch '' => skip the check)
@@ -25,18 +25,18 @@ local sub = KEYS[1]
 -- ack path epoch is '' and this is a no-op — the (gen,wake_id) fence below is the
 -- guard. A reused-as-FENCED reply is indistinguishable from the gen fence on the
 -- wire, which is fine: both grant and mutate nothing.
-if owner_fenced(KEYS[6], ARGV[#ARGV - 1], ARGV[#ARGV]) then
+if owner_fenced(KEYS[7], ARGV[#ARGV - 1], ARGV[#ARGV]) then
   return { 'FENCED' }
 end
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
 end
-if redis.call('EXISTS', KEYS[7]) == 0 then
+if redis.call('EXISTS', KEYS[6]) == 0 then
   return { 'NOSUB' }
 end
-local cfg_inc = redis.call('HGET', KEYS[7], 'incarnation')
+local cfg_inc = redis.call('HGET', KEYS[6], 'incarnation')
 local shard_inc = redis.call('HGET', sub, 'incarnation')
-if KEYS[1] ~= KEYS[7] then
+if KEYS[1] ~= KEYS[6] then
   if cfg_inc == false or cfg_inc == '' or shard_inc == false or shard_inc == '' or shard_inc ~= cfg_inc then
     return { 'FENCED' }
   end

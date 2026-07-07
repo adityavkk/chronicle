@@ -1,5 +1,5 @@
 -- claim_shard.lua — CAS takeover of a slot-ownership lease (issue #14, the
--- {ownership}-tagged analogue of claim.lua's expired-lease takeover). It grants
+-- ownership-layer analogue of claim.lua's expired-lease takeover). It grants
 -- the lease ONLY when the current owner is expired, missing, or the caller
 -- itself, and bumps owner_epoch on every *transfer* (never on a same-owner
 -- renew) — so a deposed-but-resumed owner carries a STALE epoch and is fenced by
@@ -20,7 +20,7 @@
 -- renew keeps the epoch (bump-on-transfer-only) so it never gratuitously fences
 -- the owner's own outstanding work. The model in jepsen/checker/model_shard.go
 -- (T3) checks these semantics exactly.
--- KEYS: 1=slot (ds:{ownership}:slot:<h>)
+-- KEYS: 1=slot (ds:{__ds:h}:ownership:slot:<h>)
 -- ARGV: 1=replica_id 2=now_ns 3=slot_lease_ttl_ms
 -- Reply: {status, owner_id, owner_epoch, lease_expiry_ns} ; CLAIMED | RENEWED | BUSY
 local slot, me = KEYS[1], ARGV[1]

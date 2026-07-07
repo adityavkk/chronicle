@@ -73,7 +73,7 @@ This is the **same digit-width hazard as LB-1**, one layer up: a naive client th
 
 **What it is.** [`jepsen/checker/model_shard.go`](https://github.com/adityavkk/chronicle/blob/main/jepsen/checker/model_shard.go) is the Porcupine pure-core model for the owner-epoch slot-ownership exclusivity test (T3). Its header still reads, verbatim:
 
-> `SCAFFOLD. The mechanism it models — claim_shard.lua / check_owner.lua and the ds:{ownership}:slot:<h> record — does NOT exist on today's code; it lands in #14. So this model is the EXECUTABLE SPEC for that slice ... it compiles, it is unit-tested against [model_shard_test.go] ...`
+> `SCAFFOLD. The mechanism it models — claim_shard.lua / check_owner.lua and the ds:{__ds:h}:ownership:slot:<h> record — does NOT exist on today's code; it lands in #14. So this model is the EXECUTABLE SPEC for that slice ... it compiles, it is unit-tested against [model_shard_test.go] ...`
 
 But `claim_shard.lua`, `check_owner.lua`, and the owner-epoch fence **have since shipped** — `webhook/scripts/claim_shard.lua` and `webhook/scripts/check_owner.lua` exist, and `expire_lease.lua` already calls `owner_fenced(KEYS[4], ARGV[3], ARGV[4])` ([`webhook/scripts/expire_lease.lua`](https://github.com/adityavkk/chronicle/blob/main/webhook/scripts/expire_lease.lua)). The model's header is now **stale**: it claims to be an unbacked spec for code that no longer is unbacked.
 
@@ -81,7 +81,7 @@ But `claim_shard.lua`, `check_owner.lua`, and the owner-epoch fence **have since
 
 **Severity / reachability.** Process/assurance gap, not a runtime bug. But it is **load-bearing for Phase 0**: the entire owner-epoch verification story is built on top of this model.
 
-**Recommended action — CONFIRM wiring in Phase 0 before anything else builds on it.** (1) Verify `scenario_shard.go` drives the live `claim_shard.lua`/`check_owner.lua` and the `ds:{ownership}:slot:<h>` record, not a stub. (2) If wired, **delete the SCAFFOLD header** and re-baseline the test against real Lua. (3) If not wired, wire it — this is the listed Phase 0 deliverable. Until then, treat any `model_shard` GREEN as model-internal, not a verification of the shipped owner-epoch fence.
+**Recommended action — CONFIRM wiring in Phase 0 before anything else builds on it.** (1) Verify `scenario_shard.go` drives the live `claim_shard.lua`/`check_owner.lua` and the `ds:{__ds:h}:ownership:slot:<h>` record, not a stub. (2) If wired, **delete the SCAFFOLD header** and re-baseline the test against real Lua. (3) If not wired, wire it — this is the listed Phase 0 deliverable. Until then, treat any `model_shard` GREEN as model-internal, not a verification of the shipped owner-epoch fence.
 
 ### LB-5 — the `3 * sweepInterval` T4 re-emit threshold is an unvalidated magic number
 

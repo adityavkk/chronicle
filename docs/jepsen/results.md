@@ -261,7 +261,7 @@ granularity.
 
 T3 is now a **live** local-Redis driver (`scenario_ownership.go`), promoted from
 the gated cluster scaffold. N concurrent claimants (each a distinct replica id)
-race `claim_shard` / `check_owner` over a shared set of `ds:{ownership}` slots,
+race `claim_shard` / `check_owner` over a shared set of co-homed ownership slots,
 with an in-process `gcPause` nemesis forcing intra-slot takeovers; the recorded
 history is checked against the porcupine `shardModel` CAS-register, partitioned per
 slot, **Unknown = FAIL**.
@@ -312,7 +312,7 @@ cluster and could not host a clean multi-replica k3d run without contending that
 tenant, so these are recorded honestly as env-scoped rather than executed here:
 
 - **L2 / L4** — k3d, `chronicle ×2`, continuous `killSlotOwner` (read
-  `ds:{ownership}:slot:<h>`, kill that pod) on a randomized 2–8 s window, then
+  `ds:{__ds:h}:ownership:slot:<h>`, kill that pod) on a randomized 2–8 s window, then
   quiesce. The `killSlotOwner` / ownership-timeline-sampler nemesis primitives ship
   in `jepsen/checker/nemesis.go`; the live drivers wire onto the same `shardModel`
   + sampler the T3 gate already exercises. Reproduce (orchestrator-run k3d):
