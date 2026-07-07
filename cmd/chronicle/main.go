@@ -303,7 +303,9 @@ func run() error {
 		// event closes the restart gap; no separate RunSweep is needed).
 		service.Start()
 		redisEvents.Set(service)
+		stopPromotionSignals := startPromotionSignalHandler(service, logger)
 		defer service.Stop()
+		defer stopPromotionSignals()
 		subscriptionsEnabled = true
 		logger.Info("subscriptions enabled", "stream_root_url", streamRootURL)
 	}
@@ -362,6 +364,35 @@ func run() error {
 		return srv.Close()
 	}
 	return nil
+}
+
+// startPromotionSignalHandler exposes the regional-DR controller hook: after an
+// active-passive Redis promotion and endpoint flip, the controller sends SIGUSR1
+// to this process to re-establish slot ownership on the promoted primary and run
+// the failover-aware eager reconcile (SubscriptionService.Promote). The reconnect
+// hook above covers ordinary healed connections; this explicit signal covers the
+// promotion decision itself.
+func startPromotionSignalHandler(service chronicle.SubscriptionService, logger *slog.Logger) func() {
+	sigC := make(chan os.Signal, 1)
+	stopC := make(chan struct{})
+	signal.Notify(sigC, syscall.SIGUSR1)
+	go promotionSignalLoop(sigC, stopC, service, logger)
+	return func() {
+		signal.Stop(sigC)
+		close(stopC)
+	}
+}
+
+func promotionSignalLoop(sigC <-chan os.Signal, stopC <-chan struct{}, service chronicle.SubscriptionService, logger *slog.Logger) {
+	for {
+		select {
+		case <-stopC:
+			return
+		case sig := <-sigC:
+			logger.Info("redis promotion signal received; running eager subscription reconcile", "signal", sig.String())
+			service.Promote()
+		}
+	}
 }
 
 // withUI wraps the Durable Streams API handler so chronicle also serves the

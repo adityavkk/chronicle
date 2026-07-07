@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -14,6 +17,8 @@ import (
 type recordingSubscriptionService struct {
 	reconnects  atomic.Int64
 	reconnected chan struct{}
+	promotes    atomic.Int64
+	promoted    chan struct{}
 }
 
 func (s *recordingSubscriptionService) OnStreamCreated(string) {}
@@ -22,13 +27,37 @@ func (s *recordingSubscriptionService) OnStreamDeleted(string) {}
 func (s *recordingSubscriptionService) Start()                 {}
 func (s *recordingSubscriptionService) Stop()                  {}
 func (s *recordingSubscriptionService) RunSweep()              {}
-func (s *recordingSubscriptionService) Promote()               {}
+
+func (s *recordingSubscriptionService) Promote() {
+	s.promotes.Add(1)
+	select {
+	case s.promoted <- struct{}{}:
+	default:
+	}
+}
 
 func (s *recordingSubscriptionService) OnRedisReconnect() {
 	s.reconnects.Add(1)
 	select {
 	case s.reconnected <- struct{}{}:
 	default:
+	}
+}
+
+func TestPromotionSignalTriggersSubscriptionService(t *testing.T) {
+	svc := &recordingSubscriptionService{promoted: make(chan struct{}, 1)}
+	sigC := make(chan os.Signal, 1)
+	stopC := make(chan struct{})
+	t.Cleanup(func() { close(stopC) })
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	go promotionSignalLoop(sigC, stopC, svc, logger)
+
+	sigC <- syscall.SIGUSR1
+	select {
+	case <-svc.promoted:
+		return
+	case <-time.After(time.Second):
+		t.Fatalf("promotion signal did not call Promote (count=%d)", svc.promotes.Load())
 	}
 }
 
