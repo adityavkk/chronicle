@@ -82,14 +82,20 @@ export interface StreamInfo {
 /**
  * One renderable row in the messages grid.
  *
- * For JSON streams: one row per array element. The protocol does NOT expose a
- * per-element offset (it returns a batch + a single Stream-Next-Offset), so we
- * surface the element `index` within the batch and let the caller show the
- * honest batch offset range. For text/binary: a single row for the chunk.
+ * For JSON streams: one row per array element. A bare read exposes no
+ * per-element offset (just a batch + a single Stream-Next-Offset), so such rows
+ * fall back to the element `index`; a `?envelope=1` read returns each element's
+ * own offset, surfaced as `offset`. For text/binary: a single row for the chunk.
  */
 export interface GridRow {
 	/** Zero-based index within the read batch. */
 	readonly index: number;
+	/**
+	 * The element's own durable-stream offset — present when the read used the
+	 * `?envelope=1` per-element format (JSON streams). Absent for bare reads,
+	 * text/binary chunks, and live-tail rows.
+	 */
+	readonly offset?: string;
 	/** Byte size of this element (new Blob([...]).size). */
 	readonly byteSize: number;
 	/** One-line, truncated preview for the grid cell. */

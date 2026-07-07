@@ -622,6 +622,11 @@ export function createClient(connection: Connection): DsClient {
 			if (limit !== undefined && limit > 0) {
 				url += `${url.includes("?") ? "&" : "?"}limit=${limit}`;
 			}
+			// Ask for the per-message offset envelope. JSON streams come back as
+			// [{offset,data}] with a `Stream-Envelope: offsets` header; non-JSON
+			// streams ignore it and return the bare body (header absent), so it is
+			// always safe to request on a catch-up read.
+			url += `${url.includes("?") ? "&" : "?"}envelope=1`;
 			const { exchange, response } = await doFetch("GET", url, { ...ACCEPT_HEADER }, signal);
 
 			const kind = kindFromContentType(exchange.protocol.contentType);
@@ -646,7 +651,10 @@ export function createClient(connection: Connection): DsClient {
 
 			const buffer = await safeArrayBuffer(response);
 			const rawBytes = new Uint8Array(buffer);
-			const rows = decodeRows(kind, rawBytes);
+			// When the server enveloped the batch (JSON streams), each element
+			// carries its own offset; otherwise decode the bare body as before.
+			const enveloped = response.headers.get("Stream-Envelope") === "offsets";
+			const rows = enveloped ? decodeEnvelopeRows(rawBytes) : decodeRows(kind, rawBytes);
 
 			const result: ReadResult = { ...base, rows, rawBytes, exchange };
 			return result;
@@ -1257,6 +1265,36 @@ function decodeRows(kind: "json" | "text" | "binary", bytes: Uint8Array): GridRo
 			value: bytes,
 		},
 	];
+}
+
+/**
+ * Decode a `?envelope=1` response body: a JSON array of {offset, data} where
+ * `data` is the original message element. Produces the same rows as the bare
+ * JSON decode, but each carries its per-element `offset`. Falls back to a single
+ * text row if the body is not the expected array.
+ */
+function decodeEnvelopeRows(bytes: Uint8Array): GridRow[] {
+	if (bytes.byteLength === 0) return [];
+	const text = new TextDecoder().decode(bytes);
+	const parsed = parseJsonArray(text);
+	if (!parsed.ok) return [textRow(text)];
+	return parsed.value.map((entry, index) => {
+		const rec =
+			entry !== null && typeof entry === "object"
+				? (entry as { offset?: unknown; data?: unknown })
+				: {};
+		const data = rec.data;
+		const row: GridRow = {
+			index,
+			byteSize: jsonByteSize(data),
+			preview: previewOf(data),
+			kind: "json",
+			value: data,
+		};
+		// Only attach offset when present — exactOptionalPropertyTypes forbids
+		// assigning `undefined` to the optional field.
+		return typeof rec.offset === "string" ? { ...row, offset: rec.offset } : row;
+	});
 }
 
 function textRow(text: string): GridRow {
