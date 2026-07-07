@@ -66,22 +66,105 @@ func TestNemesisWindow_InRange(t *testing.T) {
 
 // dropLeaseTail ZREMs ONLY the lease schedule entry — never the sub hash.
 func TestDropLeaseTail_ZremsOnlyScheduleEntry(t *testing.T) {
-	n, cmds := recordingNemesis(nil)
-	n.dropLeaseTail("sub-x")
+	n, cmds := recordingNemesis(map[string]string{"zrem": "1\n"})
+	if err := n.dropLeaseTail("sub-x"); err != nil {
+		t.Fatalf("dropLeaseTail: %v", err)
+	}
 
 	if len(*cmds) != 1 {
 		t.Fatalf("expected exactly one command, got %v", *cmds)
 	}
+	wantKey := dsLeaseKey(dsSlotOf("sub-x"))
 	got := strings.Join((*cmds)[0], " ")
-	if !strings.Contains(got, "zrem") || !strings.Contains(got, leaseSchedZKey) || !strings.Contains(got, "sub-x") {
+	if !strings.Contains(got, "zrem") || !strings.Contains(got, wantKey) || !strings.Contains(got, "sub-x") {
 		t.Fatalf("expected ZREM of the lease ZSET for sub-x, got %q", got)
+	}
+	if strings.Contains(got, "ds:{__ds}:sched:lease") {
+		t.Fatalf("dropLeaseTail must use the slot-homed lease ZSET, got legacy key in %q", got)
 	}
 	// The sub hash must be untouched — that is the whole point of the L3 fault.
 	for _, c := range *cmds {
 		j := strings.Join(c, " ")
-		if strings.Contains(j, "ds:{__ds}:sub:sub-x") || strings.Contains(j, "del ") {
+		if strings.Contains(j, dsSubKey("sub-x")) || strings.Contains(j, "del ") {
 			t.Fatalf("dropLeaseTail must not touch the sub hash, saw %q", j)
 		}
+	}
+}
+
+func TestDropLeaseTail_FailsWhenZremMisses(t *testing.T) {
+	n, _ := recordingNemesis(map[string]string{"zrem": "0\n"})
+	if err := n.dropLeaseTail("sub-x"); err == nil {
+		t.Fatal("dropLeaseTail must fail when ZREM removes 0 members")
+	}
+	if len(n.log) != 1 || n.log[0] != "drop-lease-tail-missed" {
+		t.Fatalf("expected drop-lease-tail-missed, got %v", n.log)
+	}
+}
+
+func TestParseRedisIntegerReply(t *testing.T) {
+	for _, in := range []string{"1\n", "(integer) 1\n"} {
+		got, ok := parseRedisIntegerReply([]byte(in))
+		if !ok || got != 1 {
+			t.Fatalf("parseRedisIntegerReply(%q) = %d,%v; want 1,true", in, got, ok)
+		}
+	}
+	if _, ok := parseRedisIntegerReply([]byte("ERR nope\n")); ok {
+		t.Fatal("ERR reply must not parse as an integer")
+	}
+}
+
+func TestDropTargetFenceOnReplica_SurgicallyResetsJustMintedFence(t *testing.T) {
+	n, cmds := recordingNemesis(map[string]string{
+		"HGET " + dsSubKey("sub-x") + " generation": "7\n",
+		"HGET " + dsSubKey("sub-x") + " wake_id":    "wake-target\n",
+	})
+	ok, err := n.dropTargetFenceOnReplica("sub-x", 7, "wake-target")
+	if err != nil || !ok {
+		t.Fatalf("dropTargetFenceOnReplica = %v,%v; want true,nil", ok, err)
+	}
+	joined := make([]string, 0, len(*cmds))
+	for _, c := range *cmds {
+		joined = append(joined, strings.Join(c, " "))
+	}
+	all := strings.Join(joined, "\n")
+	for _, want := range []string{
+		"REPLICAOF NO ONE",
+		"HSET " + dsSubKey("sub-x"),
+		"generation 6",
+		"wake_id  phase idle holder 0",
+		"ZREM " + dsLeaseKey(dsSlotOf("sub-x")) + " sub-x",
+	} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("expected command fragment %q in:\n%s", want, all)
+		}
+	}
+	if len(n.log) != 1 || n.log[0] != "target-fence-drop-replica" {
+		t.Fatalf("expected target-fence-drop-replica, got %v", n.log)
+	}
+}
+
+func TestDropTargetFenceOnReplica_FreezesNaturalTargetMiss(t *testing.T) {
+	n, cmds := recordingNemesis(map[string]string{
+		"HGET " + dsSubKey("sub-x") + " generation": "6\n",
+		"HGET " + dsSubKey("sub-x") + " wake_id":    "old-wake\n",
+	})
+	ok, err := n.dropTargetFenceOnReplica("sub-x", 7, "wake-target")
+	if err != nil || !ok {
+		t.Fatalf("dropTargetFenceOnReplica = %v,%v; want true,nil", ok, err)
+	}
+	joined := make([]string, 0, len(*cmds))
+	for _, c := range *cmds {
+		joined = append(joined, strings.Join(c, " "))
+	}
+	all := strings.Join(joined, "\n")
+	if !strings.Contains(all, "REPLICAOF NO ONE") {
+		t.Fatalf("expected replica detach to freeze the natural miss, got:\n%s", all)
+	}
+	if strings.Contains(all, "HSET "+dsSubKey("sub-x")) {
+		t.Fatalf("natural target miss should not rewrite the sub hash, got:\n%s", all)
+	}
+	if len(n.log) != 1 || n.log[0] != "target-fence-missing-replica" {
+		t.Fatalf("expected target-fence-missing-replica, got %v", n.log)
 	}
 }
 
