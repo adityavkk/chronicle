@@ -2,6 +2,12 @@
 // an external side effect, its idempotence key, and the scanner that recovers it.
 package durable
 
+import (
+	"context"
+	"errors"
+	"fmt"
+)
+
 // Marker names durable state that proves an external action may need recovery.
 type Marker string
 
@@ -11,28 +17,90 @@ type Action string
 // IdempotenceKey names the fence/key that makes a duplicate action safe.
 type IdempotenceKey string
 
-// Scanner declares the recovery code path that finds a marker and re-drives its
-// action. MarkerQueried and ActionRedriven are deliberately typed: a scanner that
-// does not query the marker it is registered for, or does not re-drive the action,
-// is vacuous.
+// ScanRuntime is the scanner's narrow capability set. A real scanner must query
+// its durable marker and re-drive its external action through this interface.
+type ScanRuntime interface {
+	QueryMarker(Marker) error
+	RedriveAction(Action) error
+}
+
+// ScannerFunc is executable recovery code for one durable marker.
+type ScannerFunc func(context.Context, ScanRuntime) error
+
+// Scanner declares executable recovery code. Its fields are private so callers
+// cannot construct a string-only scanner that bypasses NewScanner.
 type Scanner struct {
-	Name           string
-	MarkerQueried  Marker
-	ActionRedriven Action
+	name   string
+	marker Marker
+	action Action
+	run    ScannerFunc
 }
 
-// NewScanner returns a non-vacuous scanner declaration.
-func NewScanner(name string, marker Marker, action Action) Scanner {
-	if name == "" || marker == "" || action == "" {
-		panic("durable externalization scanner: name, marker, and action are required")
+// NewScanner returns a scanner with executable scan/re-drive code.
+func NewScanner(name string, marker Marker, action Action, run ScannerFunc) Scanner {
+	if name == "" || marker == "" || action == "" || run == nil {
+		panic("durable externalization scanner: name, marker, action, and run func are required")
 	}
-	return Scanner{Name: name, MarkerQueried: marker, ActionRedriven: action}
+	return Scanner{name: name, marker: marker, action: action, run: run}
 }
 
-// NonVacuous reports whether this scanner actually queries a marker and re-drives
-// an action.
-func (s Scanner) NonVacuous() bool {
-	return s.Name != "" && s.MarkerQueried != "" && s.ActionRedriven != ""
+// Name returns the scanner's human-readable name.
+func (s Scanner) Name() string { return s.name }
+
+// MarkerQueried returns the marker this scanner is bound to.
+func (s Scanner) MarkerQueried() Marker { return s.marker }
+
+// ActionRedriven returns the action this scanner re-drives.
+func (s Scanner) ActionRedriven() Action { return s.action }
+
+// Run executes the scanner against a real recovery runtime.
+func (s Scanner) Run(ctx context.Context, rt ScanRuntime) error {
+	if s.run == nil {
+		return errors.New("durable externalization scanner: missing run func")
+	}
+	return s.run(ctx, rt)
+}
+
+// NonVacuous reports whether this scanner has executable code that queries its
+// marker and re-drives its action. It runs the code against an in-memory probe;
+// a string-only scanner or a scanner that skips either step fails.
+func (s Scanner) NonVacuous() bool { return s.Verify(context.Background()) == nil }
+
+// Verify proves the scanner queries its marker and re-drives its action.
+func (s Scanner) Verify(ctx context.Context) error {
+	if s.name == "" || s.marker == "" || s.action == "" || s.run == nil {
+		return errors.New("durable externalization scanner: incomplete")
+	}
+	probe := newScanProbe()
+	if err := s.run(ctx, probe); err != nil {
+		return err
+	}
+	if !probe.queried[s.marker] {
+		return fmt.Errorf("durable externalization scanner %q did not query marker %q", s.name, s.marker)
+	}
+	if !probe.redriven[s.action] {
+		return fmt.Errorf("durable externalization scanner %q did not re-drive action %q", s.name, s.action)
+	}
+	return nil
+}
+
+type scanProbe struct {
+	queried  map[Marker]bool
+	redriven map[Action]bool
+}
+
+func newScanProbe() *scanProbe {
+	return &scanProbe{queried: map[Marker]bool{}, redriven: map[Action]bool{}}
+}
+
+func (p *scanProbe) QueryMarker(m Marker) error {
+	p.queried[m] = true
+	return nil
+}
+
+func (p *scanProbe) RedriveAction(a Action) error {
+	p.redriven[a] = true
+	return nil
 }
 
 // Externalization is the typed outbox contract. Fields are unexported so callers
@@ -50,13 +118,13 @@ func NewExternalization(marker Marker, action Action, key IdempotenceKey, scanne
 	if marker == "" || action == "" || key == "" {
 		panic("durable externalization: marker, action, and idempotence key are required")
 	}
-	if !scanner.NonVacuous() {
-		panic("durable externalization: scanner is required")
+	if err := scanner.Verify(context.Background()); err != nil {
+		panic(err)
 	}
-	if scanner.MarkerQueried != marker {
+	if scanner.MarkerQueried() != marker {
 		panic("durable externalization: scanner does not query marker")
 	}
-	if scanner.ActionRedriven != action {
+	if scanner.ActionRedriven() != action {
 		panic("durable externalization: scanner does not re-drive action")
 	}
 	return Externalization{marker: marker, action: action, key: key, scanner: scanner}
@@ -78,5 +146,16 @@ func (e Externalization) Scanner() Scanner { return e.scanner }
 // tied to this marker/action pair.
 func (e Externalization) Complete() bool {
 	return e.marker != "" && e.action != "" && e.key != "" && e.scanner.NonVacuous() &&
-		e.scanner.MarkerQueried == e.marker && e.scanner.ActionRedriven == e.action
+		e.scanner.MarkerQueried() == e.marker && e.scanner.ActionRedriven() == e.action
+}
+
+// RunExternalAction gates a real side effect through this externalization.
+func (e Externalization) RunExternalAction(run func() error) error {
+	if !e.Complete() {
+		return errors.New("durable externalization: incomplete")
+	}
+	if run == nil {
+		return errors.New("durable externalization: nil external action")
+	}
+	return run()
 }

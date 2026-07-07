@@ -1,6 +1,7 @@
 package chronicle_test
 
 import (
+	"context"
 	"testing"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/internal/durable"
@@ -53,7 +54,19 @@ func assertDurableExternalization(t *testing.T, registry string, marker durable.
 	if marker == "" || action == "" || key == "" {
 		t.Fatalf("%s durable externalization has empty marker/action/key: %v/%v/%v", registry, marker, action, key)
 	}
-	if !scanner.NonVacuous() || scanner.MarkerQueried != marker || scanner.ActionRedriven != action {
+	if !scanner.NonVacuous() || scanner.MarkerQueried() != marker || scanner.ActionRedriven() != action {
 		t.Fatalf("%s durable externalization marker=%v has vacuous scanner", registry, marker)
+	}
+}
+
+func TestDurableExternalizationRejectsVacuousScanner(t *testing.T) {
+	if (durable.Scanner{}).NonVacuous() {
+		t.Fatal("zero scanner must be vacuous")
+	}
+	scanner := durable.NewScanner("query-only", "marker", "action", func(_ context.Context, rt durable.ScanRuntime) error {
+		return rt.QueryMarker("marker")
+	})
+	if scanner.NonVacuous() {
+		t.Fatal("scanner that never re-drives must be vacuous")
 	}
 }

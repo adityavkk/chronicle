@@ -1,6 +1,10 @@
 package store
 
-import "gecgithub01.walmart.com/auk000v/chronicle/internal/durable"
+import (
+	"context"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/internal/durable"
+)
 
 const (
 	// MarkerProducerSequence is the durable producer state used for replay detection.
@@ -11,14 +15,23 @@ const (
 	KeyProducerEpochSeq durable.IdempotenceKey = "stream_path + producer_id + epoch + seq"
 )
 
-var storeDurableExternalizations = []durable.Externalization{
-	durable.NewExternalization(
-		MarkerProducerSequence,
-		ActionReplayProducer,
-		KeyProducerEpochSeq,
-		durable.NewScanner("ValidateProducer scans producer state and classifies duplicate replay", MarkerProducerSequence, ActionReplayProducer),
-	),
+var producerReplayExternalization = durable.NewExternalization(
+	MarkerProducerSequence,
+	ActionReplayProducer,
+	KeyProducerEpochSeq,
+	durable.NewScanner("ValidateProducer duplicate replay scan", MarkerProducerSequence, ActionReplayProducer, scanProducerReplay),
+)
+
+var storeDurableExternalizations = []durable.Externalization{producerReplayExternalization}
+
+func scanProducerReplay(_ context.Context, rt durable.ScanRuntime) error {
+	if err := rt.QueryMarker(MarkerProducerSequence); err != nil {
+		return err
+	}
+	return rt.RedriveAction(ActionReplayProducer)
 }
+
+func durableProducerReplay() durable.Externalization { return producerReplayExternalization }
 
 // DurableExternalizations returns stream-store crash-boundary outbox declarations.
 func DurableExternalizations() []durable.Externalization {

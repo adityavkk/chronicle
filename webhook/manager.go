@@ -601,7 +601,12 @@ func (m *Manager) issueWake(sub Subscription, triggerStream string) bool {
 	failpoint(fpArmedBeforeEmit)
 	switch sub.Config.Type {
 	case DispatchWebhook:
-		go m.deliverWebhookUnscoped(sub.ID, res.Generation, res.WakeID)
+		if err := durableWakeIntent().RunExternalAction(func() error {
+			go m.deliverWebhookUnscoped(sub.ID, res.Generation, res.WakeID)
+			return nil
+		}); err != nil {
+			m.log.Warn("webhook: dispatch wake", "sub", sub.ID, "error", err)
+		}
 	case DispatchPullWake:
 		m.writeWakeEvent(sub, triggerStream, res.Generation, res.WakeID)
 	}
@@ -629,7 +634,12 @@ func (m *Manager) issueWakeOwned(scope OwnerScope, sub Subscription, triggerStre
 	failpoint(fpArmedBeforeEmit)
 	switch sub.Config.Type {
 	case DispatchWebhook:
-		go m.deliverWebhookOwned(scope, sub.ID, res.Generation, res.WakeID)
+		if err := durableWakeIntent().RunExternalAction(func() error {
+			go m.deliverWebhookOwned(scope, sub.ID, res.Generation, res.WakeID)
+			return nil
+		}); err != nil {
+			m.log.Warn("webhook: dispatch owned wake", "sub", sub.ID, "error", err)
+		}
 	case DispatchPullWake:
 		m.writeWakeEvent(sub, triggerStream, res.Generation, res.WakeID)
 	}
@@ -637,6 +647,10 @@ func (m *Manager) issueWakeOwned(scope OwnerScope, sub Subscription, triggerStre
 }
 
 func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generation int64, wakeID string) {
+	m.writeWakeEventExternalized(durablePullWakeUnstampedEmit(), sub, triggerStream, generation, wakeID)
+}
+
+func (m *Manager) writeWakeEventExternalized(ext DurableExternalization, sub Subscription, triggerStream string, generation int64, wakeID string) {
 	if triggerStream == "" && len(sub.Links) > 0 {
 		triggerStream = sub.Links[0].Path
 	}
@@ -645,7 +659,7 @@ func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generat
 		return
 	}
 	appendStart := time.Now()
-	if err := m.streams.AppendWakeEvent(sub.Config.WakeStream, data); err != nil {
+	if err := ext.RunExternalAction(func() error { return m.streams.AppendWakeEvent(sub.Config.WakeStream, data) }); err != nil {
 		m.metrics.WakeEvent(time.Since(appendStart), "error")
 		// Leave wake_event_sent_ns at 0 so the recovery sweep re-emits, and trigger
 		// an eager reconcile so it re-emits now rather than on the coarse floor
@@ -739,7 +753,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	req.Header.Set("Webhook-Signature", SignWebhookPayload(signing, body, time.Now()))
 
 	postStart := time.Now()
-	resp, err := m.client.Do(req)
+	resp, err := m.doWebhookRequest(req)
 	if err != nil {
 		m.metrics.WakeDelivery(time.Since(postStart), "error")
 		m.recordFailure(id, generation, wakeID, owner)
@@ -787,6 +801,16 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 			}
 		}
 	}
+}
+
+func (m *Manager) doWebhookRequest(req *http.Request) (*http.Response, error) {
+	var resp *http.Response
+	err := durableWebhookDelivery().RunExternalAction(func() error {
+		var doErr error
+		resp, doErr = m.client.Do(req) //nolint:bodyclose // caller closes returned response body
+		return doErr
+	})
+	return resp, err
 }
 
 func (m *Manager) recordSuccessWithOwner(owner *OwnerScope, id string, generation int64, wakeID string) (string, error) {
@@ -1474,6 +1498,18 @@ func (m *Manager) sweepOnce() {
 		next, phaseWakes := phase.Apply(m, snapshot, result, start)
 		snapshot = next
 		wakes += phaseWakes
+	}
+	perSub := perSubscriptionRecoveryPipeline()
+	for _, sub := range subs {
+		for _, phase := range perSub {
+			result := phase.Decide(snapshot.onlySub(sub.ID))
+			next, phaseWakes := phase.Apply(m, snapshot, result, start)
+			snapshot = next
+			wakes += phaseWakes
+			if snapshot.handled(sub.ID) {
+				break
+			}
+		}
 	}
 	m.metrics.SweepTick(time.Since(start), len(subs), len(paths), wakes)
 }

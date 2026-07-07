@@ -14,7 +14,7 @@ func TestRecoveryPipelineOrderAndPolicies(t *testing.T) {
 		ExpireDueLeases,
 		WakeIdlePending,
 	}
-	gotPipeline := recoveryPipeline()
+	gotPipeline := append(recoveryPipeline(), perSubscriptionRecoveryPipeline()...)
 	gotOrder := make([]RecoveryPhaseKind, 0, len(gotPipeline))
 	for _, phase := range gotPipeline {
 		gotOrder = append(gotOrder, phase.Kind)
@@ -69,81 +69,90 @@ func TestRecoveryPhaseDecisions(t *testing.T) {
 	pullCfg := Config{Type: DispatchPullWake, WakeStream: "events/wake", LeaseTTLMs: 1000}
 	webhookCfg := Config{Type: DispatchWebhook, WebhookURL: "http://receiver", LeaseTTLMs: 1000}
 	pendingLink := []StreamLink{{Path: "events/a", LinkType: LinkExplicit, AckedOffset: begin}}
+	expiredAt := now.Add(-time.Nanosecond).UnixNano()
+	staleSentAt := now.Add(-time.Hour).UnixNano()
 
-	cases := []struct {
-		name       string
-		kind       RecoveryPhaseKind
-		snapshot   RecoverySnapshot
-		wantIDs    []string
-		wantPolicy RecoveryPhasePolicy
-	}{
-		{
-			name: "INV-LR-01 restores absent lease tail from durable lease hash and marks owed from tails",
-			kind: RestoreLeaseTails,
-			snapshot: RecoverySnapshot{
-				Subs:   []Subscription{{ID: "s-live", Config: webhookCfg, Phase: PhaseLive, LeaseUntilNs: now.Add(time.Second).UnixNano(), Links: pendingLink}},
-				Tails:  map[string]string{"events/a": tail},
-				Leased: map[string]struct{}{},
-				Now:    now,
-			},
-			wantIDs:    []string{"s-live"},
-			wantPolicy: policyForPhase(RestoreLeaseTails),
-		},
-		{
-			name: "INV-RECOVER-01 reemits unstamped pull-wake from wake_event_sent_ns == 0",
-			kind: ReemitUnstampedPullWakes,
-			snapshot: RecoverySnapshot{
-				Subs: []Subscription{{ID: "s-unsent", Config: pullCfg, Phase: PhaseWaking, Generation: 1, WakeID: "w1", WakeEventSentNs: 0}},
-				Now:  now,
-			},
-			wantIDs:    []string{"s-unsent"},
-			wantPolicy: policyForPhase(ReemitUnstampedPullWakes),
-		},
-		{
-			name: "INV-RECOVER-02 reemits stale stamped pull-wake with same fence",
-			kind: ReemitStalePullWakes,
-			snapshot: RecoverySnapshot{
-				Subs:               []Subscription{{ID: "s-stale", Config: pullCfg, Phase: PhaseWaking, Generation: 2, WakeID: "w2", WakeEventSentNs: now.Add(-time.Hour).UnixNano()}},
-				Now:                now,
-				StalePullWakeAfter: time.Minute,
-			},
-			wantIDs:    []string{"s-stale"},
-			wantPolicy: policyForPhase(ReemitStalePullWakes),
-		},
-		{
-			name: "INV-LEASE-01 expires non-idle subscription using durable lease deadline",
-			kind: ExpireDueLeases,
-			snapshot: RecoverySnapshot{
-				Subs: []Subscription{{ID: "s-expired", Config: webhookCfg, Phase: PhaseLive, LeaseUntilNs: now.Add(-time.Nanosecond).UnixNano()}},
-				Now:  now,
-			},
-			wantIDs:    []string{"s-expired"},
-			wantPolicy: policyForPhase(ExpireDueLeases),
-		},
-		{
-			name: "INV-WAKE-01 wakes idle subscription from cursor-tail truth",
-			kind: WakeIdlePending,
-			snapshot: RecoverySnapshot{
-				Subs:  []Subscription{{ID: "s-idle", Config: webhookCfg, Phase: PhaseIdle, Links: pendingLink}},
-				Tails: map[string]string{"events/a": tail},
-				Now:   now,
-			},
-			wantIDs:    []string{"s-idle"},
-			wantPolicy: policyForPhase(WakeIdlePending),
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := decidePhase(tc.kind, tc.snapshot)
-			if got.Policy() != tc.wantPolicy {
-				t.Fatalf("policy = %+v, want %+v", got.Policy(), tc.wantPolicy)
-			}
-			if ids := decisionIDs(got); !reflect.DeepEqual(ids, tc.wantIDs) {
-				t.Fatalf("decision ids = %v, want %v", ids, tc.wantIDs)
-			}
+	t.Run("INV-LR-01 restores absent lease tail and carries owed derived from tails", func(t *testing.T) {
+		got := DecideRestoreLeaseTails(RecoverySnapshot{
+			Subs:   []Subscription{{ID: "s-live", Config: webhookCfg, Phase: PhaseLive, LeaseUntilNs: now.Add(time.Second).UnixNano(), Links: pendingLink}},
+			Tails:  map[string]string{"events/a": tail},
+			Leased: map[string]struct{}{},
+			Now:    now,
 		})
-	}
+		if got.Policy() != policyForPhase(RestoreLeaseTails) {
+			t.Fatalf("policy = %+v", got.Policy())
+		}
+		want := []RestoreLeaseTailDecision{{SubID: "s-live", Owed: true}}
+		if !reflect.DeepEqual(got.Restores, want) {
+			t.Fatalf("restores = %+v, want %+v", got.Restores, want)
+		}
+	})
+
+	t.Run("INV-RECOVER-01 reemits unstamped pull-wake with same fence and reason", func(t *testing.T) {
+		got := DecideReemitUnstampedPullWakes(RecoverySnapshot{
+			Subs: []Subscription{{ID: "s-unsent", Config: pullCfg, Phase: PhaseWaking, Generation: 1, WakeID: "w1", WakeEventSentNs: 0}},
+			Now:  now,
+		})
+		if got.Policy() != policyForPhase(ReemitUnstampedPullWakes) {
+			t.Fatalf("policy = %+v", got.Policy())
+		}
+		if len(got.Reemits) != 1 {
+			t.Fatalf("reemits = %+v, want one", got.Reemits)
+		}
+		d := got.Reemits[0]
+		if d.Sub.ID != "s-unsent" || d.Sub.Generation != 1 || d.Sub.WakeID != "w1" || d.Reason != ReemitUnstamped {
+			t.Fatalf("reemit = %+v, want id=s-unsent gen=1 wake=w1 reason=%s", d, ReemitUnstamped)
+		}
+	})
+
+	t.Run("INV-RECOVER-02 reemits stale stamped pull-wake with same fence and reason", func(t *testing.T) {
+		got := DecideReemitStalePullWakes(RecoverySnapshot{
+			Subs:               []Subscription{{ID: "s-stale", Config: pullCfg, Phase: PhaseWaking, Generation: 2, WakeID: "w2", WakeEventSentNs: staleSentAt}},
+			Now:                now,
+			StalePullWakeAfter: time.Minute,
+		})
+		if got.Policy() != policyForPhase(ReemitStalePullWakes) {
+			t.Fatalf("policy = %+v", got.Policy())
+		}
+		if len(got.Reemits) != 1 {
+			t.Fatalf("reemits = %+v, want one", got.Reemits)
+		}
+		d := got.Reemits[0]
+		if d.Sub.ID != "s-stale" || d.Sub.Generation != 2 || d.Sub.WakeID != "w2" || d.Sub.WakeEventSentNs != staleSentAt || d.Reason != ReemitStale {
+			t.Fatalf("reemit = %+v, want id=s-stale gen=2 wake=w2 sent=%d reason=%s", d, staleSentAt, ReemitStale)
+		}
+	})
+
+	t.Run("INV-LEASE-01 expires exact non-idle subscription using durable deadline", func(t *testing.T) {
+		got := DecideExpireDueLeases(RecoverySnapshot{
+			Subs: []Subscription{{ID: "s-expired", Config: webhookCfg, Phase: PhaseLive, LeaseUntilNs: expiredAt}},
+			Now:  now,
+		})
+		if got.Policy() != policyForPhase(ExpireDueLeases) {
+			t.Fatalf("policy = %+v", got.Policy())
+		}
+		want := []ExpireLeaseDecision{{SubID: "s-expired"}}
+		if !reflect.DeepEqual(got.Expires, want) {
+			t.Fatalf("expires = %+v, want %+v", got.Expires, want)
+		}
+	})
+
+	t.Run("INV-WAKE-01 wakes exact idle subscription from cursor-tail truth", func(t *testing.T) {
+		got := DecideWakeIdlePending(RecoverySnapshot{
+			Subs:  []Subscription{{ID: "s-idle", Config: webhookCfg, Phase: PhaseIdle, Generation: 3, WakeID: "old", Links: pendingLink}},
+			Tails: map[string]string{"events/a": tail},
+			Now:   now,
+		})
+		if got.Policy() != policyForPhase(WakeIdlePending) {
+			t.Fatalf("policy = %+v", got.Policy())
+		}
+		if len(got.Wakes) != 1 {
+			t.Fatalf("wakes = %+v, want one", got.Wakes)
+		}
+		if got.Wakes[0].Sub.ID != "s-idle" || got.Wakes[0].Sub.Phase != PhaseIdle || !reflect.DeepEqual(got.Wakes[0].Sub.Links, pendingLink) {
+			t.Fatalf("wake = %+v, want idle s-idle with pending link", got.Wakes[0])
+		}
+	})
 }
 
 func TestRecoveryPhaseNegativeDecisions(t *testing.T) {

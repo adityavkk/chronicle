@@ -200,6 +200,18 @@ func (s RecoverySnapshot) withPhase(id string, phase Phase) RecoverySnapshot {
 	return next
 }
 
+func (s RecoverySnapshot) onlySub(id string) RecoverySnapshot {
+	next := s
+	next.Subs = nil
+	for _, sub := range s.Subs {
+		if sub.ID == id {
+			next.Subs = []Subscription{sub}
+			break
+		}
+	}
+	return next
+}
+
 // RecoveryPhaseResult is the common interface for typed phase results.
 type RecoveryPhaseResult interface {
 	PhaseKind() RecoveryPhaseKind
@@ -373,6 +385,11 @@ type recoveryPhase struct {
 func recoveryPipeline() []recoveryPhase {
 	return []recoveryPhase{
 		{Kind: RestoreLeaseTails, Decide: func(s RecoverySnapshot) RecoveryPhaseResult { return DecideRestoreLeaseTails(s) }, Apply: applyRestoreLeaseTails},
+	}
+}
+
+func perSubscriptionRecoveryPipeline() []recoveryPhase {
+	return []recoveryPhase{
 		{Kind: ReemitUnstampedPullWakes, Decide: func(s RecoverySnapshot) RecoveryPhaseResult { return DecideReemitUnstampedPullWakes(s) }, Apply: applyReemitUnstampedPullWakes},
 		{Kind: ReemitStalePullWakes, Decide: func(s RecoverySnapshot) RecoveryPhaseResult { return DecideReemitStalePullWakes(s) }, Apply: applyReemitStalePullWakes},
 		{Kind: ExpireDueLeases, Decide: func(s RecoverySnapshot) RecoveryPhaseResult { return DecideExpireDueLeases(s) }, Apply: applyExpireDueLeases},
@@ -403,13 +420,20 @@ func applyReemitStalePullWakes(m *Manager, s RecoverySnapshot, result RecoveryPh
 	return applyPullWakeReemits(m, s, res.Reemits)
 }
 
+func (d ReemitPullWakeDecision) externalization() DurableExternalization {
+	if d.Reason == ReemitStale {
+		return durablePullWakeStampedEmit()
+	}
+	return durablePullWakeUnstampedEmit()
+}
+
 func applyPullWakeReemits(m *Manager, s RecoverySnapshot, reemits []ReemitPullWakeDecision) (RecoverySnapshot, int) {
 	if len(reemits) == 0 {
 		return s, 0
 	}
 	handled := make([]string, 0, len(reemits))
 	for _, d := range reemits {
-		m.writeWakeEvent(d.Sub, "", d.Sub.Generation, d.Sub.WakeID)
+		m.writeWakeEventExternalized(d.externalization(), d.Sub, "", d.Sub.Generation, d.Sub.WakeID)
 		handled = append(handled, d.Sub.ID)
 	}
 	return s.withHandled(handled), len(reemits)
