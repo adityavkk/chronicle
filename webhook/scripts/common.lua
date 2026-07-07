@@ -5,9 +5,10 @@
 -- index (ds:{__ds}:stream:<path>) is maintained from Go as a best-effort index
 -- reconciled by the recovery sweep, so it is never touched here.
 --
--- ONE EXCEPTION (issue #14): the schedule/due-mutating scripts (arm_wake, ack,
--- expire_lease, schedule_retry, release) also take the {ownership} slot key as an
--- extra KEY to inline the owner-epoch fence (owner_fenced below). That key carries
+-- ONE EXCEPTION (issue #14): the schedule/retry/due-mutating scripts (arm_wake,
+-- ack, expire_lease, schedule_retry, record_success, release) also take the
+-- {ownership} slot key as an extra KEY to inline the owner-epoch fence
+-- (owner_fenced below). That key carries
 -- the literal {ownership} tag, a DIFFERENT cluster slot, so those EVALs are
 -- single-slot only on a single-node Redis (the deploy/test substrate); the
 -- ownership keyspace is deliberately not slot-homed (05:311), and co-locating it

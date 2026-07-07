@@ -127,16 +127,23 @@ type Store interface {
 	// deleted subscription leaves the due-set and its cardinality returns to ~0.
 	ClearDue(id string) error
 
-	// ScheduleRetryUnscoped records a webhook failure and persists next_attempt;
-	// returns the new retry count. Used by append-path deliveries.
-	ScheduleRetryUnscoped(id string, now, nextAttempt time.Time) (int, error)
+	// ScheduleRetryUnscoped records a webhook failure and persists next_attempt if
+	// the failed wake is still current; returns the new retry count. Used by
+	// append-path deliveries.
+	ScheduleRetryUnscoped(id string, generation int64, wakeID string, now, nextAttempt time.Time) (int, error)
 
 	// ScheduleRetryOwned is ScheduleRetryUnscoped plus the owner-epoch fence for the
-	// retry worker; a FENCED (deposed) caller schedules nothing (count 0).
-	ScheduleRetryOwned(scope OwnerScope, id string, now, nextAttempt time.Time) (int, error)
+	// retry worker; a FENCED (deposed) or STALE caller schedules nothing (count 0).
+	ScheduleRetryOwned(scope OwnerScope, id string, generation int64, wakeID string, now, nextAttempt time.Time) (int, error)
 
-	// RecordSuccess clears webhook failure bookkeeping after an accepted delivery.
-	RecordSuccess(id string) error
+	// RecordSuccessUnscoped clears webhook failure bookkeeping after an accepted
+	// delivery, fenced on the current (generation, wakeID). This is the external /
+	// append-path API: owner_fenced is deliberately skipped.
+	RecordSuccessUnscoped(id string, generation int64, wakeID string) (string, error)
+
+	// RecordSuccessOwned is RecordSuccessUnscoped plus the owner-epoch fence for the
+	// retry worker; a deposed owner's stale success clears nothing.
+	RecordSuccessOwned(scope OwnerScope, id string, generation int64, wakeID string) (string, error)
 
 	// RecordWakeEventSent stamps that the current pull-wake event was durably
 	// appended to the wake stream, fenced on (generation, wakeID). A no-op when

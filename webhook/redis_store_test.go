@@ -121,6 +121,57 @@ func TestStoreArmWakeSurvivesRestart(t *testing.T) {
 	}
 }
 
+func TestRecordSuccessFencesStaleWake(t *testing.T) {
+	s, client := newTestStore(t)
+	now := time.Now()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
+
+	gen1, err := s.ArmWakeUnscoped("s1", now, 1000, true, "wk-1")
+	if err != nil || !gen1.Armed {
+		t.Fatalf("arm gen1 = %+v err=%v", gen1, err)
+	}
+	if st, err := s.ExpireLeaseUnscoped("s1", now.Add(2*time.Second)); err != nil || st != "EXPIRED" {
+		t.Fatalf("expire gen1 = %q/%v, want EXPIRED", st, err)
+	}
+	gen2, err := s.ArmWakeUnscoped("s1", now.Add(3*time.Second), 1000, true, "wk-2")
+	if err != nil || !gen2.Armed || gen2.Generation == gen1.Generation {
+		t.Fatalf("arm gen2 = %+v err=%v", gen2, err)
+	}
+	if n, err := s.ScheduleRetryUnscoped("s1", gen2.Generation, gen2.WakeID, now.Add(4*time.Second), now.Add(time.Minute)); err != nil || n != 1 {
+		t.Fatalf("schedule retry = %d/%v, want 1", n, err)
+	}
+
+	status, err := s.RecordSuccessUnscoped("s1", gen1.Generation, gen1.WakeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != "STALE" {
+		t.Fatalf("stale record_success = %q, want STALE", status)
+	}
+	sub, _, _ := s.Get("s1")
+	if sub.Status != StatusFailed || sub.RetryCount != 1 || sub.NextAttemptNs == 0 {
+		t.Fatalf("stale success cleared retry state: status=%s retry=%d next=%d", sub.Status, sub.RetryCount, sub.NextAttemptNs)
+	}
+	if _, err := client.ZScore(context.Background(), retryZKey(slotOf("s1")), "s1").Result(); err != nil {
+		t.Fatalf("stale success removed retry zset member: %v", err)
+	}
+
+	status, err = s.RecordSuccessUnscoped("s1", gen2.Generation, gen2.WakeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != "OK" {
+		t.Fatalf("current record_success = %q, want OK", status)
+	}
+	sub, _, _ = s.Get("s1")
+	if sub.Status != StatusActive || sub.RetryCount != 0 || sub.NextAttemptNs != 0 {
+		t.Fatalf("current success did not clear retry state: status=%s retry=%d next=%d", sub.Status, sub.RetryCount, sub.NextAttemptNs)
+	}
+	if _, err := client.ZScore(context.Background(), retryZKey(slotOf("s1")), "s1").Result(); !errors.Is(err, goredis.Nil) {
+		t.Fatalf("current success left retry zset member: %v", err)
+	}
+}
+
 func TestStoreClaimCASAckFence(t *testing.T) {
 	s, _ := newTestStore(t)
 	now := time.Now()
