@@ -2,15 +2,16 @@
 -- appended to the wake stream, fenced on the current generation/wake so a stamp
 -- from a superseded wake is ignored. Lets the recovery sweep tell "event emitted"
 -- from "stranded between arm and emit" (where wake_event_sent_ns stays 0).
--- KEYS: 1=sub
--- ARGV: 1=now_ns 2=generation 3=wake_id
--- Reply: {status} ; OK | STALE | NOSUB
-local sub = KEYS[1]
+local k_sub = KEYS[1]
+local a_now_ns = ARGV[1]
+local a_generation = ARGV[2]
+local a_wake_id = ARGV[3]
+local sub = k_sub
 if redis.call('EXISTS', sub) == 0 then
   return { 'NOSUB' }
 end
-if redis.call('HGET', sub, 'generation') ~= ARGV[2] or redis.call('HGET', sub, 'wake_id') ~= ARGV[3] then
+if redis.call('HGET', sub, 'generation') ~= a_generation or redis.call('HGET', sub, 'wake_id') ~= a_wake_id then
   return { 'STALE' }
 end
-redis.call('HSET', sub, 'wake_event_sent_ns', ARGV[1])
+redis.call('HSET', sub, 'wake_event_sent_ns', a_now_ns)
 return { 'OK' }

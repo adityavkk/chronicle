@@ -39,12 +39,21 @@ func TestScriptKeyVectorsAreClusterSingleSlot(t *testing.T) {
 	owned := ownerScriptArgs{slotKey: slotKey(h), replicaID: "replica", epoch: "1"}
 
 	noOwnerCases := map[string][]string{
-		"arm_wake/unscoped":       mustScriptKeys(t, "arm_wake/unscoped", func() ([]string, error) { return armWakeKeys(id, unscopedOwnerArgs()) }),
-		"ack/unscoped":            mustScriptKeys(t, "ack/unscoped", func() ([]string, error) { return ackKeys(id, g, unscopedOwnerArgs()) }),
-		"release/unscoped":        mustScriptKeys(t, "release/unscoped", func() ([]string, error) { return releaseKeys(id, unscopedOwnerArgs()) }),
-		"expire_lease/unscoped":   mustScriptKeys(t, "expire_lease/unscoped", func() ([]string, error) { return expireLeaseKeys(id, unscopedOwnerArgs()) }),
-		"schedule_retry/unscoped": mustScriptKeys(t, "schedule_retry/unscoped", func() ([]string, error) { return scheduleRetryKeys(id, unscopedOwnerArgs()) }),
-		"record_success/unscoped": mustScriptKeys(t, "record_success/unscoped", func() ([]string, error) { return recordSuccessKeys(id, unscopedOwnerArgs()) }),
+		"arm_wake/unscoped": mustScriptKeys(t, "arm_wake/unscoped", func() ([]string, error) { v, err := armWakeKeys(id, unscopedOwnerArgs()); return v.redisKeys(), err }),
+		"ack/unscoped":      mustScriptKeys(t, "ack/unscoped", func() ([]string, error) { v, err := ackKeys(id, g, unscopedOwnerArgs()); return v.redisKeys(), err }),
+		"release/unscoped":  mustScriptKeys(t, "release/unscoped", func() ([]string, error) { v, err := releaseKeys(id, unscopedOwnerArgs()); return v.redisKeys(), err }),
+		"expire_lease/unscoped": mustScriptKeys(t, "expire_lease/unscoped", func() ([]string, error) {
+			v, err := expireLeaseKeys(id, unscopedOwnerArgs())
+			return v.redisKeys(), err
+		}),
+		"schedule_retry/unscoped": mustScriptKeys(t, "schedule_retry/unscoped", func() ([]string, error) {
+			v, err := scheduleRetryKeys(id, unscopedOwnerArgs())
+			return v.redisKeys(), err
+		}),
+		"record_success/unscoped": mustScriptKeys(t, "record_success/unscoped", func() ([]string, error) {
+			v, err := recordSuccessKeys(id, unscopedOwnerArgs())
+			return v.redisKeys(), err
+		}),
 	}
 	for name, keys := range noOwnerCases {
 		assertScriptKeysSingleSlot(t, name, keys)
@@ -66,18 +75,18 @@ func TestScriptKeyVectorsAreClusterSingleSlot(t *testing.T) {
 		"delete_sub":            {subKey(id), subsKey(h), linksKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), subShardRegistryKey(id)},
 		"link_stream":           {linksKey(id)},
 		"unlink_stream":         {linksKey(id)},
-		"arm_wake/owned":        mustScriptKeys(t, "arm_wake/owned", func() ([]string, error) { return armWakeKeys(id, owned) }),
+		"arm_wake/owned":        mustScriptKeys(t, "arm_wake/owned", func() ([]string, error) { v, err := armWakeKeys(id, owned); return v.redisKeys(), err }),
 		"claim/g0":              {subKey(id), subShardKey(id, 0), leaseZKey(h), subIncarnationKey(id), subShardRegistryKey(id)},
 		"claim/g7":              {subKey(id), subShardKey(id, g), leaseZKey(h), subIncarnationKey(id), subShardRegistryKey(id)},
-		"ack/owned":             mustScriptKeys(t, "ack/owned", func() ([]string, error) { return ackKeys(id, g, owned) }),
-		"release/owned":         mustScriptKeys(t, "release/owned", func() ([]string, error) { return releaseKeys(id, owned) }),
-		"expire_lease/owned":    mustScriptKeys(t, "expire_lease/owned", func() ([]string, error) { return expireLeaseKeys(id, owned) }),
+		"ack/owned":             mustScriptKeys(t, "ack/owned", func() ([]string, error) { v, err := ackKeys(id, g, owned); return v.redisKeys(), err }),
+		"release/owned":         mustScriptKeys(t, "release/owned", func() ([]string, error) { v, err := releaseKeys(id, owned); return v.redisKeys(), err }),
+		"expire_lease/owned":    mustScriptKeys(t, "expire_lease/owned", func() ([]string, error) { v, err := expireLeaseKeys(id, owned); return v.redisKeys(), err }),
 		"restore_lease":         {subKey(id), leaseZKey(h), dueZKey(h)},
 		"claim_due/lease":       {leaseZKey(h)},
 		"claim_due/retry":       {retryZKey(h)},
 		"claim_due/due":         {dueZKey(h)},
-		"schedule_retry/owned":  mustScriptKeys(t, "schedule_retry/owned", func() ([]string, error) { return scheduleRetryKeys(id, owned) }),
-		"record_success/owned":  mustScriptKeys(t, "record_success/owned", func() ([]string, error) { return recordSuccessKeys(id, owned) }),
+		"schedule_retry/owned":  mustScriptKeys(t, "schedule_retry/owned", func() ([]string, error) { v, err := scheduleRetryKeys(id, owned); return v.redisKeys(), err }),
+		"record_success/owned":  mustScriptKeys(t, "record_success/owned", func() ([]string, error) { v, err := recordSuccessKeys(id, owned); return v.redisKeys(), err }),
 		"record_wake_sent":      {subKey(id)},
 		"claim_shard":           {slotKey(h)},
 		"check_owner":           {slotKey(h)},

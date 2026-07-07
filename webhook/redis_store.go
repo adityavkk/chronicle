@@ -83,55 +83,20 @@ func (s *RedisStore) ctx() context.Context { return context.Background() }
 
 func nsArg(t time.Time) string { return strconv.FormatInt(t.UnixNano(), 10) }
 
-// evalStrings runs a script and decodes its reply as a slice of strings, the
-// fixed reply shape of every subscription script.
-func (s *RedisStore) evalStrings(script *redis.Script, keys []string, args ...any) ([]string, error) {
-	raw, err := script.Run(s.ctx(), s.client, keys, args...).Result()
-	return decodeScriptStrings(raw, err)
-}
-
-func evalStringsOn(ctx context.Context, c redis.Scripter, script *redis.Script, keys []string, args ...any) ([]string, error) {
-	raw, err := script.Run(ctx, c, keys, args...).Result()
-	return decodeScriptStrings(raw, err)
-}
-
-func decodeScriptStrings(raw any, err error) ([]string, error) {
-	if err != nil {
-		return nil, err
-	}
-	arr, ok := raw.([]any)
-	if !ok {
-		return nil, fmt.Errorf("webhook: unexpected script reply %T", raw)
-	}
-	out := make([]string, len(arr))
-	for i, e := range arr {
-		switch v := e.(type) {
-		case string:
-			out[i] = v
-		case int64:
-			out[i] = strconv.FormatInt(v, 10)
-		case nil:
-			out[i] = ""
-		default:
-			return nil, fmt.Errorf("webhook: unexpected reply element %d: %T", i, e)
-		}
-	}
-	return out, nil
-}
-
-func (s *RedisStore) evalStringsMaybePinned(script *redis.Script, keys []string, args ...any) ([]string, pinnedRedisConn, error) {
+func runMaybePinned[K scriptKeyVector, R any](s *RedisStore, script typedScript[K, R], keys K, args ...any) (R, pinnedRedisConn, error) {
+	var zero R
 	if !s.durPlan.Wait {
-		reply, err := s.evalStrings(script, keys, args...)
+		reply, err := script.run(s.ctx(), s.client, keys, args...)
 		return reply, nil, err
 	}
-	conn, err := s.pinnedConn(keys)
+	conn, err := s.pinnedConn(keys.redisKeys())
 	if err != nil {
-		return nil, nil, err
+		return zero, nil, err
 	}
-	reply, err := evalStringsOn(s.ctx(), conn, script, keys, args...)
+	reply, err := script.run(s.ctx(), conn, keys, args...)
 	if err != nil {
 		_ = conn.Close()
-		return nil, nil, err
+		return zero, nil, err
 	}
 	return reply, conn, nil
 }
@@ -363,29 +328,24 @@ func (s *RedisStore) CreateOrConfirmOwned(id string, cfg Config, links []StreamL
 	}
 	// h once per id: the sub hash, its id-set, links, and incarnation counter share
 	// one {__ds:h} slot, so create_sub.lua stays single-slot.
-	h := slotOf(id)
-	reply, err := s.evalStrings(createSubScript, []string{subKey(id), subsKey(h), linksKey(id), subIncarnationKey(id)}, args...)
+	reply, err := createSubScript.run(s.ctx(), s.client, newCreateSubKeys(id), args...)
 	if err != nil {
 		return 0, "", err
 	}
-	storedOwner := ""
-	if len(reply) > 1 {
-		storedOwner = reply[1]
-	}
-	switch reply[0] {
-	case "CREATED":
+	switch r := reply.(type) {
+	case createSubCreated:
 		for _, l := range links {
 			if err := s.indexStream(l.Path, id); err != nil {
 				return 0, "", err
 			}
 		}
-		return CreateCreated, storedOwner, nil
-	case "MATCHED":
-		return CreateMatched, storedOwner, nil
-	case "CONFLICT":
-		return CreateConflict, storedOwner, nil
+		return CreateCreated, r.Owner, nil
+	case createSubMatched:
+		return CreateMatched, r.Owner, nil
+	case createSubConflict:
+		return CreateConflict, r.Owner, nil
 	default:
-		return 0, "", fmt.Errorf("create_sub: unexpected status %q", reply[0])
+		return 0, "", fmt.Errorf("create_sub: unhandled reply %T", reply)
 	}
 }
 
@@ -469,9 +429,8 @@ func (s *RedisStore) Delete(id string) error {
 	if err != nil {
 		return err
 	}
-	h := slotOf(id)
-	if _, err := s.evalStrings(deleteSubScript,
-		[]string{subKey(id), subsKey(h), linksKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), subShardRegistryKey(id)}, id); err != nil {
+	if _, err := deleteSubScript.run(s.ctx(), s.client,
+		newDeleteSubKeys(id), id); err != nil {
 		return err
 	}
 	for _, path := range links {
@@ -523,7 +482,7 @@ func (s *RedisStore) List() ([]string, error) {
 
 // Link links a stream and maintains the fan-out index.
 func (s *RedisStore) Link(id, path string, linkType LinkType, offset string) error {
-	if _, err := s.evalStrings(linkStreamScript, []string{linksKey(id)}, path, string(linkType), offset); err != nil {
+	if _, err := linkStreamScript.run(s.ctx(), s.client, newLinkStreamKeys(id), path, string(linkType), offset); err != nil {
 		return err
 	}
 	return s.indexStream(path, id)
@@ -535,14 +494,18 @@ func (s *RedisStore) Unlink(id, path string, stillGlob bool) error {
 	if stillGlob {
 		flag = "1"
 	}
-	reply, err := s.evalStrings(unlinkStreamScript, []string{linksKey(id)}, path, flag)
+	reply, err := unlinkStreamScript.run(s.ctx(), s.client, newUnlinkStreamKeys(id), path, flag)
 	if err != nil {
 		return err
 	}
-	if reply[0] == "REMOVED" {
+	switch reply.(type) {
+	case unlinkStreamRemoved:
 		return s.deindexStream(path, id)
+	case unlinkStreamGlob, unlinkStreamGone:
+		return nil
+	default:
+		return fmt.Errorf("unlink_stream: unhandled reply %T", reply)
 	}
-	return nil
 }
 
 // StreamSubscribers returns the subscriber ids linked to a stream by
@@ -661,7 +624,7 @@ func (s *RedisStore) armWake(id string, now time.Time, leaseTTLMs int64, armLeas
 	if err != nil {
 		return ArmResult{}, err
 	}
-	reply, conn, err := s.evalStringsMaybePinned(armWakeScript, keys,
+	reply, conn, err := runMaybePinned(s, armWakeScript, keys,
 		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID, owner.replicaID, owner.epoch)
 	if err != nil {
 		return ArmResult{}, err
@@ -669,11 +632,9 @@ func (s *RedisStore) armWake(id string, now time.Time, leaseTTLMs int64, armLeas
 	if conn != nil {
 		defer func() { _ = conn.Close() }()
 	}
-	s.recordInlineFence(owner.epoch, reply[0])
-	switch reply[0] {
-	case "ARMED":
-		gen, _ := strconv.ParseInt(reply[1], 10, 64)
-		res := ArmResult{Armed: true, Generation: gen, WakeID: reply[2]}
+	switch r := reply.(type) {
+	case armWakeArmed:
+		res := ArmResult{Armed: true, Generation: r.Generation, WakeID: r.WakeID}
 		// Tier B: the generation HINCRBY (arm_wake.lua:23) just minted the fence on
 		// the primary; block on WAITAOF BEFORE the caller dispatches so a wake we
 		// externalize is durable to ~the AOF fsync interval (doc 05 Tier B). A short
@@ -691,15 +652,15 @@ func (s *RedisStore) armWake(id string, now time.Time, leaseTTLMs int64, armLeas
 			}
 		}
 		return res, nil
-	case "BUSY":
-		gen, _ := strconv.ParseInt(reply[1], 10, 64)
-		return ArmResult{Busy: true, Generation: gen, WakeID: reply[2]}, nil
-	case "NOSUB":
+	case armWakeBusy:
+		return ArmResult{Busy: true, Generation: r.Generation, WakeID: r.WakeID}, nil
+	case armWakeNoSub:
 		return ArmResult{NoSub: true}, nil
-	case "FENCED":
+	case armWakeFenced:
+		s.recordInlineFence(owner.epoch, "FENCED")
 		return ArmResult{Fenced: true}, nil
 	default:
-		return ArmResult{}, fmt.Errorf("arm_wake: unexpected status %q", reply[0])
+		return ArmResult{}, fmt.Errorf("arm_wake: unhandled reply %T", reply)
 	}
 }
 
@@ -718,8 +679,7 @@ func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now tim
 	// h from the BASE id (slotOf strips the g-suffix), so the config hash, the
 	// per-(id,g) shard hash, incarnation counter, registry, and lease ZSET all
 	// share the sub's one slot — claim.lua stays single-slot for any g.
-	h := slotOf(id)
-	reply, conn, err := s.evalStringsMaybePinned(claimScript, []string{subKey(id), subShardKey(id, g), leaseZKey(h), subIncarnationKey(id), subShardRegistryKey(id)},
+	reply, conn, err := runMaybePinned(s, claimScript, claimKeys(id, g),
 		shardMember(id, g), worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID, strconv.Itoa(g))
 	if err != nil {
 		return ClaimResult{}, err
@@ -727,11 +687,10 @@ func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now tim
 	if conn != nil {
 		defer func() { _ = conn.Close() }()
 	}
-	switch reply[0] {
-	case "CLAIMED":
+	switch r := reply.(type) {
+	case claimClaimed:
 		s.recordContention("claimed", id)
-		gen, _ := strconv.ParseInt(reply[1], 10, 64)
-		res := ClaimResult{Claimed: true, Generation: gen, WakeID: reply[2], Holder: reply[3]}
+		res := ClaimResult{Claimed: true, Generation: r.Generation, WakeID: r.WakeID, Holder: r.Holder}
 		// Tier B: a claim grant rotates/confirms the fence generation (claim.lua:41)
 		// and arms the lease; block on WAITAOF so the worker proceeds only once the
 		// claim is durable (doc 05 Tier B). A short reply is surfaced as an error so a
@@ -747,15 +706,14 @@ func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now tim
 			}
 		}
 		return res, nil
-	case "BUSY":
+	case claimBusy:
 		s.recordContention("already_claimed", id)
-		gen, _ := strconv.ParseInt(reply[1], 10, 64)
-		return ClaimResult{Busy: true, Generation: gen, Holder: reply[3]}, nil
-	case "NOSUB":
+		return ClaimResult{Busy: true, Generation: r.Generation, Holder: r.Holder}, nil
+	case claimNoSub:
 		s.recordContention("nosub", id)
 		return ClaimResult{NoSub: true}, nil
 	default:
-		return ClaimResult{}, fmt.Errorf("claim: unexpected status %q", reply[0])
+		return ClaimResult{}, fmt.Errorf("claim: unhandled reply %T", reply)
 	}
 }
 
@@ -843,13 +801,24 @@ func (s *RedisStore) ackShard(id string, g int, reqGeneration int64, reqWakeID s
 	if err != nil {
 		return "", err
 	}
-	reply, err := s.evalStrings(ackScript, keys, args...)
+	reply, err := ackScript.run(s.ctx(), s.client, keys, args...)
 	if err != nil {
 		return "", err
 	}
-	s.recordInlineFence(owner.epoch, reply[0])
-	s.recordContention(contentionStatusOf(reply[0]), id)
-	return reply[0], nil
+	var status string
+	switch reply.(type) {
+	case ackOK:
+		status = "OK"
+	case ackFenced:
+		status = "FENCED"
+	case ackNoSub:
+		status = "NOSUB"
+	default:
+		return "", fmt.Errorf("ack: unhandled reply %T", reply)
+	}
+	s.recordInlineFence(owner.epoch, status)
+	s.recordContention(contentionStatusOf(status), id)
+	return status, nil
 }
 
 // ReleaseUnscoped fences then releases the lease on the external path.
@@ -873,14 +842,25 @@ func (s *RedisStore) release(id string, reqGeneration int64, reqWakeID string, t
 	if err != nil {
 		return "", err
 	}
-	reply, err := s.evalStrings(releaseScript, keys,
+	reply, err := releaseScript.run(s.ctx(), s.client, keys,
 		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10), owner.replicaID, owner.epoch)
 	if err != nil {
 		return "", err
 	}
-	s.recordInlineFence(owner.epoch, reply[0])
-	s.recordContention(contentionStatusOf(reply[0]), id)
-	return reply[0], nil
+	var status string
+	switch reply.(type) {
+	case releaseOK:
+		status = "OK"
+	case releaseFenced:
+		status = "FENCED"
+	case releaseNoSub:
+		status = "NOSUB"
+	default:
+		return "", fmt.Errorf("release: unhandled reply %T", reply)
+	}
+	s.recordInlineFence(owner.epoch, status)
+	s.recordContention(contentionStatusOf(status), id)
+	return status, nil
 }
 
 // contentionStatusOf maps an ack.lua/release.lua reply status to the
@@ -921,12 +901,25 @@ func (s *RedisStore) expireLease(id string, now time.Time, owner ownerScriptArgs
 	if err != nil {
 		return "", err
 	}
-	reply, err := s.evalStrings(expireLeaseScript, keys, id, nsArg(now), owner.replicaID, owner.epoch)
+	reply, err := expireLeaseScript.run(s.ctx(), s.client, keys, id, nsArg(now), owner.replicaID, owner.epoch)
 	if err != nil {
 		return "", err
 	}
-	s.recordInlineFence(owner.epoch, reply[0])
-	return reply[0], nil
+	var status string
+	switch reply.(type) {
+	case expireLeaseExpired:
+		status = "EXPIRED"
+	case expireLeaseActive:
+		status = "ACTIVE"
+	case expireLeaseNoSub:
+		status = "NOSUB"
+	case expireLeaseFenced:
+		status = "FENCED"
+	default:
+		return "", fmt.Errorf("expire_lease: unhandled reply %T", reply)
+	}
+	s.recordInlineFence(owner.epoch, status)
+	return status, nil
 }
 
 // LeasedIDs returns the members of the lease schedule ZSETs (the failover-aware
@@ -961,12 +954,20 @@ func (s *RedisStore) RestoreLease(id string, owed bool, now time.Time) (string, 
 	if owed {
 		owedArg = "1"
 	}
-	h := slotOf(id)
-	reply, err := s.evalStrings(restoreLeaseScript, []string{subKey(id), leaseZKey(h), dueZKey(h)}, id, nsArg(now), owedArg)
+	reply, err := restoreLeaseScript.run(s.ctx(), s.client, newRestoreLeaseKeys(id), id, nsArg(now), owedArg)
 	if err != nil {
 		return "", err
 	}
-	return reply[0], nil
+	switch reply.(type) {
+	case restoreLeaseRestored:
+		return "RESTORED", nil
+	case restoreLeaseIntact:
+		return "INTACT", nil
+	case restoreLeaseNoSub:
+		return "NOSUB", nil
+	default:
+		return "", fmt.Errorf("restore_lease: unhandled reply %T", reply)
+	}
 }
 
 // DueLeases takes due lease-schedule members from SLOT h by re-scoring them forward,
@@ -985,8 +986,9 @@ func (s *RedisStore) DueRetries(h int, now time.Time, limit int, visibility time
 }
 
 func (s *RedisStore) due(zkey string, now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	return s.evalStrings(claimDueScript, []string{zkey},
+	reply, err := claimDueScript.run(s.ctx(), s.client, newClaimDueKeys(zkey),
 		nsArg(now), strconv.Itoa(limit), strconv.FormatInt(int64(visibility), 10))
+	return []string(reply), err
 }
 
 // ClaimDue takes due members of the "needs a wake" due-set by re-scoring them
@@ -1028,20 +1030,22 @@ func (s *RedisStore) scheduleRetry(id string, generation int64, wakeID string, n
 	if err != nil {
 		return 0, err
 	}
-	reply, err := s.evalStrings(scheduleRetryScript, keys,
+	reply, err := scheduleRetryScript.run(s.ctx(), s.client, keys,
 		id, nsArg(now), nsArg(nextAttempt), strconv.FormatInt(generation, 10), wakeID, owner.replicaID, owner.epoch)
 	if err != nil {
 		return 0, err
 	}
-	s.recordInlineFence(owner.epoch, reply[0])
-	// NOSUB (gone), STALE (superseded wake), and FENCED (a deposed owner-scoped
-	// scheduler) schedule nothing; the caller treats a non-OK as "no retry
-	// recorded".
-	if reply[0] == "NOSUB" || reply[0] == "STALE" || reply[0] == "FENCED" {
+	switch r := reply.(type) {
+	case scheduleRetryOK:
+		return r.RetryCount, nil
+	case scheduleRetryNoSub, scheduleRetryStale:
 		return 0, nil
+	case scheduleRetryFenced:
+		s.recordInlineFence(owner.epoch, "FENCED")
+		return 0, nil
+	default:
+		return 0, fmt.Errorf("schedule_retry: unhandled reply %T", reply)
 	}
-	n, _ := strconv.Atoi(reply[1])
-	return n, nil
 }
 
 // RecordSuccessUnscoped clears webhook failure bookkeeping after an accepted
@@ -1064,19 +1068,32 @@ func (s *RedisStore) recordSuccess(id string, generation int64, wakeID string, o
 	if err != nil {
 		return "", err
 	}
-	reply, err := s.evalStrings(recordSuccessScript, keys,
+	reply, err := recordSuccessScript.run(s.ctx(), s.client, keys,
 		id, strconv.FormatInt(generation, 10), wakeID, owner.replicaID, owner.epoch)
 	if err != nil {
 		return "", err
 	}
-	s.recordInlineFence(owner.epoch, reply[0])
-	return reply[0], nil
+	var status string
+	switch reply.(type) {
+	case recordSuccessOK:
+		status = "OK"
+	case recordSuccessStale:
+		status = "STALE"
+	case recordSuccessFenced:
+		status = "FENCED"
+	case recordSuccessNoSub:
+		status = "NOSUB"
+	default:
+		return "", fmt.Errorf("record_success: unhandled reply %T", reply)
+	}
+	s.recordInlineFence(owner.epoch, status)
+	return status, nil
 }
 
 // RecordWakeEventSent marks the current pull-wake event as durably emitted,
 // fenced on (generation, wakeID) so a stamp from a superseded wake is ignored.
 func (s *RedisStore) RecordWakeEventSent(id string, generation int64, wakeID string, now time.Time) error {
-	_, err := s.evalStrings(recordWakeSentScript, []string{subKey(id)},
+	_, err := recordWakeSentScript.run(s.ctx(), s.client, newRecordWakeSentKeys(id),
 		nsArg(now), strconv.FormatInt(generation, 10), wakeID)
 	return err
 }
@@ -1093,12 +1110,12 @@ func (s *RedisStore) ClaimSlot(slotKey, replicaID string, now time.Time, slotLea
 	if h, ok := ownershipSlotIndex(slotKey); ok {
 		return s.claimSlotWithLegacyGuard(h, slotKey, replicaID, now, slotLeaseTTL)
 	}
-	reply, err := s.evalStrings(claimShardScript, []string{slotKey},
+	reply, err := claimShardScript.run(s.ctx(), s.client, newClaimShardKeys(slotKey),
 		replicaID, nsArg(now), strconv.FormatInt(slotLeaseTTL.Milliseconds(), 10))
 	if err != nil {
 		return SlotClaim{}, err
 	}
-	return parseSlotClaim(reply)
+	return reply.toSlotClaim(), nil
 }
 
 func (s *RedisStore) claimSlotWithLegacyGuard(h int, key, replicaID string, now time.Time, slotLeaseTTL time.Duration) (SlotClaim, error) {
@@ -1108,17 +1125,13 @@ func (s *RedisStore) claimSlotWithLegacyGuard(h int, key, replicaID string, now 
 		return legacy, err
 	}
 
-	reply, err := s.evalStrings(claimShardScript, []string{key},
+	reply, err := claimShardScript.run(s.ctx(), s.client, newClaimShardKeys(key),
 		replicaID, nsArg(now), strconv.FormatInt(slotLeaseTTL.Milliseconds(), 10))
 	if err != nil {
 		s.releaseLegacySlotReservation(legacyKey, replicaID, legacy.ExpiryNs)
 		return SlotClaim{}, err
 	}
-	claim, err := parseSlotClaim(reply)
-	if err != nil {
-		s.releaseLegacySlotReservation(legacyKey, replicaID, legacy.ExpiryNs)
-		return SlotClaim{}, err
-	}
+	claim := reply.toSlotClaim()
 	if !claim.Granted() {
 		s.releaseLegacySlotReservation(legacyKey, replicaID, legacy.ExpiryNs)
 		return claim, nil
@@ -1130,24 +1143,19 @@ func (s *RedisStore) claimSlotWithLegacyGuard(h int, key, replicaID string, now 
 }
 
 func (s *RedisStore) reserveLegacySlot(key, replicaID string, now time.Time, slotLeaseTTL time.Duration) (bool, SlotClaim, error) {
-	reply, err := s.evalStrings(reserveLegacySlotScript, []string{key},
+	reply, err := reserveLegacySlotScript.run(s.ctx(), s.client, newReserveLegacySlotKeys(key),
 		replicaID, nsArg(now), strconv.FormatInt(slotLeaseTTL.Milliseconds(), 10))
 	if err != nil {
 		return false, SlotClaim{}, err
 	}
-	if len(reply) == 0 {
-		return false, SlotClaim{}, fmt.Errorf("webhook: empty reserve_legacy_slot reply")
+	switch r := reply.(type) {
+	case reserveLegacySlotReserved:
+		return true, r.toSlotClaim(), nil
+	case reserveLegacySlotBusy:
+		return false, r.toSlotClaim(), nil
+	default:
+		return false, SlotClaim{}, fmt.Errorf("webhook: unhandled reserve_legacy_slot reply %T", reply)
 	}
-	status := reply[0]
-	if status == "RESERVED" {
-		claim, err := parseSlotClaim(append([]string{"RENEWED"}, reply[1:]...))
-		return true, claim, err
-	}
-	if status == "BUSY" {
-		claim, err := parseSlotClaim(reply)
-		return false, claim, err
-	}
-	return false, SlotClaim{}, fmt.Errorf("webhook: unexpected reserve_legacy_slot status %q", status)
 }
 
 func (s *RedisStore) releaseLegacySlotReservation(key, replicaID string, expiryNs int64) {
@@ -1160,7 +1168,8 @@ func (s *RedisStore) releaseLegacySlotReservation(key, replicaID string, expiryN
 }
 
 func (s *RedisStore) syncLegacySlot(key string, claim SlotClaim) error {
-	return s.client.HSet(s.ctx(), key,
+	return s.client.HSet(
+		s.ctx(), key,
 		"owner_id", claim.Owner.String(),
 		"owner_epoch", claim.Epoch.String(),
 		"lease_expiry_ns", strconv.FormatInt(claim.ExpiryNs, 10),
@@ -1171,11 +1180,11 @@ func (s *RedisStore) syncLegacySlot(key string, claim SlotClaim) error {
 // webhook POST. expectedEpoch is the epoch the caller believes it holds, in the
 // base-10 form OwnerEpoch.String produces (the same form claim_shard returned).
 func (s *RedisStore) CheckOwner(slotKey, replicaID, expectedEpoch string) (OwnerCheck, error) {
-	reply, err := s.evalStrings(checkOwnerScript, []string{slotKey}, replicaID, expectedEpoch)
+	reply, err := checkOwnerScript.run(s.ctx(), s.client, newCheckOwnerKeys(slotKey), replicaID, expectedEpoch)
 	if err != nil {
 		return OwnerCheckFenced, err
 	}
-	return parseOwnerCheck(reply)
+	return reply.toOwnerCheck(), nil
 }
 
 // Heartbeat re-ZADDs this replica into the members ZSET at now+memberLeaseTTL and
@@ -1211,12 +1220,12 @@ func (s *RedisStore) LoadSigningKey(now time.Time) (SigningKey, error) {
 	if err != nil {
 		return SigningKey{}, err
 	}
-	reply, err := s.evalStrings(getOrCreateKeyScript, []string{jwksKey, activeKidKey},
+	reply, err := getOrCreateKeyScript.run(s.ctx(), s.client, newGetOrCreateKeyKeys(jwksKey, activeKidKey),
 		cand.Kid, marshalKeyMaterial(cand))
 	if err != nil {
 		return SigningKey{}, err
 	}
-	return unmarshalKeyMaterial(reply[0], reply[1])
+	return unmarshalKeyMaterial(reply.Kid, reply.Material)
 }
 
 // SigningKeys returns all persisted keys (active first) for the JWKS.
@@ -1233,12 +1242,12 @@ func (s *RedisStore) LoadWakeKey(now time.Time) (SigningKey, error) {
 	if err != nil {
 		return SigningKey{}, err
 	}
-	reply, err := s.evalStrings(getOrCreateKeyScript, []string{wakeKeysKey, wakeActiveKidKey},
+	reply, err := getOrCreateKeyScript.run(s.ctx(), s.client, newGetOrCreateKeyKeys(wakeKeysKey, wakeActiveKidKey),
 		cand.Kid, marshalKeyMaterial(cand))
 	if err != nil {
 		return SigningKey{}, err
 	}
-	return unmarshalKeyMaterial(reply[0], reply[1])
+	return unmarshalKeyMaterial(reply.Kid, reply.Material)
 }
 
 // WakeSigningKeys returns all persisted wake-token keys (active first) so the
@@ -1269,13 +1278,20 @@ func (s *RedisStore) RotateKey(purpose KeyPurpose, expectedActiveKid string, suc
 	if err != nil {
 		return false, err
 	}
-	reply, err := s.evalStrings(rotateKeyScript, []string{hashKey, activeKey},
+	reply, err := rotateKeyScript.run(s.ctx(), s.client, newRotateKeyKeys(hashKey, activeKey),
 		expectedActiveKid, successor.Kid, marshalKeyMaterial(successor),
 		strconv.FormatInt(retireAfter.Unix(), 10))
 	if err != nil {
 		return false, err
 	}
-	return len(reply) > 0 && reply[0] == "rotated", nil
+	switch reply.(type) {
+	case rotateKeyRotated:
+		return true, nil
+	case rotateKeyConflict:
+		return false, nil
+	default:
+		return false, fmt.Errorf("rotate_key: unhandled reply %T", reply)
+	}
 }
 
 // DenylistKid persists an emergency kid revocation (#123): SADD into the

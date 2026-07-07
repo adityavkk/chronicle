@@ -20,11 +20,12 @@
 -- renew keeps the epoch (bump-on-transfer-only) so it never gratuitously fences
 -- the owner's own outstanding work. The model in jepsen/checker/model_shard.go
 -- (T3) checks these semantics exactly.
--- KEYS: 1=slot (ds:{__ds:h}:ownership:slot:<h>)
--- ARGV: 1=replica_id 2=now_ns 3=slot_lease_ttl_ms
--- Reply: {status, owner_id, owner_epoch, lease_expiry_ns} ; CLAIMED | RENEWED | BUSY
-local slot, me = KEYS[1], ARGV[1]
-local now = tonumber(ARGV[2])
+local k_slot = KEYS[1]
+local a_replica_id = ARGV[1]
+local a_now_ns = ARGV[2]
+local a_slot_lease_ttl_ms = ARGV[3]
+local slot, me = k_slot, a_replica_id
+local now = tonumber(a_now_ns)
 local owner = redis.call('HGET', slot, 'owner_id')
 local exp = tonumber(redis.call('HGET', slot, 'lease_expiry_ns')) or 0
 if owner ~= false and owner ~= me and exp > now then
@@ -38,6 +39,6 @@ if owner == me then
 else
   epoch = tostring(redis.call('HINCRBY', slot, 'owner_epoch', 1)) -- transfer: bump (1 on first claim)
 end
-local until_ns = now + tonumber(ARGV[3]) * 1000000
+local until_ns = now + tonumber(a_slot_lease_ttl_ms) * 1000000
 redis.call('HSET', slot, 'owner_id', me, 'lease_expiry_ns', tostring(until_ns))
 return { (owner == me) and 'RENEWED' or 'CLAIMED', me, epoch, tostring(until_ns) }
