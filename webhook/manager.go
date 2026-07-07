@@ -1461,58 +1461,19 @@ func (m *Manager) sweepOnce() {
 	// lease expiry flips to idle below still has its tails in the batch.
 	paths := distinctLinkPaths(subs)
 	tails := m.streams.TailOffsets(paths)
-	// The failover-aware eager reconcile runs first: re-derive any stranded lease
-	// tail (a live/waking sub a failover dropped from the lease ZSET) from the
-	// durable hash, so the fast lease worker — not the coarse floor — drives its
-	// expiry. The pull-wake re-emit and idle-rewake passes below are unchanged.
-	leased := m.leasedSet()
-	m.reconcileLeases(subs, tails, leased, now)
+	snapshot := RecoverySnapshot{
+		Subs:               subs,
+		Tails:              tails,
+		Leased:             m.leasedSet(),
+		Now:                now,
+		StalePullWakeAfter: 3 * m.sweepInterval,
+	}
 	wakes := 0
-	for _, sub := range subs {
-		// Recover a pull-wake stranded by a crash between arming the wake and
-		// appending its wake event: the event was never durably emitted (its
-		// sent flag is still 0), so nothing in the schedule will deliver it and a
-		// later append only coalesces against the phantom waking state. Re-emit
-		// it; duplicate wake events are claim-fence-safe.
-		if sub.Config.Type == DispatchPullWake && sub.Phase == PhaseWaking && sub.WakeEventSentNs == 0 {
-			m.writeWakeEvent(sub, "", sub.Generation, sub.WakeID)
-			wakes++
-			continue
-		}
-		// Recover a pull-wake stranded in waking AFTER a durable emit (T4, #24): the
-		// wake event was written (its sent flag is set) but no consumer ever claimed
-		// it — the origin or consumer crashed after emit. Pull-wake arms no lease, so
-		// LeaseExpired never fires and the sub never flips back to idle; the due-set
-		// coalesces it (DecideDue is DueSkip for a non-idle phase) and reconcileLeases
-		// skips it (a pull-wake's lease_until_ns is 0, never LeaseStranded). Nothing
-		// else delivers, so it strands forever. Once the emitted wake is stale (older
-		// than a few floor ticks: a live consumer would have claimed it long before),
-		// re-emit the SAME (generation, wakeID) so a restarted consumer can reclaim it;
-		// the (gen, wake) fence makes the duplicate event claim-safe. Idempotent: it
-		// re-fires at most once per floor tick while the sub remains stranded.
-		if sub.Config.Type == DispatchPullWake && sub.Phase == PhaseWaking && sub.WakeEventSentNs != 0 &&
-			now.UnixNano()-sub.WakeEventSentNs > (3*m.sweepInterval).Nanoseconds() {
-			m.writeWakeEvent(sub, "", sub.Generation, sub.WakeID)
-			wakes++
-			continue
-		}
-		if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
-			if status, err := m.expireLeaseUnscoped(sub.ID, now); err == nil && status == "EXPIRED" {
-				sub.Phase = PhaseIdle
-			}
-		}
-		if sub.Phase == PhaseIdle && HasPendingWorkFrom(sub.Links, tails) {
-			if m.issueWake(sub, "") {
-				// A backstop wake the UNGUARDED full sweep issued — the append-time/owner
-				// wake was lost (e.g. a rebalance coverage gap where the sub's slot was
-				// unowned). This is the coverage-gap sample gate #4 reads: when a non-owner
-				// replica's sweep has to re-fire a wake the owned fast path missed. At S=1
-				// the slot's subs are the whole keyspace; #15 refines this to deliver−append
-				// for the subs whose slot was specifically unowned at append.
-				m.metrics.CoverageGap(time.Since(start))
-				wakes++
-			}
-		}
+	for _, phase := range recoveryPipeline() {
+		result := phase.Decide(snapshot)
+		next, phaseWakes := phase.Apply(m, snapshot, result, start)
+		snapshot = next
+		wakes += phaseWakes
 	}
 	m.metrics.SweepTick(time.Since(start), len(subs), len(paths), wakes)
 }
