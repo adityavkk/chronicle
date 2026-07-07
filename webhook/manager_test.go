@@ -68,7 +68,7 @@ func TestRecordWakeEventSentFences(t *testing.T) {
 	s, _ := newTestStore(t)
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
-	res, err := s.ArmWake("s1", now, 1000, false, "w_a")
+	res, err := s.ArmWakeUnscoped("s1", now, 1000, false, "w_a")
 	if err != nil || !res.Armed {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
@@ -103,7 +103,7 @@ func TestSweepReemitsStrandedPullWake(t *testing.T) {
 
 	// Simulate "arm, then crash before the wake-stream append": ArmWake sets
 	// phase=waking and wake_event_sent_ns=0, but no event is written.
-	res, err := store.ArmWake("s1", now, 1000, false, "w_a")
+	res, err := store.ArmWakeUnscoped("s1", now, 1000, false, "w_a")
 	if err != nil || !res.Armed {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
@@ -156,7 +156,7 @@ func TestSweepReemitsStrandedPullWakeAfterEmit(t *testing.T) {
 
 	// Arm the pull-wake (phase=waking, no lease) and durably record the emit at a
 	// timestamp far enough in the past that any staleness window is exceeded.
-	res, err := store.ArmWake("s1", now, 1000, false, "w_a")
+	res, err := store.ArmWakeUnscoped("s1", now, 1000, false, "w_a")
 	if err != nil || !res.Armed {
 		t.Fatalf("arm = %+v err=%v", res, err)
 	}
@@ -436,6 +436,58 @@ func TestDueWorkerFiresOwedSubscription(t *testing.T) {
 	}
 }
 
+// TestDueWorkerArmOwnedFencesAfterTakeover is the #144 GC-pause race: an owner
+// claims a due-set item, pauses, loses the slot, then resumes and tries to arm the
+// owed subscription. The dueWorker's arm_wake must carry the stale owner scope and
+// be FENCED inline, not silently fall back to the unscoped append-path arm.
+func TestDueWorkerArmOwnedFencesAfterTakeover(t *testing.T) {
+	mgr, store, fs, fm, client := newDueManager(t)
+	store.WithMetrics(fm)
+	now := time.Now()
+	begin := "0000000000000000_0000000000000000"
+	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
+	_ = store.Link("s1", "events/a", LinkGlob, begin)
+	fs.mu.Lock()
+	fs.tails["events/a"] = "0000000000000001_0000000000000000"
+	fs.mu.Unlock()
+
+	h := slotOf("s1")
+	key := slotKey(h)
+	t0 := time.Unix(1_700_000_000, 0)
+	a, err := store.ClaimSlot(key, "A", t0, slotTTL)
+	if err != nil || !a.Granted() {
+		t.Fatalf("claim A = %+v err=%v", a, err)
+	}
+	stale := OwnerScope{SlotKey: key, ReplicaID: "A", Epoch: a.Epoch.String()}
+
+	if err := client.ZAdd(context.Background(), dueZKey(h), goredis.Z{Score: float64(t0.UnixNano()), Member: "s1"}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimDue(h, t0, dueClaimLimit, mgr.workerTick*2)
+	if err != nil || len(claimed) != 1 || claimed[0] != "s1" {
+		t.Fatalf("claim due = %v err=%v", claimed, err)
+	}
+
+	// GC pause: A resumes only after B has taken over the slot and bumped epoch.
+	b, err := store.ClaimSlot(key, "B", t0.Add(slotTTL+time.Second), slotTTL)
+	if err != nil || !b.Granted() || b.Epoch.Value() <= a.Epoch.Value() {
+		t.Fatalf("takeover B = %+v err=%v", b, err)
+	}
+	if fired := mgr.fireDueOwned(stale, "s1"); fired {
+		t.Fatal("deposed dueWorker must not report a fired wake")
+	}
+	if fs.count() != 0 {
+		t.Fatalf("deposed dueWorker must not emit a wake event, got %d", fs.count())
+	}
+	if got := fm.ownerFences("inline"); got != 1 {
+		t.Fatalf("deposed dueWorker arm must hit the inline owner fence once, got %d", got)
+	}
+	sub, _, _ := store.Get("s1")
+	if sub.Phase != PhaseIdle || sub.Generation != 0 {
+		t.Fatalf("fenced arm must leave sub idle/generation 0, got phase=%s gen=%d", sub.Phase, sub.Generation)
+	}
+}
+
 // TestDueWorkerClearsStaleMark proves the dueWorker reconciles away a mark for a
 // subscription that is no longer owed (idle, cursor caught up) — without this the
 // due-set would never return to ~0 at quiescence (claim_due never ZREMs and
@@ -474,7 +526,7 @@ func TestDueWorkerSkipsInFlight(t *testing.T) {
 	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
 	_ = store.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 	// Arm directly so the sub is waking with a due mark, without a wake-stream append.
-	if res, _ := store.ArmWake("s1", now, 1000, false, "w_a"); !res.Armed {
+	if res, _ := store.ArmWakeUnscoped("s1", now, 1000, false, "w_a"); !res.Armed {
 		t.Fatal("arm should succeed")
 	}
 
@@ -523,7 +575,7 @@ func TestDueRoundTripReturnsToZero(t *testing.T) {
 	// The worker completes: a done-ack clears the mark.
 	sub, _, _ := store.Get("s1")
 	acks := []Ack{{Stream: "events/a", Offset: "0000000000000001_0000000000000000"}}
-	if st, _ := mgr.ack("s1", sub.Generation, sub.WakeID, sub.Generation, true, acks, now, 1000); st != "OK" {
+	if st, _ := mgr.ackUnscoped("s1", sub.Generation, sub.WakeID, sub.Generation, true, acks, now, 1000); st != "OK" {
 		t.Fatalf("done ack = %q, want OK", st)
 	}
 	if n := dueCard(t, client); n != 0 {
@@ -540,27 +592,27 @@ func TestDueMutationWrappersRecord(t *testing.T) {
 	_, _ = store.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 	_ = store.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
 
-	res, err := mgr.armWake("s1", now, 1000, true, "w_a")
+	res, err := mgr.armWakeUnscoped("s1", now, 1000, true, "w_a")
 	if err != nil || !res.Armed {
 		t.Fatalf("armWake = %+v err=%v", res, err)
 	}
 	// Heartbeat ack: no due mutation recorded.
-	if st, _ := mgr.ack("s1", res.Generation, res.WakeID, res.Generation, false, nil, now, 1000); st != "OK" {
+	if st, _ := mgr.ackUnscoped("s1", res.Generation, res.WakeID, res.Generation, false, nil, now, 1000); st != "OK" {
 		t.Fatalf("heartbeat ack = %q", st)
 	}
 	// Done ack: records "ack".
-	if st, _ := mgr.ack("s1", res.Generation, res.WakeID, res.Generation, true, nil, now, 1000); st != "OK" {
+	if st, _ := mgr.ackUnscoped("s1", res.Generation, res.WakeID, res.Generation, true, nil, now, 1000); st != "OK" {
 		t.Fatalf("done ack = %q", st)
 	}
 	// Re-arm then release: records "release".
-	res2, _ := mgr.armWake("s1", now, 1000, true, "w_b")
+	res2, _ := mgr.armWakeUnscoped("s1", now, 1000, true, "w_b")
 	if st, _ := mgr.release("s1", res2.Generation, res2.WakeID, res2.Generation); st != "OK" {
 		t.Fatalf("release = %q", st)
 	}
 	// Re-arm then expire past the deadline: records "expire".
-	res3, _ := mgr.armWake("s1", now, 1000, true, "w_c")
+	res3, _ := mgr.armWakeUnscoped("s1", now, 1000, true, "w_c")
 	_ = res3
-	if st, _ := mgr.expireLease("s1", now.Add(2*time.Second)); st != "EXPIRED" {
+	if st, _ := mgr.expireLeaseUnscoped("s1", now.Add(2*time.Second)); st != "EXPIRED" {
 		t.Fatalf("expireLease = %q", st)
 	}
 
@@ -707,7 +759,7 @@ func TestReconcileLeasesSkipsHealthySubs(t *testing.T) {
 	// present: webhook armed (waking, lease ZADDed, still in the lease ZSET).
 	_, _ = store.CreateOrConfirm("present", webhookCfg("https://w.example/h"), nil, now)
 	_ = store.Link("present", "events/p", LinkGlob, begin)
-	if res, _ := store.ArmWake("present", now, 1000, true, "w_p"); !res.Armed {
+	if res, _ := store.ArmWakeUnscoped("present", now, 1000, true, "w_p"); !res.Armed {
 		t.Fatal("arm present")
 	}
 	fs.mu.Lock()
@@ -784,7 +836,7 @@ func TestLeaseTailDropRecoveredByEagerReconcile(t *testing.T) {
 	// lapsed lease (idle + re-owe due at `future`), then drain the due-set at
 	// `future` — exactly what drainDue does, with the clock injected so the test is
 	// deterministic rather than sleeping out the lease TTL.
-	if st, _ := mgr.expireLease("s1", future); st != "EXPIRED" {
+	if st, _ := mgr.expireLeaseUnscoped("s1", future); st != "EXPIRED" {
 		t.Fatalf("the restored lapsed lease must expire to idle, got %q", st)
 	}
 	claimed, _ := store.ClaimDue(slotOf("s1"), future, dueClaimLimit, time.Second)
@@ -804,7 +856,7 @@ func TestLeaseTailDropRecoveredByEagerReconcile(t *testing.T) {
 	// The deposed worker A's late ack with its stale (generation, wake_id) must be
 	// FENCED — recovery rotated a fresh generation on the re-fire.
 	acks := []Ack{{Stream: "events/a", Offset: "0000000000000001_0000000000000000"}}
-	if st, _ := mgr.ack("s1", a.Generation, a.WakeID, a.Generation, true, acks, future, leaseTTLMs); st != "FENCED" {
+	if st, _ := mgr.ackUnscoped("s1", a.Generation, a.WakeID, a.Generation, true, acks, future, leaseTTLMs); st != "FENCED" {
 		t.Fatalf("the deposed holder's late ack must be FENCED, got %q", st)
 	}
 }
@@ -827,7 +879,7 @@ func TestPromoteDrivesEagerReconcile(t *testing.T) {
 	fs.mu.Lock()
 	fs.tails["events/p"] = "0000000000000001_0000000000000000" // pending work
 	fs.mu.Unlock()
-	armed, err := store.ArmWake("present", now, leaseTTLMs, true, "w_p")
+	armed, err := store.ArmWakeUnscoped("present", now, leaseTTLMs, true, "w_p")
 	if err != nil || !armed.Armed {
 		t.Fatalf("arm present = %+v err=%v", armed, err)
 	}

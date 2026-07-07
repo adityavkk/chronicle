@@ -38,7 +38,7 @@ func TestStoreTierBArmDurableLocalFsync(t *testing.T) {
 	s := base.WithConsistency(TierB, 0, 1000) // local AOF fsync only
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
-	res, err := s.ArmWake("s1", now, 1000, true, "w_a")
+	res, err := s.ArmWakeUnscoped("s1", now, 1000, true, "w_a")
 	if err != nil {
 		t.Fatalf("Tier B arm with local fsync must be durable: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestStoreTierBArmShortReplicaSurfacedAsError(t *testing.T) {
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
 
-	_, err := s.ArmWake("s1", now, 1000, true, "w_a")
+	_, err := s.ArmWakeUnscoped("s1", now, 1000, true, "w_a")
 	if err == nil {
 		t.Fatal("Tier B arm requiring a replica must surface the short WAITAOF reply as an error")
 	}
@@ -89,7 +89,7 @@ func TestStoreTierAIssuesNoWait(t *testing.T) {
 	s := base.WithConsistency(TierA, 1, 200)
 	now := time.Now()
 	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, now)
-	res, err := s.ArmWake("s1", now, 1000, true, "w_a")
+	res, err := s.ArmWakeUnscoped("s1", now, 1000, true, "w_a")
 	if err != nil {
 		t.Fatalf("Tier A must issue no WAIT and never error on durability: %v", err)
 	}

@@ -48,10 +48,10 @@ func TestShardMultiHolderDisjoint(t *testing.T) {
 	}
 
 	// Both holders can ack their own shard.
-	if st, _ := s.AckShard(id, 0, r0.Generation, r0.WakeID, r0.Generation, true, nil, now, 30000); st != "OK" {
+	if st, _ := s.AckShardUnscoped(id, 0, r0.Generation, r0.WakeID, r0.Generation, true, nil, now, 30000); st != "OK" {
 		t.Fatalf("ack shard 0 = %q; want OK", st)
 	}
-	if st, _ := s.AckShard(id, 1, r1.Generation, r1.WakeID, r1.Generation, true, nil, now, 30000); st != "OK" {
+	if st, _ := s.AckShardUnscoped(id, 1, r1.Generation, r1.WakeID, r1.Generation, true, nil, now, 30000); st != "OK" {
 		t.Fatalf("ack shard 1 = %q; want OK", st)
 	}
 }
@@ -76,16 +76,16 @@ func TestShardFenceIsolation(t *testing.T) {
 	}
 
 	// Shard 0's token applied to shard 3 must be FENCED — independent registers.
-	if st, _ := s.AckShard(id, 3, r0.Generation, r0.WakeID, r0.Generation, true, nil, now, 30000); st != "FENCED" {
+	if st, _ := s.AckShardUnscoped(id, 3, r0.Generation, r0.WakeID, r0.Generation, true, nil, now, 30000); st != "FENCED" {
 		t.Fatalf("shard-0 token acking shard 3 = %q; want FENCED (a holder of g must not ack g')", st)
 	}
 	// Shard 3 is untouched: its own holder still acks OK.
-	if st, _ := s.AckShard(id, 3, r3.Generation, r3.WakeID, r3.Generation, true, nil, now, 30000); st != "OK" {
+	if st, _ := s.AckShardUnscoped(id, 3, r3.Generation, r3.WakeID, r3.Generation, true, nil, now, 30000); st != "OK" {
 		t.Fatalf("shard-3 own ack after a foreign fenced attempt = %q; want OK", st)
 	}
 	// And shard 0's own token still acks shard 0 OK (the foreign attempt did not
 	// consume it).
-	if st, _ := s.AckShard(id, 0, r0.Generation, r0.WakeID, r0.Generation, true, nil, now, 30000); st != "OK" {
+	if st, _ := s.AckShardUnscoped(id, 0, r0.Generation, r0.WakeID, r0.Generation, true, nil, now, 30000); st != "OK" {
 		t.Fatalf("shard-0 own ack = %q; want OK", st)
 	}
 }
@@ -110,7 +110,7 @@ func TestShardZeroIsByteIdenticalToClaim(t *testing.T) {
 		t.Fatalf("ClaimShard(id,0) after Claim = %+v; want BUSY (same shard-0 lease)", busy)
 	}
 	// ...and AckShard(id,0) with the bare claim's token acks OK.
-	if st, _ := s.AckShard(id, 0, r.Generation, r.WakeID, r.Generation, true, nil, now, 30000); st != "OK" {
+	if st, _ := s.AckShardUnscoped(id, 0, r.Generation, r.WakeID, r.Generation, true, nil, now, 30000); st != "OK" {
 		t.Fatalf("AckShard(id,0) with bare-Claim token = %q; want OK", st)
 	}
 }
@@ -145,7 +145,7 @@ func TestShardDeleteRecreateFencesStaleAck(t *testing.T) {
 	if _, err := s.CreateOrConfirm(id, pullWakeShardCfg(), links, now.Add(time.Second)); err != nil {
 		t.Fatalf("recreate: %v", err)
 	}
-	st, err := s.AckShard(id, 1, claim.Generation, claim.WakeID, claim.Generation, true,
+	st, err := s.AckShardUnscoped(id, 1, claim.Generation, claim.WakeID, claim.Generation, true,
 		[]Ack{{Stream: path, Offset: tail}}, now.Add(2*time.Second), 30000)
 	if err != nil {
 		t.Fatalf("stale ack: %v", err)
@@ -192,7 +192,7 @@ func TestShardLegacyMissingIncarnationFencesStaleAck(t *testing.T) {
 		t.Fatalf("seed legacy orphan shard: %v", err)
 	}
 
-	st, err := s.AckShard(id, 1, 1, "wake-legacy", 1, true,
+	st, err := s.AckShardUnscoped(id, 1, 1, "wake-legacy", 1, true,
 		[]Ack{{Stream: path, Offset: tail}}, now.Add(time.Second), 30000)
 	if err != nil {
 		t.Fatalf("stale ack: %v", err)

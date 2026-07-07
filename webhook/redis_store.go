@@ -498,23 +498,34 @@ func (s *RedisStore) deindexStream(path, id string) error {
 	return s.client.SRem(s.ctx(), streamSubsKey(slotOf(id), path), id).Err()
 }
 
-// ArmWake issues a wake if idle. An optional OwnerScope makes arm_wake inline the
-// owner-epoch fence (issue #14): an owner-scoped caller deposed since it last
-// claimed the slot is FENCED, suppressing its wasted re-arm. The external/hot path
-// passes no scope (epoch ”), so the check is skipped and behavior is unchanged.
-func (s *RedisStore) ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, owner ...OwnerScope) (ArmResult, error) {
+// ArmWakeUnscoped issues a wake if idle on the external/hot path.
+func (s *RedisStore) ArmWakeUnscoped(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error) {
+	return s.armWake(id, now, leaseTTLMs, armLease, wakeID, unscopedOwnerArgs())
+}
+
+// ArmWakeOwned issues a wake if idle and inlines the owner-epoch fence (issue
+// #14): an owner-scoped caller deposed since it last claimed the slot is FENCED,
+// suppressing its wasted re-arm.
+func (s *RedisStore) ArmWakeOwned(scope OwnerScope, id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error) {
+	owner, err := scopedOwnerArgs(scope)
+	if err != nil {
+		return ArmResult{}, err
+	}
+	return s.armWake(id, now, leaseTTLMs, armLease, wakeID, owner)
+}
+
+func (s *RedisStore) armWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, owner ownerScriptArgs) (ArmResult, error) {
 	arm := "0"
 	if armLease {
 		arm = "1"
 	}
-	sk, me, epoch := firstOwnerScope(owner)
 	h := slotOf(id)
-	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey(h), dueZKey(h), sk},
-		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID, me, epoch)
+	reply, err := s.evalStrings(armWakeScript, []string{subKey(id), leaseZKey(h), dueZKey(h), owner.slotKey},
+		id, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), arm, wakeID, owner.replicaID, owner.epoch)
 	if err != nil {
 		return ArmResult{}, err
 	}
-	s.recordInlineFence(epoch, reply[0])
+	s.recordInlineFence(owner.epoch, reply[0])
 	switch reply[0] {
 	case "ARMED":
 		gen, _ := strconv.ParseInt(reply[1], 10, 64)
@@ -617,23 +628,44 @@ func (s *RedisStore) recordInlineFence(epoch, status string) {
 	s.metrics.OwnerFenced("inline")
 }
 
-// Ack fences, applies acks, and releases or heartbeats on the subscription's
-// single per-type lease (shard 0) — today's behavior, on the Store interface.
-func (s *RedisStore) Ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, owner ...OwnerScope) (string, error) {
-	return s.AckShard(id, 0, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs, owner...)
+// AckUnscoped fences, applies acks, and releases or heartbeats on the
+// subscription's single per-type lease (shard 0) — today's external behavior.
+func (s *RedisStore) AckUnscoped(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+	return s.ackShard(id, 0, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs, unscopedOwnerArgs())
 }
 
-// AckShard fences, applies acks, and releases or heartbeats against shard g's
-// per-(id,g) fence (claim granularity, design 08 §4). A token minted for shard g
-// is FENCED against any other shard, so a holder of g cannot release or take over
-// g'. The cursor hash is shared, so the named offsets advance forward-only as
+// AckOwned is AckUnscoped plus the inline owner-epoch fence.
+func (s *RedisStore) AckOwned(scope OwnerScope, id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+	owner, err := scopedOwnerArgs(scope)
+	if err != nil {
+		return "", err
+	}
+	return s.ackShard(id, 0, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs, owner)
+}
+
+// AckShardUnscoped fences, applies acks, and releases or heartbeats against shard
+// g's per-(id,g) fence (claim granularity, design 08 §4). A token minted for shard
+// g is FENCED against any other shard, so a holder of g cannot release or take
+// over g'. The cursor hash is shared, so the named offsets advance forward-only as
 // usual. g == 0 is the bare per-type lease (== Ack), byte-for-byte today.
-func (s *RedisStore) AckShard(id string, g int, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, owner ...OwnerScope) (string, error) {
+func (s *RedisStore) AckShardUnscoped(id string, g int, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+	return s.ackShard(id, g, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs, unscopedOwnerArgs())
+}
+
+// AckShardOwned is AckShardUnscoped plus the inline owner-epoch fence.
+func (s *RedisStore) AckShardOwned(scope OwnerScope, id string, g int, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error) {
+	owner, err := scopedOwnerArgs(scope)
+	if err != nil {
+		return "", err
+	}
+	return s.ackShard(id, g, reqGeneration, reqWakeID, tokenGeneration, done, acks, now, leaseTTLMs, owner)
+}
+
+func (s *RedisStore) ackShard(id string, g int, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, owner ownerScriptArgs) (string, error) {
 	doneArg := "0"
 	if done {
 		doneArg = "1"
 	}
-	sk, me, epoch := firstOwnerScope(owner)
 	args := make([]any, 0, 10+2*len(acks))
 	args = append(
 		args,
@@ -645,32 +677,44 @@ func (s *RedisStore) AckShard(id string, g int, reqGeneration int64, reqWakeID s
 	}
 	// replica_id, expected_epoch are the trailing pair ack.lua reads via #ARGV
 	// (after the variable-length acks) for the owner-epoch fence (issue #14).
-	args = append(args, me, epoch)
+	args = append(args, owner.replicaID, owner.epoch)
 	// h from the base id: the shard fence hash, parent config hash, the shared cursor
 	// hash, all three schedule ZSETs, and the due outbox share one slot — ack.lua
 	// stays single-slot.
 	h := slotOf(id)
-	reply, err := s.evalStrings(ackScript, []string{subShardKey(id, g), linksKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), sk, subKey(id)}, args...)
+	reply, err := s.evalStrings(ackScript, []string{subShardKey(id, g), linksKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), owner.slotKey, subKey(id)}, args...)
 	if err != nil {
 		return "", err
 	}
-	s.recordInlineFence(epoch, reply[0])
+	s.recordInlineFence(owner.epoch, reply[0])
 	s.recordContention(contentionStatusOf(reply[0]), id)
 	return reply[0], nil
 }
 
-// Release fences then releases the lease. An optional OwnerScope makes release.lua
-// inline the owner-epoch fence (GAP3 consistency, issue #14: release idles the sub
-// and clears the due mark exactly like ack(done), so it joins the inline-check set).
-func (s *RedisStore) Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, owner ...OwnerScope) (string, error) {
-	sk, me, epoch := firstOwnerScope(owner)
-	h := slotOf(id)
-	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), sk},
-		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10), me, epoch)
+// ReleaseUnscoped fences then releases the lease on the external path.
+func (s *RedisStore) ReleaseUnscoped(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error) {
+	return s.release(id, reqGeneration, reqWakeID, tokenGeneration, unscopedOwnerArgs())
+}
+
+// ReleaseOwned is ReleaseUnscoped plus the inline owner-epoch fence (GAP3
+// consistency, issue #14: release idles the sub and clears the due mark exactly
+// like ack(done), so it joins the inline-check set).
+func (s *RedisStore) ReleaseOwned(scope OwnerScope, id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error) {
+	owner, err := scopedOwnerArgs(scope)
 	if err != nil {
 		return "", err
 	}
-	s.recordInlineFence(epoch, reply[0])
+	return s.release(id, reqGeneration, reqWakeID, tokenGeneration, owner)
+}
+
+func (s *RedisStore) release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, owner ownerScriptArgs) (string, error) {
+	h := slotOf(id)
+	reply, err := s.evalStrings(releaseScript, []string{subKey(id), leaseZKey(h), retryZKey(h), dueZKey(h), owner.slotKey},
+		id, strconv.FormatInt(reqGeneration, 10), reqWakeID, strconv.FormatInt(tokenGeneration, 10), owner.replicaID, owner.epoch)
+	if err != nil {
+		return "", err
+	}
+	s.recordInlineFence(owner.epoch, reply[0])
 	s.recordContention(contentionStatusOf(reply[0]), id)
 	return reply[0], nil
 }
@@ -692,18 +736,29 @@ func contentionStatusOf(reply string) string {
 	}
 }
 
-// ExpireLease clears an expired lease. The lease worker is the primary owner-
-// scoped caller: an OwnerScope makes expire_lease.lua inline the owner-epoch fence
-// (issue #14), so a deposed owner expiring/re-owing leases it no longer owns is
-// FENCED atomically with the ZREM/ZADD — the new owner alone drives the schedule.
-func (s *RedisStore) ExpireLease(id string, now time.Time, owner ...OwnerScope) (string, error) {
-	sk, me, epoch := firstOwnerScope(owner)
-	h := slotOf(id)
-	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(id), leaseZKey(h), dueZKey(h), sk}, id, nsArg(now), me, epoch)
+// ExpireLeaseUnscoped clears an expired lease without owner fencing.
+func (s *RedisStore) ExpireLeaseUnscoped(id string, now time.Time) (string, error) {
+	return s.expireLease(id, now, unscopedOwnerArgs())
+}
+
+// ExpireLeaseOwned clears an expired lease with the inline owner-epoch fence. The
+// lease worker is the primary caller, so a deposed owner expiring/re-owing leases
+// it no longer owns is FENCED atomically with the ZREM/ZADD.
+func (s *RedisStore) ExpireLeaseOwned(scope OwnerScope, id string, now time.Time) (string, error) {
+	owner, err := scopedOwnerArgs(scope)
 	if err != nil {
 		return "", err
 	}
-	s.recordInlineFence(epoch, reply[0])
+	return s.expireLease(id, now, owner)
+}
+
+func (s *RedisStore) expireLease(id string, now time.Time, owner ownerScriptArgs) (string, error) {
+	h := slotOf(id)
+	reply, err := s.evalStrings(expireLeaseScript, []string{subKey(id), leaseZKey(h), dueZKey(h), owner.slotKey}, id, nsArg(now), owner.replicaID, owner.epoch)
+	if err != nil {
+		return "", err
+	}
+	s.recordInlineFence(owner.epoch, reply[0])
 	return reply[0], nil
 }
 
@@ -786,17 +841,29 @@ func (s *RedisStore) ClearDue(id string) error {
 	return s.client.ZRem(s.ctx(), dueZKey(slotOf(id)), id).Err()
 }
 
-// ScheduleRetry records a webhook failure and persists next_attempt; returns the
-// new retry count.
-func (s *RedisStore) ScheduleRetry(id string, now, nextAttempt time.Time, owner ...OwnerScope) (int, error) {
-	sk, me, epoch := firstOwnerScope(owner)
-	h := slotOf(id)
-	reply, err := s.evalStrings(scheduleRetryScript, []string{subKey(id), retryZKey(h), sk},
-		id, nsArg(now), nsArg(nextAttempt), me, epoch)
+// ScheduleRetryUnscoped records a webhook failure and persists next_attempt;
+// returns the new retry count.
+func (s *RedisStore) ScheduleRetryUnscoped(id string, now, nextAttempt time.Time) (int, error) {
+	return s.scheduleRetry(id, now, nextAttempt, unscopedOwnerArgs())
+}
+
+// ScheduleRetryOwned is ScheduleRetryUnscoped plus the inline owner-epoch fence.
+func (s *RedisStore) ScheduleRetryOwned(scope OwnerScope, id string, now, nextAttempt time.Time) (int, error) {
+	owner, err := scopedOwnerArgs(scope)
 	if err != nil {
 		return 0, err
 	}
-	s.recordInlineFence(epoch, reply[0])
+	return s.scheduleRetry(id, now, nextAttempt, owner)
+}
+
+func (s *RedisStore) scheduleRetry(id string, now, nextAttempt time.Time, owner ownerScriptArgs) (int, error) {
+	h := slotOf(id)
+	reply, err := s.evalStrings(scheduleRetryScript, []string{subKey(id), retryZKey(h), owner.slotKey},
+		id, nsArg(now), nsArg(nextAttempt), owner.replicaID, owner.epoch)
+	if err != nil {
+		return 0, err
+	}
+	s.recordInlineFence(owner.epoch, reply[0])
 	// NOSUB (gone) and FENCED (a deposed owner-scoped scheduler) both schedule
 	// nothing; the caller treats a non-OK as "no retry recorded".
 	if reply[0] == "NOSUB" || reply[0] == "FENCED" {

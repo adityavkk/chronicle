@@ -312,7 +312,7 @@ func (rc *redisShardClaimer) claim(g int, worker, wakeID string, now time.Time) 
 }
 
 func (rc *redisShardClaimer) ack(g int, gen int64, wakeID string, done bool, now time.Time) (string, error) {
-	return rc.store.Ack(rc.shardID(g), gen, wakeID, gen, done, nil, now, rc.ttl)
+	return rc.store.AckUnscoped(rc.shardID(g), gen, wakeID, gen, done, nil, now, rc.ttl)
 }
 
 // ---- the scenario entry point ----

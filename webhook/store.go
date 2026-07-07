@@ -59,26 +59,41 @@ type Store interface {
 	// the index update. It only mirrors links and never invents membership.
 	ReconcileIndexes() error
 
-	// ArmWake issues a new wake generation if the subscription is idle; armLease
-	// arms the lease at issue (webhook) versus deferring it to claim (pull-wake).
-	// An optional OwnerScope makes arm_wake inline the owner-epoch fence (#14).
-	ArmWake(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string, owner ...OwnerScope) (ArmResult, error)
+	// ArmWakeUnscoped issues a new wake generation if the subscription is idle;
+	// armLease arms the lease at issue (webhook) versus deferring it to claim
+	// (pull-wake). This is the external/hot-path API: owner_fenced is deliberately
+	// skipped and the (gen,wake_id) fence remains the guard.
+	ArmWakeUnscoped(id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error)
+
+	// ArmWakeOwned is ArmWakeUnscoped plus the owner-epoch fence. Background workers
+	// must use this when acting for an owned slot, so a deposed owner cannot silently
+	// downgrade to the unscoped path.
+	ArmWakeOwned(scope OwnerScope, id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error)
 
 	// Claim is the pull-wake compare-and-set claim (PROTOCOL §7.2).
 	Claim(id, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error)
 
-	// Ack fences then applies acks forward-only; done releases the lease, else it
-	// extends the lease as a heartbeat (PROTOCOL §7.1, §7.2). An optional OwnerScope
-	// makes ack inline the owner-epoch fence (#14).
-	Ack(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64, owner ...OwnerScope) (string, error)
+	// AckUnscoped fences then applies acks forward-only; done releases the lease,
+	// else it extends the lease as a heartbeat (PROTOCOL §7.1, §7.2). This is the
+	// external callback/pull-ack API.
+	AckUnscoped(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error)
 
-	// Release fences then releases the lease without acking (PROTOCOL §7.2). An
-	// optional OwnerScope makes release inline the owner-epoch fence (GAP3, #14).
-	Release(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, owner ...OwnerScope) (string, error)
+	// AckOwned is AckUnscoped plus the owner-epoch fence for owner-driven auto-acks.
+	AckOwned(scope OwnerScope, id string, reqGeneration int64, reqWakeID string, tokenGeneration int64, done bool, acks []Ack, now time.Time, leaseTTLMs int64) (string, error)
 
-	// ExpireLease clears an expired lease, returning the subscription to idle. An
-	// optional OwnerScope makes expire_lease inline the owner-epoch fence (#14).
-	ExpireLease(id string, now time.Time, owner ...OwnerScope) (string, error)
+	// ReleaseUnscoped fences then releases the lease without acking (PROTOCOL §7.2).
+	ReleaseUnscoped(id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error)
+
+	// ReleaseOwned is ReleaseUnscoped plus the owner-epoch fence.
+	ReleaseOwned(scope OwnerScope, id string, reqGeneration int64, reqWakeID string, tokenGeneration int64) (string, error)
+
+	// ExpireLeaseUnscoped clears an expired lease, returning the subscription to
+	// idle. This is kept for tests and recovery-style unscoped callers.
+	ExpireLeaseUnscoped(id string, now time.Time) (string, error)
+
+	// ExpireLeaseOwned is ExpireLeaseUnscoped plus the owner-epoch fence for the
+	// lease worker.
+	ExpireLeaseOwned(scope OwnerScope, id string, now time.Time) (string, error)
 
 	// LeasedIDs returns the members currently in the lease schedule ZSET — the set
 	// the lease worker can see. The failover-aware eager reconcile diffs the durable
@@ -112,10 +127,13 @@ type Store interface {
 	// deleted subscription leaves the due-set and its cardinality returns to ~0.
 	ClearDue(id string) error
 
-	// ScheduleRetry records a webhook failure and persists next_attempt; returns
-	// the new retry count. An optional OwnerScope makes schedule_retry inline the
-	// owner-epoch fence (#14); a FENCED (deposed) caller schedules nothing (count 0).
-	ScheduleRetry(id string, now, nextAttempt time.Time, owner ...OwnerScope) (int, error)
+	// ScheduleRetryUnscoped records a webhook failure and persists next_attempt;
+	// returns the new retry count. Used by append-path deliveries.
+	ScheduleRetryUnscoped(id string, now, nextAttempt time.Time) (int, error)
+
+	// ScheduleRetryOwned is ScheduleRetryUnscoped plus the owner-epoch fence for the
+	// retry worker; a FENCED (deposed) caller schedules nothing (count 0).
+	ScheduleRetryOwned(scope OwnerScope, id string, now, nextAttempt time.Time) (int, error)
 
 	// RecordSuccess clears webhook failure bookkeeping after an accepted delivery.
 	RecordSuccess(id string) error
