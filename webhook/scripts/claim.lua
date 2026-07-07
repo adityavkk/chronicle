@@ -18,13 +18,18 @@
 -- lease member (ARGV[1]) is the per-shard schedule member. At G=1 / shard 0,
 -- KEYS[1]==KEYS[2]==sub hash and ARGV[1]==id, so this is byte-for-byte the
 -- single-holder claim — the split is purely additive (08 §4).
--- KEYS: 1=sub(config) 2=shardstate 3=lease_zset
--- ARGV: 1=member 2=worker 3=now_ns 4=lease_ttl_ms 5=new_wake_id
+-- KEYS: 1=sub(config) 2=shardstate 3=lease_zset 4=incarnation_counter 5=shard_registry
+-- ARGV: 1=member 2=worker 3=now_ns 4=lease_ttl_ms 5=new_wake_id 6=shard_index
 -- Reply: {status, generation, wake_id, holder} ; CLAIMED | BUSY | NOSUB
 local cfg = KEYS[1]
 local sub = KEYS[2]
 if redis.call('EXISTS', cfg) == 0 then
   return { 'NOSUB' }
+end
+local cfg_inc = redis.call('HGET', cfg, 'incarnation')
+local shard_inc = redis.call('HGET', sub, 'incarnation')
+if KEYS[1] ~= KEYS[2] and cfg_inc ~= false and cfg_inc ~= '' and shard_inc ~= cfg_inc then
+  redis.call('DEL', sub)
 end
 local phase = redis.call('HGET', sub, 'phase')
 local holder = redis.call('HGET', sub, 'holder')
@@ -32,6 +37,11 @@ local lease_until = tonumber(redis.call('HGET', sub, 'lease_until_ns')) or 0
 local now = tonumber(ARGV[3])
 if phase == 'live' and holder == '1' and lease_until > now then
   return { 'BUSY', redis.call('HGET', sub, 'generation'), '', redis.call('HGET', sub, 'holder_worker') }
+end
+local incarnation = redis.call('HGET', cfg, 'incarnation')
+if incarnation == false or incarnation == '' then
+  incarnation = tostring(redis.call('INCR', KEYS[4]))
+  redis.call('HSET', cfg, 'incarnation', incarnation)
 end
 local gen = redis.call('HGET', sub, 'generation')
 local wake = redis.call('HGET', sub, 'wake_id')
@@ -43,6 +53,9 @@ if not (phase == 'waking' and wake ~= '') then
   redis.call('HSET', sub, 'wake_id', wake)
 end
 local until_ns = now + tonumber(ARGV[4]) * 1000000
-redis.call('HSET', sub, 'phase', 'live', 'holder', '1', 'holder_worker', ARGV[2], 'lease_until_ns', tostring(until_ns))
+redis.call('HSET', sub, 'phase', 'live', 'holder', '1', 'holder_worker', ARGV[2], 'lease_until_ns', tostring(until_ns), 'incarnation', incarnation)
+if KEYS[1] ~= KEYS[2] then
+  redis.call('SADD', KEYS[5], ARGV[6])
+end
 redis.call('ZADD', KEYS[3], until_ns, ARGV[1])
 return { 'CLAIMED', gen, wake, ARGV[2] }

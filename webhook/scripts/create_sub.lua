@@ -1,5 +1,5 @@
 -- create_sub.lua — create or idempotently re-confirm a subscription (PROTOCOL §6.2).
--- KEYS: 1=sub  2=subs_set  3=links
+-- KEYS: 1=sub  2=subs_set  3=links  4=incarnation_counter
 -- ARGV: 1=id 2=cfg_hash 3=now_ns 4=type 5=pattern 6=webhook_url 7=wake_stream
 --       8=lease_ttl_ms 9=description 10=owner 11=num_links then (path,link_type,offset)*
 -- Reply: {status, owner} ; CREATED | MATCHED | CONFLICT. owner is the stored
@@ -14,11 +14,13 @@ if redis.call('EXISTS', sub) == 1 then
   end
   return { 'CONFLICT', owner or '' }
 end
+local incarnation = tostring(redis.call('INCR', KEYS[4]))
 redis.call('HSET', sub,
   'id', ARGV[1], 'cfg_hash', ARGV[2], 'created_ns', ARGV[3],
   'type', ARGV[4], 'pattern', ARGV[5], 'webhook_url', ARGV[6],
   'wake_stream', ARGV[7], 'lease_ttl_ms', ARGV[8], 'description', ARGV[9],
   'owner', ARGV[10],
+  'incarnation', incarnation,
   'status', 'active', 'phase', 'idle', 'generation', '0', 'wake_id', '',
   'holder', '0', 'holder_worker', '', 'lease_until_ns', '0',
   'retry_count', '0', 'first_fail_ns', '0', 'next_attempt_ns', '0')
