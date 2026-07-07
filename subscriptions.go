@@ -122,6 +122,10 @@ type SubscriptionService interface {
 	Start()
 	Stop()
 	RunSweep()
+	// OnRedisReconnect drives the eager reconnect reconcile when go-redis opens a
+	// fresh connection after a drop/failover. Coalesced and non-blocking in the
+	// concrete manager.
+	OnRedisReconnect()
 	// Promote drives the failover-aware eager reconcile a DR promotion requires
 	// (issue #16): on an active-passive failover the DR layer calls this so each
 	// owner re-establishes slot ownership on the promoted primary and re-derives any

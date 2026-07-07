@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -36,12 +37,12 @@ import (
 //   - redis://host:port/db — standalone (Memorystore STANDARD_HA or single node)
 //   - redis+cluster://host1:port,host2:port,... — sharded cluster
 //     (Memorystore for Redis Cluster; gate #2 cross-node RTT testing)
-func newStore(cfg chronicle.Config, logger *slog.Logger) (store.Store, *redisstore.Store, goredis.UniversalClient, error) {
+func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEventSink) (store.Store, *redisstore.Store, goredis.UniversalClient, error) {
 	switch cfg.StoreBackend {
 	case "memory":
 		return store.NewMemoryStore(), nil, nil, nil
 	case "redis":
-		client, err := newRedisClient(cfg.RedisURL)
+		client, err := newRedisClient(cfg.RedisURL, redisEvents)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -57,11 +58,41 @@ func newStore(cfg chronicle.Config, logger *slog.Logger) (store.Store, *redissto
 	}
 }
 
+// redisEventSink bridges go-redis connection events to the subscription service.
+// The client is built before subscriptions exist, so the hook is installed first
+// and armed once the concrete Manager has started.
+type redisEventSink struct {
+	mu      sync.RWMutex
+	service chronicle.SubscriptionService
+}
+
+func (s *redisEventSink) Set(service chronicle.SubscriptionService) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.service = service
+	s.mu.Unlock()
+}
+
+func (s *redisEventSink) OnConnect(_ context.Context, _ *goredis.Conn) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	service := s.service
+	s.mu.RUnlock()
+	if service != nil {
+		service.OnRedisReconnect()
+	}
+	return nil
+}
+
 // newRedisClient parses a Redis URL and creates the appropriate client.
 // redis://host:port/db creates a standalone client; redis+cluster://h1,h2,h3
 // creates a ClusterClient that speaks the Redis Cluster protocol (required for
 // Memorystore for Redis Cluster, which shards keys across nodes — gate #2).
-func newRedisClient(rawURL string) (goredis.UniversalClient, error) {
+func newRedisClient(rawURL string, redisEvents *redisEventSink) (goredis.UniversalClient, error) {
 	// rediss+cluster:// = Redis Cluster over TLS; redis+cluster:// = plaintext.
 	useTLS := strings.HasPrefix(rawURL, "rediss+cluster://")
 	if useTLS || strings.HasPrefix(rawURL, "redis+cluster://") {
@@ -97,6 +128,9 @@ func newRedisClient(rawURL string) (goredis.UniversalClient, error) {
 			Username: username,
 			Password: password,
 		}
+		if redisEvents != nil {
+			opts.OnConnect = redisEvents.OnConnect
+		}
 		if useTLS {
 			// ms-df-redis requires TLS. Cluster node addrs come from CLUSTER SLOTS
 			// and won't match the cert SAN, so skip hostname verification.
@@ -107,6 +141,9 @@ func newRedisClient(rawURL string) (goredis.UniversalClient, error) {
 	opt, err := goredis.ParseURL(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid redis URL: %w", err)
+	}
+	if redisEvents != nil {
+		opt.OnConnect = redisEvents.OnConnect
 	}
 	return goredis.NewClient(opt), nil
 }
@@ -149,7 +186,8 @@ func run() error {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	st, rs, client, err := newStore(cfg, logger)
+	redisEvents := &redisEventSink{}
+	st, rs, client, err := newStore(cfg, logger, redisEvents)
 	if err != nil {
 		return err
 	}
@@ -264,7 +302,10 @@ func run() error {
 		// anything owed is re-fired before serving (issue #13 — the boot recovery
 		// event closes the restart gap; no separate RunSweep is needed).
 		service.Start()
+		redisEvents.Set(service)
+		stopPromotionSignals := startPromotionSignalHandler(service, logger)
 		defer service.Stop()
+		defer stopPromotionSignals()
 		subscriptionsEnabled = true
 		logger.Info("subscriptions enabled", "stream_root_url", streamRootURL)
 	}
@@ -323,6 +364,35 @@ func run() error {
 		return srv.Close()
 	}
 	return nil
+}
+
+// startPromotionSignalHandler exposes the regional-DR controller hook: after an
+// active-passive Redis promotion and endpoint flip, the controller sends SIGUSR1
+// to this process to re-establish slot ownership on the promoted primary and run
+// the failover-aware eager reconcile (SubscriptionService.Promote). The reconnect
+// hook above covers ordinary healed connections; this explicit signal covers the
+// promotion decision itself.
+func startPromotionSignalHandler(service chronicle.SubscriptionService, logger *slog.Logger) func() {
+	sigC := make(chan os.Signal, 1)
+	stopC := make(chan struct{})
+	signal.Notify(sigC, syscall.SIGUSR1)
+	go promotionSignalLoop(sigC, stopC, service, logger)
+	return func() {
+		signal.Stop(sigC)
+		close(stopC)
+	}
+}
+
+func promotionSignalLoop(sigC <-chan os.Signal, stopC <-chan struct{}, service chronicle.SubscriptionService, logger *slog.Logger) {
+	for {
+		select {
+		case <-stopC:
+			return
+		case sig := <-sigC:
+			logger.Info("redis promotion signal received; running eager subscription reconcile", "signal", sig.String())
+			service.Promote()
+		}
+	}
 }
 
 // withUI wraps the Durable Streams API handler so chronicle also serves the

@@ -97,6 +97,17 @@ Flags take precedence over environment variables; both over defaults.
   append can be lost on failover. Within a healthy primary, appends are atomic
   and producer idempotency is exact.
 
+### Regional DR promotion hook
+
+For active-passive Redis DR, the failover controller must notify each chronicle
+process after the standby Redis has been promoted and the Redis endpoint has
+flipped. Send `SIGUSR1` to the chronicle process. With subscriptions enabled,
+chronicle handles `SIGUSR1` by calling `SubscriptionService.Promote()`, which
+re-establishes slot ownership on the promoted primary and runs the eager
+failover reconcile. Ordinary Redis reconnects also trigger an eager reconnect
+reconcile through the go-redis `OnConnect` hook; `SIGUSR1` is the explicit
+promotion decision hook.
+
 ## How it's stored
 
 Per stream (path `p`):
