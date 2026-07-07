@@ -1024,6 +1024,41 @@ func TestReadEnvelopeComposesWithLimit(t *testing.T) {
 	}
 }
 
+func TestReadEnvelopeETagDistinctAndConditional(t *testing.T) {
+	h := testHandler(time.Second, time.Second)
+	mustCreate(t, h, "/test", "application/json", nil)
+	mustAppend(t, h, "/test", "application/json", []byte(`[1,2]`))
+
+	bare := do(h, http.MethodGet, "/test", nil, nil)
+	if bare.Code != http.StatusOK {
+		t.Fatalf("bare status = %d, body = %q", bare.Code, bare.Body.String())
+	}
+	enveloped := do(h, http.MethodGet, "/test?envelope=1", nil, nil)
+	if enveloped.Code != http.StatusOK {
+		t.Fatalf("enveloped status = %d, body = %q", enveloped.Code, enveloped.Body.String())
+	}
+	bareETag := bare.Header().Get("ETag")
+	envelopedETag := enveloped.Header().Get("ETag")
+	if bareETag == "" || envelopedETag == "" {
+		t.Fatalf("missing ETag: bare=%q enveloped=%q", bareETag, envelopedETag)
+	}
+	if bareETag == envelopedETag {
+		t.Fatalf("enveloped ETag = bare ETag = %q", bareETag)
+	}
+	if want := fmt.Sprintf(`"%s~env"`, off(2)); envelopedETag != want {
+		t.Fatalf("enveloped ETag = %q, want %q", envelopedETag, want)
+	}
+
+	rec := do(h, http.MethodGet, "/test?envelope=1", map[string]string{"If-None-Match": envelopedETag}, nil)
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("enveloped conditional status = %d, want 304", rec.Code)
+	}
+	rec = do(h, http.MethodGet, "/test?envelope=1", map[string]string{"If-None-Match": bareETag}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enveloped request with bare ETag status = %d, want 200", rec.Code)
+	}
+}
+
 func TestReadEnvelopeIgnoredForNonJSONAndFalse(t *testing.T) {
 	h := testHandler(time.Second, time.Second)
 	mustCreate(t, h, "/plain", "text/plain", nil)
