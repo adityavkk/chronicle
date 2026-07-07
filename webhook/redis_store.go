@@ -651,6 +651,9 @@ func (s *RedisStore) armWake(id string, now time.Time, leaseTTLMs int64, armLeas
 				return res, err
 			}
 		}
+		if err := durableWakeIntent().RunExternalAction(func() error { return nil }); err != nil {
+			return res, err
+		}
 		return res, nil
 	case armWakeBusy:
 		return ArmResult{Busy: true, Generation: r.Generation, WakeID: r.WakeID}, nil
@@ -704,6 +707,9 @@ func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now tim
 			if err := s.awaitDurableOn(conn); err != nil {
 				return res, err
 			}
+		}
+		if err := durableClaimGrant().RunExternalAction(func() error { return nil }); err != nil {
+			return res, err
 		}
 		return res, nil
 	case claimBusy:
@@ -1115,7 +1121,13 @@ func (s *RedisStore) ClaimSlot(slotKey, replicaID string, now time.Time, slotLea
 	if err != nil {
 		return SlotClaim{}, err
 	}
-	return reply.toSlotClaim(), nil
+	claim := reply.toSlotClaim()
+	if claim.Granted() {
+		if err := durableSlotOwnership().RunExternalAction(func() error { return nil }); err != nil {
+			return SlotClaim{}, err
+		}
+	}
+	return claim, nil
 }
 
 func (s *RedisStore) claimSlotWithLegacyGuard(h int, key, replicaID string, now time.Time, slotLeaseTTL time.Duration) (SlotClaim, error) {
@@ -1137,6 +1149,9 @@ func (s *RedisStore) claimSlotWithLegacyGuard(h int, key, replicaID string, now 
 		return claim, nil
 	}
 	if err := s.syncLegacySlot(legacyKey, claim); err != nil {
+		return SlotClaim{}, err
+	}
+	if err := durableSlotOwnership().RunExternalAction(func() error { return nil }); err != nil {
 		return SlotClaim{}, err
 	}
 	return claim, nil

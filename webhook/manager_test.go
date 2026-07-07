@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -18,6 +19,7 @@ type fakeStreams struct {
 	mu     sync.Mutex
 	tails  map[string]string
 	events []string // wake_stream paths appended to
+	ids    []string // subscription ids appended, decoded from wake event bodies
 }
 
 func (f *fakeStreams) TailOffset(path string) (string, bool) {
@@ -119,7 +121,10 @@ func (s *takeoverAfterAckStore) AckOwned(scope OwnerScope, id string, reqGenerat
 func (f *fakeStreams) AppendWakeEvent(wakeStream string, data []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	var ev WakeEvent
+	_ = json.Unmarshal(data, &ev)
 	f.events = append(f.events, wakeStream)
+	f.ids = append(f.ids, ev.SubscriptionID)
 	return nil
 }
 
@@ -127,6 +132,14 @@ func (f *fakeStreams) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.events)
+}
+
+func (f *fakeStreams) eventIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.ids))
+	copy(out, f.ids)
+	return out
 }
 
 func newTestManager(t *testing.T) (*Manager, *RedisStore, *fakeStreams) {
@@ -138,6 +151,17 @@ func newTestManager(t *testing.T) (*Manager, *RedisStore, *fakeStreams) {
 		t.Fatalf("new manager: %v", err)
 	}
 	return mgr, store, fs
+}
+
+type orderedListStore struct {
+	Store
+	ids []string
+}
+
+func (s *orderedListStore) List() ([]string, error) {
+	out := make([]string, len(s.ids))
+	copy(out, s.ids)
+	return out, nil
 }
 
 // TestRecordWakeEventSentFences is the slice-1 store contract: a matching
@@ -251,6 +275,46 @@ func TestSweepReemitsStrandedPullWakeAfterEmit(t *testing.T) {
 	mgr.RunSweep()
 	if fs.count() == 0 {
 		t.Fatal("sweep should have re-emitted the stranded-after-emit pull-wake (T4): the sub strands in waking forever")
+	}
+}
+
+func TestSweepSharedWakeStreamPreservesPerSubscriptionOrder(t *testing.T) {
+	base, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	mgr, err := NewManager(&orderedListStore{Store: base, ids: []string{"idle", "stale"}}, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/"})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	mgr.sweepInterval = 10 * time.Millisecond
+	now := time.Now()
+	cfg := pullWakeCfg()
+	begin := "0000000000000000_0000000000000000"
+	if _, err := base.CreateOrConfirm("idle", cfg, nil, now); err != nil {
+		t.Fatalf("create idle: %v", err)
+	}
+	if _, err := base.CreateOrConfirm("stale", cfg, nil, now); err != nil {
+		t.Fatalf("create stale: %v", err)
+	}
+	if err := base.Link("idle", "events/a", LinkGlob, begin); err != nil {
+		t.Fatalf("link idle: %v", err)
+	}
+	fs.mu.Lock()
+	fs.tails["events/a"] = "0000000000000001_0000000000000000"
+	fs.mu.Unlock()
+
+	res, err := base.ArmWakeUnscoped("stale", now, 1000, false, "w_stale")
+	if err != nil || !res.Armed {
+		t.Fatalf("arm stale = %+v err=%v", res, err)
+	}
+	if err := base.RecordWakeEventSent("stale", res.Generation, res.WakeID, now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr.RunSweep()
+	got := fs.eventIDs()
+	want := []string{"idle", "stale"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("wake-stream order = %v, want %v", got, want)
 	}
 }
 
