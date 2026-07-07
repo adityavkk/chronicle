@@ -2,6 +2,7 @@ package chronicle
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -911,6 +912,145 @@ func TestJSONModeRejectsInvalidJSON(t *testing.T) {
 	rec := do(h, http.MethodPost, "/test", map[string]string{"Content-Type": "application/json"}, []byte(`{broken`))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+type readEnvelopeMessage struct {
+	Offset string          `json:"offset"`
+	Data   json.RawMessage `json:"data"`
+}
+
+func decodeRawArray(t *testing.T, b []byte) []json.RawMessage {
+	t.Helper()
+	var out []json.RawMessage
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("decode raw array %q: %v", b, err)
+	}
+	return out
+}
+
+func decodeReadEnvelope(t *testing.T, b []byte) []readEnvelopeMessage {
+	t.Helper()
+	var out []readEnvelopeMessage
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("decode envelope %q: %v", b, err)
+	}
+	return out
+}
+
+func joinRawArray(values []json.RawMessage) []byte {
+	out := []byte{'['}
+	for i, v := range values {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		out = append(out, v...)
+	}
+	out = append(out, ']')
+	return out
+}
+
+func TestReadEnvelopeJSON(t *testing.T) {
+	h := testHandler(time.Second, time.Second)
+	mustCreate(t, h, "/test", "application/json", nil)
+	mustAppend(t, h, "/test", "application/json", []byte(`[{"b":2, "a":1},"\\u263a",[1, 2]]`))
+
+	bare := do(h, http.MethodGet, "/test", nil, nil)
+	if bare.Code != http.StatusOK {
+		t.Fatalf("bare read: status = %d, body = %q", bare.Code, bare.Body.String())
+	}
+	if got := bare.Header().Get(protocol.HeaderStreamEnvelope); got != "" {
+		t.Fatalf("bare Stream-Envelope = %q, want unset", got)
+	}
+	bareElements := decodeRawArray(t, bare.Body.Bytes())
+	messages, _, err := h.Store.Read("/test", store.ZeroOffset)
+	if err != nil {
+		t.Fatalf("store read: %v", err)
+	}
+
+	rec := do(h, http.MethodGet, "/test?envelope=true", nil, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("envelope read: status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(protocol.HeaderStreamEnvelope); got != "offsets" {
+		t.Fatalf("Stream-Envelope = %q, want offsets", got)
+	}
+	enveloped := decodeReadEnvelope(t, rec.Body.Bytes())
+	if len(enveloped) != len(messages) {
+		t.Fatalf("envelope count = %d, want %d", len(enveloped), len(messages))
+	}
+	data := make([]json.RawMessage, len(enveloped))
+	for i, got := range enveloped {
+		if got.Offset != messages[i].Offset.String() {
+			t.Errorf("offset[%d] = %q, want %q", i, got.Offset, messages[i].Offset.String())
+		}
+		if !bytes.Equal(got.Data, bareElements[i]) {
+			t.Errorf("data[%d] = %q, want bare element %q", i, got.Data, bareElements[i])
+		}
+		data[i] = got.Data
+	}
+	if got := joinRawArray(data); !bytes.Equal(got, bare.Body.Bytes()) {
+		t.Errorf("enveloped data joined = %q, want bare body %q", got, bare.Body.Bytes())
+	}
+	if got := rec.Header().Get(protocol.HeaderStreamNextOffset); got != bare.Header().Get(protocol.HeaderStreamNextOffset) {
+		t.Errorf("Stream-Next-Offset = %q, want bare %q", got, bare.Header().Get(protocol.HeaderStreamNextOffset))
+	}
+	if got := rec.Header().Get(protocol.HeaderStreamUpToDate); got != bare.Header().Get(protocol.HeaderStreamUpToDate) {
+		t.Errorf("Stream-Up-To-Date = %q, want bare %q", got, bare.Header().Get(protocol.HeaderStreamUpToDate))
+	}
+}
+
+func TestReadEnvelopeComposesWithLimit(t *testing.T) {
+	h := testHandler(time.Second, time.Second)
+	mustCreate(t, h, "/test", "application/json", nil)
+	mustAppend(t, h, "/test", "application/json", []byte(`[1,2,3]`))
+
+	rec := do(h, http.MethodGet, "/test?envelope=1&limit=2", nil, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(protocol.HeaderStreamEnvelope); got != "offsets" {
+		t.Fatalf("Stream-Envelope = %q, want offsets", got)
+	}
+	if got := rec.Header().Get(protocol.HeaderStreamNextOffset); got != off(2) {
+		t.Errorf("Stream-Next-Offset = %q, want %q", got, off(2))
+	}
+	if got := rec.Header().Get(protocol.HeaderStreamUpToDate); got != "" {
+		t.Errorf("Stream-Up-To-Date = %q, want unset", got)
+	}
+	want := fmt.Sprintf(`[{"offset":%q,"data":1},{"offset":%q,"data":2}]`, off(1), off(2))
+	if got := rec.Body.String(); got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+func TestReadEnvelopeIgnoredForNonJSONAndFalse(t *testing.T) {
+	h := testHandler(time.Second, time.Second)
+	mustCreate(t, h, "/plain", "text/plain", nil)
+	mustAppend(t, h, "/plain", "text/plain", []byte("hello"))
+	mustCreate(t, h, "/json", "application/json", nil)
+	mustAppend(t, h, "/json", "application/json", []byte(`[1,2]`))
+
+	rec := do(h, http.MethodGet, "/plain?envelope=true", nil, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("plain status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != "hello" {
+		t.Errorf("plain body = %q, want hello", got)
+	}
+	if got := rec.Header().Get(protocol.HeaderStreamEnvelope); got != "" {
+		t.Errorf("plain Stream-Envelope = %q, want unset", got)
+	}
+
+	rec = do(h, http.MethodGet, "/json?envelope=false", nil, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("false status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != "[1,2]" {
+		t.Errorf("false body = %q, want [1,2]", got)
+	}
+	if got := rec.Header().Get(protocol.HeaderStreamEnvelope); got != "" {
+		t.Errorf("false Stream-Envelope = %q, want unset", got)
 	}
 }
 

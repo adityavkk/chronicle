@@ -453,6 +453,10 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 			limit = n
 		}
 	}
+	envelope := false
+	if v := query.Get("envelope"); v == "1" || strings.EqualFold(v, "true") {
+		envelope = true
+	}
 
 	// Check for live mode
 	liveMode := query.Get("live")
@@ -510,6 +514,9 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 
 		// For JSON mode, return empty array; otherwise empty body
 		if store.IsJSONContentType(meta.ContentType) {
+			if envelope {
+				w.Header().Set(protocol.HeaderStreamEnvelope, "offsets")
+			}
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("[]"))
 		} else {
@@ -670,7 +677,13 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	}
 
 	// Format and write response
-	body, err := h.formatResponse(path, messages, meta.ContentType)
+	var body []byte
+	if envelope && store.IsJSONContentType(meta.ContentType) {
+		w.Header().Set(protocol.HeaderStreamEnvelope, "offsets")
+		body = h.formatEnvelopeResponse(messages)
+	} else {
+		body, err = h.formatResponse(path, messages, meta.ContentType)
+	}
 	if err != nil {
 		return err
 	}
@@ -955,6 +968,34 @@ func (h *Handler) formatResponse(path string, messages []store.Message, contentT
 		result = append(result, msg.Data...)
 	}
 	return result, nil
+}
+
+func (h *Handler) formatEnvelopeResponse(messages []store.Message) []byte {
+	if len(messages) == 0 {
+		return []byte("[]")
+	}
+
+	var total int
+	for i, msg := range messages {
+		if i > 0 {
+			total++
+		}
+		total += len(`{"offset":`) + len(msg.Offset.String()) + 2 + len(`,"data":`) + len(msg.Data) + 1
+	}
+	result := make([]byte, 0, total+2)
+	result = append(result, '[')
+	for i, msg := range messages {
+		if i > 0 {
+			result = append(result, ',')
+		}
+		result = append(result, `{"offset":`...)
+		result = strconv.AppendQuote(result, msg.Offset.String())
+		result = append(result, `,"data":`...)
+		result = append(result, msg.Data...)
+		result = append(result, '}')
+	}
+	result = append(result, ']')
+	return result
 }
 
 // HTTP error handling
