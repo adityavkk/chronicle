@@ -232,16 +232,31 @@ type writeTokenPayload struct {
 	Typ        string   `json:"typ"`
 	Sub        string   `json:"sub"`
 	Generation int64    `json:"gen"`
+	WakeID     string   `json:"wake_id,omitempty"`
+	Holder     string   `json:"holder,omitempty"`
+	Shard      int      `json:"shard,omitempty"`
 	Exp        int64    `json:"exp"`
 	Jti        string   `json:"jti"`
 	Streams    []string `json:"streams"`
 }
 
 // GenerateWriteToken mints the claim-scoped write token for a claim on subID
-// at generation, scoped to exactly streams, expiring at now+ttl (the lease
-// band — the token never outlives the claim by more than the lease). The
-// token is opaque to clients, matching Electric's electric-claim-token.
+// at generation, scoped to exactly streams, expiring at now+ttl. This legacy
+// helper intentionally mints no live-fence fields; Manager claim paths use
+// GenerateClaimWriteToken.
 func GenerateWriteToken(tokenKey []byte, subID string, generation int64, streams []auth.StreamPath, now time.Time, ttl time.Duration, rand io.Reader) (string, error) {
+	return generateWriteToken(tokenKey, subID, generation, "", "", 0, streams, now, ttl, rand)
+}
+
+// GenerateClaimWriteToken mints the live-fenced form of the claim-scoped write
+// token. The opaque token carries the wake and holder identity so the append
+// gate can reject a deposed worker against current claim state, rather than
+// treating MAC+path as sufficient authority.
+func GenerateClaimWriteToken(tokenKey []byte, subID string, generation int64, wakeID, holder string, shard int, streams []auth.StreamPath, now time.Time, ttl time.Duration, rand io.Reader) (string, error) {
+	return generateWriteToken(tokenKey, subID, generation, wakeID, holder, shard, streams, now, ttl, rand)
+}
+
+func generateWriteToken(tokenKey []byte, subID string, generation int64, wakeID, holder string, shard int, streams []auth.StreamPath, now time.Time, ttl time.Duration, rand io.Reader) (string, error) {
 	jti := make([]byte, 8)
 	if _, err := io.ReadFull(rand, jti); err != nil {
 		return "", fmt.Errorf("write token jti: %w", err)
@@ -254,6 +269,9 @@ func GenerateWriteToken(tokenKey []byte, subID string, generation int64, streams
 		Typ:        writeTokenTyp,
 		Sub:        subID,
 		Generation: generation,
+		WakeID:     wakeID,
+		Holder:     holder,
+		Shard:      shard,
 		Exp:        now.Add(ttl).Unix(),
 		Jti:        hex.EncodeToString(jti),
 		Streams:    paths,
@@ -291,6 +309,9 @@ type WriteTokenValidation struct {
 	Status     WriteTokenStatus
 	SubID      string
 	Generation int64
+	WakeID     string
+	Holder     string
+	Shard      int
 }
 
 // ValidateWriteToken verifies a claim-scoped write token for an append at
@@ -322,14 +343,14 @@ func ValidateWriteToken(tokenKey []byte, token string, path auth.StreamPath, now
 		return WriteTokenValidation{}
 	}
 	if TokenExpired(p.Exp, now.Unix()) {
-		return WriteTokenValidation{Status: WriteTokenExpired, SubID: p.Sub, Generation: p.Generation}
+		return WriteTokenValidation{Status: WriteTokenExpired, SubID: p.Sub, Generation: p.Generation, WakeID: p.WakeID, Holder: p.Holder, Shard: p.Shard}
 	}
 	for _, s := range p.Streams {
 		if s == path.String() {
-			return WriteTokenValidation{Status: WriteTokenValid, SubID: p.Sub, Generation: p.Generation}
+			return WriteTokenValidation{Status: WriteTokenValid, SubID: p.Sub, Generation: p.Generation, WakeID: p.WakeID, Holder: p.Holder, Shard: p.Shard}
 		}
 	}
-	return WriteTokenValidation{Status: WriteTokenWrongPath, SubID: p.Sub, Generation: p.Generation}
+	return WriteTokenValidation{Status: WriteTokenWrongPath, SubID: p.Sub, Generation: p.Generation, WakeID: p.WakeID, Holder: p.Holder, Shard: p.Shard}
 }
 
 // GenerateWakeID returns a unique wake id "w_<hex>" (PROTOCOL §7).

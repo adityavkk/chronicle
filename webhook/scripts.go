@@ -59,6 +59,11 @@ var (
 		Keys: []scriptKeySchema{keys("sub_config", "shardstate", "lease_zset", "incarnation_counter", "shard_registry")},
 		Args: exactArgs(arg("member", argString), arg("worker", argString), arg("now_ns", argUnixNS), arg("lease_ttl_ms", argInt), arg("new_wake_id", argString), arg("shard_index", argInt)),
 	}, claimDecoder)
+	writeFenceScript = newTypedScript[writeFenceKeyVec, writeFenceReply](scriptABI{
+		Name: "check_write_fence", File: "check_write_fence.lua",
+		Keys: []scriptKeySchema{keys("shardstate", "sub_config")},
+		Args: exactArgs(arg("now_ns", argUnixNS), arg("generation", argInt), arg("wake_id", argString), arg("holder", argString)),
+	}, writeFenceDecoder)
 	ackScript = newTypedScript[ackKeyVec, ackReply](scriptABI{
 		Name: "ack", File: "ack.lua",
 		Keys: []scriptKeySchema{keys("shardstate", "links", "lease_zset", "retry_zset", "due_zset", "sub_config"), keys("shardstate", "links", "lease_zset", "retry_zset", "due_zset", "sub_config", "slot")},
@@ -144,7 +149,7 @@ var (
 
 var registeredScripts = []registeredScript{
 	createSubScript.registration(), linkStreamScript.registration(), unlinkStreamScript.registration(), armWakeScript.registration(),
-	claimScript.registration(), ackScript.registration(), releaseScript.registration(), expireLeaseScript.registration(),
+	claimScript.registration(), writeFenceScript.registration(), ackScript.registration(), releaseScript.registration(), expireLeaseScript.registration(),
 	restoreLeaseScript.registration(), claimDueScript.registration(), scheduleRetryScript.registration(),
 	recordSuccessScript.registration(), recordWakeSentScript.registration(), deleteSubScript.registration(),
 	getOrCreateKeyScript.registration(), claimShardScript.registration(), checkOwnerScript.registration(),

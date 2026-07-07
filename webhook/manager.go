@@ -854,6 +854,32 @@ func (m *Manager) tokenTTL(sub Subscription) time.Duration {
 	return time.Duration(sub.Config.LeaseTTLMs)*time.Millisecond + time.Hour
 }
 
+func (m *Manager) writeTokenTTL(sub Subscription) time.Duration {
+	return time.Duration(sub.Config.LeaseTTLMs)*time.Millisecond + writeTokenFenceGrace
+}
+
+const writeTokenFenceGrace = 5 * time.Second
+
+// mintWriteTokenOnAck refreshes a current holder's data-plane write capability
+// when the ack response is already refreshing credentials. Done acks end the
+// lease, so they mint nothing and preserve the conformance suite's
+// {ok,next_wake} done-ack body shape.
+func (m *Manager) mintWriteTokenOnAck(id string, generation int64, wakeID string, done bool, now time.Time) (string, bool) {
+	if done {
+		return "", false
+	}
+	sub, ok, err := m.store.Get(id)
+	if err != nil || !ok || sub.Config.Type != DispatchPullWake || sub.Phase != PhaseLive || sub.WakeID != wakeID || sub.Generation != generation || !sub.Holder {
+		return "", false
+	}
+	scope := writeScopeFromLinks(sub.Links)
+	tok, err := GenerateClaimWriteToken(m.tokenKey, id, generation, wakeID, sub.HolderWorker, 0, scope, now, m.writeTokenTTL(sub), randReader)
+	if err != nil {
+		return "", false
+	}
+	return tok, true
+}
+
 // mintToken mints a fresh callback/claim token for a subscription at the given
 // generation, TTL'd off the sub's lease (tokenTTL). It is the imperative-shell
 // step the in-band token refresh and the expired-token retry path share (issue

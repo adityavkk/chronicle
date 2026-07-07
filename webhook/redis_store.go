@@ -723,6 +723,27 @@ func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now tim
 	}
 }
 
+// CheckWriteFence verifies the append capability against current live claim
+// state. It is a single slot-homed Lua read of the shard fence, so the decision
+// cannot observe a partially-updated claim record.
+func (s *RedisStore) CheckWriteFence(id string, shard int, generation int64, wakeID, holder string, now time.Time) (string, error) {
+	reply, err := writeFenceScript.run(s.ctx(), s.client, newWriteFenceKeys(id, shard),
+		nsArg(now), strconv.FormatInt(generation, 10), wakeID, holder)
+	if err != nil {
+		return "", err
+	}
+	switch reply.(type) {
+	case writeFenceOK:
+		return "OK", nil
+	case writeFenceFenced:
+		return "FENCED", nil
+	case writeFenceNoSub:
+		return "NOSUB", nil
+	default:
+		return "", fmt.Errorf("check_write_fence: unhandled reply %T", reply)
+	}
+}
+
 // recordContention reports a claim/ack/release lease outcome to the contention
 // recorder (gate #6). status uses the fixed vocabulary documented on
 // Metrics.ClaimContention; a nil recorder (a store built without NewRedisStore)

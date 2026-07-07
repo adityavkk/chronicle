@@ -403,8 +403,8 @@ func TestManagerWithFileKeySource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := mgr.WriteAuthorizer().AuthorizeAppend(wt, mustPath(t, "events/a"), now); !d.Allowed() {
-		t.Fatalf("write token minted under the file key must authorize via the manager: %s", d.Detail())
+	if v := ValidateWriteToken(mgr.tokenKey, wt, mustPath(t, "events/a"), now); v.Status != WriteTokenValid {
+		t.Fatalf("write token minted under the file key must validate via the manager key: %+v", v)
 	}
 	if d := mgr.WriteAuthorizer().AuthorizeAppend(cb, mustPath(t, "events/a"), now); d.Allowed() {
 		t.Fatal("callback token must not authorize appends (cross-family)")

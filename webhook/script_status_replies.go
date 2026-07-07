@@ -91,6 +91,45 @@ func decodeUnlinkStreamReply(r scriptReply) (unlinkStreamReply, error) {
 	}
 }
 
+type writeFenceReply interface {
+	writeFenceReply()
+	status() string
+}
+type (
+	writeFenceOK     struct{}
+	writeFenceFenced struct{}
+	writeFenceNoSub  struct{}
+)
+
+func (writeFenceOK) writeFenceReply()     {}
+func (writeFenceFenced) writeFenceReply() {}
+func (writeFenceNoSub) writeFenceReply()  {}
+func (writeFenceOK) status() string       { return "OK" }
+func (writeFenceFenced) status() string   { return "FENCED" }
+func (writeFenceNoSub) status() string    { return "NOSUB" }
+
+var (
+	writeFenceReplyVariants = []replyVariant{{Status: "OK"}, {Status: "FENCED"}, {Status: "NOSUB"}}
+	writeFenceDecoder       = scriptDecoder[writeFenceReply]{Variants: writeFenceReplyVariants, Decode: decodeWriteFenceReply}
+)
+
+func decodeWriteFenceReply(r scriptReply) (writeFenceReply, error) {
+	st, err := decodeUnitStatus(r, writeFenceReplyVariants)
+	if err != nil {
+		return nil, err
+	}
+	switch st {
+	case "OK":
+		return writeFenceOK{}, nil
+	case "FENCED":
+		return writeFenceFenced{}, nil
+	case "NOSUB":
+		return writeFenceNoSub{}, nil
+	default:
+		return nil, fmt.Errorf("unhandled check_write_fence status %q", st)
+	}
+}
+
 type ackReply interface {
 	ackReply()
 	status() string

@@ -345,6 +345,7 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 		writeErr(w, http.StatusConflict, ErrCodeFenced)
 		return
 	}
+	done := req.Done != nil && *req.Done
 	resp := AckResponse{OK: true, NextWake: nextWake}
 	// In-band refresh (issue #77): a successful callback whose token is within the
 	// refresh threshold of expiry re-mints it and returns it in the "token" field.
@@ -355,11 +356,13 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 			resp.Token = fresh
 		}
 	}
+	if wt, ok := rt.mgr.mintWriteTokenOnAck(id, req.Generation, req.WakeID, done, now); ok {
+		resp.WriteToken = wt
+	}
 	// wake_token heartbeat refresh (#123/#126 TB6a): every successful non-done
 	// ack of a single-entity subscription re-mints the entity-identity
 	// assertion for the fenced (generation, wake_id). Done acks never do, so
 	// the conformance flow's ack body shape is untouched.
-	done := req.Done != nil && *req.Done
 	if wt, ok := rt.mgr.mintWakeTokenOnAck(id, req.Generation, req.WakeID, done, now); ok {
 		resp.WakeToken = wt
 	}
@@ -414,11 +417,11 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		// The claim is where the write capability is born (issue #126): scope
-		// it to exactly the claimed streams, expiring on the same lease-derived
-		// TTL as the claim token, so it never outlives the claim by more than
-		// the lease band.
-		writeToken, err := GenerateWriteToken(rt.mgr.tokenKey, id, res.Generation, writeScope(snap), now, rt.mgr.tokenTTL(sub), randReader)
+		// The claim is where the write capability is born (issue #126): scope it
+		// to exactly the claimed streams and bind it to the live claim fence. The
+		// TTL tracks the lease plus a small fence-observation grace; the live
+		// generation/lease check below is the exclusivity mechanism, not exp.
+		writeToken, err := GenerateClaimWriteToken(rt.mgr.tokenKey, id, res.Generation, res.WakeID, res.Holder, 0, writeScope(snap), now, rt.mgr.writeTokenTTL(sub), randReader)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -489,6 +492,16 @@ func writeScope(snap []StreamSnapshot) []auth.StreamPath {
 	out := make([]auth.StreamPath, 0, len(snap))
 	for _, s := range snap {
 		if p, err := auth.NormalizeStreamPath(s.Path); err == nil {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func writeScopeFromLinks(links []StreamLink) []auth.StreamPath {
+	out := make([]auth.StreamPath, 0, len(links))
+	for _, l := range links {
+		if p, err := auth.NormalizeStreamPath(l.Path); err == nil {
 			out = append(out, p)
 		}
 	}
