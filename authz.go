@@ -30,6 +30,15 @@ type AppendAuthorizer interface {
 	AuthorizeAppend(token string, path auth.StreamPath, now time.Time) auth.Decision
 }
 
+// AppendTwoPhaseAuthorizer lets the handler validate credentials before store
+// lookup, then re-check the live fence immediately before the mutation. This is
+// a window-minimizing mitigation for #143; the same-commit atomic fence lives in
+// follow-up #169.
+type AppendTwoPhaseAuthorizer interface {
+	AuthorizeAppendCredential(token string, path auth.StreamPath, now time.Time) auth.Decision
+	AuthorizeAppendFence(token string, path auth.StreamPath, now time.Time) auth.Decision
+}
+
 // ReadAuthorizer authorizes a data-plane read with a chronicle
 // read-capability JWS (issue #126 TB5). webhook.ReadCapabilityAuthorizer
 // implements it.
@@ -177,6 +186,7 @@ func (h *Handler) resolvePrincipal(r *http.Request) auth.Principal {
 const (
 	errCodeUnauthenticated = "UNAUTHENTICATED"
 	errCodeForbidden       = "FORBIDDEN"
+	errCodeFenced          = webhook.ErrCodeFenced
 )
 
 // authError is a denial mapped to HTTP: 401 UNAUTHENTICATED or 403 FORBIDDEN,
@@ -196,6 +206,8 @@ func denyError(d auth.Decision) *authError {
 	switch d.Reason() {
 	case auth.ReasonForbidden:
 		return &authError{status: http.StatusForbidden, code: errCodeForbidden, msg: d.Detail()}
+	case auth.ReasonFenced:
+		return &authError{status: http.StatusConflict, code: errCodeFenced, msg: d.Detail()}
 	case auth.ReasonNone, auth.ReasonUnauthenticated:
 		return &authError{status: http.StatusUnauthorized, code: errCodeUnauthenticated, msg: d.Detail()}
 	default:
@@ -203,26 +215,37 @@ func denyError(d auth.Decision) *authError {
 	}
 }
 
-// authorizeAppend runs the append gate: compute the decision, enforce it in
-// ModeEnforce, log it as telemetry in ModeInsecure. It is called before any
-// store access, so a denied append neither reads nor mutates stream state,
-// and never fires a subscription wake.
-func (h *Handler) authorizeAppend(r *http.Request, rawPath string) error {
-	d := h.appendDecision(r, rawPath)
+func (h *Handler) authorizeAppendCredential(r *http.Request, rawPath string) error {
+	return h.authorizeAppendPhase(r, rawPath, appendPhaseCredential, "append credential")
+}
+
+func (h *Handler) authorizeAppendFence(r *http.Request, rawPath string) error {
+	return h.authorizeAppendPhase(r, rawPath, appendPhaseFence, "append fence")
+}
+
+func (h *Handler) authorizeAppendPhase(r *http.Request, rawPath string, phase appendAuthPhase, label string) error {
+	d := h.appendDecision(r, rawPath, phase)
 	if d.Allowed() {
 		return nil
 	}
 	if h.AuthMode == auth.ModeEnforce {
-		h.logger().Warn("append denied",
+		h.logger().Warn(label+" denied",
 			"path", rawPath, "reason", d.Reason().String(), "detail", d.Detail())
 		return denyError(d)
 	}
 	// Telemetry (insecure mode): record what enforcement would deny so an
 	// operator can observe the blast radius before flipping AuthMode.
-	h.logger().Info("authz telemetry: append would be denied",
+	h.logger().Info("authz telemetry: "+label+" would be denied",
 		"path", rawPath, "reason", d.Reason().String(), "detail", d.Detail())
 	return nil
 }
+
+type appendAuthPhase int
+
+const (
+	appendPhaseCredential appendAuthPhase = iota
+	appendPhaseFence
+)
 
 // appendDecision evaluates the append authorization with no side effects.
 // Every failure path is a Deny: an unnormalizable path, a missing authorizer
@@ -236,7 +259,7 @@ func (h *Handler) authorizeAppend(r *http.Request, rawPath string) error {
 // the claim-token path — and before the AppendAuth nil-guard, so a
 // trusted-backend-only deployment (no subscription layer) still serves its
 // service while denying everyone else.
-func (h *Handler) appendDecision(r *http.Request, rawPath string) auth.Decision {
+func (h *Handler) appendDecision(r *http.Request, rawPath string, phase appendAuthPhase) auth.Decision {
 	// Normalize the EXACT store path (rawPath), not subStreamPath(rawPath):
 	// subStreamPath strips one leading slash and NormalizeStreamPath strips
 	// another, so the pair would double-strip and silently accept a
@@ -265,7 +288,16 @@ func (h *Handler) appendDecision(r *http.Request, rawPath string) auth.Decision 
 	if h.AppendAuth == nil {
 		return auth.Deny(auth.ReasonUnauthenticated, "no append authorizer configured")
 	}
-	return h.AppendAuth.AuthorizeAppend(claimTokenFromRequest(r), path, time.Now())
+	token := claimTokenFromRequest(r)
+	if tp, ok := h.AppendAuth.(AppendTwoPhaseAuthorizer); ok {
+		switch phase {
+		case appendPhaseCredential:
+			return tp.AuthorizeAppendCredential(token, path, time.Now())
+		case appendPhaseFence:
+			return tp.AuthorizeAppendFence(token, path, time.Now())
+		}
+	}
+	return h.AppendAuth.AuthorizeAppend(token, path, time.Now())
 }
 
 // credentialPresented reports whether the request carries any read/mutate

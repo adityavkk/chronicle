@@ -85,9 +85,9 @@ func TestCallbackRefreshesNearExpiryToken(t *testing.T) {
 	}
 }
 
-// TestCallbackDoesNotRefreshComfortablyValidToken: a comfortably-valid token
-// yields NO "token" field, and the response is byte-identical to the historical
-// {ok,next_wake} body the conformance suite deep-equals.
+// TestCallbackDoesNotRefreshComfortablyValidToken: a comfortably-valid callback
+// token yields NO "token" field. Pull-wake heartbeat still refreshes the
+// shorter-lived write_token so data-plane authority follows the live lease.
 func TestCallbackDoesNotRefreshComfortablyValidToken(t *testing.T) {
 	rt, id, gen, wakeID := claimForRefreshTest(t)
 	now := time.Now()
@@ -102,10 +102,15 @@ func TestCallbackDoesNotRefreshComfortablyValidToken(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
-	// Byte-for-byte: json.Encoder appends a trailing newline; omitempty drops "token".
-	const want = "{\"ok\":true,\"next_wake\":false}\n"
-	if got := w.Body.String(); got != want {
-		t.Fatalf("no-refresh body must be byte-identical\n got: %q\nwant: %q", got, want)
+	var resp AckResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v (%s)", err, w.Body.String())
+	}
+	if resp.Token != "" {
+		t.Fatal("comfortably-valid callback token must not refresh")
+	}
+	if resp.WriteToken == "" {
+		t.Fatal("heartbeat must refresh the write token")
 	}
 }
 

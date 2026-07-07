@@ -699,10 +699,18 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 
 // handleAppend handles POST requests to append to a stream
 func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path string) error {
-	// The authorization gate runs before any store access (issue #126): a
-	// denied append neither reads stream state (a 401 does not leak stream
-	// existence, §12.2) nor mutates it.
-	if err := h.authorizeAppend(r, path); err != nil {
+	// Buffer the body before the live claim fence. This keeps a slow request body
+	// from stretching the deposed-holder window; the residual fence-to-append
+	// race is the #169 same-commit fence follow-up.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return newHTTPError(http.StatusBadRequest, "failed to read body")
+	}
+
+	// Credential preflight runs before stream store access so an invalid token
+	// still cannot probe stream existence. The live fence is repeated below,
+	// immediately before the mutation.
+	if err := h.authorizeAppendCredential(r, path); err != nil {
 		return err
 	}
 
@@ -724,12 +732,6 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 
 	// Check for Content-Type header
 	contentType := r.Header.Get("Content-Type")
-
-	// Read body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return newHTTPError(http.StatusBadRequest, "failed to read body")
-	}
 
 	// Extract producer headers early (used for close-only and append)
 	producerId := r.Header.Get(protocol.HeaderProducerId)
@@ -772,6 +774,9 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 	if len(body) == 0 && closeStream {
 		// Close-only - Content-Type validation is skipped per protocol Section 5.2
 		if hasAllProducerHeaders {
+			if err := h.authorizeAppendFence(r, path); err != nil {
+				return err
+			}
 			result, err := h.Store.CloseStreamWithProducer(path, store.CloseProducerOptions{
 				ProducerId:    producerId,
 				ProducerEpoch: *producerEpoch,
@@ -811,6 +816,9 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 			return nil
 		}
 
+		if err := h.authorizeAppendFence(r, path); err != nil {
+			return err
+		}
 		result, err := h.Store.CloseStream(path)
 		if err != nil {
 			if errors.Is(err, store.ErrStreamNotFound) {
@@ -852,6 +860,12 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 		opts.ProducerSeq = producerSeq
 	}
 
+	// Window-minimizing mitigation for #143: body IO, metadata lookup, and parse
+	// work are already complete, so the live write-token fence runs immediately
+	// before Store.Append. The true atomic append+fence is tracked in #169.
+	if err := h.authorizeAppendFence(r, path); err != nil {
+		return err
+	}
 	result, err := h.Store.Append(path, body, opts)
 	if err != nil {
 		if errors.Is(err, store.ErrStreamClosed) {
