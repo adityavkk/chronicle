@@ -128,7 +128,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, HEAD, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Stream-Seq, Stream-TTL, Stream-Expires-At, Stream-Closed, If-None-Match, Producer-Id, Producer-Epoch, Producer-Seq, Stream-Forked-From, Stream-Fork-Offset, Stream-Fork-Sub-Offset, Authorization, electric-claim-token")
-	w.Header().Set("Access-Control-Expose-Headers", "Stream-Next-Offset, Stream-Cursor, Stream-Up-To-Date, Stream-Closed, ETag, Location, Producer-Epoch, Producer-Seq, Producer-Expected-Seq, Producer-Received-Seq")
+	w.Header().Set("Access-Control-Expose-Headers", "Stream-Next-Offset, Stream-Cursor, Stream-Up-To-Date, Stream-Closed, Stream-Envelope, ETag, Location, Producer-Epoch, Producer-Seq, Producer-Expected-Seq, Producer-Received-Seq")
 
 	// Browser security headers (Protocol Section 10.7)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -453,6 +453,10 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 			limit = n
 		}
 	}
+	envelope := false
+	if v := query.Get("envelope"); v == "1" || strings.EqualFold(v, "true") {
+		envelope = true
+	}
 
 	// Check for live mode
 	liveMode := query.Get("live")
@@ -510,6 +514,9 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 
 		// For JSON mode, return empty array; otherwise empty body
 		if store.IsJSONContentType(meta.ContentType) {
+			if envelope {
+				w.Header().Set(protocol.HeaderStreamEnvelope, "offsets")
+			}
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("[]"))
 		} else {
@@ -624,6 +631,7 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	upToDate := nextOffset.Equal(currentMeta.CurrentOffset)
 
 	// Set response headers
+	enveloped := envelope && store.IsJSONContentType(meta.ContentType)
 	w.Header().Set("Content-Type", meta.ContentType)
 	w.Header().Set(protocol.HeaderStreamNextOffset, nextOffset.String())
 
@@ -652,7 +660,11 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		w.Header().Set("Cache-Control", "private")
 	} else {
 		// Set ETag for caching
-		w.Header().Set("ETag", fmt.Sprintf(`"%s"`, nextOffset.String()))
+		etag := fmt.Sprintf(`"%s"`, nextOffset.String())
+		if enveloped {
+			etag = fmt.Sprintf(`"%s~env"`, nextOffset.String())
+		}
+		w.Header().Set("ETag", etag)
 
 		// Set caching headers for historical reads
 		if !upToDate && len(messages) > 0 {
@@ -661,8 +673,7 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 
 		// Check If-None-Match for 304
 		if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" {
-			expectedETag := fmt.Sprintf(`"%s"`, nextOffset.String())
-			if ifNoneMatch == expectedETag {
+			if ifNoneMatch == etag {
 				w.WriteHeader(http.StatusNotModified)
 				return nil
 			}
@@ -670,7 +681,13 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	}
 
 	// Format and write response
-	body, err := h.formatResponse(path, messages, meta.ContentType)
+	var body []byte
+	if enveloped {
+		w.Header().Set(protocol.HeaderStreamEnvelope, "offsets")
+		body = h.formatEnvelopeResponse(messages)
+	} else {
+		body, err = h.formatResponse(path, messages, meta.ContentType)
+	}
 	if err != nil {
 		return err
 	}
@@ -955,6 +972,34 @@ func (h *Handler) formatResponse(path string, messages []store.Message, contentT
 		result = append(result, msg.Data...)
 	}
 	return result, nil
+}
+
+func (h *Handler) formatEnvelopeResponse(messages []store.Message) []byte {
+	if len(messages) == 0 {
+		return []byte("[]")
+	}
+
+	var total int
+	for i, msg := range messages {
+		if i > 0 {
+			total++
+		}
+		total += len(`{"offset":`) + len(msg.Offset.String()) + 2 + len(`,"data":`) + len(msg.Data) + 1
+	}
+	result := make([]byte, 0, total+2)
+	result = append(result, '[')
+	for i, msg := range messages {
+		if i > 0 {
+			result = append(result, ',')
+		}
+		result = append(result, `{"offset":`...)
+		result = strconv.AppendQuote(result, msg.Offset.String())
+		result = append(result, `,"data":`...)
+		result = append(result, msg.Data...)
+		result = append(result, '}')
+	}
+	result = append(result, ']')
+	return result
 }
 
 // HTTP error handling
