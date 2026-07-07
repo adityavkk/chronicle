@@ -42,7 +42,7 @@ func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEvent
 	case "memory":
 		return store.NewMemoryStore(), nil, nil, nil
 	case "redis":
-		client, err := newRedisClient(cfg.RedisURL, redisEvents)
+		client, err := newRedisClient(cfg.RedisURL, cfg.RedisPoolSize, redisEvents)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -92,7 +92,7 @@ func (s *redisEventSink) OnConnect(_ context.Context, _ *goredis.Conn) error {
 // redis://host:port/db creates a standalone client; redis+cluster://h1,h2,h3
 // creates a ClusterClient that speaks the Redis Cluster protocol (required for
 // Memorystore for Redis Cluster, which shards keys across nodes — gate #2).
-func newRedisClient(rawURL string, redisEvents *redisEventSink) (goredis.UniversalClient, error) {
+func newRedisClient(rawURL string, poolSize int, redisEvents *redisEventSink) (goredis.UniversalClient, error) {
 	// rediss+cluster:// = Redis Cluster over TLS; redis+cluster:// = plaintext.
 	useTLS := strings.HasPrefix(rawURL, "rediss+cluster://")
 	if useTLS || strings.HasPrefix(rawURL, "redis+cluster://") {
@@ -128,6 +128,9 @@ func newRedisClient(rawURL string, redisEvents *redisEventSink) (goredis.Univers
 			Username: username,
 			Password: password,
 		}
+		if poolSize > 0 {
+			opts.PoolSize = poolSize
+		}
 		if redisEvents != nil {
 			opts.OnConnect = redisEvents.OnConnect
 		}
@@ -144,6 +147,9 @@ func newRedisClient(rawURL string, redisEvents *redisEventSink) (goredis.Univers
 	}
 	if redisEvents != nil {
 		opt.OnConnect = redisEvents.OnConnect
+	}
+	if poolSize > 0 {
+		opt.PoolSize = poolSize
 	}
 	return goredis.NewClient(opt), nil
 }
@@ -165,6 +171,7 @@ func run() error {
 	flag.StringVar(&cfg.Listen, "listen", cfg.Listen, "HTTP listen address")
 	flag.StringVar(&cfg.StreamRoot, "stream-root", cfg.StreamRoot, "URL prefix the protocol is served under")
 	flag.StringVar(&cfg.RedisURL, "redis-url", cfg.RedisURL, "redis connection URL (redis backend)")
+	flag.IntVar(&cfg.RedisPoolSize, "redis-pool-size", cfg.RedisPoolSize, "go-redis per-node connection pool size, 0 = default")
 	flag.StringVar(&cfg.StoreBackend, "store", cfg.StoreBackend, `storage backend: "redis" or "memory"`)
 	flag.DurationVar(&cfg.LongPollTimeout, "long-poll-timeout", cfg.LongPollTimeout, "server-side long-poll timeout")
 	flag.DurationVar(&cfg.SSEReconnectInterval, "sse-reconnect-interval", cfg.SSEReconnectInterval, "SSE connection reconnect interval")
