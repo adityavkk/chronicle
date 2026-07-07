@@ -11,7 +11,7 @@ import (
 // homes a WHOLE subscription's key set — its config/runtime hash, links hash,
 // lease/retry/due schedule ZSETs, and per-stream fan-out membership — under ONE
 // hash tag {__ds:h}, h = fnv32a(subId) % subSlots, so every multi-key atomic Lua
-// script (ack.lua 4-5 keys, delete_sub.lua 5 keys, arm_wake/claim) stays
+// script (ack.lua, delete_sub.lua, arm_wake/claim) stays
 // byte-for-byte single-slot and cluster-safe: sharding is "compute the tag," not
 // "rewrite the atomicity contract" (05:138-157). These functions are total and
 // I/O-free (mirror state.go / shard.go); the S-parallel pipelining and bitmap
@@ -112,6 +112,20 @@ func subShardKey(id string, g int) string {
 	}
 	return subKey(id) + ":g:" + strconv.Itoa(g)
 }
+
+// subShardRegistryKey is the SET of claimed g>0 shard indexes for one
+// subscription. Delete reads it to remove per-shard fence hashes and schedule
+// members atomically with the parent sub. The members are plain decimal g values
+// so delete_sub.lua can reconstruct subShardKey(id,g) and shardMember(id,g) from
+// the already slot-homed parent key/id without duplicating Go's slot hash.
+func subShardRegistryKey(id string) string { return subKey(id) + ":shards" }
+
+// subIncarnationKey is the persistent counter for a subscription id. It is NOT
+// deleted with the sub record: each create increments it and stamps the resulting
+// incarnation into the parent hash; g>0 shard fences copy that stamp on claim, and
+// ack.lua rejects a shard whose stamp no longer matches the parent. That fences
+// stale shard hashes left by older deletes even before the registry cleanup existed.
+func subIncarnationKey(id string) string { return subKey(id) + ":incarnation" }
 
 // shardMember is the lease/retry/due ZSET member for shard g. Shard 0 keeps the
 // bare id (today's member); g>0 derives "<id>:g:<g>", which is exactly the
