@@ -63,6 +63,17 @@ func TestFailoverVerdict_PositiveRPOWithoutTargetLossIsInconclusive(t *testing.T
 	}
 }
 
+func TestFailoverAssertingGateRequiresTargetLoss(t *testing.T) {
+	inconclusive := failoverVerdict(nil, http.StatusConflict, "FENCED", 4096, false, 1200*time.Millisecond, 4)
+	if failoverAssertingGateOK(inconclusive) {
+		t.Fatalf("targetLostFence=false must not satisfy the asserting gate, got %+v", inconclusive)
+	}
+	proved := failoverVerdict(nil, http.StatusConflict, "FENCED", 4096, true, 1200*time.Millisecond, 4)
+	if !failoverAssertingGateOK(proved) {
+		t.Fatalf("targetLostFence=true clean run must satisfy the asserting gate, got %+v", proved)
+	}
+}
+
 // An L1 gap (a stream never reached tail) is a real at-least-once VIOLATION — a
 // dropped fence-write that was never re-fired (a lost update). It must FAIL even if
 // the deposed ack was fenced.

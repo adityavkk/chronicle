@@ -102,6 +102,10 @@ func failoverVerdict(gaps []deliveryGap, deposedStatus int, deposedCode string, 
 	return r
 }
 
+func failoverAssertingGateOK(r failoverResult) bool {
+	return r.verdict == failoverPassLostTargetFence
+}
+
 // String renders the durability-honest verdict block, including the explicit
 // at-least-once framing (NOT a strong-consistency claim) and the RPO/RTO tiers.
 func (r failoverResult) String() string {
@@ -263,12 +267,12 @@ func runFailover(c config, nem *nemesis) error {
 			return fmt.Errorf("gate #5 failover: FAIL")
 		}
 	}
-	if res.verdict == failoverPassLostTargetFence {
+	if failoverAssertingGateOK(res) {
 		fmt.Println("PASS: gate #5 real failover — the targeted lost fence-write degraded only to at-least-once (deduped by the monotone cursor); the deposed ack was FENCED; safety survived a REAL promotion (not AOF replay)")
-	} else {
-		fmt.Println("PASS: gate #5 no-loss smoke — safety held, but no targeted fence loss was proven; do not credit this run as the lost-write degradation proof")
+		return nil
 	}
-	return nil
+	fmt.Println("FAIL: gate #5 asserting failover — safety held, but no targeted fence loss was proven; do not credit this run as the lost-write degradation proof")
+	return fmt.Errorf("gate #5 failover: inconclusive no-loss smoke (want %s, got %s)", failoverPassLostTargetFence, res.verdict)
 }
 
 // drainToTail repeatedly claims the subscription and acks the claim snapshot's
