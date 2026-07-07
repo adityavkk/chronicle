@@ -23,8 +23,9 @@ import (
 //     built on subKey(id), so they AUTOMATICALLY inherit slot h — a sub's g-shards
 //     live in its slot. slotOf strips the ":g:<n>" suffix so a drained g>0 schedule
 //     member resolves back to its parent sub's slot (and thus to subShardKey).
-//   - {ownership} keys (#14): slotKey(h)/membersKey keep their OWN literal
-//     {ownership} tag (cross-slot cluster-membership metadata) — NOT slot-homed.
+//   - ownership keys (#14): membersKey keeps its OWN literal {ownership} tag
+//     (cluster-membership metadata). slotKey(h) is co-homed under {__ds:h} so an
+//     owner-epoch fence can compose atomically with the slot-homed schedule write.
 
 // subSlots (S) is the number of keyspace slots a subscription can be homed into. It
 // is a COMPILE-TIME CONSTANT, immutable for the life of a keyspace: changing it
@@ -236,18 +237,14 @@ const (
 	kidDenylistKey   = keyPrefix + ":kid_denylist"    // SET emergency-revoked kids (#123 rotation)
 )
 
-// ---- {ownership} keyspace (issue #14, work-sharded leased slot ownership) ----
+// ---- leased slot ownership (issue #14, work-sharded background ownership) ----
 //
-// The membership ZSET and the per-slot ownership records use their OWN literal
-// hash tag {ownership}, deliberately NOT slot-homed: they are cross-slot
-// cluster-membership metadata, separate from the per-subscription {__ds:h} control
-// plane (05:311). This ownership axis (which REPLICA runs autonomous background
-// work for a slot of the keyspace) is ORTHOGONAL to the per-(subId,g) claim
-// granularity above (#11): different keys, different tag, the owner-epoch fence
-// vs the (gen,wake_id) fence. On a single-node Redis (the deploy/test substrate)
-// one EVAL may touch an {ownership} slot key alongside the {__ds:h} schedule keys —
-// the TOCTOU inline checks rely on that atomicity; co-locating the two tags for a
-// real Redis Cluster is out of scope here (the state shard is #15, DR is #16).
+// The membership ZSET keeps its own literal {ownership} hash tag because it is
+// cluster-wide membership metadata and is never evaluated in the same script as a
+// subscription. The per-slot ownership records are different: owner-scoped
+// schedule/due scripts must read slotKey(h) atomically with {__ds:h} subscription
+// keys, so slotKey(h) is co-homed under the same {__ds:h} tag. This preserves the
+// owner-epoch fence on Redis Cluster instead of declaring cross-slot KEYS.
 const ownershipTag = "{ownership}"
 
 // membersKey is the ZSET of live replica ids -> heartbeat lease-expiry ns: every
@@ -257,7 +254,7 @@ const ownershipTag = "{ownership}"
 const membersKey = "ds:" + ownershipTag + ":members"
 
 // slotKey is the HASH holding ownership slot h's CAS record
-// {owner_id, owner_epoch, lease_expiry_ns}, claimed/renewed by claim_shard.lua
-// and read by check_owner.lua. The literal "ds:{ownership}:slot:<h>" form matches
-// the keyspace block in doc-05 and the jepsen killSlotOwner nemesis.
-func slotKey(h int) string { return "ds:" + ownershipTag + ":slot:" + strconv.Itoa(h) }
+// {owner_id, owner_epoch, lease_expiry_ns}, claimed/renewed by claim_shard.lua and
+// read by check_owner.lua. It lives in {__ds:h}, not {ownership}, so inline
+// owner-scoped schedule writes can include it without CROSSSLOT.
+func slotKey(h int) string { return "ds:" + slotTagAt(h) + ":ownership:slot:" + strconv.Itoa(h) }

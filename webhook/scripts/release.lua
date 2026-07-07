@@ -1,6 +1,7 @@
 -- release.lua — voluntary lease release without acking (PROTOCOL §7.2). Fenced
 -- like ack. The caller re-issues a wake afterward if pending work remains.
--- KEYS: 1=sub 2=lease_zset 3=retry_zset 4=due_zset 5=slot (ds:{ownership}:slot:<h>)
+-- KEYS: 1=sub 2=lease_zset 3=retry_zset 4=due_zset
+--       [5=slot (ds:{__ds:h}:ownership:slot:<h>) when owned]
 -- ARGV: 1=id 2=req_gen 3=req_wake 4=token_gen 5=replica_id 6=expected_epoch
 -- Reply: {status} ; OK | FENCED | NOSUB
 -- release.lua is in the TOCTOU inline-check set (GAP3 consistency, issue #14): it
