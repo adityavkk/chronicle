@@ -71,8 +71,7 @@ body and land its `.fail` here per the steps above.
   issue #32) rather than as an equivalence-harness `.fail` seed — the divergence
   is a pure read-comparison-key property and never materializes through the
   harness while `ReadSeq == 0`.
-- The producer Go/Lua reply boundary at `10^14` (validate_producer's `tostring`
-  of the SEQ_GAP detail fields renders `>= 10^14` in `%.14g` scientific
-  notation, which `decodeScriptReply`'s `ParseInt` rejects) is pinned in
-  `store/redis/differential_producer_test.go`
-  (`TestDifferentialProducerReplyTostringLB`, issue #32).
+- The fixed producer Go/Lua reply boundary at `10^14` (validate_producer must
+  forward SEQ_GAP detail fields as decimal strings, not Lua-number `tostring`)
+  is pinned in `store/redis/differential_producer_test.go`
+  (`TestDifferentialProducerLargeIntegerBoundaries`, issue #32).

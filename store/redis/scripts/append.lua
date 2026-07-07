@@ -25,8 +25,8 @@ local stream_seq = ARGV[4]
 local closing = ARGV[5] == '1'
 local has_producer = ARGV[6] == '1'
 local producer_id = ARGV[7]
-local p_epoch = tonumber(ARGV[8])
-local p_seq = tonumber(ARGV[9])
+local p_epoch = ARGV[8]
+local p_seq = ARGV[9]
 local expected_tail = ARGV[10]
 local new_tail = ARGV[11]
 local val_only = ARGV[12] == '1'

@@ -22,12 +22,10 @@ import (
 // These properties pin each grammar exactly against an independent oracle, the
 // TTL-vs-SubOffset metamorphic relation (they diverge precisely on the
 // [2^63, 2^64) window where TTL overflows int64 but SubOffset fits uint64), and
-// the documented two-layer overflow seam: a value in [2^53, 2^63) passes
-// IsValidIntegerString + ParseInt in Go but is the Go-accepts / Lua-imprecise
-// boundary, pinned with a checked-in fixture. All pure — no Redis. (The live
-// Lua leg for these grammars is the producer-header parse the existing
-// differential harness already drives; this file pins the pure-Go grammars
-// the issue scopes to.)
+// the producer parse width: a value in [2^53, 2^63) passes IsValidIntegerString
+// + ParseInt in Go, while the Redis producer mirror must avoid Lua tonumber on
+// those values. All pure — no Redis. (The live Lua leg is the producer
+// differential harness; this file pins the pure-Go grammars it feeds.)
 
 // strictGrammarOracle is an independent re-implementation of the ParseTTL /
 // ParseSubOffset grammar ^[1-9][0-9]*$|^0$: a non-empty all-digit string with no
@@ -63,9 +61,8 @@ func looseGrammarOracle(s string) bool {
 }
 
 const (
-	// pow2_53 is the Lua double exact-integer ceiling: tonumber() on a string
-	// >= 2^53 may lose precision. This is the lower edge of the Go-accepts /
-	// Lua-imprecise overflow seam (INV-PARSE-03).
+	// pow2_53 is the Lua double exact-integer ceiling: any producer path that
+	// reintroduces tonumber() on parsed header ints can lose precision here.
 	pow2_53 = uint64(1) << 53 // 9_007_199_254_740_992
 	// pow2_63 is the int64 ceiling: values >= 2^63 overflow int64 (so ParseTTL
 	// rejects them) but still fit uint64 (so ParseSubOffset accepts up to
@@ -327,34 +324,28 @@ func TestTTLvsSubOffsetMetamorphic(t *testing.T) {
 	})
 }
 
-// overflowSeamFixture is the checked-in [2^53, 2^63) boundary fixture for the
-// two-layer overflow seam (INV-PARSE-03). Each row is a value that PASSES the Go
-// validate-loose + parse-narrow path (IsValidIntegerString true, ParseInt
-// succeeds, fits int64) yet sits at or above 2^53, where a Lua tonumber() of the
-// same string loses integer precision. The fixture documents the seam rather
-// than asserting agreement: Go accepts these exactly; the boundary is where Lua
-// would silently round.
-var overflowSeamFixture = []struct {
-	s            string
-	luaImprecise bool // true if >= 2^53, i.e. inside the Go-accepts / Lua-imprecise band
+// producerParseWidthFixture is the checked-in [2^53, 2^63) boundary fixture for
+// INV-PARSE-03. Each row is a value that PASSES the Go validate-loose +
+// parse-narrow path (IsValidIntegerString true, ParseInt succeeds, fits int64).
+// Values at or above 2^53 collide under float64, which is why the Redis
+// producer mirror must compare decimal strings instead of Lua numbers.
+var producerParseWidthFixture = []struct {
+	s                string
+	float64Collision bool // true if >= 2^53, where neighboring int64s can share one double
 }{
-	{"9007199254740991", false},   // 2^53 - 1: last integer Lua represents EXACTLY
-	{"9007199254740992", true},    // 2^53: first value a Lua double cannot distinguish from 2^53+1
+	{"9007199254740991", false},   // 2^53 - 1: every integer below this is exactly representable
+	{"9007199254740992", true},    // 2^53: shares a double with 2^53+1
 	{"9007199254740993", true},    // 2^53 + 1: rounds to 2^53 under a double
-	{"9223372036854775807", true}, // 2^63 - 1 = math.MaxInt64: max int64, deep in the imprecise band
+	{"9223372036854775807", true}, // 2^63 - 1 = math.MaxInt64
 }
 
-// TestParseOverflowSeamFixture pins INV-PARSE-03's documented two-layer seam
-// with the checked-in fixture. For every row it asserts the Go reality the
-// handler relies on: IsValidIntegerString accepts, the narrowing
-// strconv.ParseInt(_,10,64) succeeds, and the value fits int64 — AND it pins the
-// 2^53 boundary that classifies each row as Lua-imprecise. The seam is DOCUMENTED
-// (the band is named and asserted), not silenced: a row sliding across 2^53
-// trips this test. This is the parse-layer analogue of the producer reply
-// boundary the existing differential harness pins; the live-Lua tonumber loss is
-// the same hazard one layer down.
-func TestParseOverflowSeamFixture(t *testing.T) {
-	for _, row := range overflowSeamFixture {
+// TestProducerParseWidthFixture pins INV-PARSE-03's producer parse width with
+// the checked-in fixture. For every row it asserts the Go reality the handler
+// relies on: IsValidIntegerString accepts, the narrowing strconv.ParseInt
+// succeeds, and the value fits int64. It also pins the 2^53 float64-collision
+// boundary so any future Lua-number regression has a pure parse-layer tripwire.
+func TestProducerParseWidthFixture(t *testing.T) {
+	for _, row := range producerParseWidthFixture {
 		t.Run(row.s, func(t *testing.T) {
 			// Layer 1: the loose validator accepts (it never overflows).
 			if !IsValidIntegerString(row.s) {
@@ -365,16 +356,16 @@ func TestParseOverflowSeamFixture(t *testing.T) {
 			if err != nil {
 				t.Fatalf("INV-PARSE-03: strconv.ParseInt(%q,10,64) = %v, want success", row.s, err)
 			}
-			// The Lua-imprecise classification is exactly v >= 2^53.
-			gotImprecise := uint64(v) >= pow2_53
-			if gotImprecise != row.luaImprecise {
-				t.Fatalf("INV-PARSE-03: %q classified luaImprecise=%v, fixture says %v "+
+			// The float64-collision classification is exactly v >= 2^53.
+			gotCollision := uint64(v) >= pow2_53
+			if gotCollision != row.float64Collision {
+				t.Fatalf("INV-PARSE-03: %q classified float64Collision=%v, fixture says %v "+
 					"(2^53 boundary moved — update the fixture intentionally)",
-					row.s, gotImprecise, row.luaImprecise)
+					row.s, gotCollision, row.float64Collision)
 			}
-			// The seam is real: a >= 2^53 value, when round-tripped through a
-			// float64 (the Lua double model), loses its exact identity.
-			if row.luaImprecise {
+			// The hazard is real: a >= 2^53 value can collide with a neighbor in
+			// the float64/Lua-number model.
+			if row.float64Collision {
 				asFloat := float64(v)
 				back := int64(asFloat)
 				// At or above 2^53 the float64 cannot represent every neighbor,
@@ -384,7 +375,7 @@ func TestParseOverflowSeamFixture(t *testing.T) {
 					nextSame := float64(v) == float64(v+1)
 					if !nextSame && back == v {
 						t.Logf("note: %q (=%d) still round-trips exactly through float64; "+
-							"the Lua loss bites neighbors that share its double", row.s, v)
+							"the precision loss bites neighbors that share its double", row.s, v)
 					}
 				}
 			} else if int64(float64(v)) != v {
