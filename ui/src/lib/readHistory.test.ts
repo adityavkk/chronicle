@@ -32,11 +32,13 @@ describe("appendReadHistory", () => {
 		expect(history[0]?.at).toBe(2);
 	});
 
-	it("records a revisit of a non-adjacent cursor as a distinct entry", () => {
+	it("moves a revisited cursor to newest instead of duplicating it", () => {
 		let history = appendReadHistory([], entry({ requestedOffset: "-1" }), 10);
 		history = appendReadHistory(history, entry({ requestedOffset: "42" }), 10);
 		history = appendReadHistory(history, entry({ requestedOffset: "-1" }), 10);
-		expect(history.map((e) => e.requestedOffset)).toEqual(["-1", "42", "-1"]);
+		// Re-reading "-1" (already in the trail) collapses onto it rather than
+		// appending a duplicate: the strip stays distinct, "-1" now newest.
+		expect(history.map((e) => e.requestedOffset)).toEqual(["42", "-1"]);
 	});
 
 	it("does not collapse the same offset across different streams", () => {

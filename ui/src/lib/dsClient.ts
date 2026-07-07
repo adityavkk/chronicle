@@ -232,7 +232,12 @@ export interface DsClient {
 	readonly connection: Connection;
 	testConnection(signal?: AbortSignal): Promise<ConnectionProbe>;
 	listStreams(signal?: AbortSignal): Promise<{ streams: StreamInfo[]; exchange: HttpExchange }>;
-	readStream(path: string, offset: string, signal?: AbortSignal): Promise<ReadResult>;
+	readStream(
+		path: string,
+		offset: string,
+		limit?: number,
+		signal?: AbortSignal,
+	): Promise<ReadResult>;
 	headStream(path: string, signal?: AbortSignal): Promise<HttpExchange>;
 
 	/* ---- Write / fork / lifecycle (all resolve to a typed WriteResult) ---- */
@@ -608,8 +613,15 @@ export function createClient(connection: Connection): DsClient {
 			return { streams, exchange };
 		},
 
-		async readStream(path, offset, signal) {
-			const url = streamUrl(connection, path, offset);
+		async readStream(path, offset, limit, signal) {
+			let url = streamUrl(connection, path, offset);
+			// Opt-in server-side batch cap: chronicle honours ?limit on framed
+			// streams by returning at most N messages with a mid-stream
+			// Stream-Next-Offset (and no Stream-Up-To-Date). Omitting it preserves
+			// the unlimited read. streamUrl already put ?offset=… on the URL.
+			if (limit !== undefined && limit > 0) {
+				url += `${url.includes("?") ? "&" : "?"}limit=${limit}`;
+			}
 			const { exchange, response } = await doFetch("GET", url, { ...ACCEPT_HEADER }, signal);
 
 			const kind = kindFromContentType(exchange.protocol.contentType);
