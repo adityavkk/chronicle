@@ -170,6 +170,28 @@ func TestRegisteredScriptABIMatchesLuaReferences(t *testing.T) {
 	}
 }
 
+func TestVariadicLayoutRejectsStrideAndTrailingDrift(t *testing.T) {
+	bodyBytes, err := scriptFS.ReadFile("scripts/ack.lua")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(bodyBytes)
+	schema := ackScript.abi.Args
+	if err := checkVariadicLayout(body, schema); err != nil {
+		t.Fatalf("ack layout should be valid: %v", err)
+	}
+	badStride := strings.Replace(body, "i = i + 2", "i = i + 3", 1)
+	if err := checkVariadicLayout(badStride, schema); err == nil {
+		t.Fatal("ack layout with i = i + 3 passed")
+	}
+	badTrailing := strings.Replace(body,
+		"owner_fenced(k_slot, ARGV[#ARGV - 1], ARGV[#ARGV])",
+		"owner_fenced(k_slot, ARGV[#ARGV], ARGV[#ARGV - 1])", 1)
+	if err := checkVariadicLayout(badTrailing, schema); err == nil {
+		t.Fatal("ack layout with swapped trailing owner args passed")
+	}
+}
+
 func maxKeyRoles(schemas []scriptKeySchema) []scriptKeyRole {
 	var out []scriptKeyRole
 	for _, schema := range schemas {
@@ -224,32 +246,58 @@ func argAliases(lua string) []string {
 
 func assertVariadicLayout(t *testing.T, lua string, schema scriptArgSchema) {
 	t.Helper()
+	if err := checkVariadicLayout(lua, schema); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func checkVariadicLayout(lua string, schema scriptArgSchema) error {
 	if schema.Variadic == nil {
-		return
+		return nil
 	}
 	baseRe := regexp.MustCompile(`(?m)^local i = (\d+)$`)
 	m := baseRe.FindStringSubmatch(lua)
 	if len(m) != 2 {
-		t.Fatalf("variadic script has no checked base index")
+		return fmt.Errorf("variadic script has no checked base index")
 	}
 	base, err := strconv.Atoi(m[1])
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	if want := schema.Variadic.AfterFixed + 1; base != want {
-		t.Fatalf("variadic base = %d, want %d", base, want)
+		return fmt.Errorf("variadic base = %d, want %d", base, want)
 	}
+
+	strideRe := regexp.MustCompile(`(?m)^\s*i = i \+ (\d+)$`)
+	strides := strideRe.FindAllStringSubmatch(lua, -1)
+	if len(strides) != 1 {
+		return fmt.Errorf("variadic script has %d loop strides, want 1", len(strides))
+	}
+	stride, err := strconv.Atoi(strides[0][1])
+	if err != nil {
+		return err
+	}
+	if want := len(schema.Variadic.Group); stride != want {
+		return fmt.Errorf("variadic stride = %d, want %d", stride, want)
+	}
+
 	gotOffsets := variadicOffsets(lua)
 	wantOffsets := make([]int, len(schema.Variadic.Group))
 	for i := range wantOffsets {
 		wantOffsets[i] = i
 	}
 	if !reflect.DeepEqual(gotOffsets, wantOffsets) {
-		t.Fatalf("variadic ARGV offsets = %v, want %v", gotOffsets, wantOffsets)
+		return fmt.Errorf("variadic ARGV offsets = %v, want %v", gotOffsets, wantOffsets)
 	}
-	if got, want := trailingARGVRefs(lua), len(schema.Variadic.Trailing); got != want {
-		t.Fatalf("trailing #ARGV refs = %d, want %d", got, want)
+
+	gotTrailing, err := trailingNamesFromOffsets(trailingARGVOffsets(lua), schema)
+	if err != nil {
+		return err
 	}
+	if wantTrailing := trailingArgNames(schema); !reflect.DeepEqual(gotTrailing, wantTrailing) {
+		return fmt.Errorf("trailing #ARGV args = %v, want %v", gotTrailing, wantTrailing)
+	}
+	return nil
 }
 
 func variadicOffsets(lua string) []int {
@@ -274,9 +322,48 @@ func variadicOffsets(lua string) []int {
 	return out
 }
 
-func trailingARGVRefs(lua string) int {
-	re := regexp.MustCompile(`ARGV\[#ARGV(?: - \d+)?\]`)
-	return len(re.FindAllString(lua, -1))
+func trailingARGVOffsets(lua string) []int {
+	re := regexp.MustCompile(`ARGV\[#ARGV(?: - (\d+))?\]`)
+	var out []int
+	for _, m := range re.FindAllStringSubmatch(lua, -1) {
+		if m[1] == "" {
+			out = append(out, 0)
+			continue
+		}
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			testPanic(err)
+		}
+		out = append(out, -n)
+	}
+	return out
+}
+
+func trailingNamesFromOffsets(offsets []int, schema scriptArgSchema) ([]string, error) {
+	if schema.Variadic == nil {
+		return nil, nil
+	}
+	out := make([]string, len(offsets))
+	n := len(schema.Variadic.Trailing)
+	for i, off := range offsets {
+		idx := n - 1 + off
+		if idx < 0 || idx >= n {
+			return nil, fmt.Errorf("trailing #ARGV offset %d outside %d trailing args", off, n)
+		}
+		out[i] = schema.Variadic.Trailing[idx].Name
+	}
+	return out, nil
+}
+
+func trailingArgNames(schema scriptArgSchema) []string {
+	if schema.Variadic == nil {
+		return nil
+	}
+	out := make([]string, len(schema.Variadic.Trailing))
+	for i, arg := range schema.Variadic.Trailing {
+		out[i] = arg.Name
+	}
+	return out
 }
 
 func maxDeclaredArgReference(schema scriptArgSchema) int {
