@@ -66,6 +66,9 @@ func ValidateProducer(state *ProducerState, epoch, seq, nowUnix int64) (AppendRe
 	// Same epoch - sequence validation
 	if seq <= state.LastSeq {
 		// Duplicate - idempotent success
+		if err := durableProducerReplay().RunExternalAction(func() error { return nil }); err != nil {
+			return AppendResult{}, nil, err
+		}
 		return AppendResult{
 			ProducerResult: ProducerResultDuplicate,
 			LastSeq:        state.LastSeq,
