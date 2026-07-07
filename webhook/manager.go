@@ -759,7 +759,14 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	}
 	_ = json.Unmarshal(respBody, &parsed)
 
-	_ = m.store.RecordSuccess(id)
+	status, err := m.recordSuccessWithOwner(owner, id, generation, wakeID)
+	if err != nil {
+		m.log.Warn("webhook: record success", "sub", id, "error", err)
+		return
+	}
+	if status != "OK" {
+		return
+	}
 	if parsed.Done != nil && *parsed.Done {
 		acks := acksFromSnapshot(snapshot)
 		// The auto-ack(done) is a schedule/due-mutating write, so it carries the
@@ -780,6 +787,13 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 			}
 		}
 	}
+}
+
+func (m *Manager) recordSuccessWithOwner(owner *OwnerScope, id string, generation int64, wakeID string) (string, error) {
+	if owner != nil {
+		return m.store.RecordSuccessOwned(*owner, id, generation, wakeID)
+	}
+	return m.store.RecordSuccessUnscoped(id, generation, wakeID)
 }
 
 func (m *Manager) recordFailure(id string, owner *OwnerScope) {

@@ -6,10 +6,10 @@ import (
 )
 
 // toctou_inline_test.go proves the TOCTOU resolution (issue #14, 05:372-385): each
-// schedule-/due-mutating script (arm_wake, ack, expire_lease, schedule_retry,
-// release) inlines the owner-epoch check and FENCES a stale (deposed) owner-scoped
-// caller — atomically with the write, not via a separate round-trip. Against live
-// Redis (skipped under -short).
+// schedule-/retry-/due-mutating script (arm_wake, ack, expire_lease,
+// schedule_retry, record_success, release) inlines the owner-epoch check and
+// FENCES a stale (deposed) owner-scoped caller — atomically with the write, not
+// via a separate round-trip. Against live Redis (skipped under -short).
 //
 // The isolation trick for ack/release: present a VALID (gen, wake_id) so the
 // (gen,wake_id) fence cannot fire, then show the call still FENCES under a stale
@@ -164,6 +164,49 @@ func TestInlineFence_ScheduleRetry(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("deposed schedule_retry = %d, want 0 (FENCED inline)", n)
+	}
+}
+
+func TestInlineFence_RecordSuccessAboveGenFence(t *testing.T) {
+	s, _ := newTestStore(t)
+	if _, err := s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	stale, live := ownedAndDeposed(t, s)
+	now := time.Now()
+	arm, err := s.ArmWakeUnscoped("s1", now, 60000, true, "wk-1")
+	if err != nil || !arm.Armed {
+		t.Fatalf("arm = %+v err=%v", arm, err)
+	}
+	if n, err := s.ScheduleRetryUnscoped("s1", now, now.Add(time.Minute)); err != nil || n != 1 {
+		t.Fatalf("schedule retry = %d/%v, want 1", n, err)
+	}
+
+	// VALID gen/wake → the (gen,wake_id) fence will NOT fire. A success by the
+	// current owner is OK and clears retry state.
+	status, err := s.RecordSuccessOwned(live, "s1", arm.Generation, arm.WakeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != "OK" {
+		t.Fatalf("live-owner record_success = %q, want OK", status)
+	}
+	if sub, _, _ := s.Get("s1"); sub.RetryCount != 0 || sub.Status != StatusActive {
+		t.Fatalf("live-owner success did not clear retry state: %+v", sub)
+	}
+
+	if n, err := s.ScheduleRetryUnscoped("s1", now, now.Add(time.Minute)); err != nil || n != 1 {
+		t.Fatalf("reschedule retry = %d/%v, want 1", n, err)
+	}
+	status, err = s.RecordSuccessOwned(stale, "s1", arm.Generation, arm.WakeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != "FENCED" {
+		t.Fatalf("deposed record_success with valid gen = %q, want FENCED (inline owner fence)", status)
+	}
+	if sub, _, _ := s.Get("s1"); sub.RetryCount != 1 || sub.Status != StatusFailed {
+		t.Fatalf("deposed success must leave retry state intact: %+v", sub)
 	}
 }
 

@@ -135,8 +135,14 @@ type Store interface {
 	// retry worker; a FENCED (deposed) caller schedules nothing (count 0).
 	ScheduleRetryOwned(scope OwnerScope, id string, now, nextAttempt time.Time) (int, error)
 
-	// RecordSuccess clears webhook failure bookkeeping after an accepted delivery.
-	RecordSuccess(id string) error
+	// RecordSuccessUnscoped clears webhook failure bookkeeping after an accepted
+	// delivery, fenced on the current (generation, wakeID). This is the external /
+	// append-path API: owner_fenced is deliberately skipped.
+	RecordSuccessUnscoped(id string, generation int64, wakeID string) (string, error)
+
+	// RecordSuccessOwned is RecordSuccessUnscoped plus the owner-epoch fence for the
+	// retry worker; a deposed owner's stale success clears nothing.
+	RecordSuccessOwned(scope OwnerScope, id string, generation int64, wakeID string) (string, error)
 
 	// RecordWakeEventSent stamps that the current pull-wake event was durably
 	// appended to the wake stream, fenced on (generation, wakeID). A no-op when
