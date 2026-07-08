@@ -734,6 +734,7 @@ export function setActiveConnection(id: string | null): void {
 		connections.value = connections.value.map((c) => (c.id === id ? { ...c, lastUsedAt: now } : c));
 		void refreshStreams();
 		void probeConnection(id);
+		consumePendingStreamLink();
 	}
 }
 
@@ -811,6 +812,30 @@ export async function refreshStreams(): Promise<void> {
 	} finally {
 		streamsLoading.value = false;
 	}
+}
+
+/**
+ * Deep link: `?stream=<path>` selects that stream once a connection is active.
+ * Read once at module load; consumed on the first connection activation (a
+ * restored session, a manual connect, or the config-default auto-connect that
+ * `prefillFromConfig` performs when a deep link is present).
+ */
+function readStreamLinkFromUrl(): string | null {
+	if (typeof location === "undefined") return null;
+	const raw = new URLSearchParams(location.search).get("stream");
+	if (raw === null) return null;
+	const clean = raw.trim();
+	return clean === "" ? null : clean;
+}
+
+export const pendingStreamLink = signal<string | null>(readStreamLinkFromUrl());
+
+/** Select the deep-linked stream if one is pending and a connection is live. */
+export function consumePendingStreamLink(): void {
+	const pending = pendingStreamLink.value;
+	if (pending === null || activeConnectionId.value === null) return;
+	pendingStreamLink.value = null;
+	addManualStream(pending);
 }
 
 /** Add a stream path the registry did not surface, so the user can view it. */
@@ -2411,6 +2436,11 @@ export async function prefillFromConfig(): Promise<void> {
 	if (cfg.defaultServer !== null) {
 		const conn = ensureConnection({ name: "Default server", baseUrl: cfg.defaultServer });
 		void probeConnection(conn.id);
+		// A deep link implies intent to view a stream on the default server:
+		// skip the start screen and connect (which consumes the pending link).
+		if (pendingStreamLink.value !== null && activeConnectionId.value === null) {
+			setActiveConnection(conn.id);
+		}
 	}
 }
 
@@ -2428,6 +2458,7 @@ export function initStore(): void {
 		metricsUrl.value = loadMetricsUrl(restored);
 		streamSchemas.value = loadStreamSchemas(restored);
 		void refreshStreams();
+		consumePendingStreamLink();
 	}
 	void probeAllConnections();
 	void prefillFromConfig();
