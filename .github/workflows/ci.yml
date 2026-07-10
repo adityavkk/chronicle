@@ -381,3 +381,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check SPEC_VERSION.md consistency + upstream drift
         run: ./scripts/spec-version-check.sh
+
+  # docs/BACKLOG.md contracts that its ranked table is exactly the set of open
+  # issues. This fails the moment they diverge: a PR that closes an issue must
+  # also delete its backlog row, and newly filed work must be slotted into the
+  # order. State-only drift (issues closed/opened with no push) is caught the
+  # moment it happens by backlog-drift.yml (issue-event trigger), with
+  # formal-nightly.yml as the backstop.
+  backlog-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/BACKLOG.md against the open issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/backlog-check.sh
