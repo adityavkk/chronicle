@@ -1,9 +1,9 @@
 ---
-title: "Read sealed history from immutable segments, <em>while Redis keeps append truth</em>"
-summary: "Chronicle can serve a sealed stream prefix from authenticated immutable segments and join it to a bounded Redis hot tail. Redis still acknowledges every append and retains the complete frame ZSET. The feature remains off by default, reclamation is disabled, and the retained performance matrix must be rerun."
+title: "Read old data from sealed segments, <em>and recent data from Redis</em>"
+summary: "The old reader got all stream history from Redis. The new reader can get an older sealed part from verified, read-only segment copies, then get the recent part from Redis."
 eyebrow: "Architecture"
 meta: "Performance improvements · immutable segments"
-deck: "The existing read plane stores every stream frame in a Redis sorted set. The new prototype copies sealed history into immutable, indexed segments. A serving reader pins one manifest, verifies bounded data blocks, and returns to Redis for the current tail or any safe fallback."
+deck: "Clients use the same request and receive the same stream. Redis still accepts every append and keeps the complete copy. Segments provide another place to read older data, but Chronicle does not delete the Redis copy."
 byline:
   - label: "Default"
     value: "Redis ZSET stays on"
@@ -24,14 +24,41 @@ import Aside from "../components/Aside.astro";
 import Step from "../components/Step.astro";
 import ImmutableSegmentPaths from "../components/ImmutableSegmentPaths.astro";
 import ImmutableSegmentJourney from "../components/ImmutableSegmentJourney.astro";
+import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
+
+<SimpleBeforeAfter
+  id="simple-explanation"
+  title="A long replay can read old bytes from segments and recent bytes from Redis"
+  intro="A segment is a read-only copy of older stream frames. Chronicle changes where it reads those older frames. It does not change the client request or who accepts writes."
+  clientAction="Ask Chronicle for all frames after a saved offset."
+  oldLabel="Read the complete history from Redis"
+  oldSummary="Every page of old and recent data came from the Redis frame sorted set."
+  oldSteps={[
+    { actor: "Client", action: "Requests the stream from a saved offset." },
+    { actor: "Chronicle", action: "Captures one fixed Redis snapshot for the response." },
+    { actor: "Redis", action: "Returns every page of old and recent stream frames." },
+    { actor: "Chronicle", action: "Sends those ordered frames to the client." },
+  ]}
+  newLabel="Read the sealed prefix, then the hot tail"
+  newSummary="Verified segment blocks can serve the older prefix. Redis still supplies recent frames and safe fallback."
+  newSteps={[
+    { actor: "Client", action: "Makes the same request with the same saved offset." },
+    { actor: "Chronicle", action: "Captures a Redis snapshot and pins one segment manifest." },
+    { actor: "Segment storage", action: "Returns verified blocks for the sealed older prefix." },
+    { actor: "Redis", action: "Returns the recent hot tail and any safe fallback pages." },
+    { actor: "Chronicle", action: "Joins the ordered parts and sends the same stream response." },
+  ]}
+  changed="Chronicle may read the sealed historical prefix from immutable segment storage instead of the Redis frame sorted set."
+  unchanged="Redis still validates and acknowledges every append, stores the complete stream, supplies metadata, and provides fallback."
+  downside="Chronicle must publish, index, verify, cache, and repair another copy. Deleting the Redis history is still disabled."
+/>
 
 <Tldr>
   <ul>
-    <li><strong>The old read plane keeps every history byte in Redis.</strong> Bounded catch-up limits one page, but the Redis frame ZSET still serves every page in a long replay.</li>
-    <li><strong>The new read plane copies sealed history into immutable segments.</strong> A manifest names contiguous segment ranges. Serving reads verify 64 KiB blocks and read the remaining hot tail from Redis under one fixed snapshot.</li>
-    <li><strong>Redis remains the authority.</strong> It still validates and acknowledges every append, controls expiry and deletion, stores the complete ZSET, and supplies safe fallback bytes. A segment failure never turns a local copy into a second source of truth.</li>
-    <li><strong>Migration fails closed.</strong> The global default is <code>off</code>. Shadow mode writes and verifies segment copies but serves Redis. Serving mode may use verified segments and can roll back to shadow or off because Redis retains every frame.</li>
-    <li><strong>The retained benchmark is design evidence.</strong> Local files measured 764 to 1,242 MiB/s for sealed replay, but the run predates the integrated range reader and later safety fixes. The accepted raw inputs cannot be reproduced from another checkout.</li>
+    <li><strong>Before:</strong> Redis served every page of stream history.</li>
+    <li><strong>Now:</strong> verified segment blocks can serve the sealed older prefix. Redis serves the recent tail.</li>
+    <li><strong>Safety:</strong> Redis still keeps the complete stream and remains the append authority and fallback.</li>
+    <li><strong>Cost:</strong> Chronicle has another copy to publish and verify. Reclamation is disabled, and the performance matrix still needs a reproducible rerun.</li>
   </ul>
 </Tldr>
 

@@ -1,9 +1,9 @@
 ---
-title: "Replay 16 MiB streams <em>without holding 16 MiB per reader</em>"
-summary: "Chronicle replaced unbounded Redis suffix reads and whole-response buffering with snapshot pages. Redis fetches one frame, then optionally bulk-fetches only the offset range that fits the remaining 1 MiB target, with a separate 1,024-frame cap."
+title: "Send long history in small pages, <em>instead of loading it all at once</em>"
+summary: "The old reader loaded all remaining stream data before it could respond. The new reader loads and sends about 1 MiB at a time."
 eyebrow: "Architecture"
 meta: "Performance improvements · bounded catch-up"
-deck: "The old catch-up path asked Redis for every remaining frame, then built a second complete response body in Chronicle. The new path captures one stream tail, reads bounded frame batches, returns about 1 MiB at a time, and writes each frame directly to the client."
+deck: "A client makes the same request as before. Chronicle now reads a small page from Redis, sends it, and repeats. A long replay uses more Redis calls, but one reader no longer needs memory for the complete response."
 byline:
   - label: "128-reader cell"
     value: "128 errors → 0"
@@ -26,14 +26,40 @@ import Step from "../components/Step.astro";
 import CatchupPipeline from "../components/CatchupPipeline.astro";
 import CatchupBudget from "../components/CatchupBudget.astro";
 import CatchupResults from "../components/CatchupResults.astro";
+import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
+
+<SimpleBeforeAfter
+  id="simple-explanation"
+  title="One long response now moves through Chronicle in small pieces"
+  intro="The client still asks for every frame after an offset. Chronicle changed how it reads and sends those frames."
+  clientAction="Ask Chronicle for the stream starting at a saved offset."
+  oldLabel="Load everything, then send"
+  oldSummary="One Redis call could return the complete remaining stream. Chronicle held another complete response before sending it."
+  oldSteps={[
+    { actor: "Client", action: "Requests all frames after its saved offset." },
+    { actor: "Redis", action: "Finds and returns every remaining frame in one result." },
+    { actor: "Chronicle", action: "Builds the complete HTTP response in memory." },
+    { actor: "Chronicle", action: "Starts writing the response to the client." },
+  ]}
+  newLabel="Read a page, send it, repeat"
+  newSummary="Chronicle fixes one response boundary, then moves about 1 MiB of whole frames at a time."
+  newSteps={[
+    { actor: "Client", action: "Makes the same request with the same saved offset." },
+    { actor: "Chronicle", action: "Captures the stream tail for this response." },
+    { actor: "Redis", action: "Returns one bounded page of whole frames." },
+    { actor: "Chronicle", action: "Sends that page immediately, then asks for the next page." },
+  ]}
+  changed="Redis and Chronicle handle one bounded page at a time instead of the complete remaining stream."
+  unchanged="The client receives the same ordered frames, offsets, content type, and closed state."
+  downside="A long replay needs several Redis reads. A single frame larger than the page target still has to travel whole."
+/>
 
 <Tldr>
   <ul>
-    <li><strong>The old storage read had no suffix bound.</strong> One `ZRANGEBYLEX` call materialized every remaining frame inside Redis. Chronicle then built another complete body before it wrote the first byte.</li>
-    <li><strong>The new storage read has a frame bound and a separate returned byte target.</strong> Redis fetches one candidate, then bulk-fetches only offsets that can fit the remaining part of about 1 MiB. It does not issue a lookahead query, and the complete page also stops at 1,024 frames.</li>
-    <li><strong>One response keeps one snapshot.</strong> The first page captures the tail, content type, closed state, and stream incarnation. Later appends stay outside that response. A delete followed by recreate invalidates the snapshot.</li>
-    <li><strong>The failing 128-reader cell completed.</strong> The old local server returned 128 errors and completed no accepted replay. The final paged cell completed 435 measured bodies. The 512-reader cell completed 336 measured bodies with no server errors and 1,305.3 MiB peak Chronicle RSS.</li>
-    <li><strong>The tradeoff is page size.</strong> A 16 MiB replay needs 16 returned pages at the 1 MiB default. Smaller pages add storage calls. Larger pages retain more memory and hold the Redis event loop longer.</li>
+    <li><strong>Before:</strong> one reader could load all remaining stream data into Redis and Chronicle memory.</li>
+    <li><strong>Now:</strong> Chronicle reads and sends about 1 MiB of whole frames at a time, with a separate limit of 1,024 frames per page.</li>
+    <li><strong>Result:</strong> the old 128-reader test completed no accepted replay. The new path completed 435 measured, body-checked replays with no server error.</li>
+    <li><strong>Cost:</strong> a 16 MiB replay normally needs 16 returned pages, so smaller memory use requires more Redis calls.</li>
   </ul>
 </Tldr>
 
