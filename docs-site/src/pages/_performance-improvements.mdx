@@ -1,6 +1,6 @@
 ---
 title: "Performance improvements, <em>with evidence</em>"
-summary: "Chronicle performance work is grouped by mechanism, measured result, correctness gate, and remaining limit. This page links to bounded catch-up, shared SSE fanout, horizontal scaling, cloud load tests, and the cross-system configuration report."
+summary: "Chronicle performance work is grouped by mechanism, measured result, correctness gate, and remaining limit. This page links to bounded catch-up, shared SSE fanout, immutable sealed segments, horizontal scaling, cloud load tests, and the cross-system configuration report."
 eyebrow: "Engineering"
 meta: "Performance improvements"
 deck: "Chronicle performance work starts with a measured source of repeated or serialized work. Each change names the mechanism, records the result, keeps the Durable Streams and Jepsen correctness gates, and states what remains slow."
@@ -9,6 +9,8 @@ byline:
     value: "0 complete → 435 measured"
   - label: "Live SSE reads"
     value: "970.5 → 1.000 per append"
+  - label: "Retained local files"
+    value: "764 to 1,242 MiB/s"
   - label: "Protocol gate"
     value: "332 / 332"
 ---
@@ -24,6 +26,7 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
     <li><strong>Bounded catch-up removes whole-suffix reads and buffering.</strong> Redis fetches one frame, then optionally bulk-fetches only the range that fits the remaining 1 MiB target. A separate 1,024-frame cap bounds small-frame pages. Chronicle writes each frame directly to the socket.</li>
     <li><strong>The local 128-reader failure became measurable work.</strong> The old server completed no accepted 16 MiB replay at that concurrency. The paged server completed 435 body-verified responses with no server error in the final offered-window run.</li>
     <li><strong>SSE fanout removes duplicate live reads.</strong> One stream hub on each serving Chronicle replica reads Redis once and shares the formatted event with local clients. The exact-counter guard with 1,000 clients measured 1.000 live Redis reads per append, down from 970.5.</li>
+    <li><strong>Immutable segments move sealed replay bytes away from the frame ZSET.</strong> A manifest and sparse index select authenticated data blocks, while one fixed Redis snapshot supplies the hot tail and safe fallback. The retained local result is diagnostic and must be rerun after the integrated safety fixes.</li>
     <li><strong>Horizontal scaling separates subscription work by Redis slot.</strong> The measured append fanout p99 stayed between 12.48 and 12.61 milliseconds from 1 to 8 replicas. The exact 12 replica point and a cloud run with multiple shards remain open.</li>
     <li><strong>Correctness remains a release gate.</strong> A throughput gain does not excuse a Durable Streams conformance, Jepsen, or Porcupine regression.</li>
   </ul>
@@ -69,6 +72,9 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
   - Read [SSE fanout](./sse-fanout) to understand the old per-client Redis read
     path, the shared stream hub, the safe attach sequence, and the measured
     before and after result.
+  - Read [Immutable segments](./immutable-segments) to understand how Chronicle
+    copies a sealed prefix into authenticated blocks, joins it to one Redis
+    snapshot, falls back safely, rolls back, and stops short of reclamation.
   - Read [Horizontal scale](../horizontal-scale) to understand subscription
     slot homing, work sharding, the replica curve, and the cloud gates that
     quota prevented.

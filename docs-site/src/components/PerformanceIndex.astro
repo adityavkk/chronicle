@@ -3,13 +3,17 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const links = {
   catchup: `${base}/performance-improvements/bounded-catchup`,
   sse: `${base}/performance-improvements/sse-fanout`,
+  segments: `${base}/performance-improvements/immutable-segments`,
   scaling: `${base}/horizontal-scale`,
   loadTests: `${base}/load-testing`,
   issue4: "https://gecgithub01.walmart.com/GPA/chronicle/issues/4",
   issue5: "https://gecgithub01.walmart.com/GPA/chronicle/issues/5",
+  issue6: "https://gecgithub01.walmart.com/GPA/chronicle/issues/6",
   catchupAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0004-bounded-read-pages-and-snapshot-catch-up.md",
   sseAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0005-per-instance-sse-stream-fanout.md",
+  segmentsAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0006-immutable-segment-read-plane-prototype.md",
   catchupEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md",
+  segmentsEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-6-immutable-segments.md",
   comparison: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/ds-bench/configuration-comparison.md",
 };
 ---
@@ -54,9 +58,29 @@ const links = {
     </nav>
   </article>
 
-  <article class="improvement">
+  <article class="improvement featured">
     <div class="head">
       <span class="num">03</span>
+      <span class="status">prototype</span>
+    </div>
+    <h3>Immutable sealed segments</h3>
+    <p class="result">2.67 to 4.26 times same-host sealed gain; rerun required</p>
+    <p>
+      Chronicle can read an authenticated sealed prefix from immutable blocks,
+      then join it to a bounded Redis hot tail. Redis remains the complete
+      append authority and fallback. Reclamation is disabled.
+    </p>
+    <nav aria-label="Immutable segments links">
+      <a class="primary" href={links.segments}>Read the explainer <span aria-hidden="true">→</span></a>
+      <a href={links.issue6}>GPA/chronicle issue #6 <span aria-hidden="true">↗</span></a>
+      <a href={links.segmentsAdr}>Architecture decision <span aria-hidden="true">↗</span></a>
+      <a href={links.segmentsEvidence}>Evidence report <span aria-hidden="true">↗</span></a>
+    </nav>
+  </article>
+
+  <article class="improvement">
+    <div class="head">
+      <span class="num">04</span>
       <span class="status">shipped</span>
     </div>
     <h3>Horizontal scale</h3>
@@ -74,7 +98,7 @@ const links = {
 
   <article class="improvement">
     <div class="head">
-      <span class="num">04</span>
+      <span class="num">05</span>
       <span class="status">measured</span>
     </div>
     <h3>Configurations and systems</h3>

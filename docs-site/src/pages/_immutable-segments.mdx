@@ -1,0 +1,300 @@
+---
+title: "Read sealed history from immutable segments, <em>while Redis keeps append truth</em>"
+summary: "Chronicle can serve a sealed stream prefix from authenticated immutable segments and join it to a bounded Redis hot tail. Redis still acknowledges every append and retains the complete frame ZSET. The feature remains off by default, reclamation is disabled, and the retained performance matrix must be rerun."
+eyebrow: "Architecture"
+meta: "Performance improvements · immutable segments"
+deck: "The existing read plane stores every stream frame in a Redis sorted set. The new prototype copies sealed history into immutable, indexed segments. A serving reader pins one manifest, verifies bounded data blocks, and returns to Redis for the current tail or any safe fallback."
+byline:
+  - label: "Default"
+    value: "Redis ZSET stays on"
+  - label: "Retained local files"
+    value: "764 to 1,242 MiB/s"
+  - label: "Release gate"
+    value: "332/332 + Jepsen + Porcupine"
+  - label: "Issue"
+    value: "GPA/chronicle#6"
+    href: "https://gecgithub01.walmart.com/GPA/chronicle/issues/6"
+---
+
+import Tldr from "../components/Tldr.astro";
+import SectionHead from "../components/SectionHead.astro";
+import Callout from "../components/Callout.astro";
+import Table from "../components/Table.astro";
+import Aside from "../components/Aside.astro";
+import Step from "../components/Step.astro";
+import ImmutableSegmentPaths from "../components/ImmutableSegmentPaths.astro";
+import ImmutableSegmentJourney from "../components/ImmutableSegmentJourney.astro";
+
+<Tldr>
+  <ul>
+    <li><strong>The old read plane keeps every history byte in Redis.</strong> Bounded catch-up limits one page, but the Redis frame ZSET still serves every page in a long replay.</li>
+    <li><strong>The new read plane copies sealed history into immutable segments.</strong> A manifest names contiguous segment ranges. Serving reads verify 64 KiB blocks and read the remaining hot tail from Redis under one fixed snapshot.</li>
+    <li><strong>Redis remains the authority.</strong> It still validates and acknowledges every append, controls expiry and deletion, stores the complete ZSET, and supplies safe fallback bytes. A segment failure never turns a local copy into a second source of truth.</li>
+    <li><strong>Migration fails closed.</strong> The global default is <code>off</code>. Shadow mode writes and verifies segment copies but serves Redis. Serving mode may use verified segments and can roll back to shadow or off because Redis retains every frame.</li>
+    <li><strong>The retained benchmark is design evidence.</strong> Local files measured 764 to 1,242 MiB/s for sealed replay, but the run predates the integrated range reader and later safety fixes. The accepted raw inputs cannot be reproduced from another checkout.</li>
+  </ul>
+</Tldr>
+
+<Callout icon="arrow" label="Performance improvements">
+  This prototype is one Chronicle performance workstream. The
+  [performance improvements index](../) links to bounded catch-up, shared SSE
+  fanout, horizontal scaling, load tests, and their evidence.
+</Callout>
+
+<section class="block" id="read-planes">
+  <SectionHead num="01" label="Read planes" title="Move sealed reads off the frame ZSET, <em>not append acknowledgement</em>" />
+
+  Chronicle stores each append as one member in a Redis lexicographic sorted
+  set. Bounded catch-up limits how much one Redis page can return, but a complete
+  historical replay still asks the Redis primary to find and copy every frame.
+  Adding Chronicle replicas does not remove that storage work.
+
+  Immutable segments add a second read representation. Chronicle copies an
+  ordered sealed prefix into data blocks plus a sparse index. Redis keeps the
+  complete original frames. A client still sends the same request and receives
+  the same ordered frames and cursor fields.
+
+  <ImmutableSegmentPaths />
+
+  The segment wrapper also delegates Redis notifications to the shared SSE hub.
+  Segment files and caches never publish or interpret live wake events. Redis
+  remains the notification authority as well as the append authority.[^integration]
+</section>
+
+<section class="block" id="publication">
+  <SectionHead num="02" label="Publication" title="Objects become visible only after <em>the complete generation is durable</em>" />
+
+  Sealing is a recoverable copy operation. It does not participate in the
+  append transaction. Chronicle can stop during sealing without changing which
+  bytes Redis has acknowledged.
+
+  <Step
+    n={1}
+    fn="Store.Seal"
+    loc="store/segments/store.go:146-315"
+    role="Capture one bounded, TTL neutral primary snapshot after the last sealed offset."
+  >
+    The snapshot fixes the stream incarnation, content type, closed state, and
+    upper tail. Sealing aborts if pagination changes identity, has a gap, stops
+    making progress, or returns an error.
+  </Step>
+
+  <Step
+    n={2}
+    fn="Encode"
+    loc="store/segments/codec.go:38-116"
+    role="Write ordered records, sparse index entries, and one digest for every 65,536 byte data block."
+  >
+    Manifest version 2 limits a segment to 1,024 records. A complete checksum
+    remains available for promotion and repair.
+  </Step>
+
+  <Step
+    n={3}
+    fn="Backend.Put"
+    loc="store/segments/file_backend.go:148-265"
+    role="Make every data and index object durable before publishing a manifest that names it."
+  >
+    The file backend writes a temporary file, syncs it, renames it, and syncs
+    the parent directory. Redis chunks use immutable strings. The object mode in
+    this prototype uses a filesystem origin emulator.
+  </Step>
+
+  <Step
+    n={4}
+    fn="Backend.Publish"
+    loc="store/segments/redis_backend.go:165-205"
+    role="Advance the current manifest only if its expected token still matches."
+  >
+    A concurrent loser reloads the newer generation. A crash before this
+    compare and swap leaves the prior manifest current. A crash after it leaves
+    a manifest whose referenced objects were already durable.
+  </Step>
+
+  <Table>
+    | Mode | Segment work | Client reads | Rollback |
+    | --- | --- | --- | --- |
+    | `off` | none | Redis frame ZSET | not needed |
+    | `shadow` | create and verify copies | Redis frame ZSET | switch to `off` or remove the segment pointer |
+    | `serving` | create and verify copies | verified segments plus the Redis hot tail, with Redis fallback | change the manifest to `shadow` or start in `off` |
+  </Table>
+
+  The global default remains `off`. When an operator enables a candidate
+  backend, new manifests start in shadow. Promotion verifies every referenced
+  object, index entry, record count, block digest, and final offset before a
+  serving reader can use that generation.[^adr]
+
+  <Aside label="Candidate backends" summary="The prototype keeps three storage choices because they answer different questions">
+    `redis-chunks` stores immutable data and indexes in Redis strings. It is the
+    smallest migration step, but it does not remove payload memory or network
+    work from Redis. `local-files` measures sequential host storage and page
+    cache behavior, but a host local file is not shared across replicas.
+    `object-cache` is the production direction under study because replicas can
+    share one sealed origin and keep bounded local block caches. The current
+    origin is a filesystem emulator, not a cloud object service.
+  </Aside>
+</section>
+
+<section class="block" id="journey">
+  <SectionHead num="03" label="Walkthrough" title="Follow one catch-up request through <em>both internal paths</em>" />
+
+  Priya resumes an order audit stream from a saved offset. The stream has a
+  sealed prefix and a short open tail. The walkthrough follows the request from
+  its first Redis snapshot through history, the hot tail, and final snapshot
+  release.
+
+  <ImmutableSegmentJourney />
+</section>
+
+<section class="block" id="safety-state">
+  <SectionHead num="04" label="Safety state" title="Every response is bound to <em>one stream lifetime and one generation</em>" />
+
+  The serving path combines immutable bytes with current Redis state. That join
+  is safe only when every piece names the same stream lifetime and the same
+  response boundary.
+
+  <Table wide>
+    | Mechanism | What it records | Failure behavior |
+    | --- | --- | --- |
+    | Manifest | generation, stream identity, sealed offset, contiguous segment references, index entries, and checksums | a failed publication leaves the prior generation current |
+    | Snapshot | upper tail, content type, closed state, incarnation, and an opaque store token | concurrent appends stay outside the response; a changed identity rejects continuation |
+    | Incarnation ID | one persisted random 128-bit value for each create | delete and recreate cannot join an old prefix to a new tail |
+    | Reader lease and pin | one manifest copy and one primary snapshot for one reader | final confirmation, cancellation, or error releases both; the pin is process local |
+    | Block checksum | one SHA-256 digest for each 64 KiB data block | no byte from a failed block is returned |
+    | Primary fallback | the bounded Redis snapshot captured on the first page | a missing or corrupt segment changes that reader to primary only |
+    | Rollback | the complete Redis frame ZSET and a migration state change | later reads return to Redis without rewriting client offsets |
+  </Table>
+
+  Continuation pages do not renew sliding TTL. Sealing, repair, manifest
+  verification, and inherited source reads also use no-touch pages. A logical
+  client read renews sliding TTL on its first primary snapshot page only.
+
+  A Redis failure cannot fall back to unchecked segment bytes. Chronicle still
+  needs Redis to validate expiry, deletion, current metadata, and incarnation.
+  When Redis cannot make those decisions, the read fails.[^faults]
+</section>
+
+<section class="block" id="evidence">
+  <SectionHead num="05" label="Evidence" title="Mechanism checks passed; <em>the end-to-end comparison still needs a rerun</em>" />
+
+  The integrated branch has direct evidence for the storage mechanism and its
+  safety boundaries:
+
+  - All seven segment conformance cells passed. The total was 2,324 of 2,324
+    protocol assertions. Candidate shadow cells reported zero segment reads and
+    238 seals. Candidate serving cells reported 77 segment reads and 238 seals.
+  - Direct Porcupine `store-linz` passed in `off`, `redis-chunks`,
+    `local-files`, and `object-cache`. The four histories contained 3,852,
+    3,909, 2,960, and 2,043 operations.
+  - The same four Porcupine modes passed through randomized Toxiproxy Redis
+    partitions and latency. The histories contained 2,652, 3,341, 3,517, and
+    1,645 operations.
+  - Maintained Jepsen runs reached all eight stream tails in baseline,
+    Chronicle restart, and Redis restart scenarios. Paged catch-up passed six
+    interrupted and resumed attempts across a 136-frame fork. SSE resume
+    completed all eight clients and all 320 observations.
+  - Range tests require aligned reads no larger than 65,536 bytes. Other tests
+    cover frame bounds, oversized first frames, continuation, corruption,
+    cancellation, TTL, forks, delete and recreate, and pin release.[^review]
+
+  These checks cover segment path selection, bounded storage reads, and the
+  listed safety rules. They do not measure production throughput.
+
+  The retained local performance matrix predates the range authenticated page
+  reader, random incarnation repair, TTL neutral continuation, and fail closed
+  garbage collection. Every accepted cell completed with zero HTTP errors and
+  zero catch-up drops, but the figures describe the earlier prototype.
+
+  <Table wide>
+    | 512 sealed readers | Throughput | Full-read p99 | Gain over `off` |
+    | --- | ---: | ---: | ---: |
+    | `off` | 286.5 MiB/s | 12,705.8 ms | 1.00 times |
+    | `redis-chunks` | 357.9 MiB/s | 8,237.1 ms | 1.25 times |
+    | `local-files` | 763.6 MiB/s | 3,631.1 ms | 2.67 times |
+    | `object-cache` | 788.4 MiB/s | 4,853.8 ms | 2.75 times |
+  </Table>
+
+  Across the retained sealed matrix, local files measured 763.6 to 1,241.6
+  MiB/s. Object cache measured 448.9 to 788.4 MiB/s from 32 to 512 readers.
+  Redis chunks measured 347.0 to 378.9 MiB/s. No candidate reached the
+  directional 5 times target. Under the mixed workload, local files and object
+  cache measured only 55.2 to 138.9 MiB/s because synchronous read-time sealing
+  created many small segments.[^evidence]
+
+  <Callout icon="alert" label="Retained release-evidence gap">
+    The accepted raw inputs were ignored working files. Later diagnostics
+    overwrote some cells, including the off-mode 512-reader file. The
+    regenerated summary cannot reproduce the historical tables from another
+    checkout. The harness has since fixed reader rotation, phase-tagged resource
+    samples, Redis script time, and p95 reporting, but the matrix has not been
+    rerun after the integrated correctness changes. These numbers are design
+    evidence only.
+  </Callout>
+
+  <Aside label="Cross-system context" summary="The retained report does not establish Ursula parity or cloud capacity">
+    A prior study reported about 2.6 to 2.8 GiB/s for Ursula disk, Rust WAL, and
+    Node memory on different hardware, storage, durability, and process
+    topologies. Those results are not directly comparable with this local
+    matrix. The object candidate also used a filesystem emulator. No number on
+    this page is a cloud object capacity result.
+  </Aside>
+</section>
+
+<section class="block" id="failure-boundary">
+  <SectionHead num="06" label="Failure boundary" title="What can still fail, and <em>where Chronicle stops</em>" />
+
+  <Table wide>
+    | Failure | Current response | Missing release proof |
+    | --- | --- | --- |
+    | data or index write stops before publication | keep the prior current manifest | repeat against the selected object service |
+    | cached or origin block fails checksum | return bounded bytes from the captured Redis snapshot or return an error | generation-bound cloud range reads and HTTP cache faults |
+    | path is deleted and recreated during paging | return `ErrReadSnapshotChanged`; never mix lifetimes | repeat through two Chronicle processes |
+    | publisher pauses after object write and before manifest publication | garbage collection deletes nothing | a durable staging barrier |
+    | reader on one replica holds an old manifest | process local pin protects only that replica; deletion remains disabled | shared cross-replica holds |
+    | Redis is unavailable | fail the read instead of serving unchecked local bytes | candidate mode Redis restart runs in each server configuration |
+    | object origin is slow or unavailable | cache hits may continue; a failed cold range falls back to bounded Redis pages, while a stalled request waits for cancellation or timeout | real credentials, quotas, multipart interruption, and regional fault tests |
+  </Table>
+
+  Garbage collection is audit only. It classifies protected items as kept and
+  eligible items as deferred. Deleted manifest and segment counters must remain
+  zero. This fails closed against a publisher that pauses between object write
+  and manifest publication, but storage use can grow without bound.
+
+  Real reclamation needs a collector-visible publication barrier. File and
+  object modes need a durable staging lease or a shared lock that spans object
+  writes through pointer publication. Redis needs an atomic same-slot staging
+  protocol. Every mode also needs shared snapshot, fork, rollback, and repair
+  holds. The current ADR makes no reclamation-readiness claim.[^adr]
+
+  <Callout icon="alert" label="Non-negotiable release gates">
+    The complete Durable Streams suite must remain 332 of 332 in the default
+    layout, plus shadow and serving for every candidate backend. Maintained
+    Jepsen tests must keep passing restart, interruption, resume, fork, and
+    notification faults.
+    Maintained Porcupine checks must remain linearizable in every segment mode,
+    including injected Redis partitions. A lost acknowledged byte, duplicate
+    accepted append, offset gap, stale incarnation read, premature manifest, or
+    accepted stale fence rejects the feature regardless of throughput.
+  </Callout>
+
+  <Callout icon="arrow" label="Source records">
+    Track the work in
+    [GPA/chronicle issue #6](https://gecgithub01.walmart.com/GPA/chronicle/issues/6).
+    Read the [architecture decision][adr], [performance evidence][evidence],
+    [bounded page integration][integration], [fault matrix][faults], and
+    [independent adversarial review][review] for the complete design and
+    validation record.
+  </Callout>
+</section>
+
+[^adr]: [ADR-0006, Prototype immutable sealed segments outside the Redis frame ZSET](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0006-immutable-segment-read-plane-prototype.md). It defines the storage formats, publication order, migration states, rollback policy, and disabled reclamation.
+[^evidence]: [Issue 6 immutable segment evidence](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-6-immutable-segments.md). It records the local matrix, method, exact tables, resource counters, and the retained raw-input gap.
+[^integration]: [Immutable segments with bounded catch-up](https://github.com/adityavkk/chronicle/blob/main/docs/integration/immutable-segments-pagereader.md). It defines the PageReader, snapshot release, range authentication, hot-tail handoff, and Redis notification delegation.
+[^faults]: [Immutable segment fault matrix](https://github.com/adityavkk/chronicle/blob/main/docs/verification/immutable-segments-fault-matrix.md). It separates deterministic automated evidence from remaining process, object-service, and cross-replica gates.
+[^review]: [Issue 6 adversarial review and validation record](https://github.com/adityavkk/chronicle/blob/main/docs/verification/issue-6-adversarial-review.md). It records the attack-oriented findings, fixes, exact final checks, and remaining operational limits.
+
+[adr]: https://github.com/adityavkk/chronicle/blob/main/docs/adr/0006-immutable-segment-read-plane-prototype.md
+[evidence]: https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-6-immutable-segments.md
+[integration]: https://github.com/adityavkk/chronicle/blob/main/docs/integration/immutable-segments-pagereader.md
+[faults]: https://github.com/adityavkk/chronicle/blob/main/docs/verification/immutable-segments-fault-matrix.md
+[review]: https://github.com/adityavkk/chronicle/blob/main/docs/verification/issue-6-adversarial-review.md
