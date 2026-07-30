@@ -1,0 +1,18 @@
+# Issue #6 immutable-segment matrix: fixed closed-loop replay concurrency.
+name: segment-readers-128
+description: 128 concurrent full-stream readers over 16 prefilled 4 MiB streams.
+duration: 10s
+warmup: 3s
+streams:
+  count: 16
+  prefix: bench/segments/r128
+  content_type: application/json
+  prefill:
+    messages: 4096
+    message_bytes: 1024
+    batch_size: 128
+catchup:
+  readers: 128
+limits:
+  max_in_flight_catchup: 128
+  request_timeout: 30s

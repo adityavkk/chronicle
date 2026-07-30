@@ -19,10 +19,17 @@ import (
 // interval CPU% from deltas, which is robust where instantaneous %CPU
 // readings (decaying averages) are not.
 type ResourceSample struct {
-	Sec        int     `json:"sec"`
-	Name       string  `json:"name"`
-	RSSBytes   int64   `json:"rss_bytes"`
-	CPUSeconds float64 `json:"cpu_seconds"`
+	Sec                int     `json:"sec"`
+	Phase              string  `json:"phase,omitempty"`
+	Name               string  `json:"name"`
+	RSSBytes           int64   `json:"rss_bytes"`
+	CPUSeconds         float64 `json:"cpu_seconds"`
+	NetworkReadBytes   int64   `json:"network_read_bytes,omitempty"`
+	NetworkWriteBytes  int64   `json:"network_write_bytes,omitempty"`
+	OpenFiles          int64   `json:"open_files,omitempty"`
+	Connections        int64   `json:"connections,omitempty"`
+	Operations         int64   `json:"operations,omitempty"`
+	ScriptMicroseconds int64   `json:"script_microseconds,omitempty"`
 }
 
 // MetricSample is one Prometheus or Redis INFO observation. Metric preserves
@@ -134,8 +141,30 @@ func (s *sampler) samplePids(sec int) {
 		if err != nil {
 			continue
 		}
-		s.add(ResourceSample{Sec: sec, Name: name, RSSBytes: rssKB * 1024, CPUSeconds: cpu})
+		s.add(ResourceSample{
+			Sec:        sec,
+			Name:       name,
+			RSSBytes:   rssKB * 1024,
+			CPUSeconds: cpu,
+			OpenFiles:  processOpenFiles(pidFromString(fields[0])),
+		})
 	}
+}
+
+func pidFromString(value string) int {
+	pid, _ := strconv.Atoi(value)
+	return pid
+}
+
+func processOpenFiles(pid int) int64 {
+	if pid <= 0 {
+		return 0
+	}
+	entries, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", pid))
+	if err != nil {
+		return 0 // unavailable on macOS; process collector remains the fallback
+	}
+	return int64(len(entries))
 }
 
 // parseCPUTime parses ps cputime: [[dd-]hh:]mm:ss[.cc].
@@ -164,69 +193,92 @@ func parseCPUTime(v string) (float64, error) {
 // raw TCP connection — no client dependency, no docker exec latency.
 func (s *sampler) sampleRedis(sec int) {
 	for name, addr := range s.redis {
-		mem, cpu, metrics, err := redisInfoDetailed(addr)
+		info, err := redisInfoDetailed(addr)
 		if err != nil {
 			continue
 		}
-		s.add(ResourceSample{Sec: sec, Name: name, RSSBytes: mem, CPUSeconds: cpu})
-		for metric, value := range metrics {
+		s.add(ResourceSample{
+			Sec:                sec,
+			Name:               name,
+			RSSBytes:           info.usedMemory,
+			CPUSeconds:         info.cpuSeconds,
+			NetworkReadBytes:   info.networkRead,
+			NetworkWriteBytes:  info.networkWrite,
+			Connections:        info.connections,
+			Operations:         info.operations,
+			ScriptMicroseconds: info.scriptMicroseconds,
+		})
+		for metric, value := range info.metrics {
 			s.addMetric(MetricSample{Sec: sec, Name: name, Metric: metric, Value: value})
 		}
 	}
 }
 
 func redisInfo(addr string) (usedMemory int64, cpuSeconds float64, err error) {
-	usedMemory, cpuSeconds, _, err = redisInfoDetailed(addr)
-	return usedMemory, cpuSeconds, err
+	info, err := redisInfoDetailed(addr)
+	return info.usedMemory, info.cpuSeconds, err
 }
 
-func redisInfoDetailed(addr string) (usedMemory int64, cpuSeconds float64, metrics map[string]float64, err error) {
+type redisInfoSample struct {
+	usedMemory         int64
+	cpuSeconds         float64
+	networkRead        int64
+	networkWrite       int64
+	connections        int64
+	operations         int64
+	scriptMicroseconds int64
+	metrics            map[string]float64
+}
+
+func redisInfoDetailed(addr string) (redisInfoSample, error) {
 	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(context.Background(), "tcp", addr)
 	if err != nil {
-		return 0, 0, nil, err
+		return redisInfoSample{}, err
 	}
 	defer conn.Close() //nolint:errcheck // read-only probe connection
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 	if _, err := conn.Write([]byte("INFO\r\n")); err != nil {
-		return 0, 0, nil, err
+		return redisInfoSample{}, err
 	}
 	r := bufio.NewReader(conn)
-	header, err := r.ReadString('\n')
+	info, err := readRedisBulk(r)
 	if err != nil {
-		return 0, 0, nil, err
+		return redisInfoSample{}, err
 	}
-	if !strings.HasPrefix(header, "$") {
-		return 0, 0, nil, fmt.Errorf("unexpected INFO reply %q", header)
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(header[1:]))
-	if err != nil || n <= 0 {
-		return 0, 0, nil, fmt.Errorf("bad INFO length %q", header)
-	}
-	buf := make([]byte, n)
-	if _, err := readFull(r, buf); err != nil {
-		return 0, 0, nil, err
-	}
+	result := redisInfoSample{metrics: make(map[string]float64)}
 	var sys, user float64
-	metrics = make(map[string]float64)
-	for _, line := range strings.Split(string(buf), "\r\n") {
+	for _, line := range strings.Split(string(info), "\r\n") {
 		key, raw, ok := strings.Cut(line, ":")
 		if !ok {
 			continue
 		}
 		switch {
 		case key == "used_memory":
-			usedMemory, _ = strconv.ParseInt(raw, 10, 64)
+			result.usedMemory, _ = strconv.ParseInt(raw, 10, 64)
 		case key == "used_cpu_sys":
 			sys, _ = strconv.ParseFloat(raw, 64)
 		case key == "used_cpu_user":
 			user, _ = strconv.ParseFloat(raw, 64)
+		case key == "total_net_input_bytes":
+			result.networkRead, _ = strconv.ParseInt(raw, 10, 64)
+		case key == "total_net_output_bytes":
+			result.networkWrite, _ = strconv.ParseInt(raw, 10, 64)
+		case key == "connected_clients":
+			result.connections, _ = strconv.ParseInt(raw, 10, 64)
+		case key == "total_commands_processed":
+			result.operations, _ = strconv.ParseInt(raw, 10, 64)
+			result.metrics[key] = float64(result.operations)
+		case strings.HasPrefix(key, "cmdstat_eval"):
+			result.scriptMicroseconds += redisCommandStat(line, "usec")
 		case redisMetricWanted(key):
 			if value, parseErr := strconv.ParseFloat(raw, 64); parseErr == nil {
-				metrics[key] = value
+				result.metrics[key] = value
 			}
 		}
 	}
-	return usedMemory, sys + user, metrics, nil
+	result.cpuSeconds = sys + user
+	result.metrics["cmdstat_eval_usec"] = float64(result.scriptMicroseconds)
+	return result, nil
 }
 
 func redisMetricWanted(name string) bool {
@@ -234,6 +286,7 @@ func redisMetricWanted(name string) bool {
 	case "total_commands_processed",
 		"instantaneous_ops_per_sec",
 		"blocked_clients",
+		"connected_clients",
 		"evicted_keys",
 		"keyspace_hits",
 		"keyspace_misses",
@@ -291,7 +344,9 @@ func prometheusMetricWanted(metric string) bool {
 	if i := strings.IndexByte(name, '{'); i >= 0 {
 		name = name[:i]
 	}
-	if strings.HasPrefix(name, "chronicle_read_") {
+	if strings.HasPrefix(name, "chronicle_read_") ||
+		strings.HasPrefix(name, "chronicle_sse_") ||
+		strings.HasPrefix(name, "chronicle_segment_") {
 		return true
 	}
 	switch name {
@@ -309,6 +364,49 @@ func prometheusMetricWanted(metric string) bool {
 	default:
 		return false
 	}
+}
+
+func readRedisBulk(r *bufio.Reader) ([]byte, error) {
+	header, err := r.ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(header, "$") {
+		return nil, fmt.Errorf("unexpected INFO reply %q", header)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(header[1:]))
+	if err != nil || n <= 0 {
+		return nil, fmt.Errorf("bad INFO length %q", header)
+	}
+	buf := make([]byte, n)
+	if _, err := readFull(r, buf); err != nil {
+		return nil, err
+	}
+	// Consume the bulk-string CRLF so the next pipelined response starts at its
+	// own header.
+	trailer, err := r.ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+	if trailer != "\r\n" {
+		return nil, fmt.Errorf("bad INFO trailer %q", trailer)
+	}
+	return buf, nil
+}
+
+func redisCommandStat(line, field string) int64 {
+	_, values, ok := strings.Cut(line, ":")
+	if !ok {
+		return 0
+	}
+	for _, value := range strings.Split(values, ",") {
+		key, number, found := strings.Cut(value, "=")
+		if found && key == field {
+			parsed, _ := strconv.ParseInt(number, 10, 64)
+			return parsed
+		}
+	}
+	return 0
 }
 
 func readFull(r *bufio.Reader, buf []byte) (int, error) {

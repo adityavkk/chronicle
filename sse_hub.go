@@ -282,7 +282,14 @@ func (h *sseHub) run() {
 	defer close(h.done)
 	defer h.markReady(h.ctx.Err())
 
-	if subscriber, ok := h.handler.Store.(store.NotificationSubscriber); ok {
+	var subscriber store.NotificationSubscriber
+	var ok bool
+	if provider, hasProvider := h.handler.Store.(store.NotificationSubscriberProvider); hasProvider {
+		subscriber, ok = provider.NotificationSubscriber()
+	} else {
+		subscriber, ok = h.handler.Store.(store.NotificationSubscriber)
+	}
+	if ok {
 		h.runPersistent(subscriber)
 		return
 	}
@@ -420,12 +427,17 @@ func (h *sseHub) refresh() error {
 		ctx = context.Background()
 	}
 	reader := h.handler.pageReader()
+	var snapshot *store.ReadSnapshot
+	defer func() {
+		if snapshot != nil {
+			releaseReadSnapshot(reader, h.path, *snapshot)
+		}
+	}()
 	next := h.currentOffset()
 	opts := store.ReadPageOptions{
 		TargetBytes: min(h.handler.readPageBytes(), h.batchLimit),
 		MaxFrames:   store.DefaultReadPageFrames,
 	}
-	var snapshot *store.ReadSnapshot
 	emptyPages := 0
 	for {
 		if err := ctx.Err(); err != nil {

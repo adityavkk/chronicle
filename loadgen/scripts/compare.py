@@ -22,6 +22,14 @@ SCENARIOS = [
     "fanout",
     "catchup",
     "mixed",
+    "segment-readers-8",
+    "segment-readers-32",
+    "segment-readers-128",
+    "segment-readers-512",
+    "segment-mixed-readers-8",
+    "segment-mixed-readers-32",
+    "segment-mixed-readers-128",
+    "segment-mixed-readers-512",
 ]
 
 METRICS = [

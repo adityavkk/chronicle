@@ -1,0 +1,23 @@
+# Issue #6 mixed matrix: sealed replay while the same streams retain writes.
+name: segment-mixed-readers-32
+description: 32 full-stream readers plus 80 appends/s over 16 prefilled 4 MiB streams.
+duration: 10s
+warmup: 3s
+streams:
+  count: 16
+  prefix: bench/segments/mixed-r32
+  content_type: application/json
+  prefill:
+    messages: 4096
+    message_bytes: 1024
+    batch_size: 128
+writers:
+  per_stream: 1
+  rate: 5/s
+  message_bytes: 256
+catchup:
+  readers: 32
+limits:
+  max_in_flight_appends: 256
+  max_in_flight_catchup: 32
+  request_timeout: 30s

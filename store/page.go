@@ -35,6 +35,10 @@ type ReadSnapshot struct {
 	ContentType string
 	Closed      bool
 	Incarnation string
+	// StoreToken is an opaque, process-local storage generation identifier.
+	// Handlers pass it back only through ReadPageOptions.Snapshot; it is never
+	// serialized into the Durable Streams wire protocol.
+	StoreToken string
 }
 
 // ReadPageOptions controls one bounded storage read. Snapshot is nil on the
@@ -43,6 +47,9 @@ type ReadPageOptions struct {
 	TargetBytes int
 	MaxFrames   int
 	Snapshot    *ReadSnapshot
+	// NoTouch is reserved for Chronicle's internal sealing and repair work.
+	// It preserves lazy expiry checks but does not renew a sliding TTL.
+	NoTouch bool
 }
 
 // Normalize fills safe defaults for omitted page bounds.
@@ -82,4 +89,10 @@ type ReadPage struct {
 // Store implementations continue to compile.
 type PageReader interface {
 	ReadPage(ctx context.Context, path string, offset Offset, opts ReadPageOptions) (ReadPage, error)
+}
+
+// PageSnapshotReleaser is implemented by stores that retain resources for a
+// multi-page snapshot. ReleaseReadSnapshot must be safe to call more than once.
+type PageSnapshotReleaser interface {
+	ReleaseReadSnapshot(path string, snapshot ReadSnapshot)
 }

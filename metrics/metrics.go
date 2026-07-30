@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	chronicle "gecgithub01.walmart.com/auk000v/chronicle"
+	"gecgithub01.walmart.com/auk000v/chronicle/store/segments"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
@@ -70,9 +71,15 @@ type Prometheus struct {
 	sseSubscriptionEvents *prometheus.CounterVec
 }
 
+// SegmentStatsSource is implemented by the feature-gated immutable read plane.
+type SegmentStatsSource interface {
+	Stats() segments.Stats
+}
+
 var (
-	_ webhook.Metrics      = (*Prometheus)(nil)
-	_ chronicle.SSEMetrics = (*Prometheus)(nil)
+	_ webhook.Metrics       = (*Prometheus)(nil)
+	_ chronicle.ReadMetrics = (*Prometheus)(nil)
+	_ chronicle.SSEMetrics  = (*Prometheus)(nil)
 )
 
 // New builds a Prometheus recorder with its own registry, including the standard
@@ -267,6 +274,65 @@ func New() *Prometheus {
 		p.sseSubscriptionEvents,
 	)
 	return p
+}
+
+// RegisterSegments adds issue-6 read-plane counters to this registry. It is
+// called only when a segment mode is explicitly enabled, so the default
+// observability surface stays byte-for-byte free of prototype-only series.
+func (p *Prometheus) RegisterSegments(source SegmentStatsSource) {
+	counter := func(name, help string, value func(segments.Stats) uint64) prometheus.Collector {
+		return prometheus.NewCounterFunc(prometheus.CounterOpts{Name: name, Help: help}, func() float64 {
+			return float64(value(source.Stats()))
+		})
+	}
+	seconds := func(name, help string, value func(segments.Stats) uint64, gauge bool) prometheus.Collector {
+		read := func() float64 { return float64(value(source.Stats())) / float64(time.Second) }
+		if gauge {
+			return prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: name, Help: help}, read)
+		}
+		return prometheus.NewCounterFunc(prometheus.CounterOpts{Name: name, Help: help}, read)
+	}
+	gauge := func(name, help string, value func(segments.Stats) uint64) prometheus.Collector {
+		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: name, Help: help}, func() float64 {
+			return float64(value(source.Stats()))
+		})
+	}
+	p.reg.MustRegister(
+		counter("chronicle_segment_seals_total", "Durable immutable manifest generations published.",
+			func(s segments.Stats) uint64 { return s.Seals }),
+		seconds("chronicle_segment_seal_seconds_total", "Wall time spent completing successful immutable durability barriers.",
+			func(s segments.Stats) uint64 { return s.SealDurationNanoseconds }, false),
+		seconds("chronicle_segment_seal_seconds_max", "Longest successful immutable durability barrier observed by this process.",
+			func(s segments.Stats) uint64 { return s.SealDurationMaxNanoseconds }, true),
+		counter("chronicle_segment_reads_total", "Reads which served at least one record from an immutable segment.",
+			func(s segments.Stats) uint64 { return s.SegmentReads }),
+		counter("chronicle_segment_primary_fallbacks_total", "Reads which used the complete primary Redis copy.",
+			func(s segments.Stats) uint64 { return s.PrimaryFallbacks }),
+		counter("chronicle_segment_checksum_failures_total", "Checksum or immutable-format failures rejected before serving bytes.",
+			func(s segments.Stats) uint64 { return s.ChecksumFailures }),
+		counter("chronicle_segment_bytes_served_total", "Payload bytes served from immutable segments.",
+			func(s segments.Stats) uint64 { return s.BytesServed }),
+		counter("chronicle_segment_origin_reads_total", "Data+index pairs fetched from the object origin.",
+			func(s segments.Stats) uint64 { return s.Backend.OriginReads }),
+		counter("chronicle_segment_origin_bytes_total", "Data and index bytes fetched from the object origin.",
+			func(s segments.Stats) uint64 { return s.Backend.OriginBytes }),
+		counter("chronicle_segment_cache_hits_total", "Checksum-verified local object-cache hits.",
+			func(s segments.Stats) uint64 { return s.Backend.CacheHits }),
+		counter("chronicle_segment_cache_misses_total", "Local object-cache misses, including rejected stale entries.",
+			func(s segments.Stats) uint64 { return s.Backend.CacheMisses }),
+		counter("chronicle_segment_cache_evictions_total", "Files removed to enforce the local object-cache byte bound.",
+			func(s segments.Stats) uint64 { return s.Backend.CacheEvictions }),
+		gauge("chronicle_segment_cache_bytes", "Current local object-cache occupancy in bytes.",
+			func(s segments.Stats) uint64 { return s.Backend.CacheBytes }),
+		counter("chronicle_segment_backend_bytes_read_total", "Encoded data and index bytes read by the candidate backend.",
+			func(s segments.Stats) uint64 { return s.Backend.BytesRead }),
+		counter("chronicle_segment_backend_bytes_written_total", "Encoded data and index bytes durably written by the candidate backend.",
+			func(s segments.Stats) uint64 { return s.Backend.BytesWritten }),
+		counter("chronicle_segment_redis_reads_total", "Logical immutable-segment reads from Redis strings.",
+			func(s segments.Stats) uint64 { return s.Backend.RedisReads }),
+		counter("chronicle_segment_redis_writes_total", "Logical immutable-segment writes to Redis strings.",
+			func(s segments.Stats) uint64 { return s.Backend.RedisWrites }),
+	)
 }
 
 // SweepTick implements webhook.Metrics.

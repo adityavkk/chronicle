@@ -581,6 +581,12 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		}
 		return readPageError(err)
 	}
+	ownsSnapshot := true
+	defer func() {
+		if ownsSnapshot {
+			releaseReadSnapshot(reader, path, firstPage.Snapshot)
+		}
+	}()
 
 	// Handle long-poll mode - wait if no messages and either:
 	// 1. Client used offset=now (wants to wait for future data)
@@ -658,10 +664,13 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		// The wait result is only a wake. Capture one new upper snapshot and
 		// stream it through the same bounded page path as ordinary catch-up.
 		h.observeReadPage(firstPage)
+		releaseReadSnapshot(reader, path, firstPage.Snapshot)
+		ownsSnapshot = false
 		firstPage, err = reader.ReadPage(r.Context(), path, effectiveOffset, pageOpts)
 		if err != nil {
 			return readPageError(err)
 		}
+		ownsSnapshot = true
 	}
 
 	nextOffset := firstPage.Snapshot.Tail
@@ -730,6 +739,7 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	}
 
 	w.WriteHeader(http.StatusOK)
+	ownsSnapshot = false
 	h.streamCatchupResponse(
 		w,
 		r,

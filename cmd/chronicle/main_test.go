@@ -23,6 +23,50 @@ type recordingSubscriptionService struct {
 	promoted    chan struct{}
 }
 
+func TestValidateSegmentConfig(t *testing.T) {
+	valid := chronicle.DefaultConfig()
+	if err := validateSegmentConfig(valid); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*chronicle.Config)
+	}{
+		{name: "mode", mutate: func(cfg *chronicle.Config) { cfg.SegmentMode = "unknown" }},
+		{name: "target", mutate: func(cfg *chronicle.Config) { cfg.SegmentTargetBytes = 0 }},
+		{name: "stride", mutate: func(cfg *chronicle.Config) { cfg.SegmentIndexStride = 0 }},
+		{name: "cache", mutate: func(cfg *chronicle.Config) { cfg.SegmentCacheBytes = 0 }},
+		{name: "state", mutate: func(cfg *chronicle.Config) { cfg.SegmentInitialState = "cutover" }},
+		{name: "local directory", mutate: func(cfg *chronicle.Config) {
+			cfg.SegmentMode = "local-files"
+			cfg.SegmentDir = ""
+		}},
+		{name: "object directory", mutate: func(cfg *chronicle.Config) {
+			cfg.SegmentMode = "object-cache"
+			cfg.SegmentDir = ""
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := chronicle.DefaultConfig()
+			test.mutate(&cfg)
+			if err := validateSegmentConfig(cfg); err == nil {
+				t.Fatal("invalid segment config was accepted")
+			}
+		})
+	}
+
+	for _, mode := range []string{"local-files", "object-cache"} {
+		cfg := chronicle.DefaultConfig()
+		cfg.SegmentMode = mode
+		cfg.SegmentDir = t.TempDir()
+		cfg.SegmentInitialState = "serving"
+		if err := validateSegmentConfig(cfg); err != nil {
+			t.Fatalf("valid %s config: %v", mode, err)
+		}
+	}
+}
+
 func TestValidateSSEConfig(t *testing.T) {
 	valid := chronicle.DefaultConfig()
 	if err := validateSSEConfig(valid); err != nil {

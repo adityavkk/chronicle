@@ -59,6 +59,13 @@ func (h *Handler) handleSSE(
 		}
 		return readPageError(err)
 	}
+	snapshot := first.Snapshot
+	snapshotReleased := false
+	defer func() {
+		if !snapshotReleased {
+			releaseReadSnapshot(reader, path, snapshot)
+		}
+	}()
 	if err := lease.validateSnapshot(first.Snapshot); err != nil {
 		return err
 	}
@@ -103,7 +110,6 @@ func (h *Handler) handleSSE(
 		}
 	}()
 
-	snapshot := first.Snapshot
 	page := first
 	currentOffset := offset
 	emptyPages := 0
@@ -202,6 +208,8 @@ func (h *Handler) handleSSE(
 	if err := lease.validateSnapshot(snapshot); err != nil {
 		return err
 	}
+	releaseReadSnapshot(reader, path, snapshot)
+	snapshotReleased = true
 
 	// Live delivery uses one shared bounded durable read and one shared
 	// formatted data event. A lagged client disconnects and resumes from the

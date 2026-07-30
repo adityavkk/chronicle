@@ -240,6 +240,12 @@ func (h *Handler) observeReadCancellation(phase string) {
 	}
 }
 
+func releaseReadSnapshot(reader store.PageReader, path string, snapshot store.ReadSnapshot) {
+	if releaser, ok := reader.(store.PageSnapshotReleaser); ok {
+		releaser.ReleaseReadSnapshot(path, snapshot)
+	}
+}
+
 // streamCatchupResponse writes each storage page directly to the response.
 // Once headers are committed, an internal pagination failure must abort the
 // transport. A clean EOF would otherwise let a client accept a partial opaque
@@ -257,6 +263,7 @@ func (h *Handler) streamCatchupResponse(
 ) {
 	writer := &catchupResponseWriter{w: w, json: jsonMode, enveloped: enveloped}
 	pages := 0
+	defer releaseReadSnapshot(reader, path, first.Snapshot)
 	defer func() {
 		if h.ReadMetrics != nil {
 			h.ReadMetrics.ReadResponse(writer.bytes, pages)

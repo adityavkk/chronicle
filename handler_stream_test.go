@@ -17,7 +17,33 @@ import (
 
 	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
+	"gecgithub01.walmart.com/auk000v/chronicle/store/segments"
 )
+
+func TestHandlerSelectsRealSegmentPageReaderCapability(t *testing.T) {
+	backend, err := segments.NewFileBackend(
+		segments.ModeLocalFiles,
+		t.TempDir(),
+		1<<20,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segmented, err := segments.New(store.NewMemoryStore(), segments.Options{
+		Backend:      backend,
+		InitialState: segments.StateServing,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = segmented.Close() })
+
+	handler := &Handler{Store: segmented}
+	if got := handler.pageReader(); got != store.PageReader(segmented) {
+		t.Fatalf("handler selected %T, want the real *segments.Store PageReader", got)
+	}
+}
 
 func TestCatchupFlushesBoundedPagesIncrementally(t *testing.T) {
 	s := store.NewMemoryStore()
@@ -40,6 +66,9 @@ func TestCatchupFlushesBoundedPagesIncrementally(t *testing.T) {
 	}
 	if counted.calls.Load() != 3 {
 		t.Fatalf("ReadPage calls = %d, want 3", counted.calls.Load())
+	}
+	if counted.releases.Load() != 1 {
+		t.Fatalf("snapshot releases = %d, want 1", counted.releases.Load())
 	}
 	if len(w.flushBodies) < 3 {
 		t.Fatalf("flushes = %d, want at least 3", len(w.flushBodies))
@@ -508,17 +537,25 @@ func TestSSEInitialCatchupUsesBoundedPages(t *testing.T) {
 	if counted.calls.Load() != 3 {
 		t.Fatalf("ReadPage calls = %d, want 3", counted.calls.Load())
 	}
+	if counted.releases.Load() != 1 {
+		t.Fatalf("SSE snapshot releases = %d, want 1", counted.releases.Load())
+	}
 }
 
 type countingPageStore struct {
 	store.Store
-	reader store.PageReader
-	calls  atomic.Int64
+	reader   store.PageReader
+	calls    atomic.Int64
+	releases atomic.Int64
 }
 
 func (s *countingPageStore) ReadPage(ctx context.Context, path string, offset store.Offset, opts store.ReadPageOptions) (store.ReadPage, error) {
 	s.calls.Add(1)
 	return s.reader.ReadPage(ctx, path, offset, opts)
+}
+
+func (s *countingPageStore) ReleaseReadSnapshot(string, store.ReadSnapshot) {
+	s.releases.Add(1)
 }
 
 type blockingPageStore struct {

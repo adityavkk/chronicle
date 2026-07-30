@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt smoke clean
+.PHONY: build test lint fmt smoke bench-segments clean
 
 build:
 	go build -o bin/dsload ./cmd/dsload
@@ -16,6 +16,9 @@ fmt:
 # Requires a Durable Streams server on :4437.
 smoke: build
 	bin/dsload run -scenario scenarios/smoke.yaml -label smoke -out results
+
+bench-segments: build
+	./scripts/bench-segments-local.sh
 
 clean:
 	rm -rf bin results

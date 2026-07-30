@@ -16,6 +16,10 @@
 #                              (use when Redis already runs, e.g. an external/shared instance)
 #   CHRONICLE_REDIS_CONTAINER  container name for the flushdb exec
 #                              (default: the compose `redis` service)
+#   CHRONICLE_LOG_LEVEL        server log level                   (default info)
+#   CHRONICLE_SEGMENT_EXPECT_ACTIVITY
+#                              serving: require immutable reads > 0
+#                              shadow: require seals > 0 and reads == 0
 # Defaults preserve the original behavior exactly when these are unset.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -35,6 +39,8 @@ fi
 echo "==> flushing conformance db ${REDIS_DB}"
 if [ -n "${CHRONICLE_REDIS_CONTAINER:-}" ]; then
   docker exec -i "${CHRONICLE_REDIS_CONTAINER}" redis-cli -n "${REDIS_DB}" flushdb >/dev/null
+elif [ -n "${CHRONICLE_SKIP_REDIS_START:-}" ]; then
+  redis-cli -u "${REDIS_URL}" flushdb >/dev/null
 else
   docker compose exec -T redis redis-cli -n "${REDIS_DB}" flushdb >/dev/null
 fi
@@ -46,7 +52,7 @@ echo "==> starting chronicle on :${PORT} (long-poll timeout 500ms)"
 CHRONICLE_LISTEN=":${PORT}" \
 CHRONICLE_REDIS_URL="${REDIS_URL}" \
 CHRONICLE_LONG_POLL_TIMEOUT="500ms" \
-  ./bin/chronicle &
+  ./bin/chronicle -log-level "${CHRONICLE_LOG_LEVEL:-info}" &
 SERVER_PID=$!
 trap 'kill "${SERVER_PID}" 2>/dev/null || true' EXIT
 
@@ -72,3 +78,35 @@ echo "==> running conformance suite against ${BASE_URL}"
 # programmatically instead. Extra args (e.g. -t "SSE") forward to vitest.
 (cd test/conformance && CONFORMANCE_TEST_URL="${BASE_URL}" \
   npx vitest run --no-coverage --reporter=default "$@")
+
+if [ -n "${CHRONICLE_SEGMENT_EXPECT_ACTIVITY:-}" ]; then
+  if [ -z "${CHRONICLE_METRICS_LISTEN:-}" ]; then
+    echo "segment activity assertion requires CHRONICLE_METRICS_LISTEN" >&2
+    exit 1
+  fi
+  metrics_port="${CHRONICLE_METRICS_LISTEN##*:}"
+  metrics="$(curl -sf "http://localhost:${metrics_port}/metrics")"
+  segment_reads="$(awk '$1 == "chronicle_segment_reads_total" { print int($2) }' <<<"${metrics}")"
+  segment_seals="$(awk '$1 == "chronicle_segment_seals_total" { print int($2) }' <<<"${metrics}")"
+  segment_reads="${segment_reads:-0}"
+  segment_seals="${segment_seals:-0}"
+  case "${CHRONICLE_SEGMENT_EXPECT_ACTIVITY}" in
+    serving)
+      if [ "${segment_reads}" -le 0 ] || [ "${segment_seals}" -le 0 ]; then
+        echo "serving candidate was not exercised: reads=${segment_reads} seals=${segment_seals}" >&2
+        exit 1
+      fi
+      ;;
+    shadow)
+      if [ "${segment_seals}" -le 0 ] || [ "${segment_reads}" -ne 0 ]; then
+        echo "shadow candidate activity mismatch: reads=${segment_reads} seals=${segment_seals}" >&2
+        exit 1
+      fi
+      ;;
+    *)
+      echo "unknown CHRONICLE_SEGMENT_EXPECT_ACTIVITY=${CHRONICLE_SEGMENT_EXPECT_ACTIVITY}" >&2
+      exit 1
+      ;;
+  esac
+  echo "==> segment activity: state=${CHRONICLE_SEGMENT_EXPECT_ACTIVITY} reads=${segment_reads} seals=${segment_seals}"
+fi

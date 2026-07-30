@@ -502,6 +502,85 @@ func TestReadPageDifferentialSlidingTTLAndInheritedSource(t *testing.T) {
 	}
 }
 
+func TestReadPageDifferentialContinuationDoesNotRenewSlidingTTL(t *testing.T) {
+	subjectBase := newTestStore(t)
+	clock := store.NewFakeClock(time.Unix(250, 0))
+	subject := New(subjectBase.client, Options{Clock: clock})
+	oracle := store.NewMemoryStore(store.WithClock(clock))
+	ttl := int64(10)
+	path := testPath("page-continuation-ttl")
+	create := store.CreateOptions{
+		ContentType: "application/json",
+		InitialData: []byte(`[1,2]`),
+		TTLSeconds:  &ttl,
+	}
+	if _, _, err := oracle.Create(path, create); err != nil {
+		t.Fatal(err)
+	}
+	mustCreate(t, subject, path, create)
+
+	clock.Advance(9 * time.Second)
+	oracleFirst, err := oracle.ReadPage(
+		context.Background(),
+		path,
+		store.ZeroOffset,
+		store.ReadPageOptions{TargetBytes: 1, MaxFrames: 1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjectFirst, err := subject.ReadPage(
+		context.Background(),
+		path,
+		store.ZeroOffset,
+		store.ReadPageOptions{TargetBytes: 1, MaxFrames: 1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(9 * time.Second)
+	for name, candidate := range map[string]struct {
+		reader   store.PageReader
+		snapshot store.ReadSnapshot
+	}{
+		"oracle":  {reader: oracle, snapshot: oracleFirst.Snapshot},
+		"subject": {reader: subject, snapshot: subjectFirst.Snapshot},
+	} {
+		page, err := candidate.reader.ReadPage(
+			context.Background(),
+			path,
+			store.Offset{ByteOffset: 1},
+			store.ReadPageOptions{
+				TargetBytes: 1,
+				MaxFrames:   1,
+				Snapshot:    &candidate.snapshot,
+			},
+		)
+		if err != nil || len(page.Messages) != 1 {
+			t.Fatalf("%s continuation page=%+v err=%v", name, page, err)
+		}
+	}
+
+	clock.Advance(2 * time.Second)
+	for name, candidate := range map[string]struct {
+		reader   store.PageReader
+		snapshot store.ReadSnapshot
+	}{
+		"oracle":  {reader: oracle, snapshot: oracleFirst.Snapshot},
+		"subject": {reader: subject, snapshot: subjectFirst.Snapshot},
+	} {
+		_, err := candidate.reader.ReadPage(
+			context.Background(),
+			path,
+			store.Offset{ByteOffset: 2},
+			store.ReadPageOptions{Snapshot: &candidate.snapshot},
+		)
+		if !errors.Is(err, store.ErrStreamNotFound) {
+			t.Fatalf("%s continuation extended TTL: %v", name, err)
+		}
+	}
+}
+
 func TestReadPageDifferentialProperty(t *testing.T) {
 	subject := newTestStore(t)
 	rapid.Check(t, func(rt *rapid.T) {

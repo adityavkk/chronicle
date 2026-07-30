@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -700,6 +701,46 @@ func TestEquivalenceExpiryBoundary(t *testing.T) {
 		clock.Set(start.Add(6*time.Second + time.Duration(ttl)*time.Second + time.Nanosecond))
 		if oh, _ := bothHas(t, oracle, subject, path); oh {
 			t.Fatal("renewed window: one ns past renewed expiry must be expired on both")
+		}
+	})
+
+	t.Run("internal bounded page does not renew sliding TTL", func(t *testing.T) {
+		clock, oracle, subject := freshStores()
+		path := testPath("exp-ttl-no-touch")
+		ttl := int64(10)
+		opts := store.CreateOptions{ContentType: "text/plain", TTLSeconds: &ttl}
+		mustCreate(t, subject, path, opts)
+		if _, _, err := oracle.Create(path, opts); err != nil {
+			t.Fatal(err)
+		}
+		mustAppend(t, subject, path, []byte("x"), store.AppendOptions{})
+		if _, err := oracle.Append(path, []byte("x"), store.AppendOptions{}); err != nil {
+			t.Fatal(err)
+		}
+
+		clock.Set(start.Add(6 * time.Second))
+		subjectPage, err := subject.ReadPage(
+			context.Background(),
+			path,
+			store.ZeroOffset,
+			store.ReadPageOptions{NoTouch: true},
+		)
+		if err != nil || len(subjectPage.Messages) != 1 {
+			t.Fatalf("subject no-touch page: messages=%d err=%v", len(subjectPage.Messages), err)
+		}
+		oraclePage, err := oracle.ReadPage(
+			context.Background(),
+			path,
+			store.ZeroOffset,
+			store.ReadPageOptions{NoTouch: true},
+		)
+		if err != nil || len(oraclePage.Messages) != 1 {
+			t.Fatalf("oracle no-touch page: messages=%d err=%v", len(oraclePage.Messages), err)
+		}
+
+		clock.Set(start.Add(time.Duration(ttl)*time.Second + time.Nanosecond))
+		if oh, _ := bothHas(t, oracle, subject, path); oh {
+			t.Fatal("internal snapshot extended the sliding TTL")
 		}
 	})
 }

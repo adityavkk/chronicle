@@ -8,10 +8,12 @@
 --   4=targetBytes
 --   5=maxFrames
 --   6=expectedIncarnation (empty captures the current incarnation)
---   7=rootRead ('1' checks expiry, visibility, and refreshes sliding TTL)
+--   7=rootRead ('1' checks expiry and root visibility)
 --   8=fetchFrames ('1' reads the bounded ZSET range)
 --   9=allowOversized ('1' lets the first returned frame exceed targetBytes)
 --   10=requireCandidate ('1' means the selected upper bound is a known frame)
+--   11=touchRoot ('1' refreshes the root stream's sliding TTL)
+--   12=legacyIncarnation (random ID used only by HSETNX migration)
 --
 -- Reply:
 --   {'NOTFOUND'} | {'SOFTDEL'} | {'SNAPSHOT'} | {'MISSING'}
@@ -25,6 +27,7 @@ local root_read = ARGV[7] == '1'
 local fetch_frames = ARGV[8] == '1'
 local allow_oversized = ARGV[9] == '1'
 local require_candidate = ARGV[10] == '1'
+local touch_root = ARGV[11] == '1'
 
 local m = meta_map(KEYS[1])
 if m == nil then return { 'NOTFOUND' } end
@@ -38,14 +41,25 @@ if root_read then
 end
 
 local incarnation = m.incarnation
-if incarnation == nil or incarnation == '' then incarnation = m.createdAtNs end
+if incarnation == nil or incarnation == '' then
+  if root_read then
+    redis.call('HSETNX', KEYS[1], 'incarnation', ARGV[12])
+    incarnation = redis.call('HGET', KEYS[1], 'incarnation')
+    m.incarnation = incarnation
+  else
+    -- Inherited fork sources are read against metadata fetched before this
+    -- script. Keep the compatibility identity stable until a direct root read
+    -- performs the one-time persisted migration.
+    incarnation = m.createdAtNs
+  end
+end
 if expected_incarnation ~= '' and incarnation ~= expected_incarnation then
   return { 'SNAPSHOT' }
 end
 
-if root_read then
-  -- Every page is active read work. Refresh only the root stream. Reading an
-  -- inherited range must not extend the source stream's sliding TTL.
+if root_read and touch_root then
+  -- Refresh once when the logical client read captures its root snapshot.
+  -- Continuations, sealing, and inherited ranges must not extend a TTL.
   m.accessedAtNs = string.format('%.0f', now)
   redis.call('HSET', KEYS[1], 'accessedAtNs', m.accessedAtNs)
   refresh_backstop(m, now)

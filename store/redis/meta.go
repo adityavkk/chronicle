@@ -15,12 +15,12 @@ import (
 // irrelevant for ms-granularity expiry math).
 const (
 	fCT          = "ct"          // content type
+	fIncarnation = "incarnation" // immutable random identity for this create
 	fTail        = "tail"        // current offset, "%016d_%016d" (presence marker)
 	fLastSeq     = "lastSeq"     // last Stream-Seq value (absent if never set)
 	fClosed      = "closed"      // "1" when closed
 	fTTL         = "ttl"         // TTL seconds (absent if nil)
 	fExpAt       = "expAtNs"     // absolute expiry, UnixNano (absent if nil)
-	fIncarnation = "incarnation" // opaque identity for one create
 	fCreatedAt   = "createdAtNs" // UnixNano
 	fAccessedAt  = "accessedAtNs"
 	fForkedFrom  = "forkedFrom" // source path (absent if not a fork)
@@ -38,11 +38,10 @@ const (
 // fields are omitted (callers write into fresh keys, so no HDEL needed).
 func metaToFields(m *store.StreamMetadata) map[string]string {
 	f := map[string]string{
-		fCT:          m.ContentType,
-		fTail:        m.CurrentOffset.String(),
-		fIncarnation: m.Incarnation,
-		fCreatedAt:   strconv.FormatInt(m.CreatedAt.UnixNano(), 10),
-		fAccessedAt:  strconv.FormatInt(m.LastAccessedAt.UnixNano(), 10),
+		fCT:         m.ContentType,
+		fTail:       m.CurrentOffset.String(),
+		fCreatedAt:  strconv.FormatInt(m.CreatedAt.UnixNano(), 10),
+		fAccessedAt: strconv.FormatInt(m.LastAccessedAt.UnixNano(), 10),
 	}
 	if m.Incarnation != "" {
 		f[fIncarnation] = m.Incarnation

@@ -12,7 +12,7 @@ GO        ?= go
 BINARY    := bin/chronicle
 REDIS_URL ?= redis://localhost:6379
 
-.PHONY: all build run test test-unit test-integration conformance lint fmt tidy redis-up redis-down clean spec-check
+.PHONY: all build run test test-unit test-integration conformance conformance-segments lint fmt tidy redis-up redis-down clean spec-check
 
 all: build
 
@@ -34,6 +34,11 @@ test-integration: redis-up
 
 conformance:
 	./scripts/conformance.sh
+
+# Explicit issue-6 gate: the unchanged default plus every claimed immutable
+# segment candidate. Uses only local Redis/filesystem object emulation.
+conformance-segments:
+	./scripts/conformance-segments.sh
 
 # Filtered conformance run, e.g.: make conformance-filter FILTER="Idempotent Producer"
 conformance-filter:

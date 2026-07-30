@@ -253,7 +253,7 @@ import SSEUserJourney from "../components/SSEUserJourney.astro";
   </Callout>
 </section>
 
-[^adr]: [ADR-0004, Share live SSE reads through per-instance stream hubs](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0004-per-instance-sse-stream-fanout.md). It records the sealed before measurements, the decision, safety rules, and remaining limits.
+[^adr]: [ADR-0005, Share live SSE reads through per-instance stream hubs](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0005-per-instance-sse-stream-fanout.md). It records the sealed before measurements, the decision, safety rules, and remaining limits.
 [^run]: Validation profile [`benchmarks/ds-bench/sse-hub-validation.json`](https://github.com/adityavkk/chronicle/blob/main/benchmarks/ds-bench/sse-hub-validation.json). Source build context `54e4892280ab66630bf2398164b1ba7fa3e52d78cd1ed28263883795e0859ff6`, 109 files. ds-bench image digest `sha256:c4e0f455462d168354c8452c424667b8e0a1bb4a7477609eb4c1f005aafcf719`.
 [^evidence]: The retained [`Issue 4 evidence`](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/sse-fanout/20260729-local-kubernetes/README.md) includes the exact benchmark output, raw client results, Redis counter samples, RSS samples, and runtime profiles. The local Kubernetes results are not a paid GCP replay.
 [^jepsen]: The [`sse-resume` scenario](https://github.com/adityavkk/chronicle/blob/main/jepsen/README.md) checks attach, resume, dropped and duplicate notifications, Redis and Chronicle replacement, bounded replay lag, write timeout, close ordering, and an independent durable-store oracle.

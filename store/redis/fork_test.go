@@ -93,6 +93,51 @@ func TestIntegrationForkBasics(t *testing.T) {
 	}
 }
 
+func TestIntegrationLegacySourceIncarnationMigratesWithoutBreakingForkReads(t *testing.T) {
+	s := newTestStore(t)
+	source := testPath("legacy-source")
+	fork := testPath("legacy-source-fork")
+	mustCreate(t, s, source, store.CreateOptions{})
+	mustAppend(t, s, source, []byte("inherited"), store.AppendOptions{})
+	mustCreate(t, s, fork, store.CreateOptions{ForkedFrom: source})
+
+	ctx := context.Background()
+	if err := s.client.HDel(ctx, metaKey(source), fIncarnation).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := s.client.HExists(ctx, metaKey(source), fIncarnation).Result(); err != nil || exists {
+		t.Fatalf("legacy setup: exists=%v err=%v", exists, err)
+	}
+
+	readFork := func(stage string) {
+		t.Helper()
+		page, err := s.ReadPage(ctx, fork, store.ZeroOffset, store.ReadPageOptions{})
+		if err != nil {
+			t.Fatalf("%s fork read: %v", stage, err)
+		}
+		if len(page.Messages) != 1 || string(page.Messages[0].Data) != "inherited" || !page.UpToDate {
+			t.Fatalf("%s fork page = %+v", stage, page)
+		}
+	}
+	readFork("before source migration")
+	if exists, err := s.client.HExists(ctx, metaKey(source), fIncarnation).Result(); err != nil || exists {
+		t.Fatalf("inherited read must not migrate source: exists=%v err=%v", exists, err)
+	}
+
+	sourcePage, err := s.ReadPage(ctx, source, store.ZeroOffset, store.ReadPageOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sourcePage.Snapshot.Incarnation == "" {
+		t.Fatal("direct source read did not capture a persisted incarnation")
+	}
+	persisted, err := s.client.HGet(ctx, metaKey(source), fIncarnation).Result()
+	if err != nil || persisted != sourcePage.Snapshot.Incarnation {
+		t.Fatalf("persisted incarnation=%q snapshot=%q err=%v", persisted, sourcePage.Snapshot.Incarnation, err)
+	}
+	readFork("after source migration")
+}
+
 func TestIntegrationForkSubOffsets(t *testing.T) {
 	s := newTestStore(t)
 

@@ -17,7 +17,7 @@ needs no network.
 
 ```sh
 jepsen/up.sh                       # create the k3d cluster + deploy chronicle ×2 + Redis
-jepsen/run.sh                      # run baseline, origin-restart, redis-restart, sse-resume
+jepsen/run.sh                      # run baseline, origin-restart, redis-restart, paged-catchup, sse-resume
 jepsen/run.sh origin-restart       # or a single scenario
 jepsen/run.sh sse-resume           # SSE attach/resume under Chronicle + Redis restarts
 jepsen/run.sh expired-lease-takeover glob-create-crash  # the hardening scenarios

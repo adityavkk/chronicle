@@ -90,6 +90,8 @@ func TestValidationErrors(t *testing.T) {
 		{"bad from", "name: x\nduration: 5s\ntailers: {sse_per_stream: 1, from: middle}", "tailers.from"},
 		{"tiny messages", "name: x\nduration: 5s\nwriters: {per_stream: 1, rate: 1/s, message_bytes: 8}", "message_bytes"},
 		{"catchup empty", "name: x\nduration: 5s\ncatchup: {rate: 1/s}", "streams would be empty"},
+		{"catchup readers empty", "name: x\nduration: 5s\ncatchup: {readers: 8}", "streams would be empty"},
+		{"catchup mixed modes", "name: x\nduration: 5s\nstreams: {prefill: {messages: 1}}\ncatchup: {rate: 1/s, readers: 8}", "mutually exclusive"},
 		{"unknown field", "name: x\nduration: 5s\nwriterz: {}", "writerz"},
 	}
 	for _, c := range cases {

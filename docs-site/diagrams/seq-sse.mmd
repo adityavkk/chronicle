@@ -23,5 +23,5 @@ sequenceDiagram
     F->>S: drain one durable snapshot in bounded pages
     F-->>H: shared immutable data event
     H-->>C: data then client control
-    Note over H,F: bounded replay; lagged clients resume
+    Note over H,F: bounded replay, lagged clients resume
     H-->>C: control streamClosed true → close
