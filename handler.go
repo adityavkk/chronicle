@@ -46,6 +46,28 @@ type Handler struct {
 	// ReadMetrics receives bounded catch-up observations. Nil disables them.
 	ReadMetrics ReadMetrics
 
+	// SSEHubReplayBytes bounds the shared replay window retained for each active
+	// stream. A slow client that falls behind this window reconnects from its
+	// last durable offset. Zero uses the 1 MiB default.
+	SSEHubReplayBytes int
+
+	// SSEHubBatchBytes bounds each shared live SSE data event by raw message
+	// bytes when message boundaries permit. Zero uses the 256 KiB default.
+	SSEHubBatchBytes int
+
+	// SSEHubPollInterval is the durable fallback cadence when a Redis
+	// notification is lost. Zero uses one second.
+	SSEHubPollInterval time.Duration
+
+	// SSEClientWriteTimeout bounds one data-and-control flush to a client.
+	// Zero uses the 10 second default.
+	SSEClientWriteTimeout time.Duration
+
+	// SSEMetrics records shared fanout state. Nil records nothing.
+	SSEMetrics SSEMetrics
+
+	sseHubs sseHubRegistry
+
 	// Logger receives debug/error logs; nil falls back to slog.Default().
 	Logger *slog.Logger
 
@@ -497,7 +519,7 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		if offset.IsNow() {
 			sseOffset = meta.CurrentOffset
 		}
-		return h.handleSSE(w, r, path, sseOffset, cursor, useBase64)
+		return h.handleSSE(w, r, path, meta, sseOffset, cursor, useBase64)
 	}
 
 	// For offset=now, convert to actual tail offset

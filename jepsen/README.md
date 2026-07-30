@@ -17,8 +17,9 @@ needs no network.
 
 ```sh
 jepsen/up.sh                       # create the k3d cluster + deploy chronicle ×2 + Redis
-jepsen/run.sh                      # run baseline, origin-restart, redis-restart
+jepsen/run.sh                      # run baseline, origin-restart, redis-restart, sse-resume
 jepsen/run.sh origin-restart       # or a single scenario
+jepsen/run.sh sse-resume           # SSE attach/resume under Chronicle + Redis restarts
 jepsen/run.sh expired-lease-takeover glob-create-crash  # the hardening scenarios
 jepsen/run.sh single-holder-linz cursor-monotonic       # the safety scenarios (07: T1, T2)
 jepsen/run.sh stale-gen-noop lease-tail-drop at-least-once  # the no-rebuild baseline (07: T4, L3, L1)
@@ -33,6 +34,40 @@ The hardening scenarios (`pull-wake-arm-crash`, `expired-lease-takeover`,
 `slot-isolation`, `paged-catchup`) are not in the default `run.sh` set yet; pass them by name. The
 Redis-direct gates (`ownership-exclusivity`, `shard-linz`) need no cluster — just
 `-redis-url` — so they also run in CI (`.github/workflows/ci.yml`, the `linz` job).
+
+`sse-resume` confirms eight checked readers have attached to one stream before
+faults. A direct in-cluster reader uses a separate stream, pauses, and falls
+behind the small replay window. The checker finds the Chronicle pod serving
+that reader from the per-pod active-client metric change, then requires that
+same pod's lag counter to increase. The reader records session two only after
+the resumed response returns HTTP 200 and a durable control offset.
+
+A second direct reader receives an oversized event on another isolated stream.
+The checker again finds its serving pod from the active-client metric change.
+It samples that pod's timeout counter immediately before the append, then
+requires both a timeout increase and an active-client decrease on that pod.
+Keeping these faults separate prevents either policy from satisfying the
+other's gate.
+
+The workload commits one durable append while deliberately omitting its
+`PUBLISH`, kills and counts live Pub/Sub clients, publishes a duplicate hint to
+the canonical channel and requires a positive subscriber count, replaces one
+Chronicle pod and the Redis pod, replaces every Chronicle pod, and then closes
+the stream. Reconnect metrics must increase both after the client kill and after
+Redis replacement. Pod UID replacement, reader sessions, lag, resume, and write
+timeout are all required, so a failed no-op fault cannot produce a green run.
+
+Appends use one fenced producer, so an ambiguous HTTP retry cannot create a
+duplicate durable message. The checker keeps both raw per-connection delivery
+and control-committed batches. Raw replay must start exactly at each connection's
+resume offset. Committed delivery must contain every durable message exactly
+once. Every control offset must match the data immediately before it, offsets
+must move forward, and `streamClosed` must appear once after the close request at
+the durable tail. A separate closed-stream HTTP read checks the public response.
+After close, a direct Redis oracle reads the stream's metadata hash, message
+sorted set, and producer hash. It independently computes every payload offset
+and requires exact stored frames, the closed tail, and the final producer epoch
+and sequence.
 
 `up.sh` maps `localhost:4438` to the chronicle NodePort through the k3d
 loadbalancer, so the host driver keeps reaching chronicle while individual pods

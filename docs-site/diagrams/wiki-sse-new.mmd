@@ -1,0 +1,26 @@
+flowchart LR
+    A["one append"]:::source --> R[("Redis<br/>durable stream + Pub/Sub")]:::db
+    R -.->|"one wake hint"| H["per-stream fanout hub<br/>one subscription · one durable read<br/>one formatted data event"]:::hero
+    H -->|"read durable suffix once"| R
+    H --> Q[["bounded replay window<br/>1 MiB default"]]:::buffer
+
+    subgraph clients["local SSE clients"]
+      C1["client 1<br/>offset + socket"]:::client
+      C2["client 2<br/>offset + socket"]:::client
+      CN["client 1,000<br/>offset + socket"]:::client
+    end
+
+    Q -->|"shared event"| C1
+    Q -->|"shared event"| C2
+    Q -->|"shared event"| CN
+
+    M["measured<br/>1.000 reads per append"]:::metric
+    H --> M
+
+    classDef source fill:#FFFEF9,stroke:#24837B,color:#143F3C,font-weight:700;
+    classDef db fill:#E8F1EF,stroke:#24837B,color:#143F3C,font-weight:700;
+    classDef hero fill:#E8F1EF,stroke:#24837B,color:#143F3C,font-weight:700;
+    classDef buffer fill:#FFFEF9,stroke:#24837B,color:#143F3C;
+    classDef client fill:#F2F0E5,stroke:#6F6E69,color:#100F0F;
+    classDef metric fill:#F2F0E5,stroke:#66800B,color:#66800B,font-weight:700;
+    style clients fill:#FFFCF0,stroke:#DAD8CE,color:#6F6E69;

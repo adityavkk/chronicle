@@ -2,17 +2,26 @@ sequenceDiagram
     autonumber
     participant C as Client
     participant H as Handler
-    participant S as Store
+    participant F as Stream hub
+    participant S as PageReader
     participant R as Redis
     C->>H: GET ?offset=now and live=sse
+    H->>F: acquire exact stream incarnation
+    F->>R: SUBSCRIBE and confirm once
+    F->>S: bounded durable refresh before ready
+    F-->>H: ready
     H->>S: ReadPage(path, offset) · capture snapshot
-    S->>R: EVALSHA read.lua · bounded ZRANGEBYLEX
-    S-->>H: first frame-aligned page + snapshot
+    S->>R: EVALSHA read.lua · bounded range
+    S-->>H: first frame-aligned page + fixed tail
     H-->>C: 200 · Content-Type text/event-stream
     loop pages to the captured tail
         H-->>C: one data event + one control event · flush
         H->>S: next ReadPage with the same snapshot
     end
-    H->>S: WaitForMessages(ctx, 100ms)
-    Note over H: loop: capture snapshot, emit bounded pages, wait
+    H->>F: attach at last flushed control offset
+    R-->>F: append wake hint
+    F->>S: drain one durable snapshot in bounded pages
+    F-->>H: shared immutable data event
+    H-->>C: data then client control
+    Note over H,F: bounded replay; lagged clients resume
     H-->>C: control streamClosed true → close

@@ -1,0 +1,553 @@
+---
+import Demo from "./Demo.astro";
+
+const scenes = [
+  {
+    label: "Connect",
+    moment: "Rina opens the store order dashboard",
+    context:
+      "Rina's laptop, Luis's laptop, and the wallboard already know offset …0033. Each opens an SSE connection to the same stream.",
+    old: {
+      client:
+        "Each browser sends GET /orders/store-321?offset=…0033&live=sse.",
+      internals: [
+        "Chronicle creates three independent handler loops.",
+        "Each handler reads from Redis to catch its client up.",
+        "Each handler creates its own Redis notification subscription.",
+      ],
+      counts: ["3 HTTP connections", "3 catch-up reads", "3 wait loops"],
+    },
+    next: {
+      client:
+        "Each browser sends the same GET request. No client code changes.",
+      internals: [
+        "Chronicle creates or reuses one hub for /orders/store-321 on this replica. A new hub confirms one Redis subscription and reads once to establish its starting tail.",
+        "Each handler still performs its own initial catch-up read.",
+        "Each client gets one lightweight watcher on the shared hub.",
+      ],
+      counts: ["3 client catch-up reads", "1 hub startup read", "1 hub + 3 watchers"],
+    },
+  },
+  {
+    label: "Reach live tail",
+    moment: "All three clients are caught up",
+    context:
+      "Chronicle tells each browser that …0033 is the last durable offset it has sent. The browsers save that opaque value for reconnect.",
+    old: {
+      client:
+        'Each browser receives event: control with streamNextOffset:"…0033" and upToDate:true.',
+      internals: [
+        "Each handler flushes its own control event.",
+        "Each handler then waits independently for Redis to report more data.",
+      ],
+      counts: ["3 control events", "3 socket flushes", "3 Redis waiters"],
+    },
+    next: {
+      client:
+        'Each browser receives the same control fields and saves streamNextOffset:"…0033".',
+      internals: [
+        "Each handler still flushes one control event to its own socket.",
+        "The three watchers wait on the same hub. The hub alone waits on Redis.",
+      ],
+      counts: ["3 control events", "3 socket flushes", "1 Redis waiter"],
+    },
+  },
+  {
+    label: "Append",
+    moment: "The packing service marks order 884 as packed",
+    context:
+      'The producer appends {"order":"884","state":"packed"} to the durable stream. The tail moves from …0033 to …0066.',
+    old: {
+      client:
+        "The three browsers remain idle. They do not poll Chronicle.",
+      internals: [
+        "Redis commits the append, then publishes one short wake hint.",
+        "All three client-owned Redis subscriptions receive that hint.",
+        "The hint contains no stream data. Each handler must read the durable stream.",
+      ],
+      counts: ["1 durable append", "1 published hint", "3 subscribers wake"],
+    },
+    next: {
+      client:
+        "The three browsers remain idle. Their open SSE connections carry the update.",
+      internals: [
+        "Redis commits the same append and publishes the same short wake hint.",
+        "The stream hub's single Redis subscription receives the hint.",
+        "The hint still contains no stream data. The hub must read the durable stream.",
+      ],
+      counts: ["1 durable append", "1 published hint", "1 hub wakes"],
+    },
+  },
+  {
+    label: "Deliver",
+    moment: "Chronicle turns one append into three browser updates",
+    context:
+      "Each dashboard must receive the packed event and a control event that advances its durable resume position to …0066.",
+    old: {
+      client:
+        "Each browser parses the data event, updates order 884, then saves …0066 from the following control event.",
+      internals: [
+        "Three handlers each read the same Redis suffix and fetch the same metadata.",
+        "All three format the same data event independently.",
+        "Each handler writes its data and control events, then flushes its socket.",
+      ],
+      counts: ["3 durable reads", "3 data formats", "3 socket flushes"],
+    },
+    next: {
+      client:
+        "Each browser receives the same data and control events. It performs the same parse, render, and offset-save steps.",
+      internals: [
+        "The hub reads the Redis suffix once and fetches metadata once.",
+        "The hub formats one immutable data event and places it in the bounded replay window.",
+        "Three watchers reuse that data event. Each handler still creates its own control event and flushes its own socket.",
+      ],
+      counts: ["1 durable read", "1 data format", "3 socket flushes"],
+    },
+  },
+  {
+    label: "Stall and resume",
+    moment: "The wallboard network freezes for more than ten seconds",
+    context:
+      "Rina and Luis keep receiving updates. The wallboard cannot complete its next write and its last confirmed offset remains …0066.",
+    old: {
+      client:
+        "Rina and Luis continue. The wallboard can reconnect from …0066 after its old connection eventually fails.",
+      internals: [
+        "The wallboard has its own read and write loop, so it does not block the other two clients.",
+        "The old path has no explicit per-flush deadline here. Cleanup depends on the request or connection failing.",
+        "When the wallboard reconnects, another independent Redis read loop starts.",
+      ],
+      counts: ["2 healthy loops continue", "1 blocked client loop", "resume from …0066"],
+    },
+    next: {
+      client:
+        "Rina and Luis continue. Chronicle closes only the stalled wallboard connection, whose browser reconnects from …0066.",
+      internals: [
+        "The shared hub keeps reading and serving the two healthy watchers.",
+        "The ten-second write deadline ends the stalled socket. Replay lag beyond the 1 MiB window also causes a disconnect.",
+        "The reconnect performs a durable catch-up from …0066, then attaches a new watcher to the existing hub.",
+      ],
+      counts: ["1 hub continues", "1 client disconnected", "durable resume from …0066"],
+    },
+  },
+];
+---
+
+<Demo label="One order update, followed end to end">
+  <div class="journey" data-sse-journey>
+    <div class="scenario">
+      <div class="scenario-title">
+        <span class="scenario-kicker">Scenario</span>
+        <strong>Three dashboards tail one order stream</strong>
+      </div>
+      <div class="actors" aria-label="Journey actors">
+        <span><i class="person"></i> Rina</span>
+        <span><i class="person"></i> Luis</span>
+        <span><i class="wallboard"></i> Wallboard</span>
+        <span><i class="service"></i> Chronicle</span>
+        <span><i class="redis"></i> Redis</span>
+      </div>
+    </div>
+
+    <div class="step-tabs" role="tablist" aria-label="User journey steps">
+      {
+        scenes.map((scene, index) => (
+          <button
+            type="button"
+            role="tab"
+            id={`journey-tab-${index}`}
+            aria-controls={`journey-scene-${index}`}
+            aria-selected={index === 0 ? "true" : "false"}
+            tabindex={index === 0 ? 0 : -1}
+            data-journey-tab={index}
+          >
+            <span class="step-number">{String(index + 1).padStart(2, "0")}</span>
+            <span>{scene.label}</span>
+          </button>
+        ))
+      }
+    </div>
+
+    <div class="scenes">
+      {
+        scenes.map((scene, index) => (
+          <section
+            class="scene"
+            id={`journey-scene-${index}`}
+            role="tabpanel"
+            aria-labelledby={`journey-tab-${index}`}
+            data-journey-scene={index}
+            hidden={index !== 0}
+          >
+            <header class="moment">
+              <span>Moment {index + 1}</span>
+              <h3>{scene.moment}</h3>
+              <p>{scene.context}</p>
+            </header>
+
+            <div class="paths">
+              <article class="path old">
+                <div class="path-head">
+                  <span class="path-label">Old path</span>
+                  <strong>One loop per client</strong>
+                </div>
+                <div class="client-action">
+                  <span>In the browser</span>
+                  <p>{scene.old.client}</p>
+                </div>
+                <div class="internal-action">
+                  <span>Inside Chronicle and Redis</span>
+                  <ol>
+                    {scene.old.internals.map((item) => <li>{item}</li>)}
+                  </ol>
+                </div>
+                <div class="counts" aria-label={`Old path work at ${scene.label}`}>
+                  {scene.old.counts.map((item) => <span>{item}</span>)}
+                </div>
+              </article>
+
+              <article class="path next">
+                <div class="path-head">
+                  <span class="path-label">New path</span>
+                  <strong>One hub per stream and replica</strong>
+                </div>
+                <div class="client-action">
+                  <span>In the browser</span>
+                  <p>{scene.next.client}</p>
+                </div>
+                <div class="internal-action">
+                  <span>Inside Chronicle and Redis</span>
+                  <ol>
+                    {scene.next.internals.map((item) => <li>{item}</li>)}
+                  </ol>
+                </div>
+                <div class="counts" aria-label={`New path work at ${scene.label}`}>
+                  {scene.next.counts.map((item) => <span>{item}</span>)}
+                </div>
+              </article>
+            </div>
+          </section>
+        ))
+      }
+    </div>
+
+    <div class="invariant">
+      <strong>The browser contract does not change.</strong>
+      <span>
+        Each client opens one SSE connection, handles data events, saves the
+        last <code>streamNextOffset</code>, and reconnects from that value.
+        Chronicle now shares the live Redis read and data formatting. Socket
+        delivery and initial catch-up remain per client.
+      </span>
+    </div>
+  </div>
+
+  <span slot="caption">
+    The offset labels are shortened for readability. Chronicle treats the full
+    value as opaque. The flow follows <code>handleSSE</code> in
+    <code>handler_sse.go</code> and the hub read, replay, watcher, and timeout
+    paths in <code>sse_hub.go</code>.
+  </span>
+</Demo>
+
+<script>
+  document.querySelectorAll<HTMLElement>("[data-sse-journey]").forEach((root) => {
+    const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-journey-tab]"));
+    const scenes = Array.from(root.querySelectorAll<HTMLElement>("[data-journey-scene]"));
+
+    const select = (index: number, moveFocus = false) => {
+      tabs.forEach((tab, tabIndex) => {
+        const selected = tabIndex === index;
+        tab.setAttribute("aria-selected", String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+        if (selected && moveFocus) tab.focus();
+      });
+      scenes.forEach((scene, sceneIndex) => {
+        scene.hidden = sceneIndex !== index;
+      });
+    };
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => select(index));
+      tab.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        let next = index;
+        if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+        if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+        if (event.key === "Home") next = 0;
+        if (event.key === "End") next = tabs.length - 1;
+        select(next, true);
+      });
+    });
+  });
+</script>
+
+<style lang="scss">
+  .journey {
+    color: var(--ink);
+  }
+  .scenario {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    align-items: center;
+    padding: 0 0 20px;
+  }
+  .scenario-title {
+    display: grid;
+    gap: 4px;
+  }
+  .scenario-kicker,
+  .client-action > span,
+  .internal-action > span {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .scenario-title strong {
+    font-size: 15px;
+  }
+  .actors {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .actors span {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    padding: 5px 8px;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    background: var(--paper);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--ink-mute);
+  }
+  .actors i {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .actors i.wallboard { border-radius: 1px; background: var(--warn); }
+  .actors i.service { background: var(--ink); }
+  .actors i.redis { background: var(--bad); }
+
+  .step-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    border: 1px solid var(--rule);
+    border-radius: 9px;
+    overflow: hidden;
+    background: var(--paper);
+  }
+  .step-tabs button {
+    min-width: 0;
+    padding: 11px 9px 12px;
+    border: 0;
+    border-right: 1px solid var(--rule);
+    background: transparent;
+    color: var(--ink-mute);
+    font: 600 11px/1.25 var(--sans);
+    text-align: left;
+    cursor: pointer;
+  }
+  .step-tabs button:last-child { border-right: 0; }
+  .step-tabs button:hover { background: var(--paper-warm); color: var(--ink); }
+  .step-tabs button[aria-selected="true"] {
+    background: var(--accent-tint);
+    color: var(--accent-deep);
+    box-shadow: inset 0 -3px 0 var(--accent);
+  }
+  .step-number {
+    display: block;
+    margin-bottom: 5px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+  }
+
+  .scene {
+    padding-top: 24px;
+  }
+  .scene[hidden] { display: none; }
+  .moment {
+    margin-bottom: 18px;
+    padding-left: 14px;
+    border-left: 3px solid var(--accent);
+  }
+  .moment > span {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .moment h3 {
+    margin: 3px 0 4px;
+    padding: 0;
+    border: 0;
+    font-size: 18px;
+    font-weight: 650;
+  }
+  .moment p {
+    max-width: 74ch;
+    margin: 0;
+    color: var(--ink-mute);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .paths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .path {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--card);
+  }
+  .path.old { border-top: 3px solid var(--bad); }
+  .path.next { border-top: 3px solid var(--accent); }
+  .path-head {
+    display: grid;
+    gap: 3px;
+    padding: 13px 15px;
+    border-bottom: 1px solid var(--rule-soft);
+    background: var(--paper);
+  }
+  .path-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .old .path-label { color: var(--bad); }
+  .next .path-label { color: var(--accent); }
+  .path-head strong {
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .client-action,
+  .internal-action {
+    padding: 14px 15px;
+  }
+  .client-action {
+    min-height: 108px;
+    border-bottom: 1px solid var(--rule-soft);
+    background: color-mix(in srgb, var(--accent-tint) 42%, var(--card));
+  }
+  .client-action p {
+    margin: 7px 0 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .internal-action {
+    min-height: 206px;
+  }
+  .internal-action ol {
+    margin: 9px 0 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: internals;
+  }
+  .internal-action li {
+    position: relative;
+    margin-top: 9px;
+    padding-left: 24px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    counter-increment: internals;
+  }
+  .internal-action li::before {
+    content: counter(internals);
+    position: absolute;
+    left: 0;
+    top: 1px;
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    background: var(--paper-warm);
+    color: var(--ink-mute);
+    font: 500 9px/17px var(--mono);
+    text-align: center;
+  }
+  .counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 64px;
+    align-content: flex-start;
+    padding: 11px 15px 14px;
+    border-top: 1px solid var(--rule-soft);
+    background: var(--paper);
+  }
+  .counts span {
+    padding: 4px 7px;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: var(--card);
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--ink-mute);
+  }
+  .old .counts span:first-child { border-color: color-mix(in srgb, var(--bad) 45%, var(--rule)); }
+  .next .counts span:first-child {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--rule));
+    color: var(--accent-deep);
+  }
+
+  .invariant {
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+    gap: 20px;
+    margin-top: 16px;
+    padding: 15px 16px;
+    border-left: 3px solid var(--warn);
+    background: color-mix(in srgb, var(--paper-warm) 74%, var(--card));
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .invariant code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    color: var(--accent-deep);
+  }
+
+  @media (max-width: 760px) {
+    .scenario { align-items: flex-start; flex-direction: column; }
+    .actors { justify-content: flex-start; }
+    .step-tabs {
+      grid-template-columns: 1fr;
+      overflow: visible;
+      border-radius: 8px;
+    }
+    .step-tabs button {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      align-items: center;
+      padding: 9px 12px;
+      border-right: 0;
+      border-bottom: 1px solid var(--rule);
+    }
+    .step-tabs button:last-child { border-bottom: 0; }
+    .step-tabs button[aria-selected="true"] {
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .step-number { margin: 0; }
+    .paths { grid-template-columns: 1fr; }
+    .client-action,
+    .internal-action,
+    .counts { min-height: 0; }
+    .invariant { grid-template-columns: 1fr; gap: 6px; }
+  }
+</style>

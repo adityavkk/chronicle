@@ -1,0 +1,24 @@
+flowchart LR
+    A["one append"]:::source --> R[("Redis<br/>durable stream + Pub/Sub")]:::db
+
+    subgraph clients["1,000 independent SSE client loops"]
+      C1["client 1<br/>subscribe · read · format · flush"]:::problem
+      C2["client 2<br/>subscribe · read · format · flush"]:::problem
+      CN["client 1,000<br/>subscribe · read · format · flush"]:::problem
+    end
+
+    R -.->|"wake hint"| C1
+    R -.->|"wake hint"| C2
+    R -.->|"wake hint"| CN
+    C1 -->|"durable read"| R
+    C2 -->|"same durable read"| R
+    CN -->|"same durable read"| R
+
+    M["measured<br/>970.5 reads per append"]:::metric
+    clients --> M
+
+    classDef source fill:#FFFEF9,stroke:#24837B,color:#143F3C,font-weight:700;
+    classDef db fill:#E8F1EF,stroke:#24837B,color:#143F3C,font-weight:700;
+    classDef problem fill:#FFFCF0,stroke:#AF3029,color:#100F0F,stroke-dasharray:5 4;
+    classDef metric fill:#F2F0E5,stroke:#AF3029,color:#AF3029,font-weight:700;
+    style clients fill:#FFFCF0,stroke:#DAD8CE,color:#6F6E69;

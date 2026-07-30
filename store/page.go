@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"time"
 )
@@ -28,16 +26,6 @@ var (
 	// advance a client past missing durable bytes.
 	ErrReadDataMissing = errors.New("read snapshot data missing")
 )
-
-// NewReadIncarnation returns a random 128-bit stream identity for snapshot
-// validation across delete and recreate.
-func NewReadIncarnation() (string, error) {
-	var id [16]byte
-	if _, err := rand.Read(id[:]); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(id[:]), nil
-}
 
 // ReadSnapshot fixes the upper boundary and response metadata for one catch-up
 // response. Incarnation is opaque to callers and is used only to reject a

@@ -1,0 +1,71 @@
+{
+  "schema": "chronicle-ds-bench-campaign-v1",
+  "profile": "chronicle-sse-hub-local-smoke",
+  "resource_budget": {
+    "cpu_millis": 2000,
+    "memory_mib": 3072,
+    "local_ssds": 1
+  },
+  "target": {
+    "throughput_ratio": 0.0,
+    "completion_ratio": 0.0,
+    "latency_ratio": 100.0,
+    "memory_ratio": 100.0,
+    "request_errors": 0,
+    "reference_rule": "local-wiring-only"
+  },
+  "reference_archives": [
+    {
+      "path": "docs/benchmarks/ds-bench/results/20260727T122510Z-bd85274b",
+      "evidence_tree_sha256": "ad3104c8a0a10ca8b7e81b88e636517181ad33f82ecf3b56c9bf6977d1a1c917"
+    }
+  ],
+  "cluster": {
+    "server_machine": "local-kind",
+    "server_cpus": 2,
+    "client_machine": "local-kind",
+    "client_nodes": 1,
+    "zone": "local",
+    "region": "local"
+  },
+  "systems": [
+    {
+      "key": "chronicle",
+      "mode": "chronicle",
+      "configs": [
+        {
+          "label": "chronicle-sse-hub-local",
+          "args": "always:1:1:1000:1000:1024:2048:persistent",
+          "durability": "redis-aof-always",
+          "topology": {
+            "chronicle_replicas": 1,
+            "redis_masters": 1,
+            "sse_wait_mode": "persistent"
+          }
+        }
+      ]
+    }
+  ],
+  "workloads": [
+    {
+      "key": "blog-sse",
+      "workload": "reads",
+      "reads": {
+        "mode": "sse",
+        "read_size_bytes": 256,
+        "append_rate_per_sec": 5,
+        "seed_bytes": 0,
+        "duration_secs": 4,
+        "warmup_secs": 1,
+        "settle_secs": 1,
+        "connection_levels": [
+          10
+        ],
+        "pods": 1
+      },
+      "stream_counts": [
+        1
+      ]
+    }
+  ]
+}

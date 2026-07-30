@@ -1,0 +1,1165 @@
+diff --git a/deploy/metrics/poller.sh b/deploy/metrics/poller.sh
+index bd9638e..4c3d391 100644
+--- a/deploy/metrics/poller.sh
++++ b/deploy/metrics/poller.sh
+@@ -60,16 +60,19 @@ disk_write_bytes() {
+ echo "ts_ms,rss_bytes,cpu_ticks,write_bytes,pod_ws_bytes" > "$OUT"
+ echo "poller: ${DATA_DIR} backed by device '${DEV}' (device-wide disk write_bytes)" >&2
+ while true; do
+-  # Per-process RSS/CPU (best-effort: 0 when the process name does not match — e.g.
+-  # a server whose binary name we don't track; pod memory still samples uniformly).
++  # Aggregate RSS/CPU for every process matching SERVER_PROC. Most systems have
++  # one server process. Composite systems can supply an extended regular
++  # expression such as "chronicle|redis-server" so their full SUT cost is counted.
+   # -f matches the full cmdline (not the 15-char-truncated comm); exclude self.
+   rss=0; cpu=0
+-  pid="$(pgrep -f "$PROC_NAME" | grep -vx "$$" | head -1 || true)"
+-  if [ -n "$pid" ] && [ -r "/proc/$pid/stat" ]; then
++  for pid in $(pgrep -f "$PROC_NAME" 2>/dev/null | grep -vx "$$" || true); do
++    [ -r "/proc/$pid/stat" ] || continue
+     rss_pages=$(awk '{print $24}' "/proc/$pid/stat" 2>/dev/null || echo 0)   # field 24 = rss in pages
+-    rss=$(( rss_pages * $(getconf PAGE_SIZE) ))
+-    cpu=$(awk '{s=$0; sub(/^.*\) /,"",s); split(s,f," "); print f[12]+f[13]}' "/proc/$pid/stat" 2>/dev/null || echo 0)
+-  fi
++    proc_cpu=$(awk '{s=$0; sub(/^.*\) /,"",s); split(s,f," "); print f[12]+f[13]}' "/proc/$pid/stat" 2>/dev/null || echo 0)
++    : "${rss_pages:=0}"; : "${proc_cpu:=0}"
++    rss=$(( rss + rss_pages * $(getconf PAGE_SIZE) ))
++    cpu=$(( cpu + proc_cpu ))
++  done
+   wbytes="$(disk_write_bytes)"; : "${wbytes:=0}"
+   ws="$(pod_ws_bytes)"; : "${ws:=0}"
+   ts=$(( $(date +%s%N) / 1000000 ))
+diff --git a/ds-bench/src/reads.rs b/ds-bench/src/reads.rs
+index 05546d5..ac2ee95 100644
+--- a/ds-bench/src/reads.rs
++++ b/ds-bench/src/reads.rs
+@@ -116,6 +116,10 @@ pub struct ReadsArgs {
+     #[arg(long, default_value_t = 16_777_216)] // 16 MiB
+     pub seed_bytes: u64,
+ 
++    /// catchup ONLY: maximum time to verify one stream's exact seeded size.
++    #[arg(long, default_value_t = 600)]
++    pub seed_timeout_secs: u64,
++
+     /// long-poll ONLY: appends per second PER STREAM by the writer. Low — it is
+     /// the cadence that wakes long-polls; fan-out grows with `connections`.
+     #[arg(long, default_value_t = 50.0)]
+@@ -141,6 +145,12 @@ pub struct ReadsResult {
+     pub warmup_secs: u64,
+     pub settle_secs: u64,
+     pub seed_bytes: u64,
++    pub seed_append_attempts: u64,
++    pub seed_append_failures: u64,
++    pub seed_retry_rounds: u64,
++    pub seed_verified_streams: usize,
++    pub seed_verified_min_bytes: u64,
++    pub seed_verified_max_bytes: u64,
+     pub append_rate_per_sec: f64,
+     pub elapsed_secs: f64,
+     pub counts: Counts,
+@@ -154,6 +164,35 @@ pub struct ReadsResult {
+     pub latency_ms: LatencySummary,
+ }
+ 
++#[derive(Clone, Copy, Debug, Default)]
++struct SeedStats {
++    append_attempts: u64,
++    append_failures: u64,
++    retry_rounds: u64,
++    verified_streams: usize,
++    verified_min_bytes: u64,
++    verified_max_bytes: u64,
++}
++
++impl SeedStats {
++    fn add(&mut self, other: Self) {
++        self.append_attempts += other.append_attempts;
++        self.append_failures += other.append_failures;
++        self.retry_rounds += other.retry_rounds;
++        if other.verified_streams == 0 {
++            return;
++        }
++        if self.verified_streams == 0 {
++            self.verified_min_bytes = other.verified_min_bytes;
++            self.verified_max_bytes = other.verified_max_bytes;
++        } else {
++            self.verified_min_bytes = self.verified_min_bytes.min(other.verified_min_bytes);
++            self.verified_max_bytes = self.verified_max_bytes.max(other.verified_max_bytes);
++        }
++        self.verified_streams += other.verified_streams;
++    }
++}
++
+ // ---------------------------------------------------------------------------
+ // Shared helpers
+ // ---------------------------------------------------------------------------
+@@ -288,47 +327,239 @@ async fn probe_stream_size(b: &Backend, stream: &str) -> Result<u64> {
+     Ok(next_offset)
+ }
+ 
+-/// Ensure the stream holds at least `seed_bytes` of resident data.
+-async fn ensure_seeded(b: &Backend, stream: &str, seed_bytes: u64, record_bytes: usize) -> Result<()> {
+-    if seed_bytes == 0 {
+-        return Ok(());
+-    }
+-    let current_bytes = probe_stream_size(b, stream).await.unwrap_or(0);
+-    if current_bytes >= seed_bytes {
+-        tracing::info!(current_bytes, seed_bytes, "stream already seeded — skipping");
+-        return Ok(());
+-    }
+-    let need_bytes = seed_bytes.saturating_sub(current_bytes);
+-    let record_count = (need_bytes as usize).div_ceil(record_bytes.max(1));
+-    tracing::info!(current_bytes, seed_bytes, record_count, record_bytes, "seeding stream");
+-
+-    let payload = Arc::new(fill_payload(record_bytes, 0xC0DE));
+-    let semaphore = Arc::new(tokio::sync::Semaphore::new(32));
+-    let mut joins = Vec::with_capacity(record_count);
+-    for _ in 0..record_count {
+-        let permit = semaphore.clone().acquire_owned().await.unwrap();
+-        let b = b.clone();
+-        let stream = stream.to_string();
+-        let payload = payload.clone();
+-        joins.push(tokio::spawn(async move {
+-            let _permit = permit;
+-            b.append_request(0, &stream, &payload, None, "application/octet-stream")
+-                .send()
+-                .await
+-                .map(|r| r.status().is_success())
+-                .unwrap_or(false)
+-        }));
++fn seed_payload_plan(
++    current_bytes: u64,
++    seed_bytes: u64,
++    target_record_bytes: usize,
++    stored_overhead_bytes: u64,
++) -> Result<Vec<(usize, usize)>> {
++    if target_record_bytes == 0 {
++        anyhow::bail!("seed record size must be positive");
+     }
+-    let mut failed = 0u64;
+-    for j in joins {
+-        if !j.await.unwrap_or(false) {
+-            failed += 1;
+-        }
++    if current_bytes > seed_bytes {
++        anyhow::bail!(
++            "stream already exceeds exact seed target: current={current_bytes} target={seed_bytes}"
++        );
+     }
+-    if failed > 0 {
+-        tracing::warn!(failed, record_count, "some seed appends failed");
++    let remaining_bytes = seed_bytes - current_bytes;
++    if remaining_bytes == 0 {
++        return Ok(Vec::new());
+     }
+-    Ok(())
++
++    // Keep each stored record close to the requested record size. Some
++    // implementations add per-append framing to the stored stream (the
++    // reference Node server adds five bytes), so the request payload can be
++    // smaller than the resulting stored record.
++    let record_count = remaining_bytes.div_ceil(target_record_bytes as u64);
++    let overhead_total = record_count
++        .checked_mul(stored_overhead_bytes)
++        .context("seed framing overhead overflow")?;
++    let payload_total = remaining_bytes.checked_sub(overhead_total).with_context(|| {
++        format!(
++            "exact seed target cannot absorb per-record framing: remaining={remaining_bytes} \
++             records={record_count} overhead={stored_overhead_bytes}"
++        )
++    })?;
++    if payload_total < record_count {
++        anyhow::bail!(
++            "exact seed target requires an empty seed payload: remaining={remaining_bytes} \
++             records={record_count} overhead={stored_overhead_bytes}"
++        );
++    }
++
++    let base_payload = payload_total / record_count;
++    let larger_payloads = payload_total % record_count;
++    if base_payload > target_record_bytes as u64
++        || (larger_payloads > 0 && base_payload + 1 > target_record_bytes as u64)
++    {
++        anyhow::bail!(
++            "exact seed payload exceeds the target record size: base={base_payload} \
++             extra={larger_payloads} target={target_record_bytes}"
++        );
++    }
++
++    let base_payload =
++        usize::try_from(base_payload).context("seed payload size does not fit usize")?;
++    let larger_payloads =
++        usize::try_from(larger_payloads).context("seed record count does not fit usize")?;
++    let record_count =
++        usize::try_from(record_count).context("seed record count does not fit usize")?;
++    let mut plan = Vec::with_capacity(2);
++    if larger_payloads > 0 {
++        plan.push((base_payload + 1, larger_payloads));
++    }
++    if record_count > larger_payloads {
++        plan.push((base_payload, record_count - larger_payloads));
++    }
++    Ok(plan)
++}
++
++/// Ensure the stream holds exactly `seed_bytes` of resident data. Failed
++/// concurrent appends are retried from a fresh size probe. The exact-size check
++/// prevents a short setup history from being reported as catch-up throughput.
++async fn ensure_seeded(
++    b: &Backend,
++    stream: &str,
++    seed_bytes: u64,
++    record_bytes: usize,
++    timeout: Duration,
++) -> Result<SeedStats> {
++    if seed_bytes == 0 {
++        return Ok(SeedStats::default());
++    }
++    let seed = async {
++        let mut stats = SeedStats::default();
++        let mut seed_rounds = 0u64;
++        let mut stored_overhead_bytes = None;
++        loop {
++            let mut current_bytes = probe_stream_size(b, stream)
++                .await
++                .context("probe stream before seed round")?;
++            if current_bytes == seed_bytes {
++                stats.retry_rounds += seed_rounds.saturating_sub(1);
++                stats.verified_streams = 1;
++                stats.verified_min_bytes = current_bytes;
++                stats.verified_max_bytes = current_bytes;
++                tracing::info!(
++                    current_bytes,
++                    seed_bytes,
++                    append_attempts = stats.append_attempts,
++                    append_failures = stats.append_failures,
++                    retry_rounds = stats.retry_rounds,
++                    "stream seed verified"
++                );
++                return Ok(stats);
++            }
++            if current_bytes > seed_bytes {
++                anyhow::bail!(
++                    "stream already exceeds exact seed target: current={current_bytes} \
++                     target={seed_bytes}"
++                );
++            }
++
++            let stored_overhead_bytes = match stored_overhead_bytes {
++                Some(overhead) => overhead,
++                None => {
++                    let calibration_payload_bytes =
++                        usize::try_from((seed_bytes - current_bytes).min(record_bytes as u64))
++                            .context("calibration payload size does not fit usize")?;
++                    let payload = fill_payload(calibration_payload_bytes, 0xC0DE);
++                    stats.append_attempts += 1;
++                    let accepted = b
++                        .append_request(
++                            0,
++                            stream,
++                            &payload,
++                            None,
++                            "application/octet-stream",
++                        )
++                        .send()
++                        .await
++                        .map(|response| response.status().is_success())
++                        .unwrap_or(false);
++                    if !accepted {
++                        stats.append_failures += 1;
++                    }
++                    let calibrated_bytes = probe_stream_size(b, stream)
++                        .await
++                        .context("probe stream after seed calibration")?;
++                    if calibrated_bytes <= current_bytes {
++                        stats.retry_rounds += 1;
++                        tracing::warn!(
++                            current_bytes,
++                            calibrated_bytes,
++                            calibration_payload_bytes,
++                            "seed calibration append made no visible progress; retrying"
++                        );
++                        continue;
++                    }
++                    let stored_delta = calibrated_bytes - current_bytes;
++                    let overhead = stored_delta
++                        .checked_sub(calibration_payload_bytes as u64)
++                        .with_context(|| {
++                            format!(
++                                "server stored fewer bytes than the calibration payload: \
++                                 stored_delta={stored_delta} payload={calibration_payload_bytes}"
++                            )
++                        })?;
++                    tracing::info!(
++                        calibration_payload_bytes,
++                        stored_delta,
++                        stored_overhead_bytes = overhead,
++                        "seed storage framing calibrated"
++                    );
++                    stored_overhead_bytes = Some(overhead);
++                    current_bytes = calibrated_bytes;
++                    overhead
++                }
++            };
++
++            let payload_plan = seed_payload_plan(
++                current_bytes,
++                seed_bytes,
++                record_bytes,
++                stored_overhead_bytes,
++            )?;
++            if payload_plan.is_empty() {
++                continue;
++            }
++            seed_rounds += 1;
++            let record_count = payload_plan.iter().map(|(_, count)| *count).sum::<usize>();
++            stats.append_attempts += record_count as u64;
++            tracing::info!(
++                current_bytes,
++                seed_bytes,
++                record_count,
++                record_bytes,
++                stored_overhead_bytes,
++                seed_round = seed_rounds,
++                "seeding stream"
++            );
++
++            let semaphore = Arc::new(tokio::sync::Semaphore::new(32));
++            let mut joins = Vec::with_capacity(record_count);
++            for (payload_bytes, count) in payload_plan {
++                let payload = Arc::new(fill_payload(payload_bytes, 0xC0DE));
++                for _ in 0..count {
++                    let permit = semaphore.clone().acquire_owned().await.unwrap();
++                    let b = b.clone();
++                    let stream = stream.to_string();
++                    let payload = payload.clone();
++                    joins.push(tokio::spawn(async move {
++                        let _permit = permit;
++                        b.append_request(0, &stream, &payload, None, "application/octet-stream")
++                            .send()
++                            .await
++                            .map(|r| r.status().is_success())
++                            .unwrap_or(false)
++                    }));
++                }
++            }
++            let mut failed = 0u64;
++            for join in joins {
++                if !join.await.unwrap_or(false) {
++                    failed += 1;
++                }
++            }
++            stats.append_failures += failed;
++            if failed > 0 {
++                tracing::warn!(
++                    failed,
++                    record_count,
++                    seed_round = seed_rounds,
++                    "seed appends failed; retrying"
++                );
++            }
++        }
++    };
++    tokio::time::timeout(timeout, seed)
++        .await
++        .with_context(|| {
++            format!(
++                "exact seed verification timed out for {stream} after {}s",
++                timeout.as_secs()
++            )
++        })?
+ }
+ 
+ #[allow(clippy::too_many_arguments)]
+@@ -384,9 +615,19 @@ async fn run_catchup(args: ReadsArgs) -> Result<ReadsResult> {
+     let streams: Vec<String> = (0..n_streams).map(|i| format!("{}-{}", args.stream, i)).collect();
+ 
+     backend.ensure_namespace().await?;
++    let mut seed_stats = SeedStats::default();
+     for s in &streams {
+         backend.create_stream(s, "application/octet-stream").await?;
+-        ensure_seeded(&backend, s, args.seed_bytes, args.read_size_bytes).await?;
++        seed_stats.add(
++            ensure_seeded(
++                &backend,
++                s,
++                args.seed_bytes,
++                args.read_size_bytes,
++                Duration::from_secs(args.seed_timeout_secs),
++            )
++            .await?,
++        );
+     }
+ 
+     let ok = Arc::new(AtomicU64::new(0));
+@@ -415,7 +656,17 @@ async fn run_catchup(args: ReadsArgs) -> Result<ReadsResult> {
+         let _ = w.await;
+     }
+ 
+-    finish(args, ReadMode::Catchup, &ok, &bp, &err, &bytes_total, &hist).await
++    finish(
++        args,
++        ReadMode::Catchup,
++        &ok,
++        &bp,
++        &err,
++        &bytes_total,
++        &hist,
++        seed_stats,
++    )
++    .await
+ }
+ 
+ // ===========================================================================
+@@ -627,7 +878,17 @@ async fn run_longpoll(args: ReadsArgs) -> Result<ReadsResult> {
+         let _ = w.await;
+     }
+ 
+-    finish(args, ReadMode::LongPoll, &ok, &bp, &err, &bytes_total, &hist).await
++    finish(
++        args,
++        ReadMode::LongPoll,
++        &ok,
++        &bp,
++        &err,
++        &bytes_total,
++        &hist,
++        SeedStats::default(),
++    )
++    .await
+ }
+ 
+ // ===========================================================================
+@@ -773,7 +1034,17 @@ async fn run_sse(args: ReadsArgs) -> Result<ReadsResult> {
+         let _ = w.await;
+     }
+ 
+-    finish(args, ReadMode::Sse, &ok, &bp, &err, &bytes_total, &hist).await
++    finish(
++        args,
++        ReadMode::Sse,
++        &ok,
++        &bp,
++        &err,
++        &bytes_total,
++        &hist,
++        SeedStats::default(),
++    )
++    .await
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -788,6 +1059,7 @@ async fn finish(
+     err: &AtomicU64,
+     bytes_total: &AtomicU64,
+     hist: &Mutex<Histogram<u64>>,
++    seed_stats: SeedStats,
+ ) -> Result<ReadsResult> {
+     let elapsed_secs = (args.duration_secs as f64).max(1e-9);
+     let bytes_read_total = bytes_total.load(Ordering::Relaxed);
+@@ -809,6 +1081,12 @@ async fn finish(
+         warmup_secs: args.warmup_secs,
+         settle_secs: args.settle_secs,
+         seed_bytes: args.seed_bytes,
++        seed_append_attempts: seed_stats.append_attempts,
++        seed_append_failures: seed_stats.append_failures,
++        seed_retry_rounds: seed_stats.retry_rounds,
++        seed_verified_streams: seed_stats.verified_streams,
++        seed_verified_min_bytes: seed_stats.verified_min_bytes,
++        seed_verified_max_bytes: seed_stats.verified_max_bytes,
+         append_rate_per_sec: args.append_rate_per_sec,
+         elapsed_secs,
+         counts: Counts {
+@@ -834,10 +1112,29 @@ mod tests {
+     use super::assert_single_pod_for_live;
+     use super::decode_longpoll_latencies;
+     use super::phase_offsets;
++    use super::seed_payload_plan;
+     use super::stream_for;
+     use super::ReadMode;
+     use std::time::Duration;
+ 
++    #[test]
++    fn seed_payload_plan_hits_exact_targets_with_storage_framing() {
++        assert_eq!(
++            seed_payload_plan(4_096, 16_384, 4_096, 0).unwrap(),
++            vec![(4_096, 3)]
++        );
++        let framed = seed_payload_plan(4_101, 16_777_216, 4_096, 5).unwrap();
++        assert_eq!(framed, vec![(4_091, 4_090), (4_090, 5)]);
++        let framed_bytes = framed
++            .iter()
++            .map(|(payload, count)| (*payload as u64 + 5) * *count as u64)
++            .sum::<u64>();
++        assert_eq!(4_101 + framed_bytes, 16_777_216);
++        assert!(seed_payload_plan(16_385, 16_384, 4_096, 0).is_err());
++        assert!(seed_payload_plan(9, 10, 4_096, 5).is_err());
++        assert!(seed_payload_plan(0, 16_384, 0, 0).is_err());
++    }
++
+     /// Live-tail modes (long-poll / sse) compare a writer send-time against a
+     /// reader receive-time, valid only when both share one process wall clock —
+     /// i.e. a single fleet pod. A multi-pod fleet would measure cross-node clock
+diff --git a/gke/minio.yaml b/gke/minio.yaml
+index 9e3ece2..c69e415 100644
+--- a/gke/minio.yaml
++++ b/gke/minio.yaml
+@@ -38,8 +38,8 @@ spec:
+             # durable's measure window isolated) with NO CPU limit, and MinIO bursts
+             # into the idle node during collection. Pairs with the c4d-8-lssd server
+             # node + ~64-pod fleets (MAX_FLEET_PODS in gke-bench.sh).
+-            requests: { memory: "2Gi", cpu: "2" }
+-            limits: { memory: "8Gi" }
++            requests: { memory: "${MINIO_MEMORY_REQUEST}", cpu: "${MINIO_CPU}" }
++            limits: { memory: "${MINIO_MEMORY_LIMIT}" }
+       volumes:
+         - name: data
+           emptyDir: { medium: "" }
+diff --git a/scripts/lib-bench.sh b/scripts/lib-bench.sh
+index 5ba7ac0..bec5260 100755
+--- a/scripts/lib-bench.sh
++++ b/scripts/lib-bench.sh
+@@ -30,6 +30,9 @@ PROBE_HOSTPORT="${PROBE_HOSTPORT:-durable-streams:4438}"
+ # ALL kubectl calls go through K() — scoped to the selected context + ds-bench ns.
+ K() { kubectl --context "$KCTX" -n ds-bench "$@"; }
+ 
++# shellcheck source=scripts/chronicle-topology.sh
++. "${_LIB_DIR}/chronicle-topology.sh"
++
+ # ensure_metrics_configmap — poller.sh ConfigMap (idempotent; must exist before
+ # the server, whose metrics sidecar mounts it).
+ ensure_metrics_configmap() {
+@@ -45,7 +48,8 @@ ensure_metrics_configmap() {
+ # from a prior run, so suites never stack up / contend for the single node. MinIO and
+ # the metrics ConfigMap (shared infra) stay. No-op on remote (each mode has its own cluster).
+ shutdown_local_servers() {
+-  K delete deploy durable-streams durable-node ursula s2lite --ignore-not-found --cascade=foreground >&2 2>/dev/null || true
++  K delete deploy durable-streams durable-node chronicle ursula s2lite --ignore-not-found --cascade=foreground >&2 2>/dev/null || true
++  chronicle_delete_topology
+ }
+ 
+ # ── deploy_server SERVER_CPU [extra_args...] ─────────────────────────────────
+@@ -153,29 +157,74 @@ server_label() {
+     ursula) echo "app=ursula" ;;
+     s2)     echo "app=s2lite" ;;
+     node)   echo "app=durable-node" ;;
++    chronicle) echo "app=chronicle" ;;
+     *)      echo "app=durable-streams" ;;
+   esac
+ }
+ 
+ # reset_sidecar_samples — truncate the server sidecar's samples.csv before a cell.
+ reset_sidecar_samples() {
+-  local pod
+-  pod="$( { K get pod -l "$(server_label)" -o name 2>/dev/null || true; } | head -1 | sed 's|pod/||')"
++  if [ "${SERVER_KIND:-}" = "chronicle" ] &&
++      [ "${CHRONICLE_TOPOLOGY:-colocated}" != "colocated" ]; then
++    chronicle_reset_sidecar_samples
++    return
++  fi
++  local pod attempt
++  pod="$( { K get pod -l "$(server_label)" \
++    -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' \
++    2>/dev/null || true; } | head -1)"
+   if [ -n "$pod" ]; then
+     echo "    resetting samples.csv on pod ${pod}..."
+-    K exec "$pod" -c metrics -- sh -c 'echo "ts_ms,rss_bytes,cpu_ticks,write_bytes,pod_ws_bytes" > /metrics/samples.csv' || true
++    K wait --for=condition=Ready "pod/${pod}" --timeout=120s >/dev/null 2>&1 || true
++    for attempt in 1 2 3 4 5; do
++      if K exec "$pod" -c metrics -- sh -c \
++          'echo "ts_ms,rss_bytes,cpu_ticks,write_bytes,pod_ws_bytes" > /metrics/samples.csv'; then
++        return 0
++      fi
++      sleep 2
++    done
++    echo "    WARN: metrics sidecar did not accept sample reset after ${attempt} attempts"
+   fi
+ }
+ 
++# _samples_complete PATH — accept a kubectl copy even when its SPDY connection
++# reports a reset after the complete file reached disk.
++_samples_complete() {
++  awk -F, '
++    NR == 1 && $0 != "ts_ms,rss_bytes,cpu_ticks,write_bytes,pod_ws_bytes" { exit 1 }
++    NR > 1 && NF != 5 { exit 1 }
++    END { if (NR < 2) exit 1 }
++  ' "$1" >/dev/null 2>&1
++}
++
+ # collect_sidecar DEST_DIR — copy the server sidecar's samples.csv out.
+ collect_sidecar() {
+   local dest="$1"
+-  local pod
+-  pod="$( { K get pod -l "$(server_label)" -o name 2>/dev/null || true; } | head -1 | sed 's|pod/||')"
++  if [ "${SERVER_KIND:-}" = "chronicle" ] &&
++      [ "${CHRONICLE_TOPOLOGY:-colocated}" != "colocated" ]; then
++    chronicle_collect_sidecars "$dest"
++    return
++  fi
++  local pod attempt remote_sha local_sha target="${dest}/samples.csv"
++  pod="$( { K get pod -l "$(server_label)" \
++    -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' \
++    2>/dev/null || true; } | head -1)"
+   if [ -n "$pod" ]; then
+-    K cp "ds-bench/${pod}:/metrics/samples.csv" "${dest}/samples.csv" -c metrics \
+-      && echo "    saved samples.csv → ${dest}/samples.csv" \
+-      || echo "    WARN: could not copy samples.csv"
++    for attempt in 1 2 3; do
++      remote_sha="$(K exec "$pod" -c metrics -- sh -c \
++        'cp /metrics/samples.csv /metrics/samples.snapshot.csv && sha256sum /metrics/samples.snapshot.csv' \
++        2>/dev/null | awk '{print $1}')"
++      K cp "ds-bench/${pod}:/metrics/samples.snapshot.csv" "$target" -c metrics || true
++      local_sha="$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' \
++        "$target" 2>/dev/null || true)"
++      if [ -n "$remote_sha" ] && [ "$local_sha" = "$remote_sha" ] \
++          && _samples_complete "$target"; then
++        echo "    saved samples.csv → ${target}"
++        return 0
++      fi
++      sleep 2
++    done
++    echo "    WARN: could not copy a complete samples.csv after ${attempt} attempts"
+   else
+     echo "    WARN: no server pod found for sidecar collection"
+   fi
+@@ -203,7 +252,7 @@ clean_jobs() {
+ # plus a non-Completed client pod's last log lines (the actual client-side error).
+ _capture_choke_diagnostics() {
+   echo "    ── choke diagnostics ──────────────────────────────────────────" >&2
+-  K get pods -l 'app in (durable-streams,ursula,s2lite)' -o jsonpath='{range .items[*]}      SERVER {.metadata.name} phase={.status.phase} restarts={.status.containerStatuses[0].restartCount} state={.status.containerStatuses[0].state} lastTerminated={.status.containerStatuses[0].lastState.terminated.reason}:{.status.containerStatuses[0].lastState.terminated.exitCode}{"\n"}{end}' 2>/dev/null >&2 || true
++  K get pods -l 'app in (durable-streams,durable-node,chronicle,ursula,s2lite)' -o jsonpath='{range .items[*]}      SERVER {.metadata.name} phase={.status.phase} restarts={.status.containerStatuses[0].restartCount} state={.status.containerStatuses[0].state} lastTerminated={.status.containerStatuses[0].lastState.terminated.reason}:{.status.containerStatuses[0].lastState.terminated.exitCode}{"\n"}{end}' 2>/dev/null >&2 || true
+   local fp; fp="$(K get pods -l job-name=bench-fleet --no-headers 2>/dev/null | awk '$3!="Completed"{print $1; exit}')"
+   if [ -n "$fp" ]; then
+     echo "      CLIENT pod $fp ($(K get pod "$fp" -o jsonpath='{.status.phase}' 2>/dev/null)) — log tail:" >&2
+@@ -337,8 +386,12 @@ fetch_coordinator_merged() {
+     cpod="$(K get pods -l job-name=bench-coordinator --sort-by=.metadata.creationTimestamp \
+             -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)"
+     if [ -n "$cpod" ] && out="$(K logs "$cpod" 2>/dev/null)" && [ -n "$out" ]; then
+-      printf '%s\n' "$out" > "$dest"
+-      return 0
++      printf '%s\n' "$out" > "${dest%.json}.log"
++      printf '%s\n' "$out" |
++        awk 'capture || /^[[:space:]]*{/ {capture=1; print}' > "$dest"
++      if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$dest" >/dev/null 2>&1; then
++        return 0
++      fi
+     fi
+     sleep 2
+   done
+@@ -346,6 +399,78 @@ fetch_coordinator_merged() {
+   echo "    WARN: coordinator logs unavailable after retries → wrote error marker"
+ }
+ 
++# collect_coordinator_artifacts DEST — preserve the per-pod JSON and HDR inputs
++# behind merged.json. The coordinator has already exited, so a temporary running
++# utility pod downloads the exact RUN_ID prefix from MinIO and remains available
++# for kubectl cp. The paid cluster can then be deleted without losing evidence.
++_fleet_artifacts_complete() {
++  python3 - "$1" "${PARALLELISM:-1}" <<'PY'
++import json
++from pathlib import Path
++import sys
++
++root = Path(sys.argv[1])
++expected = int(sys.argv[2])
++json_files = list(root.rglob("*.json"))
++hdr_files = list(root.rglob("*.hdr"))
++if len(json_files) < expected or len(hdr_files) < expected:
++    raise SystemExit(1)
++for path in json_files:
++    try:
++        json.loads(path.read_text())
++    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
++        raise SystemExit(1)
++if any(path.stat().st_size == 0 for path in hdr_files):
++    raise SystemExit(1)
++PY
++}
++
++collect_coordinator_artifacts() {
++  local dest="$1" collector="artifact-collector"
++  local archive="${dest}/fleet.tar" remote_sha local_sha
++  K delete pod "$collector" --ignore-not-found --wait=true >/dev/null 2>&1 || true
++  if ! K run "$collector" --image="$IMG_DSBENCH" \
++      --image-pull-policy="$PULL_POLICY" --restart=Never \
++      --command -- sleep 600 >/dev/null; then
++    echo "    WARN: could not start raw artifact collector"
++    return 0
++  fi
++  if ! K wait --for=condition=Ready "pod/${collector}" --timeout=120s >/dev/null; then
++    echo "    WARN: raw artifact collector did not become ready"
++    K delete pod "$collector" --ignore-not-found --wait=false >/dev/null 2>&1 || true
++    return 0
++  fi
++  mkdir -p "${dest}/fleet"
++  if K exec "$collector" -- env RUN_ID="$RUN_ID" sh -c \
++      'mkdir -p /tmp/fleet && mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && mc cp --recursive "local/bench-results/${RUN_ID}/" /tmp/fleet/ >/dev/null && tar -cf /tmp/fleet.tar -C /tmp/fleet .'; then
++    remote_sha="$(K exec "$collector" -- sha256sum /tmp/fleet.tar 2>/dev/null | awk '{print $1}')"
++    local attempt copied=0
++    for attempt in 1 2 3; do
++      K cp "ds-bench/${collector}:/tmp/fleet.tar" "$archive" || true
++      local_sha="$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' \
++        "$archive" 2>/dev/null || true)"
++      if [ -n "$remote_sha" ] && [ "$local_sha" = "$remote_sha" ] \
++          && tar -tf "$archive" >/dev/null 2>&1; then
++        tar -xf "$archive" -C "${dest}/fleet"
++      fi
++      if [ -n "$remote_sha" ] && [ "$local_sha" = "$remote_sha" ] \
++          && _fleet_artifacts_complete "${dest}/fleet"; then
++        echo "    saved coordinator inputs → ${dest}/fleet"
++        copied=1
++        break
++      fi
++      sleep 2
++    done
++    if [ "$copied" != "1" ]; then
++      echo "    WARN: could not copy complete coordinator inputs"
++    fi
++    rm -f "$archive"
++  else
++    echo "    WARN: could not download coordinator inputs from MinIO"
++  fi
++  K delete pod "$collector" --ignore-not-found --wait=false >/dev/null 2>&1 || true
++}
++
+ # compute_server_cpu_pct SAMPLES_CSV [START_MS END_MS] — cpu_pct =
+ # (Δticks/CLK_TCK)/Δs ×100. CLK_TCK=100. ts_ms (col 1) is unix wall-clock ms.
+ # With START_MS/END_MS (>0), only samples inside [START_MS, END_MS] count, so the
+@@ -411,6 +536,7 @@ _run_cell_one() {
+   { reset_sidecar_samples
+     run_fleet_and_coordinator
+     fetch_coordinator_merged "${cell_dir}/merged.json"
++    collect_coordinator_artifacts "${cell_dir}"
+     collect_sidecar "$cell_dir"
+   } >&2
+   local cpu_pct="0"
+@@ -508,6 +634,9 @@ reset_state() {
+       $run kubectl --context "$KCTX" -n ds-bench rollout restart deploy/durable-node
+       if [ -z "$run" ]; then kubectl --context "$KCTX" -n ds-bench rollout status deploy/durable-node --timeout=120s; _wait_server_http durable-node:4438; fi
+       ;;
++    chronicle)
++      chronicle_reset
++      ;;
+     *) echo "reset_state: unknown mode '$mode'" >&2; return 2 ;;
+   esac
+ }
+@@ -551,6 +680,10 @@ deploy_mode() {
+       envsubst "${MANIFEST_VARS} \${SERVER_CPU}" < gke/durable-node.yaml | K apply -f - >&2 \
+         && K rollout status deploy/durable-node --timeout=600s >&2 || return 1
+       T_TARGET="http://durable-node:4438"; T_API="durable"; T_NS=""; export SERVER_KIND=node ;;
++    chronicle)
++      local config="${WAL_SERVER_ARGS:-always:2:2}"
++      chronicle_deploy "$config" || return 1
++      T_TARGET="http://chronicle:4437"; T_API="durable"; T_NS=""; export SERVER_KIND=chronicle ;;
+     *) echo "deploy_mode: unknown mode '$mode'" >&2; return 1 ;;
+   esac
+   export T_TARGET T_API T_NS
+@@ -561,7 +694,20 @@ deploy_mode() {
+ # re-runs that cell; see cells.status_of). Deployment per mode: wal=durable-streams,
+ # ursula=ursula, s2=s2lite.
+ server_image_digest() {
+-  local dep; case "$1" in wal) dep=durable-streams;; ursula) dep=ursula;; s2) dep=s2lite;; esac
+-  local img; img="$(K get "deploy/$dep" -o jsonpath='{.spec.template.spec.containers[0].image}')"
+-  printf '%s\n%s\n' "$img" "${2:-}" | sha256sum | cut -c1-12
++  local dep
++  case "$1" in
++    wal) dep=durable-streams ;;
++    ursula) dep=ursula ;;
++    s2) dep=s2lite ;;
++    node) dep=durable-node ;;
++    chronicle) dep=chronicle ;;
++    *) echo "server_image_digest: unknown mode '$1'" >&2; return 2 ;;
++  esac
++  local images
++  if [ "$1" = "chronicle" ]; then
++    images="$(chronicle_server_images)"
++  else
++    images="$(K get "deploy/$dep" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}={.image}{"\n"}{end}')"
++  fi
++  printf '%s\n%s\n' "$images" "${2:-}" | sha256sum | cut -c1-12
+ }
+diff --git a/scripts/lib-bench_stdout_test.sh b/scripts/lib-bench_stdout_test.sh
+index 7554341..7b668ad 100755
+--- a/scripts/lib-bench_stdout_test.sh
++++ b/scripts/lib-bench_stdout_test.sh
+@@ -39,6 +39,10 @@ fetch_coordinator_merged() {
+   echo "    fetched coordinator merged → $1"
+ }
+ 
++collect_coordinator_artifacts() {
++  echo "    saved coordinator inputs → $1/fleet"
++}
++
+ collect_sidecar() {
+   echo "    saved samples.csv → $1/samples.csv"
+ }
+diff --git a/scripts/lib-reads.sh b/scripts/lib-reads.sh
+index b54cb3f..377504c 100644
+--- a/scripts/lib-reads.sh
++++ b/scripts/lib-reads.sh
+@@ -18,7 +18,7 @@ measure_reads() {
+   local mode="${SAT_MODE:?measure_reads: SAT_MODE unset}"
+   local rep="${SAT_REP:-1}"
+   local cell_dir; cell_dir="$(_sat_cell_dir "$pods" "$rep")"; mkdir -p "$cell_dir"
+-  READS_BENCH_CMD="reads --mode ${RD_MODE:-catchup} --target ${T_TARGET:?} --api-style ${T_API:?} ${T_NS:-} --streams ${sc} --connections ${conn} --read-size-bytes ${RD_READ_SIZE} --seed-bytes ${RD_SEED} --append-rate-per-sec ${RD_APPEND_RATE:-50} --duration-secs ${RD_DURATION} --warmup-secs ${RD_WARMUP} --settle-secs ${RD_SETTLE}"
++  READS_BENCH_CMD="reads --mode ${RD_MODE:-catchup} --target ${T_TARGET:?} --api-style ${T_API:?} ${T_NS:-} --streams ${sc} --connections ${conn} --read-size-bytes ${RD_READ_SIZE} --seed-bytes ${RD_SEED} --seed-timeout-secs ${RD_SEED_TIMEOUT} --append-rate-per-sec ${RD_APPEND_RATE:-50} --duration-secs ${RD_DURATION} --warmup-secs ${RD_WARMUP} --settle-secs ${RD_SETTLE}"
+   local merge_cmd="ds-bench hdr-merge --hdr-dir /merge --results-dir /merge --label-prefix reads-"
+   _run_cell_one "${mode}-reads-n${sc}-c${conn}" "$READS_BENCH_CMD" "reads" "$merge_cmd" "$pods" "$rep" "$cell_dir"
+ }
+@@ -26,10 +26,11 @@ measure_reads() {
+ _rd_field() { grep -oE "\"$2\"[: ]*-?[0-9.]+" "$1" 2>/dev/null | grep -oE '\-?[0-9.]+$' | head -1; }
+ 
+ # record_reads_cell — thin wrapper so tests can stub recording. Args positional to
+-# avoid a fragile here-doc: path sc conn digest ops bps p50 p99 bp err.
++# avoid a fragile here-doc:
++# path sc conn digest ops bps p50 p99 bp err read_mode seed_bytes fleet_dir.
+ record_reads_cell() {
+   python3 -c "
+-import sys; sys.path.insert(0,'scripts')
++import glob, json, os, sys; sys.path.insert(0,'scripts')
+ import reads_cells
+ def _f(x,d=None):
+     try: return float(x)
+@@ -37,11 +38,23 @@ def _f(x,d=None):
+ def _i(x,d=0):
+     try: return int(float(x))
+     except (ValueError, TypeError): return d
+-p99=_f(sys.argv[8]); ok = p99 is not None and p99 > 0
++ops=_f(sys.argv[5],0.0); bps=_f(sys.argv[6],0.0); p99=_f(sys.argv[8])
++ok = p99 is not None and p99 > 0
++reason = 'complete' if ok else 'no_reads'
++if ok and sys.argv[11] == 'catchup':
++    seed=_f(sys.argv[12],0.0)
++    records=[]
++    for path in glob.glob(os.path.join(sys.argv[13], '*.json')):
++        try:
++            with open(path) as f: records.append(json.load(f))
++        except (OSError, ValueError):
++            pass
++    ok=reads_cells.catchup_seed_verified(records, seed, int(sys.argv[2]))
++    reason='complete' if ok else 'seed_size_mismatch'
+ reads_cells.record(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), image_digest=sys.argv[4],
+-  ops_per_sec=_f(sys.argv[5]), bytes_per_sec=_f(sys.argv[6]), p50=_f(sys.argv[7]), p99=p99,
++  ops_per_sec=ops, bytes_per_sec=bps, p50=_f(sys.argv[7]), p99=p99,
+   backpressure=_i(sys.argv[9]), other_err=_i(sys.argv[10]),
+-  status=('ok' if ok else 'error'), reason=('complete' if ok else 'no_reads'))
++  status=('ok' if ok else 'error'), reason=reason)
+ " "$@"
+ }
+ 
+@@ -56,6 +69,8 @@ run_reads_cell() {
+   export RD_DURATION;  RD_DURATION="$(_sat_get s 's.reads.get("duration_secs",60)')"
+   export RD_WARMUP;    RD_WARMUP="$(_sat_get s 's.reads.get("warmup_secs",0)')"
+   export RD_SETTLE;    RD_SETTLE="$(_sat_get s 's.reads.get("settle_secs",0)')"
++  export RD_SEED_TIMEOUT; RD_SEED_TIMEOUT="$(_sat_get s 's.reads.get("seed_timeout_secs",600)')"
++  export FLEET_TIMEOUT; FLEET_TIMEOUT="$(_sat_get s 's.reads.get("fleet_timeout_secs",180)')"
+   local conns; conns="$(_sat_get s "' '.join(map(str, s.reads.get('connection_levels',[8])))")"
+   local pods;  pods="$(_sat_get s 's.reads.get("pods",1)')"
+   local fn="${MEASURE_FN:-measure_reads}"
+@@ -82,7 +97,7 @@ run_reads_cell() {
+     p99="$(_rd_field "$cd/merged.json" p99_ms)"
+     bp="$(_rd_field  "$cd/merged.json" backpressure_total)"
+     err="$(_rd_field "$cd/merged.json" other_err_total)"
+-    record_reads_cell "$cells_json" "$sc" "$conn" "$digest" "${ops:-0}" "${bps:-0}" "${p50:-None}" "${p99:-None}" "${bp:-0}" "${err:-0}"
++    record_reads_cell "$cells_json" "$sc" "$conn" "$digest" "${ops:-0}" "${bps:-0}" "${p50:-None}" "${p99:-None}" "${bp:-0}" "${err:-0}" "$RD_MODE" "$RD_SEED" "$cd/fleet"
+   done
+ 
+   python3 -c "import sys;sys.path.insert(0,'scripts');import reads_cells;reads_cells.mark_complete('$cells_json',$sc,'$digest')"
+diff --git a/scripts/lib-reads_test.sh b/scripts/lib-reads_test.sh
+index e68fa81..9dc2409 100644
+--- a/scripts/lib-reads_test.sh
++++ b/scripts/lib-reads_test.sh
+@@ -27,6 +27,8 @@ _sat_get() {
+     *duration_secs*)     echo "10" ;;
+     *warmup_secs*)       echo "2" ;;
+     *settle_secs*)       echo "1" ;;
++    *seed_timeout_secs*)  echo "120" ;;
++    *fleet_timeout_secs*) echo "900" ;;
+     *pods*)              echo "1" ;;
+     *) echo "" ;;
+   esac
+@@ -47,5 +49,7 @@ fail=0
+ grep -q -- "--streams 100 --connections 8 " "$CAPTURE"  || { echo "FAIL: missing conn=8 cmd"; fail=1; }
+ grep -q -- "--streams 100 --connections 32 " "$CAPTURE" || { echo "FAIL: missing conn=32 cmd"; fail=1; }
+ grep -q -- "--read-size-bytes 4096 --seed-bytes 1048576" "$CAPTURE" || { echo "FAIL: payload/seed args"; fail=1; }
++grep -q -- "--seed-timeout-secs 120" "$CAPTURE" || { echo "FAIL: seed timeout arg"; fail=1; }
+ grep -q -- "--warmup-secs 2 --settle-secs 1" "$CAPTURE"  || { echo "FAIL: warmup/settle args"; fail=1; }
++[ "$FLEET_TIMEOUT" = "900" ] || { echo "FAIL: fleet timeout"; fail=1; }
+ [ "$fail" = 0 ] && echo "PASS: lib-reads builds expected bench_cmds" || exit 1
+diff --git a/scripts/reads_cells.py b/scripts/reads_cells.py
+index 6b9f7d0..89034f3 100644
+--- a/scripts/reads_cells.py
++++ b/scripts/reads_cells.py
+@@ -6,6 +6,19 @@ aggregate ops/s + bytes/s (read throughput) and p50/p99 latency, plus backpressu
+ import json, os
+ 
+ 
++def catchup_seed_verified(records, seed_bytes, stream_count):
++    """True only when every client verified the exact stored stream size."""
++    if not records or seed_bytes <= 0 or stream_count <= 0:
++        return False
++    return all(
++        record.get("seed_bytes") == seed_bytes
++        and record.get("seed_verified_streams") == stream_count
++        and record.get("seed_verified_min_bytes") == seed_bytes
++        and record.get("seed_verified_max_bytes") == seed_bytes
++        for record in records
++    )
++
++
+ def _load(path):
+     if not os.path.exists(path):
+         return {"cells": {}}
+diff --git a/scripts/reads_cells_test.py b/scripts/reads_cells_test.py
+index 48bd746..380b3a9 100644
+--- a/scripts/reads_cells_test.py
++++ b/scripts/reads_cells_test.py
+@@ -17,6 +17,24 @@ class ReadsCellsTest(unittest.TestCase):
+         self.assertEqual(reads_cells.status_of(self.p, 10, "dig1"), "absent")
+         self.assertEqual(reads_cells.conn_status(self.p, 10, 8, "dig1"), "absent")
+ 
++    def test_catchup_seed_uses_post_write_stored_size_verification(self):
++        seed = 16_777_216
++        exact = {
++            "seed_bytes": seed,
++            "seed_verified_streams": 10,
++            "seed_verified_min_bytes": seed,
++            "seed_verified_max_bytes": seed,
++        }
++        self.assertTrue(reads_cells.catchup_seed_verified([exact], seed, 10))
++        self.assertFalse(
++            reads_cells.catchup_seed_verified(
++                [{**exact, "seed_verified_min_bytes": seed - 5}],
++                seed,
++                10,
++            )
++        )
++        self.assertFalse(reads_cells.catchup_seed_verified([], seed, 10))
++
+     def test_conn_status_done_after_record(self):
+         self._rec(10, 8)
+         self.assertEqual(reads_cells.conn_status(self.p, 10, 8, "dig1"), "done")
+diff --git a/scripts/reset_state_test.sh b/scripts/reset_state_test.sh
+index db314eb..f2fe1bc 100644
+--- a/scripts/reset_state_test.sh
++++ b/scripts/reset_state_test.sh
+@@ -14,4 +14,11 @@ echo "$out" | grep -q "rollout restart" || { echo "FAIL s2: no rollout restart";
+ out="$(reset_state ursula)"
+ echo "$out" | grep -q "rollout restart" || { echo "FAIL ursula: no rollout restart"; exit 1; }
+ 
++out="$(reset_state node)"
++echo "$out" | grep -q "rollout restart" || { echo "FAIL node: no rollout restart"; exit 1; }
++
++out="$(reset_state chronicle)"
++echo "$out" | grep -q "deploy/chronicle" || { echo "FAIL chronicle: wrong deployment"; exit 1; }
++echo "$out" | grep -q "rollout restart" || { echo "FAIL chronicle: no rollout restart"; exit 1; }
++
+ echo "PASS reset_state"
+diff --git a/scripts/suite_test.py b/scripts/suite_test.py
+index cc3e471..a0194a9 100644
+--- a/scripts/suite_test.py
++++ b/scripts/suite_test.py
+@@ -4,18 +4,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
+ sys.path.insert(0, HERE)
+ from suite import Suite
+ 
+-DURABLE = os.path.join(HERE, "..", "suites", "run-durable.json")
+-S2 = os.path.join(HERE, "..", "suites", "run-s2.json")
++DURABLE = os.path.join(HERE, "..", "suites", "canonical-write.json")
+ 
+ 
+ class TestSuite(unittest.TestCase):
+     def test_loads_fields(self):
+         # Structural invariants only — NOT tuning values (ladders/fleet_cpu change).
+         s = Suite.load(DURABLE)
+-        self.assertEqual(s.name, "run-durable")
++        self.assertEqual(s.name, "canonical-write")
+         self.assertEqual(s.modes, ["wal"])
+         self.assertTrue(s.stream_counts)  # non-empty
+-        self.assertEqual(s.cluster["server_machine"], "c4d-standard-16-lssd")
++        self.assertEqual(s.cluster["server_machine"], "c4d-standard-64-lssd")
+         self.assertGreater(s.saturation["plateau_pct"], 0)
+         self.assertGreater(s.saturation["fleet_cpu"], 0)
+ 
+@@ -33,20 +32,19 @@ class TestSuite(unittest.TestCase):
+             s.ladder_for(999)
+ 
+     def test_configs_for_default_when_absent(self):
+-        # A mode with no server_configs entry (s2) has one implicit config =
+-        # the mode itself with empty server args (the baseline).
+-        s = Suite.load(S2)
++        # A mode with no server_configs entry has one implicit config = the mode
++        # itself with empty server args (the baseline).
++        s = Suite({"suite": "x", "modes": ["s2"], "stream_counts": [1],
++                   "cluster": {}, "pod_ladder": {"1": [1]}})
+         self.assertEqual(s.configs_for("s2"), [{"label": "s2", "args": ""}])
+         self.assertEqual(s.labels(), ["s2"])
+ 
+     def test_durable_server_configs_side_by_side(self):
+-        # The durable suite carries wal / wal-tailcache / memory as labelled variants.
++        # The canonical durable suite carries the maintained WAL and memory arms.
+         s = Suite.load(DURABLE)
+-        self.assertEqual(s.configs_for("wal"), [
+-            {"label": "wal", "args": ""},
+-            {"label": "wal-tailcache", "args": "--tail-cache-bytes 65536"},
+-            {"label": "memory", "args": "--durability memory"}])
+-        self.assertEqual(s.labels(), ["wal", "wal-tailcache", "memory"])
++        self.assertEqual([c["label"] for c in s.configs_for("wal")],
++                         ["wal-ideal", "memory"])
++        self.assertEqual(s.labels(), ["wal-ideal", "memory"])
+ 
+     def test_configs_for_and_labels_in_memory(self):
+         s = Suite({"suite": "x", "modes": ["wal"], "stream_counts": [1],
+diff --git a/scripts/target-env.sh b/scripts/target-env.sh
+index a683a0e..2ddfbb6 100755
+--- a/scripts/target-env.sh
++++ b/scripts/target-env.sh
+@@ -24,9 +24,11 @@ case "$DS_TARGET" in
+     # io-uring, …) can be compared by pointing at distinct image tags.
+     IMG_SERVER="${IMG_SERVER:-durable-streams:dev}"
+     IMG_NODE="${IMG_NODE:-durable-node:dev}"   # Node.js reference server (kind-loaded)
++    IMG_CHRONICLE="${IMG_CHRONICLE:-chronicle:ds-bench}"
++    IMG_REDIS="${IMG_REDIS:-redis:8-alpine}"
+     IMG_URSULA="${IMG_URSULA:-ghcr.io/tonbo-io/ursula:v0.2.0}"   # upstream published image
+-    IMG_DSBENCH="ds-bench:dev"
+-    IMG_METRICS="ds-bench:dev"        # ds-bench:dev carries bash+curl+procps for the sidecar
++    IMG_DSBENCH="${IMG_DSBENCH:-ds-bench:dev}"
++    IMG_METRICS="${IMG_METRICS:-${IMG_DSBENCH}}" # ds-bench image carries bash+curl+procps
+     PULL_POLICY="IfNotPresent"        # use the kind-loaded image; never reach for a registry
+     NODESEL_SERVER="{}"               # single-node kind: schedule anywhere
+     NODESEL_CLIENT="{}"
+@@ -43,9 +45,11 @@ case "$DS_TARGET" in
+     REG="${AR_LOCATION}-docker.pkg.dev/${PROJECT}/${AR_REPO}"
+     IMG_SERVER="${IMG_SERVER:-${REG}/durable-streams:dev}"
+     IMG_NODE="${IMG_NODE:-${REG}/durable-node:dev}"   # Node.js reference server
++    IMG_CHRONICLE="${IMG_CHRONICLE:-${REG}/chronicle:ds-bench}"
++    IMG_REDIS="${IMG_REDIS:-redis:8-alpine}"
+     IMG_URSULA="${IMG_URSULA:-ghcr.io/tonbo-io/ursula:v0.2.0}"   # upstream published image
+-    IMG_DSBENCH="${REG}/ds-bench:dev"
+-    IMG_METRICS="${REG}/ds-bench:dev"   # ds-bench:dev carries bash+procps for the sidecar
++    IMG_DSBENCH="${IMG_DSBENCH:-${REG}/ds-bench:dev}"
++    IMG_METRICS="${IMG_METRICS:-${IMG_DSBENCH}}" # ds-bench image carries bash+procps
+     # Default Always (a runner pushes a fresh :dev each session). Overridable to
+     # IfNotPresent for long saturation runs where the image is FIXED for the whole
+     # run: the server restarts once per ladder rung, and re-pulling from AR every
+@@ -68,6 +72,16 @@ case "$DS_TARGET" in
+     ;;
+ esac
+ 
++if [ "$DS_TARGET" = "local" ]; then
++  MINIO_CPU="${MINIO_CPU:-500m}"
++  MINIO_MEMORY_REQUEST="${MINIO_MEMORY_REQUEST:-512Mi}"
++  MINIO_MEMORY_LIMIT="${MINIO_MEMORY_LIMIT:-2Gi}"
++else
++  MINIO_CPU="${MINIO_CPU:-2}"
++  MINIO_MEMORY_REQUEST="${MINIO_MEMORY_REQUEST:-2Gi}"
++  MINIO_MEMORY_LIMIT="${MINIO_MEMORY_LIMIT:-8Gi}"
++fi
++
+ # Server pod memory limit (the cgroup OOM ceiling — drives fan-out subscriber capacity).
+ SERVER_MEM="${SERVER_MEM:-16Gi}"
+ 
+@@ -84,11 +98,12 @@ FLEET_CPU="${FLEET_CPU:-0.5}"
+ URSULA_WAL="${URSULA_WAL:-disk}"
+ 
+ # Vars referenced by envsubst in the manifests + by the runners.
+-export DS_TARGET KCTX IMG_SERVER IMG_NODE IMG_URSULA IMG_DSBENCH IMG_METRICS PULL_POLICY \
++export DS_TARGET KCTX IMG_SERVER IMG_NODE IMG_CHRONICLE IMG_REDIS IMG_URSULA IMG_DSBENCH IMG_METRICS PULL_POLICY \
+        NODESEL_SERVER NODESEL_CLIENT PROJECT ZONE CLUSTER KIND_CLUSTER REG \
+-       AR_LOCATION AR_REPO SERVER_MEM SERVER_MACHINE FLEET_CPU URSULA_WAL
++       AR_LOCATION AR_REPO SERVER_MEM SERVER_MACHINE FLEET_CPU URSULA_WAL \
++       MINIO_CPU MINIO_MEMORY_REQUEST MINIO_MEMORY_LIMIT
+ 
+ # Every manifest envsubst must whitelist these so the image/policy/selector
+ # placeholders resolve. Runners reference $MANIFEST_VARS in their envsubst calls.
+-MANIFEST_VARS='${IMG_SERVER} ${IMG_NODE} ${IMG_URSULA} ${IMG_DSBENCH} ${IMG_METRICS} ${PULL_POLICY} ${NODESEL_SERVER} ${NODESEL_CLIENT} ${SERVER_MEM} ${FLEET_CPU} ${URSULA_WAL}'
++MANIFEST_VARS='${IMG_SERVER} ${IMG_NODE} ${IMG_CHRONICLE} ${IMG_REDIS} ${IMG_URSULA} ${IMG_DSBENCH} ${IMG_METRICS} ${PULL_POLICY} ${NODESEL_SERVER} ${NODESEL_CLIENT} ${SERVER_MEM} ${FLEET_CPU} ${URSULA_WAL} ${MINIO_CPU} ${MINIO_MEMORY_REQUEST} ${MINIO_MEMORY_LIMIT}'
+ export MANIFEST_VARS
+diff --git a/scripts/lib-saturate.sh b/scripts/lib-saturate.sh
+index e153bfc..d938317 100644
+--- a/scripts/lib-saturate.sh
++++ b/scripts/lib-saturate.sh
+@@ -130,6 +130,11 @@ else:
+         read -r _ pin_pods pin_thr <<< "$decision"
+         conf_out="$(_confirm "$fn" "$mode" "$pin_pods" "$repeats")"
+         read -r conf_p50 conf_p99 conf_thr <<< "$conf_out"
++        if [ "${conf_thr:-invalid}" = "invalid" ]; then
++          mem_mb="$(_sat_peak_podmem "$sc")"
++          _record "$cells_json" "$sc" "$digest" "$walk" "$pin_pods" 0 None False error confirmation_failed None "$mem_mb"
++          return 0
++        fi
+         conf_p50="${conf_p50:-None}"; conf_p99="${conf_p99:-None}"   # never pass empty to _record
+         # Report the MEAN throughput over the confirm reps when available (a
+         # replicated headline, not a single shot); fall back to the walk's pin
+@@ -154,15 +159,35 @@ else:
+ # walk shot. No merged.json (the unit-test mock fn) -> "None None" (thr omitted, so
+ # the caller falls back to the walk's pin throughput).
+ _confirm() {
+-  local fn="$1" mode="$2" pods="$3" reps="$4" i p50s="" p99s="" thrs="" cd p50 p99 thr
++  local fn="$1" mode="$2" pods="$3" reps="$4"
++  local i attempt valid measure_out measure_thr measure_aligned
++  local p50s="" p99s="" thrs="" cd p50 p99 thr
+   for ((i=1;i<=reps;i++)); do
+-    # reset_state -> stderr so _confirm's STDOUT carries ONLY the final result line
+-    # (its rollout/reset chatter must not be captured as the result).
+-    SAT_REP="$i"; reset_state "$mode" >&2; "$fn" "$pods" >/dev/null
+     cd="$(_sat_cell_dir "$pods" "$i")"
+-    p50="$(grep -oE '"p50_ms"[: ]*[0-9.]+' "$cd/merged.json" 2>/dev/null | grep -oE '[0-9.]+$' | head -1)"
+-    p99="$(grep -oE '"p99_ms"[: ]*[0-9.]+' "$cd/merged.json" 2>/dev/null | grep -oE '[0-9.]+$' | head -1)"
+-    thr="$(grep -oE '"aggregate_ops_per_sec"[: ]*[0-9.]+' "$cd/merged.json" 2>/dev/null | grep -oE '[0-9.]+$' | head -1)"
++    valid=0
++    for ((attempt=1;attempt<=${CONFIRM_ATTEMPTS:-3};attempt++)); do
++      mkdir -p "$cd"
++      find "$cd" -mindepth 1 -delete
++      # reset_state -> stderr so _confirm's STDOUT carries ONLY the final result.
++      SAT_REP="$i"; reset_state "$mode" >&2
++      measure_out="$("$fn" "$pods")"
++      read -r _ measure_thr measure_aligned _ _ <<< "$measure_out"
++      measure_aligned="${measure_aligned:-1}"
++      p50="$(grep -oE '"p50_ms"[: ]*[0-9.]+' "$cd/merged.json" 2>/dev/null | grep -oE '[0-9.]+$' | head -1)"
++      p99="$(grep -oE '"p99_ms"[: ]*[0-9.]+' "$cd/merged.json" 2>/dev/null | grep -oE '[0-9.]+$' | head -1)"
++      thr="$(grep -oE '"aggregate_ops_per_sec"[: ]*[0-9.]+' "$cd/merged.json" 2>/dev/null | grep -oE '[0-9.]+$' | head -1)"
++      thr="${thr:-${measure_thr:-0}}"
++      if [ "$measure_aligned" != "0" ] &&
++          awk -v value="$thr" 'BEGIN { exit !(value + 0 > 0) }'; then
++        valid=1
++        break
++      fi
++      echo "    WARN: confirmation rep ${i} attempt ${attempt} produced no valid result; retrying" >&2
++    done
++    if [ "$valid" != "1" ]; then
++      echo "None None invalid"
++      return 0
++    fi
+     p50s="$p50s ${p50:-}"; p99s="$p99s ${p99:-}"; thrs="$thrs ${thr:-}"
+   done
+   # True median: average the two middle values for an even count (the old
+diff --git a/scripts/lib-saturate_test.sh b/scripts/lib-saturate_test.sh
+index 4c95db5..ea7a68a 100644
+--- a/scripts/lib-saturate_test.sh
++++ b/scripts/lib-saturate_test.sh
+@@ -128,3 +128,24 @@ assert float(p50) == 5.0, f"even-count median p50 must average the two middles (
+ assert float(p99) == 10.0, f"even-count median p99 must be 10.0, got {p99}"
+ print("PASS _confirm averages throughput + even-count median")
+ PY
++
++# A transient missing result, such as Spot preemption, retries the same logical
++# confirmation rep and never averages fewer than the declared repeat count.
++CONFIRM_ATTEMPTS=2
++flaky_marker="$SAT_RESULT_ROOT/flaky-marker"
++measure_flaky() {
++  local cd; cd="$(_sat_cell_dir "$1" "${SAT_REP}")"; mkdir -p "$cd"
++  if [ ! -e "$flaky_marker" ]; then
++    touch "$flaky_marker"
++    echo "0 0"
++    return 0
++  fi
++  printf '{"p50_ms": 7, "p99_ms": 11, "aggregate_ops_per_sec": 123456}\n' > "$cd/merged.json"
++  echo "0 123456"
++}
++conf="$(_confirm measure_flaky wal 16 1)"
++[ "$conf" = "7 11 123456" ] || {
++  echo "FAIL: transient confirmation was not retried: $conf"
++  exit 1
++}
++echo "PASS _confirm retries transient missing results"

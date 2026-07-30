@@ -1,0 +1,73 @@
+{
+  "schema": "chronicle-ds-bench-images-v1",
+  "created_at": "2026-07-27T11:47:31.043706+00:00",
+  "target": "remote",
+  "project": "adityavkk-prototyping",
+  "registry": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench",
+  "preflight": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/images-remote-preflight.json",
+  "reused_from": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/images-remote.json",
+  "images": {
+    "chronicle": {
+      "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/chronicle@sha256:e750a3223c04b5d12e0cd4655d2704d96434a50ae084ab9c987706d44bfd8103",
+      "digest": "sha256:e750a3223c04b5d12e0cd4655d2704d96434a50ae084ab9c987706d44bfd8103",
+      "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/chronicle:ecf1a8a8f8ad-f2472e04ebe2",
+      "source": {
+        "commit": "ecf1a8a8f8ad9283cedcbd17b465acb410ccfec0",
+        "dirty": true,
+        "diff_sha256": "f2472e04ebe27ad8c2f3c1e927e7842db9dd4c0dd29d83e124cccd5dc4187a2d",
+        "untracked_files": [
+          ".dockerignore",
+          "benchmarks/ds-bench/README.md",
+          "benchmarks/ds-bench/campaign.json",
+          "benchmarks/ds-bench/dsbench.py",
+          "benchmarks/ds-bench/overlay/gke/chronicle.yaml",
+          "benchmarks/ds-bench/overlay/suites/chronicle-calibration.json",
+          "benchmarks/ds-bench/overlay/suites/chronicle-smoke.json",
+          "benchmarks/ds-bench/patches/chronicle.patch",
+          "benchmarks/ds-bench/sources.json",
+          "benchmarks/ds-bench/tests/test_dsbench.py",
+          "benchmarks/ds-bench/upstream.json",
+          "docs/benchmarks/ds-bench/plan.md",
+          "docs/benchmarks/ds-bench/research.md"
+        ]
+      }
+    },
+    "ds-bench": {
+      "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/ds-bench@sha256:49673e701d61eec142ec40996dfef08b5a27596a981f69e9297dcd38837ad95d",
+      "digest": "sha256:49673e701d61eec142ec40996dfef08b5a27596a981f69e9297dcd38837ad95d",
+      "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/ds-bench:93a1a066a511-eee390c42e3c",
+      "source": {
+        "commit": "93a1a066a511ad2ce5114dc429afb1fd0f6d99bf",
+        "adapter_sha256": "eee390c42e3c39dc1bd6c2041b796e80e4c3f6ada0244a9db758195067e228ff"
+      }
+    },
+    "rust": {
+      "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-streams@sha256:3501f08b55f60c8043cf9af99ffc5732950c676a9f5f3a2f260efb6a1889ddd2",
+      "digest": "sha256:3501f08b55f60c8043cf9af99ffc5732950c676a9f5f3a2f260efb6a1889ddd2",
+      "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-streams:88793e76595d",
+      "source": {
+        "commit": "88793e76595d69be300731b9b25c58538923a53b",
+        "provenance": "@electric-ax/durable-streams-server-rust@0.1.5"
+      }
+    },
+    "node": {
+      "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-node@sha256:e82c0192eb9124e2b0e2d166776739f14f9bd4fc8146e394e0df488708619b71",
+      "digest": "sha256:e82c0192eb9124e2b0e2d166776739f14f9bd4fc8146e394e0df488708619b71",
+      "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-node:b55f133ec80c",
+      "source": {
+        "commit": "b55f133ec80c35cd673ea745785adb031d0df1db",
+        "provenance": "official reference server repository"
+      }
+    },
+    "ursula": {
+      "reference": "ghcr.io/tonbo-io/ursula@sha256:06e8cd30c51b907b214c9edaa879427a0fbafe8ab567efd5f975225bc103e281",
+      "digest": "sha256:06e8cd30c51b907b214c9edaa879427a0fbafe8ab567efd5f975225bc103e281",
+      "tag_reference": "ghcr.io/tonbo-io/ursula:v0.2.0"
+    },
+    "redis": {
+      "reference": "redis@sha256:8096655e437712b07503796fb64d81359256cfcff0ab29d95a7da72863786efb",
+      "digest": "sha256:8096655e437712b07503796fb64d81359256cfcff0ab29d95a7da72863786efb",
+      "tag_reference": "redis:8-alpine"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+sequenceDiagram
+    autonumber
+    participant C as SSE client
+    participant H as HTTP handler
+    participant F as stream fanout hub
+    participant R as Redis
+    C->>H: GET offset and live=sse
+    H->>R: Get metadata and incarnation
+    H->>F: acquire stream hub
+    F->>R: SUBSCRIBE and confirm
+    F->>R: read durable suffix once
+    F-->>H: hub ready
+    H->>R: catch up from client offset
+    H->>R: recheck metadata and incarnation
+    H-->>C: data then control offset
+    H->>F: attach watcher at sent offset
+    Note over H,F: no gap between catch-up and live delivery
+    R-->>F: append wake hint
+    F->>R: read new durable suffix once
+    F-->>H: shared immutable data event
+    H-->>C: shared data then client control

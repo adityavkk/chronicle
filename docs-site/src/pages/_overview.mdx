@@ -31,7 +31,7 @@ import Aside from "../components/Aside.astro";
     <li><strong>Redis is the only dependency.</strong> Chronicle is one Go binary; stream data, producer state, and reader wakeups live in Redis 8.</li>
     <li><strong>Every mutation is one Lua script.</strong> Validation, write, tail update, and notification run atomically and serialized per stream. No partial appends and no lost wakeups.</li>
     <li><strong>It tracks the reference implementation.</strong> The store contract and handler mirror the upstream Caddy plugin, and ~330 official conformance tests gate every change.</li>
-    <li><strong>Load-tested against that reference.</strong> One writer per stream sustains 1,500 appends/s with zero errors. Concurrent writers on one stream collapse near 1,000/s. Both results are in the benchmark report.</li>
+    <li><strong>The SSE live path now shares one read per stream.</strong> The original 1,000-client path measured 970.5 Redis reads per append. The exact-counter guard measured 1.000 after the fanout change. A separate local Kubernetes run delivered 49,616 events/s with zero request errors.</li>
   </ul>
 </Tldr>
 
@@ -205,7 +205,7 @@ import Aside from "../components/Aside.astro";
 </section>
 
 <section class="block" id="performance">
-  <SectionHead num="05" label="Performance" title="Throughput, latency, <em>two bottlenecks</em>" />
+  <SectionHead num="05" label="Performance" title="Throughput, latency, <em>and what changed</em>" />
 
   Chronicle is load-tested with `dsload`, a declarative load generator for
   Durable Streams servers that lives on the repo's `loadgen` branch.[^rig]
@@ -244,19 +244,26 @@ import Aside from "../components/Aside.astro";
   1,500/s across 50 streams with zero errors. The collapse is specific to
   concurrent appends on a single stream.
 
-  ### A latency floor in <em>the wakeup path</em>
+  ### The live-read bottleneck was <em>removed</em>
 
-  Delivery p90 sits near 300 ms even at 20 msg/s with nothing saturated. The
+  The 2026-06-10 baseline put delivery p90 near 300 ms even at 20 msg/s with
+  nothing saturated. The
   Caddy memory store served the same fanout scenario at delivery p50 9.4 ms,
-  so the gap is Chronicle's wakeup path, not Redis round-trip time.
+  so the gap was Chronicle's wakeup path, not Redis round-trip time.
 
-  <Aside label="Mechanism" summary="Why the floor exists, and the two proposed fixes">
-    The SSE loop waits in 100 ms steps, and each iteration opens a fresh Redis
-    pub/sub subscription with a dedicated connection per `Subscribe`. The
-    benchmark Redis logged 96,564 connections received and 65,852 SUBSCRIBE
-    calls over the suite. The report names two fixes. On the write path, use
-    jittered backoff or per-stream single-flight. On the wakeup path, use a
-    persistent per-stream pub/sub hub.
+  A later sealed run made the amplification explicit. One stream with 1,000 SSE
+  clients produced 970.5 durable Redis reads per append. The
+  [per-stream fanout hub](./performance-improvements/sse-fanout) measured 1.000 in the exact-counter guard. It
+  delivered 49,616 events/s at p99 19.519 ms with no request errors. The hub
+  shares the durable read and formatted data event. Client socket writes remain
+  separate.
+
+  <Aside label="Mechanism" summary="What changed in the wake path">
+    The old SSE loop owned one Pub/Sub wait and durable read per client. The new
+    path owns one persistent subscription and one durable reader per active
+    stream on each Chronicle replica. Pub/Sub remains only a wake hint. A
+    one-second durable poll recovers a lost hint, and a bounded replay window
+    disconnects slow clients so they can resume from their last offset.
   </Aside>
 
   <Callout icon="alert" label="Caveats">
@@ -291,6 +298,7 @@ import Aside from "../components/Aside.astro";
 
   - [Endpoints &amp; Redis](./endpoints). Every endpoint walked one at a time: the request, the sequence diagram, and the exact Redis commands each Lua script runs.
   - [Subscriptions](./subscriptions). The reserved `__ds` API: webhook and pull-wake delivery, generation fencing, and the recovery sweep that survives a restart.
+  - [Performance improvements](./performance-improvements). The SSE fanout fix, horizontal scaling work, cloud load tests, configuration comparisons, and their remaining limits.
   - [README](https://github.com/adityavkk/chronicle#readme). Quickstart, configuration, and development workflow.
   - [docs/PLAN.md](https://github.com/adityavkk/chronicle/blob/main/docs/PLAN.md). The architecture and its decision log.
   - [docs/spec/PROTOCOL.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md). The vendored protocol spec.

@@ -1,0 +1,71 @@
+{
+  "schema": "chronicle-ds-bench-paid-screen-v1",
+  "project": "adityavkk-prototyping",
+  "account": "adityavkk@gmail.com",
+  "location": {
+    "region": "europe-west4",
+    "zone": "europe-west4-b",
+    "artifact_registry_region": "europe-west1"
+  },
+  "image_build": {
+    "cloud_build_submits": [
+      "chronicle",
+      "ds-bench"
+    ],
+    "reuse_reference_suts_from_sealed_archive": "docs/benchmarks/ds-bench/results/20260728T122629Z-59260e88",
+    "source_images_manifest": "docs/benchmarks/ds-bench/results/20260728T122629Z-59260e88/images.json",
+    "chronicle_build_context_sha256": "9bd0ec59492a29432038f2c7a2526531f68a674628da9c2f137e582564745dbd",
+    "ds_bench_adapter_sha256": "1440fc1d049613228429a1a8444ef93246e1b6945f926eb655d6ba44429ace65"
+  },
+  "campaigns": [
+    {
+      "name": "fixed-budget-topology-screen",
+      "definition": "benchmarks/ds-bench/scaling.json",
+      "definition_sha256": "f322695495f77cde00cf65767d058013341d39ed7a2cf7829c9f2c8858e853ed",
+      "suite_count": 6,
+      "configuration_count_per_suite": 6,
+      "suite_deadline_seconds": 10800,
+      "maximum_cluster_hours": 18
+    },
+    {
+      "name": "sse-wait-diagnostic",
+      "definition": "benchmarks/ds-bench/sse-diagnostic.json",
+      "definition_sha256": "7a6173cb05e9c27912f20727483787186edd983d83c345a1a0b1dc6a0a15454e",
+      "suite_count": 2,
+      "configuration_count_per_suite": 2,
+      "suite_deadline_seconds": 7200,
+      "maximum_cluster_hours": 4
+    },
+    {
+      "name": "sse-hub-p0-validation-4cpu",
+      "definition": "benchmarks/ds-bench/sse-hub-validation.json",
+      "definition_sha256": "ed452d41ce042d719550ad7d835f5b58898a2383827b49042e17f412710badd9",
+      "suite_count": 2,
+      "configuration_count_per_suite": 1,
+      "suite_deadline_seconds": 3600,
+      "maximum_cluster_hours": 2
+    }
+  ],
+  "cluster": {
+    "execution": "sequential",
+    "server": {
+      "count": 1,
+      "machine": "c4d-standard-16-lssd",
+      "purchasing_model": "on-demand"
+    },
+    "clients": {
+      "count": 2,
+      "machine": "n2d-standard-32",
+      "purchasing_model": "spot"
+    },
+    "maximum_total_cluster_hours": 24,
+    "watchdog_teardown": true,
+    "final_absence_proof": true
+  },
+  "approval_required": [
+    "two Cloud Build uploads",
+    "six paid fixed-budget topology suites",
+    "two paid SSE diagnostic suites",
+    "two paid SSE hub P0 validation suites"
+  ]
+}

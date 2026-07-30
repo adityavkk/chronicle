@@ -1,0 +1,189 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chronicle-redis
+  namespace: ds-bench
+  labels:
+    app: chronicle-redis
+    ds-bench-sut: chronicle
+    ds-bench-component: redis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: chronicle-redis
+  template:
+    metadata:
+      labels:
+        app: chronicle-redis
+        ds-bench-sut: chronicle
+        ds-bench-component: redis
+    spec:
+      nodeSelector: ${NODESEL_SERVER}
+      enableServiceLinks: false
+      shareProcessNamespace: true
+      containers:
+        - name: redis
+          image: ${IMG_REDIS}
+          imagePullPolicy: ${PULL_POLICY}
+          command:
+            - redis-server
+          args:
+            - "--bind"
+            - "0.0.0.0"
+            - "--protected-mode"
+            - "no"
+            - "--save"
+            - ""
+            - "--dir"
+            - "/data"
+            - "--appendonly"
+            - "yes"
+            - "--appendfsync"
+            - "${CHRONICLE_APPEND_FSYNC}"
+            - "--maxmemory"
+            - "${REDIS_MAXMEMORY_PER_POD}mb"
+            - "--maxmemory-policy"
+            - "noeviction"
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            failureThreshold: 60
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "${REDIS_CPU_PER_POD}m"
+              memory: "${REDIS_MEMORY_PER_POD}Mi"
+            limits:
+              cpu: "${REDIS_CPU_PER_POD}m"
+              memory: "${REDIS_MEMORY_PER_POD}Mi"
+        - name: metrics
+          image: ${IMG_METRICS}
+          imagePullPolicy: ${PULL_POLICY}
+          command:
+            - nice
+            - "-n"
+            - "19"
+            - bash
+            - /deploy/metrics/poller.sh
+          env:
+            - name: SERVER_PROC
+              value: "redis-server"
+            - name: METRICS_INTERVAL_S
+              value: "1"
+            - name: METRICS_OUT
+              value: /metrics/samples.csv
+            - name: DATA_DIR
+              value: /data
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          volumeMounts:
+            - name: metrics
+              mountPath: /metrics
+            - name: metrics-poller
+              mountPath: /deploy/metrics
+            - name: redis-data
+              mountPath: /data
+              readOnly: true
+            - name: cgroup-host
+              mountPath: /host/cgroup
+              readOnly: true
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "50m"
+              memory: "64Mi"
+        - name: commandstats
+          image: ${IMG_REDIS}
+          imagePullPolicy: ${PULL_POLICY}
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              until [ "$(redis-cli -h 127.0.0.1 ping 2>/dev/null)" = "PONG" ]; do
+                sleep 1
+              done
+              echo "ts_ms,zrangebylex,publish,subscribe,unsubscribe,hgetall,evalsha,hset,pexpire,connected_clients,pubsub_clients" \
+                > /metrics/redis-commandstats.csv
+              while true; do
+                info="$(redis-cli -h 127.0.0.1 --raw info commandstats)"
+                clients="$(redis-cli -h 127.0.0.1 --raw info clients)"
+                calls() {
+                  printf '%s\n' "$info" |
+                    awk -F'[=,]' -v key="cmdstat_$1:calls" \
+                      '$1 == key { gsub(/\r/, "", $2); print $2 + 0; found=1 }
+                       END { if (!found) print 0 }'
+                }
+                connected="$(printf '%s\n' "$clients" |
+                  awk -F: '$1 == "connected_clients" {
+                    gsub(/\r/, "", $2); print $2 + 0; found=1
+                  } END { if (!found) print 0 }')"
+                pubsub="$(printf '%s\n' "$clients" |
+                  awk -F: '$1 == "pubsub_clients" {
+                    gsub(/\r/, "", $2); print $2 + 0; found=1
+                  } END { if (!found) print 0 }')"
+                printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+                  "$(date +%s)000" \
+                  "$(calls zrangebylex)" \
+                  "$(calls publish)" \
+                  "$(calls subscribe)" \
+                  "$(calls unsubscribe)" \
+                  "$(calls hgetall)" \
+                  "$(calls evalsha)" \
+                  "$(calls hset)" \
+                  "$(calls pexpire)" \
+                  "$connected" \
+                  "$pubsub" >> /metrics/redis-commandstats.csv
+                sleep 1
+              done
+          volumeMounts:
+            - name: metrics
+              mountPath: /metrics
+          resources:
+            requests:
+              cpu: "5m"
+              memory: "8Mi"
+            limits:
+              cpu: "25m"
+              memory: "32Mi"
+      volumes:
+        - name: redis-data
+          emptyDir: {}
+        - name: metrics
+          emptyDir: {}
+        - name: metrics-poller
+          configMap:
+            name: metrics-poller
+            defaultMode: 0755
+        - name: cgroup-host
+          hostPath:
+            path: /sys/fs/cgroup
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chronicle-redis
+  namespace: ds-bench
+spec:
+  selector:
+    app: chronicle-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

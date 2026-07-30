@@ -29,6 +29,14 @@ func TestMuxEndpoints(t *testing.T) {
 	p.OwnerFenced("check_owner")
 	p.ClaimContention("already_claimed", "agent-handler")
 	p.DurabilityShort("WAITAOF")
+	p.SSEHubActive(1)
+	p.SSEClientActive(1)
+	p.SSEHubRead(7)
+	p.SSEHubRingBytes(4096)
+	p.SSEClientLagged()
+	p.SSEClientWriteTimeout()
+	p.SSESubscriptionActive(1)
+	p.SSESubscriptionEvent("opened")
 	mux := p.Mux(func() error { return nil })
 
 	get := func(path string) *httptest.ResponseRecorder {
@@ -42,6 +50,9 @@ func TestMuxEndpoints(t *testing.T) {
 	}
 	if rr := get("/readyz"); rr.Code != http.StatusOK {
 		t.Fatalf("/readyz (ready) = %d, want 200", rr.Code)
+	}
+	if rr := get("/debug/pprof/"); rr.Code != http.StatusNotFound {
+		t.Fatalf("/debug/pprof/ (disabled) = %d, want 404", rr.Code)
 	}
 
 	body := get("/metrics").Body.String()
@@ -73,10 +84,35 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_owner_fenced_total",
 		"chronicle_claim_contention_total",
 		"chronicle_durability_short_total",
+		"chronicle_sse_hubs",
+		"chronicle_sse_clients",
+		"chronicle_sse_hub_reads_total",
+		"chronicle_sse_hub_messages_total",
+		"chronicle_sse_hub_ring_bytes",
+		"chronicle_sse_lagged_disconnects_total",
+		"chronicle_sse_write_timeouts_total",
+		"chronicle_sse_subscriptions",
+		"chronicle_sse_subscription_events_total",
 	} {
 		if !strings.Contains(body, name) {
 			t.Errorf("/metrics output missing %q", name)
 		}
+	}
+}
+
+func TestMuxPprofIsExplicitlyEnabled(t *testing.T) {
+	p := New()
+	mux := p.Mux(nil, true)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(
+		rr,
+		httptest.NewRequest(http.MethodGet, "/debug/pprof/goroutine?debug=1", nil),
+	)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("/debug/pprof/goroutine = %d, want 200", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "goroutine profile") {
+		t.Fatalf("goroutine profile response did not contain profile data")
 	}
 }
 

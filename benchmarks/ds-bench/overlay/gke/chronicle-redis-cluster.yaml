@@ -1,0 +1,198 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: chronicle-redis-cluster
+  namespace: ds-bench
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: chronicle-redis-cluster
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+    - name: cluster-bus
+      port: 16379
+      targetPort: cluster-bus
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chronicle-redis-cluster
+  namespace: ds-bench
+  labels:
+    app: chronicle-redis-cluster
+    ds-bench-sut: chronicle
+    ds-bench-component: redis
+spec:
+  serviceName: chronicle-redis-cluster
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: chronicle-redis-cluster
+  template:
+    metadata:
+      labels:
+        app: chronicle-redis-cluster
+        ds-bench-sut: chronicle
+        ds-bench-component: redis
+    spec:
+      nodeSelector: ${NODESEL_SERVER}
+      enableServiceLinks: false
+      shareProcessNamespace: true
+      containers:
+        - name: redis
+          image: ${IMG_REDIS}
+          imagePullPolicy: ${PULL_POLICY}
+          command:
+            - redis-server
+          args:
+            - "--bind"
+            - "0.0.0.0"
+            - "--protected-mode"
+            - "no"
+            - "--save"
+            - ""
+            - "--dir"
+            - "/data"
+            - "--appendonly"
+            - "yes"
+            - "--appendfsync"
+            - "${CHRONICLE_APPEND_FSYNC}"
+            - "--maxmemory"
+            - "${REDIS_MAXMEMORY_PER_POD}mb"
+            - "--maxmemory-policy"
+            - "noeviction"
+            - "--cluster-enabled"
+            - "yes"
+            - "--cluster-config-file"
+            - "/data/nodes.conf"
+            - "--cluster-node-timeout"
+            - "5000"
+          ports:
+            - name: redis
+              containerPort: 6379
+            - name: cluster-bus
+              containerPort: 16379
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            failureThreshold: 60
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "${REDIS_CPU_PER_POD}m"
+              memory: "${REDIS_MEMORY_PER_POD}Mi"
+            limits:
+              cpu: "${REDIS_CPU_PER_POD}m"
+              memory: "${REDIS_MEMORY_PER_POD}Mi"
+        - name: metrics
+          image: ${IMG_METRICS}
+          imagePullPolicy: ${PULL_POLICY}
+          command:
+            - nice
+            - "-n"
+            - "19"
+            - bash
+            - /deploy/metrics/poller.sh
+          env:
+            - name: SERVER_PROC
+              value: "redis-server"
+            - name: METRICS_INTERVAL_S
+              value: "1"
+            - name: METRICS_OUT
+              value: /metrics/samples.csv
+            - name: DATA_DIR
+              value: /data
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          volumeMounts:
+            - name: metrics
+              mountPath: /metrics
+            - name: metrics-poller
+              mountPath: /deploy/metrics
+            - name: redis-data
+              mountPath: /data
+              readOnly: true
+            - name: cgroup-host
+              mountPath: /host/cgroup
+              readOnly: true
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "50m"
+              memory: "64Mi"
+      volumes:
+        - name: redis-data
+          emptyDir: {}
+        - name: metrics
+          emptyDir: {}
+        - name: metrics-poller
+          configMap:
+            name: metrics-poller
+            defaultMode: 0755
+        - name: cgroup-host
+          hostPath:
+            path: /sys/fs/cgroup
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: chronicle-redis-cluster-init
+  namespace: ds-bench
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: chronicle-redis-cluster-init
+    spec:
+      restartPolicy: Never
+      nodeSelector: ${NODESEL_SERVER}
+      containers:
+        - name: cluster-init
+          image: ${IMG_REDIS}
+          imagePullPolicy: ${PULL_POLICY}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              hosts="
+                chronicle-redis-cluster-0.chronicle-redis-cluster
+                chronicle-redis-cluster-1.chronicle-redis-cluster
+                chronicle-redis-cluster-2.chronicle-redis-cluster
+              "
+              nodes=""
+              for host in $hosts; do
+                for i in $(seq 1 180); do
+                  [ "$(redis-cli -h "$host" ping 2>/dev/null)" = "PONG" ] && break
+                  [ "$i" = "180" ] && exit 1
+                  sleep 1
+                done
+                nodes="$nodes $host:6379"
+              done
+              if redis-cli -h chronicle-redis-cluster-0.chronicle-redis-cluster \
+                  cluster info 2>/dev/null | grep -q '^cluster_state:ok'; then
+                exit 0
+              fi
+              redis-cli --cluster create $nodes --cluster-replicas 0 --cluster-yes
+              for i in $(seq 1 120); do
+                info="$(redis-cli -h chronicle-redis-cluster-0.chronicle-redis-cluster \
+                  cluster info 2>/dev/null || true)"
+                echo "$info" | grep -q '^cluster_state:ok' &&
+                  echo "$info" | grep -q '^cluster_slots_assigned:16384' && exit 0
+                sleep 1
+              done
+              exit 1

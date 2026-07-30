@@ -104,10 +104,21 @@ spec:
             # target, so 1 byte deterministically yields one whole frame/page.
             - name: CHRONICLE_READ_PAGE_BYTES
               value: "1"
+            - name: CHRONICLE_SSE_HUB_REPLAY_BYTES
+              value: "65536"
+            - name: CHRONICLE_SSE_HUB_BATCH_BYTES
+              value: "32768"
+            - name: CHRONICLE_SSE_CLIENT_WRITE_TIMEOUT
+              value: "5s"
+            - name: CHRONICLE_SSE_RECONNECT_INTERVAL
+              value: "10m"
+            - name: CHRONICLE_METRICS_LISTEN
+              value: ":9090"
             - name: CHRONICLE_LOG_LEVEL
               value: "info"
           ports:
             - containerPort: 4437
+            - containerPort: 9090
           readinessProbe:
             tcpSocket:
               port: 4437

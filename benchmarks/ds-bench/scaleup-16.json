@@ -1,0 +1,168 @@
+{
+  "schema": "chronicle-ds-bench-campaign-v1",
+  "profile": "chronicle-node-scaleup-16cpu",
+  "resource_budget": {
+    "cpu_millis": 16000,
+    "memory_mib": 16384,
+    "local_ssds": 1
+  },
+  "target": {
+    "throughput_ratio": 0.8,
+    "completion_ratio": 0.98,
+    "latency_ratio": 2.0,
+    "memory_ratio": 2.0,
+    "request_errors": 0,
+    "reference_rule": "better-per-cell-of-rust-wal-and-ursula-disk"
+  },
+  "reference_archives": [
+    {
+      "path": "docs/benchmarks/ds-bench/results/20260727T122510Z-bd85274b",
+      "evidence_tree_sha256": "ad3104c8a0a10ca8b7e81b88e636517181ad33f82ecf3b56c9bf6977d1a1c917"
+    },
+    {
+      "path": "docs/benchmarks/ds-bench/results/20260728T122629Z-59260e88",
+      "evidence_tree_sha256": "c0860ab25e172de648dde9280ea749d5343a142d1e6d3298fcd8a8cbf4c569e8"
+    }
+  ],
+  "cluster": {
+    "server_machine": "c4d-standard-32-lssd",
+    "server_cpus": 16,
+    "client_machine": "n2d-standard-32",
+    "client_nodes": 2,
+    "zone": "europe-west4-b",
+    "region": "europe-west4"
+  },
+  "systems": [
+    {
+      "key": "chronicle",
+      "mode": "chronicle",
+      "configs": [
+        {
+          "label": "chronicle-c1-r1-cpu16",
+          "args": "always:1:1:8000:8000:4096:12288:persistent",
+          "durability": "redis-aof-always",
+          "topology": {
+            "chronicle_replicas": 1,
+            "redis_masters": 1,
+            "sse_wait_mode": "persistent"
+          }
+        }
+      ]
+    }
+  ],
+  "workloads": [
+    {
+      "key": "write",
+      "saturation": {
+        "plateau_pct": 8,
+        "patience": 2,
+        "fleet_cpu": 2,
+        "connections": 256,
+        "repeats": 3,
+        "warmup_secs": 12,
+        "measure_secs": 20,
+        "setup_concurrency": 32,
+        "payload_bytes": 256
+      },
+      "stream_counts": [
+        100000
+      ],
+      "pod_ladder": {
+        "100000": [
+          1,
+          2,
+          4,
+          8,
+          12,
+          16,
+          24
+        ]
+      }
+    },
+    {
+      "key": "blog-sse",
+      "workload": "reads",
+      "reads": {
+        "mode": "sse",
+        "read_size_bytes": 256,
+        "append_rate_per_sec": 50,
+        "seed_bytes": 0,
+        "duration_secs": 20,
+        "warmup_secs": 5,
+        "settle_secs": 2,
+        "connection_levels": [
+          1000
+        ],
+        "pods": 1
+      },
+      "stream_counts": [
+        1
+      ]
+    },
+    {
+      "key": "reads-sse",
+      "workload": "reads",
+      "reads": {
+        "mode": "sse",
+        "read_size_bytes": 256,
+        "append_rate_per_sec": 50,
+        "seed_bytes": 0,
+        "duration_secs": 15,
+        "warmup_secs": 5,
+        "settle_secs": 2,
+        "connection_levels": [
+          2048
+        ],
+        "pods": 1
+      },
+      "stream_counts": [
+        100
+      ]
+    },
+    {
+      "key": "reads-catchup",
+      "workload": "reads",
+      "reads": {
+        "mode": "catchup",
+        "read_size_bytes": 4096,
+        "seed_bytes": 16777216,
+        "seed_timeout_secs": 600,
+        "fleet_timeout_secs": 1800,
+        "duration_secs": 15,
+        "warmup_secs": 5,
+        "settle_secs": 2,
+        "connection_levels": [
+          512
+        ],
+        "pods": 1
+      },
+      "stream_counts": [
+        100
+      ]
+    },
+    {
+      "key": "mixed-writes",
+      "workload": "mixed",
+      "mixed": {
+        "sweep": "readers",
+        "levels": [
+          100000
+        ],
+        "writers_per_stream": 1,
+        "writer_rate": 5,
+        "read_rate": 0,
+        "subscribers": 0,
+        "duration_secs": 60,
+        "payload_bytes": 256,
+        "setup_concurrency": 64,
+        "pods": 1,
+        "read_interval_ms": 30000,
+        "backfill_events": 50,
+        "fleet_timeout_secs": 900
+      },
+      "stream_counts": [
+        10000
+      ]
+    }
+  ]
+}

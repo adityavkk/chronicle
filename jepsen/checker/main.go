@@ -13,13 +13,15 @@
 //
 // This is the empirical counterpart to docs/research/07's crash-window analysis.
 //
-// Beyond the original baseline/origin-restart/redis-restart scenarios, four
-// scenarios exercise the crash windows closed by the subscription-hardening
-// slices (docs/research/10): pull-wake-arm-crash (slice 1, durable pull-wake
-// recovery), expired-lease-takeover (slice 2, fence rotation on lease takeover),
+// Beyond the original baseline/origin-restart/redis-restart scenarios,
+// sse-resume checks the live data plane across notification loss, slow-client
+// resume, and pod replacement. Four more scenarios exercise the crash windows
+// closed by the subscription-hardening slices (docs/research/10):
+// pull-wake-arm-crash (slice 1, durable pull-wake recovery),
+// expired-lease-takeover (slice 2, fence rotation on lease takeover),
 // glob-create-crash (slice 3, glob-link reconciliation), and index-repair
 // (slice 4, fan-out index repair). Each asserts the property the matching slice
-// promises — see the per-scenario comments and docs/jepsen/results.md.
+// promises. See the per-scenario comments and docs/jepsen/results.md.
 package main
 
 import (
@@ -91,7 +93,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|paged-catchup|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|failover|durable-externalize|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|paged-catchup|sse-resume|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|failover|durable-externalize|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
@@ -212,6 +214,14 @@ func run(c config, r *receiver) error {
 	if c.scenario == "durable-externalize" {
 		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
 		return runDurableExternalize(c, nem)
+	}
+
+	// sse-resume drives multiple live readers through Chronicle and Redis pod
+	// loss, then checks that every reader resumes from a forward-only control
+	// offset and covers the closed stream's complete durable sequence.
+	if c.scenario == "sse-resume" {
+		nem := &nemesis{ctx: ctx, ns: c.namespace, scenario: c.scenario}
+		return runSSEResume(c, nem)
 	}
 
 	// ownership-exclusivity (T3) is now LIVE (#14 landed claim_shard.lua /

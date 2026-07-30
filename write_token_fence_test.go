@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -57,11 +58,19 @@ func newWriteFenceManager(t *testing.T) (*webhook.Manager, *webhook.RedisStore, 
 	if testing.Short() {
 		t.Skip("skipping Redis integration test in -short mode")
 	}
-	client := goredis.NewClient(&goredis.Options{Addr: "localhost:6379", DB: 13})
+	rawURL := os.Getenv("CHRONICLE_ITEST_REDIS_URL")
+	if rawURL == "" {
+		rawURL = "redis://localhost:6379/13"
+	}
+	options, err := goredis.ParseURL(rawURL)
+	if err != nil {
+		t.Fatalf("parse Redis URL: %v", err)
+	}
+	client := goredis.NewClient(options)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
-		t.Skipf("redis unreachable: %v", err)
+		t.Skipf("redis unreachable at %s: %v", rawURL, err)
 	}
 	if err := client.FlushDB(ctx).Err(); err != nil {
 		t.Fatalf("flushdb: %v", err)

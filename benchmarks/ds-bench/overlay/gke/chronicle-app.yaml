@@ -1,0 +1,145 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chronicle
+  namespace: ds-bench
+  labels:
+    app: chronicle
+    ds-bench-sut: chronicle
+    ds-bench-component: chronicle
+spec:
+  replicas: ${CHRONICLE_REPLICAS}
+  selector:
+    matchLabels:
+      app: chronicle
+  template:
+    metadata:
+      labels:
+        app: chronicle
+        ds-bench-sut: chronicle
+        ds-bench-component: chronicle
+      annotations:
+        ds-bench/topology: "${CHRONICLE_TOPOLOGY}"
+        ds-bench/redis-appendfsync: "${CHRONICLE_APPEND_FSYNC}"
+        ds-bench/sse-wait-mode: "${CHRONICLE_SSE_WAIT_MODE}"
+    spec:
+      nodeSelector: ${NODESEL_SERVER}
+      enableServiceLinks: false
+      shareProcessNamespace: true
+      initContainers:
+        - name: wait-for-redis
+          image: ${IMG_REDIS}
+          imagePullPolicy: ${PULL_POLICY}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              for i in $(seq 1 180); do
+                if [ "${CHRONICLE_TOPOLOGY}" = "cluster" ]; then
+                  redis-cli -t 2 -h "${CHRONICLE_REDIS_READY_HOST}" cluster info 2>/dev/null |
+                    grep -q '^cluster_state:ok' && exit 0
+                else
+                  [ "$(redis-cli -t 2 -h "${CHRONICLE_REDIS_READY_HOST}" ping 2>/dev/null)" = "PONG" ] &&
+                    exit 0
+                fi
+                sleep 1
+              done
+              exit 1
+      containers:
+        - name: chronicle
+          image: ${IMG_CHRONICLE}
+          imagePullPolicy: ${PULL_POLICY}
+          args:
+            - "--listen"
+            - "0.0.0.0:4437"
+            - "--redis-url"
+            - "${CHRONICLE_REDIS_URL}"
+            - "--redis-pool-size"
+            - "${CHRONICLE_REDIS_POOL_SIZE}"
+            - "--store"
+            - "redis"
+            - "--subscriptions=false"
+            - "--ui=false"
+            - "--log-level"
+            - "warn"
+            - "--metrics-listen"
+            - "0.0.0.0:9090"
+            - "--metrics-pprof=true"
+            - "--sse-hub-replay-bytes=1048576"
+            - "--sse-hub-batch-bytes=262144"
+            - "--sse-client-write-timeout=10s"
+          ports:
+            - containerPort: 4437
+            - containerPort: 9090
+          readinessProbe:
+            tcpSocket:
+              port: 4437
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 60
+          resources:
+            requests:
+              cpu: "${CHRONICLE_CPU_PER_POD}m"
+              memory: "${CHRONICLE_MEMORY_PER_POD}Mi"
+            limits:
+              cpu: "${CHRONICLE_CPU_PER_POD}m"
+              memory: "${CHRONICLE_MEMORY_PER_POD}Mi"
+        - name: metrics
+          image: ${IMG_METRICS}
+          imagePullPolicy: ${PULL_POLICY}
+          command:
+            - nice
+            - "-n"
+            - "19"
+            - bash
+            - /deploy/metrics/poller.sh
+          env:
+            - name: SERVER_PROC
+              value: "chronicle"
+            - name: METRICS_INTERVAL_S
+              value: "1"
+            - name: METRICS_OUT
+              value: /metrics/samples.csv
+            - name: DATA_DIR
+              value: /tmp
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          volumeMounts:
+            - name: metrics
+              mountPath: /metrics
+            - name: metrics-poller
+              mountPath: /deploy/metrics
+            - name: cgroup-host
+              mountPath: /host/cgroup
+              readOnly: true
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "50m"
+              memory: "64Mi"
+      volumes:
+        - name: metrics
+          emptyDir: {}
+        - name: metrics-poller
+          configMap:
+            name: metrics-poller
+            defaultMode: 0755
+        - name: cgroup-host
+          hostPath:
+            path: /sys/fs/cgroup
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chronicle
+  namespace: ds-bench
+spec:
+  selector:
+    app: chronicle
+  ports:
+    - port: 4437
+      targetPort: 4437

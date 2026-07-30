@@ -86,7 +86,16 @@ func (w *locationRewriter) Write(b []byte) (int, error) {
 
 // Flush forwards http.Flusher so SSE streaming works through the wrapper.
 func (w *locationRewriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
+	_ = w.FlushError()
+}
+
+// FlushError preserves connection-level flush failures for ResponseController.
+func (w *locationRewriter) FlushError() error {
+	return http.NewResponseController(w.ResponseWriter).Flush()
+}
+
+// Unwrap lets http.ResponseController reach connection-level capabilities
+// such as write deadlines through the Location-rewriting wrapper.
+func (w *locationRewriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }

@@ -1,0 +1,130 @@
+{
+  "schema": "chronicle-ds-bench-execution-v1",
+  "execution_kind": "campaign",
+  "campaign_id": "20260728T122629Z-59260e88",
+  "completed_at": "2026-07-28T15:29:04.252193+00:00",
+  "suite_deadline_seconds": 14400,
+  "complete": true,
+  "planned_suites": 4,
+  "executed_suites": 4,
+  "selected_workloads": [
+    "reads-catchup"
+  ],
+  "selected_suites": [
+    "parity-reads-catchup-rust",
+    "parity-reads-catchup-node",
+    "parity-reads-catchup-ursula",
+    "parity-reads-catchup-chronicle"
+  ],
+  "all_campaign_clusters_absent": true,
+  "runs": [
+    {
+      "suite": "parity-reads-catchup-rust",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-catchup-rust.json",
+      "cluster": "chdb-reads-catc-rust",
+      "zone": "europe-west4-b",
+      "system": "rust",
+      "workload": "reads-catchup",
+      "teardown_filter": "^chdb-reads-catc-rust$",
+      "started_at": "2026-07-28T12:28:10.653638+00:00",
+      "completed_at": "2026-07-28T12:58:55.040726+00:00",
+      "elapsed_seconds": 1844.3668362909957,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T122629Z-59260e88/scripts/bench",
+        "/Users/auk000v/dev/chronicle/docs/benchmarks/ds-bench/results/20260728T122629Z-59260e88/runs/parity-reads-catchup-rust/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    },
+    {
+      "suite": "parity-reads-catchup-node",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-catchup-node.json",
+      "cluster": "chdb-reads-catc-node",
+      "zone": "europe-west4-b",
+      "system": "node",
+      "workload": "reads-catchup",
+      "teardown_filter": "^chdb-reads-catc-node$",
+      "started_at": "2026-07-28T12:58:55.040769+00:00",
+      "completed_at": "2026-07-28T13:18:49.108943+00:00",
+      "elapsed_seconds": 1194.0583856250014,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T122629Z-59260e88/scripts/bench",
+        "/Users/auk000v/dev/chronicle/docs/benchmarks/ds-bench/results/20260728T122629Z-59260e88/runs/parity-reads-catchup-node/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    },
+    {
+      "suite": "parity-reads-catchup-ursula",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-catchup-ursula.json",
+      "cluster": "chdb-reads-catc-ursula",
+      "zone": "europe-west4-b",
+      "system": "ursula",
+      "workload": "reads-catchup",
+      "teardown_filter": "^chdb-reads-catc-ursula$",
+      "started_at": "2026-07-28T13:18:49.108985+00:00",
+      "completed_at": "2026-07-28T14:37:12.862762+00:00",
+      "elapsed_seconds": 4703.739996916003,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T122629Z-59260e88/scripts/bench",
+        "/Users/auk000v/dev/chronicle/docs/benchmarks/ds-bench/results/20260728T122629Z-59260e88/runs/parity-reads-catchup-ursula/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    },
+    {
+      "suite": "parity-reads-catchup-chronicle",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-catchup-chronicle.json",
+      "cluster": "chdb-reads-catc-chronicle",
+      "zone": "europe-west4-b",
+      "system": "chronicle",
+      "workload": "reads-catchup",
+      "teardown_filter": "^chdb-reads-catc-chronicle$",
+      "started_at": "2026-07-28T14:37:12.862795+00:00",
+      "completed_at": "2026-07-28T15:29:03.044518+00:00",
+      "elapsed_seconds": 3110.1517467920203,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T122629Z-59260e88/scripts/bench",
+        "/Users/auk000v/dev/chronicle/docs/benchmarks/ds-bench/results/20260728T122629Z-59260e88/runs/parity-reads-catchup-chronicle/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    }
+  ]
+}

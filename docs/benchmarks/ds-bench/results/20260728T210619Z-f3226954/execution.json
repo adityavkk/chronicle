@@ -1,0 +1,191 @@
+{
+  "schema": "chronicle-ds-bench-execution-v1",
+  "execution_kind": "scaling",
+  "campaign_id": "20260728T210619Z-f3226954",
+  "completed_at": "2026-07-29T01:57:34.742436+00:00",
+  "suite_deadline_seconds": 10800,
+  "complete": true,
+  "planned_suites": 6,
+  "executed_suites": 6,
+  "selected_workloads": [
+    "blog-sse",
+    "mixed-delivery",
+    "mixed-writes",
+    "reads-catchup",
+    "reads-sse",
+    "write"
+  ],
+  "selected_suites": [
+    "parity-write-chronicle",
+    "parity-blog-sse-chronicle",
+    "parity-reads-sse-chronicle",
+    "parity-reads-catchup-chronicle",
+    "parity-mixed-writes-chronicle",
+    "parity-mixed-delivery-chronicle"
+  ],
+  "all_campaign_clusters_absent": true,
+  "runs": [
+    {
+      "suite": "parity-write-chronicle",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-resolved/suites/parity-write-chronicle.json",
+      "cluster": "chdb-write-chronicle",
+      "zone": "europe-west4-b",
+      "system": "chronicle",
+      "workload": "write",
+      "teardown_filter": "^chdb-write-chronicle$",
+      "started_at": "2026-07-28T21:07:22.069837+00:00",
+      "completed_at": "2026-07-28T22:38:04.927378+00:00",
+      "elapsed_seconds": 5442.816771999991,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T210619Z-f3226954/scripts/bench",
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-runs/20260728T210619Z-f3226954/runs/parity-write-chronicle/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    },
+    {
+      "suite": "parity-blog-sse-chronicle",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-resolved/suites/parity-blog-sse-chronicle.json",
+      "cluster": "chdb-blog-sse-chronicle",
+      "zone": "europe-west4-b",
+      "system": "chronicle",
+      "workload": "blog-sse",
+      "teardown_filter": "^chdb-blog-sse-chronicle$",
+      "started_at": "2026-07-28T22:38:04.927430+00:00",
+      "completed_at": "2026-07-28T23:08:09.291232+00:00",
+      "elapsed_seconds": 1804.353207750013,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T210619Z-f3226954/scripts/bench",
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-runs/20260728T210619Z-f3226954/runs/parity-blog-sse-chronicle/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    },
+    {
+      "suite": "parity-reads-sse-chronicle",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-resolved/suites/parity-reads-sse-chronicle.json",
+      "cluster": "chdb-reads-sse-chronicle",
+      "zone": "europe-west4-b",
+      "system": "chronicle",
+      "workload": "reads-sse",
+      "teardown_filter": "^chdb-reads-sse-chronicle$",
+      "started_at": "2026-07-28T23:08:09.291286+00:00",
+      "completed_at": "2026-07-28T23:36:13.312870+00:00",
+      "elapsed_seconds": 1684.0119644170045,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T210619Z-f3226954/scripts/bench",
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-runs/20260728T210619Z-f3226954/runs/parity-reads-sse-chronicle/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    },
+    {
+      "suite": "parity-reads-catchup-chronicle",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-resolved/suites/parity-reads-catchup-chronicle.json",
+      "cluster": "chdb-reads-catc-chronicle",
+      "zone": "europe-west4-b",
+      "system": "chronicle",
+      "workload": "reads-catchup",
+      "teardown_filter": "^chdb-reads-catc-chronicle$",
+      "started_at": "2026-07-28T23:36:13.312919+00:00",
+      "completed_at": "2026-07-29T00:27:18.835405+00:00",
+      "elapsed_seconds": 3065.5040849579964,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T210619Z-f3226954/scripts/bench",
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-runs/20260728T210619Z-f3226954/runs/parity-reads-catchup-chronicle/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    },
+    {
+      "suite": "parity-mixed-writes-chronicle",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-resolved/suites/parity-mixed-writes-chronicle.json",
+      "cluster": "chdb-mixed-writ-chronicle",
+      "zone": "europe-west4-b",
+      "system": "chronicle",
+      "workload": "mixed-writes",
+      "teardown_filter": "^chdb-mixed-writ-chronicle$",
+      "started_at": "2026-07-29T00:27:18.835456+00:00",
+      "completed_at": "2026-07-29T01:07:56.793802+00:00",
+      "elapsed_seconds": 2437.9439302080136,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T210619Z-f3226954/scripts/bench",
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-runs/20260728T210619Z-f3226954/runs/parity-mixed-writes-chronicle/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    },
+    {
+      "suite": "parity-mixed-delivery-chronicle",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-resolved/suites/parity-mixed-delivery-chronicle.json",
+      "cluster": "chdb-mixed-deli-chronicle",
+      "zone": "europe-west4-b",
+      "system": "chronicle",
+      "workload": "mixed-delivery",
+      "teardown_filter": "^chdb-mixed-deli-chronicle$",
+      "started_at": "2026-07-29T01:07:56.793870+00:00",
+      "completed_at": "2026-07-29T01:57:32.854685+00:00",
+      "elapsed_seconds": 2976.051410458982,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T210619Z-f3226954/scripts/bench",
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-runs/20260728T210619Z-f3226954/runs/parity-mixed-delivery-chronicle/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    }
+  ]
+}

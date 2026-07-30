@@ -1,0 +1,23 @@
+{
+  "schema": "chronicle-ds-bench-seal-repair-v1",
+  "campaign_id": "20260728T122629Z-59260e88",
+  "detected_at": "2026-07-28T15:31:39Z",
+  "reason": "The campaign sealed the archive before the final detached watchdog observed its done marker and flushed its normal terminal log line.",
+  "original_seal": {
+    "file_count": 480,
+    "tree_sha256": "ac7aafbb78043969fe19c461e3f316191cc44ebea6de208fd7fd708e05cdfa15"
+  },
+  "changed_files": [
+    {
+      "path": "runs/parity-reads-catchup-chronicle/watchdog.log",
+      "original_bytes": 213,
+      "original_sha256": "c65a9188d915088d44de677b6410f196660ab97f08977bf29ac445c94f8950ba",
+      "final_bytes": 338,
+      "final_sha256": "d3317fcdfe5ecab4cfd6d7bead817682989c825f4e1b37290efeba864973b79f",
+      "appended_event": "The done marker was present, no matching Chronicle cluster remained, and the watchdog stood down."
+    }
+  ],
+  "scope": "No measurement result, raw aggregate, manifest, image record, execution summary, diagnostic, teardown proof, or cluster absence proof changed.",
+  "repair": "The premature generated seal was removed after the watchdog exited. This record was added, and the final archive tree was resealed.",
+  "harness_fix": "Future campaigns join a completed watchdog before sealing and seal only complete campaigns."
+}

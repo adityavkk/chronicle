@@ -6,8 +6,39 @@ import (
 	"testing"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
+
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
+
+func TestNotificationEventPayloads(t *testing.T) {
+	tests := []struct {
+		item any
+		want store.NotificationEvent
+	}{
+		{item: &goredis.Message{Payload: "a"}, want: store.NotificationAppend},
+		{item: &goredis.Message{Payload: "c"}, want: store.NotificationClose},
+		{item: &goredis.Message{Payload: "d"}, want: store.NotificationDelete},
+		{item: &goredis.Subscription{Kind: "subscribe"}, want: store.NotificationReconnect},
+	}
+	for _, test := range tests {
+		if got := notificationEvent(test.item); got != test.want {
+			t.Errorf("notificationEvent(%T) = %v, want %v", test.item, got, test.want)
+		}
+	}
+}
+
+func TestCoalesceNotificationPreservesTerminalAndReconnectSignals(t *testing.T) {
+	if got := coalesceNotification(store.NotificationAppend, store.NotificationClose); got != store.NotificationClose {
+		t.Fatalf("append + close = %v", got)
+	}
+	if got := coalesceNotification(store.NotificationClose, store.NotificationReconnect); got != store.NotificationReconnect {
+		t.Fatalf("close + reconnect = %v", got)
+	}
+	if got := coalesceNotification(store.NotificationReconnect, store.NotificationDelete); got != store.NotificationDelete {
+		t.Fatalf("reconnect + delete = %v", got)
+	}
+}
 
 func TestIntegrationWaitWakesOnAppend(t *testing.T) {
 	s := newTestStore(t)
@@ -30,6 +61,40 @@ func TestIntegrationWaitWakesOnAppend(t *testing.T) {
 	}
 	if elapsed >= time.Second {
 		t.Errorf("wakeup took %v, want <1s (pub/sub path, not the defensive poll)", elapsed)
+	}
+}
+
+func TestIntegrationPersistentNotificationWakesAndCancels(t *testing.T) {
+	s := newTestStore(t)
+	path := testPath("persistent-notification")
+	mustCreate(t, s, path, store.CreateOptions{})
+
+	sub, err := s.SubscribeNotifications(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close() //nolint:errcheck
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_, _ = s.Append(path, []byte("wake"), store.AppendOptions{})
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if event, err := sub.Wait(ctx); err != nil {
+		t.Fatalf("wait for append notification: %v", err)
+	} else if event != store.NotificationAppend {
+		t.Fatalf("notification = %v, want append", event)
+	}
+	msgs, _, err := s.Read(path, store.ZeroOffset)
+	if err != nil || len(msgs) != 1 || string(msgs[0].Data) != "wake" {
+		t.Fatalf("read after persistent wake: msgs=%v err=%v", msgs, err)
+	}
+
+	cancelled, stop := context.WithCancel(context.Background())
+	stop()
+	if _, err := sub.Wait(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled wait = %v, want context.Canceled", err)
 	}
 }
 

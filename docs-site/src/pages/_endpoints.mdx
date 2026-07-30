@@ -480,8 +480,9 @@ import Aside from "../components/Aside.astro";
 
   `GET {stream-url}?offset=<offset>&live=sse` keeps a Server-Sent Events
   stream open and pushes each batch as it arrives.[^sse] The handler flushes
-  the SSE headers, then loops over `read.lua`, and every 60 seconds it cycles
-  the connection so a CDN can collapse concurrent tails.
+  the SSE headers, catches the client up from durable storage, then attaches it
+  to the stream's shared fanout hub. Every 60 seconds it cycles the connection
+  so a CDN can collapse concurrent tails.
 
   ```http title="SSE tail"
   GET /v1/stream/chat?offset=now&live=sse HTTP/1.1
@@ -504,15 +505,20 @@ import Aside from "../components/Aside.astro";
 
   <RedisTrace
     label="The SSE loop, step by step"
-    script="—  Go loop"
-    source="handler_sse.go"
+    script="—  handler + shared hub"
+    source="handler_sse.go · sse_hub.go"
     steps={[
-      { cmd: "EVAL read.lua", key: "each iteration", does: "Read frames past the current offset. Non-empty → emit an <code>event: data</code>, then an <code>event: control</code> with <code>streamNextOffset</code> and a cursor.", loc: "handler_sse.go:64", kind: "read" },
-      { cmd: "re-fetch meta", does: "Check closed state. A closed stream with the client at the tail emits a final control with <code>streamClosed: true</code> and closes the connection.", loc: "handler_sse.go:70", kind: "flow" },
-      { cmd: "SUBSCRIBE", key: "ds:notify:{p}", does: "<code>WaitForMessages</code> blocks in 100 ms quanta, and each quantum opens a <em>fresh</em> subscription. This sets the benchmarked wakeup latency floor (see the overview's §05).", loc: "handler_sse.go:187", kind: "read" },
-      { cmd: "every 60 s, return", does: "Cycle the connection so a CDN can collapse concurrent tails; the client reconnects from the last <code>streamNextOffset</code>.", loc: "handler_sse.go:59", kind: "flow" },
+      { cmd: "acquire hub", key: "path", does: "Create or reuse one per-stream hub on this Chronicle replica. The hub confirms its Redis subscription before the handler completes catch-up.", loc: "handler_sse.go:37", kind: "flow" },
+      { cmd: "EVAL read.lua + Get", key: "client catch-up", does: "Read frames past this client's offset and compare the stream incarnation. Emit data, then a control event with the exact durable offset already written.", loc: "handler_sse.go:69", kind: "read" },
+      { cmd: "SUBSCRIBE once", key: "ds:notify:{p}", does: "The shared hub owns one persistent Redis subscription. A notification is only a wake hint. The hub performs one durable read for all local clients and polls once per second if a hint is lost.", loc: "sse_hub.go:285", kind: "read" },
+      { cmd: "share data event", key: "bounded replay", does: "Format one immutable data event and retain it in the byte-bounded replay window. Each watcher writes that shared data followed by its own control cursor.", loc: "sse_hub.go:468", kind: "flow" },
+      { cmd: "every 60 s, return", does: "Cycle the connection so a CDN can collapse concurrent tails. The client reconnects from the last <code>streamNextOffset</code> it received.", loc: "handler_sse.go:186", kind: "flow" },
     ]}
   />
+
+  The [SSE fanout explainer](./performance-improvements/sse-fanout) compares the old and new
+  architecture, including the attach race, bounded replay policy, fault tests,
+  and measured read-amplification reduction.
 
   <Callout icon="info" label="Binary streams">
     For a stream whose content type is neither `text/*` nor
@@ -523,9 +529,9 @@ import Aside from "../components/Aside.astro";
   </Callout>
 
   <Complexity
-    time="O(log N + Mᵢ) per iteration · O(I·log N + T) per connection"
-    space="O(Mᵢ) per batch"
-    why="Each loop iteration re-reads from the current offset for its Mᵢ new frames. Over a connection of I iterations delivering T total frames, the seeks sum to O(I log N) and the walks to O(T). The fresh <code>SUBSCRIBE</code> per 100 ms quantum is connection churn, not asymptotic compute (overview §05)."
+    time="live reads O(S·R) · socket writes O(C)"
+    space="O(S·B + C)"
+    why="One hub refresh reads each active stream once on each serving Chronicle replica, then every client still receives its own socket write. <strong>S</strong> is active streams, <strong>R</strong> is serving replicas, <strong>C</strong> is clients, and <strong>B</strong> is the configured replay bound. Initial client catch-up remains one durable read path per client."
   />
 </section>
 

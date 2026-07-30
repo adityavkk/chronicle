@@ -12,6 +12,8 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
+
+	chronicle "gecgithub01.walmart.com/auk000v/chronicle"
 )
 
 type recordingSubscriptionService struct {
@@ -19,6 +21,48 @@ type recordingSubscriptionService struct {
 	reconnected chan struct{}
 	promotes    atomic.Int64
 	promoted    chan struct{}
+}
+
+func TestValidateSSEConfig(t *testing.T) {
+	valid := chronicle.DefaultConfig()
+	if err := validateSSEConfig(valid); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*chronicle.Config)
+	}{
+		{name: "replay", mutate: func(cfg *chronicle.Config) { cfg.SSEHubReplayBytes = 0 }},
+		{name: "batch", mutate: func(cfg *chronicle.Config) { cfg.SSEHubBatchBytes = 0 }},
+		{name: "batch exceeds replay", mutate: func(cfg *chronicle.Config) {
+			cfg.SSEHubBatchBytes = cfg.SSEHubReplayBytes + 1
+		}},
+		{name: "write timeout", mutate: func(cfg *chronicle.Config) { cfg.SSEClientWriteTimeout = 0 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := chronicle.DefaultConfig()
+			test.mutate(&cfg)
+			if err := validateSSEConfig(cfg); err == nil {
+				t.Fatal("invalid SSE config was accepted")
+			}
+		})
+	}
+}
+
+func TestValidateObservabilityConfig(t *testing.T) {
+	cfg := chronicle.DefaultConfig()
+	if err := validateObservabilityConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.MetricsPprof = true
+	if err := validateObservabilityConfig(cfg); err == nil {
+		t.Fatal("pprof without a metrics listener was accepted")
+	}
+	cfg.MetricsListen = ":9090"
+	if err := validateObservabilityConfig(cfg); err != nil {
+		t.Fatalf("pprof with a metrics listener: %v", err)
+	}
 }
 
 func (s *recordingSubscriptionService) OnStreamCreated(string) {}

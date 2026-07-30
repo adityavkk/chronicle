@@ -43,6 +43,8 @@ end
 -- refresh_backstop sets the GC key TTL (lazy expiry stays the source of
 -- truth; the key TTL only reaps idle expired streams). Streams referenced
 -- by forks or soft-deleted never carry key TTLs.
+local max_backstop_ttl_seconds = 9000000000000000
+
 local function refresh_backstop(m, now_ns)
   local ks = { KEYS[1], KEYS[2], KEYS[3], KEYS[4] }
   if tonumber(m.refCount or '0') > 0 or m.softDel == '1' then
@@ -50,7 +52,16 @@ local function refresh_backstop(m, now_ns)
     return
   end
   local pttl = nil
-  if m.ttl then pttl = tonumber(m.ttl) * 1000 + 60000 end
+  if m.ttl then
+    -- Redis PEXPIRE accepts a signed int64 millisecond value. Stream-TTL is
+    -- a signed int64 count of seconds, so large valid protocol TTLs cannot be
+    -- represented as a Redis key TTL after the seconds-to-milliseconds
+    -- conversion. Keep those keys persistent and rely on lazy expiry, which
+    -- is the source of truth. The conservative bound is exactly representable
+    -- by Lua and leaves ample room below MaxInt64 after adding the backstop.
+    local ttl = tonumber(m.ttl)
+    if ttl <= max_backstop_ttl_seconds then pttl = ttl * 1000 + 60000 end
+  end
   if m.expAtNs then
     local rem = math.floor((tonumber(m.expAtNs) - now_ns) / 1e6) + 60000
     if rem < 1 then rem = 1 end

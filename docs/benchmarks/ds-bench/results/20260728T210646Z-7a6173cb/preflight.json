@@ -1,0 +1,331 @@
+{
+  "schema": "chronicle-ds-bench-preflight-v1",
+  "timestamp": "2026-07-29T01:59:07.918290+00:00",
+  "target": "remote",
+  "phase": "campaign",
+  "project": "adityavkk-prototyping",
+  "region": "europe-west4",
+  "zone": "europe-west4-b",
+  "artifact_registry_location": "europe-west1",
+  "artifact_registry_repository": "ds-bench",
+  "ok": true,
+  "required_failures": [],
+  "checks": [
+    {
+      "name": "git installed",
+      "ok": true,
+      "required": true,
+      "command": [
+        "which",
+        "git"
+      ],
+      "detail": "/Users/auk000v/.nix-profile/bin/git"
+    },
+    {
+      "name": "python3 installed",
+      "ok": true,
+      "required": true,
+      "command": [
+        "which",
+        "python3"
+      ],
+      "detail": "/Users/auk000v/.nix-profile/bin/python3"
+    },
+    {
+      "name": "kubectl installed",
+      "ok": true,
+      "required": true,
+      "command": [
+        "which",
+        "kubectl"
+      ],
+      "detail": "/Users/auk000v/.nix-profile/bin/kubectl"
+    },
+    {
+      "name": "active gcloud account",
+      "ok": true,
+      "required": true,
+      "command": [
+        "gcloud",
+        "auth",
+        "list",
+        "--filter=status:ACTIVE",
+        "--format=value(account)"
+      ],
+      "detail": "adityavkk@gmail.com"
+    },
+    {
+      "name": "billing enabled",
+      "ok": true,
+      "required": true,
+      "command": [
+        "gcloud",
+        "billing",
+        "projects",
+        "describe",
+        "adityavkk-prototyping",
+        "--format=json"
+      ],
+      "detail": "{\n  \"billingAccountName\": \"billingAccounts/01CDAF-387501-103F26\",\n  \"billingEnabled\": true,\n  \"name\": \"projects/adityavkk-prototyping/billingInfo\",\n  \"projectId\": \"adityavkk-prototyping\"\n}"
+    },
+    {
+      "name": "required APIs enabled",
+      "ok": true,
+      "required": true,
+      "command": [
+        "gcloud",
+        "services",
+        "list",
+        "--enabled",
+        "--project",
+        "adityavkk-prototyping",
+        "--filter=name:(artifactregistry.googleapis.com cloudbuild.googleapis.com compute.googleapis.com container.googleapis.com)",
+        "--format=value(name)"
+      ],
+      "detail": {
+        "enabled": [
+          "artifactregistry.googleapis.com",
+          "cloudbuild.googleapis.com",
+          "compute.googleapis.com",
+          "container.googleapis.com"
+        ],
+        "missing": []
+      }
+    },
+    {
+      "name": "benchmarking VPC",
+      "ok": true,
+      "required": true,
+      "command": [
+        "gcloud",
+        "compute",
+        "networks",
+        "describe",
+        "benchmarking",
+        "--project",
+        "adityavkk-prototyping",
+        "--format=json"
+      ],
+      "detail": "{\n  \"autoCreateSubnetworks\": false,\n  \"creationTimestamp\": \"2026-07-26T19:06:42.996-07:00\",\n  \"id\": \"1636346546688295901\",\n  \"kind\": \"compute#network\",\n  \"name\": \"benchmarking\",\n  \"networkFirewallPolicyEnforcementOrder\": \"AFTER_CLASSIC_FIREWALL\",\n  \"routingConfig\": {\n    \"bgpBestPathSelectionMode\": \"LEGACY\",\n    \"routingMode\": \"REGIONAL\"\n  },\n  \"selfLink\": \"https://www.googleapis.com/compute/v1/projects/adityavkk-prototyping/global/networks/benchmarking\",\n  \"selfLinkWithId\": \"https://www.googleapis.com/compute/v1/projects/adityavkk-prototyping/global/networks/1636346546688295901\",\n  \"subnetworks\": [\n    \"https://www.googleapis.com/compute/v1/projects/adityavkk-prototyping/regions/europe-west4/subnetworks/benchmarking\"\n  ],\n  \"x_gcloud_bgp_routing_mode\": \"REGIONAL\",\n  \"x_gcloud_subnet_mode\": \"CUSTOM\"\n}"
+    },
+    {
+      "name": "benchmarking subnet",
+      "ok": true,
+      "required": true,
+      "command": [
+        "gcloud",
+        "compute",
+        "networks",
+        "subnets",
+        "describe",
+        "benchmarking",
+        "--region",
+        "europe-west4",
+        "--project",
+        "adityavkk-prototyping",
+        "--format=json"
+      ],
+      "detail": "{\n  \"allowSubnetCidrRoutesOverlap\": false,\n  \"creationTimestamp\": \"2026-07-26T19:06:58.666-07:00\",\n  \"fingerprint\": \"HpyKTc8BxFs=\",\n  \"gatewayAddress\": \"10.80.0.1\",\n  \"id\": \"8059426488103666605\",\n  \"ipCidrRange\": \"10.80.0.0/20\",\n  \"kind\": \"compute#subnetwork\",\n  \"name\": \"benchmarking\",\n  \"network\": \"https://www.googleapis.com/compute/v1/projects/adityavkk-prototyping/global/networks/benchmarking\",\n  \"privateIpGoogleAccess\": true,\n  \"privateIpv6GoogleAccess\": \"DISABLE_GOOGLE_ACCESS\",\n  \"purpose\": \"PRIVATE\",\n  \"region\": \"https://www.googleapis.com/compute/v1/projects/adityavkk-prototyping/regions/europe-west4\",\n  \"selfLink\": \"https://www.googleapis.com/compute/v1/projects/adityavkk-prototyping/regions/europe-west4/subnetworks/benchmarking\",\n  \"stackType\": \"IPV4_ONLY\"\n}"
+    },
+    {
+      "name": "regional quota access",
+      "ok": true,
+      "required": true,
+      "command": [
+        "gcloud",
+        "compute",
+        "regions",
+        "describe",
+        "europe-west4",
+        "--project",
+        "adityavkk-prototyping",
+        "--format=json"
+      ],
+      "detail": "      \"metric\": \"COMMITTED_E2_CPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 15.0,\n      \"metric\": \"EXTERNAL_MANAGED_FORWARDING_RULES\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 100.0,\n      \"metric\": \"C2D_CPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"COMMITTED_C2D_CPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 8.0,\n      \"metric\": \"N2A_CPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 10.0,\n      \"metric\": \"SECURITY_POLICIES_PER_REGION\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 100.0,\n      \"metric\": \"SECURITY_POLICY_RULES_PER_REGION\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 24.0,\n      \"metric\": \"T2D_CPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"COMMITTED_T2D_CPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 24.0,\n      \"metric\": \"C3_CPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"COMMITTED_C3_CPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 96.0,\n      \"metric\": \"T2A_CPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 248.0,\n      \"metric\": \"M3_CPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"COMMITTED_M3_CPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"NVIDIA_A100_80GB_GPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"PREEMPTIBLE_NVIDIA_A100_80GB_GPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"COMMITTED_NVIDIA_A100_80GB_GPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 400.0,\n      \"metric\": \"NETWORK_ATTACHMENTS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 50.0,\n      \"metric\": \"REGIONAL_INTERNAL_MANAGED_BACKEND_SERVICES\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 50.0,\n      \"metric\": \"REGIONAL_EXTERNAL_MANAGED_BACKEND_SERVICES\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 50.0,\n      \"metric\": \"REGIONAL_EXTERNAL_NETWORK_LB_BACKEND_SERVICES\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 50.0,\n      \"metric\": \"REGIONAL_INTERNAL_LB_BACKEND_SERVICES\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 250.0,\n      \"metric\": \"REGIONAL_INTERNAL_TRAFFIC_DIRECTOR_BACKEND_SERVICES\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 1.0,\n      \"metric\": \"NET_LB_SECURITY_POLICIES_PER_REGION\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"NET_LB_SECURITY_POLICY_RULES_PER_REGION\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"NET_LB_SECURITY_POLICY_RULE_ATTRIBUTES_PER_REGION\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"TPU_LITE_DEVICE_V5\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"PREEMPTIBLE_TPU_LITE_DEVICE_V5\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 16.0,\n      \"metric\": \"TPU_LITE_PODSLICE_V5\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 1.0,\n      \"metric\": \"NVIDIA_L4_GPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 1.0,\n      \"metric\": \"PREEMPTIBLE_NVIDIA_L4_GPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 1.0,\n      \"metric\": \"COMMITTED_NVIDIA_L4_GPUS\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 200.0,\n      \"metric\": \"STATIC_EXTERNAL_IPV6_ADDRESS_RANGES\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 20.0,\n      \"metric\": \"SECURITY_POLICY_ADVANCED_RULES_PER_REGION\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 16.0,\n      \"metric\": \"PREEMPTIBLE_TPU_LITE_PODSLICE_V5\",\n      \"usage\": 0.0\n    },\n    {\n      \"limit\": 0.0,\n      \"metric\": \"VARIABLE_IPV6_PUBLIC_DELEGATED_PREFIXES\",\n      \"usage\": 0.0\n    }\n  ],\n  \"selfLink\": \"https://www.googleapis.com/compute/v1/projects/adityavkk-prototyping/regions/europe-west4\",\n  \"status\": \"UP\",\n  \"supportsPzs\": false,\n  \"zones\": [\n    \"https://www.googleapis.com/compute/v1/projects/adityavkk-prototyping/zones/europe-west4-c\",\n    \"https://www.googleapis.com/compute/v1/projects/adityavkk-prototyping/zones/europe-west4-b\",\n    \"https://www.googleapis.com/compute/v1/projects/adityavkk-prototyping/zones/europe-west4-a\"\n  ]\n}"
+    },
+    {
+      "name": "GKE list access",
+      "ok": true,
+      "required": true,
+      "command": [
+        "gcloud",
+        "container",
+        "clusters",
+        "list",
+        "--project",
+        "adityavkk-prototyping",
+        "--zone",
+        "europe-west4-b",
+        "--format=json"
+      ],
+      "detail": "[]"
+    },
+    {
+      "name": "Artifact Registry repository",
+      "ok": true,
+      "required": true,
+      "command": [
+        "gcloud",
+        "artifacts",
+        "repositories",
+        "describe",
+        "ds-bench",
+        "--location",
+        "europe-west1",
+        "--project",
+        "adityavkk-prototyping",
+        "--format=json"
+      ],
+      "detail": "{\n  \"createTime\": \"2026-07-27T02:07:25.117628Z\",\n  \"description\": \"Immutable images for the Chronicle ds-bench campaign\",\n  \"format\": \"DOCKER\",\n  \"mode\": \"STANDARD_REPOSITORY\",\n  \"name\": \"projects/adityavkk-prototyping/locations/europe-west1/repositories/ds-bench\",\n  \"registryUri\": \"europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench\",\n  \"satisfiesPzi\": true,\n  \"updateTime\": \"2026-07-28T20:08:00.420258Z\",\n  \"vulnerabilityScanningConfig\": {\n    \"enablementState\": \"SCANNING_DISABLED\",\n    \"enablementStateReason\": \"API containerscanning.googleapis.com is not enabled.\",\n    \"lastEnableTime\": \"2026-07-27T02:07:14.831276746Z\"\n  }\n}"
+    },
+    {
+      "name": "Artifact Registry image list",
+      "ok": true,
+      "required": true,
+      "command": [
+        "gcloud",
+        "artifacts",
+        "docker",
+        "images",
+        "list",
+        "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench",
+        "--project",
+        "adityavkk-prototyping",
+        "--limit=1",
+        "--format=json"
+      ],
+      "detail": "[\n  {\n    \"createTime\": \"2026-07-27T11:18:04.186975Z\",\n    \"metadata\": {\n      \"buildTime\": \"2026-07-27T11:17:53.232259851Z\",\n      \"imageSizeBytes\": \"16428324\",\n      \"mediaType\": \"application/vnd.docker.distribution.manifest.v2+json\",\n      \"name\": \"projects/adityavkk-prototyping/locations/europe-west1/repositories/ds-bench/dockerImages/chronicle@sha256:1a98b521d73d312766d07e78d330942395b0a830bb8706bea469e1cb17d2f396\"\n    },\n    \"package\": \"europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/chronicle\",\n    \"tags\": \"\",\n    \"updateTime\": \"2026-07-27T11:18:04.186975Z\",\n    \"version\": \"sha256:1a98b521d73d312766d07e78d330942395b0a830bb8706bea469e1cb17d2f396\"\n  }\n]"
+    },
+    {
+      "name": "project IAM permissions",
+      "ok": true,
+      "required": true,
+      "command": [
+        "Cloud Resource Manager",
+        "projects.testIamPermissions"
+      ],
+      "detail": {
+        "granted": [
+          "artifactregistry.repositories.downloadArtifacts",
+          "artifactregistry.repositories.uploadArtifacts",
+          "cloudbuild.builds.create",
+          "cloudbuild.builds.get",
+          "compute.instances.create",
+          "compute.instances.delete",
+          "container.clusters.create",
+          "container.clusters.delete",
+          "container.clusters.get",
+          "container.clusters.list",
+          "serviceusage.services.use"
+        ],
+        "missing": []
+      }
+    },
+    {
+      "name": "campaign compute capacity",
+      "ok": true,
+      "required": true,
+      "command": [
+        "gcloud",
+        "compute",
+        "quotas"
+      ],
+      "detail": {
+        "topology": {
+          "server": {
+            "machine": "c4d-standard-16-lssd",
+            "nodes": 1,
+            "vcpus_per_node": 16
+          },
+          "clients": {
+            "machine": "n2d-standard-32",
+            "nodes": 2,
+            "vcpus_per_node": 32,
+            "purchasing_model": "spot"
+          },
+          "total_nodes": 3,
+          "total_vcpus": 80
+        },
+        "requirements": [
+          {
+            "quota": "CPUS-ALL-REGIONS-per-project",
+            "dimensions": {},
+            "required": 80,
+            "limit": 96.0,
+            "usage": 0.0,
+            "available": 96.0,
+            "ok": true
+          },
+          {
+            "quota": "CPUS-PER-VM-FAMILY-per-project-region",
+            "dimensions": {
+              "region": "europe-west4",
+              "vm_family": "C4D"
+            },
+            "required": 16,
+            "limit": 24,
+            "usage": 0,
+            "available": 24.0,
+            "ok": true
+          },
+          {
+            "quota": "PREEMPTIBLE-CPUS-per-project-region",
+            "dimensions": {
+              "region": "europe-west4"
+            },
+            "required": 64,
+            "limit": 64,
+            "usage": 0,
+            "available": 64.0,
+            "ok": true
+          },
+          {
+            "quota": "INSTANCES",
+            "dimensions": {
+              "region": "europe-west4"
+            },
+            "required": 3,
+            "limit": 24.0,
+            "usage": 0.0,
+            "available": 24.0,
+            "ok": true
+          },
+          {
+            "quota": "IN_USE_ADDRESSES",
+            "dimensions": {
+              "region": "europe-west4"
+            },
+            "required": 3,
+            "limit": 8.0,
+            "usage": 0.0,
+            "available": 8.0,
+            "ok": true
+          },
+          {
+            "quota": "DISKS_TOTAL_GB",
+            "dimensions": {
+              "region": "europe-west4"
+            },
+            "required": 300,
+            "limit": 4096.0,
+            "usage": 0.0,
+            "available": 4096.0,
+            "ok": true
+          },
+          {
+            "quota": "LOCAL_SSD_TOTAL_GB",
+            "dimensions": {
+              "region": "europe-west4"
+            },
+            "required": 375,
+            "limit": 9.223372036854776e+18,
+            "usage": 0.0,
+            "available": 9.223372036854776e+18,
+            "ok": true
+          }
+        ],
+        "failures": []
+      }
+    }
+  ]
+}

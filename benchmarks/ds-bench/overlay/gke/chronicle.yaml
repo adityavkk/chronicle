@@ -1,0 +1,165 @@
+# Chronicle and Redis form one benchmark SUT. Their resource limits add to the
+# suite's SERVER_CPU and SERVER_MEM budget. Redis keeps its AOF on the server
+# node's local-SSD-backed emptyDir. A Recreate rollout gives every cell a fresh
+# data volume.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chronicle
+  namespace: ds-bench
+  labels:
+    app: chronicle
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: chronicle
+  template:
+    metadata:
+      labels:
+        app: chronicle
+      annotations:
+        ds-bench/redis-appendfsync: "${CHRONICLE_APPEND_FSYNC}"
+        ds-bench/cpu-split: "${CHRONICLE_CPU}:${REDIS_CPU}"
+    spec:
+      nodeSelector: ${NODESEL_SERVER}
+      enableServiceLinks: false
+      shareProcessNamespace: true
+      containers:
+        - name: chronicle
+          image: ${IMG_CHRONICLE}
+          imagePullPolicy: ${PULL_POLICY}
+          args:
+            - "--listen"
+            - "0.0.0.0:4437"
+            - "--redis-url"
+            - "redis://127.0.0.1:6379/15"
+            - "--redis-pool-size"
+            - "${CHRONICLE_REDIS_POOL_SIZE}"
+            - "--store"
+            - "redis"
+            - "--subscriptions=false"
+            - "--ui=false"
+            - "--log-level"
+            - "warn"
+          ports:
+            - containerPort: 4437
+          readinessProbe:
+            tcpSocket:
+              port: 4437
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 60
+          resources:
+            requests:
+              cpu: "${CHRONICLE_CPU}"
+              memory: "${CHRONICLE_MEM}"
+            limits:
+              cpu: "${CHRONICLE_CPU}"
+              memory: "${CHRONICLE_MEM}"
+        - name: redis
+          image: ${IMG_REDIS}
+          imagePullPolicy: ${PULL_POLICY}
+          command:
+            - redis-server
+          args:
+            - "--bind"
+            - "127.0.0.1"
+            - "--protected-mode"
+            - "no"
+            - "--save"
+            - ""
+            - "--dir"
+            - "/data"
+            - "--appendonly"
+            - "yes"
+            - "--appendfsync"
+            - "${CHRONICLE_APPEND_FSYNC}"
+            - "--maxmemory"
+            - "${REDIS_MAXMEMORY}"
+            - "--maxmemory-policy"
+            - "noeviction"
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            failureThreshold: 60
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "${REDIS_CPU}"
+              memory: "${REDIS_MEM}"
+            limits:
+              cpu: "${REDIS_CPU}"
+              memory: "${REDIS_MEM}"
+        - name: metrics
+          image: ${IMG_METRICS}
+          imagePullPolicy: ${PULL_POLICY}
+          command:
+            - nice
+            - "-n"
+            - "19"
+            - bash
+            - /deploy/metrics/poller.sh
+          env:
+            - name: SERVER_PROC
+              value: "chronicle|redis-server"
+            - name: METRICS_INTERVAL_S
+              value: "1"
+            - name: METRICS_OUT
+              value: /metrics/samples.csv
+            - name: DATA_DIR
+              value: /data
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          volumeMounts:
+            - name: metrics
+              mountPath: /metrics
+            - name: metrics-poller
+              mountPath: /deploy/metrics
+            - name: redis-data
+              mountPath: /data
+              readOnly: true
+            - name: cgroup-host
+              mountPath: /host/cgroup
+              readOnly: true
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "50m"
+              memory: "64Mi"
+      volumes:
+        - name: redis-data
+          emptyDir: {}
+        - name: metrics
+          emptyDir: {}
+        - name: metrics-poller
+          configMap:
+            name: metrics-poller
+            defaultMode: 0755
+        - name: cgroup-host
+          hostPath:
+            path: /sys/fs/cgroup
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chronicle
+  namespace: ds-bench
+spec:
+  selector:
+    app: chronicle
+  ports:
+    - port: 4437
+      targetPort: 4437
