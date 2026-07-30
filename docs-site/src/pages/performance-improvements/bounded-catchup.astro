@@ -1,0 +1,12 @@
+---
+// The content stays in the shared underscore-prefixed MDX file. This wrapper
+// gives the explainer its nested performance-improvements route.
+import type { ComponentProps } from "astro/types";
+import Doc from "../../layouts/Doc.astro";
+import BoundedCatchup, { frontmatter } from "../_bounded-catchup.mdx";
+
+const fm = frontmatter as ComponentProps<typeof Doc>["frontmatter"];
+---
+<Doc frontmatter={fm}>
+  <BoundedCatchup />
+</Doc>

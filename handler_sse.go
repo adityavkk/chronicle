@@ -3,36 +3,38 @@
 package chronicle
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"io"
 	"net/http"
-	"regexp"
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
-// sseLineTerminators matches all valid SSE line terminators: CRLF, CR, or LF
-// Per SSE spec, these are all valid line terminators that could be used for injection attacks
-var sseLineTerminators = regexp.MustCompile(`\r\n|\r|\n`)
-
-// handleSSE handles Server-Sent Events streaming
+// handleSSE handles Server-Sent Events streaming.
 func (h *Handler) handleSSE(w http.ResponseWriter, r *http.Request, path string, offset store.Offset, cursor string, useBase64 bool) error {
-	meta, err := h.Store.Get(path)
+	reader := h.pageReader()
+	pageOpts := store.ReadPageOptions{
+		TargetBytes: h.readPageBytes(),
+		MaxFrames:   store.DefaultReadPageFrames,
+	}
+	first, err := reader.ReadPage(r.Context(), path, offset, pageOpts)
 	if err != nil {
-		return err
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			h.observeReadCancellation("before_first_page")
+		}
+		return readPageError(err)
 	}
 
-	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
-
-	// Add encoding header when base64 encoding is used for binary streams
 	if useBase64 {
 		w.Header().Set(protocol.HeaderStreamSSEDataEncoding, "base64")
 	}
@@ -41,151 +43,315 @@ func (h *Handler) handleSSE(w http.ResponseWriter, r *http.Request, path string,
 	if !ok {
 		return newHTTPError(http.StatusInternalServerError, "streaming not supported")
 	}
-
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
+
+	counter := &countingWriter{w: w}
+	totalPages := 0
+	defer func() {
+		if h.ReadMetrics != nil {
+			h.ReadMetrics.ReadResponse(counter.bytes, totalPages)
+		}
+	}()
 
 	ctx := r.Context()
 	reconnectTimer := time.NewTimer(h.SSEReconnectInterval)
 	defer reconnectTimer.Stop()
 
-	currentOffset := offset
-	sentInitialControl := false
+	currentOffset, closed, pages, err := h.streamSSESnapshot(
+		ctx,
+		counter,
+		flusher,
+		reader,
+		path,
+		cursor,
+		useBase64,
+		first,
+		pageOpts,
+	)
+	totalPages += pages
+	if err != nil {
+		h.logger().Debug("SSE initial catch-up stopped", "path", path, "error", err)
+		return nil
+	}
+	if closed {
+		return nil
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
+			h.observeReadCancellation("between_pages")
 			return nil
 		case <-reconnectTimer.C:
-			// Close connection to allow CDN collapsing
 			return nil
 		default:
-			// Read any available messages
-			messages, upToDate, err := h.Store.Read(path, currentOffset)
-			if err != nil {
-				return err
+		}
+
+		// WaitForMessages is a wake primitive here. The next ReadPage captures
+		// the exact bounded snapshot that will be emitted.
+		waitCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		_, timedOut, streamClosed, waitErr := h.Store.WaitForMessages(waitCtx, path, currentOffset, 100*time.Millisecond)
+		cancel()
+		if ctx.Err() != nil {
+			h.observeReadCancellation("wait")
+			return nil
+		}
+		if waitErr != nil && !errors.Is(waitErr, context.DeadlineExceeded) && !errors.Is(waitErr, context.Canceled) {
+			h.logger().Debug("SSE wake wait failed", "path", path, "error", waitErr)
+		}
+		if timedOut && !streamClosed {
+			continue
+		}
+
+		next, readErr := reader.ReadPage(ctx, path, currentOffset, pageOpts)
+		if readErr != nil {
+			if errors.Is(readErr, context.Canceled) || errors.Is(readErr, context.DeadlineExceeded) {
+				h.observeReadCancellation("storage")
 			}
-
-			// Re-fetch current metadata to check closed state
-			currentMeta, _ := h.Store.Get(path)
-			streamIsClosed := currentMeta != nil && currentMeta.Closed
-
-			if len(messages) > 0 {
-				// Send data event
-				body, _ := h.formatResponse(path, messages, meta.ContentType)
-				fmt.Fprintf(w, "event: data\n")
-
-				if useBase64 {
-					// Base64 encode the binary data for SSE delivery (Protocol Section 5.7)
-					encoded := base64.StdEncoding.EncodeToString(body)
-					fmt.Fprintf(w, "data:%s\n", encoded)
-				} else {
-					// Split on all SSE-valid line terminators (CRLF, CR, LF) to prevent injection
-					// Note: Per SSE spec, we don't add a space after "data:" because clients
-					// strip exactly one leading space. Adding one would cause data starting
-					// with spaces to lose an extra space character.
-					for _, line := range sseLineTerminators.Split(string(body), -1) {
-						fmt.Fprintf(w, "data:%s\n", line)
-					}
-				}
-				fmt.Fprintf(w, "\n")
-
-				// Update current offset
-				currentOffset = messages[len(messages)-1].Offset
-
-				// Check if client is now at tail of closed stream
-				clientAtTail := currentMeta != nil && currentOffset.Equal(currentMeta.CurrentOffset)
-
-				// Build control event
-				control := map[string]any{
-					"streamNextOffset": currentOffset.String(),
-				}
-
-				if streamIsClosed && clientAtTail {
-					// Final control event - stream is closed
-					// streamCursor is omitted when streamClosed is true per protocol
-					// upToDate is implied by streamClosed per protocol
-					control["streamClosed"] = true
-				} else {
-					// Normal control event - include cursor
-					control["streamCursor"] = protocol.GenerateResponseCursor(cursor, time.Now())
-					if upToDate {
-						control["upToDate"] = true
-					}
-				}
-
-				controlJSON, _ := json.Marshal(control)
-				fmt.Fprintf(w, "event: control\n")
-				fmt.Fprintf(w, "data:%s\n\n", controlJSON)
-
-				flusher.Flush()
-				sentInitialControl = true
-
-				// Close SSE connection after sending streamClosed
-				if streamIsClosed && clientAtTail {
-					return nil
-				}
-			} else if !sentInitialControl {
-				// Send initial control event even for empty stream
-				// Check if stream is already closed and client is at tail
-				clientAtTail := currentMeta != nil && offset.Equal(currentMeta.CurrentOffset)
-
-				control := map[string]any{
-					"streamNextOffset": currentMeta.CurrentOffset.String(),
-				}
-
-				if streamIsClosed && clientAtTail {
-					// Stream already closed at tail - send final control and exit
-					control["streamClosed"] = true
-				} else {
-					// Normal initial control
-					control["streamCursor"] = protocol.GenerateResponseCursor(cursor, time.Now())
-					control["upToDate"] = true
-				}
-
-				controlJSON, _ := json.Marshal(control)
-				fmt.Fprintf(w, "event: control\n")
-				fmt.Fprintf(w, "data:%s\n\n", controlJSON)
-
-				flusher.Flush()
-				sentInitialControl = true
-
-				// Close connection if stream is closed
-				if streamIsClosed && clientAtTail {
-					return nil
-				}
-			} else if streamIsClosed {
-				// Initial control was already sent and the stream has since been
-				// closed with no further data to deliver (e.g. a close-only
-				// request). Emit the final control event with streamClosed and
-				// close the connection. (Data appended atomically with a close is
-				// handled by the len(messages) > 0 branch above on this same
-				// iteration.)
-				clientAtTail := currentMeta != nil && currentOffset.Equal(currentMeta.CurrentOffset)
-				if clientAtTail {
-					control := map[string]any{
-						"streamNextOffset": currentOffset.String(),
-						"streamClosed":     true,
-					}
-					controlJSON, _ := json.Marshal(control)
-					fmt.Fprintf(w, "event: control\n")
-					fmt.Fprintf(w, "data:%s\n\n", controlJSON)
-					flusher.Flush()
-					return nil
-				}
-			}
-
-			// Wait for more data or stream closure, then loop back to the top
-			// of the loop. We deliberately do NOT emit the closing control event
-			// here: if the stream was closed with a final append, that data must
-			// be drained by the Read at the top of the next iteration and sent as
-			// a data event before the closing control event. Emitting it here
-			// (with the stale currentOffset) would silently drop the final append
-			// for a live reader that was caught up at the tail.
-			timeout := 100 * time.Millisecond
-			waitCtx, cancel := context.WithTimeout(ctx, timeout)
-			h.Store.WaitForMessages(waitCtx, path, currentOffset, timeout) //nolint:errcheck // wake-or-timeout only; the next iteration re-reads
-			cancel()
+			h.logger().Error("SSE storage page failed after response started", "path", path, "offset", currentOffset, "error", readErr)
+			return nil
+		}
+		currentOffset, closed, pages, err = h.streamSSESnapshot(
+			ctx,
+			counter,
+			flusher,
+			reader,
+			path,
+			cursor,
+			useBase64,
+			next,
+			pageOpts,
+		)
+		totalPages += pages
+		if err != nil {
+			h.logger().Debug("SSE live page stopped", "path", path, "error", err)
+			return nil
+		}
+		if closed {
+			return nil
 		}
 	}
+}
+
+func (h *Handler) streamSSESnapshot(
+	ctx context.Context,
+	w io.Writer,
+	flusher http.Flusher,
+	reader store.PageReader,
+	path string,
+	cursor string,
+	useBase64 bool,
+	first store.ReadPage,
+	opts store.ReadPageOptions,
+) (store.Offset, bool, int, error) {
+	page := first
+	pages := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			h.observeReadCancellation("between_pages")
+			return page.NextOffset, false, pages, err
+		}
+		if len(page.Messages) > 0 {
+			if err := writeSSEDataEvent(w, page.Messages, page.Snapshot.ContentType, useBase64); err != nil {
+				h.observeReadCancellation("write")
+				return page.NextOffset, false, pages, err
+			}
+		}
+
+		closed := page.Snapshot.Closed && page.UpToDate
+		if err := writeSSEControlEvent(w, page.NextOffset, cursor, page.UpToDate, closed); err != nil {
+			h.observeReadCancellation("write")
+			return page.NextOffset, false, pages, err
+		}
+		pages++
+		h.observeReadPage(page)
+		flusher.Flush()
+		if err := ctx.Err(); err != nil {
+			h.observeReadCancellation("flush")
+			return page.NextOffset, false, pages, err
+		}
+		if closed {
+			return page.NextOffset, true, pages, nil
+		}
+		if page.UpToDate {
+			return page.NextOffset, false, pages, nil
+		}
+
+		nextOffset := page.NextOffset
+		opts.Snapshot = &first.Snapshot
+		var err error
+		page, err = reader.ReadPage(ctx, path, nextOffset, opts)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				h.observeReadCancellation("storage")
+			}
+			return nextOffset, false, pages, err
+		}
+		if len(page.Messages) == 0 && !page.UpToDate {
+			return nextOffset, false, pages, errors.New("SSE storage page made no progress")
+		}
+	}
+}
+
+func writeSSEDataEvent(w io.Writer, messages []store.Message, contentType string, useBase64 bool) error {
+	if _, err := io.WriteString(w, "event: data\n"); err != nil {
+		return err
+	}
+	if useBase64 {
+		if _, err := io.WriteString(w, "data:"); err != nil {
+			return err
+		}
+		encoder := base64.NewEncoder(base64.StdEncoding, w)
+		for _, message := range messages {
+			if err := writeAll(encoder, message.Data); err != nil {
+				_ = encoder.Close()
+				return err
+			}
+		}
+		if err := encoder.Close(); err != nil {
+			return err
+		}
+		_, err := io.WriteString(w, "\n\n")
+		return err
+	}
+
+	dataWriter := &sseDataWriter{w: w, lineStart: true}
+	response := &catchupResponseWriter{
+		w:    dataWriter,
+		json: store.IsJSONContentType(contentType),
+	}
+	if err := response.writePage(messages); err != nil {
+		return err
+	}
+	if err := response.close(); err != nil {
+		return err
+	}
+	if err := dataWriter.close(); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w, "\n")
+	return err
+}
+
+func writeSSEControlEvent(w io.Writer, offset store.Offset, cursor string, upToDate, closed bool) error {
+	control := map[string]any{
+		"streamNextOffset": offset.String(),
+	}
+	if closed {
+		control["streamClosed"] = true
+	} else {
+		control["streamCursor"] = protocol.GenerateResponseCursor(cursor, time.Now())
+		if upToDate {
+			control["upToDate"] = true
+		}
+	}
+	body, err := json.Marshal(control)
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, "event: control\ndata:"); err != nil {
+		return err
+	}
+	if err := writeAll(w, body); err != nil {
+		return err
+	}
+	_, err = io.WriteString(w, "\n\n")
+	return err
+}
+
+type countingWriter struct {
+	w     io.Writer
+	bytes int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	n, err := w.w.Write(p)
+	w.bytes += n
+	return n, err
+}
+
+// sseDataWriter normalizes CRLF, CR, and LF to SSE data lines. It does not add
+// a space after "data:", so leading spaces in stream bytes remain intact.
+type sseDataWriter struct {
+	w         io.Writer
+	lineStart bool
+	pendingCR bool
+}
+
+func (w *sseDataWriter) Write(p []byte) (int, error) {
+	consumed := 0
+	for len(p) > 0 {
+		if w.pendingCR {
+			w.pendingCR = false
+			if p[0] == '\n' {
+				p = p[1:]
+				consumed++
+				continue
+			}
+		}
+		if w.lineStart {
+			if _, err := io.WriteString(w.w, "data:"); err != nil {
+				return consumed, err
+			}
+			w.lineStart = false
+		}
+		nextBreak := bytes.IndexAny(p, "\r\n")
+		if nextBreak < 0 {
+			n, err := writeAllCount(w.w, p)
+			consumed += n
+			if err != nil {
+				return consumed, err
+			}
+			return consumed, nil
+		}
+		if nextBreak > 0 {
+			n, err := writeAllCount(w.w, p[:nextBreak])
+			consumed += n
+			if err != nil {
+				return consumed, err
+			}
+			p = p[nextBreak:]
+		}
+		delimiter := p[0]
+		if _, err := io.WriteString(w.w, "\n"); err != nil {
+			return consumed, err
+		}
+		p = p[1:]
+		consumed++
+		w.lineStart = true
+		w.pendingCR = delimiter == '\r'
+	}
+	return consumed, nil
+}
+
+func (w *sseDataWriter) close() error {
+	if w.lineStart {
+		if _, err := io.WriteString(w.w, "data:"); err != nil {
+			return err
+		}
+	}
+	_, err := io.WriteString(w.w, "\n")
+	return err
+}
+
+func writeAll(w io.Writer, p []byte) error {
+	_, err := writeAllCount(w, p)
+	return err
+}
+
+func writeAllCount(w io.Writer, p []byte) (int, error) {
+	total := 0
+	for len(p) > 0 {
+		n, err := w.Write(p)
+		total += n
+		p = p[n:]
+		if err != nil {
+			return total, err
+		}
+		if n == 0 {
+			return total, io.ErrShortWrite
+		}
+	}
+	return total, nil
 }

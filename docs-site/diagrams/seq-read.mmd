@@ -5,11 +5,15 @@ sequenceDiagram
     participant S as Store
     participant R as Redis
     C->>H: GET /chat?offset=-1
-    H->>S: Store.Get — existence · handler.go:291
+    H->>S: Store.Get · existence · handler.go:418
     S->>R: HGETALL :meta + :prod (pipeline)
-    H->>S: Store.Read(path, offset) · handler.go:388
-    S->>R: EVALSHA read.lua · store.go:585
-    Note over R: HGETALL → HSET accessedAt → ZRANGEBYLEX
-    R-->>S: reply OK, meta, members
-    Note over S: decode frames · stitch source if fork
-    H-->>C: 200 · body · Stream-Next-Offset · ETag
+    H->>S: ReadPage(path, offset) · handler.go:548
+    S->>R: EVALSHA read.lua · capture root snapshot
+    Note over S,R: snapshot: tail · type · closed · incarnation
+    loop until the captured tail
+        S->>R: ZRANGEBYLEX lower to snapshot tail · LIMIT 0 1024
+        R-->>S: one frame-aligned page · target 1 MiB
+        S-->>H: messages · next offset · same snapshot
+        H-->>C: write page and flush
+    end
+    Note over H,S: captured tail fixes headers · later appends wait

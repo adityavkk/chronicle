@@ -116,24 +116,26 @@ From the spec + conformance inventory (research docs 01/04):
 | (a) STRING + `APPEND`, read `GETRANGE` | O(1) | exact byte ranges | lost — needs a separate boundary index anyway | rejected: 512 MB/key cap forces chunking, JSON mode needs boundaries regardless |
 | (b) Redis Streams `XADD`/`XRANGE` | O(1) | by stream ID, not byte offset — needs ID↔byte-offset index | kept | rejected: double bookkeeping, IDs leak server-assigned time semantics, trimming semantics we don't want |
 | (c) LIST of frames + ZSET index byte-offset→list-index | O(1) ×2 | ZSET lookup + `LRANGE` | kept | workable but two structures to keep consistent per message |
-| (d) **ZSET, member = `"%016d_%016d" + "|" + data`, score 0, read via `ZRANGEBYLEX`** | one `ZADD` | one `ZRANGEBYLEX (prefix +inf` | kept | **chosen** |
+| (d) **ZSET, member = `"%016d_%016d" + "|" + data`, score 0, read via `ZRANGEBYLEX`** | one `ZADD` | bounded lexicographic pages from the cursor to a captured tail | kept | **chosen** |
 
 Model (d) exploits the protocol's own offset design: offsets are zero-padded,
 fixed-width, lexicographically sortable strings, so prefixing each frame with its
-end-offset makes byte-wise lex order equal stream order, and "messages with
-end-offset > X" is exactly `ZRANGEBYLEX key (X| +`-style open interval. One
-sorted set per stream, one command per read, boundaries intact, members unique by
-construction (offset prefix). The 16+1+16+1-byte prefix overhead per message is
-noise, and the conformance suite's 10 MB single-append fits comfortably under
-both the 512 MB member cap and default `proto-max-bulk-len`.
+end-offset makes byte-wise lex order equal stream order. A page for messages
+with end-offset greater than X uses an exclusive lower bound, the response's
+captured tail as its inclusive upper bound, and `LIMIT 0 1024`. Lua stops
+accepting whole frames at a 1 MiB payload target. One frame may exceed that
+target because Chronicle does not split a stored frame. One sorted set per
+stream keeps boundaries intact and makes members unique by construction
+(offset prefix). The 16+1+16+1-byte prefix overhead per message is noise, and
+the conformance suite's 10 MB single append fits comfortably under both the
+512 MB member cap and default `proto-max-bulk-len`.
 
 Known limit (documented, acceptable): a whole stream lives in one ZSET on one
-shard, so stream size is bounded by node memory — same class of limit as the
-Caddy memory store, and Walmart-managed Redis deployments size for it. Catch-up
-reads of huge streams return everything from the requested offset today; if that
-becomes a problem, a `maxReadChunkSize` (spec-permitted partial reads, the suite
-already follows `Stream-Next-Offset` pagination) plus `ZRANGEBYLEX ... LIMIT` is
-a drop-in optimization.
+shard, so stream size is bounded by node memory. This is the same class of limit
+as the Caddy memory store, and Walmart-managed Redis deployments size for it.
+Catch-up responses may still cover a large captured suffix, but storage work and
+handler buffering stay page-bounded. The handler writes and flushes each page
+before it asks storage for the next one.
 
 ### 4.3 Key schema
 

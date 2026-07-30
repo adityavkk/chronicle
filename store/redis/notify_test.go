@@ -125,10 +125,8 @@ func TestIntegrationWaitMissingStream(t *testing.T) {
 }
 
 // TestIntegrationWaitForkInheritedRangeNeverWaits: an offset in a fork's
-// inherited range can only be served by the source, and source appends do
-// not notify fork waiters — the wait must return empty immediately rather
-// than hang. Simulated by wiping the source's data plane so the inherited
-// read comes back empty.
+// inherited range can only be served by the source. If that acknowledged data
+// vanishes, the read must fail loudly rather than wait or skip bytes.
 func TestIntegrationWaitForkInheritedRangeNeverWaits(t *testing.T) {
 	s := newTestStore(t)
 	src := testPath("wait-fork-src")
@@ -145,8 +143,8 @@ func TestIntegrationWaitForkInheritedRangeNeverWaits(t *testing.T) {
 
 	start := time.Now()
 	msgs, timedOut, closed, err := s.WaitForMessages(context.Background(), fork, store.ZeroOffset, 5*time.Second)
-	if err != nil || timedOut || closed || len(msgs) != 0 {
-		t.Fatalf("inherited-range wait: msgs=%v timedOut=%v closed=%v err=%v", msgs, timedOut, closed, err)
+	if !errors.Is(err, store.ErrReadDataMissing) || timedOut || closed || len(msgs) != 0 {
+		t.Fatalf("inherited-range missing data: msgs=%v timedOut=%v closed=%v err=%v", msgs, timedOut, closed, err)
 	}
 	if elapsed := time.Since(start); elapsed >= 500*time.Millisecond {
 		t.Errorf("inherited-range wait took %v, must not block", elapsed)

@@ -1,0 +1,372 @@
+---
+import Demo from "./Demo.astro";
+
+const choices = [
+  {
+    id: "256k",
+    label: "256 KiB",
+    bytes: "262,144",
+    throughput: "170.71",
+    p99: "2.65 s",
+    rss: "61.4 MiB",
+    completed: "64",
+    memoryWidth: "9.4%",
+    speedWidth: "100%",
+  },
+  {
+    id: "1m",
+    label: "1 MiB",
+    bytes: "1,048,576",
+    throughput: "170.71",
+    p99: "3.72 s",
+    rss: "195.9 MiB",
+    completed: "64",
+    memoryWidth: "30.0%",
+    speedWidth: "100%",
+  },
+  {
+    id: "4m",
+    label: "4 MiB",
+    bytes: "4,194,304",
+    throughput: "170.71",
+    p99: "3.12 s",
+    rss: "653.2 MiB",
+    completed: "64",
+    memoryWidth: "100%",
+    speedWidth: "100%",
+  },
+];
+---
+
+<Demo label="Choose the returned page target">
+  <div class="budget" data-catchup-budget>
+    <div class="choices" aria-label="Measured page targets">
+      {
+        choices.map((choice) => (
+          <button
+            type="button"
+            aria-pressed={choice.id === "1m" ? "true" : "false"}
+            class:list={{ selected: choice.id === "1m" }}
+            data-choice={choice.id}
+            data-bytes={choice.bytes}
+            data-throughput={choice.throughput}
+            data-p99={choice.p99}
+            data-rss={choice.rss}
+            data-completed={choice.completed}
+            data-memory-width={choice.memoryWidth}
+            data-speed-width={choice.speedWidth}
+          >
+            <span>{choice.label}</span>
+            {choice.id === "1m" && <small>default</small>}
+          </button>
+        ))
+      }
+    </div>
+
+    <div class="readout" aria-live="polite">
+      <div class="target">
+        <span>Returned byte target</span>
+        <strong data-bytes>1,048,576 bytes</strong>
+      </div>
+
+      <div class="measures">
+        <div>
+          <span>Throughput</span>
+          <strong><span data-throughput>170.71</span> MiB/s</strong>
+        </div>
+        <div>
+          <span>Catch-up p99</span>
+          <strong data-p99>3.72 s</strong>
+        </div>
+        <div>
+          <span>Chronicle RSS</span>
+          <strong data-rss>195.9 MiB</strong>
+        </div>
+        <div>
+          <span>Completed reads</span>
+          <strong data-completed>64</strong>
+        </div>
+      </div>
+
+      <div class="tradeoff">
+        <div class="tradeoff-row">
+          <span>Relative throughput</span>
+          <i><b data-speed-bar style="width:100%"></b></i>
+        </div>
+        <div class="tradeoff-row memory">
+          <span>Relative memory</span>
+          <i><b data-memory-bar style="width:30%"></b></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="candidate-gap">
+      <div class="gap-head">
+        <div>
+          <span>Rejected 512-reader branch sample</span>
+          <strong>29,436 MiB fetched from Redis</strong>
+        </div>
+        <code>old LIMIT 0 1024</code>
+      </div>
+      <div class="gap-bar" aria-label="8,127 MiB returned and 21,309 MiB discarded from candidate batches">
+        <span class="returned" style="width:27.61%"></span>
+        <span class="discarded" style="width:72.39%"></span>
+      </div>
+      <div class="legend">
+        <span><i class="returned"></i><strong>8,127 MiB</strong> returned</span>
+        <span><i class="discarded"></i><strong>21,309 MiB</strong> inspected but not returned</span>
+      </div>
+      <p>
+        This gap rejected the old candidate-batch design. The final script
+        fetches one candidate, then optionally bulk-fetches only the end-offset
+        range that fits the remaining byte target. It makes no lookahead call.
+      </p>
+    </div>
+  </div>
+
+  <span slot="caption">
+    These three measurements used 32 readers on the same local 16 MiB stream
+    workload. All three retained the same measured offered-window completion
+    rate. The 256 KiB cell had the lowest local p99 and RSS; the 4 MiB cell used
+    457.3 MiB more resident memory than the 1 MiB default.
+  </span>
+</Demo>
+
+<script>
+  document.querySelectorAll<HTMLElement>("[data-catchup-budget]").forEach((root) => {
+    const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-choice]"));
+    const bytes = root.querySelector<HTMLElement>("[data-bytes]:not(button)");
+    const throughput = root.querySelector<HTMLElement>("[data-throughput]:not(button)");
+    const p99 = root.querySelector<HTMLElement>("[data-p99]:not(button)");
+    const rss = root.querySelector<HTMLElement>("[data-rss]:not(button)");
+    const completed = root.querySelector<HTMLElement>("[data-completed]:not(button)");
+    const speedBar = root.querySelector<HTMLElement>("[data-speed-bar]");
+    const memoryBar = root.querySelector<HTMLElement>("[data-memory-bar]");
+    if (!bytes || !throughput || !p99 || !rss || !completed || !speedBar || !memoryBar) return;
+
+    const select = (button: HTMLButtonElement) => {
+      buttons.forEach((item) => {
+        const selected = item === button;
+        item.classList.toggle("selected", selected);
+        item.setAttribute("aria-pressed", String(selected));
+      });
+      bytes.textContent = `${button.dataset.bytes ?? ""} bytes`;
+      throughput.textContent = button.dataset.throughput ?? "";
+      p99.textContent = button.dataset.p99 ?? "";
+      rss.textContent = button.dataset.rss ?? "";
+      completed.textContent = button.dataset.completed ?? "";
+      speedBar.style.width = button.dataset.speedWidth ?? "0";
+      memoryBar.style.width = button.dataset.memoryWidth ?? "0";
+    };
+
+    buttons.forEach((button) => button.addEventListener("click", () => select(button)));
+  });
+</script>
+
+<style lang="scss">
+  .choices {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+  }
+  button {
+    display: flex;
+    min-height: 58px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 0;
+    border-right: 1px solid var(--rule);
+    color: var(--ink-mute);
+    background: var(--paper);
+    font: 600 12px var(--mono);
+    cursor: pointer;
+  }
+  button:last-child { border-right: 0; }
+  button:hover { color: var(--ink); background: var(--paper-warm); }
+  button.selected {
+    color: var(--accent-deep);
+    background: var(--accent-tint);
+    box-shadow: inset 0 -3px 0 var(--accent);
+  }
+  button small {
+    padding: 2px 5px;
+    border-radius: 999px;
+    color: var(--card);
+    background: var(--accent);
+    font: 8px var(--mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .target {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .target span {
+    color: var(--ink-mute);
+    font-size: 12.5px;
+  }
+  .target strong {
+    font: 600 13px var(--mono);
+    color: var(--accent-deep);
+  }
+  .measures {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-top: 16px;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+  }
+  .measures > div {
+    min-width: 0;
+    padding: 13px;
+    border-right: 1px solid var(--rule-soft);
+  }
+  .measures > div:last-child { border-right: 0; }
+  .measures span,
+  .measures strong {
+    display: block;
+  }
+  .measures span {
+    color: var(--muted);
+    font-size: 10px;
+  }
+  .measures strong {
+    margin-top: 5px;
+    font: 600 12px/1.35 var(--mono);
+    color: var(--ink);
+  }
+  .tradeoff {
+    display: grid;
+    gap: 10px;
+    margin-top: 15px;
+  }
+  .tradeoff-row {
+    display: grid;
+    grid-template-columns: 128px 1fr;
+    gap: 12px;
+    align-items: center;
+    font-size: 10.5px;
+    color: var(--ink-mute);
+  }
+  .tradeoff-row > i {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--paper-warm);
+  }
+  .tradeoff-row b {
+    display: block;
+    min-width: 3px;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 180ms ease-out;
+  }
+  .tradeoff-row.memory b { background: var(--warn); }
+  .candidate-gap {
+    margin-top: 22px;
+    padding-top: 20px;
+    border-top: 1px solid var(--rule);
+  }
+  .gap-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+  }
+  .gap-head span,
+  .gap-head strong {
+    display: block;
+  }
+  .gap-head span {
+    font: 9.5px var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .gap-head strong {
+    margin-top: 4px;
+    font-size: 13.5px;
+  }
+  .gap-head code {
+    padding: 4px 7px;
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    color: var(--accent-deep);
+    background: var(--paper-warm);
+    font: 10px var(--mono);
+  }
+  .gap-bar {
+    display: flex;
+    height: 18px;
+    margin-top: 13px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--paper-warm);
+  }
+  .gap-bar span.returned { background: var(--accent); }
+  .gap-bar span.discarded {
+    background:
+      repeating-linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--warn) 76%, var(--card)) 0 5px,
+        color-mix(in srgb, var(--warn) 42%, var(--card)) 5px 10px
+      );
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin-top: 10px;
+    font-size: 10.5px;
+    color: var(--ink-mute);
+  }
+  .legend span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .legend i {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+  }
+  .legend i.returned { background: var(--accent); }
+  .legend i.discarded { background: var(--warn); }
+  .legend strong {
+    font-family: var(--mono);
+    color: var(--ink);
+  }
+  .candidate-gap p {
+    margin: 12px 0 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--ink-mute);
+  }
+  @media (max-width: 700px) {
+    .measures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .measures > div:nth-child(2) { border-right: 0; }
+    .measures > div:nth-child(-n+2) { border-bottom: 1px solid var(--rule-soft); }
+  }
+  @media (max-width: 520px) {
+    .choices { grid-template-columns: 1fr; }
+    button {
+      min-height: 46px;
+      border-right: 0;
+      border-bottom: 1px solid var(--rule);
+    }
+    button:last-child { border-bottom: 0; }
+    button.selected { box-shadow: inset 3px 0 0 var(--accent); }
+    .target,
+    .gap-head { align-items: flex-start; flex-direction: column; gap: 5px; }
+    .tradeoff-row { grid-template-columns: 1fr; gap: 5px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tradeoff-row b { transition: none; }
+  }
+</style>

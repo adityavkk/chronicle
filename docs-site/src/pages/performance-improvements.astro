@@ -1,0 +1,12 @@
+---
+// The MDX lives in _performance-improvements.mdx and is wrapped here so the
+// shared Doc layout receives frontmatter.
+import type { ComponentProps } from "astro/types";
+import Doc from "../layouts/Doc.astro";
+import PerformanceImprovements, { frontmatter } from "./_performance-improvements.mdx";
+
+const fm = frontmatter as ComponentProps<typeof Doc>["frontmatter"];
+---
+<Doc frontmatter={fm}>
+  <PerformanceImprovements />
+</Doc>

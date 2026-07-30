@@ -15,6 +15,9 @@ func TestMuxEndpoints(t *testing.T) {
 	p.WakeDelivery(2*time.Millisecond, "ok")
 	p.WakeEvent(time.Millisecond, "ok")
 	p.WorkerTick("lease", 7)
+	p.ReadPage(1<<20, 2048, 1024, 1024, 2*time.Millisecond, 2)
+	p.ReadResponse(1200, 2)
+	p.ReadCancellation("between_pages")
 	// Horizontal-scale golden signals (GAP2): exercise each appended method so its
 	// series appears in the exposition (a CounterVec emits nothing until a label
 	// value is observed).
@@ -49,6 +52,16 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_sweep_wakes_total",
 		"chronicle_wake_delivery_seconds",
 		"chronicle_worker_due_items",
+		"chronicle_read_page_target_bytes",
+		"chronicle_read_fetched_bytes_total",
+		"chronicle_read_returned_bytes_total",
+		"chronicle_read_discarded_bytes_total",
+		"chronicle_read_pages_total",
+		"chronicle_read_pages_per_response",
+		"chronicle_read_redis_script_seconds",
+		"chronicle_read_redis_script_invocations_total",
+		"chronicle_read_response_bytes_total",
+		"chronicle_read_cancellations_total",
 		"chronicle_fanout_seconds",
 		"chronicle_fanout_slots_probed",
 		"chronicle_fanout_subs",

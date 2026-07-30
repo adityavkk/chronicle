@@ -75,6 +75,8 @@ The bundled scenarios model the protocol's documented use cases:
 | `append-sweep` | aggregate writes ramping 200→2,000/s | write-path knee |
 | `append-steady` | flat 1,000 writes/s | append latency under load |
 | `catchup` | full-stream replays of ~1.25 MiB streams @ 40/s | TTFB + read MB/s |
+| `catchup-paged` | 8 × 16 MiB streams, 8/32/128/512 reader curve | bounded catch-up throughput and memory |
+| `mixed-catchup-paged` | 32 catch-up readers plus 40 offered writes/s | at least 38 successful writes/s over the configured offer window and append p99 at most 2,000 ms |
 | `mixed` | 100 sessions: writes + SSE + long-poll + refreshes | everything at once |
 | `smoke` | 10-second everything-works check | — |
 
@@ -107,15 +109,26 @@ to p99.9 are reported, and full percentile curves are archived in
 `results.json` (`hdr_curves`, hdrhistogram.github.io-compatible).
 
 **Warmup gating.** The workload runs through `warmup` with recording
-disabled, then a measurement window of `duration` opens. Writers stop
-at window close; tailers get a 2 s drain grace so the tail of
-deliveries is observed rather than truncated.
+disabled, then a measurement window of `duration` opens. Each append and
+catch-up request is classified by its scheduled send time. A warmup request
+stays excluded even if it completes after measurement opens. A measurement
+request stays included if it completes during the bounded drain. Writers stop
+at window close; tailers get a 2 s drain grace so the tail of deliveries is
+observed rather than truncated.
 
 **Resource sampling.** With `-sample-pid name=pid` (any process) and
 `-sample-redis name=host:port` (Redis INFO over TCP), dsload samples
 RSS and cumulative CPU once per second — including itself, so "was the
 generator the bottleneck?" is answerable from the results file. CPU% is
 derived from cumulative deltas, not instantaneous readings.
+
+For bounded catch-up work, add
+`-sample-metrics chronicle=http://host:port/metrics`. The result then includes
+Chronicle heap and garbage collection data, page counts, fetched, returned, and
+discarded bytes, and Redis script timing. Redis INFO sampling also records
+operations per second, total commands, blocked clients, evictions, and network
+bytes. `-catchup-readers N` changes only the catch-up concurrency cap for one
+reader-curve cell.
 
 **Why not vegeta/fortio/k6?** Their unit of work is
 request→complete-response, which cannot express per-event latency on a

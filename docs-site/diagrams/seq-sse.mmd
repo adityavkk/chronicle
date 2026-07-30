@@ -5,10 +5,14 @@ sequenceDiagram
     participant S as Store
     participant R as Redis
     C->>H: GET ?offset=now and live=sse
+    H->>S: ReadPage(path, offset) · capture snapshot
+    S->>R: EVALSHA read.lua · bounded ZRANGEBYLEX
+    S-->>H: first frame-aligned page + snapshot
     H-->>C: 200 · Content-Type text/event-stream
-    H->>S: Store.Read(path, offset) · handler_sse.go:64
-    S->>R: EVALSHA read.lua
-    H-->>C: event data + event control
-    H->>S: WaitForMessages(ctx, 100ms) · handler_sse.go:187
-    Note over H: loop — re-read, emit, wait
+    loop pages to the captured tail
+        H-->>C: one data event + one control event · flush
+        H->>S: next ReadPage with the same snapshot
+    end
+    H->>S: WaitForMessages(ctx, 100ms)
+    Note over H: loop: capture snapshot, emit bounded pages, wait
     H-->>C: control streamClosed true → close

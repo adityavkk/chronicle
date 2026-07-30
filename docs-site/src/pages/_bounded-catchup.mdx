@@ -1,0 +1,285 @@
+---
+title: "Replay 16 MiB streams <em>without holding 16 MiB per reader</em>"
+summary: "Chronicle replaced unbounded Redis suffix reads and whole-response buffering with snapshot pages. Redis fetches one frame, then optionally bulk-fetches only the offset range that fits the remaining 1 MiB target, with a separate 1,024-frame cap."
+eyebrow: "Architecture"
+meta: "Performance improvements · bounded catch-up"
+deck: "The old catch-up path asked Redis for every remaining frame, then built a second complete response body in Chronicle. The new path captures one stream tail, reads bounded frame batches, returns about 1 MiB at a time, and writes each frame directly to the client."
+byline:
+  - label: "128-reader cell"
+    value: "128 errors → 0"
+  - label: "Returned page target"
+    value: "1 MiB"
+  - label: "Redis candidate cap"
+    value: "1,024 frames"
+  - label: "Issue"
+    value: "Bounded catch-up"
+    href: ""
+---
+
+import Tldr from "../components/Tldr.astro";
+import SectionHead from "../components/SectionHead.astro";
+import Callout from "../components/Callout.astro";
+import Table from "../components/Table.astro";
+import Aside from "../components/Aside.astro";
+import Complexity from "../components/Complexity.astro";
+import Step from "../components/Step.astro";
+import CatchupPipeline from "../components/CatchupPipeline.astro";
+import CatchupBudget from "../components/CatchupBudget.astro";
+import CatchupResults from "../components/CatchupResults.astro";
+
+<Tldr>
+  <ul>
+    <li><strong>The old storage read had no suffix bound.</strong> One `ZRANGEBYLEX` call materialized every remaining frame inside Redis. Chronicle then built another complete body before it wrote the first byte.</li>
+    <li><strong>The new storage read has a frame bound and a separate returned byte target.</strong> Redis fetches one candidate, then bulk-fetches only offsets that can fit the remaining part of about 1 MiB. It does not issue a lookahead query, and the complete page also stops at 1,024 frames.</li>
+    <li><strong>One response keeps one snapshot.</strong> The first page captures the tail, content type, closed state, and stream incarnation. Later appends stay outside that response. A delete followed by recreate invalidates the snapshot.</li>
+    <li><strong>The failing 128-reader cell completed.</strong> The old local server returned 128 errors and completed no accepted replay. The final paged cell completed 435 measured bodies. The 512-reader cell completed 336 measured bodies with no server errors and 1,305.3 MiB peak Chronicle RSS.</li>
+    <li><strong>The tradeoff is page size.</strong> A 16 MiB replay needs 16 returned pages at the 1 MiB default. Smaller pages add storage calls. Larger pages retain more memory and hold the Redis event loop longer.</li>
+  </ul>
+</Tldr>
+
+<Callout icon="arrow" label="Performance improvements">
+  This fix is one Chronicle performance workstream. The
+  [performance improvements index](../) links to horizontal scaling, cloud load
+  tests, the configuration comparison, the architecture decision, and the
+  tracking issue.
+</Callout>
+
+<section class="block" id="old-path">
+  <SectionHead num="01" label="Before" title="One reader could ask Redis for <em>the complete suffix</em>" />
+
+  Redis stores stream frames in a sorted set ordered by offset. The old read
+  script called `ZRANGEBYLEX` from the requested offset to the stream tail with
+  no `LIMIT`. Redis built the complete result while its Lua event loop was
+  occupied. Chronicle received that result and then assembled another complete
+  HTTP body.
+
+  HTTP `limit` did not solve the storage problem. Chronicle applied it after
+  Redis had already returned the full suffix. A 16 MiB stream and 512 concurrent
+  readers therefore had an 8 GiB raw suffix shape before decoded frames, Go
+  objects, socket buffers, and runtime memory.
+
+  <CatchupPipeline />
+
+  The local base completed 46 reads in the 32-reader cell, with 793.5 MiB peak
+  Chronicle RSS and a 10.12-second p99. At 128 readers, Redis read timeouts
+  caused all 128 accepted requests to fail.[^evidence]
+</section>
+
+<section class="block" id="page-contract">
+  <SectionHead num="02" label="Page contract" title="Frame count bounds Redis work; <em>bytes bound the returned prefix</em>" />
+
+  `ReadPage` takes two independent limits. `MaxFrames` limits the number of
+  sorted-set members Redis can return to Lua. `TargetBytes` bounds the returned
+  whole-frame prefix. Redis reads the first candidate alone, then derives an
+  end-offset bound for an optional bulk read from the remaining bytes. It does
+  not fetch a lookahead frame. The defaults are 1,024 frames and 1 MiB.
+
+  <CatchupBudget />
+
+  An earlier 512-reader branch sample recorded 29,436 MiB fetched into candidate
+  batches, 8,127 MiB returned, and 21,309 MiB left for later pages. That gap
+  exposed a weak candidate-fetch shape: it selected up to 1,024 frames before
+  applying the byte target. The final path makes no lookahead call and, for an
+  aligned range, fetches only candidates it returns. Those figures explain the
+  change but are not final-path measurements.
+
+  <Complexity
+    time="O(log N + F)"
+    space="O(Σ candidate frame bytes)"
+    why="<strong>N</strong> is the frame count in the stream and <strong>F</strong> is at most 1,024 for one page. The first range fetches one frame. An optional second range ends at the remaining byte budget, with no lookahead."
+  />
+
+  <Aside label="Oversized frame" summary="One indivisible frame may exceed the returned byte target">
+    Chronicle stores each append frame as one sorted-set member. It cannot split
+    that member during a read. If the first valid frame is larger than 1 MiB,
+    the page returns that frame so the cursor can make progress. A storage
+    format with chunked values would be required for a strict byte ceiling.
+  </Aside>
+</section>
+
+<section class="block" id="snapshot">
+  <SectionHead num="03" label="Snapshot" title="Every page belongs to <em>one response lifetime</em>" />
+
+  Paging must not turn one response into a moving view of the stream. The first
+  read captures the response tail and stream metadata. Every later page carries
+  that snapshot back to the store.
+
+  <Step
+    n={1}
+    fn="ReadPageOptions"
+    loc="store/page.go:35-50"
+    role="The first call has no snapshot. The store returns the tail, content type, closed state, and a random stream incarnation."
+  >
+    Later calls reuse the returned snapshot. The tail is the inclusive upper
+    bound for the whole response.
+  </Step>
+
+  <Step
+    n={2}
+    fn="read.lua"
+    loc="store/redis/scripts/read.lua:52-75"
+    role="Redis fetches one candidate, then optionally bulk-fetches the end-offset range that fits the remaining target. Both calls have a <code>LIMIT</code>."
+  >
+    The script rejects a different incarnation before it returns data. It also
+    refreshes sliding expiry only for the root stream, not an inherited fork
+    source.
+  </Step>
+
+  <Step
+    n={3}
+    fn="streamCatchupResponse"
+    loc="handler_stream.go:200-258"
+    role="The handler writes one page, flushes it, checks cancellation, and asks for the next page from the last returned offset."
+  >
+    The handler never constructs a second whole-response body. JSON punctuation,
+    envelopes, and binary frames are written in response order as pages arrive.
+  </Step>
+
+  <Step
+    n={4}
+    fn="streamSSESnapshot"
+    loc="handler_sse.go:140-191"
+    role="SSE catch-up uses the same page and snapshot contract before it resumes the existing wait and live loop."
+  >
+    Each page ends with a control event that carries the exact resume offset.
+    A reconnect starts from the last complete control offset the client received.
+  </Step>
+
+  <Callout icon="alert" label="Interrupted response">
+    TCP cannot retract a partial frame after a socket failure. Chronicle stops
+    before another frame or page once it observes cancellation. An SSE client
+    can resume from its last complete control offset. A non-live HTTP client
+    must retry from an offset it has confirmed.
+  </Callout>
+</section>
+
+<section class="block" id="results">
+  <SectionHead num="04" label="Results" title="The reader curve completed where <em>the old path timed out</em>" />
+
+  <CatchupResults />
+
+  The local runs used an arm64 macOS host with 14 logical CPUs, Go 1.26.4, and
+  Redis 8.8.0 in Docker with AOF `everysec`. Chronicle, Redis, and the load
+  generator shared the host. These numbers establish the memory shape and local
+  tradeoffs. They are not production capacity numbers.[^evidence]
+
+  <Table wide>
+    | Path | Readers | Completed | Throughput | p99 | Errors | Chronicle RSS |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+    | old local | 8 | 51 | 121.26 MiB/s | 1.40 s | 0 | 436.3 MiB |
+    | final local | 8 | 56 | 149.37 MiB/s | 0.90 s | 0 | 69.5 MiB |
+    | old local | 32 | 46 | 79.94 MiB/s | 10.12 s | 0 | 793.5 MiB |
+    | final local | 32 | 64 | 170.71 MiB/s | 3.72 s | 0 | 195.9 MiB |
+    | old local | 128 | 0 | 0 | n/a | 128 | 723.7 MiB |
+    | final local | 128 | 435 | 232.06 MiB/s | 8.95 s | 0 | 470.7 MiB |
+    | final local | 512 | 336 | 179.24 MiB/s | 28.85 s | 0 | 1,305.3 MiB |
+  </Table>
+
+  The final 32-reader cell completed more reads with lower p99 and 597.6 MiB
+  less resident memory than the local base. The 128-reader cell changed from
+  complete failure to 435 measured, body-integrity-checked responses. Counts
+  include requests scheduled in the measurement window even when their
+  completion drained later; warmup completions remain excluded.
+
+  <Aside label="512-reader comparison" summary="The sealed old result used different hardware">
+    The sealed old 512-reader artifact came from a 16 vCPU environment and
+    reported 57.60 MiB/s, a 34.10-second p99, and 940 errors. The final
+    512-reader value came from the shared local host. The two runs do not support
+    a direct latency comparison. The useful new result is 336 complete validated
+    bodies, finite memory, and no server errors at a 512-reader cap.
+  </Aside>
+</section>
+
+<section class="block" id="writes">
+  <SectionHead num="05" label="Write capacity" title="Catch-up cannot pass by <em>starving appends</em>" />
+
+  The mixed workload keeps 32 catch-up readers active while eight writers offer
+  40 single-frame appends per second. The accepted local run completed all
+  1,200 writes during the 30-second offer window. That is 40.0 successful
+  appends per second. Append p99 was 163.33 milliseconds, and no request failed.
+
+  The paid GKE job now has explicit limits. It requires at least 38 successful
+  appends per second over the configured offer window and append p99 at or below
+  2,000 milliseconds. The existing zero-error check still runs, but zero errors
+  alone cannot pass the cell.
+
+  <Table>
+    | Mixed-cell signal | Passing limit | Accepted local result |
+    | --- | ---: | ---: |
+    | Successful append rate | at least 38/s | **40.0/s** |
+    | Append p99 | at most 2,000 ms | **163.33 ms** |
+    | Request errors | 0 | **0** |
+    | Catch-up reads completed | at least 1, exact body | **290** |
+    | Chronicle RSS | reported | **190.1 MiB** |
+  </Table>
+
+  <Callout icon="info" label="Cloud validation boundary">
+    The authorized GKE rerun stopped during preflight. The current account still
+    received VPC Service Controls denials for Compute quota, Artifact Registry,
+    and the default VPC. The managed Valkey 8 API was also disabled. No GKE or
+    Valkey resources were created. The exact request IDs are in the
+    [evidence report](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md).
+  </Callout>
+</section>
+
+<section class="block" id="correctness">
+  <SectionHead num="06" label="Correctness" title="The page boundary keeps <em>the original stream contract</em>" />
+
+  The differential tests run the same page cases through `MemoryStore` and
+  Redis. They cover empty streams, exact targets, oversized frames, offsets,
+  closure, concurrent append, fork inheritance, expiry, and every configured
+  page size. Cancellation tests stop before the first page, between pages,
+  while waiting for a Redis connection, during a socket write, and after a
+  flush.
+
+  <Table>
+    | Gate | Result |
+    | --- | --- |
+    | Durable Streams conformance | **332 / 332 passed** |
+    | Paged catch-up Jepsen scenario | **6 attempts: 4 faulted, 1 concurrent snapshot, 1 clean drain** |
+    | Fork snapshot oracle | **136 frames matched exactly** |
+    | Maintained data-plane Porcupine history | **linearizable across 3,472 operations** |
+    | Maintained single-holder Porcupine history | **linearizable across 672 operations** |
+  </Table>
+
+  The paged Jepsen scenario used four fault or interruption attempts: client
+  cancellation, a client transport interruption, a restart of every Chronicle
+  origin, and a Redis restart. It then captured a snapshot during concurrent
+  append and close, followed by one clean final drain. The checker required
+  forward-only exact-once coverage and compared acknowledged frames with a
+  direct Redis sorted-set oracle.[^jepsen]
+</section>
+
+<section class="block" id="limits">
+  <SectionHead num="07" label="Limits" title="What bounded pages <em>do not solve</em>" />
+
+  - **Candidate bytes do not have an absolute 1 MiB ceiling.** Redis can fetch
+    one indivisible oversized first frame. At a fork-segment transition it can
+    inspect one non-fitting first candidate before stopping. It cannot
+    speculatively materialize a batch of hundreds of oversized frames.
+  - **One large frame can exceed the returned target.** Chronicle cannot split
+    the current sorted-set member format.
+  - **Small pages add round trips.** In the fresh short local comparison, all
+    page sizes retained the same offered-window completion rate and 256 KiB had
+    the best p99. A managed-Valkey run is needed before claiming a production
+    latency optimum.
+  - **High concurrency still has long latency.** The 512-reader local p99 was
+    28.85 seconds. Paging prevents the old failure shape. It does not make the
+    shared laptop a production-sized system.
+  - **External stores need the optional page interface.** A third-party backend
+    that implements only `store.Store` keeps source compatibility and avoids the
+    second handler buffer, but it cannot promise bounded storage work.
+  - **The managed Valkey 8 run remains missing.** The local evidence is enough
+    to judge the mechanism and memory shape. It is not a GKE capacity result.
+
+  <Callout icon="arrow" label="Related records">
+    Return to [Performance improvements](../) for horizontal scaling, load
+    tests, and the cross-system configuration report. Read the
+    [architecture decision](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0004-bounded-read-pages-and-snapshot-catch-up.md)
+    for the interface and alternatives. Track the remaining cloud validation in
+    bounded catch-up.
+  </Callout>
+</section>
+
+[^evidence]: [Issue 5 bounded catch-up evidence](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md). It records the commands, reader curves, page-size comparison, Redis counters, allocation profile, correctness runs, and cloud preflight evidence.
+[^jepsen]: The [`paged-catchup` scenario](https://github.com/adityavkk/chronicle/blob/main/jepsen/README.md) checks cancellation, transport interruption, Chronicle and Redis replacement, concurrent append and close, fork inheritance, exact frame coverage, and cursor progress.

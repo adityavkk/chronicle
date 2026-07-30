@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
@@ -24,25 +25,37 @@ type ResourceSample struct {
 	CPUSeconds float64 `json:"cpu_seconds"`
 }
 
+// MetricSample is one Prometheus or Redis INFO observation. Metric preserves
+// any bounded labels so histogram buckets and cancellation phases remain
+// distinguishable in results.json.
+type MetricSample struct {
+	Sec    int     `json:"sec"`
+	Name   string  `json:"name"`
+	Metric string  `json:"metric"`
+	Value  float64 `json:"value"`
+}
+
 // sampler polls SUT processes (via ps) and Redis (via INFO over TCP)
 // once per second for the duration of the run. The load generator
 // samples itself too, so "was the generator the bottleneck?" is
 // answerable from the results file.
 type sampler struct {
-	pids  map[string]int
-	redis map[string]string
-	logf  func(string, ...any)
+	pids    map[string]int
+	redis   map[string]string
+	metrics map[string]string
+	logf    func(string, ...any)
 
-	mu  sync.Mutex
-	out []ResourceSample
+	mu        sync.Mutex
+	out       []ResourceSample
+	metricOut []MetricSample
 }
 
-func newSampler(pids map[string]int, redis map[string]string, logf func(string, ...any)) *sampler {
+func newSampler(pids map[string]int, redis, metrics map[string]string, logf func(string, ...any)) *sampler {
 	all := map[string]int{"loadgen": os.Getpid()}
 	for k, v := range pids {
 		all[k] = v
 	}
-	return &sampler{pids: all, redis: redis, logf: logf}
+	return &sampler{pids: all, redis: redis, metrics: metrics, logf: logf}
 }
 
 func (s *sampler) start(ctx context.Context, wg *sync.WaitGroup, anchor time.Time) {
@@ -59,15 +72,28 @@ func (s *sampler) start(ctx context.Context, wg *sync.WaitGroup, anchor time.Tim
 				sec := int(time.Since(anchor).Seconds())
 				s.samplePids(sec)
 				s.sampleRedis(sec)
+				s.samplePrometheus(sec)
 			}
 		}
 	}()
+}
+
+func (s *sampler) metricSamples() []MetricSample {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]MetricSample(nil), s.metricOut...)
 }
 
 func (s *sampler) samples() []ResourceSample {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]ResourceSample(nil), s.out...)
+}
+
+func (s *sampler) addMetric(sample MetricSample) {
+	s.mu.Lock()
+	s.metricOut = append(s.metricOut, sample)
+	s.mu.Unlock()
 }
 
 func (s *sampler) add(sample ResourceSample) {
@@ -138,52 +164,151 @@ func parseCPUTime(v string) (float64, error) {
 // raw TCP connection — no client dependency, no docker exec latency.
 func (s *sampler) sampleRedis(sec int) {
 	for name, addr := range s.redis {
-		mem, cpu, err := redisInfo(addr)
+		mem, cpu, metrics, err := redisInfoDetailed(addr)
 		if err != nil {
 			continue
 		}
 		s.add(ResourceSample{Sec: sec, Name: name, RSSBytes: mem, CPUSeconds: cpu})
+		for metric, value := range metrics {
+			s.addMetric(MetricSample{Sec: sec, Name: name, Metric: metric, Value: value})
+		}
 	}
 }
 
 func redisInfo(addr string) (usedMemory int64, cpuSeconds float64, err error) {
+	usedMemory, cpuSeconds, _, err = redisInfoDetailed(addr)
+	return usedMemory, cpuSeconds, err
+}
+
+func redisInfoDetailed(addr string) (usedMemory int64, cpuSeconds float64, metrics map[string]float64, err error) {
 	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(context.Background(), "tcp", addr)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 	defer conn.Close() //nolint:errcheck // read-only probe connection
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 	if _, err := conn.Write([]byte("INFO\r\n")); err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 	r := bufio.NewReader(conn)
 	header, err := r.ReadString('\n')
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 	if !strings.HasPrefix(header, "$") {
-		return 0, 0, fmt.Errorf("unexpected INFO reply %q", header)
+		return 0, 0, nil, fmt.Errorf("unexpected INFO reply %q", header)
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(header[1:]))
 	if err != nil || n <= 0 {
-		return 0, 0, fmt.Errorf("bad INFO length %q", header)
+		return 0, 0, nil, fmt.Errorf("bad INFO length %q", header)
 	}
 	buf := make([]byte, n)
 	if _, err := readFull(r, buf); err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 	var sys, user float64
+	metrics = make(map[string]float64)
 	for _, line := range strings.Split(string(buf), "\r\n") {
+		key, raw, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
 		switch {
-		case strings.HasPrefix(line, "used_memory:"):
-			usedMemory, _ = strconv.ParseInt(strings.TrimPrefix(line, "used_memory:"), 10, 64)
-		case strings.HasPrefix(line, "used_cpu_sys:"):
-			sys, _ = strconv.ParseFloat(strings.TrimPrefix(line, "used_cpu_sys:"), 64)
-		case strings.HasPrefix(line, "used_cpu_user:"):
-			user, _ = strconv.ParseFloat(strings.TrimPrefix(line, "used_cpu_user:"), 64)
+		case key == "used_memory":
+			usedMemory, _ = strconv.ParseInt(raw, 10, 64)
+		case key == "used_cpu_sys":
+			sys, _ = strconv.ParseFloat(raw, 64)
+		case key == "used_cpu_user":
+			user, _ = strconv.ParseFloat(raw, 64)
+		case redisMetricWanted(key):
+			if value, parseErr := strconv.ParseFloat(raw, 64); parseErr == nil {
+				metrics[key] = value
+			}
 		}
 	}
-	return usedMemory, sys + user, nil
+	return usedMemory, sys + user, metrics, nil
+}
+
+func redisMetricWanted(name string) bool {
+	switch name {
+	case "total_commands_processed",
+		"instantaneous_ops_per_sec",
+		"blocked_clients",
+		"evicted_keys",
+		"keyspace_hits",
+		"keyspace_misses",
+		"total_net_input_bytes",
+		"total_net_output_bytes":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *sampler) samplePrometheus(sec int) {
+	for name, endpoint := range s.metrics {
+		samples, err := scrapePrometheus(endpoint)
+		if err != nil {
+			continue
+		}
+		for metric, value := range samples {
+			s.addMetric(MetricSample{Sec: sec, Name: name, Metric: metric, Value: value})
+		}
+	}
+}
+
+func scrapePrometheus(endpoint string) (map[string]float64, error) {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close() //nolint:errcheck // read-only probe
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("metrics status %d", resp.StatusCode)
+	}
+	out := make(map[string]float64)
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		metric, raw, ok := strings.Cut(line, " ")
+		if !ok || !prometheusMetricWanted(metric) {
+			continue
+		}
+		value, parseErr := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if parseErr == nil {
+			out[metric] = value
+		}
+	}
+	return out, scanner.Err()
+}
+
+func prometheusMetricWanted(metric string) bool {
+	name := metric
+	if i := strings.IndexByte(name, '{'); i >= 0 {
+		name = name[:i]
+	}
+	if strings.HasPrefix(name, "chronicle_read_") {
+		return true
+	}
+	switch name {
+	case "process_resident_memory_bytes",
+		"process_cpu_seconds_total",
+		"go_memstats_alloc_bytes_total",
+		"go_memstats_heap_alloc_bytes",
+		"go_memstats_heap_inuse_bytes",
+		"go_gc_heap_allocs_bytes_total",
+		"go_gc_heap_live_bytes",
+		"go_gc_cycles_total",
+		"go_gc_duration_seconds_sum",
+		"go_gc_duration_seconds_count":
+		return true
+	default:
+		return false
+	}
 }
 
 func readFull(r *bufio.Reader, buf []byte) (int, error) {

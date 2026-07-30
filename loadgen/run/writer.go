@@ -51,11 +51,12 @@ func (r *runner) writer(ctx context.Context, w int, wg *sync.WaitGroup) {
 		if err := sleepCtx(ctx, time.Until(intended)); err != nil {
 			return
 		}
+		eligible := r.measurementIncludes(intended)
 
 		select {
 		case r.appendSem <- struct{}{}:
 		default:
-			rec.Count("appends_dropped", 1)
+			rec.CountEligible(eligible, "appends_dropped", 1)
 			r.col.Series.Add("appends_dropped", r.sec(), 1)
 			continue
 		}
@@ -92,16 +93,16 @@ func (r *runner) writer(ctx context.Context, w int, wg *sync.WaitGroup) {
 			r.col.Series.Add("appends_sent", sec, 1)
 			switch {
 			case err != nil:
-				rec.CountError("append", classify(err))
+				rec.CountErrorEligible(eligible, "append", classify(err))
 				r.col.Series.Add("appends_err", sec, 1)
 			case resp.Status/100 == 2:
-				rec.Record(stats.Append, lat)
-				rec.Count("appends_ok", 1)
-				rec.Count("msgs_appended", int64(batch))
-				rec.Count("bytes_appended", int64(len(body)))
+				rec.RecordEligible(eligible, stats.Append, lat)
+				rec.CountEligible(eligible, "appends_ok", 1)
+				rec.CountEligible(eligible, "msgs_appended", int64(batch))
+				rec.CountEligible(eligible, "bytes_appended", int64(len(body)))
 				r.col.Series.Add("appends_ok", sec, 1)
 			default:
-				rec.CountError("append", fmt.Sprintf("status=%d", resp.Status))
+				rec.CountErrorEligible(eligible, "append", fmt.Sprintf("status=%d", resp.Status))
 				r.col.Series.Add("appends_err", sec, 1)
 			}
 		}

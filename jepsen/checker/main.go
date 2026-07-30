@@ -91,7 +91,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|failover|durable-externalize|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|paged-catchup|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|failover|durable-externalize|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
@@ -237,6 +237,14 @@ func run(c config, r *receiver) error {
 	fmt.Printf("== scenario %q: %d streams x %d msgs ==\n", c.scenario, c.streams, c.msgs)
 	if err := waitReady(c.base, 60*time.Second); err != nil {
 		return fmt.Errorf("chronicle not ready: %w", err)
+	}
+
+	// paged-catchup is the bounded-read data-plane fault gate. It streams a
+	// fork through many HTTP/storage pages, resumes after client cancellation,
+	// origin and Redis restarts, and a network interruption, then checks exact
+	// coverage against raw Redis ZSET members (scenario_paged_catchup.go).
+	if c.scenario == "paged-catchup" {
+		return runPagedCatchup(c)
 	}
 
 	// expired-lease-takeover asserts a fence-rotation property over the pull-wake

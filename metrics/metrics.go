@@ -21,14 +21,24 @@ import (
 // duration and the K and U (subscriptions, unique tails) that drive it, plus
 // wake-delivery latency and per-worker backlog.
 type Prometheus struct {
-	reg          *prometheus.Registry
-	sweepSeconds prometheus.Histogram
-	sweepSubs    prometheus.Histogram
-	sweepTails   prometheus.Histogram
-	sweepWakes   prometheus.Counter
-	delivery     *prometheus.HistogramVec
-	wakeEvent    *prometheus.HistogramVec
-	workerDue    *prometheus.HistogramVec
+	reg                  *prometheus.Registry
+	sweepSeconds         prometheus.Histogram
+	sweepSubs            prometheus.Histogram
+	sweepTails           prometheus.Histogram
+	sweepWakes           prometheus.Counter
+	delivery             *prometheus.HistogramVec
+	wakeEvent            *prometheus.HistogramVec
+	workerDue            *prometheus.HistogramVec
+	readTarget           prometheus.Histogram
+	readFetched          prometheus.Counter
+	readReturned         prometheus.Counter
+	readDiscarded        prometheus.Counter
+	readPages            prometheus.Counter
+	readPagesPerResponse prometheus.Histogram
+	readScript           prometheus.Histogram
+	readScriptInvokes    prometheus.Counter
+	readResponse         prometheus.Counter
+	readCanceled         *prometheus.CounterVec
 
 	// Horizontal-scale golden signals (docs/specs/horizontal-scale/research/05
 	// "New metrics"). Appended after the original set; see webhook.Metrics for the
@@ -94,6 +104,49 @@ func New() *Prometheus {
 			Help:    "Due items claimed per lease/retry worker tick, by kind.",
 			Buckets: prometheus.ExponentialBuckets(1, 2, 12),
 		}, []string{"kind"}),
+		readTarget: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_read_page_target_bytes",
+			Help:    "Requested storage page byte target for catch-up reads.",
+			Buckets: prometheus.ExponentialBuckets(64<<10, 2, 8),
+		}),
+		readFetched: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_read_fetched_bytes_total",
+			Help: "Message payload bytes fetched by bounded storage pages.",
+		}),
+		readReturned: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_read_returned_bytes_total",
+			Help: "Message payload bytes returned by bounded storage pages.",
+		}),
+		readDiscarded: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_read_discarded_bytes_total",
+			Help: "Fetched payload bytes discarded at a storage page boundary.",
+		}),
+		readPages: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_read_pages_total",
+			Help: "Bounded storage pages evaluated for HTTP and SSE catch-up.",
+		}),
+		readPagesPerResponse: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_read_pages_per_response",
+			Help:    "Bounded storage pages evaluated per HTTP or SSE response.",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 12),
+		}),
+		readScript: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_read_redis_script_seconds",
+			Help:    "Mean client-observed wall time per Redis script invocation within one bounded storage page, including pool and server queueing.",
+			Buckets: prometheus.ExponentialBuckets(0.00005, 2, 18),
+		}),
+		readScriptInvokes: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_read_redis_script_invocations_total",
+			Help: "Redis script invocations used by bounded storage pages.",
+		}),
+		readResponse: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_read_response_bytes_total",
+			Help: "HTTP and SSE catch-up response body bytes written.",
+		}),
+		readCanceled: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_read_cancellations_total",
+			Help: "Catch-up cancellations by fixed processing phase.",
+		}, []string{"phase"}),
 		fanoutSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "chronicle_fanout_seconds",
 			Help:    "OnStreamAppend fan-out wall-clock duration under slot-homing (gate #2).",
@@ -145,7 +198,13 @@ func New() *Prometheus {
 			Help: "Tier B fence-minting writes that reached the primary but could not prove durability within the WAIT/WAITAOF timeout, by command (WAITAOF|WAIT) — the RPO-exposure signal (issue #43, INV-DUR-01). Durability only: carries no holder/generation/exclusivity.",
 		}, []string{"cmd"}),
 	}
-	reg.MustRegister(p.sweepSeconds, p.sweepSubs, p.sweepTails, p.sweepWakes, p.delivery, p.wakeEvent, p.workerDue)
+	reg.MustRegister(
+		p.sweepSeconds, p.sweepSubs, p.sweepTails, p.sweepWakes,
+		p.delivery, p.wakeEvent, p.workerDue,
+		p.readTarget, p.readFetched, p.readReturned, p.readDiscarded,
+		p.readPages, p.readPagesPerResponse, p.readScript,
+		p.readScriptInvokes, p.readResponse, p.readCanceled,
+	)
 	reg.MustRegister(
 		p.fanoutSeconds, p.fanoutSlotsProbed, p.fanoutSubs,
 		p.dueSetMutations, p.dueWorkerSeconds, p.dueWorkerFired,
@@ -176,6 +235,34 @@ func (p *Prometheus) WakeEvent(dur time.Duration, outcome string) {
 // WorkerTick implements webhook.Metrics.
 func (p *Prometheus) WorkerTick(kind string, due int) {
 	p.workerDue.WithLabelValues(kind).Observe(float64(due))
+}
+
+// ReadPage records one bounded storage page. RedisScriptTime is zero for the
+// memory backend. When a page used more than one script, the histogram records
+// the mean while the counter preserves the invocation count.
+func (p *Prometheus) ReadPage(targetBytes, fetchedBytes, returnedBytes, discardedBytes int, redisScriptTime time.Duration, redisScriptInvokes int) {
+	p.readTarget.Observe(float64(targetBytes))
+	p.readFetched.Add(float64(fetchedBytes))
+	p.readReturned.Add(float64(returnedBytes))
+	p.readDiscarded.Add(float64(discardedBytes))
+	p.readPages.Inc()
+	if redisScriptInvokes > 0 {
+		p.readScript.Observe(redisScriptTime.Seconds() / float64(redisScriptInvokes))
+		p.readScriptInvokes.Add(float64(redisScriptInvokes))
+	}
+}
+
+// ReadResponse records the bytes written and the number of storage pages
+// evaluated for one HTTP or SSE response.
+func (p *Prometheus) ReadResponse(responseBytes, pages int) {
+	p.readResponse.Add(float64(responseBytes))
+	p.readPagesPerResponse.Observe(float64(pages))
+}
+
+// ReadCancellation records one fixed cancellation phase. Call sites pass only
+// the bounded set documented by handler_stream.go and handler_sse.go.
+func (p *Prometheus) ReadCancellation(phase string) {
+	p.readCanceled.WithLabelValues(phase).Inc()
 }
 
 // FanOut implements webhook.Metrics.

@@ -66,6 +66,7 @@ Flags take precedence over environment variables; both over defaults.
 | `--stream-root` | `CHRONICLE_STREAM_ROOT` | `/v1/stream/` | URL prefix streams live under |
 | `--long-poll-timeout` | `CHRONICLE_LONG_POLL_TIMEOUT` | `30s` | How long `live=long-poll` waits before `204` |
 | `--sse-reconnect-interval` | `CHRONICLE_SSE_RECONNECT_INTERVAL` | `60s` | SSE connection cycling (enables CDN collapsing) |
+| `--read-page-bytes` | `CHRONICLE_READ_PAGE_BYTES` | `1048576` | Returned payload target for each HTTP and SSE catch-up storage page. One valid frame may exceed it |
 | `--subscriptions` | `CHRONICLE_SUBSCRIPTIONS` | `true` | Enable the reserved `__ds` subscription APIs (requires the redis backend) |
 | `--public-url` | `CHRONICLE_PUBLIC_URL` | _(listen addr)_ | Externally reachable origin used in webhook `callback_url` / `jwks_url` |
 | `--webhook-allow-private` | `CHRONICLE_WEBHOOK_ALLOW_PRIVATE` | `false` | Allow webhook delivery to private/loopback addresses (trusted networks / local dev) |
@@ -81,6 +82,14 @@ Flags take precedence over environment variables; both over defaults.
 | _(env only)_ | `CHRONICLE_OIDC_NS_CLAIM` | _(unset)_ | Claim name holding the caller's namespace prefixes (string or array); the claim→scope mapping is IdP-side deploy config |
 | _(env only)_ | `CHRONICLE_KEY_ROTATION_OVERLAP` | _(per-family defaults)_ | Rotation overlap window for both Ed25519 key families ([#123](https://github.com/adityavkk/chronicle/issues/123)): how long a retiring kid keeps verifying after its successor takes over; defaults derive from each family's max token lifetime |
 | _(env only)_ | `CHRONICLE_WAKE_TOKEN_AUD` | _(unset)_ | `aud` stamped into minted `wake_token`s ([#123](https://github.com/adityavkk/chronicle/issues/123)) **and** required by the data-plane entity gate ([#126](https://github.com/adityavkk/chronicle/issues/126) TB6b) — one value keeps the mint and the gate in agreement; a woken entity's token then reads/appends within exactly its own entity subtree |
+
+Chronicle captures one tail offset for each catch-up response and reads toward
+it in bounded storage pages. Each returned page targets 1 MiB. Redis examines
+at most 1,024 candidate frames before Lua selects the returned prefix, so
+candidate bytes can exceed 1 MiB. A smaller returned page lowers per-reader
+memory use, but it adds Redis round trips. A larger page improves sequential
+throughput at the cost of more memory. The 256 KiB, 1 MiB, and 4 MiB benchmark
+comparison selected the 1 MiB default.
 
 ### Redis requirements
 

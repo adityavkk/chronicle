@@ -212,49 +212,68 @@ cannot serve a stale tail in a loop.
 
   </Step>
 
-  <Step n="2" fn="redis.Store.Read" loc="store/redis/store.go:644" role="One Lua call with a lexicographic lower bound built from the caller's offset.">
+  <Step n="2" fn="redis.Store.ReadPage" loc="store/redis/store.go:666" role="Capture one response snapshot, then request one bounded frame-aligned page.">
 
-```go title="store/redis/store.go" showLineNumbers startLineNumber=644
-func (s *Store) Read(path string, offset store.Offset) ([]store.Message, bool, error) {
-	ctx := context.Background()
-	raw, err := readScript.Run(ctx, s.client, keysFor(path), s.nowNsArg(), lexLowerBound(offset)).Result()
+```go title="store/redis/store.go" showLineNumbers startLineNumber=666
+func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, opts store.ReadPageOptions) (store.ReadPage, error) {
+	opts = opts.Normalize()
+	root, err := s.runReadPageScript(ctx, path, offset, store.ZeroOffset,
+		opts.TargetBytes, opts.MaxFrames, expected, true, false, true, false)
+	// The root result captures or validates tail, content type, closed state,
+	// and incarnation. Frame segments are capped at that snapshot tail.
 ```
 
 `lexLowerBound(offset)` is the exclusive bound just past the caller's offset. It
-selects everything strictly after the caller's position. The work happens inside
-`read.lua`.
+selects frames strictly after the caller's position. The first script call
+validates the root and refreshes its sliding TTL. Bounded segment calls then
+read the root or inherited fork ranges without extending an ancestor's TTL.
 
   </Step>
 
-  <Step n="3" fn="read.lua range the set" loc="store/redis/scripts/read.lua:22" role="A read counts as access, so the script slides the TTL forward, then ranges the sorted set.">
+  <Step n="3" fn="read.lua range the set" loc="store/redis/scripts/read.lua:92" role="Fetch one candidate, then optionally bulk-fetch only end offsets that fit the remaining byte target. Both calls have a frame limit.">
 
-```lua title="store/redis/scripts/read.lua" showLineNumbers startLineNumber=22
--- Sliding-TTL touch: Read counts as access (Get does not).
-m.accessedAtNs = string.format('%.0f', now)
-redis.call('HSET', KEYS[1], 'accessedAtNs', m.accessedAtNs)
-refresh_backstop(m, now)
-
-local members = redis.call('ZRANGEBYLEX', KEYS[2], ARGV[2], '+')
-return { 'OK', redis.call('HGETALL', KEYS[1]), members }
+```lua title="store/redis/scripts/read.lua" showLineNumbers startLineNumber=92
+if fetch_frames and max_frames > 0 and target_bytes > 0 then
+  local first = redis.call(
+    'ZRANGEBYLEX', KEYS[2], ARGV[2], ARGV[3], 'LIMIT', 0, 1
+  )
+  if #first == 1 then
+    accept(first[1])
+  end
+  if #first == 1 and accepting and #members < max_frames then
+    -- byte_max is firstOffset + the remaining returned-byte budget.
+    local candidates = redis.call(
+      'ZRANGEBYLEX', KEYS[2], next_min, byte_max,
+      'LIMIT', 0, max_frames - #members
+    )
+    for _, member in ipairs(candidates) do accept(member) end
+  end
+end
 ```
 
-`ZRANGEBYLEX` returns every frame from the caller's bound to the end. Go decodes
-the `offset|bytes` members into messages. When the caller is already at the tail,
-`members` is empty, and an empty result is what sends this request onto the
-waiting path.
+`ARGV[3]` is the inclusive upper bound for the captured snapshot tail or fork
+segment. The default page ceiling is 1,024 frames. The first candidate may be
+larger than the default 1 MiB target because Chronicle never splits a frame.
+Otherwise the optional bulk call cannot cross the remaining byte budget. There
+is no lookahead call. When the caller is already at the tail, `members` is
+empty, which sends a long-poll request onto the waiting path. An empty candidate
+set inside a range whose upper bound is a known frame is corruption and fails
+loudly instead of advancing the cursor.
 
   </Step>
 
   <Complexity
-    time="O(log N + M) for M frames returned"
-    space="O(M) for the returned frames"
-    why="<code>ZRANGEBYLEX</code> seeks the lexicographic lower bound in <code>O(log N)</code> over the <code>msg</code> set, then streams the <code>M</code> frames from the caller's offset to the tail. At the tail, <code>M</code> is zero and the empty result is what sends the request onto the waiting path."
+    time="O(log N + M) for one storage page"
+    space="O(M) for one bounded page"
+    why="<code>ZRANGEBYLEX</code> seeks the lower bound in <code>O(log N)</code>. It fetches one candidate, then optionally visits only end offsets inside the remaining byte budget, with at most 1,024 frames in the page. The handler writes each accepted page to the socket and flushes it before asking storage for the next page."
   />
 
-  <Step n="4" fn="Handler.handleRead decide to wait" loc="handler.go:457" role="Empty result, caller at the tail, long-poll asked for. Only now does the request block.">
+  <Step n="4" fn="Handler.handleRead decide to wait" loc="handler.go:559" role="Empty first page, caller at the captured tail, long-poll asked for. Only now does the request block.">
 
-```go title="handler.go" showLineNumbers startLineNumber=457
-	shouldWait := liveMode == "long-poll" && len(messages) == 0 && (isNowOffset || effectiveOffset.Equal(meta.CurrentOffset))
+```go title="handler.go" showLineNumbers startLineNumber=559
+	shouldWait := liveMode == "long-poll" &&
+		len(firstPage.Messages) == 0 &&
+		(isNowOffset || effectiveOffset.Equal(firstPage.Snapshot.Tail))
 	if shouldWait {
 ```
 

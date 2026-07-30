@@ -22,6 +22,7 @@ jepsen/run.sh origin-restart       # or a single scenario
 jepsen/run.sh expired-lease-takeover glob-create-crash  # the hardening scenarios
 jepsen/run.sh single-holder-linz cursor-monotonic       # the safety scenarios (07: T1, T2)
 jepsen/run.sh stale-gen-noop lease-tail-drop at-least-once  # the no-rebuild baseline (07: T4, L3, L1)
+jepsen/run.sh paged-catchup          # bounded catch-up through data-plane faults
 jepsen/down.sh                     # tear down the cluster
 ```
 
@@ -29,7 +30,7 @@ The hardening scenarios (`pull-wake-arm-crash`, `expired-lease-takeover`,
 `glob-create-crash`, `index-repair`), the safety scenarios (`single-holder-linz`,
 `cursor-monotonic`, `stale-gen-noop`), the liveness scenarios (`lease-tail-drop`,
 `at-least-once`), and the now-live acceptance gates (`ownership-exclusivity`,
-`slot-isolation`) are not in the default `run.sh` set yet; pass them by name. The
+`slot-isolation`, `paged-catchup`) are not in the default `run.sh` set yet; pass them by name. The
 Redis-direct gates (`ownership-exclusivity`, `shard-linz`) need no cluster — just
 `-redis-url` — so they also run in CI (`.github/workflows/ci.yml`, the `linz` job).
 
@@ -54,6 +55,13 @@ die. Override `CLUSTER`, `STREAMS`, `MSGS` via env.
      from the recovery sweep on a restarted origin).
    - `redis-restart` — delete the Redis pod mid-workload; it recreates and replays
      its PVC-backed AOF.
+   - `paged-catchup` reads a JSON fork across one-frame storage pages. It resumes
+     after client cancellation, a client network interruption, a full Chronicle
+     restart, and a Redis restart. It also appends and closes the fork after a
+     response captures its snapshot. The checker compares every complete frame
+     with raw Redis ZSET members and rejects gaps, duplicates, reordered frames,
+     or data returned past the captured snapshot. Set `-toxiproxy` to replace the
+     client network interruption with a partition between Chronicle and Redis.
 
    Hardening scenarios (one per slice, docs/research/10):
    - `pull-wake-arm-crash` (slice 1) — a pull-wake subscription drained by a
@@ -175,12 +183,16 @@ the history was too concurrent to decide in the timeout — reduce `-workers` or
 - `checker/check_stalegen.go` — pure no-stale-generation-effect checker (T4).
 - `checker/check_delivery.go` — pure at-least-once / per-message delivery checker (L1).
 - `checker/check_contention.go` — pure C1/C2/C3 contention skeleton (gate #6, #11).
+- `checker/check_paged_catchup.go` checks resumed page histories against a direct
+  Redis frame oracle.
 - `checker/nemesis.go` — gcPause/toxiproxy/killSlotOwner/dropLeaseTail/clock-skew/randomized-window primitives.
 - `checker/history.go` — the recorder seam (driver-host monotonic clock).
 - `checker/scenario_lease.go` — `single-holder-linz` driver + gcPause nemesis.
 - `checker/scenario_cursor.go` — `cursor-monotonic` driver + cursor poller.
 - `checker/scenario_stalegen.go` — `stale-gen-noop` driver (T4).
 - `checker/scenario_leasetail.go` — `lease-tail-drop` driver (L3).
+- `checker/scenario_paged_catchup.go` drives bounded fork reads through
+  cancellation, restart, network, append, and close faults.
 - `checker/scenario_ownership.go` — `ownership-exclusivity` driver (T3): live `claim_shard.lua` / `check_owner.lua` CAS, no cluster.
 - `checker/scenario_slot.go` — `slot-isolation` driver (T5): live S-slot `{__ds:h}` differential checker, no cluster.
 - `checker/*_test.go` — unit tests for the pure models/checkers/nemesis (no cluster).

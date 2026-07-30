@@ -1,0 +1,394 @@
+<figure class="pipeline">
+  <div class="pipeline-label">One 16 MiB catch-up response</div>
+
+  <div class="paths">
+    <article class="path before">
+      <header>
+        <span class="tag">Before</span>
+        <strong>Read and hold the complete suffix</strong>
+      </header>
+
+      <div class="flow">
+        <div class="station redis">
+          <span class="station-label">Redis</span>
+          <div class="suffix" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+          <b>unbounded suffix</b>
+          <small>one Lua reply</small>
+        </div>
+
+        <span class="arrow" aria-hidden="true">→</span>
+
+        <div class="station server">
+          <span class="station-label">Chronicle</span>
+          <div class="buffers" aria-hidden="true">
+            <i>storage result</i>
+            <i>response body</i>
+          </div>
+          <b>two full buffers</b>
+          <small>before the first write</small>
+        </div>
+
+        <span class="arrow" aria-hidden="true">→</span>
+
+        <div class="station client">
+          <span class="station-label">Client</span>
+          <div class="socket old-socket" aria-hidden="true"></div>
+          <b>first byte waits</b>
+          <small>for the suffix read</small>
+        </div>
+      </div>
+
+      <p>
+        Redis materializes every remaining frame. Chronicle then builds another
+        complete body before it writes to the socket.
+      </p>
+    </article>
+
+    <article class="path after">
+      <header>
+        <span class="tag">After</span>
+        <strong>Capture one tail and drain bounded pages</strong>
+      </header>
+
+      <div class="snapshot">
+        <span>snapshot tail</span>
+        <code>…4096</code>
+        <span>incarnation</span>
+        <code>7f3c…</code>
+      </div>
+
+      <div class="flow">
+        <div class="station redis">
+          <span class="station-label">Redis</span>
+          <div class="pages" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <em>×16</em>
+          </div>
+          <b>first + bounded bulk</b>
+          <small>≤1,024 frames per page</small>
+        </div>
+
+        <span class="arrow" aria-hidden="true">→</span>
+
+        <div class="station server">
+          <span class="station-label">Chronicle</span>
+          <div class="page-buffer" aria-hidden="true">
+            <i></i><span>about 1 MiB</span>
+          </div>
+          <b>one returned page</b>
+          <small>held at a time</small>
+        </div>
+
+        <span class="arrow" aria-hidden="true">→</span>
+
+        <div class="station client">
+          <span class="station-label">Client</span>
+          <div class="socket new-socket" aria-hidden="true">
+            <i></i><i></i><i></i><i></i>
+          </div>
+          <b>4 KiB writes</b>
+          <small>flush while paging</small>
+        </div>
+      </div>
+
+      <p>
+        Every page stays below the captured tail. A later append cannot enter
+        the response, and a delete followed by recreate cannot reuse the old
+        snapshot.
+      </p>
+    </article>
+  </div>
+
+  <figcaption>
+    The 1 MiB target applies to the returned whole-frame prefix. A first
+    indivisible frame can exceed it. The separate 1,024-frame
+    <code>LIMIT</code> bounds small-frame pages, and the script never fetches a
+    lookahead frame.
+  </figcaption>
+</figure>
+
+<style lang="scss">
+  .pipeline {
+    margin: 32px 0 30px var(--rail-indent);
+    max-width: var(--prose-max);
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--card);
+    box-shadow: var(--shadow-sm);
+  }
+  .pipeline-label {
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .paths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .path {
+    min-width: 0;
+    padding: 22px;
+  }
+  .path + .path {
+    border-left: 1px solid var(--rule);
+  }
+  header {
+    display: grid;
+    gap: 7px;
+    min-height: 58px;
+  }
+  header .tag {
+    width: fit-content;
+    padding: 2px 7px;
+    border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--rule));
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--bad);
+    background: color-mix(in srgb, var(--bad) 7%, var(--card));
+  }
+  .after header .tag {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--rule));
+    color: var(--accent-deep);
+    background: var(--accent-tint);
+  }
+  header strong {
+    font-size: 15px;
+    line-height: 1.3;
+  }
+  .snapshot {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 3px 12px;
+    margin: 14px 0 0;
+    padding: 9px 11px;
+    border: 1px solid rgba(36, 131, 123, 0.24);
+    border-radius: 7px;
+    background: var(--accent-tint);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--ink-mute);
+  }
+  .snapshot code {
+    color: var(--accent-deep);
+    background: none;
+  }
+  .before .flow { margin-top: 64px; }
+  .flow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.1fr) auto minmax(0, 0.8fr);
+    gap: 7px;
+    align-items: center;
+    margin-top: 16px;
+  }
+  .station {
+    min-width: 0;
+    text-align: center;
+  }
+  .station-label {
+    display: block;
+    margin-bottom: 7px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .station b,
+  .station small {
+    display: block;
+    line-height: 1.3;
+  }
+  .station b {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    color: var(--ink);
+  }
+  .station small {
+    margin-top: 3px;
+    font-size: 8.5px;
+    color: var(--muted);
+  }
+  .arrow {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .suffix {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    height: 42px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--bad) 55%, var(--rule));
+    border-radius: 5px;
+  }
+  .suffix i {
+    border-right: 1px solid color-mix(in srgb, var(--bad) 25%, transparent);
+    background: color-mix(in srgb, var(--bad) 15%, var(--card));
+  }
+  .suffix i:nth-child(even) {
+    background: color-mix(in srgb, var(--bad) 24%, var(--card));
+  }
+  .buffers {
+    position: relative;
+    height: 42px;
+  }
+  .buffers i {
+    position: absolute;
+    inset: 0 9px 9px 0;
+    display: grid;
+    place-items: center;
+    border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--rule));
+    border-radius: 5px;
+    background: var(--paper-warm);
+    font: 7.5px var(--mono);
+    color: var(--ink-mute);
+  }
+  .buffers i + i {
+    inset: 9px 0 0 9px;
+    background: color-mix(in srgb, var(--bad) 10%, var(--card));
+  }
+  .socket {
+    position: relative;
+    height: 42px;
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    background: var(--paper-warm);
+  }
+  .old-socket::after {
+    position: absolute;
+    inset: 17px 8px;
+    content: "";
+    border-top: 2px dashed var(--bad);
+  }
+  .pages {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2px;
+    height: 42px;
+  }
+  .pages i {
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--rule));
+    border-radius: 2px;
+    background: var(--accent-tint);
+    animation: page-pulse 3.2s ease-in-out infinite;
+  }
+  .pages i:nth-child(2) { animation-delay: 0.15s; }
+  .pages i:nth-child(3) { animation-delay: 0.3s; }
+  .pages i:nth-child(4) { animation-delay: 0.45s; }
+  .pages i:nth-child(5) { animation-delay: 0.6s; }
+  .pages i:nth-child(6) { animation-delay: 0.75s; }
+  .pages i:nth-child(7) { animation-delay: 0.9s; }
+  .pages i:nth-child(8) { animation-delay: 1.05s; }
+  .pages em {
+    position: absolute;
+    right: -4px;
+    bottom: -5px;
+    padding: 1px 3px;
+    border-radius: 2px;
+    background: var(--card);
+    font: 7px var(--mono);
+    color: var(--accent-deep);
+  }
+  .page-buffer {
+    position: relative;
+    height: 42px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--rule));
+    border-radius: 5px;
+    background: var(--paper-warm);
+  }
+  .page-buffer i {
+    position: absolute;
+    inset: 0;
+    width: 72%;
+    background: linear-gradient(90deg, var(--accent-tint), rgba(36, 131, 123, 0.28));
+  }
+  .page-buffer span {
+    position: relative;
+    display: grid;
+    height: 100%;
+    place-items: center;
+    font: 7.5px var(--mono);
+    color: var(--accent-deep);
+  }
+  .new-socket {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 7px;
+  }
+  .new-socket i {
+    width: 4px;
+    height: 100%;
+    border-radius: 1px;
+    background: var(--accent);
+    animation: write-pulse 2s ease-in-out infinite;
+  }
+  .new-socket i:nth-child(2) { animation-delay: 0.18s; }
+  .new-socket i:nth-child(3) { animation-delay: 0.36s; }
+  .new-socket i:nth-child(4) { animation-delay: 0.54s; }
+  .path > p {
+    min-height: 92px;
+    margin: 20px 0 0;
+    padding-top: 15px;
+    border-top: 1px solid var(--rule-soft);
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--ink-mute);
+  }
+  figcaption {
+    padding: 14px 24px 18px;
+    border-top: 1px solid var(--rule);
+    background: var(--paper);
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--muted);
+  }
+  figcaption code {
+    font-family: var(--mono);
+    color: var(--accent-deep);
+  }
+  @keyframes page-pulse {
+    0%, 55%, 100% { opacity: 0.45; transform: translateY(0); }
+    15%, 35% { opacity: 1; transform: translateY(-2px); }
+  }
+  @keyframes write-pulse {
+    0%, 35%, 100% { opacity: 0.3; }
+    12% { opacity: 1; }
+  }
+  @media (max-width: 840px) {
+    .pipeline { margin-left: 0; max-width: none; }
+    .paths { grid-template-columns: 1fr; }
+    .path + .path {
+      border-top: 1px solid var(--rule);
+      border-left: 0;
+    }
+    .path > p { min-height: 0; }
+  }
+  @media (max-width: 520px) {
+    .flow {
+      grid-template-columns: 1fr;
+      gap: 9px;
+    }
+    .before .flow { margin-top: 24px; }
+    .arrow { transform: rotate(90deg); }
+    .station { max-width: 220px; width: 100%; margin: 0 auto; }
+    .station b { font-size: 9.5px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pages i,
+    .new-socket i { animation: none; opacity: 1; }
+  }
+</style>

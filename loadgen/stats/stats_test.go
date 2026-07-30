@@ -27,6 +27,31 @@ func TestRecorderGatedByCollector(t *testing.T) {
 	}
 }
 
+func TestRecorderScheduleEligibilityIsIndependentOfCompletionGate(t *testing.T) {
+	c := NewCollector(10)
+	r := c.NewRecorder()
+
+	// A warmup operation that completes after measurement opens stays excluded.
+	c.SetRecording(true)
+	r.RecordEligible(false, Append, 10*time.Millisecond)
+	r.CountEligible(false, "appends_ok", 1)
+
+	// A measurement operation that completes during drain stays included even
+	// after the completion-time gate closes.
+	c.SetRecording(false)
+	r.RecordEligible(true, Append, 20*time.Millisecond)
+	r.CountEligible(true, "appends_ok", 1)
+
+	hists, counts := c.Merged()
+	if got := hists[Append].TotalCount(); got != 1 {
+		t.Fatalf("recorded %d samples, want only the scheduled measurement operation", got)
+	}
+	if counts["appends_ok"] != 1 {
+		t.Fatalf("appends_ok = %d, want 1", counts["appends_ok"])
+	}
+	t.Logf("warmup_completion_counted=0 measurement_drain_completion_counted=%d", counts["appends_ok"])
+}
+
 func TestMergeAcrossRecorders(t *testing.T) {
 	c := NewCollector(10)
 	c.SetRecording(true)

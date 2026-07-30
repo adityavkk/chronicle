@@ -46,7 +46,10 @@ type Store struct {
 	clock  store.Clock
 }
 
-var _ store.Store = (*Store)(nil)
+var (
+	_ store.Store      = (*Store)(nil)
+	_ store.PageReader = (*Store)(nil)
+)
 
 // New wraps a go-redis client as a store.Store. The store takes ownership
 // of the client: Close() closes it. On connect it best-effort checks that
@@ -264,9 +267,14 @@ func (s *Store) Create(path string, opts store.CreateOptions) (*store.StreamMeta
 		return nil, false, store.ErrConfigMismatch
 	}
 
+	incarnation, err := store.NewReadIncarnation()
+	if err != nil {
+		return nil, false, err
+	}
 	now := s.clock.Now()
 	meta := &store.StreamMetadata{
 		Path:           path,
+		Incarnation:    incarnation,
 		ContentType:    opts.ContentType,
 		CurrentOffset:  store.ZeroOffset,
 		CreatedAt:      now,
@@ -639,64 +647,313 @@ func (s *Store) mapAppendReply(r *scriptReply) (store.AppendResult, error) {
 	}
 }
 
-// Read returns messages with end offset > offset, stitching fork chains.
-// It refreshes the sliding TTL (Read counts as access).
-func (s *Store) Read(path string, offset store.Offset) ([]store.Message, bool, error) {
-	ctx := context.Background()
-	raw, err := readScript.Run(ctx, s.client, keysFor(path), s.nowNsArg(), lexLowerBound(offset)).Result()
-	if err != nil {
-		return nil, false, err
-	}
-	status, rest, err := decodeStatusReply(raw)
-	if err != nil {
-		return nil, false, err
-	}
-	switch status {
-	case stNotFound, stSoftDel:
-		// Read hides soft-deleted streams as not-found (Get surfaces them).
-		return nil, false, store.ErrStreamNotFound
-	case stOK:
-	default:
-		return nil, false, fmt.Errorf("read.lua: unexpected status %q", status)
-	}
-	if len(rest) < 2 {
-		return nil, false, fmt.Errorf("read.lua: malformed OK reply")
-	}
-	metaFields, err := flatToMap(rest[0])
-	if err != nil {
-		return nil, false, err
-	}
-	meta, err := metaFromFields(path, metaFields)
-	if err != nil || meta == nil {
-		return nil, false, fmt.Errorf("read.lua: bad metadata: %w", err)
-	}
-	members, err := toStrings(rest[1])
-	if err != nil {
-		return nil, false, err
-	}
-	own, err := decodeFrames(members)
-	if err != nil {
-		return nil, false, err
+type redisReadSegment struct {
+	path         string
+	lower        store.Offset
+	upper        store.Offset
+	incarnation  string
+	requireFrame bool
+}
+
+type redisPageScriptResult struct {
+	meta     *store.StreamMetadata
+	messages []store.Message
+	stats    store.ReadPageStats
+}
+
+// ReadPage returns one bounded, frame-aligned page for a fixed root snapshot.
+// The root validation script refreshes only the root stream's sliding TTL.
+// Inherited source ranges use read-only branches of the same script.
+func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, opts store.ReadPageOptions) (store.ReadPage, error) {
+	opts = opts.Normalize()
+	if err := ctx.Err(); err != nil {
+		return store.ReadPage{}, err
 	}
 
-	messages := own
-	if meta.ForkedFrom != "" && offset.LessThan(meta.ForkOffset) {
-		inherited, err := s.readInherited(ctx, meta, offset)
+	expected := ""
+	if opts.Snapshot != nil {
+		expected = opts.Snapshot.Incarnation
+	}
+	root, err := s.runReadPageScript(ctx, path, offset, store.ZeroOffset, opts.TargetBytes, opts.MaxFrames, expected, true, false, true, false)
+	if err != nil {
+		return store.ReadPage{}, err
+	}
+
+	var snapshot store.ReadSnapshot
+	if opts.Snapshot == nil {
+		snapshot = store.ReadSnapshot{
+			Tail:        root.meta.CurrentOffset,
+			ContentType: root.meta.ContentType,
+			Closed:      root.meta.Closed,
+			Incarnation: root.meta.Incarnation,
+		}
+	} else {
+		snapshot = *opts.Snapshot
+	}
+
+	page := store.ReadPage{
+		NextOffset: offset,
+		Snapshot:   snapshot,
+		Stats: store.ReadPageStats{
+			RequestedBytes:     opts.TargetBytes,
+			RedisScriptTime:    root.stats.RedisScriptTime,
+			RedisScriptInvokes: root.stats.RedisScriptInvokes,
+		},
+	}
+
+	segments, err := s.readSegments(ctx, path, root.meta, offset, snapshot.Tail, true)
+	if err != nil {
+		return store.ReadPage{}, err
+	}
+	for _, segment := range segments {
+		if page.Stats.ReturnedBytes >= opts.TargetBytes || len(page.Messages) >= opts.MaxFrames {
+			break
+		}
+		remainingBytes := opts.TargetBytes - page.Stats.ReturnedBytes
+		remainingFrames := opts.MaxFrames - len(page.Messages)
+		result, err := s.runReadPageScript(
+			ctx,
+			segment.path,
+			segment.lower,
+			segment.upper,
+			remainingBytes,
+			remainingFrames,
+			segment.incarnation,
+			false,
+			true,
+			len(page.Messages) == 0,
+			segment.requireFrame,
+		)
+		if err != nil {
+			return store.ReadPage{}, err
+		}
+		page.Stats.FetchedBytes += result.stats.FetchedBytes
+		page.Stats.ReturnedBytes += result.stats.ReturnedBytes
+		page.Stats.DiscardedBytes += result.stats.DiscardedBytes
+		page.Stats.RedisScriptTime += result.stats.RedisScriptTime
+		page.Stats.RedisScriptInvokes += result.stats.RedisScriptInvokes
+
+		if len(result.messages) == 0 {
+			if result.stats.FetchedBytes > 0 {
+				// The next frame did not fit the remaining page budget. The
+				// next call retries it with a full target.
+				break
+			}
+			// A fork boundary may lie inside a binary frame, leaving a
+			// valid inherited subrange with no complete candidate.
+			continue
+		}
+		page.Messages = append(page.Messages, result.messages...)
+		page.NextOffset = result.messages[len(result.messages)-1].Offset
+		if page.NextOffset.LessThan(segment.upper) {
+			// This chronological segment still has data. Stop here so a
+			// later fork segment cannot leap over the remaining frames.
+			break
+		}
+	}
+
+	if len(page.Messages) == 0 {
+		// Preserve the historical HTTP behavior for empty, stale, and
+		// beyond-tail reads.
+		page.NextOffset = snapshot.Tail
+	}
+	page.UpToDate = page.NextOffset.Equal(snapshot.Tail)
+	return page, nil
+}
+
+// Read implements Store by concatenating bounded pages for one snapshot.
+func (s *Store) Read(path string, offset store.Offset) ([]store.Message, bool, error) {
+	var (
+		messages []store.Message
+		snapshot *store.ReadSnapshot
+		next     = offset
+	)
+	for {
+		page, err := s.ReadPage(context.Background(), path, next, store.ReadPageOptions{Snapshot: snapshot})
 		if err != nil {
 			return nil, false, err
 		}
-		if len(inherited) > 0 {
-			messages = concatMessages(inherited, own)
+		if snapshot == nil {
+			captured := page.Snapshot
+			snapshot = &captured
 		}
+		messages = append(messages, page.Messages...)
+		if page.UpToDate {
+			upToDate := len(messages) > 0 || offset.Equal(snapshot.Tail) || snapshot.Tail.Equal(store.ZeroOffset)
+			return messages, upToDate, nil
+		}
+		if page.NextOffset.Equal(next) {
+			return nil, false, errors.New("redis read page made no progress")
+		}
+		next = page.NextOffset
+	}
+}
+
+func (s *Store) runReadPageScript(
+	ctx context.Context,
+	path string,
+	lower, upper store.Offset,
+	targetBytes, maxFrames int,
+	expectedIncarnation string,
+	rootRead, fetchFrames, allowOversized, requireCandidate bool,
+) (*redisPageScriptResult, error) {
+	started := time.Now()
+	raw, err := readScript.Run(
+		ctx,
+		s.client,
+		keysFor(path),
+		s.nowNsArg(),
+		lexLowerBound(lower),
+		lexUpperBoundInclusive(upper),
+		strconv.Itoa(targetBytes),
+		strconv.Itoa(maxFrames),
+		expectedIncarnation,
+		boolArg(rootRead),
+		boolArg(fetchFrames),
+		boolArg(allowOversized),
+		boolArg(requireCandidate),
+	).Result()
+	elapsed := time.Since(started)
+	if err != nil {
+		return nil, err
+	}
+	status, rest, err := decodeStatusReply(raw)
+	if err != nil {
+		return nil, err
+	}
+	switch status {
+	case stNotFound, stSoftDel:
+		return nil, store.ErrStreamNotFound
+	case stSnapshot:
+		return nil, store.ErrReadSnapshotChanged
+	case stMissing:
+		return nil, store.ErrReadDataMissing
+	case stOK:
+	default:
+		return nil, fmt.Errorf("read.lua: unexpected status %q", status)
+	}
+	if len(rest) < 4 {
+		return nil, fmt.Errorf("read.lua: malformed OK reply")
+	}
+	fields, err := flatToMap(rest[0])
+	if err != nil {
+		return nil, err
+	}
+	meta, err := metaFromFields(path, fields)
+	if err != nil || meta == nil {
+		return nil, fmt.Errorf("read.lua: bad metadata: %w", err)
+	}
+	members, err := toStrings(rest[1])
+	if err != nil {
+		return nil, err
+	}
+	messages, err := decodeFrames(members)
+	if err != nil {
+		return nil, err
+	}
+	fetched, err := parseScriptInt(rest[2], "fetched bytes")
+	if err != nil {
+		return nil, err
+	}
+	returned, err := parseScriptInt(rest[3], "returned bytes")
+	if err != nil {
+		return nil, err
+	}
+	return &redisPageScriptResult{
+		meta:     meta,
+		messages: messages,
+		stats: store.ReadPageStats{
+			RequestedBytes:     targetBytes,
+			FetchedBytes:       fetched,
+			ReturnedBytes:      returned,
+			DiscardedBytes:     fetched - returned,
+			RedisScriptTime:    elapsed,
+			RedisScriptInvokes: 1,
+		},
+	}, nil
+}
+
+func boolArg(v bool) string {
+	if v {
+		return "1"
+	}
+	return "0"
+}
+
+func parseScriptInt(v any, name string) (int, error) {
+	raw, ok := v.(string)
+	if !ok {
+		return 0, fmt.Errorf("read.lua: %s has type %T", name, v)
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("read.lua: bad %s %q: %w", name, raw, err)
+	}
+	return n, nil
+}
+
+func (s *Store) readSegments(
+	ctx context.Context,
+	path string,
+	meta *store.StreamMetadata,
+	lower, upper store.Offset,
+	upperIsFrame bool,
+) ([]redisReadSegment, error) {
+	if !lower.LessThan(upper) {
+		return nil, nil
 	}
 
-	var upToDate bool
-	if len(messages) > 0 {
-		upToDate = messages[len(messages)-1].Offset.Equal(meta.CurrentOffset)
-	} else {
-		upToDate = offset.Equal(meta.CurrentOffset) || meta.CurrentOffset.Equal(store.ZeroOffset)
+	var segments []redisReadSegment
+	if meta.ForkedFrom != "" && lower.LessThan(meta.ForkOffset) {
+		sourceUpper := upper
+		if meta.ForkOffset.LessThan(sourceUpper) {
+			sourceUpper = meta.ForkOffset
+		}
+		sourceUpperIsFrame := upperIsFrame
+		if !upper.LessThan(meta.ForkOffset) {
+			// Fork offsets may be legal sub-frame byte positions, so crossing a
+			// fork boundary does not prove the source range ends on a frame.
+			sourceUpperIsFrame = false
+		}
+		sourceMeta, err := s.fetchMeta(ctx, meta.ForkedFrom)
+		if err != nil {
+			return nil, err
+		}
+		if sourceMeta == nil {
+			return nil, fmt.Errorf(
+				"%w: inherited source metadata %s is absent",
+				store.ErrReadDataMissing,
+				meta.ForkedFrom,
+			)
+		}
+		inherited, err := s.readSegments(
+			ctx,
+			meta.ForkedFrom,
+			sourceMeta,
+			lower,
+			sourceUpper,
+			sourceUpperIsFrame,
+		)
+		if err != nil {
+			return nil, err
+		}
+		segments = append(segments, inherited...)
 	}
-	return messages, upToDate, nil
+
+	ownLower := lower
+	if meta.ForkedFrom != "" && ownLower.LessThan(meta.ForkOffset) {
+		ownLower = meta.ForkOffset
+	}
+	if ownLower.LessThan(upper) {
+		segments = append(segments, redisReadSegment{
+			path:         path,
+			lower:        ownLower,
+			upper:        upper,
+			incarnation:  meta.Incarnation,
+			requireFrame: upperIsFrame,
+		})
+	}
+	return segments, nil
 }
 
 func decodeFrames(members []string) ([]store.Message, error) {
@@ -714,64 +971,44 @@ func decodeFrames(members []string) ([]store.Message, error) {
 	return msgs, nil
 }
 
-// readInherited reads the inherited range of a fork (offset < ForkOffset)
-// from its source chain, capped at the fork point so post-fork source
-// appends stay invisible.
-func (s *Store) readInherited(ctx context.Context, forkMeta *store.StreamMetadata, offset store.Offset) ([]store.Message, error) {
-	srcMeta, err := s.fetchMeta(ctx, forkMeta.ForkedFrom)
-	if err != nil {
-		return nil, err
-	}
-	if srcMeta == nil {
-		return nil, nil // source vanished: mirror upstream's silent skip
-	}
-	msgs, err := s.readForkChain(ctx, forkMeta.ForkedFrom, srcMeta, offset)
-	if err != nil {
-		return nil, err
-	}
-	capped := msgs[:0]
-	for _, m := range msgs {
-		if m.Offset.LessThanOrEqual(forkMeta.ForkOffset) {
-			capped = append(capped, m)
-		}
-	}
-	return capped, nil
-}
-
 // readForkChain mirrors MemoryStore.readForkedStream: own frames > offset,
 // preceded by inherited frames from the recursive source chain capped at
 // this stream's fork point. It deliberately ignores SoftDeleted and expiry
-// on sources (forks must read through soft-deleted parents) and never
-// touches their TTLs.
+// on sources (forks must read through soft-deleted parents), never touches
+// their TTLs, and bounds every Redis lookup.
 func (s *Store) readForkChain(ctx context.Context, path string, meta *store.StreamMetadata, offset store.Offset) ([]store.Message, error) {
-	members, err := s.client.ZRangeByLex(ctx, msgKey(path), &redis.ZRangeBy{
-		Min: lexLowerBound(offset),
-		Max: "+",
-	}).Result()
+	segments, err := s.readSegments(ctx, path, meta, offset, meta.CurrentOffset, true)
 	if err != nil {
 		return nil, err
 	}
-	own, err := decodeFrames(members)
-	if err != nil {
-		return nil, err
+	var messages []store.Message
+	for _, segment := range segments {
+		next := segment.lower
+		for next.LessThan(segment.upper) {
+			result, err := s.runReadPageScript(
+				ctx,
+				segment.path,
+				next,
+				segment.upper,
+				store.DefaultReadPageBytes,
+				store.DefaultReadPageFrames,
+				segment.incarnation,
+				false,
+				true,
+				true,
+				segment.requireFrame,
+			)
+			if err != nil {
+				return nil, err
+			}
+			if len(result.messages) == 0 {
+				break
+			}
+			messages = append(messages, result.messages...)
+			next = result.messages[len(result.messages)-1].Offset
+		}
 	}
-	if meta.ForkedFrom == "" || !offset.LessThan(meta.ForkOffset) {
-		return own, nil
-	}
-	inherited, err := s.readInherited(ctx, meta, offset)
-	if err != nil {
-		return nil, err
-	}
-	if len(inherited) == 0 {
-		return own, nil
-	}
-	return concatMessages(inherited, own), nil
-}
-
-func concatMessages(a, b []store.Message) []store.Message {
-	out := make([]store.Message, 0, len(a)+len(b))
-	out = append(out, a...)
-	return append(out, b...)
+	return messages, nil
 }
 
 // Delete removes a stream: soft-delete when forks reference it, hard

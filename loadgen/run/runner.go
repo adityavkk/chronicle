@@ -23,30 +23,32 @@ import (
 
 // Options configures one run.
 type Options struct {
-	Scenario    scenario.Scenario
-	Label       string            // SUT label, e.g. "caddy-mem", "chronicle-redis"
-	SamplePIDs  map[string]int    // process name → pid to sample (RSS, CPU)
-	SampleRedis map[string]string // name → host:port to sample via INFO
-	KeepStreams bool              // skip deleting streams at teardown
-	Logf        func(format string, args ...any)
+	Scenario      scenario.Scenario
+	Label         string            // SUT label, e.g. "caddy-mem", "chronicle-redis"
+	SamplePIDs    map[string]int    // process name → pid to sample (RSS, CPU)
+	SampleRedis   map[string]string // name → host:port to sample via INFO
+	SampleMetrics map[string]string // name → Prometheus metrics URL
+	KeepStreams   bool              // skip deleting streams at teardown
+	Logf          func(format string, args ...any)
 }
 
 // Result is the complete outcome of one run; it serializes to results.json.
 type Result struct {
-	Scenario     scenario.Scenario          `json:"scenario"`
-	Label        string                     `json:"label"`
-	BaseURL      string                     `json:"base_url"`
-	Env          Env                        `json:"env"`
-	StartedAt    time.Time                  `json:"started_at"`
-	MeasureStart time.Time                  `json:"measure_start"`
-	MeasureEnd   time.Time                  `json:"measure_end"`
-	EndedAt      time.Time                  `json:"ended_at"`
-	Metrics      map[string]stats.Quantiles `json:"metrics"`
-	Counters     map[string]int64           `json:"counters"`
-	Series       map[string][]int64         `json:"series"`
-	Resources    []ResourceSample           `json:"resources,omitempty"`
-	HDRCurves    map[string][]string        `json:"hdr_curves,omitempty"`
-	Notes        []string                   `json:"notes,omitempty"`
+	Scenario      scenario.Scenario          `json:"scenario"`
+	Label         string                     `json:"label"`
+	BaseURL       string                     `json:"base_url"`
+	Env           Env                        `json:"env"`
+	StartedAt     time.Time                  `json:"started_at"`
+	MeasureStart  time.Time                  `json:"measure_start"`
+	MeasureEnd    time.Time                  `json:"measure_end"`
+	EndedAt       time.Time                  `json:"ended_at"`
+	Metrics       map[string]stats.Quantiles `json:"metrics"`
+	Counters      map[string]int64           `json:"counters"`
+	Series        map[string][]int64         `json:"series"`
+	Resources     []ResourceSample           `json:"resources,omitempty"`
+	MetricSamples []MetricSample             `json:"metric_samples,omitempty"`
+	HDRCurves     map[string][]string        `json:"hdr_curves,omitempty"`
+	Notes         []string                   `json:"notes,omitempty"`
 }
 
 // Env captures where the run happened.
@@ -64,20 +66,26 @@ func (r *Result) MeasureSeconds() float64 {
 }
 
 type runner struct {
-	sc         scenario.Scenario
-	cl         *dsclient.Client
-	col        *stats.Collector
-	start      time.Time // run anchor for series/stagger timing
-	paceStart  time.Time // writers/catchup pacing anchor: set when they start
-	appendSem  chan struct{}
-	catchupSem chan struct{}
-	logf       func(string, ...any)
+	sc           scenario.Scenario
+	cl           *dsclient.Client
+	col          *stats.Collector
+	start        time.Time // run anchor for series/stagger timing
+	paceStart    time.Time // writers/catchup pacing anchor: set when they start
+	measureStart time.Time // inclusive intended-send boundary
+	measureEnd   time.Time // exclusive intended-send boundary
+	appendSem    chan struct{}
+	catchupSem   chan struct{}
+	logf         func(string, ...any)
 
 	mu    sync.Mutex
 	notes []string
 }
 
 func (r *runner) sec() int { return int(time.Since(r.start).Seconds()) }
+
+func (r *runner) measurementIncludes(intended time.Time) bool {
+	return !intended.Before(r.measureStart) && intended.Before(r.measureEnd)
+}
 
 func (r *runner) note(format string, args ...any) {
 	r.mu.Lock()
@@ -126,7 +134,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	// Sampler runs for the whole workload.
 	samplerCtx, stopSampler := context.WithCancel(ctx)
 	defer stopSampler()
-	sampler := newSampler(opts.SamplePIDs, opts.SampleRedis, logf)
+	sampler := newSampler(opts.SamplePIDs, opts.SampleRedis, opts.SampleMetrics, logf)
 	var samplerWG sync.WaitGroup
 
 	// Tailers attach before writers start so offset=now sees everything.
@@ -146,6 +154,8 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	// inherit a backlog from setup time, or the first seconds become an
 	// artificial burst.
 	r.paceStart = time.Now()
+	r.measureStart = r.paceStart.Add(sc.Warmup.Duration)
+	r.measureEnd = r.measureStart.Add(sc.Duration.Duration)
 	r.startWriters(writerCtx, &writerWG)
 	r.startCatchup(writerCtx, &writerWG)
 
@@ -153,13 +163,11 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return nil, err
 	}
 	r.col.SetRecording(true)
-	measureStart := time.Now()
 	logf("measurement window open (%s)", sc.Duration)
 
 	err := sleepCtx(ctx, sc.Duration.Duration)
 	cancelWriters()
 	writerWG.Wait() // includes in-flight appends (bounded by request timeout)
-	measureEnd := time.Now()
 	if err != nil {
 		r.note("run interrupted: %v", err)
 	}
@@ -188,20 +196,21 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 	host, _ := os.Hostname()
 	return &Result{
-		Scenario:     sc,
-		Label:        opts.Label,
-		BaseURL:      sc.Target.BaseURL,
-		Env:          Env{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, NumCPU: runtime.NumCPU(), GoVersion: runtime.Version(), Hostname: host},
-		StartedAt:    startedAt,
-		MeasureStart: measureStart,
-		MeasureEnd:   measureEnd,
-		EndedAt:      time.Now(),
-		Metrics:      metrics,
-		Counters:     counts,
-		Series:       r.col.Series.Snapshot(),
-		Resources:    sampler.samples(),
-		HDRCurves:    curves,
-		Notes:        r.notes,
+		Scenario:      sc,
+		Label:         opts.Label,
+		BaseURL:       sc.Target.BaseURL,
+		Env:           Env{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, NumCPU: runtime.NumCPU(), GoVersion: runtime.Version(), Hostname: host},
+		StartedAt:     startedAt,
+		MeasureStart:  r.measureStart,
+		MeasureEnd:    r.measureEnd,
+		EndedAt:       time.Now(),
+		Metrics:       metrics,
+		Counters:      counts,
+		Series:        r.col.Series.Snapshot(),
+		Resources:     sampler.samples(),
+		MetricSamples: sampler.metricSamples(),
+		HDRCurves:     curves,
+		Notes:         r.notes,
 	}, nil
 }
 

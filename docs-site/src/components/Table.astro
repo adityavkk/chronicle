@@ -17,7 +17,8 @@ const { wide = false } = Astro.props;
     margin: 16px 0 28px var(--rail-indent);
     max-width: var(--prose-max);
     border-radius: 10px;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
     box-shadow: var(--shadow-sm);
     border: 1px solid var(--rule);
     &.wide { max-width: none; margin-left: 0; }

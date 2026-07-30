@@ -12,7 +12,9 @@
 # Config via env (defaults shown): LT_PROJECT LT_ZONE=us-central1-a
 # LT_REGION=us-central1 LT_CLUSTER=chronicle-loadtest LT_AR_REPO=chronicle
 # LT_TAG=v1 LT_MACHINE=e2-standard-2 LT_DISK_GB=50 LT_REDIS_SIZE_GB=1
-# LT_REDIS_VERSION=redis_7_2
+# LT_REDIS_VERSION=redis_7_2. Set LT_REDIS_URL to an existing managed Valkey
+# 8 primary endpoint for production-representative catch-up runs; ltctl will
+# neither create nor delete that external instance.
 set -euo pipefail
 
 : "${LT_PROJECT:=$(gcloud config get-value project 2>/dev/null)}"
@@ -25,6 +27,7 @@ set -euo pipefail
 : "${LT_DISK_GB:=50}"
 : "${LT_REDIS_SIZE_GB:=1}"
 : "${LT_REDIS_VERSION:=redis_7_2}"
+: "${LT_REDIS_URL:=}"
 # LT_REDIS_TIER selects the Memorystore tier: "basic" (no failover — gates #1–#4) or
 # "standard" / "STANDARD_HA" (a replica + managed failover + a stable endpoint —
 # gate #5, issue #16). `up --redis-tier=STANDARD_HA` overrides this.
@@ -67,13 +70,17 @@ cmd_up() {
       --substitutions=_REG="$REG",_TAG="$LT_TAG" \
       --default-buckets-behavior=regional-user-owned-bucket --region="$LT_REGION" . )
 
-  log "Memorystore Redis (${LT_REDIS_TIER} ${LT_REDIS_SIZE_GB}G, noeviction)"
-  # standard tier => a managed failover replica + a stable endpoint (gate #5 needs a
-  # real failover, not the basic tier's AOF replay). The Tier B WAITAOF 1 1 barrier
-  # has a replica to ack only on the standard tier.
-  "${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" >/dev/null 2>&1 ||
-    "${G[@]}" redis instances create "${LT_CLUSTER}-redis" --size "$LT_REDIS_SIZE_GB" --region "$LT_REGION" \
-      --tier "$LT_REDIS_TIER" --redis-version "$LT_REDIS_VERSION" --redis-config maxmemory-policy=noeviction
+  if [ -n "$LT_REDIS_URL" ]; then
+    log "external managed Redis/Valkey endpoint (preserved on teardown)"
+  else
+    log "Memorystore Redis (${LT_REDIS_TIER} ${LT_REDIS_SIZE_GB}G, noeviction)"
+    # standard tier => a managed failover replica + a stable endpoint (gate #5 needs a
+    # real failover, not the basic tier's AOF replay). The Tier B WAITAOF 1 1 barrier
+    # has a replica to ack only on the standard tier.
+    "${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" >/dev/null 2>&1 ||
+      "${G[@]}" redis instances create "${LT_CLUSTER}-redis" --size "$LT_REDIS_SIZE_GB" --region "$LT_REGION" \
+        --tier "$LT_REDIS_TIER" --redis-version "$LT_REDIS_VERSION" --redis-config maxmemory-policy=noeviction
+  fi
 
   log "GKE cluster + node pools (sut, loadgen)"
   "${G[@]}" container clusters describe "$LT_CLUSTER" --zone "$LT_ZONE" >/dev/null 2>&1 ||
@@ -92,32 +99,48 @@ cmd_up() {
 
 cmd_run() {
   local spec="${1:?usage: ltctl run <spec.yaml>}"
-  local spec_abs out redis_host
+  local spec_abs out redis_host redis_url job_label pod result_dir
   spec_abs="$(cd "$(dirname "$spec")" && pwd)/$(basename "$spec")"
-  redis_host="$("${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" --format='value(host)')"
+  if [ -n "$LT_REDIS_URL" ]; then
+    redis_url="$LT_REDIS_URL"
+  else
+    redis_host="$("${G[@]}" redis instances describe "${LT_CLUSTER}-redis" --region "$LT_REGION" --format='value(host)')"
+    redis_url="redis://${redis_host}:6379/0"
+  fi
   out="$(mktemp -d)"
 
-  log "render $spec (redis=$redis_host, images=$REG/*:$LT_TAG)"
+  log "render $spec (redis endpoint configured, images=$REG/*:$LT_TAG)"
   ( cd "$REPO_ROOT/loadgen" && go run ./cmd/render -spec "$spec_abs" -out "$out" \
-      -redis-url "redis://${redis_host}:6379/0" \
+      -redis-url "$redis_url" \
       -image "$REG/chronicle:$LT_TAG" -loadgen-image "$REG/chronicle-loadgen:$LT_TAG" )
 
   log "deploy SUT"
   kubectl apply -f "$out/sut.yaml"
   kubectl -n "$NS" rollout status deploy/chronicle --timeout=180s
 
-  log "run sweepscale job"
-  kubectl -n "$NS" delete job -l app=sweepscale --ignore-not-found >/dev/null
+  job_label="sweepscale"
+  if grep -q 'app: catchupscale' "$out/job.yaml"; then
+    job_label="catchupscale"
+  fi
+  log "run ${job_label} job"
+  kubectl -n "$NS" delete job -l "app=$job_label" --ignore-not-found >/dev/null
   kubectl apply -f "$out/job.yaml"
-  kubectl -n "$NS" wait --for=condition=complete --timeout=600s job -l app=sweepscale 2>/dev/null ||
-    kubectl -n "$NS" wait --for=condition=failed --timeout=5s job -l app=sweepscale 2>/dev/null || true
+  kubectl -n "$NS" wait --for=condition=complete --timeout=3600s job -l "app=$job_label" 2>/dev/null ||
+    kubectl -n "$NS" wait --for=condition=failed --timeout=5s job -l "app=$job_label" 2>/dev/null || true
 
   log "report"
-  kubectl -n "$NS" logs -l app=sweepscale --tail=-1
-  if [ "$(kubectl -n "$NS" get job -l app=sweepscale -o jsonpath='{.items[0].status.succeeded}')" = "1" ]; then
+  kubectl -n "$NS" logs -l "app=$job_label" --tail=-1
+  if [ "$job_label" = "catchupscale" ]; then
+    pod="$(kubectl -n "$NS" get pod -l app=catchupscale -o jsonpath='{.items[0].metadata.name}')"
+    result_dir="$REPO_ROOT/loadtest/results/$(date -u +%Y%m%dT%H%M%SZ)-${LT_TAG}"
+    mkdir -p "$result_dir"
+    kubectl -n "$NS" cp "$pod:/results/." "$result_dir"
+    log "catch-up result artifacts copied to $result_dir"
+  fi
+  if [ "$(kubectl -n "$NS" get job -l "app=$job_label" -o jsonpath='{.items[0].status.succeeded}')" = "1" ]; then
     log "SLO PASS"
   else
-    log "SLO FAIL (sweep p99 over budget, or error)"; return 1
+    log "SLO FAIL (${job_label} error or an issue-5 cell recorded errors)"; return 1
   fi
 }
 
@@ -344,11 +367,15 @@ cmd_down() {
   _torn=1
   log "teardown (deleting cluster + Redis; keeping Artifact Registry images)"
   "${G[@]}" container clusters delete "$LT_CLUSTER" --zone "$LT_ZONE" 2>/dev/null &
-  local c=$!
-  "${G[@]}" redis instances delete "${LT_CLUSTER}-redis" --region "$LT_REGION" 2>/dev/null &
-  local r=$!
+  local c=$! r=""
+  if [ -z "$LT_REDIS_URL" ]; then
+    "${G[@]}" redis instances delete "${LT_CLUSTER}-redis" --region "$LT_REGION" 2>/dev/null &
+    r=$!
+  fi
   wait "$c" || true
-  wait "$r" || true
+  if [ -n "$r" ]; then
+    wait "$r" || true
+  fi
   log "down complete — meter stopped"
 }
 

@@ -1,9 +1,121 @@
+{{if .Catchup}}
+# Rendered from one issue-5 experiment spec. Both scenario files and every
+# reader curve point are fixed here; the live cluster is never hand edited.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catchup-scenarios-{{.Name}}
+  namespace: {{.SUT.Namespace}}
+data:
+  catchup.yaml: |
+    name: catchup-paged
+    description: GKE issue-5 bounded catch-up reader curve.
+    duration: {{.Catchup.Duration}}
+    warmup: {{.Catchup.Warmup}}
+    streams:
+      count: {{.Catchup.Streams}}
+      prefix: bench/catchup-paged
+      prefill:
+        messages: {{.Catchup.MessagesPerStream}}
+        message_bytes: {{.Catchup.MessageBytes}}
+        batch_size: {{.Catchup.BatchSize}}
+    catchup:
+      rate: {{.Catchup.OfferedRate}}
+    limits:
+      max_in_flight_catchup: 512
+      request_timeout: {{.Catchup.RequestTimeout}}
+  mixed.yaml: |
+    name: mixed-catchup-paged
+    description: GKE issue-5 reserved write-capacity cell.
+    duration: {{.Catchup.Duration}}
+    warmup: {{.Catchup.Warmup}}
+    streams:
+      count: {{.Catchup.Streams}}
+      prefix: bench/mixed-catchup-paged
+      prefill:
+        messages: {{.Catchup.MessagesPerStream}}
+        message_bytes: {{.Catchup.MessageBytes}}
+        batch_size: {{.Catchup.BatchSize}}
+    writers:
+      per_stream: 1
+      rate: {{.Catchup.MixedWriterRate}}
+      message_bytes: 256
+      batch: 1
+      producer: none
+    catchup:
+      rate: {{.Catchup.OfferedRate}}
+    limits:
+      max_in_flight_appends: 1024
+      max_in_flight_catchup: {{.Catchup.MixedReaders}}
+      request_timeout: {{.Catchup.RequestTimeout}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: catchup-{{.Name}}
+  namespace: {{.SUT.Namespace}}
+  labels: { app: catchupscale }
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 3600
+  template:
+    metadata:
+      labels: { app: catchupscale }
+    spec:
+      nodeSelector: { role: loadgen }
+      restartPolicy: Never
+      containers:
+        - name: catchupscale
+          image: {{.LoadgenImage}}
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              mkdir -p /results
+              {{range .Catchup.ReaderCurve}}
+              dsload run \
+                -scenario /scenarios/catchup.yaml \
+                -label gke-1m-r{{.}} \
+                -out /results \
+                -base-url http://chronicle.{{$.SUT.Namespace}}:4437 \
+                -catchup-readers {{.}} \
+                -sample-redis redis={{$.SUT.RedisAddress}} \
+                -sample-metrics chronicle=http://chronicle.{{$.SUT.Namespace}}:9090/metrics
+              # A concurrency point is valid only if measured work completed.
+              # The gate also proves every counted body has the exact expected
+              # length and that Redis/Chronicle telemetry was sampled.
+              dsload gate-catchup \
+                -result /results/gke-1m-r{{.}}/catchup-paged/results.json \
+                -min-completions 1
+              {{end}}
+              dsload run \
+                -scenario /scenarios/mixed.yaml \
+                -label gke-1m-mixed \
+                -out /results \
+                -base-url http://chronicle.{{.SUT.Namespace}}:4437 \
+                -sample-redis redis={{.SUT.RedisAddress}} \
+                -sample-metrics chronicle=http://chronicle.{{.SUT.Namespace}}:9090/metrics
+              dsload gate-mixed \
+                -result /results/gke-1m-mixed/mixed-catchup-paged/results.json \
+                -min-append-rate {{.Catchup.MixedMinAppendRate}} \
+                -max-append-p99-ms {{.Catchup.MixedMaxAppendP99MS}}
+              if grep -R -E '"err:[^"]+":[[:space:]]*[1-9]' /results; then
+                echo "FAIL: one or more issue-5 cells recorded a server or transport error" >&2
+                exit 1
+              fi
+          volumeMounts:
+            - { name: scenarios, mountPath: /scenarios, readOnly: true }
+            - { name: results, mountPath: /results }
+          resources:
+            requests: { cpu: "2", memory: "2Gi" }
+            limits: { cpu: "4", memory: "4Gi" }
+      volumes:
+        - name: scenarios
+          configMap: { name: catchup-scenarios-{{.Name}} }
+        - name: results
+          emptyDir: {}
+{{else}}
 # Rendered by `render` — the sweep-scale load job. It runs on the loadgen node
-# pool so it never shares a node with the SUT. It scrapes the chronicle Service
-# /metrics, which is exact when sut.replicas is 1 (each replica sweeps all K
-# identically, so one replica's tick is the scaling signal). With several
-# replicas, read the per-replica histogram via Prometheus and the O(N*K) Redis
-# load via the managed-Redis metrics instead.
+# pool so it never shares a node with the SUT.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -31,3 +143,4 @@ spec:
             - "-measure={{.Workload.Measure}}"
             - "-slo-p99-ms={{.SLO.SweepP99Ms}}"
             - "-max-seed-errors={{.SLO.MaxSeedErrors}}"
+{{end}}

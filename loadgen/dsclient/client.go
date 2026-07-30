@@ -76,6 +76,7 @@ type Response struct {
 	UpToDate   bool
 	Closed     bool
 	Body       []byte
+	BodyBytes  int64
 	TTFB       time.Duration // request start → response headers read
 	Total      time.Duration // request start → body fully read
 }
@@ -85,7 +86,7 @@ func responseFrom(resp *http.Response, start time.Time, readBody bool) (Response
 		Status:     resp.StatusCode,
 		NextOffset: resp.Header.Get(HeaderNextOffset),
 		Cursor:     resp.Header.Get(HeaderCursor),
-		UpToDate:   resp.Header.Get(HeaderUpToDate) != "",
+		UpToDate:   strings.EqualFold(resp.Header.Get(HeaderUpToDate), "true"),
 		Closed:     strings.EqualFold(resp.Header.Get(HeaderClosed), "true"),
 		TTFB:       time.Since(start),
 	}
@@ -96,9 +97,29 @@ func responseFrom(resp *http.Response, start time.Time, readBody bool) (Response
 			return r, fmt.Errorf("read body: %w", err)
 		}
 		r.Body = body
+		r.BodyBytes = int64(len(body))
 	} else {
 		_, _ = io.Copy(io.Discard, resp.Body)
 	}
+	r.Total = time.Since(start)
+	return r, nil
+}
+
+func responseCountFrom(resp *http.Response, start time.Time) (Response, error) {
+	r := Response{
+		Status:     resp.StatusCode,
+		NextOffset: resp.Header.Get(HeaderNextOffset),
+		Cursor:     resp.Header.Get(HeaderCursor),
+		UpToDate:   strings.EqualFold(resp.Header.Get(HeaderUpToDate), "true"),
+		Closed:     strings.EqualFold(resp.Header.Get(HeaderClosed), "true"),
+		TTFB:       time.Since(start),
+	}
+	defer resp.Body.Close() //nolint:errcheck // read side; nothing actionable
+	n, err := io.Copy(io.Discard, resp.Body)
+	if err != nil {
+		return r, fmt.Errorf("read body: %w", err)
+	}
+	r.BodyBytes = n
 	r.Total = time.Since(start)
 	return r, nil
 }
@@ -187,6 +208,24 @@ func (c *Client) Read(ctx context.Context, name, offset, live, cursor string) (R
 		return Response{}, err
 	}
 	return c.do(req, true)
+}
+
+// ReadCatchup issues a non-live catch-up GET and counts the body while
+// discarding it. The load generator therefore does not retain one complete
+// stream suffix per concurrent reader.
+func (c *Client) ReadCatchup(ctx context.Context, name, offset string) (Response, error) {
+	q := url.Values{}
+	q.Set("offset", offset)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.StreamURL(name)+"?"+q.Encode(), nil)
+	if err != nil {
+		return Response{}, err
+	}
+	start := time.Now()
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return Response{}, err
+	}
+	return responseCountFrom(resp, start)
 }
 
 func (c *Client) do(req *http.Request, readBody bool) (Response, error) {

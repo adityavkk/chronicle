@@ -1,0 +1,27 @@
+# Issue 5 bounded catch-up curve. Every stream contains 4,096 records of
+# exactly 4 KiB, which is 16 MiB of payload. The open-loop offered rate is
+# deliberately above the expected completion rate. Each curve cell changes only
+# limits.max_in_flight_catchup through dsload's -catchup-readers flag.
+name: catchup-paged
+description: >
+  Issue 5 catch-up acceptance workload: eight 16 MiB streams, no writes or live
+  tailers, and an offered 200 full reads per second. The client caps concurrent
+  full reads at the selected 8, 32, 128, or 512 reader curve point.
+
+duration: 30s
+warmup: 5s
+
+streams:
+  count: 8
+  prefix: bench/catchup-paged
+  prefill:
+    messages: 4096
+    message_bytes: 4096
+    batch_size: 64
+
+catchup:
+  rate: 200/s
+
+limits:
+  max_in_flight_catchup: 512
+  request_timeout: 300s

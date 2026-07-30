@@ -21,6 +21,7 @@ const (
 	fTTL         = "ttl"         // TTL seconds (absent if nil)
 	fExpAt       = "expAtNs"     // absolute expiry, UnixNano (absent if nil)
 	fCreatedAt   = "createdAtNs" // UnixNano
+	fIncarnation = "incarnation" // opaque identity for this create
 	fAccessedAt  = "accessedAtNs"
 	fForkedFrom  = "forkedFrom" // source path (absent if not a fork)
 	fForkOff     = "forkOff"    // resolved fork offset string
@@ -41,6 +42,9 @@ func metaToFields(m *store.StreamMetadata) map[string]string {
 		fTail:       m.CurrentOffset.String(),
 		fCreatedAt:  strconv.FormatInt(m.CreatedAt.UnixNano(), 10),
 		fAccessedAt: strconv.FormatInt(m.LastAccessedAt.UnixNano(), 10),
+	}
+	if m.Incarnation != "" {
+		f[fIncarnation] = m.Incarnation
 	}
 	if m.LastSeq != "" {
 		f[fLastSeq] = m.LastSeq
@@ -93,6 +97,7 @@ func metaFromFields(path string, fields map[string]string) (*store.StreamMetadat
 	}
 	m := &store.StreamMetadata{
 		Path:          path,
+		Incarnation:   fields[fIncarnation],
 		ContentType:   fields[fCT],
 		CurrentOffset: cur,
 		LastSeq:       fields[fLastSeq],
@@ -103,6 +108,9 @@ func metaFromFields(path string, fields map[string]string) (*store.StreamMetadat
 	}
 	if m.CreatedAt, err = parseNanoTime(fields, fCreatedAt); err != nil {
 		return nil, fmt.Errorf("meta %s: %w", path, err)
+	}
+	if m.Incarnation == "" {
+		m.Incarnation = fields[fCreatedAt]
 	}
 	if m.LastAccessedAt, err = parseNanoTime(fields, fAccessedAt); err != nil {
 		return nil, fmt.Errorf("meta %s: %w", path, err)
