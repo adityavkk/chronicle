@@ -452,7 +452,7 @@ func (s *Store) ReadPage(
 			return store.ReadPage{}, err
 		}
 		page, err := s.readLeasedPage(ctx, lease, offset, opts, false, store.ReadPageStats{})
-		if err != nil || page.UpToDate {
+		if err != nil {
 			s.ReleaseReadSnapshot(path, *opts.Snapshot)
 		}
 		return page, err
@@ -474,20 +474,15 @@ func (s *Store) ReadPage(
 		return store.ReadPage{}, err
 	}
 	primarySnapshot := primaryPage.Snapshot
-	manifest, manifestToken, err := s.backend.Load(ctx, path)
-	if err != nil {
-		if !errors.Is(err, ErrNoManifest) {
-			s.stats.primaryFallbacks.Add(1)
+	manifest, manifestToken := s.loadCandidateManifest(ctx, path)
+	if manifest == nil {
+		if err := ctx.Err(); err != nil {
+			s.releasePrimarySnapshot(path, primarySnapshot)
+			return store.ReadPage{}, err
 		}
 		return primaryPage, nil
 	}
-	sealed, parseErr := store.ParseOffset(manifest.SealedThrough)
-	if parseErr != nil ||
-		validateManifest(manifest, s.backend.Mode(), path, primarySnapshot.Incarnation) != nil ||
-		!store.ContentTypeMatches(manifest.ContentType, primarySnapshot.ContentType) ||
-		manifest.State == StateShadow ||
-		primarySnapshot.Tail.LessThan(sealed) ||
-		!offset.LessThan(sealed) {
+	if !s.usableManifest(manifest, path, primarySnapshot, offset) {
 		s.stats.primaryFallbacks.Add(1)
 		return primaryPage, nil
 	}
@@ -520,10 +515,38 @@ func (s *Store) ReadPage(
 		s.ReleaseReadSnapshot(path, snapshot)
 		return store.ReadPage{}, err
 	}
-	if page.UpToDate {
-		s.ReleaseReadSnapshot(path, snapshot)
-	}
 	return page, nil
+}
+
+func (s *Store) loadCandidateManifest(ctx context.Context, path string) (*Manifest, string) {
+	manifest, token, err := s.backend.Load(ctx, path)
+	if err == nil {
+		return manifest, token
+	}
+	// Candidate metadata is never authoritative. An absent or unreadable
+	// manifest deliberately falls back to the already captured primary page.
+	if !errors.Is(err, ErrNoManifest) {
+		s.stats.primaryFallbacks.Add(1)
+	}
+	return nil, ""
+}
+
+func (s *Store) usableManifest(
+	manifest *Manifest,
+	path string,
+	snapshot store.ReadSnapshot,
+	offset store.Offset,
+) bool {
+	sealed, err := store.ParseOffset(manifest.SealedThrough)
+	if err != nil ||
+		validateManifest(manifest, s.backend.Mode(), path, snapshot.Incarnation) != nil ||
+		!store.ContentTypeMatches(manifest.ContentType, snapshot.ContentType) ||
+		manifest.State == StateShadow ||
+		snapshot.Tail.LessThan(sealed) ||
+		!offset.LessThan(sealed) {
+		return false
+	}
+	return true
 }
 
 func (s *Store) readLeasedPage(

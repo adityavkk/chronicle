@@ -199,7 +199,7 @@ func TestFileCandidatesServeSealedPrefixAndPrimaryTail(t *testing.T) {
 	}
 }
 
-func TestReadPageBoundsFixedSnapshotAndAutomaticPinRelease(t *testing.T) {
+func TestReadPageBoundsFixedSnapshotAndExplicitPinRelease(t *testing.T) {
 	primary := store.NewMemoryStore()
 	seg, _ := newFileSegmentStore(t, ModeLocalFiles, primary, StateServing)
 	path := "/bounded-snapshot"
@@ -258,6 +258,22 @@ func TestReadPageBoundsFixedSnapshotAndAutomaticPinRelease(t *testing.T) {
 			t.Fatalf("message %d = %x, want %x", i, got[i].Data, want[i])
 		}
 	}
+	confirmationOpts := opts
+	confirmationOpts.Snapshot = &first.Snapshot
+	confirmation, err := seg.ReadPage(
+		context.Background(),
+		path,
+		first.Snapshot.Tail,
+		confirmationOpts,
+	)
+	if err != nil {
+		t.Fatalf("final snapshot confirmation: %v", err)
+	}
+	if len(confirmation.Messages) != 0 || !confirmation.UpToDate ||
+		!confirmation.NextOffset.Equal(first.Snapshot.Tail) {
+		t.Fatalf("final snapshot confirmation = %+v", confirmation)
+	}
+	seg.ReleaseReadSnapshot(path, first.Snapshot)
 	seg.leasesMu.Lock()
 	activeLeases := len(seg.leases)
 	seg.leasesMu.Unlock()
@@ -265,7 +281,7 @@ func TestReadPageBoundsFixedSnapshotAndAutomaticPinRelease(t *testing.T) {
 	activePins := len(seg.pins[path])
 	seg.pinsMu.Unlock()
 	if activeLeases != 0 || activePins != 0 {
-		t.Fatalf("final page retained leases=%d pins=%d", activeLeases, activePins)
+		t.Fatalf("explicit final release retained leases=%d pins=%d", activeLeases, activePins)
 	}
 	nextOpts := opts
 	nextOpts.Snapshot = &first.Snapshot

@@ -492,17 +492,6 @@ func (h *sseHub) poll() error {
 	return h.refresh()
 }
 
-func (h *sseHub) checkIncarnation(meta *store.StreamMetadata) error {
-	snapshot := &store.StreamMetadata{
-		Incarnation: h.incarnation,
-		CreatedAt:   h.createdAt,
-	}
-	if !snapshot.SameIncarnation(meta) {
-		return errSSEHubRecreated
-	}
-	return nil
-}
-
 func (h *sseHub) validateSnapshot(snapshot store.ReadSnapshot) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
