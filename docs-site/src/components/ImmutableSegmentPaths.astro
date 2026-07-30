@@ -1,0 +1,345 @@
+<figure class="segment-paths">
+  <div class="figure-label">One catch-up request, two storage planes</div>
+
+  <div class="paths">
+    <article class="path before">
+      <header>
+        <span class="tag">Before</span>
+        <strong>Every history page comes from the Redis frame ZSET</strong>
+      </header>
+
+      <div class="flow" aria-label="Old Redis sorted set read path">
+        <div class="node client">
+          <span>Client</span>
+          <b>GET from offset</b>
+          <small>one logical snapshot</small>
+        </div>
+        <span class="connector" aria-hidden="true">↓</span>
+        <div class="node chronicle">
+          <span>Chronicle</span>
+          <b>bounded page loop</b>
+          <small>decode and write frames</small>
+        </div>
+        <span class="connector" aria-hidden="true">↓</span>
+        <div class="node redis">
+          <span>Redis primary</span>
+          <div class="zset" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+          <b>metadata + frame ZSET</b>
+          <small>serves the complete replay, page by page</small>
+        </div>
+      </div>
+
+      <div class="work">
+        <span>Append authority</span>
+        <strong>Redis</strong>
+        <span>Historical read bytes</span>
+        <strong>Redis</strong>
+      </div>
+
+      <p>
+        Bounded catch-up limits each page, but Redis still stores and returns
+        every historical frame. More Chronicle replicas do not remove that
+        replay work from the Redis primary.
+      </p>
+    </article>
+
+    <article class="path after">
+      <header>
+        <span class="tag">After</span>
+        <strong>Verified segments serve the sealed prefix</strong>
+      </header>
+
+      <div class="flow" aria-label="Immutable segment serving read path">
+        <div class="node client">
+          <span>Client</span>
+          <b>same GET from offset</b>
+          <small>the HTTP contract is unchanged</small>
+        </div>
+        <span class="connector" aria-hidden="true">↓</span>
+        <div class="node chronicle">
+          <span>Chronicle</span>
+          <b>snapshot + manifest pin</b>
+          <small>one incarnation and upper tail</small>
+        </div>
+        <span class="connector fork" aria-hidden="true">↙ &nbsp; ↘</span>
+        <div class="split">
+          <div class="node segments">
+            <span>Immutable origin</span>
+            <div class="blocks" aria-hidden="true">
+              <i></i><i></i><i></i><i></i>
+            </div>
+            <b>sealed prefix</b>
+            <small>authenticated 64 KiB blocks</small>
+          </div>
+          <div class="node redis">
+            <span>Redis primary</span>
+            <div class="tail" aria-hidden="true">
+              <i></i><i></i><i></i>
+            </div>
+            <b>snapshot + hot tail</b>
+            <small>still validates liveness</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="work">
+        <span>Append authority</span>
+        <strong>Redis</strong>
+        <span>Sealed read bytes</span>
+        <strong>segments</strong>
+      </div>
+
+      <p>
+        Chronicle reads the immutable prefix in bounded authenticated ranges,
+        then drains the Redis hot tail under the first snapshot. Missing or
+        corrupt segment data falls back to that captured Redis snapshot.
+      </p>
+    </article>
+  </div>
+
+  <figcaption>
+    <strong>The change moves sealed read work, not append truth.</strong>
+    Redis still acknowledges every append, retains the complete frame ZSET,
+    controls expiry and deletion, and supplies the bounded hot tail.
+  </figcaption>
+</figure>
+
+<style lang="scss">
+  .segment-paths {
+    margin: 32px 0 30px var(--rail-indent);
+    max-width: var(--prose-max);
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--card);
+    box-shadow: var(--shadow-sm);
+  }
+  .figure-label {
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .paths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .path {
+    min-width: 0;
+    padding: 22px;
+  }
+  .path + .path {
+    border-left: 1px solid var(--rule);
+  }
+  header {
+    display: grid;
+    gap: 7px;
+    min-height: 74px;
+  }
+  .tag {
+    width: fit-content;
+    padding: 2px 7px;
+    border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--rule));
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--bad);
+    background: color-mix(in srgb, var(--bad) 7%, var(--card));
+  }
+  .after .tag {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--rule));
+    color: var(--accent-deep);
+    background: var(--accent-tint);
+  }
+  header strong {
+    max-width: 28ch;
+    font-size: 15px;
+    line-height: 1.35;
+  }
+  .flow {
+    display: grid;
+    justify-items: center;
+    min-height: 360px;
+    margin-top: 12px;
+    padding: 18px;
+    border: 1px solid var(--rule-soft);
+    border-radius: 9px;
+    background:
+      linear-gradient(var(--rule-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--rule-soft) 1px, transparent 1px),
+      var(--paper);
+    background-size: 18px 18px;
+  }
+  .node {
+    width: 100%;
+    max-width: 260px;
+    padding: 12px 14px;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--card);
+    box-shadow: var(--shadow-sm);
+    text-align: center;
+  }
+  .node > span {
+    display: block;
+    margin-bottom: 8px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .node b,
+  .node small {
+    display: block;
+    line-height: 1.35;
+  }
+  .node b {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink);
+  }
+  .node small {
+    margin-top: 3px;
+    font-size: 9.5px;
+    color: var(--ink-mute);
+  }
+  .client {
+    border-top: 3px solid var(--ink);
+  }
+  .chronicle {
+    border-top: 3px solid var(--accent);
+  }
+  .redis {
+    border-top: 3px solid var(--bad);
+  }
+  .segments {
+    border-top: 3px solid var(--ok);
+  }
+  .connector {
+    align-self: center;
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--muted);
+  }
+  .connector.fork {
+    letter-spacing: 0.25em;
+  }
+  .split {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    width: 100%;
+  }
+  .zset,
+  .blocks,
+  .tail {
+    display: grid;
+    height: 34px;
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+  }
+  .zset {
+    grid-template-columns: repeat(8, 1fr);
+  }
+  .zset i {
+    border-right: 1px solid color-mix(in srgb, var(--bad) 24%, transparent);
+    background: color-mix(in srgb, var(--bad) 13%, var(--card));
+  }
+  .zset i:nth-child(even) {
+    background: color-mix(in srgb, var(--bad) 22%, var(--card));
+  }
+  .blocks {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2px;
+    border: 0;
+  }
+  .blocks i {
+    border: 1px solid color-mix(in srgb, var(--ok) 44%, var(--rule));
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--ok) 11%, var(--card));
+    animation: block-read 3.4s ease-in-out infinite;
+  }
+  .blocks i:nth-child(2) { animation-delay: 0.2s; }
+  .blocks i:nth-child(3) { animation-delay: 0.4s; }
+  .blocks i:nth-child(4) { animation-delay: 0.6s; }
+  .tail {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    padding: 3px;
+  }
+  .tail i {
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--bad) 18%, var(--card));
+  }
+  .work {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 5px 14px;
+    margin-top: 14px;
+    padding: 11px 13px;
+    border: 1px solid var(--rule);
+    border-radius: 7px;
+    background: var(--paper-warm);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--ink-mute);
+  }
+  .work strong {
+    color: var(--accent-deep);
+    font-weight: 600;
+  }
+  .path > p {
+    min-height: 118px;
+    margin: 18px 0 0;
+    padding-top: 15px;
+    border-top: 1px solid var(--rule-soft);
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--ink-mute);
+  }
+  figcaption {
+    padding: 14px 24px 18px;
+    border-top: 1px solid var(--rule);
+    background: var(--paper);
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--muted);
+  }
+  figcaption strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  @keyframes block-read {
+    0%, 52%, 100% { opacity: 0.46; transform: translateY(0); }
+    14%, 32% { opacity: 1; transform: translateY(-2px); }
+  }
+  @media (max-width: 920px) {
+    .paths { grid-template-columns: 1fr; }
+    .path + .path {
+      border-top: 1px solid var(--rule);
+      border-left: 0;
+    }
+    .path > p { min-height: 0; }
+  }
+  @media (max-width: 840px) {
+    .segment-paths { margin-left: 0; max-width: none; }
+  }
+  @media (max-width: 520px) {
+    .flow { min-height: 0; padding: 14px; }
+    .split { grid-template-columns: 1fr; }
+    .connector.fork { transform: rotate(45deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .blocks i { animation: none; opacity: 1; }
+  }
+</style>
