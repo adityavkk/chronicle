@@ -27,13 +27,15 @@ jepsen/run.sh paged-catchup          # bounded catch-up through data-plane fault
 jepsen/down.sh                     # tear down the cluster
 ```
 
-The hardening scenarios (`pull-wake-arm-crash`, `expired-lease-takeover`,
-`glob-create-crash`, `index-repair`), the safety scenarios (`single-holder-linz`,
-`cursor-monotonic`, `stale-gen-noop`), the liveness scenarios (`lease-tail-drop`,
-`at-least-once`), and the now-live acceptance gates (`ownership-exclusivity`,
-`slot-isolation`, `paged-catchup`) are not in the default `run.sh` set yet; pass them by name. The
-Redis-direct gates (`ownership-exclusivity`, `shard-linz`) need no cluster — just
-`-redis-url` — so they also run in CI (`.github/workflows/ci.yml`, the `linz` job).
+`paged-catchup` is part of the default `run.sh` set. The hardening scenarios
+(`pull-wake-arm-crash`, `expired-lease-takeover`, `glob-create-crash`,
+`index-repair`), the safety scenarios (`single-holder-linz`,
+`cursor-monotonic`, `stale-gen-noop`), the liveness scenarios
+(`lease-tail-drop`, `at-least-once`), and the acceptance gates
+(`ownership-exclusivity`, `slot-isolation`) remain opt-in. Pass them by name.
+The Redis-direct gates (`ownership-exclusivity`, `shard-linz`) need only
+`-redis-url`, so CI also runs them in the `linz` job in
+`.github/workflows/ci.yml`.
 
 `sse-resume` confirms eight checked readers have attached to one stream before
 faults. A direct in-cluster reader uses a separate stream, pauses, and falls

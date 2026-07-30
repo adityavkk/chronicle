@@ -170,15 +170,19 @@ func (b *encodedRangeBackend) Mode() Mode { return ModeLocalFiles }
 func (b *encodedRangeBackend) Load(context.Context, string) (*Manifest, string, error) {
 	return nil, "", ErrNoManifest
 }
+
 func (b *encodedRangeBackend) Put(context.Context, string, uint64, EncodedSegment) (SegmentRef, error) {
 	return SegmentRef{}, errors.New("not implemented")
 }
+
 func (b *encodedRangeBackend) Publish(context.Context, string, string, *Manifest) (string, error) {
 	return "", errors.New("not implemented")
 }
+
 func (b *encodedRangeBackend) Read(context.Context, SegmentRef) ([]byte, []byte, error) {
 	return nil, nil, errors.New("not implemented")
 }
+
 func (b *encodedRangeBackend) ReadDataRange(
 	_ context.Context,
 	ref SegmentRef,

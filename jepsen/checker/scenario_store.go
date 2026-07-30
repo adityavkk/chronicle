@@ -292,7 +292,15 @@ func storeDoRead(st store.Store, path string, clientID int, rng *rand.Rand, rec 
 	// tail. We recompute it from metadata exactly as handler.go / handler_sse.go do
 	// (currentMeta.Closed && upToDate at the post-read offset).
 	closedSig := false
-	if meta, mErr := st.Get(path); mErr == nil && meta.Closed {
+	meta, mErr := st.Get(path)
+	if mErr != nil {
+		// The model treats readClosed=false as an observed OPEN state. A
+		// failed metadata recheck leaves that state unknown, so recording false
+		// would fabricate evidence and can create a false counterexample during
+		// a Redis partition.
+		return
+	}
+	if meta.Closed {
 		end := from
 		if len(msgs) > 0 {
 			end = msgs[len(msgs)-1].Offset

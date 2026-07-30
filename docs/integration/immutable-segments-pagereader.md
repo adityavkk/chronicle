@@ -69,9 +69,12 @@ When the continuation reaches the sealed boundary, the wrapper reads the hot
 tail through the primary `PageReader` with the exact primary snapshot captured
 on the first page. It does not capture a second tail at the boundary.
 
-The wrapper releases the manifest pin and nested primary snapshot when it
-returns the final page, when a page fails, when the caller cancels the read, or
-when the handler ends the response. Release is idempotent.
+The wrapper releases the manifest pin and nested primary snapshot when a page
+fails, when the caller cancels the read, or when the caller explicitly ends the
+response. A final page does not invalidate the snapshot on return because SSE
+must perform one last incarnation check before it attaches to the live hub.
+Every maintained handler and the compatibility `Read` method release the
+snapshot with a defer. Release is idempotent.
 
 ## Immutable range format
 
@@ -152,7 +155,8 @@ The merged tests cover these cases:
 - Delete and recreate during continuation fails with
   `store.ErrReadSnapshotChanged`.
 - Independent readers receive different lease tokens.
-- Final pages, errors, cancellation, and handlers release snapshot pins.
+- Final-page confirmation remains valid until explicit release. Errors,
+  cancellation, compatibility reads, and handlers release snapshot pins.
 - A corrupt range falls back to bounded primary pages and the lease stays
   primary only.
 - A forged sparse position fails both full and ranged decoding.

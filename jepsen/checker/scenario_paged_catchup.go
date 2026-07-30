@@ -202,14 +202,42 @@ func fetchPagedAttempt(
 	triggerAfter int,
 	action func(context.CancelFunc, io.Closer),
 ) (pagedAttempt, error) {
+	return fetchPagedAttemptWithClient(
+		http.DefaultClient,
+		base,
+		stream,
+		start,
+		name,
+		triggerAfter,
+		action,
+	)
+}
+
+func fetchPagedAttemptWithClient(
+	client *http.Client,
+	base, stream, start, name string,
+	triggerAfter int,
+	action func(context.CancelFunc, io.Closer),
+) (pagedAttempt, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	requestURL := fmt.Sprintf("%s/v1/stream/%s?offset=%s&envelope=1", base, stream, url.QueryEscape(start))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
-	if err != nil {
-		return pagedAttempt{}, err
-	}
-	resp, err := http.DefaultClient.Do(req)
+	var resp *http.Response
+	err := retry(20, 100*time.Millisecond, func() error {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+		if reqErr != nil {
+			return reqErr
+		}
+		candidate, doErr := client.Do(req)
+		if doErr != nil {
+			if candidate != nil {
+				candidate.Body.Close()
+			}
+			return doErr
+		}
+		resp = candidate
+		return nil
+	})
 	if err != nil {
 		return pagedAttempt{}, fmt.Errorf("%s start: %w", name, err)
 	}

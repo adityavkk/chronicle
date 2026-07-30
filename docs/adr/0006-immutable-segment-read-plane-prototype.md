@@ -241,10 +241,13 @@ Any lost acknowledged byte, duplicate accepted producer append, reordered frame,
 reader instead of `legacyPageReader`. Each reader receives a different opaque
 lease token, even when two readers use the same manifest generation.
 
-The wrapper releases the manifest pin after the final page, an error,
-cancellation, or handler completion. A corrupt range marks that lease as
-primary only. Later pages use the captured bounded primary snapshot and do not
-retry the segment backend. The implementation and acceptance tests are in
+The wrapper keeps the snapshot valid through final-page confirmation, then the
+caller releases it. Errors, cancellation, handler completion, and the
+compatibility `Read` method also release it. This lets SSE revalidate the
+incarnation after its last catch-up flush and before live-hub attachment. A
+corrupt range marks that lease as primary only. Later pages use the captured
+bounded primary snapshot and do not retry the segment backend. The
+implementation and acceptance tests are in
 `docs/integration/immutable-segments-pagereader.md`.
 
 ## Consequences

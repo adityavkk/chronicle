@@ -15,6 +15,7 @@ import (
 
 	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
+	"gecgithub01.walmart.com/auk000v/chronicle/store/segments"
 )
 
 type hubTestStore struct {
@@ -208,6 +209,56 @@ func TestSSEHubSharesOneSubscriptionAndOneLiveRead(t *testing.T) {
 		t.Fatalf("live reads after append = %d, want one shared read", got)
 	}
 	waitForCount(t, &st.closes, 1)
+}
+
+func TestSegmentSSEKeepsFinalSnapshotForLiveAttach(t *testing.T) {
+	backend, err := segments.NewFileBackend(
+		segments.ModeLocalFiles,
+		t.TempDir(),
+		1<<20,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segmented, err := segments.New(store.NewMemoryStore(), segments.Options{
+		Backend:      backend,
+		InitialState: segments.StateServing,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = segmented.Close() })
+
+	h := newHubTestHandler(segmented)
+	h.SSEHubPollInterval = 10 * time.Millisecond
+	mustCreate(t, h, "/test", "text/plain", []byte("seed"))
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/test?offset=-1&live=sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // test cleanup
+
+	rec := do(h, http.MethodPost, "/test", map[string]string{
+		"Content-Type":              "text/plain",
+		protocol.HeaderStreamClosed: "true",
+	}, []byte("live"))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("append and close: status = %d body=%q", rec.Code, rec.Body.String())
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: data\ndata:seed\n\n") ||
+		!strings.Contains(text, "event: data\ndata:live\n\n") ||
+		!strings.Contains(text, `"streamClosed":true`) {
+		t.Fatalf("segment SSE failed across live attach:\n%s", text)
+	}
 }
 
 func TestSSEHubSubscribeThenReadClosesAttachRace(t *testing.T) {

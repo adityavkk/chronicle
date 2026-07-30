@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"pgregory.net/rapid"
@@ -76,6 +79,49 @@ func TestCheckPagedCatchupPropertyPartitionsRemainExact(t *testing.T) {
 			rt.Fatalf("valid partition rejected: %v", err)
 		}
 	})
+}
+
+type transientPagedTransport struct {
+	calls int
+}
+
+func (t *transientPagedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.calls++
+	if t.calls == 1 {
+		return nil, io.EOF
+	}
+	headers := make(http.Header)
+	headers.Set("Stream-Next-Offset", "0000000000000001_0000000000000000")
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     headers,
+		Body: io.NopCloser(strings.NewReader(
+			`[{"offset":"0000000000000001_0000000000000000","data":{"n":1}}]`,
+		)),
+		Request: req,
+	}, nil
+}
+
+func TestFetchPagedAttemptRetriesTransientStartFailure(t *testing.T) {
+	transport := &transientPagedTransport{}
+	attempt, err := fetchPagedAttemptWithClient(
+		&http.Client{Transport: transport},
+		"http://chronicle.invalid",
+		"stream",
+		"-1",
+		"restart",
+		0,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("fetchPagedAttemptWithClient: %v", err)
+	}
+	if transport.calls != 2 {
+		t.Fatalf("transport calls = %d, want 2", transport.calls)
+	}
+	if !attempt.Complete || len(attempt.Frames) != 1 {
+		t.Fatalf("attempt = %+v, want one complete frame", attempt)
+	}
 }
 
 func testPagedOracle(n int) []pagedFrame {

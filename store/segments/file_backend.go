@@ -437,13 +437,13 @@ func readFileRange(ctx context.Context, name string, start, length int64) ([]byt
 	}
 	f, err := os.Open(name)
 	if err != nil {
-		return nil, fmt.Errorf("%w: open immutable range: %v", ErrCorrupt, err)
+		return nil, fmt.Errorf("%w: open immutable range: %w", ErrCorrupt, err)
 	}
 	defer f.Close() //nolint:errcheck // the read result is authoritative
 	data := make([]byte, length)
 	n, err := f.ReadAt(data, start)
-	if err != nil && !(errors.Is(err, io.EOF) && int64(n) == length) {
-		return nil, fmt.Errorf("%w: read immutable range: %v", ErrCorrupt, err)
+	if err != nil && (!errors.Is(err, io.EOF) || int64(n) != length) {
+		return nil, fmt.Errorf("%w: read immutable range: %w", ErrCorrupt, err)
 	}
 	if int64(n) != length {
 		return nil, fmt.Errorf("%w: short immutable range", ErrCorrupt)
