@@ -1,0 +1,42 @@
+{
+  "schema": "chronicle-ds-bench-selection-v1",
+  "selected_workloads": [
+    "blog-sse",
+    "mixed-writes",
+    "reads-catchup",
+    "reads-sse",
+    "write"
+  ],
+  "selected_suites": [
+    {
+      "suite": "parity-write-chronicle",
+      "system": "chronicle",
+      "workload": "write",
+      "cluster": "chdb-write-chronicle"
+    },
+    {
+      "suite": "parity-blog-sse-chronicle",
+      "system": "chronicle",
+      "workload": "blog-sse",
+      "cluster": "chdb-blog-sse-chronicle"
+    },
+    {
+      "suite": "parity-reads-sse-chronicle",
+      "system": "chronicle",
+      "workload": "reads-sse",
+      "cluster": "chdb-reads-sse-chronicle"
+    },
+    {
+      "suite": "parity-reads-catchup-chronicle",
+      "system": "chronicle",
+      "workload": "reads-catchup",
+      "cluster": "chdb-reads-catc-chronicle"
+    },
+    {
+      "suite": "parity-mixed-writes-chronicle",
+      "system": "chronicle",
+      "workload": "mixed-writes",
+      "cluster": "chdb-mixed-writ-chronicle"
+    }
+  ]
+}

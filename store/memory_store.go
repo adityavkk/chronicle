@@ -134,7 +134,7 @@ func (s *MemoryStore) Create(path string, opts CreateOptions) (*StreamMetadata, 
 		}
 	}
 
-	incarnation, err := NewReadIncarnation()
+	incarnation, err := NewIncarnationID()
 	if err != nil {
 		return nil, false, err
 	}
@@ -216,8 +216,8 @@ func (s *MemoryStore) Create(path string, opts CreateOptions) (*StreamMetadata, 
 	now := s.now()
 	meta := StreamMetadata{
 		Path:           path,
-		Incarnation:    incarnation,
 		ContentType:    contentType,
+		Incarnation:    incarnation,
 		CreatedAt:      now,
 		LastAccessedAt: now,
 		Closed:         opts.Closed, // Support creating stream in closed state

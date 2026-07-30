@@ -9,7 +9,7 @@ BASE="${BASE:-http://localhost:4438}"
 STREAMS="${STREAMS:-8}"
 MSGS="${MSGS:-40}"
 SCENARIOS=("$@")
-[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(baseline origin-restart redis-restart)
+[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(baseline origin-restart redis-restart sse-resume)
 
 echo "==> building checker"
 go build -o jepsen/bin/jepsen-checker ./jepsen/checker
@@ -21,7 +21,10 @@ for s in "${SCENARIOS[@]}"; do
   echo "# scenario: $s"
   echo "############################################################"
   # Reset the keyspace and roll the deployments so each scenario starts clean.
-  kubectl --context "k3d-$CLUSTER" -n chronicle-jepsen exec deploy/redis -- redis-cli -n 0 flushdb >/dev/null 2>&1 || true
+  kubectl --context "k3d-$CLUSTER" -n chronicle-jepsen exec deploy/redis -- redis-cli -n 0 flushdb >/dev/null
+  kubectl --context "k3d-$CLUSTER" -n chronicle-jepsen rollout restart deploy/redis deploy/chronicle >/dev/null
+  kubectl --context "k3d-$CLUSTER" -n chronicle-jepsen rollout status deploy/redis --timeout=120s
+  kubectl --context "k3d-$CLUSTER" -n chronicle-jepsen rollout status deploy/chronicle --timeout=120s
   jepsen/bin/jepsen-checker \
     -base "$BASE" -cluster "$CLUSTER" \
     -streams "$STREAMS" -msgs "$MSGS" -scenario "$s" || rc=1

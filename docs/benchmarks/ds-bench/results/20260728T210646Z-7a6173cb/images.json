@@ -1,0 +1,74 @@
+{
+  "schema": "chronicle-ds-bench-images-v1",
+  "created_at": "2026-07-28T20:08:07.154331+00:00",
+  "target": "remote",
+  "project": "adityavkk-prototyping",
+  "registry": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench",
+  "preflight": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-images-preflight.json",
+  "reused_from": null,
+  "sut_reused_from": null,
+  "reference_suts_reused_from": {
+    "schema": "chronicle-ds-bench-reference-sut-reuse-v1",
+    "archive": "/Users/auk000v/dev/chronicle/docs/benchmarks/ds-bench/results/20260728T122629Z-59260e88",
+    "campaign_id": "20260728T122629Z-59260e88",
+    "evidence_tree_sha256": "c0860ab25e172de648dde9280ea749d5343a142d1e6d3298fcd8a8cbf4c569e8",
+    "images": [
+      "node",
+      "redis",
+      "rust",
+      "ursula"
+    ]
+  },
+  "images": {
+    "node": {
+      "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-node@sha256:e82c0192eb9124e2b0e2d166776739f14f9bd4fc8146e394e0df488708619b71",
+      "digest": "sha256:e82c0192eb9124e2b0e2d166776739f14f9bd4fc8146e394e0df488708619b71",
+      "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-node:b55f133ec80c",
+      "source": {
+        "commit": "b55f133ec80c35cd673ea745785adb031d0df1db",
+        "provenance": "official reference server repository"
+      }
+    },
+    "ursula": {
+      "reference": "ghcr.io/tonbo-io/ursula@sha256:06e8cd30c51b907b214c9edaa879427a0fbafe8ab567efd5f975225bc103e281",
+      "digest": "sha256:06e8cd30c51b907b214c9edaa879427a0fbafe8ab567efd5f975225bc103e281",
+      "tag_reference": "ghcr.io/tonbo-io/ursula:v0.2.0"
+    },
+    "redis": {
+      "reference": "redis@sha256:8096655e437712b07503796fb64d81359256cfcff0ab29d95a7da72863786efb",
+      "digest": "sha256:8096655e437712b07503796fb64d81359256cfcff0ab29d95a7da72863786efb",
+      "tag_reference": "redis:8-alpine"
+    },
+    "rust": {
+      "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-streams@sha256:3501f08b55f60c8043cf9af99ffc5732950c676a9f5f3a2f260efb6a1889ddd2",
+      "digest": "sha256:3501f08b55f60c8043cf9af99ffc5732950c676a9f5f3a2f260efb6a1889ddd2",
+      "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-streams:88793e76595d",
+      "source": {
+        "commit": "88793e76595d69be300731b9b25c58538923a53b",
+        "provenance": "@electric-ax/durable-streams-server-rust@0.1.5"
+      }
+    },
+    "ds-bench": {
+      "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/ds-bench@sha256:8b68435dec204e5ab7d3f5f8276c56062a3edb7422e812e78fb2cf365452a67b",
+      "digest": "sha256:8b68435dec204e5ab7d3f5f8276c56062a3edb7422e812e78fb2cf365452a67b",
+      "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/ds-bench:93a1a066a511-425ddb541e96",
+      "source": {
+        "commit": "93a1a066a511ad2ce5114dc429afb1fd0f6d99bf",
+        "adapter_sha256": "425ddb541e9655eef6b1340cf7c73e4430d62adc40d74456128a7574f642d434",
+        "build_context_sha256": "bc2401a8338bb00298d5a16bc2e0371f02ca06a7cfcca850d54716813c3908b0",
+        "build_context_file_count": 24
+      }
+    },
+    "chronicle": {
+      "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/chronicle@sha256:7dbe8a49c4cbb60751f29ee9d23bd24a739261f0b4dceb705c7b0f1c8e109783",
+      "digest": "sha256:7dbe8a49c4cbb60751f29ee9d23bd24a739261f0b4dceb705c7b0f1c8e109783",
+      "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/chronicle:ecf1a8a8f8ad-b54e482fdb99",
+      "source": {
+        "schema": "chronicle-image-source-v1",
+        "commit": "ecf1a8a8f8ad9283cedcbd17b465acb410ccfec0",
+        "build_context_sha256": "dafa211a80b13500c824a31b15336fc1de93e3899a4d0482929e83a22c457bfa",
+        "build_context_file_count": 110
+      }
+    }
+  }
+}

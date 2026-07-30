@@ -698,6 +698,18 @@ func TestStreamMetadata_IsExpired_NoExpiry(t *testing.T) {
 	}
 }
 
+func TestStreamMetadataMaxTTLDoesNotOverflow(t *testing.T) {
+	ttl := int64(1<<63 - 1)
+	now := time.Unix(1_765_000_000, 123)
+	meta := &StreamMetadata{
+		TTLSeconds:     &ttl,
+		LastAccessedAt: now,
+	}
+	if meta.IsExpiredAt(now.Add(100 * 365 * 24 * time.Hour)) {
+		t.Fatal("max TTL overflowed into an expired deadline")
+	}
+}
+
 func TestMemoryStore_ExpiryOnGet(t *testing.T) {
 	s := NewMemoryStore()
 	defer s.Close()

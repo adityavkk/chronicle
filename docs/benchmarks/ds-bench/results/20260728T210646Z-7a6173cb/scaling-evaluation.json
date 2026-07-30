@@ -1,0 +1,249 @@
+{
+  "schema": "chronicle-ds-bench-scaling-evaluation-v1",
+  "campaign_id": "20260728T210646Z-7a6173cb",
+  "target": {
+    "throughput_ratio": 0.8,
+    "completion_ratio": 0.98,
+    "latency_ratio": 2.0,
+    "memory_ratio": 2.0,
+    "request_errors": 0,
+    "reference_rule": "better-per-cell-of-rust-wal-and-ursula-disk"
+  },
+  "reference_campaigns": [
+    "20260727T122510Z-bd85274b",
+    "20260728T122629Z-59260e88"
+  ],
+  "candidate_count": 2,
+  "minimal_qualifying": null,
+  "closest_nonqualifying": "chronicle-c1-r1-sse-persistent",
+  "candidates": [
+    {
+      "label": "chronicle-c1-r1-legacy",
+      "args": "always:1:1:2000:2000:4096:12288:legacy",
+      "topology": {
+        "kind": "shared",
+        "chronicle_replicas": 1,
+        "redis_masters": 1,
+        "appendfsync": "always",
+        "sse_wait_mode": "legacy",
+        "requested": {
+          "chronicle_cpu_millis": 2000,
+          "redis_cpu_millis": 2000,
+          "chronicle_memory_mib": 4096,
+          "redis_memory_mib": 12288
+        },
+        "per_pod": {
+          "chronicle": {
+            "cpu_millis": 2000,
+            "memory_mib": 4096
+          },
+          "redis": {
+            "cpu_millis": 2000,
+            "memory_mib": 12288
+          }
+        },
+        "effective": {
+          "cpu_millis": 4000,
+          "memory_mib": 16384
+        }
+      },
+      "qualifies": false,
+      "passed_checks": 0,
+      "total_checks": 12,
+      "coverage_ratio": 0.0,
+      "worst_throughput_ratio": 0.1341310544274301,
+      "minimal_order": [
+        4000,
+        16384,
+        1,
+        1
+      ],
+      "cells": [
+        {
+          "suite": "parity-blog-sse-chronicle",
+          "workload": "blog-sse",
+          "stream_count": 1,
+          "level": 1000,
+          "checks": [],
+          "failures": [
+            "classification=overload",
+            "completion=0.22794099999999998<0.98",
+            "ops_per_sec_ratio=0.2277<0.8000",
+            "p50=138.239>limit=6.1700",
+            "p99=377.087>limit=9.2780",
+            "memory=249.4453125>limit=43.6MiB"
+          ],
+          "observed": {
+            "completion_ratio": 0.22794099999999998,
+            "ops_per_sec": 11397.05,
+            "p50": 138.239,
+            "p99": 377.087,
+            "pod_memory_peak_mib": 249.4453125
+          },
+          "reference_targets": {
+            "ops_per_sec": 50060.75,
+            "p50": 3.085,
+            "p99": 4.639,
+            "pod_memory_peak_mib": 21.796875
+          },
+          "limits": {
+            "completion_ratio_min": 0.98,
+            "p50": 6.17,
+            "p99": 9.278,
+            "pod_memory_peak_mib": 43.59375
+          }
+        },
+        {
+          "suite": "parity-reads-sse-chronicle",
+          "workload": "reads-sse",
+          "stream_count": 100,
+          "level": 2048,
+          "checks": [],
+          "failures": [
+            "classification=overload",
+            "completion=0.13430989583333333<0.98",
+            "ops_per_sec_ratio=0.1341<0.8000",
+            "p50=267.775>limit=1.4060",
+            "p99=343.039>limit=3.3320",
+            "memory=503.25390625>limit=79.2MiB"
+          ],
+          "observed": {
+            "completion_ratio": 0.13430989583333333,
+            "ops_per_sec": 13753.333333333334,
+            "p50": 267.775,
+            "p99": 343.039,
+            "pod_memory_peak_mib": 503.25390625
+          },
+          "reference_targets": {
+            "ops_per_sec": 102536.53333333334,
+            "p50": 0.703,
+            "p99": 1.666,
+            "pod_memory_peak_mib": 39.59375
+          },
+          "limits": {
+            "completion_ratio_min": 0.98,
+            "p50": 1.406,
+            "p99": 3.332,
+            "pod_memory_peak_mib": 79.1875
+          }
+        }
+      ],
+      "dominated_by": [
+        "chronicle-c1-r1-sse-persistent"
+      ]
+    },
+    {
+      "label": "chronicle-c1-r1-sse-persistent",
+      "args": "always:1:1:2000:2000:4096:12288:persistent",
+      "topology": {
+        "kind": "shared",
+        "chronicle_replicas": 1,
+        "redis_masters": 1,
+        "appendfsync": "always",
+        "sse_wait_mode": "persistent",
+        "requested": {
+          "chronicle_cpu_millis": 2000,
+          "redis_cpu_millis": 2000,
+          "chronicle_memory_mib": 4096,
+          "redis_memory_mib": 12288
+        },
+        "per_pod": {
+          "chronicle": {
+            "cpu_millis": 2000,
+            "memory_mib": 4096
+          },
+          "redis": {
+            "cpu_millis": 2000,
+            "memory_mib": 12288
+          }
+        },
+        "effective": {
+          "cpu_millis": 4000,
+          "memory_mib": 16384
+        }
+      },
+      "qualifies": false,
+      "passed_checks": 0,
+      "total_checks": 12,
+      "coverage_ratio": 0.0,
+      "worst_throughput_ratio": 0.24744611351531287,
+      "minimal_order": [
+        4000,
+        16384,
+        1,
+        1
+      ],
+      "cells": [
+        {
+          "suite": "parity-blog-sse-chronicle",
+          "workload": "blog-sse",
+          "stream_count": 1,
+          "level": 1000,
+          "checks": [],
+          "failures": [
+            "classification=overload",
+            "completion=0.5961609999999999<0.98",
+            "ops_per_sec_ratio=0.5954<0.8000",
+            "p50=62.239>limit=6.1700",
+            "p99=78.975>limit=9.2780",
+            "memory=375.94140625>limit=43.6MiB"
+          ],
+          "observed": {
+            "completion_ratio": 0.5961609999999999,
+            "ops_per_sec": 29808.05,
+            "p50": 62.239,
+            "p99": 78.975,
+            "pod_memory_peak_mib": 375.94140625
+          },
+          "reference_targets": {
+            "ops_per_sec": 50060.75,
+            "p50": 3.085,
+            "p99": 4.639,
+            "pod_memory_peak_mib": 21.796875
+          },
+          "limits": {
+            "completion_ratio_min": 0.98,
+            "p50": 6.17,
+            "p99": 9.278,
+            "pod_memory_peak_mib": 43.59375
+          }
+        },
+        {
+          "suite": "parity-reads-sse-chronicle",
+          "workload": "reads-sse",
+          "stream_count": 100,
+          "level": 2048,
+          "checks": [],
+          "failures": [
+            "classification=overload",
+            "completion=0.24777604166666664<0.98",
+            "ops_per_sec_ratio=0.2474<0.8000",
+            "p50=133.503>limit=1.4060",
+            "p99=164.607>limit=3.3320",
+            "memory=643.9453125>limit=79.2MiB"
+          ],
+          "observed": {
+            "completion_ratio": 0.24777604166666664,
+            "ops_per_sec": 25372.266666666663,
+            "p50": 133.503,
+            "p99": 164.607,
+            "pod_memory_peak_mib": 643.9453125
+          },
+          "reference_targets": {
+            "ops_per_sec": 102536.53333333334,
+            "p50": 0.703,
+            "p99": 1.666,
+            "pod_memory_peak_mib": 39.59375
+          },
+          "limits": {
+            "completion_ratio_min": 0.98,
+            "p50": 1.406,
+            "p99": 3.332,
+            "pod_memory_peak_mib": 79.1875
+          }
+        }
+      ],
+      "dominated_by": []
+    }
+  ]
+}

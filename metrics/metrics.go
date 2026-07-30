@@ -7,12 +7,15 @@ package metrics
 
 import (
 	"net/http"
+	httppprof "net/http/pprof"
+	"runtime"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	chronicle "gecgithub01.walmart.com/auk000v/chronicle"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
@@ -55,9 +58,22 @@ type Prometheus struct {
 	ownerFenced       *prometheus.CounterVec
 	claimContention   *prometheus.CounterVec
 	durabilityShort   *prometheus.CounterVec
+
+	sseHubs               prometheus.Gauge
+	sseClients            prometheus.Gauge
+	sseHubReads           prometheus.Counter
+	sseHubMessages        prometheus.Counter
+	sseHubRingBytes       prometheus.Gauge
+	sseLaggedDisconnects  prometheus.Counter
+	sseWriteTimeouts      prometheus.Counter
+	sseSubscriptions      prometheus.Gauge
+	sseSubscriptionEvents *prometheus.CounterVec
 }
 
-var _ webhook.Metrics = (*Prometheus)(nil)
+var (
+	_ webhook.Metrics      = (*Prometheus)(nil)
+	_ chronicle.SSEMetrics = (*Prometheus)(nil)
+)
 
 // New builds a Prometheus recorder with its own registry, including the standard
 // Go-runtime and process collectors so a load test also sees GC pauses,
@@ -197,6 +213,42 @@ func New() *Prometheus {
 			Name: "chronicle_durability_short_total",
 			Help: "Tier B fence-minting writes that reached the primary but could not prove durability within the WAIT/WAITAOF timeout, by command (WAITAOF|WAIT) — the RPO-exposure signal (issue #43, INV-DUR-01). Durability only: carries no holder/generation/exclusivity.",
 		}, []string{"cmd"}),
+		sseHubs: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "chronicle_sse_hubs",
+			Help: "Active per-stream SSE fanout hubs on this Chronicle replica.",
+		}),
+		sseClients: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "chronicle_sse_clients",
+			Help: "SSE clients attached to shared fanout hubs on this Chronicle replica.",
+		}),
+		sseHubReads: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_sse_hub_reads_total",
+			Help: "Durable stream reads performed by shared SSE hubs.",
+		}),
+		sseHubMessages: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_sse_hub_messages_total",
+			Help: "Durable messages read once and offered to local SSE clients through a shared hub.",
+		}),
+		sseHubRingBytes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "chronicle_sse_hub_ring_bytes",
+			Help: "Approximate bytes retained in all shared SSE replay rings on this replica.",
+		}),
+		sseLaggedDisconnects: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_sse_lagged_disconnects_total",
+			Help: "SSE clients disconnected after falling behind the bounded shared replay window.",
+		}),
+		sseWriteTimeouts: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_sse_write_timeouts_total",
+			Help: "SSE clients disconnected after one data-and-control flush exceeded its write deadline.",
+		}),
+		sseSubscriptions: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "chronicle_sse_subscriptions",
+			Help: "Active shared Redis notification subscriptions on this Chronicle replica.",
+		}),
+		sseSubscriptionEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_sse_subscription_events_total",
+			Help: "Shared Redis notification subscription lifecycle events by event.",
+		}, []string{"event"}),
 	}
 	reg.MustRegister(
 		p.sweepSeconds, p.sweepSubs, p.sweepTails, p.sweepWakes,
@@ -210,6 +262,9 @@ func New() *Prometheus {
 		p.dueSetMutations, p.dueWorkerSeconds, p.dueWorkerFired,
 		p.slotOwnership, p.coverageGap, p.ownerFenced, p.claimContention,
 		p.durabilityShort,
+		p.sseHubs, p.sseClients, p.sseHubReads, p.sseHubMessages,
+		p.sseHubRingBytes, p.sseLaggedDisconnects, p.sseWriteTimeouts, p.sseSubscriptions,
+		p.sseSubscriptionEvents,
 	)
 	return p
 }
@@ -317,11 +372,67 @@ func (p *Prometheus) DurabilityShort(cmd string) {
 	p.durabilityShort.WithLabelValues(cmd).Inc()
 }
 
+// SSEHubActive implements chronicle.SSEMetrics.
+func (p *Prometheus) SSEHubActive(delta int) {
+	p.sseHubs.Add(float64(delta))
+}
+
+// SSEClientActive implements chronicle.SSEMetrics.
+func (p *Prometheus) SSEClientActive(delta int) {
+	p.sseClients.Add(float64(delta))
+}
+
+// SSEHubRead implements chronicle.SSEMetrics.
+func (p *Prometheus) SSEHubRead(messages int) {
+	p.sseHubReads.Inc()
+	p.sseHubMessages.Add(float64(messages))
+}
+
+// SSEHubRingBytes implements chronicle.SSEMetrics.
+func (p *Prometheus) SSEHubRingBytes(delta int) {
+	p.sseHubRingBytes.Add(float64(delta))
+}
+
+// SSEClientLagged implements chronicle.SSEMetrics.
+func (p *Prometheus) SSEClientLagged() {
+	p.sseLaggedDisconnects.Inc()
+}
+
+// SSEClientWriteTimeout implements chronicle.SSEMetrics.
+func (p *Prometheus) SSEClientWriteTimeout() {
+	p.sseWriteTimeouts.Inc()
+}
+
+// SSESubscriptionActive implements chronicle.SSEMetrics.
+func (p *Prometheus) SSESubscriptionActive(delta int) {
+	p.sseSubscriptions.Add(float64(delta))
+}
+
+// SSESubscriptionEvent implements chronicle.SSEMetrics.
+func (p *Prometheus) SSESubscriptionEvent(event string) {
+	p.sseSubscriptionEvents.WithLabelValues(event).Inc()
+}
+
+// EnableRuntimeProfiles turns on the block and mutex sampling needed for useful
+// /debug/pprof/block and /debug/pprof/mutex profiles. CPU, heap, allocation, and
+// goroutine profiles are available without it. The returned function restores
+// the previous sampling configuration.
+func EnableRuntimeProfiles() func() {
+	runtime.SetBlockProfileRate(1)
+	previousMutexFraction := runtime.SetMutexProfileFraction(1)
+	return func() {
+		runtime.SetBlockProfileRate(0)
+		runtime.SetMutexProfileFraction(previousMutexFraction)
+	}
+}
+
 // Mux returns the observability HTTP surface: /metrics (Prometheus exposition),
 // /healthz (liveness — 200 while the process serves), and /readyz (readiness —
 // 200 when ready() returns nil, else 503). ready is typically a Redis ping, so
 // a load-test harness and Kubernetes both hold traffic until the store is up.
-func (p *Prometheus) Mux(ready func() error) *http.ServeMux {
+// When enablePprof is true, Go runtime profiles are also exposed under
+// /debug/pprof/. Keep that surface on a protected listener.
+func (p *Prometheus) Mux(ready func() error, enablePprof ...bool) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(p.reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -338,5 +449,12 @@ func (p *Prometheus) Mux(ready func() error) *http.ServeMux {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready"))
 	})
+	if len(enablePprof) > 0 && enablePprof[0] {
+		mux.HandleFunc("/debug/pprof/", httppprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", httppprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", httppprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", httppprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", httppprof.Trace)
+	}
 	return mux
 }

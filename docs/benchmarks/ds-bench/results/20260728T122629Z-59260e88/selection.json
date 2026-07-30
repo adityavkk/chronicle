@@ -1,0 +1,32 @@
+{
+  "schema": "chronicle-ds-bench-selection-v1",
+  "selected_workloads": [
+    "reads-catchup"
+  ],
+  "selected_suites": [
+    {
+      "suite": "parity-reads-catchup-rust",
+      "system": "rust",
+      "workload": "reads-catchup",
+      "cluster": "chdb-reads-catc-rust"
+    },
+    {
+      "suite": "parity-reads-catchup-node",
+      "system": "node",
+      "workload": "reads-catchup",
+      "cluster": "chdb-reads-catc-node"
+    },
+    {
+      "suite": "parity-reads-catchup-ursula",
+      "system": "ursula",
+      "workload": "reads-catchup",
+      "cluster": "chdb-reads-catc-ursula"
+    },
+    {
+      "suite": "parity-reads-catchup-chronicle",
+      "system": "chronicle",
+      "workload": "reads-catchup",
+      "cluster": "chdb-reads-catc-chronicle"
+    }
+  ]
+}

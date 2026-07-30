@@ -1,0 +1,75 @@
+{
+  "schema": "chronicle-ds-bench-execution-v1",
+  "execution_kind": "scaling",
+  "campaign_id": "20260728T210646Z-7a6173cb",
+  "completed_at": "2026-07-29T02:28:51.541663+00:00",
+  "suite_deadline_seconds": 7200,
+  "complete": true,
+  "planned_suites": 2,
+  "executed_suites": 2,
+  "selected_workloads": [
+    "blog-sse",
+    "reads-sse"
+  ],
+  "selected_suites": [
+    "parity-blog-sse-chronicle",
+    "parity-reads-sse-chronicle"
+  ],
+  "all_campaign_clusters_absent": true,
+  "runs": [
+    {
+      "suite": "parity-blog-sse-chronicle",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/sse-diagnostic-resolved/suites/parity-blog-sse-chronicle.json",
+      "cluster": "chdb-blog-sse-chronicle",
+      "zone": "europe-west4-b",
+      "system": "chronicle",
+      "workload": "blog-sse",
+      "teardown_filter": "^chdb-blog-sse-chronicle$",
+      "started_at": "2026-07-29T01:59:09.861313+00:00",
+      "completed_at": "2026-07-29T02:15:15.212112+00:00",
+      "elapsed_seconds": 965.3468642499938,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T210646Z-7a6173cb/scripts/bench",
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/sse-diagnostic-runs/20260728T210646Z-7a6173cb/runs/parity-blog-sse-chronicle/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    },
+    {
+      "suite": "parity-reads-sse-chronicle",
+      "suite_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/sse-diagnostic-resolved/suites/parity-reads-sse-chronicle.json",
+      "cluster": "chdb-reads-sse-chronicle",
+      "zone": "europe-west4-b",
+      "system": "chronicle",
+      "workload": "reads-sse",
+      "teardown_filter": "^chdb-reads-sse-chronicle$",
+      "started_at": "2026-07-29T02:15:15.212180+00:00",
+      "completed_at": "2026-07-29T02:28:49.936013+00:00",
+      "elapsed_seconds": 814.7212347919994,
+      "returncode": 0,
+      "timed_out": false,
+      "cluster_absent": true,
+      "kept_for_debugging": false,
+      "command": [
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/runs/20260728T210646Z-7a6173cb/scripts/bench",
+        "/Users/auk000v/dev/chronicle/.tmp/ds-bench/sse-diagnostic-runs/20260728T210646Z-7a6173cb/runs/parity-reads-sse-chronicle/suite.json",
+        "run"
+      ],
+      "environment": {
+        "DS_TARGET": "remote",
+        "PROJECT": "adityavkk-prototyping",
+        "PULL_POLICY": "IfNotPresent",
+        "BENCH_KEEP_CLUSTER": "1"
+      }
+    }
+  ]
+}

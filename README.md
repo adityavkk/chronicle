@@ -67,6 +67,11 @@ Flags take precedence over environment variables; both over defaults.
 | `--long-poll-timeout` | `CHRONICLE_LONG_POLL_TIMEOUT` | `30s` | How long `live=long-poll` waits before `204` |
 | `--sse-reconnect-interval` | `CHRONICLE_SSE_RECONNECT_INTERVAL` | `60s` | SSE connection cycling (enables CDN collapsing) |
 | `--read-page-bytes` | `CHRONICLE_READ_PAGE_BYTES` | `1048576` | Returned payload target for each HTTP and SSE catch-up storage page. One valid frame may exceed it |
+| `--sse-hub-replay-bytes` | `CHRONICLE_SSE_HUB_REPLAY_BYTES` | `1048576` | Replay memory retained for each active stream's shared SSE hub |
+| `--sse-hub-batch-bytes` | `CHRONICLE_SSE_HUB_BATCH_BYTES` | `262144` | Target retained bytes in one shared live SSE data event |
+| `--sse-client-write-timeout` | `CHRONICLE_SSE_CLIENT_WRITE_TIMEOUT` | `10s` | Maximum time allowed to flush one SSE data-and-control update to one client |
+| `--metrics-listen` | `CHRONICLE_METRICS_LISTEN` | _(empty)_ | Separate listener for `/metrics`, `/healthz`, and `/readyz` |
+| `--metrics-pprof` | `CHRONICLE_METRICS_PPROF` | `false` | Expose Go profiles under `/debug/pprof/` on the observability listener |
 | `--subscriptions` | `CHRONICLE_SUBSCRIPTIONS` | `true` | Enable the reserved `__ds` subscription APIs (requires the redis backend) |
 | `--public-url` | `CHRONICLE_PUBLIC_URL` | _(listen addr)_ | Externally reachable origin used in webhook `callback_url` / `jwks_url` |
 | `--webhook-allow-private` | `CHRONICLE_WEBHOOK_ALLOW_PRIVATE` | `false` | Allow webhook delivery to private/loopback addresses (trusted networks / local dev) |
@@ -84,12 +89,32 @@ Flags take precedence over environment variables; both over defaults.
 | _(env only)_ | `CHRONICLE_WAKE_TOKEN_AUD` | _(unset)_ | `aud` stamped into minted `wake_token`s ([#123](https://github.com/adityavkk/chronicle/issues/123)) **and** required by the data-plane entity gate ([#126](https://github.com/adityavkk/chronicle/issues/126) TB6b) — one value keeps the mint and the gate in agreement; a woken entity's token then reads/appends within exactly its own entity subtree |
 
 Chronicle captures one tail offset for each catch-up response and reads toward
-it in bounded storage pages. Each returned page targets 1 MiB. Redis examines
-at most 1,024 candidate frames before Lua selects the returned prefix, so
-candidate bytes can exceed 1 MiB. A smaller returned page lowers per-reader
-memory use, but it adds Redis round trips. A larger page improves sequential
-throughput at the cost of more memory. The 256 KiB, 1 MiB, and 4 MiB benchmark
-comparison selected the 1 MiB default.
+it in bounded, frame-aligned storage pages. Each returned page targets 1 MiB
+and at most 1,024 frames. Chronicle never splits a durable frame, so an
+oversized first frame can exceed the byte target. Smaller pages lower
+per-reader memory use but add Redis round trips.
+
+Each Chronicle replica keeps one live SSE hub for each stream with connected
+clients. The hub holds one Redis notification subscription, reads each append
+once, and shares one formatted data event with local clients. Redis Pub/Sub is a
+wake hint. The hub rereads durable state every second, so a lost notification
+does not lose data and an active live reader renews a positive sliding TTL.
+
+Each client holds one coalesced wake signal, not a payload queue. The replay
+limit applies after a client reaches the live tail. A client that falls behind
+the retained window, or cannot accept one update before the write timeout,
+disconnects and resumes from the last `streamNextOffset` control value it
+received. Batches are split by retained message plus formatted-event bytes, and
+the batch target cannot exceed the replay limit. Chronicle never splits one
+durable message, so one message may exceed both byte targets.
+
+`/metrics` reports active hubs, clients, Redis subscriptions, shared reads,
+retained ring bytes, lagged disconnects, write timeouts, and subscription
+lifecycle events through the `chronicle_sse_*` metrics.
+
+Runtime profiling is opt-in and requires `--metrics-listen`. Bind that listener
+only on a protected network: pprof data can reveal process internals, and block
+and mutex sampling adds overhead while profiling is enabled.
 
 ### Redis requirements
 
@@ -123,7 +148,7 @@ Per stream (path `p`):
 
 | Key | Type | Holds |
 | --- | --- | --- |
-| `ds:{p}:meta` | hash | content type, tail offset, closed flag, TTL/expiry, fork lineage, refcount |
+| `ds:{p}:meta` | hash | content type, tail offset, opaque incarnation ID, closed flag, TTL/expiry, fork lineage, refcount |
 | `ds:{p}:msg` | sorted set | message frames `"<offset>\|<bytes>"`, ordered lexicographically by offset |
 | `ds:{p}:prod` | hash | idempotent-producer state: `producerId → epoch:lastSeq` |
 | `ds:notify:{p}` | pub/sub | wakes long-poll/SSE waiters on append/close/delete |

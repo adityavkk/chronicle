@@ -1,0 +1,328 @@
+{
+  "schema": "chronicle-ds-bench-manifest-v1",
+  "execution_kind": "scaling",
+  "created_at": "2026-07-28T21:06:46.813660+00:00",
+  "campaign_id": "20260728T210646Z-7a6173cb",
+  "profile": "chronicle-sse-wait-diagnostic-4cpu",
+  "chronicle_source": {
+    "commit": "ecf1a8a8f8ad9283cedcbd17b465acb410ccfec0",
+    "dirty": true,
+    "diff_sha256": "48a4c3cffaf7b1c42dfbc68ff88decaf81f3c8c5958d576f4862ff4c7dd38e30",
+    "untracked_files": [
+      ".dockerignore",
+      "benchmarks/ds-bench/README.md",
+      "benchmarks/ds-bench/campaign.json",
+      "benchmarks/ds-bench/dsbench.py",
+      "benchmarks/ds-bench/overlay/gke/chronicle-app.yaml",
+      "benchmarks/ds-bench/overlay/gke/chronicle-redis-cluster.yaml",
+      "benchmarks/ds-bench/overlay/gke/chronicle-redis-shared.yaml",
+      "benchmarks/ds-bench/overlay/gke/chronicle.yaml",
+      "benchmarks/ds-bench/overlay/scripts/aggregate_chronicle_samples.py",
+      "benchmarks/ds-bench/overlay/scripts/aggregate_chronicle_samples_test.py",
+      "benchmarks/ds-bench/overlay/scripts/chronicle-topology.sh",
+      "benchmarks/ds-bench/overlay/scripts/chronicle-topology_test.sh",
+      "benchmarks/ds-bench/overlay/scripts/lib-bench_artifacts_test.sh",
+      "benchmarks/ds-bench/overlay/suites/chronicle-calibration.json",
+      "benchmarks/ds-bench/overlay/suites/chronicle-smoke.json",
+      "benchmarks/ds-bench/paid-screen.json",
+      "benchmarks/ds-bench/patches/chronicle.patch",
+      "benchmarks/ds-bench/scaling.json",
+      "benchmarks/ds-bench/sources.json",
+      "benchmarks/ds-bench/sse-diagnostic.json",
+      "benchmarks/ds-bench/tests/test_dsbench.py",
+      "benchmarks/ds-bench/upstream.json",
+      "docs/benchmarks/ds-bench/plan.md",
+      "docs/benchmarks/ds-bench/research.md",
+      "docs/benchmarks/ds-bench/scaling/README.md",
+      "docs/benchmarks/ds-bench/scaling/execution-screen.md",
+      "docs/benchmarks/ds-bench/scaling/plan.md",
+      "docs/benchmarks/ds-bench/scaling/research.md"
+    ]
+  },
+  "sut_chronicle_source": {
+    "commit": "ecf1a8a8f8ad9283cedcbd17b465acb410ccfec0",
+    "dirty": true,
+    "diff_sha256": "48a4c3cffaf7b1c42dfbc68ff88decaf81f3c8c5958d576f4862ff4c7dd38e30",
+    "untracked_files": [
+      ".dockerignore",
+      "benchmarks/ds-bench/README.md",
+      "benchmarks/ds-bench/campaign.json",
+      "benchmarks/ds-bench/dsbench.py",
+      "benchmarks/ds-bench/overlay/gke/chronicle-app.yaml",
+      "benchmarks/ds-bench/overlay/gke/chronicle-redis-cluster.yaml",
+      "benchmarks/ds-bench/overlay/gke/chronicle-redis-shared.yaml",
+      "benchmarks/ds-bench/overlay/gke/chronicle.yaml",
+      "benchmarks/ds-bench/overlay/scripts/aggregate_chronicle_samples.py",
+      "benchmarks/ds-bench/overlay/scripts/aggregate_chronicle_samples_test.py",
+      "benchmarks/ds-bench/overlay/scripts/chronicle-topology.sh",
+      "benchmarks/ds-bench/overlay/scripts/chronicle-topology_test.sh",
+      "benchmarks/ds-bench/overlay/scripts/lib-bench_artifacts_test.sh",
+      "benchmarks/ds-bench/overlay/suites/chronicle-calibration.json",
+      "benchmarks/ds-bench/overlay/suites/chronicle-smoke.json",
+      "benchmarks/ds-bench/paid-screen.json",
+      "benchmarks/ds-bench/patches/chronicle.patch",
+      "benchmarks/ds-bench/scaling.json",
+      "benchmarks/ds-bench/sources.json",
+      "benchmarks/ds-bench/sse-diagnostic.json",
+      "benchmarks/ds-bench/tests/test_dsbench.py",
+      "benchmarks/ds-bench/upstream.json",
+      "docs/benchmarks/ds-bench/plan.md",
+      "docs/benchmarks/ds-bench/research.md",
+      "docs/benchmarks/ds-bench/scaling/README.md",
+      "docs/benchmarks/ds-bench/scaling/execution-screen.md",
+      "docs/benchmarks/ds-bench/scaling/plan.md",
+      "docs/benchmarks/ds-bench/scaling/research.md"
+    ]
+  },
+  "ds_bench": {
+    "url": "https://github.com/electric-sql/ds-bench.git",
+    "commit": "93a1a066a511ad2ce5114dc429afb1fd0f6d99bf",
+    "adapter_sha256": "0aee8115d10d7fe3e6043e0efebbec3d280a1062646fb6be18004b8275f301c8"
+  },
+  "comparison_sources": {
+    "rust": {
+      "url": "https://github.com/electric-sql/electric.git",
+      "commit": "88793e76595d69be300731b9b25c58538923a53b",
+      "subdirectory": "packages/durable-streams-rust",
+      "provenance": "@electric-ax/durable-streams-server-rust@0.1.5"
+    },
+    "node": {
+      "url": "https://github.com/durable-streams/durable-streams.git",
+      "commit": "b55f133ec80c35cd673ea745785adb031d0df1db",
+      "subdirectory": ".",
+      "provenance": "official reference server repository"
+    },
+    "ursula": {
+      "image": "ghcr.io/tonbo-io/ursula:v0.2.0"
+    },
+    "redis": {
+      "image": "redis:8-alpine"
+    }
+  },
+  "campaign": {
+    "definition": "/Users/auk000v/dev/chronicle/benchmarks/ds-bench/sse-diagnostic.json",
+    "definition_sha256": "7a6173cb05e9c27912f20727483787186edd983d83c345a1a0b1dc6a0a15454e",
+    "resolved_index": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/sse-diagnostic-resolved/index.json",
+    "chronicle_split": null,
+    "suites": [
+      {
+        "suite": "parity-blog-sse-chronicle",
+        "system": "chronicle",
+        "workload": "blog-sse",
+        "path": "suites/parity-blog-sse-chronicle.json",
+        "sha256": "55b41ffdaf62a69ac7613cd6a3e3d20018e545a3ce805ce6c6aabd5302079d42",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/sse-diagnostic-resolved/suites/parity-blog-sse-chronicle.json",
+        "cluster": "chdb-blog-sse-chronicle",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-reads-sse-chronicle",
+        "system": "chronicle",
+        "workload": "reads-sse",
+        "path": "suites/parity-reads-sse-chronicle.json",
+        "sha256": "7fa565f85233c8cde95ec910334aac07f7aae8d3b20eda2cc7b078df08633f8d",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/sse-diagnostic-resolved/suites/parity-reads-sse-chronicle.json",
+        "cluster": "chdb-reads-sse-chronicle",
+        "zone": "europe-west4-b"
+      }
+    ],
+    "target": {
+      "throughput_ratio": 0.8,
+      "completion_ratio": 0.98,
+      "latency_ratio": 2.0,
+      "memory_ratio": 2.0,
+      "request_errors": 0,
+      "reference_rule": "better-per-cell-of-rust-wal-and-ursula-disk"
+    },
+    "reference_archives": [
+      {
+        "path": "/Users/auk000v/dev/chronicle/docs/benchmarks/ds-bench/results/20260727T122510Z-bd85274b",
+        "campaign_id": "20260727T122510Z-bd85274b",
+        "evidence_tree_sha256": "ad3104c8a0a10ca8b7e81b88e636517181ad33f82ecf3b56c9bf6977d1a1c917",
+        "file_count": 2584
+      },
+      {
+        "path": "/Users/auk000v/dev/chronicle/docs/benchmarks/ds-bench/results/20260728T122629Z-59260e88",
+        "campaign_id": "20260728T122629Z-59260e88",
+        "evidence_tree_sha256": "c0860ab25e172de648dde9280ea749d5343a142d1e6d3298fcd8a8cbf4c569e8",
+        "file_count": 481
+      }
+    ],
+    "candidate_order": [
+      {
+        "label": "chronicle-c1-r1-legacy",
+        "args": "always:1:1:2000:2000:4096:12288:legacy",
+        "topology": {
+          "kind": "shared",
+          "chronicle_replicas": 1,
+          "redis_masters": 1,
+          "appendfsync": "always",
+          "sse_wait_mode": "legacy",
+          "requested": {
+            "chronicle_cpu_millis": 2000,
+            "redis_cpu_millis": 2000,
+            "chronicle_memory_mib": 4096,
+            "redis_memory_mib": 12288
+          },
+          "per_pod": {
+            "chronicle": {
+              "cpu_millis": 2000,
+              "memory_mib": 4096
+            },
+            "redis": {
+              "cpu_millis": 2000,
+              "memory_mib": 12288
+            }
+          },
+          "effective": {
+            "cpu_millis": 4000,
+            "memory_mib": 16384
+          }
+        }
+      },
+      {
+        "label": "chronicle-c1-r1-sse-persistent",
+        "args": "always:1:1:2000:2000:4096:12288:persistent",
+        "topology": {
+          "kind": "shared",
+          "chronicle_replicas": 1,
+          "redis_masters": 1,
+          "appendfsync": "always",
+          "sse_wait_mode": "persistent",
+          "requested": {
+            "chronicle_cpu_millis": 2000,
+            "redis_cpu_millis": 2000,
+            "chronicle_memory_mib": 4096,
+            "redis_memory_mib": 12288
+          },
+          "per_pod": {
+            "chronicle": {
+              "cpu_millis": 2000,
+              "memory_mib": 4096
+            },
+            "redis": {
+              "cpu_millis": 2000,
+              "memory_mib": 12288
+            }
+          },
+          "effective": {
+            "cpu_millis": 4000,
+            "memory_mib": 16384
+          }
+        }
+      }
+    ]
+  },
+  "hardware": {
+    "server_machine": "c4d-standard-16-lssd",
+    "server_cpus": 4,
+    "client_machine": "n2d-standard-32",
+    "client_nodes": 2,
+    "zone": "europe-west4-b",
+    "region": "europe-west4",
+    "resource_budget": {
+      "cpu_millis": 4000,
+      "memory_mib": 16384,
+      "local_ssds": 1
+    },
+    "disk_mode": "one local-NVMe-backed ephemeral-storage filesystem",
+    "server_purchasing_model": "on-demand",
+    "client_purchasing_model": "spot"
+  },
+  "redis": {
+    "appendonly": "yes",
+    "appendfsync_arms": [
+      "always"
+    ],
+    "maxmemory": "five-sixths of each declared Redis pod memory limit",
+    "maxmemory_policy": "noeviction",
+    "chronicle_pool_size": 4096
+  },
+  "images": {
+    "schema": "chronicle-ds-bench-images-v1",
+    "created_at": "2026-07-28T20:08:07.154331+00:00",
+    "target": "remote",
+    "project": "adityavkk-prototyping",
+    "registry": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench",
+    "preflight": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-images-preflight.json",
+    "reused_from": null,
+    "sut_reused_from": null,
+    "reference_suts_reused_from": {
+      "schema": "chronicle-ds-bench-reference-sut-reuse-v1",
+      "archive": "/Users/auk000v/dev/chronicle/docs/benchmarks/ds-bench/results/20260728T122629Z-59260e88",
+      "campaign_id": "20260728T122629Z-59260e88",
+      "evidence_tree_sha256": "c0860ab25e172de648dde9280ea749d5343a142d1e6d3298fcd8a8cbf4c569e8",
+      "images": [
+        "node",
+        "redis",
+        "rust",
+        "ursula"
+      ]
+    },
+    "images": {
+      "node": {
+        "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-node@sha256:e82c0192eb9124e2b0e2d166776739f14f9bd4fc8146e394e0df488708619b71",
+        "digest": "sha256:e82c0192eb9124e2b0e2d166776739f14f9bd4fc8146e394e0df488708619b71",
+        "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-node:b55f133ec80c",
+        "source": {
+          "commit": "b55f133ec80c35cd673ea745785adb031d0df1db",
+          "provenance": "official reference server repository"
+        }
+      },
+      "ursula": {
+        "reference": "ghcr.io/tonbo-io/ursula@sha256:06e8cd30c51b907b214c9edaa879427a0fbafe8ab567efd5f975225bc103e281",
+        "digest": "sha256:06e8cd30c51b907b214c9edaa879427a0fbafe8ab567efd5f975225bc103e281",
+        "tag_reference": "ghcr.io/tonbo-io/ursula:v0.2.0"
+      },
+      "redis": {
+        "reference": "redis@sha256:8096655e437712b07503796fb64d81359256cfcff0ab29d95a7da72863786efb",
+        "digest": "sha256:8096655e437712b07503796fb64d81359256cfcff0ab29d95a7da72863786efb",
+        "tag_reference": "redis:8-alpine"
+      },
+      "rust": {
+        "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-streams@sha256:3501f08b55f60c8043cf9af99ffc5732950c676a9f5f3a2f260efb6a1889ddd2",
+        "digest": "sha256:3501f08b55f60c8043cf9af99ffc5732950c676a9f5f3a2f260efb6a1889ddd2",
+        "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-streams:88793e76595d",
+        "source": {
+          "commit": "88793e76595d69be300731b9b25c58538923a53b",
+          "provenance": "@electric-ax/durable-streams-server-rust@0.1.5"
+        }
+      },
+      "ds-bench": {
+        "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/ds-bench@sha256:8b68435dec204e5ab7d3f5f8276c56062a3edb7422e812e78fb2cf365452a67b",
+        "digest": "sha256:8b68435dec204e5ab7d3f5f8276c56062a3edb7422e812e78fb2cf365452a67b",
+        "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/ds-bench:93a1a066a511-425ddb541e96",
+        "source": {
+          "commit": "93a1a066a511ad2ce5114dc429afb1fd0f6d99bf",
+          "adapter_sha256": "425ddb541e9655eef6b1340cf7c73e4430d62adc40d74456128a7574f642d434",
+          "build_context_sha256": "bc2401a8338bb00298d5a16bc2e0371f02ca06a7cfcca850d54716813c3908b0",
+          "build_context_file_count": 24
+        }
+      },
+      "chronicle": {
+        "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/chronicle@sha256:7dbe8a49c4cbb60751f29ee9d23bd24a739261f0b4dceb705c7b0f1c8e109783",
+        "digest": "sha256:7dbe8a49c4cbb60751f29ee9d23bd24a739261f0b4dceb705c7b0f1c8e109783",
+        "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/chronicle:ecf1a8a8f8ad-b54e482fdb99",
+        "source": {
+          "schema": "chronicle-image-source-v1",
+          "commit": "ecf1a8a8f8ad9283cedcbd17b465acb410ccfec0",
+          "build_context_sha256": "dafa211a80b13500c824a31b15336fc1de93e3899a4d0482929e83a22c457bfa",
+          "build_context_file_count": 110
+        }
+      }
+    }
+  },
+  "images_file": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/scaling-images.json",
+  "validity_policy": {
+    "headline_requires": [
+      "status=ok",
+      "zero errors",
+      "zero lazy stream creation during measurement",
+      "aligned fleet measurement windows",
+      "no client bottleneck",
+      "observed plateau"
+    ],
+    "ladder_exhausted": "lower_bound_only",
+    "durability_classes_are_separate": true
+  }
+}

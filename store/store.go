@@ -13,17 +13,18 @@ import (
 
 // Common errors
 var (
-	ErrStreamNotFound      = errors.New("stream not found")
-	ErrStreamExpired       = errors.New("stream has expired")
-	ErrStreamExists        = errors.New("stream already exists")
-	ErrConfigMismatch      = errors.New("stream configuration mismatch")
-	ErrSequenceConflict    = errors.New("sequence number conflict")
-	ErrContentTypeMismatch = errors.New("content type mismatch")
-	ErrEmptyBody           = errors.New("empty body not allowed")
-	ErrInvalidOffset       = errors.New("invalid offset")
-	ErrEmptyJSONArray      = errors.New("empty JSON array not allowed")
-	ErrInvalidJSON         = errors.New("invalid JSON")
-	ErrStreamClosed        = errors.New("stream is closed")
+	ErrStreamNotFound                 = errors.New("stream not found")
+	ErrStreamExpired                  = errors.New("stream has expired")
+	ErrStreamExists                   = errors.New("stream already exists")
+	ErrConfigMismatch                 = errors.New("stream configuration mismatch")
+	ErrSequenceConflict               = errors.New("sequence number conflict")
+	ErrContentTypeMismatch            = errors.New("content type mismatch")
+	ErrEmptyBody                      = errors.New("empty body not allowed")
+	ErrInvalidOffset                  = errors.New("invalid offset")
+	ErrEmptyJSONArray                 = errors.New("empty JSON array not allowed")
+	ErrInvalidJSON                    = errors.New("invalid JSON")
+	ErrStreamClosed                   = errors.New("stream is closed")
+	ErrNotificationSubscriptionClosed = errors.New("notification subscription closed")
 )
 
 // Producer validation errors
@@ -151,6 +152,43 @@ type Store interface {
 	Close() error
 }
 
+// NotificationSubscription is an optional long-lived notification feed. It
+// carries wake hints only. Callers must read durable state after every wake
+// because notifications may be coalesced or lost.
+type NotificationSubscription interface {
+	// Wait blocks until a notification arrives or ctx ends. Implementations may
+	// coalesce a burst of hints. Every event, including NotificationDelete, must
+	// be confirmed against durable state. NotificationReconnect means the
+	// transport resubscribed and callers must immediately recheck durable state.
+	Wait(ctx context.Context) (NotificationEvent, error)
+
+	// Close releases the subscription and its underlying connection.
+	Close() error
+}
+
+// NotificationSubscriber is an optional Store capability for shared live
+// readers. One subscription can wake one per-stream fanout hub instead of one
+// subscription per HTTP client.
+type NotificationSubscriber interface {
+	SubscribeNotifications(ctx context.Context, path string) (NotificationSubscription, error)
+}
+
+// NotificationEvent describes why a shared live reader should recheck durable
+// state. Every event is a hint; only a durable read or incarnation check may
+// terminate the current stream incarnation.
+type NotificationEvent uint8
+
+const (
+	// NotificationAppend reports an append or an unknown wake hint.
+	NotificationAppend NotificationEvent = iota
+	// NotificationClose reports a stream close hint.
+	NotificationClose
+	// NotificationDelete reports a delete hint that must be durably confirmed.
+	NotificationDelete
+	// NotificationReconnect reports that the notification transport resubscribed.
+	NotificationReconnect
+)
+
 // ClosedByProducer tracks which producer closed the stream for idempotent duplicate detection
 type ClosedByProducer struct {
 	ProducerId string
@@ -220,6 +258,19 @@ type StreamMetadata struct {
 	SoftDeleted         bool                      // Logically deleted but retained for fork readers
 }
 
+// SameIncarnation reports whether two metadata snapshots refer to the same
+// created stream. Empty IDs are accepted only as a compatibility fallback for
+// streams created before incarnation IDs were persisted.
+func (m *StreamMetadata) SameIncarnation(other *StreamMetadata) bool {
+	if m == nil || other == nil {
+		return false
+	}
+	if m.Incarnation != "" || other.Incarnation != "" {
+		return m.Incarnation != "" && m.Incarnation == other.Incarnation
+	}
+	return m.CreatedAt.Equal(other.CreatedAt)
+}
+
 // IsExpired checks if the stream has expired based on TTL or ExpiresAt,
 // evaluated against the wall clock. It is preserved for backward
 // compatibility; expiry-sensitive code that needs a controllable clock
@@ -241,10 +292,22 @@ func (m *StreamMetadata) IsExpiredAt(now time.Time) bool {
 
 	// Check TTL-based expiry
 	if m.TTLSeconds != nil {
-		expiryTime := m.LastAccessedAt.Add(time.Duration(*m.TTLSeconds) * time.Second)
-		if now.After(expiryTime) {
-			return true
+		// TTL is protocol-level int64 seconds, which is much wider than
+		// time.Duration's nanosecond range. Compare the absolute seconds and
+		// nanoseconds directly so a large valid TTL cannot wrap negative and
+		// expire immediately.
+		const maxInt64 = int64(1<<63 - 1)
+		ttl := *m.TTLSeconds
+		lastSeconds := m.LastAccessedAt.Unix()
+		if ttl > 0 && lastSeconds > maxInt64-ttl {
+			return false
 		}
+		expirySeconds := lastSeconds + ttl
+		nowSeconds := now.Unix()
+		if nowSeconds != expirySeconds {
+			return nowSeconds > expirySeconds
+		}
+		return now.Nanosecond() > m.LastAccessedAt.Nanosecond()
 	}
 
 	return false

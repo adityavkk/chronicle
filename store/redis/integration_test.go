@@ -127,6 +127,75 @@ func TestIntegrationCreateGetHas(t *testing.T) {
 	}
 }
 
+func TestIntegrationDeleteRecreateChangesIncarnationWithFrozenClock(t *testing.T) {
+	base := newTestStore(t)
+	clock := store.NewFakeClock(time.Unix(1_765_000_000, 123))
+	subject := New(base.client, Options{Clock: clock})
+	path := testPath("frozen-incarnation")
+
+	first := mustCreate(t, subject, path, store.CreateOptions{ContentType: "text/plain"})
+	if err := subject.Delete(path); err != nil {
+		t.Fatal(err)
+	}
+	second := mustCreate(t, subject, path, store.CreateOptions{ContentType: "text/plain"})
+
+	if !first.CreatedAt.Equal(second.CreatedAt) {
+		t.Fatalf("frozen CreatedAt changed: first=%s second=%s", first.CreatedAt, second.CreatedAt)
+	}
+	if first.Incarnation == "" || second.Incarnation == "" {
+		t.Fatalf("empty incarnation: first=%q second=%q", first.Incarnation, second.Incarnation)
+	}
+	if first.SameIncarnation(second) {
+		t.Fatalf("delete/recreate reused incarnation %q", first.Incarnation)
+	}
+}
+
+func TestIntegrationMaxTTLUsesLazyExpiryWithoutOverflow(t *testing.T) {
+	s := newTestStore(t)
+	path := testPath("max-ttl")
+	ttl := int64(1<<63 - 1)
+
+	meta := mustCreate(t, s, path, store.CreateOptions{
+		ContentType: "text/plain",
+		TTLSeconds:  &ttl,
+	})
+	if meta.TTLSeconds == nil || *meta.TTLSeconds != ttl {
+		t.Fatalf("Create TTL = %v, want %d", meta.TTLSeconds, ttl)
+	}
+
+	mustAppend(t, s, path, []byte("payload"), store.AppendOptions{})
+	msgs, upToDate, err := s.Read(path, store.ZeroOffset)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !upToDate || len(msgs) != 1 || !bytes.Equal(msgs[0].Data, []byte("payload")) {
+		t.Fatalf("Read = (%q, %v), want one payload at tail", msgs, upToDate)
+	}
+
+	pttl, err := testClient.Do(context.Background(), "PTTL", metaKey(path)).Int64()
+	if err != nil {
+		t.Fatalf("PTTL: %v", err)
+	}
+	if pttl != -1 {
+		t.Fatalf("PTTL = %d, want -1: unrepresentable backstop must remain persistent", pttl)
+	}
+}
+
+func TestIntegrationOrdinaryTTLInstallsBackstop(t *testing.T) {
+	s := newTestStore(t)
+	path := testPath("ordinary-ttl")
+	ttl := int64(3600)
+
+	mustCreate(t, s, path, store.CreateOptions{TTLSeconds: &ttl})
+	pttl, err := testClient.Do(context.Background(), "PTTL", metaKey(path)).Int64()
+	if err != nil {
+		t.Fatalf("PTTL: %v", err)
+	}
+	if pttl <= 0 || pttl > (ttl+60)*1000 {
+		t.Fatalf("PTTL = %d, want a positive backstop no longer than %d", pttl, (ttl+60)*1000)
+	}
+}
+
 func TestIntegrationCreateIdempotency(t *testing.T) {
 	s := newTestStore(t)
 	path := testPath("idem")

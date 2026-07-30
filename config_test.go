@@ -2,6 +2,7 @@ package chronicle
 
 import (
 	"testing"
+	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 )
@@ -31,6 +32,89 @@ func TestLoadEnvReadPageBytes(t *testing.T) {
 		if err := c.LoadEnv(lookup(value)); err == nil {
 			t.Fatalf("ReadPageBytes %q must fail", value)
 		}
+	}
+}
+
+func TestLoadEnvSSEHubBounds(t *testing.T) {
+	env := func(vars map[string]string) func(string) (string, bool) {
+		return func(key string) (string, bool) {
+			value, ok := vars[key]
+			return value, ok
+		}
+	}
+
+	cfg := DefaultConfig()
+	if cfg.SSEHubReplayBytes != defaultSSEHubReplayBytes {
+		t.Fatalf("default replay bytes = %d, want %d", cfg.SSEHubReplayBytes, defaultSSEHubReplayBytes)
+	}
+	if cfg.SSEHubBatchBytes != defaultSSEHubBatchBytes {
+		t.Fatalf("default batch bytes = %d, want %d", cfg.SSEHubBatchBytes, defaultSSEHubBatchBytes)
+	}
+	if cfg.SSEClientWriteTimeout != defaultSSEWriteTimeout {
+		t.Fatalf(
+			"default client write timeout = %s, want %s",
+			cfg.SSEClientWriteTimeout,
+			defaultSSEWriteTimeout,
+		)
+	}
+
+	if err := cfg.LoadEnv(env(map[string]string{
+		EnvSSEHubReplayBytes:     "2097152",
+		EnvSSEHubBatchBytes:      "131072",
+		EnvSSEClientWriteTimeout: "3s",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SSEHubReplayBytes != 2097152 || cfg.SSEHubBatchBytes != 131072 {
+		t.Fatalf("SSE hub bounds = replay %d batch %d", cfg.SSEHubReplayBytes, cfg.SSEHubBatchBytes)
+	}
+	if cfg.SSEClientWriteTimeout != 3*time.Second {
+		t.Fatalf("client write timeout = %s", cfg.SSEClientWriteTimeout)
+	}
+
+	for _, key := range []string{EnvSSEHubReplayBytes, EnvSSEHubBatchBytes} {
+		cfg = DefaultConfig()
+		if err := cfg.LoadEnv(env(map[string]string{key: "0"})); err == nil {
+			t.Fatalf("%s=0 must fail startup", key)
+		}
+		cfg = DefaultConfig()
+		if err := cfg.LoadEnv(env(map[string]string{key: "not-an-int"})); err == nil {
+			t.Fatalf("%s with invalid integer must fail startup", key)
+		}
+	}
+
+	cfg = DefaultConfig()
+	if err := cfg.LoadEnv(env(map[string]string{
+		EnvSSEClientWriteTimeout: "0s",
+	})); err == nil {
+		t.Fatal("zero client write timeout must fail startup")
+	}
+}
+
+func TestLoadEnvMetricsPprof(t *testing.T) {
+	lookup := func(value string) func(string) (string, bool) {
+		return func(key string) (string, bool) {
+			if key == EnvMetricsPprof {
+				return value, true
+			}
+			return "", false
+		}
+	}
+
+	cfg := DefaultConfig()
+	if cfg.MetricsPprof {
+		t.Fatal("pprof must be disabled by default")
+	}
+	if err := cfg.LoadEnv(lookup("true")); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.MetricsPprof {
+		t.Fatal("CHRONICLE_METRICS_PPROF=true did not enable pprof")
+	}
+
+	cfg = DefaultConfig()
+	if err := cfg.LoadEnv(lookup("not-a-bool")); err == nil {
+		t.Fatal("invalid pprof boolean was accepted")
 	}
 }
 

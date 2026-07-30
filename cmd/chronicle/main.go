@@ -176,6 +176,9 @@ func run() error {
 	flag.DurationVar(&cfg.LongPollTimeout, "long-poll-timeout", cfg.LongPollTimeout, "server-side long-poll timeout")
 	flag.DurationVar(&cfg.SSEReconnectInterval, "sse-reconnect-interval", cfg.SSEReconnectInterval, "SSE connection reconnect interval")
 	flag.IntVar(&cfg.ReadPageBytes, "read-page-bytes", cfg.ReadPageBytes, "catch-up returned page payload target in bytes")
+	flag.IntVar(&cfg.SSEHubReplayBytes, "sse-hub-replay-bytes", cfg.SSEHubReplayBytes, "per-stream SSE hub replay memory bound in bytes")
+	flag.IntVar(&cfg.SSEHubBatchBytes, "sse-hub-batch-bytes", cfg.SSEHubBatchBytes, "target retained bytes per shared SSE data event")
+	flag.DurationVar(&cfg.SSEClientWriteTimeout, "sse-client-write-timeout", cfg.SSEClientWriteTimeout, "maximum duration of one SSE client event flush")
 	flag.StringVar(&cfg.PublicBaseURL, "public-url", cfg.PublicBaseURL, "externally reachable origin for webhook callback/JWKS URLs")
 	flag.BoolVar(&cfg.Subscriptions, "subscriptions", cfg.Subscriptions, "enable the reserved __ds subscription APIs (redis backend only)")
 	flag.BoolVar(&cfg.UI, "ui", cfg.UI, "serve the embedded dsui console alongside the API (false = backend API only)")
@@ -185,10 +188,17 @@ func run() error {
 	flag.DurationVar(&cfg.ReconcileInterval, "reconcile-interval", cfg.ReconcileInterval, "slow reconcile loop interval (subscriptions)")
 	flag.IntVar(&cfg.SweepBatch, "sweep-batch", cfg.SweepBatch, "max subscriptions evaluated per sweep tick, 0 = no cap (subscriptions)")
 	flag.StringVar(&cfg.MetricsListen, "metrics-listen", cfg.MetricsListen, "address for /metrics + /healthz + /readyz, e.g. :9090 (empty disables)")
+	flag.BoolVar(&cfg.MetricsPprof, "metrics-pprof", cfg.MetricsPprof, "expose Go runtime profiles on the protected metrics listener")
 	flag.StringVar(&logLevel, "log-level", logLevel, "log level: debug, info, warn or error")
 	flag.Parse()
 	if cfg.ReadPageBytes <= 0 {
 		return fmt.Errorf("-read-page-bytes must be positive")
+	}
+	if err := validateSSEConfig(cfg); err != nil {
+		return err
+	}
+	if err := validateObservabilityConfig(cfg); err != nil {
+		return err
 	}
 
 	var level slog.Level
@@ -205,12 +215,15 @@ func run() error {
 	defer st.Close() //nolint:errcheck // best-effort release on shutdown
 
 	handler := &chronicle.Handler{
-		Store:                st,
-		LongPollTimeout:      cfg.LongPollTimeout,
-		SSEReconnectInterval: cfg.SSEReconnectInterval,
-		ReadPageBytes:        cfg.ReadPageBytes,
-		Logger:               logger,
-		AuthMode:             cfg.AuthMode,
+		Store:                 st,
+		LongPollTimeout:       cfg.LongPollTimeout,
+		SSEReconnectInterval:  cfg.SSEReconnectInterval,
+		ReadPageBytes:         cfg.ReadPageBytes,
+		SSEHubReplayBytes:     cfg.SSEHubReplayBytes,
+		SSEHubBatchBytes:      cfg.SSEHubBatchBytes,
+		SSEClientWriteTimeout: cfg.SSEClientWriteTimeout,
+		Logger:                logger,
+		AuthMode:              cfg.AuthMode,
 	}
 
 	// Trusted-backend service principals (issue #126 TB4). Counts only in the
@@ -254,9 +267,14 @@ func run() error {
 	var subMetrics webhook.Metrics
 	var metricsSrv *http.Server
 	if cfg.MetricsListen != "" {
+		if cfg.MetricsPprof {
+			disableRuntimeProfiles := metrics.EnableRuntimeProfiles()
+			defer disableRuntimeProfiles()
+		}
 		prom := metrics.New()
 		subMetrics = prom
 		handler.ReadMetrics = prom
+		handler.SSEMetrics = prom
 		ready := func() error { return nil }
 		if client != nil {
 			ready = func() error {
@@ -267,7 +285,7 @@ func run() error {
 		}
 		metricsSrv = &http.Server{
 			Addr:              cfg.MetricsListen,
-			Handler:           prom.Mux(ready),
+			Handler:           prom.Mux(ready, cfg.MetricsPprof),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 		go func() {
@@ -275,7 +293,10 @@ func run() error {
 				logger.Error("metrics server", "error", err)
 			}
 		}()
-		logger.Info("metrics enabled", "addr", cfg.MetricsListen)
+		logger.Info("metrics enabled", "addr", cfg.MetricsListen, "pprof", cfg.MetricsPprof)
+		if cfg.MetricsPprof {
+			logger.Warn("pprof enabled; keep the metrics listener private", "addr", cfg.MetricsListen)
+		}
 	}
 
 	subscriptionsEnabled := false
@@ -375,6 +396,29 @@ func run() error {
 		// Open-ended SSE connections can outlive the drain window; cut them.
 		logger.Warn("graceful shutdown incomplete, forcing close", "error", err)
 		return srv.Close()
+	}
+	return nil
+}
+
+func validateSSEConfig(cfg chronicle.Config) error {
+	if cfg.SSEHubReplayBytes <= 0 {
+		return fmt.Errorf("-sse-hub-replay-bytes must be positive")
+	}
+	if cfg.SSEHubBatchBytes <= 0 {
+		return fmt.Errorf("-sse-hub-batch-bytes must be positive")
+	}
+	if cfg.SSEHubBatchBytes > cfg.SSEHubReplayBytes {
+		return fmt.Errorf("-sse-hub-batch-bytes must not exceed -sse-hub-replay-bytes")
+	}
+	if cfg.SSEClientWriteTimeout <= 0 {
+		return fmt.Errorf("-sse-client-write-timeout must be positive")
+	}
+	return nil
+}
+
+func validateObservabilityConfig(cfg chronicle.Config) error {
+	if cfg.MetricsPprof && cfg.MetricsListen == "" {
+		return fmt.Errorf("-metrics-pprof requires -metrics-listen")
 	}
 	return nil
 }

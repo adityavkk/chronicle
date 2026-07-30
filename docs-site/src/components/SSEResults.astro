@@ -1,0 +1,178 @@
+<figure class="result-panel">
+  <div class="result-label">Measured change</div>
+  <div class="stats">
+    <div class="stat">
+      <strong>1.000</strong>
+      <span>exact live reads per append</span>
+    </div>
+    <div class="stat">
+      <strong>1.0226</strong>
+      <span>full-cell reads per append, 100 streams</span>
+    </div>
+    <div class="stat">
+      <strong>332 / 332</strong>
+      <span>conformance tests passed</span>
+    </div>
+    <div class="stat">
+      <strong>0</strong>
+      <span>request errors in both new runs</span>
+    </div>
+  </div>
+
+  <div class="bars">
+    <div class="bar-group">
+      <div class="bar-title">
+        <strong>1 stream · 1,000 clients</strong>
+        <span>reads per append</span>
+      </div>
+      <div class="bar-row old">
+        <span class="name">before</span>
+        <span class="track"><span style="width:100%"></span></span>
+        <strong>970.5</strong>
+      </div>
+      <div class="bar-row new">
+        <span class="name">after</span>
+        <span class="track"><span style="width:0.103%"></span></span>
+        <strong>1.000</strong>
+      </div>
+    </div>
+
+    <div class="bar-group">
+      <div class="bar-title">
+        <strong>100 streams · 2,048 clients</strong>
+        <span>reads per append</span>
+      </div>
+      <div class="bar-row old">
+        <span class="name">before</span>
+        <span class="track"><span style="width:100%"></span></span>
+        <strong>20.1</strong>
+      </div>
+      <div class="bar-row new">
+        <span class="name">after</span>
+        <span class="track"><span style="width:5.087%"></span></span>
+        <strong>1.0226</strong>
+      </div>
+    </div>
+  </div>
+  <figcaption>
+    Bar lengths are relative within each workload. The after bar has a
+    three-pixel visual floor so it remains visible. The one-stream after value
+    comes from the exact-counter guard. The 100-stream after value uses the
+    conservative full-cell counters because the sampler missed the live-window
+    boundary.
+  </figcaption>
+</figure>
+
+<style lang="scss">
+  .result-panel {
+    margin: 32px 0 30px var(--rail-indent);
+    max-width: var(--prose-max);
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--card);
+    box-shadow: var(--shadow-sm);
+  }
+  .result-label {
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-bottom: 1px solid var(--rule);
+  }
+  .stat {
+    min-width: 0;
+    padding: 18px 20px;
+    border-right: 1px solid var(--rule-soft);
+  }
+  .stat:last-child { border-right: none; }
+  .stat strong {
+    display: block;
+    font-family: var(--mono);
+    font-size: 20px;
+    line-height: 1.2;
+    color: var(--accent-deep);
+  }
+  .stat span {
+    display: block;
+    margin-top: 7px;
+    color: var(--ink-mute);
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+  .bars {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 30px;
+    padding: 24px;
+  }
+  .bar-title {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 13px;
+    font-size: 12.5px;
+  }
+  .bar-title span {
+    color: var(--ink-mute);
+    font-size: 11.5px;
+  }
+  .bar-row {
+    display: grid;
+    grid-template-columns: 48px minmax(80px, 1fr) 58px;
+    gap: 10px;
+    align-items: center;
+    margin-top: 9px;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .bar-row .name { color: var(--ink-mute); }
+  .bar-row strong {
+    text-align: right;
+    font-size: 11px;
+    color: var(--ink);
+  }
+  .track {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--paper-warm);
+  }
+  .track span {
+    display: block;
+    min-width: 3px;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--bad);
+  }
+  .new .track span { background: var(--accent); }
+  figcaption {
+    padding: 13px 24px 16px;
+    border-top: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  @media (max-width: 840px) {
+    .result-panel { margin-left: 0; max-width: none; }
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stat:nth-child(2) { border-right: none; }
+    .stat:nth-child(-n+2) { border-bottom: 1px solid var(--rule-soft); }
+    .bars { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    .stats { grid-template-columns: 1fr; }
+    .stat { border-right: none; border-bottom: 1px solid var(--rule-soft); }
+    .stat:nth-child(3) { border-bottom: 1px solid var(--rule-soft); }
+    .stat:last-child { border-bottom: none; }
+    .bar-title { flex-direction: column; gap: 2px; }
+  }
+</style>

@@ -1,0 +1,167 @@
+---
+import Demo from "./Demo.astro";
+---
+
+<Demo label="Try the live-read scaling rule">
+  <div class="amp" data-sse-amplification>
+    <div class="controls">
+      <label>
+        <span>SSE clients on one stream</span>
+        <input data-clients type="range" min="1" max="2000" step="1" value="1000" />
+        <output data-client-value>1,000</output>
+      </label>
+      <label>
+        <span>Serving Chronicle replicas</span>
+        <input data-replicas type="range" min="1" max="8" step="1" value="1" />
+        <output data-replica-value>1</output>
+      </label>
+    </div>
+
+    <div class="readout" aria-live="polite">
+      <div class="read-row old">
+        <div class="read-head">
+          <span>Old live path</span>
+          <strong><span data-old>1,000</span> Redis reads</strong>
+        </div>
+        <div class="track"><span data-old-bar></span></div>
+        <p>One durable read after the append for every connected client.</p>
+      </div>
+      <div class="read-row new">
+        <div class="read-head">
+          <span>New live path</span>
+          <strong><span data-new>1</span> Redis read</strong>
+        </div>
+        <div class="track"><span data-new-bar></span></div>
+        <p>One durable read for each replica that serves this stream.</p>
+      </div>
+      <p class="saving"><strong data-saving>99.90%</strong> fewer live Redis reads in this model.</p>
+    </div>
+  </div>
+  <span slot="caption">
+    This models one append on one stream after clients reach the live tail.
+    Initial catch-up is still one read path per client. A replica with no local
+    clients does not create a hub for the stream.
+  </span>
+</Demo>
+
+<script>
+  document.querySelectorAll<HTMLElement>("[data-sse-amplification]").forEach((root) => {
+    const clients = root.querySelector<HTMLInputElement>("[data-clients]");
+    const replicas = root.querySelector<HTMLInputElement>("[data-replicas]");
+    const clientValue = root.querySelector<HTMLOutputElement>("[data-client-value]");
+    const replicaValue = root.querySelector<HTMLOutputElement>("[data-replica-value]");
+    const oldValue = root.querySelector<HTMLElement>("[data-old]");
+    const newValue = root.querySelector<HTMLElement>("[data-new]");
+    const oldBar = root.querySelector<HTMLElement>("[data-old-bar]");
+    const newBar = root.querySelector<HTMLElement>("[data-new-bar]");
+    const savingValue = root.querySelector<HTMLElement>("[data-saving]");
+    if (!clients || !replicas || !clientValue || !replicaValue || !oldValue ||
+        !newValue || !oldBar || !newBar || !savingValue) return;
+
+    const format = new Intl.NumberFormat("en-US");
+    const update = () => {
+      const clientCount = Number(clients.value);
+      if (Number(replicas.value) > clientCount) {
+        replicas.value = String(clientCount);
+      }
+      const replicaCount = Number(replicas.value);
+      const saving = Math.max(0, 100 * (1 - replicaCount / clientCount));
+
+      clientValue.value = format.format(clientCount);
+      replicaValue.value = format.format(replicaCount);
+      oldValue.textContent = format.format(clientCount);
+      newValue.textContent = format.format(replicaCount);
+      savingValue.textContent = `${saving.toFixed(2)}%`;
+      oldBar.style.width = "100%";
+      newBar.style.width = `${Math.max(0.6, 100 * replicaCount / clientCount)}%`;
+    };
+
+    clients.addEventListener("input", update);
+    replicas.addEventListener("input", update);
+    update();
+  });
+</script>
+
+<style lang="scss">
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 22px;
+  }
+  label {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 14px;
+    align-items: center;
+    color: var(--ink);
+    font-size: 13.5px;
+  }
+  label span {
+    font-weight: 600;
+  }
+  input {
+    grid-column: 1 / -1;
+    width: 100%;
+    accent-color: var(--accent);
+  }
+  output {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent-deep);
+  }
+  .read-row + .read-row {
+    margin-top: 18px;
+  }
+  .read-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: baseline;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .read-head > span {
+    color: var(--ink-mute);
+  }
+  .track {
+    height: 9px;
+    margin-top: 7px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--paper-warm);
+  }
+  .track span {
+    display: block;
+    min-width: 3px;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--bad);
+    transition: width 160ms ease-out;
+  }
+  .new .track span {
+    background: var(--accent);
+  }
+  .read-row p {
+    margin: 6px 0 0;
+    color: var(--ink-mute);
+    font-size: 12.5px;
+  }
+  .saving {
+    margin: 18px 0 0;
+    padding: 12px 14px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-tint);
+    font-size: 13.5px;
+  }
+  .saving strong {
+    font-family: var(--mono);
+    color: var(--accent-deep);
+  }
+  @media (max-width: 620px) {
+    .controls { grid-template-columns: 1fr; }
+    .read-head { align-items: flex-start; flex-direction: column; gap: 3px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .track span { transition: none; }
+  }
+</style>

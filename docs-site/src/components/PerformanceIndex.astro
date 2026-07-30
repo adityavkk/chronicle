@@ -2,11 +2,14 @@
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const links = {
   catchup: `${base}/performance-improvements/bounded-catchup`,
+  sse: `${base}/performance-improvements/sse-fanout`,
   scaling: `${base}/horizontal-scale`,
   loadTests: `${base}/load-testing`,
+  issue4: "https://gecgithub01.walmart.com/GPA/chronicle/issues/4",
   issue5: "https://gecgithub01.walmart.com/GPA/chronicle/issues/5",
-  adr5: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0004-bounded-read-pages-and-snapshot-catch-up.md",
-  evidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md",
+  catchupAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0004-bounded-read-pages-and-snapshot-catch-up.md",
+  sseAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0005-per-instance-sse-stream-fanout.md",
+  catchupEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md",
   comparison: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/ds-bench/configuration-comparison.md",
 };
 ---
@@ -27,14 +30,33 @@ const links = {
     <nav aria-label="Bounded catch-up links">
       <a class="primary" href={links.catchup}>Read the explainer <span aria-hidden="true">→</span></a>
       <a href={links.issue5}>GPA/chronicle issue #5 <span aria-hidden="true">↗</span></a>
-      <a href={links.adr5}>Architecture decision <span aria-hidden="true">↗</span></a>
-      <a href={links.evidence}>Evidence report <span aria-hidden="true">↗</span></a>
+      <a href={links.catchupAdr}>Architecture decision <span aria-hidden="true">↗</span></a>
+      <a href={links.catchupEvidence}>Evidence report <span aria-hidden="true">↗</span></a>
+    </nav>
+  </article>
+
+  <article class="improvement featured">
+    <div class="head">
+      <span class="num">02</span>
+      <span class="status">validated</span>
+    </div>
+    <h3>SSE stream fanout</h3>
+    <p class="result">970.5 to 1.000 live Redis reads per append</p>
+    <p>
+      One hub reads each active stream once on a Chronicle replica. Local SSE
+      clients share the formatted data event while retaining independent,
+      deadline-bound socket writes.
+    </p>
+    <nav aria-label="SSE fanout links">
+      <a class="primary" href={links.sse}>Read the explainer <span aria-hidden="true">→</span></a>
+      <a href={links.issue4}>GPA/chronicle issue #4 <span aria-hidden="true">↗</span></a>
+      <a href={links.sseAdr}>Architecture decision <span aria-hidden="true">↗</span></a>
     </nav>
   </article>
 
   <article class="improvement">
     <div class="head">
-      <span class="num">02</span>
+      <span class="num">03</span>
       <span class="status">shipped</span>
     </div>
     <h3>Horizontal scale</h3>
@@ -52,7 +74,7 @@ const links = {
 
   <article class="improvement">
     <div class="head">
-      <span class="num">03</span>
+      <span class="num">04</span>
       <span class="status">measured</span>
     </div>
     <h3>Configurations and systems</h3>
@@ -72,7 +94,7 @@ const links = {
 <style lang="scss">
   .improvements {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 18px;
   }
   .improvement {

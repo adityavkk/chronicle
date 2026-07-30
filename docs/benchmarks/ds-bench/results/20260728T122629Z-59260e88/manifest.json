@@ -1,0 +1,484 @@
+{
+  "schema": "chronicle-ds-bench-manifest-v1",
+  "created_at": "2026-07-28T12:26:29.101935+00:00",
+  "campaign_id": "20260728T122629Z-59260e88",
+  "profile": "blog-parity-4cpu",
+  "chronicle_source": {
+    "commit": "ecf1a8a8f8ad9283cedcbd17b465acb410ccfec0",
+    "dirty": true,
+    "diff_sha256": "dce3097e35084c9025e6648ff3d41b53b2c76318be011ca63c519227c745405c",
+    "untracked_files": [
+      ".dockerignore",
+      "benchmarks/ds-bench/README.md",
+      "benchmarks/ds-bench/campaign.json",
+      "benchmarks/ds-bench/dsbench.py",
+      "benchmarks/ds-bench/overlay/gke/chronicle.yaml",
+      "benchmarks/ds-bench/overlay/scripts/lib-bench_artifacts_test.sh",
+      "benchmarks/ds-bench/overlay/suites/chronicle-calibration.json",
+      "benchmarks/ds-bench/overlay/suites/chronicle-smoke.json",
+      "benchmarks/ds-bench/patches/chronicle.patch",
+      "benchmarks/ds-bench/sources.json",
+      "benchmarks/ds-bench/tests/test_dsbench.py",
+      "benchmarks/ds-bench/upstream.json",
+      "docs/benchmarks/ds-bench/plan.md",
+      "docs/benchmarks/ds-bench/research.md"
+    ]
+  },
+  "sut_chronicle_source": {
+    "commit": "ecf1a8a8f8ad9283cedcbd17b465acb410ccfec0",
+    "dirty": true,
+    "diff_sha256": "f2472e04ebe27ad8c2f3c1e927e7842db9dd4c0dd29d83e124cccd5dc4187a2d",
+    "untracked_files": [
+      ".dockerignore",
+      "benchmarks/ds-bench/README.md",
+      "benchmarks/ds-bench/campaign.json",
+      "benchmarks/ds-bench/dsbench.py",
+      "benchmarks/ds-bench/overlay/gke/chronicle.yaml",
+      "benchmarks/ds-bench/overlay/suites/chronicle-calibration.json",
+      "benchmarks/ds-bench/overlay/suites/chronicle-smoke.json",
+      "benchmarks/ds-bench/patches/chronicle.patch",
+      "benchmarks/ds-bench/sources.json",
+      "benchmarks/ds-bench/tests/test_dsbench.py",
+      "benchmarks/ds-bench/upstream.json",
+      "docs/benchmarks/ds-bench/plan.md",
+      "docs/benchmarks/ds-bench/research.md"
+    ]
+  },
+  "ds_bench": {
+    "url": "https://github.com/electric-sql/ds-bench.git",
+    "commit": "93a1a066a511ad2ce5114dc429afb1fd0f6d99bf",
+    "adapter_sha256": "0260541bc07293d6b645b0e122d98125beced1ea3b442eecc0c05aab6ac5918d"
+  },
+  "comparison_sources": {
+    "rust": {
+      "url": "https://github.com/electric-sql/electric.git",
+      "commit": "88793e76595d69be300731b9b25c58538923a53b",
+      "subdirectory": "packages/durable-streams-rust",
+      "provenance": "@electric-ax/durable-streams-server-rust@0.1.5"
+    },
+    "node": {
+      "url": "https://github.com/durable-streams/durable-streams.git",
+      "commit": "b55f133ec80c35cd673ea745785adb031d0df1db",
+      "subdirectory": ".",
+      "provenance": "official reference server repository"
+    },
+    "ursula": {
+      "image": "ghcr.io/tonbo-io/ursula:v0.2.0"
+    },
+    "redis": {
+      "image": "redis:8-alpine"
+    }
+  },
+  "campaign": {
+    "definition": "/Users/auk000v/dev/chronicle/benchmarks/ds-bench/campaign.json",
+    "definition_sha256": "59260e880d04ac21e0872fb6fc46ebfa5ba7694e9841cff135aca93bef85b824",
+    "resolved_index": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/index.json",
+    "chronicle_split": "2:2",
+    "calibration": {
+      "results_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/calibration-runs/20260727T114748Z-cal-c9792ed3/runs/chronicle-calibration/raw",
+      "results_sha256": "8a31d7976e6d348bde3af7399a38bd963900562a1828a0d1f897eacc0785d03f",
+      "selected": {
+        "label": "chronicle-cal-2-2",
+        "split": "2:2",
+        "median_throughput": 33933.4,
+        "valid": true,
+        "reasons": [],
+        "source": ".tmp/ds-bench/calibration-runs/20260727T114748Z-cal-c9792ed3/runs/chronicle-calibration/raw/chronicle-cal-2-2/cells.json"
+      },
+      "candidates": [
+        {
+          "label": "chronicle-cal-1-3",
+          "split": "1:3",
+          "median_throughput": 19474.85,
+          "valid": true,
+          "reasons": [],
+          "source": ".tmp/ds-bench/calibration-runs/20260727T114748Z-cal-c9792ed3/runs/chronicle-calibration/raw/chronicle-cal-1-3/cells.json"
+        },
+        {
+          "label": "chronicle-cal-2-2",
+          "split": "2:2",
+          "median_throughput": 33933.4,
+          "valid": true,
+          "reasons": [],
+          "source": ".tmp/ds-bench/calibration-runs/20260727T114748Z-cal-c9792ed3/runs/chronicle-calibration/raw/chronicle-cal-2-2/cells.json"
+        },
+        {
+          "label": "chronicle-cal-3-1",
+          "split": "3:1",
+          "median_throughput": 0.0,
+          "valid": false,
+          "reasons": [
+            "status=error",
+            "missing_pinned_pods",
+            "confirmation_reps=0/3",
+            "creation_choke",
+            "confirmation_reps=0"
+          ],
+          "source": ".tmp/ds-bench/calibration-runs/20260727T114748Z-cal-c9792ed3/runs/chronicle-calibration/raw/chronicle-cal-3-1/cells.json"
+        }
+      ]
+    },
+    "suites": [
+      {
+        "suite": "parity-write-rust",
+        "system": "rust",
+        "workload": "write",
+        "path": "suites/parity-write-rust.json",
+        "sha256": "e041866077576cac7d75c2e0d6a2fde6b0f7aa01f68619af555e5c7da14a7385",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-write-rust.json",
+        "cluster": "chdb-write-rust",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-write-node",
+        "system": "node",
+        "workload": "write",
+        "path": "suites/parity-write-node.json",
+        "sha256": "d8aa8aa41f732c0784371defb12359182d644a87c4cbaf83b2fde67da7c00a39",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-write-node.json",
+        "cluster": "chdb-write-node",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-write-ursula",
+        "system": "ursula",
+        "workload": "write",
+        "path": "suites/parity-write-ursula.json",
+        "sha256": "fb741545fedf8bf38de4954ad2607e3b94f79209429698a5cfa6d826d194ba9f",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-write-ursula.json",
+        "cluster": "chdb-write-ursula",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-write-chronicle",
+        "system": "chronicle",
+        "workload": "write",
+        "path": "suites/parity-write-chronicle.json",
+        "sha256": "3800cbf8933456077adb5159d441e736e4f21a1bbed7011472c5831241fcd54f",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-write-chronicle.json",
+        "cluster": "chdb-write-chronicle",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-blog-sse-rust",
+        "system": "rust",
+        "workload": "blog-sse",
+        "path": "suites/parity-blog-sse-rust.json",
+        "sha256": "e9a632668fa14817d89f18a41533204a5145de2fc325fd4c64d4811716fbc6c8",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-blog-sse-rust.json",
+        "cluster": "chdb-blog-sse-rust",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-blog-sse-node",
+        "system": "node",
+        "workload": "blog-sse",
+        "path": "suites/parity-blog-sse-node.json",
+        "sha256": "afbd5b49372dddbc136fb5515219dd10371712412791844c097f30342ae2a6a6",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-blog-sse-node.json",
+        "cluster": "chdb-blog-sse-node",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-blog-sse-ursula",
+        "system": "ursula",
+        "workload": "blog-sse",
+        "path": "suites/parity-blog-sse-ursula.json",
+        "sha256": "cfe96d38ea457bcc7c677cfc11b49ac9ca530ad67f17ae0cab8387451128be0b",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-blog-sse-ursula.json",
+        "cluster": "chdb-blog-sse-ursula",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-blog-sse-chronicle",
+        "system": "chronicle",
+        "workload": "blog-sse",
+        "path": "suites/parity-blog-sse-chronicle.json",
+        "sha256": "8f507bfb58ddbc52d4edf2fb732f8596670e089bf29f0da69df812a83f115be4",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-blog-sse-chronicle.json",
+        "cluster": "chdb-blog-sse-chronicle",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-reads-sse-rust",
+        "system": "rust",
+        "workload": "reads-sse",
+        "path": "suites/parity-reads-sse-rust.json",
+        "sha256": "e61cc4ffe8679dda05ee7801fda73789bdfd898133c9b34323e9fa061229e245",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-sse-rust.json",
+        "cluster": "chdb-reads-sse-rust",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-reads-sse-node",
+        "system": "node",
+        "workload": "reads-sse",
+        "path": "suites/parity-reads-sse-node.json",
+        "sha256": "709c358b5b10001d599fd2d03c6524782464533efe71792fc65e528849e33db0",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-sse-node.json",
+        "cluster": "chdb-reads-sse-node",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-reads-sse-ursula",
+        "system": "ursula",
+        "workload": "reads-sse",
+        "path": "suites/parity-reads-sse-ursula.json",
+        "sha256": "ffa44bc147371f61d044ff0e6b5154a11f22dc6931763c752b4a3df31b501682",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-sse-ursula.json",
+        "cluster": "chdb-reads-sse-ursula",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-reads-sse-chronicle",
+        "system": "chronicle",
+        "workload": "reads-sse",
+        "path": "suites/parity-reads-sse-chronicle.json",
+        "sha256": "326b5fb8d63974d81fab250c0e365d286f84766147dd54c88ca58e6e1f72935e",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-sse-chronicle.json",
+        "cluster": "chdb-reads-sse-chronicle",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-reads-catchup-rust",
+        "system": "rust",
+        "workload": "reads-catchup",
+        "path": "suites/parity-reads-catchup-rust.json",
+        "sha256": "889b710b5fb7c4eece90aeeec611fde9e658da9b3aeec0e6f25938f93f5c27dd",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-catchup-rust.json",
+        "cluster": "chdb-reads-catc-rust",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-reads-catchup-node",
+        "system": "node",
+        "workload": "reads-catchup",
+        "path": "suites/parity-reads-catchup-node.json",
+        "sha256": "23553923a98832c9669d93edb289013d009eac20e2c7f2ea761debb8df56896f",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-catchup-node.json",
+        "cluster": "chdb-reads-catc-node",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-reads-catchup-ursula",
+        "system": "ursula",
+        "workload": "reads-catchup",
+        "path": "suites/parity-reads-catchup-ursula.json",
+        "sha256": "0e890787b16a249b8d0f89796ea797555b7858978967c2ae2339f85a9c7eb180",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-catchup-ursula.json",
+        "cluster": "chdb-reads-catc-ursula",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-reads-catchup-chronicle",
+        "system": "chronicle",
+        "workload": "reads-catchup",
+        "path": "suites/parity-reads-catchup-chronicle.json",
+        "sha256": "3eb12eb4fc86081799cd066c65b7402a41aa6351a802f795378d0a72c6a88c29",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-reads-catchup-chronicle.json",
+        "cluster": "chdb-reads-catc-chronicle",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-mixed-writes-rust",
+        "system": "rust",
+        "workload": "mixed-writes",
+        "path": "suites/parity-mixed-writes-rust.json",
+        "sha256": "04aea49c3889218dffae553e47c06649f946f706041d67ad74144b2596ce1245",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-mixed-writes-rust.json",
+        "cluster": "chdb-mixed-writ-rust",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-mixed-writes-node",
+        "system": "node",
+        "workload": "mixed-writes",
+        "path": "suites/parity-mixed-writes-node.json",
+        "sha256": "3921890b7042faf359f24a9fab991ab391d8d9a15f1064b640dca2962e8c0879",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-mixed-writes-node.json",
+        "cluster": "chdb-mixed-writ-node",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-mixed-writes-ursula",
+        "system": "ursula",
+        "workload": "mixed-writes",
+        "path": "suites/parity-mixed-writes-ursula.json",
+        "sha256": "e2dfbac228d7195aee2cec673cd90cdbaa8bcbc97c823bf155fb198f3f410116",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-mixed-writes-ursula.json",
+        "cluster": "chdb-mixed-writ-ursula",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-mixed-writes-chronicle",
+        "system": "chronicle",
+        "workload": "mixed-writes",
+        "path": "suites/parity-mixed-writes-chronicle.json",
+        "sha256": "c9ea7118e2eb0df4a38f361d7f5d0514cfbdd7460c44a946ad0583d4bf48fd5b",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-mixed-writes-chronicle.json",
+        "cluster": "chdb-mixed-writ-chronicle",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-mixed-delivery-rust",
+        "system": "rust",
+        "workload": "mixed-delivery",
+        "path": "suites/parity-mixed-delivery-rust.json",
+        "sha256": "1864cfb0188a1363d00d53a4d3e79314af51a309b44184b97d21b934adfb20a0",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-mixed-delivery-rust.json",
+        "cluster": "chdb-mixed-deli-rust",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-mixed-delivery-node",
+        "system": "node",
+        "workload": "mixed-delivery",
+        "path": "suites/parity-mixed-delivery-node.json",
+        "sha256": "b93015b2de8cd0259b4e0298f80267ab76a1ee320a68f7000ba1abb04aaa667f",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-mixed-delivery-node.json",
+        "cluster": "chdb-mixed-deli-node",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-mixed-delivery-ursula",
+        "system": "ursula",
+        "workload": "mixed-delivery",
+        "path": "suites/parity-mixed-delivery-ursula.json",
+        "sha256": "8010ebe43f0db84282c3d95049e8010a7239b63e638ec90ae63178c850d12cdd",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-mixed-delivery-ursula.json",
+        "cluster": "chdb-mixed-deli-ursula",
+        "zone": "europe-west4-b"
+      },
+      {
+        "suite": "parity-mixed-delivery-chronicle",
+        "system": "chronicle",
+        "workload": "mixed-delivery",
+        "path": "suites/parity-mixed-delivery-chronicle.json",
+        "sha256": "f82a9bbadd74e0eaf9bdf25059748195bcf4edd146f515a25c9a0eee33b4ce70",
+        "absolute_path": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/resolved-catchup-overhead-aware/suites/parity-mixed-delivery-chronicle.json",
+        "cluster": "chdb-mixed-deli-chronicle",
+        "zone": "europe-west4-b"
+      }
+    ]
+  },
+  "hardware": {
+    "server_machine": "c4d-standard-16-lssd",
+    "server_cpus": 4,
+    "client_machine": "n2d-standard-32",
+    "client_nodes": 2,
+    "zone": "europe-west4-b",
+    "region": "europe-west4",
+    "resource_budget": {
+      "cpu_millis": 4000,
+      "memory_mib": 16384,
+      "local_ssds": 1
+    },
+    "disk_mode": "one local-NVMe-backed ephemeral-storage filesystem",
+    "server_purchasing_model": "on-demand",
+    "client_purchasing_model": "spot"
+  },
+  "redis": {
+    "appendonly": "yes",
+    "appendfsync_arms": [
+      "always",
+      "everysec"
+    ],
+    "maxmemory": "10gb",
+    "maxmemory_policy": "noeviction",
+    "chronicle_pool_size": 1024
+  },
+  "images": {
+    "schema": "chronicle-ds-bench-images-v1",
+    "created_at": "2026-07-28T12:26:20.761986+00:00",
+    "target": "remote",
+    "project": "adityavkk-prototyping",
+    "registry": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench",
+    "preflight": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/images-catchup-overhead-aware-preflight.json",
+    "reused_from": null,
+    "sut_reused_from": {
+      "schema": "chronicle-ds-bench-sut-reuse-v1",
+      "archive": "/Users/auk000v/dev/chronicle/docs/benchmarks/ds-bench/results/20260727T122510Z-bd85274b",
+      "campaign_id": "20260727T122510Z-bd85274b",
+      "evidence_tree_sha256": "ad3104c8a0a10ca8b7e81b88e636517181ad33f82ecf3b56c9bf6977d1a1c917"
+    },
+    "images": {
+      "redis": {
+        "reference": "redis@sha256:8096655e437712b07503796fb64d81359256cfcff0ab29d95a7da72863786efb",
+        "digest": "sha256:8096655e437712b07503796fb64d81359256cfcff0ab29d95a7da72863786efb",
+        "tag_reference": "redis:8-alpine"
+      },
+      "ursula": {
+        "reference": "ghcr.io/tonbo-io/ursula@sha256:06e8cd30c51b907b214c9edaa879427a0fbafe8ab567efd5f975225bc103e281",
+        "digest": "sha256:06e8cd30c51b907b214c9edaa879427a0fbafe8ab567efd5f975225bc103e281",
+        "tag_reference": "ghcr.io/tonbo-io/ursula:v0.2.0"
+      },
+      "rust": {
+        "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-streams@sha256:3501f08b55f60c8043cf9af99ffc5732950c676a9f5f3a2f260efb6a1889ddd2",
+        "digest": "sha256:3501f08b55f60c8043cf9af99ffc5732950c676a9f5f3a2f260efb6a1889ddd2",
+        "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-streams:88793e76595d",
+        "source": {
+          "commit": "88793e76595d69be300731b9b25c58538923a53b",
+          "provenance": "@electric-ax/durable-streams-server-rust@0.1.5"
+        }
+      },
+      "chronicle": {
+        "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/chronicle@sha256:e750a3223c04b5d12e0cd4655d2704d96434a50ae084ab9c987706d44bfd8103",
+        "digest": "sha256:e750a3223c04b5d12e0cd4655d2704d96434a50ae084ab9c987706d44bfd8103",
+        "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/chronicle:ecf1a8a8f8ad-f2472e04ebe2",
+        "source": {
+          "commit": "ecf1a8a8f8ad9283cedcbd17b465acb410ccfec0",
+          "dirty": true,
+          "diff_sha256": "f2472e04ebe27ad8c2f3c1e927e7842db9dd4c0dd29d83e124cccd5dc4187a2d",
+          "untracked_files": [
+            ".dockerignore",
+            "benchmarks/ds-bench/README.md",
+            "benchmarks/ds-bench/campaign.json",
+            "benchmarks/ds-bench/dsbench.py",
+            "benchmarks/ds-bench/overlay/gke/chronicle.yaml",
+            "benchmarks/ds-bench/overlay/suites/chronicle-calibration.json",
+            "benchmarks/ds-bench/overlay/suites/chronicle-smoke.json",
+            "benchmarks/ds-bench/patches/chronicle.patch",
+            "benchmarks/ds-bench/sources.json",
+            "benchmarks/ds-bench/tests/test_dsbench.py",
+            "benchmarks/ds-bench/upstream.json",
+            "docs/benchmarks/ds-bench/plan.md",
+            "docs/benchmarks/ds-bench/research.md"
+          ]
+        }
+      },
+      "node": {
+        "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-node@sha256:e82c0192eb9124e2b0e2d166776739f14f9bd4fc8146e394e0df488708619b71",
+        "digest": "sha256:e82c0192eb9124e2b0e2d166776739f14f9bd4fc8146e394e0df488708619b71",
+        "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/durable-node:b55f133ec80c",
+        "source": {
+          "commit": "b55f133ec80c35cd673ea745785adb031d0df1db",
+          "provenance": "official reference server repository"
+        }
+      },
+      "ds-bench": {
+        "reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/ds-bench@sha256:5b71a66d60318c02772cdfc257ddf0c55161c0395e63761607e8da61349e27be",
+        "digest": "sha256:5b71a66d60318c02772cdfc257ddf0c55161c0395e63761607e8da61349e27be",
+        "tag_reference": "europe-west1-docker.pkg.dev/adityavkk-prototyping/ds-bench/ds-bench:93a1a066a511-0260541bc072",
+        "source": {
+          "commit": "93a1a066a511ad2ce5114dc429afb1fd0f6d99bf",
+          "adapter_sha256": "0260541bc07293d6b645b0e122d98125beced1ea3b442eecc0c05aab6ac5918d",
+          "build_context_sha256": "bc2401a8338bb00298d5a16bc2e0371f02ca06a7cfcca850d54716813c3908b0",
+          "build_context_file_count": 24
+        }
+      }
+    }
+  },
+  "images_file": "/Users/auk000v/dev/chronicle/.tmp/ds-bench/images-catchup-overhead-aware.json",
+  "validity_policy": {
+    "headline_requires": [
+      "status=ok",
+      "zero errors",
+      "zero lazy stream creation during measurement",
+      "aligned fleet measurement windows",
+      "no client bottleneck",
+      "observed plateau"
+    ],
+    "ladder_exhausted": "lower_bound_only",
+    "durability_classes_are_separate": true
+  }
+}

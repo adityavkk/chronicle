@@ -13,22 +13,26 @@ import (
 // Environment variables recognized by Config.LoadEnv. Precedence in
 // cmd/chronicle is flags over environment over defaults.
 const (
-	EnvListen               = "CHRONICLE_LISTEN"
-	EnvRedisURL             = "CHRONICLE_REDIS_URL"
-	EnvRedisPoolSize        = "CHRONICLE_REDIS_POOL_SIZE"
-	EnvStore                = "CHRONICLE_STORE"
-	EnvLongPollTimeout      = "CHRONICLE_LONG_POLL_TIMEOUT"
-	EnvSSEReconnectInterval = "CHRONICLE_SSE_RECONNECT_INTERVAL"
-	EnvReadPageBytes        = "CHRONICLE_READ_PAGE_BYTES"
-	EnvPublicURL            = "CHRONICLE_PUBLIC_URL"
-	EnvSubscriptions        = "CHRONICLE_SUBSCRIPTIONS"
-	EnvUI                   = "CHRONICLE_UI"
-	EnvUIServer             = "CHRONICLE_UI_SERVER"
-	EnvWebhookAllowPrivate  = "CHRONICLE_WEBHOOK_ALLOW_PRIVATE"
-	EnvSweepInterval        = "CHRONICLE_SWEEP_INTERVAL"
-	EnvReconcileInterval    = "CHRONICLE_RECONCILE_INTERVAL"
-	EnvSweepBatch           = "CHRONICLE_SWEEP_BATCH"
-	EnvMetricsListen        = "CHRONICLE_METRICS_LISTEN"
+	EnvListen                = "CHRONICLE_LISTEN"
+	EnvRedisURL              = "CHRONICLE_REDIS_URL"
+	EnvRedisPoolSize         = "CHRONICLE_REDIS_POOL_SIZE"
+	EnvStore                 = "CHRONICLE_STORE"
+	EnvLongPollTimeout       = "CHRONICLE_LONG_POLL_TIMEOUT"
+	EnvSSEReconnectInterval  = "CHRONICLE_SSE_RECONNECT_INTERVAL"
+	EnvReadPageBytes         = "CHRONICLE_READ_PAGE_BYTES"
+	EnvSSEHubReplayBytes     = "CHRONICLE_SSE_HUB_REPLAY_BYTES"
+	EnvSSEHubBatchBytes      = "CHRONICLE_SSE_HUB_BATCH_BYTES"
+	EnvSSEClientWriteTimeout = "CHRONICLE_SSE_CLIENT_WRITE_TIMEOUT"
+	EnvPublicURL             = "CHRONICLE_PUBLIC_URL"
+	EnvSubscriptions         = "CHRONICLE_SUBSCRIPTIONS"
+	EnvUI                    = "CHRONICLE_UI"
+	EnvUIServer              = "CHRONICLE_UI_SERVER"
+	EnvWebhookAllowPrivate   = "CHRONICLE_WEBHOOK_ALLOW_PRIVATE"
+	EnvSweepInterval         = "CHRONICLE_SWEEP_INTERVAL"
+	EnvReconcileInterval     = "CHRONICLE_RECONCILE_INTERVAL"
+	EnvSweepBatch            = "CHRONICLE_SWEEP_BATCH"
+	EnvMetricsListen         = "CHRONICLE_METRICS_LISTEN"
+	EnvMetricsPprof          = "CHRONICLE_METRICS_PPROF"
 	// Tunable-consistency surface (issue #16, doc 05 "Tunable consistency").
 	EnvConsistencyTier = "CHRONICLE_CONSISTENCY_TIER" // A (default) | B | C
 	EnvWaitReplicas    = "CHRONICLE_WAIT_REPLICAS"    // Tier B WAITAOF numreplicas (1 on STANDARD_HA, 0 on a single Redis)
@@ -97,6 +101,17 @@ type Config struct {
 	// The default is 1 MiB. One valid frame may exceed the target.
 	ReadPageBytes int
 
+	// SSEHubReplayBytes bounds each active stream's shared live replay window.
+	// Clients that fall behind reconnect from their last durable offset.
+	SSEHubReplayBytes int
+
+	// SSEHubBatchBytes is the target retained size of one shared SSE event.
+	// A single message may exceed it because Chronicle never splits a message.
+	SSEHubBatchBytes int
+
+	// SSEClientWriteTimeout bounds one shared event flush to one SSE client.
+	SSEClientWriteTimeout time.Duration
+
 	// PublicBaseURL is the externally reachable origin (scheme + host[:port])
 	// the server is served behind. It is combined with StreamRoot to build the
 	// absolute callback_url and jwks_url in webhook notifications and
@@ -146,6 +161,11 @@ type Config struct {
 	// /healthz, /readyz). Empty (the default) disables it; a load-test or
 	// production deployment sets e.g. ":9090".
 	MetricsListen string
+
+	// MetricsPprof exposes Go runtime profiles under /debug/pprof/ on the
+	// observability server. It is disabled by default because profiles can
+	// reveal process internals and add sampling overhead.
+	MetricsPprof bool
 
 	// Consistency is the tunable-consistency tier for the fence-minting writes
 	// (issue #16, doc 05). Parsed into the sealed webhook.ConsistencyTier at the env
@@ -236,23 +256,26 @@ type Config struct {
 // Provision defaults for the shared knobs.
 func DefaultConfig() Config {
 	return Config{
-		Listen:               ":4437",
-		StreamRoot:           "/v1/stream/",
-		RedisURL:             "redis://localhost:6379",
-		RedisPoolSize:        0, // go-redis default
-		StoreBackend:         "redis",
-		LongPollTimeout:      30 * time.Second,
-		SSEReconnectInterval: 60 * time.Second,
-		ReadPageBytes:        1 << 20,
-		PublicBaseURL:        "http://localhost:4437",
-		Subscriptions:        true,
-		UI:                   true,
-		SweepInterval:        30 * time.Second, // coarse recovery floor (issue #13); recovery is event-triggered, not a 2s sweep
-		ReconcileInterval:    30 * time.Second,
-		Consistency:          webhook.TierA, // no WAIT by default — best latency, at-least-once
-		WaitReplicas:         1,             // the realistic Redis Software HA ceiling (06:70), used only by Tier B
-		WaitTimeoutMs:        1000,
-		AuthMode:             auth.ModeInsecure, // telemetry-first: enforcement is an explicit per-stage opt-in (issue #126)
+		Listen:                ":4437",
+		StreamRoot:            "/v1/stream/",
+		RedisURL:              "redis://localhost:6379",
+		RedisPoolSize:         0, // go-redis default
+		StoreBackend:          "redis",
+		LongPollTimeout:       30 * time.Second,
+		SSEReconnectInterval:  60 * time.Second,
+		ReadPageBytes:         1 << 20,
+		SSEHubReplayBytes:     defaultSSEHubReplayBytes,
+		SSEHubBatchBytes:      defaultSSEHubBatchBytes,
+		SSEClientWriteTimeout: defaultSSEWriteTimeout,
+		PublicBaseURL:         "http://localhost:4437",
+		Subscriptions:         true,
+		UI:                    true,
+		SweepInterval:         30 * time.Second, // coarse recovery floor (issue #13); recovery is event-triggered, not a 2s sweep
+		ReconcileInterval:     30 * time.Second,
+		Consistency:           webhook.TierA, // no WAIT by default — best latency, at-least-once
+		WaitReplicas:          1,             // the realistic Redis Software HA ceiling (06:70), used only by Tier B
+		WaitTimeoutMs:         1000,
+		AuthMode:              auth.ModeInsecure, // telemetry-first: enforcement is an explicit per-stage opt-in (issue #126)
 	}
 }
 
@@ -296,6 +319,27 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 		}
 		c.ReadPageBytes = n
 	}
+	if v, ok := lookup(EnvSSEHubReplayBytes); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("%s: must be a positive integer", EnvSSEHubReplayBytes)
+		}
+		c.SSEHubReplayBytes = n
+	}
+	if v, ok := lookup(EnvSSEHubBatchBytes); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("%s: must be a positive integer", EnvSSEHubBatchBytes)
+		}
+		c.SSEHubBatchBytes = n
+	}
+	if v, ok := lookup(EnvSSEClientWriteTimeout); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("%s: must be a positive duration", EnvSSEClientWriteTimeout)
+		}
+		c.SSEClientWriteTimeout = d
+	}
 	if v, ok := lookup(EnvPublicURL); ok {
 		c.PublicBaseURL = v
 	}
@@ -334,6 +378,13 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvMetricsListen); ok {
 		c.MetricsListen = v
+	}
+	if v, ok := lookup(EnvMetricsPprof); ok {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvMetricsPprof, err)
+		}
+		c.MetricsPprof = enabled
 	}
 	if v, ok := lookup(EnvConsistencyTier); ok {
 		tier, err := webhook.ParseConsistencyTier(v)

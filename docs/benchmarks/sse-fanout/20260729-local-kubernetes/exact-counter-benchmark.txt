@@ -1,0 +1,25 @@
+Recorded: 2026-07-30T05:43:19Z
+Base HEAD: ec1a63be7571f6ca03fd4401332002730c8c8349
+Working tree: dirty Issue 4 implementation; intentionally uncommitted
+Host: darwin/arm64, Apple M4 Pro
+Redis image: redis:8-alpine
+Redis digest: sha256:9eb6a7ba3d344e1958c7e1589fa3dee90373a934e8159c634562a91d622759a0
+Redis endpoint: isolated local container at 127.0.0.1:6382, database 12
+
+Command:
+env GOCACHE=/private/tmp/chronicle-p0-sse-gocache REDIS_URL=redis://127.0.0.1:6382/12 go test -run '^$' -bench '^BenchmarkSSEHubReadAmplification1000Clients$' -benchtime=100x -count=1 .
+
+Output:
+goos: darwin
+goarch: arm64
+pkg: gecgithub01.walmart.com/auk000v/chronicle
+cpu: Apple M4 Pro
+BenchmarkSSEHubReadAmplification1000Clients-14    	     100	  12671485 ns/op	       100.0 redis_publish	      5750 redis_publish_after	      5650 redis_publish_before	         1.000 redis_reads/publish	       100.0 redis_zrangebylex	     24508 redis_zrangebylex_after	     24408 redis_zrangebylex_before
+PASS
+ok  	gecgithub01.walmart.com/auk000v/chronicle	3.502s
+
+Interpretation:
+The commandstats snapshot was taken only after the hub and all 1,000 client
+catch-up reads settled. Each of 100 measured appends waited for the shared hub
+refresh. Redis PUBLISH advanced from 5,650 to 5,750 and ZRANGEBYLEX advanced
+from 24,408 to 24,508: exact deltas of 100 and 100, or 1.000 reads per publish.

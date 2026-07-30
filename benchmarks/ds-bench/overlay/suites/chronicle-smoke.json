@@ -1,0 +1,41 @@
+{
+  "suite": "chronicle-smoke",
+  "_doc": "Local wiring check only. This suite is not publication data.",
+  "cluster": {
+    "server_machine": "kind",
+    "server_cpus": 2,
+    "client_machine": "kind",
+    "client_nodes": 1,
+    "region": "local"
+  },
+  "saturation": {
+    "plateau_pct": -100,
+    "patience": 1,
+    "fleet_cpu": 0.5,
+    "connections": 16,
+    "repeats": 1,
+    "warmup_secs": 1,
+    "measure_secs": 2,
+    "setup_concurrency": 8,
+    "payload_bytes": 256
+  },
+  "modes": [
+    "chronicle"
+  ],
+  "server_configs": {
+    "chronicle": [
+      {
+        "label": "chronicle-redis-aof-always",
+        "args": "always:1:1"
+      }
+    ]
+  },
+  "stream_counts": [
+    100
+  ],
+  "pod_ladder": {
+    "100": [
+      1
+    ]
+  }
+}

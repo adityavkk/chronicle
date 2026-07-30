@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
+
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
@@ -11,6 +13,86 @@ import (
 // pub/sub: Redis pub/sub is fire-and-forget, so a dropped wakeup (connection
 // churn) is recovered within one tick instead of hanging until timeout.
 const defensivePollInterval = time.Second
+
+type notificationSubscription struct {
+	pubsub *goredis.PubSub
+	wake   <-chan any
+}
+
+// SubscribeNotifications opens and confirms one Redis subscription for path.
+// The caller reuses it across durable reads and owns Close.
+func (s *Store) SubscribeNotifications(ctx context.Context, path string) (store.NotificationSubscription, error) {
+	pubsub := s.client.Subscribe(ctx, notifyChannel(path))
+	if _, err := pubsub.Receive(ctx); err != nil {
+		_ = pubsub.Close()
+		return nil, err
+	}
+	return &notificationSubscription{
+		pubsub: pubsub,
+		wake:   pubsub.ChannelWithSubscriptions(),
+	}, nil
+}
+
+func (s *notificationSubscription) Wait(ctx context.Context) (store.NotificationEvent, error) {
+	select {
+	case item, ok := <-s.wake:
+		if !ok {
+			return store.NotificationAppend, store.ErrNotificationSubscriptionClosed
+		}
+		event := notificationEvent(item)
+		for {
+			select {
+			case item, ok := <-s.wake:
+				if !ok {
+					return event, nil
+				}
+				event = coalesceNotification(event, notificationEvent(item))
+			default:
+				return event, nil
+			}
+		}
+	case <-ctx.Done():
+		return store.NotificationAppend, ctx.Err()
+	}
+}
+
+func (s *notificationSubscription) Close() error {
+	return s.pubsub.Close()
+}
+
+func notificationEvent(item any) store.NotificationEvent {
+	switch value := item.(type) {
+	case *goredis.Subscription:
+		return store.NotificationReconnect
+	case *goredis.Message:
+		switch value.Payload {
+		case "c":
+			return store.NotificationClose
+		case "d":
+			return store.NotificationDelete
+		default:
+			return store.NotificationAppend
+		}
+	default:
+		return store.NotificationAppend
+	}
+}
+
+func coalesceNotification(
+	current store.NotificationEvent,
+	next store.NotificationEvent,
+) store.NotificationEvent {
+	if current == store.NotificationDelete || next == store.NotificationDelete {
+		return store.NotificationDelete
+	}
+	if current == store.NotificationReconnect || next == store.NotificationReconnect {
+		return store.NotificationReconnect
+	}
+	if current == store.NotificationClose || next == store.NotificationClose {
+		return store.NotificationClose
+	}
+	return store.NotificationAppend
+}
 
 // WaitForMessages blocks until messages past offset exist, the stream
 // closes, the timeout expires, or ctx is cancelled.

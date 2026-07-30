@@ -1,0 +1,186 @@
+{
+  "schema": "chronicle-ds-bench-validation-v1",
+  "campaign_id": "20260729T151520Z-675c412d",
+  "complete": true,
+  "cell_count": 5,
+  "invalid_or_gap_count": 0,
+  "overload_count": 4,
+  "evidence_seal": {
+    "schema": "chronicle-ds-bench-evidence-v1",
+    "file_count": 195,
+    "tree_sha256": "93e46b7d0a3ee90ecc9a29012ee63bcd3d16584f5a2252be99e23fca38af6ef1",
+    "verified": true
+  },
+  "cells": [
+    {
+      "suite": "parity-write-chronicle",
+      "system": "chronicle",
+      "workload": "write",
+      "label": "chronicle-c1-r1-cpu16",
+      "durability": "redis-aof-always",
+      "stream_count": 100000,
+      "classification": "headline",
+      "reasons": [],
+      "throughput": 30967.9,
+      "p50_ms": 8.303,
+      "p99_ms": 11.159,
+      "pod_memory_peak_mib": 563,
+      "pod_memory_p50_mib": 324,
+      "walk": [
+        [
+          1,
+          30369.6,
+          8.399,
+          11.295
+        ],
+        [
+          2,
+          30267.25,
+          16.527,
+          26.591
+        ],
+        [
+          4,
+          28806.9,
+          36.191,
+          50.079
+        ]
+      ]
+    },
+    {
+      "suite": "parity-blog-sse-chronicle",
+      "system": "chronicle",
+      "workload": "blog-sse",
+      "label": "chronicle-c1-r1-cpu16",
+      "durability": "redis-aof-always",
+      "stream_count": 1,
+      "classification": "overload",
+      "reasons": [
+        "completion_ratio=0.6276<0.9800"
+      ],
+      "offered_rate": 50000.0,
+      "completion_ratio": 0.627635,
+      "pod_memory_peak_mib": 350.45703125,
+      "metrics": {
+        "mode": "chronicle-c1-r1-cpu16",
+        "stream_count": 1,
+        "connections": 1000,
+        "ops_per_sec": 31381.75,
+        "bytes_per_sec": 8033728.0,
+        "mib_per_sec": 7.7,
+        "p50": 60.479,
+        "p99": 72.575,
+        "backpressure": 0,
+        "other_err": 0,
+        "status": "ok",
+        "is_peak": true
+      }
+    },
+    {
+      "suite": "parity-reads-sse-chronicle",
+      "system": "chronicle",
+      "workload": "reads-sse",
+      "label": "chronicle-c1-r1-cpu16",
+      "durability": "redis-aof-always",
+      "stream_count": 100,
+      "classification": "overload",
+      "reasons": [
+        "completion_ratio=0.2513<0.9800"
+      ],
+      "offered_rate": 102400.0,
+      "completion_ratio": 0.2512805989583333,
+      "pod_memory_peak_mib": 651.28125,
+      "metrics": {
+        "mode": "chronicle-c1-r1-cpu16",
+        "stream_count": 100,
+        "connections": 2048,
+        "ops_per_sec": 25731.133333333335,
+        "bytes_per_sec": 6587170.133333334,
+        "mib_per_sec": 6.3,
+        "p50": 131.071,
+        "p99": 174.335,
+        "backpressure": 0,
+        "other_err": 0,
+        "status": "ok",
+        "is_peak": true
+      }
+    },
+    {
+      "suite": "parity-reads-catchup-chronicle",
+      "system": "chronicle",
+      "workload": "reads-catchup",
+      "label": "chronicle-c1-r1-cpu16",
+      "durability": "redis-aof-always",
+      "stream_count": 100,
+      "classification": "overload",
+      "reasons": [
+        "errors=940"
+      ],
+      "offered_rate": null,
+      "completion_ratio": null,
+      "pod_memory_peak_mib": 4972.48828125,
+      "metrics": {
+        "mode": "chronicle-c1-r1-cpu16",
+        "stream_count": 100,
+        "connections": 512,
+        "ops_per_sec": 3.6,
+        "bytes_per_sec": 60397977.6,
+        "mib_per_sec": 57.6,
+        "p50": 29900.799,
+        "p99": 34144.255,
+        "backpressure": 0,
+        "other_err": 940,
+        "status": "ok",
+        "is_peak": true,
+        "seed_append_attempts": 411695,
+        "seed_append_failures": 2095,
+        "seed_retry_rounds": 100,
+        "seed_verified_streams": 100,
+        "seed_verified_min_bytes": 16777216,
+        "seed_verified_max_bytes": 16777216
+      }
+    },
+    {
+      "suite": "parity-mixed-writes-chronicle",
+      "system": "chronicle",
+      "workload": "mixed-writes",
+      "label": "chronicle-c1-r1-cpu16",
+      "durability": "redis-aof-always",
+      "stream_count": 10000,
+      "classification": "overload",
+      "reasons": [
+        "errors=1076",
+        "completion_ratio=0.1409<0.9800"
+      ],
+      "offered_rate": 50000.0,
+      "completion_ratio": 0.140854,
+      "pod_memory_peak_mib": 2516.2265625,
+      "metrics": {
+        "mode": "chronicle-c1-r1-cpu16",
+        "stream_count": 10000,
+        "sweep": "readers",
+        "level": 100000,
+        "readers": 100000,
+        "subscribers": 0,
+        "writer_rate": 5,
+        "read_rate": 0,
+        "write_ops_per_sec": 7042.7,
+        "write_p50": 26099.711,
+        "write_p99": 52396.031,
+        "read_ops_per_sec": 4814.25,
+        "read_mib_per_sec": 93.904833984375,
+        "read_p50": 1198.079,
+        "read_p99": 21037.055,
+        "events_per_sec": 0.0,
+        "delivery_p50": null,
+        "delivery_p99": null,
+        "write_bp": 0,
+        "write_err": 551,
+        "read_bp": 0,
+        "read_err": 525,
+        "status": "ok",
+        "reason": "complete"
+      }
+    }
+  ]
+}

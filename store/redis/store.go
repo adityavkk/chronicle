@@ -267,16 +267,17 @@ func (s *Store) Create(path string, opts store.CreateOptions) (*store.StreamMeta
 		return nil, false, store.ErrConfigMismatch
 	}
 
-	incarnation, err := store.NewReadIncarnation()
+	incarnation, err := store.NewIncarnationID()
 	if err != nil {
 		return nil, false, err
 	}
+
 	now := s.clock.Now()
 	meta := &store.StreamMetadata{
 		Path:           path,
-		Incarnation:    incarnation,
 		ContentType:    opts.ContentType,
 		CurrentOffset:  store.ZeroOffset,
+		Incarnation:    incarnation,
 		CreatedAt:      now,
 		LastAccessedAt: now,
 		Closed:         opts.Closed,
