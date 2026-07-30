@@ -27,9 +27,9 @@ const links = {
     <h3>Bounded catch-up</h3>
     <p class="result">128 errors to 435 complete measured replays</p>
     <p>
-      Redis fetches one frame, then optionally bulk-fetches only the range that
-      fits the remaining 1 MiB target. A separate 1,024-frame cap bounds each
-      page, and Chronicle writes each frame directly to the client.
+      <strong>Before:</strong> one long read could load the complete remaining
+      stream into memory. <strong>Now:</strong> Chronicle reads and sends about
+      1 MiB of whole frames at a time.
     </p>
     <nav aria-label="Bounded catch-up links">
       <a class="primary" href={links.catchup}>Read the explainer <span aria-hidden="true">→</span></a>
@@ -47,9 +47,9 @@ const links = {
     <h3>SSE stream fanout</h3>
     <p class="result">970.5 to 1.000 live Redis reads per append</p>
     <p>
-      One hub reads each active stream once on a Chronicle replica. Local SSE
-      clients share the formatted data event while retaining independent,
-      deadline-bound socket writes.
+      <strong>Before:</strong> every browser reread the same update from Redis.
+      <strong>Now:</strong> one stream hub reads and formats it once, then local
+      client handlers reuse it.
     </p>
     <nav aria-label="SSE fanout links">
       <a class="primary" href={links.sse}>Read the explainer <span aria-hidden="true">→</span></a>
@@ -66,9 +66,9 @@ const links = {
     <h3>Immutable sealed segments</h3>
     <p class="result">2.67 to 4.26 times same-host sealed gain; rerun required</p>
     <p>
-      Chronicle can read an authenticated sealed prefix from immutable blocks,
-      then join it to a bounded Redis hot tail. Redis remains the complete
-      append authority and fallback. Reclamation is disabled.
+      <strong>Before:</strong> Redis served every page of history.
+      <strong>Now:</strong> verified segments can serve the older prefix while
+      Redis serves the recent tail and remains the complete fallback.
     </p>
     <nav aria-label="Immutable segments links">
       <a class="primary" href={links.segments}>Read the explainer <span aria-hidden="true">→</span></a>

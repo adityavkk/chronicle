@@ -1,0 +1,380 @@
+---
+interface FlowStep {
+  actor: string;
+  action: string;
+}
+
+interface Props {
+  id: string;
+  title: string;
+  intro: string;
+  clientAction: string;
+  oldLabel: string;
+  oldSummary: string;
+  oldSteps: FlowStep[];
+  newLabel: string;
+  newSummary: string;
+  newSteps: FlowStep[];
+  changed: string;
+  unchanged: string;
+  downside: string;
+}
+
+const {
+  id,
+  title,
+  intro,
+  clientAction,
+  oldLabel,
+  oldSummary,
+  oldSteps,
+  newLabel,
+  newSummary,
+  newSteps,
+  changed,
+  unchanged,
+  downside,
+} = Astro.props;
+
+const headingId = `${id}-title`;
+---
+
+<section class="simple" id={id} aria-labelledby={headingId}>
+  <header class="simple-head">
+    <span class="kicker">Start here</span>
+    <h2 id={headingId}>{title}</h2>
+    <p>{intro}</p>
+  </header>
+
+  <div class="client">
+    <span>Client</span>
+    <strong>{clientAction}</strong>
+  </div>
+
+  <div class="flows">
+    <article class="flow before">
+      <header>
+        <span class="flow-label">Old system</span>
+        <h3>{oldLabel}</h3>
+        <p>{oldSummary}</p>
+      </header>
+      <ol aria-label={`Old system sequence: ${oldLabel}`}>
+        {
+          oldSteps.map((step, index) => (
+            <li>
+              <span class="step-num" aria-hidden="true">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <div>
+                <span class="actor">{step.actor}</span>
+                <p>{step.action}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </article>
+
+    <div class="change-arrow" aria-hidden="true">
+      <span>becomes</span>
+      <b>→</b>
+    </div>
+
+    <article class="flow after">
+      <header>
+        <span class="flow-label">New architecture</span>
+        <h3>{newLabel}</h3>
+        <p>{newSummary}</p>
+      </header>
+      <ol aria-label={`New architecture sequence: ${newLabel}`}>
+        {
+          newSteps.map((step, index) => (
+            <li>
+              <span class="step-num" aria-hidden="true">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <div>
+                <span class="actor">{step.actor}</span>
+                <p>{step.action}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </article>
+  </div>
+
+  <dl class="meaning">
+    <div>
+      <dt>What changed</dt>
+      <dd>{changed}</dd>
+    </div>
+    <div>
+      <dt>What stayed the same</dt>
+      <dd>{unchanged}</dd>
+    </div>
+    <div class="downside">
+      <dt>Downside</dt>
+      <dd>{downside}</dd>
+    </div>
+  </dl>
+</section>
+
+<style lang="scss">
+  .simple {
+    position: relative;
+    margin: 52px 0 64px;
+    padding: clamp(24px, 4vw, 44px);
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    border-radius: calc(var(--radius) + 4px);
+    background:
+      radial-gradient(circle at 92% 4%, rgba(255, 194, 32, 0.13), transparent 24%),
+      var(--card);
+    box-shadow: var(--shadow-md);
+  }
+  .simple::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    content: "";
+    background: var(--accent);
+  }
+  .simple-head {
+    max-width: 720px;
+  }
+  .kicker,
+  .flow-label,
+  .client span,
+  dt,
+  .actor,
+  .step-num,
+  .change-arrow span {
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .kicker {
+    display: block;
+    margin-bottom: 12px;
+    color: var(--accent);
+    font-size: 10px;
+    font-weight: 700;
+  }
+  h2 {
+    max-width: 650px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    color: var(--ink);
+    font-size: clamp(29px, 4vw, 43px);
+    font-weight: 500;
+    line-height: 1.06;
+    letter-spacing: -0.035em;
+  }
+  .simple-head > p {
+    max-width: 660px;
+    margin: 18px 0 0;
+    color: var(--ink-mute);
+    font-size: 17px;
+    line-height: 1.6;
+  }
+  .client {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 30px 0 18px;
+    padding: 14px 18px;
+    border: 1px solid rgba(0, 83, 226, 0.18);
+    border-radius: 10px;
+    background: rgba(169, 221, 243, 0.22);
+  }
+  .client span {
+    flex: 0 0 auto;
+    color: var(--accent);
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .client strong {
+    color: var(--ink);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.45;
+  }
+  .flows {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 48px minmax(0, 1fr);
+    align-items: stretch;
+  }
+  .flow {
+    min-width: 0;
+    padding: clamp(19px, 3vw, 28px);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--paper);
+  }
+  .flow.before {
+    background: linear-gradient(180deg, rgba(138, 72, 52, 0.04), var(--paper) 32%);
+  }
+  .flow.after {
+    border-color: rgba(0, 83, 226, 0.28);
+    background: linear-gradient(180deg, rgba(0, 83, 226, 0.07), var(--paper) 32%);
+  }
+  .flow-label {
+    color: var(--ink-mute);
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .after .flow-label { color: var(--accent); }
+  h3 {
+    margin: 9px 0 0;
+    padding: 0;
+    border: 0;
+    color: var(--ink);
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.15;
+  }
+  .flow header > p {
+    min-height: 3em;
+    margin: 11px 0 24px;
+    color: var(--ink-mute);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  ol {
+    display: grid;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  li {
+    position: relative;
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+  }
+  li:not(:last-child)::after {
+    position: absolute;
+    top: 31px;
+    bottom: -14px;
+    left: 14px;
+    width: 1px;
+    content: "";
+    background: var(--rule);
+  }
+  .after li:not(:last-child)::after {
+    background: rgba(0, 83, 226, 0.24);
+  }
+  .step-num {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    border: 1px solid var(--rule);
+    border-radius: 50%;
+    color: var(--ink-mute);
+    background: var(--card);
+    font-size: 8px;
+    font-weight: 700;
+  }
+  .after .step-num {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .actor {
+    display: block;
+    margin: 1px 0 4px;
+    color: var(--ink);
+    font-size: 9px;
+    font-weight: 700;
+  }
+  li p {
+    margin: 0;
+    color: var(--ink-mute);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .change-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: var(--accent);
+  }
+  .change-arrow span {
+    font-size: 7px;
+    font-weight: 700;
+    writing-mode: vertical-rl;
+  }
+  .change-arrow b {
+    font-size: 24px;
+    font-weight: 400;
+  }
+  .meaning {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 20px 0 0;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--paper);
+  }
+  .meaning > div {
+    padding: 16px 18px;
+  }
+  .meaning > div + div {
+    border-left: 1px solid var(--rule);
+  }
+  .meaning .downside {
+    background: rgba(255, 194, 32, 0.08);
+  }
+  dt {
+    margin-bottom: 7px;
+    color: var(--accent);
+    font-size: 8px;
+    font-weight: 700;
+  }
+  .downside dt { color: var(--ink); }
+  dd {
+    margin: 0;
+    color: var(--ink-mute);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  @media (max-width: 760px) {
+    .simple {
+      margin: 34px 0 48px;
+      padding: 22px 18px 20px;
+    }
+    .client {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .flows {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+    .change-arrow {
+      min-height: 50px;
+      flex-direction: row;
+    }
+    .change-arrow span { writing-mode: horizontal-tb; }
+    .change-arrow b { transform: rotate(90deg); }
+    .flow header > p { min-height: 0; }
+    .meaning { grid-template-columns: 1fr; }
+    .meaning > div + div {
+      border-top: 1px solid var(--rule);
+      border-left: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { scroll-behavior: auto; }
+  }
+</style>

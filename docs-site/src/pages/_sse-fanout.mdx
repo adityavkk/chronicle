@@ -1,9 +1,9 @@
 ---
-title: "One Redis read, <em>shared by every SSE client</em>"
-summary: "Chronicle replaced one Redis read and Pub/Sub wait loop per SSE client with one per-stream fanout hub on each replica. An exact-counter guard with 1,000 clients measured 1.000 Redis reads per append, down from 970.5 in the sealed baseline."
+title: "Read each live update once, <em>then share it with every client</em>"
+summary: "The old system read the same Redis data once per connected client. The new system reads it once per active stream and shares the result."
 eyebrow: "Architecture"
 meta: "Performance improvements · SSE fanout"
-deck: "The old live tail path repeated the same Redis work once for every connected client. The fix adds one in-process <strong>fanout hub</strong> for each active stream on each Chronicle replica. The hub reads Redis once, formats one data event, and shares it with every local client through a bounded replay window."
+deck: "Browsers keep the same SSE connection and resume offset. Inside Chronicle, one stream hub now reads and formats each update once. Chronicle still writes separately to every browser."
 byline:
   - label: "Live reads"
     value: "970.5 → 1.000 per append"
@@ -26,14 +26,40 @@ import Complexity from "../components/Complexity.astro";
 import SSEAmplification from "../components/SSEAmplification.astro";
 import SSEResults from "../components/SSEResults.astro";
 import SSEUserJourney from "../components/SSEUserJourney.astro";
+import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
+
+<SimpleBeforeAfter
+  id="simple-explanation"
+  title="One update no longer causes the same Redis read for every browser"
+  intro="Each browser still has its own connection. Chronicle now shares the storage read and event formatting that those connections need."
+  clientAction="Keep one SSE connection open and save the last durable offset."
+  oldLabel="Every browser reads again"
+  oldSummary="A Redis wake hint caused every client handler to fetch and format the same durable update."
+  oldSteps={[
+    { actor: "Producer", action: "Appends one durable update to Redis." },
+    { actor: "Redis", action: "Publishes a short wake hint." },
+    { actor: "Every client handler", action: "Wakes and reads the same stream data from Redis." },
+    { actor: "Every client handler", action: "Formats and writes its own copy of the same event." },
+  ]}
+  newLabel="One hub reads for everyone"
+  newSummary="One hub for the active stream reads and formats the update. Local client handlers reuse it."
+  newSteps={[
+    { actor: "Producer", action: "Appends the same durable update to Redis." },
+    { actor: "Redis", action: "Wakes one stream hub on this Chronicle replica." },
+    { actor: "Stream hub", action: "Reads the durable update once and formats one data event." },
+    { actor: "Client handlers", action: "Reuse that event and write it to their separate browser connections." },
+  ]}
+  changed="The Redis read and data-event formatting happen once per active stream on each serving replica."
+  unchanged="Every browser keeps its own HTTP connection, durable offset, control event, and socket write."
+  downside="Chronicle keeps a bounded replay window for each active stream. A slow browser must disconnect and resume when it falls behind."
+/>
 
 <Tldr>
   <ul>
-    <li><strong>The old path scaled with clients.</strong> Every SSE connection owned a Redis Pub/Sub subscription, reread the same stream after each append, formatted the same data, and flushed it independently. With 1,000 clients on one stream, the sealed benchmark measured 970.5 live Redis reads per append.</li>
-    <li><strong>The new path scales with active streams on each replica.</strong> One hub subscribes and performs the durable read. Every local client receives the shared immutable data event. The exact-counter guard measured 100 Redis reads for 100 publishes with 1,000 connected clients.</li>
-    <li><strong>Redis remains the source of truth.</strong> Pub/Sub only says “look again.” A one-second durable poll recovers a lost hint. A random stream incarnation ID prevents an old hub from crossing into a deleted and recreated stream.</li>
-    <li><strong>Slow clients cannot hold the system open.</strong> The shared replay window is bounded to 1 MiB by default. A client that falls behind reconnects from its last durable offset. One socket write has a ten-second default deadline.</li>
-    <li><strong>Correctness still blocks release.</strong> All 332 Durable Streams conformance tests passed. The Jepsen SSE scenario also passed attach, resume, lost notification, duplicate notification, Redis replacement, Chronicle replacement, lag, and write-timeout faults.</li>
+    <li><strong>Before:</strong> 1,000 clients could cause about 1,000 Redis reads for one append.</li>
+    <li><strong>Now:</strong> one hub reads the stream once and shares the formatted event with local clients.</li>
+    <li><strong>Result:</strong> the measured ratio fell from 970.5 Redis reads per append to 1.000.</li>
+    <li><strong>Cost:</strong> socket writes still happen once per client, and slow clients may have to reconnect from their last saved offset.</li>
   </ul>
 </Tldr>
 
