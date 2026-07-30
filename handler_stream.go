@@ -46,36 +46,52 @@ func (r legacyPageReader) ReadPage(ctx context.Context, path string, offset stor
 		return store.ReadPage{}, err
 	}
 	opts = opts.Normalize()
-	meta, err := r.store.Get(path)
+
+	var (
+		messages []store.Message
+		snapshot store.ReadSnapshot
+	)
+	metaPtr, err := r.store.Get(path)
 	if err != nil {
 		return store.ReadPage{}, err
 	}
-	incarnation := readIncarnation(meta)
+	// Store.Get historically returns a pointer. Some compatible stores,
+	// including MemoryStore, point it at live metadata. Copy it before Read so
+	// an append cannot silently move the pre-read incarnation check.
+	meta := *metaPtr
+	incarnation := readIncarnation(&meta)
 	if opts.Snapshot != nil && (opts.Snapshot.Incarnation != incarnation ||
 		!store.ContentTypeMatches(opts.Snapshot.ContentType, meta.ContentType)) {
 		return store.ReadPage{}, store.ErrReadSnapshotChanged
 	}
-	messages, _, err := r.store.Read(path, offset)
+	messages, _, err = r.store.Read(path, offset)
 	if err != nil {
 		return store.ReadPage{}, err
 	}
-	after, err := r.store.Get(path)
+	afterPtr, err := r.store.Get(path)
 	if err != nil {
 		return store.ReadPage{}, err
 	}
-	if readIncarnation(after) != incarnation ||
+	after := *afterPtr
+	if readIncarnation(&after) != incarnation ||
 		!after.CreatedAt.Equal(meta.CreatedAt) ||
 		!store.ContentTypeMatches(after.ContentType, meta.ContentType) {
 		return store.ReadPage{}, store.ErrReadSnapshotChanged
 	}
-	snapshot := store.ReadSnapshot{
-		Tail:        meta.CurrentOffset,
-		ContentType: meta.ContentType,
-		Closed:      meta.Closed,
-		Incarnation: incarnation,
-	}
+
 	if opts.Snapshot != nil {
 		snapshot = *opts.Snapshot
+	} else {
+		// Capture the post-read tail. An append between Read and Get is then
+		// inside this snapshot but not this page; the next page fetches it from
+		// the unchanged offset. This preserves the old SSE race-closing
+		// behavior without falsely checkpointing or skipping the append.
+		snapshot = store.ReadSnapshot{
+			Tail:        after.CurrentOffset,
+			ContentType: after.ContentType,
+			Closed:      after.Closed,
+			Incarnation: incarnation,
+		}
 	}
 
 	filtered := make([]store.Message, 0, min(len(messages), opts.MaxFrames))
@@ -98,6 +114,9 @@ func (r legacyPageReader) ReadPage(ctx context.Context, path string, offset stor
 		returned += len(message.Data)
 	}
 	next := snapshot.Tail
+	if offset.LessThan(snapshot.Tail) {
+		next = offset
+	}
 	if len(filtered) > 0 {
 		next = filtered[len(filtered)-1].Offset
 	}
