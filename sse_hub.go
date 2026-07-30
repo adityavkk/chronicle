@@ -413,6 +413,12 @@ func (h *sseHub) runWaitLoop() {
 }
 
 func (h *sseHub) refresh() error {
+	ctx := h.ctx
+	if ctx == nil {
+		// refresh is also exercised directly by focused tests and diagnostic
+		// callers. Production hubs always install a cancellable context.
+		ctx = context.Background()
+	}
 	reader := h.handler.pageReader()
 	next := h.currentOffset()
 	opts := store.ReadPageOptions{
@@ -420,12 +426,13 @@ func (h *sseHub) refresh() error {
 		MaxFrames:   store.DefaultReadPageFrames,
 	}
 	var snapshot *store.ReadSnapshot
+	emptyPages := 0
 	for {
-		if err := h.ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		opts.Snapshot = snapshot
-		page, err := reader.ReadPage(h.ctx, h.path, next, opts)
+		page, err := reader.ReadPage(ctx, h.path, next, opts)
 		if err != nil {
 			return err
 		}
@@ -440,9 +447,14 @@ func (h *sseHub) refresh() error {
 			}
 		}
 		if len(page.Messages) == 0 && !page.UpToDate {
-			return errors.New("SSE hub read page made no progress")
+			emptyPages++
+			if emptyPages >= 8 {
+				return store.ErrReadDataMissing
+			}
+			continue
 		}
-		if err := h.ctx.Err(); err != nil {
+		emptyPages = 0
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if err := h.publish(

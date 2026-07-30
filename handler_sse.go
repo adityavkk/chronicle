@@ -106,6 +106,7 @@ func (h *Handler) handleSSE(
 	snapshot := first.Snapshot
 	page := first
 	currentOffset := offset
+	emptyPages := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -119,6 +120,23 @@ func (h *Handler) handleSSE(
 		if err := lease.validateSnapshot(snapshot); err != nil {
 			return err
 		}
+		if len(page.Messages) == 0 && !page.UpToDate {
+			h.observeReadPage(page)
+			emptyPages++
+			if emptyPages >= 8 {
+				return store.ErrReadDataMissing
+			}
+			pageOpts.Snapshot = &snapshot
+			page, err = reader.ReadPage(ctx, path, currentOffset, pageOpts)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					h.observeReadCancellation("storage")
+				}
+				return err
+			}
+			continue
+		}
+		emptyPages = 0
 		var data []byte
 		if len(page.Messages) > 0 {
 			data, err = h.formatSSEDataEvent(path, page.Messages, snapshot.ContentType, useBase64)
