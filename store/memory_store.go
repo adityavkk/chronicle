@@ -9,6 +9,8 @@ package store
 import (
 	"bytes"
 	"context"
+	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -132,6 +134,11 @@ func (s *MemoryStore) Create(path string, opts CreateOptions) (*StreamMetadata, 
 		}
 	}
 
+	incarnation, err := NewReadIncarnation()
+	if err != nil {
+		return nil, false, err
+	}
+
 	// Fork creation: validate source stream and resolve fork parameters
 	var forkOffset Offset
 	var sourceContentType string
@@ -209,6 +216,7 @@ func (s *MemoryStore) Create(path string, opts CreateOptions) (*StreamMetadata, 
 	now := s.now()
 	meta := StreamMetadata{
 		Path:           path,
+		Incarnation:    incarnation,
 		ContentType:    contentType,
 		CreatedAt:      now,
 		LastAccessedAt: now,
@@ -783,14 +791,56 @@ func (s *MemoryStore) readForkedStream(stream *memoryStream, offset Offset) []Me
 	return append(inherited, ownMessages...)
 }
 
-// Read implements Store.
-func (s *MemoryStore) Read(path string, offset Offset) ([]Message, bool, error) {
+func memoryReadIncarnation(meta *StreamMetadata) string {
+	if meta.Incarnation != "" {
+		return meta.Incarnation
+	}
+	return strconv.FormatInt(meta.CreatedAt.UnixNano(), 10)
+}
+
+// walkForkedMessages visits messages in the same inherited-prefix then
+// child-suffix order as readForkedStream. upper is inclusive. Returning false
+// from visit stops the walk without materializing the remaining suffix.
+func (s *MemoryStore) walkForkedMessages(stream *memoryStream, offset, upper Offset, visit func(Message) bool) bool {
+	if stream.metadata.ForkedFrom != "" && offset.LessThan(stream.metadata.ForkOffset) {
+		sourceUpper := upper
+		if stream.metadata.ForkOffset.LessThan(sourceUpper) {
+			sourceUpper = stream.metadata.ForkOffset
+		}
+		if source, ok := s.streams[stream.metadata.ForkedFrom]; ok {
+			if !s.walkForkedMessages(source, offset, sourceUpper, visit) {
+				return false
+			}
+		}
+	}
+
+	for _, msg := range stream.messages {
+		if !offset.LessThan(msg.Offset) {
+			continue
+		}
+		if upper.LessThan(msg.Offset) {
+			break
+		}
+		if !visit(msg) {
+			return false
+		}
+	}
+	return true
+}
+
+// ReadPage implements PageReader.
+func (s *MemoryStore) ReadPage(ctx context.Context, path string, offset Offset, opts ReadPageOptions) (ReadPage, error) {
+	opts = opts.Normalize()
+	if err := ctx.Err(); err != nil {
+		return ReadPage{}, err
+	}
+
 	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	stream, ok := s.streams[path]
 	if !ok {
-		s.mu.Unlock()
-		return nil, false, ErrStreamNotFound
+		return ReadPage{}, ErrStreamNotFound
 	}
 
 	// Check if stream has expired
@@ -799,36 +849,101 @@ func (s *MemoryStore) Read(path string, offset Offset) ([]Message, bool, error) 
 			// Expiry with active forks: treat as soft-delete
 			stream.metadata.SoftDeleted = true
 		}
-		s.mu.Unlock()
-		return nil, false, ErrStreamNotFound
+		return ReadPage{}, ErrStreamNotFound
 	}
 
 	// Soft-deleted streams are not visible for direct reads
 	if stream.metadata.SoftDeleted {
-		s.mu.Unlock()
-		return nil, false, ErrStreamNotFound
+		return ReadPage{}, ErrStreamNotFound
 	}
 
-	// Refresh TTL sliding window
+	incarnation := memoryReadIncarnation(&stream.metadata)
+	var snapshot ReadSnapshot
+	if opts.Snapshot == nil {
+		snapshot = ReadSnapshot{
+			Tail:        stream.metadata.CurrentOffset,
+			ContentType: stream.metadata.ContentType,
+			Closed:      stream.metadata.Closed,
+			Incarnation: incarnation,
+		}
+	} else {
+		snapshot = *opts.Snapshot
+		if snapshot.Incarnation != incarnation || !ContentTypeMatches(snapshot.ContentType, stream.metadata.ContentType) {
+			return ReadPage{}, ErrReadSnapshotChanged
+		}
+	}
+	// Every page is active read work and renews the root stream's sliding TTL.
+	// Inherited source streams remain untouched.
 	stream.metadata.LastAccessedAt = s.now()
 
-	// Read messages across fork chain
-	messages := s.readForkedStream(stream, offset)
-
-	// upToDate is true when client has reached the tail of the fork's own data
-	// (its CurrentOffset). For forks, this means we've read all inherited data
-	// AND all of the fork's own messages.
-	var upToDate bool
-	if len(messages) > 0 {
-		upToDate = messages[len(messages)-1].Offset.Equal(stream.metadata.CurrentOffset)
-	} else {
-		// No messages returned: either the stream has no data at all,
-		// or the client is already at the tail
-		upToDate = offset.Equal(stream.metadata.CurrentOffset) || stream.metadata.CurrentOffset.Equal(ZeroOffset)
+	page := ReadPage{
+		NextOffset: offset,
+		Snapshot:   snapshot,
+		Stats: ReadPageStats{
+			RequestedBytes: opts.TargetBytes,
+		},
 	}
+	messages := make([]Message, 0, min(opts.MaxFrames, 16))
+	s.walkForkedMessages(stream, offset, snapshot.Tail, func(msg Message) bool {
+		if err := ctx.Err(); err != nil {
+			return false
+		}
+		if len(messages) >= opts.MaxFrames {
+			return false
+		}
 
-	s.mu.Unlock()
-	return messages, upToDate, nil
+		n := len(msg.Data)
+		page.Stats.FetchedBytes += n
+		if len(messages) > 0 && page.Stats.ReturnedBytes+n > opts.TargetBytes {
+			page.Stats.DiscardedBytes += n
+			return false
+		}
+
+		messages = append(messages, msg)
+		page.Stats.ReturnedBytes += n
+		page.NextOffset = msg.Offset
+		return page.Stats.ReturnedBytes < opts.TargetBytes
+	})
+	if err := ctx.Err(); err != nil {
+		return ReadPage{}, err
+	}
+	page.Messages = messages
+
+	if len(messages) == 0 {
+		// This matches the HTTP read path's historical behavior for empty,
+		// stale, and beyond-tail reads.
+		page.NextOffset = snapshot.Tail
+	}
+	page.UpToDate = page.NextOffset.Equal(snapshot.Tail)
+	return page, nil
+}
+
+// Read implements Store by concatenating bounded pages for one snapshot.
+func (s *MemoryStore) Read(path string, offset Offset) ([]Message, bool, error) {
+	var (
+		messages []Message
+		snapshot *ReadSnapshot
+		next     = offset
+	)
+	for {
+		page, err := s.ReadPage(context.Background(), path, next, ReadPageOptions{Snapshot: snapshot})
+		if err != nil {
+			return nil, false, err
+		}
+		if snapshot == nil {
+			captured := page.Snapshot
+			snapshot = &captured
+		}
+		messages = append(messages, page.Messages...)
+		if page.UpToDate {
+			upToDate := len(messages) > 0 || offset.Equal(snapshot.Tail) || snapshot.Tail.Equal(ZeroOffset)
+			return messages, upToDate, nil
+		}
+		if page.NextOffset.Equal(next) {
+			return nil, false, errors.New("memory read page made no progress")
+		}
+		next = page.NextOffset
+	}
 }
 
 // WaitForMessages implements Store.
@@ -842,13 +957,14 @@ func (s *MemoryStore) WaitForMessages(ctx context.Context, path string, offset O
 	}
 	s.mu.RUnlock()
 
-	// First check if there are already messages
-	messages, _, err := s.Read(path, offset)
+	// First check if there are already messages. One bounded page is enough to
+	// decide whether the waiter should return.
+	page, err := s.ReadPage(ctx, path, offset, ReadPageOptions{})
 	if err != nil {
 		return nil, false, false, err
 	}
-	if len(messages) > 0 {
-		return messages, false, false, nil
+	if len(page.Messages) > 0 {
+		return page.Messages, false, false, nil
 	}
 
 	// For forks: if offset is in the inherited range (< ForkOffset),
@@ -885,20 +1001,20 @@ func (s *MemoryStore) WaitForMessages(ctx context.Context, path string, offset O
 			currentOffset := stream.metadata.CurrentOffset
 			s.mu.RUnlock()
 			// Check if there are any final messages
-			messages, _, err := s.Read(path, offset)
+			page, err := s.ReadPage(ctx, path, offset, ReadPageOptions{})
 			if err != nil {
 				return nil, false, false, err
 			}
 			// If no messages and client is at tail, stream is closed
-			if len(messages) == 0 && offset.Equal(currentOffset) {
+			if len(page.Messages) == 0 && offset.Equal(currentOffset) {
 				return nil, false, true, nil
 			}
-			return messages, false, false, nil
+			return page.Messages, false, false, nil
 		}
 		s.mu.RUnlock()
 		// New data available
-		messages, _, err := s.Read(path, offset)
-		return messages, false, false, err
+		page, err := s.ReadPage(ctx, path, offset, ReadPageOptions{})
+		return page.Messages, false, false, err
 	case <-timer.C:
 		// Timeout - check if stream was closed during wait
 		s.mu.RLock()

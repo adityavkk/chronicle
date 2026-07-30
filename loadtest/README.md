@@ -60,6 +60,30 @@ make all SPEC=spec/sweep-10k.yaml   # provision → run → ALWAYS tear down
 never left running by accident. Edit the spec (K, P, replicas, SLO) and re-run;
 override the target with env vars (`LT_PROJECT`, `LT_ZONE`, `LT_MACHINE`, …).
 
+Issue 5 has one spec for the full reader curve and mixed-write guard. For
+production-representative results, give it the primary endpoint of an existing
+managed Valkey 8 instance:
+
+```sh
+LT_PROJECT=adityavkk-prototyping \
+LT_MACHINE=e2-highcpu-16 \
+LT_REDIS_URL=redis://VALKEY8_PRIMARY_IP:6379/0 \
+make all SPEC=spec/catchup-paged.yaml
+```
+
+`LT_REDIS_URL` is treated as external. The run uses it, but `ltctl.sh` does not
+create or delete it. The GKE cluster and both isolated node pools are still
+deleted by the `all` trap. Without this variable, the older rig behavior remains
+available and provisions its temporary Memorystore for Redis 7.2 instance.
+
+The mixed cell has a result gate in addition to the zero error check. Eight
+writers offer 40 appends per second while 32 catch-up readers run. The job fails
+unless it records at least 38 successful appends per second and append p99 is at
+most 2,000 ms. This retains at least 95 percent of the offered write capacity.
+Each reader-curve cell must also complete measured work. The gate rejects zero
+completed readers, verifies the exact expected body bytes for every counted
+response, and requires both Redis and Chronicle telemetry samples.
+
 Granular, when iterating (the cluster + Redis stay up between `run`s):
 
 ```sh

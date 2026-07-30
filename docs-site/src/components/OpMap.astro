@@ -72,7 +72,7 @@ const OPS: Op[] = [
     steps: [
       { c: "HGETALL", k: ":meta", n: "missing → 404 · expired → cleanup, then 404" },
       { c: "HSET", k: ":meta", n: "accessedAtNs touch" },
-      { c: "ZRANGEBYLEX", k: ":msg", n: "\"(<offset>\\xff\" → \"+\" — every frame past the cursor" },
+      { c: "ZRANGEBYLEX", k: ":msg", n: "first candidate LIMIT 0 1 · optional byte-bounded bulk · page cap 1024" },
       { c: "(fork chain)", k: ":msg", n: "offsets below a fork point read the source stream, capped at forkOff" },
     ],
   },

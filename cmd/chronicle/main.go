@@ -175,6 +175,7 @@ func run() error {
 	flag.StringVar(&cfg.StoreBackend, "store", cfg.StoreBackend, `storage backend: "redis" or "memory"`)
 	flag.DurationVar(&cfg.LongPollTimeout, "long-poll-timeout", cfg.LongPollTimeout, "server-side long-poll timeout")
 	flag.DurationVar(&cfg.SSEReconnectInterval, "sse-reconnect-interval", cfg.SSEReconnectInterval, "SSE connection reconnect interval")
+	flag.IntVar(&cfg.ReadPageBytes, "read-page-bytes", cfg.ReadPageBytes, "catch-up returned page payload target in bytes")
 	flag.StringVar(&cfg.PublicBaseURL, "public-url", cfg.PublicBaseURL, "externally reachable origin for webhook callback/JWKS URLs")
 	flag.BoolVar(&cfg.Subscriptions, "subscriptions", cfg.Subscriptions, "enable the reserved __ds subscription APIs (redis backend only)")
 	flag.BoolVar(&cfg.UI, "ui", cfg.UI, "serve the embedded dsui console alongside the API (false = backend API only)")
@@ -186,6 +187,9 @@ func run() error {
 	flag.StringVar(&cfg.MetricsListen, "metrics-listen", cfg.MetricsListen, "address for /metrics + /healthz + /readyz, e.g. :9090 (empty disables)")
 	flag.StringVar(&logLevel, "log-level", logLevel, "log level: debug, info, warn or error")
 	flag.Parse()
+	if cfg.ReadPageBytes <= 0 {
+		return fmt.Errorf("-read-page-bytes must be positive")
+	}
 
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(logLevel)); err != nil {
@@ -204,6 +208,7 @@ func run() error {
 		Store:                st,
 		LongPollTimeout:      cfg.LongPollTimeout,
 		SSEReconnectInterval: cfg.SSEReconnectInterval,
+		ReadPageBytes:        cfg.ReadPageBytes,
 		Logger:               logger,
 		AuthMode:             cfg.AuthMode,
 	}
@@ -251,6 +256,7 @@ func run() error {
 	if cfg.MetricsListen != "" {
 		prom := metrics.New()
 		subMetrics = prom
+		handler.ReadMetrics = prom
 		ready := func() error { return nil }
 		if client != nil {
 			ready = func() error {

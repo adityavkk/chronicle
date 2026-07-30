@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/loadgen/dsclient"
 	"gecgithub01.walmart.com/auk000v/chronicle/loadgen/stats"
 )
 
@@ -39,10 +40,11 @@ func (r *runner) catchupLoop(ctx context.Context, wg *sync.WaitGroup) {
 		if err := sleepCtx(ctx, time.Until(intended)); err != nil {
 			return
 		}
+		eligible := r.measurementIncludes(intended)
 		select {
 		case r.catchupSem <- struct{}{}:
 		default:
-			rec.Count("catchup_dropped", 1)
+			rec.CountEligible(eligible, "catchup_dropped", 1)
 			r.col.Series.Add("catchup_dropped", r.sec(), 1)
 			continue
 		}
@@ -52,26 +54,43 @@ func (r *runner) catchupLoop(ctx context.Context, wg *sync.WaitGroup) {
 			defer func() { <-r.catchupSem; inFlight.Done() }()
 			sendStart := time.Now()
 			reqCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
-			resp, err := r.cl.Read(reqCtx, stream, "-1", "", "")
+			resp, err := r.cl.ReadCatchup(reqCtx, stream, "-1")
 			cancel()
 			schedDelay := sendStart.Sub(intended)
 			sec := r.sec()
 			r.col.Series.Add("catchup_sent", sec, 1)
+			var protocolErr error
+			if err == nil && resp.Status == 200 {
+				protocolErr = validateCatchupResponse(resp)
+			}
 			switch {
 			case err != nil:
-				rec.CountError("catchup", classify(err))
+				rec.CountErrorEligible(eligible, "catchup", classify(err))
+				r.col.Series.Add("catchup_err", sec, 1)
+			case protocolErr != nil:
+				rec.CountErrorEligible(eligible, "catchup", "protocol-headers")
 				r.col.Series.Add("catchup_err", sec, 1)
 			case resp.Status == 200:
-				rec.Record(stats.CatchupTTFB, schedDelay+resp.TTFB)
-				rec.Record(stats.CatchupTotal, schedDelay+resp.Total)
-				rec.Count("catchup_ok", 1)
-				rec.Count("catchup_bytes", int64(len(resp.Body)))
+				rec.RecordEligible(eligible, stats.CatchupTTFB, schedDelay+resp.TTFB)
+				rec.RecordEligible(eligible, stats.CatchupTotal, schedDelay+resp.Total)
+				rec.CountEligible(eligible, "catchup_ok", 1)
+				rec.CountEligible(eligible, "catchup_bytes", resp.BodyBytes)
 				r.col.Series.Add("catchup_ok", sec, 1)
-				r.col.Series.Add("catchup_bytes", sec, int64(len(resp.Body)))
+				r.col.Series.Add("catchup_bytes", sec, resp.BodyBytes)
 			default:
-				rec.CountError("catchup", fmt.Sprintf("status=%d", resp.Status))
+				rec.CountErrorEligible(eligible, "catchup", fmt.Sprintf("status=%d", resp.Status))
 				r.col.Series.Add("catchup_err", sec, 1)
 			}
 		}()
 	}
+}
+
+func validateCatchupResponse(resp dsclient.Response) error {
+	if resp.NextOffset == "" {
+		return fmt.Errorf("missing %s", dsclient.HeaderNextOffset)
+	}
+	if !resp.UpToDate {
+		return fmt.Errorf("missing or false %s", dsclient.HeaderUpToDate)
+	}
+	return nil
 }

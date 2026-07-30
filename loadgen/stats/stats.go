@@ -60,6 +60,20 @@ func (r *Recorder) Record(m Metric, d time.Duration) {
 	if !r.gate.Load() {
 		return
 	}
+	r.record(m, d)
+}
+
+// RecordEligible adds a latency observation when the operation's intended
+// schedule time belongs to the measurement window. Unlike Record, this does
+// not inspect the completion-time gate.
+func (r *Recorder) RecordEligible(eligible bool, m Metric, d time.Duration) {
+	if !eligible {
+		return
+	}
+	r.record(m, d)
+}
+
+func (r *Recorder) record(m Metric, d time.Duration) {
 	us := d.Microseconds()
 	if us < histMin {
 		us = histMin
@@ -82,6 +96,19 @@ func (r *Recorder) Count(name string, delta int64) {
 	if !r.gate.Load() {
 		return
 	}
+	r.count(name, delta)
+}
+
+// CountEligible increments a counter when the operation's intended schedule
+// time belongs to the measurement window.
+func (r *Recorder) CountEligible(eligible bool, name string, delta int64) {
+	if !eligible {
+		return
+	}
+	r.count(name, delta)
+}
+
+func (r *Recorder) count(name string, delta int64) {
 	r.mu.Lock()
 	r.cnt[name] += delta
 	r.mu.Unlock()
@@ -91,6 +118,11 @@ func (r *Recorder) Count(name string, delta int64) {
 // e.g. ("append", "status=409") or ("sse", "transport").
 func (r *Recorder) CountError(op, class string) {
 	r.Count("err:"+op+":"+class, 1)
+}
+
+// CountErrorEligible records an operation error by schedule-time eligibility.
+func (r *Recorder) CountErrorEligible(eligible bool, op, class string) {
+	r.CountEligible(eligible, "err:"+op+":"+class, 1)
 }
 
 // Collector owns the measurement gate, the worker recorders, and the

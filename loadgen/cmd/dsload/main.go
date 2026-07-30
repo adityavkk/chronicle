@@ -2,6 +2,8 @@
 //
 //	dsload run      -scenario scenarios/fanout.yaml -label chronicle-redis -out results/
 //	dsload validate -scenario scenarios/fanout.yaml
+//	dsload gate-catchup -result results/catchup/results.json -min-completions 512
+//	dsload gate-mixed   -result results/mixed/results.json -min-append-rate 38 -max-append-p99-ms 2000
 //
 // See README.md for the scenario schema and methodology.
 package main
@@ -19,6 +21,7 @@ import (
 	"strings"
 	"syscall"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/loadgen/gate"
 	"gecgithub01.walmart.com/auk000v/chronicle/loadgen/report"
 	"gecgithub01.walmart.com/auk000v/chronicle/loadgen/run"
 	"gecgithub01.walmart.com/auk000v/chronicle/loadgen/scenario"
@@ -36,6 +39,10 @@ func main() {
 		err = cmdRun(os.Args[2:])
 	case "validate":
 		err = cmdValidate(os.Args[2:])
+	case "gate-catchup":
+		err = cmdGateCatchup(os.Args[2:])
+	case "gate-mixed":
+		err = cmdGateMixed(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -50,7 +57,10 @@ func usage() {
   dsload run      -scenario <file> [-label <sut>] [-out <dir>] [-base-url <url>]
                   [-duration <d>] [-warmup <d>] [-sample-pid name=pid ...]
                   [-sample-redis name=host:port ...] [-keep-streams]
-  dsload validate -scenario <file>`)
+  dsload validate -scenario <file>
+  dsload gate-catchup -result <results.json> -min-completions <count>
+  dsload gate-mixed -result <results.json> -min-append-rate <per-second>
+                    -max-append-p99-ms <milliseconds>`)
 }
 
 type repeated []string
@@ -73,6 +83,83 @@ func cmdValidate(args []string) error {
 	return nil
 }
 
+func cmdGateCatchup(args []string) error {
+	fs := flag.NewFlagSet("gate-catchup", flag.ContinueOnError)
+	resultPath := fs.String("result", "", "catch-up reader-cell results.json")
+	minCompletions := fs.Int64("min-completions", 0, "minimum complete catch-up responses")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *resultPath == "" {
+		return fmt.Errorf("-result is required")
+	}
+	data, err := os.ReadFile(*resultPath)
+	if err != nil {
+		return err
+	}
+	var result run.Result
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("decode %s: %w", *resultPath, err)
+	}
+	measured, err := gate.CheckCatchup(&result, gate.CatchupSLO{MinCompletions: *minCompletions})
+	if err != nil {
+		return fmt.Errorf(
+			"catch-up acceptance failed: %w (completed %d, body bytes %d)",
+			err,
+			measured.Completions,
+			measured.BodyBytes,
+		)
+	}
+	fmt.Printf(
+		"catch-up acceptance PASS: %d complete responses >= %d; %d bytes each; body and telemetry complete\n",
+		measured.Completions,
+		*minCompletions,
+		measured.ExpectedResponseBytes,
+	)
+	return nil
+}
+
+func cmdGateMixed(args []string) error {
+	fs := flag.NewFlagSet("gate-mixed", flag.ContinueOnError)
+	resultPath := fs.String("result", "", "mixed catch-up results.json")
+	minAppendRate := fs.Float64("min-append-rate", 0, "minimum successful append requests per second")
+	maxAppendP99MS := fs.Float64("max-append-p99-ms", 0, "maximum append p99 in milliseconds")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *resultPath == "" {
+		return fmt.Errorf("-result is required")
+	}
+	data, err := os.ReadFile(*resultPath)
+	if err != nil {
+		return err
+	}
+	var result run.Result
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("decode %s: %w", *resultPath, err)
+	}
+	measured, err := gate.CheckMixedCatchup(&result, gate.MixedCatchupSLO{
+		MinAppendRate:  *minAppendRate,
+		MaxAppendP99MS: *maxAppendP99MS,
+	})
+	if err != nil {
+		return fmt.Errorf(
+			"mixed catch-up SLO failed: %w (measured %.2f appends/s, append p99 %.2f ms)",
+			err,
+			measured.AppendRate,
+			measured.AppendP99MS,
+		)
+	}
+	fmt.Printf(
+		"mixed catch-up SLO PASS: %.2f appends/s >= %.2f/s; append p99 %.2f ms <= %.2f ms\n",
+		measured.AppendRate,
+		*minAppendRate,
+		measured.AppendP99MS,
+		*maxAppendP99MS,
+	)
+	return nil
+}
+
 func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	path := fs.String("scenario", "", "scenario YAML file")
@@ -81,10 +168,12 @@ func cmdRun(args []string) error {
 	baseURL := fs.String("base-url", "", "override target.base_url")
 	duration := fs.Duration("duration", 0, "override scenario duration")
 	warmup := fs.Duration("warmup", -1, "override scenario warmup")
+	catchupReaders := fs.Int("catchup-readers", 0, "override limits.max_in_flight_catchup for a reader-curve cell")
 	keep := fs.Bool("keep-streams", false, "do not delete streams at teardown")
-	var samplePids, sampleRedis repeated
+	var samplePids, sampleRedis, sampleMetrics repeated
 	fs.Var(&samplePids, "sample-pid", "name=pid of a SUT process to sample (repeatable)")
 	fs.Var(&sampleRedis, "sample-redis", "name=host:port of a Redis to sample via INFO (repeatable)")
+	fs.Var(&sampleMetrics, "sample-metrics", "name=http://host:port/metrics endpoint to sample (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -102,6 +191,9 @@ func cmdRun(args []string) error {
 	if *warmup >= 0 {
 		sc.Warmup.Duration = *warmup
 	}
+	if *catchupReaders > 0 {
+		sc.Limits.MaxInFlightCatchup = *catchupReaders
+	}
 	if err := sc.Validate(); err != nil {
 		return err
 	}
@@ -118,6 +210,14 @@ func cmdRun(args []string) error {
 		}
 		redis[name] = addr
 	}
+	metrics := map[string]string{}
+	for _, kv := range sampleMetrics {
+		name, endpoint, ok := strings.Cut(kv, "=")
+		if !ok {
+			return fmt.Errorf("invalid -sample-metrics %q: want name=url", kv)
+		}
+		metrics[name] = endpoint
+	}
 
 	raiseFDLimit(sc)
 
@@ -126,12 +226,13 @@ func cmdRun(args []string) error {
 
 	log.Printf("scenario %s against %s [%s]", sc.Name, sc.Target.BaseURL, *label)
 	result, err := run.Run(ctx, run.Options{
-		Scenario:    sc,
-		Label:       *label,
-		SamplePIDs:  pids,
-		SampleRedis: redis,
-		KeepStreams: *keep,
-		Logf:        log.Printf,
+		Scenario:      sc,
+		Label:         *label,
+		SamplePIDs:    pids,
+		SampleRedis:   redis,
+		SampleMetrics: metrics,
+		KeepStreams:   *keep,
+		Logf:          log.Printf,
 	})
 	if err != nil {
 		return err

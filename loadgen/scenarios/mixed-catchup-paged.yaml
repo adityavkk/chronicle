@@ -1,0 +1,33 @@
+# Issue 5 mixed-load guard. The read side matches catchup-paged.yaml, while a
+# reserved aggregate 40 append requests per second continues throughout the
+# catch-up load.
+name: mixed-catchup-paged
+description: >
+  Eight prefilled 16 MiB streams with 32 active catch-up readers and a reserved
+  aggregate write offer of 40 single-record appends per second.
+
+duration: 30s
+warmup: 5s
+
+streams:
+  count: 8
+  prefix: bench/mixed-catchup-paged
+  prefill:
+    messages: 4096
+    message_bytes: 4096
+    batch_size: 64
+
+writers:
+  per_stream: 1
+  rate: 5/s
+  message_bytes: 256
+  batch: 1
+  producer: none
+
+catchup:
+  rate: 200/s
+
+limits:
+  max_in_flight_appends: 1024
+  max_in_flight_catchup: 32
+  request_timeout: 300s

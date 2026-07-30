@@ -1024,6 +1024,48 @@ func TestReadEnvelopeComposesWithLimit(t *testing.T) {
 	}
 }
 
+func TestReadLimitAtAndAboveStorageFrameCap(t *testing.T) {
+	h := testHandler(time.Second, time.Second)
+	mustCreate(t, h, "/test", "application/json", nil)
+	values := make([]int, store.DefaultReadPageFrames+1)
+	for i := range values {
+		values[i] = i
+	}
+	body, err := json.Marshal(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustAppend(t, h, "/test", "application/json", body)
+
+	rec := do(
+		h,
+		http.MethodGet,
+		fmt.Sprintf("/test?limit=%d", store.DefaultReadPageFrames),
+		nil,
+		nil,
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("limit at cap: status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	if got := len(decodeRawArray(t, rec.Body.Bytes())); got != store.DefaultReadPageFrames {
+		t.Fatalf("limit at cap returned %d messages, want %d", got, store.DefaultReadPageFrames)
+	}
+	if got := rec.Header().Get(protocol.HeaderStreamUpToDate); got != "" {
+		t.Fatalf("limit at cap Stream-Up-To-Date = %q, want unset", got)
+	}
+
+	rec = do(
+		h,
+		http.MethodGet,
+		fmt.Sprintf("/test?limit=%d", store.DefaultReadPageFrames+1),
+		nil,
+		nil,
+	)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("limit above cap: status = %d, want 400", rec.Code)
+	}
+}
+
 func TestReadEnvelopeETagDistinctAndConditional(t *testing.T) {
 	h := testHandler(time.Second, time.Second)
 	mustCreate(t, h, "/test", "application/json", nil)

@@ -26,7 +26,7 @@ import Aside from "../components/Aside.astro";
   <ul>
     <li><strong>Five verbs, one script each.</strong> <code>PUT</code> creates, <code>POST</code> appends or closes, <code>GET</code> reads, <code>HEAD</code> probes, <code>DELETE</code> removes. Every write is a single Lua script. Validation, write, tail update, and wakeup land together or not at all.</li>
     <li><strong>The same four parts every time.</strong> The HTTP handler parses the request, the Go store frames the bytes and calls the script, and Redis runs it. Decisions live in the script. The handler only maps the reply to a status code.</li>
-    <li><strong>Reads are one <code>ZRANGEBYLEX</code>.</strong> Frames are stored as <code>"&lt;offset&gt;|&lt;bytes&gt;"</code> members in a sorted set, zero-padded so byte order equals stream order. A read is a single lexicographic range from the cursor.</li>
+    <li><strong>Reads use bounded <code>ZRANGEBYLEX</code> pages.</strong> Frames are stored as <code>"&lt;offset&gt;|&lt;bytes&gt;"</code> members in a sorted set, zero-padded so byte order equals stream order. The first page captures the response tail. Redis fetches one candidate, then optionally bulk-fetches only the offset range that fits the remaining 1 MiB target. A separate 1,024-frame cap bounds the page.</li>
     <li><strong>Live tailing is pub/sub plus a re-read.</strong> A long-poll subscribes to the stream's notify channel, then re-reads before blocking, so an append that lands in the gap is never missed.</li>
     <li><strong>One operation has no script.</strong> <code>HEAD</code> is two pipelined reads and no write. It is the only client-facing path that does not touch a Lua script or slide the TTL.</li>
   </ul>
@@ -75,9 +75,10 @@ import Aside from "../components/Aside.astro";
     framing. A frame is one sorted-set member holding the message end offset,
     a `|`, then the raw payload, e.g. `0_13|{"tok":"The"}`.[^frame] Because
     the prefix is fixed-width and zero-padded, bytewise order equals stream
-    order, so a read is a single `ZRANGEBYLEX` from an exclusive lower bound.
-    This page abbreviates offsets to their significant digits (`0_0`, `0_13`,
-    `0_29`). On the wire both halves are full width.
+    order. Each storage page uses `ZRANGEBYLEX` from an exclusive lower bound
+    to the captured snapshot tail. This page abbreviates offsets to their
+    significant digits (`0_0`, `0_13`, `0_29`). On the wire both halves are
+    full width.
   </Aside>
 
   <Aside label="Shared machinery" summary="Three things that recur inside the mutation scripts">
@@ -175,7 +176,7 @@ import Aside from "../components/Aside.astro";
   <Diagram
     name="seq-fork"
     label="PUT, fork"
-    caption="Reads on the fork below forkOff are served from the source in Go (a ZRANGEBYLEX against the source's :msg in its own slot, capped at the fork point). The fork's own appends extend it past forkOff."
+    caption="For reads below forkOff, Go plans a finite source segment and runs the bounded read script against the source's :msg in its own slot, capped at the fork point. The fork's own appends extend it past forkOff."
   />
 
   <RedisTrace
@@ -360,10 +361,12 @@ import Aside from "../components/Aside.astro";
 <section class="block" id="get-catchup">
   <SectionHead num="04" label="GET" title="Read, catch-up" />
 
-  `GET {stream-url}?offset=<offset>` returns every message past the offset,
-  up to a server chunk limit. `offset=-1` (or an absent offset) starts from
-  the beginning, and `offset=now` resolves to the current tail.[^read] The
-  read is one `ZRANGEBYLEX` inside `read.lua`.
+  `GET {stream-url}?offset=<offset>` returns messages past the offset through
+  the tail captured by the first storage page. `offset=-1` (or an absent
+  offset) starts from the beginning, and `offset=now` resolves to the current
+  tail.[^read] Chronicle reads frame-aligned pages and writes each page directly
+  to the response before fetching the next. Concurrent appends are left for the
+  next response.
 
   ```http title="Read from the beginning"
   GET /v1/stream/chat?offset=-1 HTTP/1.1
@@ -387,21 +390,22 @@ import Aside from "../components/Aside.astro";
     script="read.lua"
     source="store/redis/scripts/read.lua"
     steps={[
-      { cmd: "HGETALL", key: "ds:{p}:meta", does: "Load meta. Absent → <code>NOTFOUND</code> (<strong>404</strong>).", loc: "read.lua:12" },
-      { cmd: "is_expired?", does: "Expired → cleanup and <code>NOTFOUND</code>.", loc: "read.lua:15", kind: "flow" },
-      { cmd: "softDel?", does: "Soft-deleted → <code>SOFTDEL</code>. The handler maps Read's <code>SOFTDEL</code> to <strong>404</strong>. It is <code>Get</code> and <code>HEAD</code> that surface the <strong>410</strong>.", loc: "read.lua:20", kind: "flow" },
-      { cmd: "HSET", key: "ds:{p}:meta accessedAtNs", does: "A Read counts as access and slides the TTL. (A bare <code>Get</code> or <code>HEAD</code> does not. This is the one place a read mutates a key.)", loc: "read.lua:23" },
-      { cmd: "PEXPIRE", key: "ds:{p}:*", does: "Re-arm the backstop against the refreshed <code>accessedAtNs</code>.", loc: "read.lua:25" },
-      { cmd: "ZRANGEBYLEX", key: "ds:{p}:msg", does: "The read itself: <code>\"(&lt;offset&gt;\\xff\"</code> → <code>\"+\"</code>. The bound excludes a frame whose end offset equals the cursor, because its next byte is <code>|</code> (<code>0x7C</code>) &lt; <code>0xFF</code>, and includes every higher offset, so the client gets exactly the frames it has not seen.", loc: "read.lua:27" },
-      { cmd: "HGETALL", key: "ds:{p}:meta", does: "Return the fresh meta alongside the frames so the handler can compute the next offset and whether the client is up to date.", loc: "read.lua:28" },
+      { cmd: "HGETALL", key: "ds:{p}:meta", does: "Load meta. Absent → <code>NOTFOUND</code> (<strong>404</strong>). The first root call captures tail, content type, closed state, and incarnation. Later pages validate the incarnation before reading.", loc: "read.lua:27" },
+      { cmd: "is_expired?", does: "Expired → cleanup and <code>NOTFOUND</code>.", loc: "read.lua:31", kind: "flow" },
+      { cmd: "softDel?", does: "Soft-deleted → <code>SOFTDEL</code>. The handler maps the read result to <strong>404</strong>. It is <code>Get</code> and <code>HEAD</code> that surface <strong>410</strong>.", loc: "read.lua:35", kind: "flow" },
+      { cmd: "incarnation matches?", does: "A delete and recreate between pages returns <code>SNAPSHOT</code>, so bytes from two stream incarnations cannot enter one response.", loc: "read.lua:38", kind: "flow" },
+      { cmd: "HSET", key: "ds:{p}:meta accessedAtNs", does: "A root read counts as access and slides the TTL. Reading an inherited fork segment does not extend the source stream's TTL.", loc: "read.lua:44" },
+      { cmd: "PEXPIRE", key: "ds:{p}:*", does: "Re-arm the root stream's backstop against the refreshed <code>accessedAtNs</code>.", loc: "read.lua:49" },
+      { cmd: "ZRANGEBYLEX", key: "ds:{p}:msg", does: "Fetch the first candidate with <code>LIMIT 0 1</code>. If more range exists and that frame fits, make one optional bulk call ending at <code>firstOffset + remainingTargetBytes</code>, with the remaining part of the 1,024-frame cap. There is no lookahead call.", loc: "read.lua:92" },
+      { cmd: "HGETALL", key: "ds:{p}:meta", does: "Return meta beside the bounded members. Go computes the next offset and whether this page reached the captured tail.", loc: "read.lua:78" },
     ]}
-    caption="A fork read adds a second ZRANGEBYLEX, in Go, against the source's :msg in its own slot, capped at the fork offset, so the inherited prefix comes back ahead of the fork's own frames, and post-fork source appends stay invisible."
+    caption="For a fork, Go computes finite source and child segments. It runs the same bounded script against each segment's own slot, capped by the fork offset and the root snapshot tail. The inherited prefix arrives first, and post-fork source appends stay invisible."
   />
 
   <Complexity
-    time="O(log N + M)"
-    space="O(M), the frames returned"
-    why="<code>ZRANGEBYLEX</code> descends the skiplist to the cursor in O(log N), then walks the M frames at or past it, and the two bounded <code>HGETALL</code>s on meta are O(1). A fork read repeats the seek-and-walk on each source up the chain, which is O(d · (log N + M)) for chain depth d, and the server caps M at a chunk limit, so one response stays bounded."
+    time="O(log N + M) per storage page"
+    space="O(M), one bounded storage page"
+    why="<code>ZRANGEBYLEX</code> descends the skiplist to the cursor in O(log N). The first call fetches one frame; an optional second call visits only end offsets inside the remaining 1 MiB budget and the remaining part of the 1,024-frame cap. One indivisible first frame may exceed the target. A fork page may seek finite segments up the chain. The handler flushes each page before asking for the next, so a long response does not require one suffix-sized storage result or a second whole-response buffer."
   />
 
   <Callout icon="info" label="Why the bound looks the way it does">
@@ -409,8 +413,10 @@ import Aside from "../components/Aside.astro";
     `0xFF`. Frames sharing the requested offset prefix have `|` (`0x7C`) as
     their next byte, which sorts below `0xFF`, so they are excluded, because
     the client already has those bytes. Any frame with a greater offset
-    prefix sorts above the bound and is included. Payload bytes never enter
-    the comparison. The fixed-width prefix decides first.[^lex]
+    prefix sorts above the bound and is included. The upper bound
+    `"[<snapshot-tail>\xff"` includes frames ending at the captured tail and
+    excludes later appends. Payload bytes never enter the comparison. The
+    fixed-width prefix decides first.[^lex]
   </Callout>
 </section>
 

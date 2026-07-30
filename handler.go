@@ -39,6 +39,13 @@ type Handler struct {
 	// SSEReconnectInterval is how often SSE connections should reconnect.
 	SSEReconnectInterval time.Duration
 
+	// ReadPageBytes is the returned page payload target for HTTP and SSE catch-up.
+	// Zero uses store.DefaultReadPageBytes.
+	ReadPageBytes int
+
+	// ReadMetrics receives bounded catch-up observations. Nil disables them.
+	ReadMetrics ReadMetrics
+
 	// Logger receives debug/error logs; nil falls back to slog.Default().
 	Logger *slog.Logger
 
@@ -442,7 +449,8 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 
 	// Optional read batch limit — the concrete lever behind §5.6's
 	// "server-defined maximum chunk size". A positive ?limit caps a catch-up
-	// read to N messages (framed/JSON streams only); the response then omits
+	// read to N messages (framed/JSON streams only), up to the storage page
+	// frame cap; the response then omits
 	// Stream-Up-To-Date and its Stream-Next-Offset lands mid-stream, so a
 	// client pages forward by re-reading from that cursor. Absent, empty, or
 	// non-positive means unlimited (the historical behaviour), so no existing
@@ -452,6 +460,12 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
 			limit = n
 		}
+	}
+	if limit > store.DefaultReadPageFrames {
+		return newHTTPError(
+			http.StatusBadRequest,
+			fmt.Sprintf("limit cannot exceed %d", store.DefaultReadPageFrames),
+		)
 	}
 	envelope := false
 	if v := query.Get("envelope"); v == "1" || strings.EqualFold(v, "true") {
@@ -525,41 +539,37 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		return nil
 	}
 
-	// Read messages
-	messages, _, err := h.Store.Read(path, effectiveOffset)
-	if err != nil {
+	reader := h.pageReader()
+	pageOpts := store.ReadPageOptions{
+		TargetBytes: h.readPageBytes(),
+		MaxFrames:   store.DefaultReadPageFrames,
+	}
+	stopAfterFirst := limit > 0 && store.IsJSONContentType(meta.ContentType)
+	if stopAfterFirst && limit < pageOpts.MaxFrames {
+		pageOpts.MaxFrames = limit
+	}
+	if err := r.Context().Err(); err != nil {
+		h.observeReadCancellation("before_first_page")
 		return err
 	}
-
-	// Apply the opt-in read batch limit to framed (JSON) streams only. Cutting
-	// by message count is meaningful only where messages are discrete; unframed
-	// streams have no persisted boundaries (a read is one concatenated blob), so
-	// they keep unlimited behaviour. Slicing here — before the next-offset
-	// calculation below — is all that's needed: nextOffset falls to the last
-	// kept message's offset, so upToDate computes false (we're short of the
-	// tail) and the ETag/caching headers describe this exact batch.
-	if limit > 0 && len(messages) > limit && store.IsJSONContentType(meta.ContentType) {
-		messages = messages[:limit]
-	}
-
-	// Calculate next offset
-	nextOffset := effectiveOffset
-	if len(messages) > 0 {
-		nextOffset = messages[len(messages)-1].Offset
-	} else {
-		// No new messages, use current offset from metadata
-		nextOffset = meta.CurrentOffset
+	firstPage, err := reader.ReadPage(r.Context(), path, effectiveOffset, pageOpts)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			h.observeReadCancellation("storage")
+		}
+		return readPageError(err)
 	}
 
 	// Handle long-poll mode - wait if no messages and either:
 	// 1. Client used offset=now (wants to wait for future data)
 	// 2. Client is caught up (at the tail)
-	shouldWait := liveMode == "long-poll" && len(messages) == 0 && (isNowOffset || effectiveOffset.Equal(meta.CurrentOffset))
+	shouldWait := liveMode == "long-poll" && len(firstPage.Messages) == 0 && (isNowOffset || effectiveOffset.Equal(firstPage.Snapshot.Tail))
 	if shouldWait {
 		// If stream is closed and client is at tail, return immediately (don't wait)
-		if meta.Closed {
-			w.Header().Set("Content-Type", meta.ContentType)
-			w.Header().Set(protocol.HeaderStreamNextOffset, meta.CurrentOffset.String())
+		if firstPage.Snapshot.Closed {
+			h.observeReadPage(firstPage)
+			w.Header().Set("Content-Type", firstPage.Snapshot.ContentType)
+			w.Header().Set(protocol.HeaderStreamNextOffset, firstPage.Snapshot.Tail.String())
 			w.Header().Set(protocol.HeaderStreamUpToDate, "true")
 			w.Header().Set(protocol.HeaderStreamClosed, "true")
 			w.Header().Set(protocol.HeaderStreamCursor, protocol.GenerateResponseCursor(cursor, time.Now()))
@@ -574,11 +584,13 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 
 		var timedOut bool
 		var streamClosed bool
-		messages, timedOut, streamClosed, err = h.Store.WaitForMessages(ctx, path, effectiveOffset, timeout)
+		_, timedOut, streamClosed, err = h.Store.WaitForMessages(ctx, path, effectiveOffset, timeout)
 		if err != nil {
+			h.observeReadPage(firstPage)
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				// Timeout or client disconnect - return 204 with current offset
-				w.Header().Set("Content-Type", meta.ContentType)
+				h.observeReadCancellation("wait")
+				w.Header().Set("Content-Type", firstPage.Snapshot.ContentType)
 				w.Header().Set(protocol.HeaderStreamNextOffset, effectiveOffset.String())
 				w.Header().Set(protocol.HeaderStreamUpToDate, "true")
 				w.Header().Set(protocol.HeaderStreamCursor, protocol.GenerateResponseCursor(cursor, time.Now()))
@@ -595,7 +607,8 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 
 		// If stream was closed during wait, return immediately with Stream-Closed
 		if streamClosed {
-			w.Header().Set("Content-Type", meta.ContentType)
+			h.observeReadPage(firstPage)
+			w.Header().Set("Content-Type", firstPage.Snapshot.ContentType)
 			w.Header().Set(protocol.HeaderStreamNextOffset, effectiveOffset.String())
 			w.Header().Set(protocol.HeaderStreamUpToDate, "true")
 			w.Header().Set(protocol.HeaderStreamClosed, "true")
@@ -605,8 +618,9 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		}
 
 		if timedOut {
+			h.observeReadPage(firstPage)
 			// Timeout - return 204 with current offset
-			w.Header().Set("Content-Type", meta.ContentType)
+			w.Header().Set("Content-Type", firstPage.Snapshot.ContentType)
 			w.Header().Set(protocol.HeaderStreamNextOffset, effectiveOffset.String())
 			w.Header().Set(protocol.HeaderStreamUpToDate, "true")
 			w.Header().Set(protocol.HeaderStreamCursor, protocol.GenerateResponseCursor(cursor, time.Now()))
@@ -619,20 +633,25 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 			return nil
 		}
 
-		// Got new messages - update nextOffset
-		if len(messages) > 0 {
-			nextOffset = messages[len(messages)-1].Offset
+		// The wait result is only a wake. Capture one new upper snapshot and
+		// stream it through the same bounded page path as ordinary catch-up.
+		h.observeReadPage(firstPage)
+		firstPage, err = reader.ReadPage(r.Context(), path, effectiveOffset, pageOpts)
+		if err != nil {
+			return readPageError(err)
 		}
 	}
 
-	// Determine if we're up to date (at the tail of the stream)
-	// Re-fetch current offset to check if we're at the tail
-	currentMeta, _ := h.Store.Get(path)
-	upToDate := nextOffset.Equal(currentMeta.CurrentOffset)
+	nextOffset := firstPage.Snapshot.Tail
+	upToDate := true
+	if stopAfterFirst {
+		nextOffset = firstPage.NextOffset
+		upToDate = firstPage.UpToDate
+	}
 
 	// Set response headers
-	enveloped := envelope && store.IsJSONContentType(meta.ContentType)
-	w.Header().Set("Content-Type", meta.ContentType)
+	enveloped := envelope && store.IsJSONContentType(firstPage.Snapshot.ContentType)
+	w.Header().Set("Content-Type", firstPage.Snapshot.ContentType)
 	w.Header().Set(protocol.HeaderStreamNextOffset, nextOffset.String())
 
 	// Always set Stream-Up-To-Date when at tail
@@ -641,7 +660,7 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	}
 
 	// Include Stream-Closed when stream is closed AND client is at tail AND upToDate
-	if currentMeta.Closed && upToDate {
+	if firstPage.Snapshot.Closed && upToDate {
 		w.Header().Set(protocol.HeaderStreamClosed, "true")
 	}
 
@@ -667,33 +686,39 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		w.Header().Set("ETag", etag)
 
 		// Set caching headers for historical reads
-		if !upToDate && len(messages) > 0 {
+		if !upToDate && len(firstPage.Messages) > 0 {
 			w.Header().Set("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
 		}
 
 		// Check If-None-Match for 304
 		if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" {
 			if ifNoneMatch == etag {
+				h.observeReadPage(firstPage)
+				if h.ReadMetrics != nil {
+					h.ReadMetrics.ReadResponse(0, 1)
+				}
 				w.WriteHeader(http.StatusNotModified)
 				return nil
 			}
 		}
 	}
 
-	// Format and write response
-	var body []byte
 	if enveloped {
 		w.Header().Set(protocol.HeaderStreamEnvelope, "offsets")
-		body = h.formatEnvelopeResponse(messages)
-	} else {
-		body, err = h.formatResponse(path, messages, meta.ContentType)
-	}
-	if err != nil {
-		return err
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write(body)
+	h.streamCatchupResponse(
+		w,
+		r,
+		reader,
+		path,
+		firstPage,
+		pageOpts,
+		stopAfterFirst,
+		store.IsJSONContentType(firstPage.Snapshot.ContentType),
+		enveloped,
+	)
 	return nil
 }
 
@@ -968,52 +993,6 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request, path stri
 	h.onStreamDeleted(path)
 	w.WriteHeader(http.StatusNoContent)
 	return nil
-}
-
-// formatResponse formats messages based on content type
-func (h *Handler) formatResponse(path string, messages []store.Message, contentType string) ([]byte, error) {
-	if store.IsJSONContentType(contentType) {
-		return store.FormatJSONResponse(messages), nil
-	}
-
-	// Non-JSON: concatenate raw data
-	var total int
-	for _, msg := range messages {
-		total += len(msg.Data)
-	}
-	result := make([]byte, 0, total)
-	for _, msg := range messages {
-		result = append(result, msg.Data...)
-	}
-	return result, nil
-}
-
-func (h *Handler) formatEnvelopeResponse(messages []store.Message) []byte {
-	if len(messages) == 0 {
-		return []byte("[]")
-	}
-
-	var total int
-	for i, msg := range messages {
-		if i > 0 {
-			total++
-		}
-		total += len(`{"offset":`) + len(msg.Offset.String()) + 2 + len(`,"data":`) + len(msg.Data) + 1
-	}
-	result := make([]byte, 0, total+2)
-	result = append(result, '[')
-	for i, msg := range messages {
-		if i > 0 {
-			result = append(result, ',')
-		}
-		result = append(result, `{"offset":`...)
-		result = strconv.AppendQuote(result, msg.Offset.String())
-		result = append(result, `,"data":`...)
-		result = append(result, msg.Data...)
-		result = append(result, '}')
-	}
-	result = append(result, ']')
-	return result
 }
 
 // HTTP error handling

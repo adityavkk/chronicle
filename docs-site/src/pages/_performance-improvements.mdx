@@ -1,0 +1,76 @@
+---
+title: "Performance improvements, <em>with evidence</em>"
+summary: "Chronicle performance work is grouped by mechanism, measured result, correctness gate, and remaining limit. This page links to bounded catch-up, horizontal scaling, cloud load tests, and the configuration report that compares systems."
+eyebrow: "Engineering"
+meta: "Performance improvements"
+deck: "Chronicle performance work starts with a measured source of repeated or serialized work. Each change names the mechanism, records the result, keeps the Durable Streams and Jepsen correctness gates, and states what remains slow."
+byline:
+  - label: "128-reader catch-up"
+    value: "0 / 128 → 128 / 128"
+  - label: "Returned page target"
+    value: "1 MiB"
+  - label: "Protocol gate"
+    value: "332 / 332"
+---
+
+import Tldr from "../components/Tldr.astro";
+import SectionHead from "../components/SectionHead.astro";
+import Table from "../components/Table.astro";
+import Callout from "../components/Callout.astro";
+import PerformanceIndex from "../components/PerformanceIndex.astro";
+
+<Tldr>
+  <ul>
+    <li><strong>Bounded catch-up removes whole-suffix reads and buffering.</strong> Redis fetches one frame, then optionally bulk-fetches only the range that fits the remaining 1 MiB target. A separate 1,024-frame cap bounds small-frame pages. Chronicle writes each frame directly to the socket.</li>
+    <li><strong>The local 128-reader failure became a complete run.</strong> The old server completed none of the 128 accepted 16 MiB replays. The paged server completed all 128 with no server errors.</li>
+    <li><strong>Horizontal scaling separates subscription work by Redis slot.</strong> The measured append fanout p99 stayed between 12.48 and 12.61 milliseconds from 1 to 8 replicas. The exact 12 replica point and a cloud run with multiple shards remain open.</li>
+    <li><strong>Correctness remains a release gate.</strong> A throughput gain does not excuse a Durable Streams conformance, Jepsen, or Porcupine regression.</li>
+  </ul>
+</Tldr>
+
+<section class="block" id="workstreams">
+  <SectionHead num="01" label="Workstreams" title="Open the change, its evidence, <em>and its issue</em>" />
+
+  <PerformanceIndex />
+</section>
+
+<section class="block" id="evidence">
+  <SectionHead num="02" label="Evidence" title="Every result needs <em>four checks</em>" />
+
+  A performance result belongs here when the evidence names the mechanism and
+  the test setup. The same record must state the correctness result and the
+  remaining limit.
+
+  <Table>
+    | Check | Required evidence |
+    | --- | --- |
+    | Mechanism | A counter, trace, or profile that measures the repeated or serialized work |
+    | System result | Throughput, latency, errors, memory, and the exact workload shape |
+    | Correctness | Durable Streams conformance plus the relevant Jepsen or Porcupine scenario |
+    | Limit | The next bottleneck, unmeasured configuration, or cost introduced by the change |
+  </Table>
+
+  <Callout icon="alert" label="Release rule">
+    The complete Durable Streams conformance suite remains a merge blocker.
+    The Jepsen and Porcupine suites remain maintained blockers. Performance
+    work may change how Chronicle shares, pages, or schedules work. It must not
+    weaken producer fencing, append atomicity, offsets, closure, expiry, forks,
+    or persistence.
+  </Callout>
+</section>
+
+<section class="block" id="reading">
+  <SectionHead num="03" label="Reading" title="Start with the result you <em>need to judge</em>" />
+
+  - Read [Bounded catch-up](./bounded-catchup) to understand the old suffix
+    read, the new snapshot page contract, the 1 MiB returned target, the
+    1,024-frame Redis limit, and the measured reader curves.
+  - Read [Horizontal scale](../horizontal-scale) to understand subscription
+    slot homing, work sharding, the replica curve, and the cloud gates that
+    quota prevented.
+  - Read [Load tests](../load-testing) for the GKE and managed Redis rig,
+    configuration table, fault runs, and teardown record.
+  - Read the [configuration comparison report](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/ds-bench/configuration-comparison.md)
+    for Chronicle, Ursula, Rust, and Node results across machine and storage
+    configurations.
+</section>

@@ -6,6 +6,34 @@ import (
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 )
 
+func TestLoadEnvReadPageBytes(t *testing.T) {
+	lookup := func(value string) func(string) (string, bool) {
+		return func(key string) (string, bool) {
+			if key == EnvReadPageBytes {
+				return value, true
+			}
+			return "", false
+		}
+	}
+
+	if got := DefaultConfig().ReadPageBytes; got != 1<<20 {
+		t.Fatalf("default ReadPageBytes = %d, want %d", got, 1<<20)
+	}
+	c := DefaultConfig()
+	if err := c.LoadEnv(lookup("262144")); err != nil {
+		t.Fatal(err)
+	}
+	if c.ReadPageBytes != 256<<10 {
+		t.Fatalf("ReadPageBytes = %d, want %d", c.ReadPageBytes, 256<<10)
+	}
+	for _, value := range []string{"0", "-1", "nope"} {
+		c = DefaultConfig()
+		if err := c.LoadEnv(lookup(value)); err == nil {
+			t.Fatalf("ReadPageBytes %q must fail", value)
+		}
+	}
+}
+
 // TestLoadEnvAuthMode pins the enforcement toggle's env boundary: unset stays
 // insecure (telemetry default — a deploy sync can never auto-enforce),
 // "enforce" opts in, and garbage refuses to start rather than guessing.

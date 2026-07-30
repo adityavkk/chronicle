@@ -1,0 +1,31 @@
+# One declarative source of truth for the issue-5 paid GKE suite. The renderer
+# creates one SUT deployment and one loadgen Job on the separate loadgen pool.
+# That Job runs the 8, 32, 128, and 512 reader cells, then the mixed write cell.
+name: catchup-paged
+
+loadgen_image: REGISTRY/chronicle-loadgen:TAG
+
+sut:
+  image: REGISTRY/chronicle:TAG
+  replicas: 1
+  redis_url: ""
+  cpu: "14"
+  memory: 24Gi
+  read_page_bytes: 1048576
+
+catchup:
+  reader_curve: [8, 32, 128, 512]
+  streams: 8
+  messages_per_stream: 4096
+  message_bytes: 4096
+  batch_size: 64
+  offered_rate: 200/s
+  warmup: 5s
+  duration: 30s
+  request_timeout: 300s
+  mixed_readers: 32
+  mixed_writer_rate: 5/s
+  # Eight writers offer 40 appends/s. The job must retain at least 95 percent
+  # of that capacity and keep scheduled-to-response append p99 within 2 seconds.
+  mixed_min_append_rate: 38
+  mixed_max_append_p99_ms: 2000

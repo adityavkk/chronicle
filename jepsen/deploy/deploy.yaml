@@ -100,6 +100,10 @@ spec:
               value: "http://chronicle:4437"
             - name: CHRONICLE_LONG_POLL_TIMEOUT
               value: "2s"
+            # Force multi-page catch-up histories. A valid frame may exceed the
+            # target, so 1 byte deterministically yields one whole frame/page.
+            - name: CHRONICLE_READ_PAGE_BYTES
+              value: "1"
             - name: CHRONICLE_LOG_LEVEL
               value: "info"
           ports:

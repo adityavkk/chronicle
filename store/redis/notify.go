@@ -29,13 +29,14 @@ func (s *Store) WaitForMessages(ctx context.Context, path string, offset store.O
 		return nil, false, true, nil
 	}
 
-	// Fast path: messages already available.
-	msgs, _, err := s.Read(path, offset)
+	// Fast path: one bounded page is enough to decide whether messages are
+	// already available.
+	page, err := s.ReadPage(ctx, path, offset, store.ReadPageOptions{})
 	if err != nil {
 		return nil, false, false, err
 	}
-	if len(msgs) > 0 {
-		return msgs, false, false, nil
+	if len(page.Messages) > 0 {
+		return page.Messages, false, false, nil
 	}
 
 	// Fork guard: an offset in the inherited range (< ForkOffset) can only
@@ -54,7 +55,7 @@ func (s *Store) WaitForMessages(ctx context.Context, path string, offset store.O
 
 	// Re-read before waiting: closes the missed-wakeup race window between
 	// the fast-path read and the subscribe.
-	if msgs, closed, done, err := s.recheck(path, offset); done {
+	if msgs, closed, done, err := s.recheck(ctx, path, offset); done {
 		return msgs, false, closed, err
 	}
 
@@ -66,11 +67,11 @@ func (s *Store) WaitForMessages(ctx context.Context, path string, offset store.O
 	for {
 		select {
 		case <-wake:
-			if msgs, closed, done, err := s.recheck(path, offset); done {
+			if msgs, closed, done, err := s.recheck(ctx, path, offset); done {
 				return msgs, false, closed, err
 			}
 		case <-ticker.C:
-			if msgs, closed, done, err := s.recheck(path, offset); done {
+			if msgs, closed, done, err := s.recheck(ctx, path, offset); done {
 				return msgs, false, closed, err
 			}
 		case <-timer.C:
@@ -91,15 +92,15 @@ func (s *Store) WaitForMessages(ctx context.Context, path string, offset store.O
 // arrived, the stream closed at the caller's tail, or reading failed (e.g.
 // the stream was deleted mid-wait). A spurious wakeup with nothing new
 // keeps waiting (done=false).
-func (s *Store) recheck(path string, offset store.Offset) (msgs []store.Message, closed, done bool, err error) {
-	msgs, _, err = s.Read(path, offset)
+func (s *Store) recheck(ctx context.Context, path string, offset store.Offset) (msgs []store.Message, closed, done bool, err error) {
+	page, err := s.ReadPage(ctx, path, offset, store.ReadPageOptions{})
 	if err != nil {
 		return nil, false, true, err
 	}
-	if len(msgs) > 0 {
-		return msgs, false, true, nil
+	if len(page.Messages) > 0 {
+		return page.Messages, false, true, nil
 	}
-	meta, err := s.fetchMeta(context.Background(), path)
+	meta, err := s.fetchMeta(ctx, path)
 	if err != nil {
 		return nil, false, true, err
 	}

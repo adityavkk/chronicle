@@ -11,10 +11,11 @@ import (
 //
 //	if msg.Offset.ByteOffset > offset.ByteOffset { ... }
 //
-// while the Redis backend range-scans frames with ZRANGEBYLEX over the FULL
-// offset string (read.lua: ZRANGEBYLEX KEYS[2] lexLowerBound(offset) '+'), whose
-// exclusive lower bound lexLowerBound (store/redis/keys.go) is built from
-// offset.String() — the "%016d_%016d" rendering of BOTH ReadSeq and ByteOffset.
+// while the Redis backend range-scans bounded pages with ZRANGEBYLEX over the
+// FULL offset string. The exclusive lower bound lexLowerBound
+// (store/redis/keys.go) is built from offset.String(), the "%016d_%016d"
+// rendering of BOTH ReadSeq and ByteOffset. The inclusive upper bound and LIMIT
+// do not change that ordering rule.
 // Equivalently, Redis orders by the full Offset.Compare (high-order ReadSeq,
 // then ByteOffset), and within the LB-1 width-safe domain (< 10^16) byte-lex
 // order of Offset.String() equals Offset.Compare exactly (asserted in

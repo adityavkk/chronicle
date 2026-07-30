@@ -87,9 +87,9 @@ status.
     | Function | Verb | Calls |
     | --- | --- | --- |
     | [`handleCreate`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L145) | `PUT` | `Store.Create` → `201`/`200` |
-    | [`handleRead`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L341) | `GET` | `Store.Read`, then `handleSSE` or `WaitForMessages` |
+    | [`handleRead`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L404) | `GET` | `PageReader.ReadPage`, then `WaitForMessages` when caught up |
     | [`handleAppend`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L582) | `POST` | `Store.Append` / `CloseStreamWithProducer` |
-    | [`handleSSE`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go#L23) | `GET live=sse` | polls `Store.Read` on a reconnect timer |
+    | [`handleSSE`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go#L18) | `GET live=sse` | streams bounded pages, then uses `WaitForMessages` as a wake primitive |
     | [`Mount`](https://github.com/adityavkk/chronicle/blob/main/mount.go#L27) | any | wraps the handler, does prefix and `Location` rewriting |
   </Table>
 </section>
@@ -180,20 +180,29 @@ type Store interface {
 	GetCurrentOffset(path string) (Offset, error)
 	Close() error
 }
+
+type PageReader interface {
+	ReadPage(ctx context.Context, path string, offset Offset, opts ReadPageOptions) (ReadPage, error)
+}
 ```
 
 The core type in the contract is the `Offset`. It is two zero-padded 64-bit
 integers, `ReadSeq` and `ByteOffset`, formatted as `"%016d_%016d"`. The padding
 makes the string form sort in the same order as the numbers. The Redis backend
-can then store frames in a sorted set keyed by offset string and read a range
-with one `ZRANGEBYLEX`. `Read` returns the messages plus an `upToDate` bool.
-`WaitForMessages` is the long-poll call that blocks until an append, a close, or
-a timeout.
+can then store frames in a sorted set keyed by offset string and seek each page
+with `ZRANGEBYLEX`. `PageReader` is a separate optional capability so existing
+third-party `Store` implementations still compile. Chronicle's maintained
+stores implement it with a 1 MiB returned payload target and a 1,024-frame
+page ceiling. The
+first page captures the tail, content type, closed state, and stream
+incarnation. Later pages reuse that snapshot, so concurrent appends belong to
+the next response. `WaitForMessages` blocks until an append, a close, or a
+timeout.
 
 <Complexity
-  time="O(log N + M) per read"
-  space="O(M) for the M returned frames"
-  why="Because the padded offset string sorts in numeric order, a read is one <code>ZRANGEBYLEX</code>: a log-N seek into the sorted set plus the M frames in range. No scan, no per-frame round trip."
+  time="O(log N + M) per storage page"
+  space="O(M) for one bounded page"
+  why="The padded offset makes each page a log-N seek. Redis fetches one candidate, then optionally bulk-fetches only the offset range that fits the remaining byte target, with at most 1,024 frames in the page. One returned frame may exceed the target because Chronicle never splits a stored frame."
 />
 
   </Step>

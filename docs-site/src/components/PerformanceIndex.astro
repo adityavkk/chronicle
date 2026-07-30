@@ -1,0 +1,164 @@
+---
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const links = {
+  catchup: `${base}/performance-improvements/bounded-catchup`,
+  scaling: `${base}/horizontal-scale`,
+  loadTests: `${base}/load-testing`,
+  issue5: "https://gecgithub01.walmart.com/GPA/chronicle/issues/5",
+  adr5: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0004-bounded-read-pages-and-snapshot-catch-up.md",
+  evidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md",
+  comparison: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/ds-bench/configuration-comparison.md",
+};
+---
+
+<div class="improvements">
+  <article class="improvement featured">
+    <div class="head">
+      <span class="num">01</span>
+      <span class="status">validated</span>
+    </div>
+    <h3>Bounded catch-up</h3>
+    <p class="result">128 errors to 435 complete measured replays</p>
+    <p>
+      Redis fetches one frame, then optionally bulk-fetches only the range that
+      fits the remaining 1 MiB target. A separate 1,024-frame cap bounds each
+      page, and Chronicle writes each frame directly to the client.
+    </p>
+    <nav aria-label="Bounded catch-up links">
+      <a class="primary" href={links.catchup}>Read the explainer <span aria-hidden="true">→</span></a>
+      <a href={links.issue5}>GPA/chronicle issue #5 <span aria-hidden="true">↗</span></a>
+      <a href={links.adr5}>Architecture decision <span aria-hidden="true">↗</span></a>
+      <a href={links.evidence}>Evidence report <span aria-hidden="true">↗</span></a>
+    </nav>
+  </article>
+
+  <article class="improvement">
+    <div class="head">
+      <span class="num">02</span>
+      <span class="status">shipped</span>
+    </div>
+    <h3>Horizontal scale</h3>
+    <p class="result">12.48 to 12.61 ms fanout p99 from 1 to 8 replicas</p>
+    <p>
+      Chronicle homes subscription state by Redis slot and divides claim work.
+      The cloud curve stayed flat through eight replicas. Quota blocked the
+      12 replica point and the cloud run with multiple shards.
+    </p>
+    <nav aria-label="Horizontal scale links">
+      <a class="primary" href={links.scaling}>Read the scaling report <span aria-hidden="true">→</span></a>
+      <a href={links.loadTests}>Open the cloud load tests <span aria-hidden="true">→</span></a>
+    </nav>
+  </article>
+
+  <article class="improvement">
+    <div class="head">
+      <span class="num">03</span>
+      <span class="status">measured</span>
+    </div>
+    <h3>Configurations and systems</h3>
+    <p class="result">Chronicle compared with Ursula, Rust, and Node</p>
+    <p>
+      The benchmark record separates Chronicle node size, Redis size, replica
+      count, durability, and workload shape. Historical replay remains
+      Chronicle's largest measured gap.
+    </p>
+    <nav aria-label="Configuration comparison links">
+      <a class="primary" href={links.comparison}>Open the comparison report <span aria-hidden="true">↗</span></a>
+      <a href={links.loadTests}>Read the load test method <span aria-hidden="true">→</span></a>
+    </nav>
+  </article>
+</div>
+
+<style lang="scss">
+  .improvements {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+  }
+  .improvement {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    padding: 22px;
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--card);
+    box-shadow: var(--shadow-sm);
+  }
+  .improvement.featured::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    content: "";
+    background: var(--accent);
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 22px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .num { color: var(--accent); }
+  .status {
+    padding: 3px 8px;
+    border: 1px solid rgba(36, 131, 123, 0.35);
+    border-radius: 999px;
+    color: var(--accent-deep);
+    background: var(--accent-tint);
+  }
+  h3 {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font-size: 21px;
+    font-weight: 500;
+    line-height: 1.2;
+  }
+  .result {
+    margin: 12px 0 0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.5;
+    color: var(--accent-deep);
+  }
+  p {
+    margin: 16px 0 22px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--ink-mute);
+  }
+  nav {
+    display: grid;
+    gap: 9px;
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule-soft);
+  }
+  a {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--ink-mute);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.4;
+    text-decoration: none;
+  }
+  a:hover { color: var(--accent); }
+  a.primary {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  @media (max-width: 980px) {
+    .improvements { grid-template-columns: 1fr; }
+  }
+</style>

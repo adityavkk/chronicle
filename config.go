@@ -19,6 +19,7 @@ const (
 	EnvStore                = "CHRONICLE_STORE"
 	EnvLongPollTimeout      = "CHRONICLE_LONG_POLL_TIMEOUT"
 	EnvSSEReconnectInterval = "CHRONICLE_SSE_RECONNECT_INTERVAL"
+	EnvReadPageBytes        = "CHRONICLE_READ_PAGE_BYTES"
 	EnvPublicURL            = "CHRONICLE_PUBLIC_URL"
 	EnvSubscriptions        = "CHRONICLE_SUBSCRIPTIONS"
 	EnvUI                   = "CHRONICLE_UI"
@@ -91,6 +92,10 @@ type Config struct {
 	// SSEReconnectInterval is how often SSE connections are closed to allow
 	// CDN request collapsing. Caddy default: 60s.
 	SSEReconnectInterval time.Duration
+
+	// ReadPageBytes is the returned storage page payload target for catch-up.
+	// The default is 1 MiB. One valid frame may exceed the target.
+	ReadPageBytes int
 
 	// PublicBaseURL is the externally reachable origin (scheme + host[:port])
 	// the server is served behind. It is combined with StreamRoot to build the
@@ -238,6 +243,7 @@ func DefaultConfig() Config {
 		StoreBackend:         "redis",
 		LongPollTimeout:      30 * time.Second,
 		SSEReconnectInterval: 60 * time.Second,
+		ReadPageBytes:        1 << 20,
 		PublicBaseURL:        "http://localhost:4437",
 		Subscriptions:        true,
 		UI:                   true,
@@ -282,6 +288,13 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvSSEReconnectInterval, err)
 		}
 		c.SSEReconnectInterval = d
+	}
+	if v, ok := lookup(EnvReadPageBytes); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("%s: must be a positive integer", EnvReadPageBytes)
+		}
+		c.ReadPageBytes = n
 	}
 	if v, ok := lookup(EnvPublicURL); ok {
 		c.PublicBaseURL = v

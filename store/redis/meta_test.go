@@ -14,6 +14,7 @@ func TestMetaRoundTripFull(t *testing.T) {
 	reqOff := off(7)
 	in := &store.StreamMetadata{
 		Path:                "/v1/full",
+		Incarnation:         "00112233445566778899aabbccddeeff",
 		ContentType:         "application/json",
 		CurrentOffset:       off(42),
 		LastSeq:             "seq-009",
@@ -46,6 +47,7 @@ func TestMetaRoundTripFull(t *testing.T) {
 func TestMetaRoundTripMinimal(t *testing.T) {
 	in := &store.StreamMetadata{
 		Path:           "/v1/min",
+		Incarnation:    "ffeeddccbbaa99887766554433221100",
 		ContentType:    "application/octet-stream",
 		CurrentOffset:  store.ZeroOffset,
 		CreatedAt:      time.Unix(1765000000, 0),

@@ -64,6 +64,8 @@ const (
 	stGone        = "GONE"
 	stUnderflow   = "UNDERFLOW"
 	stCascade     = "CASCADE"
+	stSnapshot    = "SNAPSHOT"
+	stMissing     = "MISSING"
 )
 
 // scriptReply is the decoded fixed-shape array reply of the append/close

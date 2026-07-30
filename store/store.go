@@ -201,6 +201,7 @@ type Message struct {
 // StreamMetadata contains metadata about a stream
 type StreamMetadata struct {
 	Path                string
+	Incarnation         string // Opaque identity for this create; changes after delete and recreate
 	ContentType         string
 	CurrentOffset       Offset
 	LastSeq             string // Last Stream-Seq value
