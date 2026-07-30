@@ -87,6 +87,29 @@ func TestMemoryStore_CreateIdempotent(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_IncarnationChangesOnRecreateWithFrozenClock(t *testing.T) {
+	clock := NewFakeClock(time.Unix(100, 0))
+	s := NewMemoryStore(WithClock(clock))
+	path := "/same-clock-incarnation"
+	first, created, err := s.Create(path, CreateOptions{ContentType: "application/octet-stream"})
+	if err != nil || !created {
+		t.Fatalf("first Create: created=%v err=%v", created, err)
+	}
+	if first.Incarnation == "" {
+		t.Fatal("first create has empty incarnation")
+	}
+	if err := s.Delete(path); err != nil {
+		t.Fatal(err)
+	}
+	second, created, err := s.Create(path, CreateOptions{ContentType: "application/octet-stream"})
+	if err != nil || !created {
+		t.Fatalf("second Create: created=%v err=%v", created, err)
+	}
+	if second.Incarnation == "" || second.Incarnation == first.Incarnation {
+		t.Fatalf("recreate incarnation = %q, first = %q", second.Incarnation, first.Incarnation)
+	}
+}
+
 func TestMemoryStore_AppendAndRead(t *testing.T) {
 	s := NewMemoryStore()
 	defer s.Close()

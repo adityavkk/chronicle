@@ -195,6 +195,18 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		curves[string(m)] = stats.PercentileCurve(h)
 	}
 	host, _ := os.Hostname()
+	resources := sampler.samples()
+	for i := range resources {
+		sampledAt := r.start.Add(time.Duration(resources[i].Sec) * time.Second)
+		switch {
+		case sampledAt.Before(r.measureStart):
+			resources[i].Phase = "warmup"
+		case !sampledAt.Before(r.measureEnd):
+			resources[i].Phase = "drain"
+		default:
+			resources[i].Phase = "measurement"
+		}
+	}
 	return &Result{
 		Scenario:      sc,
 		Label:         opts.Label,
@@ -207,7 +219,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		Metrics:       metrics,
 		Counters:      counts,
 		Series:        r.col.Series.Snapshot(),
-		Resources:     sampler.samples(),
+		Resources:     resources,
 		MetricSamples: sampler.metricSamples(),
 		HDRCurves:     curves,
 		Notes:         r.notes,

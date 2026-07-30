@@ -394,8 +394,8 @@ import Aside from "../components/Aside.astro";
       { cmd: "is_expired?", does: "Expired → cleanup and <code>NOTFOUND</code>.", loc: "read.lua:31", kind: "flow" },
       { cmd: "softDel?", does: "Soft-deleted → <code>SOFTDEL</code>. The handler maps the read result to <strong>404</strong>. It is <code>Get</code> and <code>HEAD</code> that surface <strong>410</strong>.", loc: "read.lua:35", kind: "flow" },
       { cmd: "incarnation matches?", does: "A delete and recreate between pages returns <code>SNAPSHOT</code>, so bytes from two stream incarnations cannot enter one response.", loc: "read.lua:38", kind: "flow" },
-      { cmd: "HSET", key: "ds:{p}:meta accessedAtNs", does: "A root read counts as access and slides the TTL. Reading an inherited fork segment does not extend the source stream's TTL.", loc: "read.lua:44" },
-      { cmd: "PEXPIRE", key: "ds:{p}:*", does: "Re-arm the root stream's backstop against the refreshed <code>accessedAtNs</code>.", loc: "read.lua:49" },
+      { cmd: "HSET", key: "ds:{p}:meta accessedAtNs", does: "The first root page of a read snapshot counts as access and slides the TTL once. Continuation pages and inherited fork segments validate without extending a TTL.", loc: "read.lua:44" },
+      { cmd: "PEXPIRE", key: "ds:{p}:*", does: "On that first root page only, re-arm the root stream's backstop against the refreshed <code>accessedAtNs</code>. Continuations use <code>NoTouch</code>.", loc: "read.lua:49" },
       { cmd: "ZRANGEBYLEX", key: "ds:{p}:msg", does: "Fetch the first candidate with <code>LIMIT 0 1</code>. If more range exists and that frame fits, make one optional bulk call ending at <code>firstOffset + remainingTargetBytes</code>, with the remaining part of the 1,024-frame cap. There is no lookahead call.", loc: "read.lua:92" },
       { cmd: "HGETALL", key: "ds:{p}:meta", does: "Return meta beside the bounded members. Go computes the next offset and whether this page reached the captured tail.", loc: "read.lua:78" },
     ]}

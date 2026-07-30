@@ -275,9 +275,9 @@ func (s *Store) Create(path string, opts store.CreateOptions) (*store.StreamMeta
 	now := s.clock.Now()
 	meta := &store.StreamMetadata{
 		Path:           path,
+		Incarnation:    incarnation,
 		ContentType:    opts.ContentType,
 		CurrentOffset:  store.ZeroOffset,
-		Incarnation:    incarnation,
 		CreatedAt:      now,
 		LastAccessedAt: now,
 		Closed:         opts.Closed,
@@ -675,9 +675,26 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 	if opts.Snapshot != nil {
 		expected = opts.Snapshot.Incarnation
 	}
-	root, err := s.runReadPageScript(ctx, path, offset, store.ZeroOffset, opts.TargetBytes, opts.MaxFrames, expected, true, false, true, false)
+	root, err := s.runReadPageScript(
+		ctx,
+		path,
+		offset,
+		store.ZeroOffset,
+		opts.TargetBytes,
+		opts.MaxFrames,
+		expected,
+		true,
+		false,
+		true,
+		false,
+		!opts.NoTouch && opts.Snapshot == nil,
+	)
 	if err != nil {
 		return store.ReadPage{}, err
+	}
+	if opts.Snapshot != nil &&
+		!store.ContentTypeMatches(opts.Snapshot.ContentType, root.meta.ContentType) {
+		return store.ReadPage{}, store.ErrReadSnapshotChanged
 	}
 
 	var snapshot store.ReadSnapshot
@@ -724,6 +741,7 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 			true,
 			len(page.Messages) == 0,
 			segment.requireFrame,
+			false,
 		)
 		if err != nil {
 			return store.ReadPage{}, err
@@ -796,9 +814,17 @@ func (s *Store) runReadPageScript(
 	lower, upper store.Offset,
 	targetBytes, maxFrames int,
 	expectedIncarnation string,
-	rootRead, fetchFrames, allowOversized, requireCandidate bool,
+	rootRead, fetchFrames, allowOversized, requireCandidate, touchRoot bool,
 ) (*redisPageScriptResult, error) {
 	started := time.Now()
+	legacyIncarnation := ""
+	if rootRead {
+		var err error
+		legacyIncarnation, err = store.NewIncarnationID()
+		if err != nil {
+			return nil, err
+		}
+	}
 	raw, err := readScript.Run(
 		ctx,
 		s.client,
@@ -813,6 +839,8 @@ func (s *Store) runReadPageScript(
 		boolArg(fetchFrames),
 		boolArg(allowOversized),
 		boolArg(requireCandidate),
+		boolArg(touchRoot),
+		legacyIncarnation,
 	).Result()
 	elapsed := time.Since(started)
 	if err != nil {
@@ -940,7 +968,6 @@ func (s *Store) readSegments(
 		}
 		segments = append(segments, inherited...)
 	}
-
 	ownLower := lower
 	if meta.ForkedFrom != "" && ownLower.LessThan(meta.ForkOffset) {
 		ownLower = meta.ForkOffset
@@ -998,6 +1025,7 @@ func (s *Store) readForkChain(ctx context.Context, path string, meta *store.Stre
 				true,
 				true,
 				segment.requireFrame,
+				false,
 			)
 			if err != nil {
 				return nil, err

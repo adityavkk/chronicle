@@ -276,7 +276,7 @@ func TestMemoryReadPageOffsetsAndCancellation(t *testing.T) {
 	}
 }
 
-func TestMemoryReadPageRenewsSlidingTTL(t *testing.T) {
+func TestMemoryReadPageRenewsSlidingTTLOncePerSnapshot(t *testing.T) {
 	clock := NewFakeClock(time.Unix(100, 0))
 	s := NewMemoryStore(WithClock(clock))
 	ttl := int64(10)
@@ -302,8 +302,13 @@ func TestMemoryReadPageRenewsSlidingTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock.Advance(9 * time.Second)
-	if _, err := s.ReadPage(context.Background(), "/ttl", second.NextOffset, ReadPageOptions{Snapshot: &first.Snapshot}); err != nil {
-		t.Fatalf("page did not renew sliding TTL: %v", err)
+	if _, err := s.ReadPage(
+		context.Background(),
+		"/ttl",
+		second.NextOffset,
+		ReadPageOptions{Snapshot: &first.Snapshot},
+	); !errors.Is(err, ErrStreamNotFound) {
+		t.Fatalf("continuation extended sliding TTL: %v", err)
 	}
 }
 

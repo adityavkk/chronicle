@@ -70,7 +70,8 @@ type Tailers struct {
 // Catchup describes cold catch-up reads (offset=-1 full-stream GETs)
 // issued open-loop against randomly chosen streams.
 type Catchup struct {
-	Rate Rate `yaml:"rate"`
+	Rate    Rate `yaml:"rate"`
+	Readers int  `yaml:"readers"` // fixed closed-loop concurrency; mutually exclusive with Rate
 }
 
 // Limits bounds client-side resource usage so an overloaded SUT degrades
@@ -291,12 +292,15 @@ func (s *Scenario) Validate() error {
 		"tailers.from must be %q or %q, got %q", FromNow, FromStart, s.Tailers.From)
 
 	check(s.Catchup.Rate.From >= 0 && s.Catchup.Rate.To >= 0, "catchup.rate must be non-negative")
-	if !s.Catchup.Rate.IsZero() {
+	check(s.Catchup.Readers >= 0, "catchup.readers must be non-negative")
+	check(s.Catchup.Rate.IsZero() || s.Catchup.Readers == 0,
+		"catchup.rate and catchup.readers are mutually exclusive")
+	if !s.Catchup.Rate.IsZero() || s.Catchup.Readers > 0 {
 		check(s.Streams.Prefill.Messages > 0 || s.Writers.PerStream > 0,
 			"catchup.rate set but streams would be empty: add writers or prefill")
 	}
 
-	hasWork := s.Writers.PerStream > 0 || !s.Catchup.Rate.IsZero() ||
+	hasWork := s.Writers.PerStream > 0 || !s.Catchup.Rate.IsZero() || s.Catchup.Readers > 0 ||
 		s.Tailers.SSEPerStream > 0 || s.Tailers.LongPollPerStream > 0
 	check(hasWork, "scenario defines no workload: add writers, tailers, or catchup")
 

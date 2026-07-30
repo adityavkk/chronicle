@@ -17,6 +17,13 @@ const (
 	EnvRedisURL              = "CHRONICLE_REDIS_URL"
 	EnvRedisPoolSize         = "CHRONICLE_REDIS_POOL_SIZE"
 	EnvStore                 = "CHRONICLE_STORE"
+	EnvSegmentMode           = "CHRONICLE_SEGMENT_MODE"
+	EnvSegmentDir            = "CHRONICLE_SEGMENT_DIR"
+	EnvSegmentTargetBytes    = "CHRONICLE_SEGMENT_TARGET_BYTES"
+	EnvSegmentIndexStride    = "CHRONICLE_SEGMENT_INDEX_STRIDE"
+	EnvSegmentCacheBytes     = "CHRONICLE_SEGMENT_CACHE_BYTES"
+	EnvSegmentAutoSealRead   = "CHRONICLE_SEGMENT_AUTO_SEAL_READ"
+	EnvSegmentInitialState   = "CHRONICLE_SEGMENT_INITIAL_STATE"
 	EnvLongPollTimeout       = "CHRONICLE_LONG_POLL_TIMEOUT"
 	EnvSSEReconnectInterval  = "CHRONICLE_SSE_RECONNECT_INTERVAL"
 	EnvReadPageBytes         = "CHRONICLE_READ_PAGE_BYTES"
@@ -88,6 +95,27 @@ type Config struct {
 
 	// StoreBackend selects the storage backend: "redis" or "memory".
 	StoreBackend string
+
+	// SegmentMode feature-gates the immutable sealed-prefix read plane:
+	// "off" (default), "redis-chunks", "local-files", or "object-cache".
+	// Redis remains the complete acknowledged-write authority in every mode.
+	SegmentMode string
+	// SegmentDir is required by local-files and object-cache. Object-cache
+	// creates separate object-origin and bounded-cache trees beneath it.
+	SegmentDir string
+	// SegmentTargetBytes is the approximate immutable data-blob size.
+	SegmentTargetBytes int
+	// SegmentIndexStride emits one fixed-width sparse boundary per N records.
+	SegmentIndexStride int
+	// SegmentCacheBytes bounds object-cache's local cache.
+	SegmentCacheBytes int64
+	// SegmentAutoSealRead reconciles Redis into a new durable generation before
+	// a catch-up read. It is useful for the prototype and local evidence runs;
+	// a production follow-up should use a background sealing queue.
+	SegmentAutoSealRead bool
+	// SegmentInitialState is "shadow" or "serving". Cutover is an explicit
+	// control-plane transition and is never a startup default.
+	SegmentInitialState string
 
 	// LongPollTimeout is the server-side timeout for long-poll requests.
 	// Caddy default: 30s. The conformance harness overrides it to 500ms.
@@ -261,6 +289,12 @@ func DefaultConfig() Config {
 		RedisURL:              "redis://localhost:6379",
 		RedisPoolSize:         0, // go-redis default
 		StoreBackend:          "redis",
+		SegmentMode:           "off",
+		SegmentTargetBytes:    256 << 10,
+		SegmentIndexStride:    128,
+		SegmentCacheBytes:     256 << 20,
+		SegmentAutoSealRead:   false,
+		SegmentInitialState:   "shadow",
 		LongPollTimeout:       30 * time.Second,
 		SSEReconnectInterval:  60 * time.Second,
 		ReadPageBytes:         1 << 20,
@@ -297,6 +331,39 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvStore); ok {
 		c.StoreBackend = v
+	}
+	if v, ok := lookup(EnvSegmentMode); ok {
+		c.SegmentMode = v
+	}
+	if v, ok := lookup(EnvSegmentDir); ok {
+		c.SegmentDir = v
+	}
+	if v, ok := lookup(EnvSegmentTargetBytes); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("%s: want a positive integer, got %q", EnvSegmentTargetBytes, v)
+		}
+		c.SegmentTargetBytes = n
+	}
+	if v, ok := lookup(EnvSegmentIndexStride); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("%s: want a positive integer, got %q", EnvSegmentIndexStride, v)
+		}
+		c.SegmentIndexStride = n
+	}
+	if v, ok := lookup(EnvSegmentCacheBytes); ok {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("%s: want a positive integer, got %q", EnvSegmentCacheBytes, v)
+		}
+		c.SegmentCacheBytes = n
+	}
+	if v, ok := lookup(EnvSegmentAutoSealRead); ok {
+		c.SegmentAutoSealRead = v == "1" || v == "true"
+	}
+	if v, ok := lookup(EnvSegmentInitialState); ok {
+		c.SegmentInitialState = v
 	}
 	if v, ok := lookup(EnvLongPollTimeout); ok {
 		d, err := time.ParseDuration(v)

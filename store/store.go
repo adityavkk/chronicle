@@ -173,6 +173,13 @@ type NotificationSubscriber interface {
 	SubscribeNotifications(ctx context.Context, path string) (NotificationSubscription, error)
 }
 
+// NotificationSubscriberProvider conditionally exposes a notification
+// capability through Store wrappers without making every wrapper implement
+// NotificationSubscriber unconditionally.
+type NotificationSubscriberProvider interface {
+	NotificationSubscriber() (NotificationSubscriber, bool)
+}
+
 // NotificationEvent describes why a shared live reader should recheck durable
 // state. Every event is a hint; only a durable read or incarnation check may
 // terminate the current stream incarnation.

@@ -15,3 +15,4 @@ Naming: `NNNN-short-title.md`, zero-padded, monotonically increasing.
 | [0003](0003-offset-string-width-migration-lb1.md) | Proposed | Offset.String() `%016d` minimum-width inverts lex order at a field ≥ 10^16 (LB-1) — migration decision |
 | [0004](0004-bounded-read-pages-and-snapshot-catch-up.md) | Accepted | Add optional bounded read pages, capture one response snapshot, and stream HTTP and SSE catch-up incrementally |
 | [0005](0005-per-instance-sse-stream-fanout.md) | Accepted | Share live SSE reads and formatting through one bounded per-stream hub on each Chronicle replica |
+| [0006](0006-immutable-segment-read-plane-prototype.md) | Accepted for prototype | Copy sealed prefixes into range-authenticated immutable segments while Redis remains authoritative |

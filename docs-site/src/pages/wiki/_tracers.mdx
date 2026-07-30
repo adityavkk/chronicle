@@ -224,9 +224,10 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 ```
 
 `lexLowerBound(offset)` is the exclusive bound just past the caller's offset. It
-selects frames strictly after the caller's position. The first script call
-validates the root and refreshes its sliding TTL. Bounded segment calls then
-read the root or inherited fork ranges without extending an ancestor's TTL.
+selects frames strictly after the caller's position. The first page captures the
+root snapshot and refreshes its sliding TTL once. Continuation pages validate
+that same snapshot with `NoTouch`, and inherited fork ranges never extend an
+ancestor's TTL.
 
   </Step>
 

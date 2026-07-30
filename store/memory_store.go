@@ -133,7 +133,6 @@ func (s *MemoryStore) Create(path string, opts CreateOptions) (*StreamMetadata, 
 			return nil, false, ErrConfigMismatch
 		}
 	}
-
 	incarnation, err := NewIncarnationID()
 	if err != nil {
 		return nil, false, err
@@ -216,8 +215,8 @@ func (s *MemoryStore) Create(path string, opts CreateOptions) (*StreamMetadata, 
 	now := s.now()
 	meta := StreamMetadata{
 		Path:           path,
-		ContentType:    contentType,
 		Incarnation:    incarnation,
+		ContentType:    contentType,
 		CreatedAt:      now,
 		LastAccessedAt: now,
 		Closed:         opts.Closed, // Support creating stream in closed state
@@ -872,9 +871,11 @@ func (s *MemoryStore) ReadPage(ctx context.Context, path string, offset Offset, 
 			return ReadPage{}, ErrReadSnapshotChanged
 		}
 	}
-	// Every page is active read work and renews the root stream's sliding TTL.
-	// Inherited source streams remain untouched.
-	stream.metadata.LastAccessedAt = s.now()
+	// One logical client read renews the root stream once, when it captures its
+	// snapshot. Continuation pages and internal sealing must not extend the TTL.
+	if !opts.NoTouch && opts.Snapshot == nil {
+		stream.metadata.LastAccessedAt = s.now()
+	}
 
 	page := ReadPage{
 		NextOffset: offset,

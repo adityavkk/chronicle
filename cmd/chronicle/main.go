@@ -26,6 +26,7 @@ import (
 	"gecgithub01.walmart.com/auk000v/chronicle/metrics"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
+	"gecgithub01.walmart.com/auk000v/chronicle/store/segments"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
@@ -40,6 +41,9 @@ import (
 func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEventSink) (store.Store, *redisstore.Store, goredis.UniversalClient, error) {
 	switch cfg.StoreBackend {
 	case "memory":
+		if cfg.SegmentMode != string(segments.ModeOff) {
+			return nil, nil, nil, errors.New("experimental segment modes require the redis primary store")
+		}
 		return store.NewMemoryStore(), nil, nil, nil
 	case "redis":
 		client, err := newRedisClient(cfg.RedisURL, cfg.RedisPoolSize, redisEvents)
@@ -52,7 +56,43 @@ func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEvent
 			return nil, nil, nil, fmt.Errorf("redis unreachable at %s: %w", cfg.RedisURL, err)
 		}
 		rs := redisstore.New(client, redisstore.Options{Logger: logger})
-		return rs, rs, client, nil
+		mode, err := segments.ParseMode(cfg.SegmentMode)
+		if err != nil {
+			_ = client.Close()
+			return nil, nil, nil, err
+		}
+		var backend segments.Backend
+		switch mode {
+		case segments.ModeOff:
+			return rs, rs, client, nil
+		case segments.ModeRedisChunks:
+			backend = segments.NewRedisBackend(client, nil)
+		case segments.ModeLocalFiles, segments.ModeObjectCache:
+			backend, err = segments.NewFileBackend(mode, cfg.SegmentDir, cfg.SegmentCacheBytes, nil)
+			if err != nil {
+				_ = client.Close()
+				return nil, nil, nil, err
+			}
+		}
+		state := segments.MigrationState(cfg.SegmentInitialState)
+		segmented, err := segments.New(rs, segments.Options{
+			Backend:      backend,
+			TargetBytes:  cfg.SegmentTargetBytes,
+			IndexStride:  cfg.SegmentIndexStride,
+			AutoSealRead: cfg.SegmentAutoSealRead,
+			InitialState: state,
+		}, logger)
+		if err != nil {
+			_ = client.Close()
+			return nil, nil, nil, err
+		}
+		if _, ok := segmented.NotificationSubscriber(); !ok {
+			_ = segmented.Close()
+			return nil, nil, nil, errors.New(
+				"segment wrapper requires the Redis primary notification capability",
+			)
+		}
+		return segmented, rs, client, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("unknown store backend %q (want %q or %q)", cfg.StoreBackend, "redis", "memory")
 	}
@@ -173,6 +213,13 @@ func run() error {
 	flag.StringVar(&cfg.RedisURL, "redis-url", cfg.RedisURL, "redis connection URL (redis backend)")
 	flag.IntVar(&cfg.RedisPoolSize, "redis-pool-size", cfg.RedisPoolSize, "go-redis per-node connection pool size, 0 = default")
 	flag.StringVar(&cfg.StoreBackend, "store", cfg.StoreBackend, `storage backend: "redis" or "memory"`)
+	flag.StringVar(&cfg.SegmentMode, "segment-mode", cfg.SegmentMode, `experimental immutable read plane: "off", "redis-chunks", "local-files", or "object-cache"`)
+	flag.StringVar(&cfg.SegmentDir, "segment-dir", cfg.SegmentDir, "root directory for local-files/object-cache segment modes")
+	flag.IntVar(&cfg.SegmentTargetBytes, "segment-target-bytes", cfg.SegmentTargetBytes, "approximate immutable segment data bytes")
+	flag.IntVar(&cfg.SegmentIndexStride, "segment-index-stride", cfg.SegmentIndexStride, "records per fixed-width sparse index entry")
+	flag.Int64Var(&cfg.SegmentCacheBytes, "segment-cache-bytes", cfg.SegmentCacheBytes, "bounded local cache bytes for object-cache mode")
+	flag.BoolVar(&cfg.SegmentAutoSealRead, "segment-auto-seal-read", cfg.SegmentAutoSealRead, "reconcile a durable segment generation before catch-up reads")
+	flag.StringVar(&cfg.SegmentInitialState, "segment-initial-state", cfg.SegmentInitialState, `migration state for new manifests: "shadow" or "serving"`)
 	flag.DurationVar(&cfg.LongPollTimeout, "long-poll-timeout", cfg.LongPollTimeout, "server-side long-poll timeout")
 	flag.DurationVar(&cfg.SSEReconnectInterval, "sse-reconnect-interval", cfg.SSEReconnectInterval, "SSE connection reconnect interval")
 	flag.IntVar(&cfg.ReadPageBytes, "read-page-bytes", cfg.ReadPageBytes, "catch-up returned page payload target in bytes")
@@ -193,6 +240,9 @@ func run() error {
 	flag.Parse()
 	if cfg.ReadPageBytes <= 0 {
 		return fmt.Errorf("-read-page-bytes must be positive")
+	}
+	if err := validateSegmentConfig(cfg); err != nil {
+		return err
 	}
 	if err := validateSSEConfig(cfg); err != nil {
 		return err
@@ -272,6 +322,9 @@ func run() error {
 			defer disableRuntimeProfiles()
 		}
 		prom := metrics.New()
+		if source, ok := st.(metrics.SegmentStatsSource); ok {
+			prom.RegisterSegments(source)
+		}
 		subMetrics = prom
 		handler.ReadMetrics = prom
 		handler.SSEMetrics = prom
@@ -374,6 +427,8 @@ func run() error {
 		"addr", cfg.Listen,
 		"root", cfg.StreamRoot,
 		"store", cfg.StoreBackend,
+		"segment_mode", cfg.SegmentMode,
+		"segment_state", cfg.SegmentInitialState,
 		"subscriptions", subscriptionsEnabled,
 		"ui", uiEnabled,
 		"auth_mode", cfg.AuthMode.String(),
@@ -396,6 +451,35 @@ func run() error {
 		// Open-ended SSE connections can outlive the drain window; cut them.
 		logger.Warn("graceful shutdown incomplete, forcing close", "error", err)
 		return srv.Close()
+	}
+	return nil
+}
+
+func validateSegmentConfig(cfg chronicle.Config) error {
+	mode, err := segments.ParseMode(cfg.SegmentMode)
+	if err != nil {
+		return fmt.Errorf("-segment-mode: %w", err)
+	}
+	if cfg.SegmentTargetBytes <= 0 {
+		return fmt.Errorf("-segment-target-bytes must be positive")
+	}
+	if cfg.SegmentIndexStride <= 0 {
+		return fmt.Errorf("-segment-index-stride must be positive")
+	}
+	if cfg.SegmentCacheBytes <= 0 {
+		return fmt.Errorf("-segment-cache-bytes must be positive")
+	}
+	state := segments.MigrationState(cfg.SegmentInitialState)
+	if state != segments.StateShadow && state != segments.StateServing {
+		return fmt.Errorf(
+			"-segment-initial-state must be %q or %q",
+			segments.StateShadow,
+			segments.StateServing,
+		)
+	}
+	if (mode == segments.ModeLocalFiles || mode == segments.ModeObjectCache) &&
+		cfg.SegmentDir == "" {
+		return fmt.Errorf("-segment-dir is required for -segment-mode=%s", mode)
 	}
 	return nil
 }

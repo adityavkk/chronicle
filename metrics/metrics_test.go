@@ -7,7 +7,31 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/store/segments"
 )
+
+type fakeSegmentStats struct{}
+
+func (fakeSegmentStats) Stats() segments.Stats {
+	return segments.Stats{
+		Seals:                      2,
+		SealDurationNanoseconds:    uint64(3 * time.Second),
+		SealDurationMaxNanoseconds: uint64(2 * time.Second),
+		SegmentReads:               3,
+		PrimaryFallbacks:           1,
+		ChecksumFailures:           1,
+		BytesServed:                1024,
+		Backend: segments.BackendStats{
+			OriginReads: 4,
+			OriginBytes: 4096,
+			CacheHits:   5,
+			CacheMisses: 6,
+			CacheBytes:  2048,
+			RedisReads:  7,
+		},
+	}
+}
 
 func TestMuxEndpoints(t *testing.T) {
 	p := New()
@@ -123,5 +147,35 @@ func TestReadyzReportsNotReady(t *testing.T) {
 	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("/readyz (not ready) = %d, want 503", rr.Code)
+	}
+}
+
+func TestSegmentMetricsAreFeatureGated(t *testing.T) {
+	without := New()
+	rr := httptest.NewRecorder()
+	without.Mux(nil).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if strings.Contains(rr.Body.String(), "chronicle_segment_reads_total") {
+		t.Fatal("prototype segment metrics appeared without an enabled source")
+	}
+
+	with := New()
+	with.RegisterSegments(fakeSegmentStats{})
+	rr = httptest.NewRecorder()
+	with.Mux(nil).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := rr.Body.String()
+	for _, sample := range []string{
+		"chronicle_segment_reads_total 3",
+		"chronicle_segment_seal_seconds_total 3",
+		"chronicle_segment_seal_seconds_max 2",
+		"chronicle_segment_primary_fallbacks_total 1",
+		"chronicle_segment_checksum_failures_total 1",
+		"chronicle_segment_cache_hits_total 5",
+		"chronicle_segment_cache_bytes 2048",
+		"chronicle_segment_origin_bytes_total 4096",
+		"chronicle_segment_redis_reads_total 7",
+	} {
+		if !strings.Contains(body, sample) {
+			t.Errorf("metrics output missing %q", sample)
+		}
 	}
 }

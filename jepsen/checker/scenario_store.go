@@ -13,6 +13,7 @@ import (
 
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
+	"gecgithub01.walmart.com/auk000v/chronicle/store/segments"
 )
 
 // scenario_store.go is the imperative SHELL of the data-plane linearizability
@@ -53,8 +54,44 @@ func runStoreLinz(c config) error {
 	if err != nil {
 		return err
 	}
-	defer client.Close()
-	st := redisstore.New(client, redisstore.Options{})
+	primary := redisstore.New(client, redisstore.Options{})
+	var st store.Store = primary
+	var segmentStore *segments.Store
+	mode, err := segments.ParseMode(c.segmentMode)
+	if err != nil {
+		_ = primary.Close()
+		return err
+	}
+	if mode != segments.ModeOff {
+		var backend segments.Backend
+		switch mode {
+		case segments.ModeOff:
+			// The enclosing condition makes this unreachable, but keeping
+			// the enum exhaustive prevents a newly added mode from
+			// silently selecting a nil backend.
+			_ = primary.Close()
+			return errors.New("unexpected disabled segment mode")
+		case segments.ModeRedisChunks:
+			backend = segments.NewRedisBackend(client, nil)
+		case segments.ModeLocalFiles, segments.ModeObjectCache:
+			backend, err = segments.NewFileBackend(mode, c.segmentDir, c.segmentCacheBytes, nil)
+			if err != nil {
+				_ = primary.Close()
+				return err
+			}
+		}
+		segmentStore, err = segments.New(primary, segments.Options{
+			Backend:      backend,
+			AutoSealRead: true,
+			InitialState: segments.StateServing,
+		}, nil)
+		if err != nil {
+			_ = primary.Close()
+			return err
+		}
+		st = segmentStore
+	}
+	defer st.Close() //nolint:errcheck // best-effort driver teardown
 
 	path := fmt.Sprintf("/store-linz/%d", time.Now().UnixNano())
 	if _, _, err := st.Create(path, store.CreateOptions{ContentType: "application/octet-stream"}); err != nil {
@@ -66,8 +103,8 @@ func runStoreLinz(c config) error {
 	if K < 1 {
 		K = 1
 	}
-	fmt.Printf("== store-linz: path=%s clients=%d toxiproxy=%q for %dms ==\n",
-		path, K, c.toxiproxy, c.workloadMs)
+	fmt.Printf("== store-linz: path=%s clients=%d toxiproxy=%q segment-mode=%q for %dms ==\n",
+		path, K, c.toxiproxy, mode, c.workloadMs)
 
 	rec := newRecorder()
 	deadline := time.Now().Add(time.Duration(c.workloadMs) * time.Millisecond)
@@ -111,6 +148,17 @@ func runStoreLinz(c config) error {
 	result, info := porcupine.CheckOperationsVerbose(streamModel(), history, 30*time.Second)
 	switch result {
 	case porcupine.Ok:
+		if segmentStore != nil {
+			stats := segmentStore.Stats()
+			if stats.Seals == 0 || stats.SegmentReads == 0 {
+				return fmt.Errorf(
+					"immutable candidate was not exercised: mode=%s seals=%d segment-reads=%d",
+					mode,
+					stats.Seals,
+					stats.SegmentReads,
+				)
+			}
+		}
 		fmt.Println("PASS: data-plane linearizable — append/read/close on the single-slot EVAL are a linearization point (INV-LIN-01/02, INV-CLOSE-01, INV-READ-01)")
 		return nil
 	case porcupine.Illegal:
@@ -128,7 +176,7 @@ func runStoreLinz(c config) error {
 // deadline, recording every op into the shared porcupine history. Each client
 // owns a private opSeq counter so its frames carry a unique (clientId, opSeq)
 // tag — the exact-read identity the model checks (INV-READ-01).
-func storeClient(st *redisstore.Store, path string, clientID, K int, deadline time.Time, rec *recorder) {
+func storeClient(st store.Store, path string, clientID, K int, deadline time.Time, rec *recorder) {
 	rng := rand.New(rand.NewSource(int64(clientID)*1_000_003 + time.Now().UnixNano()))
 	opSeq := 0
 	// Exactly one client (the last) is the closer, late in the run, so most ops
@@ -171,7 +219,7 @@ var storeAlreadyClosed atomic.Bool
 // storeDoAppend issues one append under a short deadline. A timeout / contention
 // exhaustion is recorded as INDETERMINATE (the maybe-committed honesty); a clean
 // success/closed/dup reply is recorded exactly.
-func storeDoAppend(st *redisstore.Store, path string, clientID int, opSeq *int, rng *rand.Rand, rec *recorder) {
+func storeDoAppend(st store.Store, path string, clientID int, opSeq *int, rng *rand.Rand, rec *recorder) {
 	seq := *opSeq
 	*opSeq++
 	// The payload ENCODES the (clientId, opSeq) tag (plus padding to a random
@@ -216,7 +264,7 @@ func storeDoAppend(st *redisstore.Store, path string, clientID int, opSeq *int, 
 // storeDoRead reads from a randomly chosen lower-bound offset and records the
 // EXACT tagged suffix returned (frame identity, not just length), the upToDate
 // flag, and the clean-EOF closed signal — the INV-READ-01 / INV-CLOSE-EOF checks.
-func storeDoRead(st *redisstore.Store, path string, clientID int, rng *rand.Rand, rec *recorder) {
+func storeDoRead(st store.Store, path string, clientID int, rng *rand.Rand, rec *recorder) {
 	// Read from the tail occasionally (to exercise read-past-close EOF) and from
 	// the beginning or a small offset otherwise.
 	from := store.ZeroOffset
@@ -258,7 +306,7 @@ func storeDoRead(st *redisstore.Store, path string, clientID int, rng *rand.Rand
 }
 
 // storeDoGetOffset records GetCurrentOffset -> tail (INV-LIN-01 tail read).
-func storeDoGetOffset(st *redisstore.Store, path string, clientID int, rec *recorder) {
+func storeDoGetOffset(st store.Store, path string, clientID int, rec *recorder) {
 	callNs := rec.now()
 	cur, err := st.GetCurrentOffset(path)
 	if err != nil {
@@ -268,7 +316,7 @@ func storeDoGetOffset(st *redisstore.Store, path string, clientID int, rec *reco
 }
 
 // storeDoClose records CloseStream -> fresh-flip or already-closed (INV-CLOSE-01).
-func storeDoClose(st *redisstore.Store, path string, clientID int, rec *recorder) {
+func storeDoClose(st store.Store, path string, clientID int, rec *recorder) {
 	callNs := rec.now()
 	res, err := st.CloseStream(path)
 	if err != nil {

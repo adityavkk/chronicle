@@ -82,6 +82,11 @@ type config struct {
 	ramp       string
 	c3         bool
 	sharded    bool
+	// Immutable-segment issue-6 data plane for store-linz. Off is the
+	// unchanged default; filesystem candidates also require segmentDir.
+	segmentMode       string
+	segmentDir        string
+	segmentCacheBytes int64
 }
 
 func main() {
@@ -113,6 +118,9 @@ func main() {
 	flag.BoolVar(&c.c3, "c3", false, "contention: also run the G=1 baseline and assert C3 (the knee moves ~Gx; gate #6)")
 	flag.BoolVar(&c.sharded, "sharded", false, "contention/shard-linz: use the chronicle per-(subId,g) capability (ClaimShard) rather than client-side G subscriptions")
 	flag.IntVar(&c.slots, "slots", 4, "ownership-exclusivity (T3): number of ownership slots concurrent claimants contend over")
+	flag.StringVar(&c.segmentMode, "segment-mode", "off", "store-linz immutable read plane: off|redis-chunks|local-files|object-cache")
+	flag.StringVar(&c.segmentDir, "segment-dir", "", "store-linz root for local-files/object-cache")
+	flag.Int64Var(&c.segmentCacheBytes, "segment-cache-bytes", 256<<20, "store-linz object-cache byte bound")
 	flag.Parse()
 
 	r := newReceiver()

@@ -265,3 +265,43 @@ func TestLoadEnvKeysFileAllowGroupRead(t *testing.T) {
 		t.Fatal("CHRONICLE_KEYS_FILE_ALLOW_GROUP_READ=true must set the flag")
 	}
 }
+
+func TestLoadEnvImmutableSegments(t *testing.T) {
+	env := func(vars map[string]string) func(string) (string, bool) {
+		return func(k string) (string, bool) { v, ok := vars[k]; return v, ok }
+	}
+	c := DefaultConfig()
+	if c.SegmentMode != "off" || c.SegmentAutoSealRead || c.SegmentInitialState != "shadow" {
+		t.Fatalf("unsafe segment defaults: mode=%q autoSeal=%v state=%q",
+			c.SegmentMode, c.SegmentAutoSealRead, c.SegmentInitialState)
+	}
+	if err := c.LoadEnv(env(map[string]string{
+		EnvSegmentMode:         "object-cache",
+		EnvSegmentDir:          "/var/lib/chronicle-segments",
+		EnvSegmentTargetBytes:  "1048576",
+		EnvSegmentIndexStride:  "64",
+		EnvSegmentCacheBytes:   "33554432",
+		EnvSegmentAutoSealRead: "false",
+		EnvSegmentInitialState: "shadow",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if c.SegmentMode != "object-cache" || c.SegmentDir == "" ||
+		c.SegmentTargetBytes != 1048576 || c.SegmentIndexStride != 64 ||
+		c.SegmentCacheBytes != 33554432 || c.SegmentAutoSealRead ||
+		c.SegmentInitialState != "shadow" {
+		t.Fatalf("segment env not loaded: %+v", c)
+	}
+	for _, tc := range []struct {
+		key, value string
+	}{
+		{EnvSegmentTargetBytes, "0"},
+		{EnvSegmentIndexStride, "-1"},
+		{EnvSegmentCacheBytes, "not-a-number"},
+	} {
+		c = DefaultConfig()
+		if err := c.LoadEnv(env(map[string]string{tc.key: tc.value})); err == nil {
+			t.Fatalf("%s=%q must fail", tc.key, tc.value)
+		}
+	}
+}
