@@ -1,16 +1,19 @@
 sequenceDiagram
     autonumber
     participant Cli as Client
-    participant OA as Origin A · handles the append
-    participant R as Redis · slot {__ds:h}
-    participant OB as Origin B · owns slot h
+    participant OA as Origin A
+    participant RS as Stream Redis
+    participant RC as Sub Redis h
+    participant OB as Slot owner B
     participant Recv as Receiver
     Cli->>OA: POST events/abc + body
-    OA->>R: append.lua — durable write to events/abc
-    OA-->>Cli: 204 · the byte is committed
-    Note over OA,R: OnStreamAppend: S parallel SMEMBERS over occupied slots → sub-1 lives in slot h
-    OA->>R: arm_wake.lua on {__ds:h} — generation++ · ZADD {__ds:h}:due now
-    OA->>Recv: POST signed wake — fast path, the appending origin delivers
+    OA->>RS: append.lua · durable write to events/abc
+    RS-->>OA: committed append result
+    Note over OA: OnStreamAppend enqueues one path locally<br/>no Redis call
+    OA-->>Cli: 204 · byte committed · hint recorded
+    Note over OA,RC: dirty worker: occupied bitmap → pipelined fanout sets<br/>hydrate sub-1 · batch linked tails
+    OA->>RC: arm_wake.lua · generation++ · ZADD due now
+    OA->>Recv: POST signed wake · async worker delivers
     Recv-->>OA: 200 {done:true}
-    OA->>R: ack.lua on {__ds:h} — cursor → tail · ZREM {__ds:h}:due
-    Note over OB: Origin B owns slot h — its due-worker finds the due-set empty, nothing owed, no redundant delivery
+    OA->>RC: ack.lua · cursor → tail · ZREM due
+    Note over RC,OB: Slot owner finds the due set empty<br/>nothing owed · no redundant delivery

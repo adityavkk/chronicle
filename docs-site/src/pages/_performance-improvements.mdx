@@ -1,9 +1,9 @@
 ---
 title: "Performance improvements, <em>with evidence</em>"
-summary: "Chronicle performance work is grouped by mechanism, measured result, correctness gate, and remaining limit. This page links each result to the endpoint sequence it changes."
+summary: "Chronicle performance work is grouped by mechanism, measured result, correctness gate, and remaining limit. Request-path results link to their endpoint sequence, while system-level results keep their evidence and limits beside them."
 eyebrow: "Engineering"
 meta: "Performance improvements"
-deck: "Chronicle performance work starts with a measured source of repeated or serialized work. Each change names the mechanism, records the result, keeps the Durable Streams and Jepsen correctness gates, and states what remains slow."
+deck: "Chronicle performance work starts with a measured source of repeated or serialized work. Each change names the mechanism, records the result, keeps the Durable Streams and Jepsen correctness gates, and states what remains slow. Subscription fanout now runs after one bounded append handoff instead of on the HTTP response goroutine."
 byline:
   - label: "128-reader catch-up"
     value: "0 complete → 435 measured"
@@ -11,6 +11,8 @@ byline:
     value: "970.5 → 1.000 per append"
   - label: "Root page scripts"
     value: "2 → 1"
+  - label: "1,000-sub append p99"
+    value: "5,053.845 → 1.235 ms"
   - label: "Protocol gate"
     value: "332 / 332"
 ---
@@ -28,6 +30,7 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
     <li><strong>SSE fanout removes duplicate live reads.</strong> One stream hub on each serving Chronicle replica reads Redis once and shares the formatted event with local clients. The exact-counter guard with 1,000 clients measured 1.000 live Redis reads per append, down from 970.5.</li>
     <li><strong>Persistent root pages use one atomic read.</strong> A five-byte GET fell from six to one metadata <code>HGETALL</code>, from two read scripts to one, and from five read-side writes to zero. Sliding TTL renewal, legacy migration, and lazy expiry cleanup remain explicit write cases.</li>
     <li><strong>Live reads register before they capture <code>offset=now</code>.</strong> A confirmed notification feed covers appends after the atomic page. The page tail includes appends that Redis ordered before it. New SSE hubs need one initial page instead of two, and long-poll no longer needs an immediate attach recheck.</li>
+    <li><strong>Subscription fanout no longer runs on the append response goroutine.</strong> After a new durable append, the handler records one stream in a bounded process-local queue. Subscriber lookup, hydration, linked-tail reads, wake arming, and delivery run in a Manager-owned worker. At 1,000 subscribers with four links each, append p99 changed from 5,053.845 ms to 1.235 ms, with every owed wake verified.</li>
     <li><strong>Immutable segments move sealed replay bytes away from the frame ZSET.</strong> A manifest and sparse index select authenticated data blocks, while one fixed Redis snapshot supplies the hot tail and safe fallback. The retained local result is diagnostic and must be rerun after the integrated safety fixes.</li>
     <li><strong>Horizontal scaling separates subscription work by Redis slot.</strong> The measured append fanout p99 stayed between 12.48 and 12.61 milliseconds from 1 to 8 replicas. The exact 12 replica point and a cloud run with multiple shards remain open.</li>
     <li><strong>Correctness remains a release gate.</strong> A throughput gain does not excuse a Durable Streams conformance, Jepsen, or Porcupine regression.</li>
@@ -98,6 +101,9 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
     the typed read snapshot, exact sliding TTL decision, root-range oracle,
     register-first live handoff, and measured command, AOF, replication, and
     latency deltas.
+  - Read [Async subscription fanout](./async-subscription-fanout) to understand
+    the post-commit queue handoff, coalescing, overflow recovery, Manager-owned
+    worker, complete fanout measurements, and endpoint behavior.
   - Read [Immutable segments](./immutable-segments) to understand how Chronicle
     copies a sealed prefix into authenticated blocks, joins it to one Redis
     snapshot, falls back safely, rolls back, and stops short of reclamation.

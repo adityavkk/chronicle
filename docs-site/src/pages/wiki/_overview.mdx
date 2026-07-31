@@ -46,11 +46,11 @@ import Aside from "../../components/Aside.astro";
   <Table>
     | Package | Job | Start at |
     | --- | --- | --- |
-    | [`handler.go`](https://github.com/adityavkk/chronicle/blob/main/handler.go) · [`mount.go`](https://github.com/adityavkk/chronicle/blob/main/mount.go) | The imperative shell: route by method, parse, respond | [`Handler.ServeHTTP`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L83) |
+    | [`handler.go`](https://github.com/adityavkk/chronicle/blob/main/handler.go) · [`mount.go`](https://github.com/adityavkk/chronicle/blob/main/mount.go) | The imperative shell: route by method, parse, respond | [`Handler.ServeHTTP`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L172) |
     | [`protocol/`](https://github.com/adityavkk/chronicle/tree/main/protocol) | Pure core: header grammar, cursor math, SSE framing | [`ParseTTL`](https://github.com/adityavkk/chronicle/blob/main/protocol/parse.go#L27) |
     | [`store/`](https://github.com/adityavkk/chronicle/tree/main/store) | The storage contract + offset type + producer rules | [`store.Store`](https://github.com/adityavkk/chronicle/blob/main/store/store.go#L98) |
-    | [`store/redis/`](https://github.com/adityavkk/chronicle/tree/main/store/redis) | The Redis backend: Lua mutations, key schema, pub/sub | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L523) |
-    | [`webhook/`](https://github.com/adityavkk/chronicle/tree/main/webhook) | Subscriptions: wakes, leases, signed delivery, recovery | [`Manager.OnStreamAppend`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L359) |
+    | [`store/redis/`](https://github.com/adityavkk/chronicle/tree/main/store/redis) | The Redis backend: Lua mutations, key schema, pub/sub | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L533) |
+    | [`webhook/`](https://github.com/adityavkk/chronicle/tree/main/webhook) | Subscriptions: bounded dirty handoff, async wakes, leases, recovery | [`Manager.OnStreamAppend`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L537) |
     | [`cmd/chronicle/`](https://github.com/adityavkk/chronicle/tree/main/cmd/chronicle) | The binary: flags, wiring, the listener | `main` |
   </Table>
 
@@ -83,14 +83,17 @@ import Aside from "../../components/Aside.astro";
 
   <Diagram name="wiki-arch" label="System architecture" caption="A request enters the <strong>shell</strong> (<code>Handler.ServeHTTP</code>), consults the <strong>core</strong> for parsing and validation decisions, and calls the <strong>store.Store</strong> interface. The Redis backend turns each mutation into one Lua script. A durable append also fires the subscription hook into the webhook manager." />
 
-  The diagram reads left to right as control flow. A durable append also fires
-  the `OnStreamAppend` hook, which is where the subscription plane picks up.
+  The diagram reads left to right as control flow. After a durable append, the
+  `OnStreamAppend` hook records one path in a bounded local queue. The
+  subscription Manager performs fanout in its background worker.
 
   <Aside label="Live readers" summary="How a tailing read waits for the next append">
-    For a live read the Redis backend, after running the read script, waits on a
-    per-stream pub/sub channel. A durable append publishes to that channel inside
-    the same Lua script that writes the message, so the wake cannot race the
-    write. The default long-poll timeout is 30 seconds (`config.go`).
+    For `offset=now`, the handler confirms a per-stream Pub/Sub registration
+    before it captures the atomic page. The page covers appends Redis ordered
+    before it, and the registration covers appends ordered after it. Numeric
+    long-poll offsets retain the first-page, subscribe, and no-touch recheck
+    sequence. Pub/Sub is only a wake hint; every wake and safety poll reads
+    durable state. The default long-poll timeout is 30 seconds (`config.go`).
   </Aside>
 </section>
 
@@ -101,7 +104,7 @@ import Aside from "../../components/Aside.astro";
   hands them to a pure function, and acts on the answer. The producer idempotency
   rules from spec section 5.2.1 are the clearest case.
 
-<Step n={1} fn="Handler.ServeHTTP" loc="handler.go:124" role="One switch on the HTTP method routes every request to one of five handlers. No protocol decisions happen here.">
+<Step n={1} fn="Handler.ServeHTTP" loc="handler.go:172" role="One switch on the HTTP method routes every request to one of five handlers. No protocol decisions happen here.">
 ```go title="handler.go"
 switch r.Method {
 case http.MethodPut:

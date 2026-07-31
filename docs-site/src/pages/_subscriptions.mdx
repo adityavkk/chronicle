@@ -1,9 +1,9 @@
 ---
 title: "Subscriptions are <em>durable cursors</em>"
-summary: "Chronicle implements the Durable Streams reserved subscription APIs on Redis. It supports webhook and pull-wake delivery, generation fencing, and a recovery sweep that re-fires wakes lost to a crash. The in-memory reference servers lack this durability."
+summary: "Chronicle implements the Durable Streams reserved subscription APIs on Redis. A bounded local hint moves append fanout off the HTTP response path, while durable cursors, generation fencing, and recovery sweeps preserve delivery after overload or a crash."
 eyebrow: "Reference"
 meta: "Subscriptions & durability"
-deck: "The protocol reserves a <strong>subscription</strong> API under the <code>__ds</code> prefix. A subscription is a durable cursor per stream that wakes a worker when new events arrive, by signed <strong>webhook</strong> or by <strong>pull-wake</strong>. Chronicle persists every cursor, lease, and retry to Redis and sweeps for owed wakes after a restart. A message that earned a 200 is delivered even if the origin that accepted it dies first."
+deck: "The protocol reserves a <strong>subscription</strong> API under the <code>__ds</code> prefix. A subscription is a durable cursor per stream that wakes a worker when new events arrive, by signed <strong>webhook</strong> or by <strong>pull-wake</strong>. An append records one bounded local hint, and a background worker evaluates subscribers after the response. Chronicle persists every cursor, lease, and retry to Redis and sweeps for owed wakes after a restart."
 byline:
   - label: "Delivery"
     value: "webhook · pull-wake"
@@ -29,7 +29,8 @@ import Step from "../components/Step.astro";
     <li><strong>A subscription is a durable cursor per stream.</strong> When a linked stream's tail moves past its <code>acked_offset</code>, the subscription has pending work and the server wakes a worker.</li>
     <li><strong>Two delivery modes share one model.</strong> <code>webhook</code> signs and POSTs a notification to your URL. <code>pull-wake</code> writes a wake event to a stream your workers poll and claim. Both use the same cursor, generation, lease, and stream membership.</li>
     <li><strong>The generation fence keeps duplicates safe.</strong> Every wake carries a monotonic <code>generation</code> and a single-use <code>wake_id</code>. A stale callback gets <code>409 FENCED</code>. Delivery is at-least-once, and the fence makes a duplicate harmless.</li>
-    <li><strong>All state is in Redis, under one hash tag.</strong> The reference engines keep cursors, leases, and retry schedules in an in-memory map that a restart loses. Chronicle persists them under <code>{"{__ds}"}</code> so they survive a restart. It also runs a recovery sweep, because after a crash a durable cursor for an idle subscription is never re-checked on its own.</li>
+    <li><strong>Append fanout runs after the response.</strong> Once a new append commits, the handler records its stream in a fixed 1,024-entry local queue. A Manager-owned worker later looks up subscribers, loads their cursors and linked tails, and arms the owed wakes. Repeated appends to one stream coalesce.</li>
+    <li><strong>All correctness state is in Redis.</strong> Each subscription and its schedules share one of 256 fixed <code>{"{__ds:h}"}</code> hash tags, so its fenced scripts remain single-slot while the control plane scales across Redis. Chronicle also runs a recovery sweep, because after a crash a durable cursor for an idle subscription is never re-checked on its own.</li>
     <li><strong>Checked under fault injection.</strong> A Jepsen-style suite kills origins and Redis mid-flight on Kubernetes. Every durably appended message still reaches its cursor.</li>
   </ul>
 </Tldr>
@@ -106,7 +107,10 @@ import Step from "../components/Step.astro";
     accepts private targets for receivers inside the cluster.
   </Aside>
 
-  When a matching append lands and the subscription is idle, the server bumps the
+  When a matching append commits, the handler records the stream in a bounded
+  local queue and returns. A Manager-owned worker looks up the stream's
+  subscribers, loads their durable cursors and linked tails, and evaluates
+  pending work. If the subscription is idle and behind, the worker bumps the
   `generation`, mints a `wake_id`, arms the lease, and POSTs a signed
   notification. The `Webhook-Signature` is an Ed25519 signature over
   `<timestamp>.<raw_body>`, and the wake body's `kid` selects the verifying key
@@ -134,25 +138,26 @@ import Step from "../components/Step.astro";
   <Diagram
     name="seq-sub-webhook"
     label="Webhook: wake & auto-ack"
-    caption="The client gets its 204 (step 3) at the durable append. Everything below it is the wake, which runs after the append and on its own schedule. A {done:true} receiver reduces delivery to one signed POST."
+    caption="The client gets its 204 after the durable append and one bounded local handoff. Subscriber lookup, cursor hydration, linked-tail reads, wake arming, and the signed POST run in the Manager-owned worker. A {done:true} receiver reduces delivery to one signed POST."
   />
 
   <RedisTrace
     script="arm_wake.lua"
     source="webhook/scripts/arm_wake.lua"
     steps={[
-      { cmd: "HGET", key: "ds:{__ds}:sub:1", does: "Read <code>phase</code>. Only an <strong>idle</strong> subscription arms a wake. A <code>waking</code> or <code>live</code> one returns <code>BUSY</code>. This check is also what coalesces a burst of appends into one wake whose snapshot already covers every pending offset.", loc: "arm_wake.lua:13", kind: "read" },
-      { cmd: "HINCRBY", key: "ds:{__ds}:sub:1 generation", does: "Bump the fencing counter. Every wake gets a strictly greater <code>generation</code>, so a callback minted for a superseded wake can be told apart and rejected.", loc: "arm_wake.lua:16", kind: "write" },
-      { cmd: "HSET", key: "ds:{__ds}:sub:1", does: "Write the single-use <code>wake_id</code> and set <code>phase</code> to <code>waking</code>. The <code>wake_id</code> prevents replaying one wake into another within the same generation.", loc: "arm_wake.lua:17", kind: "write" },
-      { cmd: "ZADD", key: "ds:{__ds}:sched:lease", when: "webhook arms here", does: "Score the lease deadline as <code>now + lease_ttl</code>. The lease is a durable ZSET score rather than a goroutine timer, so it survives a restart that would drop a goroutine.", loc: "arm_wake.lua:21", kind: "ttl" },
+      { cmd: "HGET", key: "ds:{__ds:h}:sub:1", does: "Read <code>phase</code>. Only an <strong>idle</strong> subscription arms a wake. A <code>waking</code> or <code>live</code> one returns <code>BUSY</code>. This check also coalesces a burst of appends into one wake whose snapshot covers every pending offset.", loc: "arm_wake.lua:24", kind: "read" },
+      { cmd: "HINCRBY", key: "ds:{__ds:h}:sub:1 generation", does: "Bump the fencing counter. Every wake gets a strictly greater <code>generation</code>, so a callback minted for a superseded wake can be told apart and rejected.", loc: "arm_wake.lua:29", kind: "write" },
+      { cmd: "HSET", key: "ds:{__ds:h}:sub:1", does: "Write the single-use <code>wake_id</code> and set <code>phase</code> to <code>waking</code>. The <code>wake_id</code> prevents replaying one wake into another within the same generation.", loc: "arm_wake.lua:30", kind: "write" },
+      { cmd: "ZADD", key: "ds:{__ds:h}:due", does: "Record that this subscription owes a wake. The owned due worker can re-fire it if delivery stops after the arm.", loc: "arm_wake.lua:34", kind: "write" },
+      { cmd: "ZADD", key: "ds:{__ds:h}:sched:lease", when: "webhook arms here", does: "Score the lease deadline as <code>now + lease_ttl</code>. The lease is a durable ZSET score rather than a goroutine timer, so it survives a restart that would drop a goroutine.", loc: "arm_wake.lua:39", kind: "ttl" },
     ]}
-    caption="One EVALSHA on the {__ds} slot. The whole control plane shares that one hash tag, so every wake, lease, and generation change is a single-slot atomic script. That keeps it safe to run on a Redis cluster."
+    caption="One EVALSHA on this subscription's {__ds:h} slot. Its state, links, due mark, and schedules share that tag, so every wake, lease, and generation change remains single-slot and atomic on a Redis cluster."
   />
 
   <Complexity
-    time="O(log L) per wake · O(F log L) to fan one append out"
-    space="O(1)"
-    why="Arming a wake is three O(1) hash writes plus one O(log L) insert into the due-scored lease ZSET, where L is the count of scheduled subscriptions. An append fans out to the F subscriptions in the stream's <code>stream:&lt;path&gt;</code> set and arms each one. The idle-phase check coalesces a burst into one wake per subscription until it is acked, so steady-state work is one arm per subscription, not one per append."
+    time="response O(1) · async O(F · P + U + F log L)"
+    space="O(F + U) per dirty stream"
+    why="The response performs one bounded local queue transition, independent of subscriber and link count. The worker loads F matching subscriptions with P links each, reads U distinct linked tails in a batch, and arms each owed wake with an O(log L) lease-schedule write. The idle-phase check and the dirty queue both coalesce bursts, so neither creates one wake per append."
   />
 </section>
 
@@ -239,11 +244,11 @@ import Step from "../components/Step.astro";
     script="ack.lua"
     source="webhook/scripts/ack.lua"
     steps={[
-      { cmd: "HGET", key: "ds:{__ds}:sub:1 generation · wake_id", does: "Load the current fence state.", loc: "ack.lua:14", kind: "read" },
+      { cmd: "HGET", key: "ds:{__ds:h}:sub:1 generation · wake_id", does: "Load the current fence state.", loc: "ack.lua:14", kind: "read" },
       { cmd: "fenced?", does: "Reject unless token-generation, request-generation, and request-<code>wake_id</code> all match. A miss returns <code>FENCED</code> (the handler answers <strong>409</strong>) and nothing else runs.", loc: "ack.lua:16", kind: "flow" },
-      { cmd: "HSET", key: "ds:{__ds}:sub:1:links cur:<path>", does: "Advance each acked cursor <strong>forward only</strong>. A backward offset is ignored. Acks include the last processed offset, so the next read starts after the acked offset.", loc: "ack.lua:28", kind: "write" },
-      { cmd: "ZREM", key: "ds:{__ds}:sched:lease · :retry", when: "done:true", does: "Release the wake. Clear the holder and <code>wake_id</code>, drop both schedule entries, and return to <code>idle</code>. The handler then recomputes pending work and reports <code>next_wake</code>.", loc: "ack.lua:37", kind: "write" },
-      { cmd: "ZADD", key: "ds:{__ds}:sched:lease", when: "heartbeat", does: "An ack <em>without</em> <code>done</code> is a heartbeat. It extends the lease and stays <code>live</code>. The ack endpoint also serves as the keepalive.", loc: "ack.lua:42", kind: "ttl" },
+      { cmd: "HSET", key: "ds:{__ds:h}:sub:1:links cur:<path>", does: "Advance each acked cursor <strong>forward only</strong>. A backward offset is ignored. Acks include the last processed offset, so the next read starts after the acked offset.", loc: "ack.lua:28", kind: "write" },
+      { cmd: "ZREM", key: "ds:{__ds:h}:sched:lease · :retry · :due", when: "done:true", does: "Release the wake. Clear the holder and <code>wake_id</code>, drop the schedule and due entries, and return to <code>idle</code>. The handler then recomputes pending work and reports <code>next_wake</code>.", loc: "ack.lua:37", kind: "write" },
+      { cmd: "ZADD", key: "ds:{__ds:h}:sched:lease", when: "heartbeat", does: "An ack <em>without</em> <code>done</code> is a heartbeat. It extends the lease and stays <code>live</code>. The ack endpoint also serves as the keepalive.", loc: "ack.lua:42", kind: "ttl" },
     ]}
   />
 
@@ -295,10 +300,10 @@ import Step from "../components/Step.astro";
     script="claim.lua"
     source="webhook/scripts/claim.lua"
     steps={[
-      { cmd: "HGET", key: "ds:{__ds}:sub:1 phase · holder · lease_until_ns", does: "Read the lease state.", loc: "claim.lua:15", kind: "read" },
+      { cmd: "HGET", key: "ds:{__ds:h}:sub:1 phase · holder · lease_until_ns", does: "Read the lease state.", loc: "claim.lua:15", kind: "read" },
       { cmd: "busy?", does: "If <code>phase == live</code>, a holder is set, and the lease has not expired, return <code>BUSY</code>. The handler answers <strong>409 ALREADY_CLAIMED</strong> with the current holder. A claim never takes a live lease.", loc: "claim.lua:18", kind: "flow" },
-      { cmd: "HINCRBY", key: "ds:{__ds}:sub:1 generation", when: "no wake in flight", does: "If the subscription was idle with no current wake, mint a fresh generation and <code>wake_id</code> so the worker gets a valid fence. If a wake event is already outstanding, reuse its generation so two workers racing one event collide instead of both winning.", loc: "claim.lua:24", kind: "write" },
-      { cmd: "ZADD", key: "ds:{__ds}:sched:lease", does: "Acquire the lease. Set <code>holder</code>, <code>holder_worker</code>, and <code>phase = live</code>, then arm the lease. Single-threaded Redis runs this as the compare-and-set, so exactly one claim wins.", loc: "claim.lua:30", kind: "ttl" },
+      { cmd: "HINCRBY", key: "ds:{__ds:h}:sub:1 generation", when: "no wake in flight", does: "If the subscription was idle with no current wake, mint a fresh generation and <code>wake_id</code> so the worker gets a valid fence. If a wake event is already outstanding, reuse its generation so two workers racing one event collide instead of both winning.", loc: "claim.lua:24", kind: "write" },
+      { cmd: "ZADD", key: "ds:{__ds:h}:sched:lease", does: "Acquire the lease. Set <code>holder</code>, <code>holder_worker</code>, and <code>phase = live</code>, then arm the lease. Single-threaded Redis runs this as the compare-and-set, so exactly one claim wins.", loc: "claim.lua:30", kind: "ttl" },
     ]}
   />
 
@@ -312,21 +317,23 @@ import Step from "../components/Step.astro";
 <section class="block" id="durability">
   <SectionHead num="05" label="Durability" title="Why a cursor <em>isn't enough</em>" />
 
-  The whole control plane lives in Redis under one fixed hash tag, `{__ds}`, so
-  every correctness-critical script touches one slot and is safe to run on a
-  cluster. The per-stream log has high cardinality and stays sharded under each
-  stream's own tag. Only the control plane is centralized, and it holds far less
-  state, one entry per subscription rather than one per message.
+  The control plane lives in Redis across 256 fixed application slots. A
+  subscription ID hashes to `h`, and its state, links, due mark, and schedules all
+  use `{__ds:h}`. Every correctness-critical script for that subscription still
+  touches one Redis Cluster slot. The per-stream log remains independently
+  sharded under the stream path's tag.
 
   <Table>
     | Key | Type | Holds |
     | --- | --- | --- |
-    | `ds:{__ds}:sub:<id>` | hash | config + runtime: `generation`, `wake_id`, `phase`, `holder`, `lease_until_ns`, retry state |
-    | `ds:{__ds}:sub:<id>:links` | hash | the durable cursors, `path → "<link_type>:<acked_offset>"` |
-    | `ds:{__ds}:subs` | set | every subscription id, for the sweep |
-    | `ds:{__ds}:stream:<path>` | set | fan-out index: which subscriptions a stream wakes |
-    | `ds:{__ds}:sched:lease` | sorted set | `sub → lease_expiry_ns`, the liveness lease as a due-scored timer |
-    | `ds:{__ds}:sched:retry` | sorted set | `sub → next_attempt_ns`, the webhook backoff schedule |
+    | `ds:{__ds:h}:sub:<id>` | hash | config + runtime: `generation`, `wake_id`, `phase`, `holder`, `lease_until_ns`, retry state |
+    | `ds:{__ds:h}:sub:<id>:links` | hash | the durable cursors, `path → "<link_type>:<acked_offset>"` |
+    | `ds:{__ds:h}:subs` | set | subscription ids homed in slot `h`, for recovery |
+    | `ds:{__ds:h}:stream:<path>` | set | the fanout shard for subscribers homed in slot `h` |
+    | `ds:{__ds-occ}:streamslots:<path>` | string bitmap | which of the 256 slots have subscribers for the stream |
+    | `ds:{__ds:h}:sched:lease` | sorted set | `sub → lease_expiry_ns`, the liveness lease as a due-scored timer |
+    | `ds:{__ds:h}:sched:retry` | sorted set | `sub → next_attempt_ns`, the webhook backoff schedule |
+    | `ds:{__ds:h}:due` | sorted set | subscriptions with an armed wake still owed |
     | `ds:{__ds}:jwks` | hash | Ed25519 signing keys, so the `kid` is stable across restarts |
   </Table>
 
@@ -341,13 +348,18 @@ import Step from "../components/Step.astro";
     # fall due again. L = scheduled subscriptions, D = due this tick.
     ```
 
-    ```text title="Wake fan-out is a SET read, and the sweep is the one O(K) pass"
-    SMEMBERS :stream:<path>             # the F subs this append wakes   O(F)
-    for sub in those: arm_wake(sub)     # each O(log L)                  => O(F log L)
+    ```text title="Append handoff is local; fanout and recovery read Redis later"
+    enqueue(path)                       # bounded local transition       O(1)
+
+    occupied = GET {__ds-occ}:streamslots:<path>                            O(1)
+    subscribers = PIPELINE SMEMBERS {__ds:h}:stream:<path> for occupied h  O(F)
+    subs = GetMany(subscribers)                 # pipelined state + links O(F·P)
+    tails = TailOffsets(distinct(subs.links))   # pipelined tails         O(U)
+    for sub in subs: if idle and behind: arm_wake(sub)                   O(F log L)
 
     for id in SMEMBERS :subs:           # every subscription, each tick  O(K)
         expire_lease(id); if behind: arm_wake(id)   # each O(log L)
-    # => O(K log L) per sweep — linear in subscription count, not log size.
+    # => O(K log L) per sweep, linear in subscription count, not log size.
     ```
 
     Throughout: **K** = subscriptions, **P** = streams linked to one
@@ -361,10 +373,11 @@ import Step from "../components/Step.astro";
   restart, an *idle* subscription whose streams are quiet is never re-evaluated.
   Its durable cursor now makes the answer computable, but nothing asks the
   question.[^research] So Chronicle runs a **recovery sweep** on boot and on the
-  sweep interval, a 30 s coarse recovery floor. The append-time hook is the fast
-  path. Recovery is event-triggered, so the floor is a backstop, not the primary
-  path. The sweep walks every subscription, expires stale leases, and for any idle
-  subscription with pending work it re-issues the wake the crash dropped.
+  sweep interval, a 30 s coarse recovery floor. The dirty-stream worker is the
+  low-latency path. The append hook only records bounded local state. Recovery is
+  event-triggered, so the floor is a backstop, not the primary path. The sweep
+  walks every subscription, expires stale leases, and re-issues any owed wake
+  that overload, shutdown, or a crash left behind.
 
   <Diagram
     name="seq-sub-sweep"
@@ -372,29 +385,27 @@ import Step from "../components/Step.astro";
     caption="Origin A commits the append and dies before its wake fires. The byte is durable but the wake is lost. A peer's sweep recomputes HasPendingWork from the durable cursor and re-fires the wake. Delivery happens after the accepting origin no longer exists."
   />
 
-  <Step n={1} fn="Manager.sweepOnce" loc="webhook/manager.go:1147" role="Runs on every origin at boot and on the sweep interval. Reads every subscription id, then batches the state and tail reads. A crash erased this from the in-memory map but not from Redis.">
+  <Step n={1} fn="Manager.sweepOnce" loc="webhook/manager.go:1840" role="Runs on every origin at boot and on the sweep interval. Reads every subscription id, then batches the state and tail reads. A crash erased the local dirty hint but not the durable cursor or stream tail.">
   ```go title="manager.go"
   ids, _ := m.store.List()           // SMEMBERS over the sub-slots
   subs, _ := m.store.GetMany(ids)    // pipelined HGETALL of state + links
   paths := distinctLinkPaths(subs)
-  tails := m.streams.TailOffsets(paths)
+  tails, _ := m.streams.TailOffsets(paths)
   ```
   </Step>
 
-  <Step n={2} fn="LeaseExpired · expireLease" loc="webhook/manager.go:1202" role="Clear a lease whose deadline has passed, which backstops the lease worker. A pull-wake wake with no lease yet is left alone, because its event is already in the wake stream.">
-  ```go title="manager.go"
-  if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, now) {
-      if status, err := m.expireLease(sub.ID, now); err == nil && status == "EXPIRED" {
-          sub.Phase = PhaseIdle
-      }
+  <Step n={2} fn="DecideExpireDueLeases · applyExpireDueLeases" loc="webhook/recovery_phases.go:341" role="A pure phase identifies expired leases. The imperative phase clears each one through the existing atomic script, which also restores its durable due mark.">
+  ```go title="recovery_phases.go"
+  if sub.Phase != PhaseIdle && LeaseExpired(sub.LeaseUntilNs, s.Now) {
+      res.Expires = append(res.Expires, ExpireLeaseDecision{SubID: sub.ID})
   }
   ```
   </Step>
 
-  <Step n={3} fn="HasPendingWorkFrom · issueWake" loc="webhook/manager.go:1207" role="In Go, compare each durable cursor against its stream's tail. The tail lives in the stream's own slot, so this cannot be a {__ds} Lua script. For an idle subscription that is behind, re-issue the wake. It is idempotent under the fence. If it races a real append's wake, both bump generation, one supersedes the other, and the stale one is fenced.">
-  ```go title="manager.go"
-  if sub.Phase == PhaseIdle && HasPendingWorkFrom(sub.Links, tails) {
-      m.issueWake(sub, "")   // arm_wake.lua under the fence
+  <Step n={3} fn="DecideWakeIdlePending · applyWakeIdlePending" loc="webhook/recovery_phases.go:366" role="The pure phase compares each durable cursor with the batched tail snapshot. The apply phase re-arms every owed idle subscription through the existing compare-and-set fence.">
+  ```go title="recovery_phases.go"
+  if sub.Phase == PhaseIdle && HasPendingWorkFrom(sub.Links, s.Tails) {
+      res.Wakes = append(res.Wakes, WakeIdleDecision{Sub: sub})
   }
   ```
   </Step>
@@ -416,8 +427,8 @@ import Step from "../components/Step.astro";
     script="claim_due.lua"
     source="webhook/scripts/claim_due.lua"
     steps={[
-      { cmd: "ZRANGEBYSCORE", key: "ds:{__ds}:sched:lease 0 now", does: "Take the members whose deadline has passed. These are leases to expire or retries to re-deliver.", loc: "claim_due.lua:10", kind: "read" },
-      { cmd: "ZADD", key: "ds:{__ds}:sched:lease now+visibility", does: "<strong>Re-score forward, never ZREM.</strong> If this origin dies mid-handling, the item falls due again on another origin. Visibility is set from <code>lease_ttl × 2</code> so a delivery that is slow but alive is not reclaimed and fired twice.", loc: "claim_due.lua:13", kind: "write" },
+      { cmd: "ZRANGEBYSCORE", key: "ds:{__ds:h}:sched:lease 0 now", does: "Take the members whose deadline has passed. These are leases to expire or retries to re-deliver.", loc: "claim_due.lua:10", kind: "read" },
+      { cmd: "ZADD", key: "ds:{__ds:h}:sched:lease now+visibility", does: "<strong>Re-score forward, never ZREM.</strong> If this origin dies mid-handling, the item falls due again on another origin. Visibility is set from <code>lease_ttl × 2</code> so a delivery that is slow but alive is not reclaimed and fired twice.", loc: "claim_due.lua:13", kind: "write" },
     ]}
   />
 
@@ -454,12 +465,12 @@ import Step from "../components/Step.astro";
   server initiates each delivery.
 
   When the order service appends `paid` to `orders/A1234`, that append gets its
-  `204` at the durable write, and everything else happens after that. The server
-  bumps the generation, arms the lease, signs the wake snapshot, and POSTs it. The
-  receiver verifies the Ed25519 signature against the cached JWKS, sends the
-  email, and returns `{done:true}`, which auto-acks the tail and releases the
-  lease in the same round trip. That is one signed POST, with no callback and no
-  polling.
+  `204` after the durable write and one bounded local queue transition. The
+  background worker then loads the subscription and its linked tails, bumps the
+  generation, arms the lease, signs the wake snapshot, and POSTs it. The receiver
+  verifies the Ed25519 signature against the cached JWKS, sends the email, and
+  returns `{done:true}`, which auto-acks the tail and releases the lease in the
+  same round trip. That is one signed POST, with no callback and no polling.
 
   A `503` schedules a retry with persisted backoff from 1 s to 60 s and 20%
   jitter, so the receipt is still sent after the receiver or the accepting origin
@@ -613,6 +624,15 @@ import Step from "../components/Step.astro";
 <section class="block" id="scaling">
   <SectionHead num="10" label="Scaling" title="The sweep reads in <em>one batch</em>" />
 
+  Normal append fanout and recovery use the same durable cursor decision but
+  start from different scopes. The dirty worker starts with at most 64 changed
+  stream paths. For each path it pipelines subscription hydration, batches the
+  distinct linked-tail reads, and evaluates the loaded subscriptions in memory.
+  Subscriber count and link count affect asynchronous completion time, queue age,
+  and Redis load. They do not affect the append response after its bounded local
+  handoff. The [async fanout performance page](../performance-improvements/async-subscription-fanout)
+  shows the response boundary, queue policy, metrics, and complete fanout results.
+
   The recovery sweep is the durability backstop from section 05. On each tick it
   re-derives pending work for *every* subscription by reading its durable cursor
   and the tail of each linked stream. That read pattern is where the poll meets
@@ -706,30 +726,25 @@ import Step from "../components/Step.astro";
   answer from durable state. It also marks the design's open edges, and all of
   them are about the latency and cost of that recompute, never its correctness.
 
-  - **No recovery faster than the sweep.** A wake lost to a crash is re-derived
-    by event-triggered recovery, with the 30 s sweep floor as the backstop. A glob
-    link missed during an outage waits for the next reconcile, about 30 s.
-    Recovery is a post-crash event, so that latency is the right cost to pay. A
-    loss-sensitive pull-wake workload has no faster path than the sweep today. The
-    named upgrade is the delivery [outbox
-    sketched in
-    `docs/research/10`](https://github.com/adityavkk/chronicle/blob/main/docs/research/10-subscription-hardening-handoff.md),
-    a due-scored wake schedule that fires before the next tick, at the cost of a
-    third schedule ZSET and a fourth worker loop.
+  - **A crash can still pay the recovery floor.** Overflow and dirty-worker
+    errors request an eager sweep, and boot, Redis reconnect, and owner movement
+    also trigger recovery. A process can still die after the stream commit and
+    before another process observes the loss. That eventless window is bounded by
+    the 30 s periodic floor. A durable outbox could shorten it, but would add
+    another cross-slot write, schedule, and cleanup lifecycle.
 
-  - **The fast path is in-process, not cross-origin.** The append-time hook
-    (`OnStreamAppend`) is a synchronous Go call on the origin that handled the
-    append. It is not the `ds:notify` pub/sub the direct-consumer long-poll uses.
-    So an append on origin A wakes A's subscribers at append latency, while a
-    subscriber a peer origin would serve waits for that peer's sweep. Redis holds
-    the durable state, so any origin *can* act. The open question is whether the
-    fast path should reach across origins rather than leaving the sweep to bridge
-    them.
+  - **The low-latency hint is local to the accepting origin.** `OnStreamAppend`
+    records process-local state. It is not the `ds:notify` pub/sub used by
+    long-poll readers. The accepting origin's worker evaluates every linked
+    subscription slot, without filtering by delivery owner. If that origin dies,
+    a boot or periodic sweep on a surviving origin derives the same owed work
+    from Redis. A cross-origin dirty handoff could reduce that recovery latency,
+    but is not required for correctness.
 
   - **The poll still has a ceiling, just a higher one.** Batching the sweep's
     reads in section 10 moved the cliff from a few thousand subscriptions to well
     past 10k on one replica, but two edges stay open. The sweep still runs
-    redundantly on every replica, `O(N·K)` against the shared `{__ds}` slot, and
+    redundantly on every replica, `O(N·K)` across the slot-homed control plane, and
     it is still `O(K)` work per tick. Past what batching buys, the fixes are
     sharding the sweep across replicas, where the fence already makes a missharded
     item harmless, or an event-driven backstop, the doc-10 outbox, that touches
@@ -748,6 +763,7 @@ import Step from "../components/Step.astro";
 
   - [Overview](../). The data model, design, performance, and conformance posture.
   - [Endpoints &amp; Redis](../endpoints). Every stream endpoint walked one at a time, down to the Redis command.
+  - [Async subscription fanout](../performance-improvements/async-subscription-fanout). The bounded response handoff, dirty queue, failure policy, metrics, and before-and-after measurements.
   - [webhook/](https://github.com/adityavkk/chronicle/tree/main/webhook). The subscription layer: pure core, Redis store, Lua scripts, manager, and routes.
   - [docs/research/07](https://github.com/adityavkk/chronicle/blob/main/docs/research/07-subscription-wake-lease-durability.md). The design study, with the crash-window analysis and the recovery sweep.
   - [docs/research/10](https://github.com/adityavkk/chronicle/blob/main/docs/research/10-subscription-hardening-handoff.md). The hardening handoff, with the four crash windows and the outbox upgrade path.
@@ -758,7 +774,7 @@ import Step from "../components/Step.astro";
 
 [^protocol]: Reserved Subscription APIs and Subscription Delivery: [PROTOCOL.md §6 to §7](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md). Subscriptions are defined there as durable cursors with generation fencing and a lease.
 
-[^research]: Why a durable cursor is necessary but not sufficient, and why a sweep is required: [`docs/research/07`](https://github.com/adityavkk/chronicle/blob/main/docs/research/07-subscription-wake-lease-durability.md) §6.3 and §8. The single-`{__ds}`-slot decision is in [`docs/research/09`](https://github.com/adityavkk/chronicle/blob/main/docs/research/09-subscription-implementation-plan.md) §2.
+[^research]: Why a durable cursor is necessary but not sufficient, and why a sweep is required: [`docs/research/07`](https://github.com/adityavkk/chronicle/blob/main/docs/research/07-subscription-wake-lease-durability.md) §6.3 and §8. The original single-slot design is in [`docs/research/09`](https://github.com/adityavkk/chronicle/blob/main/docs/research/09-subscription-implementation-plan.md) §2. The current 256-slot layout is explained on the [horizontal-scale page](../horizontal-scale#move1).
 
 [^ssrf]: Webhook URL validation: `ClassifyWebhookURL` in [`webhook/ssrf.go`](https://github.com/adityavkk/chronicle/blob/main/webhook/ssrf.go), matching PROTOCOL §6.2 and §12.8.
 

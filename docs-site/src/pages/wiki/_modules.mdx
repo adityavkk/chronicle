@@ -3,7 +3,7 @@ title: "The modules, <em>one at a time</em>"
 summary: "A walkthrough of chronicle one package at a time. The imperative shell, the pure protocol core, the store contract, the Redis backend, and the subscription plane. Each one with its main function and a snippet read from the source."
 eyebrow: "Code Wiki"
 meta: "Modules"
-deck: "Five packages, each with one job. This page takes them in the order a request meets them. The HTTP <strong>shell</strong>, the pure <strong>core</strong> it consults, the <strong>store</strong> contract it calls, the <strong>Redis</strong> backend behind that contract, and the <strong>subscription</strong> plane a write fires on its way out."
+deck: "Five packages, each with one job. This page takes them in the order a request meets them. The HTTP <strong>shell</strong>, the pure <strong>core</strong> it consults, the <strong>store</strong> contract it calls, the <strong>Redis</strong> backend behind that contract, and the <strong>subscription</strong> plane that receives one bounded dirty hint after a write commits."
 byline:
   - label: "Reading"
     value: "source at main"
@@ -28,7 +28,7 @@ import Aside from "../../components/Aside.astro";
     <li><strong>The handler never names Redis.</strong> It depends on <code>store.Store</code> plus narrow typed read, wait, and notification capabilities. The Redis backend and in-memory reference backend expose the same behavior.</li>
     <li><strong>Each single-stream mutation step is one Lua script.</strong> Append, close, delete, and an ordinary create run as one <code>EVALSHA</code>, so validation and writes are atomic per stream. Fork creation composes two single-slot scripts in Go.</li>
     <li><strong>A root-owned read page is one Lua script.</strong> <code>read.lua</code> loads metadata once, fixes the response tail, classifies the range, and returns bounded root frames without producer state. New <code>offset=now</code> live reads confirm their notification registration before that page.</li>
-    <li><strong>Subscriptions attach through two hooks.</strong> A durable append fires <code>OnStreamAppend</code>; the webhook <code>Manager</code> turns it into a fenced wake, recovered by a sweep so a crash cannot lose or double-deliver it.</li>
+    <li><strong>Subscriptions attach through two hooks.</strong> After a durable append, <code>OnStreamAppend</code> only adds or coalesces one path in a fixed local queue. A Manager-owned worker later evaluates subscribers and arms fenced wakes. Durable recovery repairs a hint lost to overload or a crash.</li>
   </ul>
 </Tldr>
 
@@ -44,7 +44,7 @@ import Aside from "../../components/Aside.astro";
   router, no route table, and no regex. A verb maps to a handler, and each
   handler calls the narrow storage capabilities required for that operation.
 
-  <Step n="1" fn="Handler.ServeHTTP, the dispatch" loc="handler.go:122-141" role="Five verbs, five handlers. This switch is the whole router. Above it is headers and the <code>__ds</code> guard. Below it is one error writer.">
+  <Step n="1" fn="Handler.ServeHTTP, the dispatch" loc="handler.go:172" role="Five verbs, five handlers. This switch is the whole router. Above it is headers and the <code>__ds</code> guard. Below it is one error writer.">
 
 ```go title="handler.go" showLineNumbers startLineNumber=122
 	var err error
@@ -235,7 +235,7 @@ for source compatibility.
     | [`ReadSnapshot`](https://github.com/adityavkk/chronicle/blob/main/store/page.go#L34) | Typed read projection. Carries response and fencing state without producer state |
     | [`ValidateProducer`](https://github.com/adityavkk/chronicle/blob/main/store/producer.go#L17) | The pure producer state machine, used by both backends |
     | [`ProcessJSONAppend`](https://github.com/adityavkk/chronicle/blob/main/store/json.go#L16) | Turns a JSON array into one frame per element |
-    | [`MemoryStore`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store.go#L79) | The in-memory reference backend used in tests |
+    | [`MemoryStore`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store.go#L20) | The in-memory reference backend used in tests |
   </Table>
 </section>
 
@@ -324,13 +324,13 @@ matches, write.
   <SectionHead num="05" label="webhook/" title="Subscriptions &amp; <em>webhooks</em>" />
 
   The subscription plane is optional. It attaches through two hooks the handler
-  fires: `OnStreamCreated` and `OnStreamAppend`. When a durable append lands on a
-  matched stream, the webhook `Manager` looks up the stream's subscribers in a
-  fan-out index and wakes any that are idle and have pending work. A wake is not a
-  one-way notification. It is a fenced state change in Redis, so a crash on either
-  side can be recovered instead of lost or delivered twice. A fence here is a
-  counter Redis checks on every later message, and it rejects any message that
-  carries an older count.
+  fires: `OnStreamCreated` and `OnStreamAppend`. Once a durable append commits,
+  `OnStreamAppend` adds or coalesces its path in a 1,024-entry local queue. It
+  does not call Redis. A Manager-owned worker then reads the fanout index,
+  pipelines subscription state, batches distinct linked-tail reads, and wakes
+  subscriptions that are idle and behind. A wake is a fenced state change in
+  Redis. A crash can therefore cost latency without allowing a stale callback to
+  advance a cursor.
 
   `arm_wake.lua` creates a wake. It only fires if the subscription is idle, and it
   increments a `generation` counter that fences every later message about this
@@ -348,6 +348,7 @@ if redis.call('HGET', sub, 'phase') ~= 'idle' then
 end
 local gen = redis.call('HINCRBY', sub, 'generation', 1)
 redis.call('HSET', sub, 'wake_id', ARGV[5], 'phase', 'waking', 'holder', '0', 'holder_worker', '')
+redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1])
 if ARGV[4] == '1' then
   local until_ns = tonumber(ARGV[2]) + tonumber(ARGV[3]) * 1000000
   redis.call('HSET', sub, 'lease_until_ns', tostring(until_ns))
@@ -364,20 +365,21 @@ one with a `409`. Webhook delivery signs the POST with Ed25519 and runs it past
 an SSRF guard. Pull-wake instead appends an event to the worker's wake stream and
 lets workers race to `claim` a lease. A recovery loop backs both. It runs every
 30 seconds, re-arms wakes stranded by a crash, and expires leases whose holder
-went away. It is the durability backstop for the best-effort append-time hook.
+went away. It is the durability backstop for the process-local append hint.
 
   </Step>
 
   <Table>
     | Function | Where | Does |
     | --- | --- | --- |
-    | [`OnStreamAppend`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L214) | `manager.go` | fan-out, which wakes every idle subscriber with pending work |
-    | [`issueWake`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L256) | `manager.go` | arm a generation, then sign and POST, or append a wake event |
-    | [`Claim`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store.go#L225) | `redis_store.go` | pull-wake lease compare-and-set, which rotates the fence |
-    | [`recoveryLoop`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L978) | `manager.go` | every 30 s, re-arm stranded wakes and expire dead leases |
+    | [`OnStreamAppend`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L537) | `manager.go` | one bounded queue transition, with explicit coalescing and overflow |
+    | [`processDirtyStream`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L625) | `manager.go` | async lookup, hydration, batched tails, and pure pending-work decisions |
+    | [`issueWake`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L810) | `manager.go` | arm a generation and due mark, then sign and POST or append a wake event |
+    | [`Claim`](https://github.com/adityavkk/chronicle/blob/main/webhook/redis_store.go#L672) | `redis_store.go` | pull-wake lease compare-and-set, which rotates the fence |
+    | [`recoveryLoop`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L1671) | `manager.go` | event-triggered recovery plus the 30-second periodic floor |
   </Table>
 
-  The [Subscriptions](./../subscriptions) reference covers the fencing,
-  generations, and recovery sweep in full. The [wake tracer](./tracers#wake)
+  The [Subscriptions](../../subscriptions) reference covers the fencing,
+  generations, and recovery sweep in full. The [wake tracer](../tracers#wake)
   follows one wake through this code end to end.
 </section>
