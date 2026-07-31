@@ -61,3 +61,45 @@ func TestFailpointArmedBeforeEmitStrandsThenRecovers(t *testing.T) {
 		t.Fatalf("the recovery sweep must re-emit the stranded wake, got %d", fs.count())
 	}
 }
+
+func TestFailpointDirtyHintLostBeforeSignalRecoversAfterRestart(t *testing.T) {
+	store, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{"events/a": "0000000000000001_0000000000000000"}}
+	now := time.Now()
+	_, _ = store.CreateOrConfirm("s1", pullWakeCfg(), nil, now)
+	_ = store.Link("s1", "events/a", LinkGlob, fs.BeginningOffset())
+
+	first, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fired := false
+	FailpointHook = func(name string) {
+		if name == fpDirtyAfterEnqueueBeforeSignal {
+			fired = true
+			panic("failpoint: crash after dirty enqueue before worker signal")
+		}
+	}
+	t.Cleanup(func() { FailpointHook = nil })
+	func() {
+		defer func() { _ = recover() }()
+		first.OnStreamAppend("events/a")
+	}()
+	if !fired {
+		t.Fatal("dirty-boundary failpoint did not fire")
+	}
+	first.Stop()
+	if fs.count() != 0 {
+		t.Fatal("crashed manager processed a notification that was never signaled")
+	}
+
+	FailpointHook = nil
+	second, err := NewManager(store, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.RunSweep()
+	if fs.count() != 1 {
+		t.Fatalf("boot-style recovery emitted %d wakes, want 1", fs.count())
+	}
+}

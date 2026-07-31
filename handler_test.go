@@ -437,13 +437,19 @@ func (c *countingHooks) OnStreamCreated(string) { c.created++ }
 func (c *countingHooks) OnStreamAppend(string)  { c.appended++ }
 func (c *countingHooks) OnStreamDeleted(string) { c.deleted++ }
 
+type countingAppendMetrics struct{ calls int }
+
+func (m *countingAppendMetrics) AppendSubscriptionHook(time.Duration) { m.calls++ }
+
 // TestAppendDuplicateDoesNotWake pins the fix for #76: a deduplicated producer
 // retry wrote no new data, so it must not wake subscribers; only a genuinely new
 // append fires OnStreamAppend.
 func TestAppendDuplicateDoesNotWake(t *testing.T) {
 	h := testHandler(time.Second, time.Second)
 	hooks := &countingHooks{}
+	appendMetrics := &countingAppendMetrics{}
 	h.SubHooks = hooks
+	h.AppendMetrics = appendMetrics
 	mustCreate(t, h, "/test", "text/plain", nil)
 
 	// New producer write: wakes subscribers.
@@ -453,6 +459,9 @@ func TestAppendDuplicateDoesNotWake(t *testing.T) {
 	if hooks.appended != 1 {
 		t.Fatalf("after new append: OnStreamAppend fired %d times, want 1", hooks.appended)
 	}
+	if appendMetrics.calls != 1 {
+		t.Fatalf("after new append: hook metric recorded %d times, want 1", appendMetrics.calls)
+	}
 
 	// Duplicate retry of the same seq: 204, no new data, must NOT wake.
 	if rec := do(h, http.MethodPost, "/test", producerHeaders("p1", "1", "0"), []byte("a")); rec.Code != http.StatusNoContent {
@@ -461,6 +470,18 @@ func TestAppendDuplicateDoesNotWake(t *testing.T) {
 	if hooks.appended != 1 {
 		t.Errorf("after duplicate: OnStreamAppend fired %d times, want still 1", hooks.appended)
 	}
+	if appendMetrics.calls != 1 {
+		t.Errorf("after duplicate: hook metric recorded %d times, want still 1", appendMetrics.calls)
+	}
+
+	// A rejected append committed nothing and must not enqueue or record a
+	// post-commit subscription interval.
+	if rec := do(h, http.MethodPost, "/test", map[string]string{"Content-Type": "application/json"}, []byte(`{}`)); rec.Code != http.StatusConflict {
+		t.Fatalf("failed append: status = %d, want 409", rec.Code)
+	}
+	if hooks.appended != 1 || appendMetrics.calls != 1 {
+		t.Fatalf("failed append changed hooks/metrics to %d/%d", hooks.appended, appendMetrics.calls)
+	}
 
 	// A second genuinely new append wakes again.
 	if rec := do(h, http.MethodPost, "/test", producerHeaders("p1", "1", "1"), []byte("b")); rec.Code != http.StatusOK {
@@ -468,6 +489,37 @@ func TestAppendDuplicateDoesNotWake(t *testing.T) {
 	}
 	if hooks.appended != 2 {
 		t.Errorf("after second append: OnStreamAppend fired %d times, want 2", hooks.appended)
+	}
+	if appendMetrics.calls != 2 {
+		t.Errorf("after second append: hook metric recorded %d times, want 2", appendMetrics.calls)
+	}
+}
+
+func TestCreateWithInitialDataNotifiesAppendOnce(t *testing.T) {
+	h := testHandler(time.Second, time.Second)
+	hooks := &countingHooks{}
+	appendMetrics := &countingAppendMetrics{}
+	h.SubHooks = hooks
+	h.AppendMetrics = appendMetrics
+
+	rec := do(h, http.MethodPut, "/initial", map[string]string{"Content-Type": "text/plain"}, []byte("hello"))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201", rec.Code)
+	}
+	if hooks.created != 1 || hooks.appended != 1 {
+		t.Fatalf("create/append hooks = %d/%d, want 1/1", hooks.created, hooks.appended)
+	}
+	if appendMetrics.calls != 1 {
+		t.Fatalf("append hook metric = %d, want 1", appendMetrics.calls)
+	}
+
+	// Idempotent create neither appends nor repeats lifecycle work.
+	rec = do(h, http.MethodPut, "/initial", map[string]string{"Content-Type": "text/plain"}, []byte("hello"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("idempotent create = %d, want 200", rec.Code)
+	}
+	if hooks.created != 1 || hooks.appended != 1 || appendMetrics.calls != 1 {
+		t.Fatalf("idempotent create changed hooks/metric to %d/%d/%d", hooks.created, hooks.appended, appendMetrics.calls)
 	}
 }
 
@@ -636,6 +688,8 @@ func TestCloseOnlyWithProducer(t *testing.T) {
 
 func TestAppendWithClose(t *testing.T) {
 	h := testHandler(time.Second, time.Second)
+	hooks := &countingHooks{}
+	h.SubHooks = hooks
 	mustCreate(t, h, "/test", "text/plain", nil)
 
 	rec := do(h, http.MethodPost, "/test", map[string]string{
@@ -650,6 +704,9 @@ func TestAppendWithClose(t *testing.T) {
 	}
 	if got := rec.Header().Get(protocol.HeaderStreamNextOffset); got != off(5) {
 		t.Errorf("Stream-Next-Offset = %q, want %q", got, off(5))
+	}
+	if hooks.appended != 1 {
+		t.Fatalf("append-with-close hook count = %d, want 1", hooks.appended)
 	}
 }
 

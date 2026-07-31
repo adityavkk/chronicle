@@ -2,6 +2,7 @@ package chronicle
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -155,28 +156,34 @@ func (a streamAdapter) TailOffset(path string) (string, bool) {
 // store is available, else a per-path fallback. Paths absent from the result do
 // not exist. The sweep reads every linked tail per tick, so the batch keeps that
 // from being a round trip per link.
-func (a streamAdapter) TailOffsets(paths []string) map[string]string {
+func (a streamAdapter) TailOffsets(paths []string) (map[string]string, error) {
 	if a.rs != nil {
 		keyed := make([]string, len(paths))
 		for i, p := range paths {
 			keyed[i] = storePath(p)
 		}
-		if offs, err := a.rs.GetCurrentOffsets(context.Background(), keyed); err == nil {
-			out := make(map[string]string, len(offs))
-			for sp, off := range offs {
-				out[strings.TrimPrefix(sp, "/")] = off.String()
-			}
-			return out
+		offs, err := a.rs.GetCurrentOffsets(context.Background(), keyed)
+		if err != nil {
+			return nil, err
 		}
-		// fall through to per-path on error
+		out := make(map[string]string, len(offs))
+		for sp, off := range offs {
+			out[strings.TrimPrefix(sp, "/")] = off.String()
+		}
+		return out, nil
 	}
 	out := make(map[string]string, len(paths))
 	for _, p := range paths {
-		if tail, ok := a.TailOffset(p); ok {
-			out[p] = tail
+		off, err := a.st.GetCurrentOffset(storePath(p))
+		if errors.Is(err, store.ErrStreamNotFound) || errors.Is(err, store.ErrStreamExpired) {
+			continue
 		}
+		if err != nil {
+			return nil, err
+		}
+		out[p] = off.String()
 	}
-	return out
+	return out, nil
 }
 
 func (a streamAdapter) BeginningOffset() string { return store.ZeroOffset.String() }

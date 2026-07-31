@@ -42,12 +42,12 @@ func (writeFenceStreams) TailOffset(string) (string, bool) {
 	return "0000000000000000_0000000000000001", true
 }
 
-func (writeFenceStreams) TailOffsets(paths []string) map[string]string {
+func (writeFenceStreams) TailOffsets(paths []string) (map[string]string, error) {
 	out := make(map[string]string, len(paths))
 	for _, p := range paths {
 		out[p] = "0000000000000000_0000000000000001"
 	}
-	return out
+	return out, nil
 }
 
 func (writeFenceStreams) BeginningOffset() string              { return "0000000000000000_0000000000000000" }

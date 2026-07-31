@@ -209,6 +209,14 @@ sole safety gate). A `porcupine.Unknown` result (linearizability is NP-hard) mea
 the history was too concurrent to decide in the timeout — reduce `-workers` or
 `-workload-ms`; the scenario fails closed.
 
+The ownership model also records every claim that returns a transport error as
+`INDETERMINATE`. `claim_shard.lua` is a write, so Redis may have applied it
+before the client lost the reply. The model admits both the unchanged state and
+the one-epoch transfer state; later successful claims and owner checks constrain
+which branch can linearize. Omitting the failed call would invent an unrecorded
+ownership mutation and can falsely reject a valid same-owner retry as an
+impossible `RENEWED` response.
+
 ## Files
 
 - `deploy/deploy.yaml` — Namespace, Redis (AOF on a PVC), chronicle ×2, Services.

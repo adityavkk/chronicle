@@ -51,6 +51,19 @@ type Prometheus struct {
 	fanoutSeconds     prometheus.Histogram
 	fanoutSlotsProbed prometheus.Histogram
 	fanoutSubs        prometheus.Histogram
+	appendHookSeconds prometheus.Histogram
+	dirtyEnqueues     *prometheus.CounterVec
+	dirtyDepth        prometheus.Gauge
+	dirtyCapacity     prometheus.Gauge
+	dirtyOldestAge    prometheus.Gauge
+	dirtyProcess      *prometheus.HistogramVec
+	dirtyProcessSubs  prometheus.Counter
+	dirtyProcessWakes prometheus.Counter
+	dirtyDuplicates   prometheus.Counter
+	dirtyOverflows    prometheus.Counter
+	reconcileRequests *prometheus.CounterVec
+	dirtyErrors       *prometheus.CounterVec
+	dirtyRecovery     prometheus.Histogram
 	dueSetMutations   *prometheus.CounterVec
 	dueWorkerSeconds  prometheus.Histogram
 	dueWorkerFired    prometheus.Histogram
@@ -77,9 +90,10 @@ type SegmentStatsSource interface {
 }
 
 var (
-	_ webhook.Metrics       = (*Prometheus)(nil)
-	_ chronicle.ReadMetrics = (*Prometheus)(nil)
-	_ chronicle.SSEMetrics  = (*Prometheus)(nil)
+	_ webhook.Metrics         = (*Prometheus)(nil)
+	_ chronicle.AppendMetrics = (*Prometheus)(nil)
+	_ chronicle.ReadMetrics   = (*Prometheus)(nil)
+	_ chronicle.SSEMetrics    = (*Prometheus)(nil)
 )
 
 // New builds a Prometheus recorder with its own registry, including the standard
@@ -172,18 +186,73 @@ func New() *Prometheus {
 		}, []string{"phase"}),
 		fanoutSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "chronicle_fanout_seconds",
-			Help:    "OnStreamAppend fan-out wall-clock duration under slot-homing (gate #2).",
+			Help:    "Async fan-out subscriber lookup duration under slot-homing (gate #2 component).",
 			Buckets: prometheus.DefBuckets,
 		}),
 		fanoutSlotsProbed: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "chronicle_fanout_slots_probed",
-			Help:    "Slots probed per OnStreamAppend fan-out (occupied-slots bitmap effect).",
+			Help:    "Slots probed per async subscriber lookup (occupied-slots bitmap effect).",
 			Buckets: prometheus.ExponentialBuckets(1, 2, 9), // 1 .. 256
 		}),
 		fanoutSubs: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "chronicle_fanout_subs",
-			Help:    "Subscribers found per OnStreamAppend fan-out.",
+			Help:    "Subscribers found per async fan-out lookup.",
 			Buckets: prometheus.ExponentialBuckets(1, 2, 14),
+		}),
+		appendHookSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_append_subscription_hook_seconds",
+			Help:    "Wall time from a successful append commit through all synchronous subscription hook work before the HTTP response.",
+			Buckets: prometheus.ExponentialBuckets(0.000001, 2, 20),
+		}),
+		dirtyEnqueues: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_subscription_dirty_enqueues_total",
+			Help: "Committed append dirty-handoff outcomes by bounded result.",
+		}, []string{"result"}),
+		dirtyDepth: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "chronicle_subscription_dirty_queue_depth",
+			Help: "Current process-local dirty stream entries, including work in progress.",
+		}),
+		dirtyCapacity: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "chronicle_subscription_dirty_queue_capacity",
+			Help: "Fixed process-local dirty stream capacity.",
+		}),
+		dirtyOldestAge: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "chronicle_subscription_dirty_oldest_age_seconds",
+			Help: "Age of the oldest queued, processing, or overflowed dirty hint.",
+		}),
+		dirtyProcess: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "chronicle_subscription_dirty_processing_seconds",
+			Help:    "Async dirty batch processing duration by outcome (ok|error).",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 18),
+		}, []string{"outcome"}),
+		dirtyProcessSubs: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_subscription_dirty_subscribers_evaluated_total",
+			Help: "Subscriptions hydrated and evaluated by async dirty fan-out.",
+		}),
+		dirtyProcessWakes: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_subscription_dirty_wakes_armed_total",
+			Help: "Wakes successfully armed by async dirty fan-out.",
+		}),
+		dirtyDuplicates: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_subscription_dirty_duplicate_work_total",
+			Help: "Async fan-out candidates already absent or in flight when evaluated.",
+		}),
+		dirtyOverflows: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_subscription_dirty_overflow_total",
+			Help: "Process-local dirty queue overflow epochs that requested eager recovery.",
+		}),
+		reconcileRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_subscription_reconcile_requests_total",
+			Help: "Eager recovery requests by bounded reason and enqueue result.",
+		}, []string{"reason", "result"}),
+		dirtyErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_subscription_dirty_processing_errors_total",
+			Help: "Async dirty processing failures by fixed stage.",
+		}, []string{"stage"}),
+		dirtyRecovery: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_subscription_dirty_recovery_delay_seconds",
+			Help:    "Delay from a committed append hint or overflow epoch to successful async evaluation or recovery.",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 20),
 		}),
 		dueSetMutations: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_due_set_mutations_total",
@@ -265,7 +334,11 @@ func New() *Prometheus {
 		p.readScriptInvokes, p.readResponse, p.readCanceled,
 	)
 	reg.MustRegister(
-		p.fanoutSeconds, p.fanoutSlotsProbed, p.fanoutSubs,
+		p.fanoutSeconds, p.fanoutSlotsProbed, p.fanoutSubs, p.appendHookSeconds,
+		p.dirtyEnqueues, p.dirtyDepth, p.dirtyCapacity, p.dirtyOldestAge,
+		p.dirtyProcess, p.dirtyProcessSubs, p.dirtyProcessWakes,
+		p.dirtyDuplicates, p.dirtyOverflows, p.reconcileRequests, p.dirtyErrors,
+		p.dirtyRecovery,
 		p.dueSetMutations, p.dueWorkerSeconds, p.dueWorkerFired,
 		p.slotOwnership, p.coverageGap, p.ownerFenced, p.claimContention,
 		p.durabilityShort,
@@ -391,6 +464,50 @@ func (p *Prometheus) FanOut(dur time.Duration, slotsProbed, subs int) {
 	p.fanoutSeconds.Observe(dur.Seconds())
 	p.fanoutSlotsProbed.Observe(float64(slotsProbed))
 	p.fanoutSubs.Observe(float64(subs))
+}
+
+// AppendSubscriptionHook implements chronicle.AppendMetrics.
+func (p *Prometheus) AppendSubscriptionHook(dur time.Duration) {
+	p.appendHookSeconds.Observe(dur.Seconds())
+}
+
+// DirtyEnqueue implements webhook.Metrics.
+func (p *Prometheus) DirtyEnqueue(result string, depth, capacity int, oldestAge time.Duration) {
+	p.dirtyEnqueues.WithLabelValues(result).Inc()
+	p.DirtyQueue(depth, capacity, oldestAge)
+}
+
+// DirtyQueue implements webhook.Metrics.
+func (p *Prometheus) DirtyQueue(depth, capacity int, oldestAge time.Duration) {
+	p.dirtyDepth.Set(float64(depth))
+	p.dirtyCapacity.Set(float64(capacity))
+	p.dirtyOldestAge.Set(oldestAge.Seconds())
+}
+
+// DirtyProcess implements webhook.Metrics.
+func (p *Prometheus) DirtyProcess(dur time.Duration, subs, wakes, duplicates int, outcome string) {
+	p.dirtyProcess.WithLabelValues(outcome).Observe(dur.Seconds())
+	p.dirtyProcessSubs.Add(float64(subs))
+	p.dirtyProcessWakes.Add(float64(wakes))
+	p.dirtyDuplicates.Add(float64(duplicates))
+}
+
+// DirtyOverflow implements webhook.Metrics.
+func (p *Prometheus) DirtyOverflow() { p.dirtyOverflows.Inc() }
+
+// ReconcileRequest implements webhook.Metrics.
+func (p *Prometheus) ReconcileRequest(scope, result string) {
+	p.reconcileRequests.WithLabelValues(scope, result).Inc()
+}
+
+// DirtyProcessingError implements webhook.Metrics.
+func (p *Prometheus) DirtyProcessingError(stage string) {
+	p.dirtyErrors.WithLabelValues(stage).Inc()
+}
+
+// DirtyRecoveryDelay implements webhook.Metrics.
+func (p *Prometheus) DirtyRecoveryDelay(dur time.Duration) {
+	p.dirtyRecovery.Observe(dur.Seconds())
 }
 
 // DueSetMutation implements webhook.Metrics.

@@ -64,9 +64,10 @@ import (
 // replies (docs/specs/horizontal-scale/research/05). statusClaimed, statusBusy,
 // and statusFenced are shared with model_fence.go.
 const (
-	statusRenewed = "RENEWED" // claim_shard: same-owner renew (epoch kept)
-	statusOwner   = "OWNER"   // check_owner: caller is the current owner at epoch
-	statusUnowned = "UNOWNED" // check_owner: the slot has no owner
+	statusRenewed       = "RENEWED"       // claim_shard: same-owner renew (epoch kept)
+	statusIndeterminate = "INDETERMINATE" // claim_shard transport error: applied-or-not
+	statusOwner         = "OWNER"         // check_owner: caller is the current owner at epoch
+	statusUnowned       = "UNOWNED"       // check_owner: the slot has no owner
 )
 
 // shardOpKind is the operation recorded into a slot-ownership history.
@@ -107,19 +108,45 @@ type shardState struct {
 // shardModel is the porcupine model for T3, partitioned per slot so the
 // linearizability search stays per-key.
 func shardModel() porcupine.Model {
-	return porcupine.Model{
+	nm := porcupine.NondeterministicModel{
 		Partition: partitionByShard,
-		Init: func() interface{} {
+		Init: func() []interface{} {
 			// No owner has ever been granted: unowned, epoch strictly below any the
 			// server can mint (claim_shard HINCRBYs to >= 1 on the first transfer), so
 			// the first claim always advances the epoch.
-			return shardState{owner: "", epoch: 0}
+			return []interface{}{shardState{owner: "", epoch: 0}}
 		},
-		Step:              shardStep,
+		Step:              shardNondeterministicStep,
 		Equal:             func(a, b interface{}) bool { return a.(shardState) == b.(shardState) },
 		DescribeOperation: describeShardOp,
 		DescribeState:     describeShardState,
 	}
+	return nm.ToModel()
+}
+
+// shardNondeterministicStep preserves the exact deterministic ownership model
+// for every observed reply. A transport error is different: claim_shard may
+// have committed before the client lost the reply, so the honest history has
+// two possible next states. Treating that call as absent invents a silent Redis
+// mutation and can make a later same-owner RENEWED reply look impossible.
+func shardNondeterministicStep(state, input, output interface{}) []interface{} {
+	s := state.(shardState)
+	in := input.(shardInput)
+	out := output.(shardOutput)
+	if in.op == opClaimShard && out.status == statusIndeterminate {
+		next := []interface{}{s} // BUSY, RENEWED, or not executed.
+		if s.owner != in.caller {
+			// If the ambiguous call acquired an unowned or expired slot, the Lua
+			// HINCRBY advances the epoch by exactly one and installs the caller.
+			next = append(next, shardState{owner: in.caller, epoch: s.epoch + 1})
+		}
+		return next
+	}
+	ok, next := shardStep(s, in, out)
+	if !ok {
+		return nil
+	}
+	return []interface{}{next}
 }
 
 // shardStep is the pure transition: given the current state and an observed

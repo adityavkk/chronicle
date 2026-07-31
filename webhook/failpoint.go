@@ -32,6 +32,10 @@ const (
 	// appended. Firing here strands the wake exactly as a crash in that window
 	// would, which the host nemesis cannot land on (07 honest-gap #2).
 	fpArmedBeforeEmit = "issueWake.armedBeforeEmit"
+	// fpDirtyAfterEnqueueBeforeSignal is the new append boundary: the stream hint
+	// is present only in process memory, but the worker has not been signaled. A
+	// crash here loses the hint and must be repaired by boot recovery.
+	fpDirtyAfterEnqueueBeforeSignal = "OnStreamAppend.dirtyAfterEnqueueBeforeSignal"
 )
 
 // failpoint fires the named injection site if a hook is installed. With no hook

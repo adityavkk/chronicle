@@ -29,7 +29,7 @@ func (f *fakeStreams) TailOffset(path string) (string, bool) {
 	return v, ok
 }
 
-func (f *fakeStreams) TailOffsets(paths []string) map[string]string {
+func (f *fakeStreams) TailOffsets(paths []string) (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make(map[string]string, len(paths))
@@ -38,7 +38,7 @@ func (f *fakeStreams) TailOffsets(paths []string) map[string]string {
 			out[p] = v
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (f *fakeStreams) BeginningOffset() string { return "0000000000000000_0000000000000000" }
@@ -412,7 +412,15 @@ func (f *fakeMetrics) WakeDelivery(time.Duration, string) {}
 func (f *fakeMetrics) WakeEvent(time.Duration, string)    {}
 func (f *fakeMetrics) WorkerTick(string, int)             {}
 
-func (f *fakeMetrics) FanOut(time.Duration, int, int) {}
+func (f *fakeMetrics) FanOut(time.Duration, int, int)               {}
+func (f *fakeMetrics) DirtyEnqueue(string, int, int, time.Duration) {}
+func (f *fakeMetrics) DirtyQueue(int, int, time.Duration)           {}
+func (f *fakeMetrics) DirtyProcess(time.Duration, int, int, int, string) {
+}
+func (f *fakeMetrics) DirtyOverflow()                   {}
+func (f *fakeMetrics) ReconcileRequest(string, string)  {}
+func (f *fakeMetrics) DirtyProcessingError(string)      {}
+func (f *fakeMetrics) DirtyRecoveryDelay(time.Duration) {}
 
 // DueSetMutation / DueWorkerTick are wired by Move 2 (#12); record them so the
 // dueWorker tests can assert the mutations and drain ticks actually fire.
@@ -1117,7 +1125,10 @@ func TestReconcileLeasesSkipsHealthySubs(t *testing.T) {
 
 	ids, _ := store.List()
 	subs, _ := store.GetMany(ids)
-	tails := fs.TailOffsets(distinctLinkPaths(subs))
+	tails, err := fs.TailOffsets(distinctLinkPaths(subs))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if n := mgr.reconcileLeases(subs, tails, mgr.leasedSet(), now); n != 0 {
 		t.Fatalf("no sub is stranded (idle holds no lease; present is in the zset), got %d restored", n)
 	}
