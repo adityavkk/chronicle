@@ -75,7 +75,10 @@ and sequence.
 
 `up.sh` maps `localhost:4438` to the chronicle NodePort through the k3d
 loadbalancer, so the host driver keeps reaching chronicle while individual pods
-die. Override `CLUSTER`, `STREAMS`, `MSGS` via env.
+die. `run.sh` uses `host.k3d.internal` for callbacks, except on a Colima Docker
+context where the k3d bridge terminates inside the VM and
+`host.docker.internal` is the routable macOS host. Override `CLUSTER`,
+`STREAMS`, `MSGS`, or `RECV_HOST` via env.
 
 ## What it does
 

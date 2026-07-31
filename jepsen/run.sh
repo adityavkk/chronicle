@@ -8,8 +8,18 @@ CLUSTER="${CLUSTER:-chronicle-jepsen}"
 BASE="${BASE:-http://localhost:4438}"
 STREAMS="${STREAMS:-8}"
 MSGS="${MSGS:-40}"
+RECV_HOST="${RECV_HOST:-}"
 SCENARIOS=("$@")
 [ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(baseline origin-restart redis-restart paged-catchup read-expiry sse-resume)
+
+if [ -z "$RECV_HOST" ]; then
+  RECV_HOST="host.k3d.internal"
+  # With Colima, k3d's bridge gateway terminates inside the VM rather than on
+  # macOS. Colima owns this stable host route into the VM.
+  if docker context show 2>/dev/null | grep -q '^colima'; then
+    RECV_HOST="host.docker.internal"
+  fi
+fi
 
 echo "==> building checker"
 go build -o jepsen/bin/jepsen-checker ./jepsen/checker
@@ -27,6 +37,7 @@ for s in "${SCENARIOS[@]}"; do
   kubectl --context "k3d-$CLUSTER" -n chronicle-jepsen rollout status deploy/chronicle --timeout=120s
   jepsen/bin/jepsen-checker \
     -base "$BASE" -cluster "$CLUSTER" \
+    -recv-host "$RECV_HOST" \
     -streams "$STREAMS" -msgs "$MSGS" -scenario "$s" || rc=1
 done
 exit $rc
