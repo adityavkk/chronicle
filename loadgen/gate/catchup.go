@@ -17,6 +17,7 @@ type CatchupSLO struct {
 // CatchupResult contains the values checked by the reader-cell gate.
 type CatchupResult struct {
 	Completions           int64
+	IntegrityCompletions  int64
 	BodyBytes             int64
 	ExpectedResponseBytes int64
 }
@@ -35,9 +36,11 @@ func CheckCatchup(result *run.Result, slo CatchupSLO) (CatchupResult, error) {
 		return CatchupResult{}, err
 	}
 	completions := result.Counters["catchup_ok"]
+	integrityCompletions := result.Counters["catchup_integrity_ok"]
 	bodyBytes := result.Counters["catchup_bytes"]
 	measured := CatchupResult{
 		Completions:           completions,
+		IntegrityCompletions:  integrityCompletions,
 		BodyBytes:             bodyBytes,
 		ExpectedResponseBytes: expectedBytes,
 	}
@@ -79,6 +82,15 @@ func CheckCatchup(result *run.Result, slo CatchupSLO) (CatchupResult, error) {
 			expectedBytes,
 			wantTotalBytes,
 		))
+	}
+	if result.Scenario.Writers.PerStream == 0 || result.Scenario.Writers.Rate.IsZero() {
+		if integrityCompletions != completions {
+			failures = append(failures, fmt.Errorf(
+				"catch-up body integrity completions %d do not match successful completions %d",
+				integrityCompletions,
+				completions,
+			))
+		}
 	}
 	if !hasMetricSample(result, "redis", "total_commands_processed") {
 		failures = append(failures, errors.New("required Redis metric samples are missing"))

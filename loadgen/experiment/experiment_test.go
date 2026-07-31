@@ -64,6 +64,7 @@ sut:
   image: example/chronicle:dev
   redis_url: redis://10.1.2.3:6379/0
   read_page_bytes: 1048576
+  max_append_bytes: 16777216
 catchup:
   reader_curve: [8, 512]
   streams: 8
@@ -88,6 +89,7 @@ catchup:
 	}
 	for _, want := range []string{
 		`CHRONICLE_READ_PAGE_BYTES, value: "1048576"`,
+		`CHRONICLE_MAX_APPEND_BYTES, value: "16777216"`,
 		`CHRONICLE_SUBSCRIPTIONS, value: "false"`,
 	} {
 		if !strings.Contains(rendered.SUTManifest, want) {
@@ -115,6 +117,22 @@ catchup:
 	}
 }
 
+func TestCatchupPageSizeLabels(t *testing.T) {
+	for _, test := range []struct {
+		bytes int
+		want  string
+	}{
+		{bytes: 256 << 10, want: "256k"},
+		{bytes: 1 << 20, want: "1m"},
+		{bytes: 4 << 20, want: "4m"},
+		{bytes: 123, want: "123b"},
+	} {
+		if got := readPageLabel(test.bytes); got != test.want {
+			t.Errorf("readPageLabel(%d) = %q, want %q", test.bytes, got, test.want)
+		}
+	}
+}
+
 func TestLoadRejectsInvalidMixedCatchupGate(t *testing.T) {
 	_, err := Load([]byte(`
 name: catch
@@ -126,6 +144,20 @@ catchup:
   mixed_max_append_p99_ms: 2000
 `))
 	if err == nil || !strings.Contains(err.Error(), "mixed append rate and p99 gates must be positive") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadRejectsNegativeAppendCeiling(t *testing.T) {
+	_, err := Load([]byte(`
+loadgen_image: example/loadgen:dev
+sut:
+  image: example/chronicle:dev
+  max_append_bytes: -1
+workload:
+  subscriptions: 1
+`))
+	if err == nil || !strings.Contains(err.Error(), "max_append_bytes must be non-negative") {
 		t.Fatalf("error = %v", err)
 	}
 }

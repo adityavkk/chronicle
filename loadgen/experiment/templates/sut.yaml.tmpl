@@ -39,6 +39,7 @@ spec:
             - { name: CHRONICLE_REDIS_URL, value: "{{.SUT.RedisURL}}" }
             - { name: CHRONICLE_SUBSCRIPTIONS, value: "{{if .Catchup}}false{{else}}true{{end}}" }
             - { name: CHRONICLE_READ_PAGE_BYTES, value: "{{.SUT.ReadPageBytes}}" }
+            - { name: CHRONICLE_MAX_APPEND_BYTES, value: "{{.SUT.MaxAppendBytes}}" }
             - { name: CHRONICLE_WEBHOOK_ALLOW_PRIVATE, value: "true" }
             - { name: CHRONICLE_PUBLIC_URL, value: "http://chronicle.{{.SUT.Namespace}}:4437" }
             - { name: CHRONICLE_SWEEP_INTERVAL, value: "{{.SUT.SweepInterval}}" }

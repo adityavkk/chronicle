@@ -18,10 +18,40 @@ func mixedResult(appends int64, p99 float64) *run.Result {
 		// Catch-up requests can drain after the open-loop offer closes. The
 		// retained write rate must still use the configured offer duration.
 		MeasureEnd: start.Add(30 * time.Second),
-		Counters:   map[string]int64{"appends_ok": appends},
-		Metrics: map[string]stats.Quantiles{
-			string(stats.Append): {Count: appends, P99: p99},
+		Counters: map[string]int64{
+			"appends_ok":           appends,
+			"catchup_ok":           12,
+			"catchup_bytes":        12 * 1024,
+			"catchup_body_read_ok": 12,
 		},
+		Metrics: map[string]stats.Quantiles{
+			string(stats.Append):       {Count: appends, P99: p99},
+			string(stats.CatchupTotal): {Count: 12},
+		},
+	}
+}
+
+func TestCheckMixedCatchupRejectsNoCatchupWork(t *testing.T) {
+	result := mixedResult(400, 100)
+	result.Counters["catchup_ok"] = 0
+	result.Counters["catchup_bytes"] = 0
+	result.Counters["catchup_body_read_ok"] = 0
+	result.Metrics[string(stats.CatchupTotal)] = stats.Quantiles{}
+	_, err := CheckMixedCatchup(result, MixedCatchupSLO{MinAppendRate: 38, MaxAppendP99MS: 2000})
+	if err == nil || !strings.Contains(err.Error(), "completed no reads") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCheckMixedCatchupRejectsPartialOrFailedCatchup(t *testing.T) {
+	result := mixedResult(400, 100)
+	result.Counters["catchup_body_read_ok"] = 11
+	result.Counters["err:catchup:transport"] = 1
+	_, err := CheckMixedCatchup(result, MixedCatchupSLO{MinAppendRate: 38, MaxAppendP99MS: 2000})
+	if err == nil ||
+		!strings.Contains(err.Error(), "completed-body reads 11 do not match catchup_ok 12") ||
+		!strings.Contains(err.Error(), "err:catchup:transport=1") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

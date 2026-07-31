@@ -144,18 +144,22 @@ func cmdGateMixed(args []string) error {
 	})
 	if err != nil {
 		return fmt.Errorf(
-			"mixed catch-up SLO failed: %w (measured %.2f appends/s, append p99 %.2f ms)",
+			"mixed catch-up SLO failed: %w (measured %.2f appends/s, append p99 %.2f ms, catch-up reads %d, bytes %d)",
 			err,
 			measured.AppendRate,
 			measured.AppendP99MS,
+			measured.CatchupOK,
+			measured.CatchupBodyBytes,
 		)
 	}
 	fmt.Printf(
-		"mixed catch-up SLO PASS: %.2f appends/s >= %.2f/s; append p99 %.2f ms <= %.2f ms\n",
+		"mixed catch-up SLO PASS: %.2f appends/s >= %.2f/s; append p99 %.2f ms <= %.2f ms; %d complete catch-up reads, %d bytes, zero append/catch-up errors\n",
 		measured.AppendRate,
 		*minAppendRate,
 		measured.AppendP99MS,
 		*maxAppendP99MS,
+		measured.CatchupOK,
+		measured.CatchupBodyBytes,
 	)
 	return nil
 }

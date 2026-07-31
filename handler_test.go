@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
@@ -118,6 +119,154 @@ func TestCreateWithInitialData(t *testing.T) {
 	}
 	if got := rec.Header().Get(protocol.HeaderStreamNextOffset); got != off(5) {
 		t.Errorf("Stream-Next-Offset = %q, want %q", got, off(5))
+	}
+}
+
+type appendLimitMetricsRecorder struct{ rejected int }
+
+func (m *appendLimitMetricsRecorder) AppendBodyRejected() { m.rejected++ }
+
+type panicReadCloser struct{}
+
+func (panicReadCloser) Read([]byte) (int, error) { panic("oversized declared body was read") }
+func (panicReadCloser) Close() error             { return nil }
+
+type countingReadCloser struct {
+	reader io.Reader
+	read   int
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.read += n
+	return n, err
+}
+
+func (*countingReadCloser) Close() error { return nil }
+
+type mutationCountingStore struct {
+	store.Store
+	creates int
+	gets    int
+	appends int
+}
+
+func (s *mutationCountingStore) Create(path string, opts store.CreateOptions) (*store.StreamMetadata, bool, error) {
+	s.creates++
+	return s.Store.Create(path, opts)
+}
+
+func (s *mutationCountingStore) Get(path string) (*store.StreamMetadata, error) {
+	s.gets++
+	return s.Store.Get(path)
+}
+
+func (s *mutationCountingStore) Append(path string, data []byte, opts store.AppendOptions) (store.AppendResult, error) {
+	s.appends++
+	return s.Store.Append(path, data, opts)
+}
+
+func TestAppendCeilingRejectsBeforeBodyReadAndStoreAccess(t *testing.T) {
+	base := store.NewMemoryStore()
+	if _, _, err := base.Create("/append", store.CreateOptions{ContentType: "text/plain"}); err != nil {
+		t.Fatal(err)
+	}
+	counted := &mutationCountingStore{Store: base}
+	metrics := &appendLimitMetricsRecorder{}
+	h := testHandler(time.Second, time.Second)
+	h.Store = counted
+	h.MaxAppendBytes = 4
+	h.AppendLimitMetrics = metrics
+
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPut, path: "/create"},
+		{method: http.MethodPost, path: "/append"},
+	} {
+		req := httptest.NewRequest(test.method, test.path, http.NoBody)
+		req.Body = panicReadCloser{}
+		req.ContentLength = 5
+		req.Header.Set("Content-Type", "text/plain")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("%s status = %d, want 413", test.method, rec.Code)
+		}
+	}
+	if counted.creates != 0 || counted.gets != 0 || counted.appends != 0 {
+		t.Fatalf("oversized bodies reached store: creates=%d gets=%d appends=%d", counted.creates, counted.gets, counted.appends)
+	}
+	if metrics.rejected != 2 {
+		t.Fatalf("rejected metric = %d, want 2", metrics.rejected)
+	}
+}
+
+func TestAppendCeilingBoundsUnknownLengthBody(t *testing.T) {
+	h := testHandler(time.Second, time.Second)
+	h.MaxAppendBytes = 4
+	reader := &countingReadCloser{reader: strings.NewReader("12345")}
+	req := httptest.NewRequest(http.MethodPut, "/test", http.NoBody)
+	req.Body = reader
+	req.ContentLength = -1
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", rec.Code)
+	}
+	if reader.read != 5 {
+		t.Fatalf("body bytes read = %d, want exactly limit+1", reader.read)
+	}
+	if h.Store.Has("/test") {
+		t.Fatal("oversized unknown-length body created stream")
+	}
+}
+
+func TestAppendCeilingAcceptsExactLimitForCreateAndAppend(t *testing.T) {
+	h := testHandler(time.Second, time.Second)
+	h.MaxAppendBytes = 4
+	create := do(h, http.MethodPut, "/test", map[string]string{"Content-Type": "text/plain"}, []byte("1234"))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201: %s", create.Code, create.Body.String())
+	}
+	appendResponse := do(h, http.MethodPost, "/test", map[string]string{"Content-Type": "text/plain"}, []byte("5678"))
+	if appendResponse.Code != http.StatusNoContent {
+		t.Fatalf("append status = %d, want 204: %s", appendResponse.Code, appendResponse.Body.String())
+	}
+}
+
+func TestAppendCeilingPreservesAuthorizationOrder(t *testing.T) {
+	createHandler := testHandler(time.Second, time.Second)
+	createHandler.MaxAppendBytes = 4
+	createHandler.AuthMode = auth.ModeEnforce
+	createMetrics := &appendLimitMetricsRecorder{}
+	createHandler.AppendLimitMetrics = createMetrics
+	createReq := httptest.NewRequest(http.MethodPut, "/create", http.NoBody)
+	createReq.Body = panicReadCloser{}
+	createReq.ContentLength = 5
+	createReq.Header.Set("Content-Type", "text/plain")
+	createRec := httptest.NewRecorder()
+	createHandler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized create status = %d, want 401", createRec.Code)
+	}
+	if createMetrics.rejected != 0 {
+		t.Fatal("create ceiling ran before authorization")
+	}
+
+	appendHandler := testHandler(time.Second, time.Second)
+	appendHandler.MaxAppendBytes = 4
+	appendHandler.AuthMode = auth.ModeEnforce
+	appendReq := httptest.NewRequest(http.MethodPost, "/append", http.NoBody)
+	appendReq.Body = panicReadCloser{}
+	appendReq.ContentLength = 5
+	appendReq.Header.Set("Content-Type", "text/plain")
+	appendRec := httptest.NewRecorder()
+	appendHandler.ServeHTTP(appendRec, appendReq)
+	if appendRec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("append body-first status = %d, want 413", appendRec.Code)
 	}
 }
 

@@ -10,14 +10,17 @@ const links = {
   loadTests: `${base}/load-testing`,
   issue4: "",
   issue5: "",
+  issue15: "",
   issue6: "",
   issue172: "https://github.com/adityavkk/chronicle/issues/172",
   issue13: "",
   catchupAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0004-bounded-read-pages-and-snapshot-catch-up.md",
+  issue15Adr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0008-finite-append-frames-and-response-local-fork-plans.md",
   sseAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0005-per-instance-sse-stream-fanout.md",
   segmentsAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0006-immutable-segment-read-plane-prototype.md",
   readOnlyAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0007-fuse-root-pages-and-register-live-reads-first.md",
   catchupEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md",
+  issue15Evidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-15-bounded-catchup-e2e.md",
   segmentsEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-6-immutable-segments.md",
   readOnlyEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/research/12-read-only-fast-path-results.md",
   asyncSubscriptionsEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/perf-async-subscription-fanout/results.md",
@@ -37,13 +40,17 @@ const links = {
     <p>
       <strong>Before:</strong> one long read could load the complete remaining
       stream into memory. <strong>Now:</strong> Chronicle reads and sends about
-      1 MiB of whole frames at a time.
+      1 MiB of whole frames at a time. Operators can bound an indivisible frame,
+      and one fork response can reuse its validated ancestry plan.
     </p>
     <nav aria-label="Bounded catch-up links">
       <a class="primary" href={links.catchup}>Read the explainer <span aria-hidden="true">→</span></a>
       
+      <a href={links.issue15}>GPA/chronicle issue #15 <span aria-hidden="true">↗</span></a>
       <a href={links.catchupAdr}>Architecture decision <span aria-hidden="true">↗</span></a>
+      <a href={links.issue15Adr}>End-to-end decision <span aria-hidden="true">↗</span></a>
       <a href={links.catchupEvidence}>Evidence report <span aria-hidden="true">↗</span></a>
+      <a href={links.issue15Evidence}>End-to-end evidence <span aria-hidden="true">↗</span></a>
     </nav>
   </article>
 

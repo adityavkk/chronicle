@@ -35,6 +35,12 @@ type AppendMetrics interface {
 	AppendSubscriptionHook(dur time.Duration)
 }
 
+// AppendLimitMetrics records requests rejected before Chronicle buffers an
+// operator-bounded create or append body.
+type AppendLimitMetrics interface {
+	AppendBodyRejected()
+}
+
 // Handler serves the Durable Streams protocol over HTTP.
 type Handler struct {
 	// Store is the stream storage backend.
@@ -49,6 +55,10 @@ type Handler struct {
 	// ReadPageBytes is the returned page payload target for HTTP and SSE catch-up.
 	// Zero uses store.DefaultReadPageBytes.
 	ReadPageBytes int
+
+	// MaxAppendBytes bounds create-with-data and append bodies before buffering.
+	// Zero preserves the protocol-compatible unlimited default.
+	MaxAppendBytes int64
 
 	// ReadMetrics receives bounded catch-up observations. Nil disables them.
 	ReadMetrics ReadMetrics
@@ -90,6 +100,10 @@ type Handler struct {
 	// AppendMetrics receives the end-to-end synchronous subscription-hook time
 	// after a committed append. Nil disables it.
 	AppendMetrics AppendMetrics
+
+	// AppendLimitMetrics records configured body-ceiling rejections. Nil
+	// disables the observation without changing enforcement.
+	AppendLimitMetrics AppendLimitMetrics
 
 	// AuthMode selects authorization enforcement (issue #126). The zero value
 	// ModeInsecure evaluates decisions for telemetry only, so a base-protocol
@@ -289,14 +303,11 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 		expiresAt = &t
 	}
 
-	// Read optional initial body
-	var initialData []byte
-	if r.ContentLength > 0 {
-		var err error
-		initialData, err = io.ReadAll(r.Body)
-		if err != nil {
-			return newHTTPError(http.StatusBadRequest, "failed to read body")
-		}
+	// Read optional initial body through the same operator ceiling as append.
+	// The reader is bounded before allocation even when Content-Length is absent.
+	initialData, err := h.readAppendBody(w, r)
+	if err != nil {
+		return err
 	}
 
 	opts := store.CreateOptions{
@@ -536,6 +547,16 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		if err := sseLease.waitRegistered(r.Context()); err != nil {
 			sseLease.close()
 			return err
+		}
+	} else {
+		// A session belongs only to this HTTP response. SSE live delivery remains
+		// owned by the shared hub and must not acquire response-local planning state.
+		if factory, ok := h.Store.(store.PageReaderSessionFactory); ok {
+			pageSession := factory.NewPageReaderSession(path)
+			if pageSession != nil {
+				reader = pageSession
+				defer pageSession.Close()
+			}
 		}
 	}
 	pageOpts := store.ReadPageOptions{
@@ -804,9 +825,9 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 	// Buffer the body before the live claim fence. This keeps a slow request body
 	// from stretching the deposed-holder window; the residual fence-to-append
 	// race is the #169 same-commit fence follow-up.
-	body, err := io.ReadAll(r.Body)
+	body, err := h.readAppendBody(w, r)
 	if err != nil {
-		return newHTTPError(http.StatusBadRequest, "failed to read body")
+		return err
 	}
 
 	// Credential preflight runs before stream store access so an invalid token
@@ -1048,6 +1069,41 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 		w.WriteHeader(http.StatusNoContent)
 	}
 	return nil
+}
+
+func (h *Handler) readAppendBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	limit := h.MaxAppendBytes
+	if limit > 0 && r.ContentLength > limit {
+		h.observeAppendBodyRejected()
+		return nil, newHTTPError(http.StatusRequestEntityTooLarge, "request body exceeds configured append ceiling")
+	}
+	if r.Body == nil || r.ContentLength == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, newHTTPError(http.StatusBadRequest, "failed to read body")
+		}
+		return body, nil
+	}
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			h.observeAppendBodyRejected()
+			return nil, newHTTPError(http.StatusRequestEntityTooLarge, "request body exceeds configured append ceiling")
+		}
+		return nil, newHTTPError(http.StatusBadRequest, "failed to read body")
+	}
+	return body, nil
+}
+
+func (h *Handler) observeAppendBodyRejected() {
+	if h.AppendLimitMetrics != nil {
+		h.AppendLimitMetrics.AppendBodyRejected()
+	}
 }
 
 // handleDelete handles DELETE requests to delete a stream

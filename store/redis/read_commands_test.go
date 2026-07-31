@@ -3,6 +3,7 @@ package redis
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -347,6 +348,110 @@ func TestReadPageMetadataOnlyCommandShape(t *testing.T) {
 	}
 }
 
+func TestPageReaderSessionReusesOnlyResponseLocalForkPlan(t *testing.T) {
+	subject := newTestStore(t)
+	source := testPath("session-fork-source")
+	mustCreate(t, subject, source, store.CreateOptions{
+		ContentType: "application/json",
+		InitialData: []byte(`[1,2,3]`),
+	})
+	fork := testPath("session-fork-root")
+	mustCreate(t, subject, fork, store.CreateOptions{ForkedFrom: source})
+	client := concreteTestClient(t, subject)
+	session := subject.NewPageReaderSession(fork)
+
+	var pages []store.ReadPage
+	lines := monitorRedis(t, client, func() {
+		var snapshot *store.ReadSnapshot
+		next := store.ZeroOffset
+		for range 3 {
+			page, err := session.ReadPage(
+				context.Background(),
+				fork,
+				next,
+				store.ReadPageOptions{TargetBytes: 1, MaxFrames: 1, Snapshot: snapshot},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pages = append(pages, page)
+			if snapshot == nil {
+				captured := page.Snapshot
+				snapshot = &captured
+			}
+			next = page.NextOffset
+		}
+	})
+	session.Close()
+
+	if len(pages) != 3 || string(pages[0].Messages[0].Data) != "1" ||
+		string(pages[2].Messages[0].Data) != "3" || !pages[2].UpToDate {
+		t.Fatalf("session pages = %+v", pages)
+	}
+	for i, page := range pages {
+		if page.Stats.RedisScriptInvokes != 2 {
+			t.Fatalf("page %d script invocations = %d, want root + source", i, page.Stats.RedisScriptInvokes)
+		}
+	}
+	if got := countMonitoredCommand(lines, "evalsha", ""); got != 6 {
+		t.Fatalf("EVALSHA calls = %d, want 6\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "hgetall", metaKey(fork)); got != 3 {
+		t.Fatalf("root metadata HGETALL calls = %d, want one per page\n%s", got, strings.Join(lines, "\n"))
+	}
+	// The source is loaded once while building the response plan, then once in
+	// each source script so its expected incarnation is still validated.
+	if got := countMonitoredCommand(lines, "hgetall", metaKey(source)); got != 4 {
+		t.Fatalf("source metadata HGETALL calls = %d, want one plan + three validation loads\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "zrangebylex", msgKey(source)); got != 3 {
+		t.Fatalf("source range calls = %d, want one per page\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "hgetall", prodKey(source)); got != 0 {
+		t.Fatalf("producer metadata reads = %d, want 0\n%s", got, strings.Join(lines, "\n"))
+	}
+	assertNoMonitoredCommands(t, lines, fork, "hset", "hsetnx", "pexpire", "persist")
+	if _, err := session.ReadPage(context.Background(), fork, store.ZeroOffset, store.ReadPageOptions{}); !errors.Is(err, errPageReaderSessionClosed) {
+		t.Fatalf("ReadPage after Close error = %v, want session closed", err)
+	}
+}
+
+func TestPageReaderSessionRebuildsPlanAtNilSnapshotResponseBoundary(t *testing.T) {
+	subject := newTestStore(t)
+	source := testPath("session-boundary-source")
+	mustCreate(t, subject, source, store.CreateOptions{
+		ContentType: "application/json",
+		InitialData: []byte(`[1,2]`),
+	})
+	fork := testPath("session-boundary-fork")
+	mustCreate(t, subject, fork, store.CreateOptions{ForkedFrom: source})
+	session := subject.NewPageReaderSession(fork)
+	defer session.Close()
+
+	lines := monitorRedis(t, concreteTestClient(t, subject), func() {
+		for range 2 {
+			page, err := session.ReadPage(
+				context.Background(),
+				fork,
+				store.ZeroOffset,
+				store.ReadPageOptions{TargetBytes: 1, MaxFrames: 1},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(page.Messages) != 1 || string(page.Messages[0].Data) != "1" {
+				t.Fatalf("first page = %+v", page)
+			}
+		}
+	})
+
+	// Each nil-snapshot call starts a new response, so each must rediscover the
+	// source once and then validate it again inside the source script.
+	if got := countMonitoredCommand(lines, "hgetall", metaKey(source)); got != 4 {
+		t.Fatalf("source metadata HGETALL calls = %d, want 4 across two responses\n%s", got, strings.Join(lines, "\n"))
+	}
+}
+
 func TestReadPageLegacyIncarnationMigratesExactlyOnce(t *testing.T) {
 	subject := newTestStore(t)
 	path := testPath("legacy-incarnation-command")
@@ -615,10 +720,12 @@ func monitoredCommand(line string) string {
 }
 
 func countMonitoredCommand(lines []string, command, key string) int {
-	quotedKey := strconv.Quote(key)
 	count := 0
 	for _, line := range lines {
-		if monitoredCommand(line) == command && strings.Contains(line, quotedKey) {
+		if monitoredCommand(line) != command {
+			continue
+		}
+		if key == "" || strings.Contains(line, strconv.Quote(key)) {
 			count++
 		}
 	}

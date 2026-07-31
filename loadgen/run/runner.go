@@ -75,6 +75,7 @@ type runner struct {
 	measureEnd   time.Time // exclusive intended-send boundary
 	appendSem    chan struct{}
 	catchupSem   chan struct{}
+	catchupSHA   map[string]string
 	logf         func(string, ...any)
 
 	mu    sync.Mutex
@@ -118,6 +119,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		col:        stats.NewCollector(totalSec),
 		appendSem:  make(chan struct{}, sc.Limits.MaxInFlightAppends),
 		catchupSem: make(chan struct{}, sc.Limits.MaxInFlightCatchup),
+		catchupSHA: make(map[string]string, sc.Streams.Count),
 		logf:       logf,
 	}
 

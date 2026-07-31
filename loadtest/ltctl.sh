@@ -28,6 +28,7 @@ set -euo pipefail
 : "${LT_REDIS_SIZE_GB:=1}"
 : "${LT_REDIS_VERSION:=redis_7_2}"
 : "${LT_REDIS_URL:=}"
+: "${LT_READ_PAGE_BYTES:=0}"
 # LT_REDIS_TIER selects the Memorystore tier: "basic" (no failover — gates #1–#4) or
 # "standard" / "STANDARD_HA" (a replica + managed failover + a stable endpoint —
 # gate #5, issue #16). `up --redis-tier=STANDARD_HA` overrides this.
@@ -112,6 +113,7 @@ cmd_run() {
   log "render $spec (redis endpoint configured, images=$REG/*:$LT_TAG)"
   ( cd "$REPO_ROOT/loadgen" && go run ./cmd/render -spec "$spec_abs" -out "$out" \
       -redis-url "$redis_url" \
+      -read-page-bytes "$LT_READ_PAGE_BYTES" \
       -image "$REG/chronicle:$LT_TAG" -loadgen-image "$REG/chronicle-loadgen:$LT_TAG" )
 
   log "deploy SUT"

@@ -15,11 +15,18 @@ what the Redis deployment must provide and what guarantees you get back.
 
 ### Managed Redis (e.g. Walmart-managed)
 
-- `CONFIG GET/SET` is often denied: chronicle treats config checks as
-  best-effort and never requires them at runtime.
-- Lowered `proto-max-bulk-len` caps the largest single append chronicle can
-  store (each append is one ZSET member). The protocol allows rejecting
-  oversized appends with `413 Payload Too Large`.
+- `CONFIG GET/SET` is often denied. A permission or unsupported-command error
+  on the append-ceiling probe is an explicit operator-enforcement warning.
+  Transport, timeout, malformed, and missing-value failures are fatal because
+  silently accepting an indeterminate ceiling would hide a broken startup.
+- Lowered `proto-max-bulk-len` caps the largest single frame chronicle can
+  store. Set `--max-append-bytes` (or `CHRONICLE_MAX_APPEND_BYTES`) when the
+  deployment needs a finite request and oversized-first-frame bound. The
+  configured body size plus the 34-byte stored-frame prefix must fit
+  `proto-max-bulk-len`. Chronicle validates the relationship when `CONFIG GET`
+  is permitted and otherwise logs that the operator must enforce it. Bodies
+  over the configured ceiling return `413 Payload Too Large` before store
+  access. Zero retains the compatible unlimited HTTP policy.
 - Cluster mode: every key for a stream carries a `{path}` hash tag, so each
   stream lives in exactly one slot and Lua scripts stay cluster-legal. Fork
   creation and cascade deletion touch two streams (two slots) and execute as

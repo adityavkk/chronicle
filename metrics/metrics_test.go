@@ -47,6 +47,7 @@ func TestMuxEndpoints(t *testing.T) {
 	// value is observed).
 	p.FanOut(3*time.Millisecond, 4, 12)
 	p.AppendSubscriptionHook(20 * time.Microsecond)
+	p.AppendBodyRejected()
 	p.DirtyEnqueue("enqueued", 1, 1024, time.Millisecond)
 	p.DirtyQueue(1, 1024, time.Millisecond)
 	p.DirtyProcess(4*time.Millisecond, 12, 3, 2, "ok")
@@ -114,6 +115,7 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_fanout_seconds",
 		"chronicle_fanout_slots_probed",
 		"chronicle_fanout_subs",
+		"chronicle_append_body_rejected_total",
 		"chronicle_append_subscription_hook_seconds",
 		"chronicle_subscription_dirty_enqueues_total",
 		"chronicle_subscription_dirty_queue_depth",

@@ -52,6 +52,7 @@ type Prometheus struct {
 	fanoutSlotsProbed prometheus.Histogram
 	fanoutSubs        prometheus.Histogram
 	appendHookSeconds prometheus.Histogram
+	appendRejected    prometheus.Counter
 	dirtyEnqueues     *prometheus.CounterVec
 	dirtyDepth        prometheus.Gauge
 	dirtyCapacity     prometheus.Gauge
@@ -103,10 +104,11 @@ type SegmentStatsSource interface {
 }
 
 var (
-	_ webhook.Metrics         = (*Prometheus)(nil)
-	_ chronicle.AppendMetrics = (*Prometheus)(nil)
-	_ chronicle.ReadMetrics   = (*Prometheus)(nil)
-	_ chronicle.SSEMetrics    = (*Prometheus)(nil)
+	_ webhook.Metrics              = (*Prometheus)(nil)
+	_ chronicle.AppendMetrics      = (*Prometheus)(nil)
+	_ chronicle.AppendLimitMetrics = (*Prometheus)(nil)
+	_ chronicle.ReadMetrics        = (*Prometheus)(nil)
+	_ chronicle.SSEMetrics         = (*Prometheus)(nil)
 )
 
 // New builds a Prometheus recorder with its own registry, including the standard
@@ -216,6 +218,10 @@ func New() *Prometheus {
 			Name:    "chronicle_append_subscription_hook_seconds",
 			Help:    "Wall time from a successful append commit through all synchronous subscription hook work before the HTTP response.",
 			Buckets: prometheus.ExponentialBuckets(0.000001, 2, 20),
+		}),
+		appendRejected: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_append_body_rejected_total",
+			Help: "Create and append request bodies rejected by the configured byte ceiling.",
 		}),
 		dirtyEnqueues: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_subscription_dirty_enqueues_total",
@@ -401,6 +407,7 @@ func New() *Prometheus {
 	)
 	reg.MustRegister(
 		p.fanoutSeconds, p.fanoutSlotsProbed, p.fanoutSubs, p.appendHookSeconds,
+		p.appendRejected,
 		p.dirtyEnqueues, p.dirtyDepth, p.dirtyCapacity, p.dirtyOldestAge,
 		p.dirtyProcess, p.dirtyProcessSubs, p.dirtyProcessWakes,
 		p.dirtyDuplicates, p.dirtyOverflows, p.reconcileRequests, p.dirtyErrors,
@@ -540,6 +547,9 @@ func (p *Prometheus) FanOut(dur time.Duration, slotsProbed, subs int) {
 func (p *Prometheus) AppendSubscriptionHook(dur time.Duration) {
 	p.appendHookSeconds.Observe(dur.Seconds())
 }
+
+// AppendBodyRejected implements chronicle.AppendLimitMetrics.
+func (p *Prometheus) AppendBodyRejected() { p.appendRejected.Inc() }
 
 // DirtyEnqueue implements webhook.Metrics.
 func (p *Prometheus) DirtyEnqueue(result string, depth, capacity int, oldestAge time.Duration) {

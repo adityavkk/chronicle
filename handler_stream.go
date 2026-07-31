@@ -326,6 +326,7 @@ func (h *Handler) waitForPage(
 		return store.ReadWaitResult{}, err
 	}
 	if !store.SameReadStream(initial, page.Snapshot) {
+		releaseReadSnapshot(reader, path, page.Snapshot)
 		return store.ReadWaitResult{}, store.ErrReadSnapshotChanged
 	}
 	return store.ReadWaitResult{Page: page, TimedOut: timedOut}, nil

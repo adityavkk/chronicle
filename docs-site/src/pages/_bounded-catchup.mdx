@@ -126,8 +126,11 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Aside label="Oversized frame" summary="One indivisible frame may exceed the returned byte target">
     Chronicle stores each append frame as one sorted-set member. It cannot split
     that member during a read. If the first valid frame is larger than 1 MiB,
-    the page returns that frame so the cursor can make progress. A storage
-    format with chunked values would be required for a strict byte ceiling.
+    the page returns that frame so the cursor can make progress. Operators can
+    set `--max-append-bytes` to bound this exception before Chronicle allocates
+    or stores a declared request body. Zero keeps the compatible unlimited HTTP
+    policy. The ceiling plus the 34-byte stored-frame prefix must fit Redis
+    `proto-max-bulk-len`.
   </Aside>
 </section>
 
@@ -147,6 +150,14 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     Later calls reuse the returned snapshot. The tail is the inclusive upper
     bound for the whole response.
   </Step>
+
+  <Aside label="Fork responses" summary="Reuse ancestry only inside one non-SSE response">
+    A direct Redis response may keep its immutable fork plan in a
+    response-local reader session. It still runs the root script on every page
+    and the selected source script with the expected incarnation. A new
+    response rebuilds the plan. SSE keeps the shared hub and notification
+    multiplexer; it does not create a session or another hub.
+  </Aside>
 
   <Step
     n={2}
@@ -226,6 +237,15 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     a direct latency comparison. The useful new result is 336 complete validated
     bodies, finite memory, and no server errors at a 512-reader cap.
   </Aside>
+
+  A fresh issue 15 verification supplement used a five-second warmup and a
+  30-second measured window. Warmup completions were excluded, and a completion
+  counted only after its exact SHA-256 body digest matched. The 8, 32, 128, and
+  512 reader cells completed 376, 396, 389, and 115 verified responses with no
+  request errors. Their p99 values were 0.819, 2.494, 9.748, and 26.264 seconds.
+  The same server process served the four cells, so those values prove the final
+  path under the requested curve but are not a fresh-process capacity
+  comparison.[^issue15]
 </section>
 
 <section class="block" id="writes">
@@ -251,12 +271,19 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     | Chronicle RSS | reported | **190.1 MiB** |
   </Table>
 
+  The fresh issue 15 mixed rerun used a new Chronicle process and completed all
+  1,200 offered appends at 40.00/s with a 274.43 ms p99, zero errors, and 392
+  concurrent catch-up completions. It independently passes both paid-gate
+  thresholds.[^issue15]
+
   <Callout icon="info" label="Cloud validation boundary">
-    The authorized GKE rerun stopped during preflight. The current account still
-    received VPC Service Controls denials for Compute quota, Artifact Registry,
-    and the default VPC. The managed Valkey 8 API was also disabled. No GKE or
-    Valkey resources were created. The exact request IDs are in the
-    [evidence report](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md).
+    The 2026-07-31 authorized GKE rerun stopped during preflight. The active
+    account received VPC Service Controls denials for Compute quota, GKE,
+    managed Redis, and Artifact Registry. The managed Valkey 8 API was also
+    disabled. No build or provisioning command ran, so the task created no GKE,
+    Valkey, Redis, Artifact Registry, or Cloud Build resource. The exact current
+    request IDs and required command are in the
+    [issue 15 evidence report](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-15-bounded-catchup-e2e.md).
   </Callout>
 </section>
 
@@ -286,6 +313,12 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   append and close, followed by one clean final drain. The checker required
   forward-only exact-once coverage and compared acknowledged frames with a
   direct Redis sorted-set oracle.[^jepsen]
+
+  The issue 15 rerun repeated all six paged-catchup attempts, the complete SSE
+  resume fault matrix, and every maintained Porcupine binding. The direct store
+  model was linearizable in Redis frames, Redis chunks, local files, and object
+  cache modes. The cluster-backed lease history was linearizable across 662
+  operations.[^issue15]
 </section>
 
 <section class="block" id="limits">
@@ -320,4 +353,5 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
 </section>
 
 [^evidence]: [Issue 5 bounded catch-up evidence](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md). It records the commands, reader curves, page-size comparison, Redis counters, allocation profile, correctness runs, and cloud preflight evidence.
+[^issue15]: [Issue 15 bounded catch-up end-to-end evidence](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-15-bounded-catchup-e2e.md). It records the append ceiling, response-local fork-plan profile gate, exact body integrity, refreshed reader and mixed cells, transport faults, and maintained Jepsen and Porcupine runs.
 [^jepsen]: The [`paged-catchup` scenario](https://github.com/adityavkk/chronicle/blob/main/jepsen/README.md) checks cancellation, transport interruption, Chronicle and Redis replacement, concurrent append and close, fork inheritance, exact frame coverage, and cursor progress.
