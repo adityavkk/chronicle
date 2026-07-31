@@ -27,9 +27,9 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
   <ul>
     <li><strong>Bounded catch-up removes whole-suffix reads and buffering.</strong> Redis fetches one frame, then optionally bulk-fetches only the range that fits the remaining 1 MiB target. A separate 1,024-frame cap bounds small-frame pages. Chronicle writes each frame directly to the socket.</li>
     <li><strong>The local 128-reader failure became measurable work.</strong> The old server completed no accepted 16 MiB replay at that concurrency. The paged server completed 435 body-verified responses with no server error in the final offered-window run.</li>
-    <li><strong>SSE fanout removes duplicate live reads.</strong> One stream hub on each serving Chronicle replica reads Redis once and shares the formatted event with local clients. The exact-counter guard with 1,000 clients measured 1.000 live Redis reads per append, down from 970.5.</li>
+    <li><strong>SSE fanout removes duplicate live reads and connections.</strong> One stream hub on each serving Chronicle replica reads Redis once and shares the formatted event with local clients. One store-owned multiplexer carries every logical stream registration over one physical Pub/Sub connection by default. The exact-counter guard with 1,000 clients measured 1.000 live Redis read page and 1.000 Redis read command per append, down from 970.5 reads.</li>
     <li><strong>Persistent root pages use one atomic read.</strong> A five-byte GET fell from six to one metadata <code>HGETALL</code>, from two read scripts to one, and from five read-side writes to zero. Sliding TTL renewal, legacy migration, and lazy expiry cleanup remain explicit write cases.</li>
-    <li><strong>Live reads register before they capture <code>offset=now</code>.</strong> A confirmed notification feed covers appends after the atomic page. The page tail includes appends that Redis ordered before it. New SSE hubs need one initial page instead of two, and long-poll no longer needs an immediate attach recheck.</li>
+    <li><strong>Live reads register before they capture <code>offset=now</code>.</strong> A confirmed notification feed covers appends after the atomic page. Long-poll does not need an immediate attach recheck. SSE seeds readiness from that authoritative page without a duplicate initial refresh, then performs one final bounded no-touch incarnation confirmation before exact-boundary attach. Reconnect generations refresh durable state immediately without touching access time.</li>
     <li><strong>Subscription fanout no longer runs on the append response goroutine.</strong> After a new durable append, the handler records one stream in a bounded process-local queue. Subscriber lookup, hydration, linked-tail reads, wake arming, and delivery run in a Manager-owned worker. At 1,000 subscribers with four links each, append p99 changed from 5,053.845 ms to 1.235 ms, with every owed wake verified.</li>
     <li><strong>Immutable segments move sealed replay bytes away from the frame ZSET.</strong> A manifest and sparse index select authenticated data blocks, while one fixed Redis snapshot supplies the hot tail and safe fallback. The retained local result is diagnostic and must be rerun after the integrated safety fixes.</li>
     <li><strong>Horizontal scaling separates subscription work by Redis slot.</strong> The measured append fanout p99 stayed between 12.48 and 12.61 milliseconds from 1 to 8 replicas. The exact 12 replica point and a cloud run with multiple shards remain open.</li>
@@ -95,8 +95,10 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
     read, the new snapshot page contract, the 1 MiB returned target, the
     1,024-frame Redis limit, and the measured reader curves.
   - Read [SSE fanout](./sse-fanout) to understand the old per-client Redis read
-    path, the shared stream hub, the safe attach sequence, and the measured
-    before and after result.
+    path, the shared stream hub, the notification multiplexer, the exact attach
+    sequence, and the measured before and after result. The work is tracked in
+    [issue 4](https://gecgithub01.walmart.com/GPA/chronicle/issues/4) and
+    [issue 13](https://gecgithub01.walmart.com/GPA/chronicle/issues/13).
   - Read [Read-only and fused root pages](./read-only-fast-path) to understand
     the typed read snapshot, exact sliding TTL decision, root-range oracle,
     register-first live handoff, and measured command, AOF, replication, and

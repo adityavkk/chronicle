@@ -280,10 +280,12 @@ import Aside from "../components/Aside.astro";
 
   <Aside label="Mechanism" summary="What changed in the wake path">
     The old SSE loop owned one Pub/Sub wait and durable read per client. The new
-    path owns one persistent subscription and one durable reader per active
-    stream on each Chronicle replica. Pub/Sub remains only a wake hint. A
-    one-second durable poll recovers a lost hint, and a bounded replay window
-    disconnects slow clients so they can resume from their last offset.
+    path owns one logical registration and one durable reader per active stream
+    on each Chronicle replica. A store-owned multiplexer carries those logical
+    registrations over one physical Redis Pub/Sub connection by default.
+    Pub/Sub remains only a wake hint. A one-second durable poll recovers a lost
+    hint, and a bounded replay window disconnects slow clients so they can
+    resume from their last offset.
   </Aside>
 
   ### Subscription fanout moved <em>off the response path</em>

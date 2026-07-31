@@ -8,12 +8,12 @@ byline:
   - label: "Live reads"
     value: "970.5 → 1.000 per append"
   - label: "One-stream delivery"
-    value: "49,616 events/s"
+    value: "49,099 events/s"
   - label: "Safety"
     value: "332/332 + Jepsen"
   - label: "Issue"
-    value: "GPA/chronicle#4"
-    href: "https://gecgithub01.walmart.com/GPA/chronicle/issues/4"
+    value: "GPA/chronicle#4, #13"
+    href: "https://gecgithub01.walmart.com/GPA/chronicle/issues/13"
 ---
 
 import Tldr from "../components/Tldr.astro";
@@ -106,11 +106,12 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <SectionHead num="02" label="After" title="One stream hub does <em>the shared work once</em>" />
 
   The new handler creates or reuses one hub for the stream on the current
-  Chronicle replica. The hub owns one persistent Redis notification
-  subscription. After a wake hint, it reads the durable suffix once, formats
-  one immutable SSE data event, and places that event in a bounded replay
-  window. Each local client has only a coalesced wake signal and its own durable
-  offset.
+  Chronicle replica. The hub owns one logical notification registration. A
+  store-owned multiplexer carries all such registrations over one physical
+  Redis Pub/Sub connection by default. After a wake hint, the hub pages through
+  one exact durable tail, formats one immutable SSE data event, and places that
+  event in a bounded replay window. Each local client has only a coalesced wake
+  signal and its own durable offset.
 
   <Diagram
     name="wiki-sse-new"
@@ -121,12 +122,13 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Table>
     | Work | Old setup | New setup |
     | --- | --- | --- |
-    | Redis notification subscription | one per SSE client | one per active stream on each serving replica |
+    | Logical notification registration | one per SSE client | one per active stream on each serving replica |
+    | Physical Redis Pub/Sub connection | one per SSE client | one per store by default |
     | Durable live read after an append | one per client | one per stream hub |
     | Data-event formatting and base64 | repeated by every client | one shared immutable event |
-    | Client progress | held in each read loop | one offset per watcher |
+    | Client progress lookup | linear ring scan | monotonic sequence plus indexed boundary lookup |
     | Slow client | could keep its loop and socket blocked | disconnects after replay lag or write timeout |
-    | Last client leaves | its loop closes | the hub and Redis subscription close |
+    | Last client leaves | its loop closes | the hub and logical registration close |
   </Table>
 
   <Complexity
@@ -158,24 +160,42 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Diagram
     name="seq-sse-hub-attach"
     label="Catch-up to live handoff"
-    caption="The hub confirms its Redis subscription before the handler completes catch-up. The handler then checks the stream incarnation and attaches at the exact offset it already sent. An append can land at any point without being lost or sent before its control offset."
+    caption="The multiplexer confirms the hub's logical registration before the first catch-up page captures its tail. The handler confirms the stream incarnation and attaches at the exact control offset it flushed. An append can land at any point without being lost or sent before its control offset."
   />
 
-  Five rules protect this boundary:
+  Eight rules protect this boundary:
 
-  1. **Register before the authoritative page.** Chronicle reserves an existing
-     hub before capture, or confirms one new Redis subscription first.
-  2. **Seed from the first typed page.** `handleRead` then supplies content type,
-     tail, closure, incarnation, and first catch-up frames without loading
-     producer state. A new hub starts at that tail and needs no duplicate
-     no-touch attach refresh.
-  3. **Recheck the durable stream.** A wake is only a hint. The hub reads Redis
+  1. **Register before the first page.** The multiplexer waits for the current
+     Redis connection generation to acknowledge the hub's logical channel. The
+     first `ReadPage` then captures the incarnation and exact tail.
+  2. **Seed readiness from page one.** Client catch-up uses `ReadPage` and the
+     first confirmed hub generation starts from that authoritative snapshot.
+     It does not reread the same offset for readiness. Catch-up stops at its
+     captured tail even when appends continue, and neither catch-up nor hub
+     refresh can fall back to an unbounded `Store.Read`.
+  3. **Flush before advancing.** The handler puts the page's data and control
+     flush under one write deadline. It advances the attach offset only after
+     that control value reaches the client.
+  4. **Attach at the exact boundary.** The handler confirms the durable stream
+     identity without renewing its TTL again. It then uses the ring's sequence
+     and boundary index to find the exact controlled offset. If eviction removed
+     it, Chronicle closes the connection and lets the client resume. It never
+     skips to a newer offset. Any failure discovered after SSE headers are
+     committed aborts the transport; Chronicle never appends an ordinary HTTP
+     error payload to the event stream.
+  5. **Recheck the durable stream.** A wake is only a hint. The hub reads Redis
      after a hint and once per second while idle. A lost Pub/Sub message delays
      delivery by at most one poll. It does not lose data.
-  4. **Name each stream lifetime.** Every create stores a random 128-bit
+  6. **Recover the notification connection.** A reconnect invalidates old
+     acknowledgements, restores all desired channels, and wakes each hub for an
+     immediate durable no-touch refresh. A replacement subscription generation
+     refreshes the same way before waiting. Append and close hints and defensive
+     polls retain their access-touch semantics. A coalesced nonblocking signal
+     keeps one blocked hub from holding another.
+  7. **Name each stream lifetime.** Every create stores a random 128-bit
      incarnation ID. If a path is deleted and recreated, the old hub stops
      instead of serving the new stream with old state.
-  5. **Bound slow consumers.** The replay window is 1 MiB by default and each
+  8. **Bound slow consumers.** The replay window is 1 MiB by default and each
      client flush has a ten-second deadline. A lagging client disconnects and
      resumes from the last control offset it actually received.
 
@@ -200,56 +220,61 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
 
   <SSEResults />
 
-  The new image was tested with one Chronicle replica, one Redis primary, and
+  The issue 13 image was tested with one Chronicle replica, one Redis primary, and
   AOF configured to sync every write. Chronicle had 2 vCPU and 4 GiB. Redis had
   2 vCPU and 12 GiB. The one-stream workload used 1,000 clients for 20 seconds.
-  The 100-stream workload used 2,048 clients for 15 seconds.[^run]
+  The 100-stream workload used 2,048 clients for 15 seconds. Each workload ran
+  three times from fresh result state. The table uses the component median.[^issue13]
 
   <Table wide>
-    | Workload | Delivered | Delivery rate | p50 | p99 | p999 | Errors |
-    | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 1 stream, 1,000 clients | 992,320 | **49,616/s** | 7.123 ms | 19.519 ms | 58.815 ms | 0 |
-    | 100 streams, 2,048 clients | 1,173,067 | **78,204/s** | 40.159 ms | 71.167 ms | 104.191 ms | 0 |
+    | Workload | Result | Delivered | Delivery rate | p50 | p99 | Completion | Errors |
+    | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+    | 1 stream, 1,000 clients | issue 4 baseline | 992,320 | 49,616/s | 7.123 ms | 19.519 ms | 99.232% | 0 |
+    | 1 stream, 1,000 clients | issue 13 median | 981,983 | **49,099/s** | 5.047 ms | **8.591 ms** | 98.198% | 0 |
+    | 100 streams, 2,048 clients | issue 4 baseline | 1,173,067 | 78,204/s | 40.159 ms | 71.167 ms | 76.371% | 0 |
+    | 100 streams, 2,048 clients | issue 13 median | 1,495,527 | **99,702/s** | 23.967 ms | **51.903 ms** | 97.365% | 0 |
   </Table>
 
-  The branch-local exact-counter guard opened 1,000 clients and waited for all
-  catch-up reads to settle. Redis `PUBLISH` then advanced from 1,445 to 1,545,
-  while `ZRANGEBYLEX` advanced from 11,021 to 11,121. The exact live ratio was
-  1.000 reads per append, which passes the 1.2 gate.[^evidence]
+  The exact-counter guard opened 1,000 clients and waited for catch-up reads to
+  settle. Redis `PUBLISH` then advanced from 3,480 to 3,580, while
+  `ZRANGEBYLEX` advanced from 5,602 to 5,702. The instrumented hub also
+  completed 100 `ReadPage` calls. The result was 1.000 Redis read command and
+  1.000 durable page per append, which passes the 1.2 gate.[^issue13]
 
-  The issue 172 follow-up also measures connection setup. A new empty
-  `offset=now` hub now performs one `EVALSHA` and one metadata `HGETALL`, down
-  from two after the earlier read-only fast path. The same exact-counter
-  benchmark, with completion counted after each durable read, recorded 10
-  `PUBLISH` calls and 10 `ZRANGEBYLEX` calls across 1,000 connected clients.
+  The fused root-read follow-up supplies one authoritative first page after
+  registration. The first confirmed hub generation becomes ready from that
+  page with no duplicate initial refresh. Issue 13 retains one final bounded
+  no-touch identity confirmation immediately before indexed attach. It fences
+  a delete/recreate race without delivering client data twice at the same
+  offset. Reconnect generations also refresh durable state immediately with
+  no access touch.
 
-  The one-stream Kubernetes workload delivered 99.232 percent of the offered
-  events with no backpressure or request errors. Peak sampled Chronicle RSS was
-  175.75 MiB. The 100-stream workload reached 100 active Redis subscriptions
-  and a peak sampled RSS of 505.29 MiB.
+  Every final workload repetition recorded zero backpressure and zero other
+  client errors. Median peak sampled Chronicle RSS was 134.25 MiB for one stream
+  and 396.89 MiB for 100 streams. The 100-stream run used 100 logical
+  notification registrations over one physical Redis Pub/Sub connection.
 
-  The Kubernetes counter sampler did not capture the exact start of its live
-  measurement window. Its auditable full-cell counters were 2,326 reads for
-  1,325 publishes in the one-stream cell, including setup and one catch-up read
-  per client. The 100-stream cell recorded 88,902 reads for 86,937 publishes,
-  or 1.0226 reads per publish. These conservative full-cell values replace the
-  prior live-window deltas, which the retained samples could not reproduce.
+  The frame benchmark also changed the per-client control path. A typed reusable
+  buffer reduced allocation from 905 to 216 bytes per update, a 76.1 percent
+  reduction, while median time improved by 4.8 percent. A focused CPU profile
+  then removed repeated Redis path-escaper construction. The 100-stream median
+  moved from a failing 75.647 ms p99 to 51.903 ms.[^issue13]
 
   <Aside label="How to read the throughput number" summary="The read ratio is the direct proof; the rate comparison is directional">
-    The old and new workloads have the same shapes, but the results are not a
-    randomized A/B trial on one untouched cluster. The live read ratio directly
-    measures the mechanism that changed. The move from the old observed ceiling
-    of roughly 25,000 to 32,000 events per second to 49,616 events per second is
-    a strong directional result, not a precise percentage claim.
+    The issue 4 baseline and issue 13 image used the same local Kubernetes
+    workload shape and resource split, but they were not randomized on an
+    untouched cluster. The exact page and Redis command counters prove the
+    shared-read mechanism. The three-run medians reduce host noise without
+    turning the throughput comparison into a universal capacity claim.
   </Aside>
 
   The performance work did not stop at happy-path tests. The full 332-test
   conformance suite passed. Four live Jepsen scenarios passed: baseline, origin
   restart, Redis restart, and SSE resume. The SSE scenario delivered 320
   expected events exactly once across eight checked readers and verified 11
-  fault actions, including independent replay lag and write timeout faults. A
-  direct Redis oracle checked the final frames, offsets, tail, closed state, and
-  producer state.[^jepsen]
+  fault actions, including replay lag, write timeout, delete and recreate, and
+  attachment at a page boundary. A direct Redis oracle checked the final frames,
+  offsets, tail, closed state, and producer state.[^jepsen]
 </section>
 
 <section class="block" id="limits">
@@ -269,24 +294,21 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   - **The replay window adds shared state.** It is bounded, but the attach,
     eviction, and delete-recreate paths are more complex than one isolated loop.
 
-  CPU profiles now point mostly at socket syscalls. Allocation profiles also
-  show per-client control framing, Redis connection buffers, and stream-key
-  escaping. The next high-value work is to reduce per-client control
-  allocations, multiplex notification subscriptions by Redis shard, reduce the
-  remaining per-client historical replay work, and remove repeated key-escaping
-  work. Those are separate improvements. None should weaken the conformance or
-  Jepsen gates.
+  CPU profiles now point mostly at socket syscalls. Remaining allocation work
+  includes per-client control framing and Redis connection buffers. Initial
+  historical replay also remains per client. Those are separate improvements.
+  None should weaken the conformance or Jepsen gates.
 
-  The runtime metrics snapshots were taken after the clients disconnected.
-  They therefore do not measure peak memory during a slow-client or reconnect
-  storm. The replay ring, watcher signal, write deadline, and lifecycle tests
-  enforce fixed in-process bounds, but an active-fault memory run remains open.
+  A 30-minute active run added a throttled client and 69,879 protocol
+  reconnects. Chronicle averaged 48.2 MiB RSS and peaked at 56.5 MiB. Heap,
+  goroutines, descriptors, registrations, and ring bytes stayed bounded in the
+  final window. Cleanup returned clients, hubs, registrations, physical
+  connections, and every ring byte component to exactly zero.[^issue13]
 
   <Callout icon="info" label="Validation boundary">
-    The results on this page are the exact local Kubernetes validation results
-    for the fixed image. They do not claim a completed paid GCP replay. The
-    Chronicle image digest was
-    <code>sha256:a2595bf4d5c9ffdb467b437ce0f71c5a1a0907a8a11df0b15a2a4277280f8767</code>.
+    The results on this page are local Kubernetes and host validation results.
+    They do not claim a paid GCP replay. The Chronicle image digest was
+    <code>sha256:d4cd1389…</code> (the task image was removed after evidence capture).
   </Callout>
 
   <Callout icon="arrow" label="Related performance work">
@@ -295,10 +317,13 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     Read the [registered first-page decision](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0007-fuse-root-pages-and-register-live-reads-first.md)
     and track its follow-up in
     [GitHub issue #172](https://github.com/adityavkk/chronicle/issues/172).
+    Track SSE fanout in
+    [GPA/chronicle issue #4](https://gecgithub01.walmart.com/GPA/chronicle/issues/4)
+    and the hardening work in
+    [issue #13](https://gecgithub01.walmart.com/GPA/chronicle/issues/13).
   </Callout>
 </section>
 
 [^adr]: [ADR-0005, Share live SSE reads through per-instance stream hubs](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0005-per-instance-sse-stream-fanout.md). It records the sealed before measurements, the decision, safety rules, and remaining limits.
-[^run]: Validation profile [`benchmarks/ds-bench/sse-hub-validation.json`](https://github.com/adityavkk/chronicle/blob/main/benchmarks/ds-bench/sse-hub-validation.json). Source build context `54e4892280ab66630bf2398164b1ba7fa3e52d78cd1ed28263883795e0859ff6`, 109 files. ds-bench image digest `sha256:c4e0f455462d168354c8452c424667b8e0a1bb4a7477609eb4c1f005aafcf719`.
-[^evidence]: The retained [`Issue 4 evidence`](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/sse-fanout/20260729-local-kubernetes/README.md) includes the exact benchmark output, raw client results, Redis counter samples, RSS samples, and runtime profiles. The local Kubernetes results are not a paid GCP replay.
+[^issue13]: The retained [`Issue 13 evidence`](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/sse-fanout/20260731-issue-13-local/README.md) includes all six final client JSON records, Redis and page counters, active and cleanup runtime samples, frame benchmarks, focused profiles, the 30-minute fault run, a manifest, and checksums.
 [^jepsen]: The [`sse-resume` scenario](https://github.com/adityavkk/chronicle/blob/main/jepsen/README.md) checks attach, resume, dropped and duplicate notifications, Redis and Chronicle replacement, bounded replay lag, write timeout, close ordering, and an independent durable-store oracle.
