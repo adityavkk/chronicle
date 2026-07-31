@@ -410,7 +410,7 @@ func (h *Handler) handleHead(w http.ResponseWriter, r *http.Request, path string
 		return err
 	}
 
-	meta, err := h.Store.Get(path)
+	snapshot, err := h.captureReadSnapshot(r.Context(), path, true)
 	if err != nil {
 		if errors.Is(err, store.ErrStreamNotFound) {
 			return newHTTPError(http.StatusNotFound, "stream not found")
@@ -421,19 +421,19 @@ func (h *Handler) handleHead(w http.ResponseWriter, r *http.Request, path string
 		return err
 	}
 
-	w.Header().Set("Content-Type", meta.ContentType)
-	w.Header().Set(protocol.HeaderStreamNextOffset, meta.CurrentOffset.String())
+	w.Header().Set("Content-Type", snapshot.ContentType)
+	w.Header().Set(protocol.HeaderStreamNextOffset, snapshot.Tail.String())
 	w.Header().Set("Cache-Control", "no-store")
 
-	if meta.TTLSeconds != nil {
-		w.Header().Set(protocol.HeaderStreamTTL, strconv.FormatInt(*meta.TTLSeconds, 10))
+	if snapshot.TTLSeconds != nil {
+		w.Header().Set(protocol.HeaderStreamTTL, strconv.FormatInt(*snapshot.TTLSeconds, 10))
 	}
-	if meta.ExpiresAt != nil {
-		w.Header().Set(protocol.HeaderStreamExpiresAt, meta.ExpiresAt.Format(time.RFC3339))
+	if snapshot.ExpiresAt != nil {
+		w.Header().Set(protocol.HeaderStreamExpiresAt, snapshot.ExpiresAt.Format(time.RFC3339))
 	}
 
 	// Include Stream-Closed header if stream is closed
-	if meta.Closed {
+	if snapshot.Closed {
 		w.Header().Set(protocol.HeaderStreamClosed, "true")
 	}
 
@@ -455,37 +455,25 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		return err
 	}
 
-	// Check if stream exists
-	meta, err := h.Store.Get(path)
-	if err != nil {
-		if errors.Is(err, store.ErrStreamNotFound) {
-			return newHTTPError(http.StatusNotFound, "stream not found")
-		}
-		if errors.Is(err, store.ErrStreamSoftDeleted) {
-			return newHTTPError(http.StatusGone, "stream has been deleted")
-		}
-		return err
-	}
-
 	// Check for explicit empty offset parameter (different from missing offset)
 	query := r.URL.Query()
 	offsetValues, offsetProvided := query["offset"]
 	offsetStr := ""
 	if offsetProvided {
 		if len(offsetValues) > 1 {
-			return newHTTPError(http.StatusBadRequest, "multiple offset parameters not allowed")
+			return h.readValidationError(r.Context(), path, "multiple offset parameters not allowed")
 		}
 		offsetStr = offsetValues[0]
 		// Reject empty offset string when explicitly provided
 		if offsetStr == "" {
-			return newHTTPError(http.StatusBadRequest, "offset parameter cannot be empty")
+			return h.readValidationError(r.Context(), path, "offset parameter cannot be empty")
 		}
 	}
 
 	// Parse offset
 	offset, err := store.ParseOffset(offsetStr)
 	if err != nil {
-		return newHTTPError(http.StatusBadRequest, "invalid offset")
+		return h.readValidationError(r.Context(), path, "invalid offset")
 	}
 
 	// Optional read batch limit — the concrete lever behind §5.6's
@@ -503,8 +491,9 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		}
 	}
 	if limit > store.DefaultReadPageFrames {
-		return newHTTPError(
-			http.StatusBadRequest,
+		return h.readValidationError(
+			r.Context(),
+			path,
 			fmt.Sprintf("limit cannot exceed %d", store.DefaultReadPageFrames),
 		)
 	}
@@ -518,82 +507,29 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	cursor := query.Get("cursor")
 	// Validate long-poll requires offset
 	if liveMode == "long-poll" && !offsetProvided {
-		return newHTTPError(http.StatusBadRequest, "offset required for long-poll mode")
+		return h.readValidationError(r.Context(), path, "offset required for long-poll mode")
 	}
 
 	// Validate SSE requires offset
 	if liveMode == "sse" && !offsetProvided {
-		return newHTTPError(http.StatusBadRequest, "offset required for SSE mode")
+		return h.readValidationError(r.Context(), path, "offset required for SSE mode")
 	}
 
-	// Handle SSE mode first (before reading)
-	if liveMode == "sse" {
-		// Auto-detect binary content types for base64 encoding
-		ct := strings.ToLower(store.ExtractMediaType(meta.ContentType))
-		isTextCompatible := strings.HasPrefix(ct, "text/") || ct == "application/json"
-		useBase64 := !isTextCompatible
-
-		// For SSE with offset=now, convert to actual tail offset
-		sseOffset := offset
-		if offset.IsNow() {
-			sseOffset = meta.CurrentOffset
-		}
-		return h.handleSSE(w, r, path, meta, sseOffset, cursor, useBase64)
-	}
-
-	// For offset=now, convert to actual tail offset
-	// This allows long-poll to immediately start waiting for new data
-	effectiveOffset := offset
 	isNowOffset := offset.IsNow()
-	if isNowOffset {
-		effectiveOffset = meta.CurrentOffset
-	}
-
-	// Handle catch-up mode offset=now: return empty response with tail offset
-	// For long-poll mode, we fall through to wait for new data instead
-	if isNowOffset && liveMode != "long-poll" {
-		w.Header().Set("Content-Type", meta.ContentType)
-		w.Header().Set(protocol.HeaderStreamNextOffset, meta.CurrentOffset.String())
-		w.Header().Set(protocol.HeaderStreamUpToDate, "true")
-
-		// Include Stream-Closed if stream is closed (client at tail, upToDate)
-		if meta.Closed {
-			w.Header().Set(protocol.HeaderStreamClosed, "true")
-		}
-
-		// Prevent caching - tail offset changes with each append
-		w.Header().Set("Cache-Control", "no-store")
-
-		// No ETag for offset=now responses - Cache-Control: no-store makes ETag unnecessary
-		// and some CDNs may behave unexpectedly with both headers
-
-		// For JSON mode, return empty array; otherwise empty body
-		if store.IsJSONContentType(meta.ContentType) {
-			if envelope {
-				w.Header().Set(protocol.HeaderStreamEnvelope, "offsets")
-			}
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("[]"))
-		} else {
-			w.WriteHeader(http.StatusOK)
-		}
-		return nil
-	}
 
 	reader := h.pageReader()
 	pageOpts := store.ReadPageOptions{
 		TargetBytes: h.readPageBytes(),
 		MaxFrames:   store.DefaultReadPageFrames,
 	}
-	stopAfterFirst := limit > 0 && store.IsJSONContentType(meta.ContentType)
-	if stopAfterFirst && limit < pageOpts.MaxFrames {
+	if limit > 0 && limit < pageOpts.MaxFrames {
 		pageOpts.MaxFrames = limit
 	}
 	if err := r.Context().Err(); err != nil {
 		h.observeReadCancellation("before_first_page")
 		return err
 	}
-	firstPage, err := reader.ReadPage(r.Context(), path, effectiveOffset, pageOpts)
+	firstPage, err := reader.ReadPage(r.Context(), path, offset, pageOpts)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			h.observeReadCancellation("storage")
@@ -606,6 +542,55 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 			releaseReadSnapshot(reader, path, firstPage.Snapshot)
 		}
 	}()
+
+	if liveMode == "sse" {
+		ct := strings.ToLower(store.ExtractMediaType(firstPage.Snapshot.ContentType))
+		useBase64 := !strings.HasPrefix(ct, "text/") && ct != "application/json"
+		sseOffset := offset
+		if sseOffset.IsNow() {
+			sseOffset = firstPage.Snapshot.Tail
+		}
+		ownsSnapshot = false
+		return h.handleSSE(
+			w,
+			r,
+			path,
+			reader,
+			firstPage,
+			pageOpts,
+			sseOffset,
+			cursor,
+			useBase64,
+		)
+	}
+
+	effectiveOffset := offset
+	if isNowOffset {
+		effectiveOffset = firstPage.Snapshot.Tail
+	}
+
+	// offset=now captures and touches one authoritative root snapshot while
+	// deliberately returning no historical frames.
+	if isNowOffset && liveMode != "long-poll" {
+		h.observeReadPage(firstPage)
+		w.Header().Set("Content-Type", firstPage.Snapshot.ContentType)
+		w.Header().Set(protocol.HeaderStreamNextOffset, firstPage.Snapshot.Tail.String())
+		w.Header().Set(protocol.HeaderStreamUpToDate, "true")
+		if firstPage.Snapshot.Closed {
+			w.Header().Set(protocol.HeaderStreamClosed, "true")
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		if store.IsJSONContentType(firstPage.Snapshot.ContentType) {
+			if envelope {
+				w.Header().Set(protocol.HeaderStreamEnvelope, "offsets")
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("[]"))
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+		return nil
+	}
 
 	// Handle long-poll mode - wait if no messages and either:
 	// 1. Client used offset=now (wants to wait for future data)
@@ -624,74 +609,50 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 			return nil
 		}
 
-		// Client is caught up, wait for new data
-		timeout := h.LongPollTimeout
-		ctx, cancel := context.WithTimeout(r.Context(), timeout)
-		defer cancel()
-
-		var timedOut bool
-		var streamClosed bool
-		_, timedOut, streamClosed, err = h.Store.WaitForMessages(ctx, path, effectiveOffset, timeout)
+		// Client is caught up. Subscription/registration happens before a
+		// no-touch durable recheck, and the final page owns every response
+		// header needed for wake, close, or timeout.
+		waited, waitErr := h.waitForPage(
+			r.Context(),
+			reader,
+			path,
+			effectiveOffset,
+			firstPage.Snapshot,
+			h.LongPollTimeout,
+			pageOpts,
+		)
+		h.observeReadPage(firstPage)
+		releaseReadSnapshot(reader, path, firstPage.Snapshot)
+		ownsSnapshot = false
+		err = waitErr
 		if err != nil {
-			h.observeReadPage(firstPage)
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				// Timeout or client disconnect - return 204 with current offset
 				h.observeReadCancellation("wait")
-				w.Header().Set("Content-Type", firstPage.Snapshot.ContentType)
-				w.Header().Set(protocol.HeaderStreamNextOffset, effectiveOffset.String())
-				w.Header().Set(protocol.HeaderStreamUpToDate, "true")
-				w.Header().Set(protocol.HeaderStreamCursor, protocol.GenerateResponseCursor(cursor, time.Now()))
-				// Check if stream was closed during wait
-				currentMeta, _ := h.Store.Get(path)
-				if currentMeta != nil && currentMeta.Closed {
-					w.Header().Set(protocol.HeaderStreamClosed, "true")
-				}
-				w.WriteHeader(http.StatusNoContent)
-				return nil
+				return err
 			}
-			return err
+			return readPageError(err)
 		}
 
-		// If stream was closed during wait, return immediately with Stream-Closed
-		if streamClosed {
+		firstPage = waited.Page
+		ownsSnapshot = true
+		closedAtTail := firstPage.Snapshot.Closed &&
+			effectiveOffset.Equal(firstPage.Snapshot.Tail) &&
+			len(firstPage.Messages) == 0
+		if waited.TimedOut || closedAtTail {
 			h.observeReadPage(firstPage)
 			w.Header().Set("Content-Type", firstPage.Snapshot.ContentType)
-			w.Header().Set(protocol.HeaderStreamNextOffset, effectiveOffset.String())
-			w.Header().Set(protocol.HeaderStreamUpToDate, "true")
-			w.Header().Set(protocol.HeaderStreamClosed, "true")
-			w.Header().Set(protocol.HeaderStreamCursor, protocol.GenerateResponseCursor(cursor, time.Now()))
-			w.WriteHeader(http.StatusNoContent)
-			return nil
-		}
-
-		if timedOut {
-			h.observeReadPage(firstPage)
-			// Timeout - return 204 with current offset
-			w.Header().Set("Content-Type", firstPage.Snapshot.ContentType)
-			w.Header().Set(protocol.HeaderStreamNextOffset, effectiveOffset.String())
+			w.Header().Set(protocol.HeaderStreamNextOffset, firstPage.Snapshot.Tail.String())
 			w.Header().Set(protocol.HeaderStreamUpToDate, "true")
 			w.Header().Set(protocol.HeaderStreamCursor, protocol.GenerateResponseCursor(cursor, time.Now()))
-			// Check if stream was closed during timeout
-			currentMeta, _ := h.Store.Get(path)
-			if currentMeta != nil && currentMeta.Closed {
+			if closedAtTail {
 				w.Header().Set(protocol.HeaderStreamClosed, "true")
 			}
 			w.WriteHeader(http.StatusNoContent)
 			return nil
 		}
-
-		// The wait result is only a wake. Capture one new upper snapshot and
-		// stream it through the same bounded page path as ordinary catch-up.
-		h.observeReadPage(firstPage)
-		releaseReadSnapshot(reader, path, firstPage.Snapshot)
-		ownsSnapshot = false
-		firstPage, err = reader.ReadPage(r.Context(), path, effectiveOffset, pageOpts)
-		if err != nil {
-			return readPageError(err)
-		}
-		ownsSnapshot = true
 	}
 
+	stopAfterFirst := limit > 0 && store.IsJSONContentType(firstPage.Snapshot.ContentType)
 	nextOffset := firstPage.Snapshot.Tail
 	upToDate := true
 	if stopAfterFirst {

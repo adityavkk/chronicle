@@ -98,7 +98,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", "chronicle-jepsen", "kubernetes namespace")
 	flag.IntVar(&c.streams, "streams", 8, "number of event streams")
 	flag.IntVar(&c.msgs, "msgs", 40, "messages appended per stream")
-	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|paged-catchup|sse-resume|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|failover|durable-externalize|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
+	flag.StringVar(&c.scenario, "scenario", "origin-restart", "baseline|origin-restart|redis-restart|paged-catchup|read-expiry|sse-resume|pull-wake-arm-crash|expired-lease-takeover|glob-create-crash|index-repair|single-holder-linz|cursor-monotonic|stale-gen-noop|lease-tail-drop|failover|durable-externalize|at-least-once|ownership-exclusivity|slot-isolation|contention|shard-linz|store-linz|composed")
 	flag.DurationVar(&c.settle, "settle", 25*time.Second, "post-fault settle time for the recovery sweep")
 	flag.IntVar(&c.workers, "workers", 4, "contending workers for the single-holder-linz scenario")
 	flag.IntVar(&c.workloadMs, "workload-ms", 8000, "workload duration in ms for the single-holder-linz scenario")
@@ -263,6 +263,13 @@ func run(c config, r *receiver) error {
 	// coverage against raw Redis ZSET members (scenario_paged_catchup.go).
 	if c.scenario == "paged-catchup" {
 		return runPagedCatchup(c)
+	}
+
+	// read-expiry is the data-plane access-semantics gate. It checks through the
+	// public HTTP API that reads renew sliding TTLs, HEAD does not, fixed expiry
+	// never moves, and an ordinary stream remains durable across repeated reads.
+	if c.scenario == "read-expiry" {
+		return runReadExpiry(c)
 	}
 
 	// expired-lease-takeover asserts a fence-rotation property over the pull-wake

@@ -177,3 +177,92 @@ func TestIntegrationExpiresAtAbsolute(t *testing.T) {
 		t.Error("no-expiry stream should persist")
 	}
 }
+
+func TestReadAccessDecisionDifferential(t *testing.T) {
+	base := newTestStore(t)
+	start := time.Unix(1_000, 0)
+
+	for _, tc := range []struct {
+		name       string
+		expiry     func() (*int64, *time.Time)
+		advance    time.Duration
+		wantAccess time.Time
+	}{
+		{
+			name:       "non-expiring",
+			expiry:     func() (*int64, *time.Time) { return nil, nil },
+			advance:    5 * time.Second,
+			wantAccess: start,
+		},
+		{
+			name: "absolute expiry",
+			expiry: func() (*int64, *time.Time) {
+				expiresAt := start.Add(time.Hour)
+				return nil, &expiresAt
+			},
+			advance:    5 * time.Second,
+			wantAccess: start,
+		},
+		{
+			name: "sliding TTL",
+			expiry: func() (*int64, *time.Time) {
+				ttl := int64(10)
+				return &ttl, nil
+			},
+			advance:    5 * time.Second,
+			wantAccess: start.Add(5 * time.Second),
+		},
+		{
+			name: "combined expiry rules",
+			expiry: func() (*int64, *time.Time) {
+				ttl := int64(10)
+				expiresAt := start.Add(time.Hour)
+				return &ttl, &expiresAt
+			},
+			advance:    5 * time.Second,
+			wantAccess: start.Add(5 * time.Second),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clock := store.NewFakeClock(start)
+			oracle := store.NewMemoryStore(store.WithClock(clock))
+			subject := New(base.client, Options{Clock: clock})
+			path := testPath("read-access-" + tc.name)
+			ttl, expiresAt := tc.expiry()
+			opts := store.CreateOptions{
+				ContentType: "text/plain",
+				TTLSeconds:  ttl,
+				ExpiresAt:   expiresAt,
+			}
+			if _, _, err := oracle.Create(path, opts); err != nil {
+				t.Fatal(err)
+			}
+			mustCreate(t, subject, path, opts)
+			clock.Advance(tc.advance)
+
+			if _, err := oracle.ReadPage(context.Background(), path, store.ZeroOffset, store.ReadPageOptions{}); err != nil {
+				t.Fatalf("MemoryStore ReadPage: %v", err)
+			}
+			if _, err := subject.ReadPage(context.Background(), path, store.ZeroOffset, store.ReadPageOptions{}); err != nil {
+				t.Fatalf("Redis ReadPage: %v", err)
+			}
+			oracleMeta, err := oracle.Get(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			subjectMeta, err := subject.Get(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !oracleMeta.LastAccessedAt.Equal(subjectMeta.LastAccessedAt) ||
+				!oracleMeta.LastAccessedAt.Equal(tc.wantAccess) {
+				t.Fatalf(
+					"LastAccessedAt: MemoryStore=%s Redis=%s want=%s",
+					oracleMeta.LastAccessedAt,
+					subjectMeta.LastAccessedAt,
+					tc.wantAccess,
+				)
+			}
+		})
+	}
+}

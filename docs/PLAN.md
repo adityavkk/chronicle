@@ -51,9 +51,9 @@ cmd/chronicle/          main: flags/env → config → wire deps → serve, grac
         offset.go       Offset type: "%016d_%016d" ReadSeq_ByteOffset (copied semantics)
         redis/          the Redis 8 implementation
           store.go      RedisStore: satisfies store.Store
-          scripts.go    embedded Lua scripts (append, create, close, delete, fork)
+          scripts.go    embedded operation scripts and shared Lua helpers
           keys.go       key schema ({path} hash-tagged)
-          notify.go     pub/sub waiter machinery for WaitForMessages
+          notify.go     typed pub/sub waiter plus WaitForMessages compatibility
 ```
 
 **Pure core.** Everything decidable without I/O lives in `protocol/` and the
@@ -103,7 +103,8 @@ From the spec + conformance inventory (research docs 01/04):
   a JSON array; fork sub-offsets slice the first following message).
 - Live tailing: long-poll/SSE waiters woken promptly (conformance appends 500 ms
   after opening the poll and expects delivery well inside a 5 s test timeout).
-- Sliding TTL (renewed by GET/POST, not HEAD) and absolute expiry, observable
+- Sliding TTL (renewed by POST and once at the first root snapshot of a logical
+  GET, not by HEAD or page continuations) and absolute expiry, observable
   within ~1–2 s of nominal (lazy expiry on access is acceptable — the suite polls).
 - Producer state per `(stream, producerId)`; survives as long as the stream.
 - Forks: refcounts, soft-delete, cascade GC, offset-space sharing with source.
@@ -154,8 +155,9 @@ binary; `{`/`}` in user paths are escaped).
 
 ### 4.4 Atomicity: Lua scripts
 
-Every mutation is one `EVALSHA` operating only on `{<path>}`-tagged keys —
-validation, write, metadata update, and `PUBLISH` execute atomically and
+Every single-stream mutation step is one `EVALSHA` operating only on
+`{<path>}`-tagged keys. Validation, write, metadata update, and `PUBLISH`
+execute atomically and
 serialized per stream (Redis is single-threaded per shard), which directly
 satisfies the spec's "serialize validation + append per (stream, producerId)"
 MUST and its atomic producer-state+append SHOULD:
@@ -167,8 +169,19 @@ MUST and its atomic producer-state+append SHOULD:
   pre-flattened by Go (JSON parsing stays in Go; Lua receives the frame list),
   ZADD frames, meta update, PUBLISH.
 - `close.lua` — close-only path incl. producer-tuple dedup (`closedBy`).
-- `read_meta_touch.lua` — metadata fetch + sliding-TTL touch (GET path).
 - `delete.lua` — refcount-aware delete/soft-delete + cascade GC walk.
+- `incr_ref.lua` and `decr_ref.lua` — fork-source reference accounting and
+  cross-stream cascade steps.
+
+Reads use `read.lua`. One invocation loads metadata once and returns the same
+field map in its reply. A root invocation captures or validates the typed
+`ReadSnapshot`. A range invocation validates one root or inherited segment and
+returns bounded frames. Neither invocation reads the producer hash. A valid
+non-expiring or absolute-expiry-only read performs no Redis write. Only the first
+root snapshot of a logical sliding-TTL read updates `accessedAtNs` and its key
+TTL. Continuations, long-poll rechecks, inherited ranges, sealing, repair, and
+SSE attach refreshes are no-touch. Lazy expiry cleanup and one-time legacy
+incarnation migration are explicit exceptions.
 
 Tradeoff vs `MULTI/EXEC`+`WATCH`: optimistic transactions would need
 read-modify-write retry loops for producer validation and give weaker
@@ -186,36 +199,47 @@ NOSCRIPT→full-source-EVAL reload. See
 
 ### 4.5 Live tailing: pub/sub with a re-check, plus poll fallback
 
-`WaitForMessages` (same signature as Caddy's):
+The HTTP handler first calls `ReadPage`. That page is the logical client access
+and supplies the response content type, captured tail, closed state,
+incarnation, and next offset. If a long-poll is caught up, `WaitForPage` then:
 
-1. Fast path: closed-at-tail check, then a `Read` — if frames exist, return.
-2. SUBSCRIBE `ds:notify:{<path>}`, then **re-Read before waiting** (an append
-   between step 1 and the subscribe must not be missed — pub/sub is
-   fire-and-forget).
-3. Wait for: notification → re-Read; context/timeout → return `timedOut`;
-   close notification → return `streamClosed`.
-4. Defensive poll every 1 s while waiting (covers dropped pub/sub messages on
-   connection churn; conformance tolerates this latency only as a fallback, the
-   pub/sub path is the primary wake).
+1. Subscribes to `ds:notify:{<path>}` and confirms the subscription.
+2. Captures a fresh no-touch page and requires the same stream incarnation as
+   the first page. This closes the attach race because an append between the
+   first read and the subscription is visible in the recheck.
+3. Waits for a notification, a one-second defensive poll, or the timeout. Each
+   branch performs the same no-touch recheck.
+4. Returns a typed `ReadWaitResult`. Its final page is authoritative for a wake,
+   close, or timeout, so the handler does not reload metadata or producer state.
+
+`WaitForMessages` remains on the base `Store` interface for source
+compatibility. Maintained backends and the HTTP handler use the typed
+`PageWaiter` path.
 
 Keyspace notifications were rejected: they require `notify-keyspace-events`
 server config that managed Redis frequently locks down, and they fire per-command
 rather than per-protocol-event. Plain `PUBLISH` from the mutation scripts is
 explicit and config-free.
 
-The SSE loop mirrors Caddy's: read → emit `data` + `control` events → wait
-(WaitForMessages with short timeout) → loop, closing on reconnect interval or
-`streamClosed` per spec §5.8.
+SSE starts with the same first `ReadPage` already held by `handleRead`. The
+shared stream hub subscribes and performs a no-touch durable refresh from that
+snapshot tail before it reports ready. The handler emits its existing first
+page, continues under the same snapshot, and attaches at the last flushed
+control offset. It does not perform another initial read or a metadata reload
+after catch-up. The hub then performs one logical durable refresh for all local
+clients after each wake or defensive poll.
 
 ### 4.6 TTL and expiry
 
-Mirrors the Caddy stores' **lazy expiry** (`IsExpired` checked on every access)
-as the source of truth — `lastAccessedAt` is bumped by GET/POST (not HEAD) inside
-the Lua scripts, satisfying the sliding-window MUSTs exactly. On top, a Redis key
-TTL (`PEXPIRE`, TTL + 60 s slack, refreshed on access) acts as garbage collection
-so idle expired streams don't leak memory. Exception: streams with `refCount > 0`
-or `softDeleted` never carry key TTLs (fork readers need the data); cascade GC
-deletes them explicitly.
+The Caddy stores' lazy expiry rule remains the source of truth. Chronicle checks
+`IsExpired` at the first root snapshot. An append updates `lastAccessedAt`. A
+logical client read updates it once only when the stream has a sliding TTL.
+Persistent and absolute-expiry-only reads do not update metadata or key expiry.
+`HEAD`, continuation pages, long-poll rechecks, inherited source ranges, and
+internal reads are no-touch. A Redis key TTL with 60 seconds of slack acts only
+as garbage collection. Streams with `refCount > 0` or `softDeleted` never carry
+key TTLs because forks still need their data. Cascade GC deletes them
+explicitly.
 
 `noeviction` is the required maxmemory policy (documented in deployment docs):
 any LRU/random eviction would silently truncate streams.
@@ -246,10 +270,11 @@ response-budget-bounded reads for multi-GB streams under lowered
 it reproduces the reference memory store's message-list contract almost 1:1
 (lowest conformance risk), uses a fixed key set per Lua script (no cluster
 declared-keys RETRY protocol), and makes fork sub-offset resolution trivial.
-Doc 05 is the blueprint for the scale-up backend if byte-bounded reads or
-per-stream sizes beyond node comfort become requirements; everything else in
-doc 05 (pub/sub wake protocol, HEXPIRE producer records, lazy TTL + backstop
-key TTLs, noeviction posture, honest durability guarantees) is adopted as-is.
+Doc 05 remains the blueprint if a chunked-STRING layout or per-stream sizes
+beyond node comfort become requirements. Chronicle adopted its pub/sub wake
+protocol, lazy TTL plus backstop key TTLs, noeviction posture, and durability
+accounting. It did not adopt field-level `HEXPIRE`: producer records stay in the
+stream's producer hash and share the stream lifetime.
 
 ### 4.10 Subscription fan-out after append
 

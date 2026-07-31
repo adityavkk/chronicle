@@ -163,15 +163,19 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
 
   Four rules protect this boundary:
 
-  1. **Subscribe before attaching.** The hub confirms its Redis subscription,
-     performs a durable read, and only then reports ready.
-  2. **Recheck the durable stream.** A wake is only a hint. The hub reads Redis
+  1. **Reuse the first typed page.** `handleRead` supplies content type, tail,
+     closure, incarnation, and the first catch-up frames without loading producer
+     state. The SSE handler does not repeat that read.
+  2. **Subscribe before attaching.** The hub confirms its Redis subscription,
+     performs a no-touch durable read from the first snapshot tail, and only then
+     reports ready.
+  3. **Recheck the durable stream.** A wake is only a hint. The hub reads Redis
      after a hint and once per second while idle. A lost Pub/Sub message delays
      delivery by at most one poll. It does not lose data.
-  3. **Name each stream lifetime.** Every create stores a random 128-bit
+  4. **Name each stream lifetime.** Every create stores a random 128-bit
      incarnation ID. If a path is deleted and recreated, the old hub stops
      instead of serving the new stream with old state.
-  4. **Bound slow consumers.** The replay window is 1 MiB by default and each
+  5. **Bound slow consumers.** The replay window is 1 MiB by default and each
      client flush has a ten-second deadline. A lagging client disconnects and
      resumes from the last control offset it actually received.
 
@@ -255,9 +259,10 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   CPU profiles now point mostly at socket syscalls. Allocation profiles also
   show per-client control framing, Redis connection buffers, and stream-key
   escaping. The next high-value work is to reduce per-client control
-  allocations, multiplex notification subscriptions by Redis shard, bound large
-  historical reads, and remove repeated key-escaping work. Those are separate
-  improvements. None should weaken the conformance or Jepsen gates.
+  allocations, multiplex notification subscriptions by Redis shard, reduce the
+  remaining per-client historical replay work, and remove repeated key-escaping
+  work. Those are separate improvements. None should weaken the conformance or
+  Jepsen gates.
 
   The runtime metrics snapshots were taken after the clients disconnected.
   They therefore do not measure peak memory during a slow-client or reconnect

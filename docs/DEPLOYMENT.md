@@ -7,7 +7,7 @@ what the Redis deployment must provide and what guarantees you get back.
 
 | Requirement | Why | If unavailable |
 | --- | --- | --- |
-| Redis ≥ 7.4 (8.x recommended) | `HEXPIRE` for producer-state aging; otherwise standard commands | producer state never ages out (bounded by stream lifetime — acceptable) |
+| Redis ≥ 6.0 (managed Redis 8 recommended) | `EVALSHA`, pub/sub, `ZRANGEBYLEX`, and key-level `PEXPIRE` / `PERSIST` | chronicle cannot run without these commands |
 | `EVAL`/`EVALSHA` permitted | every mutation is one atomic Lua script | chronicle cannot run — this is a hard requirement |
 | Pub/sub permitted | long-poll/SSE wakeups | hard requirement (waiters would degrade to pure polling) |
 | `maxmemory-policy noeviction` | eviction silently truncates stream data | chronicle warns at startup when it can read the config; reads detect missing data and fail loudly rather than serve corrupt streams |

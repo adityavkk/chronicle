@@ -1,0 +1,328 @@
+---
+title: "Read a non-expiring stream, <em>without writing it back to Redis</em>"
+summary: "Ordinary reads used to update access metadata, run four PERSIST commands, load metadata twice inside Lua, and fetch producer state in the HTTP handler. The read-only fast path removes that work while keeping sliding expiry exact."
+eyebrow: "Architecture"
+meta: "Performance improvements · read-only fast path"
+deck: "A persistent stream does not need an access timestamp or a TTL refresh. Chronicle now returns the metadata from its atomic read, carries a typed snapshot through HTTP, long-poll, and SSE, and writes only when expiry or legacy migration requires it."
+byline:
+  - label: "GET HGETALL"
+    value: "6 → 2"
+  - label: "GET read-side writes"
+    value: "5 → 0"
+  - label: "GET AOF growth"
+    value: "+86 B → 0"
+  - label: "Issue"
+    value: "GPA/chronicle#7"
+    href: "https://gecgithub01.walmart.com/GPA/chronicle/issues/7"
+---
+
+import Tldr from "../components/Tldr.astro";
+import SectionHead from "../components/SectionHead.astro";
+import Callout from "../components/Callout.astro";
+import Table from "../components/Table.astro";
+import Aside from "../components/Aside.astro";
+import Step from "../components/Step.astro";
+import RedisTrace from "../components/RedisTrace.astro";
+import ReadOnlyResults from "../components/ReadOnlyResults.astro";
+import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
+
+<SimpleBeforeAfter
+  id="simple-explanation"
+  title="A persistent read now observes state without changing it"
+  intro="The client makes the same GET, long-poll, or SSE request. Chronicle changed the internal path that gathers stream state and closes read races."
+  clientAction="Read a stream from a durable offset, with the same response headers and body as before."
+  oldLabel="Load, touch, then load again"
+  oldSummary="The handler and Lua script repeated metadata work, and every first read touched access state even when the stream had no expiry."
+  oldSteps={[
+    { actor: "HTTP handler", action: "Loads complete stream metadata and the producer hash before reading data." },
+    { actor: "Redis read script", action: "Loads metadata to validate existence, expiry, and the read snapshot." },
+    { actor: "Redis read script", action: "Writes the access timestamp and runs PERSIST on four keys for a non-expiring stream." },
+    { actor: "Redis read script", action: "Loads the same metadata again to build its reply." },
+  ]}
+  newLabel="Read once and carry the snapshot"
+  newSummary="One atomic page returns both data and the typed stream state needed by the rest of the request."
+  newSteps={[
+    { actor: "HTTP handler", action: "Starts with one bounded read instead of a producer-bearing metadata fetch." },
+    { actor: "Redis read script", action: "Loads metadata once and validates the same expiry and snapshot rules." },
+    { actor: "Pure access rule", action: "Skips the access write when no sliding TTL is configured." },
+    { actor: "Typed read result", action: "Carries content type, tail, closure, incarnation, and expiry state through HTTP, wait, and SSE work." },
+  ]}
+  changed="Chronicle removed duplicate metadata reads, producer-state reads, and non-expiring access writes from the read path."
+  unchanged="Clients receive the same frames, headers, offsets, closure state, cache rules, and expiry behavior."
+  downside="Every bounded page still runs one Lua script and reads metadata once. A legacy stream without an incarnation performs one migration write."
+/>
+
+<Tldr>
+  <ul>
+    <li><strong>Before:</strong> a five-byte GET issued six <code>HGETALL</code> calls, one <code>HSET</code>, and four <code>PERSIST</code> commands.</li>
+    <li><strong>Now:</strong> the same GET issues two <code>HGETALL</code> calls across its two bounded pages and no Redis write command.</li>
+    <li><strong>Expiry stays exact:</strong> a sliding TTL renews once at the first root snapshot. Absolute expiry, continuations, inherited ranges, sealing, repair, and wait rechecks do not renew it.</li>
+    <li><strong>Measured limit:</strong> the command and persistence deltas are deterministic. Short local shell timings are too noisy to support a throughput multiplier.</li>
+  </ul>
+</Tldr>
+
+<Callout icon="arrow" label="Performance improvements">
+  This fix is one Chronicle performance workstream. The
+  [performance improvements index](../) links to bounded catch-up, shared SSE
+  fanout, immutable segments, horizontal scaling, and the retained evidence.
+</Callout>
+
+<section class="block" id="old-path">
+  <SectionHead num="01" label="Before" title="One logical read caused <em>repeated reads and writes</em>" />
+
+  The old HTTP handler called `Store.Get` before its first bounded page. The
+  Redis implementation pipelined one `HGETALL` for stream metadata and another
+  for the producer hash. Producer state is required for append fencing. A
+  reader does not use it.
+
+  The old Lua script then loaded metadata through `meta_map`, wrote
+  `accessedAtNs`, and called `refresh_backstop`. A stream with no TTL or absolute
+  deadline reached the `PERSIST` branch for its metadata, messages, producer,
+  and fork keys. The script finally called `HGETALL` again to return metadata it
+  had already loaded.
+
+  A five-byte GET used two bounded pages. The handler and both script calls
+  produced six `HGETALL` commands in total. Its first page also produced one
+  `HSET` and four `PERSIST` commands. An empty SSE attach added another bounded
+  read and another access touch.
+
+  <Table>
+    | Repeated work | Plain GET | Empty SSE attach |
+    | --- | ---: | ---: |
+    | `HGETALL` | 6 | 8 |
+    | `HSET` access timestamp | 1 | 2 |
+    | `PERSIST` | 4 | 8 |
+    | `EVALSHA` | 2 | 3 |
+  </Table>
+
+  The five read-side write commands grew the local AOF by 86 bytes and moved
+  the primary replication offset by one. `PERSIST` did not change already
+  persistent keys, but Redis still had to execute the commands inside Lua.
+</section>
+
+<section class="block" id="read-contract">
+  <SectionHead num="02" label="Read contract" title="One atomic page returns <em>data and typed state</em>" />
+
+  The new `ReadSnapshot` is the read projection of stream metadata. It contains
+  the tail, content type, closed state, incarnation, expiry configuration, and
+  fork boundary needed by readers. It does not contain producer epochs or
+  sequence state.
+
+  <Step
+    n={1}
+    fn="ReadSnapshotFromMetadata"
+    loc="store/page.go:53"
+    role="Pure Go projects stream metadata into the fields a reader may use. Producer state does not cross this boundary."
+  >
+    Pointer fields are copied, so the snapshot owns its expiry and fork values.
+    A delete and recreation cannot mutate an earlier response snapshot.
+  </Step>
+
+  <Step
+    n={2}
+    fn="meta_flat"
+    loc="store/redis/scripts/common.lua:21"
+    role="Lua flattens the metadata map that the read already loaded instead of issuing another HGETALL for its reply."
+  >
+    Go decodes raw field and value pairs at one Redis boundary. Typed results are
+    used above that boundary.
+  </Step>
+
+  <Step
+    n={3}
+    fn="ShouldRenewReadAccess"
+    loc="store/page.go:82"
+    role="The pure Go rule returns true only when the stream has a configured sliding TTL."
+  >
+    `should_touch_read` in `common.lua` mirrors this decision. Differential
+    tests run persistent, absolute, sliding, and combined internal cases through
+    MemoryStore and Redis.
+  </Step>
+
+  <RedisTrace
+    script="read.lua"
+    source="store/redis/scripts/read.lua"
+    label="One bounded root page"
+    steps={[
+      { cmd: "HGETALL", key: "ds:{path}:meta", does: "Load metadata once for existence, expiry, incarnation, and the response snapshot.", loc: "common.lua:10", kind: "read" },
+      { cmd: "validate", does: "Apply lazy expiry, soft-deletion, and incarnation fencing before any frame is returned.", loc: "read.lua:29", kind: "flow" },
+      { cmd: "HSET + TTL", key: "stream keys", does: "Renew access and apply the exact PEXPIRE or PERSIST backstop required by the first root snapshot of a sliding-TTL read.", when: "sliding TTL only", loc: "read.lua:60", kind: "ttl" },
+      { cmd: "ZRANGEBYLEX", key: "ds:{path}:msg", does: "Read the bounded whole-frame range for this page.", when: "frames requested", loc: "read.lua:105", kind: "read" },
+      { cmd: "return map", does: "Return the metadata table already in Lua memory. No second Redis command is needed.", loc: "read.lua:158", kind: "flow" },
+    ]}
+    caption="A persistent stream skips step three. Legacy incarnation migration and lazy expiry cleanup are separate, explicit write cases."
+  />
+</section>
+
+<section class="block" id="expiry">
+  <SectionHead num="03" label="Expiry" title="Only a sliding root snapshot <em>renews access</em>" />
+
+  The access decision is made for each logical read, not for each storage page.
+  The first root page may renew a sliding TTL. Every continuation carries the
+  captured snapshot and sets the read script to no-touch.
+
+  <Table wide>
+    | Read case | Access timestamp | Key expiry work | Reason |
+    | --- | --- | --- | --- |
+    | New non-expiring root | unchanged | none | No deadline exists to renew |
+    | Absolute expiry | unchanged | none | The configured deadline is fixed |
+    | First sliding-TTL root snapshot | renewed once | exact backstop refresh | One logical client access |
+    | Page continuation | unchanged | none | It belongs to the captured logical read |
+    | Inherited fork-source range | unchanged | none | Reading a child must not keep its source alive |
+    | Sealing or repair validation | unchanged | none | Internal maintenance is not client access |
+    | Long-poll race recheck | unchanged | none | The first page already recorded access |
+    | Legacy root without incarnation | unchanged | one `HSETNX` | Persist one stable delete/recreate fence |
+    | Read after lazy expiry | not renewed | delete or soft-delete cleanup | Expired state must become invisible and release references safely |
+  </Table>
+
+  The implementation does not coalesce TTL touches or round the protocol
+  boundary. Tests use the minimum supported sliding TTL and exact fake-clock
+  boundaries. A read at the expiry instant remains valid because Chronicle's
+  existing rule expires only after the deadline.
+
+  <Aside label="Zero-write scope" summary="The claim applies to a valid, non-expiring stream after any legacy migration">
+    A stream discovered after expiry must still run lazy cleanup. A legacy root
+    without an incarnation must still store one random incarnation. Those writes
+    preserve visibility, fork references, and delete/recreate fencing. The
+    steady state does not hide either case inside its benchmark.
+  </Aside>
+</section>
+
+<section class="block" id="http-paths">
+  <SectionHead num="04" label="HTTP paths" title="GET, long-poll, and SSE reuse <em>authoritative page state</em>" />
+
+  The first bounded page now supplies every field the handler needs to frame a
+  response. Authorization still runs before existence checks. Invalid reads use
+  a no-touch projection to preserve the existing authorization, existence, and
+  validation order without loading producer state.
+
+  <Step
+    n={1}
+    fn="handleRead"
+    loc="handler.go:426"
+    role="One first page supplies content type, snapshot tail, closure, incarnation, and the next offset for plain reads and offset=now."
+  >
+    JSON envelopes, binary framing, cache headers, cursors, stale offsets,
+    beyond-tail offsets, and closed-stream responses keep their existing wire
+    behavior.
+  </Step>
+
+  <Step
+    n={2}
+    fn="WaitForPage"
+    loc="store/redis/notify.go:100"
+    role="Long-poll subscribes, confirms the subscription, then performs a no-touch durable recheck fenced to the first snapshot."
+  >
+    The final typed page is authoritative on wake, close, or timeout. The
+    handler no longer calls `Get` after waiting to reconstruct response headers.
+  </Step>
+
+  <Step
+    n={3}
+    fn="handleSSE"
+    loc="handler_sse.go:17"
+    role="SSE gives its first page to the stream hub instead of performing another bounded read."
+  >
+    The hub subscribes before its no-touch durable refresh, which closes the
+    attach race. Its incarnation fence rejects a delete and recreation between
+    catch-up and live delivery.
+  </Step>
+
+  The immutable-segment wrapper uses the same read projection for sealing,
+  repair, transition, pinning, first reads, and waits. It no longer calls the
+  producer-bearing `Get` method for that work. MemoryStore implements the same
+  snapshot and wait contract, so tests can compare the two maintained backends.
+</section>
+
+<section class="block" id="results">
+  <SectionHead num="05" label="Results" title="The command delta is exact; <em>the timing delta is small</em>" />
+
+  <ReadOnlyResults />
+
+  Both versions ran on the same local host against Redis 8.10.0 with AOF
+  enabled. Lua scripts were warmed. The GET read one five-byte `text/plain`
+  frame from offset `-1`. The SSE case attached to an empty persistent stream.
+  Unique `ECHO` markers isolated each request in Redis `MONITOR`.[^evidence]
+
+  Sixteen concurrent first reads of a newly created non-expiring stream produced
+  one metadata `HGETALL` per read and zero `HSET`, `HSETNX`, `PEXPIRE`, or
+  `PERSIST` commands. PTTL values for the metadata, message, producer, and fork
+  keys did not change. A separate legacy case produced one `HSETNX` on its first
+  read and none on its second.
+
+  <Table>
+    | Local shell loop | Base | Read-only path |
+    | --- | ---: | ---: |
+    | 200 serial five-byte GETs | 2.23 s | 2.20 s |
+    | 50 serial SSE attaches with a 100 ms client deadline | 6.06 s | 5.78 s |
+  </Table>
+
+  These loops include one `curl` process start per request. They are not a
+  server-throughput benchmark, and the result does not support a speedup
+  multiplier. The Redis command, AOF, replication-offset, and key-expiry deltas
+  are the evidence for the mechanism.
+</section>
+
+<section class="block" id="correctness">
+  <SectionHead num="06" label="Correctness" title="The faster path keeps <em>the same stream lifetime</em>" />
+
+  The tests cover returned bytes and the commands that Redis executes. The
+  handler tests also use a counting store to reject any producer-bearing `Get`
+  from plain GET, HEAD, long-poll timeout, and SSE attach or refresh work.
+
+  <Table>
+    | Gate | Result |
+    | --- | --- |
+    | Redis MONITOR command tests | **Persistent, concurrent, legacy, and minimum-TTL cases passed** |
+    | MemoryStore and Redis differential tests | **Persistent, absolute, sliding, and combined internal expiry decisions matched** |
+    | Go unit, integration, and race suites | **All packages passed** |
+    | golangci-lint | **0 issues** |
+    | Durable Streams conformance | **332 / 332 passed** |
+    | Jepsen durability suite | **Baseline, Chronicle restart, Redis restart, paged network interruption, and SSE resume passed** |
+    | Jepsen read-expiry scenario | **Sliding renewal, HEAD no-touch, absolute expiry, and persistent reads passed** |
+  </Table>
+
+  Existing and focused cases cover soft deletion, ref-counted fork sources,
+  closure, offset `now`, stale and beyond-tail reads, multi-page continuation,
+  immutable sealing reads, long-poll timeout and close races, SSE attach, and
+  delete and recreation between pages. The paged Jepsen scenario also reads
+  across client interruption, every Chronicle origin restarting, and Redis
+  restarting.[^jepsen]
+
+  <Callout icon="alert" label="Release rule">
+    A read optimization may remove duplicate work. It may not relax expiry
+    precision, producer fencing, snapshot consistency, fork inheritance,
+    closure, cursor progress, or response framing. Conformance, differential,
+    race, lint, and Jepsen failures remain release blockers.
+  </Callout>
+</section>
+
+<section class="block" id="limits">
+  <SectionHead num="07" label="Limits" title="What the read-only path <em>still has to do</em>" />
+
+  - **Every page still reads metadata once.** A long catch-up uses several
+    bounded Lua calls because each page validates its fixed snapshot.
+  - **Legacy migration writes once.** A root created before incarnation IDs
+    stores one random ID on its first direct read.
+  - **Expired streams still need cleanup.** Lazy expiry may delete keys or mark
+    a referenced fork source as soft-deleted.
+  - **Sliding TTL still writes with exact timing.** The first root snapshot for
+    each logical read updates access state and refreshes the Redis backstop.
+  - **SSE still performs durable safety reads.** Pub/Sub remains a wake hint.
+    The hub reads Redis after notifications and during its safety poll.
+  - **Producer mutations still fetch producer state.** Append and a
+    producer-fenced close need the epoch and sequence fence. This change removes
+    producer state only from non-producer read work.
+  - **No throughput multiplier is claimed.** The retained local timing loops
+    are dominated by client process startup and short-run noise.
+
+  <Callout icon="arrow" label="Related records">
+    Return to [Performance improvements](../). Read the complete
+    [measurement record](https://github.com/adityavkk/chronicle/blob/main/docs/research/12-read-only-fast-path-results.md),
+    or track the work in
+    [GPA/chronicle issue #7](https://gecgithub01.walmart.com/GPA/chronicle/issues/7).
+  </Callout>
+</section>
+
+[^evidence]: The [read-only fast path results](https://github.com/adityavkk/chronicle/blob/main/docs/research/12-read-only-fast-path-results.md) record the exact Redis command counts, AOF and replication-offset deltas, key-expiry checks, local timings, environment, and measurement limits.
+[^jepsen]: The [`paged-catchup`, `sse-resume`, and `read-expiry` scenarios](https://github.com/adityavkk/chronicle/blob/main/jepsen/README.md) cover client interruption, Chronicle and Redis replacement, SSE resume, closure, and read behavior around sliding and absolute expiry.

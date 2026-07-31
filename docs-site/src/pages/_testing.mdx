@@ -123,10 +123,11 @@ import Aside from "../components/Aside.astro";
     | Producer fencing state machine (pure oracle) | PROTOCOL §5.2.1: first contact is seq 0; stale epoch is `ErrStaleEpoch`; an epoch bump must restart at seq 0; duplicate returns the highest accepted seq | [^producer] |
     | **DIFFERENTIAL** parity: Redis Lua vs pure-Go oracle | the Lua append path is byte-identical to `ValidateProducer` per row, plus the persisted hash matches and a write lands iff the row is accepted | [^differential] |
     | Forks / branching | stitched reads, JSON vs binary sub-offsets, `RefCount`, soft-delete-through, and a hard cascade that wipes every Redis key | [^fork] |
-    | TTL & expiry | sliding window renewed by Read/Append but not Get; absolute `ExpiresAt`; fork TTL inheritance; expired-source-with-forks flips to soft-deleted | [^ttl] |
+    | TTL & expiry | sliding window renewed once by the first root read and by append, but not by metadata lookup or continuation; absolute `ExpiresAt`; fork TTL inheritance; expired-source-with-forks flips to soft-deleted | [^ttl] |
+    | Read-only HTTP projection | persistent reads issue zero `HSET`, `HSETNX`, `PEXPIRE`, and `PERSIST`; legacy incarnation migrates once; minimum sliding TTL touches only the first snapshot; GET, long-poll, and SSE never fetch producer state | [^readfast] |
     | Redis keyspace & hash-tag co-location | the `meta`/`msg`/`prod`/`forks` keys per stream share one hash tag for one cluster slot; user braces escaped injectively | [^keys] |
     | Frame encoding & lex bounds | an `offset` then `|` then raw bytes, stored in a ZSET at score 0; round-trips adversarial bytes; sorting frames equals sorting by offset | [^frame] |
-    | Notify / long-poll & SSE wakeups | `WaitForMessages` wakes in under a second via pub/sub, returns immediately on present data, times out at tail, wakes on close, honors cancellation | [^notify] |
+    | Typed long-poll and shared SSE wakeups | `WaitForPage` closes the subscribe race with no-touch typed rechecks; the SSE hub shares one subscription and live read, recovers dropped hints by polling, and fences stream recreation | [^notify] |
     | Stream closure & seq dedup | `CloseStream` idempotent with a stable `FinalOffset`; append-to-closed is `ErrStreamClosed`; seq dedup is bytewise lex (`"10"` after `"2"` is rejected) | [^closure] |
     | Redis metadata round-trip | `StreamMetadata` ↔ hash fields losslessly, nanosecond `ExpiresAt` fidelity; minimal meta leaves optional fields absent | [^meta] |
   </Table>
@@ -607,13 +608,15 @@ import Aside from "../components/Aside.astro";
 
 [^fork]: Forks / branching, stitched reads, sub-offsets, refcount, soft-delete cascade: [`store/redis/fork_test.go:13`](https://github.com/adityavkk/chronicle/blob/main/store/redis/fork_test.go) (real Redis) and [`store/memory_store_test.go:579`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go) (MemoryStore). Asserts `testClient.Exists(...)==0` after a hard cascade.
 
-[^ttl]: TTL & expiry, sliding window, absolute, fork inheritance: [`store/redis/differential_test.go:120`](https://github.com/adityavkk/chronicle/blob/main/store/redis/differential_test.go) (real Redis) and [`store/memory_store_test.go:647`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go) (`IsExpired` and per-op expiry). Read/Append renew; Get does not.
+[^ttl]: TTL & expiry, sliding window, absolute, fork inheritance: [`store/redis/differential_test.go:120`](https://github.com/adityavkk/chronicle/blob/main/store/redis/differential_test.go) (real Redis) and [`store/memory_store_test.go:647`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go) (`IsExpired` and per-op expiry). The first root `ReadPage` and `Append` renew a sliding TTL. `Store.Get` and page continuations do not.
+
+[^readfast]: Read command shape and legacy migration: [`store/redis/read_commands_test.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/read_commands_test.go). HTTP GET, long-poll, and SSE projection boundaries: [`handler_read_projection_test.go`](https://github.com/adityavkk/chronicle/blob/main/handler_read_projection_test.go).
 
 [^keys]: Redis keyspace, hash-tag co-location & escaping: [`store/redis/keys_test.go:14`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys_test.go); `TestEscapePathHashTagSafety` counts braces and asserts injective escaping. Schema in [`store/redis/keys.go:36`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go).
 
 [^frame]: Frame encoding & lex bounds (the ZSET model invariant): [`store/redis/keys_test.go:140`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys_test.go). `TestFrameLexOrderEqualsStreamOrder` sorts a shuffled adversarial frame list; `lexLowerBound` is exclusive, defined in [`store/redis/keys.go:66`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go).
 
-[^notify]: Notify / long-poll & SSE wakeups (`WaitForMessages`): [`store/redis/notify_test.go:12`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify_test.go) (real Redis pub/sub) and [`store/memory_store_test.go:233`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go). Timing bounds: under one second proves pub/sub, under 200ms proves the fast path ([`store/redis/notify_test.go:31`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify_test.go)).
+[^notify]: Typed long-poll race closure and compatibility behavior: [`store/redis/notify_test.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify_test.go). Shared SSE subscription, attach-race, dropped-hint, expiry, and incarnation tests: [`sse_hub_test.go`](https://github.com/adityavkk/chronicle/blob/main/sse_hub_test.go).
 
 [^closure]: Stream closure & seq dedup (offset-byte append guard): [`store/redis/integration_test.go:287`](https://github.com/adityavkk/chronicle/blob/main/store/redis/integration_test.go) and [`store/memory_store_test.go:349`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go). Seq dedup is bytewise lex: `"10"` after `"2"` is `ErrSequenceConflict`.
 

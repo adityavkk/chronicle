@@ -99,8 +99,12 @@ writer for initial catch-up. The fanout ring may retain formatted live events,
 but it must not build a second full catch-up body.
 
 The fanout branch caps its defensive poll by sliding TTL. Preserve that rule.
-Every root `ReadPage` is an active read and renews the root stream. Reading an
-inherited fork page must not renew its source.
+The first root page of one logical client read renews access only when the root
+has a sliding TTL. Continuation pages and inherited fork ranges are no-touch.
+The hub's initial subscribe-then-refresh is also no-touch because the client
+already performed its logical first read. Later shared hub refreshes count as
+active reads, but persistent and absolute-expiry-only streams still perform no
+read-side write.
 
 ## Combined tests
 

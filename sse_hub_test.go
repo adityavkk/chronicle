@@ -511,7 +511,7 @@ func TestSSEHubRecreatedStreamReplacesHubWithOldLeaseStillOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldLease := h.acquireSSEHub("/test", oldMeta, false)
+	oldLease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(oldMeta), false)
 	defer oldLease.close()
 	if err := oldLease.waitReady(context.Background()); err != nil {
 		t.Fatal(err)
@@ -533,7 +533,7 @@ func TestSSEHubRecreatedStreamReplacesHubWithOldLeaseStillOpen(t *testing.T) {
 	if oldMeta.Incarnation == newMeta.Incarnation {
 		t.Fatalf("recreated stream reused incarnation %q", oldMeta.Incarnation)
 	}
-	newLease := h.acquireSSEHub("/test", newMeta, false)
+	newLease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(newMeta), false)
 	defer newLease.close()
 	if newLease.hub == oldLease.hub {
 		t.Fatal("recreated stream reused the old incarnation's hub")
@@ -1069,7 +1069,7 @@ func TestSSEHubRingBytesTracksRetainedBytesThroughEvictionAndCleanup(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease := h.acquireSSEHub("/test", meta, false)
+	lease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(meta), false)
 	if err := lease.waitReady(t.Context()); err != nil {
 		t.Fatal(err)
 	}

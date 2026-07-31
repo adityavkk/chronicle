@@ -49,6 +49,7 @@ type Store struct {
 var (
 	_ store.Store      = (*Store)(nil)
 	_ store.PageReader = (*Store)(nil)
+	_ store.PageWaiter = (*Store)(nil)
 )
 
 // New wraps a go-redis client as a store.Store. The store takes ownership
@@ -699,18 +700,17 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 
 	var snapshot store.ReadSnapshot
 	if opts.Snapshot == nil {
-		snapshot = store.ReadSnapshot{
-			Tail:        root.meta.CurrentOffset,
-			ContentType: root.meta.ContentType,
-			Closed:      root.meta.Closed,
-			Incarnation: root.meta.Incarnation,
-		}
+		snapshot = store.ReadSnapshotFromMetadata(root.meta)
 	} else {
 		snapshot = *opts.Snapshot
 	}
 
+	readOffset := offset
+	if readOffset.IsNow() {
+		readOffset = snapshot.Tail
+	}
 	page := store.ReadPage{
-		NextOffset: offset,
+		NextOffset: readOffset,
 		Snapshot:   snapshot,
 		Stats: store.ReadPageStats{
 			RequestedBytes:     opts.TargetBytes,
@@ -719,7 +719,7 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 		},
 	}
 
-	segments, err := s.readSegments(ctx, path, root.meta, offset, snapshot.Tail, true)
+	segments, err := s.readSegments(ctx, path, root.meta, readOffset, snapshot.Tail, true)
 	if err != nil {
 		return store.ReadPage{}, err
 	}
@@ -790,6 +790,9 @@ func (s *Store) Read(path string, offset store.Offset) ([]store.Message, bool, e
 	for {
 		page, err := s.ReadPage(context.Background(), path, next, store.ReadPageOptions{Snapshot: snapshot})
 		if err != nil {
+			if errors.Is(err, store.ErrStreamSoftDeleted) {
+				err = store.ErrStreamNotFound
+			}
 			return nil, false, err
 		}
 		if snapshot == nil {
@@ -851,8 +854,10 @@ func (s *Store) runReadPageScript(
 		return nil, err
 	}
 	switch status {
-	case stNotFound, stSoftDel:
+	case stNotFound:
 		return nil, store.ErrStreamNotFound
+	case stSoftDel:
+		return nil, store.ErrStreamSoftDeleted
 	case stSnapshot:
 		return nil, store.ErrReadSnapshotChanged
 	case stMissing:
