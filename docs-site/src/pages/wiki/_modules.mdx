@@ -26,7 +26,8 @@ import Aside from "../../components/Aside.astro";
     <li><strong>The shell is the only networked code.</strong> <code>Handler.ServeHTTP</code> sets headers, guards the <code>__ds</code> namespace, and dispatches one <code>switch</code> over five verbs to five handlers. No router, no route table.</li>
     <li><strong>The core is pure functions.</strong> TTL and offset grammars, cursor math, and the producer state machine (<code>ValidateProducer</code>) decide everything possible without I/O, so they test without mocks.</li>
     <li><strong>The handler never names Redis.</strong> It depends on <code>store.Store</code> plus narrow typed read, wait, and notification capabilities. The Redis backend and in-memory reference backend expose the same behavior.</li>
-    <li><strong>Each single-stream mutation step is one Lua script.</strong> Append, close, delete, and an ordinary create run as one <code>EVALSHA</code>, so validation and writes are atomic per stream. Fork creation composes two single-slot scripts in Go. <code>read.lua</code> returns the typed read projection without producer state.</li>
+    <li><strong>Each single-stream mutation step is one Lua script.</strong> Append, close, delete, and an ordinary create run as one <code>EVALSHA</code>, so validation and writes are atomic per stream. Fork creation composes two single-slot scripts in Go.</li>
+    <li><strong>A root-owned read page is one Lua script.</strong> <code>read.lua</code> loads metadata once, fixes the response tail, classifies the range, and returns bounded root frames without producer state. New <code>offset=now</code> live reads confirm their notification registration before that page.</li>
     <li><strong>Subscriptions attach through two hooks.</strong> A durable append fires <code>OnStreamAppend</code>; the webhook <code>Manager</code> turns it into a fenced wake, recovered by a sweep so a crash cannot lose or double-deliver it.</li>
   </ul>
 </Tldr>
@@ -68,12 +69,15 @@ import Aside from "../../components/Aside.astro";
 	}
 ```
 
-Each `handle*` method parses the request, calls the required storage capability,
-and turns typed results into status codes and response headers. Mutations make
-one primary store call. Reads use `PageReader`, add `PageWaiter` only when a
-long-poll reaches the tail, and attach SSE to the shared hub after the first
-page. Errors return as values and meet one `writeError`, which maps each `store`
-error variable to its HTTP status.
+Each `handle*` method authorizes and parses the request, calls the required
+storage capability, and turns typed results into status codes, headers, and
+body framing. Mutations make one primary store call. Reads use `PageReader`.
+For a new `offset=now` live read, the handler confirms a
+`NotificationSubscriber` registration before its authoritative first page.
+Numeric long-poll offsets retain `PageWaiter` after the first page. SSE gives
+the first page and confirmed registration to the shared hub. Errors return as
+values and meet one `writeError`, which maps each `store` error to its HTTP
+status.
 
 <Aside label="Edge case" summary="How <code>Mount</code> keeps the handler path-relative">
   <code>Mount</code> wraps the handler. It strips the stream-root prefix
@@ -87,10 +91,12 @@ error variable to its HTTP status.
   <Table>
     | Function | Verb | Calls |
     | --- | --- | --- |
-    | [`handleCreate`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L145) | `PUT` | `Store.Create` → `201`/`200` |
-    | [`handleRead`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L404) | `GET` | `PageReader.ReadPage`, then typed `PageWaiter.WaitForPage` when caught up |
-    | [`handleAppend`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L582) | `POST` | `Store.Append` / `CloseStreamWithProducer` |
-    | [`handleSSE`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go#L18) | `GET live=sse` | reuses the first typed page, then attaches to a shared notification-backed read hub |
+    | [`handleCreate`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L234) | `PUT` | `Store.Create` → `201`/`200` |
+    | [`handleHead`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L405) | `HEAD` | no-touch metadata `ReadPage` → response headers only |
+    | [`handleRead`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L445) | `GET` | optional live registration → `PageReader.ReadPage` → wait or streamed catch-up response |
+    | [`handleAppend`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L823) | `POST` | `Store.Append`, `CloseStream`, or `CloseStreamWithProducer` |
+    | [`handleDelete`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L1074) | `DELETE` | `Store.Delete` → `204` |
+    | [`handleSSE`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go#L17) | `GET live=sse` | reuses the registered first page, then attaches to a shared notification-backed read hub |
     | [`Mount`](https://github.com/adityavkk/chronicle/blob/main/mount.go#L27) | any | wraps the handler, does prefix and `Location` rewriting |
   </Table>
 </section>
@@ -191,6 +197,10 @@ type PageWaiter interface {
 		initial ReadSnapshot, timeout time.Duration,
 		opts ReadPageOptions) (ReadWaitResult, error)
 }
+
+type NotificationSubscriber interface {
+	SubscribeNotifications(ctx context.Context, path string) (NotificationSubscription, error)
+}
 ```
 
 The core type in the contract is the `Offset`. It is two zero-padded 64-bit
@@ -203,10 +213,12 @@ stores implement it with a 1 MiB returned payload target and a 1,024-frame
 page ceiling. The first page captures a `ReadSnapshot` with the tail, content
 type, closed state, expiry configuration, fork boundary, and stream
 incarnation. It contains no producer state. Later pages reuse that snapshot, so
-concurrent appends belong to the next response. `PageWaiter` is the optional
-typed long-poll capability. It subscribes, performs no-touch rechecks, and
-returns the final page for an append, close, or timeout. `WaitForMessages`
-remains on `Store` for source compatibility.
+concurrent appends belong to the next response. `NotificationSubscriber`
+provides the wake registration that a new SSE hub or `offset=now` long-poll
+confirms before page capture. `PageWaiter` retains the typed subscribe and
+no-touch recheck path for numeric long-poll offsets. Every wait returns the
+final page for append, close, or timeout. `WaitForMessages` remains on `Store`
+for source compatibility.
 
 <Complexity
   time="O(log N + M) per storage page"
@@ -293,10 +305,12 @@ matches, write.
   <Table>
     | Piece | Where | Does |
     | --- | --- | --- |
-    | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L459) | `store.go` | reads the tail, frames the batch, runs the script, retries on `RETRY` |
+    | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L533) | `store.go` | reads the tail, frames the batch, runs the script, retries on `RETRY` |
     | [`keysFor`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go#L45) | `keys.go` | builds the four `{path}`-tagged keys for one slot |
-    | [`WaitForPage`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go#L100) | `notify.go` | `SUBSCRIBE`, no-touch typed rechecks, and the authoritative final long-poll page |
-    | [`Delete`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L720) | `store.go` | soft-delete if referenced, else hard-delete and cascade |
+    | [`ReadPage`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L670) | `store.go` | captures one typed root snapshot and returns a bounded root-owned range in the same script |
+    | [`SubscribeNotifications`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go) | `notify.go` | confirms the wake feed used before an `offset=now` page and by shared SSE hubs |
+    | [`waitForRegisteredPage`](https://github.com/adityavkk/chronicle/blob/main/handler_stream.go#L349) | `handler_stream.go` | waits on a confirmed registration, runs no-touch wake and safety-poll pages, and returns the authoritative final page |
+    | [`Delete`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L1119) | `store.go` | soft-deletes if referenced, else hard-deletes and cascades |
   </Table>
 
   <Callout icon="alert" label="Durability">

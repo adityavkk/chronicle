@@ -1,7 +1,7 @@
 ---
 // OpMap.astro — every protocol operation, mapped to its Redis commands.
 //
-// Data-driven: OPS below is rendered to static markup at build time (all ten
+// Data-driven: OPS below is rendered to static markup at build time (all eleven
 // panels in the DOM), and the client script only toggles which panel shows.
 // With JS off, every panel renders stacked in order — nothing is lost.
 // The command sequences mirror store/redis verbatim (scripts.go, notify.go);
@@ -107,6 +107,19 @@ const OPS: Op[] = [
     ],
   },
   {
+    id: "head",
+    tab: "HEAD",
+    script: "read.lua · metadata-only branch",
+    req: ["HEAD /v1/stream/chat HTTP/1.1"],
+    resp: ["200 OK", "Stream-Next-Offset: …0002_…0029", "Cache-Control: no-store", "(no response body)"],
+    steps: [
+      { c: "authorize", n: "run before existence so HEAD cannot reveal an unauthorized path" },
+      { c: "EVALSHA read.lua", k: ":meta", n: "offset=now · NoTouch · load typed metadata once" },
+      { c: "classify", n: "expiry · soft deletion · incarnation; no :prod and no :msg" },
+      { c: "map headers", n: "content type · next offset · closure · TTL or expiry · no-store" },
+    ],
+  },
+  {
     id: "close",
     tab: "POST close",
     script: "close.lua — one atomic script",
@@ -162,8 +175,8 @@ const OPS: Op[] = [
 ---
 
 <Demo
-  label="Every operation, mapped to Redis"
-  caption="Each tab is one protocol operation: the HTTP exchange on the left, the Redis command sequence on the right, in script order, with the key each command touches. Each single-stream mutation step is atomic. Fork creation and delete cascades compose steps across streams and are not atomic as a group."
+  label="Every stream operation, mapped to Redis"
+  caption="Each tab shows the HTTP exchange on the left and its storage sequence on the right. Read tabs include the handler steps that establish registration, snapshot, and response order. Each single-stream mutation step is atomic. Fork creation and delete cascades compose steps across streams and are not atomic as a group."
 >
   <div class="opmap" data-opmap>
     <div class="opmap-tabs" role="tablist">

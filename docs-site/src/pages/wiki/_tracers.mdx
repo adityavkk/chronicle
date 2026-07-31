@@ -23,7 +23,7 @@ import Switch from "../../components/Switch.astro";
 <Tldr>
   <ul>
     <li><strong>A write crosses five files and is decided once.</strong> <code>ServeHTTP</code> routes <code>POST</code> to <code>handleAppend</code>, the backend snapshots the tail and sends one <code>EVALSHA</code>, and <code>append.lua</code> commits or returns <code>RETRY</code> if the live tail moved.</li>
-    <li><strong>A long-poll reads, then subscribes, then re-reads.</strong> The first typed page finds nothing and supplies the stream snapshot. The waiter <code>SUBSCRIBE</code>s before a no-touch recheck. An append in the gap is caught by the recheck or the <code>PUBLISH</code>. The final page supplies the HTTP response without a metadata or producer-state fetch.</li>
+    <li><strong>An <code>offset=now</code> long-poll registers, captures one page, then waits.</strong> The confirmed notification feed covers appends after the atomic page. Its fixed tail includes appends ordered before it. Wake, safety poll, and timeout paths return a fresh no-touch page for the HTTP response.</li>
     <li><strong>A durable append wakes a subscriber, fenced.</strong> <code>onStreamAppend</code> hands off to the webhook manager, which signs a webhook or arms a pull-wake. A <code>generation</code> counter fences every ack, so a crash costs latency and not correctness.</li>
   </ul>
 </Tldr>
@@ -163,10 +163,11 @@ consumer groups and no server-side cursor.
   <SectionHead num="02" label="GET live=long-poll" title="A reader <em>tails</em>" />
 
   A `GET` with `offset=now&live=long-poll` means the caller is at the tail and
-  wants the <em>next</em> write. The fast path reads and finds nothing. The slow
-  path subscribes to a pub/sub channel and blocks. Correctness depends on doing
-  those two steps in the right order. The same tail-follow request has two live
-  modes, and only the `live=` value changes.
+  wants the <em>next</em> write. Chronicle first confirms a notification
+  registration, then captures one atomic root page. The page is authoritative
+  for everything Redis ordered before it, and the registration covers
+  everything ordered after it. The same tail-follow request has two live modes,
+  and only the `live=` value changes.
 
   <Switch name="trace-live" label="Live read modes" tabs={["long-poll", "SSE"]}>
     <div data-panel="0">
@@ -185,84 +186,91 @@ curl -i 'http://localhost:4437/v1/stream/demo?offset=now&live=sse'
     </div>
   </Switch>
 
-  <Diagram name="seq-trace-read" label="Long-poll · call stack" caption="The race this design closes. An append that lands between the fast-path read and the <code>SUBSCRIBE</code> would be missed by a waiter that subscribed too late. Subscribing first and then re-reading means the waiter sees data that arrived in the gap, or the <code>PUBLISH</code> that follows." />
+  <Diagram name="seq-trace-read" label="Long-poll · call stack" caption="Chronicle confirms the registration before the authoritative page. An append ordered before that page is inside its fixed tail. An append ordered after it is covered by the registration. The one-second safety poll recovers a lost wake hint." />
 
-  <Step n="1" fn="Handler.handleRead parse" loc="handler.go:439" role="Resolve the offset and the live mode. offset=now means the captured tail, and live=long-poll means block only after the first page finds no data.">
+  <Step n="1" fn="Handler.handleRead authorize and parse" loc="handler.go:445" role="Authorize before existence, then resolve the offset, cursor, live mode, optional limit, envelope, and response framing.">
 
-```go title="handler.go" showLineNumbers startLineNumber=439
-	// Parse offset
+```go title="handler.go" showLineNumbers startLineNumber=453
+	authorizedPrivate, err := h.authorizeRead(r, path)
+	if err != nil {
+		return err
+	}
+
 	offset, err := store.ParseOffset(offsetStr)
 	if err != nil {
 		return h.readValidationError(r.Context(), path, "invalid offset")
 	}
 
-	// Check for live mode
 	liveMode := query.Get("live")
 	cursor := query.Get("cursor")
-	// Validate long-poll requires offset
 	if liveMode == "long-poll" && !offsetProvided {
 		return h.readValidationError(r.Context(), path, "offset required for long-poll mode")
 	}
 ```
 
 `ParseOffset` maps `now` to a value that means the current tail, and `-1` to the
-start. Any other value parses as `readseq_byteoffset`. `cursor` is the CDN
-cache key. The handler echoes it back and advances it on each request, so a cache
-cannot serve a stale tail in a loop.
+start. Any other value parses as `readseq_byteoffset`. `cursor` prevents a CDN
+from serving one stale tail response in a loop. The handler authorizes before
+the storage lookup so a rejected caller cannot learn whether the path exists.
 
   </Step>
 
-  <Step n="2" fn="redis.Store.ReadPage" loc="store/redis/store.go:666" role="Capture one typed response snapshot, then request one bounded frame-aligned page. Producer state never crosses this read boundary.">
+  <Step n="2" fn="Handler.subscribeNotifications" loc="handler.go:533" role="For offset=now, confirm one notification registration before the authoritative first page.">
 
-```go title="store/redis/store.go" showLineNumbers startLineNumber=666
-func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, opts store.ReadPageOptions) (store.ReadPage, error) {
-	opts = opts.Normalize()
-	root, err := s.runReadPageScript(ctx, path, offset, store.ZeroOffset,
+```go title="handler.go" showLineNumbers startLineNumber=533
+	var liveSubscription store.NotificationSubscription
+	if liveMode == "long-poll" && isNowOffset {
+		liveSubscription, _, err = h.subscribeNotifications(r.Context(), path)
+		if err != nil {
+			return err
+		}
+	}
+```
+
+The Redis implementation waits for the `SUBSCRIBE` acknowledgement before it
+returns the registration. The handler owns and closes it unless ownership moves
+to an SSE hub. Numeric long-poll offsets keep the older first-page, subscribe,
+and no-touch recheck sequence because they may already have historical data.
+
+  </Step>
+
+  <Step n="3" fn="redis.Store.ReadPage and read.lua" loc="store/redis/store.go:670" role="Capture one typed response snapshot. The same atomic script classifies the root range and returns any root-owned bounded frames.">
+
+```go title="store/redis/store.go" showLineNumbers startLineNumber=683
+	root, err := s.runReadPageScript(
+		ctx, path, offset, store.ZeroOffset,
 		opts.TargetBytes, opts.MaxFrames, expected,
-		true, false, true, false, !opts.NoTouch && opts.Snapshot == nil)
-	// The root result captures or validates tail, content type, closed state,
-	// expiry configuration, fork boundary, and incarnation.
+		true, true, false,
+		!opts.NoTouch && opts.Snapshot == nil,
+		fixedRootTail, offset.IsNow(),
+	)
+
+	wantRootRange := store.ClassifyRootReadRange(
+		offset, snapshot.Tail, root.meta.ForkedFrom, root.meta.ForkOffset,
+	)
+	if root.rootRange == nil || *root.rootRange != wantRootRange {
+		got := "segment"
+		if root.rootRange != nil {
+			got = root.rootRange.String()
+		}
+		return store.ReadPage{}, fmt.Errorf(
+			"read.lua: root range decision %q disagrees with Go oracle %q",
+			got, wantRootRange,
+		)
+	}
 ```
 
-`lexLowerBound(offset)` is the exclusive bound just past the caller's offset. It
-selects frames strictly after the caller's position. The first page captures the
-root snapshot. It refreshes access once only when the root has a sliding TTL.
-Persistent and absolute-expiry-only streams skip that write branch. Continuation
-pages, long-poll rechecks, and inherited fork ranges are no-touch. The read
-projection contains no producer map, so the handler never loads `:prod`.
+`read.lua` loads metadata once and captures the tail, content type, closure,
+expiry configuration, fork boundary, and incarnation. It mirrors the pure Go
+classification as empty, inherited, or root-owned. An `offset=now` page is
+empty and does not read the message set. A root-owned page fetches one candidate
+and an optional byte-bounded range in the same script. An inherited fork prefix
+keeps its later source-slot traversal. Producer state never crosses this read
+boundary.
 
-  </Step>
-
-  <Step n="3" fn="read.lua range the set" loc="store/redis/scripts/read.lua:106" role="Fetch one candidate, then optionally bulk-fetch only end offsets that fit the remaining byte target. Both calls have a frame limit.">
-
-```lua title="store/redis/scripts/read.lua" showLineNumbers startLineNumber=106
-local first = redis.call(
-  'ZRANGEBYLEX', KEYS[2], ARGV[2], ARGV[3], 'LIMIT', 0, 1
-)
-local accepting = true
-if #first == 1 then accepting = accept(first[1]) end
-
-if #first == 1 and accepting and #members < max_frames then
-  -- byte_max is firstOffset + the remaining returned-byte budget.
-  local candidates = redis.call(
-    'ZRANGEBYLEX', KEYS[2],
-    '(' .. first_offset .. string.char(255), byte_max,
-    'LIMIT', 0, max_frames - #members
-  )
-  for _, member in ipairs(candidates) do
-    if not accept(member) then break end
-  end
-end
-```
-
-`ARGV[3]` is the inclusive upper bound for the captured snapshot tail or fork
-segment. The default page ceiling is 1,024 frames. The first candidate may be
-larger than the default 1 MiB target because Chronicle never splits a frame.
-Otherwise the optional bulk call cannot cross the remaining byte budget. There
-is no lookahead call. When the caller is already at the tail, `members` is
-empty, which sends a long-poll request onto the waiting path. An empty candidate
-set inside a range whose upper bound is a known frame is corruption and fails
-loudly instead of advancing the cursor.
+The first page renews access only for a sliding TTL. Persistent and absolute
+expiry streams perform no write. Continuations, wake rechecks, inherited fork
+ranges, sealing, and repair are no-touch.
 
   </Step>
 
@@ -272,36 +280,14 @@ loudly instead of advancing the cursor.
     why="<code>ZRANGEBYLEX</code> seeks the lower bound in <code>O(log N)</code>. It fetches one candidate, then optionally visits only end offsets inside the remaining byte budget, with at most 1,024 frames in the page. The handler writes each accepted page to the socket and flushes it before asking storage for the next page."
   />
 
-  <Step n="4" fn="Handler.handleRead decide to wait" loc="handler.go:576" role="The first page is empty, the caller is at the captured tail, and long-poll was requested. Only now does the request block.">
+  <Step n="4" fn="Handler.waitForRegisteredPage" loc="handler_stream.go:349" role="Block on the confirmed registration. Every notification, safety poll, or timeout ends with a fresh no-touch durable page.">
 
-```go title="handler.go" showLineNumbers startLineNumber=576
-	shouldWait := liveMode == "long-poll" &&
-		len(firstPage.Messages) == 0 &&
-		(isNowOffset || effectiveOffset.Equal(firstPage.Snapshot.Tail))
-	if shouldWait {
-```
-
-If the stream is already closed at the tail, the handler returns `204`
-immediately. Otherwise it calls `h.waitForPage` with the first typed snapshot
-and the configured `LongPollTimeout`, which is 30 seconds by default.
-
-  </Step>
-
-  <Step n="5" fn="redis.Store.WaitForPage" loc="store/redis/notify.go:100" role="Subscribe first, then perform no-touch typed rechecks. Return the final page for wake, close, or timeout.">
-
-```go title="store/redis/notify.go" showLineNumbers startLineNumber=108
-	pubsub := s.client.Subscribe(ctx, notifyChannel(path))
-	defer func() { _ = pubsub.Close() }()
-	if _, err := pubsub.Receive(ctx); err != nil { // confirm subscription
-		return store.ReadWaitResult{}, err
-	}
-	wake := pubsub.Channel()
-
+```go title="handler_stream.go" showLineNumbers startLineNumber=359
 	recheck := func() (store.ReadPage, bool, error) {
 		recheckOpts := opts
 		recheckOpts.Snapshot = nil
 		recheckOpts.NoTouch = true
-		page, err := s.ReadPage(ctx, path, offset, recheckOpts)
+		page, err := reader.ReadPage(ctx, path, offset, recheckOpts)
 		if err != nil {
 			return store.ReadPage{}, false, err
 		}
@@ -314,27 +300,51 @@ and the configured `LongPollTimeout`, which is 30 seconds by default.
 	}
 ```
 
-An append that lands between the fast-path read and the `SUBSCRIBE` would never
-reach a listener that was not there yet. Subscribing <em>before</em> the re-read
-closes that window. If the write arrived in the gap, the no-touch page finds it.
-If it arrives later, the subscription catches the `PUBLISH 'a'`. A `select`
-loop then waits on the wake channel, a one-second backup poll, or the timeout.
-Every branch returns a `ReadWaitResult` with the authoritative final page. The
-handler does not call `Store.Get` to reconstruct headers after waiting.
+There is no immediate attach recheck for `offset=now`. Let `R` be the first
+atomic page. An append before `R` is in its captured tail. An append after `R`
+is covered by the confirmed registration. Redis orders the boundary race on
+one side or the other. The one-second poll recovers a lost Pub/Sub hint. The
+incarnation and content type check reject a delete and recreation.
 
   </Step>
 
-  When [walkthrough one](#append) runs `PUBLISH channel 'a'` on this stream, the
-  wake channel fires, `recheck` returns the page containing the new frames. The
-  handler formats that same page, sets a fresh `Stream-Cursor`, and answers `200`
-  with the frames and next offset. On timeout, the waiter performs one final
-  no-touch read and returns that page with `204 No Content` if it is still empty.
+  <Step n="5" fn="Handler.handleRead response" loc="handler.go:720" role="Use the final typed page for status, cursor, closure, next offset, cache policy, and body. Do not reload metadata or producer state.">
+
+```go title="handler.go" showLineNumbers startLineNumber=721
+	firstPage = waited.Page
+	closedAtTail := firstPage.Snapshot.Closed &&
+		effectiveOffset.Equal(firstPage.Snapshot.Tail) &&
+		len(firstPage.Messages) == 0
+	if waited.TimedOut || closedAtTail {
+		w.Header().Set("Content-Type", firstPage.Snapshot.ContentType)
+		w.Header().Set(protocol.HeaderStreamNextOffset, firstPage.Snapshot.Tail.String())
+		w.Header().Set(protocol.HeaderStreamUpToDate, "true")
+		w.Header().Set(protocol.HeaderStreamCursor,
+			protocol.GenerateResponseCursor(cursor, time.Now()))
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+```
+
+On an append, the same final page supplies the `200` body and its exact next
+offset. On timeout or EOF, it supplies the `204` headers. A credentialed read
+uses `Cache-Control: private`. An uncredentialed historical response keeps its
+ETag and public cache policy. JSON envelopes, binary bytes, closure, and cursors
+use the same framing code as a plain catch-up read.
+
+  </Step>
+
+  When [walkthrough one](#append) runs `PUBLISH channel 'a'`, the registration
+  wakes. `waitForRegisteredPage` reads the durable frames, and the handler
+  answers `200` from that page. If no data arrives, the timeout path still reads
+  one final page before it answers `204 No Content`.
 
   <Callout icon="info" label="One known cost">
-    Each `WaitForPage` opens its own pub/sub subscription, plus a one-second
-    backup poll (`defensivePollInterval`) that re-reads while blocked. The wake
-    arrives on the `PUBLISH`, so the poll is a fallback, not the common case.
-    Unlike SSE, long-poll still uses one subscription per blocked request.[^perf]
+    Each blocked long-poll owns one notification registration. It also performs
+    a no-touch durable read after each one-second safety interval. The
+    registration removes a duplicate attach read for `offset=now`; it does not
+    share work across separate long-poll requests. SSE uses one shared hub per
+    active stream on each serving replica.[^perf]
   </Callout>
 </section>
 

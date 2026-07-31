@@ -6,6 +6,7 @@ sequenceDiagram
     participant S as PageReader
     participant R as Redis
     C->>H: GET ?offset=now and live=sse
+    H->>H: authorize path · validate offset and cursor · choose event encoding
     H->>F: reserve existing hub, or create confirmed subscription
     F->>R: SUBSCRIBE and confirm once for a new hub
     H->>S: ReadPage(path, offset) · capture first typed page
@@ -13,15 +14,17 @@ sequenceDiagram
     S-->>H: first page · type · tail · closed · incarnation
     H->>F: seed new hub identity + tail from that page
     F-->>H: ready · no duplicate initial refresh
-    H-->>C: 200 · Content-Type text/event-stream
+    H-->>C: 200 · text/event-stream · no-cache · keep-alive
     loop pages to the captured tail
         H-->>C: emit the page already held · data + control · flush
         H->>S: continuation ReadPage with same snapshot · no touch
     end
     H->>F: attach at last flushed offset
-    R-->>F: append wake hint
-    F->>S: one shared logical ReadPage refresh
-    F-->>H: shared immutable data event
-    H-->>C: data then client control
+    loop append wake or 1 s safety poll
+        R-->>F: wake hint, or the poll timer fires
+        F->>S: one shared logical ReadPage refresh
+        F-->>H: shared immutable data event
+        H-->>C: data then client control offset · flush
+    end
     Note over H,R: first page is after registration · no Store.Get · no :prod · no attach reread
-    H-->>C: control streamClosed true → close
+    H-->>C: control streamClosed true → close, or cycle at 60 s

@@ -35,9 +35,27 @@ import Aside from "../components/Aside.astro";
 <section class="block" id="how-to-read">
   <SectionHead num="00" label="Orientation" title="How to read <em>this page</em>" />
 
-  Every section below has the same four parts. A request you can `curl`, a
-  sequence diagram, the Redis command sequence the script runs, and a sentence
-  on each command.
+  Every section below contains a request you can run, a sequence diagram, the
+  Redis command sequence, and an explanation of each command.
+
+  ### Endpoint <em>path index</em>
+
+  Each link lands on one complete path from the HTTP request through the
+  handler, store, Redis operation, and final response.
+
+  <Table wide>
+    | Request | Handler and storage path | Final response | Sequence |
+    | --- | --- | --- | --- |
+    | `PUT` | authorize and parse → validate options → `Create` → `create.lua` | `201`, or `200` for matching configuration | [Create](#put-create) |
+    | `PUT` with `Stream-Forked-From` | authorize and parse → validate source → `incr_ref.lua` → `create.lua` | `201` at the resolved fork offset | [Fork](#put-create) |
+    | `POST` with a body | authorize and parse → frame against a tail snapshot → `append.lua` → retry on tail conflict | `200` or `204` with the next offset | [Append](#post-append) |
+    | `POST` with `Stream-Closed: true` | authorize and parse → `close.lua`, or the closing branch of `append.lua` | `204` with durable closure | [Close](#post-close) |
+    | `GET ?offset=<offset>` | authorize and parse → atomic bounded page → continue to the fixed tail → frame body | `200`, `204`, or conditional `304` | [Catch-up read](#get-catchup) |
+    | `GET ?offset=now&live=long-poll` | authorize and parse → confirm notification registration → atomic page → wait → no-touch final page | `200` on data or `204` on timeout or EOF | [Long-poll](#get-longpoll) |
+    | `GET ?offset=now&live=sse` | authorize and parse → reserve hub or confirm registration → first page → catch-up → attach → shared live pages | SSE data and control events | [SSE](#get-sse) |
+    | `HEAD` | authorize → metadata-only page → response headers | `200` with `Cache-Control: no-store` | [Metadata](#head) |
+    | `DELETE` | authorize → `delete.lua` → release fork references one ancestor at a time | `204`, or `410` when already soft-deleted | [Delete](#delete) |
+  </Table>
 
   ### Four <em>parts</em>
 
@@ -51,6 +69,22 @@ import Aside from "../components/Aside.astro";
     | **Store** | `store/redis/store.go` (Go) | Frames bytes, captures typed read snapshots, runs Lua scripts, and decodes raw Redis replies at one boundary |
     | **Redis** | Redis 8 | Runs one Lua script per mutation, atomically and serialized per stream |
   </Table>
+
+  ### Handler order and <em>response ownership</em>
+
+  The handler keeps the protocol's observable order while the store owns
+  atomic state transitions.
+
+  1. Chronicle authorizes the request before revealing whether the stream
+     exists.
+  2. The handler parses headers, query parameters, cursors, and request bodies.
+     It rejects malformed input before starting a live registration.
+  3. The store captures or changes stream state. Lua repeats any decision that
+     must remain atomic with Redis data.
+  4. The handler maps the typed result to status, cache headers, cursor headers,
+     JSON or binary framing, and SSE data or control events.
+  5. A catch-up response keeps one fixed snapshot tail. Later appends belong to
+     the next request or to the registered live path.
 
   ### Keys and the <em>notify channel</em>
 
@@ -108,6 +142,14 @@ import Aside from "../components/Aside.astro";
     The protocol's reserved subscription API (`__ds` webhook and pull-wake
     delivery) is also implemented, on a separate plane with its own
     durability story, on [its own page](../subscriptions).
+  </Callout>
+
+  <Callout icon="arrow" label="Performance evidence">
+    The [performance improvements index](../performance-improvements) maps the
+    bounded page, fused root read, and shared SSE work back to these endpoint
+    sequences. The [fused root read explainer](../performance-improvements/read-only-fast-path)
+    records the command counts, latency samples, live registration proof, and
+    remaining costs.
   </Callout>
 </section>
 
@@ -391,14 +433,16 @@ import Aside from "../components/Aside.astro";
     script="read.lua"
     source="store/redis/scripts/read.lua"
     steps={[
-      { cmd: "EVALSHA + HGETALL", key: "ds:{p}:meta", does: "The root validation invocation loads metadata once. Absent → <code>NOTFOUND</code> (<strong>404</strong>). The first page captures tail, content type, closed state, expiry configuration, fork boundary, and incarnation. It never reads <code>:prod</code>.", loc: "read.lua:32", kind: "read" },
-      { cmd: "expiry · softDel", does: "An expired root runs lazy cleanup and reports <code>NOTFOUND</code>. A soft-deleted root reports <code>SOFTDEL</code>, which the GET path hides as <strong>404</strong>.", loc: "read.lua:35", kind: "flow" },
-      { cmd: "HSETNX", key: "ds:{p}:meta incarnation", does: "A legacy stream without an incarnation stores one random identity once. New streams skip this branch.", when: "legacy metadata only", loc: "read.lua:43", kind: "write" },
-      { cmd: "incarnation matches?", does: "A continuation page whose path now names a recreated stream returns <code>SNAPSHOT</code>. One HTTP response cannot combine two stream lifetimes.", loc: "read.lua:56", kind: "flow" },
-      { cmd: "HSET + PEXPIRE/PERSIST", key: "root stream keys", does: "Update <code>accessedAtNs</code> and re-arm the exact backstop once for the logical client read. Persistent and absolute-expiry-only streams skip this branch. Continuations, long-poll rechecks, inherited ranges, sealing, and repair are no-touch.", when: "first root snapshot with sliding TTL only", loc: "read.lua:60", kind: "ttl" },
-      { cmd: "classify root range", does: "Compare the complete requested offset, fixed response tail, and fork boundary as typed unsigned decimal components. Empty and inherited ranges skip the root message set. A root-owned range continues inside this same atomic invocation.", loc: "read.lua", kind: "flow" },
+      { cmd: "authorize + parse", does: "Authorize the path first. Then parse the offset, cursor, live mode, conditional headers, and response media rules before reading storage.", loc: "handler.go:445", kind: "flow" },
+      { cmd: "EVALSHA + HGETALL", key: "ds:{p}:meta", does: "The root validation invocation loads metadata once. Absent → <code>NOTFOUND</code> (<strong>404</strong>). The first page captures tail, content type, closed state, expiry configuration, fork boundary, and incarnation. It never reads <code>:prod</code>.", loc: "read.lua:35", kind: "read" },
+      { cmd: "expiry · softDel", does: "An expired root runs lazy cleanup and reports <code>NOTFOUND</code>. A soft-deleted root reports <code>SOFTDEL</code>, which the GET path hides as <strong>404</strong>.", loc: "read.lua:38", kind: "flow" },
+      { cmd: "HSETNX", key: "ds:{p}:meta incarnation", does: "A legacy stream without an incarnation stores one random identity once. New streams skip this branch.", when: "legacy metadata only", loc: "read.lua:46", kind: "write" },
+      { cmd: "incarnation matches?", does: "A continuation page whose path now names a recreated stream returns <code>SNAPSHOT</code>. One HTTP response cannot combine two stream lifetimes.", loc: "read.lua:59", kind: "flow" },
+      { cmd: "HSET + PEXPIRE/PERSIST", key: "root stream keys", does: "Update <code>accessedAtNs</code> and re-arm the exact backstop once for the logical client read. Persistent and absolute-expiry-only streams skip this branch. Continuations, long-poll rechecks, inherited ranges, sealing, and repair are no-touch.", when: "first root snapshot with sliding TTL only", loc: "read.lua:63", kind: "ttl" },
+      { cmd: "classify root range", does: "Compare the complete requested offset, fixed response tail, and fork boundary as typed unsigned decimal components. Empty and inherited ranges skip the root message set. A root-owned range continues inside this same atomic invocation.", loc: "read.lua:71", kind: "flow" },
       { cmd: "ZRANGEBYLEX", key: "root :msg", does: "For a root-owned range, fetch the first candidate with <code>LIMIT 0 1</code>. If more range exists and that frame fits, make one optional bulk call ending at <code>firstOffset + remainingTargetBytes</code>, capped by the fixed snapshot tail and the remaining part of the 1,024-frame limit. There is no lookahead call.", loc: "read.lua", kind: "read" },
       { cmd: "return meta_flat(m) + frames", does: "Return the already-loaded metadata and bounded root frames together. A simple root-owned page therefore needs one script and one metadata load. An inherited fork prefix still uses later source-slot invocations in chronological order.", loc: "read.lua", kind: "flow" },
+      { cmd: "frame + flush", does: "Map the typed page to status, cache validators, cursor headers, content type, and JSON or binary framing. Flush each complete page before requesting the next page under the same snapshot.", loc: "handler_stream.go:412", kind: "flow" },
     ]}
     caption="For a fork, Go computes finite source and child segments. It runs the no-touch range invocation against each segment's own slot, capped by the fork offset and the root snapshot tail. The inherited prefix arrives first, and post-fork source appends stay invisible."
   />
@@ -462,12 +506,14 @@ import Aside from "../components/Aside.astro";
   <RedisTrace
     label="The wait loop, step by step"
     script="—  Go orchestration"
-    source="store/redis/notify.go"
+    source="handler.go · handler_stream.go · store/redis/notify.go"
     steps={[
+      { cmd: "authorize + parse", does: "Authorize the path, validate the offset and cursor, require a valid long-poll offset, and choose the response framing before opening a subscription.", loc: "handler.go:445", kind: "flow" },
       { cmd: "SUBSCRIBE", key: "ds:notify:{p}", does: "For <code>offset=now</code>, open and confirm the optional notification feed before reading durable state.", loc: "handler.go", kind: "read" },
       { cmd: "ReadPage", key: "authoritative logical first read", does: "Capture content type, tail, closed state, incarnation, and expiry configuration after registration. This is the only page that may renew a sliding TTL. There is no immediate attach reread.", loc: "handler.go", kind: "read" },
       { cmd: "block", does: "Wait on that registration for a channel message, a 1 s defensive poll, or the 30 s timeout. Every branch performs a no-touch typed durable page.", loc: "handler_stream.go", kind: "flow" },
       { cmd: "return ReadWaitResult", key: "authoritative final page", does: "Return the final page and timeout flag. The handler uses that page for content type, tail, closed state, next offset, and response status. It does not call <code>Store.Get</code> after the wait.", loc: "handler_stream.go", kind: "flow" },
+      { cmd: "write response", does: "Return <strong>200</strong> with the bounded body when data arrived. Return <strong>204</strong> with <code>Stream-Up-To-Date</code>, cursor, and closure headers on timeout or EOF.", loc: "handler.go", kind: "flow" },
     ]}
   />
 
@@ -519,11 +565,13 @@ import Aside from "../components/Aside.astro";
     script="—  handler + shared hub"
     source="handler_sse.go · sse_hub.go"
     steps={[
+      { cmd: "authorize + parse", does: "Authorize the path, validate offset and cursor state, require the SSE live mode, and choose text, JSON, or base64 event framing.", loc: "handler.go:445", kind: "flow" },
       { cmd: "reserve or SUBSCRIBE", key: "ds:notify:{p}", does: "Reserve an existing compatible hub before the client page, or confirm a new notification subscription before reading durable state.", loc: "handler.go", kind: "read" },
       { cmd: "ReadPage", key: "client first page", does: "Capture one typed page after registration. It supplies content type, tail, closure, incarnation, next offset, and first catch-up frames. A new hub is seeded from this same page and takes ownership of the confirmed subscription.", loc: "handler.go", kind: "read" },
       { cmd: "hub ready", key: "exact stream lifetime", does: "A pre-registered new hub needs no duplicate empty no-touch refresh. A concurrent creator closes the redundant subscription and reuses the compatible hub. An old-incarnation reservation is replaced behind a fresh registration and no-touch incarnation fence.", loc: "sse_hub.go", kind: "flow" },
       { cmd: "reuse first page", key: "client catch-up", does: "The handler emits the first page it already owns, then continuation pages under the same snapshot. It performs no extra initial bounded read and no metadata reload after catch-up.", loc: "handler_sse.go:103", kind: "read" },
-      { cmd: "shared live ReadPage", key: "bounded replay", does: "After each wake, the hub performs one logical durable refresh for all local clients, formats one immutable event, and retains it in the bounded replay window. A sliding TTL renews once per hub refresh. Persistent and absolute-expiry-only streams remain read-only.", loc: "sse_hub.go:435", kind: "read" },
+      { cmd: "shared live ReadPage", key: "bounded replay", does: "After each wake, the hub performs one logical durable refresh for all local clients, formats one immutable event, and retains it in the bounded replay window. A sliding TTL renews once per hub refresh. Persistent and absolute-expiry-only streams remain read-only.", loc: "sse_hub.go:505", kind: "read" },
+      { cmd: "write data + control", does: "Write each shared data event, then a client control event with the next durable offset and cursor. A final closed control ends the connection without reconnect.", loc: "handler_sse.go", kind: "flow" },
       { cmd: "every 60 s, return", does: "Cycle the connection so a CDN can collapse concurrent tails. The client reconnects from the last <code>streamNextOffset</code> it received.", loc: "handler_sse.go:203", kind: "flow" },
     ]}
   />
@@ -577,10 +625,12 @@ import Aside from "../components/Aside.astro";
     script="read.lua, metadata branch"
     source="handler_stream.go · store/redis/scripts/read.lua"
     steps={[
-      { cmd: "ReadPage offset=now", key: "TargetBytes 1 · MaxFrames 1 · NoTouch", does: "Ask the page reader for a typed snapshot only. Resolving <code>now</code> to the captured tail leaves no frame range to fetch.", loc: "handler_stream.go:37", kind: "read" },
+      { cmd: "authorize", does: "Authorize the path before reading metadata, so a caller cannot use HEAD to test whether an unauthorized stream exists.", loc: "handler.go:405", kind: "flow" },
+      { cmd: "ReadPage offset=now", key: "TargetBytes 1 · MaxFrames 1 · NoTouch", does: "Ask the page reader for a typed snapshot only. Resolving <code>now</code> to the captured tail leaves no frame range to fetch.", loc: "handler_stream.go:39", kind: "read" },
       { cmd: "EVALSHA + HGETALL", key: "ds:{p}:meta", does: "Load metadata once. The <code>tail</code> field is the existence marker. The reply contains the same metadata map, so no second <code>HGETALL</code> runs.", loc: "read.lua:32", kind: "read" },
       { cmd: "classify", does: "Expired → lazy cleanup and <strong>404</strong>. Soft-deleted → <strong>410</strong>. A legacy stream without an incarnation runs one <code>HSETNX</code> migration. A current live stream performs no write.", loc: "read.lua:35", kind: "flow" },
-      { cmd: "skip :prod · skip :msg", does: "HEAD needs neither producer fencing state nor frames. <code>NoTouch</code> also skips <code>accessedAtNs</code> and the TTL backstop.", loc: "store.go:691", kind: "flow" },
+      { cmd: "skip :prod · skip :msg", does: "HEAD needs neither producer fencing state nor frames. <code>NoTouch</code> also skips <code>accessedAtNs</code> and the TTL backstop.", loc: "store.go:670", kind: "flow" },
+      { cmd: "map headers", does: "Return the content type, next offset, closed state, TTL or expiry, and <code>Cache-Control: no-store</code> from the same typed snapshot.", loc: "handler.go:405", kind: "flow" },
     ]}
   />
 
