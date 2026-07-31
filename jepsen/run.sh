@@ -9,7 +9,7 @@ BASE="${BASE:-http://localhost:4438}"
 STREAMS="${STREAMS:-8}"
 MSGS="${MSGS:-40}"
 SCENARIOS=("$@")
-[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(baseline origin-restart redis-restart paged-catchup sse-resume)
+[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(baseline origin-restart redis-restart paged-catchup read-expiry sse-resume)
 
 echo "==> building checker"
 go build -o jepsen/bin/jepsen-checker ./jepsen/checker

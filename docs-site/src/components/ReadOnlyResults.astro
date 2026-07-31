@@ -1,0 +1,279 @@
+<figure class="results">
+  <div class="result-label">One request, bracketed Redis commands</div>
+
+  <div class="stats">
+    <div class="stat">
+      <strong>6 → 2</strong>
+      <span>HGETALL calls for a five-byte GET</span>
+    </div>
+    <div class="stat">
+      <strong>5 → 0</strong>
+      <span>read-side writes for that GET</span>
+    </div>
+    <div class="stat">
+      <strong>+86 B → 0</strong>
+      <span>AOF growth from that GET</span>
+    </div>
+    <div class="stat">
+      <strong>332 / 332</strong>
+      <span>Durable Streams conformance tests</span>
+    </div>
+  </div>
+
+  <div class="comparisons">
+    <section aria-labelledby="get-result">
+      <header>
+        <div>
+          <span class="scope">Plain GET</span>
+          <strong id="get-result">One five-byte frame</strong>
+        </div>
+        <span class="shape">old / new</span>
+      </header>
+
+      <div class="metric">
+        <span class="name">HGETALL</span>
+        <div class="bars">
+          <i class="old"><b style="width:100%"></b></i>
+          <i class="new"><b style="width:33.33%"></b></i>
+        </div>
+        <strong>6 / 2</strong>
+      </div>
+      <div class="metric">
+        <span class="name">HSET</span>
+        <div class="bars">
+          <i class="old"><b style="width:16.67%"></b></i>
+          <i class="new zero"><b></b></i>
+        </div>
+        <strong>1 / 0</strong>
+      </div>
+      <div class="metric">
+        <span class="name">PERSIST</span>
+        <div class="bars">
+          <i class="old"><b style="width:66.67%"></b></i>
+          <i class="new zero"><b></b></i>
+        </div>
+        <strong>4 / 0</strong>
+      </div>
+    </section>
+
+    <section aria-labelledby="sse-result">
+      <header>
+        <div>
+          <span class="scope">SSE attach</span>
+          <strong id="sse-result">One empty persistent stream</strong>
+        </div>
+        <span class="shape">old / new</span>
+      </header>
+
+      <div class="metric">
+        <span class="name">HGETALL</span>
+        <div class="bars">
+          <i class="old"><b style="width:100%"></b></i>
+          <i class="new"><b style="width:25%"></b></i>
+        </div>
+        <strong>8 / 2</strong>
+      </div>
+      <div class="metric">
+        <span class="name">HSET</span>
+        <div class="bars">
+          <i class="old"><b style="width:25%"></b></i>
+          <i class="new zero"><b></b></i>
+        </div>
+        <strong>2 / 0</strong>
+      </div>
+      <div class="metric">
+        <span class="name">PERSIST</span>
+        <div class="bars">
+          <i class="old"><b style="width:100%"></b></i>
+          <i class="new zero"><b></b></i>
+        </div>
+        <strong>8 / 0</strong>
+      </div>
+    </section>
+  </div>
+
+  <div class="persistence">
+    <div>
+      <span>AOF delta</span>
+      <strong>+86 bytes</strong>
+      <b aria-hidden="true">→</b>
+      <strong class="after">0 bytes</strong>
+    </div>
+    <div>
+      <span>Primary replication offset</span>
+      <strong>+1</strong>
+      <b aria-hidden="true">→</b>
+      <strong class="after">0</strong>
+    </div>
+  </div>
+
+  <figcaption>
+    Both versions used the same local Redis 8.10.0 server with AOF enabled and
+    warmed Lua scripts. Unique ECHO markers isolated each request in MONITOR.
+    No replica was connected, so the primary offset is the local replication
+    signal. Bar lengths compare commands within each request and have no time
+    scale.
+  </figcaption>
+</figure>
+
+<style lang="scss">
+  .results {
+    margin: 32px 0 30px var(--rail-indent);
+    max-width: var(--prose-max);
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--card);
+    box-shadow: var(--shadow-sm);
+  }
+  .result-label {
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--rule);
+    color: var(--accent);
+    font: 11px var(--mono);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-bottom: 1px solid var(--rule);
+  }
+  .stat {
+    min-width: 0;
+    padding: 18px 20px;
+    border-right: 1px solid var(--rule-soft);
+  }
+  .stat:last-child { border-right: 0; }
+  .stat strong {
+    display: block;
+    color: var(--accent-deep);
+    font: 600 19px/1.2 var(--mono);
+  }
+  .stat span {
+    display: block;
+    margin-top: 7px;
+    color: var(--ink-mute);
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+  .comparisons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 30px;
+    padding: 24px;
+  }
+  section + section {
+    padding-left: 30px;
+    border-left: 1px solid var(--rule);
+  }
+  header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 15px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  header span,
+  header strong { display: block; }
+  .scope {
+    color: var(--accent);
+    font: 9.5px var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  header strong {
+    margin-top: 4px;
+    color: var(--ink);
+    font-size: 12.5px;
+  }
+  .shape {
+    color: var(--muted);
+    font: 9.5px var(--mono);
+  }
+  .metric {
+    display: grid;
+    grid-template-columns: 58px minmax(60px, 1fr) 42px;
+    gap: 10px;
+    align-items: center;
+    margin-top: 12px;
+    font: 9.5px var(--mono);
+  }
+  .name { color: var(--ink-mute); }
+  .metric > strong {
+    text-align: right;
+    color: var(--ink);
+    font: 600 9.5px var(--mono);
+  }
+  .bars { display: grid; gap: 4px; }
+  i {
+    display: block;
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--paper-warm);
+  }
+  i b {
+    display: block;
+    min-width: 3px;
+    height: 100%;
+    border-radius: inherit;
+  }
+  i.old b { background: color-mix(in srgb, var(--bad) 72%, var(--card)); }
+  i.new b { background: var(--accent); }
+  i.zero b { min-width: 0; width: 0; }
+  .persistence {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-top: 1px solid var(--rule);
+    background: var(--paper);
+  }
+  .persistence > div {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 10px;
+    align-items: center;
+    padding: 15px 24px;
+    font: 10.5px var(--mono);
+  }
+  .persistence > div + div { border-left: 1px solid var(--rule); }
+  .persistence span { color: var(--ink-mute); }
+  .persistence strong { color: var(--ink); }
+  .persistence b { color: var(--muted); font-weight: 400; }
+  .persistence .after { color: var(--accent-deep); }
+  figcaption {
+    padding: 14px 24px 18px;
+    border-top: 1px solid var(--rule);
+    color: var(--muted);
+    background: var(--paper);
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  @media (max-width: 840px) {
+    .results { margin-left: 0; max-width: none; }
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stat:nth-child(2) { border-right: 0; }
+    .stat:nth-child(-n+2) { border-bottom: 1px solid var(--rule-soft); }
+    .comparisons { grid-template-columns: 1fr; }
+    section + section {
+      padding-top: 24px;
+      padding-left: 0;
+      border-top: 1px solid var(--rule);
+      border-left: 0;
+    }
+    .persistence { grid-template-columns: 1fr; }
+    .persistence > div + div { border-top: 1px solid var(--rule); border-left: 0; }
+  }
+  @media (max-width: 520px) {
+    .stats { grid-template-columns: 1fr; }
+    .stat { border-right: 0; border-bottom: 1px solid var(--rule-soft); }
+    .stat:last-child { border-bottom: 0; }
+    .comparisons { padding: 20px 18px; }
+    .persistence > div {
+      grid-template-columns: 1fr auto auto;
+    }
+    .persistence span { grid-column: 1 / -1; }
+  }
+</style>

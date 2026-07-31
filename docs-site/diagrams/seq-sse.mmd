@@ -6,22 +6,22 @@ sequenceDiagram
     participant S as PageReader
     participant R as Redis
     C->>H: GET ?offset=now and live=sse
-    H->>F: acquire exact stream incarnation
+    H->>S: ReadPage(path, offset) · capture first typed page
+    S->>R: EVALSHA read.lua · metadata + optional bounded range
+    S-->>H: first page · type · tail · closed · incarnation
+    H->>F: acquire hub for that exact stream lifetime
     F->>R: SUBSCRIBE and confirm once
-    F->>S: bounded durable refresh before ready
-    F-->>H: ready
-    H->>S: ReadPage(path, offset) · capture snapshot
-    S->>R: EVALSHA read.lua · bounded range
-    S-->>H: first frame-aligned page + fixed tail
+    F->>S: ReadPage NoTouch from first snapshot tail
+    F-->>H: ready · attach window retained
     H-->>C: 200 · Content-Type text/event-stream
     loop pages to the captured tail
-        H-->>C: one data event + one control event · flush
-        H->>S: next ReadPage with the same snapshot
+        H-->>C: emit the page already held · data + control · flush
+        H->>S: continuation ReadPage with same snapshot · no touch
     end
-    H->>F: attach at last flushed control offset
+    H->>F: attach at last flushed offset · no extra read
     R-->>F: append wake hint
-    F->>S: drain one durable snapshot in bounded pages
+    F->>S: one shared logical ReadPage refresh
     F-->>H: shared immutable data event
     H-->>C: data then client control
-    Note over H,F: bounded replay, lagged clients resume
+    Note over H,R: no Store.Get and no :prod read (persistent and absolute-expiry-only refreshes are read-only)
     H-->>C: control streamClosed true → close

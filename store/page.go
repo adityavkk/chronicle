@@ -31,14 +31,80 @@ var (
 // response. Incarnation is opaque to callers and is used only to reject a
 // delete and recreate between pages.
 type ReadSnapshot struct {
-	Tail        Offset
-	ContentType string
-	Closed      bool
-	Incarnation string
+	Tail                Offset
+	ContentType         string
+	Closed              bool
+	Incarnation         string
+	TTLSeconds          *int64
+	ExpiresAt           *time.Time
+	CreatedAt           time.Time
+	ForkedFrom          string
+	ForkOffset          Offset
+	ForkOffsetRequested *Offset
+	ForkSubOffset       uint64
 	// StoreToken is an opaque, process-local storage generation identifier.
 	// Handlers pass it back only through ReadPageOptions.Snapshot; it is never
 	// serialized into the Durable Streams wire protocol.
 	StoreToken string
+}
+
+// ReadSnapshotFromMetadata projects the immutable state needed by readers.
+// Producer and writer-sequence state deliberately do not cross this boundary.
+func ReadSnapshotFromMetadata(meta *StreamMetadata) ReadSnapshot {
+	if meta == nil {
+		return ReadSnapshot{}
+	}
+	return ReadSnapshot{
+		Tail:                meta.CurrentOffset,
+		ContentType:         meta.ContentType,
+		Closed:              meta.Closed,
+		Incarnation:         meta.Incarnation,
+		TTLSeconds:          cloneInt64(meta.TTLSeconds),
+		ExpiresAt:           cloneTime(meta.ExpiresAt),
+		CreatedAt:           meta.CreatedAt,
+		ForkedFrom:          meta.ForkedFrom,
+		ForkOffset:          meta.ForkOffset,
+		ForkOffsetRequested: cloneOffset(meta.ForkOffsetRequested),
+		ForkSubOffset:       meta.ForkSubOffset,
+	}
+}
+
+// SameReadStream reports whether two snapshots belong to the same created
+// stream. Content type is part of the fence because it controls wire framing.
+func SameReadStream(left, right ReadSnapshot) bool {
+	return left.Incarnation != "" &&
+		left.Incarnation == right.Incarnation &&
+		ContentTypeMatches(left.ContentType, right.ContentType)
+}
+
+// ShouldRenewReadAccess is the pure access decision mirrored by
+// should_touch_read in Redis common.lua. Absolute expiry never slides.
+func ShouldRenewReadAccess(meta *StreamMetadata) bool {
+	return meta != nil && meta.TTLSeconds != nil
+}
+
+func cloneInt64(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func cloneOffset(value *Offset) *Offset {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 // ReadPageOptions controls one bounded storage read. Snapshot is nil on the
@@ -89,6 +155,27 @@ type ReadPage struct {
 // Store implementations continue to compile.
 type PageReader interface {
 	ReadPage(ctx context.Context, path string, offset Offset, opts ReadPageOptions) (ReadPage, error)
+}
+
+// ReadWaitResult is the durable state observed when a long-poll wakes or
+// times out. Page is authoritative for response headers in either case.
+type ReadWaitResult struct {
+	Page     ReadPage
+	TimedOut bool
+}
+
+// PageWaiter is the race-closing long-poll capability implemented by
+// Chronicle's maintained stores. The caller has already performed the logical
+// read access represented by Initial; wait rechecks must therefore be no-touch.
+type PageWaiter interface {
+	WaitForPage(
+		ctx context.Context,
+		path string,
+		offset Offset,
+		initial ReadSnapshot,
+		timeout time.Duration,
+		opts ReadPageOptions,
+	) (ReadWaitResult, error)
 }
 
 // PageSnapshotReleaser is implemented by stores that retain resources for a

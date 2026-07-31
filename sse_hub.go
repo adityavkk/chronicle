@@ -85,6 +85,12 @@ func (l *sseHubLease) waitReady(ctx context.Context) error {
 	}
 }
 
+func (l *sseHubLease) progressedBeyond(offset store.Offset, closed bool) bool {
+	l.hub.mu.Lock()
+	defer l.hub.mu.Unlock()
+	return offset.LessThan(l.hub.current) || (!closed && l.hub.closed)
+}
+
 func (l *sseHubLease) validateSnapshot(snapshot store.ReadSnapshot) error {
 	if l == nil {
 		return errors.New("SSE hub lease is nil")
@@ -120,7 +126,7 @@ func (l *sseHubLease) close() {
 	})
 }
 
-func (h *Handler) acquireSSEHub(path string, meta *store.StreamMetadata, useBase64 bool) *sseHubLease {
+func (h *Handler) acquireSSEHub(path string, snapshot store.ReadSnapshot, useBase64 bool) *sseHubLease {
 	metrics := h.sseMetrics()
 	h.sseHubs.mu.Lock()
 	defer h.sseHubs.mu.Unlock()
@@ -129,16 +135,16 @@ func (h *Handler) acquireSSEHub(path string, meta *store.StreamMetadata, useBase
 		h.sseHubs.hubs = make(map[string]*sseHubEntry)
 	}
 	entry := h.sseHubs.hubs[path]
-	if entry == nil || !entry.hub.canServe(meta) {
+	if entry == nil || !entry.hub.canServe(snapshot) {
 		ctx, cancel := context.WithCancel(context.Background())
 		replayLimit := positiveOr(h.SSEHubReplayBytes, defaultSSEHubReplayBytes)
 		batchLimit := min(positiveOr(h.SSEHubBatchBytes, defaultSSEHubBatchBytes), replayLimit)
 		pollInterval := durationOr(h.SSEHubPollInterval, defaultSSEHubPoll)
-		pollInterval = capSSEHubPollForTTL(pollInterval, meta.TTLSeconds)
+		pollInterval = capSSEHubPollForTTL(pollInterval, snapshot.TTLSeconds)
 		hub := &sseHub{
 			handler:      h,
 			path:         path,
-			contentType:  meta.ContentType,
+			contentType:  snapshot.ContentType,
 			useBase64:    useBase64,
 			replayLimit:  replayLimit,
 			batchLimit:   batchLimit,
@@ -147,10 +153,10 @@ func (h *Handler) acquireSSEHub(path string, meta *store.StreamMetadata, useBase
 			cancel:       cancel,
 			done:         make(chan struct{}),
 			ready:        make(chan struct{}),
-			current:      meta.CurrentOffset,
-			closed:       meta.Closed,
-			incarnation:  meta.Incarnation,
-			createdAt:    meta.CreatedAt,
+			current:      snapshot.Tail,
+			closed:       snapshot.Closed,
+			incarnation:  snapshot.Incarnation,
+			createdAt:    snapshot.CreatedAt,
 			watchers:     make(map[*sseHubWatcher]struct{}),
 			metrics:      metrics,
 		}
@@ -320,7 +326,7 @@ func (h *sseHub) runPersistent(subscriber store.NotificationSubscriber) {
 			})
 		}
 
-		if err := h.refresh(); err != nil {
+		if err := h.refreshNoTouch(); err != nil {
 			closeSub()
 			if h.handleReadError(err) {
 				h.markReady(err)
@@ -391,8 +397,14 @@ func (h *sseHub) runPersistent(subscriber store.NotificationSubscriber) {
 
 func (h *sseHub) runWaitLoop() {
 	retry := sseHubRetryMin
+	initial := true
 	for h.ctx.Err() == nil && !h.isClosed() {
-		err := h.refresh()
+		var err error
+		if initial {
+			err = h.refreshNoTouch()
+		} else {
+			err = h.refresh()
+		}
 		if err != nil {
 			if h.ctx.Err() != nil {
 				return
@@ -408,6 +420,7 @@ func (h *sseHub) runWaitLoop() {
 			retry = min(retry*2, sseHubRetryMax)
 			continue
 		}
+		initial = false
 		retry = sseHubRetryMin
 		h.markReady(nil)
 		if h.isClosed() {
@@ -420,6 +433,14 @@ func (h *sseHub) runWaitLoop() {
 }
 
 func (h *sseHub) refresh() error {
+	return h.refreshPage(false)
+}
+
+func (h *sseHub) refreshNoTouch() error {
+	return h.refreshPage(true)
+}
+
+func (h *sseHub) refreshPage(noTouch bool) error {
 	ctx := h.ctx
 	if ctx == nil {
 		// refresh is also exercised directly by focused tests and diagnostic
@@ -437,6 +458,7 @@ func (h *sseHub) refresh() error {
 	opts := store.ReadPageOptions{
 		TargetBytes: min(h.handler.readPageBytes(), h.batchLimit),
 		MaxFrames:   store.DefaultReadPageFrames,
+		NoTouch:     noTouch,
 	}
 	emptyPages := 0
 	for {
@@ -667,14 +689,15 @@ func (h *sseHub) isClosed() bool {
 	return h.closed
 }
 
-func (h *sseHub) canServe(meta *store.StreamMetadata) bool {
+func (h *sseHub) canServe(snapshot store.ReadSnapshot) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	snapshot := &store.StreamMetadata{
+	current := store.ReadSnapshot{
 		Incarnation: h.incarnation,
+		ContentType: h.contentType,
 		CreatedAt:   h.createdAt,
 	}
-	return h.terminalErr == nil && snapshot.SameIncarnation(meta)
+	return h.terminalErr == nil && store.SameReadStream(current, snapshot)
 }
 
 func (h *sseHub) fail(err error) {

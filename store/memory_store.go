@@ -34,6 +34,8 @@ type MemoryStore struct {
 	producerLocksMu sync.Mutex
 }
 
+var _ PageWaiter = (*MemoryStore)(nil)
+
 // MemoryStoreOption configures a MemoryStore at construction.
 type MemoryStoreOption func(*MemoryStore)
 
@@ -851,41 +853,43 @@ func (s *MemoryStore) ReadPage(ctx context.Context, path string, offset Offset, 
 		return ReadPage{}, ErrStreamNotFound
 	}
 
-	// Soft-deleted streams are not visible for direct reads
+	// Soft-deleted streams are not visible for direct reads.
 	if stream.metadata.SoftDeleted {
-		return ReadPage{}, ErrStreamNotFound
+		return ReadPage{}, ErrStreamSoftDeleted
 	}
 
 	incarnation := memoryReadIncarnation(&stream.metadata)
 	var snapshot ReadSnapshot
 	if opts.Snapshot == nil {
-		snapshot = ReadSnapshot{
-			Tail:        stream.metadata.CurrentOffset,
-			ContentType: stream.metadata.ContentType,
-			Closed:      stream.metadata.Closed,
-			Incarnation: incarnation,
-		}
+		snapshot = ReadSnapshotFromMetadata(&stream.metadata)
+		snapshot.Incarnation = incarnation
 	} else {
 		snapshot = *opts.Snapshot
-		if snapshot.Incarnation != incarnation || !ContentTypeMatches(snapshot.ContentType, stream.metadata.ContentType) {
+		current := ReadSnapshotFromMetadata(&stream.metadata)
+		current.Incarnation = incarnation
+		if !SameReadStream(snapshot, current) {
 			return ReadPage{}, ErrReadSnapshotChanged
 		}
 	}
 	// One logical client read renews the root stream once, when it captures its
 	// snapshot. Continuation pages and internal sealing must not extend the TTL.
-	if !opts.NoTouch && opts.Snapshot == nil {
+	if !opts.NoTouch && opts.Snapshot == nil && ShouldRenewReadAccess(&stream.metadata) {
 		stream.metadata.LastAccessedAt = s.now()
 	}
 
+	readOffset := offset
+	if readOffset.IsNow() {
+		readOffset = snapshot.Tail
+	}
 	page := ReadPage{
-		NextOffset: offset,
+		NextOffset: readOffset,
 		Snapshot:   snapshot,
 		Stats: ReadPageStats{
 			RequestedBytes: opts.TargetBytes,
 		},
 	}
 	messages := make([]Message, 0, min(opts.MaxFrames, 16))
-	s.walkForkedMessages(stream, offset, snapshot.Tail, func(msg Message) bool {
+	s.walkForkedMessages(stream, readOffset, snapshot.Tail, func(msg Message) bool {
 		if err := ctx.Err(); err != nil {
 			return false
 		}
@@ -919,6 +923,67 @@ func (s *MemoryStore) ReadPage(ctx context.Context, path string, offset Offset, 
 	return page, nil
 }
 
+// WaitForPage implements PageWaiter. Registration happens before the first
+// no-touch recheck, closing the append race without renewing the logical read a
+// second time.
+func (s *MemoryStore) WaitForPage(
+	ctx context.Context,
+	path string,
+	offset Offset,
+	initial ReadSnapshot,
+	timeout time.Duration,
+	opts ReadPageOptions,
+) (ReadWaitResult, error) {
+	ch := make(chan struct{}, 1)
+	s.longPoll.register(path, ch)
+	defer s.longPoll.unregister(path, ch)
+
+	recheck := func() (ReadPage, bool, error) {
+		recheckOpts := opts
+		recheckOpts.Snapshot = nil
+		recheckOpts.NoTouch = true
+		page, err := s.ReadPage(ctx, path, offset, recheckOpts)
+		if err != nil {
+			return ReadPage{}, false, err
+		}
+		if !SameReadStream(initial, page.Snapshot) {
+			return ReadPage{}, false, ErrReadSnapshotChanged
+		}
+		done := len(page.Messages) > 0 ||
+			(page.Snapshot.Closed && offset.Equal(page.Snapshot.Tail))
+		return page, done, nil
+	}
+
+	if page, done, err := recheck(); err != nil {
+		return ReadWaitResult{}, err
+	} else if done {
+		return ReadWaitResult{Page: page}, nil
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ch:
+			page, done, err := recheck()
+			if err != nil {
+				return ReadWaitResult{}, err
+			}
+			if done {
+				return ReadWaitResult{Page: page}, nil
+			}
+		case <-timer.C:
+			page, done, err := recheck()
+			if err != nil {
+				return ReadWaitResult{}, err
+			}
+			return ReadWaitResult{Page: page, TimedOut: !done}, nil
+		case <-ctx.Done():
+			return ReadWaitResult{}, ctx.Err()
+		}
+	}
+}
+
 // Read implements Store by concatenating bounded pages for one snapshot.
 func (s *MemoryStore) Read(path string, offset Offset) ([]Message, bool, error) {
 	var (
@@ -929,6 +994,9 @@ func (s *MemoryStore) Read(path string, offset Offset) ([]Message, bool, error) 
 	for {
 		page, err := s.ReadPage(context.Background(), path, next, ReadPageOptions{Snapshot: snapshot})
 		if err != nil {
+			if errors.Is(err, ErrStreamSoftDeleted) {
+				err = ErrStreamNotFound
+			}
 			return nil, false, err
 		}
 		if snapshot == nil {
@@ -949,15 +1017,6 @@ func (s *MemoryStore) Read(path string, offset Offset) ([]Message, bool, error) 
 
 // WaitForMessages implements Store.
 func (s *MemoryStore) WaitForMessages(ctx context.Context, path string, offset Offset, timeout time.Duration) ([]Message, bool, bool, error) {
-	// First check if stream is closed and client is at tail
-	s.mu.RLock()
-	stream, ok := s.streams[path]
-	if ok && stream.metadata.Closed && offset.Equal(stream.metadata.CurrentOffset) {
-		s.mu.RUnlock()
-		return nil, false, true, nil // streamClosed = true
-	}
-	s.mu.RUnlock()
-
 	// First check if there are already messages. One bounded page is enough to
 	// decide whether the waiter should return.
 	page, err := s.ReadPage(ctx, path, offset, ReadPageOptions{})
@@ -967,65 +1026,27 @@ func (s *MemoryStore) WaitForMessages(ctx context.Context, path string, offset O
 	if len(page.Messages) > 0 {
 		return page.Messages, false, false, nil
 	}
+	if page.Snapshot.Closed && offset.Equal(page.Snapshot.Tail) {
+		return nil, false, true, nil
+	}
 
 	// For forks: if offset is in the inherited range (< ForkOffset),
 	// inherited data exists in the source. The Read call above should have
 	// returned it already, but if the source is missing/empty, don't wait
 	// — inherited data will never arrive via long-poll notifications
 	// (source appends don't notify fork waiters).
-	s.mu.RLock()
-	stream, ok = s.streams[path]
-	if ok && stream.metadata.ForkedFrom != "" && offset.LessThan(stream.metadata.ForkOffset) {
-		s.mu.RUnlock()
-		// Return empty — no data available and waiting won't help
-		// since source appends don't notify this fork's waiters.
-		// The upToDate flag should reflect the actual state.
+	if page.Snapshot.ForkedFrom != "" && offset.LessThan(page.Snapshot.ForkOffset) {
 		return nil, false, false, nil
 	}
-	s.mu.RUnlock()
 
-	// No messages, set up wait
-	ch := make(chan struct{}, 1)
-	s.longPoll.register(path, ch)
-	defer s.longPoll.unregister(path, ch)
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	select {
-	case <-ch:
-		// New data or closure available - check which
-		s.mu.RLock()
-		stream, ok := s.streams[path]
-		if ok && stream.metadata.Closed {
-			// Stream was closed
-			currentOffset := stream.metadata.CurrentOffset
-			s.mu.RUnlock()
-			// Check if there are any final messages
-			page, err := s.ReadPage(ctx, path, offset, ReadPageOptions{})
-			if err != nil {
-				return nil, false, false, err
-			}
-			// If no messages and client is at tail, stream is closed
-			if len(page.Messages) == 0 && offset.Equal(currentOffset) {
-				return nil, false, true, nil
-			}
-			return page.Messages, false, false, nil
-		}
-		s.mu.RUnlock()
-		// New data available
-		page, err := s.ReadPage(ctx, path, offset, ReadPageOptions{})
-		return page.Messages, false, false, err
-	case <-timer.C:
-		// Timeout - check if stream was closed during wait
-		s.mu.RLock()
-		stream, ok := s.streams[path]
-		streamClosed := ok && stream.metadata.Closed
-		s.mu.RUnlock()
-		return nil, true, streamClosed, nil
-	case <-ctx.Done():
-		return nil, false, false, ctx.Err()
+	result, err := s.WaitForPage(ctx, path, offset, page.Snapshot, timeout, ReadPageOptions{})
+	if err != nil {
+		return nil, false, false, err
 	}
+	closed := result.Page.Snapshot.Closed &&
+		offset.Equal(result.Page.Snapshot.Tail) &&
+		len(result.Page.Messages) == 0
+	return result.Page.Messages, result.TimedOut, closed, nil
 }
 
 // GetCurrentOffset implements Store.

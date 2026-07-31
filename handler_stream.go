@@ -34,6 +34,43 @@ func (h *Handler) pageReader() store.PageReader {
 	return legacyPageReader{store: h.Store}
 }
 
+func (h *Handler) captureReadSnapshot(
+	ctx context.Context,
+	path string,
+	noTouch bool,
+) (store.ReadSnapshot, error) {
+	reader := h.pageReader()
+	page, err := reader.ReadPage(
+		ctx,
+		path,
+		store.NowOffset,
+		store.ReadPageOptions{
+			TargetBytes: 1,
+			MaxFrames:   1,
+			NoTouch:     noTouch,
+		},
+	)
+	if err != nil {
+		return store.ReadSnapshot{}, err
+	}
+	releaseReadSnapshot(reader, path, page.Snapshot)
+	return page.Snapshot, nil
+}
+
+// readValidationError preserves the protocol's authorization → existence →
+// request-validation order without loading producer state. Invalid reads do
+// not count as access and therefore use a no-touch projection.
+func (h *Handler) readValidationError(
+	ctx context.Context,
+	path string,
+	message string,
+) error {
+	if _, err := h.captureReadSnapshot(ctx, path, true); err != nil {
+		return readPageError(err)
+	}
+	return newHTTPError(http.StatusBadRequest, message)
+}
+
 // legacyPageReader keeps third-party Store implementations source compatible.
 // It prevents the handler's second whole-body allocation, but the backend
 // cannot promise bounded storage work without implementing store.PageReader.
@@ -64,7 +101,11 @@ func (r legacyPageReader) ReadPage(ctx context.Context, path string, offset stor
 		!store.ContentTypeMatches(opts.Snapshot.ContentType, meta.ContentType)) {
 		return store.ReadPage{}, store.ErrReadSnapshotChanged
 	}
-	messages, _, err = r.store.Read(path, offset)
+	readOffset := offset
+	if readOffset.IsNow() {
+		readOffset = meta.CurrentOffset
+	}
+	messages, _, err = r.store.Read(path, readOffset)
 	if err != nil {
 		return store.ReadPage{}, err
 	}
@@ -86,12 +127,13 @@ func (r legacyPageReader) ReadPage(ctx context.Context, path string, offset stor
 		// inside this snapshot but not this page; the next page fetches it from
 		// the unchanged offset. This preserves the old SSE race-closing
 		// behavior without falsely checkpointing or skipping the append.
-		snapshot = store.ReadSnapshot{
-			Tail:        after.CurrentOffset,
-			ContentType: after.ContentType,
-			Closed:      after.Closed,
-			Incarnation: incarnation,
+		snapshotMeta := &after
+		if offset.IsNow() {
+			snapshotMeta = &meta
+			messages = nil
 		}
+		snapshot = store.ReadSnapshotFromMetadata(snapshotMeta)
+		snapshot.Incarnation = incarnation
 	}
 
 	filtered := make([]store.Message, 0, min(len(messages), opts.MaxFrames))
@@ -114,8 +156,8 @@ func (r legacyPageReader) ReadPage(ctx context.Context, path string, offset stor
 		returned += len(message.Data)
 	}
 	next := snapshot.Tail
-	if offset.LessThan(snapshot.Tail) {
-		next = offset
+	if readOffset.LessThan(snapshot.Tail) {
+		next = readOffset
 	}
 	if len(filtered) > 0 {
 		next = filtered[len(filtered)-1].Offset
@@ -246,6 +288,36 @@ func releaseReadSnapshot(reader store.PageReader, path string, snapshot store.Re
 	}
 }
 
+func (h *Handler) waitForPage(
+	ctx context.Context,
+	reader store.PageReader,
+	path string,
+	offset store.Offset,
+	initial store.ReadSnapshot,
+	timeout time.Duration,
+	opts store.ReadPageOptions,
+) (store.ReadWaitResult, error) {
+	if waiter, ok := h.Store.(store.PageWaiter); ok {
+		return waiter.WaitForPage(ctx, path, offset, initial, timeout, opts)
+	}
+
+	_, timedOut, _, err := h.Store.WaitForMessages(ctx, path, offset, timeout)
+	if err != nil {
+		return store.ReadWaitResult{}, err
+	}
+	recheckOpts := opts
+	recheckOpts.Snapshot = nil
+	recheckOpts.NoTouch = true
+	page, err := reader.ReadPage(ctx, path, offset, recheckOpts)
+	if err != nil {
+		return store.ReadWaitResult{}, err
+	}
+	if !store.SameReadStream(initial, page.Snapshot) {
+		return store.ReadWaitResult{}, store.ErrReadSnapshotChanged
+	}
+	return store.ReadWaitResult{Page: page, TimedOut: timedOut}, nil
+}
+
 // streamCatchupResponse writes each storage page directly to the response.
 // Once headers are committed, an internal pagination failure must abort the
 // transport. A clean EOF would otherwise let a client accept a partial opaque
@@ -328,6 +400,8 @@ func readPageError(err error) error {
 	switch {
 	case errors.Is(err, store.ErrStreamNotFound):
 		return newHTTPError(http.StatusNotFound, "stream not found")
+	case errors.Is(err, store.ErrStreamSoftDeleted):
+		return newHTTPError(http.StatusGone, "stream has been deleted")
 	case errors.Is(err, store.ErrReadSnapshotChanged):
 		return fmt.Errorf("stream changed during read: %w", err)
 	default:

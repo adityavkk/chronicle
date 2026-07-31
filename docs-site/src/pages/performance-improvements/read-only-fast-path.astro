@@ -1,0 +1,12 @@
+---
+// The content stays in the shared underscore-prefixed MDX file. This wrapper
+// gives the explainer its nested performance-improvements route.
+import type { ComponentProps } from "astro/types";
+import Doc from "../../layouts/Doc.astro";
+import ReadOnlyFastPath, { frontmatter } from "../_read-only-fast-path.mdx";
+
+const fm = frontmatter as ComponentProps<typeof Doc>["frontmatter"];
+---
+<Doc frontmatter={fm}>
+  <ReadOnlyFastPath />
+</Doc>

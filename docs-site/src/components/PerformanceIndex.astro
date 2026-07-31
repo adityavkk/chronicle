@@ -4,16 +4,19 @@ const links = {
   catchup: `${base}/performance-improvements/bounded-catchup`,
   sse: `${base}/performance-improvements/sse-fanout`,
   segments: `${base}/performance-improvements/immutable-segments`,
+  readOnly: `${base}/performance-improvements/read-only-fast-path`,
   scaling: `${base}/horizontal-scale`,
   loadTests: `${base}/load-testing`,
   issue4: "",
   issue5: "",
   issue6: "",
+  issue7: "",
   catchupAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0004-bounded-read-pages-and-snapshot-catch-up.md",
   sseAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0005-per-instance-sse-stream-fanout.md",
   segmentsAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0006-immutable-segment-read-plane-prototype.md",
   catchupEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md",
   segmentsEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-6-immutable-segments.md",
+  readOnlyEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/research/12-read-only-fast-path-results.md",
   comparison: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/ds-bench/configuration-comparison.md",
 };
 ---
@@ -78,9 +81,29 @@ const links = {
     </nav>
   </article>
 
-  <article class="improvement">
+  <article class="improvement featured">
     <div class="head">
       <span class="num">04</span>
+      <span class="status">validated</span>
+    </div>
+    <h3>Read-only fast path</h3>
+    <p class="result">GET HGETALL calls 6 to 2; read-side writes 5 to 0</p>
+    <p>
+      <strong>Before:</strong> persistent reads loaded producer state, loaded
+      metadata twice inside Lua, and touched Redis expiry state.
+      <strong>Now:</strong> one typed page carries the state that GET,
+      long-poll, and SSE need.
+    </p>
+    <nav aria-label="Read-only fast path links">
+      <a class="primary" href={links.readOnly}>Read the explainer <span aria-hidden="true">→</span></a>
+      <a href={links.issue7}>GPA/chronicle issue #7 <span aria-hidden="true">↗</span></a>
+      <a href={links.readOnlyEvidence}>Evidence report <span aria-hidden="true">↗</span></a>
+    </nav>
+  </article>
+
+  <article class="improvement">
+    <div class="head">
+      <span class="num">05</span>
       <span class="status">shipped</span>
     </div>
     <h3>Horizontal scale</h3>
@@ -98,7 +121,7 @@ const links = {
 
   <article class="improvement">
     <div class="head">
-      <span class="num">05</span>
+      <span class="num">06</span>
       <span class="status">measured</span>
     </div>
     <h3>Configurations and systems</h3>

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -87,6 +88,16 @@ type notificationPrimary struct {
 	subscriber store.NotificationSubscriber
 }
 
+type getCountingPrimary struct {
+	*store.MemoryStore
+	gets atomic.Int64
+}
+
+func (p *getCountingPrimary) Get(path string) (*store.StreamMetadata, error) {
+	p.gets.Add(1)
+	return p.MemoryStore.Get(path)
+}
+
 func (p *notificationPrimary) NotificationSubscriber() (store.NotificationSubscriber, bool) {
 	return p.subscriber, true
 }
@@ -157,6 +168,39 @@ func TestNotificationSubscriberDelegatesThroughSegmentWrapper(t *testing.T) {
 	got, ok := seg.NotificationSubscriber()
 	if !ok || got != subscriber {
 		t.Fatalf("NotificationSubscriber() = (%T, %v), want delegated subscriber", got, ok)
+	}
+}
+
+func TestImmutableReadAndControlWorkDoesNotLoadProducerMetadata(t *testing.T) {
+	primary := &getCountingPrimary{MemoryStore: store.NewMemoryStore()}
+	seg, _ := newFileSegmentStore(t, ModeLocalFiles, primary, StateShadow)
+	path := "/no-producer-metadata"
+	mustSegmentCreate(t, seg, path, "text/plain")
+	mustSegmentAppend(t, seg, path, []byte("payload"), store.AppendOptions{})
+	primary.gets.Store(0)
+
+	if _, err := seg.Seal(path); err != nil {
+		t.Fatal(err)
+	}
+	page, err := seg.ReadPage(context.Background(), path, store.ZeroOffset, store.ReadPageOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg.ReleaseReadSnapshot(path, page.Snapshot)
+	pin, err := seg.PinSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin.Release()
+	if _, err := seg.Transition(path, StateServing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seg.Repair(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := primary.gets.Load(); got != 0 {
+		t.Fatalf("full metadata Get calls = %d, want 0", got)
 	}
 }
 

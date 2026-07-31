@@ -94,51 +94,46 @@ func coalesceNotification(
 	return store.NotificationAppend
 }
 
-// WaitForMessages blocks until messages past offset exist, the stream
-// closes, the timeout expires, or ctx is cancelled.
-//
-// Wake protocol (docs/PLAN.md §4.5): fast-path read first, SUBSCRIBE to the
-// stream's notify channel, then re-read BEFORE waiting (an append between
-// the first read and the subscribe must not be missed), then loop on
-// notification / defensive poll / timeout.
-func (s *Store) WaitForMessages(ctx context.Context, path string, offset store.Offset, timeout time.Duration) ([]store.Message, bool, bool, error) {
-	// Fast path: stream closed and caller at tail.
-	meta, err := s.fetchMeta(ctx, path)
-	if err != nil {
-		return nil, false, false, err
-	}
-	if meta != nil && meta.Closed && offset.Equal(meta.CurrentOffset) {
-		return nil, false, true, nil
-	}
-
-	// Fast path: one bounded page is enough to decide whether messages are
-	// already available.
-	page, err := s.ReadPage(ctx, path, offset, store.ReadPageOptions{})
-	if err != nil {
-		return nil, false, false, err
-	}
-	if len(page.Messages) > 0 {
-		return page.Messages, false, false, nil
-	}
-
-	// Fork guard: an offset in the inherited range (< ForkOffset) can only
-	// be served by the source, and source appends never notify fork
-	// waiters — waiting would hang. Return empty immediately.
-	if meta != nil && meta.ForkedFrom != "" && offset.LessThan(meta.ForkOffset) {
-		return nil, false, false, nil
-	}
-
+// WaitForPage implements store.PageWaiter. The caller's first page already
+// performed the logical access touch. Every race-closing recheck is therefore
+// a fresh, no-touch snapshot fenced to the same stream incarnation.
+func (s *Store) WaitForPage(
+	ctx context.Context,
+	path string,
+	offset store.Offset,
+	initial store.ReadSnapshot,
+	timeout time.Duration,
+	opts store.ReadPageOptions,
+) (store.ReadWaitResult, error) {
 	pubsub := s.client.Subscribe(ctx, notifyChannel(path))
 	defer func() { _ = pubsub.Close() }()
 	if _, err := pubsub.Receive(ctx); err != nil { // confirm subscription
-		return nil, false, false, err
+		return store.ReadWaitResult{}, err
 	}
 	wake := pubsub.Channel()
 
-	// Re-read before waiting: closes the missed-wakeup race window between
-	// the fast-path read and the subscribe.
-	if msgs, closed, done, err := s.recheck(ctx, path, offset); done {
-		return msgs, false, closed, err
+	recheck := func() (store.ReadPage, bool, error) {
+		recheckOpts := opts
+		recheckOpts.Snapshot = nil
+		recheckOpts.NoTouch = true
+		page, err := s.ReadPage(ctx, path, offset, recheckOpts)
+		if err != nil {
+			return store.ReadPage{}, false, err
+		}
+		if !store.SameReadStream(initial, page.Snapshot) {
+			return store.ReadPage{}, false, store.ErrReadSnapshotChanged
+		}
+		done := len(page.Messages) > 0 ||
+			(page.Snapshot.Closed && offset.Equal(page.Snapshot.Tail))
+		return page, done, nil
+	}
+
+	// Re-read after subscription confirmation so an append in the attach
+	// window cannot be missed.
+	if page, done, err := recheck(); err != nil {
+		return store.ReadWaitResult{}, err
+	} else if done {
+		return store.ReadWaitResult{Page: page}, nil
 	}
 
 	timer := time.NewTimer(timeout)
@@ -149,45 +144,63 @@ func (s *Store) WaitForMessages(ctx context.Context, path string, offset store.O
 	for {
 		select {
 		case <-wake:
-			if msgs, closed, done, err := s.recheck(ctx, path, offset); done {
-				return msgs, false, closed, err
+			page, done, err := recheck()
+			if err != nil {
+				return store.ReadWaitResult{}, err
+			}
+			if done {
+				return store.ReadWaitResult{Page: page}, nil
 			}
 		case <-ticker.C:
-			if msgs, closed, done, err := s.recheck(ctx, path, offset); done {
-				return msgs, false, closed, err
+			page, done, err := recheck()
+			if err != nil {
+				return store.ReadWaitResult{}, err
+			}
+			if done {
+				return store.ReadWaitResult{Page: page}, nil
 			}
 		case <-timer.C:
-			// Timed out: report whether the stream is now closed (snapshot,
-			// mirroring MemoryStore's timeout path).
-			m, err := s.fetchMeta(ctx, path)
+			page, done, err := recheck()
 			if err != nil {
-				return nil, false, false, err
+				return store.ReadWaitResult{}, err
 			}
-			return nil, true, m != nil && m.Closed, nil
+			return store.ReadWaitResult{Page: page, TimedOut: !done}, nil
 		case <-ctx.Done():
-			return nil, false, false, ctx.Err()
+			return store.ReadWaitResult{}, ctx.Err()
 		}
 	}
 }
 
-// recheck re-reads the stream. done=true means the wait is over: messages
-// arrived, the stream closed at the caller's tail, or reading failed (e.g.
-// the stream was deleted mid-wait). A spurious wakeup with nothing new
-// keeps waiting (done=false).
-func (s *Store) recheck(ctx context.Context, path string, offset store.Offset) (msgs []store.Message, closed, done bool, err error) {
+// WaitForMessages retains the Store compatibility contract by performing the
+// initial logical read, then delegating race closure to the typed page waiter.
+func (s *Store) WaitForMessages(ctx context.Context, path string, offset store.Offset, timeout time.Duration) ([]store.Message, bool, bool, error) {
 	page, err := s.ReadPage(ctx, path, offset, store.ReadPageOptions{})
 	if err != nil {
-		return nil, false, true, err
+		return nil, false, false, err
 	}
 	if len(page.Messages) > 0 {
-		return page.Messages, false, true, nil
+		return page.Messages, false, false, nil
 	}
-	meta, err := s.fetchMeta(ctx, path)
+	if page.Snapshot.Closed && offset.Equal(page.Snapshot.Tail) {
+		return nil, false, true, nil
+	}
+	if page.Snapshot.ForkedFrom != "" && offset.LessThan(page.Snapshot.ForkOffset) {
+		return nil, false, false, nil
+	}
+
+	result, err := s.WaitForPage(
+		ctx,
+		path,
+		offset,
+		page.Snapshot,
+		timeout,
+		store.ReadPageOptions{},
+	)
 	if err != nil {
-		return nil, false, true, err
+		return nil, false, false, err
 	}
-	if meta != nil && meta.Closed && offset.Equal(meta.CurrentOffset) {
-		return nil, true, true, nil
-	}
-	return nil, false, false, nil
+	closed := result.Page.Snapshot.Closed &&
+		offset.Equal(result.Page.Snapshot.Tail) &&
+		len(result.Page.Messages) == 0
+	return result.Page.Messages, result.TimedOut, closed, nil
 }

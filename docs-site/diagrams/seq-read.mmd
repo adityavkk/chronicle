@@ -5,15 +5,21 @@ sequenceDiagram
     participant S as Store
     participant R as Redis
     C->>H: GET /chat?offset=-1
-    H->>S: Store.Get · existence · handler.go:418
-    S->>R: HGETALL :meta + :prod (pipeline)
-    H->>S: ReadPage(path, offset) · handler.go:548
-    S->>R: EVALSHA read.lua · capture root snapshot
-    Note over S,R: snapshot: tail · type · closed · incarnation
+    H->>S: ReadPage(path, offset) · handler.go:513
+    S->>R: EVALSHA read.lua · HGETALL :meta once
+    Note over S,R: capture tail · type · closed · expiry · incarnation (never read :prod)
+    opt first root snapshot has sliding TTL
+        S->>R: HSET accessedAtNs · refresh exact key TTL
+    end
+    S->>R: EVALSHA read.lua · segment HGETALL + bounded ZRANGEBYLEX
+    R-->>S: first frame-aligned page + typed snapshot
+    S-->>H: messages · next offset · fixed tail
+    H-->>C: write page and flush
     loop until the captured tail
-        S->>R: ZRANGEBYLEX lower to snapshot tail · LIMIT 0 1024
-        R-->>S: one frame-aligned page · target 1 MiB
+        H->>S: ReadPage with same snapshot · no touch
+        S->>R: validate incarnation + bounded range
         S-->>H: messages · next offset · same snapshot
         H-->>C: write page and flush
     end
-    Note over H,S: captured tail fixes headers · later appends wait
+    Note over H,S: persistent and absolute-expiry-only reads write nothing
+    Note over H,S: exceptions: legacy incarnation migration and lazy expiry cleanup

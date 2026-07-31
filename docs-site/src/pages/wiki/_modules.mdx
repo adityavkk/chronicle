@@ -25,8 +25,8 @@ import Aside from "../../components/Aside.astro";
   <ul>
     <li><strong>The shell is the only networked code.</strong> <code>Handler.ServeHTTP</code> sets headers, guards the <code>__ds</code> namespace, and dispatches one <code>switch</code> over five verbs to five handlers. No router, no route table.</li>
     <li><strong>The core is pure functions.</strong> TTL and offset grammars, cursor math, and the producer state machine (<code>ValidateProducer</code>) decide everything possible without I/O, so they test without mocks.</li>
-    <li><strong>The handler never names Redis.</strong> It depends on <code>store.Store</code>, an eleven-method interface. A Redis backend and an in-memory reference backend implement it, and the handler cannot tell them apart.</li>
-    <li><strong>Every Redis mutation is one Lua script.</strong> Create, append, close, and delete each run as a single <code>EVALSHA</code>, so validate, write, and publish are atomic and serialized per stream.</li>
+    <li><strong>The handler never names Redis.</strong> It depends on <code>store.Store</code> plus narrow typed read, wait, and notification capabilities. The Redis backend and in-memory reference backend expose the same behavior.</li>
+    <li><strong>Each single-stream mutation step is one Lua script.</strong> Append, close, delete, and an ordinary create run as one <code>EVALSHA</code>, so validation and writes are atomic per stream. Fork creation composes two single-slot scripts in Go. <code>read.lua</code> returns the typed read projection without producer state.</li>
     <li><strong>Subscriptions attach through two hooks.</strong> A durable append fires <code>OnStreamAppend</code>; the webhook <code>Manager</code> turns it into a fenced wake, recovered by a sweep so a crash cannot lose or double-deliver it.</li>
   </ul>
 </Tldr>
@@ -40,8 +40,8 @@ import Aside from "../../components/Aside.astro";
   is the entry point. It sets CORS and the browser security headers, answers
   `OPTIONS` preflight, intercepts the reserved `__ds` subscription namespace, and
   then dispatches on the HTTP method. The dispatch is one `switch`. There is no
-  router, no route table, and no regex. A verb maps to a handler, and the handler
-  maps to one store call.
+  router, no route table, and no regex. A verb maps to a handler, and each
+  handler calls the narrow storage capabilities required for that operation.
 
   <Step n="1" fn="Handler.ServeHTTP, the dispatch" loc="handler.go:122-141" role="Five verbs, five handlers. This switch is the whole router. Above it is headers and the <code>__ds</code> guard. Below it is one error writer.">
 
@@ -68,11 +68,12 @@ import Aside from "../../components/Aside.astro";
 	}
 ```
 
-Each `handle*` method does the same three steps in order. It parses the request
-(headers, query, body), calls one method on `h.Store`, and turns the result into
-a status code and response headers. Errors return as values and meet a single
-`writeError` at the bottom, which maps each `store` error variable to its HTTP
-status.
+Each `handle*` method parses the request, calls the required storage capability,
+and turns typed results into status codes and response headers. Mutations make
+one primary store call. Reads use `PageReader`, add `PageWaiter` only when a
+long-poll reaches the tail, and attach SSE to the shared hub after the first
+page. Errors return as values and meet one `writeError`, which maps each `store`
+error variable to its HTTP status.
 
 <Aside label="Edge case" summary="How <code>Mount</code> keeps the handler path-relative">
   <code>Mount</code> wraps the handler. It strips the stream-root prefix
@@ -87,9 +88,9 @@ status.
     | Function | Verb | Calls |
     | --- | --- | --- |
     | [`handleCreate`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L145) | `PUT` | `Store.Create` → `201`/`200` |
-    | [`handleRead`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L404) | `GET` | `PageReader.ReadPage`, then `WaitForMessages` when caught up |
+    | [`handleRead`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L404) | `GET` | `PageReader.ReadPage`, then typed `PageWaiter.WaitForPage` when caught up |
     | [`handleAppend`](https://github.com/adityavkk/chronicle/blob/main/handler.go#L582) | `POST` | `Store.Append` / `CloseStreamWithProducer` |
-    | [`handleSSE`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go#L18) | `GET live=sse` | streams bounded pages, then uses `WaitForMessages` as a wake primitive |
+    | [`handleSSE`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go#L18) | `GET live=sse` | reuses the first typed page, then attaches to a shared notification-backed read hub |
     | [`Mount`](https://github.com/adityavkk/chronicle/blob/main/mount.go#L27) | any | wraps the handler, does prefix and `Location` rewriting |
   </Table>
 </section>
@@ -184,6 +185,12 @@ type Store interface {
 type PageReader interface {
 	ReadPage(ctx context.Context, path string, offset Offset, opts ReadPageOptions) (ReadPage, error)
 }
+
+type PageWaiter interface {
+	WaitForPage(ctx context.Context, path string, offset Offset,
+		initial ReadSnapshot, timeout time.Duration,
+		opts ReadPageOptions) (ReadWaitResult, error)
+}
 ```
 
 The core type in the contract is the `Offset`. It is two zero-padded 64-bit
@@ -193,11 +200,13 @@ can then store frames in a sorted set keyed by offset string and seek each page
 with `ZRANGEBYLEX`. `PageReader` is a separate optional capability so existing
 third-party `Store` implementations still compile. Chronicle's maintained
 stores implement it with a 1 MiB returned payload target and a 1,024-frame
-page ceiling. The
-first page captures the tail, content type, closed state, and stream
-incarnation. Later pages reuse that snapshot, so concurrent appends belong to
-the next response. `WaitForMessages` blocks until an append, a close, or a
-timeout.
+page ceiling. The first page captures a `ReadSnapshot` with the tail, content
+type, closed state, expiry configuration, fork boundary, and stream
+incarnation. It contains no producer state. Later pages reuse that snapshot, so
+concurrent appends belong to the next response. `PageWaiter` is the optional
+typed long-poll capability. It subscribes, performs no-touch rechecks, and
+returns the final page for an append, close, or timeout. `WaitForMessages`
+remains on `Store` for source compatibility.
 
 <Complexity
   time="O(log N + M) per storage page"
@@ -211,6 +220,7 @@ timeout.
     | Symbol | Role |
     | --- | --- |
     | [`Offset`](https://github.com/adityavkk/chronicle/blob/main/store/offset.go#L11) | Position as `ReadSeq_ByteOffset`. String form sorts in numeric order |
+    | [`ReadSnapshot`](https://github.com/adityavkk/chronicle/blob/main/store/page.go#L34) | Typed read projection. Carries response and fencing state without producer state |
     | [`ValidateProducer`](https://github.com/adityavkk/chronicle/blob/main/store/producer.go#L17) | The pure producer state machine, used by both backends |
     | [`ProcessJSONAppend`](https://github.com/adityavkk/chronicle/blob/main/store/json.go#L16) | Turns a JSON array into one frame per element |
     | [`MemoryStore`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store.go#L79) | The in-memory reference backend used in tests |
@@ -285,7 +295,7 @@ matches, write.
     | --- | --- | --- |
     | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L459) | `store.go` | reads the tail, frames the batch, runs the script, retries on `RETRY` |
     | [`keysFor`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go#L45) | `keys.go` | builds the four `{path}`-tagged keys for one slot |
-    | [`WaitForMessages`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go#L22) | `notify.go` | `SUBSCRIBE`, re-read, and a backup poll for long-poll |
+    | [`WaitForPage`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go#L100) | `notify.go` | `SUBSCRIBE`, no-touch typed rechecks, and the authoritative final long-poll page |
     | [`Delete`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L720) | `store.go` | soft-delete if referenced, else hard-delete and cascade |
   </Table>
 
