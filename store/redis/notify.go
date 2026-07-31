@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -14,50 +15,22 @@ import (
 // churn) is recovered within one tick instead of hanging until timeout.
 const defensivePollInterval = time.Second
 
-type notificationSubscription struct {
-	pubsub *goredis.PubSub
-	wake   <-chan any
-}
-
-// SubscribeNotifications opens and confirms one Redis subscription for path.
-// The caller reuses it across durable reads and owns Close.
+// SubscribeNotifications registers path with the store-owned Pub/Sub
+// multiplexer and returns only after the actor has observed Redis's
+// acknowledgement for its current connection generation.
 func (s *Store) SubscribeNotifications(ctx context.Context, path string) (store.NotificationSubscription, error) {
-	pubsub := s.client.Subscribe(ctx, notifyChannel(path))
-	if _, err := pubsub.Receive(ctx); err != nil {
-		_ = pubsub.Close()
-		return nil, err
+	if s.notifications == nil {
+		return nil, store.ErrNotificationSubscriptionClosed
 	}
-	return &notificationSubscription{
-		pubsub: pubsub,
-		wake:   pubsub.ChannelWithSubscriptions(),
-	}, nil
+	return s.notifications.Register(ctx, path)
 }
 
-func (s *notificationSubscription) Wait(ctx context.Context) (store.NotificationEvent, error) {
-	select {
-	case item, ok := <-s.wake:
-		if !ok {
-			return store.NotificationAppend, store.ErrNotificationSubscriptionClosed
-		}
-		event := notificationEvent(item)
-		for {
-			select {
-			case item, ok := <-s.wake:
-				if !ok {
-					return event, nil
-				}
-				event = coalesceNotification(event, notificationEvent(item))
-			default:
-				return event, nil
-			}
-		}
-	case <-ctx.Done():
-		return store.NotificationAppend, ctx.Err()
+// SetNotificationMetrics attaches the process metrics recorder to the
+// store-owned multiplexer. It is safe after registrations have started.
+func (s *Store) SetNotificationMetrics(metrics store.NotificationMetrics) {
+	if s.notifications != nil {
+		s.notifications.SetMetrics(metrics)
 	}
-}
-
-func (s *notificationSubscription) Close() error {
-	return s.pubsub.Close()
 }
 
 func notificationEvent(item any) store.NotificationEvent {
@@ -94,9 +67,10 @@ func coalesceNotification(
 	return store.NotificationAppend
 }
 
-// WaitForPage implements store.PageWaiter. The caller's first page already
-// performed the logical access touch. Every race-closing recheck is therefore
-// a fresh, no-touch snapshot fenced to the same stream incarnation.
+// WaitForPage implements store.PageWaiter through the store-owned notification
+// multiplexer. The caller's first page already performed the logical access
+// touch. Every race-closing recheck is therefore a fresh, no-touch snapshot
+// fenced to the same stream incarnation.
 func (s *Store) WaitForPage(
 	ctx context.Context,
 	path string,
@@ -105,12 +79,11 @@ func (s *Store) WaitForPage(
 	timeout time.Duration,
 	opts store.ReadPageOptions,
 ) (store.ReadWaitResult, error) {
-	pubsub := s.client.Subscribe(ctx, notifyChannel(path))
-	defer func() { _ = pubsub.Close() }()
-	if _, err := pubsub.Receive(ctx); err != nil { // confirm subscription
+	subscription, err := s.SubscribeNotifications(ctx, path)
+	if err != nil {
 		return store.ReadWaitResult{}, err
 	}
-	wake := pubsub.Channel()
+	defer func() { _ = subscription.Close() }()
 
 	recheck := func() (store.ReadPage, bool, error) {
 		recheckOpts := opts
@@ -136,37 +109,34 @@ func (s *Store) WaitForPage(
 		return store.ReadWaitResult{Page: page}, nil
 	}
 
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	ticker := time.NewTicker(defensivePollInterval)
-	defer ticker.Stop()
+	deadline := time.Now().Add(timeout)
 
 	for {
-		select {
-		case <-wake:
-			page, done, err := recheck()
-			if err != nil {
-				return store.ReadWaitResult{}, err
-			}
-			if done {
-				return store.ReadWaitResult{Page: page}, nil
-			}
-		case <-ticker.C:
-			page, done, err := recheck()
-			if err != nil {
-				return store.ReadWaitResult{}, err
-			}
-			if done {
-				return store.ReadWaitResult{Page: page}, nil
-			}
-		case <-timer.C:
-			page, done, err := recheck()
-			if err != nil {
-				return store.ReadWaitResult{}, err
-			}
-			return store.ReadWaitResult{Page: page, TimedOut: !done}, nil
-		case <-ctx.Done():
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			page, done, recheckErr := recheck()
+			return store.ReadWaitResult{Page: page, TimedOut: !done}, recheckErr
+		}
+
+		waitCtx, cancel := context.WithTimeout(ctx, min(remaining, defensivePollInterval))
+		_, waitErr := subscription.Wait(waitCtx)
+		cancel()
+		if ctx.Err() != nil {
 			return store.ReadWaitResult{}, ctx.Err()
+		}
+		if waitErr != nil && !errors.Is(waitErr, context.DeadlineExceeded) {
+			return store.ReadWaitResult{}, waitErr
+		}
+
+		page, done, recheckErr := recheck()
+		if recheckErr != nil {
+			return store.ReadWaitResult{}, recheckErr
+		}
+		if done {
+			return store.ReadWaitResult{Page: page}, nil
+		}
+		if time.Now().Compare(deadline) >= 0 {
+			return store.ReadWaitResult{Page: page, TimedOut: true}, nil
 		}
 	}
 }

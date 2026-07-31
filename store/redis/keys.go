@@ -29,13 +29,17 @@ const (
 	framePrefixLn = offsetStrLen + 1
 )
 
+// strings.Replacer is safe for concurrent use after construction. Keep one
+// immutable encoder instead of rebuilding its replacement table on every Redis
+// command in the stream hot path.
+var pathEscaper = strings.NewReplacer("%", "%25", "{", "%7B", "}", "%7D")
+
 // escapePath escapes hash-tag delimiters in user paths. Redis hash tags are
 // delimited by the first '{' and the next '}'; escaping both characters keeps
 // arbitrary user paths inside a single tag. The escaping is injective
 // (% is escaped too) so distinct paths map to distinct keys.
 func escapePath(path string) string {
-	r := strings.NewReplacer("%", "%25", "{", "%7B", "}", "%7D")
-	return r.Replace(path)
+	return pathEscaper.Replace(path)
 }
 
 func tag(path string) string {

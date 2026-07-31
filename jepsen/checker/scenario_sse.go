@@ -83,6 +83,20 @@ func runSSEResume(c config, nem *nemesis) error {
 			return fmt.Errorf("client %d did not attach before the fault phase", i)
 		}
 	}
+	// The Jepsen deployment forces one durable frame per ReadPage. Observing
+	// message zero under its following control proves every reader crossed a
+	// real page boundary before the live-fault phase begins.
+	if err := waitForSeenMessage(seen, 0, clientCount, 6*time.Second); err != nil {
+		cancel()
+		clients.Wait()
+		return fmt.Errorf("page-boundary attach did not complete: %w", err)
+	}
+	nem.record("page-boundary-attach-verified")
+	if err := exerciseSSEDeleteRecreate(c.base, nem); err != nil {
+		cancel()
+		clients.Wait()
+		return err
+	}
 
 	lostHintSeq := max(c.msgs/4, 2)
 	reconnectSeq := lostHintSeq + 1
@@ -399,6 +413,145 @@ func runSSEResume(c config, nem *nemesis) error {
 	}
 	fmt.Println("PASS: every SSE client observed each durable message exactly once and resumed to the closed tail")
 	return nil
+}
+
+func exerciseSSEDeleteRecreate(base string, nem *nemesis) error {
+	stream := fmt.Sprintf("events/sse-recreate-%d", time.Now().UnixNano())
+	endpoint := fmt.Sprintf("%s/v1/stream/%s", base, stream)
+	create := func(marker string, closed bool) error {
+		request, _ := http.NewRequest(
+			http.MethodPut,
+			endpoint,
+			strings.NewReader(fmt.Sprintf(`{"incarnation":%q}`, marker)),
+		)
+		request.Header.Set("Content-Type", "application/json")
+		if closed {
+			request.Header.Set(protocol.HeaderStreamClosed, "true")
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusCreated {
+			body, _ := io.ReadAll(response.Body)
+			return fmt.Errorf("create %s incarnation status %d: %s", marker, response.StatusCode, body)
+		}
+		return nil
+	}
+	if err := create("old-incarnation", false); err != nil {
+		return fmt.Errorf("create old SSE incarnation: %w", err)
+	}
+
+	readCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	request, _ := http.NewRequestWithContext(
+		readCtx,
+		http.MethodGet,
+		endpoint+"?offset=-1&live=sse",
+		nil,
+	)
+	response, err := http.DefaultClient.Do(request) //nolint:bodyclose // consumed and closed by the reader goroutine below
+	if err != nil {
+		return fmt.Errorf("open old SSE incarnation: %w", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		return fmt.Errorf("old SSE incarnation status %d", response.StatusCode)
+	}
+	type readResult struct {
+		body string
+		err  error
+	}
+	oldSeen := make(chan struct{})
+	readDone := make(chan readResult, 1)
+	go func() {
+		defer response.Body.Close()
+		var body strings.Builder
+		scanner := bufio.NewScanner(response.Body)
+		var seenOnce sync.Once
+		for scanner.Scan() {
+			line := scanner.Text()
+			body.WriteString(line)
+			body.WriteByte('\n')
+			if strings.Contains(line, "old-incarnation") {
+				seenOnce.Do(func() { close(oldSeen) })
+			}
+		}
+		readDone <- readResult{body: body.String(), err: scanner.Err()}
+	}()
+	select {
+	case <-oldSeen:
+	case result := <-readDone:
+		if result.err != nil {
+			return fmt.Errorf("old SSE incarnation ended before its first page: %w body=%q", result.err, result.body)
+		}
+		return fmt.Errorf("old SSE incarnation ended before its first page: body=%q", result.body)
+	case <-time.After(10 * time.Second):
+		return errors.New("old SSE incarnation did not deliver its first page")
+	}
+
+	deleteRequest, _ := http.NewRequest(http.MethodDelete, endpoint, nil)
+	deleteResponse, err := http.DefaultClient.Do(deleteRequest)
+	if err != nil {
+		return fmt.Errorf("delete old SSE incarnation: %w", err)
+	}
+	deleteResponse.Body.Close()
+	if deleteResponse.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("delete old SSE incarnation status %d", deleteResponse.StatusCode)
+	}
+	if err := create("new-incarnation", true); err != nil {
+		return fmt.Errorf("create replacement SSE incarnation: %w", err)
+	}
+
+	var oldResult readResult
+	select {
+	case oldResult = <-readDone:
+	case <-time.After(6 * time.Second):
+		return errors.New("old SSE incarnation did not terminate after delete and recreate")
+	}
+	if err := requireCommittedSSEAbort(oldResult.err); err != nil {
+		return err
+	}
+	if strings.Contains(oldResult.body, "new-incarnation") {
+		return fmt.Errorf("old SSE connection observed replacement incarnation: %q", oldResult.body)
+	}
+
+	freshResponse, err := http.Get(endpoint + "?offset=-1")
+	if err != nil {
+		return fmt.Errorf("read replacement SSE incarnation: %w", err)
+	}
+	freshBody, readErr := io.ReadAll(freshResponse.Body)
+	freshResponse.Body.Close()
+	if readErr != nil {
+		return fmt.Errorf("read replacement body: %w", readErr)
+	}
+	if freshResponse.StatusCode != http.StatusOK ||
+		!strings.Contains(string(freshBody), "new-incarnation") ||
+		strings.Contains(string(freshBody), "old-incarnation") {
+		return fmt.Errorf(
+			"replacement incarnation status=%d body=%q",
+			freshResponse.StatusCode,
+			freshBody,
+		)
+	}
+	nem.record("delete-recreate-stale-incarnation-verified")
+	return nil
+}
+
+func requireCommittedSSEAbort(err error) error {
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil
+	}
+	if err == nil {
+		return errors.New(
+			"old SSE incarnation completed normally, want committed-response abort",
+		)
+	}
+	return fmt.Errorf(
+		"old SSE incarnation termination, want committed-response abort: %w",
+		err,
+	)
 }
 
 type sseObservation struct {

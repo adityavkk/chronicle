@@ -32,6 +32,12 @@ type Options struct {
 	// injects a shared FakeClock so the Redis backend and the MemoryStore
 	// oracle make identical lazy-expiry decisions at a frozen now.
 	Clock store.Clock
+
+	// NotificationConnectionGroups bounds the physical Redis Pub/Sub
+	// connections owned by the store. Channels are deterministically spread
+	// across the groups. Zero uses one global Pub/Sub connection, which is the
+	// default for both standalone Redis and Redis Cluster global Pub/Sub.
+	NotificationConnectionGroups int
 }
 
 // Store implements store.Store on Redis 8 using the ZSET-lex frame
@@ -41,9 +47,10 @@ type Options struct {
 // Durability note: Redis replication is asynchronous — an acknowledged
 // append can be lost on failover. See docs/PLAN.md §4.7.
 type Store struct {
-	client redis.UniversalClient
-	log    *slog.Logger
-	clock  store.Clock
+	client        redis.UniversalClient
+	log           *slog.Logger
+	clock         store.Clock
+	notifications *notificationMultiplexer
 }
 
 var (
@@ -65,7 +72,12 @@ func New(client redis.UniversalClient, opts Options) *Store {
 	if clock == nil {
 		clock = store.RealClock()
 	}
+	notificationGroups := opts.NotificationConnectionGroups
+	if notificationGroups <= 0 {
+		notificationGroups = 1
+	}
 	s := &Store{client: client, log: log, clock: clock}
+	s.notifications = newNotificationMultiplexer(client, notificationGroups)
 	s.warnEvictionPolicy()
 	return s
 }
@@ -84,7 +96,13 @@ func (s *Store) warnEvictionPolicy() {
 }
 
 func keysFor(path string) []string {
-	return []string{metaKey(path), msgKey(path), prodKey(path), forksKey(path)}
+	tagged := tag(path)
+	return []string{
+		keyPrefix + tagged + metaSuffix,
+		keyPrefix + tagged + msgSuffix,
+		keyPrefix + tagged + prodSuffix,
+		keyPrefix + tagged + forksSuffix,
+	}
 }
 
 // isExpired evaluates a stream's lazy expiry against the injected clock, so
@@ -1272,5 +1290,8 @@ func (s *Store) FormatResponse(path string, messages []store.Message) ([]byte, e
 
 // Close releases the store's resources, closing the underlying client.
 func (s *Store) Close() error {
+	if s.notifications != nil {
+		s.notifications.Close()
+	}
 	return s.client.Close()
 }

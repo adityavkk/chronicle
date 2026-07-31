@@ -2,6 +2,7 @@ package chronicle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -22,8 +23,10 @@ import (
 
 type sseRedisBenchmarkStore struct {
 	*redisstore.Store
-	reads atomic.Int64
-	evals atomic.Int64
+	reads       atomic.Int64
+	evals       atomic.Int64
+	pages       atomic.Int64
+	legacyReads atomic.Int64
 }
 
 func (s *sseRedisBenchmarkStore) DialHook(next goredis.DialHook) goredis.DialHook {
@@ -57,14 +60,11 @@ func (s *sseRedisBenchmarkStore) ProcessPipelineHook(
 }
 
 func (s *sseRedisBenchmarkStore) Read(
-	path string,
-	offset store.Offset,
+	string,
+	store.Offset,
 ) ([]store.Message, bool, error) {
-	messages, upToDate, err := s.Store.Read(path, offset)
-	if err == nil {
-		s.reads.Add(1)
-	}
-	return messages, upToDate, err
+	s.legacyReads.Add(1)
+	return nil, false, errors.New("SSE benchmark unexpectedly called Store.Read")
 }
 
 func (s *sseRedisBenchmarkStore) ReadPage(
@@ -76,6 +76,7 @@ func (s *sseRedisBenchmarkStore) ReadPage(
 	page, err := s.Store.ReadPage(ctx, path, offset, opts)
 	if err == nil {
 		s.reads.Add(1)
+		s.pages.Add(1)
 	}
 	return page, err
 }
@@ -142,8 +143,9 @@ func BenchmarkSSEHubReadAmplification1000Clients(b *testing.B) {
 		}
 		bodies = append(bodies, response.Body)
 	}
-	waitForBenchmarkReadCount(b, &st.reads, clients)
-	waitForBenchmarkReadsToSettle(b, &st.reads)
+	waitForBenchmarkWatchersAttached(b, h, "/amplification", clients)
+	waitForBenchmarkReadsToSettle(b, &st.pages)
+	pagesBefore := st.pages.Load()
 
 	before, err := redisCommandCounters(ctx, client)
 	if err != nil {
@@ -152,15 +154,15 @@ func BenchmarkSSEHubReadAmplification1000Clients(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		readsBeforeAppend := st.reads.Load()
-		if _, err := st.Append(
+		result, err := st.Append(
 			"/amplification",
 			[]byte("x"),
 			store.AppendOptions{ContentType: "text/plain"},
-		); err != nil {
+		)
+		if err != nil {
 			b.Fatalf("append %d: %v", i, err)
 		}
-		waitForBenchmarkReadCount(b, &st.reads, readsBeforeAppend+1)
+		waitForBenchmarkHubOffset(b, h, "/amplification", result.Offset)
 	}
 	b.StopTimer()
 
@@ -168,28 +170,36 @@ func BenchmarkSSEHubReadAmplification1000Clients(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	reads := after.zrangeByLex - before.zrangeByLex
+	readCommands := after.zrangeByLex - before.zrangeByLex
+	pages := st.pages.Load() - pagesBefore
 	publishes := after.publish - before.publish
 	if publishes != int64(b.N) {
 		b.Fatalf("Redis PUBLISH delta = %d, want %d", publishes, b.N)
 	}
-	ratio := float64(reads) / float64(publishes)
+	pageRatio := float64(pages) / float64(publishes)
+	commandRatio := float64(readCommands) / float64(publishes)
 	b.ReportMetric(float64(before.zrangeByLex), "redis_zrangebylex_before")
 	b.ReportMetric(float64(after.zrangeByLex), "redis_zrangebylex_after")
 	b.ReportMetric(float64(before.publish), "redis_publish_before")
 	b.ReportMetric(float64(after.publish), "redis_publish_after")
-	b.ReportMetric(float64(reads), "redis_zrangebylex")
+	b.ReportMetric(float64(readCommands), "redis_read_commands")
 	b.ReportMetric(float64(publishes), "redis_publish")
-	b.ReportMetric(ratio, "redis_reads/publish")
-	if ratio > 1.2 {
-		b.Fatalf("Redis read amplification = %.6f, want <= 1.2", ratio)
+	b.ReportMetric(float64(pages), "durable_read_pages")
+	b.ReportMetric(commandRatio, "redis_commands/publish")
+	b.ReportMetric(pageRatio, "read_pages/publish")
+	if legacy := st.legacyReads.Load(); legacy != 0 {
+		b.Fatalf("legacy Store.Read calls = %d, want zero", legacy)
+	}
+	if pageRatio > 1.2 {
+		b.Fatalf("durable page amplification = %.6f, want <= 1.2", pageRatio)
 	}
 }
 
 // BenchmarkRedisLiveReadModes measures the live-mode decision gate separately
 // from root-frame fusion. Read counts are exact: register-first offset=now
-// long-poll needs an initial and a final page, while a new SSE hub is seeded by
-// its single authoritative client page.
+// long-poll needs an initial and a final page. New SSE readiness uses only its
+// authoritative client page; exact attach then performs one final no-touch
+// incarnation confirmation, for two pages total and no readiness reread.
 func BenchmarkRedisLiveReadModes(b *testing.B) {
 	b.Run("long-poll-timeout", func(b *testing.B) {
 		st, h, _ := newRedisLiveBenchmarkHarness(b)
@@ -295,8 +305,8 @@ func BenchmarkRedisLiveReadModes(b *testing.B) {
 			}
 			b.StopTimer()
 			waitForBenchmarkReadsToSettle(b, &st.reads)
-			reportLiveBenchmarkReads(b, st.reads.Load()-before, 1)
-			reportLiveBenchmarkScripts(b, st.evals.Load()-beforeEvals-int64(b.N), 1)
+			reportLiveBenchmarkReads(b, st.reads.Load()-before, 2)
+			reportLiveBenchmarkScripts(b, st.evals.Load()-beforeEvals-int64(b.N), 2)
 		})
 	}
 }
@@ -412,6 +422,60 @@ func redisCommandCalls(info, command string) (int64, error) {
 		}
 	}
 	return 0, nil
+}
+
+func waitForBenchmarkWatchersAttached(
+	b *testing.B,
+	h *Handler,
+	path string,
+	want int,
+) {
+	b.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		h.sseHubs.mu.Lock()
+		entry := h.sseHubs.hubs[path]
+		attached := 0
+		if entry != nil {
+			entry.hub.mu.Lock()
+			for watcher := range entry.hub.watchers {
+				if watcher.attached {
+					attached++
+				}
+			}
+			entry.hub.mu.Unlock()
+		}
+		h.sseHubs.mu.Unlock()
+		if attached == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	b.Fatalf("did not observe %d attached SSE watchers", want)
+}
+
+func waitForBenchmarkHubOffset(
+	b *testing.B,
+	h *Handler,
+	path string,
+	want store.Offset,
+) {
+	b.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		h.sseHubs.mu.Lock()
+		entry := h.sseHubs.hubs[path]
+		var current store.Offset
+		if entry != nil {
+			current = entry.hub.currentOffset()
+		}
+		h.sseHubs.mu.Unlock()
+		if current.Equal(want) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	b.Fatalf("hub did not reach offset %s", want)
 }
 
 func waitForBenchmarkReadCount(b *testing.B, value *atomic.Int64, want int64) {
