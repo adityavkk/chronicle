@@ -16,6 +16,17 @@ local function meta_map(key)
   return m
 end
 
+-- meta_flat returns the already-loaded metadata for a script reply. Reads must
+-- not issue a second HGETALL merely to cross the Redis/Go decoding boundary.
+local function meta_flat(m)
+  local flat = {}
+  for field, value in pairs(m) do
+    flat[#flat + 1] = field
+    flat[#flat + 1] = value
+  end
+  return flat
+end
+
 -- is_expired mirrors StreamMetadata.IsExpired (lazy expiry source of truth).
 local function is_expired(m, now_ns)
   if m.expAtNs and now_ns > tonumber(m.expAtNs) then return true end
@@ -23,6 +34,12 @@ local function is_expired(m, now_ns)
     return true
   end
   return false
+end
+
+-- should_touch_read mirrors store.ShouldRenewReadAccess. Absolute expiry is a
+-- fixed deadline; only a configured sliding TTL renews on access.
+local function should_touch_read(m)
+  return m.ttl ~= nil
 end
 
 -- expire_cleanup handles a stream discovered expired: fork sources

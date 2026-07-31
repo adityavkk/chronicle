@@ -57,7 +57,7 @@ if expected_incarnation ~= '' and incarnation ~= expected_incarnation then
   return { 'SNAPSHOT' }
 end
 
-if root_read and touch_root then
+if root_read and touch_root and should_touch_read(m) then
   -- Refresh once when the logical client read captures its root snapshot.
   -- Continuations, sealing, and inherited ranges must not extend a TTL.
   m.accessedAtNs = string.format('%.0f', now)
@@ -158,7 +158,7 @@ end
 
 return {
   'OK',
-  redis.call('HGETALL', KEYS[1]),
+  meta_flat(m),
   members,
   tostring(fetched_bytes),
   tostring(returned_bytes)

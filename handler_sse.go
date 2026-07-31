@@ -5,7 +5,6 @@ package chronicle
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -19,7 +18,9 @@ func (h *Handler) handleSSE(
 	w http.ResponseWriter,
 	r *http.Request,
 	path string,
-	meta *store.StreamMetadata,
+	reader store.PageReader,
+	first store.ReadPage,
+	pageOpts store.ReadPageOptions,
 	offset store.Offset,
 	cursor string,
 	useBase64 bool,
@@ -37,29 +38,18 @@ func (h *Handler) handleSSE(
 	}()
 
 	ctx := r.Context()
-	reader := h.pageReader()
-	pageOpts := store.ReadPageOptions{
-		TargetBytes: h.readPageBytes(),
-		MaxFrames:   store.DefaultReadPageFrames,
-	}
 
-	// Acquire the hub before catch-up. Its confirmed notification subscription
-	// and first durable refresh close the append race between catch-up and live
-	// delivery. The first page is captured only after the hub is ready.
-	lease := h.acquireSSEHub(path, meta, useBase64)
+	// The first atomic page supplies the hub identity and tail. The hub then
+	// subscribes and performs a durable no-touch read from that tail before the
+	// response starts, retaining any append from the attach window.
+	lease := h.acquireSSEHub(path, first.Snapshot, useBase64)
 	defer lease.close()
 	if err := lease.waitReady(ctx); err != nil {
 		return err
 	}
 
-	first, err := reader.ReadPage(ctx, path, offset, pageOpts)
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			h.observeReadCancellation("before_first_page")
-		}
-		return readPageError(err)
-	}
 	snapshot := first.Snapshot
+	var err error
 	snapshotReleased := false
 	defer func() {
 		if !snapshotReleased {
@@ -143,6 +133,15 @@ func (h *Handler) handleSSE(
 			continue
 		}
 		emptyPages = 0
+		if len(page.Messages) == 0 && page.UpToDate && !snapshot.Closed &&
+			lease.progressedBeyond(page.NextOffset, snapshot.Closed) {
+			// The hub subscribed before its durable refresh, so an append after
+			// this empty snapshot is already in replay. Do not emit an empty
+			// checkpoint ahead of that data.
+			h.observeReadPage(page)
+			currentOffset = page.NextOffset
+			break
+		}
 		var data []byte
 		if len(page.Messages) > 0 {
 			data, err = h.formatSSEDataEvent(path, page.Messages, snapshot.ContentType, useBase64)
@@ -189,22 +188,9 @@ func (h *Handler) handleSSE(
 		}
 	}
 
-	// Close the delete/recreate window between the final page and hub attach.
-	// Reading at the captured tail returns no payload but atomically validates
-	// the fixed incarnation and snapshot boundary in the maintained stores.
-	pageOpts.Snapshot = &snapshot
-	confirmed, err := reader.ReadPage(ctx, path, currentOffset, pageOpts)
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			h.observeReadCancellation("storage")
-		}
-		return err
-	}
-	h.observeReadPage(confirmed)
-	if len(confirmed.Messages) != 0 || !confirmed.UpToDate ||
-		!confirmed.NextOffset.Equal(snapshot.Tail) {
-		return fmt.Errorf("SSE catch-up snapshot confirmation made unexpected progress")
-	}
+	// The hub's subscribe-then-refresh already closed the attach race. Its
+	// incarnation check fences delete/recreate, and its replay starts exactly at
+	// this snapshot tail, so another storage read here would be redundant.
 	if err := lease.validateSnapshot(snapshot); err != nil {
 		return err
 	}
