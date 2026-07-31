@@ -1,8 +1,11 @@
 package redis
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,23 +151,40 @@ func concreteTestClient(t *testing.T, subject *Store) *goredis.Client {
 
 func monitorRedis(t *testing.T, client *goredis.Client, action func()) []string {
 	t.Helper()
-	options := client.Options()
-	options.Protocol = 2
-	monitorClient := goredis.NewClient(options)
-	t.Cleanup(func() { _ = monitorClient.Close() })
-
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	conn, reader := openRedisMonitor(t, ctx, client.Options())
 	events := make(chan string, 4096)
-	monitor := monitorClient.Monitor(ctx, events)
-	monitor.Start()
-	defer monitor.Stop()
+	errors := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			line, err := readRedisSimpleString(reader)
+			if err != nil {
+				select {
+				case errors <- err:
+				case <-ctx.Done():
+				}
+				return
+			}
+			select {
+			case events <- line:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	defer func() {
+		cancel()
+		_ = conn.Close()
+		<-done
+	}()
 
 	start := fmt.Sprintf("chronicle-monitor-start-%d", time.Now().UnixNano())
 	if err := client.Echo(ctx, start).Err(); err != nil {
 		t.Fatal(err)
 	}
-	waitForMonitorMarker(t, events, start)
+	waitForMonitorMarker(t, events, errors, start)
 
 	action()
 
@@ -182,13 +202,109 @@ func monitorRedis(t *testing.T, client *goredis.Client, action func()) []string 
 				return lines
 			}
 			lines = append(lines, line)
+		case err := <-errors:
+			t.Fatalf("read Redis MONITOR output: %v", err)
 		case <-timer.C:
 			t.Fatalf("timed out waiting for Redis MONITOR end marker")
 		}
 	}
 }
 
-func waitForMonitorMarker(t *testing.T, events <-chan string, marker string) {
+// openRedisMonitor owns a dedicated connection because MONITOR changes the
+// connection protocol into an unbounded stream. Keeping it outside the client
+// pool makes readiness explicit and gives shutdown one race-free owner.
+func openRedisMonitor(
+	t *testing.T,
+	ctx context.Context,
+	options *goredis.Options,
+) (net.Conn, *bufio.Reader) {
+	t.Helper()
+	conn, err := options.Dialer(ctx, options.Network, options.Addr)
+	if err != nil {
+		t.Fatalf("dial Redis MONITOR connection: %v", err)
+	}
+	reader := bufio.NewReader(conn)
+	ok := false
+	defer func() {
+		if !ok {
+			_ = conn.Close()
+		}
+	}()
+
+	username, password := options.Username, options.Password
+	if options.CredentialsProviderContext != nil {
+		username, password, err = options.CredentialsProviderContext(ctx)
+		if err != nil {
+			t.Fatalf("get Redis MONITOR credentials: %v", err)
+		}
+	} else if options.CredentialsProvider != nil {
+		username, password = options.CredentialsProvider()
+	}
+	if username != "" {
+		writeRedisCommand(t, conn, "AUTH", username, password)
+		readRedisOK(t, reader, "AUTH")
+	} else if password != "" {
+		writeRedisCommand(t, conn, "AUTH", password)
+		readRedisOK(t, reader, "AUTH")
+	}
+	if options.DB != 0 {
+		writeRedisCommand(t, conn, "SELECT", strconv.Itoa(options.DB))
+		readRedisOK(t, reader, "SELECT")
+	}
+	writeRedisCommand(t, conn, "MONITOR")
+	readRedisOK(t, reader, "MONITOR")
+	ok = true
+	return conn, reader
+}
+
+func writeRedisCommand(t *testing.T, writer io.Writer, args ...string) {
+	t.Helper()
+	var command strings.Builder
+	fmt.Fprintf(&command, "*%d\r\n", len(args))
+	for _, arg := range args {
+		fmt.Fprintf(&command, "$%d\r\n%s\r\n", len(arg), arg)
+	}
+	if _, err := io.WriteString(writer, command.String()); err != nil {
+		t.Fatalf("write Redis %s command: %v", args[0], err)
+	}
+}
+
+func readRedisOK(t *testing.T, reader *bufio.Reader, command string) {
+	t.Helper()
+	reply, err := readRedisSimpleString(reader)
+	if err != nil {
+		t.Fatalf("read Redis %s response: %v", command, err)
+	}
+	if reply != "OK" {
+		t.Fatalf("Redis %s response = %q, want OK", command, reply)
+	}
+}
+
+func readRedisSimpleString(reader *bufio.Reader) (string, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+	if len(line) == 0 {
+		return "", fmt.Errorf("empty Redis response")
+	}
+	switch line[0] {
+	case '+':
+		return line[1:], nil
+	case '-':
+		return "", fmt.Errorf("Redis error: %s", line[1:])
+	default:
+		return "", fmt.Errorf("unexpected Redis response: %q", line)
+	}
+}
+
+func waitForMonitorMarker(
+	t *testing.T,
+	events <-chan string,
+	errors <-chan error,
+	marker string,
+) {
 	t.Helper()
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -198,6 +314,8 @@ func waitForMonitorMarker(t *testing.T, events <-chan string, marker string) {
 			if strings.Contains(line, strconv.Quote(marker)) {
 				return
 			}
+		case err := <-errors:
+			t.Fatalf("read Redis MONITOR output: %v", err)
 		case <-timer.C:
 			t.Fatalf("timed out waiting for Redis MONITOR start marker")
 		}
