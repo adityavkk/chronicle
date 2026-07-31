@@ -40,11 +40,21 @@ The Redis-direct gates (`ownership-exclusivity`, `shard-linz`) need only
 `.github/workflows/ci.yml`.
 
 `sse-resume` confirms eight checked readers have attached to one stream before
-faults. A direct in-cluster reader uses a separate stream, pauses, and falls
-behind the small replay window. The checker finds the Chronicle pod serving
-that reader from the per-pod active-client metric change, then requires that
-same pod's lag counter to increase. The reader records session two only after
-the resumed response returns HTTP 200 and a durable control offset.
+faults. The deployment allows one durable frame per storage page. Every checked
+reader must commit the first frame under its control event before the fault
+phase, which exercises attachment at a page boundary. A separate live reader
+watches one stream incarnation while the checker deletes and recreates that
+path. The old connection must stop without observing the new incarnation, and
+an independent read must see only the replacement. Because the old response
+has already committed its SSE headers and first control, this fence must reach
+the client as an abort-style unexpected EOF rather than a normal completed
+response or a second HTTP error body.
+
+A direct in-cluster reader uses another stream, pauses, and falls behind the
+small replay window. The checker finds the Chronicle pod serving that reader
+from the per-pod active-client metric change, then requires that same pod's lag
+counter to increase. The reader records session two only after the resumed
+response returns HTTP 200 and a durable control offset.
 
 A second direct reader receives an oversized event on another isolated stream.
 The checker again finds its serving pod from the active-client metric change.
@@ -59,7 +69,9 @@ the canonical channel and requires a positive subscriber count, replaces one
 Chronicle pod and the Redis pod, replaces every Chronicle pod, and then closes
 the stream. Reconnect metrics must increase both after the client kill and after
 Redis replacement. Pod UID replacement, reader sessions, lag, resume, and write
-timeout are all required, so a failed no-op fault cannot produce a green run.
+timeout are all required. Page-boundary attachment and delete and recreate
+isolation are also required, so a failed no-op fault cannot produce a green
+run.
 
 Appends use one fenced producer, so an ambiguous HTTP retry cannot create a
 duplicate durable message. The checker keeps both raw per-connection delivery

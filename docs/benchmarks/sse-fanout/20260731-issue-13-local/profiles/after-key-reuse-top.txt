@@ -1,0 +1,51 @@
+File: chronicle
+Build ID: dec891ffaa83795ed2c57c91cdbbec4351445862
+Type: cpu
+Time: 2026-07-31 13:20:09 EDT
+Duration: 40s, Total samples = 40.59s (101.47%)
+Active filters:
+   focus=escapePath|tag|keysFor|strings\.\(\*Replacer\)
+Showing nodes accounting for 0.21s, 0.52% of 40.59s total
+      flat  flat%   sum%        cum   cum%
+     0.06s  0.15%  0.15%      0.06s  0.15%  strings.(*byteStringReplacer).Replace
+     0.05s  0.12%  0.27%      0.05s  0.12%  strings.(*byteReplacer).Replace
+     0.02s 0.049%  0.32%      0.07s  0.17%  runtime.concatstring3
+     0.02s 0.049%  0.37%      0.05s  0.12%  runtime.concatstrings
+     0.02s 0.049%  0.42%      0.02s 0.049%  runtime.memclrNoHeapPointers
+     0.01s 0.025%  0.44%      0.01s 0.025%  runtime.acquirem (inline)
+     0.01s 0.025%  0.47%      0.01s 0.025%  runtime.memmove
+     0.01s 0.025%  0.49%      0.02s 0.049%  runtime.rawstringtmp
+     0.01s 0.025%  0.52%      0.12s   0.3%  strings.(*Replacer).Replace
+         0     0%  0.52%      0.10s  0.25%  gecgithub01.walmart.com/auk000v/chronicle.(*Handler).ServeHTTP
+         0     0%  0.52%      0.10s  0.25%  gecgithub01.walmart.com/auk000v/chronicle.(*Handler).handleAppend
+         0     0%  0.52%      0.06s  0.15%  gecgithub01.walmart.com/auk000v/chronicle.(*sseHub).refresh (inline)
+         0     0%  0.52%      0.06s  0.15%  gecgithub01.walmart.com/auk000v/chronicle.(*sseHub).refreshPage
+         0     0%  0.52%      0.06s  0.15%  gecgithub01.walmart.com/auk000v/chronicle.(*sseHub).refreshPageLocked
+         0     0%  0.52%      0.06s  0.15%  gecgithub01.walmart.com/auk000v/chronicle.(*sseHub).run
+         0     0%  0.52%      0.06s  0.15%  gecgithub01.walmart.com/auk000v/chronicle.(*sseHub).runPersistent
+         0     0%  0.52%      0.10s  0.25%  gecgithub01.walmart.com/auk000v/chronicle.Mount.func1
+         0     0%  0.52%      0.10s  0.25%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.(*Store).Append
+         0     0%  0.52%      0.06s  0.15%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.(*Store).ReadPage
+         0     0%  0.52%      0.06s  0.15%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.(*Store).runReadPageScript
+         0     0%  0.52%      0.07s  0.17%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.escapePath (inline)
+         0     0%  0.52%      0.08s   0.2%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.keysFor
+         0     0%  0.52%      0.08s   0.2%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.notifyChannel (inline)
+         0     0%  0.52%      0.11s  0.27%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.tag (inline)
+         0     0%  0.52%      0.05s  0.12%  net/http.(*chunkWriter).close
+         0     0%  0.52%      0.05s  0.12%  net/http.(*chunkWriter).writeHeader
+         0     0%  0.52%      0.15s  0.37%  net/http.(*conn).serve
+         0     0%  0.52%      0.05s  0.12%  net/http.(*response).finishRequest
+         0     0%  0.52%      0.10s  0.25%  net/http.HandlerFunc.ServeHTTP
+         0     0%  0.52%      0.05s  0.12%  net/http.Header.WriteSubset (inline)
+         0     0%  0.52%      0.05s  0.12%  net/http.Header.writeSubset
+         0     0%  0.52%      0.10s  0.25%  net/http.serverHandler.ServeHTTP
+         0     0%  0.52%      0.02s 0.049%  runtime.(*mcache).nextFree
+         0     0%  0.52%      0.02s 0.049%  runtime.(*mcache).refill
+         0     0%  0.52%      0.02s 0.049%  runtime.(*mcentral).cacheSpan
+         0     0%  0.52%      0.02s 0.049%  runtime.(*mcentral).grow
+         0     0%  0.52%      0.02s 0.049%  runtime.(*mspan).initHeapBits
+         0     0%  0.52%      0.03s 0.074%  runtime.mallocgc
+         0     0%  0.52%      0.01s 0.025%  runtime.mallocgcSmallNoscan
+         0     0%  0.52%      0.02s 0.049%  runtime.mallocgcSmallScanNoHeader
+         0     0%  0.52%      0.02s 0.049%  runtime.newobject
+         0     0%  0.52%      0.01s 0.025%  runtime.rawstring (inline)

@@ -1,8 +1,8 @@
 # ADR 0004: Bounded read pages and snapshot catch-up
 
-- Status: Accepted, amended 2026-07-31 by issue 7
+- Status: Accepted, amended 2026-07-31 by issues 7 and 13
 - Date: 2026-07-29
-- Issues: GPA/chronicle#5, GPA/chronicle#7
+- Issues: bounded catch-up, the fused-read follow-up, the shared-hub implementation
 
 ## Context
 
@@ -87,12 +87,20 @@ records, or envelope records directly to `http.ResponseWriter` as pages arrive.
 It will check request cancellation before storage work, between pages, and
 after writes and flushes.
 
-SSE catch-up will use the same page operation and snapshot. `handleRead` will
-pass its first page into the SSE handler. The stream hub will subscribe and
-perform a no-touch durable refresh from the snapshot tail before it reports
-ready. The handler will emit one data event and one control event per page, then
-attach to the hub at the exact offset already sent. It will not repeat the first
-read or reload metadata after catch-up.
+SSE catch-up will require `store.PageReader`. It will not fall back to
+`Store.Read`. The handler will confirm its logical notification registration
+before the first page captures the stream incarnation and exact tail. It will
+pass the first page to the SSE handler and page only to that tail while appends
+continue. The stream hub will also use `ReadPage` for every durable refresh.
+
+The handler will flush one data event and its control event under one client
+write deadline for each page. It will advance the attach offset only after the
+control flush succeeds. Before live attachment, it will perform one no-touch
+snapshot confirmation and compare the exact stream identity. Concurrent
+clients may share that confirmation. The client will attach at its last
+confirmed control offset. If the bounded replay ring no longer contains that
+exact boundary, Chronicle will close the connection and let the client resume.
+Chronicle will never move the client to a newer boundary.
 
 The operator policy is one returned payload target for all catch-up pages. The
 default is 1 MiB. The server will expose it as
@@ -137,6 +145,11 @@ be rolled back. Chronicle will never start a later frame or storage page after
 it observes cancellation. SSE clients can resume from the last completed
 control offset. Non-live HTTP clients must retry an interrupted response from
 their last confirmed offset.
+
+The PageReader requirement narrows the SSE extension point. An external store
+that implements only `store.Store` can still serve ordinary reads through the
+compatibility path, but Chronicle will reject SSE for that backend. This avoids
+an unbounded fallback in a live path.
 
 ## Alternatives considered
 

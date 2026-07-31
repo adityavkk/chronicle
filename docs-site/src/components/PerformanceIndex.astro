@@ -12,6 +12,7 @@ const links = {
   issue5: "",
   issue6: "",
   issue172: "https://github.com/adityavkk/chronicle/issues/172",
+  issue13: "",
   catchupAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0004-bounded-read-pages-and-snapshot-catch-up.md",
   sseAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0005-per-instance-sse-stream-fanout.md",
   segmentsAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0006-immutable-segment-read-plane-prototype.md",
@@ -20,6 +21,7 @@ const links = {
   segmentsEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-6-immutable-segments.md",
   readOnlyEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/research/12-read-only-fast-path-results.md",
   asyncSubscriptionsEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/perf-async-subscription-fanout/results.md",
+  sseEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/sse-fanout/20260731-issue-13-local/README.md",
   comparison: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/ds-bench/configuration-comparison.md",
 };
 ---
@@ -60,7 +62,9 @@ const links = {
     <nav aria-label="SSE fanout links">
       <a class="primary" href={links.sse}>Read the explainer <span aria-hidden="true">→</span></a>
       
+      
       <a href={links.sseAdr}>Architecture decision <span aria-hidden="true">↗</span></a>
+      <a href={links.sseEvidence}>Evidence report <span aria-hidden="true">↗</span></a>
     </nav>
   </article>
 

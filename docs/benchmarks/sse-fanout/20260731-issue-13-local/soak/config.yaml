@@ -1,0 +1,26 @@
+name: issue13-sse-soak
+description: >
+  Thirty-minute active SSE stability run with 20 streams, reconnect cycling,
+  and a separately throttled client.
+duration: 30m
+warmup: 30s
+
+streams:
+  count: 20
+  prefix: issue13/soak
+
+writers:
+  per_stream: 1
+  rate: 1/s
+  message_bytes: 256
+
+tailers:
+  sse_per_stream: 2
+  long_poll_per_stream: 0
+  from: now
+  connect_ramp: 10s
+
+limits:
+  max_in_flight_appends: 1024
+  max_in_flight_catchup: 64
+  request_timeout: 10s

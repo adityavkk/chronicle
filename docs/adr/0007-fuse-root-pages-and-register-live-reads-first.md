@@ -51,21 +51,30 @@ registration through the same interface.
 For a new SSE hub, the handler confirms one subscription before its
 authoritative first page. That page seeds the hub's incarnation, content type,
 tail, and closed state, and the hub takes ownership of the subscription without
-an initial refresh. An existing hub is reserved before page capture and then
-validated against the page. A concurrent creator closes its redundant
-subscription. A stale-incarnation reservation is replaced only after a new
-registration and a fresh no-touch page fenced to the request's first logical
-page.
+an initial readiness refresh. Immediately before exact indexed attach, the
+handler performs one bounded no-touch incarnation confirmation; this is an
+identity fence, not a same-offset data reread. An existing hub is reserved
+before page capture and then validated against the page. A concurrent creator
+closes its redundant subscription. A stale-incarnation reservation is replaced
+only after a new registration and a fresh no-touch page fenced to the request's
+first logical page. A failure discovered after SSE headers are committed aborts
+the handler transport instead of writing an HTTP error into the event stream.
 
 For `offset=now` long-poll, the handler confirms registration before the first
 page and blocks without an immediate attach recheck. Numeric offsets retain the
-existing first-page, subscribe, and no-touch-recheck path.
+existing first-page, subscribe, and no-touch-recheck path. Redis implements
+that optional `PageWaiter` seam through `SubscribeNotifications`, so numeric
+compatibility waits share the same bounded physical connection multiplexer.
 
 Let `R` be the atomic page captured after registration. An append linearized
 before `R` is in `R`'s tail. An append linearized after `R` is covered by the
 confirmed subscription. Redis orders a boundary race on one side or the other.
-A lost wake is recovered by the one-second durable poll. Every later page is
-no-touch and must match `R`'s stream incarnation and content type.
+A lost wake is recovered by the one-second durable poll. Append and close hints
+and defensive polls preserve the ordinary access-touch semantics. A
+notification reconnect or replacement subscription generation instead forces
+an immediate durable no-touch refresh, because transport recovery must not
+extend the stream lifetime. Every page must match `R`'s stream incarnation and
+content type.
 
 ## Consequences
 
@@ -73,7 +82,8 @@ no-touch and must match `R`'s stream incarnation and content type.
 
 - A one-frame root-owned page uses one `EVALSHA`, one metadata `HGETALL`, and
   one bounded `ZRANGEBYLEX`, with no producer read.
-- A new empty SSE hub uses one metadata-only page instead of two.
+- A new empty SSE hub reaches readiness with one metadata-only page instead of
+  two; exact attach still performs its bounded no-touch identity confirmation.
 - An `offset=now` long-poll timeout uses its first page and final timeout page,
   without a third attach page.
 - The first logical read still performs the only sliding-TTL renewal. Valid

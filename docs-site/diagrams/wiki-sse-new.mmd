@@ -1,6 +1,7 @@
 flowchart LR
     A["one append"]:::source --> R[("Redis<br/>durable stream + Pub/Sub")]:::db
-    R -.->|"one wake hint"| H["per-stream fanout hub<br/>one subscription · one durable read<br/>one formatted data event"]:::hero
+    R -.->|"one physical connection"| X["store notification multiplexer<br/>logical channels · generation acknowledgements"]:::mux
+    X -.->|"one coalesced wake hint"| H["per-stream fanout hub<br/>one logical registration · one durable read<br/>one formatted data event"]:::hero
     H -->|"read durable suffix once"| R
     H --> Q[["bounded replay window<br/>1 MiB default"]]:::buffer
 
@@ -20,6 +21,7 @@ flowchart LR
     classDef source fill:#FFFEF9,stroke:#24837B,color:#143F3C,font-weight:700;
     classDef db fill:#E8F1EF,stroke:#24837B,color:#143F3C,font-weight:700;
     classDef hero fill:#E8F1EF,stroke:#24837B,color:#143F3C,font-weight:700;
+    classDef mux fill:#F2F0E5,stroke:#66800B,color:#100F0F,font-weight:700;
     classDef buffer fill:#FFFEF9,stroke:#24837B,color:#143F3C;
     classDef client fill:#F2F0E5,stroke:#6F6E69,color:#100F0F;
     classDef metric fill:#F2F0E5,stroke:#66800B,color:#66800B,font-weight:700;

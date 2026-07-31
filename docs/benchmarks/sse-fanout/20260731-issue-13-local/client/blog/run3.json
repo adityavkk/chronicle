@@ -1,0 +1,43 @@
+{
+  "scenario": "reads",
+  "mode": "sse",
+  "api_style": "Durable",
+  "target": "http://chronicle:4437",
+  "stream": "bench-reads-stream",
+  "streams": 1,
+  "read_size_bytes": 256,
+  "connections": 1000,
+  "duration_secs": 20,
+  "warmup_secs": 5,
+  "settle_secs": 2,
+  "seed_bytes": 0,
+  "seed_append_attempts": 0,
+  "seed_append_failures": 0,
+  "seed_retry_rounds": 0,
+  "seed_verified_streams": 0,
+  "seed_verified_min_bytes": 0,
+  "seed_verified_max_bytes": 0,
+  "append_rate_per_sec": 50.0,
+  "elapsed_secs": 20.0,
+  "counts": {
+    "ok": 984000,
+    "backpressure": 0,
+    "other_err": 0
+  },
+  "bytes_read_total": 251904000,
+  "aggregate_ops_per_sec": 49200.0,
+  "bytes_per_sec": 12595200.0,
+  "p50_ms": 5.059,
+  "p90_ms": 7.399,
+  "p99_ms": 10.999,
+  "p999_ms": 19.951,
+  "latency_ms": {
+    "count": 984000,
+    "mean_ms": 5.156415516260161,
+    "p50_ms": 5.059,
+    "p90_ms": 7.399,
+    "p99_ms": 10.999,
+    "p999_ms": 19.951,
+    "max_ms": 28.575
+  }
+}

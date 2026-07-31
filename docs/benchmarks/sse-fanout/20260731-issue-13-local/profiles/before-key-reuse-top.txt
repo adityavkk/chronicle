@@ -1,0 +1,90 @@
+File: chronicle
+Build ID: c4100b9506672ce30470ad646a04f28ce08e3c4c
+Type: cpu
+Time: 2026-07-31 13:10:10 EDT
+Duration: 40s, Total samples = 38.70s (96.74%)
+Active filters:
+   focus=escapePath|tag|keysFor|strings\.\(\*Replacer\)
+Showing nodes accounting for 1.38s, 3.57% of 38.70s total
+Showing top 80 nodes out of 141
+      flat  flat%   sum%        cum   cum%
+     0.43s  1.11%  1.11%      1.17s  3.02%  strings.(*Replacer).build
+     0.11s  0.28%  1.40%      0.11s  0.28%  runtime.memclrNoHeapPointers
+     0.05s  0.13%  1.52%      0.05s  0.13%  runtime.(*fixalloc).alloc
+     0.05s  0.13%  1.65%      0.05s  0.13%  runtime.heapSetTypeSmallHeader (inline)
+     0.04s   0.1%  1.76%      0.04s   0.1%  runtime.concatstrings
+     0.04s   0.1%  1.86%      0.04s   0.1%  strings.(*byteStringReplacer).Replace
+     0.03s 0.078%  1.94%      0.06s  0.16%  runtime.(*mheap).initSpan
+     0.03s 0.078%  2.02%      0.11s  0.28%  runtime.pcvalue
+     0.03s 0.078%  2.09%      0.05s  0.13%  runtime.step
+     0.03s 0.078%  2.17%      0.03s 0.078%  strings.(*byteReplacer).Replace
+     0.03s 0.078%  2.25%      1.20s  3.10%  sync.(*Once).doSlow
+     0.02s 0.052%  2.30%      0.02s 0.052%  runtime.(*mheap).setSpans
+     0.02s 0.052%  2.35%      0.02s 0.052%  runtime.(*moduledata).textAddr
+     0.02s 0.052%  2.40%      0.03s 0.078%  runtime.(*pallocBits).summarize
+     0.02s 0.052%  2.45%      0.02s 0.052%  runtime.(*spanScanOwnership).or (inline)
+     0.02s 0.052%  2.51%      0.02s 0.052%  runtime.getGCMask (inline)
+     0.02s 0.052%  2.56%      0.71s  1.83%  runtime.mallocgc
+     0.02s 0.052%  2.61%      0.04s   0.1%  runtime.mallocgcTiny
+     0.02s 0.052%  2.66%      0.02s 0.052%  runtime.readvarint (inline)
+     0.02s 0.052%  2.71%      0.09s  0.23%  runtime.stringtoslicebyte
+     0.02s 0.052%  2.76%      0.02s 0.052%  runtime.typePointers.next
+     0.01s 0.026%  2.79%      0.01s 0.026%  internal/runtime/atomic.(*Uint64).Load (inline)
+     0.01s 0.026%  2.82%      0.01s 0.026%  runtime.(*consistentHeapStats).acquire
+     0.01s 0.026%  2.84%      0.22s  0.57%  runtime.(*mheap).allocSpan
+     0.01s 0.026%  2.87%      0.01s 0.026%  runtime.(*mspan).init
+     0.01s 0.026%  2.89%      0.02s 0.052%  runtime.(*mspan).initHeapBits
+     0.01s 0.026%  2.92%      0.03s 0.078%  runtime.(*mspan).writeHeapBitsSmall
+     0.01s 0.026%  2.95%      0.01s 0.026%  runtime.(*pageCache).alloc
+     0.01s 0.026%  2.97%      0.01s 0.026%  runtime.(*pallocBits).findSmallN
+     0.01s 0.026%  3.00%      0.01s 0.026%  runtime.(*scavengeIndex).alloc
+     0.01s 0.026%  3.02%      0.01s 0.026%  runtime.(*spanInlineMarkBits).init
+     0.01s 0.026%  3.05%      0.01s 0.026%  runtime.(*sysMemStat).add
+     0.01s 0.026%  3.07%      0.01s 0.026%  runtime.(*unwinder).initAt
+     0.01s 0.026%  3.10%      0.02s 0.052%  runtime.(*wbBuf).get1 (inline)
+     0.01s 0.026%  3.13%      0.01s 0.026%  runtime.acquirem (inline)
+     0.01s 0.026%  3.15%      0.01s 0.026%  runtime.adjustframe
+     0.01s 0.026%  3.18%      0.05s  0.13%  runtime.bulkBarrierPreWrite
+     0.01s 0.026%  3.20%      0.02s 0.052%  runtime.deductSweepCredit
+     0.01s 0.026%  3.23%      0.01s 0.026%  runtime.findfunc
+     0.01s 0.026%  3.26%      0.01s 0.026%  runtime.forEachG
+     0.01s 0.026%  3.28%      0.03s 0.078%  runtime.funcInfo.entry (inline)
+     0.01s 0.026%  3.31%      0.01s 0.026%  runtime.futex
+     0.01s 0.026%  3.33%      0.06s  0.16%  runtime.growslice
+     0.01s 0.026%  3.36%      0.15s  0.39%  runtime.mProf_Malloc
+     0.01s 0.026%  3.39%      0.06s  0.16%  runtime.makeslice
+     0.01s 0.026%  3.41%      0.53s  1.37%  runtime.mallocgcSmallScanHeader
+     0.01s 0.026%  3.44%      0.01s 0.026%  runtime.mutexSampleContention (inline)
+     0.01s 0.026%  3.46%      0.03s 0.078%  runtime.newInlineUnwinder
+     0.01s 0.026%  3.49%      0.01s 0.026%  runtime.packPallocSum (inline)
+     0.01s 0.026%  3.51%      0.01s 0.026%  runtime.roundupsize (inline)
+     0.01s 0.026%  3.54%      0.01s 0.026%  runtime.scanObjectsSmall
+     0.01s 0.026%  3.57%      0.01s 0.026%  runtime.wbBufFlush1
+         0     0%  3.57%      0.67s  1.73%  gecgithub01.walmart.com/auk000v/chronicle.(*Handler).ServeHTTP
+         0     0%  3.57%      0.61s  1.58%  gecgithub01.walmart.com/auk000v/chronicle.(*Handler).handleAppend
+         0     0%  3.57%      0.06s  0.16%  gecgithub01.walmart.com/auk000v/chronicle.(*Handler).handleRead
+         0     0%  3.57%      0.68s  1.76%  gecgithub01.walmart.com/auk000v/chronicle.(*sseHub).refresh (inline)
+         0     0%  3.57%      0.68s  1.76%  gecgithub01.walmart.com/auk000v/chronicle.(*sseHub).refreshPage
+         0     0%  3.57%      0.68s  1.76%  gecgithub01.walmart.com/auk000v/chronicle.(*sseHub).refreshPageLocked
+         0     0%  3.57%      0.68s  1.76%  gecgithub01.walmart.com/auk000v/chronicle.(*sseHub).run
+         0     0%  3.57%      0.68s  1.76%  gecgithub01.walmart.com/auk000v/chronicle.(*sseHub).runPersistent
+         0     0%  3.57%      0.67s  1.73%  gecgithub01.walmart.com/auk000v/chronicle.Mount.func1
+         0     0%  3.57%      0.45s  1.16%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.(*Store).Append
+         0     0%  3.57%      0.16s  0.41%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.(*Store).Get
+         0     0%  3.57%      0.74s  1.91%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.(*Store).ReadPage
+         0     0%  3.57%      0.74s  1.91%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.(*Store).runReadPageScript
+         0     0%  3.57%      1.31s  3.39%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.escapePath
+         0     0%  3.57%      0.18s  0.47%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.forksKey (inline)
+         0     0%  3.57%      1.07s  2.76%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.keysFor
+         0     0%  3.57%      0.42s  1.09%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.metaKey (inline)
+         0     0%  3.57%      0.31s   0.8%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.msgKey (inline)
+         0     0%  3.57%      0.05s  0.13%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.notifyChannel (inline)
+         0     0%  3.57%      0.39s  1.01%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.prodKey (inline)
+         0     0%  3.57%      1.34s  3.46%  gecgithub01.walmart.com/auk000v/chronicle/store/redis.tag (inline)
+         0     0%  3.57%      0.03s 0.078%  net/http.(*chunkWriter).close
+         0     0%  3.57%      0.03s 0.078%  net/http.(*chunkWriter).writeHeader
+         0     0%  3.57%      0.70s  1.81%  net/http.(*conn).serve
+         0     0%  3.57%      0.03s 0.078%  net/http.(*response).finishRequest
+         0     0%  3.57%      0.67s  1.73%  net/http.HandlerFunc.ServeHTTP
+         0     0%  3.57%      0.03s 0.078%  net/http.Header.WriteSubset (inline)
+         0     0%  3.57%      0.03s 0.078%  net/http.Header.writeSubset
