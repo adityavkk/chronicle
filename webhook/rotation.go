@@ -305,7 +305,7 @@ func (m *Manager) keysReloadLoop() {
 	defer t.Stop()
 	for {
 		select {
-		case <-m.stop:
+		case <-m.runCtx.Done():
 			return
 		case <-t.C:
 			if err := m.ReloadKeys(); err != nil {

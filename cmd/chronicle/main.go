@@ -328,6 +328,7 @@ func run() error {
 		subMetrics = prom
 		handler.ReadMetrics = prom
 		handler.SSEMetrics = prom
+		handler.AppendMetrics = prom
 		ready := func() error { return nil }
 		if client != nil {
 			ready = func() error {

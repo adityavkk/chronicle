@@ -251,6 +251,54 @@ per-stream sizes beyond node comfort become requirements; everything else in
 doc 05 (pub/sub wake protocol, HEXPIRE producer records, lazy TTL + backstop
 key TTLs, noeviction posture, honest durability guarantees) is adopted as-is.
 
+### 4.10 Subscription fan-out after append
+
+A successful append commits before it produces a subscription hint. A failed
+append and an idempotent producer duplicate produce no hint. A create with
+initial data links the new stream first, then produces one append hint. The HTTP
+handler measures the complete interval from the store commit through the end of
+this synchronous hook.
+
+The hook changes only process-local state. It takes a short mutex, applies one
+typed queue transition, records bounded-cardinality metrics, and attempts one
+nonblocking signal. It does not call Redis, enumerate or hydrate subscriptions,
+read linked tails, arm wakes, deliver webhooks, or start a goroutine. The queue
+holds at most 1024 distinct stream paths. Its depth-one signal channel cannot
+accumulate a notification per append.
+
+Each stream is in one of two queue states: queued or processing. Repeated
+appends to a queued stream coalesce. An append while that stream is processing
+marks it dirty again, so it returns once to the queue tail. This keeps a hot
+stream from starving older work. The Manager owns the worker context. Start and
+Stop are idempotent, and Stop cancels and waits for the worker without holding a
+mutex across Redis, stream, or delivery calls.
+
+The worker takes at most 64 streams at a time. For each stream it performs one
+subscriber lookup, one pipelined subscription hydration, and one batched read
+of all distinct linked tails. It then applies the existing pure pending-work
+decision and the existing wake, generation, lease, claim, acknowledgement,
+retry, write-token, and owner-epoch fences. The occupied-slot lookup remains a
+separate metric component. Append hints are not filtered by subscription owner
+because only the Chronicle replica that accepted the append observes the hint.
+
+Backpressure is explicit. If all 1024 stream entries are occupied, the queue
+opens one overflow epoch and signals the existing eager recovery loop. Further
+overflow coalesces. A successful full recovery sweep closes the epoch. An
+overflow that occurs during the sweep requires another pass because it may be
+newer than the sweep snapshot. A failed dirty evaluation returns to the queue
+tail and also requests recovery. Retries wait for the normal worker tick so a
+Redis outage cannot create a hot loop.
+
+The queue is a latency aid, not correctness storage. Process death can discard
+it. The unchanged boot, reconnect, eager, and periodic recovery sweeps derive
+owed work from durable stream tails and durable subscription cursors, so they
+repair lost hints, overflow, owner movement, and transient Redis failure.
+Duplicate evaluation is harmless because wake arming is compare-and-set fenced.
+The append and subscription state occupy different Redis Cluster slots and are
+not claimed to be atomic. No distributed transaction or second durable dirty
+database is introduced. See
+[the implementation research](perf-async-subscription-fanout/research.md).
+
 ## 5. Conformance strategy
 
 - `make conformance`: `docker compose up -d --wait redis` → build & start

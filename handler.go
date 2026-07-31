@@ -28,6 +28,13 @@ import (
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
+// AppendMetrics records work between a durable append commit and the HTTP
+// response. It lives in the HTTP package because only the handler can observe
+// both boundaries exactly.
+type AppendMetrics interface {
+	AppendSubscriptionHook(dur time.Duration)
+}
+
 // Handler serves the Durable Streams protocol over HTTP.
 type Handler struct {
 	// Store is the stream storage backend.
@@ -78,6 +85,10 @@ type Handler struct {
 	// SubHooks, when set, receives stream lifecycle events so the subscription
 	// layer can wake subscribers after a durable write. Nil disables the hooks.
 	SubHooks SubscriptionHooks
+
+	// AppendMetrics receives the end-to-end synchronous subscription-hook time
+	// after a committed append. Nil disables it.
+	AppendMetrics AppendMetrics
 
 	// AuthMode selects authorization enforcement (issue #126). The zero value
 	// ModeInsecure evaluates decisions for telemetry only, so a base-protocol
@@ -135,6 +146,12 @@ func (h *Handler) onStreamCreated(path string) {
 func (h *Handler) onStreamAppend(path string) {
 	if h.SubHooks != nil {
 		h.SubHooks.OnStreamAppend(subStreamPath(path))
+	}
+}
+
+func (h *Handler) observeAppendSubscriptionHook(start time.Time) {
+	if h.SubHooks != nil && h.AppendMetrics != nil {
+		h.AppendMetrics.AppendSubscriptionHook(time.Since(start))
 	}
 }
 
@@ -307,6 +324,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 	}
 
 	meta, wasCreated, err := h.Store.Create(path, opts)
+	createReturnedAt := time.Now()
 	if err != nil {
 		if errors.Is(err, store.ErrStreamNotFound) {
 			return newHTTPError(http.StatusNotFound, "source stream not found")
@@ -345,6 +363,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 		h.onStreamCreated(path)
 		if len(initialData) > 0 {
 			h.onStreamAppend(path)
+			h.observeAppendSubscriptionHook(createReturnedAt)
 		}
 	}
 
@@ -924,6 +943,7 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 		return err
 	}
 	result, err := h.Store.Append(path, body, opts)
+	appendReturnedAt := time.Now()
 	if err != nil {
 		if errors.Is(err, store.ErrStreamClosed) {
 			w.Header().Set(protocol.HeaderStreamClosed, "true")
@@ -992,6 +1012,7 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 	// genuinely new append — a deduplicated producer retry wrote no new data,
 	// so waking subscribers for it would be spurious.
 	h.onStreamAppend(path)
+	h.observeAppendSubscriptionHook(appendReturnedAt)
 
 	// For non-producer appends, return 204 No Content
 	// For producer appends (new writes), return 200 OK to distinguish from duplicates

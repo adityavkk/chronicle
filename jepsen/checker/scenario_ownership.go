@@ -126,6 +126,11 @@ func ownershipClaimant(store *webhook.RedisStore, slotKeys, slotIDs []string, wi
 		callNs := rec.now()
 		claim, err := store.ClaimSlot(slotKeys[h], replica, time.Now(), slotTTL)
 		if err != nil {
+			// claim_shard is a write: a lost reply is applied-or-not, never an
+			// operation that can be erased from a linearizability history. The pure
+			// model admits both outcomes and later observations constrain which one
+			// occurred, matching the data-plane store checker.
+			rec.recordOp(wid, shardInput{shard: slotIDs[h], op: opClaimShard, caller: replica}, shardOutput{status: statusIndeterminate}, callNs)
 			sleep(backoff)
 			continue
 		}

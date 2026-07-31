@@ -50,7 +50,10 @@ func renewedShardOut(owner string, epoch int64) shardOutput {
 	return shardOutput{status: statusRenewed, owner: owner, epoch: epoch}
 }
 
-func busyShardOut() shardOutput   { return shardOutput{status: statusBusy} }
+func busyShardOut() shardOutput { return shardOutput{status: statusBusy} }
+func indeterminateShardOut() shardOutput {
+	return shardOutput{status: statusIndeterminate}
+}
 func ownerOut() shardOutput       { return shardOutput{status: statusOwner} }
 func fencedOwnerOut() shardOutput { return shardOutput{status: statusFenced} }
 func unownedOut() shardOutput     { return shardOutput{status: statusUnowned} }
@@ -140,6 +143,29 @@ func TestShardModel_BusyClaimIsNoop(t *testing.T) {
 		shardOp(0, claimShard("h1", "A"), renewedShardOut("A", 1), 7, 8),
 	}
 	checkShardLinearizable(t, "busy claim is no-op", h, true)
+}
+
+// A timed-out claim may have transferred ownership before its reply was lost.
+// Its same-owner retry then legitimately returns RENEWED at the new epoch. This
+// is the exact history the live checker must preserve across a Redis partition;
+// dropping the ambiguous operation would fabricate an impossible silent change.
+func TestShardModel_IndeterminateClaimMayHaveCommitted(t *testing.T) {
+	h := []porcupine.Operation{
+		shardOp(0, claimShard("h1", "A"), claimedShardOut("A", 1), 1, 2),
+		shardOp(1, claimShard("h1", "B"), indeterminateShardOut(), 3, 4),
+		shardOp(1, claimShard("h1", "B"), renewedShardOut("B", 2), 5, 6),
+		shardOp(1, checkOwner("h1", "B", 2), ownerOut(), 7, 8),
+	}
+	checkShardLinearizable(t, "indeterminate claim committed before lost reply", h, true)
+}
+
+func TestShardModel_IndeterminateClaimMayNotHaveCommitted(t *testing.T) {
+	h := []porcupine.Operation{
+		shardOp(0, claimShard("h1", "A"), claimedShardOut("A", 1), 1, 2),
+		shardOp(1, claimShard("h1", "B"), indeterminateShardOut(), 3, 4),
+		shardOp(0, claimShard("h1", "A"), renewedShardOut("A", 1), 5, 6),
+	}
+	checkShardLinearizable(t, "indeterminate claim not committed", h, true)
 }
 
 // check_owner on a never-claimed slot returns UNOWNED — a legal no-op.

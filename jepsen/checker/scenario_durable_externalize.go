@@ -151,7 +151,7 @@ func runDurableExternalize(c config, nem *nemesis) error {
 	}
 
 	stopDrain := make(chan struct{})
-	go drainWorker(c.base, subID, "events/de-wake", stopDrain)
+	go drainAckOffsets(c.base, subID, stopDrain)
 	deadline := time.Now().Add(60 * time.Second)
 	var gaps []deliveryGap
 	for time.Now().Before(deadline) {

@@ -46,6 +46,14 @@ func TestMuxEndpoints(t *testing.T) {
 	// series appears in the exposition (a CounterVec emits nothing until a label
 	// value is observed).
 	p.FanOut(3*time.Millisecond, 4, 12)
+	p.AppendSubscriptionHook(20 * time.Microsecond)
+	p.DirtyEnqueue("enqueued", 1, 1024, time.Millisecond)
+	p.DirtyQueue(1, 1024, time.Millisecond)
+	p.DirtyProcess(4*time.Millisecond, 12, 3, 2, "ok")
+	p.DirtyOverflow()
+	p.ReconcileRequest("dirty-overflow", "enqueued")
+	p.DirtyProcessingError("lookup")
+	p.DirtyRecoveryDelay(5 * time.Millisecond)
 	p.DueSetMutation("arm")
 	p.DueWorkerTick(time.Millisecond, 2)
 	p.SlotOwnership("claimed", 7)
@@ -100,6 +108,19 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_fanout_seconds",
 		"chronicle_fanout_slots_probed",
 		"chronicle_fanout_subs",
+		"chronicle_append_subscription_hook_seconds",
+		"chronicle_subscription_dirty_enqueues_total",
+		"chronicle_subscription_dirty_queue_depth",
+		"chronicle_subscription_dirty_queue_capacity",
+		"chronicle_subscription_dirty_oldest_age_seconds",
+		"chronicle_subscription_dirty_processing_seconds",
+		"chronicle_subscription_dirty_subscribers_evaluated_total",
+		"chronicle_subscription_dirty_wakes_armed_total",
+		"chronicle_subscription_dirty_duplicate_work_total",
+		"chronicle_subscription_dirty_overflow_total",
+		"chronicle_subscription_reconcile_requests_total",
+		"chronicle_subscription_dirty_processing_errors_total",
+		"chronicle_subscription_dirty_recovery_delay_seconds",
 		"chronicle_due_set_mutations_total",
 		"chronicle_due_worker_tick_seconds",
 		"chronicle_due_worker_fired",

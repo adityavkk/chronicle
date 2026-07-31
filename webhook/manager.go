@@ -34,7 +34,7 @@ type Streams interface {
 	// every linked stream's tail per tick, so a per-path round trip does not
 	// scale; this is the batched form. A path whose stream does not exist is
 	// omitted from the map (the batched form of TailOffset's not-ok result).
-	TailOffsets(paths []string) map[string]string
+	TailOffsets(paths []string) (map[string]string, error)
 	// BeginningOffset is the canonical "start of stream" cursor (store.ZeroOffset);
 	// a stream linked here has no pending work until its first append.
 	BeginningOffset() string
@@ -72,6 +72,8 @@ const (
 	defaultSweepInterval     = 30 * time.Second
 	defaultReconcileInterval = 30 * time.Second
 	dueClaimLimit            = 256
+	dirtyQueueCapacity       = 1024
+	dirtyBatchSize           = 64
 
 	// Leased slot-ownership timers (issue #14, 05:502-505). A DIFFERENT lease layer
 	// from the per-subscription webhook lease_ttl_ms — these govern which replica
@@ -229,9 +231,34 @@ type Manager struct {
 	// reconciles are claim-fence-safe, so dropping the surplus is sound.
 	reconcileC chan scope
 
-	stop chan struct{}
-	wg   sync.WaitGroup
+	// dirty is the bounded, process-local append hint queue. dirtyMu protects
+	// only in-memory transitions; no Redis, stream, or delivery call is made
+	// while it is held.
+	dirtyMu     sync.Mutex
+	dirty       dirtyQueue
+	dirtyNotify chan struct{}
+	dirtyClosed bool
+	now         func() time.Time
+
+	// runCtx owns every Manager background loop. The lifecycle state makes Start
+	// and Stop race-safe and idempotent without holding lifeMu across I/O.
+	runCtx    context.Context
+	cancelRun context.CancelFunc
+	lifeMu    sync.Mutex
+	life      managerLifecycle
+	startDone chan struct{}
+	wg        sync.WaitGroup
 }
+
+type managerLifecycle uint8
+
+const (
+	managerNew managerLifecycle = iota
+	managerStarting
+	managerRunning
+	managerStopping
+	managerStopped
+)
 
 // NewManager builds a Manager and loads the signing and token keys from the
 // configured KeySource — the store (which installs persisted keys, so the kid
@@ -262,6 +289,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 	if wakeKey.Kid == signing.Kid {
 		return nil, fmt.Errorf("webhook: wake-token key equals the envelope signing key (kid %s)", wakeKey.Kid)
 	}
+	runCtx, cancelRun := context.WithCancel(context.Background())
 	m := &Manager{
 		store:                 store,
 		keys:                  keys,
@@ -289,7 +317,12 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		slotReconcileInterval: opts.SlotReconcileInterval,
 		held:                  map[SlotID]OwnerEpoch{},
 		reconcileC:            make(chan scope, 1),
-		stop:                  make(chan struct{}),
+		dirty:                 newDirtyQueue(dirtyQueueCapacity),
+		dirtyNotify:           make(chan struct{}, 1),
+		now:                   time.Now,
+		runCtx:                runCtx,
+		cancelRun:             cancelRun,
+		startDone:             make(chan struct{}),
 	}
 	if m.metrics == nil {
 		m.metrics = NopMetrics{}
@@ -319,11 +352,14 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 	// a coherent key state refuses startup (fail closed); after this, reload
 	// failures keep the last good snapshot instead.
 	if err := m.ReloadKeys(); err != nil {
+		cancelRun()
 		return nil, err
 	}
 	if err := m.initOwnership(opts); err != nil {
+		cancelRun()
 		return nil, err
 	}
+	m.metrics.DirtyQueue(0, dirtyQueueCapacity, 0)
 	return m, nil
 }
 
@@ -494,29 +530,212 @@ func (m *Manager) OnStreamCreated(path string) {
 	}
 }
 
-// OnStreamAppend wakes every idle subscription with pending work on path
-// (PROTOCOL §7). It is the best-effort low-latency path; the recovery sweep is
-// the durability backstop if this is lost to a crash (docs/research/09 §2).
+// OnStreamAppend records one process-local dirty hint after a durable append.
+// The handoff is bounded by dirtyQueueCapacity and never calls Redis, reads a
+// stream tail, delivers a wake, or starts a goroutine. The recovery sweep is the
+// durable backstop if this hint is lost to shutdown or overflow.
 func (m *Manager) OnStreamAppend(path string) {
-	// Under slot-homing the fan-out is S parallel pipelined SMEMBERS over the
-	// stream's occupied slots (~max-node-RTT, not S serial), gated by the
-	// occupied-slots bitmap so a sparse-wide stream probes only its occupied slots.
-	// FanOut records the scatter-gather cost (duration, slots probed, subscribers
-	// found) — the number gate #2 measures (05:490-500, 05:525).
-	start := time.Now()
+	now := m.now()
+	m.dirtyMu.Lock()
+	result, requestRecovery := dirtyStopped, false
+	if !m.dirtyClosed {
+		result, requestRecovery = m.dirty.enqueue(path, now)
+	}
+	stats := m.dirty.stats(now)
+	m.dirtyMu.Unlock()
+
+	m.metrics.DirtyEnqueue(result.String(), stats.depth, stats.capacity, stats.oldestAge)
+	switch result {
+	case dirtyEnqueued:
+		failpoint(fpDirtyAfterEnqueueBeforeSignal)
+		m.signalDirty()
+	case dirtyOverflowed:
+		m.metrics.DirtyOverflow()
+		m.signalDirty()
+	default:
+		if requestRecovery {
+			panic("webhook: dirty recovery request without enqueue outcome")
+		}
+	}
+}
+
+func (m *Manager) signalDirty() {
+	select {
+	case m.dirtyNotify <- struct{}{}:
+	default:
+	}
+}
+
+func (m *Manager) takeDirtyBatch() ([]dirtyWork, dirtyQueueStats) {
+	now := m.now()
+	m.dirtyMu.Lock()
+	work := m.dirty.take(dirtyBatchSize)
+	stats := m.dirty.stats(now)
+	m.dirtyMu.Unlock()
+	return work, stats
+}
+
+func (m *Manager) completeDirty(path string, completion dirtyCompletion) dirtyQueueStats {
+	now := m.now()
+	m.dirtyMu.Lock()
+	m.dirty.complete(path, completion)
+	stats := m.dirty.stats(now)
+	m.dirtyMu.Unlock()
+	return stats
+}
+
+type dirtyProcessStage uint8
+
+const (
+	dirtyStageNone dirtyProcessStage = iota
+	dirtyStageLookup
+	dirtyStageHydrate
+	dirtyStageTails
+	dirtyStageArm
+)
+
+func (s dirtyProcessStage) String() string {
+	switch s {
+	case dirtyStageLookup:
+		return "lookup"
+	case dirtyStageHydrate:
+		return "hydrate"
+	case dirtyStageTails:
+		return "tails"
+	case dirtyStageArm:
+		return "arm"
+	default:
+		return "none"
+	}
+}
+
+type dirtyProcessResult struct {
+	subs       int
+	wakes      int
+	duplicates int
+}
+
+// processDirtyStream is the asynchronous fan-out shell for one stream. It
+// performs one scatter-gather subscriber lookup, one pipelined hydration, and
+// one batched read of all distinct linked tails before making pure pending-work
+// decisions. Subscription ownership cannot filter this append hint: only the
+// replica that accepted the stream append observes it, and it must cover every
+// subscriber slot. Generation and owner fences remain in the existing arm and
+// worker paths.
+func (m *Manager) processDirtyStream(path string) (dirtyProcessResult, dirtyProcessStage, error) {
+	lookupStart := m.now()
 	ids, slotsProbed, err := m.store.StreamSubscribers(path)
 	if err != nil {
-		// The low-latency wake path failed: this append's subscribers could not be
-		// read, so its wakes are lost. Trigger a recovery reconcile rather than wait
-		// for the coarse floor (doc-05 correction #2, the append-error event).
-		m.log.Warn("webhook: stream subscribers", "path", path, "error", err)
-		m.triggerReconcile(scopeAppendError)
-		return
+		return dirtyProcessResult{}, dirtyStageLookup, err
 	}
-	m.metrics.FanOut(time.Since(start), slotsProbed, len(ids))
-	for _, id := range ids {
-		m.maybeWake(id, path)
+	m.metrics.FanOut(m.now().Sub(lookupStart), slotsProbed, len(ids))
+	if len(ids) == 0 {
+		return dirtyProcessResult{}, dirtyStageNone, nil
 	}
+
+	subs, err := m.store.GetMany(ids)
+	if err != nil {
+		return dirtyProcessResult{}, dirtyStageHydrate, err
+	}
+	result := dirtyProcessResult{subs: len(subs), duplicates: len(ids) - len(subs)}
+	idle := make([]Subscription, 0, len(subs))
+	for _, sub := range subs {
+		if sub.Phase != PhaseIdle {
+			result.duplicates++
+			continue
+		}
+		idle = append(idle, sub)
+	}
+	if len(idle) == 0 {
+		return result, dirtyStageNone, nil
+	}
+
+	paths := distinctLinkPaths(idle)
+	tails, err := m.streams.TailOffsets(paths)
+	if err != nil {
+		return result, dirtyStageTails, err
+	}
+	armFailed := false
+	for _, sub := range idle {
+		if !HasPendingWorkFrom(sub.Links, tails) {
+			continue
+		}
+		switch m.issueWakeResult(sub, path) {
+		case wakeIssueArmed:
+			result.wakes++
+		case wakeIssueDuplicate:
+			result.duplicates++
+		case wakeIssueFailed:
+			armFailed = true
+		}
+	}
+	if armFailed {
+		return result, dirtyStageArm, fmt.Errorf("one or more subscription wakes failed to arm")
+	}
+	return result, dirtyStageNone, nil
+}
+
+// processDirtyBatch runs at most dirtyBatchSize streams. A failed stream returns
+// to the queue tail and requests eager recovery. The worker loop delays further
+// retries until its next tick, so a Redis outage cannot create a hot retry loop.
+func (m *Manager) processDirtyBatch() (processed int, hadError bool) {
+	work, stats := m.takeDirtyBatch()
+	m.metrics.DirtyQueue(stats.depth, stats.capacity, stats.oldestAge)
+	if len(work) == 0 {
+		return 0, false
+	}
+
+	start := m.now()
+	total := dirtyProcessResult{}
+	for _, item := range work {
+		result, stage, err := m.processDirtyStream(item.path)
+		total.subs += result.subs
+		total.wakes += result.wakes
+		total.duplicates += result.duplicates
+		completion := dirtySucceeded
+		if err != nil {
+			completion = dirtyRetry
+			hadError = true
+			m.metrics.DirtyProcessingError(stage.String())
+			m.log.Warn("webhook: async stream fan-out", "stage", stage.String(), "error", err)
+			m.triggerReconcile(scopeAppendError)
+		} else {
+			m.metrics.DirtyRecoveryDelay(m.now().Sub(item.since))
+		}
+		stats = m.completeDirty(item.path, completion)
+		processed++
+	}
+	outcome := "ok"
+	if hadError {
+		outcome = "error"
+	}
+	m.metrics.DirtyProcess(m.now().Sub(start), total.subs, total.wakes, total.duplicates, outcome)
+	m.metrics.DirtyQueue(stats.depth, stats.capacity, stats.oldestAge)
+	if !hadError && m.dirtyHasReady() {
+		m.signalDirty()
+	}
+	return processed, hadError
+}
+
+func (m *Manager) dirtyHasReady() bool {
+	m.dirtyMu.Lock()
+	ready := m.dirty.hasReady()
+	m.dirtyMu.Unlock()
+	return ready
+}
+
+func (m *Manager) dirtyOverflowPending() bool {
+	m.dirtyMu.Lock()
+	pending := m.dirty.hasPendingOverflow()
+	m.dirtyMu.Unlock()
+	return pending
+}
+
+// RunDirtyWorker processes one bounded dirty batch immediately. It is the
+// deterministic test and benchmark seam, parallel to RunSweep and RunDueWorker.
+func (m *Manager) RunDirtyWorker() int {
+	processed, _ := m.processDirtyBatch()
+	return processed
 }
 
 // OnRedisReconnect signals that the Redis connection healed after a drop, so any
@@ -577,23 +796,35 @@ func (m *Manager) maybeWake(id, triggerStream string) {
 	m.issueWake(sub, triggerStream)
 }
 
+type wakeIssueResult uint8
+
+const (
+	wakeIssueArmed wakeIssueResult = iota
+	wakeIssueDuplicate
+	wakeIssueFailed
+)
+
 // issueWake arms a new wake generation and delivers it (webhook POST or pull-wake
 // event). For webhook the lease is armed at issue; for pull-wake the lease waits
 // for a claim (PROTOCOL §7.3).
 func (m *Manager) issueWake(sub Subscription, triggerStream string) bool {
+	return m.issueWakeResult(sub, triggerStream) == wakeIssueArmed
+}
+
+func (m *Manager) issueWakeResult(sub Subscription, triggerStream string) wakeIssueResult {
 	wakeID, err := GenerateWakeID(rand.Reader)
 	if err != nil {
 		m.log.Warn("webhook: generate wake id", "error", err)
-		return false
+		return wakeIssueFailed
 	}
 	armLease := sub.Config.Type == DispatchWebhook
-	res, err := m.armWakeUnscoped(sub.ID, time.Now(), sub.Config.LeaseTTLMs, armLease, wakeID)
+	res, err := m.armWakeUnscoped(sub.ID, m.now(), sub.Config.LeaseTTLMs, armLease, wakeID)
 	if err != nil {
 		m.log.Warn("webhook: arm wake", "sub", sub.ID, "error", err)
-		return false
+		return wakeIssueFailed
 	}
 	if !res.Armed {
-		return false // already in flight (coalesced) or gone
+		return wakeIssueDuplicate // already in flight (coalesced) or gone
 	}
 	// The arm→emit surgical window (07 honest-gap #2): the fence is minted but the
 	// wake is not yet emitted. A no-op in production; a test failpoint can crash/stall
@@ -610,7 +841,7 @@ func (m *Manager) issueWake(sub Subscription, triggerStream string) bool {
 	case DispatchPullWake:
 		m.writeWakeEvent(sub, triggerStream, res.Generation, res.WakeID)
 	}
-	return true
+	return wakeIssueArmed
 }
 
 // issueWakeOwned is issueWake for owner-driven background workers. The arm_wake
@@ -1028,13 +1259,23 @@ func (m *Manager) expireLeaseOwned(scope OwnerScope, id string, now time.Time) (
 
 // ---- background loops ----
 
-// Start launches the lease worker, retry worker, due-set worker, the recovery
-// loop (the coarse floor + event-triggered reconciles), and the slow reconcile
-// loop. It first runs the boot reconcile synchronously so anything owed is
-// re-fired before the loops — and before serving — closing the restart gap
-// (doc-05 correction #2, the boot event).
+// Start launches every Manager-owned loop once. It first runs boot recovery
+// without holding the lifecycle mutex, then publishes the running state before
+// returning. A concurrent Stop cancels startup and waits for this transition.
 func (m *Manager) Start() {
+	m.lifeMu.Lock()
+	if m.life != managerNew {
+		m.lifeMu.Unlock()
+		return
+	}
+	m.life = managerStarting
+	m.lifeMu.Unlock()
+
 	m.reconcile(scopeBoot)
+	if m.runCtx.Err() != nil {
+		m.finishStart(false)
+		return
+	}
 	// Join membership and claim our owned slots BEFORE the fast workers tick, so a
 	// fresh replica does not idle a whole slotReconcileInterval before owning work
 	// (and so the boot owner is established before serving). Both are best-effort:
@@ -1042,16 +1283,39 @@ func (m *Manager) Start() {
 	if err := m.store.Heartbeat(m.replicaID.String(), time.Now(), m.memberLeaseTTL); err != nil {
 		m.log.Warn("webhook: initial heartbeat", "replica", m.replicaID, "error", err)
 	}
+	if m.runCtx.Err() != nil {
+		m.finishStart(false)
+		return
+	}
 	m.slotReconcileOnce()
-	m.wg.Add(8)
+	if !m.finishStart(true) {
+		return
+	}
 	go m.keysReloadLoop()
 	go m.leaseWorker()
 	go m.retryWorker()
 	go m.dueWorker()
+	go m.dirtyWorker()
 	go m.recoveryLoop()
 	go m.reconcileLoop()
 	go m.heartbeatLoop()
 	go m.slotReconcileLoop()
+}
+
+// finishStart publishes the end of startup. The wait-group increment happens
+// before startDone closes, so Stop cannot race Wait against Add.
+func (m *Manager) finishStart(run bool) bool {
+	m.lifeMu.Lock()
+	defer m.lifeMu.Unlock()
+	if !run || m.life == managerStopping || m.runCtx.Err() != nil {
+		m.life = managerStopped
+		close(m.startDone)
+		return false
+	}
+	m.wg.Add(9)
+	m.life = managerRunning
+	close(m.startDone)
+	return true
 }
 
 // Stop signals the background loops and waits for them to drain. It does NOT
@@ -1059,8 +1323,61 @@ func (m *Manager) Start() {
 // (05:248), so a surviving replica reclaims this one's slots once its slot lease
 // (and membership lease) lapse. The full sweep covers the interim coverage gap.
 func (m *Manager) Stop() {
-	close(m.stop)
+	m.lifeMu.Lock()
+	switch m.life {
+	case managerNew:
+		m.life = managerStopped
+		m.cancelRun()
+		close(m.startDone)
+	case managerStarting:
+		m.life = managerStopping
+		m.cancelRun()
+	case managerRunning:
+		m.life = managerStopped
+		m.cancelRun()
+	case managerStopping, managerStopped:
+		m.cancelRun()
+	}
+	startDone := m.startDone
+	m.lifeMu.Unlock()
+
+	m.dirtyMu.Lock()
+	m.dirtyClosed = true
+	stats := m.dirty.stats(m.now())
+	m.dirtyMu.Unlock()
+	m.metrics.DirtyQueue(stats.depth, stats.capacity, stats.oldestAge)
+
+	<-startDone
 	m.wg.Wait()
+}
+
+// dirtyWorker owns async append fan-out. A notification starts work immediately.
+// After an error, retries wait for workerTick; this is the bounded-delay analogue
+// of a delaying workqueue and prevents a Redis outage from becoming a hot loop.
+func (m *Manager) dirtyWorker() {
+	defer m.wg.Done()
+	ticker := time.NewTicker(m.workerTick)
+	defer ticker.Stop()
+	retrying := false
+	for {
+		select {
+		case <-m.runCtx.Done():
+			return
+		case <-m.dirtyNotify:
+			if retrying {
+				continue
+			}
+			_, retrying = m.processDirtyBatch()
+			if m.dirtyOverflowPending() {
+				m.triggerReconcile(scopeDirtyOverflow)
+			}
+		case <-ticker.C:
+			_, retrying = m.processDirtyBatch()
+			if m.dirtyOverflowPending() {
+				m.triggerReconcile(scopeDirtyOverflow)
+			}
+		}
+	}
 }
 
 // leaseWorker expires due leases (PROTOCOL §7.3). Due members are re-scored
@@ -1074,7 +1391,7 @@ func (m *Manager) leaseWorker() {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-m.stop:
+		case <-m.runCtx.Done():
 			return
 		case <-ticker.C:
 			// Work-sharded: a replica runs the lease worker only over the slots it
@@ -1116,7 +1433,7 @@ func (m *Manager) dueWorker() {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-m.stop:
+		case <-m.runCtx.Done():
 			return
 		case <-ticker.C:
 			// Work-sharded: a replica drains the due-set only for its owned slots
@@ -1212,7 +1529,7 @@ func (m *Manager) retryWorker() {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-m.stop:
+		case <-m.runCtx.Done():
 			return
 		case <-ticker.C:
 			// Work-sharded: a replica runs the retry worker only over its owned slots
@@ -1253,12 +1570,13 @@ func (m *Manager) retryWorker() {
 type scope int
 
 const (
-	scopeBoot        scope = iota // process boot: re-fire anything owed before serving
-	scopeReconnect                // a Redis reconnect: the connection that lost in-flight ops healed
-	scopeAppendError              // an OnStreamAppend / wake-event append failed: the low-latency wake path errored
-	scopeFloor                    // the coarse periodic floor: the one eventless case (an owed mark on an unowned, quiet slot)
-	scopeEpochBump                // #16: a DR promotion / owner_epoch bump drives the eager reconcile (Manager.Promote)
-	scopeNewOwnerCAS              // #14: a new-owner claim_shard CAS reconciles its freshly-claimed slot
+	scopeBoot          scope = iota // process boot: re-fire anything owed before serving
+	scopeReconnect                  // a Redis reconnect: the connection that lost in-flight ops healed
+	scopeAppendError                // an OnStreamAppend / wake-event append failed: the low-latency wake path errored
+	scopeFloor                      // the coarse periodic floor: the one eventless case (an owed mark on an unowned, quiet slot)
+	scopeEpochBump                  // #16: a DR promotion / owner_epoch bump drives the eager reconcile (Manager.Promote)
+	scopeNewOwnerCAS                // #14: a new-owner claim_shard CAS reconciles its freshly-claimed slot
+	scopeDirtyOverflow              // the bounded append-hint queue overflowed and needs a cursor rebuild
 )
 
 func (s scope) String() string {
@@ -1275,6 +1593,8 @@ func (s scope) String() string {
 		return "epoch-bump"
 	case scopeNewOwnerCAS:
 		return "new-owner-cas"
+	case scopeDirtyOverflow:
+		return "dirty-overflow"
 	default:
 		return "unknown"
 	}
@@ -1296,8 +1616,29 @@ func (s scope) String() string {
 // narrows it to the freshly-claimed slot's subs once state is slot-homed.
 func (m *Manager) reconcile(s scope) {
 	switch s {
-	case scopeBoot, scopeReconnect, scopeAppendError, scopeFloor, scopeEpochBump, scopeNewOwnerCAS:
-		m.sweepOnce()
+	case scopeBoot, scopeReconnect, scopeAppendError, scopeFloor, scopeEpochBump, scopeNewOwnerCAS, scopeDirtyOverflow:
+		m.dirtyMu.Lock()
+		overflowSince, coveringOverflow := m.dirty.beginReconcile()
+		m.dirtyMu.Unlock()
+
+		success := m.sweepOnce()
+		if !coveringOverflow {
+			return
+		}
+		m.dirtyMu.Lock()
+		requestAgain := m.dirty.completeReconcile(success)
+		stats := m.dirty.stats(m.now())
+		m.dirtyMu.Unlock()
+		m.metrics.DirtyQueue(stats.depth, stats.capacity, stats.oldestAge)
+		if success {
+			m.metrics.DirtyRecoveryDelay(m.now().Sub(overflowSince))
+		}
+		if requestAgain && success {
+			// An append overflowed after the successful sweep began, so its later
+			// epoch needs another pass. Failed sweeps retry on dirtyWorker's tick to
+			// avoid a hot loop during a Redis outage.
+			m.triggerReconcile(scopeDirtyOverflow)
+		}
 	}
 }
 
@@ -1307,10 +1648,15 @@ func (m *Manager) reconcile(s scope) {
 // most one queued reconcile while one runs: duplicate reconciles are claim-fence-
 // safe, and a storm of append errors cannot pile up a reconcile per error.
 func (m *Manager) triggerReconcile(s scope) {
+	result := "enqueued"
 	select {
 	case m.reconcileC <- s:
 	default:
 		// a reconcile is already queued; this event coalesces into it.
+		result = "coalesced"
+	}
+	if m.metrics != nil {
+		m.metrics.ReconcileRequest(s.String(), result)
 	}
 }
 
@@ -1328,7 +1674,7 @@ func (m *Manager) recoveryLoop() {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-m.stop:
+		case <-m.runCtx.Done():
 			return
 		case <-ticker.C:
 			m.reconcile(scopeFloor)
@@ -1357,7 +1703,7 @@ func (m *Manager) heartbeatLoop() {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-m.stop:
+		case <-m.runCtx.Done():
 			return
 		case <-ticker.C:
 			if err := m.store.Heartbeat(m.replicaID.String(), time.Now(), m.memberLeaseTTL); err != nil {
@@ -1378,7 +1724,7 @@ func (m *Manager) slotReconcileLoop() {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-m.stop:
+		case <-m.runCtx.Done():
 			return
 		case <-ticker.C:
 			m.slotReconcileOnce()
@@ -1491,11 +1837,14 @@ func containsReplica(members []ReplicaID, r ReplicaID) bool {
 	return false
 }
 
-func (m *Manager) sweepOnce() {
+func (m *Manager) sweepOnce() bool {
 	start := time.Now()
 	ids, err := m.store.List()
-	if err != nil || len(ids) == 0 {
-		return
+	if err != nil {
+		return false
+	}
+	if len(ids) == 0 {
+		return true
 	}
 	ids = m.sweepWindow(ids)
 	now := time.Now()
@@ -1505,12 +1854,15 @@ func (m *Manager) sweepOnce() {
 	// subscription reads; TailOffsets pipelines every linked tail into one batch.
 	subs, err := m.store.GetMany(ids)
 	if err != nil {
-		return
+		return false
 	}
 	// Collect tails across all subs (not just idle ones) so a subscription that
 	// lease expiry flips to idle below still has its tails in the batch.
 	paths := distinctLinkPaths(subs)
-	tails := m.streams.TailOffsets(paths)
+	tails, err := m.streams.TailOffsets(paths)
+	if err != nil {
+		return false
+	}
 	snapshot := RecoverySnapshot{
 		Subs:               subs,
 		Tails:              tails,
@@ -1538,6 +1890,7 @@ func (m *Manager) sweepOnce() {
 		}
 	}
 	m.metrics.SweepTick(time.Since(start), len(subs), len(paths), wakes)
+	return true
 }
 
 // leasedSet reads the lease-ZSET membership into a set for the failover-aware
@@ -1636,7 +1989,7 @@ func distinctLinkPaths(subs []Subscription) []string {
 }
 
 // RunSweep runs one recovery sweep immediately (used at startup and in tests).
-func (m *Manager) RunSweep() { m.sweepOnce() }
+func (m *Manager) RunSweep() { m.reconcile(scopeFloor) }
 
 // ---- route-level operations (called by routes.go) ----
 
@@ -1745,7 +2098,7 @@ func (m *Manager) reconcileLoop() {
 	m.reconcileOnce()
 	for {
 		select {
-		case <-m.stop:
+		case <-m.runCtx.Done():
 			return
 		case <-ticker.C:
 			m.reconcileOnce()

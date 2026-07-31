@@ -503,7 +503,7 @@ func runPullWakeArmCrash(c config, nem *nemesis) error {
 	stopWorker := make(chan struct{})
 	var wwg sync.WaitGroup
 	wwg.Add(1)
-	go func() { defer wwg.Done(); drainWorker(c.base, subID, wakeStream, stopWorker) }()
+	go func() { defer wwg.Done(); drainAckOffsets(c.base, subID, stopWorker) }()
 
 	// Nemesis: light churn during the workload to lose some arm-time emits.
 	nem.scenario = "pull-wake-arm-crash"
@@ -741,28 +741,6 @@ func ackPullWake(base, id, token, wakeID string, generation int64) (status int, 
 		}
 	}
 	return status, code, nil
-}
-
-// drainWorker continuously claims, acks every pending stream up to its tail with
-// done=true, and lets the next claim proceed — draining all pull-wakes toward
-// their tails. It runs until stop is closed. Errors (no pending work, transient
-// origin churn) are expected and simply retried after a short pause.
-func drainWorker(base, id, wakeStream string, stop <-chan struct{}) {
-	worker := fmt.Sprintf("drain-%d", time.Now().UnixNano())
-	for {
-		select {
-		case <-stop:
-			return
-		default:
-		}
-		res, err := claim(base, id, worker)
-		if err != nil || res.Token == "" {
-			// No pending work or origin churn: back off briefly and retry.
-			sleep(200 * time.Millisecond)
-			continue
-		}
-		ackPullWake(base, id, res.Token, res.WakeID, res.Generation)
-	}
 }
 
 // ClaimBody and CallbackBody mirror the request wire shapes (webhook/wire.go

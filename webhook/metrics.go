@@ -38,6 +38,24 @@ type Metrics interface {
 	// duration, how many slots it probed, and how many subscribers it found.
 	// Feeds gate #2 (fan-out p99 regression). Wired at OnStreamAppend in #15.
 	FanOut(dur time.Duration, slotsProbed, subs int)
+	// DirtyEnqueue records the bounded append handoff outcome and queue snapshot.
+	// result is one of enqueued, coalesced-queued, coalesced-processing,
+	// overflow, overflow-coalesced, or stopped.
+	DirtyEnqueue(result string, depth, capacity int, oldestAge time.Duration)
+	// DirtyQueue updates the queue gauges after a worker transition.
+	DirtyQueue(depth, capacity int, oldestAge time.Duration)
+	// DirtyProcess records one bounded async batch and its fixed outcome.
+	DirtyProcess(dur time.Duration, subs, wakes, duplicates int, outcome string)
+	// DirtyOverflow records the first queue overflow in a coalesced epoch.
+	DirtyOverflow()
+	// ReconcileRequest records whether a bounded recovery signal was enqueued or
+	// coalesced. scope and result both have closed vocabularies.
+	ReconcileRequest(scope, result string)
+	// DirtyProcessingError records the fixed stage at which async work failed.
+	DirtyProcessingError(stage string)
+	// DirtyRecoveryDelay records append-hint age when async work or overflow
+	// recovery completes.
+	DirtyRecoveryDelay(dur time.Duration)
 	// DueSetMutation records one mutation of a per-subscription due-set: op is
 	// "arm", "ack", "expire", or "release" (GAP3). Feeds gate #3 (due write
 	// amplification). Wired at the arm/ack/expire/release call sites in #12.
@@ -105,6 +123,27 @@ func (NopMetrics) WorkerTick(string, int) {}
 
 // FanOut implements Metrics.
 func (NopMetrics) FanOut(time.Duration, int, int) {}
+
+// DirtyEnqueue implements Metrics.
+func (NopMetrics) DirtyEnqueue(string, int, int, time.Duration) {}
+
+// DirtyQueue implements Metrics.
+func (NopMetrics) DirtyQueue(int, int, time.Duration) {}
+
+// DirtyProcess implements Metrics.
+func (NopMetrics) DirtyProcess(time.Duration, int, int, int, string) {}
+
+// DirtyOverflow implements Metrics.
+func (NopMetrics) DirtyOverflow() {}
+
+// ReconcileRequest implements Metrics.
+func (NopMetrics) ReconcileRequest(string, string) {}
+
+// DirtyProcessingError implements Metrics.
+func (NopMetrics) DirtyProcessingError(string) {}
+
+// DirtyRecoveryDelay implements Metrics.
+func (NopMetrics) DirtyRecoveryDelay(time.Duration) {}
 
 // DueSetMutation implements Metrics.
 func (NopMetrics) DueSetMutation(string) {}
