@@ -27,7 +27,8 @@ import Aside from "../components/Aside.astro";
     <li><strong>Five verbs, with atomic mutations and bounded reads.</strong> <code>PUT</code> creates, <code>POST</code> appends or closes, <code>GET</code> reads, <code>HEAD</code> probes, and <code>DELETE</code> removes. Each mutation script validates and commits as one Redis operation. <code>GET</code> and <code>HEAD</code> use <code>read.lua</code> to return a typed snapshot without loading producer state.</li>
     <li><strong>The same four parts every time.</strong> The HTTP handler parses the request. The Go store frames bytes and owns typed results. Redis runs the required script. Pure Go functions define semantic decisions, and Lua mirrors the decisions that must run atomically.</li>
     <li><strong>Reads use bounded <code>ZRANGEBYLEX</code> pages.</strong> Frames are stored as <code>"&lt;offset&gt;|&lt;bytes&gt;"</code> members in a sorted set, zero-padded so byte order equals stream order. The first page captures the response tail. Redis fetches one candidate, then optionally bulk-fetches only the offset range that fits the remaining 1 MiB target. A separate 1,024-frame cap bounds the page.</li>
-    <li><strong>Live tailing registers before the authoritative <code>offset=now</code> page.</strong> A confirmed subscription covers appends after that atomic page; its captured tail covers appends before it. Numeric long-poll offsets retain the read, subscribe, no-touch-recheck sequence. Every wake, poll, or timeout still ends in a typed durable page.</li>
+    <li><strong>Live tailing registers before the authoritative <code>offset=now</code> page.</strong> A confirmed subscription covers appends after that atomic page; its captured tail covers appends before it. Numeric long-poll offsets retain the read, subscribe, no-touch-recheck sequence. Redis routes both long-poll and SSE registrations through one store-owned multiplexer, and a waiter returns its final durable page so the handler does not reread the same offset.</li>
+    <li><strong>SSE readiness and lifetime confirmation are separate.</strong> The first confirmed generation becomes ready from the authoritative page without another read. Immediately before indexed live attach, the handler performs one bounded no-touch incarnation confirmation. A post-commit mismatch aborts the transport instead of writing an HTTP error into the event stream.</li>
     <li><strong>An append response does not run subscription fanout.</strong> After a new append commits, the handler performs one bounded local dirty-queue transition. Subscriber lookup, cursor hydration, linked-tail reads, and wake arming run in a Manager-owned worker. Failed appends and producer duplicates create no dirty hint.</li>
     <li><strong>Ordinary persistent reads do not write.</strong> For a valid non-expiring stream, <code>GET</code>, <code>HEAD</code>, long-poll rechecks, and SSE refreshes issue no <code>HSET</code>, <code>HSETNX</code>, <code>PEXPIRE</code>, or <code>PERSIST</code>. Sliding TTL reads renew once at the first root snapshot. Lazy expiry cleanup and one-time legacy incarnation migration remain explicit write cases.</li>
   </ul>
@@ -52,8 +53,8 @@ import Aside from "../components/Aside.astro";
     | `POST` with a body | authorize and parse → frame against a tail snapshot → `append.lua` → retry on tail conflict | `200` or `204` with the next offset | [Append](#post-append) |
     | `POST` with `Stream-Closed: true` | authorize and parse → `close.lua`, or the closing branch of `append.lua` | `204` with durable closure | [Close](#post-close) |
     | `GET ?offset=<offset>` | authorize and parse → atomic bounded page → continue to the fixed tail → frame body | `200`, `204`, or conditional `304` | [Catch-up read](#get-catchup) |
-    | `GET ?offset=now&live=long-poll` | authorize and parse → confirm notification registration → atomic page → wait → no-touch final page | `200` on data or `204` on timeout or EOF | [Long-poll](#get-longpoll) |
-    | `GET ?offset=now&live=sse` | authorize and parse → reserve hub or confirm registration → first page → catch-up → attach → shared live pages | SSE data and control events | [SSE](#get-sse) |
+    | `GET ?offset=now&live=long-poll` | authorize and parse → confirm logical registration on the shared multiplexer → atomic page → wait → reuse no-touch final page | `200` on data or `204` on timeout or EOF | [Long-poll](#get-longpoll) |
+    | `GET ?offset=now&live=sse` | authorize and parse → reserve hub and confirm registration → authoritative first page → catch-up → no-touch lifetime confirmation → indexed attach → shared live pages | SSE data and control events, or a transport abort after a committed failure | [SSE](#get-sse) |
     | `HEAD` | authorize → metadata-only page → response headers | `200` with `Cache-Control: no-store` | [Metadata](#head) |
     | `DELETE` | authorize → `delete.lua` → release fork references one ancestor at a time | `204`, or `410` when already soft-deleted | [Delete](#delete) |
   </Table>
@@ -512,6 +513,8 @@ import Aside from "../components/Aside.astro";
   notification registration before its authoritative first page. An append
   before that atomic page is in its tail; an append after it is covered by the
   registration. Numeric offsets keep the existing subscribe-then-recheck path.
+  Both paths use the store-owned notification multiplexer, which carries their
+  logical channels over one physical Redis Pub/Sub connection by default.
 
   ```http title="Long-poll from the tail"
   GET /v1/stream/chat?offset=now&live=long-poll HTTP/1.1
@@ -537,10 +540,10 @@ import Aside from "../components/Aside.astro";
     source="handler.go · handler_stream.go · store/redis/notify.go"
     steps={[
       { cmd: "authorize + parse", does: "Authorize the path, validate the offset and cursor, require a valid long-poll offset, and choose the response framing before opening a subscription.", loc: "handler.go:445", kind: "flow" },
-      { cmd: "SUBSCRIBE", key: "ds:notify:{p}", does: "For <code>offset=now</code>, open and confirm the optional notification feed before reading durable state.", loc: "handler.go", kind: "read" },
+      { cmd: "register + acknowledge", key: "ds:notify:{p}", does: "For <code>offset=now</code>, register the logical channel on the store-owned multiplexer and wait for its current physical connection generation to acknowledge the channel before reading durable state.", loc: "handler.go", kind: "read" },
       { cmd: "ReadPage", key: "authoritative logical first read", does: "Capture content type, tail, closed state, incarnation, and expiry configuration after registration. This is the only page that may renew a sliding TTL. There is no immediate attach reread.", loc: "handler.go", kind: "read" },
       { cmd: "block", does: "Wait on that registration for a channel message, a 1 s defensive poll, or the 30 s timeout. Every branch performs a no-touch typed durable page.", loc: "handler_stream.go", kind: "flow" },
-      { cmd: "return ReadWaitResult", key: "authoritative final page", does: "Return the final page and timeout flag. The handler uses that page for content type, tail, closed state, next offset, and response status. It does not call <code>Store.Get</code> after the wait.", loc: "handler_stream.go", kind: "flow" },
+      { cmd: "return ReadWaitResult", key: "authoritative final page", does: "Return the final page and timeout flag. The handler uses that page for content type, tail, closed state, next offset, response status, and body. It does not call <code>Store.Get</code> or reread the same offset after the wait.", loc: "handler_stream.go", kind: "flow" },
       { cmd: "write response", does: "Return <strong>200</strong> with the bounded body when data arrived. Return <strong>204</strong> with <code>Stream-Up-To-Date</code>, cursor, and closure headers on timeout or EOF.", loc: "handler.go", kind: "flow" },
     ]}
   />
@@ -569,6 +572,15 @@ import Aside from "../components/Aside.astro";
   then attaches it to the stream's shared fanout hub at the last control offset
   it flushed. Every 60 seconds it cycles the connection so a CDN can collapse
   concurrent tails.
+
+  Registration acknowledgement and final lifetime confirmation close different
+  races. Registration must precede the authoritative first page, and the first
+  confirmed hub generation becomes ready from that page with no duplicate
+  readiness refresh. After catch-up, one bounded no-touch page confirms that the
+  path still names the same stream incarnation immediately before indexed
+  attach. If that confirmation fails after headers were flushed, the status is
+  already `200`; Chronicle aborts the transport, sends no replacement data,
+  performs no live attach, and appends no HTTP error body.
 
   ```http title="SSE tail"
   GET /v1/stream/chat?offset=now&live=sse HTTP/1.1

@@ -1,14 +1,16 @@
 ---
 title: "Read each live update once, <em>then share it with every client</em>"
-summary: "The old system read the same Redis data once per connected client. The new system reads it once per active stream and shares the result."
+summary: "The old system read the same Redis data and opened a notification connection once per client. The new system shares one durable reader per active stream and one store-owned Pub/Sub multiplexer while preserving exact resume offsets."
 eyebrow: "Architecture"
 meta: "Performance improvements · SSE fanout"
-deck: "Browsers keep the same SSE connection and resume offset. Inside Chronicle, one stream hub now reads and formats each update once. Chronicle still writes separately to every browser."
+deck: "Browsers keep separate SSE connections and resume offsets. Inside Chronicle, one stream hub reads and formats each update once, an indexed ring retains bounded replay, and one store-owned multiplexer carries logical stream registrations over a bounded number of Redis Pub/Sub connections."
 byline:
   - label: "Live reads"
     value: "970.5 → 1.000 per append"
   - label: "One-stream delivery"
     value: "49,099 events/s"
+  - label: "Notification topology"
+    value: "100 logical · 1 physical"
   - label: "Safety"
     value: "332/332 + Jepsen"
   - label: "Issue"
@@ -57,16 +59,18 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
 <Tldr>
   <ul>
     <li><strong>Before:</strong> 1,000 clients could cause about 1,000 Redis reads for one append.</li>
-    <li><strong>Now:</strong> one hub reads the stream once and shares the formatted event with local clients.</li>
+    <li><strong>Now:</strong> one hub reads the stream once and shares the formatted event with local clients. One store-owned multiplexer carries every logical stream registration over one physical Pub/Sub connection by default.</li>
     <li><strong>Result:</strong> the measured ratio fell from 970.5 Redis reads per append to 1.000.</li>
+    <li><strong>Attach:</strong> registration precedes the authoritative first page. The first generation has no readiness reread, but one final bounded no-touch incarnation page still fences replacement immediately before indexed attach.</li>
+    <li><strong>Failure:</strong> if replacement is discovered after the <code>200</code> is committed, Chronicle aborts the transport. It sends no replacement data and no ordinary HTTP error body.</li>
     <li><strong>Cost:</strong> socket writes still happen once per client, and slow clients may have to reconnect from their last saved offset.</li>
   </ul>
 </Tldr>
 
 <Callout icon="arrow" label="Performance improvements">
-  This fix is one Chronicle performance workstream. The
-  [performance improvements index](../) links to the scaling report, cloud load
-  tests, configuration comparison, architecture decision, and tracking issue.
+  The [performance improvements index](../) links this shared-read mechanism to
+  the scaling report, cloud load tests, configuration comparison, architecture
+  decision, and tracking issue.
 </Callout>
 
 <section class="block" id="old-path">
@@ -79,8 +83,8 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
 
   The wake message did not contain the stream data, which was correct. Redis
   Pub/Sub can lose a message during a disconnect, so clients had to read the
-  durable stream after every wake. The problem was where that read happened.
-  It happened once per client instead of once per stream.
+  durable stream after every wake. Each client performed that durable read even
+  though every client on the stream needed the same bytes.
 
   <Diagram
     name="wiki-sse-old"
@@ -96,8 +100,8 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   </Table>
 
   The difference between 1,000 clients and 970.5 reads per append comes from
-  timing and incomplete delivery during the measured window. The mechanism is
-  still direct: more clients on one stream create more duplicate reads.
+  timing and incomplete delivery during the measured window. More clients on
+  one stream still created more duplicate reads.
   Increasing Chronicle and Redis from 4 to 16 vCPU did not move the observed
   SSE ceiling beyond roughly 25,000 to 32,000 delivered events per second.[^adr]
 </section>
@@ -154,8 +158,10 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <SectionHead num="04" label="Safety" title="The hard part is <em>joining without a gap</em>" />
 
   Sharing the live path creates a handoff problem. A client may arrive while an
-  append, delete, or recreation is in flight. Chronicle solves that by starting
-  the hub before the client finishes catch-up.
+  append, delete, or recreation is in flight. Chronicle confirms the hub's
+  logical notification registration before storage captures the request's
+  authoritative first page. It then carries that page to the client and the hub
+  instead of rereading the same offset for readiness.
 
   <Diagram
     name="seq-sse-hub-attach"
@@ -163,7 +169,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     caption="The multiplexer confirms the hub's logical registration before the first catch-up page captures its tail. The handler confirms the stream incarnation and attaches at the exact control offset it flushed. An append can land at any point without being lost or sent before its control offset."
   />
 
-  Eight rules protect this boundary:
+  Nine rules protect this boundary:
 
   1. **Register before the first page.** The multiplexer waits for the current
      Redis connection generation to acknowledge the hub's logical channel. The
@@ -176,26 +182,27 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   3. **Flush before advancing.** The handler puts the page's data and control
      flush under one write deadline. It advances the attach offset only after
      that control value reaches the client.
-  4. **Attach at the exact boundary.** The handler confirms the durable stream
-     identity without renewing its TTL again. It then uses the ring's sequence
-     and boundary index to find the exact controlled offset. If eviction removed
-     it, Chronicle closes the connection and lets the client resume. It never
-     skips to a newer offset. Any failure discovered after SSE headers are
-     committed aborts the transport; Chronicle never appends an ordinary HTTP
-     error payload to the event stream.
-  5. **Recheck the durable stream.** A wake is only a hint. The hub reads Redis
+  4. **Confirm the lifetime immediately before attach.** The handler reads one
+     bounded no-touch identity page after catch-up. This is not an initial
+     readiness refresh. It is the final fence against a path deleted and
+     recreated after the authoritative page returned.
+  5. **Attach at the exact boundary.** The handler uses the ring's sequence and
+     boundary index to find the exact controlled offset. If eviction removed it,
+     Chronicle closes the connection and lets the client resume. It never skips
+     to a newer offset.
+  6. **Recheck the durable stream.** A wake is only a hint. The hub reads Redis
      after a hint and once per second while idle. A lost Pub/Sub message delays
      delivery by at most one poll. It does not lose data.
-  6. **Recover the notification connection.** A reconnect invalidates old
+  7. **Recover the notification connection.** A reconnect invalidates old
      acknowledgements, restores all desired channels, and wakes each hub for an
      immediate durable no-touch refresh. A replacement subscription generation
      refreshes the same way before waiting. Append and close hints and defensive
      polls retain their access-touch semantics. A coalesced nonblocking signal
      keeps one blocked hub from holding another.
-  7. **Name each stream lifetime.** Every create stores a random 128-bit
+  8. **Name each stream lifetime.** Every create stores a random 128-bit
      incarnation ID. If a path is deleted and recreated, the old hub stops
      instead of serving the new stream with old state.
-  8. **Bound slow consumers.** The replay window is 1 MiB by default and each
+  9. **Bound slow consumers.** The replay window is 1 MiB by default and each
      client flush has a ten-second deadline. A lagging client disconnects and
      resumes from the last control offset it actually received.
 
@@ -205,6 +212,31 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   lost notification, and the incarnation check fences a delete and recreation.
   The [SSE endpoint sequence](../../endpoints#get-sse) follows the same request
   from authorization through the final data and control events.
+
+  <Table wide>
+    | Durable read cause | Read count at that point | `NoTouch` | Purpose |
+    | --- | ---: | --- | --- |
+    | Authoritative first page | one | no | Capture content type, exact tail, closure, expiry, and incarnation after registration acknowledgement |
+    | First-generation readiness | zero additional reads | n/a | Seed hub readiness from the authoritative page without repeating its offset |
+    | Final attach confirmation | one | yes | Confirm the same incarnation immediately before live ring lookup |
+    | Append or close hint | bounded pages to one captured tail | no | Deliver new durable data and preserve active-reader sliding TTL semantics |
+    | Defensive poll | bounded pages to one captured tail | no | Recover a dropped hint and preserve active-reader sliding TTL semantics |
+    | Reconnect event or replacement generation | immediate bounded pages | yes | Recover a notification gap without extending stream lifetime |
+  </Table>
+
+  A replacement can occur after the first page has already committed the SSE
+  response. A non-200 status is then physically impossible. The final
+  confirmation still prevents replacement data and prevents live attach. The
+  handler converts that post-commit failure to `http.ErrAbortHandler`, so
+  `net/http` terminates the stream and does not append a text error body. A
+  browser resumes from the last control offset it received.
+
+  Numeric long-poll waits use the same store-owned multiplexer. The Redis
+  `PageWaiter` registers through `SubscribeNotifications`, performs its
+  compatibility recheck, and returns the durable wake or timeout page. The HTTP
+  handler uses that returned page directly instead of reading the same offset
+  again. The optional `PageWaiter` and `NotificationSubscriber` capabilities
+  remain independent interfaces for third-party stores.
 
   <Callout icon="alert" label="Correctness gate">
     The optimization is allowed to change how work is shared. It is not allowed
@@ -268,17 +300,75 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     turning the throughput comparison into a universal capacity claim.
   </Aside>
 
-  The performance work did not stop at happy-path tests. The full 332-test
-  conformance suite passed. Four live Jepsen scenarios passed: baseline, origin
-  restart, Redis restart, and SSE resume. The SSE scenario delivered 320
+  The full 332-test conformance suite passed. Four live Jepsen scenarios passed:
+  baseline, origin restart, Redis restart, and SSE resume. The SSE scenario delivered 320
   expected events exactly once across eight checked readers and verified 11
   fault actions, including replay lag, write timeout, delete and recreate, and
   attachment at a page boundary. A direct Redis oracle checked the final frames,
   offsets, tail, closed state, and producer state.[^jepsen]
 </section>
 
+<section class="block" id="operations">
+  <SectionHead num="06" label="Operations" title="Observe the shared path <em>and prove cleanup</em>" />
+
+  The metrics separate logical demand from physical Redis connections. They
+  also account for every byte retained by the indexed replay ring. No SSE
+  metric uses a stream path label.
+
+  <Table wide>
+    | Question | Metric | Expected signal |
+    | --- | --- | --- |
+    | How many streams have a local live reader? | `chronicle_sse_hubs` | One hub per active stream and Chronicle replica, then zero after the last lease closes |
+    | How many clients use those hubs? | `chronicle_sse_clients` | One per active SSE response, independent of Redis registration count |
+    | How many logical channels are registered? | `chronicle_sse_subscriptions` | One per active stream by default |
+    | How many physical Redis connections carry them? | `chronicle_sse_notification_connections{topology}` | One for the default single-group topology, then zero after the last logical registration closes |
+    | Why did a hub read durable state? | `chronicle_sse_hub_refreshes_total{cause}` | Separate `hint`, `poll`, `reconnect`, `initial`, and `attach` refreshes |
+    | How much replay memory is retained? | `chronicle_sse_hub_ring_raw_bytes`, `chronicle_sse_hub_ring_wire_bytes`, `chronicle_sse_hub_ring_index_bytes` | Components sum exactly to `chronicle_sse_hub_ring_bytes` |
+    | Did exact lookup fail? | `chronicle_sse_watcher_lookup_misses_total` | A miss disconnects the client; it never advances to a newer boundary |
+    | Did a client exceed a bound? | `chronicle_sse_lagged_disconnects_total`, `chronicle_sse_write_timeouts_total` | Cumulative reasons for resume, not queued payload growth |
+  </Table>
+
+  The 30-minute active fault run kept 20 writers, 40 regular SSE clients, and
+  one repeatedly throttled client active. The writer rate was one 256-byte
+  message per stream per second.[^issue13]
+
+  <Table wide>
+    | Signal | Measured result |
+    | --- | ---: |
+    | Successful appends | 36,000 |
+    | SSE deliveries | 72,040 |
+    | Protocol reconnects | 69,879 |
+    | Load generator errors | 0 |
+    | Chronicle RSS | 48.2 MiB mean; 56.5 MiB peak |
+    | Sampled heap | 20.1 MiB allocated peak; 27.7 MiB in-use peak |
+    | Sampled goroutines and file descriptors | 157 goroutines peak; 143 descriptors peak |
+    | Notification topology | 20 to 21 logical registrations; 1 physical connection |
+    | Replay ring | 3,138,828 bytes peak, including 250,272 index bytes |
+    | Bound events | 0 lag disconnects; 244 write timeouts caused by the throttled fault client |
+  </Table>
+
+  <Table wide>
+    | Resource after every client left | Final value |
+    | --- | ---: |
+    | SSE clients | 0 |
+    | Stream hubs | 0 |
+    | Logical notification registrations | 0 |
+    | Physical notification connections | 0 |
+    | Raw replay bytes | 0 |
+    | Formatted wire bytes | 0 |
+    | Boundary-index bytes | 0 |
+    | Total replay-ring bytes | 0 |
+  </Table>
+
+  The cleanup goroutine profile contained eight goroutines. Task images,
+  binaries, Kind and Colima resources, and build caches were removed after the
+  evidence archive was sealed. The evidence directory retains result records,
+  counters, profiles, configuration, metrics, a manifest, and checksums. It
+  does not retain runnable infrastructure.
+</section>
+
 <section class="block" id="limits">
-  <SectionHead num="06" label="Limits" title="What this fix does <em>not</em> remove" />
+  <SectionHead num="07" label="Limits" title="What this fix does <em>not</em> remove" />
 
   The hub removes duplicate live reads. It does not make every SSE cost shared.
 
@@ -299,11 +389,8 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   historical replay also remains per client. Those are separate improvements.
   None should weaken the conformance or Jepsen gates.
 
-  A 30-minute active run added a throttled client and 69,879 protocol
-  reconnects. Chronicle averaged 48.2 MiB RSS and peaked at 56.5 MiB. Heap,
-  goroutines, descriptors, registrations, and ring bytes stayed bounded in the
-  final window. Cleanup returned clients, hubs, registrations, physical
-  connections, and every ring byte component to exactly zero.[^issue13]
+  The [operations section](#operations) gives the complete 30-minute resource
+  inventory and the zeroed cleanup gauges.
 
   <Callout icon="info" label="Validation boundary">
     The results on this page are local Kubernetes and host validation results.

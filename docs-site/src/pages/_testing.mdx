@@ -30,6 +30,7 @@ import Aside from "../components/Aside.astro";
     <li><strong>Jepsen kills pods and Redis on a live cluster.</strong> A <code>kubectl</code> and <code>redis-cli</code> nemesis crashes origins and Redis mid-flight on <code>k3d</code>. Final-state checks assert every subscription cursor reaches its stream tail within a settle window, and that a deposed worker's late ack is <code>FENCED</code>.</li>
     <li><strong>Real Redis or skip, with isolated DBs and no miniredis.</strong> Store, webhook, and bench each ping a dedicated DB (15, 14, 13), call <code>FlushDB</code> once, and skip under <code>-short</code> or when Redis is unreachable. So <code>go test ./...</code> stays green with no server while still exercising the embedded Lua and the round-trip cost.</li>
     <li><strong>The wire surface is pinned from outside the tree.</strong> About 330 black-box conformance tests (vitest plus fast-check property fuzzing) hold Chronicle to the Durable Streams spec. A batched-sweep microbenchmark and an on-demand GKE rig validate scale at K=10,000 subscriptions.</li>
+    <li><strong>The shared live path has race-specific regressions.</strong> Focused tests pin one physical notification connection, no duplicate first-generation readiness read, a no-touch reconnect refresh, reuse of the page returned by <code>PageWaiter</code>, and a committed-response abort when replacement wins before live attach. The old incarnation never emits replacement data or an HTTP error body.</li>
     <li><strong>The full property contract is named, and most of it is green.</strong> One table lists all thirteen properties: five safety (T1 to T5), five liveness (L1 to L5), and three contention (C1 to C3). Ten pass today on a local Chronicle plus Redis stack, including every safety property and the whole contention suite, because the horizontal-scale epic is merged. The other three are liveness bounds (L2, L4, L5) whose mechanism and rig are built but whose verdict needs a multi-node cloud run that GCP quota blocked. The cloud results that exercise these at scale are on the <a href="./load-testing">load and stress page</a>.</li>
     <li><strong>Honest about what is not tested.</strong> The jepsen pod-kill still only approximates the arm-to-emit window of a few microseconds, though an in-process failpoint seam now hits it exactly. The real Redis failover substrate is built but its run is cloud-pending. Lua and Go parity is asserted by convention, not enforced. The store and HTTP layers are example-based tables with no fuzz, property, or linearizability harness.</li>
   </ul>
@@ -127,7 +128,7 @@ import Aside from "../components/Aside.astro";
     | Fused root-page and read-only projection | a root-owned page uses one `EVALSHA`, one metadata `HGETALL`, and no producer read; persistent and absolute-expiry reads leave AOF and replication offsets unchanged; legacy migration and sliding TTL retain their exact writes | [^readfast] |
     | Redis keyspace & hash-tag co-location | the `meta`/`msg`/`prod`/`forks` keys per stream share one hash tag for one cluster slot; user braces escaped injectively | [^keys] |
     | Frame encoding & lex bounds | an `offset` then `|` then raw bytes, stored in a ZSET at score 0; round-trips adversarial bytes; sorting frames equals sorting by offset | [^frame] |
-    | Typed long-poll and shared SSE wakeups | `offset=now` confirms registration before its atomic page; numeric offsets retain subscribe and no-touch recheck; the SSE hub shares one subscription and live read, recovers dropped hints by polling, and fences stream recreation | [^notify] |
+    | Typed long-poll and shared SSE wakeups | `offset=now` confirms registration before its atomic page; numeric waits register through the same multiplexer and return the final page without a handler reread; the first SSE generation skips a readiness refresh but retains the final no-touch incarnation page; reconnect refreshes no-touch while append, close, and poll reads preserve access touch | [^notify] |
     | Stream closure & seq dedup | `CloseStream` idempotent with a stable `FinalOffset`; append-to-closed is `ErrStreamClosed`; seq dedup is bytewise lex (`"10"` after `"2"` is rejected) | [^closure] |
     | Redis metadata round-trip | `StreamMetadata` ↔ hash fields losslessly, nanosecond `ExpiresAt` fidelity; minimal meta leaves optional fields absent | [^meta] |
   </Table>
@@ -170,7 +171,7 @@ import Aside from "../components/Aside.astro";
     | `offset=now` (tail) reads | skips history: empty body (or `"[]"`), tail offset, no `ETag`, `Cache-Control:no-store` | [^http-now] |
     | JSON mode flattening | `[1,2,3]` advances offsets by element byte length; GET re-wraps; suffix re-wraps the remainder; empty-array append `400` | [^http-json] |
     | Long-poll (`live=long-poll`) | immediate data `200`, timeout `204` + cursor, a concurrent append wakes before timeout, close-during-wait `204`, strictly advancing cursor | [^http-lp] |
-    | SSE framing (`live=sse`) | `text/event-stream`, `data:`/`control` events, base64 for binary, CRLF split safely, a final append delivered *before* `streamClosed` | [^http-sse] |
+    | SSE framing and committed failure (`live=sse`) | `text/event-stream`, `data:`/`control` events, base64 for binary, CRLF split safely, a final append delivered *before* `streamClosed`; replacement after the authoritative page aborts the committed response with no replacement data, no live attach, and no HTTP error payload | [^http-sse] |
     | Dispatch, CORS & security headers | OPTIONS `204`, unknown verb `405`, CORS + expose-headers + `nosniff` on every response | [^http-cors] |
     | `Mount` prefix translation | path outside the root `404`, `__ds` namespace `501` stub, wire→store key translation, root-string validation | [^http-mount] |
     | Protocol grammar & cursor codec | strict `ParseTTL`/`ParseSubOffset` grammar, `IsValidIntegerString`, monotonic `GenerateResponseCursor` | [^http-proto] |
@@ -189,6 +190,25 @@ import Aside from "../components/Aside.astro";
   ```
 
   </Step>
+
+  The live handoff tests count storage reads and connection owners, not only
+  response bytes.
+
+  <Table wide>
+    | Regression | Assertion |
+    | --- | --- |
+    | `TestSSEHubFirstConfirmedGenerationSkipsReadinessRefreshButKeepsAttachConfirmation` | Read count is one at readiness and two only after the final no-touch incarnation confirmation |
+    | `TestSSEAttachFencesReplacementAfterAuthoritativePage` | A replacement after page one leaves the committed status at `200`, emits no new-incarnation bytes, performs zero live-ring lookups, and terminates through `http.ErrAbortHandler` |
+    | `TestSSEHubReconnectNotificationRefreshesWithoutTouch` | Reconnect uses `NoTouch`; the next append and defensive poll use access-touch reads |
+    | `TestIntegrationNotificationMultiplexerUsesOnePhysicalConnectionForManyChannels` | 100 logical channels use one named physical Redis Pub/Sub connection |
+    | `TestIntegrationWaitForPageSharesNotificationMultiplexerConnection` | A compatibility numeric wait and a persistent registration share one physical connection; the wait returns its durable page |
+    | `TestLongPollDeliversPageWaiterResultWithoutSameOffsetReread` | The HTTP handler performs one initial page read and writes the page returned by the optional `PageWaiter` seam |
+  </Table>
+
+  These cases are part of the focused race suite as well as the complete Go
+  gate. They protect registration ownership and teardown because a leaked
+  logical registration can keep a physical multiplexer connection alive after
+  all requests finish.[^sse-handoff]
 
   <Callout icon="alert" label="Gaps in the HTTP layer">
     Error envelopes are plain-text <code>http.Error</code> bodies, not a JSON
@@ -616,7 +636,7 @@ import Aside from "../components/Aside.astro";
 
 [^frame]: Frame encoding & lex bounds (the ZSET model invariant): [`store/redis/keys_test.go:140`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys_test.go). `TestFrameLexOrderEqualsStreamOrder` sorts a shuffled adversarial frame list; `lexLowerBound` is exclusive, defined in [`store/redis/keys.go:66`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go).
 
-[^notify]: Numeric long-poll race closure and compatibility behavior: [`store/redis/notify_test.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify_test.go). Register-first handler and shared SSE subscription, attach race, dropped hint, expiry, and incarnation tests: [`live_read_redis_test.go`](https://github.com/adityavkk/chronicle/blob/main/live_read_redis_test.go) and [`sse_hub_test.go`](https://github.com/adityavkk/chronicle/blob/main/sse_hub_test.go).
+[^notify]: Numeric long-poll race closure, multiplexer ownership, and compatibility behavior: [`store/redis/notify_test.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify_test.go). Register-first handler, returned-page reuse, shared SSE registration, attach race, dropped hint, expiry, and incarnation tests: [`handler_stream_test.go`](https://github.com/adityavkk/chronicle/blob/main/handler_stream_test.go), [`live_read_redis_test.go`](https://github.com/adityavkk/chronicle/blob/main/live_read_redis_test.go), and [`sse_hub_test.go`](https://github.com/adityavkk/chronicle/blob/main/sse_hub_test.go).
 
 [^closure]: Stream closure & seq dedup (offset-byte append guard): [`store/redis/integration_test.go:287`](https://github.com/adityavkk/chronicle/blob/main/store/redis/integration_test.go) and [`store/memory_store_test.go:349`](https://github.com/adityavkk/chronicle/blob/main/store/memory_store_test.go). Seq dedup is bytewise lex: `"10"` after `"2"` is `ErrSequenceConflict`.
 
@@ -644,7 +664,9 @@ import Aside from "../components/Aside.astro";
 
 [^http-lp]: Long-poll (`live=long-poll`), `TestLongPollReceivesAppend` wakes a concurrent append in under two seconds, and `TestLongPollEchoedCursorAdvances`: [`handler_test.go:910`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
 
-[^http-sse]: SSE framing (`live=sse`), headers, `data:`/`control` events, base64 binary, CRLF safety, and `TestSSEDrainsFinalAppendBeforeClose` over a real `httptest.NewServer`: [`handler_test.go:1008`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go), with [`handler_sse.go`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go).
+[^http-sse]: SSE framing (`live=sse`), headers, `data:`/`control` events, base64 binary, CRLF safety, and `TestSSEDrainsFinalAppendBeforeClose` over a real `httptest.NewServer`: [`handler_test.go`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go). Committed lifetime-fence failures are covered in [`sse_hub_test.go`](https://github.com/adityavkk/chronicle/blob/main/sse_hub_test.go), with the abort boundary in [`handler.go`](https://github.com/adityavkk/chronicle/blob/main/handler.go) and [`handler_sse.go`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go).
+
+[^sse-handoff]: The focused ownership and attach regressions live in [`sse_hub_test.go`](https://github.com/adityavkk/chronicle/blob/main/sse_hub_test.go), [`handler_stream_test.go`](https://github.com/adityavkk/chronicle/blob/main/handler_stream_test.go), and [`store/redis/notify_test.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify_test.go).
 
 [^http-cors]: Dispatch, CORS & security headers, `assertSecurityHeaders` and `TestCORSHeadersOnAllResponses`: [`handler_test.go:64`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go) and [`handler_test.go:1186`](https://github.com/adityavkk/chronicle/blob/main/handler_test.go).
 

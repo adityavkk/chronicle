@@ -1,14 +1,16 @@
 ---
 title: "Performance improvements, <em>with evidence</em>"
-summary: "Chronicle performance work is grouped by mechanism, measured result, correctness gate, and remaining limit. Request-path results link to their endpoint sequence, while system-level results keep their evidence and limits beside them."
+summary: "Chronicle performance work is grouped by mechanism, measured result, correctness gate, resource cost, and remaining limit. Request-path results link to their endpoint sequence, while system-level results keep their evidence and limits beside them."
 eyebrow: "Engineering"
 meta: "Performance improvements"
-deck: "Chronicle performance work starts with a measured source of repeated or serialized work. Each change names the mechanism, records the result, keeps the Durable Streams and Jepsen correctness gates, and states what remains slow. Subscription fanout now runs after one bounded append handoff instead of on the HTTP response goroutine."
+deck: "Chronicle performance work starts with a measured source of repeated or serialized work. Each change names the mechanism, records the result, keeps the Durable Streams and Jepsen correctness gates, and states the new resource cost. Live SSE delivery now shares storage work by stream while retaining a separate socket and durable resume offset for every client."
 byline:
   - label: "128-reader catch-up"
     value: "0 complete → 435 measured"
   - label: "Live SSE reads"
     value: "970.5 → 1.000 per append"
+  - label: "Pub/Sub topology"
+    value: "100 channels · 1 connection"
   - label: "Root page scripts"
     value: "2 → 1"
   - label: "1,000-sub append p99"
@@ -27,9 +29,9 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
   <ul>
     <li><strong>Bounded catch-up removes whole-suffix reads and buffering.</strong> Redis fetches one frame, then optionally bulk-fetches only the range that fits the remaining 1 MiB target. A separate 1,024-frame cap bounds small-frame pages. Chronicle writes each frame directly to the socket.</li>
     <li><strong>The local 128-reader failure became measurable work.</strong> The old server completed no accepted 16 MiB replay at that concurrency. The paged server completed 435 body-verified responses with no server error in the final offered-window run.</li>
-    <li><strong>SSE fanout removes duplicate live reads and connections.</strong> One stream hub on each serving Chronicle replica reads Redis once and shares the formatted event with local clients. One store-owned multiplexer carries every logical stream registration over one physical Pub/Sub connection by default. The exact-counter guard with 1,000 clients measured 1.000 live Redis read page and 1.000 Redis read command per append, down from 970.5 reads.</li>
+    <li><strong>SSE fanout removes duplicate live reads and per-client Pub/Sub connections.</strong> One stream hub on each serving Chronicle replica reads Redis once and shares the formatted event with local clients. One store-owned multiplexer carries every logical stream registration over one physical Pub/Sub connection by default. The exact-counter guard with 1,000 clients measured 1.000 durable page and 1.000 Redis read command per append, down from 970.5 reads.</li>
     <li><strong>Persistent root pages use one atomic read.</strong> A five-byte GET fell from six to one metadata <code>HGETALL</code>, from two read scripts to one, and from five read-side writes to zero. Sliding TTL renewal, legacy migration, and lazy expiry cleanup remain explicit write cases.</li>
-    <li><strong>Live reads register before they capture <code>offset=now</code>.</strong> A confirmed notification feed covers appends after the atomic page. Long-poll does not need an immediate attach recheck. SSE seeds readiness from that authoritative page without a duplicate initial refresh, then performs one final bounded no-touch incarnation confirmation before exact-boundary attach. Reconnect generations refresh durable state immediately without touching access time.</li>
+    <li><strong>Live reads register before they capture <code>offset=now</code>.</strong> A confirmed notification feed covers appends after the atomic page. <code>offset=now</code> long-poll does not perform an immediate attach recheck. SSE seeds its first notification generation from that authoritative page without a readiness reread, then performs one final bounded no-touch incarnation confirmation before exact-boundary attach. Numeric long-poll keeps its compatibility recheck.</li>
     <li><strong>Subscription fanout no longer runs on the append response goroutine.</strong> After a new durable append, the handler records one stream in a bounded process-local queue. Subscriber lookup, hydration, linked-tail reads, wake arming, and delivery run in a Manager-owned worker. At 1,000 subscribers with four links each, append p99 changed from 5,053.845 ms to 1.235 ms, with every owed wake verified.</li>
     <li><strong>Immutable segments move sealed replay bytes away from the frame ZSET.</strong> A manifest and sparse index select authenticated data blocks, while one fixed Redis snapshot supplies the hot tail and safe fallback. The retained local result is diagnostic and must be rerun after the integrated safety fixes.</li>
     <li><strong>Horizontal scaling separates subscription work by Redis slot.</strong> The measured append fanout p99 stayed between 12.48 and 12.61 milliseconds from 1 to 8 replicas. The exact 12 replica point and a cloud run with multiple shards remain open.</li>
@@ -53,18 +55,79 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
     | Request | Ordered path | Performance change | Full sequence |
     | --- | --- | --- | --- |
     | `GET ?offset=<offset>` | authorize and parse → atomic bounded page → stream pages to the fixed tail → write headers and body | Root-owned pages combine snapshot capture and their bounded range in one `EVALSHA` | [Catch-up GET](../endpoints#get-catchup) |
-    | `GET ?offset=now&live=long-poll` | authorize and parse → confirm subscription → capture atomic page → wait → no-touch final page → response | Registration removes the immediate attach recheck | [Long-poll GET](../endpoints#get-longpoll) |
-    | `GET ?offset=now&live=sse` | authorize and parse → reserve a hub or confirm a subscription → capture first page → send catch-up → attach → share later pages | A new hub starts from the first page and skips a duplicate refresh | [SSE GET](../endpoints#get-sse) |
+    | `GET ?offset=now&live=long-poll` | authorize and parse → confirm logical registration → capture atomic page → wait → no-touch final page → response | Registration removes the immediate attach recheck; the waiter returns the response page so the handler does not reread the same offset | [Long-poll GET](../endpoints#get-longpoll) |
+    | `GET ?offset=now&live=sse` | authorize and parse → reserve and confirm hub registration → capture first page → send catch-up → no-touch lifetime confirmation → indexed attach → share later pages | A new hub starts from the first page without a readiness reread; the final confirmation is a separate lifetime fence | [SSE GET](../endpoints#get-sse) |
     | `HEAD` | authorize → metadata-only page → map snapshot fields to headers | One metadata `HGETALL`; no frame or producer read | [HEAD](../endpoints#head) |
   </Table>
 
   Numeric long-poll offsets retain their established first read, subscribe,
-  and no-touch recheck order. Inherited fork prefixes retain their cross-stream
-  traversal. Those paths do not lose a Redis round trip from issue #172.
+  and no-touch recheck order. Redis implements that wait through the same
+  store-owned notification multiplexer as SSE. The optional `PageWaiter` and
+  `NotificationSubscriber` capabilities remain separate seams for compatible
+  stores. Inherited fork prefixes retain their cross-stream traversal. Those
+  paths do not lose a Redis round trip from issue #172.
+</section>
+
+<section class="block" id="live-delivery">
+  <SectionHead num="03" label="Live delivery" title="Share storage work, <em>keep client state separate</em>" />
+
+  SSE fanout changes the cardinality of storage work. It does not change the
+  protocol seen by a client.
+
+  <Table wide>
+    | Layer | Owner | Cardinality on one Chronicle replica | Work |
+    | --- | --- | --- | --- |
+    | Notification connection | store-owned multiplexer | one physical Redis Pub/Sub connection by default | Registers every desired channel and acknowledges each connection generation |
+    | Logical notification | multiplexer | one per active stream | Coalesces append, close, delete, and reconnect hints without letting one blocked stream stop another |
+    | Durable live read | stream hub | one per active stream and serving replica | Pages to one exact tail, formats one immutable data event, and publishes it to the local replay ring |
+    | Replay lookup | indexed hub ring | one retained boundary lookup per client advance | Finds the exact last flushed control offset; a missing boundary disconnects instead of skipping ahead |
+    | HTTP delivery | client handler | one per client | Writes data and control events under a deadline and advances only after the control event flushes |
+  </Table>
+
+  The first confirmed SSE generation has one authoritative `ReadPage`, not an
+  authoritative page plus a readiness refresh. A second read still occurs
+  immediately before live attach. That bounded `NoTouch` page compares the
+  stream incarnation with the page already sent. It is required because a path
+  can be deleted and recreated after the first page returns.
+
+  <Table wide>
+    | Event | Durable action | Access touch | Why |
+    | --- | --- | --- | --- |
+    | First confirmed generation | Use the registered authoritative page | once, on that first logical read | Registration covers later appends, so another readiness read would repeat work |
+    | Final live attach | Read one bounded identity page | no | Fence deletion or replacement immediately before indexed attach |
+    | Replacement subscription generation | Refresh immediately before waiting | no | Recover hints missed while the previous generation was unavailable without extending stream lifetime |
+    | In-band reconnect event | Refresh immediately | no | Treat the new acknowledgement as a generation boundary |
+    | Append or close hint | Refresh to one durable tail | yes | An active live reader is a protocol access and renews a sliding TTL |
+    | One-second defensive poll | Refresh to one durable tail | yes | Recover a dropped Pub/Sub hint and keep an active sliding-TTL reader alive |
+  </Table>
+
+  The response may already be a committed `200` when the final identity page
+  detects replacement. Chronicle cannot change that status. It terminates the
+  transport with `http.ErrAbortHandler`, emits no replacement data, performs no
+  live-ring attach, and appends no ordinary HTTP error body to the SSE stream.
+  The client sees a broken stream and resumes from its last flushed control
+  offset.
+
+  The retained issue 13 workload measured the following operating points.[^sse-evidence]
+
+  <Table wide>
+    | Check | Result | Boundary |
+    | --- | --- | --- |
+    | One stream, 1,000 clients | 49,099 deliveries/s median; 8.591 ms p99; 98.198% completion; 0 errors | 20-second local Kind workload, three fresh runs |
+    | 100 streams, 2,048 clients | 99,702 deliveries/s median; 51.903 ms p99; 97.365% completion; 0 errors | 15-second local Kind workload, three fresh runs |
+    | Exact amplification | 1.000 durable pages and 1.000 Redis read commands per append | 1,000 settled clients and 100 measured appends |
+    | Connection topology | 100 logical channels over 1 physical Pub/Sub connection | one store, one Chronicle replica |
+    | Active fault run | 36,000 appends, 72,040 deliveries, 69,879 reconnects, 0 load errors | 30 minutes with a continuously throttled client |
+    | Cleanup | 0 clients, hubs, registrations, physical connections, and retained ring bytes | measured after every client left |
+  </Table>
+
+  Socket writes, initial client catch-up, and kernel buffers still scale with
+  client count. The one-second poll scales with active streams and serving
+  replicas. Those costs are not hidden by the read-amplification result.
 </section>
 
 <section class="block" id="evidence">
-  <SectionHead num="03" label="Evidence" title="Every result needs <em>four checks</em>" />
+  <SectionHead num="04" label="Evidence" title="Every result needs <em>four checks</em>" />
 
   A performance result belongs here when the evidence names the mechanism and
   the test setup. The same record must state the correctness result and the
@@ -89,7 +152,7 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
 </section>
 
 <section class="block" id="reading">
-  <SectionHead num="04" label="Reading" title="Start with the result you <em>need to judge</em>" />
+  <SectionHead num="05" label="Reading" title="Start with the result you <em>need to judge</em>" />
 
   - Read [Bounded catch-up](./bounded-catchup) to understand the old suffix
     read, the new snapshot page contract, the 1 MiB returned target, the
@@ -118,3 +181,5 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
     for Chronicle, Ursula, Rust, and Node results across machine and storage
     configurations.
 </section>
+
+[^sse-evidence]: The retained [issue 13 evidence](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/sse-fanout/20260731-issue-13-local/README.md) includes six final workload records, exact Redis and page counters, the frame benchmark, CPU profiles, the 30-minute active fault run, resource cleanup snapshots, a manifest, and checksums.

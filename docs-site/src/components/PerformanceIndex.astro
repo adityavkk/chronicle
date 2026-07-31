@@ -53,11 +53,12 @@ const links = {
       <span class="status">validated</span>
     </div>
     <h3>SSE stream fanout</h3>
-    <p class="result">970.5 to 1.000 live Redis reads per append</p>
+    <p class="result">970.5 to 1.000 reads per append; 100 channels on 1 connection</p>
     <p>
       <strong>Before:</strong> every browser reread the same update from Redis.
-      <strong>Now:</strong> one stream hub reads and formats it once, then local
-      client handlers reuse it.
+      <strong>Now:</strong> one stream hub reads and formats it once, an indexed
+      replay ring preserves exact boundaries, and the store multiplexer owns the
+      bounded Pub/Sub connection set. Socket writes remain per client.
     </p>
     <nav aria-label="SSE fanout links">
       <a class="primary" href={links.sse}>Read the explainer <span aria-hidden="true">→</span></a>

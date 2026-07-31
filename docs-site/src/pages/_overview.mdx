@@ -32,7 +32,8 @@ import Aside from "../components/Aside.astro";
     <li><strong>Every mutation is one Lua script.</strong> Validation, write, tail update, and notification run atomically and serialized per stream. No partial appends and no lost wakeups.</li>
     <li><strong>An ordinary root read is one atomic script.</strong> The script loads metadata once, fixes the response tail, classifies fork ownership, and returns the bounded root range. Persistent and absolute-expiry-only reads do not write Redis state.</li>
     <li><strong>It tracks the reference implementation.</strong> The store contract and handler mirror the upstream Caddy plugin, and ~330 official conformance tests gate every change.</li>
-    <li><strong>The SSE live path now shares one read per stream.</strong> The original 1,000-client path measured 970.5 Redis reads per append. The exact-counter guard measured 1.000 after the fanout change. A separate local Kubernetes run delivered 49,616 events/s with zero request errors.</li>
+    <li><strong>The SSE live path now shares one read per stream.</strong> The original 1,000-client path measured 970.5 Redis reads per append. The exact-counter guard measured 1.000 durable page and 1.000 Redis read command after the fanout change. The final three-run median delivered 49,099 events/s with 8.591 ms p99 and zero client errors.</li>
+    <li><strong>One store owns live notification connections.</strong> SSE hubs and numeric long-poll compatibility waits register logical channels through the same multiplexer. The default uses one physical Redis Pub/Sub connection. The first SSE generation reuses its authoritative page for readiness, then performs one final no-touch incarnation confirmation before indexed attach.</li>
     <li><strong>Subscription fanout runs after the append response.</strong> Once new data commits, the handler records one bounded local dirty hint. A Manager-owned worker later loads subscribers and linked tails and arms owed wakes. Durable recovery repairs a lost hint.</li>
   </ul>
 </Tldr>
@@ -164,8 +165,13 @@ import Aside from "../components/Aside.astro";
   persistent read performs no Redis write. A sliding TTL renews once at the
   first root snapshot. An `offset=now` live read confirms notification
   registration before its authoritative first page; numeric long-poll retains
-  the subscribe-then-recheck path. SSE attaches through one shared
-  notification-backed stream hub. The OpMap
+  the subscribe-then-recheck path through the same store-owned multiplexer. A
+  long-poll waiter returns its final durable page, which the handler writes
+  without a same-offset reread. SSE attaches through one shared
+  notification-backed stream hub. Its first confirmed generation starts from
+  the authoritative page without a readiness reread. A final bounded no-touch
+  identity page fences stream replacement immediately before indexed attach.
+  The OpMap
   below walks each operation's Redis steps.
 
   <OpMap />
@@ -242,8 +248,6 @@ import Aside from "../components/Aside.astro";
     | `sessions-light`, 10 streams, unsaturated | 20 appends/s | append p50 8.4 ms, p90 287 ms, p99 534 ms |
   </Table>
 
-  Both negative results have a named mechanism.
-
   ### Append collapse under <em>concurrent writers</em>
 
   `store/redis` retries a contended append optimistically, up to 64 times
@@ -254,7 +258,7 @@ import Aside from "../components/Aside.astro";
   1,500/s across 50 streams with zero errors. The collapse is specific to
   concurrent appends on a single stream.
 
-  ### The live-read bottleneck was <em>removed</em>
+  ### The live-read bottleneck moved from <em>Redis reads to client sockets</em>
 
   The 2026-06-10 baseline put delivery p90 near 300 ms even at 20 msg/s with
   nothing saturated. The
@@ -263,10 +267,12 @@ import Aside from "../components/Aside.astro";
 
   A later sealed run made the amplification explicit. One stream with 1,000 SSE
   clients produced 970.5 durable Redis reads per append. The
-  [per-stream fanout hub](./performance-improvements/sse-fanout) measured 1.000 in the exact-counter guard. It
-  delivered 49,616 events/s at p99 19.519 ms with no request errors. The hub
-  shares the durable read and formatted data event. Client socket writes remain
-  separate.
+  [per-stream fanout hub](./performance-improvements/sse-fanout) measured 1.000
+  durable page and 1.000 Redis read command per append in the exact-counter
+  guard. The final one-stream median delivered 49,099 events/s at 8.591 ms p99
+  with zero client errors. The 100-stream median delivered 99,702 events/s at
+  51.903 ms p99 with zero client errors. The hub shares the durable read and
+  formatted data event. Client socket writes remain separate.
 
   The issue #172 follow-up removed the remaining repeated work around the first
   page. A one-frame root-owned page now uses one script instead of two. Six
@@ -284,9 +290,18 @@ import Aside from "../components/Aside.astro";
     on each Chronicle replica. A store-owned multiplexer carries those logical
     registrations over one physical Redis Pub/Sub connection by default.
     Pub/Sub remains only a wake hint. A one-second durable poll recovers a lost
-    hint, and a bounded replay window disconnects slow clients so they can
-    resume from their last offset.
+    hint. The ring indexes exact control offsets, and its 1 MiB default bound
+    disconnects slow clients so they can resume from the last control offset
+    they received.
   </Aside>
+
+  Registration and final attach confirmation close different races. The
+  multiplexer acknowledges registration before the authoritative first page.
+  The first hub generation uses that page for readiness without a duplicate
+  refresh. After catch-up, one bounded no-touch page confirms the stream
+  incarnation immediately before indexed attach. A replacement found after the
+  SSE `200` is committed aborts the transport; Chronicle emits no replacement
+  data and appends no HTTP error body.
 
   ### Subscription fanout moved <em>off the response path</em>
 

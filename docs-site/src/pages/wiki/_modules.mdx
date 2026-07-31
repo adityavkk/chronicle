@@ -65,6 +65,9 @@ import Aside from "../../components/Aside.astro";
 	}
 
 	if err != nil {
+		if errors.Is(err, http.ErrAbortHandler) {
+			panic(http.ErrAbortHandler)
+		}
 		h.writeError(w, err)
 	}
 ```
@@ -76,8 +79,10 @@ For a new `offset=now` live read, the handler confirms a
 `NotificationSubscriber` registration before its authoritative first page.
 Numeric long-poll offsets retain `PageWaiter` after the first page. SSE gives
 the first page and confirmed registration to the shared hub. Errors return as
-values and meet one `writeError`, which maps each `store` error to its HTTP
-status.
+values. Before a response is committed, `writeError` maps each `store` error to
+its HTTP status. After an SSE response is committed, `http.ErrAbortHandler`
+terminates the transport so an ordinary HTTP error body cannot be appended to
+the event stream.
 
 <Aside label="Edge case" summary="How <code>Mount</code> keeps the handler path-relative">
   <code>Mount</code> wraps the handler. It strips the stream-root prefix
@@ -216,9 +221,12 @@ incarnation. It contains no producer state. Later pages reuse that snapshot, so
 concurrent appends belong to the next response. `NotificationSubscriber`
 provides the wake registration that a new SSE hub or `offset=now` long-poll
 confirms before page capture. `PageWaiter` retains the typed subscribe and
-no-touch recheck path for numeric long-poll offsets. Every wait returns the
-final page for append, close, or timeout. `WaitForMessages` remains on `Store`
-for source compatibility.
+no-touch recheck path for numeric long-poll offsets. Redis implements it by
+calling `SubscribeNotifications`, so numeric waits and persistent SSE hubs use
+the same store-owned connection multiplexer. Every wait returns the final page
+for append, close, or timeout, and the handler writes that page without a
+same-offset reread. `WaitForMessages` remains on `Store` for source
+compatibility.
 
 <Complexity
   time="O(log N + M) per storage page"
@@ -308,7 +316,8 @@ matches, write.
     | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L533) | `store.go` | reads the tail, frames the batch, runs the script, retries on `RETRY` |
     | [`keysFor`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go#L45) | `keys.go` | builds the four `{path}`-tagged keys for one slot |
     | [`ReadPage`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L670) | `store.go` | captures one typed root snapshot and returns a bounded root-owned range in the same script |
-    | [`SubscribeNotifications`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go) | `notify.go` | confirms the wake feed used before an `offset=now` page and by shared SSE hubs |
+    | [`SubscribeNotifications`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go) | `notify.go` | registers one logical channel through the store-owned multiplexer and confirms the current physical connection generation |
+    | [`WaitForPage`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go) | `notify.go` | preserves numeric long-poll compatibility through that same multiplexer and returns the durable wake or timeout page |
     | [`waitForRegisteredPage`](https://github.com/adityavkk/chronicle/blob/main/handler_stream.go#L349) | `handler_stream.go` | waits on a confirmed registration, runs no-touch wake and safety-poll pages, and returns the authoritative final page |
     | [`Delete`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L1119) | `store.go` | soft-deletes if referenced, else hard-deletes and cascades |
   </Table>
