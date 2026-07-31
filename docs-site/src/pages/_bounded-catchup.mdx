@@ -143,12 +143,13 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Step
     n={2}
     fn="read.lua"
-    loc="store/redis/scripts/read.lua:52-75"
+    loc="store/redis/scripts/read.lua:32-65"
     role="Redis fetches one candidate, then optionally bulk-fetches the end-offset range that fits the remaining target. Both calls have a <code>LIMIT</code>."
   >
     The script rejects a different incarnation before it returns data. It also
-    refreshes sliding expiry only for the root stream, not an inherited fork
-    source.
+    refreshes access once at the first root snapshot only when the stream has a
+    sliding TTL. Persistent streams, absolute-expiry-only streams, continuation pages,
+    long-poll rechecks, and inherited fork sources do not run that write branch.
   </Step>
 
   <Step
@@ -163,12 +164,14 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
 
   <Step
     n={4}
-    fn="streamSSESnapshot"
-    loc="handler_sse.go:140-191"
-    role="SSE catch-up uses the same page and snapshot contract before it resumes the existing wait and live loop."
+    fn="handleSSE"
+    loc="handler_sse.go:103"
+    role="SSE catch-up starts with the page already captured by handleRead, then continues under the same snapshot before attaching to the shared stream hub."
   >
     Each page ends with a control event that carries the exact resume offset.
-    A reconnect starts from the last complete control offset the client received.
+    The hub subscribes and performs a no-touch durable refresh before it reports
+    ready, so no extra post-catch-up metadata read is needed. A reconnect starts
+    from the last complete control offset the client received.
   </Step>
 
   <Callout icon="alert" label="Interrupted response">

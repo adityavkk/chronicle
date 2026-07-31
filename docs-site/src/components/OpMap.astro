@@ -70,10 +70,11 @@ const OPS: Op[] = [
     req: ["GET /v1/stream/chat?offset=-1 HTTP/1.1"],
     resp: ["200 OK", "Stream-Next-Offset: …0002_…0029", 'ETag: "…0002_…0029"', "Cache-Control: public, max-age=60   (behind the tail)"],
     steps: [
-      { c: "HGETALL", k: ":meta", n: "missing → 404 · expired → cleanup, then 404" },
-      { c: "HSET", k: ":meta", n: "accessedAtNs touch" },
+      { c: "EVALSHA read.lua", k: ":meta", n: "load once → typed tail · type · closed · expiry · incarnation; never read :prod" },
+      { c: "HSET + PEXPIRE/PERSIST", k: ":meta · stream keys", n: "first root snapshot with sliding TTL only; persistent and absolute-expiry-only reads skip" },
+      { c: "EVALSHA read.lua", k: "selected segment", n: "validate the same snapshot without touching access" },
       { c: "ZRANGEBYLEX", k: ":msg", n: "first candidate LIMIT 0 1 · optional byte-bounded bulk · page cap 1024" },
-      { c: "(fork chain)", k: ":msg", n: "offsets below a fork point read the source stream, capped at forkOff" },
+      { c: "(fork chain)", k: ":msg", n: "inherited source ranges are capped at forkOff and always no-touch" },
     ],
   },
   {
@@ -83,23 +84,26 @@ const OPS: Op[] = [
     req: ["GET /v1/stream/chat?offset=now&live=long-poll HTTP/1.1"],
     resp: ["200 OK             data arrived", "204 No Content     30 s timeout · Stream-Up-To-Date: true"],
     steps: [
-      { c: "EVAL read.lua", n: "fast path — data already there responds 200 immediately" },
-      { c: "SUBSCRIBE", k: "notify", n: "subscribe, then re-check: closes the check-then-wait race" },
-      { c: "EVAL read.lua", n: "the re-check after subscribing" },
+      { c: "ReadPage", n: "first logical read → data responds 200; empty tail carries the typed snapshot" },
+      { c: "SUBSCRIBE", k: "notify", n: "confirm subscription before the attach recheck" },
+      { c: "ReadPage NoTouch", n: "same-incarnation recheck closes the attach race" },
       { c: "(wait)", n: "wake on 'a' / 'c' / 'd', a 1 s defensive poll, or the timeout" },
-      { c: "EVAL read.lua", n: "woke → read what landed, respond" },
+      { c: "ReadPage NoTouch", n: "wake, poll, and timeout return one authoritative final page; no metadata reload" },
       { c: "UNSUBSCRIBE", k: "notify" },
     ],
   },
   {
     id: "sse",
     tab: "SSE",
-    script: "read.lua in a loop (Go, not Lua)",
+    script: "typed ReadPage + one shared stream hub",
     req: ["GET /v1/stream/chat?offset=now&live=sse HTTP/1.1"],
     resp: ["200 OK", "Content-Type: text/event-stream", "", "event: data       one per message", "event: control    streamNextOffset cursor"],
     steps: [
-      { c: "EVAL read.lua", n: "emit pending frames as event: data" },
-      { c: "SUBSCRIBE", k: "notify", n: "waits in 100 ms quanta, a fresh subscription per wait — § 05's latency floor" },
+      { c: "ReadPage", n: "reuse the handler's typed first page; no Store.Get and no producer read" },
+      { c: "SUBSCRIBE", k: "notify", n: "one persistent subscription per active stream hub on this replica" },
+      { c: "ReadPage NoTouch", n: "durable attach refresh from the first snapshot tail closes the race" },
+      { c: "(catch-up)", n: "emit the page already held, then bounded no-touch continuations under the same snapshot" },
+      { c: "shared ReadPage", n: "one logical refresh after each wake or defensive poll serves every local client" },
       { c: "(loop)", n: "every 60 s the server cycles the connection so CDNs can collapse concurrent tails" },
     ],
   },
@@ -152,7 +156,7 @@ const OPS: Op[] = [
       { c: "is_expired(meta)", n: "expAtNs passed, or accessedAtNs + ttl passed" },
       { c: "DEL / soft-delete", k: "all keys", n: "cleanup on the first touch after expiry" },
       { c: "PEXPIRE", k: "all keys", n: "backstop = ttl + 60 s grace, for streams nobody ever touches again" },
-      { c: "HSET", k: ":meta", n: "reads and appends slide accessedAtNs; close deliberately does not" },
+      { c: "HSET", k: ":meta", n: "append updates access; a sliding-TTL read does so once at its first root snapshot; HEAD and continuations do not" },
     ],
   },
 ];
@@ -160,7 +164,7 @@ const OPS: Op[] = [
 
 <Demo
   label="Every operation, mapped to Redis"
-  caption="Each tab is one protocol operation: the HTTP exchange on the left, the Redis command sequence on the right — in script order, with the key each command touches. Mutations are single Lua scripts, so a sequence either lands whole or not at all; the one exception is fork, which spans two streams and is documented as non-atomic across them."
+  caption="Each tab is one protocol operation: the HTTP exchange on the left, the Redis command sequence on the right, in script order, with the key each command touches. Each single-stream mutation step is atomic. Fork creation and delete cascades compose steps across streams and are not atomic as a group."
 >
   <div class="opmap" data-opmap>
     <div class="opmap-tabs" role="tablist">

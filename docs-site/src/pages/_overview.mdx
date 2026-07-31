@@ -140,7 +140,7 @@ import Aside from "../components/Aside.astro";
 <section class="block" id="storage">
   <SectionHead num="03" label="Storage" title="The Redis <em>data model</em>" />
 
-  Each stream at path `p` maps to three Redis keys and one pub/sub channel:
+  Each stream at path `p` maps to four Redis keys and one pub/sub channel:
 
   <Table>
     | Key | Type | Holds |
@@ -148,22 +148,28 @@ import Aside from "../components/Aside.astro";
     | `ds:{p}:meta` | hash | content type, tail offset, closed flag, TTL/expiry, fork lineage, refcount |
     | `ds:{p}:msg` | sorted set | message frames `"<offset>\|<bytes>"`, ordered lexicographically by offset |
     | `ds:{p}:prod` | hash | idempotent-producer state: `producerId → epoch:lastSeq` |
+    | `ds:{p}:forks` | set | child paths that keep this stream alive as a fork source |
     | `ds:notify:{p}` | pub/sub | wakes long-poll/SSE waiters on append, close, and delete |
   </Table>
 
-  Every mutation runs as a single Lua script via `EVALSHA`. Redis runs
-  scripts atomically,[^eval] so validation, the write, the tail update, and
-  the waiter notification land together or not at all, serialized per stream.
-  A long-poll reader subscribes to the notify channel and then re-checks the
-  stream, so an append that lands between the check and the subscribe is never
-  missed. The OpMap below walks each operation's Redis steps.
+  Every single-stream mutation step runs as one Lua script via `EVALSHA`.
+  Redis runs scripts atomically,[^eval] so validation, the write, the tail
+  update, and the waiter notification land together or not at all, serialized
+  per stream. Fork creation and cascade deletion compose single-stream steps in
+  Go because their streams may occupy different slots.
+  Reads use `read.lua` to return a typed, bounded page with content type, tail,
+  closure, expiry, and incarnation. They do not load producer state. A valid
+  persistent read performs no Redis write. A sliding TTL renews once at the
+  first root snapshot. A long-poll subscribes before its no-touch recheck, and
+  SSE attaches through one shared notification-backed stream hub. The OpMap
+  below walks each operation's Redis steps.
 
   <OpMap />
 
   The model requires this of the Redis deployment:
 
-  - **Redis ≥ 7.4, 8.x recommended.** Chronicle uses `EVALSHA` scripts,
-    pub/sub, and hash-field TTLs (`HEXPIRE`).[^hexpire]
+  - **Redis ≥ 6.0, managed Redis 8 recommended.** Chronicle uses `EVALSHA`,
+    pub/sub, sorted-set lex ranges, and key-level `PEXPIRE` / `PERSIST`.
   - **`maxmemory-policy noeviction`.** Any eviction policy can drop keys and
     truncate a stream.[^evict] Chronicle warns at startup if it can read the
     config and the policy differs.
@@ -309,7 +315,6 @@ import Aside from "../components/Aside.astro";
 [^spec]: Durable Streams protocol specification, vendored at [docs/spec/PROTOCOL.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md).
 [^caddy]: The reference implementation: [durable-streams/packages/caddy-plugin](https://github.com/durable-streams/durable-streams/tree/main/packages/caddy-plugin).
 [^eval]: Redis docs, [EVAL](https://redis.io/docs/latest/commands/eval/). "Redis guarantees the script's atomic execution."
-[^hexpire]: Redis docs, [HEXPIRE](https://redis.io/docs/latest/commands/hexpire/). Per-field hash TTLs, new in Redis 7.4.
 [^evict]: Redis docs, [key eviction](https://redis.io/docs/latest/develop/reference/eviction/). `maxmemory-policy` behavior.
 [^repl]: Redis docs, [replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/). "Redis uses by default asynchronous replication."
 [^rig]: The `dsload` generator: [loadgen/ on the loadgen branch](https://github.com/adityavkk/chronicle/tree/loadgen/loadgen).

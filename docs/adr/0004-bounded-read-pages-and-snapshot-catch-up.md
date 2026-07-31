@@ -1,8 +1,8 @@
 # ADR 0004: Bounded read pages and snapshot catch-up
 
-- Status: Accepted
+- Status: Accepted, amended 2026-07-31 by issue 7
 - Date: 2026-07-29
-- Issue: GPA/chronicle#5
+- Issues: GPA/chronicle#5, GPA/chronicle#7
 
 ## Context
 
@@ -38,7 +38,9 @@ an optional snapshot. The first call will capture the root stream's:
 - content type;
 - tail offset;
 - closed state;
-- incarnation token.
+- incarnation token;
+- expiry configuration;
+- fork boundary.
 
 The result will contain those snapshot fields, the messages in the page, the
 next offset, whether the page reached the snapshot tail, and page statistics.
@@ -49,8 +51,12 @@ Every later call for the same response will carry the first call's snapshot.
 The backend will reject a different incarnation. It will never read a frame
 whose end offset is above the captured tail.
 
-Every page will renew the root stream's sliding TTL while the response is
-active. Reading an inherited range will not renew the source stream's TTL.
+The first page of one logical client read will renew the root stream only when
+it has a sliding TTL. Persistent and absolute-expiry-only reads will not write.
+Continuation pages, long-poll rechecks, inherited source ranges, sealing,
+repair, and other internal reads will not renew a TTL. This rule was amended by
+issue 7. It replaces the original decision that every continuation page would
+renew the root.
 
 Redis will fetch the first candidate alone. If it fits, Lua will derive a
 lexicographic end-offset bound from the remaining byte budget and bulk-fetch
@@ -81,10 +87,12 @@ records, or envelope records directly to `http.ResponseWriter` as pages arrive.
 It will check request cancellation before storage work, between pages, and
 after writes and flushes.
 
-SSE catch-up will use the same page operation and snapshot. It will emit one
-data event and one control event per page. After it sends the control event for
-the snapshot tail, it will resume the existing wait and live read loop with the
-exact offset already sent.
+SSE catch-up will use the same page operation and snapshot. `handleRead` will
+pass its first page into the SSE handler. The stream hub will subscribe and
+perform a no-touch durable refresh from the snapshot tail before it reports
+ready. The handler will emit one data event and one control event per page, then
+attach to the hub at the exact offset already sent. It will not repeat the first
+read or reload metadata after catch-up.
 
 The operator policy is one returned payload target for all catch-up pages. The
 default is 1 MiB. The server will expose it as

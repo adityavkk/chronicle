@@ -1,14 +1,14 @@
 ---
 title: "Every endpoint, <em>down to the Redis command</em>"
-summary: "Each Durable Streams endpoint Chronicle serves: PUT, POST, GET, HEAD, DELETE. For each one a request example, a sequence diagram, and the exact Redis commands the Lua script runs, explained one at a time."
+summary: "Each Durable Streams endpoint Chronicle serves: PUT, POST, GET, HEAD, DELETE. For each one, this page shows a request, the handler and store flow, and the Redis commands that run."
 eyebrow: "Reference"
 meta: "Endpoints & Redis"
-deck: "Chronicle maps the <strong>Durable Streams</strong> protocol onto five HTTP verbs, and every mutation onto a single Lua script that runs inside Redis atomically. Each section takes one endpoint: a request you can run, the path it travels, and what each Redis command does, in execution order, with the source line."
+deck: "Chronicle maps the <strong>Durable Streams</strong> protocol onto five HTTP verbs. Mutations run in atomic Lua scripts. Reads use a typed, bounded page that carries both frames and the response snapshot. Each section follows one endpoint through the handler, store, and Redis commands in execution order."
 byline:
   - label: "Verbs"
     value: "PUT · POST · GET · HEAD · DELETE"
   - label: "Scripts"
-    value: "8 Lua, one per mutation"
+    value: "7 operations + shared prelude"
   - label: "Source"
     value: "store/redis"
     href: "https://github.com/adityavkk/chronicle/tree/main/store/redis"
@@ -24,11 +24,11 @@ import Aside from "../components/Aside.astro";
 
 <Tldr>
   <ul>
-    <li><strong>Five verbs, one script each.</strong> <code>PUT</code> creates, <code>POST</code> appends or closes, <code>GET</code> reads, <code>HEAD</code> probes, <code>DELETE</code> removes. Every write is a single Lua script. Validation, write, tail update, and wakeup land together or not at all.</li>
-    <li><strong>The same four parts every time.</strong> The HTTP handler parses the request, the Go store frames the bytes and calls the script, and Redis runs it. Decisions live in the script. The handler only maps the reply to a status code.</li>
+    <li><strong>Five verbs, with atomic mutations and bounded reads.</strong> <code>PUT</code> creates, <code>POST</code> appends or closes, <code>GET</code> reads, <code>HEAD</code> probes, and <code>DELETE</code> removes. Each mutation script validates and commits as one Redis operation. <code>GET</code> and <code>HEAD</code> use <code>read.lua</code> to return a typed snapshot without loading producer state.</li>
+    <li><strong>The same four parts every time.</strong> The HTTP handler parses the request. The Go store frames bytes and owns typed results. Redis runs the required script. Pure Go functions define semantic decisions, and Lua mirrors the decisions that must run atomically.</li>
     <li><strong>Reads use bounded <code>ZRANGEBYLEX</code> pages.</strong> Frames are stored as <code>"&lt;offset&gt;|&lt;bytes&gt;"</code> members in a sorted set, zero-padded so byte order equals stream order. The first page captures the response tail. Redis fetches one candidate, then optionally bulk-fetches only the offset range that fits the remaining 1 MiB target. A separate 1,024-frame cap bounds the page.</li>
-    <li><strong>Live tailing is pub/sub plus a re-read.</strong> A long-poll subscribes to the stream's notify channel, then re-reads before blocking, so an append that lands in the gap is never missed.</li>
-    <li><strong>One operation has no script.</strong> <code>HEAD</code> is two pipelined reads and no write. It is the only client-facing path that does not touch a Lua script or slide the TTL.</li>
+    <li><strong>Live tailing is pub/sub plus a typed re-read.</strong> A long-poll performs one logical read, subscribes, then makes no-touch rechecks before blocking and after each wake. The final page supplies the timeout or wake response. The handler does not fetch metadata again.</li>
+    <li><strong>Ordinary persistent reads do not write.</strong> For a valid non-expiring stream, <code>GET</code>, <code>HEAD</code>, long-poll rechecks, and SSE refreshes issue no <code>HSET</code>, <code>HSETNX</code>, <code>PEXPIRE</code>, or <code>PERSIST</code>. Sliding TTL reads renew once at the first root snapshot. Lazy expiry cleanup and one-time legacy incarnation migration remain explicit write cases.</li>
   </ul>
 </Tldr>
 
@@ -48,7 +48,7 @@ import Aside from "../components/Aside.astro";
     | --- | --- | --- |
     | **Client** | `curl`, a browser, an official client library | Sends an HTTP request, stores one offset string to resume |
     | **Handler** | `handler.go` (Go) | Parses headers and query, calls the store, maps store errors to HTTP status codes |
-    | **Store** | `store/redis/store.go` (Go) | Frames bytes into messages, snapshots the tail, runs the Lua script, decodes its reply |
+    | **Store** | `store/redis/store.go` (Go) | Frames bytes, captures typed read snapshots, runs Lua scripts, and decodes raw Redis replies at one boundary |
     | **Redis** | Redis 8 | Runs one Lua script per mutation, atomically and serialized per stream |
   </Table>
 
@@ -84,11 +84,12 @@ import Aside from "../components/Aside.astro";
   <Aside label="Shared machinery" summary="Three things that recur inside the mutation scripts">
     <ul>
       <li><strong>Lazy expiry.</strong> The first script to touch an expired stream runs <code>expire_cleanup</code> (a <code>DEL</code>, or a soft-delete if forks still reference it) and reports not found. Expiry is checked on access. There is no sweeper.</li>
-      <li><strong>The sliding-TTL touch.</strong> A read or an append writes <code>HSET …:meta accessedAtNs &lt;now&gt;</code>, moving the idle window forward. A bare <code>Get</code>, a <code>HEAD</code>, and a close deliberately do not.</li>
+      <li><strong>The sliding-TTL touch.</strong> An append updates <code>accessedAtNs</code>. A logical client read does so once, at its first root snapshot, and only when the stream has a sliding TTL. A non-expiring read, an absolute-expiry-only read, <code>HEAD</code>, a continuation page, a long-poll recheck, an inherited source range, and an internal sealing or repair read do not renew access.</li>
       <li><strong>The TTL backstop.</strong> <code>refresh_backstop</code> arms a key TTL of <code>ttl × 1000 + 60000</code> ms via <code>PEXPIRE</code>, a 60-second grace over the logical TTL. A fork-referenced or soft-deleted stream gets <code>PERSIST</code> instead.</li>
     </ul>
-    Every mutation reply is a fixed nine-field string array so int64 values
-    survive Lua's double round-trip.[^reply]
+    Mutation replies use a fixed nine-field string array so int64 values
+    survive Lua's double round-trip. Read replies instead carry one metadata
+    field array, one bounded member array, and byte counts.[^reply]
   </Aside>
 
   <Aside label="Cost model" summary="Why each endpoint costs what it costs. Three Redis structures carry the work">
@@ -390,17 +391,25 @@ import Aside from "../components/Aside.astro";
     script="read.lua"
     source="store/redis/scripts/read.lua"
     steps={[
-      { cmd: "HGETALL", key: "ds:{p}:meta", does: "Load meta. Absent → <code>NOTFOUND</code> (<strong>404</strong>). The first root call captures tail, content type, closed state, and incarnation. Later pages validate the incarnation before reading.", loc: "read.lua:27" },
-      { cmd: "is_expired?", does: "Expired → cleanup and <code>NOTFOUND</code>.", loc: "read.lua:31", kind: "flow" },
-      { cmd: "softDel?", does: "Soft-deleted → <code>SOFTDEL</code>. The handler maps the read result to <strong>404</strong>. It is <code>Get</code> and <code>HEAD</code> that surface <strong>410</strong>.", loc: "read.lua:35", kind: "flow" },
-      { cmd: "incarnation matches?", does: "A delete and recreate between pages returns <code>SNAPSHOT</code>, so bytes from two stream incarnations cannot enter one response.", loc: "read.lua:38", kind: "flow" },
-      { cmd: "HSET", key: "ds:{p}:meta accessedAtNs", does: "The first root page of a read snapshot counts as access and slides the TTL once. Continuation pages and inherited fork segments validate without extending a TTL.", loc: "read.lua:44" },
-      { cmd: "PEXPIRE", key: "ds:{p}:*", does: "On that first root page only, re-arm the root stream's backstop against the refreshed <code>accessedAtNs</code>. Continuations use <code>NoTouch</code>.", loc: "read.lua:49" },
-      { cmd: "ZRANGEBYLEX", key: "ds:{p}:msg", does: "Fetch the first candidate with <code>LIMIT 0 1</code>. If more range exists and that frame fits, make one optional bulk call ending at <code>firstOffset + remainingTargetBytes</code>, with the remaining part of the 1,024-frame cap. There is no lookahead call.", loc: "read.lua:92" },
-      { cmd: "HGETALL", key: "ds:{p}:meta", does: "Return meta beside the bounded members. Go computes the next offset and whether this page reached the captured tail.", loc: "read.lua:78" },
+      { cmd: "EVALSHA + HGETALL", key: "ds:{p}:meta", does: "The root validation invocation loads metadata once. Absent → <code>NOTFOUND</code> (<strong>404</strong>). The first page captures tail, content type, closed state, expiry configuration, fork boundary, and incarnation. It never reads <code>:prod</code>.", loc: "read.lua:32", kind: "read" },
+      { cmd: "expiry · softDel", does: "An expired root runs lazy cleanup and reports <code>NOTFOUND</code>. A soft-deleted root reports <code>SOFTDEL</code>, which the GET path hides as <strong>404</strong>.", loc: "read.lua:35", kind: "flow" },
+      { cmd: "HSETNX", key: "ds:{p}:meta incarnation", does: "A legacy stream without an incarnation stores one random identity once. New streams skip this branch.", when: "legacy metadata only", loc: "read.lua:43", kind: "write" },
+      { cmd: "incarnation matches?", does: "A continuation page whose path now names a recreated stream returns <code>SNAPSHOT</code>. One HTTP response cannot combine two stream lifetimes.", loc: "read.lua:56", kind: "flow" },
+      { cmd: "HSET + PEXPIRE/PERSIST", key: "root stream keys", does: "Update <code>accessedAtNs</code> and re-arm the exact backstop once for the logical client read. Persistent and absolute-expiry-only streams skip this branch. Continuations, long-poll rechecks, inherited ranges, sealing, and repair are no-touch.", when: "first root snapshot with sliding TTL only", loc: "read.lua:60", kind: "ttl" },
+      { cmd: "return meta_flat(m)", does: "Return the metadata table already loaded by this invocation. The script does not issue a second <code>HGETALL</code> to build its reply.", loc: "read.lua:159", kind: "flow" },
+      { cmd: "EVALSHA + HGETALL", key: "selected segment :meta", does: "When a frame range exists, a second invocation validates that segment's incarnation and loads its metadata once. It is always no-touch. A simple non-empty root read therefore has two metadata loads total, one per script invocation, and no producer load.", loc: "store.go:732", kind: "read" },
+      { cmd: "ZRANGEBYLEX", key: "selected segment :msg", does: "Fetch the first candidate with <code>LIMIT 0 1</code>. If more range exists and that frame fits, make one optional bulk call ending at <code>firstOffset + remainingTargetBytes</code>, with the remaining part of the 1,024-frame cap. There is no lookahead call.", loc: "read.lua:108", kind: "read" },
     ]}
-    caption="For a fork, Go computes finite source and child segments. It runs the same bounded script against each segment's own slot, capped by the fork offset and the root snapshot tail. The inherited prefix arrives first, and post-fork source appends stay invisible."
+    caption="For a fork, Go computes finite source and child segments. It runs the no-touch range invocation against each segment's own slot, capped by the fork offset and the root snapshot tail. The inherited prefix arrives first, and post-fork source appends stay invisible."
   />
+
+  <Callout icon="info" label="Steady-state persistent command shape">
+    A small non-empty read of a newly created non-expiring stream runs two
+    `EVALSHA` calls, two metadata `HGETALL` calls, and one `ZRANGEBYLEX`. It
+    runs zero `HSET`, `HSETNX`, `PEXPIRE`, and `PERSIST` commands. The first
+    script invocation captures the root snapshot. The second reads the selected
+    frame range. Producer state is absent from both.
+  </Callout>
 
   <Complexity
     time="O(log N + M) per storage page"
@@ -425,9 +434,9 @@ import Aside from "../components/Aside.astro";
 
   `GET {stream-url}?offset=<offset>&live=long-poll` holds the request open
   until data arrives past the offset, the stream closes, or a 30-second
-  timeout returns `204`.[^longpoll] The waiting runs in Go
-  (`WaitForMessages`), not in a script, and it re-reads before blocking so an
-  append that lands in the gap is never missed.
+  timeout returns `204`.[^longpoll] The waiting runs in Go through the typed
+  `WaitForPage` capability, not in a script. It subscribes before its no-touch
+  recheck, so an append that lands in the attach gap is never missed.
 
   ```http title="Long-poll from the tail"
   GET /v1/stream/chat?offset=now&live=long-poll HTTP/1.1
@@ -452,26 +461,26 @@ import Aside from "../components/Aside.astro";
     script="—  Go orchestration"
     source="store/redis/notify.go"
     steps={[
-      { cmd: "EVAL read.lua", key: "fast path", does: "If frames already sit past the offset, respond <strong>200</strong> now and skip the subscribe entirely. Most caught-up polls that race an append end here.", loc: "notify.go:33", kind: "read" },
-      { cmd: "SUBSCRIBE", key: "ds:notify:{p}", does: "Open a dedicated pub/sub connection to the stream's channel and confirm it before waiting.", loc: "notify.go:48", kind: "read" },
-      { cmd: "EVAL read.lua", key: "re-check", does: "Re-read <em>before</em> blocking. An append that landed between the fast-path read and the SUBSCRIBE would otherwise be lost until the timeout. This re-read closes that race.", loc: "notify.go:57", kind: "read" },
-      { cmd: "block", does: "Wait on three timers: a channel message (<code>a</code> append, <code>c</code> close, <code>d</code> delete), a 1 s defensive poll, or the 30 s timeout → <strong>204</strong>.", loc: "notify.go:66", kind: "flow" },
-      { cmd: "EVAL read.lua", key: "on wake", does: "Re-read on every wake. A spurious wakeup with nothing new just loops back to <code>block</code>.", loc: "notify.go:95", kind: "read" },
+      { cmd: "ReadPage", key: "logical first read", does: "The handler reads before it subscribes. Frames return <strong>200</strong> immediately. An empty page at the tail carries the content type, closed state, incarnation, and expiry configuration needed to wait. This is the only read in the request that may renew a sliding TTL.", loc: "handler.go:513", kind: "read" },
+      { cmd: "SUBSCRIBE", key: "ds:notify:{p}", does: "Open a dedicated pub/sub connection to the stream's channel and confirm it before waiting.", loc: "notify.go:108", kind: "read" },
+      { cmd: "ReadPage NoTouch", key: "recheck", does: "Capture a fresh typed page before blocking and require the same stream incarnation as the first page. An append in the subscribe window is visible here. This recheck does not renew access.", loc: "notify.go:115", kind: "read" },
+      { cmd: "block", does: "Wait for a channel message, a 1 s defensive poll, or the 30 s timeout. Every branch performs the same no-touch typed recheck.", loc: "notify.go:139", kind: "flow" },
+      { cmd: "return ReadWaitResult", key: "authoritative final page", does: "Return the final page and timeout flag. The handler uses that page for content type, tail, closed state, next offset, and response status. It does not call <code>Store.Get</code> after the wait.", loc: "notify.go:162", kind: "flow" },
     ]}
   />
 
   <Callout icon="alert" label="Fork waiters never hang">
     An offset in a fork's inherited range (below `forkOffset`) can only be
     served by the source, and source appends never publish to the fork's
-    channel. Blocking there would hang until the timeout, so the store
-    detects this case and returns empty immediately instead of
-    subscribing.[^forkwait]
+    channel. The handler starts a long-poll only when the effective offset is
+    the root snapshot tail. An inherited-range request therefore returns its
+    bounded page instead of subscribing to the fork channel.[^forkwait]
   </Callout>
 
   <Complexity
     time="O(log N + M) per read"
     space="O(M) returned + O(1) subscription"
-    why="Every read is the same skiplist seek-and-walk. The <code>SUBSCRIBE</code> is O(1), and the block costs no compute while idle. One request does the fast-path read, the re-check read, and one read per wakeup, which is a small constant number of reads, independent of how long it waits."
+    why="Every page is the same skiplist seek-and-walk. The <code>SUBSCRIBE</code> is O(1), and the block costs no compute while idle. One request does one logical first read, one no-touch attach recheck, and one no-touch recheck per wake, defensive poll, or timeout. The final page is reused for the HTTP response."
   />
 </section>
 
@@ -508,11 +517,12 @@ import Aside from "../components/Aside.astro";
     script="—  handler + shared hub"
     source="handler_sse.go · sse_hub.go"
     steps={[
-      { cmd: "acquire hub", key: "path", does: "Create or reuse one per-stream hub on this Chronicle replica. The hub confirms its Redis subscription before the handler completes catch-up.", loc: "handler_sse.go:37", kind: "flow" },
-      { cmd: "EVAL read.lua + Get", key: "client catch-up", does: "Read frames past this client's offset and compare the stream incarnation. Emit data, then a control event with the exact durable offset already written.", loc: "handler_sse.go:69", kind: "read" },
-      { cmd: "SUBSCRIBE once", key: "ds:notify:{p}", does: "The shared hub owns one persistent Redis subscription. A notification is only a wake hint. The hub performs one durable read for all local clients and polls once per second if a hint is lost.", loc: "sse_hub.go:285", kind: "read" },
-      { cmd: "share data event", key: "bounded replay", does: "Format one immutable data event and retain it in the byte-bounded replay window. Each watcher writes that shared data followed by its own control cursor.", loc: "sse_hub.go:468", kind: "flow" },
-      { cmd: "every 60 s, return", does: "Cycle the connection so a CDN can collapse concurrent tails. The client reconnects from the last <code>streamNextOffset</code> it received.", loc: "handler_sse.go:186", kind: "flow" },
+      { cmd: "ReadPage", key: "client first page", does: "Before SSE dispatch, <code>handleRead</code> captures one typed page. It supplies content type, tail, closure, incarnation, next offset, and the first catch-up frames. No <code>Store.Get</code> or producer hash read occurs.", loc: "handler.go:513", kind: "read" },
+      { cmd: "acquire hub", key: "exact stream lifetime", does: "Create or reuse one hub for this stream incarnation on the Chronicle replica. The handler passes the first page's typed snapshot into the hub.", loc: "handler_sse.go:42", kind: "flow" },
+      { cmd: "SUBSCRIBE + NoTouch ReadPage", key: "ds:notify:{p}", does: "The hub confirms its persistent Redis subscription, then reads durably from the first snapshot tail without renewing access. This retains an append from the attach window before the hub reports ready.", loc: "sse_hub.go:305", kind: "read" },
+      { cmd: "reuse first page", key: "client catch-up", does: "The handler emits the first page it already owns, then continuation pages under the same snapshot. It performs no extra initial bounded read and no metadata reload after catch-up.", loc: "handler_sse.go:103", kind: "read" },
+      { cmd: "shared live ReadPage", key: "bounded replay", does: "After each wake, the hub performs one logical durable refresh for all local clients, formats one immutable event, and retains it in the bounded replay window. A sliding TTL renews once per hub refresh. Persistent and absolute-expiry-only streams remain read-only.", loc: "sse_hub.go:435", kind: "read" },
+      { cmd: "every 60 s, return", does: "Cycle the connection so a CDN can collapse concurrent tails. The client reconnects from the last <code>streamNextOffset</code> it received.", loc: "handler_sse.go:203", kind: "flow" },
     ]}
   />
 
@@ -539,10 +549,11 @@ import Aside from "../components/Aside.astro";
   <SectionHead num="07" label="HEAD" title="Read metadata" />
 
   `HEAD {stream-url}` returns the tail offset, content type, TTL/expiry, and
-  closed status with no body.[^head] This is the only client-facing operation
-  with no Lua script. The store reads the two hashes in one pipeline and checks
-  soft-deletion and expiry in Go. A metadata probe is not access, so it does
-  not slide the TTL.
+  closed status with no body.[^head] The handler captures a no-touch
+  `ReadSnapshot` at `offset=now`. Redis runs the metadata branch of `read.lua`,
+  so it checks lazy expiry, soft deletion, and incarnation without reading
+  frames or producer state. A metadata probe is not access, so it does not
+  slide the TTL.
 
   ```http title="Probe a stream"
   HEAD /v1/stream/chat HTTP/1.1
@@ -557,23 +568,24 @@ import Aside from "../components/Aside.astro";
   <Diagram
     name="seq-head"
     label="HEAD, metadata"
-    caption="Two reads in one round trip, no key mutated. Cache-Control: no-store keeps a stale tail offset or closed flag from ever being cached."
+    caption="One typed no-touch snapshot supplies every response header. Cache-Control: no-store keeps a stale tail offset or closed flag from being cached."
   />
 
   <RedisTrace
-    script="—  no Lua, a pipelined read"
-    source="store/redis/store.go"
+    script="read.lua, metadata branch"
+    source="handler_stream.go · store/redis/scripts/read.lua"
     steps={[
-      { cmd: "HGETALL", key: "ds:{p}:meta", does: "The whole metadata hash. The <code>tail</code> field is the existence marker. Its absence means the stream does not exist, so <strong>404</strong>.", loc: "store.go:132", kind: "read" },
-      { cmd: "HGETALL", key: "ds:{p}:prod", does: "Fetched in the same pipeline round trip. HEAD returns metadata only, but <code>Get</code>'s contract attaches producer state, so both hashes come back together.", loc: "store.go:133", kind: "read" },
-      { cmd: "in Go: classify", does: "Soft-deleted → <strong>410</strong>, expired → <strong>404</strong>. HEAD checks expiry but, unlike Read and Append, does <em>not</em> write <code>accessedAtNs</code>, so the idle window keeps counting.", loc: "store.go:144", kind: "flow" },
+      { cmd: "ReadPage offset=now", key: "TargetBytes 1 · MaxFrames 1 · NoTouch", does: "Ask the page reader for a typed snapshot only. Resolving <code>now</code> to the captured tail leaves no frame range to fetch.", loc: "handler_stream.go:37", kind: "read" },
+      { cmd: "EVALSHA + HGETALL", key: "ds:{p}:meta", does: "Load metadata once. The <code>tail</code> field is the existence marker. The reply contains the same metadata map, so no second <code>HGETALL</code> runs.", loc: "read.lua:32", kind: "read" },
+      { cmd: "classify", does: "Expired → lazy cleanup and <strong>404</strong>. Soft-deleted → <strong>410</strong>. A legacy stream without an incarnation runs one <code>HSETNX</code> migration. A current live stream performs no write.", loc: "read.lua:35", kind: "flow" },
+      { cmd: "skip :prod · skip :msg", does: "HEAD needs neither producer fencing state nor frames. <code>NoTouch</code> also skips <code>accessedAtNs</code> and the TTL backstop.", loc: "store.go:691", kind: "flow" },
     ]}
   />
 
   <Complexity
-    time="O(P)"
+    time="O(1)"
     space="O(1), no body"
-    why="HEAD reads the bounded meta hash and the producer hash, which is O(P) for P tracked producers and effectively O(1), then classifies in Go. No frames are touched, no key is mutated, and no body crosses the wire."
+    why="HEAD reads the bounded metadata hash once and returns a typed snapshot. It does not read the producer hash or frame set. A current live stream is not mutated, and no body crosses the wire. Lazy expiry cleanup and one-time legacy incarnation migration remain exceptional writes."
   />
 </section>
 
@@ -647,7 +659,7 @@ import Aside from "../components/Aside.astro";
   `file:line` into the repository at the time of writing.
 
   - [Overview](../). The data model, design, performance, and conformance posture.
-  - [store/redis/scripts/](https://github.com/adityavkk/chronicle/tree/main/store/redis/scripts). The eight Lua scripts, one per mutation.
+  - [store/redis/scripts/](https://github.com/adityavkk/chronicle/tree/main/store/redis/scripts). Seven operation scripts plus their shared validation and reply helpers. `read.lua` returns the typed atomic read projection; the other six perform mutations.
   - [docs/spec/PROTOCOL.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md). The vendored protocol specification.
   - [docs/PLAN.md](https://github.com/adityavkk/chronicle/blob/main/docs/PLAN.md). The Redis data model and its decision log.
 </section>
@@ -664,7 +676,7 @@ import Aside from "../components/Aside.astro";
 [^read]: Catch-up reads, `Stream-Up-To-Date`, and EOF signaling: PROTOCOL.md §5.6.
 [^lex]: The exclusive lower bound and why payload bytes never enter the comparison: `lexLowerBound` in [`store/redis/keys.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go).
 [^longpoll]: Long-poll mode, timeout, and closed-stream behavior: PROTOCOL.md §5.7; the wake protocol in [`store/redis/notify.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go).
-[^forkwait]: The fork-waiter guard: `WaitForMessages` in [`store/redis/notify.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go).
+[^forkwait]: The long-poll tail guard in [`handler.go`](https://github.com/adityavkk/chronicle/blob/main/handler.go), followed by typed race closure in [`store/redis/notify.go`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go).
 [^sse]: SSE mode, the data/control event format, and connection cycling: PROTOCOL.md §5.8; [`handler_sse.go`](https://github.com/adityavkk/chronicle/blob/main/handler_sse.go).
 [^binary]: Base64 encoding for binary SSE streams: PROTOCOL.md §5.8; the media-type check in [`handler.go`](https://github.com/adityavkk/chronicle/blob/main/handler.go).
 [^head]: Stream metadata via `HEAD`, and the `no-store` caching guidance: PROTOCOL.md §5.5.

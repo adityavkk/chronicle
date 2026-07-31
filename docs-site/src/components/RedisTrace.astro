@@ -43,13 +43,13 @@ const {
   caption,
 } = Astro.props;
 
-const WRITE = new Set(["HSET", "ZADD", "DEL", "HINCRBY", "SADD", "SREM", "PERSIST", "PEXPIRE", "HEXPIRE"]);
+const WRITE = new Set(["HSET", "ZADD", "DEL", "HINCRBY", "SADD", "SREM", "PERSIST", "PEXPIRE"]);
 const READ = new Set(["HGETALL", "HGET", "HMGET", "ZRANGEBYLEX", "EXISTS"]);
 function kindOf(s: Step): Kind {
   if (s.kind) return s.kind;
   const verb = s.cmd.split(" ")[0].toUpperCase();
   if (verb.startsWith("PUBLISH")) return "pub";
-  if (verb === "PEXPIRE" || verb === "PERSIST" || verb === "HEXPIRE") return "ttl";
+  if (verb === "PEXPIRE" || verb === "PERSIST") return "ttl";
   if (WRITE.has(verb)) return "write";
   if (READ.has(verb)) return "read";
   return "flow";
