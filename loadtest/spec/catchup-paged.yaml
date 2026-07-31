@@ -1,6 +1,8 @@
 # One declarative source of truth for the issue-5 paid GKE suite. The renderer
 # creates one SUT deployment and one loadgen Job on the separate loadgen pool.
 # That Job runs the 8, 32, 128, and 512 reader cells, then the mixed write cell.
+# The managed decision matrix re-renders this same topology with
+# LT_READ_PAGE_BYTES=262144, 1048576, and 4194304.
 name: catchup-paged
 
 loadgen_image: REGISTRY/chronicle-loadgen:TAG
@@ -12,6 +14,9 @@ sut:
   cpu: "14"
   memory: 24Gi
   read_page_bytes: 1048576
+  # The read target may admit one oversized first frame for progress. This
+  # ceiling makes that exception finite in the production acceptance cells.
+  max_append_bytes: 16777216
 
 catchup:
   reader_curve: [8, 32, 128, 512]

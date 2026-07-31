@@ -26,6 +26,7 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
 <Tldr>
   <ul>
     <li><strong>Bounded catch-up removes whole-suffix reads and buffering.</strong> Redis fetches one frame, then optionally bulk-fetches only the range that fits the remaining 1 MiB target. A separate 1,024-frame cap bounds small-frame pages. Chronicle writes each frame directly to the socket.</li>
+    <li><strong>The exceptional frame and fork-plan lifetimes are explicit.</strong> Operators may set an append-body ceiling before allocation and storage, while zero preserves compatibility. Direct Redis fork responses reuse ancestry only within one response and still validate the root and selected source on every page.</li>
     <li><strong>The local 128-reader failure became measurable work.</strong> The old server completed no accepted 16 MiB replay at that concurrency. The paged server completed 435 body-verified responses with no server error in the final offered-window run.</li>
     <li><strong>SSE fanout removes duplicate live reads and connections.</strong> One stream hub on each serving Chronicle replica reads Redis once and shares the formatted event with local clients. One store-owned multiplexer carries every logical stream registration over one physical Pub/Sub connection by default. The exact-counter guard with 1,000 clients measured 1.000 live Redis read page and 1.000 Redis read command per append, down from 970.5 reads.</li>
     <li><strong>Persistent root pages use one atomic read.</strong> A five-byte GET fell from six to one metadata <code>HGETALL</code>, from two read scripts to one, and from five read-side writes to zero. Sliding TTL renewal, legacy migration, and lazy expiry cleanup remain explicit write cases.</li>
@@ -60,7 +61,9 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
 
   Numeric long-poll offsets retain their established first read, subscribe,
   and no-touch recheck order. Inherited fork prefixes retain their cross-stream
-  traversal. Those paths do not lose a Redis round trip from issue #172.
+  traversal. Those paths do not lose a Redis round trip from issue #172. A
+  non-SSE response may reuse its already validated ordered fork plan, but every
+  page still executes the root and selected source scripts.
 </section>
 
 <section class="block" id="evidence">

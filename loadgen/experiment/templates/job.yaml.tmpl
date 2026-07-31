@@ -74,7 +74,7 @@ spec:
               {{range .Catchup.ReaderCurve}}
               dsload run \
                 -scenario /scenarios/catchup.yaml \
-                -label gke-1m-r{{.}} \
+                -label gke-{{$.SUT.ReadPageLabel}}-r{{.}} \
                 -out /results \
                 -base-url http://chronicle.{{$.SUT.Namespace}}:4437 \
                 -catchup-readers {{.}} \
@@ -84,18 +84,18 @@ spec:
               # The gate also proves every counted body has the exact expected
               # length and that Redis/Chronicle telemetry was sampled.
               dsload gate-catchup \
-                -result /results/gke-1m-r{{.}}/catchup-paged/results.json \
+                -result /results/gke-{{$.SUT.ReadPageLabel}}-r{{.}}/catchup-paged/results.json \
                 -min-completions 1
               {{end}}
               dsload run \
                 -scenario /scenarios/mixed.yaml \
-                -label gke-1m-mixed \
+                -label gke-{{.SUT.ReadPageLabel}}-mixed \
                 -out /results \
                 -base-url http://chronicle.{{.SUT.Namespace}}:4437 \
                 -sample-redis redis={{.SUT.RedisAddress}} \
                 -sample-metrics chronicle=http://chronicle.{{.SUT.Namespace}}:9090/metrics
               dsload gate-mixed \
-                -result /results/gke-1m-mixed/mixed-catchup-paged/results.json \
+                -result /results/gke-{{.SUT.ReadPageLabel}}-mixed/mixed-catchup-paged/results.json \
                 -min-append-rate {{.Catchup.MixedMinAppendRate}} \
                 -max-append-p99-ms {{.Catchup.MixedMaxAppendP99MS}}
               if grep -R -E '"err:[^"]+":[[:space:]]*[1-9]' /results; then

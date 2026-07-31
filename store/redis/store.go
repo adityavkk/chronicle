@@ -54,9 +54,10 @@ type Store struct {
 }
 
 var (
-	_ store.Store      = (*Store)(nil)
-	_ store.PageReader = (*Store)(nil)
-	_ store.PageWaiter = (*Store)(nil)
+	_ store.Store                    = (*Store)(nil)
+	_ store.PageReader               = (*Store)(nil)
+	_ store.PageWaiter               = (*Store)(nil)
+	_ store.PageReaderSessionFactory = (*Store)(nil)
 )
 
 // New wraps a go-redis client as a store.Store. The store takes ownership
@@ -675,6 +676,36 @@ type redisReadSegment struct {
 	requireFrame bool
 }
 
+type redisResponseReadPlan struct {
+	snapshot store.ReadSnapshot
+	lower    store.Offset
+	segments []redisReadSegment
+}
+
+func (p *redisResponseReadPlan) matches(snapshot store.ReadSnapshot, lower store.Offset) bool {
+	return p != nil &&
+		store.SameReadStream(p.snapshot, snapshot) &&
+		p.snapshot.Tail.Equal(snapshot.Tail) &&
+		!lower.LessThan(p.lower)
+}
+
+func (p *redisResponseReadPlan) from(lower store.Offset) []redisReadSegment {
+	segments := make([]redisReadSegment, 0, len(p.segments))
+	for _, original := range p.segments {
+		if !lower.LessThan(original.upper) {
+			continue
+		}
+		segment := original
+		if segment.lower.LessThan(lower) {
+			segment.lower = lower
+		}
+		if segment.lower.LessThan(segment.upper) {
+			segments = append(segments, segment)
+		}
+	}
+	return segments
+}
+
 type redisPageScriptResult struct {
 	meta      *store.StreamMetadata
 	messages  []store.Message
@@ -686,9 +717,24 @@ type redisPageScriptResult struct {
 // The root validation script refreshes only the root stream's sliding TTL.
 // Inherited source ranges use read-only branches of the same script.
 func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, opts store.ReadPageOptions) (store.ReadPage, error) {
+	return s.readPage(ctx, path, offset, opts, nil)
+}
+
+func (s *Store) readPage(
+	ctx context.Context,
+	path string,
+	offset store.Offset,
+	opts store.ReadPageOptions,
+	plan **redisResponseReadPlan,
+) (store.ReadPage, error) {
 	opts = opts.Normalize()
 	if err := ctx.Err(); err != nil {
 		return store.ReadPage{}, err
+	}
+	if plan != nil && opts.Snapshot == nil {
+		// A nil snapshot is the response boundary. Never let a session reused by
+		// a caller carry a fork plan into a later logical response.
+		*plan = nil
 	}
 
 	expected := ""
@@ -766,9 +812,24 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 		page.Messages = append(page.Messages, root.messages...)
 		page.NextOffset = root.messages[len(root.messages)-1].Offset
 	case store.RootReadRangeInherited:
-		segments, err = s.readSegments(ctx, path, root.meta, readOffset, snapshot.Tail, true)
-		if err != nil {
-			return store.ReadPage{}, err
+		// A nil snapshot starts a new logical response even if a caller reuses the
+		// session object. Only continuation pages carrying the first page's fixed
+		// snapshot may reuse the immutable response-local fork plan.
+		if plan != nil && opts.Snapshot != nil && (*plan).matches(snapshot, readOffset) {
+			segments = (*plan).from(readOffset)
+		} else {
+			segments, err = s.readSegments(ctx, path, root.meta, readOffset, snapshot.Tail, true)
+			if err != nil {
+				return store.ReadPage{}, err
+			}
+			if plan != nil {
+				copied := append([]redisReadSegment(nil), segments...)
+				*plan = &redisResponseReadPlan{
+					snapshot: snapshot,
+					lower:    readOffset,
+					segments: copied,
+				}
+			}
 		}
 	}
 	for _, segment := range segments {
@@ -793,6 +854,13 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 			false,
 		)
 		if err != nil {
+			if segment.path != path && errors.Is(err, store.ErrStreamNotFound) {
+				return store.ReadPage{}, fmt.Errorf(
+					"%w: inherited source metadata %s is absent",
+					store.ErrReadDataMissing,
+					segment.path,
+				)
+			}
 			return store.ReadPage{}, err
 		}
 		page.Stats.FetchedBytes += result.stats.FetchedBytes
@@ -831,13 +899,15 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 
 // Read implements Store by concatenating bounded pages for one snapshot.
 func (s *Store) Read(path string, offset store.Offset) ([]store.Message, bool, error) {
+	session := s.NewPageReaderSession(path)
+	defer session.Close()
 	var (
 		messages []store.Message
 		snapshot *store.ReadSnapshot
 		next     = offset
 	)
 	for {
-		page, err := s.ReadPage(context.Background(), path, next, store.ReadPageOptions{Snapshot: snapshot})
+		page, err := session.ReadPage(context.Background(), path, next, store.ReadPageOptions{Snapshot: snapshot})
 		if err != nil {
 			if errors.Is(err, store.ErrStreamSoftDeleted) {
 				err = store.ErrStreamNotFound

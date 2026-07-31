@@ -495,3 +495,32 @@ cloud. Every rig tears down on success/failure/Ctrl-C (STOP-THE-METER).
   SLO PASS) must reproduce under the combined chaos + DR drill —
   `spec/dispatch-webhook-ha.yaml` (S=256, replicas≥2, `STANDARD_HA`, Tier B) is the
   full-system load+chaos run; SLO `sweep_p99_ms ≤ 1500`.
+
+## 2026-07-31 — issue 15 bounded catch-up integration rerun
+
+The final issue 15 tree ran the default k3d suite against one AOF Redis and two
+Chronicle replicas. Baseline, origin restart, Redis restart, read expiry, and
+SSE resume passed. The bounded `paged-catchup` scenario completed all six
+resumed attempts: five injected events between pages (client cancellation,
+Chronicle replacement, Redis replacement, a network interruption, and
+concurrent append plus close), followed by the final closed-stream drain. The
+concatenated result matched a 136-frame direct Redis oracle.
+The SSE scenario delivered all 320 expected messages exactly once to 8/8
+clients through 13 strict faults, including origin and Redis replacement,
+dropped and duplicate notifications, delete/recreate fencing, page-boundary
+attach, slow and stuck readers, and write timeout.
+
+The cluster-backed safety supplement passed:
+
+- `single-holder-linz`: 662 operations, linearizable;
+- `cursor-monotonic`: 1,352 samples across eight streams, no regression or
+  phantom advance;
+- `stale-gen-noop`: deposed acknowledgement returned 409 FENCED, made no
+  durable cursor change, and the current generation positive control advanced.
+
+The Redis-direct CI Porcupine matrix also passed. Ownership exclusivity covered
+169 operations across four slots; per-shard leases covered 24 operations
+across 12 partitions; the composed two-fence model covered 1,423 operations.
+The data-plane model was linearizable in every maintained mode: Redis frames
+(2,077 operations), Redis chunks (1,767), local files (1,442), and object cache
+(1,333). No checker returned Unknown.

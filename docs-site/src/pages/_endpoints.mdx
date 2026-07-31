@@ -285,6 +285,14 @@ import Aside from "../components/Aside.astro";
   (16 bytes), with end offsets `0_13` and `0_29`, so the tail advances to
   `0_29`.
 
+  <Callout icon="info" label="Optional append ceiling">
+    `--max-append-bytes` applies to this body and to a `PUT` body that creates
+    initial data. A declared excess body returns **413** before allocation or
+    store access; a chunked or HTTP/2 body is bounded while Chronicle reads it.
+    Zero keeps the compatible unlimited HTTP policy. The ceiling controls one
+    indivisible frame, not the returned page target.
+  </Callout>
+
   <Diagram
     name="seq-append"
     label="POST, append"
@@ -482,6 +490,14 @@ import Aside from "../components/Aside.astro";
     script both captures the root snapshot and reads its bounded frame range.
     Producer state is absent. Fork reads below their divergence point retain
     the separate source metadata and script work required across Redis slots.
+  </Callout>
+
+  <Callout icon="info" label="Fork plan lifetime">
+    A direct Redis, non-SSE response can reuse its ordered fork plan between
+    pages. It still executes the root script on every page and the selected
+    source script with the captured source incarnation. Missing or recreated
+    ancestors fail loudly. A new response rebuilds the plan; SSE stays on the
+    shared hub and notification multiplexer.
   </Callout>
 
   <Complexity

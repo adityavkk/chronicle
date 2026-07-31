@@ -369,6 +369,12 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
 
   - **Every page still reads metadata once.** A long catch-up uses several
     bounded Lua calls because each page validates its fixed snapshot.
+  - **Fork-plan reuse removes discovery, not fencing.** One direct Redis,
+    non-SSE response may retain its ordered ancestry plan. Every page still
+    validates the root, and every selected source still validates its captured
+    incarnation. A new response rebuilds the plan; a missing source fails
+    loudly. The local 64-page profile reduced median latency by 32.7 percent at
+    depth one and 60.5 percent at depth four.
   - **Legacy migration writes once.** A root created before incarnation IDs
     stores one random ID on its first direct read.
   - **Expired streams still need cleanup.** Lazy expiry may delete keys or mark

@@ -76,7 +76,7 @@ The bundled scenarios model the protocol's documented use cases:
 | `append-steady` | flat 1,000 writes/s | append latency under load |
 | `catchup` | full-stream replays of ~1.25 MiB streams @ 40/s | TTFB + read MB/s |
 | `catchup-paged` | 8 × 16 MiB streams, 8/32/128/512 reader curve | bounded catch-up throughput and memory |
-| `mixed-catchup-paged` | 32 catch-up readers plus 40 offered writes/s | at least 38 successful writes/s over the configured offer window and append p99 at most 2,000 ms |
+| `mixed-catchup-paged` | 32 catch-up readers plus 40 offered writes/s | at least 38 successful writes/s, append p99 at most 2,000 ms, nonzero complete catch-up bodies, and zero append/catch-up errors |
 | `mixed` | 100 sessions: writes + SSE + long-poll + refreshes | everything at once |
 | `smoke` | 10-second everything-works check | — |
 

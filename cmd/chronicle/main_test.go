@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -21,6 +22,79 @@ type recordingSubscriptionService struct {
 	reconnected chan struct{}
 	promotes    atomic.Int64
 	promoted    chan struct{}
+}
+
+type redisConfigGetterStub struct {
+	values map[string]string
+	err    error
+	calls  int
+}
+
+func (s *redisConfigGetterStub) ConfigGet(ctx context.Context, parameter string) *goredis.MapStringStringCmd {
+	s.calls++
+	cmd := goredis.NewMapStringStringCmd(ctx, "config", "get", parameter)
+	cmd.SetVal(s.values)
+	cmd.SetErr(s.err)
+	return cmd
+}
+
+func TestValidateAppendCeiling(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	disabled := &redisConfigGetterStub{err: errors.New("must not be called")}
+	if err := validateAppendCeiling(context.Background(), disabled, 0, logger); err != nil {
+		t.Fatal(err)
+	}
+	if disabled.calls != 0 {
+		t.Fatalf("disabled ceiling performed %d probe(s)", disabled.calls)
+	}
+
+	valid := &redisConfigGetterStub{values: map[string]string{"proto-max-bulk-len": "1000"}}
+	if err := validateAppendCeiling(context.Background(), valid, 100, logger); err != nil {
+		t.Fatalf("valid ceiling: %v", err)
+	}
+	if valid.calls != 1 {
+		t.Fatalf("valid ceiling probes = %d, want 1", valid.calls)
+	}
+
+	tooLarge := &redisConfigGetterStub{values: map[string]string{"proto-max-bulk-len": "100"}}
+	if err := validateAppendCeiling(context.Background(), tooLarge, 100, logger); err == nil {
+		t.Fatal("ceiling that leaves no frame-prefix room must fail")
+	}
+
+	malformed := &redisConfigGetterStub{values: map[string]string{"proto-max-bulk-len": "unknown"}}
+	if err := validateAppendCeiling(context.Background(), malformed, 100, logger); err == nil {
+		t.Fatal("malformed proto-max-bulk-len must fail")
+	}
+
+	var logs strings.Builder
+	warnLogger := slog.New(slog.NewTextHandler(&logs, nil))
+	denied := &redisConfigGetterStub{err: errors.New("NOPERM CONFIG GET")}
+	if err := validateAppendCeiling(context.Background(), denied, 100, warnLogger); err != nil {
+		t.Fatalf("denied probe must defer to deployment enforcement: %v", err)
+	}
+	if !strings.Contains(logs.String(), "deployment must enforce") || !strings.Contains(logs.String(), "NOPERM") {
+		t.Fatalf("denied probe warning missing evidence: %s", logs.String())
+	}
+	unsupported := &redisConfigGetterStub{err: errors.New("ERR unknown command 'CONFIG'")}
+	if err := validateAppendCeiling(context.Background(), unsupported, 100, warnLogger); err != nil {
+		t.Fatalf("unsupported probe must defer to deployment enforcement: %v", err)
+	}
+	transient := &redisConfigGetterStub{err: syscall.ECONNRESET}
+	if err := validateAppendCeiling(context.Background(), transient, 100, warnLogger); !errors.Is(err, syscall.ECONNRESET) {
+		t.Fatalf("transient probe error = %v, want ECONNRESET", err)
+	}
+	missing := &redisConfigGetterStub{values: map[string]string{}}
+	if err := validateAppendCeiling(context.Background(), missing, 100, warnLogger); err == nil ||
+		!strings.Contains(err.Error(), "omitted proto-max-bulk-len") {
+		t.Fatalf("missing probe value error = %v", err)
+	}
+
+	if err := validateAppendCeiling(context.Background(), nil, 100, logger); err != nil {
+		t.Fatalf("memory backend ceiling: %v", err)
+	}
+	if err := validateAppendCeiling(context.Background(), nil, -1, logger); err == nil {
+		t.Fatal("negative ceiling must fail")
+	}
 }
 
 func TestValidateSegmentConfig(t *testing.T) {

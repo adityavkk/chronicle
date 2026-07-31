@@ -8,6 +8,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -77,6 +79,7 @@ type Response struct {
 	Closed     bool
 	Body       []byte
 	BodyBytes  int64
+	BodySHA256 string
 	TTFB       time.Duration // request start → response headers read
 	Total      time.Duration // request start → body fully read
 }
@@ -115,11 +118,13 @@ func responseCountFrom(resp *http.Response, start time.Time) (Response, error) {
 		TTFB:       time.Since(start),
 	}
 	defer resp.Body.Close() //nolint:errcheck // read side; nothing actionable
-	n, err := io.Copy(io.Discard, resp.Body)
+	digest := sha256.New()
+	n, err := io.Copy(digest, resp.Body)
 	if err != nil {
 		return r, fmt.Errorf("read body: %w", err)
 	}
 	r.BodyBytes = n
+	r.BodySHA256 = hex.EncodeToString(digest.Sum(nil))
 	r.Total = time.Since(start)
 	return r, nil
 }

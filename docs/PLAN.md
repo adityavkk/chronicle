@@ -131,6 +131,14 @@ stream keeps boundaries intact and makes members unique by construction
 the conformance suite's 10 MB single append fits comfortably under both the
 512 MB member cap and default `proto-max-bulk-len`.
 
+The returned-page target is not a maximum frame size. Chronicle therefore has
+an independent operator policy, `MaxAppendBytes`, that can reject a create or
+append body with HTTP 413 before it reaches the store. Its compatible default
+is zero, which keeps the existing unlimited HTTP policy. A positive ceiling
+plus the 34-byte stored-frame prefix must fit Redis `proto-max-bulk-len`.
+Startup enforces that relationship when `CONFIG GET` is available and reports
+the operator obligation when a managed service denies the probe.
+
 Known limit (documented, acceptable): a whole stream lives in one ZSET on one
 shard, so stream size is bounded by node memory. This is the same class of limit
 as the Caddy memory store, and Walmart-managed Redis deployments size for it.
@@ -187,6 +195,14 @@ root snapshot of a logical sliding-TTL read updates `accessedAtNs` and its key
 TTL. Continuations, long-poll rechecks, inherited ranges, sealing, repair, and
 SSE race rechecks are no-touch. Lazy expiry cleanup and one-time legacy
 incarnation migration are explicit exceptions.
+
+For one non-SSE HTTP response, the Redis store may retain the immutable ordered
+fork plan in a response-local reader session. Every page still runs the root
+script, and every selected source still runs its script with the captured
+source incarnation. Reuse removes only repeated ancestry discovery. A missing
+or recreated ancestor fails loudly; a new response builds a new plan. The
+session owns no connection, goroutine, or global cache, and SSE remains on the
+shared hub and notification multiplexer.
 
 Tradeoff vs `MULTI/EXEC`+`WATCH`: optimistic transactions would need
 read-modify-write retry loops for producer validation and give weaker

@@ -67,6 +67,7 @@ Flags take precedence over environment variables; both over defaults.
 | `--long-poll-timeout` | `CHRONICLE_LONG_POLL_TIMEOUT` | `30s` | How long `live=long-poll` waits before `204` |
 | `--sse-reconnect-interval` | `CHRONICLE_SSE_RECONNECT_INTERVAL` | `60s` | SSE connection cycling (enables CDN collapsing) |
 | `--read-page-bytes` | `CHRONICLE_READ_PAGE_BYTES` | `1048576` | Returned payload target for each HTTP and SSE catch-up storage page. One valid frame may exceed it |
+| `--max-append-bytes` | `CHRONICLE_MAX_APPEND_BYTES` | `0` | Maximum create-with-data or append body bytes; `0` preserves the unlimited HTTP policy. An excess body returns `413` |
 | `--sse-hub-replay-bytes` | `CHRONICLE_SSE_HUB_REPLAY_BYTES` | `1048576` | Replay memory retained for each active stream's shared SSE hub |
 | `--sse-hub-batch-bytes` | `CHRONICLE_SSE_HUB_BATCH_BYTES` | `262144` | Target retained bytes in one shared live SSE data event |
 | `--sse-notification-connections` | `CHRONICLE_SSE_NOTIFICATION_CONNECTIONS` | `1` | Maximum store-owned Redis Pub/Sub connections for SSE stream notifications |
@@ -94,6 +95,13 @@ it in bounded, frame-aligned storage pages. Each returned page targets 1 MiB
 and at most 1,024 frames. Chronicle never splits a durable frame, so an
 oversized first frame can exceed the byte target. Smaller pages lower
 per-reader memory use but add Redis round trips.
+
+The page target is not a maximum message size. Operators that require a finite
+bound for the indivisible oversized-first-frame exception can set
+`--max-append-bytes`. Chronicle applies that ceiling before buffering either a
+create body or append body. For Redis deployments, the configured value plus
+Chronicle's stored-frame prefix must fit `proto-max-bulk-len`; startup validates
+that relationship when the managed service permits `CONFIG GET`.
 
 Each Chronicle replica keeps one live SSE hub for each stream with connected
 clients. The Redis store multiplexes all logical stream registrations over one

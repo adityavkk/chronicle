@@ -35,6 +35,42 @@ func TestLoadEnvReadPageBytes(t *testing.T) {
 	}
 }
 
+func TestLoadEnvMaxAppendBytes(t *testing.T) {
+	env := func(value string) func(string) (string, bool) {
+		return func(key string) (string, bool) {
+			if key == EnvMaxAppendBytes {
+				return value, true
+			}
+			return "", false
+		}
+	}
+
+	if got := DefaultConfig().MaxAppendBytes; got != 0 {
+		t.Fatalf("default MaxAppendBytes = %d, want disabled", got)
+	}
+	for _, test := range []struct {
+		value string
+		want  int64
+	}{
+		{value: "0", want: 0},
+		{value: "16777216", want: 16 << 20},
+	} {
+		cfg := DefaultConfig()
+		if err := cfg.LoadEnv(env(test.value)); err != nil {
+			t.Fatalf("MaxAppendBytes %q: %v", test.value, err)
+		}
+		if cfg.MaxAppendBytes != test.want {
+			t.Fatalf("MaxAppendBytes %q = %d, want %d", test.value, cfg.MaxAppendBytes, test.want)
+		}
+	}
+	for _, value := range []string{"-1", "nope", "9223372036854775808"} {
+		cfg := DefaultConfig()
+		if err := cfg.LoadEnv(env(value)); err == nil {
+			t.Fatalf("MaxAppendBytes %q must fail", value)
+		}
+	}
+}
+
 func TestLoadEnvSSEHubBounds(t *testing.T) {
 	env := func(vars map[string]string) func(string) (string, bool) {
 		return func(key string) (string, bool) {

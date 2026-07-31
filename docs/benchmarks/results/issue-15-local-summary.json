@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "date": "2026-07-31",
+  "environment": {
+    "hostname": "m-H6R03HYGYY",
+    "os": "darwin",
+    "arch": "arm64",
+    "logical_cpus": 14,
+    "go": "go1.26.4",
+    "backends": {
+      "reader_and_mixed": "redis:8-alpine",
+      "fork_plan": "valkey/valkey:8-alpine"
+    },
+    "production_capacity_claim": false
+  },
+  "reader_curve": {
+    "streams": 8,
+    "messages_per_stream": 4096,
+    "message_bytes": 4096,
+    "response_bytes": 16781313,
+    "warmup_seconds": 5,
+    "measurement_seconds": 30,
+    "cells": [
+      {"readers": 8, "completed": 376, "integrity_ok": 376, "p99_ms": 818.687, "peak_chronicle_rss_mib": 72.3},
+      {"readers": 32, "completed": 396, "integrity_ok": 396, "p99_ms": 2494.463, "peak_chronicle_rss_mib": 133.5},
+      {"readers": 128, "completed": 389, "integrity_ok": 389, "p99_ms": 9748.479, "peak_chronicle_rss_mib": 501.0},
+      {"readers": 512, "completed": 115, "integrity_ok": 115, "p99_ms": 26263.551, "peak_chronicle_rss_mib": 1318.4}
+    ],
+    "errors": 0,
+    "fetched_equals_returned": true,
+    "discarded_bytes": 0
+  },
+  "mixed": {
+    "readers": 32,
+    "writers": 8,
+    "offered_appends_per_second": 40,
+    "successful_appends": 1200,
+    "successful_appends_per_second": 40.0,
+    "append_p99_ms": 298.239,
+    "catchup_completed": 388,
+    "completed_body_sha256_reads": 388,
+    "catchup_bytes": 6521047285,
+    "append_or_catchup_errors": 0,
+    "peak_chronicle_rss_mib": 153.2,
+    "gate": "pass"
+  },
+  "handler_16mib": {
+    "iterations_per_cell": 10,
+    "max_underlying_write_bytes": 4096,
+    "cells": [
+      {"page_bytes": 262144, "ns_per_op": 214917, "bytes_per_op": 339885, "allocs_per_op": 235},
+      {"page_bytes": 1048576, "ns_per_op": 97242, "bytes_per_op": 386107, "allocs_per_op": 124},
+      {"page_bytes": 4194304, "ns_per_op": 67425, "bytes_per_op": 364859, "allocs_per_op": 72}
+    ]
+  },
+  "fork_plan": {
+    "pages_per_response": 64,
+    "samples_per_cell": 20,
+    "cells": [
+      {"depth": 1, "reader": "baseline", "median_ms": 65.214, "hgetall": 192, "evalsha": 128},
+      {"depth": 1, "reader": "response_session", "median_ms": 43.902, "hgetall": 129, "evalsha": 128},
+      {"depth": 4, "reader": "baseline", "median_ms": 123.841, "hgetall": 384, "evalsha": 128},
+      {"depth": 4, "reader": "response_session", "median_ms": 48.942, "hgetall": 132, "evalsha": 128}
+    ]
+  },
+  "managed_valkey8": {
+    "status": "blocked_before_provisioning",
+    "page_sizes_bytes": [262144, 1048576, 4194304],
+    "required_repeats": 2,
+    "replacement_local_result_used": false
+  }
+}

@@ -2,7 +2,11 @@ package run
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"hash"
 	"sync"
 	"time"
 
@@ -10,6 +14,43 @@ import (
 )
 
 const setupParallelism = 32
+
+type catchupDigest struct {
+	hash      hash.Hash
+	json      bool
+	wroteBody bool
+}
+
+func newCatchupDigest(jsonMode bool) *catchupDigest {
+	digest := &catchupDigest{hash: sha256.New(), json: jsonMode}
+	if jsonMode {
+		_, _ = digest.hash.Write([]byte{'['})
+	}
+	return digest
+}
+
+func (d *catchupDigest) addBatch(body []byte) error {
+	if !d.json {
+		_, _ = d.hash.Write(body)
+		return nil
+	}
+	if len(body) < 2 || body[0] != '[' || body[len(body)-1] != ']' {
+		return errors.New("JSON prefill batch is not an array")
+	}
+	if d.wroteBody {
+		_, _ = d.hash.Write([]byte{','})
+	}
+	_, _ = d.hash.Write(body[1 : len(body)-1])
+	d.wroteBody = true
+	return nil
+}
+
+func (d *catchupDigest) finish() string {
+	if d.json {
+		_, _ = d.hash.Write([]byte{']'})
+	}
+	return hex.EncodeToString(d.hash.Sum(nil))
+}
 
 // forEachStream runs fn for every stream index with bounded parallelism
 // and returns the first error.
@@ -66,6 +107,7 @@ func (r *runner) prefill(ctx context.Context) error {
 	isJSON := r.sc.Streams.ContentType == "application/json"
 	t0 := time.Now()
 	err := r.forEachStream(ctx, func(ctx context.Context, _ int, name string) error {
+		digest := newCatchupDigest(isJSON)
 		for sent := 0; sent < p.Messages; {
 			n := min(p.BatchSize, p.Messages-sent)
 			var body []byte
@@ -83,8 +125,14 @@ func (r *runner) prefill(ctx context.Context) error {
 			if resp.Status/100 != 2 {
 				return fmt.Errorf("prefill %s: status %d", name, resp.Status)
 			}
+			if err := digest.addBatch(body); err != nil {
+				return fmt.Errorf("prefill %s digest: %w", name, err)
+			}
 			sent += n
 		}
+		r.mu.Lock()
+		r.catchupSHA[name] = digest.finish()
+		r.mu.Unlock()
 		return nil
 	})
 	if err != nil {

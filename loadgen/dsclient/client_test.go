@@ -2,6 +2,8 @@ package dsclient
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -36,6 +38,10 @@ func TestReadCatchupCountsWithoutRetainingBody(t *testing.T) {
 	}
 	if response.BodyBytes != int64(len(body)) {
 		t.Fatalf("body bytes = %d, want %d", response.BodyBytes, len(body))
+	}
+	wantDigest := sha256.Sum256([]byte(body))
+	if response.BodySHA256 != hex.EncodeToString(wantDigest[:]) {
+		t.Fatalf("body SHA-256 = %q, want %x", response.BodySHA256, wantDigest)
 	}
 	if response.NextOffset != "42" || !response.UpToDate {
 		t.Fatalf("protocol headers = offset %q up-to-date %v", response.NextOffset, response.UpToDate)

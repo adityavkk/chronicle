@@ -121,42 +121,60 @@ func TestReadPageOversizedCandidatesDoNotAmplifyFetchedBytes(t *testing.T) {
 				)
 			}
 
-			page, err := subject.ReadPage(
-				context.Background(),
-				path,
-				store.ZeroOffset,
-				store.ReadPageOptions{
-					TargetBytes: tc.target,
-					MaxFrames:   store.DefaultReadPageFrames,
-				},
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if page.Stats.ReturnedBytes != tc.wantReturned ||
-				page.Stats.FetchedBytes != tc.wantFetched ||
-				page.Stats.DiscardedBytes != tc.wantDiscarded {
-				t.Fatalf(
-					"stats = %+v, want returned=%d fetched=%d discarded=%d",
-					page.Stats,
-					tc.wantReturned,
-					tc.wantFetched,
-					tc.wantDiscarded,
+			next := store.ZeroOffset
+			var snapshot *store.ReadSnapshot
+			pages := 0
+			for {
+				page, err := subject.ReadPage(
+					context.Background(),
+					path,
+					next,
+					store.ReadPageOptions{
+						TargetBytes: tc.target,
+						MaxFrames:   store.DefaultReadPageFrames,
+						Snapshot:    snapshot,
+					},
 				)
-			}
-			if page.Stats.FetchedBytes > page.Stats.ReturnedBytes+oversizedBytes {
-				t.Fatalf(
-					"fetched-byte amplification: fetched=%d returned=%d; more than one oversized candidate was materialized",
-					page.Stats.FetchedBytes,
+				if err != nil {
+					t.Fatal(err)
+				}
+				if pages == 0 && (page.Stats.ReturnedBytes != tc.wantReturned ||
+					page.Stats.FetchedBytes != tc.wantFetched ||
+					page.Stats.DiscardedBytes != tc.wantDiscarded) {
+					t.Fatalf(
+						"first-page stats = %+v, want returned=%d fetched=%d discarded=%d",
+						page.Stats,
+						tc.wantReturned,
+						tc.wantFetched,
+						tc.wantDiscarded,
+					)
+				}
+				if page.Stats.FetchedBytes != page.Stats.ReturnedBytes || page.Stats.DiscardedBytes != 0 {
+					t.Fatalf(
+						"page %d fetched-byte amplification: %+v; every oversized-first page must fetch exactly what it returns",
+						pages,
+						page.Stats,
+					)
+				}
+				t.Logf(
+					"page=%d returned=%d fetched=%d discarded=%d",
+					pages,
 					page.Stats.ReturnedBytes,
+					page.Stats.FetchedBytes,
+					page.Stats.DiscardedBytes,
 				)
+				pages++
+				if page.UpToDate {
+					break
+				}
+				next = page.NextOffset
+				if snapshot == nil {
+					snapshot = &page.Snapshot
+				}
 			}
-			t.Logf(
-				"frames_on_stream=4 returned=%d fetched=%d discarded=%d",
-				page.Stats.ReturnedBytes,
-				page.Stats.FetchedBytes,
-				page.Stats.DiscardedBytes,
-			)
+			if pages != 4 {
+				t.Fatalf("pages = %d, want 4 one-frame progress pages", pages)
+			}
 		})
 	}
 }
