@@ -239,7 +239,7 @@ import Demo from "./Demo.astro";
           return { code: 404, status: "MISSING", reply: "no stream at /v1/stream/demo",
             trace: ["EVAL read.lua", "HGETALL :meta", "(nil → 404)"] };
         const unread = frames.filter((f) => cursor === "" || f.off > cursor);
-        const trace = ["EVALSHA read.lua · root", "HGETALL :meta once", "typed snapshot · no :prod · persistent → no write", "EVALSHA read.lua · range", `ZRANGEBYLEX :msg "(${cursor ? short(cursor) : "-"}…" "[snapshot-tail…" LIMIT 0 1`, "optional bounded bulk range · page cap 1024"];
+        const trace = ["EVALSHA read.lua · root", "HGETALL :meta once", "typed snapshot · no :prod · persistent → no write", "classify root-owned", `ZRANGEBYLEX :msg "(${cursor ? short(cursor) : "-"}…" "[snapshot-tail…" LIMIT 0 1 · same script`, "optional bounded bulk range · page cap 1024"];
         if (unread.length === 0)
           return { code: closed ? 204 : 204, status: "READ",
             reply: `up to date — nothing after the cursor${closed ? "; stream closed" : ""}`,
@@ -265,8 +265,8 @@ import Demo from "./Demo.astro";
         waiting = true;
         readerEl.hidden = true;
         return { code: 0, status: "WAIT",
-          reply: "reader armed: nothing at the offset, so it SUBSCRIBEs and re-checks. Append (or close) to wake it; long-poll again to simulate the 30 s timeout.",
-          trace: ["ReadPage · first logical read", "(empty typed page at tail)", "SUBSCRIBE ds:notify:{…}", "ReadPage NoTouch · attach recheck", "(wait…)"] };
+          reply: "reader armed: offset=now confirms its subscription before the authoritative empty page. Append (or close) to wake it; long-poll again to simulate the 30 s timeout.",
+          trace: ["SUBSCRIBE ds:notify:{…} and confirm", "ReadPage · authoritative first logical read", "(empty typed page at tail · no attach reread)", "(wait…)"] };
       },
       close() {
         if (!exists)

@@ -1,14 +1,14 @@
-# Integrating bounded catch-up with the pending SSE fanout hub
+# Bounded catch-up and the SSE fanout hub
 
-## Merge order
+## Status
 
-Land issue 5 first, then rebase `perf/sse-fanout-hub` from
-`/private/tmp/chronicle-p0-sse`. Bounded storage pages are a prerequisite for
-the hub. Do not resolve `handler_sse.go` by choosing either file in full. The
-correct result combines the fanout branch's subscribe-before-read ordering with
-issue 5's captured, bounded page drain.
+Issue 5's bounded page drain and the per-stream fanout hub are integrated on
+`main`. Issue 172 refines their connection boundary: a new hub now confirms its
+notification registration before the authoritative first page, then uses that
+page to seed the hub instead of issuing a duplicate initial no-touch refresh.
+The bounded catch-up and replay contracts below remain current.
 
-The main overlapping files are:
+The main integration files are:
 
 - `handler.go` and `handler_sse.go`
 - `config.go`, `config_test.go`, and `cmd/chronicle/main.go`
@@ -17,9 +17,8 @@ The main overlapping files are:
   `store/redis/notify.go`, and `store/redis/store.go`
 - `jepsen/checker/main.go`, `jepsen/deploy/deploy.yaml`, and `jepsen/README.md`
 
-Both branches add stream incarnation support. Keep one 128-bit generator and
-one persisted metadata field. Update both branches' tests to use the shared
-helper. Do not keep two names for the same identity.
+Stream incarnation remains one persisted 128-bit identity shared by paging,
+segments, and the hub. Delete and recreate must never join two lifetimes.
 
 `store.PageReader` and the fanout branch's notification subscriber should
 remain optional capability interfaces beside `store.Store`. This preserves
@@ -27,17 +26,20 @@ source compatibility for external store implementations.
 
 ## Required SSE sequence
 
-The combined request path should use this order:
+The request path uses this order:
 
-1. Read request metadata and acquire the per-stream hub for that exact
-   incarnation.
-2. Let the hub establish its Redis subscription, perform its durable fallback
-   read, and report ready.
-3. Call `ReadPage` from the client's requested offset with no supplied
+1. Reserve an existing nonterminal per-stream hub before reading, so it cannot
+   disappear during page capture. If none exists, confirm one notification
+   subscription first.
+2. Call `ReadPage` from the client's requested offset with no supplied
    snapshot. This first page captures the response tail, content type, closed
-   state, and incarnation.
-4. Reject the request if the captured page incarnation differs from the hub
-   incarnation.
+   state, incarnation, and first bounded frames.
+3. Validate a reserved hub against that snapshot. For a new hub, seed its tail,
+   closed state, content type, and incarnation from the page and transfer the
+   confirmed subscription into it. It reports ready without another read.
+4. If the reserved hub names an earlier incarnation, release it, confirm a new
+   subscription, and perform a fresh no-touch page fenced to the first logical
+   page before creating the replacement hub.
 5. Send headers, then write one data event and one control event for each
    storage page. Reuse the first page's snapshot on every following call.
 6. Flush each complete page. Advance the client position only after its control
@@ -49,11 +51,11 @@ The combined request path should use this order:
    let the client resume from the last control offset. Never skip ahead to the
    hub's current offset.
 
-Acquiring the hub before the first page closes the append race. Capturing the
-storage snapshot after the hub is ready is safe. Appends included in both the
-hub replay ring and the storage snapshot are removed by attaching at the exact
-sent offset. Appends after the snapshot are delivered by the hub. This gives no
-gap and no duplicate.
+Registration before the atomic first page closes the append race. An append
+before that page is included in its captured tail. An append after it is covered
+by the confirmed subscription, with the defensive poll recovering a lost hint.
+Attaching at the exact sent offset removes overlap between catch-up and replay.
+This gives no gap and no duplicate without a duplicate attach read.
 
 Delete and recreate must remain terminal for the old request. Check the
 incarnation after hub readiness, on every storage page through
@@ -101,10 +103,11 @@ but it must not build a second full catch-up body.
 The fanout branch caps its defensive poll by sliding TTL. Preserve that rule.
 The first root page of one logical client read renews access only when the root
 has a sliding TTL. Continuation pages and inherited fork ranges are no-touch.
-The hub's initial subscribe-then-refresh is also no-touch because the client
-already performed its logical first read. Later shared hub refreshes count as
-active reads, but persistent and absolute-expiry-only streams still perform no
-read-side write.
+The new hub's subscription precedes the client's logical first page, so there
+is no initial refresh. A stale-hub replacement page is no-touch because the
+client already performed its logical first read. Later shared hub refreshes
+count as active reads, but persistent and absolute-expiry-only streams still
+perform no read-side write.
 
 ## Combined tests
 

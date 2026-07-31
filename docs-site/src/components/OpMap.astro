@@ -72,9 +72,9 @@ const OPS: Op[] = [
     steps: [
       { c: "EVALSHA read.lua", k: ":meta", n: "load once → typed tail · type · closed · expiry · incarnation; never read :prod" },
       { c: "HSET + PEXPIRE/PERSIST", k: ":meta · stream keys", n: "first root snapshot with sliding TTL only; persistent and absolute-expiry-only reads skip" },
-      { c: "EVALSHA read.lua", k: "selected segment", n: "validate the same snapshot without touching access" },
-      { c: "ZRANGEBYLEX", k: ":msg", n: "first candidate LIMIT 0 1 · optional byte-bounded bulk · page cap 1024" },
-      { c: "(fork chain)", k: ":msg", n: "inherited source ranges are capped at forkOff and always no-touch" },
+      { c: "classify", n: "empty · inherited · root-owned using the full typed offset and fixed response tail" },
+      { c: "ZRANGEBYLEX", k: ":msg", n: "root-owned range in the same script · first candidate LIMIT 0 1 · optional byte-bounded bulk · page cap 1024" },
+      { c: "(fork chain)", k: ":msg", n: "only inherited source ranges need later slot-local scripts; capped at forkOff and no-touch" },
     ],
   },
   {
@@ -84,9 +84,8 @@ const OPS: Op[] = [
     req: ["GET /v1/stream/chat?offset=now&live=long-poll HTTP/1.1"],
     resp: ["200 OK             data arrived", "204 No Content     30 s timeout · Stream-Up-To-Date: true"],
     steps: [
-      { c: "ReadPage", n: "first logical read → data responds 200; empty tail carries the typed snapshot" },
-      { c: "SUBSCRIBE", k: "notify", n: "confirm subscription before the attach recheck" },
-      { c: "ReadPage NoTouch", n: "same-incarnation recheck closes the attach race" },
+      { c: "SUBSCRIBE", k: "notify", n: "offset=now confirms registration before durable state" },
+      { c: "ReadPage", n: "authoritative first logical page after registration; no immediate attach reread" },
       { c: "(wait)", n: "wake on 'a' / 'c' / 'd', a 1 s defensive poll, or the timeout" },
       { c: "ReadPage NoTouch", n: "wake, poll, and timeout return one authoritative final page; no metadata reload" },
       { c: "UNSUBSCRIBE", k: "notify" },
@@ -99,9 +98,9 @@ const OPS: Op[] = [
     req: ["GET /v1/stream/chat?offset=now&live=sse HTTP/1.1"],
     resp: ["200 OK", "Content-Type: text/event-stream", "", "event: data       one per message", "event: control    streamNextOffset cursor"],
     steps: [
-      { c: "ReadPage", n: "reuse the handler's typed first page; no Store.Get and no producer read" },
-      { c: "SUBSCRIBE", k: "notify", n: "one persistent subscription per active stream hub on this replica" },
-      { c: "ReadPage NoTouch", n: "durable attach refresh from the first snapshot tail closes the race" },
+      { c: "reserve / SUBSCRIBE", k: "notify", n: "reserve an existing hub or confirm one new subscription before the client page" },
+      { c: "ReadPage", n: "capture the typed page after registration and seed a new hub; no Store.Get or producer read" },
+      { c: "hub ready", n: "the pre-registered page closes the race, so no duplicate initial refresh is required" },
       { c: "(catch-up)", n: "emit the page already held, then bounded no-touch continuations under the same snapshot" },
       { c: "shared ReadPage", n: "one logical refresh after each wake or defensive poll serves every local client" },
       { c: "(loop)", n: "every 60 s the server cycles the connection so CDNs can collapse concurrent tails" },

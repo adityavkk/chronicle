@@ -3,7 +3,7 @@
 
   <div class="stats">
     <div class="stat">
-      <strong>6 → 2</strong>
+      <strong>6 → 1</strong>
       <span>HGETALL calls for a five-byte GET</span>
     </div>
     <div class="stat">
@@ -34,9 +34,9 @@
         <span class="name">HGETALL</span>
         <div class="bars">
           <i class="old"><b style="width:100%"></b></i>
-          <i class="new"><b style="width:33.33%"></b></i>
+          <i class="new"><b style="width:16.67%"></b></i>
         </div>
-        <strong>6 / 2</strong>
+        <strong>6 / 1</strong>
       </div>
       <div class="metric">
         <span class="name">HSET</span>
@@ -69,9 +69,9 @@
         <span class="name">HGETALL</span>
         <div class="bars">
           <i class="old"><b style="width:100%"></b></i>
-          <i class="new"><b style="width:25%"></b></i>
+          <i class="new"><b style="width:12.5%"></b></i>
         </div>
-        <strong>8 / 2</strong>
+        <strong>8 / 1</strong>
       </div>
       <div class="metric">
         <span class="name">HSET</span>
@@ -108,11 +108,11 @@
   </div>
 
   <figcaption>
-    Both versions used the same local Redis 8.10.0 server with AOF enabled and
-    warmed Lua scripts. Unique ECHO markers isolated each request in MONITOR.
-    No replica was connected, so the primary offset is the local replication
-    signal. Bar lengths compare commands within each request and have no time
-    scale.
+    These endpoints combine the retained issue 7 base with the deterministic
+    issue 172 final command trace. Lua scripts were warmed and unique ECHO
+    markers isolated each request in MONITOR. The final persistent GET and SSE
+    attach also leave AOF size and the primary replication offset unchanged.
+    Bar lengths compare commands within each request and have no time scale.
   </figcaption>
 </figure>
 

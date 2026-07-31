@@ -340,6 +340,43 @@ func TestMemoryStore_LongPollStreamClosed(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_NotificationRegistrationPrecedesRead(t *testing.T) {
+	s := NewMemoryStore()
+	if _, _, err := s.Create("/registered", CreateOptions{ContentType: "text/plain"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	subscription, err := s.SubscribeNotifications(ctx, "/registered")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	initial, err := s.ReadPage(ctx, "/registered", NowOffset, ReadPageOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Append("/registered", []byte("wake"), AppendOptions{ContentType: "text/plain"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := subscription.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.ReadPage(ctx, "/registered", initial.Snapshot.Tail, ReadPageOptions{NoTouch: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 1 || string(page.Messages[0].Data) != "wake" {
+		t.Fatalf("registered read = %+v", page)
+	}
+	if err := subscription.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := subscription.Wait(ctx); !errors.Is(err, ErrNotificationSubscriptionClosed) {
+		t.Fatalf("Wait after Close = %v", err)
+	}
+}
+
 func TestMemoryStore_InitialData(t *testing.T) {
 	s := NewMemoryStore()
 	defer s.Close()

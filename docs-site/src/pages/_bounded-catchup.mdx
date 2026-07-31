@@ -100,6 +100,14 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   end-offset bound for an optional bulk read from the remaining bytes. It does
   not fetch a lookahead frame. The defaults are 1,024 frames and 1 MiB.
 
+  For the common root-owned range, the atomic script that loads and validates
+  root metadata now performs that bounded range read in the same invocation.
+  A small root page therefore uses one `EVALSHA` and one metadata `HGETALL`,
+  down from two of each. A pure typed Go classifier and its Lua mirror agree on
+  empty, inherited, and root-owned ranges. Inherited fork prefixes retain their
+  later source-slot reads so cross-slot ordering and fork visibility do not
+  change.
+
   <CatchupBudget />
 
   An earlier 512-reader branch sample recorded 29,436 MiB fetched into candidate
@@ -144,7 +152,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     n={2}
     fn="read.lua"
     loc="store/redis/scripts/read.lua:32-65"
-    role="Redis fetches one candidate, then optionally bulk-fetches the end-offset range that fits the remaining target. Both calls have a <code>LIMIT</code>."
+    role="After atomic root validation, Redis classifies the first range. A root-owned range fetches one candidate and optionally the end-offset range that fits the remaining target in that same script. Both calls have a <code>LIMIT</code>."
   >
     The script rejects a different incarnation before it returns data. It also
     refreshes access once at the first root snapshot only when the stream has a
@@ -169,9 +177,10 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     role="SSE catch-up starts with the page already captured by handleRead, then continues under the same snapshot before attaching to the shared stream hub."
   >
     Each page ends with a control event that carries the exact resume offset.
-    The hub subscribes and performs a no-touch durable refresh before it reports
-    ready, so no extra post-catch-up metadata read is needed. A reconnect starts
-    from the last complete control offset the client received.
+    A new hub confirms its notification subscription before this first page,
+    then seeds its identity and tail from the page. It reports ready without a
+    duplicate initial refresh. A reconnect starts from the last complete
+    control offset the client received.
   </Step>
 
   <Callout icon="alert" label="Interrupted response">

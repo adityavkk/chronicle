@@ -126,15 +126,38 @@ func (l *sseHubLease) close() {
 	})
 }
 
-func (h *Handler) acquireSSEHub(path string, snapshot store.ReadSnapshot, useBase64 bool) *sseHubLease {
+// acquireExistingSSEHub reserves a path's live hub before the caller reads its
+// own page. The later snapshot validation decides whether the hub belongs to
+// the same stream incarnation.
+func (h *Handler) acquireExistingSSEHub(path string) *sseHubLease {
 	metrics := h.sseMetrics()
 	h.sseHubs.mu.Lock()
 	defer h.sseHubs.mu.Unlock()
+	entry := h.sseHubs.hubs[path]
+	if entry == nil || !entry.hub.canAttemptServe() {
+		return nil
+	}
+	return h.leaseSSEHubLocked(path, entry, metrics)
+}
+
+// acquireSSEHub creates or reuses the hub for snapshot. A non-nil registered
+// subscription was confirmed before snapshot was captured. The hub takes
+// ownership when it creates the matching entry; otherwise it closes the
+// redundant registration after releasing the registry lock.
+func (h *Handler) acquireSSEHub(
+	path string,
+	snapshot store.ReadSnapshot,
+	useBase64 bool,
+	registered store.NotificationSubscription,
+) *sseHubLease {
+	metrics := h.sseMetrics()
+	h.sseHubs.mu.Lock()
 
 	if h.sseHubs.hubs == nil {
 		h.sseHubs.hubs = make(map[string]*sseHubEntry)
 	}
 	entry := h.sseHubs.hubs[path]
+	registrationTransferred := false
 	if entry == nil || !entry.hub.canServe(snapshot) {
 		ctx, cancel := context.WithCancel(context.Background())
 		replayLimit := positiveOr(h.SSEHubReplayBytes, defaultSSEHubReplayBytes)
@@ -142,30 +165,45 @@ func (h *Handler) acquireSSEHub(path string, snapshot store.ReadSnapshot, useBas
 		pollInterval := durationOr(h.SSEHubPollInterval, defaultSSEHubPoll)
 		pollInterval = capSSEHubPollForTTL(pollInterval, snapshot.TTLSeconds)
 		hub := &sseHub{
-			handler:      h,
-			path:         path,
-			contentType:  snapshot.ContentType,
-			useBase64:    useBase64,
-			replayLimit:  replayLimit,
-			batchLimit:   batchLimit,
-			pollInterval: pollInterval,
-			ctx:          ctx,
-			cancel:       cancel,
-			done:         make(chan struct{}),
-			ready:        make(chan struct{}),
-			current:      snapshot.Tail,
-			closed:       snapshot.Closed,
-			incarnation:  snapshot.Incarnation,
-			createdAt:    snapshot.CreatedAt,
-			watchers:     make(map[*sseHubWatcher]struct{}),
-			metrics:      metrics,
+			handler:             h,
+			path:                path,
+			contentType:         snapshot.ContentType,
+			useBase64:           useBase64,
+			replayLimit:         replayLimit,
+			batchLimit:          batchLimit,
+			pollInterval:        pollInterval,
+			ctx:                 ctx,
+			cancel:              cancel,
+			done:                make(chan struct{}),
+			ready:               make(chan struct{}),
+			current:             snapshot.Tail,
+			closed:              snapshot.Closed,
+			incarnation:         snapshot.Incarnation,
+			createdAt:           snapshot.CreatedAt,
+			watchers:            make(map[*sseHubWatcher]struct{}),
+			metrics:             metrics,
+			initialSubscription: registered,
 		}
+		registrationTransferred = registered != nil
 		entry = &sseHubEntry{hub: hub}
 		h.sseHubs.hubs[path] = entry
 		metrics.SSEHubActive(1)
 		go hub.run()
 	}
 
+	lease := h.leaseSSEHubLocked(path, entry, metrics)
+	h.sseHubs.mu.Unlock()
+	if registered != nil && !registrationTransferred {
+		_ = registered.Close()
+	}
+	return lease
+}
+
+func (h *Handler) leaseSSEHubLocked(
+	path string,
+	entry *sseHubEntry,
+	metrics SSEMetrics,
+) *sseHubLease {
 	watcher := entry.hub.addWatcher()
 	entry.refs++
 	metrics.SSEClientActive(1)
@@ -229,19 +267,20 @@ func capSSEHubPollForTTL(poll time.Duration, ttlSeconds *int64) time.Duration {
 }
 
 type sseHub struct {
-	handler      *Handler
-	path         string
-	contentType  string
-	useBase64    bool
-	replayLimit  int
-	batchLimit   int
-	pollInterval time.Duration
-	ctx          context.Context
-	cancel       context.CancelFunc
-	done         chan struct{}
-	ready        chan struct{}
-	readyOnce    sync.Once
-	metrics      SSEMetrics
+	handler             *Handler
+	path                string
+	contentType         string
+	useBase64           bool
+	replayLimit         int
+	batchLimit          int
+	pollInterval        time.Duration
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	done                chan struct{}
+	ready               chan struct{}
+	readyOnce           sync.Once
+	metrics             SSEMetrics
+	initialSubscription store.NotificationSubscription
 
 	mu          sync.Mutex
 	readyErr    error
@@ -295,25 +334,46 @@ func (h *sseHub) run() {
 	} else {
 		subscriber, ok = h.handler.Store.(store.NotificationSubscriber)
 	}
+	initial := h.initialSubscription
+	h.initialSubscription = nil
 	if ok {
-		h.runPersistent(subscriber)
+		h.runPersistent(subscriber, initial)
+		return
+	}
+	if initial != nil {
+		_ = initial.Close()
+		h.markReady(errors.New("SSE hub has a registered subscription without a notification provider"))
 		return
 	}
 	h.runWaitLoop()
 }
 
-func (h *sseHub) runPersistent(subscriber store.NotificationSubscriber) {
+func (h *sseHub) runPersistent(
+	subscriber store.NotificationSubscriber,
+	initial store.NotificationSubscription,
+) {
+	defer func() {
+		if initial != nil {
+			_ = initial.Close()
+		}
+	}()
 	retry := sseHubRetryMin
 	for h.ctx.Err() == nil {
-		sub, err := subscriber.SubscribeNotifications(h.ctx, h.path)
-		if err != nil {
-			h.metrics.SSESubscriptionEvent("subscribe_error")
-			h.logRetry("subscribe", err)
-			if !sleepContext(h.ctx, retry) {
-				return
+		preconfirmed := initial != nil
+		sub := initial
+		initial = nil
+		if sub == nil {
+			var err error
+			sub, err = subscriber.SubscribeNotifications(h.ctx, h.path)
+			if err != nil {
+				h.metrics.SSESubscriptionEvent("subscribe_error")
+				h.logRetry("subscribe", err)
+				if !sleepContext(h.ctx, retry) {
+					return
+				}
+				retry = min(retry*2, sseHubRetryMax)
+				continue
 			}
-			retry = min(retry*2, sseHubRetryMax)
-			continue
 		}
 		h.metrics.SSESubscriptionEvent("opened")
 		h.metrics.SSESubscriptionActive(1)
@@ -326,18 +386,20 @@ func (h *sseHub) runPersistent(subscriber store.NotificationSubscriber) {
 			})
 		}
 
-		if err := h.refreshNoTouch(); err != nil {
-			closeSub()
-			if h.handleReadError(err) {
-				h.markReady(err)
-				return
+		if !preconfirmed {
+			if err := h.refreshNoTouch(); err != nil {
+				closeSub()
+				if h.handleReadError(err) {
+					h.markReady(err)
+					return
+				}
+				h.metrics.SSESubscriptionEvent("read_error")
+				if !sleepContext(h.ctx, retry) {
+					return
+				}
+				retry = min(retry*2, sseHubRetryMax)
+				continue
 			}
-			h.metrics.SSESubscriptionEvent("read_error")
-			if !sleepContext(h.ctx, retry) {
-				return
-			}
-			retry = min(retry*2, sseHubRetryMax)
-			continue
 		}
 		retry = sseHubRetryMin
 		h.markReady(nil)
@@ -698,6 +760,12 @@ func (h *sseHub) canServe(snapshot store.ReadSnapshot) bool {
 		CreatedAt:   h.createdAt,
 	}
 	return h.terminalErr == nil && store.SameReadStream(current, snapshot)
+}
+
+func (h *sseHub) canAttemptServe() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.terminalErr == nil
 }
 
 func (h *sseHub) fail(err error) {

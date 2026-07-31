@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,14 +23,61 @@ import (
 type sseRedisBenchmarkStore struct {
 	*redisstore.Store
 	reads atomic.Int64
+	evals atomic.Int64
+}
+
+func (s *sseRedisBenchmarkStore) DialHook(next goredis.DialHook) goredis.DialHook {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return next(ctx, network, addr)
+	}
+}
+
+func (s *sseRedisBenchmarkStore) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook {
+	return func(ctx context.Context, cmd goredis.Cmder) error {
+		err := next(ctx, cmd)
+		if strings.EqualFold(cmd.Name(), "evalsha") {
+			s.evals.Add(1)
+		}
+		return err
+	}
+}
+
+func (s *sseRedisBenchmarkStore) ProcessPipelineHook(
+	next goredis.ProcessPipelineHook,
+) goredis.ProcessPipelineHook {
+	return func(ctx context.Context, commands []goredis.Cmder) error {
+		err := next(ctx, commands)
+		for _, command := range commands {
+			if strings.EqualFold(command.Name(), "evalsha") {
+				s.evals.Add(1)
+			}
+		}
+		return err
+	}
 }
 
 func (s *sseRedisBenchmarkStore) Read(
 	path string,
 	offset store.Offset,
 ) ([]store.Message, bool, error) {
-	s.reads.Add(1)
-	return s.Store.Read(path, offset)
+	messages, upToDate, err := s.Store.Read(path, offset)
+	if err == nil {
+		s.reads.Add(1)
+	}
+	return messages, upToDate, err
+}
+
+func (s *sseRedisBenchmarkStore) ReadPage(
+	ctx context.Context,
+	path string,
+	offset store.Offset,
+	opts store.ReadPageOptions,
+) (store.ReadPage, error) {
+	page, err := s.Store.ReadPage(ctx, path, offset, opts)
+	if err == nil {
+		s.reads.Add(1)
+	}
+	return page, err
 }
 
 // BenchmarkSSEHubReadAmplification1000Clients is the cheap, exact-counter guard
@@ -94,7 +142,7 @@ func BenchmarkSSEHubReadAmplification1000Clients(b *testing.B) {
 		}
 		bodies = append(bodies, response.Body)
 	}
-	waitForBenchmarkReadCount(b, &st.reads, clients+1)
+	waitForBenchmarkReadCount(b, &st.reads, clients)
 	waitForBenchmarkReadsToSettle(b, &st.reads)
 
 	before, err := redisCommandCounters(ctx, client)
@@ -135,6 +183,189 @@ func BenchmarkSSEHubReadAmplification1000Clients(b *testing.B) {
 	b.ReportMetric(ratio, "redis_reads/publish")
 	if ratio > 1.2 {
 		b.Fatalf("Redis read amplification = %.6f, want <= 1.2", ratio)
+	}
+}
+
+// BenchmarkRedisLiveReadModes measures the live-mode decision gate separately
+// from root-frame fusion. Read counts are exact: register-first offset=now
+// long-poll needs an initial and a final page, while a new SSE hub is seeded by
+// its single authoritative client page.
+func BenchmarkRedisLiveReadModes(b *testing.B) {
+	b.Run("long-poll-timeout", func(b *testing.B) {
+		st, h, _ := newRedisLiveBenchmarkHarness(b)
+		h.LongPollTimeout = 2 * time.Millisecond
+		mustCreateBenchmarkStream(b, st, "/long-poll-timeout", nil)
+		before := st.reads.Load()
+		beforeEvals := st.evals.Load()
+		b.ResetTimer()
+		for b.Loop() {
+			recorder := do(
+				h,
+				http.MethodGet,
+				"/long-poll-timeout?offset=now&live=long-poll",
+				nil,
+				nil,
+			)
+			if recorder.Code != http.StatusNoContent {
+				b.Fatalf("status = %d, want 204", recorder.Code)
+			}
+		}
+		b.StopTimer()
+		reportLiveBenchmarkReads(b, st.reads.Load()-before, 2)
+		reportLiveBenchmarkScripts(b, st.evals.Load()-beforeEvals, 2)
+	})
+
+	b.Run("long-poll-wake", func(b *testing.B) {
+		st, h, _ := newRedisLiveBenchmarkHarness(b)
+		h.LongPollTimeout = time.Second
+		mustCreateBenchmarkStream(b, st, "/long-poll-wake", nil)
+		before := st.reads.Load()
+		beforeEvals := st.evals.Load()
+		b.ResetTimer()
+		for b.Loop() {
+			readsBefore := st.reads.Load()
+			evalsBefore := st.evals.Load()
+			result := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				result <- do(
+					h,
+					http.MethodGet,
+					"/long-poll-wake?offset=now&live=long-poll",
+					nil,
+					nil,
+				)
+			}()
+			waitForBenchmarkReadCount(b, &st.reads, readsBefore+1)
+			waitForBenchmarkReadCount(b, &st.evals, evalsBefore+1)
+			if _, err := st.Append(
+				"/long-poll-wake",
+				[]byte("x"),
+				store.AppendOptions{ContentType: "text/plain"},
+			); err != nil {
+				b.Fatal(err)
+			}
+			recorder := <-result
+			if recorder.Code != http.StatusOK || recorder.Body.String() != "x" {
+				b.Fatalf("response = %d %q, want 200 x", recorder.Code, recorder.Body.String())
+			}
+		}
+		b.StopTimer()
+		reportLiveBenchmarkReads(b, st.reads.Load()-before, 2)
+		reportLiveBenchmarkScripts(b, st.evals.Load()-beforeEvals-int64(b.N), 2)
+	})
+
+	for _, tc := range []struct {
+		name    string
+		initial []byte
+		offset  string
+	}{
+		{name: "sse-initial-catchup", initial: []byte("frame"), offset: "-1"},
+		{name: "sse-empty-new-hub", offset: "now"},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			st, _, server := newRedisLiveBenchmarkHarness(b)
+			client := server.Client()
+			before := st.reads.Load()
+			beforeEvals := st.evals.Load()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				path := fmt.Sprintf("/%s-%d", tc.name, i)
+				mustCreateBenchmarkStream(b, st, path, tc.initial)
+				requestCtx, cancel := context.WithCancel(context.Background())
+				request, err := http.NewRequestWithContext(
+					requestCtx,
+					http.MethodGet,
+					server.URL+path+"?offset="+tc.offset+"&live=sse",
+					nil,
+				)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.StartTimer()
+				response, err := client.Do(request) //nolint:bodyclose // closed below on every iteration
+				if err != nil {
+					b.Fatal(err)
+				}
+				if response.StatusCode != http.StatusOK {
+					b.Fatalf("status = %d, want 200", response.StatusCode)
+				}
+				cancel()
+				_ = response.Body.Close()
+			}
+			b.StopTimer()
+			waitForBenchmarkReadsToSettle(b, &st.reads)
+			reportLiveBenchmarkReads(b, st.reads.Load()-before, 1)
+			reportLiveBenchmarkScripts(b, st.evals.Load()-beforeEvals-int64(b.N), 1)
+		})
+	}
+}
+
+func newRedisLiveBenchmarkHarness(
+	b *testing.B,
+) (*sseRedisBenchmarkStore, *Handler, *httptest.Server) {
+	b.Helper()
+	rawURL := os.Getenv("REDIS_URL")
+	if rawURL == "" {
+		b.Skip("REDIS_URL is required for Redis live-read benchmarks")
+	}
+	options, err := goredis.ParseURL(rawURL)
+	if err != nil {
+		b.Fatal(err)
+	}
+	client := goredis.NewClient(options)
+	ctx := context.Background()
+	if err := client.Ping(ctx).Err(); err != nil {
+		b.Fatalf("Redis ping: %v", err)
+	}
+	if err := client.FlushDB(ctx).Err(); err != nil {
+		b.Fatalf("Redis flush: %v", err)
+	}
+	st := &sseRedisBenchmarkStore{}
+	client.AddHook(st)
+	st.Store = redisstore.New(client, redisstore.Options{})
+	h := newHubTestHandler(st)
+	h.SSEHubPollInterval = time.Hour
+	server := httptest.NewServer(h)
+	b.Cleanup(func() {
+		server.Close()
+		_ = st.Close()
+	})
+	return st, h, server
+}
+
+func mustCreateBenchmarkStream(
+	b *testing.B,
+	st *sseRedisBenchmarkStore,
+	path string,
+	initial []byte,
+) {
+	b.Helper()
+	if _, created, err := st.Create(path, store.CreateOptions{
+		ContentType: "text/plain",
+		InitialData: initial,
+	}); err != nil {
+		b.Fatal(err)
+	} else if !created {
+		b.Fatalf("stream %q already exists", path)
+	}
+}
+
+func reportLiveBenchmarkReads(b *testing.B, reads, wantPerOp int64) {
+	b.Helper()
+	ratio := float64(reads) / float64(b.N)
+	b.ReportMetric(ratio, "redis_pages/op")
+	if reads != wantPerOp*int64(b.N) {
+		b.Fatalf("Redis pages = %d over %d operations, want %d per operation", reads, b.N, wantPerOp)
+	}
+}
+
+func reportLiveBenchmarkScripts(b *testing.B, scripts, wantPerOp int64) {
+	b.Helper()
+	ratio := float64(scripts) / float64(b.N)
+	b.ReportMetric(ratio, "redis_scripts/op")
+	if scripts != wantPerOp*int64(b.N) {
+		b.Fatalf("Redis scripts = %d over %d operations, want %d per operation", scripts, b.N, wantPerOp)
 	}
 }
 

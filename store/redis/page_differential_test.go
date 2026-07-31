@@ -188,11 +188,263 @@ func TestReadPageOneFrameUsesOneRangeCall(t *testing.T) {
 	if len(page.Messages) != 1 || !page.UpToDate {
 		t.Fatalf("page = %+v, want one complete frame", page)
 	}
+	if page.Stats.RedisScriptInvokes != 1 {
+		t.Fatalf("Redis script invokes = %d, want 1", page.Stats.RedisScriptInvokes)
+	}
 	if calls := redisCommandCalls(t, subject.client, "zrangebylex"); calls != 1 {
 		t.Fatalf("ZRANGEBYLEX calls = %d, want 1 for a one-frame page", calls)
 	} else {
 		t.Logf("one-frame page ZRANGEBYLEX calls=%d", calls)
 	}
+}
+
+func BenchmarkReadPageRootOwnedOneFrame(b *testing.B) {
+	subject := testStoreFor(b)
+	path := testPath("benchmark-root-owned-one-frame")
+	mustCreateBenchmark(b, subject, path, store.CreateOptions{
+		ContentType: "application/octet-stream",
+		InitialData: []byte("one frame"),
+	})
+	ctx := context.Background()
+	readOpts := store.ReadPageOptions{
+		TargetBytes: store.DefaultReadPageBytes,
+		MaxFrames:   store.DefaultReadPageFrames,
+	}
+	if _, err := subject.ReadPage(ctx, path, store.ZeroOffset, readOpts); err != nil {
+		b.Fatal(err)
+	}
+
+	var scripts int64
+	b.ResetTimer()
+	for b.Loop() {
+		page, err := subject.ReadPage(ctx, path, store.ZeroOffset, readOpts)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(page.Messages) != 1 || !page.UpToDate {
+			b.Fatalf("page = %+v, want one complete frame", page)
+		}
+		scripts += int64(page.Stats.RedisScriptInvokes)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(scripts)/float64(b.N), "redis_scripts/op")
+	if scripts != int64(b.N) {
+		b.Fatalf("Redis script invokes = %d over %d reads, want one per read", scripts, b.N)
+	}
+}
+
+// BenchmarkReadPageShapes covers the bounded-page shapes whose command count
+// can change when root validation and frame selection are fused. Setup is kept
+// outside the timed loop; every case reports both client-observed script calls
+// and Redis's cumulative EVALSHA execution time.
+func BenchmarkReadPageShapes(b *testing.B) {
+	type readCase struct {
+		path         string
+		offset       store.Offset
+		opts         store.ReadPageOptions
+		wantMessages int
+		wantScripts  int64
+	}
+
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.B, *Store) readCase
+	}{
+		{
+			name: "near-byte-target",
+			setup: func(b *testing.B, subject *Store) readCase {
+				const target = store.DefaultReadPageBytes
+				path := testPath("benchmark-near-byte-target")
+				mustCreateBenchmark(b, subject, path, store.CreateOptions{
+					ContentType: "application/octet-stream",
+					InitialData: bytes.Repeat([]byte("x"), target-128),
+				})
+				return readCase{
+					path:         path,
+					opts:         store.ReadPageOptions{TargetBytes: target},
+					wantMessages: 1,
+					wantScripts:  1,
+				}
+			},
+		},
+		{
+			name: "many-small-frames-at-cap",
+			setup: func(b *testing.B, subject *Store) readCase {
+				const frameCap = 128
+				values := make([]string, frameCap)
+				for i := range values {
+					values[i] = "x"
+				}
+				body, err := json.Marshal(values)
+				if err != nil {
+					b.Fatal(err)
+				}
+				path := testPath("benchmark-many-small-frames")
+				mustCreateBenchmark(b, subject, path, store.CreateOptions{
+					ContentType: "application/json",
+					InitialData: body,
+				})
+				return readCase{
+					path: path,
+					opts: store.ReadPageOptions{
+						TargetBytes: store.DefaultReadPageBytes,
+						MaxFrames:   frameCap,
+					},
+					wantMessages: frameCap,
+					wantScripts:  1,
+				}
+			},
+		},
+		{
+			name: "empty-tail",
+			setup: func(b *testing.B, subject *Store) readCase {
+				path := testPath("benchmark-empty-tail")
+				meta := mustCreateBenchmark(b, subject, path, store.CreateOptions{
+					ContentType: "application/octet-stream",
+					InitialData: []byte("frame"),
+				})
+				return readCase{path: path, offset: meta.CurrentOffset, wantScripts: 1}
+			},
+		},
+		{
+			name: "root-owned-fork",
+			setup: func(b *testing.B, subject *Store) readCase {
+				sourcePath := testPath("benchmark-root-fork-source")
+				source := mustCreateBenchmark(b, subject, sourcePath, store.CreateOptions{
+					ContentType: "application/octet-stream",
+					InitialData: []byte("source"),
+				})
+				forkPath := testPath("benchmark-root-fork")
+				forkOffset := source.CurrentOffset
+				mustCreateBenchmark(b, subject, forkPath, store.CreateOptions{
+					ContentType: "application/octet-stream",
+					ForkedFrom:  sourcePath,
+					ForkOffset:  &forkOffset,
+					InitialData: []byte("root"),
+				})
+				return readCase{
+					path:         forkPath,
+					offset:       forkOffset,
+					wantMessages: 1,
+					wantScripts:  1,
+				}
+			},
+		},
+		{
+			name: "inherited-fork",
+			setup: func(b *testing.B, subject *Store) readCase {
+				sourcePath := testPath("benchmark-inherited-source")
+				source := mustCreateBenchmark(b, subject, sourcePath, store.CreateOptions{
+					ContentType: "application/octet-stream",
+					InitialData: []byte("source"),
+				})
+				forkPath := testPath("benchmark-inherited-fork")
+				forkOffset := source.CurrentOffset
+				mustCreateBenchmark(b, subject, forkPath, store.CreateOptions{
+					ContentType: "application/octet-stream",
+					ForkedFrom:  sourcePath,
+					ForkOffset:  &forkOffset,
+				})
+				return readCase{
+					path:         forkPath,
+					wantMessages: 1,
+					wantScripts:  2,
+				}
+			},
+		},
+		{
+			name: "sliding-first-page",
+			setup: func(b *testing.B, subject *Store) readCase {
+				ttl := int64(300)
+				path := testPath("benchmark-sliding-first")
+				mustCreateBenchmark(b, subject, path, store.CreateOptions{
+					ContentType: "application/octet-stream",
+					InitialData: []byte("frame"),
+					TTLSeconds:  &ttl,
+				})
+				return readCase{path: path, wantMessages: 1, wantScripts: 1}
+			},
+		},
+		{
+			name: "sliding-continuation",
+			setup: func(b *testing.B, subject *Store) readCase {
+				ttl := int64(300)
+				path := testPath("benchmark-sliding-continuation")
+				mustCreateBenchmark(b, subject, path, store.CreateOptions{
+					ContentType: "application/json",
+					InitialData: []byte(`["first","second"]`),
+					TTLSeconds:  &ttl,
+				})
+				first, err := subject.ReadPage(
+					context.Background(),
+					path,
+					store.ZeroOffset,
+					store.ReadPageOptions{MaxFrames: 1},
+				)
+				if err != nil {
+					b.Fatal(err)
+				}
+				return readCase{
+					path:         path,
+					offset:       first.NextOffset,
+					opts:         store.ReadPageOptions{MaxFrames: 1, Snapshot: &first.Snapshot},
+					wantMessages: 1,
+					wantScripts:  1,
+				}
+			},
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			subject := testStoreFor(b)
+			read := tc.setup(b, subject)
+			ctx := context.Background()
+			if _, err := subject.ReadPage(ctx, read.path, read.offset, read.opts); err != nil {
+				b.Fatal(err)
+			}
+			beforeUsec := redisCommandUsec(b, subject.client, "evalsha")
+			var scripts int64
+			b.ResetTimer()
+			for b.Loop() {
+				page, err := subject.ReadPage(ctx, read.path, read.offset, read.opts)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(page.Messages) != read.wantMessages {
+					b.Fatalf("messages = %d, want %d", len(page.Messages), read.wantMessages)
+				}
+				scripts += int64(page.Stats.RedisScriptInvokes)
+			}
+			b.StopTimer()
+			afterUsec := redisCommandUsec(b, subject.client, "evalsha")
+			b.ReportMetric(float64(scripts)/float64(b.N), "redis_scripts/op")
+			b.ReportMetric(float64(afterUsec-beforeUsec)/float64(b.N), "redis_evalsha_usec/op")
+			if scripts != read.wantScripts*int64(b.N) {
+				b.Fatalf(
+					"Redis script invokes = %d over %d reads, want %d per read",
+					scripts,
+					b.N,
+					read.wantScripts,
+				)
+			}
+		})
+	}
+}
+
+func mustCreateBenchmark(
+	b *testing.B,
+	subject *Store,
+	path string,
+	opts store.CreateOptions,
+) *store.StreamMetadata {
+	b.Helper()
+	meta, created, err := subject.Create(path, opts)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if !created {
+		b.Fatalf("stream %q already exists", path)
+	}
+	return meta
 }
 
 func redisCommandCalls(t *testing.T, client goredis.UniversalClient, command string) int64 {
@@ -217,6 +469,33 @@ func redisCommandCalls(t *testing.T, client goredis.UniversalClient, command str
 				t.Fatalf("parse %s calls %q: %v", command, raw, parseErr)
 			}
 			return calls
+		}
+	}
+	return 0
+}
+
+func redisCommandUsec(tb testing.TB, client goredis.UniversalClient, command string) int64 {
+	tb.Helper()
+	info, err := client.Info(context.Background(), "commandstats").Result()
+	if err != nil {
+		tb.Fatalf("Redis commandstats: %v", err)
+	}
+	prefix := "cmdstat_" + strings.ToLower(command) + ":"
+	for _, line := range strings.Split(info, "\r\n") {
+		rest, ok := strings.CutPrefix(line, prefix)
+		if !ok {
+			continue
+		}
+		for _, field := range strings.Split(rest, ",") {
+			raw, ok := strings.CutPrefix(field, "usec=")
+			if !ok {
+				continue
+			}
+			usec, parseErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil {
+				tb.Fatalf("parse %s usec %q: %v", command, raw, parseErr)
+			}
+			return usec
 		}
 	}
 	return 0

@@ -175,12 +175,17 @@ MUST and its atomic producer-state+append SHOULD:
 
 Reads use `read.lua`. One invocation loads metadata once and returns the same
 field map in its reply. A root invocation captures or validates the typed
-`ReadSnapshot`. A range invocation validates one root or inherited segment and
-returns bounded frames. Neither invocation reads the producer hash. A valid
+`ReadSnapshot`, then atomically classifies the first chronological range as
+empty, inherited, or root-owned. The pure typed Go classifier is the oracle;
+Lua mirrors its full `ReadSeq` and byte-offset comparison without converting a
+`uint64` component to a Lua number. For a root-owned range, that same invocation
+returns the bounded frames through the captured or fixed snapshot tail. Only an
+inherited fork range needs later cross-stream invocations, in chronological
+source-to-child order. No read invocation reads the producer hash. A valid
 non-expiring or absolute-expiry-only read performs no Redis write. Only the first
 root snapshot of a logical sliding-TTL read updates `accessedAtNs` and its key
 TTL. Continuations, long-poll rechecks, inherited ranges, sealing, repair, and
-SSE attach refreshes are no-touch. Lazy expiry cleanup and one-time legacy
+SSE race rechecks are no-touch. Lazy expiry cleanup and one-time legacy
 incarnation migration are explicit exceptions.
 
 Tradeoff vs `MULTI/EXEC`+`WATCH`: optimistic transactions would need
@@ -199,9 +204,10 @@ NOSCRIPT→full-source-EVAL reload. See
 
 ### 4.5 Live tailing: pub/sub with a re-check, plus poll fallback
 
-The HTTP handler first calls `ReadPage`. That page is the logical client access
-and supplies the response content type, captured tail, closed state,
-incarnation, and next offset. If a long-poll is caught up, `WaitForPage` then:
+For a numeric long-poll offset, the HTTP handler first calls `ReadPage`. That
+page is the logical client access and supplies the response content type,
+captured tail, closed state, incarnation, and next offset. If it is caught up,
+`WaitForPage` then:
 
 1. Subscribes to `ds:notify:{<path>}` and confirms the subscription.
 2. Captures a fresh no-touch page and requires the same stream incarnation as
@@ -216,18 +222,34 @@ incarnation, and next offset. If a long-poll is caught up, `WaitForPage` then:
 compatibility. Maintained backends and the HTTP handler use the typed
 `PageWaiter` path.
 
+`offset=now` has no historical range to decide before registration. When the
+optional `NotificationSubscriber` capability is available, the handler instead
+confirms the subscription first and then performs the one authoritative root
+page. Let that atomic page be `R`: an append before `R` is in its captured tail,
+and an append after `R` is covered by the confirmed subscription. The handler
+therefore blocks without the otherwise-required immediate attach recheck. A
+wake, one-second defensive poll, or timeout still ends in a no-touch durable
+page fenced to the incarnation captured by `R`. Stores without the optional
+capability retain the compatibility path above.
+
 Keyspace notifications were rejected: they require `notify-keyspace-events`
 server config that managed Redis frequently locks down, and they fire per-command
 rather than per-protocol-event. Plain `PUBLISH` from the mutation scripts is
 explicit and config-free.
 
-SSE starts with the same first `ReadPage` already held by `handleRead`. The
-shared stream hub subscribes and performs a no-touch durable refresh from that
-snapshot tail before it reports ready. The handler emits its existing first
-page, continues under the same snapshot, and attaches at the last flushed
-control offset. It does not perform another initial read or a metadata reload
-after catch-up. The hub then performs one logical durable refresh for all local
-clients after each wake or defensive poll.
+SSE reserves an existing compatible stream hub before the client page so the
+hub cannot disappear during capture. For a new hub, the handler confirms one
+notification subscription first and then captures the authoritative
+`ReadPage`. That page seeds the hub's incarnation, content type, tail, and
+closed state, and the hub takes ownership of the already-confirmed
+subscription. It reports ready without the former duplicate empty no-touch
+refresh. The handler emits its existing first page, continues under the same
+snapshot, and attaches at the last flushed control offset. A concurrent hub
+creator may win; the redundant subscription is then closed. A reserved hub
+from an earlier delete-and-recreate lifetime is released, followed by a new
+subscription and a no-touch page fenced to the first logical read. The hub
+performs one logical durable refresh for all local clients after each wake or
+defensive poll.
 
 ### 4.6 TTL and expiry
 
