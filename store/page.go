@@ -48,6 +48,53 @@ type ReadSnapshot struct {
 	StoreToken string
 }
 
+// RootReadRange identifies which stream owns the first chronological range of
+// a root read. Redis mirrors this decision inside read.lua after atomically
+// loading root metadata.
+type RootReadRange uint8
+
+const (
+	// RootReadRangeEmpty means the requested range has no bytes inside the fixed
+	// response tail, including offset=now, at-tail, and beyond-tail reads.
+	RootReadRangeEmpty RootReadRange = iota
+	// RootReadRangeInherited means a fork request begins below its divergence
+	// point and must keep traversing the source chain.
+	RootReadRangeInherited
+	// RootReadRangeOwned means the root's own message ZSET owns the complete
+	// nonempty requested range.
+	RootReadRangeOwned
+)
+
+// ClassifyRootReadRange is the pure oracle for first-page root ownership. It
+// compares the complete typed offset, including ReadSeq.
+func ClassifyRootReadRange(
+	offset Offset,
+	tail Offset,
+	forkedFrom string,
+	forkOffset Offset,
+) RootReadRange {
+	if offset.IsNow() || !offset.LessThan(tail) {
+		return RootReadRangeEmpty
+	}
+	if forkedFrom != "" && offset.LessThan(forkOffset) {
+		return RootReadRangeInherited
+	}
+	return RootReadRangeOwned
+}
+
+func (r RootReadRange) String() string {
+	switch r {
+	case RootReadRangeEmpty:
+		return "empty"
+	case RootReadRangeInherited:
+		return "inherited"
+	case RootReadRangeOwned:
+		return "root"
+	default:
+		return "unknown"
+	}
+}
+
 // ReadSnapshotFromMetadata projects the immutable state needed by readers.
 // Producer and writer-sequence state deliberately do not cross this boundary.
 func ReadSnapshotFromMetadata(meta *StreamMetadata) ReadSnapshot {

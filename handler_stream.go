@@ -12,6 +12,8 @@ import (
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
+const liveReadPollInterval = time.Second
+
 // ReadMetrics receives bounded catch-up observations. Implementations must use
 // bounded-cardinality labels.
 type ReadMetrics interface {
@@ -316,6 +318,91 @@ func (h *Handler) waitForPage(
 		return store.ReadWaitResult{}, store.ErrReadSnapshotChanged
 	}
 	return store.ReadWaitResult{Page: page, TimedOut: timedOut}, nil
+}
+
+func (h *Handler) subscribeNotifications(
+	ctx context.Context,
+	path string,
+) (store.NotificationSubscription, bool, error) {
+	var subscriber store.NotificationSubscriber
+	var ok bool
+	if provider, hasProvider := h.Store.(store.NotificationSubscriberProvider); hasProvider {
+		subscriber, ok = provider.NotificationSubscriber()
+	} else {
+		subscriber, ok = h.Store.(store.NotificationSubscriber)
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	subscription, err := subscriber.SubscribeNotifications(ctx, path)
+	if err != nil {
+		return nil, true, err
+	}
+	return subscription, true, nil
+}
+
+// waitForRegisteredPage waits on a notification registration that was
+// confirmed before the caller's authoritative first page. It deliberately has
+// no immediate attach recheck: an append before that page is in its captured
+// tail, while an append after it is covered by the registration. Wake, poll,
+// and timeout results remain fresh no-touch durable pages.
+func (h *Handler) waitForRegisteredPage(
+	ctx context.Context,
+	reader store.PageReader,
+	path string,
+	offset store.Offset,
+	initial store.ReadSnapshot,
+	timeout time.Duration,
+	opts store.ReadPageOptions,
+	subscription store.NotificationSubscription,
+) (store.ReadWaitResult, error) {
+	recheck := func() (store.ReadPage, bool, error) {
+		recheckOpts := opts
+		recheckOpts.Snapshot = nil
+		recheckOpts.NoTouch = true
+		page, err := reader.ReadPage(ctx, path, offset, recheckOpts)
+		if err != nil {
+			return store.ReadPage{}, false, err
+		}
+		if !store.SameReadStream(initial, page.Snapshot) {
+			releaseReadSnapshot(reader, path, page.Snapshot)
+			return store.ReadPage{}, false, store.ErrReadSnapshotChanged
+		}
+		done := len(page.Messages) > 0 ||
+			(page.Snapshot.Closed && offset.Equal(page.Snapshot.Tail))
+		return page, done, nil
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			page, done, err := recheck()
+			if err != nil {
+				return store.ReadWaitResult{}, err
+			}
+			return store.ReadWaitResult{Page: page, TimedOut: !done}, nil
+		}
+		waitFor := min(remaining, liveReadPollInterval)
+		waitCtx, cancel := context.WithTimeout(ctx, waitFor)
+		_, waitErr := subscription.Wait(waitCtx)
+		cancel()
+		if err := ctx.Err(); err != nil {
+			return store.ReadWaitResult{}, err
+		}
+		if waitErr != nil && !errors.Is(waitErr, context.DeadlineExceeded) {
+			return store.ReadWaitResult{}, waitErr
+		}
+
+		page, done, err := recheck()
+		if err != nil {
+			return store.ReadWaitResult{}, err
+		}
+		if done || !time.Now().Before(deadline) {
+			return store.ReadWaitResult{Page: page, TimedOut: !done}, nil
+		}
+		releaseReadSnapshot(reader, path, page.Snapshot)
+	}
 }
 
 // streamCatchupResponse writes each storage page directly to the response.

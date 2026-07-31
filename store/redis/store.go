@@ -658,9 +658,10 @@ type redisReadSegment struct {
 }
 
 type redisPageScriptResult struct {
-	meta     *store.StreamMetadata
-	messages []store.Message
-	stats    store.ReadPageStats
+	meta      *store.StreamMetadata
+	messages  []store.Message
+	stats     store.ReadPageStats
+	rootRange *store.RootReadRange
 }
 
 // ReadPage returns one bounded, frame-aligned page for a fixed root snapshot.
@@ -673,8 +674,11 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 	}
 
 	expected := ""
+	var fixedRootTail *store.Offset
 	if opts.Snapshot != nil {
 		expected = opts.Snapshot.Incarnation
+		tail := opts.Snapshot.Tail
+		fixedRootTail = &tail
 	}
 	root, err := s.runReadPageScript(
 		ctx,
@@ -685,10 +689,11 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 		opts.MaxFrames,
 		expected,
 		true,
-		false,
 		true,
 		false,
 		!opts.NoTouch && opts.Snapshot == nil,
+		fixedRootTail,
+		offset.IsNow(),
 	)
 	if err != nil {
 		return store.ReadPage{}, err
@@ -704,6 +709,23 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 	} else {
 		snapshot = *opts.Snapshot
 	}
+	wantRootRange := store.ClassifyRootReadRange(
+		offset,
+		snapshot.Tail,
+		root.meta.ForkedFrom,
+		root.meta.ForkOffset,
+	)
+	if root.rootRange == nil || *root.rootRange != wantRootRange {
+		got := "segment"
+		if root.rootRange != nil {
+			got = root.rootRange.String()
+		}
+		return store.ReadPage{}, fmt.Errorf(
+			"read.lua: root range decision %q disagrees with Go oracle %q",
+			got,
+			wantRootRange,
+		)
+	}
 
 	readOffset := offset
 	if readOffset.IsNow() {
@@ -712,16 +734,24 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 	page := store.ReadPage{
 		NextOffset: readOffset,
 		Snapshot:   snapshot,
-		Stats: store.ReadPageStats{
-			RequestedBytes:     opts.TargetBytes,
-			RedisScriptTime:    root.stats.RedisScriptTime,
-			RedisScriptInvokes: root.stats.RedisScriptInvokes,
-		},
+		Stats:      root.stats,
 	}
 
-	segments, err := s.readSegments(ctx, path, root.meta, readOffset, snapshot.Tail, true)
-	if err != nil {
-		return store.ReadPage{}, err
+	var segments []redisReadSegment
+	switch wantRootRange {
+	case store.RootReadRangeEmpty:
+		// The fixed snapshot contains no bytes after the requested offset.
+	case store.RootReadRangeOwned:
+		if len(root.messages) == 0 {
+			return store.ReadPage{}, store.ErrReadDataMissing
+		}
+		page.Messages = append(page.Messages, root.messages...)
+		page.NextOffset = root.messages[len(root.messages)-1].Offset
+	case store.RootReadRangeInherited:
+		segments, err = s.readSegments(ctx, path, root.meta, readOffset, snapshot.Tail, true)
+		if err != nil {
+			return store.ReadPage{}, err
+		}
 	}
 	for _, segment := range segments {
 		if page.Stats.ReturnedBytes >= opts.TargetBytes || len(page.Messages) >= opts.MaxFrames {
@@ -738,9 +768,10 @@ func (s *Store) ReadPage(ctx context.Context, path string, offset store.Offset, 
 			remainingFrames,
 			segment.incarnation,
 			false,
-			true,
 			len(page.Messages) == 0,
 			segment.requireFrame,
+			false,
+			nil,
 			false,
 		)
 		if err != nil {
@@ -817,7 +848,9 @@ func (s *Store) runReadPageScript(
 	lower, upper store.Offset,
 	targetBytes, maxFrames int,
 	expectedIncarnation string,
-	rootRead, fetchFrames, allowOversized, requireCandidate, touchRoot bool,
+	rootRead, allowOversized, requireCandidate, touchRoot bool,
+	fixedRootTail *store.Offset,
+	rootOffsetNow bool,
 ) (*redisPageScriptResult, error) {
 	started := time.Now()
 	legacyIncarnation := ""
@@ -827,6 +860,10 @@ func (s *Store) runReadPageScript(
 		if err != nil {
 			return nil, err
 		}
+	}
+	fixedRootTailArg := ""
+	if fixedRootTail != nil {
+		fixedRootTailArg = fixedRootTail.String()
 	}
 	raw, err := readScript.Run(
 		ctx,
@@ -839,11 +876,14 @@ func (s *Store) runReadPageScript(
 		strconv.Itoa(maxFrames),
 		expectedIncarnation,
 		boolArg(rootRead),
-		boolArg(fetchFrames),
+		"1",
 		boolArg(allowOversized),
 		boolArg(requireCandidate),
 		boolArg(touchRoot),
 		legacyIncarnation,
+		lower.String(),
+		fixedRootTailArg,
+		boolArg(rootOffsetNow),
 	).Result()
 	elapsed := time.Since(started)
 	if err != nil {
@@ -866,7 +906,7 @@ func (s *Store) runReadPageScript(
 	default:
 		return nil, fmt.Errorf("read.lua: unexpected status %q", status)
 	}
-	if len(rest) < 4 {
+	if len(rest) < 5 {
 		return nil, fmt.Errorf("read.lua: malformed OK reply")
 	}
 	fields, err := flatToMap(rest[0])
@@ -893,9 +933,14 @@ func (s *Store) runReadPageScript(
 	if err != nil {
 		return nil, err
 	}
+	rootRange, err := parseRootReadRange(rest[4])
+	if err != nil {
+		return nil, err
+	}
 	return &redisPageScriptResult{
-		meta:     meta,
-		messages: messages,
+		meta:      meta,
+		messages:  messages,
+		rootRange: rootRange,
 		stats: store.ReadPageStats{
 			RequestedBytes:     targetBytes,
 			FetchedBytes:       fetched,
@@ -905,6 +950,27 @@ func (s *Store) runReadPageScript(
 			RedisScriptInvokes: 1,
 		},
 	}, nil
+}
+
+func parseRootReadRange(value any) (*store.RootReadRange, error) {
+	raw, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("read.lua: root range has type %T", value)
+	}
+	var result store.RootReadRange
+	switch raw {
+	case "segment":
+		return nil, nil
+	case store.RootReadRangeEmpty.String():
+		result = store.RootReadRangeEmpty
+	case store.RootReadRangeInherited.String():
+		result = store.RootReadRangeInherited
+	case store.RootReadRangeOwned.String():
+		result = store.RootReadRangeOwned
+	default:
+		return nil, fmt.Errorf("read.lua: unexpected root range %q", raw)
+	}
+	return &result, nil
 }
 
 func boolArg(v bool) string {
@@ -1028,8 +1094,9 @@ func (s *Store) readForkChain(ctx context.Context, path string, meta *store.Stre
 				segment.incarnation,
 				false,
 				true,
-				true,
 				segment.requireFrame,
+				false,
+				nil,
 				false,
 			)
 			if err != nil {

@@ -33,9 +33,25 @@ notification capability. It also validates the segment mode, directory, target
 size, index stride, cache size, and initial migration state before starting the
 server.
 
+## Live registration ordering
+
+For a new SSE hub or an `offset=now` long-poll, the HTTP handler obtains the
+notification subscriber through `NotificationSubscriberProvider` and confirms
+registration before it asks the segment wrapper for the authoritative first
+page. The wrapper then captures its primary snapshot and segment lease in the
+normal order below. An append before that primary page is in its captured tail;
+an append after it is covered by the confirmed primary notification feed.
+
+The handler transfers a new SSE subscription into the hub together with the
+page's incarnation and tail, so the hub does not perform a duplicate initial
+segment or primary read. Numeric long-poll offsets retain `PageWaiter` and its
+subscribe-then-recheck path. Every discarded poll or race-recheck page is
+released through `PageSnapshotReleaser`, including its nested primary snapshot
+and manifest pin.
+
 ## First page
 
-The first page performs these operations:
+After any live registration, the first page performs these operations:
 
 1. The primary `PageReader` captures the stream incarnation, content type,
    closed state, and upper tail in one bounded read.

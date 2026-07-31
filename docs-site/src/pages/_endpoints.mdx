@@ -27,7 +27,7 @@ import Aside from "../components/Aside.astro";
     <li><strong>Five verbs, with atomic mutations and bounded reads.</strong> <code>PUT</code> creates, <code>POST</code> appends or closes, <code>GET</code> reads, <code>HEAD</code> probes, and <code>DELETE</code> removes. Each mutation script validates and commits as one Redis operation. <code>GET</code> and <code>HEAD</code> use <code>read.lua</code> to return a typed snapshot without loading producer state.</li>
     <li><strong>The same four parts every time.</strong> The HTTP handler parses the request. The Go store frames bytes and owns typed results. Redis runs the required script. Pure Go functions define semantic decisions, and Lua mirrors the decisions that must run atomically.</li>
     <li><strong>Reads use bounded <code>ZRANGEBYLEX</code> pages.</strong> Frames are stored as <code>"&lt;offset&gt;|&lt;bytes&gt;"</code> members in a sorted set, zero-padded so byte order equals stream order. The first page captures the response tail. Redis fetches one candidate, then optionally bulk-fetches only the offset range that fits the remaining 1 MiB target. A separate 1,024-frame cap bounds the page.</li>
-    <li><strong>Live tailing is pub/sub plus a typed re-read.</strong> A long-poll performs one logical read, subscribes, then makes no-touch rechecks before blocking and after each wake. The final page supplies the timeout or wake response. The handler does not fetch metadata again.</li>
+    <li><strong>Live tailing registers before the authoritative <code>offset=now</code> page.</strong> A confirmed subscription covers appends after that atomic page; its captured tail covers appends before it. Numeric long-poll offsets retain the read, subscribe, no-touch-recheck sequence. Every wake, poll, or timeout still ends in a typed durable page.</li>
     <li><strong>Ordinary persistent reads do not write.</strong> For a valid non-expiring stream, <code>GET</code>, <code>HEAD</code>, long-poll rechecks, and SSE refreshes issue no <code>HSET</code>, <code>HSETNX</code>, <code>PEXPIRE</code>, or <code>PERSIST</code>. Sliding TTL reads renew once at the first root snapshot. Lazy expiry cleanup and one-time legacy incarnation migration remain explicit write cases.</li>
   </ul>
 </Tldr>
@@ -396,19 +396,20 @@ import Aside from "../components/Aside.astro";
       { cmd: "HSETNX", key: "ds:{p}:meta incarnation", does: "A legacy stream without an incarnation stores one random identity once. New streams skip this branch.", when: "legacy metadata only", loc: "read.lua:43", kind: "write" },
       { cmd: "incarnation matches?", does: "A continuation page whose path now names a recreated stream returns <code>SNAPSHOT</code>. One HTTP response cannot combine two stream lifetimes.", loc: "read.lua:56", kind: "flow" },
       { cmd: "HSET + PEXPIRE/PERSIST", key: "root stream keys", does: "Update <code>accessedAtNs</code> and re-arm the exact backstop once for the logical client read. Persistent and absolute-expiry-only streams skip this branch. Continuations, long-poll rechecks, inherited ranges, sealing, and repair are no-touch.", when: "first root snapshot with sliding TTL only", loc: "read.lua:60", kind: "ttl" },
-      { cmd: "return meta_flat(m)", does: "Return the metadata table already loaded by this invocation. The script does not issue a second <code>HGETALL</code> to build its reply.", loc: "read.lua:159", kind: "flow" },
-      { cmd: "EVALSHA + HGETALL", key: "selected segment :meta", does: "When a frame range exists, a second invocation validates that segment's incarnation and loads its metadata once. It is always no-touch. A simple non-empty root read therefore has two metadata loads total, one per script invocation, and no producer load.", loc: "store.go:732", kind: "read" },
-      { cmd: "ZRANGEBYLEX", key: "selected segment :msg", does: "Fetch the first candidate with <code>LIMIT 0 1</code>. If more range exists and that frame fits, make one optional bulk call ending at <code>firstOffset + remainingTargetBytes</code>, with the remaining part of the 1,024-frame cap. There is no lookahead call.", loc: "read.lua:108", kind: "read" },
+      { cmd: "classify root range", does: "Compare the complete requested offset, fixed response tail, and fork boundary as typed unsigned decimal components. Empty and inherited ranges skip the root message set. A root-owned range continues inside this same atomic invocation.", loc: "read.lua", kind: "flow" },
+      { cmd: "ZRANGEBYLEX", key: "root :msg", does: "For a root-owned range, fetch the first candidate with <code>LIMIT 0 1</code>. If more range exists and that frame fits, make one optional bulk call ending at <code>firstOffset + remainingTargetBytes</code>, capped by the fixed snapshot tail and the remaining part of the 1,024-frame limit. There is no lookahead call.", loc: "read.lua", kind: "read" },
+      { cmd: "return meta_flat(m) + frames", does: "Return the already-loaded metadata and bounded root frames together. A simple root-owned page therefore needs one script and one metadata load. An inherited fork prefix still uses later source-slot invocations in chronological order.", loc: "read.lua", kind: "flow" },
     ]}
     caption="For a fork, Go computes finite source and child segments. It runs the no-touch range invocation against each segment's own slot, capped by the fork offset and the root snapshot tail. The inherited prefix arrives first, and post-fork source appends stay invisible."
   />
 
   <Callout icon="info" label="Steady-state persistent command shape">
-    A small non-empty read of a newly created non-expiring stream runs two
-    `EVALSHA` calls, two metadata `HGETALL` calls, and one `ZRANGEBYLEX`. It
+    A small root-owned read of a newly created non-expiring stream runs one
+    `EVALSHA`, one metadata `HGETALL`, and one `ZRANGEBYLEX`. It
     runs zero `HSET`, `HSETNX`, `PEXPIRE`, and `PERSIST` commands. The first
-    script invocation captures the root snapshot. The second reads the selected
-    frame range. Producer state is absent from both.
+    script both captures the root snapshot and reads its bounded frame range.
+    Producer state is absent. Fork reads below their divergence point retain
+    the separate source metadata and script work required across Redis slots.
   </Callout>
 
   <Complexity
@@ -435,8 +436,10 @@ import Aside from "../components/Aside.astro";
   `GET {stream-url}?offset=<offset>&live=long-poll` holds the request open
   until data arrives past the offset, the stream closes, or a 30-second
   timeout returns `204`.[^longpoll] The waiting runs in Go through the typed
-  `WaitForPage` capability, not in a script. It subscribes before its no-touch
-  recheck, so an append that lands in the attach gap is never missed.
+  wait capabilities, not in a script. For `offset=now`, Chronicle confirms the
+  notification registration before its authoritative first page. An append
+  before that atomic page is in its tail; an append after it is covered by the
+  registration. Numeric offsets keep the existing subscribe-then-recheck path.
 
   ```http title="Long-poll from the tail"
   GET /v1/stream/chat?offset=now&live=long-poll HTTP/1.1
@@ -461,11 +464,10 @@ import Aside from "../components/Aside.astro";
     script="—  Go orchestration"
     source="store/redis/notify.go"
     steps={[
-      { cmd: "ReadPage", key: "logical first read", does: "The handler reads before it subscribes. Frames return <strong>200</strong> immediately. An empty page at the tail carries the content type, closed state, incarnation, and expiry configuration needed to wait. This is the only read in the request that may renew a sliding TTL.", loc: "handler.go:513", kind: "read" },
-      { cmd: "SUBSCRIBE", key: "ds:notify:{p}", does: "Open a dedicated pub/sub connection to the stream's channel and confirm it before waiting.", loc: "notify.go:108", kind: "read" },
-      { cmd: "ReadPage NoTouch", key: "recheck", does: "Capture a fresh typed page before blocking and require the same stream incarnation as the first page. An append in the subscribe window is visible here. This recheck does not renew access.", loc: "notify.go:115", kind: "read" },
-      { cmd: "block", does: "Wait for a channel message, a 1 s defensive poll, or the 30 s timeout. Every branch performs the same no-touch typed recheck.", loc: "notify.go:139", kind: "flow" },
-      { cmd: "return ReadWaitResult", key: "authoritative final page", does: "Return the final page and timeout flag. The handler uses that page for content type, tail, closed state, next offset, and response status. It does not call <code>Store.Get</code> after the wait.", loc: "notify.go:162", kind: "flow" },
+      { cmd: "SUBSCRIBE", key: "ds:notify:{p}", does: "For <code>offset=now</code>, open and confirm the optional notification feed before reading durable state.", loc: "handler.go", kind: "read" },
+      { cmd: "ReadPage", key: "authoritative logical first read", does: "Capture content type, tail, closed state, incarnation, and expiry configuration after registration. This is the only page that may renew a sliding TTL. There is no immediate attach reread.", loc: "handler.go", kind: "read" },
+      { cmd: "block", does: "Wait on that registration for a channel message, a 1 s defensive poll, or the 30 s timeout. Every branch performs a no-touch typed durable page.", loc: "handler_stream.go", kind: "flow" },
+      { cmd: "return ReadWaitResult", key: "authoritative final page", does: "Return the final page and timeout flag. The handler uses that page for content type, tail, closed state, next offset, and response status. It does not call <code>Store.Get</code> after the wait.", loc: "handler_stream.go", kind: "flow" },
     ]}
   />
 
@@ -480,7 +482,7 @@ import Aside from "../components/Aside.astro";
   <Complexity
     time="O(log N + M) per read"
     space="O(M) returned + O(1) subscription"
-    why="Every page is the same skiplist seek-and-walk. The <code>SUBSCRIBE</code> is O(1), and the block costs no compute while idle. One request does one logical first read, one no-touch attach recheck, and one no-touch recheck per wake, defensive poll, or timeout. The final page is reused for the HTTP response."
+    why="Every page is the same skiplist seek-and-walk. The <code>SUBSCRIBE</code> is O(1), and the block costs no compute while idle. An <code>offset=now</code> request does one logical first page after registration and one no-touch page per wake, defensive poll, or timeout. Numeric offsets retain one no-touch attach recheck. The final page is reused for the HTTP response."
   />
 </section>
 
@@ -517,9 +519,9 @@ import Aside from "../components/Aside.astro";
     script="—  handler + shared hub"
     source="handler_sse.go · sse_hub.go"
     steps={[
-      { cmd: "ReadPage", key: "client first page", does: "Before SSE dispatch, <code>handleRead</code> captures one typed page. It supplies content type, tail, closure, incarnation, next offset, and the first catch-up frames. No <code>Store.Get</code> or producer hash read occurs.", loc: "handler.go:513", kind: "read" },
-      { cmd: "acquire hub", key: "exact stream lifetime", does: "Create or reuse one hub for this stream incarnation on the Chronicle replica. The handler passes the first page's typed snapshot into the hub.", loc: "handler_sse.go:42", kind: "flow" },
-      { cmd: "SUBSCRIBE + NoTouch ReadPage", key: "ds:notify:{p}", does: "The hub confirms its persistent Redis subscription, then reads durably from the first snapshot tail without renewing access. This retains an append from the attach window before the hub reports ready.", loc: "sse_hub.go:305", kind: "read" },
+      { cmd: "reserve or SUBSCRIBE", key: "ds:notify:{p}", does: "Reserve an existing compatible hub before the client page, or confirm a new notification subscription before reading durable state.", loc: "handler.go", kind: "read" },
+      { cmd: "ReadPage", key: "client first page", does: "Capture one typed page after registration. It supplies content type, tail, closure, incarnation, next offset, and first catch-up frames. A new hub is seeded from this same page and takes ownership of the confirmed subscription.", loc: "handler.go", kind: "read" },
+      { cmd: "hub ready", key: "exact stream lifetime", does: "A pre-registered new hub needs no duplicate empty no-touch refresh. A concurrent creator closes the redundant subscription and reuses the compatible hub. An old-incarnation reservation is replaced behind a fresh registration and no-touch incarnation fence.", loc: "sse_hub.go", kind: "flow" },
       { cmd: "reuse first page", key: "client catch-up", does: "The handler emits the first page it already owns, then continuation pages under the same snapshot. It performs no extra initial bounded read and no metadata reload after catch-up.", loc: "handler_sse.go:103", kind: "read" },
       { cmd: "shared live ReadPage", key: "bounded replay", does: "After each wake, the hub performs one logical durable refresh for all local clients, formats one immutable event, and retains it in the bounded replay window. A sliding TTL renews once per hub refresh. Persistent and absolute-expiry-only streams remain read-only.", loc: "sse_hub.go:435", kind: "read" },
       { cmd: "every 60 s, return", does: "Cycle the connection so a CDN can collapse concurrent tails. The client reconnects from the last <code>streamNextOffset</code> it received.", loc: "handler_sse.go:203", kind: "flow" },

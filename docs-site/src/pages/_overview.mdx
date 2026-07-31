@@ -160,8 +160,10 @@ import Aside from "../components/Aside.astro";
   Reads use `read.lua` to return a typed, bounded page with content type, tail,
   closure, expiry, and incarnation. They do not load producer state. A valid
   persistent read performs no Redis write. A sliding TTL renews once at the
-  first root snapshot. A long-poll subscribes before its no-touch recheck, and
-  SSE attaches through one shared notification-backed stream hub. The OpMap
+  first root snapshot. An `offset=now` live read confirms notification
+  registration before its authoritative first page; numeric long-poll retains
+  the subscribe-then-recheck path. SSE attaches through one shared
+  notification-backed stream hub. The OpMap
   below walks each operation's Redis steps.
 
   <OpMap />

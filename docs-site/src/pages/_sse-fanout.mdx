@@ -161,14 +161,14 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     caption="The hub confirms its Redis subscription before the handler completes catch-up. The handler then checks the stream incarnation and attaches at the exact offset it already sent. An append can land at any point without being lost or sent before its control offset."
   />
 
-  Four rules protect this boundary:
+  Five rules protect this boundary:
 
-  1. **Reuse the first typed page.** `handleRead` supplies content type, tail,
-     closure, incarnation, and the first catch-up frames without loading producer
-     state. The SSE handler does not repeat that read.
-  2. **Subscribe before attaching.** The hub confirms its Redis subscription,
-     performs a no-touch durable read from the first snapshot tail, and only then
-     reports ready.
+  1. **Register before the authoritative page.** Chronicle reserves an existing
+     hub before capture, or confirms one new Redis subscription first.
+  2. **Seed from the first typed page.** `handleRead` then supplies content type,
+     tail, closure, incarnation, and first catch-up frames without loading
+     producer state. A new hub starts at that tail and needs no duplicate
+     no-touch attach refresh.
   3. **Recheck the durable stream.** A wake is only a hint. The hub reads Redis
      after a hint and once per second while idle. A lost Pub/Sub message delays
      delivery by at most one poll. It does not lose data.
@@ -209,6 +209,12 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   catch-up reads to settle. Redis `PUBLISH` then advanced from 1,445 to 1,545,
   while `ZRANGEBYLEX` advanced from 11,021 to 11,121. The exact live ratio was
   1.000 reads per append, which passes the 1.2 gate.[^evidence]
+
+  The issue 172 follow-up also measures connection setup. A new empty
+  `offset=now` hub now performs one `EVALSHA` and one metadata `HGETALL`, down
+  from two after the earlier read-only fast path. The same exact-counter
+  benchmark, with completion counted after each durable read, recorded 10
+  `PUBLISH` calls and 10 `ZRANGEBYLEX` calls across 1,000 connected clients.
 
   The one-stream Kubernetes workload delivered 99.232 percent of the offered
   events with no backpressure or request errors. Peak sampled Chronicle RSS was

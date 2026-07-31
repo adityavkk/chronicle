@@ -127,6 +127,29 @@ local function int_cmp(a, b)
   return c
 end
 
+-- offset_cmp compares canonical "readSeq_byteOffset" values without passing
+-- either uint64 component through a Lua number. It mirrors store.Compare.
+local function offset_cmp(a, b)
+  local ar, ab = string.match(a or '', '^(%d+)_(%d+)$')
+  local br, bb = string.match(b or '', '^(%d+)_(%d+)$')
+  if ar == nil or br == nil then error('invalid stream offset') end
+  local read_seq_cmp = int_cmp(ar, br)
+  if read_seq_cmp ~= 0 then return read_seq_cmp end
+  return int_cmp(ab, bb)
+end
+
+-- classify_root_read_range mirrors store.ClassifyRootReadRange. page_tail is
+-- the atomically loaded tail for a first page or the caller's fixed snapshot
+-- tail for a continuation.
+local function classify_root_read_range(m, requested, page_tail, is_now)
+  if is_now or offset_cmp(requested, page_tail) >= 0 then return 'empty' end
+  if m.forkedFrom and m.forkedFrom ~= '' and
+      offset_cmp(requested, m.forkOff or '0000000000000000_0000000000000000') < 0 then
+    return 'inherited'
+  end
+  return 'root'
+end
+
 local function int_is_zero(s)
   local _, d = int_parts(s)
   return d == '0'

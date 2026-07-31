@@ -529,6 +529,39 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		h.observeReadCancellation("before_first_page")
 		return err
 	}
+
+	var liveSubscription store.NotificationSubscription
+	var sseLease *sseHubLease
+	if liveMode == "sse" {
+		// Keep an existing shared hub alive while this client captures its page.
+		// A new hub instead confirms its notification registration first.
+		sseLease = h.acquireExistingSSEHub(path)
+		if sseLease == nil {
+			liveSubscription, _, err = h.subscribeNotifications(r.Context(), path)
+			if err != nil {
+				return err
+			}
+		}
+	} else if liveMode == "long-poll" && isNowOffset {
+		// offset=now has no historical page to inspect. Confirm registration
+		// before the authoritative first page and reuse it while blocked.
+		liveSubscription, _, err = h.subscribeNotifications(r.Context(), path)
+		if err != nil {
+			return err
+		}
+	}
+	defer func() {
+		if liveSubscription != nil {
+			_ = liveSubscription.Close()
+		}
+	}()
+	ownsSSELease := sseLease != nil
+	defer func() {
+		if ownsSSELease {
+			sseLease.close()
+		}
+	}()
+
 	firstPage, err := reader.ReadPage(r.Context(), path, offset, pageOpts)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -544,13 +577,49 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	}()
 
 	if liveMode == "sse" {
+		if sseLease != nil {
+			if validationErr := sseLease.validateSnapshot(firstPage.Snapshot); validationErr != nil {
+				// The reserved hub belongs to an earlier lifetime. Establish the new
+				// registration before a fresh no-touch page, while fencing that page
+				// to the logical read already performed above.
+				sseLease.close()
+				sseLease = nil
+				ownsSSELease = false
+				var supported bool
+				liveSubscription, supported, err = h.subscribeNotifications(r.Context(), path)
+				if err != nil {
+					return err
+				}
+				if supported {
+					recheckOpts := pageOpts
+					recheckOpts.NoTouch = true
+					fresh, readErr := reader.ReadPage(r.Context(), path, offset, recheckOpts)
+					if readErr != nil {
+						return readPageError(readErr)
+					}
+					if !store.SameReadStream(firstPage.Snapshot, fresh.Snapshot) {
+						releaseReadSnapshot(reader, path, fresh.Snapshot)
+						return readPageError(store.ErrReadSnapshotChanged)
+					}
+					h.observeReadPage(firstPage)
+					releaseReadSnapshot(reader, path, firstPage.Snapshot)
+					firstPage = fresh
+				}
+			}
+		}
 		ct := strings.ToLower(store.ExtractMediaType(firstPage.Snapshot.ContentType))
 		useBase64 := !strings.HasPrefix(ct, "text/") && ct != "application/json"
+		if sseLease == nil {
+			sseLease = h.acquireSSEHub(path, firstPage.Snapshot, useBase64, liveSubscription)
+			liveSubscription = nil
+			ownsSSELease = true
+		}
 		sseOffset := offset
 		if sseOffset.IsNow() {
 			sseOffset = firstPage.Snapshot.Tail
 		}
 		ownsSnapshot = false
+		ownsSSELease = false
 		return h.handleSSE(
 			w,
 			r,
@@ -561,6 +630,7 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 			sseOffset,
 			cursor,
 			useBase64,
+			sseLease,
 		)
 	}
 
@@ -612,15 +682,30 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		// Client is caught up. Subscription/registration happens before a
 		// no-touch durable recheck, and the final page owns every response
 		// header needed for wake, close, or timeout.
-		waited, waitErr := h.waitForPage(
-			r.Context(),
-			reader,
-			path,
-			effectiveOffset,
-			firstPage.Snapshot,
-			h.LongPollTimeout,
-			pageOpts,
-		)
+		var waited store.ReadWaitResult
+		var waitErr error
+		if liveSubscription != nil {
+			waited, waitErr = h.waitForRegisteredPage(
+				r.Context(),
+				reader,
+				path,
+				effectiveOffset,
+				firstPage.Snapshot,
+				h.LongPollTimeout,
+				pageOpts,
+				liveSubscription,
+			)
+		} else {
+			waited, waitErr = h.waitForPage(
+				r.Context(),
+				reader,
+				path,
+				effectiveOffset,
+				firstPage.Snapshot,
+				h.LongPollTimeout,
+				pageOpts,
+			)
+		}
 		h.observeReadPage(firstPage)
 		releaseReadSnapshot(reader, path, firstPage.Snapshot)
 		ownsSnapshot = false

@@ -34,7 +34,10 @@ type MemoryStore struct {
 	producerLocksMu sync.Mutex
 }
 
-var _ PageWaiter = (*MemoryStore)(nil)
+var (
+	_ PageWaiter             = (*MemoryStore)(nil)
+	_ NotificationSubscriber = (*MemoryStore)(nil)
+)
 
 // MemoryStoreOption configures a MemoryStore at construction.
 type MemoryStoreOption func(*MemoryStore)
@@ -59,6 +62,14 @@ type memoryStream struct {
 type longPollManager struct {
 	mu      sync.Mutex
 	waiters map[string][]chan struct{}
+}
+
+type memoryNotificationSubscription struct {
+	manager *longPollManager
+	path    string
+	wake    chan struct{}
+	done    chan struct{}
+	once    sync.Once
 }
 
 // NewMemoryStore creates a new in-memory store. By default it uses the real
@@ -982,6 +993,45 @@ func (s *MemoryStore) WaitForPage(
 			return ReadWaitResult{}, ctx.Err()
 		}
 	}
+}
+
+// SubscribeNotifications exposes the same register-before-read wake seam used
+// by the Redis store. Events are hints, so the in-memory implementation can
+// coalesce append, close, and delete into NotificationAppend.
+func (s *MemoryStore) SubscribeNotifications(
+	ctx context.Context,
+	path string,
+) (NotificationSubscription, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	sub := &memoryNotificationSubscription{
+		manager: s.longPoll,
+		path:    path,
+		wake:    make(chan struct{}, 1),
+		done:    make(chan struct{}),
+	}
+	s.longPoll.register(path, sub.wake)
+	return sub, nil
+}
+
+func (s *memoryNotificationSubscription) Wait(ctx context.Context) (NotificationEvent, error) {
+	select {
+	case <-s.wake:
+		return NotificationAppend, nil
+	case <-s.done:
+		return NotificationAppend, ErrNotificationSubscriptionClosed
+	case <-ctx.Done():
+		return NotificationAppend, ctx.Err()
+	}
+}
+
+func (s *memoryNotificationSubscription) Close() error {
+	s.once.Do(func() {
+		s.manager.unregister(s.path, s.wake)
+		close(s.done)
+	})
+	return nil
 }
 
 // Read implements Store by concatenating bounded pages for one snapshot.

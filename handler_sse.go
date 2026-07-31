@@ -24,6 +24,7 @@ func (h *Handler) handleSSE(
 	offset store.Offset,
 	cursor string,
 	useBase64 bool,
+	lease *sseHubLease,
 ) (returnErr error) {
 	streamStarted := false
 	defer func() {
@@ -39,10 +40,6 @@ func (h *Handler) handleSSE(
 
 	ctx := r.Context()
 
-	// The first atomic page supplies the hub identity and tail. The hub then
-	// subscribes and performs a durable no-touch read from that tail before the
-	// response starts, retaining any append from the attach window.
-	lease := h.acquireSSEHub(path, first.Snapshot, useBase64)
 	defer lease.close()
 	if err := lease.waitReady(ctx); err != nil {
 		return err

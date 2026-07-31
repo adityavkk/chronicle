@@ -5,21 +5,25 @@ sequenceDiagram
     participant S as Store
     participant R as Redis
     C->>H: GET /chat?offset=-1
-    H->>S: ReadPage(path, offset) · handler.go:513
+    H->>S: ReadPage(path, offset)
     S->>R: EVALSHA read.lua · HGETALL :meta once
-    Note over S,R: capture tail · type · closed · expiry · incarnation (never read :prod)
+    Note over S,R: capture tail · validate · classify empty / inherited / root-owned
     opt first root snapshot has sliding TTL
         S->>R: HSET accessedAtNs · refresh exact key TTL
     end
-    S->>R: EVALSHA read.lua · segment HGETALL + bounded ZRANGEBYLEX
+    S->>R: same EVALSHA · bounded ZRANGEBYLEX for a root-owned range
     R-->>S: first frame-aligned page + typed snapshot
     S-->>H: messages · next offset · fixed tail
     H-->>C: write page and flush
     loop until the captured tail
         H->>S: ReadPage with same snapshot · no touch
-        S->>R: validate incarnation + bounded range
+        S->>R: one EVALSHA · validate fixed tail + bounded root range
         S-->>H: messages · next offset · same snapshot
         H-->>C: write page and flush
     end
+    opt requested range is inherited from a fork source
+        S->>R: later source-slot EVALSHA calls in chronological order
+    end
+    Note over S,R: simple root-owned page = 1 EVALSHA · 1 metadata HGETALL · never :prod
     Note over H,S: persistent and absolute-expiry-only reads write nothing
     Note over H,S: exceptions: legacy incarnation migration and lazy expiry cleanup

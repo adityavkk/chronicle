@@ -8,6 +8,38 @@ import (
 	"time"
 )
 
+func TestClassifyRootReadRange(t *testing.T) {
+	tail := Offset{ReadSeq: 2, ByteOffset: 100}
+	fork := Offset{ReadSeq: 2, ByteOffset: 40}
+
+	for _, tc := range []struct {
+		name       string
+		offset     Offset
+		tail       Offset
+		forkedFrom string
+		forkOffset Offset
+		want       RootReadRange
+	}{
+		{name: "unforked", offset: Offset{ReadSeq: 2, ByteOffset: 10}, tail: tail, want: RootReadRangeOwned},
+		{name: "fork before", offset: Offset{ReadSeq: 2, ByteOffset: 10}, tail: tail, forkedFrom: "/source", forkOffset: fork, want: RootReadRangeInherited},
+		{name: "fork at", offset: fork, tail: tail, forkedFrom: "/source", forkOffset: fork, want: RootReadRangeOwned},
+		{name: "fork above", offset: Offset{ReadSeq: 2, ByteOffset: 50}, tail: tail, forkedFrom: "/source", forkOffset: fork, want: RootReadRangeOwned},
+		{name: "zero tail", offset: ZeroOffset, tail: ZeroOffset, want: RootReadRangeEmpty},
+		{name: "now", offset: NowOffset, tail: tail, want: RootReadRangeEmpty},
+		{name: "at tail", offset: tail, tail: tail, want: RootReadRangeEmpty},
+		{name: "beyond tail", offset: tail.Add(1), tail: tail, want: RootReadRangeEmpty},
+		{name: "older read sequence", offset: Offset{ReadSeq: 1, ByteOffset: 999}, tail: tail, want: RootReadRangeOwned},
+		{name: "newer read sequence", offset: Offset{ReadSeq: 3}, tail: tail, want: RootReadRangeEmpty},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ClassifyRootReadRange(tc.offset, tc.tail, tc.forkedFrom, tc.forkOffset)
+			if got != tc.want {
+				t.Fatalf("ClassifyRootReadRange() = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func drainReadPages(t *testing.T, reader PageReader, path string, offset Offset, target, maxFrames int, afterFirst func(ReadSnapshot)) ([]Message, ReadPage) {
 	t.Helper()
 

@@ -64,6 +64,289 @@ func TestReadPageNonExpiringCommandsAreReadOnly(t *testing.T) {
 	}
 }
 
+func TestReadPageRootOwnedCommandShape(t *testing.T) {
+	subject := newTestStore(t)
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name   string
+		setup  func(*testing.T) (string, store.Offset, store.ReadPageOptions)
+		frames int
+	}{
+		{
+			name: "unforked first page",
+			setup: func(t *testing.T) (string, store.Offset, store.ReadPageOptions) {
+				path := testPath("root-command-first")
+				mustCreate(t, subject, path, store.CreateOptions{
+					ContentType: "application/octet-stream",
+					InitialData: []byte("frame"),
+				})
+				return path, store.ZeroOffset, store.ReadPageOptions{}
+			},
+			frames: 1,
+		},
+		{
+			name: "unforked continuation",
+			setup: func(t *testing.T) (string, store.Offset, store.ReadPageOptions) {
+				path := testPath("root-command-continuation")
+				mustCreate(t, subject, path, store.CreateOptions{
+					ContentType: "application/json",
+					InitialData: []byte(`[1,2]`),
+				})
+				first, err := subject.ReadPage(ctx, path, store.ZeroOffset, store.ReadPageOptions{
+					TargetBytes: 1,
+					MaxFrames:   1,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return path, first.NextOffset, store.ReadPageOptions{
+					TargetBytes: 1,
+					MaxFrames:   1,
+					Snapshot:    &first.Snapshot,
+				}
+			},
+			frames: 1,
+		},
+		{
+			name: "fork root-owned first page",
+			setup: func(t *testing.T) (string, store.Offset, store.ReadPageOptions) {
+				sourcePath := testPath("root-command-fork-source")
+				source := mustCreate(t, subject, sourcePath, store.CreateOptions{
+					ContentType: "application/octet-stream",
+					InitialData: []byte("source"),
+				})
+				forkPath := testPath("root-command-fork")
+				forkOffset := source.CurrentOffset
+				mustCreate(t, subject, forkPath, store.CreateOptions{
+					ContentType: "application/octet-stream",
+					ForkedFrom:  sourcePath,
+					ForkOffset:  &forkOffset,
+					InitialData: []byte("own"),
+				})
+				return forkPath, forkOffset, store.ReadPageOptions{}
+			},
+			frames: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, offset, opts := tc.setup(t)
+			// Load read.lua before the measured EVALSHA so NOSCRIPT recovery does
+			// not add an EVAL to the command trace.
+			if _, err := subject.ReadPage(ctx, path, store.NowOffset, store.ReadPageOptions{NoTouch: true}); err != nil {
+				t.Fatal(err)
+			}
+
+			var page store.ReadPage
+			lines := monitorRedis(t, concreteTestClient(t, subject), func() {
+				var err error
+				page, err = subject.ReadPage(ctx, path, offset, opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+			})
+			if len(page.Messages) != tc.frames || page.Stats.RedisScriptInvokes != 1 {
+				t.Fatalf("page messages/scripts = %d/%d, want %d/1", len(page.Messages), page.Stats.RedisScriptInvokes, tc.frames)
+			}
+			if got := countMonitoredCommand(lines, "evalsha", metaKey(path)); got != 1 {
+				t.Fatalf("EVALSHA calls = %d, want 1\n%s", got, strings.Join(lines, "\n"))
+			}
+			if got := countMonitoredCommand(lines, "hgetall", metaKey(path)); got != 1 {
+				t.Fatalf("metadata HGETALL calls = %d, want 1\n%s", got, strings.Join(lines, "\n"))
+			}
+			if got := countMonitoredCommand(lines, "zrangebylex", msgKey(path)); got != 1 {
+				t.Fatalf("ZRANGEBYLEX calls = %d, want 1\n%s", got, strings.Join(lines, "\n"))
+			}
+			if got := countMonitoredCommand(lines, "hgetall", prodKey(path)); got != 0 {
+				t.Fatalf("producer HGETALL calls = %d, want 0\n%s", got, strings.Join(lines, "\n"))
+			}
+			assertNoMonitoredCommands(
+				t,
+				lines,
+				path,
+				"hset",
+				"hsetnx",
+				"pexpire",
+				"persist",
+				"del",
+				"zadd",
+			)
+		})
+	}
+}
+
+func TestReadPageInheritedForkKeepsTwoSegmentCommands(t *testing.T) {
+	subject := newTestStore(t)
+	ctx := context.Background()
+	sourcePath := testPath("inherited-command-source")
+	source := mustCreate(t, subject, sourcePath, store.CreateOptions{
+		ContentType: "application/octet-stream",
+		InitialData: []byte("source"),
+	})
+	forkPath := testPath("inherited-command-fork")
+	forkOffset := source.CurrentOffset
+	mustCreate(t, subject, forkPath, store.CreateOptions{
+		ContentType: "application/octet-stream",
+		ForkedFrom:  sourcePath,
+		ForkOffset:  &forkOffset,
+	})
+	// Load read.lua before the measured EVALSHA so NOSCRIPT recovery does not
+	// add an EVAL to the trace.
+	if _, err := subject.ReadPage(ctx, forkPath, store.NowOffset, store.ReadPageOptions{NoTouch: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	var page store.ReadPage
+	lines := monitorRedis(t, concreteTestClient(t, subject), func() {
+		var err error
+		page, err = subject.ReadPage(ctx, forkPath, store.ZeroOffset, store.ReadPageOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	if len(page.Messages) != 1 || string(page.Messages[0].Data) != "source" ||
+		page.Stats.RedisScriptInvokes != 2 {
+		t.Fatalf("inherited page = %+v, want one source frame and two scripts", page)
+	}
+	if got := countMonitoredCommand(lines, "evalsha", metaKey(forkPath)); got != 1 {
+		t.Fatalf("root EVALSHA calls = %d, want 1\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "evalsha", metaKey(sourcePath)); got != 1 {
+		t.Fatalf("source EVALSHA calls = %d, want 1\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "hgetall", metaKey(forkPath)); got != 1 {
+		t.Fatalf("root metadata HGETALL calls = %d, want 1\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "hgetall", metaKey(sourcePath)); got != 2 {
+		t.Fatalf("source metadata HGETALL calls = %d, want traversal plus script (2)\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "zrangebylex", msgKey(forkPath)); got != 0 {
+		t.Fatalf("root ZRANGEBYLEX calls = %d, want 0\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "zrangebylex", msgKey(sourcePath)); got != 1 {
+		t.Fatalf("source ZRANGEBYLEX calls = %d, want 1\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "hgetall", prodKey(forkPath)); got != 0 {
+		t.Fatalf("root producer HGETALL calls = %d, want 0\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "hgetall", prodKey(sourcePath)); got != 0 {
+		t.Fatalf("source producer HGETALL calls = %d, want 0\n%s", got, strings.Join(lines, "\n"))
+	}
+}
+
+func TestReadPageRootOwnedDoesNotAdvanceAOFOrReplication(t *testing.T) {
+	subject := newTestStore(t)
+	client := concreteTestClient(t, subject)
+	ctx := context.Background()
+
+	config, err := client.ConfigGet(ctx, "appendonly").Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config["appendonly"] != "yes" {
+		t.Skip("Redis appendonly is disabled; repository Redis enables it")
+	}
+
+	for _, tc := range []struct {
+		name      string
+		expiresAt *time.Time
+	}{
+		{name: "persistent"},
+		{name: "absolute expiry", expiresAt: func() *time.Time {
+			value := time.Now().Add(time.Hour)
+			return &value
+		}()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := testPath("read-persistence-" + tc.name)
+			mustCreate(t, subject, path, store.CreateOptions{
+				ContentType: "application/octet-stream",
+				InitialData: []byte("frame"),
+				ExpiresAt:   tc.expiresAt,
+			})
+			if _, err := subject.ReadPage(ctx, path, store.NowOffset, store.ReadPageOptions{NoTouch: true}); err != nil {
+				t.Fatal(err)
+			}
+			if err := client.Do(ctx, "WAITAOF", 1, 0, 1000).Err(); err != nil {
+				t.Fatal(err)
+			}
+			beforeAOF := redisInfoInt(t, client, "persistence", "aof_current_size")
+			beforeReplication := redisInfoInt(t, client, "replication", "master_repl_offset")
+
+			page, err := subject.ReadPage(ctx, path, store.ZeroOffset, store.ReadPageOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(page.Messages) != 1 || page.Stats.RedisScriptInvokes != 1 {
+				t.Fatalf("page = %+v", page)
+			}
+			if err := client.Do(ctx, "WAITAOF", 1, 0, 1000).Err(); err != nil {
+				t.Fatal(err)
+			}
+			afterAOF := redisInfoInt(t, client, "persistence", "aof_current_size")
+			afterReplication := redisInfoInt(t, client, "replication", "master_repl_offset")
+			if afterAOF != beforeAOF || afterReplication != beforeReplication {
+				t.Fatalf(
+					"read persistence deltas: AOF=%d replication=%d, want 0/0",
+					afterAOF-beforeAOF,
+					afterReplication-beforeReplication,
+				)
+			}
+			t.Logf(
+				"AOF %d -> %d; master replication offset %d -> %d",
+				beforeAOF,
+				afterAOF,
+				beforeReplication,
+				afterReplication,
+			)
+		})
+	}
+}
+
+func TestReadPageMetadataOnlyCommandShape(t *testing.T) {
+	subject := newTestStore(t)
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name    string
+		initial []byte
+		offset  store.Offset
+	}{
+		{name: "empty", offset: store.ZeroOffset},
+		{name: "now", initial: []byte("frame"), offset: store.NowOffset},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := testPath("metadata-command-" + tc.name)
+			mustCreate(t, subject, path, store.CreateOptions{
+				ContentType: "application/octet-stream",
+				InitialData: tc.initial,
+			})
+			if _, err := subject.ReadPage(ctx, path, store.NowOffset, store.ReadPageOptions{NoTouch: true}); err != nil {
+				t.Fatal(err)
+			}
+
+			lines := monitorRedis(t, concreteTestClient(t, subject), func() {
+				page, err := subject.ReadPage(ctx, path, tc.offset, store.ReadPageOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(page.Messages) != 0 || page.Stats.RedisScriptInvokes != 1 {
+					t.Fatalf("metadata page = %+v", page)
+				}
+			})
+			if got := countMonitoredCommand(lines, "evalsha", metaKey(path)); got != 1 {
+				t.Fatalf("EVALSHA calls = %d, want 1\n%s", got, strings.Join(lines, "\n"))
+			}
+			if got := countMonitoredCommand(lines, "hgetall", metaKey(path)); got != 1 {
+				t.Fatalf("metadata HGETALL calls = %d, want 1\n%s", got, strings.Join(lines, "\n"))
+			}
+			if got := countMonitoredCommand(lines, "zrangebylex", msgKey(path)); got != 0 {
+				t.Fatalf("ZRANGEBYLEX calls = %d, want 0\n%s", got, strings.Join(lines, "\n"))
+			}
+		})
+	}
+}
+
 func TestReadPageLegacyIncarnationMigratesExactlyOnce(t *testing.T) {
 	subject := newTestStore(t)
 	path := testPath("legacy-incarnation-command")
@@ -352,6 +635,27 @@ func assertNoMonitoredCommands(t *testing.T, lines []string, path string, comman
 			}
 		}
 	}
+}
+
+func redisInfoInt(t *testing.T, client *goredis.Client, section, field string) int64 {
+	t.Helper()
+	info, err := client.Info(context.Background(), section).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(info, "\r\n") {
+		raw, ok := strings.CutPrefix(line, field+":")
+		if !ok {
+			continue
+		}
+		value, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil {
+			t.Fatalf("parse Redis INFO %s %s=%q: %v", section, field, raw, parseErr)
+		}
+		return value
+	}
+	t.Fatalf("Redis INFO %s omitted %s", section, field)
+	return 0
 }
 
 func keyPTTLs(t *testing.T, client *goredis.Client, path string) []time.Duration {

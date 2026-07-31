@@ -14,10 +14,13 @@
 --   10=requireCandidate ('1' means the selected upper bound is a known frame)
 --   11=touchRoot ('1' refreshes the root stream's sliding TTL)
 --   12=legacyIncarnation (random ID used only by HSETNX migration)
+--   13=requestedRootOffset (canonical typed offset; root reads only)
+--   14=fixedRootTail (empty captures m.tail; root reads only)
+--   15=rootOffsetNow ('1' preserves the offset=now sentinel)
 --
 -- Reply:
 --   {'NOTFOUND'} | {'SOFTDEL'} | {'SNAPSHOT'} | {'MISSING'}
---   {'OK', metaFlat, members, fetchedBytes, returnedBytes}
+--   {'OK', metaFlat, members, fetchedBytes, returnedBytes, rootRange}
 
 local now = tonumber(ARGV[1])
 local target_bytes = tonumber(ARGV[4])
@@ -65,6 +68,21 @@ if root_read and touch_root and should_touch_read(m) then
   refresh_backstop(m, now)
 end
 
+local root_range = 'segment'
+local range_max = ARGV[3]
+if root_read then
+  local page_tail = ARGV[14]
+  if page_tail == '' then page_tail = m.tail end
+  root_range = classify_root_read_range(m, ARGV[13], page_tail, ARGV[15] == '1')
+  if root_range == 'root' then
+    fetch_frames = true
+    require_candidate = true
+    range_max = '[' .. page_tail .. string.char(255)
+  else
+    fetch_frames = false
+  end
+end
+
 local members = {}
 local fetched_bytes = 0
 local returned_bytes = 0
@@ -106,7 +124,7 @@ if fetch_frames and max_frames > 0 and target_bytes > 0 then
   -- Fetch the first candidate alone. This makes an oversized first frame cost
   -- one member, not max_frames members.
   local first = redis.call(
-    'ZRANGEBYLEX', KEYS[2], ARGV[2], ARGV[3], 'LIMIT', 0, 1
+    'ZRANGEBYLEX', KEYS[2], ARGV[2], range_max, 'LIMIT', 0, 1
   )
   if #first == 0 then
     if require_candidate or (
@@ -125,7 +143,7 @@ if fetch_frames and max_frames > 0 and target_bytes > 0 then
   -- the common one-frame refresh needs no second range call.
   if #first == 1 and accepting and #members < max_frames then
     local first_offset = string.sub(first[1], 1, 33)
-    local segment_upper = string.sub(ARGV[3], 2, 34)
+    local segment_upper = string.sub(range_max, 2, -2)
     if first_offset < segment_upper then
       local byte_max_offset = add_offset_bytes(
         first_offset,
@@ -133,7 +151,7 @@ if fetch_frames and max_frames > 0 and target_bytes > 0 then
       )
       if byte_max_offset ~= nil then
         local byte_max = '[' .. byte_max_offset .. string.char(255)
-        if byte_max > ARGV[3] then byte_max = ARGV[3] end
+        if byte_max > range_max then byte_max = range_max end
         local candidates = redis.call(
           'ZRANGEBYLEX',
           KEYS[2],
@@ -161,5 +179,6 @@ return {
   meta_flat(m),
   members,
   tostring(fetched_bytes),
-  tostring(returned_bytes)
+  tostring(returned_bytes),
+  root_range
 }

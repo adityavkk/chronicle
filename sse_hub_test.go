@@ -175,7 +175,7 @@ func TestSSEHubSharesOneSubscriptionAndOneLiveRead(t *testing.T) {
 	}
 
 	waitForCount(t, &st.subscriptions, 1)
-	waitForAtLeast(t, &st.reads, clients+1)
+	waitForAtLeast(t, &st.reads, clients)
 	waitForStableCount(t, &st.reads)
 	beforeAppend := st.reads.Load()
 
@@ -209,6 +209,46 @@ func TestSSEHubSharesOneSubscriptionAndOneLiveRead(t *testing.T) {
 		t.Fatalf("live reads after append = %d, want one shared read", got)
 	}
 	waitForCount(t, &st.closes, 1)
+}
+
+func TestLongPollNowRegisterFirstSkipsAttachRecheck(t *testing.T) {
+	st := newHubTestStore()
+	h := newHubTestHandler(st)
+	h.LongPollTimeout = 20 * time.Millisecond
+	mustCreate(t, h, "/test", "text/plain", nil)
+
+	rec := do(h, http.MethodGet, "/test?offset=now&live=long-poll", nil, nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %q", rec.Code, rec.Body.String())
+	}
+	if got := st.subscriptions.Load(); got != 1 {
+		t.Fatalf("subscriptions = %d, want 1", got)
+	}
+	if got := st.waits.Load(); got != 1 {
+		t.Fatalf("notification waits = %d, want 1", got)
+	}
+	if got := st.reads.Load(); got != 2 {
+		t.Fatalf("reads = %d, want first page plus timeout page with no attach recheck", got)
+	}
+	if got := st.closes.Load(); got != 1 {
+		t.Fatalf("subscription closes = %d, want 1", got)
+	}
+}
+
+func TestLongPollNumericKeepsPreReadPath(t *testing.T) {
+	st := newHubTestStore()
+	h := newHubTestHandler(st)
+	h.LongPollTimeout = 20 * time.Millisecond
+	mustCreate(t, h, "/test", "text/plain", nil)
+
+	offset := store.ZeroOffset.String()
+	rec := do(h, http.MethodGet, "/test?offset="+offset+"&live=long-poll", nil, nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %q", rec.Code, rec.Body.String())
+	}
+	if got := st.subscriptions.Load(); got != 0 {
+		t.Fatalf("handler notification subscriptions = %d, want numeric PageWaiter path", got)
+	}
 }
 
 func TestSegmentSSEKeepsFinalSnapshotForLiveAttach(t *testing.T) {
@@ -295,9 +335,9 @@ func TestSSEHubEmptyCatchupNeverCheckpointsUndeliveredAppend(t *testing.T) {
 	h := newHubTestHandler(st)
 	mustCreate(t, h, "/test", "text/plain", nil)
 
-	// Read 1 is the hub's subscribe-then-read. Read 2 is this client's
-	// catch-up read. Append after that read but before its metadata lookup.
-	st.afterReadAt = 2
+	// The subscription is confirmed before this client's first read. Append
+	// after that read but before its metadata lookup.
+	st.afterReadAt = 1
 	st.afterRead = func() {
 		if _, err := st.Append(
 			"/test",
@@ -328,10 +368,10 @@ func TestSSEHubCatchupDoesNotCrossStreamIncarnation(t *testing.T) {
 	h := newHubTestHandler(st)
 	mustCreate(t, h, "/test", "text/plain", nil)
 
-	// Read 1 is the hub's subscribe-then-read. Read 2 is this client's
-	// catch-up read. Replace the stream after that read but before its metadata
-	// lookup, so the request must not emit data from the new incarnation.
-	st.afterReadAt = 2
+	// The subscription is confirmed before this client's first read. Replace
+	// the stream after that read but before its metadata lookup, so the request
+	// must not emit data from the new incarnation.
+	st.afterReadAt = 1
 	st.afterRead = func() {
 		if err := st.Store.Delete("/test"); err != nil {
 			t.Errorf("delete old incarnation: %v", err)
@@ -511,7 +551,7 @@ func TestSSEHubRecreatedStreamReplacesHubWithOldLeaseStillOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldLease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(oldMeta), false)
+	oldLease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(oldMeta), false, nil)
 	defer oldLease.close()
 	if err := oldLease.waitReady(context.Background()); err != nil {
 		t.Fatal(err)
@@ -533,7 +573,7 @@ func TestSSEHubRecreatedStreamReplacesHubWithOldLeaseStillOpen(t *testing.T) {
 	if oldMeta.Incarnation == newMeta.Incarnation {
 		t.Fatalf("recreated stream reused incarnation %q", oldMeta.Incarnation)
 	}
-	newLease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(newMeta), false)
+	newLease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(newMeta), false, nil)
 	defer newLease.close()
 	if newLease.hub == oldLease.hub {
 		t.Fatal("recreated stream reused the old incarnation's hub")
@@ -826,11 +866,11 @@ func TestSSEReconnectTimerIsNotStarvedByReplayBacklog(t *testing.T) {
 	mustCreate(t, h, "/test", "text/plain", nil)
 
 	const messages = 100
-	// Read 1 is the hub's confirmed-subscription refresh. Read 2 is the
-	// client's empty catch-up. Fill the durable stream after that read and
-	// wake the hub once so it publishes a retained event for every message.
-	st.afterReadAt = 2
-	st.afterRead = func() {
+	// The client's authoritative empty page is the first read. Fill the durable
+	// stream after its final metadata lookup and wake the already-confirmed hub,
+	// so the hub's second read publishes one retained event per message.
+	st.afterGetAt = 2
+	st.afterGet = func() {
 		for n := range messages {
 			if _, err := st.Store.Append(
 				"/test",
@@ -1069,7 +1109,7 @@ func TestSSEHubRingBytesTracksRetainedBytesThroughEvictionAndCleanup(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(meta), false)
+	lease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(meta), false, nil)
 	if err := lease.waitReady(t.Context()); err != nil {
 		t.Fatal(err)
 	}

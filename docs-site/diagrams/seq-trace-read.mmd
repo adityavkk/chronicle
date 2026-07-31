@@ -6,11 +6,10 @@ sequenceDiagram
     participant P as Other writer
     C->>H: GET /events/x?offset=now&live=long-poll
     Note over H: handleRead · parse offset + cursor
+    H->>S: SUBSCRIBE ds:notify and confirm
     H->>S: ReadPage · one logical access + typed root snapshot
     S-->>H: empty page · caller is at the tail
-    Note over H: at tail → WaitForPage with the first snapshot
-    H->>S: SUBSCRIBE ds:notify and confirm
-    Note over S: ReadPage NoTouch closes the attach race
+    Note over H,S: subscription before atomic page closes the attach race
     P->>S: POST append → append.lua PUBLISH 'a'
     S-->>H: wake
     H->>S: ReadPage NoTouch · final authoritative snapshot
@@ -18,4 +17,4 @@ sequenceDiagram
         S-->>H: frame-aligned page
         H-->>C: write page and flush
     end
-    Note over H,S: no metadata reload · no producer read · timeout returns the final page with 204 No Content
+    Note over H,S: no immediate attach reread · no producer read · timeout returns a final no-touch page with 204

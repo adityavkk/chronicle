@@ -6,16 +6,17 @@ sequenceDiagram
     participant R as Redis
     participant N as notify ch
     C->>H: GET ?offset=now and live=long-poll
-    H->>S: ReadPage · first logical read · handler.go:513
+    H->>N: SUBSCRIBE ds:notify:p and confirm
+    H->>S: ReadPage · authoritative first logical read
     S->>R: EVALSHA read.lua · metadata only · never :prod
     R-->>S: empty page + typed root snapshot
     S-->>H: tail · type · closed · incarnation
-    H->>S: WaitForPage(initial snapshot, 30s) · handler.go:596
-    S->>N: SUBSCRIBE ds:notify:p and confirm · notify.go:108
-    S->>R: ReadPage NoTouch · attach recheck · notify.go:115
-    Note over S: block · wake on a/c/d · 1 s poll · 30 s timeout
-    N-->>S: message 'a' — a concurrent append published it
+    Note over H,S: no immediate attach recheck · registration preceded the atomic page
+    Note over H: block · wake on a/c/d · 1 s poll · 30 s timeout
+    N-->>H: message 'a' — a concurrent append published it
+    H->>S: recheck durable state
     S->>R: ReadPage NoTouch · authoritative wake page
     S-->>H: ReadWaitResult · page + timedOut
     H-->>C: 200 data · or 204 Up-To-Date
+    Note over H,S: numeric offsets keep read → subscribe → no-touch attach recheck
     Note over H,R: no Store.Get after wait · no producer hash read · only the first page may renew a sliding TTL
