@@ -1,0 +1,251 @@
+package redis
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	goredis "github.com/redis/go-redis/v9"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/store"
+)
+
+func TestReadPageNonExpiringCommandsAreReadOnly(t *testing.T) {
+	subject := newTestStore(t)
+	path := testPath("read-only-commands")
+	mustCreate(t, subject, path, store.CreateOptions{
+		ContentType: "text/plain",
+	})
+	client := concreteTestClient(t, subject)
+
+	before := keyPTTLs(t, client, path)
+	const reads = 16
+	lines := monitorRedis(t, client, func() {
+		var group sync.WaitGroup
+		group.Add(reads)
+		for range reads {
+			go func() {
+				defer group.Done()
+				page, err := subject.ReadPage(
+					context.Background(),
+					path,
+					store.ZeroOffset,
+					store.ReadPageOptions{},
+				)
+				if err != nil {
+					t.Errorf("ReadPage: %v", err)
+					return
+				}
+				if len(page.Messages) != 0 || !page.UpToDate {
+					t.Errorf("ReadPage result = %+v", page)
+				}
+			}()
+		}
+		group.Wait()
+	})
+
+	assertNoMonitoredCommands(t, lines, path, "hset", "hsetnx", "pexpire", "persist")
+	if got := countMonitoredCommand(lines, "hgetall", metaKey(path)); got != reads {
+		t.Fatalf("metadata HGETALL calls = %d, want one per read (%d)\n%s", got, reads, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "hgetall", prodKey(path)); got != 0 {
+		t.Fatalf("producer HGETALL calls = %d, want 0\n%s", got, strings.Join(lines, "\n"))
+	}
+	after := keyPTTLs(t, client, path)
+	if fmt.Sprint(after) != fmt.Sprint(before) {
+		t.Fatalf("read changed key expiry: before=%v after=%v", before, after)
+	}
+}
+
+func TestReadPageLegacyIncarnationMigratesExactlyOnce(t *testing.T) {
+	subject := newTestStore(t)
+	path := testPath("legacy-incarnation-command")
+	mustCreate(t, subject, path, store.CreateOptions{ContentType: "text/plain"})
+	client := concreteTestClient(t, subject)
+	if err := subject.client.HDel(context.Background(), metaKey(path), fIncarnation).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	var first, second store.ReadPage
+	lines := monitorRedis(t, client, func() {
+		var err error
+		first, err = subject.ReadPage(context.Background(), path, store.ZeroOffset, store.ReadPageOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err = subject.ReadPage(context.Background(), path, store.ZeroOffset, store.ReadPageOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if first.Snapshot.Incarnation == "" ||
+		first.Snapshot.Incarnation != second.Snapshot.Incarnation {
+		t.Fatalf("legacy migration snapshots = %q, %q", first.Snapshot.Incarnation, second.Snapshot.Incarnation)
+	}
+	if got := countMonitoredCommand(lines, "hsetnx", metaKey(path)); got != 1 {
+		t.Fatalf("HSETNX calls = %d, want exactly 1\n%s", got, strings.Join(lines, "\n"))
+	}
+	assertNoMonitoredCommands(t, lines, path, "hset", "pexpire", "persist")
+}
+
+func TestReadPageMinimumSlidingTTLTouchesOnlyFirstSnapshot(t *testing.T) {
+	base := newTestStore(t)
+	clock := store.NewFakeClock(time.Unix(1_000, 0))
+	subject := New(base.client, Options{Clock: clock})
+	path := testPath("minimum-sliding-ttl")
+	ttl := int64(0)
+	mustCreate(t, subject, path, store.CreateOptions{
+		ContentType: "text/plain",
+		InitialData: []byte("frame"),
+		TTLSeconds:  &ttl,
+	})
+	client := concreteTestClient(t, subject)
+
+	var first store.ReadPage
+	lines := monitorRedis(t, client, func() {
+		var err error
+		first, err = subject.ReadPage(
+			context.Background(),
+			path,
+			store.ZeroOffset,
+			store.ReadPageOptions{TargetBytes: 1, MaxFrames: 1},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = subject.ReadPage(
+			context.Background(),
+			path,
+			first.NextOffset,
+			store.ReadPageOptions{Snapshot: &first.Snapshot},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if got := countMonitoredCommand(lines, "hset", metaKey(path)); got != 1 {
+		t.Fatalf("access HSET calls = %d, want 1\n%s", got, strings.Join(lines, "\n"))
+	}
+	if got := countMonitoredCommand(lines, "pexpire", metaKey(path)); got != 1 {
+		t.Fatalf("metadata PEXPIRE calls = %d, want 1\n%s", got, strings.Join(lines, "\n"))
+	}
+}
+
+func concreteTestClient(t *testing.T, subject *Store) *goredis.Client {
+	t.Helper()
+	client, ok := subject.client.(*goredis.Client)
+	if !ok {
+		t.Fatalf("test store client type = %T, want *redis.Client", subject.client)
+	}
+	return client
+}
+
+func monitorRedis(t *testing.T, client *goredis.Client, action func()) []string {
+	t.Helper()
+	options := client.Options()
+	options.Protocol = 2
+	monitorClient := goredis.NewClient(options)
+	t.Cleanup(func() { _ = monitorClient.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := make(chan string, 4096)
+	monitor := monitorClient.Monitor(ctx, events)
+	monitor.Start()
+	defer monitor.Stop()
+
+	start := fmt.Sprintf("chronicle-monitor-start-%d", time.Now().UnixNano())
+	if err := client.Echo(ctx, start).Err(); err != nil {
+		t.Fatal(err)
+	}
+	waitForMonitorMarker(t, events, start)
+
+	action()
+
+	end := start + "-end"
+	if err := client.Echo(ctx, end).Err(); err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case line := <-events:
+			if strings.Contains(line, strconv.Quote(end)) {
+				return lines
+			}
+			lines = append(lines, line)
+		case <-timer.C:
+			t.Fatalf("timed out waiting for Redis MONITOR end marker")
+		}
+	}
+}
+
+func waitForMonitorMarker(t *testing.T, events <-chan string, marker string) {
+	t.Helper()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case line := <-events:
+			if strings.Contains(line, strconv.Quote(marker)) {
+				return
+			}
+		case <-timer.C:
+			t.Fatalf("timed out waiting for Redis MONITOR start marker")
+		}
+	}
+}
+
+func monitoredCommand(line string) string {
+	_, command, ok := strings.Cut(line, "] ")
+	if !ok {
+		return ""
+	}
+	name, _, _ := strings.Cut(command, " ")
+	return strings.ToLower(strings.Trim(name, `"`))
+}
+
+func countMonitoredCommand(lines []string, command, key string) int {
+	quotedKey := strconv.Quote(key)
+	count := 0
+	for _, line := range lines {
+		if monitoredCommand(line) == command && strings.Contains(line, quotedKey) {
+			count++
+		}
+	}
+	return count
+}
+
+func assertNoMonitoredCommands(t *testing.T, lines []string, path string, commands ...string) {
+	t.Helper()
+	keys := []string{metaKey(path), msgKey(path), prodKey(path), forksKey(path)}
+	for _, command := range commands {
+		for _, key := range keys {
+			if got := countMonitoredCommand(lines, command, key); got != 0 {
+				t.Fatalf("%s %s calls = %d, want 0\n%s", command, key, got, strings.Join(lines, "\n"))
+			}
+		}
+	}
+}
+
+func keyPTTLs(t *testing.T, client *goredis.Client, path string) []time.Duration {
+	t.Helper()
+	keys := []string{metaKey(path), msgKey(path), prodKey(path), forksKey(path)}
+	result := make([]time.Duration, len(keys))
+	for i, key := range keys {
+		pttl, err := client.PTTL(context.Background(), key).Result()
+		if err != nil {
+			t.Fatal(err)
+		}
+		result[i] = pttl
+	}
+	return result
+}

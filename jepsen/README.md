@@ -17,17 +17,19 @@ needs no network.
 
 ```sh
 jepsen/up.sh                       # create the k3d cluster + deploy chronicle ×2 + Redis
-jepsen/run.sh                      # run baseline, origin-restart, redis-restart, paged-catchup, sse-resume
+jepsen/run.sh                      # run the default durability, paged-read, expiry, and SSE gates
 jepsen/run.sh origin-restart       # or a single scenario
 jepsen/run.sh sse-resume           # SSE attach/resume under Chronicle + Redis restarts
 jepsen/run.sh expired-lease-takeover glob-create-crash  # the hardening scenarios
 jepsen/run.sh single-holder-linz cursor-monotonic       # the safety scenarios (07: T1, T2)
 jepsen/run.sh stale-gen-noop lease-tail-drop at-least-once  # the no-rebuild baseline (07: T4, L3, L1)
 jepsen/run.sh paged-catchup          # bounded catch-up through data-plane faults
+jepsen/run.sh read-expiry             # sliding, fixed, HEAD, and ordinary read expiry semantics
 jepsen/down.sh                     # tear down the cluster
 ```
 
-`paged-catchup` is part of the default `run.sh` set. The hardening scenarios
+`paged-catchup` and `read-expiry` are part of the default `run.sh` set. The
+hardening scenarios
 (`pull-wake-arm-crash`, `expired-lease-takeover`, `glob-create-crash`,
 `index-repair`), the safety scenarios (`single-holder-linz`,
 `cursor-monotonic`, `stale-gen-noop`), the liveness scenarios
@@ -99,6 +101,10 @@ die. Override `CLUSTER`, `STREAMS`, `MSGS` via env.
      with raw Redis ZSET members and rejects gaps, duplicates, reordered frames,
      or data returned past the captured snapshot. Set `-toxiproxy` to replace the
      client network interruption with a partition between Chronicle and Redis.
+   - `read-expiry` reads deployed streams on both sides of their expiry
+     deadlines. It requires GET to renew a sliding TTL, HEAD not to renew it,
+     absolute expiry to remain fixed despite reads, and repeated ordinary reads
+     never to expire a persistent stream.
 
    Hardening scenarios (one per slice, docs/research/10):
    - `pull-wake-arm-crash` (slice 1) — a pull-wake subscription drained by a

@@ -2,12 +2,9 @@ package segments
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,6 +75,7 @@ type Stats struct {
 var (
 	_ store.Store                          = (*Store)(nil)
 	_ store.PageReader                     = (*Store)(nil)
+	_ store.PageWaiter                     = (*Store)(nil)
 	_ store.PageSnapshotReleaser           = (*Store)(nil)
 	_ store.NotificationSubscriberProvider = (*Store)(nil)
 )
@@ -122,21 +120,29 @@ func (s *Store) pathLock(path string) *sync.Mutex {
 	return lock
 }
 
-func incarnation(path string, meta *store.StreamMetadata) string {
-	if meta.Incarnation != "" {
-		return meta.Incarnation
+func snapshotIncarnation(snapshot store.ReadSnapshot) string {
+	return snapshot.Incarnation
+}
+
+func (s *Store) capturePrimarySnapshot(
+	ctx context.Context,
+	path string,
+) (store.ReadSnapshot, error) {
+	page, err := s.reader.ReadPage(
+		ctx,
+		path,
+		store.NowOffset,
+		store.ReadPageOptions{
+			TargetBytes: 1,
+			MaxFrames:   1,
+			NoTouch:     true,
+		},
+	)
+	if err != nil {
+		return store.ReadSnapshot{}, err
 	}
-	h := sha256.New()
-	h.Write([]byte(path))
-	h.Write([]byte{0})
-	h.Write([]byte(strconv.FormatInt(meta.CreatedAt.UnixNano(), 10)))
-	h.Write([]byte{0})
-	h.Write([]byte(meta.ContentType))
-	h.Write([]byte{0})
-	h.Write([]byte(meta.ForkedFrom))
-	h.Write([]byte{0})
-	h.Write([]byte(meta.ForkOffset.String()))
-	return hex.EncodeToString(h.Sum(nil))
+	s.releasePrimarySnapshot(path, page.Snapshot)
+	return page.Snapshot, nil
 }
 
 // Seal reconciles the immutable prefix with one atomic primary Read snapshot.
@@ -202,11 +208,11 @@ func (s *Store) sealLocked(path string) (*Manifest, error) {
 	started := time.Now()
 	for attempt := 0; attempt < 8; attempt++ {
 		replacePriorIncarnation := false
-		meta, err := s.primary.Get(path)
+		head, err := s.capturePrimarySnapshot(ctx, path)
 		if err != nil {
 			return nil, err
 		}
-		identity := incarnation(path, meta)
+		identity := snapshotIncarnation(head)
 		manifest, token, err := s.backend.Load(ctx, path)
 		switch {
 		case errors.Is(err, ErrNoManifest):
@@ -215,10 +221,10 @@ func (s *Store) sealLocked(path string) (*Manifest, error) {
 				Mode:            s.backend.Mode(),
 				Path:            path,
 				Incarnation:     identity,
-				ContentType:     meta.ContentType,
+				ContentType:     head.ContentType,
 				State:           s.opts.InitialState,
 				SealedThrough:   store.ZeroOffset.String(),
-				CreatedAtUnixNS: meta.CreatedAt.UnixNano(),
+				CreatedAtUnixNS: head.CreatedAt.UnixNano(),
 			}
 			token = ""
 		case err != nil:
@@ -235,10 +241,10 @@ func (s *Store) sealLocked(path string) (*Manifest, error) {
 					Mode:            s.backend.Mode(),
 					Path:            path,
 					Incarnation:     identity,
-					ContentType:     meta.ContentType,
+					ContentType:     head.ContentType,
 					State:           s.opts.InitialState,
 					SealedThrough:   store.ZeroOffset.String(),
-					CreatedAtUnixNS: meta.CreatedAt.UnixNano(),
+					CreatedAtUnixNS: head.CreatedAt.UnixNano(),
 				}
 			} else if err := validateManifest(manifest, s.backend.Mode(), path, identity); err != nil {
 				return nil, err
@@ -262,8 +268,7 @@ func (s *Store) sealLocked(path string) (*Manifest, error) {
 		releasePrimary := func() {
 			s.releasePrimarySnapshot(path, primarySnapshot)
 		}
-		if primarySnapshot.Incarnation != identity ||
-			!store.ContentTypeMatches(primarySnapshot.ContentType, meta.ContentType) {
+		if !store.SameReadStream(head, primarySnapshot) {
 			releasePrimary()
 			continue
 		}
@@ -281,8 +286,8 @@ func (s *Store) sealLocked(path string) (*Manifest, error) {
 		next.Generation = manifest.Generation + 1
 		next.Segments = append([]SegmentRef(nil), manifest.Segments...)
 		next.PublishedAtUnixN = time.Now().UnixNano()
-		if next.Fork == nil && meta.ForkedFrom != "" {
-			next.Fork = forkReference(meta)
+		if next.Fork == nil && head.ForkedFrom != "" {
+			next.Fork = forkReference(head)
 		}
 
 		start := sealed
@@ -320,8 +325,8 @@ func (s *Store) sealLocked(path string) (*Manifest, error) {
 		if err := validateManifest(&next, s.backend.Mode(), path, identity); err != nil {
 			return nil, err
 		}
-		freshMeta, err := s.primary.Get(path)
-		if err != nil || incarnation(path, freshMeta) != identity {
+		fresh, err := s.capturePrimarySnapshot(ctx, path)
+		if err != nil || snapshotIncarnation(fresh) != identity {
 			continue
 		}
 		if _, err := s.backend.Publish(ctx, path, token, &next); errors.Is(err, ErrConflict) {
@@ -348,14 +353,14 @@ func (s *Store) observeSealDuration(duration time.Duration) {
 	}
 }
 
-func forkReference(meta *store.StreamMetadata) *ForkReference {
+func forkReference(snapshot store.ReadSnapshot) *ForkReference {
 	ref := &ForkReference{
-		SourcePath: meta.ForkedFrom,
-		Through:    meta.ForkOffset.String(),
-		SubOffset:  meta.ForkSubOffset,
+		SourcePath: snapshot.ForkedFrom,
+		Through:    snapshot.ForkOffset.String(),
+		SubOffset:  snapshot.ForkSubOffset,
 	}
-	if meta.ForkOffsetRequested != nil {
-		ref.RequestedOffset = meta.ForkOffsetRequested.String()
+	if snapshot.ForkOffsetRequested != nil {
+		ref.RequestedOffset = snapshot.ForkOffsetRequested.String()
 	}
 	return ref
 }
@@ -458,22 +463,31 @@ func (s *Store) ReadPage(
 		return page, err
 	}
 
-	meta, err := s.primary.Get(path)
-	if err != nil {
-		return store.ReadPage{}, err
-	}
-	identity := incarnation(path, meta)
-	if s.opts.AutoSealRead {
-		if err := s.sealForRead(path, identity, meta.CurrentOffset); err != nil {
-			s.stats.primaryFallbacks.Add(1)
-		}
-	}
-
 	primaryPage, err := s.reader.ReadPage(ctx, path, offset, opts)
 	if err != nil {
 		return store.ReadPage{}, err
 	}
+	return s.readCapturedPrimaryPage(ctx, path, offset, opts, primaryPage)
+}
+
+func (s *Store) readCapturedPrimaryPage(
+	ctx context.Context,
+	path string,
+	offset store.Offset,
+	opts store.ReadPageOptions,
+	primaryPage store.ReadPage,
+) (store.ReadPage, error) {
 	primarySnapshot := primaryPage.Snapshot
+	if s.opts.AutoSealRead {
+		if err := s.sealForRead(
+			path,
+			snapshotIncarnation(primarySnapshot),
+			primarySnapshot.Tail,
+		); err != nil {
+			s.stats.primaryFallbacks.Add(1)
+		}
+	}
+
 	manifest, manifestToken := s.loadCandidateManifest(ctx, path)
 	if manifest == nil {
 		if err := ctx.Err(); err != nil {
@@ -689,7 +703,8 @@ func (s *Store) readPrimaryPage(
 	opts.Snapshot = &primarySnapshot
 	page, err := s.reader.ReadPage(ctx, path, offset, opts)
 	if err != nil {
-		if errors.Is(err, store.ErrStreamNotFound) {
+		if errors.Is(err, store.ErrStreamNotFound) ||
+			errors.Is(err, store.ErrStreamSoftDeleted) {
 			return store.ReadPage{}, store.ErrReadSnapshotChanged
 		}
 		return store.ReadPage{}, err
@@ -842,6 +857,66 @@ func (s *Store) WaitForMessages(ctx context.Context, path string, offset store.O
 	return s.primary.WaitForMessages(ctx, path, offset, timeout)
 }
 
+// WaitForPage preserves the primary wait's atomic read projection, then applies
+// the same immutable-generation selection as an ordinary first page. The
+// caller's initial lease stays live until it releases that snapshot.
+func (s *Store) WaitForPage(
+	ctx context.Context,
+	path string,
+	offset store.Offset,
+	initial store.ReadSnapshot,
+	timeout time.Duration,
+	opts store.ReadPageOptions,
+) (store.ReadWaitResult, error) {
+	primaryInitial := initial
+	if initial.StoreToken != "" {
+		lease, err := s.lookupLease(path, initial)
+		if err != nil {
+			return store.ReadWaitResult{}, err
+		}
+		primaryInitial = lease.primarySnapshot
+	}
+
+	waiter, ok := s.primary.(store.PageWaiter)
+	if !ok {
+		_, timedOut, _, err := s.primary.WaitForMessages(ctx, path, offset, timeout)
+		if err != nil {
+			return store.ReadWaitResult{}, err
+		}
+		opts.Snapshot = nil
+		opts.NoTouch = true
+		page, err := s.reader.ReadPage(ctx, path, offset, opts)
+		if err != nil {
+			return store.ReadWaitResult{}, err
+		}
+		if !store.SameReadStream(primaryInitial, page.Snapshot) {
+			s.releasePrimarySnapshot(path, page.Snapshot)
+			return store.ReadWaitResult{}, store.ErrReadSnapshotChanged
+		}
+		result, err := s.readCapturedPrimaryPage(ctx, path, offset, opts, page)
+		if err != nil {
+			return store.ReadWaitResult{}, err
+		}
+		return store.ReadWaitResult{Page: result, TimedOut: timedOut}, nil
+	}
+
+	opts.Snapshot = nil
+	opts.NoTouch = true
+	result, err := waiter.WaitForPage(ctx, path, offset, primaryInitial, timeout, opts)
+	if err != nil {
+		return store.ReadWaitResult{}, err
+	}
+	if !store.SameReadStream(primaryInitial, result.Page.Snapshot) {
+		s.releasePrimarySnapshot(path, result.Page.Snapshot)
+		return store.ReadWaitResult{}, store.ErrReadSnapshotChanged
+	}
+	page, err := s.readCapturedPrimaryPage(ctx, path, offset, opts, result.Page)
+	if err != nil {
+		return store.ReadWaitResult{}, err
+	}
+	return store.ReadWaitResult{Page: page, TimedOut: result.TimedOut}, nil
+}
+
 // NotificationSubscriber exposes the authoritative primary's optional
 // persistent wake feed without making the segment wrapper itself a
 // notification authority.
@@ -869,11 +944,11 @@ func (s *Store) Repair(path string) (*Manifest, error) {
 
 	ctx := context.Background()
 	for attempt := 0; attempt < 8; attempt++ {
-		meta, err := s.primary.Get(path)
+		head, err := s.capturePrimarySnapshot(ctx, path)
 		if err != nil {
 			return nil, err
 		}
-		identity := incarnation(path, meta)
+		identity := snapshotIncarnation(head)
 		manifest, token, err := s.backend.Load(ctx, path)
 		if err != nil {
 			return nil, err
@@ -898,8 +973,7 @@ func (s *Store) Repair(path string) (*Manifest, error) {
 		releasePrimary := func() {
 			s.releasePrimarySnapshot(path, primarySnapshot)
 		}
-		if primarySnapshot.Incarnation != identity ||
-			!store.ContentTypeMatches(primarySnapshot.ContentType, meta.ContentType) {
+		if !store.SameReadStream(head, primarySnapshot) {
 			releasePrimary()
 			continue
 		}
@@ -946,8 +1020,8 @@ func (s *Store) Repair(path string) (*Manifest, error) {
 		if err := s.verifyManifest(&next); err != nil {
 			return nil, err
 		}
-		freshMeta, err := s.primary.Get(path)
-		if err != nil || incarnation(path, freshMeta) != identity {
+		fresh, err := s.capturePrimarySnapshot(ctx, path)
+		if err != nil || !store.SameReadStream(head, fresh) {
 			continue
 		}
 		if _, err := s.backend.Publish(ctx, path, token, &next); errors.Is(err, ErrConflict) {
@@ -972,7 +1046,7 @@ func (s *Store) Transition(path string, target MigrationState) (*Manifest, error
 		return nil, err
 	}
 	for attempt := 0; attempt < 8; attempt++ {
-		meta, err := s.primary.Get(path)
+		head, err := s.capturePrimarySnapshot(context.Background(), path)
 		if err != nil {
 			return nil, err
 		}
@@ -980,7 +1054,7 @@ func (s *Store) Transition(path string, target MigrationState) (*Manifest, error
 		if err != nil {
 			return nil, err
 		}
-		if err := validateManifest(manifest, s.backend.Mode(), path, incarnation(path, meta)); err != nil {
+		if err := validateManifest(manifest, s.backend.Mode(), path, snapshotIncarnation(head)); err != nil {
 			return nil, err
 		}
 		if err := s.verifyManifest(manifest); err != nil {
@@ -1021,7 +1095,7 @@ func (s *Store) PinSnapshot(path string) (*SnapshotPin, error) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	meta, err := s.primary.Get(path)
+	head, err := s.capturePrimarySnapshot(context.Background(), path)
 	if err != nil {
 		return nil, err
 	}
@@ -1029,20 +1103,14 @@ func (s *Store) PinSnapshot(path string) (*SnapshotPin, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateManifest(manifest, s.backend.Mode(), path, incarnation(path, meta)); err != nil {
+	if err := validateManifest(manifest, s.backend.Mode(), path, snapshotIncarnation(head)); err != nil {
 		return nil, err
 	}
-	page, err := s.reader.ReadPage(
-		context.Background(),
-		path,
-		meta.CurrentOffset,
-		store.ReadPageOptions{NoTouch: true},
-	)
+	confirmed, err := s.capturePrimarySnapshot(context.Background(), path)
 	if err != nil {
 		return nil, err
 	}
-	s.releasePrimarySnapshot(path, page.Snapshot)
-	if page.Snapshot.Incarnation != incarnation(path, meta) {
+	if !store.SameReadStream(head, confirmed) {
 		return nil, fmt.Errorf("%w: stream incarnation changed while pinning manifest", ErrCorrupt)
 	}
 
