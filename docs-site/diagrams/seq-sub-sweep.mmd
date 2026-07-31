@@ -7,13 +7,15 @@ sequenceDiagram
     participant Recv as Receiver
     C->>O1: POST /events/abc + body
     O1->>R: EVALSHA append.lua — durable append
-    O1-->>C: 204 · the byte is committed
-    Note over O1: crash before OnStreamAppend fires the wake
-    Note over R: cursor < tail · no wake armed · wake lost
-    loop recovery sweep · every 2s on every origin
-        O2->>R: SMEMBERS ds:{__ds}:subs · HasPendingWork per sub
+    R-->>O1: committed append result
+    Note over O1: OnStreamAppend records one local dirty hint
+    O1-->>C: 204 · byte committed · hint recorded
+    Note over O1: crash before the dirty worker arms a wake
+    Note over R: cursor < tail · no wake armed · local hint lost
+    loop boot or eager recovery · periodic floor every 30s
+        O2->>R: List + GetMany across slots · batch linked tails
         Note over O2: cursor < tail → a wake is owed
-        O2->>R: EVALSHA arm_wake.lua — generation++ · re-fire
+        O2->>R: EVALSHA arm_wake.lua — generation++ · ZADD due
         O2->>Recv: POST webhook · delivered after Origin A is gone
         Recv-->>O2: 200 {done:true}
         O2->>R: EVALSHA ack.lua — cursor → tail

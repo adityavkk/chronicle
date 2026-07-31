@@ -6,7 +6,13 @@ sequenceDiagram
     participant M as Manager
     participant R as Redis
     C->>H: POST /events/abc + body
-    H->>M: OnStreamAppend · arm_wake (no lease yet)
+    H->>R: append.lua · durable append
+    R-->>H: committed append result
+    H->>M: OnStreamAppend · enqueue or coalesce
+    M-->>H: bounded local outcome
+    H-->>C: 204 · Stream-Next-Offset
+    Note over M,R: async worker loads subscribers and linked tails
+    M->>R: arm_wake.lua · generation++ · ZADD due · no lease yet
     M->>R: append {type:wake} to wake_stream · manager.go
     Wk->>H: GET /wake/pool — poll the wake stream
     H-->>Wk: wake event · subscription_id, generation

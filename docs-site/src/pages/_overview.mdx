@@ -32,6 +32,7 @@ import Aside from "../components/Aside.astro";
     <li><strong>Every mutation is one Lua script.</strong> Validation, write, tail update, and notification run atomically and serialized per stream. No partial appends and no lost wakeups.</li>
     <li><strong>It tracks the reference implementation.</strong> The store contract and handler mirror the upstream Caddy plugin, and ~330 official conformance tests gate every change.</li>
     <li><strong>The SSE live path now shares one read per stream.</strong> The original 1,000-client path measured 970.5 Redis reads per append. The exact-counter guard measured 1.000 after the fanout change. A separate local Kubernetes run delivered 49,616 events/s with zero request errors.</li>
+    <li><strong>Subscription fanout runs after the append response.</strong> Once new data commits, the handler records one bounded local dirty hint. A Manager-owned worker later loads subscribers and linked tails and arms owed wakes. Durable recovery repairs a lost hint.</li>
   </ul>
 </Tldr>
 
@@ -272,6 +273,17 @@ import Aside from "../components/Aside.astro";
     disconnects slow clients so they can resume from their last offset.
   </Aside>
 
+  ### Subscription fanout moved <em>off the response path</em>
+
+  A stream append used to wait for subscriber lookup, subscription hydration,
+  linked-tail reads, and wake arming. It now waits only for one bounded local
+  queue transition after the durable commit. At 1,000 subscriptions with four
+  links each, append p99 changed from 5,053.845 ms to 1.235 ms. The benchmark
+  waited for complete asynchronous fanout and verified every owed wake before
+  starting its next iteration. The [async subscription fanout
+  explainer](./performance-improvements/async-subscription-fanout) covers the
+  queue, overflow recovery, metrics, endpoint behavior, and full results.
+
   <Callout icon="alert" label="Caveats">
     Single host and loopback HTTP, so no network jitter and no TLS. Redis
     ran behind Docker Desktop, which adds about 0.4 ms median per round
@@ -304,7 +316,7 @@ import Aside from "../components/Aside.astro";
 
   - [Endpoints &amp; Redis](./endpoints). Every endpoint walked one at a time: the request, the sequence diagram, and the exact Redis commands each Lua script runs.
   - [Subscriptions](./subscriptions). The reserved `__ds` API: webhook and pull-wake delivery, generation fencing, and the recovery sweep that survives a restart.
-  - [Performance improvements](./performance-improvements). The SSE fanout fix, horizontal scaling work, cloud load tests, configuration comparisons, and their remaining limits.
+  - [Performance improvements](./performance-improvements). Bounded reads, SSE sharing, the asynchronous subscription handoff, horizontal scaling, cloud load tests, and their remaining limits.
   - [README](https://github.com/adityavkk/chronicle#readme). Quickstart, configuration, and development workflow.
   - [docs/PLAN.md](https://github.com/adityavkk/chronicle/blob/main/docs/PLAN.md). The architecture and its decision log.
   - [docs/spec/PROTOCOL.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md). The vendored protocol spec.
