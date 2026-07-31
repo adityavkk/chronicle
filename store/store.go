@@ -162,7 +162,8 @@ type NotificationSubscription interface {
 	// transport resubscribed and callers must immediately recheck durable state.
 	Wait(ctx context.Context) (NotificationEvent, error)
 
-	// Close releases the subscription and its underlying connection.
+	// Close releases the logical subscription. A shared transport may keep its
+	// underlying physical connection open for other registrations.
 	Close() error
 }
 
@@ -171,6 +172,21 @@ type NotificationSubscription interface {
 // subscription per HTTP client.
 type NotificationSubscriber interface {
 	SubscribeNotifications(ctx context.Context, path string) (NotificationSubscription, error)
+}
+
+// NotificationMetrics receives bounded-cardinality lifecycle observations from
+// a store-owned notification transport. Implementations must never use a
+// stream path as a metric label.
+type NotificationMetrics interface {
+	NotificationPhysicalConnection(topology string, delta int)
+	NotificationEvent(event string)
+}
+
+// NotificationMetricsSetter lets the HTTP layer attach its metrics recorder to
+// an optional store-owned notification transport after both have been built.
+// The setter must be safe to call while registrations are active.
+type NotificationMetricsSetter interface {
+	SetNotificationMetrics(NotificationMetrics)
 }
 
 // NotificationSubscriberProvider conditionally exposes a notification

@@ -55,7 +55,10 @@ func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEvent
 		if err := client.Ping(ctx).Err(); err != nil {
 			return nil, nil, nil, fmt.Errorf("redis unreachable at %s: %w", cfg.RedisURL, err)
 		}
-		rs := redisstore.New(client, redisstore.Options{Logger: logger})
+		rs := redisstore.New(client, redisstore.Options{
+			Logger:                       logger,
+			NotificationConnectionGroups: cfg.SSENotificationGroups,
+		})
 		mode, err := segments.ParseMode(cfg.SegmentMode)
 		if err != nil {
 			_ = client.Close()
@@ -225,6 +228,7 @@ func run() error {
 	flag.IntVar(&cfg.ReadPageBytes, "read-page-bytes", cfg.ReadPageBytes, "catch-up returned page payload target in bytes")
 	flag.IntVar(&cfg.SSEHubReplayBytes, "sse-hub-replay-bytes", cfg.SSEHubReplayBytes, "per-stream SSE hub replay memory bound in bytes")
 	flag.IntVar(&cfg.SSEHubBatchBytes, "sse-hub-batch-bytes", cfg.SSEHubBatchBytes, "target retained bytes per shared SSE data event")
+	flag.IntVar(&cfg.SSENotificationGroups, "sse-notification-connections", cfg.SSENotificationGroups, "maximum physical Redis Pub/Sub connections for SSE notifications")
 	flag.DurationVar(&cfg.SSEClientWriteTimeout, "sse-client-write-timeout", cfg.SSEClientWriteTimeout, "maximum duration of one SSE client event flush")
 	flag.StringVar(&cfg.PublicBaseURL, "public-url", cfg.PublicBaseURL, "externally reachable origin for webhook callback/JWKS URLs")
 	flag.BoolVar(&cfg.Subscriptions, "subscriptions", cfg.Subscriptions, "enable the reserved __ds subscription APIs (redis backend only)")
@@ -494,6 +498,9 @@ func validateSSEConfig(cfg chronicle.Config) error {
 	}
 	if cfg.SSEHubBatchBytes > cfg.SSEHubReplayBytes {
 		return fmt.Errorf("-sse-hub-batch-bytes must not exceed -sse-hub-replay-bytes")
+	}
+	if cfg.SSENotificationGroups <= 0 {
+		return fmt.Errorf("-sse-notification-connections must be positive")
 	}
 	if cfg.SSEClientWriteTimeout <= 0 {
 		return fmt.Errorf("-sse-client-write-timeout must be positive")

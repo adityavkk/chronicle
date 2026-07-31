@@ -2,12 +2,28 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"strconv"
 	"strings"
 	"testing"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
+
+func TestRequireCommittedSSEAbort(t *testing.T) {
+	if err := requireCommittedSSEAbort(io.ErrUnexpectedEOF); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireCommittedSSEAbort(errors.Join(errors.New("read body"), io.ErrUnexpectedEOF)); err != nil {
+		t.Fatal(err)
+	}
+	for _, err := range []error{nil, errors.New("ordinary read failure")} {
+		if got := requireCommittedSSEAbort(err); got == nil {
+			t.Fatalf("termination %v accepted without a committed-response abort", err)
+		}
+	}
+}
 
 func TestSSEParserHandlesMultilineDataCommentsAndCRLF(t *testing.T) {
 	var parser sseParser

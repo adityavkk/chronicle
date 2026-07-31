@@ -81,6 +81,9 @@ func TestValidateSSEConfig(t *testing.T) {
 		{name: "batch exceeds replay", mutate: func(cfg *chronicle.Config) {
 			cfg.SSEHubBatchBytes = cfg.SSEHubReplayBytes + 1
 		}},
+		{name: "notification connections", mutate: func(cfg *chronicle.Config) {
+			cfg.SSENotificationGroups = 0
+		}},
 		{name: "write timeout", mutate: func(cfg *chronicle.Config) { cfg.SSEClientWriteTimeout = 0 }},
 	}
 	for _, test := range tests {

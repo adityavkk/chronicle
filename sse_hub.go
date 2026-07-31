@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"unsafe"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
@@ -26,16 +27,22 @@ const (
 
 var (
 	errSSEHubLagged    = errors.New("SSE client fell behind the hub replay window")
+	errSSEHubBehind    = errors.New("SSE hub has not reached the client catch-up boundary")
 	errSSEHubRecreated = errors.New("stream was deleted and recreated")
 )
 
 // SSEMetrics is the data-plane metrics seam for the shared SSE hub. The
 // Prometheus implementation lives in metrics; nil records nothing.
 type SSEMetrics interface {
+	store.NotificationMetrics
 	SSEHubActive(delta int)
 	SSEClientActive(delta int)
 	SSEHubRead(messages int)
-	SSEHubRingBytes(delta int)
+	SSEHubRingBytes(rawDelta, wireDelta, indexDelta int)
+	SSEHubRefresh(cause string, pages, bytes int, duration time.Duration)
+	SSEPage(phase string, bytes int)
+	SSEWatcherLookup(steps int, miss bool)
+	SSEReason(reason string)
 	SSEClientLagged()
 	SSEClientWriteTimeout()
 	SSESubscriptionActive(delta int)
@@ -44,14 +51,20 @@ type SSEMetrics interface {
 
 type nopSSEMetrics struct{}
 
-func (nopSSEMetrics) SSEHubActive(int)            {}
-func (nopSSEMetrics) SSEClientActive(int)         {}
-func (nopSSEMetrics) SSEHubRead(int)              {}
-func (nopSSEMetrics) SSEHubRingBytes(int)         {}
-func (nopSSEMetrics) SSEClientLagged()            {}
-func (nopSSEMetrics) SSEClientWriteTimeout()      {}
-func (nopSSEMetrics) SSESubscriptionActive(int)   {}
-func (nopSSEMetrics) SSESubscriptionEvent(string) {}
+func (nopSSEMetrics) SSEHubActive(int)                              {}
+func (nopSSEMetrics) SSEClientActive(int)                           {}
+func (nopSSEMetrics) SSEHubRead(int)                                {}
+func (nopSSEMetrics) SSEHubRingBytes(int, int, int)                 {}
+func (nopSSEMetrics) SSEHubRefresh(string, int, int, time.Duration) {}
+func (nopSSEMetrics) SSEPage(string, int)                           {}
+func (nopSSEMetrics) SSEWatcherLookup(int, bool)                    {}
+func (nopSSEMetrics) SSEReason(string)                              {}
+func (nopSSEMetrics) SSEClientLagged()                              {}
+func (nopSSEMetrics) SSEClientWriteTimeout()                        {}
+func (nopSSEMetrics) SSESubscriptionActive(int)                     {}
+func (nopSSEMetrics) SSESubscriptionEvent(string)                   {}
+func (nopSSEMetrics) NotificationPhysicalConnection(string, int)    {}
+func (nopSSEMetrics) NotificationEvent(string)                      {}
 
 type sseHubRegistry struct {
 	mu   sync.Mutex
@@ -80,6 +93,18 @@ func (l *sseHubLease) waitReady(ctx context.Context) error {
 	case <-l.hub.ready:
 		l.hub.mu.Lock()
 		err := l.hub.readyErr
+		l.hub.mu.Unlock()
+		return err
+	}
+}
+
+func (l *sseHubLease) waitRegistered(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-l.hub.registered:
+		l.hub.mu.Lock()
+		err := l.hub.registeredErr
 		l.hub.mu.Unlock()
 		return err
 	}
@@ -126,80 +151,84 @@ func (l *sseHubLease) close() {
 	})
 }
 
-// acquireExistingSSEHub reserves a path's live hub before the caller reads its
-// own page. The later snapshot validation decides whether the hub belongs to
-// the same stream incarnation.
-func (h *Handler) acquireExistingSSEHub(path string) *sseHubLease {
+func (h *Handler) acquireSSEHubRegistration(path string) *sseHubLease {
 	metrics := h.sseMetrics()
 	h.sseHubs.mu.Lock()
 	defer h.sseHubs.mu.Unlock()
-	entry := h.sseHubs.hubs[path]
-	if entry == nil || !entry.hub.canAttemptServe() {
-		return nil
-	}
-	return h.leaseSSEHubLocked(path, entry, metrics)
-}
-
-// acquireSSEHub creates or reuses the hub for snapshot. A non-nil registered
-// subscription was confirmed before snapshot was captured. The hub takes
-// ownership when it creates the matching entry; otherwise it closes the
-// redundant registration after releasing the registry lock.
-func (h *Handler) acquireSSEHub(
-	path string,
-	snapshot store.ReadSnapshot,
-	useBase64 bool,
-	registered store.NotificationSubscription,
-) *sseHubLease {
-	metrics := h.sseMetrics()
-	h.sseHubs.mu.Lock()
 
 	if h.sseHubs.hubs == nil {
 		h.sseHubs.hubs = make(map[string]*sseHubEntry)
 	}
 	entry := h.sseHubs.hubs[path]
-	registrationTransferred := false
-	if entry == nil || !entry.hub.canServe(snapshot) {
-		ctx, cancel := context.WithCancel(context.Background())
-		replayLimit := positiveOr(h.SSEHubReplayBytes, defaultSSEHubReplayBytes)
-		batchLimit := min(positiveOr(h.SSEHubBatchBytes, defaultSSEHubBatchBytes), replayLimit)
-		pollInterval := durationOr(h.SSEHubPollInterval, defaultSSEHubPoll)
-		pollInterval = capSSEHubPollForTTL(pollInterval, snapshot.TTLSeconds)
-		hub := &sseHub{
-			handler:             h,
-			path:                path,
-			contentType:         snapshot.ContentType,
-			useBase64:           useBase64,
-			replayLimit:         replayLimit,
-			batchLimit:          batchLimit,
-			pollInterval:        pollInterval,
-			ctx:                 ctx,
-			cancel:              cancel,
-			done:                make(chan struct{}),
-			ready:               make(chan struct{}),
-			current:             snapshot.Tail,
-			closed:              snapshot.Closed,
-			incarnation:         snapshot.Incarnation,
-			createdAt:           snapshot.CreatedAt,
-			watchers:            make(map[*sseHubWatcher]struct{}),
-			metrics:             metrics,
-			initialSubscription: registered,
-		}
-		registrationTransferred = registered != nil
-		entry = &sseHubEntry{hub: hub}
+	if entry == nil || entry.hub.isTerminal() {
+		entry = h.newSSEHubEntry(path, metrics)
 		h.sseHubs.hubs[path] = entry
-		metrics.SSEHubActive(1)
-		go hub.run()
 	}
 
-	lease := h.leaseSSEHubLocked(path, entry, metrics)
-	h.sseHubs.mu.Unlock()
-	if registered != nil && !registrationTransferred {
-		_ = registered.Close()
+	return h.addSSEHubLeaseLocked(path, entry, metrics)
+}
+
+// acquireSSEHub is retained for focused hub tests and internal callers that
+// already own a snapshot. Production SSE requests use
+// acquireSSEHubRegistration so registration is acknowledged before the first
+// page captures that snapshot.
+func (h *Handler) acquireSSEHub(path string, snapshot store.ReadSnapshot, useBase64 bool) *sseHubLease {
+	lease := h.acquireSSEHubRegistration(path)
+	if err := lease.hub.initialize(snapshot, useBase64); err == nil {
+		return lease
+	}
+	return h.replaceSSEHubLease(lease, snapshot, useBase64)
+}
+
+func (h *Handler) replaceSSEHubLease(
+	old *sseHubLease,
+	snapshot store.ReadSnapshot,
+	useBase64 bool,
+) *sseHubLease {
+	path := old.path
+	oldEntry := old.entry
+	old.close()
+	metrics := h.sseMetrics()
+	h.sseHubs.mu.Lock()
+	defer h.sseHubs.mu.Unlock()
+	entry := h.sseHubs.hubs[path]
+	if entry == nil || entry == oldEntry || entry.hub.isTerminal() {
+		entry = h.newSSEHubEntry(path, metrics)
+		h.sseHubs.hubs[path] = entry
+	}
+	lease := h.addSSEHubLeaseLocked(path, entry, metrics)
+	if err := lease.hub.initialize(snapshot, useBase64); err != nil {
+		lease.hub.fail(err)
 	}
 	return lease
 }
 
-func (h *Handler) leaseSSEHubLocked(
+func (h *Handler) newSSEHubEntry(path string, metrics SSEMetrics) *sseHubEntry {
+	ctx, cancel := context.WithCancel(context.Background())
+	replayLimit := positiveOr(h.SSEHubReplayBytes, defaultSSEHubReplayBytes)
+	batchLimit := min(positiveOr(h.SSEHubBatchBytes, defaultSSEHubBatchBytes), replayLimit)
+	hub := &sseHub{
+		handler:       h,
+		path:          path,
+		replayLimit:   replayLimit,
+		batchLimit:    batchLimit,
+		ctx:           ctx,
+		cancel:        cancel,
+		done:          make(chan struct{}),
+		registered:    make(chan struct{}),
+		initialized:   make(chan struct{}),
+		ready:         make(chan struct{}),
+		firstSequence: 1,
+		nextSequence:  1,
+		watchers:      make(map[*sseHubWatcher]struct{}),
+		metrics:       metrics,
+	}
+	metrics.SSEHubActive(1)
+	go hub.run()
+	return &sseHubEntry{hub: hub}
+}
+
+func (h *Handler) addSSEHubLeaseLocked(
 	path string,
 	entry *sseHubEntry,
 	metrics SSEMetrics,
@@ -267,46 +296,79 @@ func capSSEHubPollForTTL(poll time.Duration, ttlSeconds *int64) time.Duration {
 }
 
 type sseHub struct {
-	handler             *Handler
-	path                string
-	contentType         string
-	useBase64           bool
-	replayLimit         int
-	batchLimit          int
-	pollInterval        time.Duration
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	done                chan struct{}
-	ready               chan struct{}
-	readyOnce           sync.Once
-	metrics             SSEMetrics
-	initialSubscription store.NotificationSubscription
+	handler        *Handler
+	path           string
+	contentType    string
+	useBase64      bool
+	replayLimit    int
+	batchLimit     int
+	pollInterval   time.Duration
+	ctx            context.Context
+	cancel         context.CancelFunc
+	done           chan struct{}
+	registered     chan struct{}
+	registeredOnce sync.Once
+	initialized    chan struct{}
+	ready          chan struct{}
+	readyOnce      sync.Once
+	metrics        SSEMetrics
+	refreshMu      sync.Mutex
+	confirmationMu sync.Mutex
+	confirmation   *sseHubConfirmation
 
-	mu          sync.Mutex
-	readyErr    error
-	current     store.Offset
-	closed      bool
-	incarnation string
-	createdAt   time.Time
-	terminalErr error
-	events      []*sseHubEvent
-	replayBytes int
-	watchers    map[*sseHubWatcher]struct{}
+	mu             sync.Mutex
+	registeredErr  error
+	isInitialized  bool
+	readyErr       error
+	current        store.Offset
+	closed         bool
+	incarnation    string
+	createdAt      time.Time
+	terminalErr    error
+	events         []*sseHubEvent
+	firstSequence  uint64
+	nextSequence   uint64
+	ringRawBytes   int
+	ringWireBytes  int
+	ringIndexBytes int
+	replayBytes    int
+	watchers       map[*sseHubWatcher]struct{}
 }
 
 type sseHubEvent struct {
+	sequence   uint64
 	from       store.Offset
 	to         store.Offset
-	messages   []store.Message
 	data       []byte
+	boundaries []sseHubBoundary
 	upToDate   bool
 	closed     bool
+	rawBytes   int
+	wireBytes  int
+	indexBytes int
 	memorySize int
 }
 
+type sseHubBoundary struct {
+	offset  store.Offset
+	wireEnd int
+}
+
+type sseHubConfirmation struct {
+	done     chan struct{}
+	snapshot store.ReadSnapshot
+	err      error
+}
+
+const sseHubBoundaryBytes = int(unsafe.Sizeof(sseHubBoundary{}))
+
 type sseHubWatcher struct {
-	hub  *sseHub
-	wake chan struct{}
+	hub            *sseHub
+	wake           chan struct{}
+	attached       bool
+	sequence       uint64
+	offset         store.Offset
+	firstWireStart int
 }
 
 func (h *sseHub) addWatcher() *sseHubWatcher {
@@ -325,6 +387,7 @@ func (h *sseHub) removeWatcher(watcher *sseHubWatcher) {
 
 func (h *sseHub) run() {
 	defer close(h.done)
+	defer h.markRegistered(h.ctx.Err())
 	defer h.markReady(h.ctx.Err())
 
 	var subscriber store.NotificationSubscriber
@@ -334,49 +397,33 @@ func (h *sseHub) run() {
 	} else {
 		subscriber, ok = h.handler.Store.(store.NotificationSubscriber)
 	}
-	initial := h.initialSubscription
-	h.initialSubscription = nil
-	if ok {
-		h.runPersistent(subscriber, initial)
-		return
+	if setter, hasSetter := subscriber.(store.NotificationMetricsSetter); hasSetter {
+		setter.SetNotificationMetrics(h.metrics)
 	}
-	if initial != nil {
-		_ = initial.Close()
-		h.markReady(errors.New("SSE hub has a registered subscription without a notification provider"))
+	if ok {
+		h.runPersistent(subscriber)
 		return
 	}
 	h.runWaitLoop()
 }
 
-func (h *sseHub) runPersistent(
-	subscriber store.NotificationSubscriber,
-	initial store.NotificationSubscription,
-) {
-	defer func() {
-		if initial != nil {
-			_ = initial.Close()
-		}
-	}()
+func (h *sseHub) runPersistent(subscriber store.NotificationSubscriber) {
 	retry := sseHubRetryMin
+	firstConfirmedGeneration := true
 	for h.ctx.Err() == nil {
-		preconfirmed := initial != nil
-		sub := initial
-		initial = nil
-		if sub == nil {
-			var err error
-			sub, err = subscriber.SubscribeNotifications(h.ctx, h.path)
-			if err != nil {
-				h.metrics.SSESubscriptionEvent("subscribe_error")
-				h.logRetry("subscribe", err)
-				if !sleepContext(h.ctx, retry) {
-					return
-				}
-				retry = min(retry*2, sseHubRetryMax)
-				continue
+		sub, err := subscriber.SubscribeNotifications(h.ctx, h.path)
+		if err != nil {
+			h.metrics.SSESubscriptionEvent("subscribe_error")
+			h.logRetry("subscribe", err)
+			if !sleepContext(h.ctx, retry) {
+				return
 			}
+			retry = min(retry*2, sseHubRetryMax)
+			continue
 		}
 		h.metrics.SSESubscriptionEvent("opened")
 		h.metrics.SSESubscriptionActive(1)
+		h.markRegistered(nil)
 		var closeOnce sync.Once
 		closeSub := func() {
 			closeOnce.Do(func() {
@@ -386,7 +433,19 @@ func (h *sseHub) runPersistent(
 			})
 		}
 
-		if !preconfirmed {
+		if !h.waitInitialized() {
+			closeSub()
+			return
+		}
+		if firstConfirmedGeneration {
+			// Registration was acknowledged before the handler captured the
+			// authoritative first page. Redis orders every append either into
+			// that page's tail or into this subscription, so a duplicate initial
+			// readiness refresh is neither necessary nor desirable.
+			firstConfirmedGeneration = false
+		} else {
+			// A replacement subscription may have missed hints while the old
+			// generation was unavailable. Refresh durable state before waiting.
 			if err := h.refreshNoTouch(); err != nil {
 				closeSub()
 				if h.handleReadError(err) {
@@ -426,12 +485,19 @@ func (h *sseHub) runPersistent(
 			}
 			if event == store.NotificationReconnect {
 				h.metrics.SSESubscriptionEvent("reconnect")
+				h.metrics.SSEReason("notification_reconnect")
 			}
 
 			var refreshErr error
-			if errors.Is(err, context.DeadlineExceeded) {
+			switch {
+			case errors.Is(err, context.DeadlineExceeded):
 				refreshErr = h.poll()
-			} else {
+			case event == store.NotificationReconnect:
+				// A reconnect begins a notification generation that may have
+				// missed hints. Confirm durable state without extending the
+				// stream's access lifetime.
+				refreshErr = h.refreshPage("reconnect", true)
+			default:
 				refreshErr = h.refresh()
 			}
 			if refreshErr != nil {
@@ -458,6 +524,10 @@ func (h *sseHub) runPersistent(
 }
 
 func (h *sseHub) runWaitLoop() {
+	h.markRegistered(nil)
+	if !h.waitInitialized() {
+		return
+	}
 	retry := sseHubRetryMin
 	initial := true
 	for h.ctx.Err() == nil && !h.isClosed() {
@@ -495,21 +565,49 @@ func (h *sseHub) runWaitLoop() {
 }
 
 func (h *sseHub) refresh() error {
-	return h.refreshPage(false)
+	return h.refreshPage("hint", false)
 }
 
 func (h *sseHub) refreshNoTouch() error {
-	return h.refreshPage(true)
+	return h.refreshPage("initial", true)
 }
 
-func (h *sseHub) refreshPage(noTouch bool) error {
+func (h *sseHub) refreshCause(cause string) error {
+	return h.refreshPage(cause, false)
+}
+
+func (h *sseHub) refreshPage(cause string, noTouch bool) error {
+	h.refreshMu.Lock()
+	defer h.refreshMu.Unlock()
+	return h.refreshPageLocked(cause, noTouch)
+}
+
+func (h *sseHub) refreshTo(offset store.Offset) error {
+	h.refreshMu.Lock()
+	defer h.refreshMu.Unlock()
+	if !h.currentOffset().LessThan(offset) {
+		return nil
+	}
+	return h.refreshPageLocked("attach", false)
+}
+
+func (h *sseHub) refreshPageLocked(cause string, noTouch bool) error {
+	started := time.Now()
+	pages := 0
+	bytes := 0
+	defer func() {
+		h.metrics.SSEHubRefresh(cause, pages, bytes, time.Since(started))
+	}()
 	ctx := h.ctx
 	if ctx == nil {
 		// refresh is also exercised directly by focused tests and diagnostic
 		// callers. Production hubs always install a cancellable context.
 		ctx = context.Background()
 	}
-	reader := h.handler.pageReader()
+	reader, ok := h.handler.Store.(store.PageReader)
+	if !ok {
+		return errors.New("SSE hub requires a store.PageReader backend")
+	}
 	var snapshot *store.ReadSnapshot
 	defer func() {
 		if snapshot != nil {
@@ -534,6 +632,8 @@ func (h *sseHub) refreshPage(noTouch bool) error {
 		}
 		h.handler.observeReadPage(page)
 		h.metrics.SSEHubRead(len(page.Messages))
+		pages++
+		bytes += page.Stats.ReturnedBytes
 
 		if snapshot == nil {
 			captured := page.Snapshot
@@ -569,11 +669,57 @@ func (h *sseHub) refreshPage(noTouch bool) error {
 	}
 }
 
+func (h *sseHub) confirmSnapshot(
+	ctx context.Context,
+	reader store.PageReader,
+	path string,
+) (store.ReadSnapshot, error) {
+	h.confirmationMu.Lock()
+	confirmation := h.confirmation
+	if confirmation == nil {
+		confirmation = &sseHubConfirmation{done: make(chan struct{})}
+		h.confirmation = confirmation
+		h.confirmationMu.Unlock()
+
+		readCtx := h.ctx
+		if readCtx == nil {
+			readCtx = context.Background()
+		}
+		page, err := reader.ReadPage(readCtx, path, store.NowOffset, store.ReadPageOptions{
+			TargetBytes: 1,
+			MaxFrames:   1,
+			NoTouch:     true,
+		})
+		if err == nil {
+			h.handler.observeReadPage(page)
+			h.metrics.SSEPage("confirm", page.Stats.ReturnedBytes)
+			releaseReadSnapshot(reader, path, page.Snapshot)
+			confirmation.snapshot = page.Snapshot
+		}
+		confirmation.err = err
+
+		h.confirmationMu.Lock()
+		if h.confirmation == confirmation {
+			h.confirmation = nil
+		}
+		close(confirmation.done)
+		h.confirmationMu.Unlock()
+	} else {
+		h.confirmationMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return store.ReadSnapshot{}, ctx.Err()
+		case <-confirmation.done:
+		}
+	}
+	return confirmation.snapshot, confirmation.err
+}
+
 func (h *sseHub) poll() error {
 	// Read, rather than Get, is required even when the tail is unchanged:
 	// protocol sliding TTL treats an active live reader as access. It also
 	// remains the durable fallback for a lost Pub/Sub notification.
-	return h.refresh()
+	return h.refreshCause("poll")
 }
 
 func (h *sseHub) validateSnapshot(snapshot store.ReadSnapshot) error {
@@ -596,29 +742,14 @@ func (h *sseHub) publish(
 	streamClosed bool,
 	tail store.Offset,
 ) error {
-	chunks := splitSSEMessages(messages, h.batchLimit, h.contentType, h.useBase64)
-	events := make([]*sseHubEvent, 0, len(chunks))
-	next := from
-	for i, chunk := range chunks {
-		last := i == len(chunks)-1
-		data, err := h.handler.formatSSEDataEvent(h.path, chunk, h.contentType, h.useBase64)
-		if err != nil {
-			return err
-		}
-		event := &sseHubEvent{
-			from:     next,
-			to:       chunk[len(chunk)-1].Offset,
-			messages: chunk,
-			data:     data,
-			upToDate: last && upToDate,
-		}
-		event.closed = last && streamClosed && event.to.Equal(tail)
-		event.memorySize = len(event.data)
-		for _, message := range chunk {
-			event.memorySize += len(message.Data)
-		}
-		events = append(events, event)
-		next = event.to
+	events, err := h.buildSSEHubEvents(from, messages)
+	if err != nil {
+		return err
+	}
+	if len(events) > 0 {
+		last := events[len(events)-1]
+		last.upToDate = upToDate
+		last.closed = streamClosed && last.to.Equal(tail)
 	}
 
 	h.mu.Lock()
@@ -627,9 +758,20 @@ func (h *sseHub) publish(
 		return fmt.Errorf("SSE hub offset changed during publish: have %s, read from %s", h.current, from)
 	}
 
-	previousReplayBytes := h.replayBytes
+	if h.nextSequence == 0 {
+		h.firstSequence = 1
+		h.nextSequence = 1
+	}
+	previousRawBytes := h.ringRawBytes
+	previousWireBytes := h.ringWireBytes
+	previousIndexBytes := h.ringIndexBytes
 	for _, event := range events {
+		event.sequence = h.nextSequence
+		h.nextSequence++
 		h.events = append(h.events, event)
+		h.ringRawBytes += event.rawBytes
+		h.ringWireBytes += event.wireBytes
+		h.ringIndexBytes += event.indexBytes
 		h.replayBytes += event.memorySize
 		h.current = event.to
 	}
@@ -641,102 +783,68 @@ func (h *sseHub) publish(
 	}
 
 	for h.replayBytes > h.replayLimit && len(h.events) > 1 {
-		h.replayBytes -= h.events[0].memorySize
+		evicted := h.events[0]
+		h.ringRawBytes -= evicted.rawBytes
+		h.ringWireBytes -= evicted.wireBytes
+		h.ringIndexBytes -= evicted.indexBytes
+		h.replayBytes -= evicted.memorySize
 		h.events[0] = nil
 		h.events = h.events[1:]
+		h.firstSequence++
 	}
-	if retainedDelta := h.replayBytes - previousReplayBytes; retainedDelta != 0 {
-		h.metrics.SSEHubRingBytes(retainedDelta)
+	if len(h.events) == 0 {
+		h.firstSequence = h.nextSequence
+	}
+	rawDelta := h.ringRawBytes - previousRawBytes
+	wireDelta := h.ringWireBytes - previousWireBytes
+	indexDelta := h.ringIndexBytes - previousIndexBytes
+	if rawDelta != 0 || wireDelta != 0 || indexDelta != 0 {
+		h.metrics.SSEHubRingBytes(rawDelta, wireDelta, indexDelta)
 	}
 	h.notifyLocked()
 	return nil
 }
 
-func splitSSEMessages(
+func (h *sseHub) buildSSEHubEvents(
+	from store.Offset,
 	messages []store.Message,
-	limit int,
-	contentType string,
-	useBase64 bool,
-) [][]store.Message {
-	if len(messages) == 0 {
-		return nil
-	}
-
-	jsonContent := store.IsJSONContentType(contentType)
-	var chunks [][]store.Message
-	start := 0
-	rawBytes := 0
-	size := newSSEEventSize(jsonContent)
-	for i, message := range messages {
-		candidate := size
-		if jsonContent && i > start {
-			candidate.addByte(',')
+) ([]*sseHubEvent, error) {
+	var events []*sseHubEvent
+	event := &sseHubEvent{from: from}
+	finish := func() {
+		if len(event.boundaries) == 0 {
+			return
 		}
-		candidate.add(message.Data)
-		candidateRawBytes := rawBytes + len(message.Data)
-		if i > start && candidate.retainedBytes(candidateRawBytes, jsonContent, useBase64) > limit {
-			chunks = append(chunks, append([]store.Message(nil), messages[start:i]...))
-			start = i
-			candidateRawBytes = len(message.Data)
-			candidate = newSSEEventSize(jsonContent)
-			candidate.add(message.Data)
+		event.to = event.boundaries[len(event.boundaries)-1].offset
+		event.wireBytes = len(event.data)
+		event.indexBytes = len(event.boundaries) * sseHubBoundaryBytes
+		event.memorySize = event.rawBytes + event.wireBytes + event.indexBytes
+		events = append(events, event)
+		event = &sseHubEvent{from: event.to}
+	}
+	for _, message := range messages {
+		wire, err := h.handler.formatSSEDataEvent(
+			h.path,
+			[]store.Message{message},
+			h.contentType,
+			h.useBase64,
+		)
+		if err != nil {
+			return nil, err
 		}
-		rawBytes = candidateRawBytes
-		size = candidate
+		candidateBytes := len(event.data) + len(wire) +
+			(len(event.boundaries)+1)*sseHubBoundaryBytes
+		if len(event.boundaries) > 0 && candidateBytes > h.batchLimit {
+			finish()
+		}
+		event.data = append(event.data, wire...)
+		event.boundaries = append(event.boundaries, sseHubBoundary{
+			offset:  message.Offset,
+			wireEnd: len(event.data),
+		})
 	}
-	return append(chunks, append([]store.Message(nil), messages[start:]...))
-}
-
-type sseEventSize struct {
-	bodyBytes  int
-	textBytes  int
-	lineBreaks int
-	previousCR bool
-}
-
-func newSSEEventSize(jsonContent bool) sseEventSize {
-	var size sseEventSize
-	if jsonContent {
-		size.addByte('[')
-	}
-	return size
-}
-
-func (s *sseEventSize) add(data []byte) {
-	for _, b := range data {
-		s.addByte(b)
-	}
-}
-
-func (s *sseEventSize) addByte(b byte) {
-	s.bodyBytes++
-	if b == '\n' && s.previousCR {
-		s.previousCR = false
-		return
-	}
-	s.previousCR = b == '\r'
-	if b == '\r' || b == '\n' {
-		s.lineBreaks++
-		return
-	}
-	s.textBytes++
-}
-
-func (s sseEventSize) retainedBytes(rawBytes int, jsonContent, useBase64 bool) int {
-	if jsonContent {
-		s.addByte(']')
-	}
-	const eventPrefixBytes = len("event: data\n")
-	if useBase64 {
-		const framingBytes = eventPrefixBytes + len("data:") + len("\n\n")
-		return rawBytes + framingBytes + base64.StdEncoding.EncodedLen(s.bodyBytes)
-	}
-	const (
-		dataLineBytes = len("data:") + len("\n")
-		finalNewline  = len("\n")
-	)
-	eventBytes := eventPrefixBytes + s.textBytes + dataLineBytes*(s.lineBreaks+1) + finalNewline
-	return rawBytes + eventBytes
+	finish()
+	return events, nil
 }
 
 func (h *sseHub) currentOffset() store.Offset {
@@ -751,21 +859,54 @@ func (h *sseHub) isClosed() bool {
 	return h.closed
 }
 
-func (h *sseHub) canServe(snapshot store.ReadSnapshot) bool {
+func (h *sseHub) isTerminal() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	current := store.ReadSnapshot{
-		Incarnation: h.incarnation,
-		ContentType: h.contentType,
-		CreatedAt:   h.createdAt,
-	}
-	return h.terminalErr == nil && store.SameReadStream(current, snapshot)
+	return h.terminalErr != nil
 }
 
-func (h *sseHub) canAttemptServe() bool {
+func (h *sseHub) initialize(snapshot store.ReadSnapshot, useBase64 bool) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.terminalErr == nil
+	if h.terminalErr != nil {
+		err := h.terminalErr
+		h.mu.Unlock()
+		return err
+	}
+	if h.isInitialized {
+		current := store.ReadSnapshot{
+			Incarnation: h.incarnation,
+			ContentType: h.contentType,
+			CreatedAt:   h.createdAt,
+		}
+		matches := store.SameReadStream(current, snapshot) && h.useBase64 == useBase64
+		h.mu.Unlock()
+		if !matches {
+			return errSSEHubRecreated
+		}
+		return nil
+	}
+	h.contentType = snapshot.ContentType
+	h.useBase64 = useBase64
+	h.pollInterval = durationOr(h.handler.SSEHubPollInterval, defaultSSEHubPoll)
+	h.pollInterval = capSSEHubPollForTTL(h.pollInterval, snapshot.TTLSeconds)
+	h.current = snapshot.Tail
+	h.closed = snapshot.Closed
+	h.incarnation = snapshot.Incarnation
+	h.createdAt = snapshot.CreatedAt
+	h.isInitialized = true
+	initialized := h.initialized
+	h.mu.Unlock()
+	close(initialized)
+	return nil
+}
+
+func (h *sseHub) waitInitialized() bool {
+	select {
+	case <-h.ctx.Done():
+		return false
+	case <-h.initialized:
+		return true
+	}
 }
 
 func (h *sseHub) fail(err error) {
@@ -784,11 +925,25 @@ func (h *sseHub) markReady(err error) {
 	})
 }
 
+func (h *sseHub) markRegistered(err error) {
+	h.registeredOnce.Do(func() {
+		h.mu.Lock()
+		h.registeredErr = err
+		h.mu.Unlock()
+		close(h.registered)
+	})
+}
+
 func (h *sseHub) handleReadError(err error) bool {
 	if errors.Is(err, store.ErrStreamNotFound) ||
 		errors.Is(err, store.ErrStreamExpired) ||
-		errors.Is(err, store.ErrStreamSoftDeleted) ||
-		errors.Is(err, errSSEHubRecreated) {
+		errors.Is(err, store.ErrStreamSoftDeleted) {
+		h.metrics.SSEReason("terminal_state")
+		h.fail(err)
+		return true
+	}
+	if errors.Is(err, errSSEHubRecreated) || errors.Is(err, store.ErrReadSnapshotChanged) {
+		h.metrics.SSEReason("incarnation_change")
 		h.fail(err)
 		return true
 	}
@@ -815,12 +970,82 @@ func (h *sseHub) notifyLocked() {
 
 func (h *sseHub) releaseReplay() {
 	h.mu.Lock()
-	bytes := h.replayBytes
+	rawBytes := h.ringRawBytes
+	wireBytes := h.ringWireBytes
+	indexBytes := h.ringIndexBytes
+	h.ringRawBytes = 0
+	h.ringWireBytes = 0
+	h.ringIndexBytes = 0
 	h.replayBytes = 0
 	h.events = nil
+	h.firstSequence = h.nextSequence
 	h.mu.Unlock()
-	if bytes != 0 {
-		h.metrics.SSEHubRingBytes(-bytes)
+	if rawBytes != 0 || wireBytes != 0 || indexBytes != 0 {
+		h.metrics.SSEHubRingBytes(-rawBytes, -wireBytes, -indexBytes)
+	}
+}
+
+func (w *sseHubWatcher) attach(offset store.Offset) error {
+	h := w.hub
+	h.mu.Lock()
+	if h.terminalErr != nil {
+		err := h.terminalErr
+		h.mu.Unlock()
+		return err
+	}
+	if offset.Equal(h.current) {
+		w.attached = true
+		w.sequence = h.nextSequence
+		w.offset = offset
+		w.firstWireStart = 0
+		h.mu.Unlock()
+		h.metrics.SSEWatcherLookup(0, false)
+		return nil
+	}
+	if h.current.LessThan(offset) {
+		h.mu.Unlock()
+		return errSSEHubBehind
+	}
+
+	eventIndex, steps := firstSSEEventAfter(h.events, offset)
+	if eventIndex >= len(h.events) {
+		h.mu.Unlock()
+		w.recordReplayLag(true, steps)
+		return errSSEHubLagged
+	}
+	event := h.events[eventIndex]
+	wireStart := 0
+	if !offset.Equal(event.from) {
+		boundaryIndex, boundarySteps := findSSEBoundary(event.boundaries, offset)
+		steps += boundarySteps
+		if boundaryIndex < 0 {
+			h.mu.Unlock()
+			w.recordReplayLag(true, steps)
+			return errSSEHubLagged
+		}
+		wireStart = event.boundaries[boundaryIndex].wireEnd
+	}
+	w.attached = true
+	w.sequence = event.sequence
+	w.offset = offset
+	w.firstWireStart = wireStart
+	h.mu.Unlock()
+	h.metrics.SSEWatcherLookup(steps, false)
+	return nil
+}
+
+func (w *sseHubWatcher) waitAttach(ctx context.Context, offset store.Offset) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := w.attach(offset)
+		if !errors.Is(err, errSSEHubBehind) {
+			return err
+		}
+		if err := w.hub.refreshTo(offset); err != nil {
+			return err
+		}
 	}
 }
 
@@ -832,6 +1057,10 @@ func (w *sseHubWatcher) next(offset store.Offset) (*sseHubEvent, error) {
 		h.mu.Unlock()
 		return nil, err
 	}
+	if !w.attached || !offset.Equal(w.offset) {
+		h.mu.Unlock()
+		return nil, errors.New("SSE watcher used without exact attach boundary")
+	}
 	if offset.Equal(h.current) {
 		if h.closed {
 			event := &sseHubEvent{from: offset, to: offset, upToDate: true, closed: true}
@@ -841,56 +1070,93 @@ func (w *sseHubWatcher) next(offset store.Offset) (*sseHubEvent, error) {
 		h.mu.Unlock()
 		return nil, nil
 	}
-	if h.current.LessThan(offset) {
+	if w.sequence < h.firstSequence {
+		h.mu.Unlock()
+		w.recordReplayLag(false, 1)
+		return nil, errSSEHubLagged
+	}
+	if w.sequence >= h.nextSequence {
 		h.mu.Unlock()
 		return nil, nil
 	}
-
-	var found *sseHubEvent
-	start := 0
-	for _, event := range h.events {
-		if offset.Equal(event.from) {
-			found = event
-			break
-		}
-		for i, message := range event.messages {
-			if !offset.Equal(message.Offset) {
-				continue
-			}
-			if i+1 < len(event.messages) {
-				found = event
-				start = i + 1
-			}
-			break
-		}
-		if found != nil {
-			break
-		}
-	}
-	h.mu.Unlock()
-
-	if found == nil {
-		h.metrics.SSEClientLagged()
+	eventIndex := int(w.sequence - h.firstSequence)
+	if eventIndex < 0 || eventIndex >= len(h.events) {
+		h.mu.Unlock()
+		w.recordReplayLag(false, 1)
 		return nil, errSSEHubLagged
 	}
-	if start == 0 {
+	found := h.events[eventIndex]
+	wireStart := w.firstWireStart
+	h.mu.Unlock()
+	h.metrics.SSEWatcherLookup(1, false)
+	if wireStart == 0 {
 		return found, nil
 	}
-
-	messages := found.messages[start:]
-	data, err := h.handler.formatSSEDataEvent(h.path, messages, h.contentType, h.useBase64)
-	if err != nil {
-		return nil, err
-	}
 	return &sseHubEvent{
+		sequence:   found.sequence,
 		from:       offset,
-		to:         messages[len(messages)-1].Offset,
-		messages:   messages,
-		data:       data,
+		to:         found.to,
+		data:       found.data[wireStart:],
 		upToDate:   found.upToDate,
 		closed:     found.closed,
-		memorySize: len(data),
+		memorySize: len(found.data) - wireStart,
 	}, nil
+}
+
+func (w *sseHubWatcher) commit(event *sseHubEvent) {
+	if event == nil || event.sequence == 0 {
+		return
+	}
+	h := w.hub
+	h.mu.Lock()
+	if w.attached && w.sequence == event.sequence {
+		w.sequence++
+		w.offset = event.to
+		w.firstWireStart = 0
+	}
+	h.mu.Unlock()
+}
+
+func (w *sseHubWatcher) recordReplayLag(beforeAttach bool, steps int) {
+	w.hub.metrics.SSEClientLagged()
+	w.hub.metrics.SSEWatcherLookup(steps, true)
+	if beforeAttach {
+		w.hub.metrics.SSEReason("replay_loss_before_attach")
+		return
+	}
+	w.hub.metrics.SSEReason("replay_loss_after_attach")
+}
+
+func firstSSEEventAfter(events []*sseHubEvent, offset store.Offset) (int, int) {
+	low, high, steps := 0, len(events), 0
+	for low < high {
+		steps++
+		middle := low + (high-low)/2
+		if offset.LessThan(events[middle].to) {
+			high = middle
+		} else {
+			low = middle + 1
+		}
+	}
+	return low, steps
+}
+
+func findSSEBoundary(boundaries []sseHubBoundary, offset store.Offset) (int, int) {
+	low, high, steps := 0, len(boundaries), 0
+	for low < high {
+		steps++
+		middle := low + (high-low)/2
+		comparison := store.Compare(boundaries[middle].offset, offset)
+		if comparison < 0 {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	if low >= len(boundaries) || !boundaries[low].offset.Equal(offset) {
+		return -1, steps
+	}
+	return low, steps
 }
 
 func (h *Handler) formatSSEDataEvent(
@@ -1026,47 +1292,78 @@ func writeSSEUpdate(
 	closed bool,
 	writeTimeout time.Duration,
 ) error {
-	controller := http.NewResponseController(w)
-	if err := controller.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil &&
-		!errors.Is(err, http.ErrNotSupported) {
-		return err
-	}
-	if len(data) > 0 {
-		if _, err := w.Write(data); err != nil {
+	writer := sseClientFrameWriter{response: w, writeTimeout: writeTimeout}
+	return writer.write(data, next, cursor, upToDate, closed)
+}
+
+type sseControlFrame struct {
+	StreamClosed     bool   `json:"streamClosed,omitempty"`
+	StreamCursor     string `json:"streamCursor,omitempty"`
+	StreamNextOffset string `json:"streamNextOffset"`
+	UpToDate         bool   `json:"upToDate,omitempty"`
+}
+
+type sseClientFrameWriter struct {
+	response     http.ResponseWriter
+	writeTimeout time.Duration
+	control      bytes.Buffer
+}
+
+func (w *sseClientFrameWriter) write(
+	data []byte,
+	next store.Offset,
+	cursor string,
+	upToDate bool,
+	closed bool,
+) error {
+	return withSSEWriteDeadline(w.response, w.writeTimeout, func(controller *http.ResponseController) error {
+		if len(data) > 0 {
+			if _, err := w.response.Write(data); err != nil {
+				return err
+			}
+		}
+		control := sseControlFrame{
+			StreamClosed:     closed,
+			StreamNextOffset: next.String(),
+		}
+		if !closed {
+			control.StreamCursor = cursor
+			control.UpToDate = upToDate
+		}
+		w.control.Reset()
+		w.control.WriteString("event: control\ndata:")
+		if err := json.NewEncoder(&w.control).Encode(control); err != nil {
 			return err
 		}
-	}
-
-	control := map[string]any{"streamNextOffset": next.String()}
-	if closed {
-		control["streamClosed"] = true
-	} else {
-		control["streamCursor"] = cursor
-		if upToDate {
-			control["upToDate"] = true
+		// Encoder.Encode contributes the first event terminator newline.
+		w.control.WriteByte('\n')
+		if _, err := w.response.Write(w.control.Bytes()); err != nil {
+			return err
 		}
-	}
-	controlJSON, err := json.Marshal(control)
-	if err != nil {
+		return controller.Flush()
+	})
+}
+
+func withSSEWriteDeadline(
+	w http.ResponseWriter,
+	writeTimeout time.Duration,
+	action func(*http.ResponseController) error,
+) (returnErr error) {
+	controller := http.NewResponseController(w)
+	err := controller.SetWriteDeadline(time.Now().Add(writeTimeout))
+	if err != nil && !errors.Is(err, http.ErrNotSupported) {
 		return err
 	}
-	var event bytes.Buffer
-	event.Grow(len(controlJSON) + 32)
-	event.WriteString("event: control\n")
-	event.WriteString("data:")
-	event.Write(controlJSON)
-	event.WriteString("\n\n")
-	if _, err := w.Write(event.Bytes()); err != nil {
-		return err
+	deadlineInstalled := err == nil
+	if deadlineInstalled {
+		defer func() {
+			clearErr := controller.SetWriteDeadline(time.Time{})
+			if clearErr != nil && !errors.Is(clearErr, http.ErrNotSupported) && returnErr == nil {
+				returnErr = clearErr
+			}
+		}()
 	}
-	if err := controller.Flush(); err != nil {
-		return err
-	}
-	if err := controller.SetWriteDeadline(time.Time{}); err != nil &&
-		!errors.Is(err, http.ErrNotSupported) {
-		return err
-	}
-	return nil
+	return action(controller)
 }
 
 func sleepContext(ctx context.Context, delay time.Duration) bool {

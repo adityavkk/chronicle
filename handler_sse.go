@@ -30,16 +30,27 @@ func (h *Handler) handleSSE(
 	defer func() {
 		if streamStarted && returnErr != nil {
 			h.logger().Warn(
-				"closing SSE connection after streaming error",
+				"aborting committed SSE connection after streaming error",
 				"path", path,
 				"error", returnErr,
 			)
-			returnErr = nil
+			returnErr = http.ErrAbortHandler
 		}
 	}()
 
 	ctx := r.Context()
 
+	// Registration was acknowledged before the first atomic page. Bind that
+	// page's incarnation and tail to the provisional hub. The first confirmed
+	// notification generation becomes ready from this authoritative page; a
+	// later notification or final attach confirmation covers subsequent change.
+	if err := lease.hub.initialize(first.Snapshot, useBase64); err != nil {
+		lease = h.replaceSSEHubLease(lease, first.Snapshot, useBase64)
+		if err := lease.waitRegistered(ctx); err != nil {
+			lease.close()
+			return err
+		}
+	}
 	defer lease.close()
 	if err := lease.waitReady(ctx); err != nil {
 		return err
@@ -74,22 +85,16 @@ func (h *Handler) handleSSE(
 
 	// The initial header flush can block on the client just like every later SSE
 	// flush. Put it under the same per-client deadline before committing the 200.
-	controller := http.NewResponseController(w)
-	if err := controller.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil &&
-		!errors.Is(err, http.ErrNotSupported) {
-		return err
-	}
-	w.WriteHeader(http.StatusOK)
-	streamStarted = true
-	if err := controller.Flush(); err != nil {
+	if err := withSSEWriteDeadline(w, writeTimeout, func(controller *http.ResponseController) error {
+		w.WriteHeader(http.StatusOK)
+		streamStarted = true
+		return controller.Flush()
+	}); err != nil {
 		return h.recordSSEWriteError(err)
-	}
-	if err := controller.SetWriteDeadline(time.Time{}); err != nil &&
-		!errors.Is(err, http.ErrNotSupported) {
-		return err
 	}
 
 	counted := &sseCountingResponseWriter{ResponseWriter: w}
+	frameWriter := &sseClientFrameWriter{response: counted, writeTimeout: writeTimeout}
 	responsePages := 0
 	defer func() {
 		if h.ReadMetrics != nil {
@@ -106,6 +111,7 @@ func (h *Handler) handleSSE(
 			h.observeReadCancellation("between_pages")
 			return nil
 		case <-reconnectTimer.C:
+			h.sseMetrics().SSEReason("protocol_reconnect")
 			return nil
 		default:
 		}
@@ -115,6 +121,7 @@ func (h *Handler) handleSSE(
 		}
 		if len(page.Messages) == 0 && !page.UpToDate {
 			h.observeReadPage(page)
+			h.sseMetrics().SSEPage("catchup", page.Stats.ReturnedBytes)
 			emptyPages++
 			if emptyPages >= 8 {
 				return store.ErrReadDataMissing
@@ -132,10 +139,11 @@ func (h *Handler) handleSSE(
 		emptyPages = 0
 		if len(page.Messages) == 0 && page.UpToDate && !snapshot.Closed &&
 			lease.progressedBeyond(page.NextOffset, snapshot.Closed) {
-			// The hub subscribed before its durable refresh, so an append after
-			// this empty snapshot is already in replay. Do not emit an empty
-			// checkpoint ahead of that data.
+			// The hub subscribed before this authoritative snapshot, so an append
+			// after it is already covered by the notification feed. Do not emit an
+			// empty checkpoint ahead of that data.
 			h.observeReadPage(page)
+			h.sseMetrics().SSEPage("catchup", page.Stats.ReturnedBytes)
 			currentOffset = page.NextOffset
 			break
 		}
@@ -147,14 +155,12 @@ func (h *Handler) handleSSE(
 			}
 		}
 		closed := snapshot.Closed && page.UpToDate
-		if err := writeSSEUpdate(
-			counted,
+		if err := frameWriter.write(
 			data,
 			page.NextOffset,
 			protocol.GenerateResponseCursor(cursor, time.Now()),
 			page.UpToDate,
 			closed,
-			writeTimeout,
 		); err != nil {
 			h.observeReadCancellation("write")
 			return h.recordSSEWriteError(err)
@@ -165,6 +171,7 @@ func (h *Handler) handleSSE(
 		currentOffset = page.NextOffset
 		responsePages++
 		h.observeReadPage(page)
+		h.sseMetrics().SSEPage("catchup", page.Stats.ReturnedBytes)
 		if closed {
 			return nil
 		}
@@ -185,14 +192,33 @@ func (h *Handler) handleSSE(
 		}
 	}
 
-	// The hub's subscribe-then-refresh already closed the attach race. Its
-	// incarnation check fences delete/recreate, and its replay starts exactly at
-	// this snapshot tail, so another storage read here would be redundant.
+	// Confirm the durable incarnation immediately before live attach. The tail
+	// may advance, but the path must still name the captured stream. This is a
+	// bounded PageReader call and deliberately does not renew access a second
+	// time for the same request.
 	if err := lease.validateSnapshot(snapshot); err != nil {
 		return err
 	}
+	confirmation, err := lease.hub.confirmSnapshot(ctx, reader, path)
+	if err != nil {
+		return err
+	}
+	if !store.SameReadStream(snapshot, confirmation) {
+		return store.ErrReadSnapshotChanged
+	}
 	releaseReadSnapshot(reader, path, snapshot)
 	snapshotReleased = true
+	if err := lease.watcher.waitAttach(ctx, currentOffset); err != nil {
+		if errors.Is(err, errSSEHubLagged) {
+			h.logger().Warn(
+				"disconnecting SSE client whose attach boundary left the replay window",
+				"path", path,
+				"offset", currentOffset.String(),
+			)
+			return nil
+		}
+		return err
+	}
 
 	// Live delivery uses one shared bounded durable read and one shared
 	// formatted data event. A lagged client disconnects and resumes from the
@@ -202,6 +228,7 @@ func (h *Handler) handleSSE(
 		case <-ctx.Done():
 			return nil
 		case <-reconnectTimer.C:
+			h.sseMetrics().SSEReason("protocol_reconnect")
 			return nil
 		default:
 		}
@@ -219,17 +246,16 @@ func (h *Handler) handleSSE(
 			return nextErr
 		}
 		if event != nil {
-			if err := writeSSEUpdate(
-				counted,
+			if err := frameWriter.write(
 				event.data,
 				event.to,
 				protocol.GenerateResponseCursor(cursor, time.Now()),
 				event.upToDate,
 				event.closed,
-				writeTimeout,
 			); err != nil {
 				return h.recordSSEWriteError(err)
 			}
+			lease.watcher.commit(event)
 			currentOffset = event.to
 			if event.closed {
 				return nil
@@ -241,6 +267,7 @@ func (h *Handler) handleSSE(
 		case <-ctx.Done():
 			return nil
 		case <-reconnectTimer.C:
+			h.sseMetrics().SSEReason("protocol_reconnect")
 			return nil
 		case <-lease.watcher.wake:
 		}
@@ -268,6 +295,7 @@ func (h *Handler) recordSSEWriteError(err error) error {
 	}
 	if errors.As(err, &timeout) && timeout.Timeout() {
 		h.sseMetrics().SSEClientWriteTimeout()
+		h.sseMetrics().SSEReason("write_timeout")
 	}
 	return err
 }

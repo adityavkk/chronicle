@@ -58,11 +58,14 @@ func TestRedisRegisterFirstLiveReadCommandShape(t *testing.T) {
 		wantMetaReads int
 	}{
 		{
-			name:          "new SSE hub",
-			path:          "/register-first-sse",
-			query:         "?offset=now&live=sse",
-			wantEvalSHA:   1,
-			wantMetaReads: 1,
+			name:  "new SSE hub",
+			path:  "/register-first-sse",
+			query: "?offset=now&live=sse",
+			// The initial authoritative page and the bounded incarnation
+			// confirmation are both metadata-only at offset=now. There is no
+			// third readiness refresh for the first confirmed generation.
+			wantEvalSHA:   2,
+			wantMetaReads: 2,
 		},
 		{
 			name:          "offset now long poll timeout",

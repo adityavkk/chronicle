@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ type hubTestStore struct {
 	failNextWait  atomic.Bool
 	afterReadAt   int64
 	afterRead     func()
+	afterPage     func(int64, store.ReadPageOptions, store.ReadPage)
 	gets          atomic.Int64
 	afterGetAt    int64
 	afterGet      func()
@@ -56,12 +58,28 @@ func (s *hubTestStore) Get(path string) (*store.StreamMetadata, error) {
 }
 
 func (s *hubTestStore) Read(path string, offset store.Offset) ([]store.Message, bool, error) {
+	return nil, false, fmt.Errorf("unexpected Store.Read in SSE path for %s at %s", path, offset)
+}
+
+func (s *hubTestStore) ReadPage(
+	ctx context.Context,
+	path string,
+	offset store.Offset,
+	opts store.ReadPageOptions,
+) (store.ReadPage, error) {
 	read := s.reads.Add(1)
-	messages, upToDate, err := s.Store.Read(path, offset)
+	reader, ok := s.Store.(store.PageReader)
+	if !ok {
+		return store.ReadPage{}, errors.New("test store does not expose PageReader")
+	}
+	page, err := reader.ReadPage(ctx, path, offset, opts)
+	if s.afterPage != nil && err == nil {
+		s.afterPage(read, opts, page)
+	}
 	if s.afterRead != nil && read == s.afterReadAt {
 		s.afterRead()
 	}
-	return messages, upToDate, err
+	return page, err
 }
 
 func (s *hubTestStore) Append(path string, data []byte, opts store.AppendOptions) (store.AppendResult, error) {
@@ -154,6 +172,26 @@ func newHubTestHandler(st store.Store) *Handler {
 	}
 }
 
+func serveExpectAbort(
+	t *testing.T,
+	handler http.Handler,
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	t.Helper()
+	var recovered any
+	func() {
+		defer func() {
+			recovered = recover()
+		}()
+		handler.ServeHTTP(w, r)
+	}()
+	recoveredErr, ok := recovered.(error)
+	if !ok || !errors.Is(recoveredErr, http.ErrAbortHandler) {
+		t.Fatalf("committed response panic = %#v, want http.ErrAbortHandler", recovered)
+	}
+}
+
 func TestSSEHubSharesOneSubscriptionAndOneLiveRead(t *testing.T) {
 	st := newHubTestStore()
 	h := newHubTestHandler(st)
@@ -209,6 +247,136 @@ func TestSSEHubSharesOneSubscriptionAndOneLiveRead(t *testing.T) {
 		t.Fatalf("live reads after append = %d, want one shared read", got)
 	}
 	waitForCount(t, &st.closes, 1)
+}
+
+func TestSSEHubFirstConfirmedGenerationSkipsReadinessRefreshButKeepsAttachConfirmation(t *testing.T) {
+	st := newHubTestStore()
+	h := newHubTestHandler(st)
+	mustCreate(t, h, "/test", "text/plain", nil)
+
+	lease := h.acquireSSEHubRegistration("/test")
+	defer lease.close()
+	if err := lease.waitRegistered(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	first, err := st.ReadPage(
+		t.Context(),
+		"/test",
+		store.ZeroOffset,
+		store.ReadPageOptions{TargetBytes: 1, MaxFrames: 1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.hub.initialize(first.Snapshot, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.waitReady(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.reads.Load(); got != 1 {
+		t.Fatalf("reads at first-generation readiness = %d, want authoritative page only", got)
+	}
+
+	confirmation, err := lease.hub.confirmSnapshot(t.Context(), st, "/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !store.SameReadStream(first.Snapshot, confirmation) {
+		t.Fatalf("confirmation = %+v, want lifetime %+v", confirmation, first.Snapshot)
+	}
+	if got := st.reads.Load(); got != 2 {
+		t.Fatalf("reads after final attach confirmation = %d, want 2", got)
+	}
+}
+
+func TestSSEHubReplacementGenerationRefreshesBeforeWaiting(t *testing.T) {
+	st := newHubTestStore()
+	st.failNextWait.Store(true)
+	h := newHubTestHandler(st)
+	mustCreate(t, h, "/test", "text/plain", nil)
+
+	lease := h.acquireSSEHubRegistration("/test")
+	defer lease.close()
+	if err := lease.waitRegistered(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	first, err := st.ReadPage(
+		t.Context(),
+		"/test",
+		store.ZeroOffset,
+		store.ReadPageOptions{TargetBytes: 1, MaxFrames: 1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.hub.initialize(first.Snapshot, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.waitReady(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	waitForCount(t, &st.subscriptions, 2)
+	waitForStableCount(t, &st.reads)
+	if got := st.reads.Load(); got != 2 {
+		t.Fatalf("reads after replacement generation = %d, want first page plus durable refresh", got)
+	}
+}
+
+func TestSSEHubReconnectNotificationRefreshesWithoutTouch(t *testing.T) {
+	st := newHubTestStore()
+	readOptions := make(chan store.ReadPageOptions, 3)
+	st.afterPage = func(read int64, opts store.ReadPageOptions, _ store.ReadPage) {
+		if read > 1 {
+			readOptions <- opts
+		}
+	}
+	h := newHubTestHandler(st)
+	mustCreate(t, h, "/test", "text/plain", nil)
+
+	lease := h.acquireSSEHubRegistration("/test")
+	defer lease.close()
+	if err := lease.waitRegistered(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	first, err := st.ReadPage(
+		t.Context(),
+		"/test",
+		store.ZeroOffset,
+		store.ReadPageOptions{TargetBytes: 1, MaxFrames: 1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.hub.initialize(first.Snapshot, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.waitReady(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	assertNextTouchMode := func(cause string, wantNoTouch bool) {
+		t.Helper()
+		select {
+		case opts := <-readOptions:
+			if opts.NoTouch != wantNoTouch {
+				t.Fatalf("%s refresh NoTouch = %t, want %t", cause, opts.NoTouch, wantNoTouch)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %s refresh", cause)
+		}
+	}
+
+	st.signal(store.NotificationReconnect)
+	assertNextTouchMode("reconnect", true)
+
+	st.signal(store.NotificationAppend)
+	assertNextTouchMode("append", false)
+
+	if err := lease.hub.poll(); err != nil {
+		t.Fatal(err)
+	}
+	assertNextTouchMode("poll", false)
 }
 
 func TestLongPollNowRegisterFirstSkipsAttachRecheck(t *testing.T) {
@@ -351,15 +519,95 @@ func TestSSEHubEmptyCatchupNeverCheckpointsUndeliveredAppend(t *testing.T) {
 	rec := do(h, http.MethodGet, "/test?offset=-1&live=sse", nil, nil)
 	body := rec.Body.String()
 	dataAt := strings.Index(body, "event: data\ndata:raced\n\n")
-	controlAt := strings.Index(body, "event: control")
 	if dataAt < 0 {
 		t.Fatalf("raced append was not delivered: %q", body)
 	}
-	if controlAt < dataAt {
+	current, err := st.Get("/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpointAt := strings.Index(
+		body,
+		`"streamNextOffset":"`+current.CurrentOffset.String()+`"`,
+	)
+	if checkpointAt < dataAt {
 		t.Fatalf("control checkpointed raced data before delivery: %q", body)
 	}
 	if !strings.Contains(body, `"streamClosed":true`) {
 		t.Fatalf("raced close was not delivered: %q", body)
+	}
+}
+
+func TestSSEPageSnapshotAppendsAtEveryCatchupBoundary(t *testing.T) {
+	st := newHubTestStore()
+	h := newHubTestHandler(st)
+	h.ReadPageBytes = 1
+	mustCreate(t, h, "/test", "text/plain", nil)
+	for n := 1; n <= 4; n++ {
+		if _, err := st.Store.Append(
+			"/test",
+			[]byte(fmt.Sprintf("|old-%d|", n)),
+			store.AppendOptions{ContentType: "text/plain"},
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	original, err := st.Get("/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalTail := original.CurrentOffset
+
+	var boundaries atomic.Int64
+	st.afterPage = func(_ int64, opts store.ReadPageOptions, page store.ReadPage) {
+		// Client catch-up pages are the only touching pages. The hub's initial
+		// and pre-attach reads are no-touch, and later live refresh snapshots
+		// have a tail beyond the exact catch-up snapshot.
+		if opts.NoTouch || !page.Snapshot.Tail.Equal(originalTail) {
+			return
+		}
+		n := boundaries.Add(1)
+		if n > 4 {
+			return
+		}
+		if _, err := st.Store.Append(
+			"/test",
+			[]byte(fmt.Sprintf("|raced-%d|", n)),
+			store.AppendOptions{ContentType: "text/plain"},
+		); err != nil {
+			t.Errorf("append at catch-up boundary %d: %v", n, err)
+			return
+		}
+		st.signal(store.NotificationAppend)
+		if n == 4 {
+			if _, err := st.Store.CloseStream("/test"); err != nil {
+				t.Errorf("close after final boundary: %v", err)
+			}
+			st.signal(store.NotificationClose)
+		}
+	}
+
+	rec := do(h, http.MethodGet, "/test?offset=-1&live=sse", nil, nil)
+	if got := boundaries.Load(); got != 4 {
+		t.Fatalf("catch-up boundaries = %d, want 4", got)
+	}
+	body := rec.Body.String()
+	previous := -1
+	for _, family := range []string{"old", "raced"} {
+		for n := 1; n <= 4; n++ {
+			marker := fmt.Sprintf("|%s-%d|", family, n)
+			if count := strings.Count(body, marker); count != 1 {
+				t.Fatalf("marker %s count = %d, want 1 in %q", marker, count, body)
+			}
+			index := strings.Index(body, marker)
+			if index <= previous {
+				t.Fatalf("marker %s reordered at %d after %d", marker, index, previous)
+			}
+			previous = index
+		}
+	}
+	if !strings.Contains(body, `"streamClosed":true`) {
+		t.Fatalf("final close missing: %q", body)
 	}
 }
 
@@ -369,8 +617,8 @@ func TestSSEHubCatchupDoesNotCrossStreamIncarnation(t *testing.T) {
 	mustCreate(t, h, "/test", "text/plain", nil)
 
 	// The subscription is confirmed before this client's first read. Replace
-	// the stream after that read but before its metadata lookup, so the request
-	// must not emit data from the new incarnation.
+	// the stream after that authoritative page returns, so the request must not
+	// emit data from the new incarnation.
 	st.afterReadAt = 1
 	st.afterRead = func() {
 		if err := st.Store.Delete("/test"); err != nil {
@@ -393,7 +641,9 @@ func TestSSEHubCatchupDoesNotCrossStreamIncarnation(t *testing.T) {
 		}
 	}
 
-	rec := do(h, http.MethodGet, "/test?offset=-1&live=sse", nil, nil)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test?offset=-1&live=sse", nil)
+	serveExpectAbort(t, h, rec, req)
 	body := rec.Body.String()
 	if strings.Contains(body, "new-incarnation") {
 		t.Fatalf("catch-up crossed stream incarnation: %q", body)
@@ -482,6 +732,44 @@ func TestSSEHubActiveReaderRenewsSlidingTTL(t *testing.T) {
 	}
 }
 
+func TestSSEHubExpiryTerminatesCapturedIncarnation(t *testing.T) {
+	clock := store.NewFakeClock(time.Unix(1_765_000_000, 0))
+	st := newHubTestStoreWithStore(store.NewMemoryStore(store.WithClock(clock)))
+	metrics := &recordingSSEMetrics{}
+	h := newHubTestHandler(st)
+	h.SSEMetrics = metrics
+	h.SSEHubPollInterval = time.Hour
+	expires := clock.Now().Add(time.Second)
+	if _, _, err := st.Create("/test", store.CreateOptions{
+		ContentType: "text/plain",
+		ExpiresAt:   &expires,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	response, err := http.Get(srv.URL + "/test?offset=-1&live=sse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close() //nolint:errcheck // test cleanup
+	waitForCount(t, &st.subscriptions, 1)
+	clock.Advance(2 * time.Second)
+	st.signal(store.NotificationAppend)
+	body, err := io.ReadAll(response.Body)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expiry transport error = %v, want committed-response abort", err)
+	}
+	if strings.Contains(string(body), "stream not found") ||
+		strings.Contains(string(body), "Internal Server Error") {
+		t.Fatalf("ordinary HTTP expiry error leaked into SSE body: %q", body)
+	}
+	if got := metrics.reasons.Load(); got == 0 {
+		t.Fatal("terminal expiry reason was not recorded")
+	}
+}
+
 func TestSSEHubPollIntervalDoesNotOverflowAtMaxTTL(t *testing.T) {
 	ttl := int64(1<<63 - 1)
 	if got := capSSEHubPollForTTL(time.Second, &ttl); got != time.Second {
@@ -518,14 +806,15 @@ func TestSSEHubPollTerminatesDeletedStreamIncarnation(t *testing.T) {
 	mustCreate(t, h, "/test", "text/plain", []byte("new-incarnation"))
 
 	oldBody, err := io.ReadAll(old.Body)
-	if err != nil {
-		t.Fatalf("read old SSE: %v", err)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("old SSE transport error = %v, want committed-response abort", err)
 	}
 	if strings.Contains(string(oldBody), "new-incarnation") {
 		t.Fatalf("old hub crossed stream incarnation: %q", oldBody)
 	}
 	if strings.Contains(string(oldBody), "stream was deleted") ||
-		strings.Contains(string(oldBody), "stream not found") {
+		strings.Contains(string(oldBody), "stream not found") ||
+		strings.Contains(string(oldBody), "Internal Server Error") {
 		t.Fatalf("ordinary HTTP error leaked into SSE framing: %q", oldBody)
 	}
 
@@ -551,7 +840,7 @@ func TestSSEHubRecreatedStreamReplacesHubWithOldLeaseStillOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldLease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(oldMeta), false, nil)
+	oldLease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(oldMeta), false)
 	defer oldLease.close()
 	if err := oldLease.waitReady(context.Background()); err != nil {
 		t.Fatal(err)
@@ -573,7 +862,7 @@ func TestSSEHubRecreatedStreamReplacesHubWithOldLeaseStillOpen(t *testing.T) {
 	if oldMeta.Incarnation == newMeta.Incarnation {
 		t.Fatalf("recreated stream reused incarnation %q", oldMeta.Incarnation)
 	}
-	newLease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(newMeta), false, nil)
+	newLease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(newMeta), false)
 	defer newLease.close()
 	if newLease.hub == oldLease.hub {
 		t.Fatal("recreated stream reused the old incarnation's hub")
@@ -583,14 +872,16 @@ func TestSSEHubRecreatedStreamReplacesHubWithOldLeaseStillOpen(t *testing.T) {
 	}
 }
 
-func TestSSEAttachRejectsReplacementBetweenMetadataAndHub(t *testing.T) {
+func TestSSEAttachFencesReplacementAfterAuthoritativePage(t *testing.T) {
 	clock := store.NewFakeClock(time.Unix(1_765_000_000, 123))
 	st := newHubTestStoreWithStore(store.NewMemoryStore(store.WithClock(clock)))
+	metrics := &recordingSSEMetrics{}
 	h := newHubTestHandler(st)
+	h.SSEMetrics = metrics
 	mustCreate(t, h, "/test", "application/octet-stream", []byte("old"))
 
-	st.afterGetAt = 1
-	st.afterGet = func() {
+	st.afterReadAt = 1
+	st.afterRead = func() {
 		if err := st.Store.Delete("/test"); err != nil {
 			t.Errorf("delete old stream: %v", err)
 			return
@@ -607,15 +898,32 @@ func TestSSEAttachRejectsReplacementBetweenMetadataAndHub(t *testing.T) {
 		}
 	}
 
-	rec := do(h, http.MethodGet, "/test?offset=now&live=sse", nil, nil)
-	if rec.Code == http.StatusOK {
-		t.Fatalf("replacement attach returned 200: %q", rec.Body.String())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test?offset=now&live=sse", nil)
+	serveExpectAbort(t, h, rec, req)
+	// The SSE response is committed before its final attach confirmation. A
+	// replacement after the authoritative page therefore aborts the old
+	// lifetime's committed 200 response instead of changing its status or
+	// appending an HTTP error body.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("old lifetime response status = %d, want 200", rec.Code)
 	}
-	if got := rec.Header().Get(protocol.HeaderStreamSSEDataEncoding); got != "" {
-		t.Fatalf("replacement attach kept old binary encoding %q", got)
+	if got := rec.Header().Get(protocol.HeaderStreamSSEDataEncoding); got != "base64" {
+		t.Fatalf("old lifetime encoding = %q, want base64", got)
 	}
 	if strings.Contains(rec.Body.String(), "new-text") {
 		t.Fatalf("replacement attach emitted new incarnation: %q", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "stream was deleted") ||
+		strings.Contains(rec.Body.String(), "snapshot changed") ||
+		strings.Contains(rec.Body.String(), "Internal Server Error") {
+		t.Fatalf("committed SSE body contains an HTTP error: %q", rec.Body.String())
+	}
+	if got := st.reads.Load(); got != 2 {
+		t.Fatalf("replacement fence reads = %d, want authoritative page plus final confirmation", got)
+	}
+	if got := metrics.watcherLookups.Load(); got != 0 {
+		t.Fatalf("replacement performed %d live attach lookups, want zero", got)
 	}
 }
 
@@ -778,6 +1086,9 @@ func TestSSEHubDoesNotAdvertiseStaleUpToDate(t *testing.T) {
 	if err := hub.refresh(); err != nil {
 		t.Fatal(err)
 	}
+	if err := watcher.attach(store.ZeroOffset); err != nil {
+		t.Fatal(err)
+	}
 	event, err := watcher.next(store.ZeroOffset)
 	if err != nil {
 		t.Fatal(err)
@@ -785,8 +1096,20 @@ func TestSSEHubDoesNotAdvertiseStaleUpToDate(t *testing.T) {
 	if event == nil || !event.to.Equal(first.Offset) {
 		t.Fatalf("first event = %#v", event)
 	}
-	if event.upToDate {
-		t.Fatal("event advertised upToDate after metadata advanced beyond its offset")
+	if !event.upToDate {
+		t.Fatal("event did not advertise the exact captured snapshot tail")
+	}
+	watcher.commit(event)
+	st.afterRead = nil
+	if err := hub.refresh(); err != nil {
+		t.Fatal(err)
+	}
+	next, err := watcher.next(first.Offset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next == nil || string(next.data) != "event: data\ndata:b\n\n" {
+		t.Fatalf("next bounded refresh = %#v", next)
 	}
 }
 
@@ -866,11 +1189,13 @@ func TestSSEReconnectTimerIsNotStarvedByReplayBacklog(t *testing.T) {
 	mustCreate(t, h, "/test", "text/plain", nil)
 
 	const messages = 100
-	// The client's authoritative empty page is the first read. Fill the durable
-	// stream after its final metadata lookup and wake the already-confirmed hub,
-	// so the hub's second read publishes one retained event per message.
-	st.afterGetAt = 2
-	st.afterGet = func() {
+	// Fill the durable stream after the already-confirmed authoritative page is
+	// captured. The buffered wake makes the hub's first live refresh publish one
+	// retained event per message without an initial readiness reread.
+	st.afterPage = func(read int64, _ store.ReadPageOptions, _ store.ReadPage) {
+		if read != 1 {
+			return
+		}
 		for n := range messages {
 			if _, err := st.Store.Append(
 				"/test",
@@ -930,6 +1255,45 @@ func TestWriteSSEUpdateSetsAndClearsPerClientDeadline(t *testing.T) {
 	}
 	if !recorder.deadlines[1].IsZero() {
 		t.Fatalf("final write deadline = %s, want cleared", recorder.deadlines[1])
+	}
+}
+
+func TestWriteSSEUpdateClearsDeadlineOnEveryFailurePath(t *testing.T) {
+	tests := []struct {
+		name        string
+		failWriteAt int
+		flushErr    error
+	}{
+		{name: "data write", failWriteAt: 1},
+		{name: "control write", failWriteAt: 2},
+		{name: "flush", flushErr: timeoutTestError{}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := &failingFrameRecorder{
+				deadlineRecorder: &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()},
+				failWriteAt:      test.failWriteAt,
+				flushErr:         test.flushErr,
+			}
+			err := writeSSEUpdate(
+				recorder,
+				[]byte("event: data\ndata:x\n\n"),
+				store.Offset{ByteOffset: 1},
+				"cursor",
+				true,
+				false,
+				50*time.Millisecond,
+			)
+			if err == nil {
+				t.Fatal("write unexpectedly succeeded")
+			}
+			if len(recorder.deadlines) != 2 {
+				t.Fatalf("write deadlines = %v, want set then clear", recorder.deadlines)
+			}
+			if recorder.deadlines[0].IsZero() || !recorder.deadlines[1].IsZero() {
+				t.Fatalf("write deadlines = %v, want nonzero then zero", recorder.deadlines)
+			}
+		})
 	}
 }
 
@@ -995,7 +1359,11 @@ func TestSSEInitialHeaderFlushTimeoutReleasesHub(t *testing.T) {
 				deadlineRecorder: &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()},
 			}
 			request := httptest.NewRequest(http.MethodGet, target, nil)
-			handler.ServeHTTP(recorder, request)
+			serveExpectAbort(t, handler, recorder, request)
+			if len(recorder.deadlines) != 2 || recorder.deadlines[0].IsZero() ||
+				!recorder.deadlines[1].IsZero() {
+				t.Fatalf("initial flush deadlines = %v, want nonzero then zero", recorder.deadlines)
+			}
 
 			if got := metrics.writeTimeouts.Load(); got != 1 {
 				t.Fatalf("write timeout metric = %d, want 1", got)
@@ -1052,6 +1420,9 @@ func TestSSEHubReplaySupportsInteriorOffset(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := watcher.attach(messages[0].Offset); err != nil {
+		t.Fatal(err)
+	}
 	event, err := watcher.next(messages[0].Offset)
 	if err != nil {
 		t.Fatal(err)
@@ -1059,7 +1430,7 @@ func TestSSEHubReplaySupportsInteriorOffset(t *testing.T) {
 	if event == nil || event.to != messages[2].Offset {
 		t.Fatalf("partial replay event = %#v", event)
 	}
-	if got := string(event.data); got != "event: data\ndata:bc\n\n" {
+	if got := string(event.data); got != "event: data\ndata:b\n\nevent: data\ndata:c\n\n" {
 		t.Fatalf("partial replay data = %q", got)
 	}
 }
@@ -1096,20 +1467,85 @@ func TestSSEHubReplaySplitsByRetainedBytes(t *testing.T) {
 	}
 }
 
+func TestSSEHubRetainsOneOversizedFrame(t *testing.T) {
+	h := newHubTestHandler(store.NewMemoryStore())
+	hub := &sseHub{
+		handler:     h,
+		path:        "/test",
+		contentType: "text/plain",
+		replayLimit: 32,
+		batchLimit:  16,
+		current:     store.ZeroOffset,
+		watchers:    make(map[*sseHubWatcher]struct{}),
+		metrics:     nopSSEMetrics{},
+	}
+	message := store.Message{
+		Data:   []byte(strings.Repeat("x", 256)),
+		Offset: store.Offset{ByteOffset: 256},
+	}
+	if err := hub.publish(store.ZeroOffset, []store.Message{message}, true, false, message.Offset); err != nil {
+		t.Fatal(err)
+	}
+	if len(hub.events) != 1 {
+		t.Fatalf("retained events = %d, want one oversized event", len(hub.events))
+	}
+	if hub.replayBytes <= hub.replayLimit || hub.events[0].memorySize <= hub.batchLimit {
+		t.Fatalf("oversized event bytes = %d; replay=%d batch=%d", hub.events[0].memorySize, hub.replayLimit, hub.batchLimit)
+	}
+}
+
+func TestSSEHubRingBytesRemainExactAcrossHubReplacement(t *testing.T) {
+	metrics := &recordingSSEMetrics{}
+	makeHub := func() *sseHub {
+		return &sseHub{
+			handler:     newHubTestHandler(store.NewMemoryStore()),
+			path:        "/test",
+			contentType: "text/plain",
+			replayLimit: 1 << 20,
+			batchLimit:  1 << 20,
+			current:     store.ZeroOffset,
+			watchers:    make(map[*sseHubWatcher]struct{}),
+			metrics:     metrics,
+		}
+	}
+	oldHub := makeHub()
+	replacementHub := makeHub()
+	oldMessage := store.Message{Data: []byte("old"), Offset: store.Offset{ByteOffset: 3}}
+	newMessage := store.Message{Data: []byte("replacement"), Offset: store.Offset{ByteOffset: 11}}
+	if err := oldHub.publish(store.ZeroOffset, []store.Message{oldMessage}, true, false, oldMessage.Offset); err != nil {
+		t.Fatal(err)
+	}
+	if err := replacementHub.publish(store.ZeroOffset, []store.Message{newMessage}, true, false, newMessage.Offset); err != nil {
+		t.Fatal(err)
+	}
+	wantBoth := int64(oldHub.replayBytes + replacementHub.replayBytes)
+	if got := metrics.ringBytes.Load(); got != wantBoth {
+		t.Fatalf("replacement ring bytes = %d, want %d", got, wantBoth)
+	}
+	oldHub.releaseReplay()
+	if got := metrics.ringBytes.Load(); got != int64(replacementHub.replayBytes) {
+		t.Fatalf("ring bytes after old cleanup = %d, want %d", got, replacementHub.replayBytes)
+	}
+	replacementHub.releaseReplay()
+	if got := metrics.ringBytes.Load(); got != 0 {
+		t.Fatalf("ring bytes after replacement cleanup = %d, want zero", got)
+	}
+}
+
 func TestSSEHubRingBytesTracksRetainedBytesThroughEvictionAndCleanup(t *testing.T) {
 	st := newHubTestStore()
 	metrics := &recordingSSEMetrics{}
 	h := newHubTestHandler(st)
 	h.SSEMetrics = metrics
-	h.SSEHubReplayBytes = 64
-	h.SSEHubBatchBytes = 1
+	h.SSEHubReplayBytes = 180
+	h.SSEHubBatchBytes = 120
 	mustCreate(t, h, "/test", "text/plain", nil)
 
 	meta, err := st.Get("/test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(meta), false, nil)
+	lease := h.acquireSSEHub("/test", store.ReadSnapshotFromMetadata(meta), false)
 	if err := lease.waitReady(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1133,24 +1569,64 @@ func TestSSEHubRingBytesTracksRetainedBytesThroughEvictionAndCleanup(t *testing.
 
 	lease.hub.mu.Lock()
 	retainedBytes := lease.hub.replayBytes
+	rawBytes := lease.hub.ringRawBytes
+	wireBytes := lease.hub.ringWireBytes
+	indexBytes := lease.hub.ringIndexBytes
 	retainedEvents := append([]*sseHubEvent(nil), lease.hub.events...)
 	lease.hub.mu.Unlock()
-	var summedBytes int
+	var summedRaw, summedWire, summedIndex, summedBytes int
 	for _, event := range retainedEvents {
+		summedRaw += event.rawBytes
+		summedWire += event.wireBytes
+		summedIndex += event.indexBytes
 		summedBytes += event.memorySize
+		if event.memorySize != event.rawBytes+event.wireBytes+event.indexBytes {
+			t.Fatalf("event component sum = %d, total = %d", event.rawBytes+event.wireBytes+event.indexBytes, event.memorySize)
+		}
 	}
-	if retainedBytes != summedBytes {
-		t.Fatalf("retained bytes = %d, event sum = %d", retainedBytes, summedBytes)
+	if rawBytes != 0 || rawBytes != summedRaw {
+		t.Fatalf("retained raw bytes = %d, event sum = %d, want zero duplicate raw retention", rawBytes, summedRaw)
+	}
+	if wireBytes != summedWire || indexBytes != summedIndex ||
+		retainedBytes != rawBytes+wireBytes+indexBytes || retainedBytes != summedBytes {
+		t.Fatalf("retained components raw=%d wire=%d index=%d total=%d; event sums raw=%d wire=%d index=%d total=%d", rawBytes, wireBytes, indexBytes, retainedBytes, summedRaw, summedWire, summedIndex, summedBytes)
 	}
 	if got := metrics.ringBytes.Load(); got != int64(retainedBytes) {
 		t.Fatalf("ring-byte metric = %d, retained bytes = %d", got, retainedBytes)
 	}
+	if got := metrics.ringRawBytes.Load(); got != int64(rawBytes) {
+		t.Fatalf("raw-byte metric = %d, want %d", got, rawBytes)
+	}
+	if got := metrics.ringWireBytes.Load(); got != int64(wireBytes) {
+		t.Fatalf("wire-byte metric = %d, want %d", got, wireBytes)
+	}
+	if got := metrics.ringIndexBytes.Load(); got != int64(indexBytes) {
+		t.Fatalf("index-byte metric = %d, want %d", got, indexBytes)
+	}
 	if len(retainedEvents) >= len(messages) {
 		t.Fatalf("retained events = %d, want eviction from %d published events", len(retainedEvents), len(messages))
+	}
+	if len(retainedEvents) != 1 || len(retainedEvents[0].boundaries) < 2 {
+		t.Fatalf("retained boundary shape = %d events, %d boundaries", len(retainedEvents), len(retainedEvents[0].boundaries))
+	}
+	watcher := lease.hub.addWatcher()
+	interior := retainedEvents[0].boundaries[0].offset
+	if err := watcher.attach(interior); err != nil {
+		t.Fatal(err)
+	}
+	if event, err := watcher.next(interior); err != nil || event == nil {
+		t.Fatalf("interior resume event = %#v, %v", event, err)
+	}
+	lease.hub.removeWatcher(watcher)
+	if got := metrics.ringBytes.Load(); got != int64(retainedBytes) {
+		t.Fatalf("interior resume changed retained bytes to %d, want %d", got, retainedBytes)
 	}
 
 	lease.close()
 	waitForCount(t, &metrics.ringBytes, 0)
+	waitForCount(t, &metrics.ringRawBytes, 0)
+	waitForCount(t, &metrics.ringWireBytes, 0)
+	waitForCount(t, &metrics.ringIndexBytes, 0)
 	if got := metrics.hubs.Load(); got != 0 {
 		t.Fatalf("active hubs = %d, want 0 after last-client cleanup", got)
 	}
@@ -1185,20 +1661,184 @@ func TestSSEHubDisconnectsClientOutsideReplayWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := watcher.next(store.ZeroOffset); !errors.Is(err, errSSEHubLagged) {
-		t.Fatalf("next outside replay window = %v, want %v", err, errSSEHubLagged)
+	if err := watcher.attach(store.ZeroOffset); !errors.Is(err, errSSEHubLagged) {
+		t.Fatalf("attach outside replay window = %v, want %v", err, errSSEHubLagged)
 	}
 	if got := metrics.lagged.Load(); got != 1 {
 		t.Fatalf("lagged metric = %d, want 1", got)
 	}
 }
 
+func TestSSEHubWaitsForCatchupBoundaryAheadOfRefresh(t *testing.T) {
+	metrics := &recordingSSEMetrics{}
+	st := store.NewMemoryStore()
+	if _, _, err := st.Create("/test", store.CreateOptions{ContentType: "text/plain"}); err != nil {
+		t.Fatal(err)
+	}
+	message, err := st.Append("/test", []byte("0123456789"), store.AppendOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := st.Get("/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHubTestHandler(st)
+	hub := &sseHub{
+		handler:     h,
+		path:        "/test",
+		contentType: "text/plain",
+		replayLimit: 1 << 20,
+		batchLimit:  256 << 10,
+		current:     store.ZeroOffset,
+		incarnation: meta.Incarnation,
+		createdAt:   meta.CreatedAt,
+		ctx:         t.Context(),
+		watchers:    make(map[*sseHubWatcher]struct{}),
+		metrics:     metrics,
+	}
+	watcher := hub.addWatcher()
+	target := message.Offset
+	if err := watcher.attach(target); !errors.Is(err, errSSEHubBehind) {
+		t.Fatalf("attach ahead of hub = %v, want %v", err, errSSEHubBehind)
+	}
+
+	if err := watcher.waitAttach(t.Context(), target); err != nil {
+		t.Fatal(err)
+	}
+	if got := metrics.lagged.Load(); got != 0 {
+		t.Fatalf("lagged metric = %d, want 0 while hub was only behind", got)
+	}
+}
+
+func TestSSEHubCoalescesConcurrentSnapshotConfirmations(t *testing.T) {
+	const callers = 64
+	reader := &blockingConfirmationReader{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		page: store.ReadPage{Snapshot: store.ReadSnapshot{
+			Incarnation: "confirmation-incarnation",
+			ContentType: "text/plain",
+			CreatedAt:   time.Unix(1, 0),
+		}},
+	}
+	hub := &sseHub{
+		handler: &Handler{},
+		ctx:     t.Context(),
+		metrics: nopSSEMetrics{},
+	}
+	var entered atomic.Int64
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for range callers {
+		go func() {
+			defer wg.Done()
+			entered.Add(1)
+			snapshot, err := hub.confirmSnapshot(t.Context(), reader, "/test")
+			if err == nil && snapshot.Incarnation != reader.page.Snapshot.Incarnation {
+				err = fmt.Errorf("confirmation incarnation = %q", snapshot.Incarnation)
+			}
+			errs <- err
+		}()
+	}
+	<-reader.started
+	waitForCount(t, &entered, callers)
+	time.Sleep(10 * time.Millisecond)
+	close(reader.release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := reader.calls.Load(); got != 1 {
+		t.Fatalf("confirmation PageReader calls = %d, want 1", got)
+	}
+}
+
+func TestSSEHubDisconnectsClientEvictedAfterAttach(t *testing.T) {
+	metrics := &recordingSSEMetrics{}
+	h := newHubTestHandler(store.NewMemoryStore())
+	hub := &sseHub{
+		handler:     h,
+		path:        "/test",
+		contentType: "text/plain",
+		replayLimit: 80,
+		batchLimit:  1,
+		current:     store.ZeroOffset,
+		watchers:    make(map[*sseHubWatcher]struct{}),
+		metrics:     metrics,
+	}
+	watcher := hub.addWatcher()
+	first := store.Message{Data: []byte("0123456789"), Offset: store.Offset{ByteOffset: 10}}
+	if err := hub.publish(store.ZeroOffset, []store.Message{first}, true, false, first.Offset); err != nil {
+		t.Fatal(err)
+	}
+	if err := watcher.attach(store.ZeroOffset); err != nil {
+		t.Fatal(err)
+	}
+	from := first.Offset
+	for n := 2; n <= 10; n++ {
+		message := store.Message{
+			Data:   []byte("0123456789"),
+			Offset: store.Offset{ByteOffset: uint64(n * 10)},
+		}
+		if err := hub.publish(from, []store.Message{message}, true, false, message.Offset); err != nil {
+			t.Fatal(err)
+		}
+		from = message.Offset
+	}
+	if _, err := watcher.next(store.ZeroOffset); !errors.Is(err, errSSEHubLagged) {
+		t.Fatalf("next after attached event eviction = %v, want %v", err, errSSEHubLagged)
+	}
+	if got := metrics.lagged.Load(); got != 1 {
+		t.Fatalf("lagged disconnects = %d, want 1", got)
+	}
+}
+
 type recordingSSEMetrics struct {
-	lagged        atomic.Int64
-	writeTimeouts atomic.Int64
-	clients       atomic.Int64
-	hubs          atomic.Int64
-	ringBytes     atomic.Int64
+	lagged         atomic.Int64
+	writeTimeouts  atomic.Int64
+	clients        atomic.Int64
+	hubs           atomic.Int64
+	ringRawBytes   atomic.Int64
+	ringWireBytes  atomic.Int64
+	ringIndexBytes atomic.Int64
+	ringBytes      atomic.Int64
+	reasons        atomic.Int64
+	subscriptions  atomic.Int64
+	physical       atomic.Int64
+	reconnects     atomic.Int64
+	watcherLookups atomic.Int64
+}
+
+type blockingConfirmationReader struct {
+	calls   atomic.Int64
+	started chan struct{}
+	release chan struct{}
+	page    store.ReadPage
+}
+
+func (r *blockingConfirmationReader) ReadPage(
+	ctx context.Context,
+	_ string,
+	_ store.Offset,
+	opts store.ReadPageOptions,
+) (store.ReadPage, error) {
+	if !opts.NoTouch || opts.TargetBytes != 1 || opts.MaxFrames != 1 {
+		return store.ReadPage{}, fmt.Errorf("confirmation options = %+v", opts)
+	}
+	if r.calls.Add(1) == 1 {
+		close(r.started)
+	}
+	select {
+	case <-ctx.Done():
+		return store.ReadPage{}, ctx.Err()
+	case <-r.release:
+		return r.page, nil
+	}
 }
 
 type deadlineRecorder struct {
@@ -1221,6 +1861,29 @@ func (r *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
 
 type failingFlushRecorder struct {
 	*deadlineRecorder
+}
+
+type failingFrameRecorder struct {
+	*deadlineRecorder
+	failWriteAt int
+	flushErr    error
+	writes      int
+}
+
+func (r *failingFrameRecorder) Write(body []byte) (int, error) {
+	r.writes++
+	if r.writes == r.failWriteAt {
+		return 0, timeoutTestError{}
+	}
+	return r.deadlineRecorder.Write(body)
+}
+
+func (r *failingFrameRecorder) Flush() {
+	_ = r.FlushError()
+}
+
+func (r *failingFrameRecorder) FlushError() error {
+	return r.flushErr
 }
 
 func (r *failingFlushRecorder) Flush() {
@@ -1248,13 +1911,38 @@ func (m *recordingSSEMetrics) SSEClientActive(delta int) {
 }
 
 func (*recordingSSEMetrics) SSEHubRead(int) {}
-func (m *recordingSSEMetrics) SSEHubRingBytes(delta int) {
-	m.ringBytes.Add(int64(delta))
+func (m *recordingSSEMetrics) SSEHubRingBytes(rawDelta, wireDelta, indexDelta int) {
+	m.ringRawBytes.Add(int64(rawDelta))
+	m.ringWireBytes.Add(int64(wireDelta))
+	m.ringIndexBytes.Add(int64(indexDelta))
+	m.ringBytes.Add(int64(rawDelta + wireDelta + indexDelta))
 }
-func (m *recordingSSEMetrics) SSEClientLagged()          { m.lagged.Add(1) }
-func (m *recordingSSEMetrics) SSEClientWriteTimeout()    { m.writeTimeouts.Add(1) }
-func (*recordingSSEMetrics) SSESubscriptionActive(int)   {}
+func (*recordingSSEMetrics) SSEHubRefresh(string, int, int, time.Duration) {}
+func (*recordingSSEMetrics) SSEPage(string, int)                           {}
+func (m *recordingSSEMetrics) SSEWatcherLookup(int, bool) {
+	m.watcherLookups.Add(1)
+}
+func (m *recordingSSEMetrics) SSEReason(string) { m.reasons.Add(1) }
+func (m *recordingSSEMetrics) SSEClientLagged() { m.lagged.Add(1) }
+func (m *recordingSSEMetrics) SSEClientWriteTimeout() {
+	m.writeTimeouts.Add(1)
+}
+
+func (m *recordingSSEMetrics) SSESubscriptionActive(delta int) {
+	m.subscriptions.Add(int64(delta))
+}
+
 func (*recordingSSEMetrics) SSESubscriptionEvent(string) {}
+
+func (m *recordingSSEMetrics) NotificationPhysicalConnection(_ string, delta int) {
+	m.physical.Add(int64(delta))
+}
+
+func (m *recordingSSEMetrics) NotificationEvent(event string) {
+	if event == "reconnect" {
+		m.reconnects.Add(1)
+	}
+}
 
 func waitForCount(t *testing.T, value *atomic.Int64, want int64) {
 	t.Helper()

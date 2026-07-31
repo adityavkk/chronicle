@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -42,6 +43,37 @@ func TestHandlerSelectsRealSegmentPageReaderCapability(t *testing.T) {
 	handler := &Handler{Store: segmented}
 	if got := handler.pageReader(); got != store.PageReader(segmented) {
 		t.Fatalf("handler selected %T, want the real *segments.Store PageReader", got)
+	}
+}
+
+func TestLongPollDeliversPageWaiterResultWithoutSameOffsetReread(t *testing.T) {
+	base := store.NewMemoryStore()
+	if _, _, err := base.Create("/stream", store.CreateOptions{
+		ContentType: "text/plain",
+		InitialData: []byte("seed"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	subject := &returnedPageWaitStore{Store: base, reader: base}
+	h := &Handler{Store: subject, LongPollTimeout: time.Second}
+
+	recorder := httptest.NewRecorder()
+	h.ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/stream?offset=0_4&live=long-poll", nil),
+	)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Body.String(); got != "waited" {
+		t.Fatalf("body = %q, want PageWaiter result", got)
+	}
+	if got := subject.pageReads.Load(); got != 1 {
+		t.Fatalf("handler ReadPage calls = %d, want only the initial read", got)
+	}
+	if got := subject.waits.Load(); got != 1 {
+		t.Fatalf("PageWaiter calls = %d, want 1", got)
 	}
 }
 
@@ -542,11 +574,134 @@ func TestSSEInitialCatchupUsesBoundedPages(t *testing.T) {
 	}
 }
 
+func TestSSERejectsLegacyStoreWithoutPageReader(t *testing.T) {
+	base := store.NewMemoryStore()
+	if _, _, err := base.Create("/stream", store.CreateOptions{
+		ContentType: "text/plain",
+		Closed:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{Store: legacyOnlyStore{Store: base}}
+	recorder := httptest.NewRecorder()
+	h.ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/stream?offset=-1&live=sse", nil),
+	)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("legacy SSE status = %d, want 500", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "store.PageReader") {
+		t.Fatalf("legacy SSE error = %q", recorder.Body.String())
+	}
+}
+
+func TestSSEForkCatchupPagesInheritedAndOwnedFrames(t *testing.T) {
+	s := store.NewMemoryStore()
+	if _, _, err := s.Create("/source", store.CreateOptions{ContentType: "text/plain"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []string{"source-a", "source-b", "source-c"} {
+		if _, err := s.Append(
+			"/source",
+			[]byte(message),
+			store.AppendOptions{ContentType: "text/plain"},
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := s.Create("/fork", store.CreateOptions{
+		ContentType: "text/plain",
+		ForkedFrom:  "/source",
+		InitialData: []byte("fork-owned"),
+		Closed:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	counted := &countingPageStore{Store: s, reader: s}
+	h := &Handler{
+		Store:                counted,
+		ReadPageBytes:        1,
+		SSEReconnectInterval: time.Minute,
+	}
+	recorder := httptest.NewRecorder()
+	h.ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/fork?offset=-1&live=sse", nil),
+	)
+	body := recorder.Body.String()
+	previous := -1
+	for _, message := range []string{"source-a", "source-b", "source-c", "fork-owned"} {
+		if count := strings.Count(body, message); count != 1 {
+			t.Fatalf("message %q count = %d, want 1 in %q", message, count, body)
+		}
+		index := strings.Index(body, message)
+		if index <= previous {
+			t.Fatalf("message %q reordered at %d after %d", message, index, previous)
+		}
+		previous = index
+	}
+	if calls := counted.calls.Load(); calls != 4 {
+		t.Fatalf("fork ReadPage calls = %d, want 4 bounded pages", calls)
+	}
+	if !strings.Contains(body, `"streamClosed":true`) {
+		t.Fatalf("fork close control missing: %q", body)
+	}
+}
+
 type countingPageStore struct {
 	store.Store
 	reader   store.PageReader
 	calls    atomic.Int64
 	releases atomic.Int64
+}
+
+// returnedPageWaitStore makes a second handler ReadPage fail. Its PageWaiter
+// performs the durable wake read itself and returns that authoritative page,
+// pinning the optional capability contract used by long-poll handlers.
+type returnedPageWaitStore struct {
+	store.Store
+	reader    store.PageReader
+	pageReads atomic.Int64
+	waits     atomic.Int64
+}
+
+var _ store.PageWaiter = (*returnedPageWaitStore)(nil)
+
+func (s *returnedPageWaitStore) ReadPage(
+	ctx context.Context,
+	path string,
+	offset store.Offset,
+	opts store.ReadPageOptions,
+) (store.ReadPage, error) {
+	if call := s.pageReads.Add(1); call > 1 {
+		return store.ReadPage{}, fmt.Errorf("unexpected same-offset handler reread at %s", offset)
+	}
+	return s.reader.ReadPage(ctx, path, offset, opts)
+}
+
+func (s *returnedPageWaitStore) WaitForPage(
+	ctx context.Context,
+	path string,
+	offset store.Offset,
+	initial store.ReadSnapshot,
+	_ time.Duration,
+	opts store.ReadPageOptions,
+) (store.ReadWaitResult, error) {
+	s.waits.Add(1)
+	if _, err := s.Append(path, []byte("waited"), store.AppendOptions{ContentType: "text/plain"}); err != nil {
+		return store.ReadWaitResult{}, err
+	}
+	opts.Snapshot = nil
+	opts.NoTouch = true
+	page, err := s.reader.ReadPage(ctx, path, offset, opts)
+	if err != nil {
+		return store.ReadWaitResult{}, err
+	}
+	if !store.SameReadStream(initial, page.Snapshot) {
+		return store.ReadWaitResult{}, store.ErrReadSnapshotChanged
+	}
+	return store.ReadWaitResult{Page: page}, nil
 }
 
 func (s *countingPageStore) ReadPage(ctx context.Context, path string, offset store.Offset, opts store.ReadPageOptions) (store.ReadPage, error) {
