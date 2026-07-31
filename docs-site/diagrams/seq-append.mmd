@@ -4,6 +4,7 @@ sequenceDiagram
     participant H as Handler
     participant S as Store
     participant R as Redis
+    participant M as Sub Manager
     C->>H: POST /chat + body
     H->>H: authorize path · parse content type, producer headers, sequence, and close flag
     H->>S: handleAppend → Store.Append(path, data, opts)
@@ -17,4 +18,8 @@ sequenceDiagram
     end
     S-->>H: typed append result and producer result
     H->>H: map duplicate, fence, conflict, close, and success headers
+    H->>M: OnStreamAppend(path) after a new durable append
+    Note over H,M: enqueue or coalesce one path<br/>fixed 1,024-entry local queue · no Redis call
+    M-->>H: bounded enqueue outcome
     H-->>C: 200 or 204 · Stream-Next-Offset 0_29
+    Note over H,M: worker evaluates subscribers independently

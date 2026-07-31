@@ -7,7 +7,7 @@ sequenceDiagram
     S-->>W: 201 Created — signing kid ds_abc123
     O->>S: POST orders/A1234 "paid"
     S-->>O: 204 — durably appended
-    Note over S: append matches · bump generation · arm lease
+    Note over S: dirty worker matches · bumps generation · arms lease
     S->>W: POST /hooks — signed wake (orders/A1234 behind)
     Note over W: verify Ed25519 sig · send the receipt email
     W-->>S: 200 done:true

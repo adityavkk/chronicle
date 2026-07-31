@@ -19,8 +19,8 @@ flowchart TB
     Store --> Redis
     Store -.->|"alt backend"| Mem
     Redis -->|"EVALSHA · SUBSCRIBE"| RDB
-    Handler -.->|"OnStreamAppend hook"| Subs
-    Subs -->|"cursors · leases"| RDB
+    Handler -.->|"bounded dirty hint after commit"| Subs
+    Subs -->|"async fanout · cursors · leases"| RDB
     Subs -.->|"signed wake / event"| Out
 
     classDef client fill:#F2F0E5,stroke:#6F6E69,color:#100F0F;

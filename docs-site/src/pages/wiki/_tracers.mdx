@@ -39,9 +39,9 @@ import Switch from "../../components/Switch.astro";
 
   <Diagram name="seq-trace-append" label="Append · call stack" caption="The optimistic-concurrency loop is the part to watch. The backend snapshots the tail before framing, and <code>append.lua</code> rejects the write with <code>RETRY</code> if the live tail has moved. The Go caller then re-snapshots and retries, up to 64 times." />
 
-  <Step n="1" fn="Handler.ServeHTTP" loc="handler.go:130" role="The method switch routes POST to handleAppend. Every verb takes this same switch.">
+  <Step n="1" fn="Handler.ServeHTTP" loc="handler.go:212" role="The method switch routes POST to handleAppend. Every verb takes this same switch.">
 
-```go title="handler.go" showLineNumbers startLineNumber=130
+```go title="handler.go" showLineNumbers startLineNumber=212
 	case http.MethodPost:
 		err = h.handleAppend(w, r, streamPath)
 ```
@@ -52,26 +52,30 @@ namespace. This switch is the whole router.
 
   </Step>
 
-  <Step n="2" fn="Handler.handleAppend" loc="handler.go:584" role="Confirm the stream exists, parse the producer and closure headers, read the body, build options, call the store.">
+  <Step n="2" fn="Handler.handleAppend" loc="handler.go:823" role="Buffer the body, authorize before existence, load stream metadata, parse producer and closure headers, then repeat the live write fence immediately before the store call.">
 
-```go title="handler.go" showLineNumbers startLineNumber=584
-meta, err := h.Store.Get(path)
-if err != nil {
-	if errors.Is(err, store.ErrStreamNotFound) {
-		return newHTTPError(http.StatusNotFound, "stream not found")
+```go title="handler.go" showLineNumbers startLineNumber=827
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return newHTTPError(http.StatusBadRequest, "failed to read body")
+	}
+	if err := h.authorizeAppendCredential(r, path); err != nil {
+		return err
+	}
+	meta, err := h.Store.Get(path)
 ```
 
-After the existence check, `handleAppend` parses `Producer-Id`, `Producer-Epoch`,
-`Producer-Seq`, and `Stream-Closed`, reads the request body, verifies the
-`Content-Type` matches the stream, and packs it all into an `AppendOptions`
-before calling `h.Store.Append`. It decides nothing about ordering or
-idempotency. The store and the script handle that.
+The credential preflight runs before stream storage, so an invalid caller
+cannot probe existence. The handler then parses `Producer-Id`, `Producer-Epoch`,
+`Producer-Seq`, and `Stream-Closed`, verifies the `Content-Type`, and builds
+`AppendOptions`. It repeats the live write-token fence immediately before
+`h.Store.Append`. The store and script decide ordering and idempotency.
 
   </Step>
 
-  <Step n="3" fn="redis.Store.Append" loc="store/redis/store.go:574" role="The backend has already snapshotted the tail with HMGET and pre-framed the batch. Now it sends everything to one EVALSHA.">
+  <Step n="3" fn="redis.Store.Append" loc="store/redis/store.go:533" role="The backend snapshots the tail with HMGET, frames the batch against it, and sends everything to one EVALSHA.">
 
-```go title="store/redis/store.go" showLineNumbers startLineNumber=574
+```go title="store/redis/store.go" showLineNumbers startLineNumber=584
 args := append([]any{
 	s.nowNsArg(), notifyChannel(path), reqCT, opts.Seq, closeArg,
 	hasProd, pid, epochArg, seqArg,
@@ -118,9 +122,9 @@ new tail.
   </Step>
 
   <Complexity
-    time="O(k log k) for a k-frame batch · plus O(r) on contention"
+    time="O(k log N) for a k-frame batch · multiplied by retries under contention"
     space="O(b) for a b-byte batch"
-    why="Each frame is one <code>ZADD</code> into the <code>msg</code> sorted set, chunked at 1,000 members because Lua's <code>unpack</code> is C-stack bounded. The <code>r</code> term is the optimistic retry: a concurrent append on the same stream re-snapshots the tail and re-runs, up to 64 times."
+    why="Each frame is one <code>ZADD</code> into a <code>msg</code> sorted set of size N, chunked at 1,000 members because Lua's <code>unpack</code> is C-stack bounded. A concurrent append on the same stream can force the complete snapshot, framing, and script attempt to repeat, up to 64 times."
   />
 
   <Aside label="Edge case" summary="Why the <code>ZADD</code> is chunked and the retry caps at 64">
@@ -131,24 +135,24 @@ new tail.
     `maxAppendRetries` (64) times before giving up.
   </Aside>
 
-  <Step n="5" fn="Handler.handleAppend respond" loc="handler.go:775" role="Back in Go. Fire the subscription hook, set the next offset, then choose the status.">
+  <Step n="5" fn="Handler.handleAppend respond" loc="handler.go:1036" role="Set response headers, skip the hook for a producer duplicate, enqueue one dirty path for a new append, then choose the status.">
 
-```go title="handler.go" showLineNumbers startLineNumber=775
-h.onStreamAppend(path)
+```go title="handler.go" showLineNumbers startLineNumber=1036
 w.Header().Set(protocol.HeaderStreamNextOffset, result.Offset.String())
-if opts.ProducerId != "" {
-	w.WriteHeader(http.StatusOK)
-} else {
+if result.ProducerResult == store.ProducerResultDuplicate {
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
-return nil
+h.onStreamAppend(path)
+h.observeAppendSubscriptionHook(appendReturnedAt)
 ```
 
-`onStreamAppend` is the best-effort hand-off into the subscription plane. The
-[wake walkthrough](#wake) starts exactly here. A producer append answers `200 OK`.
-A plain append answers `204 No Content`. Both carry `Stream-Next-Offset`, the one
-string a client stores and passes back as `?offset=` to resume. There are no
-consumer groups and no server-side cursor.
+`onStreamAppend` makes one bounded process-local queue transition. The
+[wake walkthrough](#wake) starts exactly here, while the Manager-owned worker
+runs fanout later. A producer append answers `200 OK`. A plain append answers
+`204 No Content`. Both carry `Stream-Next-Offset`, the one string a client stores
+and passes back as `?offset=` to resume. A producer duplicate returns before the
+hook because it wrote no new data.
 
   </Step>
 
@@ -357,11 +361,11 @@ use the same framing code as a plain catch-up read.
   generation counter fences every message, so a crash anywhere costs latency and
   not correctness.
 
-  <Diagram name="seq-trace-wake" label="Subscription wake · call stack" caption="Two delivery modes share one fencing model. <strong>Webhook</strong>: sign and POST, auto-ack on <code>{done:true}</code>. <strong>Pull-wake</strong>: append a wake event, let workers race to <code>claim</code> a lease. A periodic <code>sweepOnce</code> floor re-arms anything left stranded by a crash." />
+  <Diagram name="seq-trace-wake" label="Subscription wake · call stack" caption="The handler records one dirty path and returns. A Manager-owned worker evaluates subscribers and arms the wake later. <strong>Webhook</strong> signs and POSTs. <strong>Pull-wake</strong> appends a wake event for workers to claim. Recovery repairs any local hint or armed delivery left stranded." />
 
-  <Step n="1" fn="Handler.onStreamAppend" loc="handler.go:63" role="The exact call that closed the append trace. With no subscription layer wired, it is a no-op.">
+  <Step n="1" fn="Handler.onStreamAppend" loc="handler.go:146" role="The exact call that closes the append trace. With no subscription layer wired, it is a no-op.">
 
-```go title="handler.go" showLineNumbers startLineNumber=63
+```go title="handler.go" showLineNumbers startLineNumber=146
 func (h *Handler) onStreamAppend(path string) {
 	if h.SubHooks != nil {
 		h.SubHooks.OnStreamAppend(subStreamPath(path))
@@ -370,30 +374,65 @@ func (h *Handler) onStreamAppend(path string) {
 ```
 
 `subStreamPath` strips the leading slash to match the protocol's wire paths.
-This runs inline on the append's goroutine, right after the durable write. It is
-the best-effort, low-latency path into the subscription plane.
+This runs inline on the append goroutine, right after the durable write. The
+call returns after one bounded local handoff. It does not enumerate subscribers,
+load cursors, read linked tails, or arm a wake.
 
   </Step>
 
-  <Step n="2" fn="Manager.OnStreamAppend" loc="webhook/manager.go:359" role="Look up who is listening on this stream from the fan-out index, and wake each.">
+  <Step n="2" fn="Manager.OnStreamAppend" loc="webhook/manager.go:537" role="Add or coalesce the path in a fixed queue, expose the enqueue result, and signal the dirty worker without blocking.">
 
-```go title="webhook/manager.go" showLineNumbers startLineNumber=359
+```go title="webhook/manager.go (abridged)" showLineNumbers startLineNumber=537
 func (m *Manager) OnStreamAppend(path string) {
-	start := time.Now()
-	ids, slotsProbed, err := m.store.StreamSubscribers(path)
-	if err != nil {
+	now := m.now()
+	m.dirtyMu.Lock()
+	result, _ := m.dirty.enqueue(path, now)
+	stats := m.dirty.stats(now)
+	m.dirtyMu.Unlock()
+
+	m.metrics.DirtyEnqueue(result.String(), stats.depth, stats.capacity, stats.oldestAge)
+	if result == dirtyEnqueued || result == dirtyOverflowed {
+		m.signalDirty()
+	}
+}
 ```
 
-`StreamSubscribers` reads a Redis set kept per stream. That set is the index of
-who is listening. For each subscription, `maybeWake` checks that it is idle and
-that its cursor is behind the new tail, which means it has pending work, before
-arming anything. Arming a wake runs `arm_wake.lua`, which bumps the
-subscription's `generation` and stamps a fresh `wake_id`. The [modules
-page](./modules#subs) shows that script.
+Repeated appends to a queued path coalesce. An append that arrives while the
+path is processing marks it dirty again, so it returns once to the queue tail.
+If all 1,024 entries are occupied, an overflow epoch requests eager recovery.
+No enqueue result blocks the HTTP response.
 
   </Step>
 
-  <Step n="3" fn="claim.lua the pull-wake fence" loc="webhook/scripts/claim.lua:36" role="Two workers race to claim the wake. The lease compare-and-set picks one, and the fence rotates.">
+  <Step n="3" fn="Manager.processDirtyStream" loc="webhook/manager.go:625" role="The background worker looks up subscribers, hydrates their state, reads distinct linked tails in a batch, and applies the pure pending-work decision.">
+
+```go title="webhook/manager.go (abridged)" showLineNumbers startLineNumber=625
+ids, _, err := m.store.StreamSubscribers(path)
+subs, err := m.store.GetMany(ids)
+idle := make([]Subscription, 0, len(subs))
+for _, sub := range subs {
+	if sub.Phase == PhaseIdle {
+		idle = append(idle, sub)
+	}
+}
+paths := distinctLinkPaths(idle)
+tails, err := m.streams.TailOffsets(paths)
+for _, sub := range idle {
+	if HasPendingWorkFrom(sub.Links, tails) {
+		m.issueWakeResult(sub, path)
+	}
+}
+```
+
+`StreamSubscribers` reads a bounded occupied-slot bitmap, then pipelines one
+fanout-set read for each occupied subscription slot. `GetMany` pipelines state
+and cursor hydration. `TailOffsets` reads each distinct linked stream tail once.
+Arming an owed wake runs `arm_wake.lua`, which bumps the generation, stamps a
+fresh `wake_id`, and records the due mark atomically.
+
+  </Step>
+
+  <Step n="4" fn="claim.lua, the pull-wake fence" loc="webhook/scripts/claim.lua:36" role="Two workers race to claim the wake. The lease compare-and-set picks one, and the fence rotates.">
 
 ```lua title="webhook/scripts/claim.lua" showLineNumbers startLineNumber=36
 local gen = redis.call('HGET', sub, 'generation')
@@ -417,18 +456,20 @@ generation fence applied to a push instead of a pull.
 
   </Step>
 
-  A backstop keeps the whole plane working through crashes. The append-time hook
-  is the fast path, and a periodic floor guarantees the work still happens.
+  A backstop keeps the whole plane working through crashes. The dirty worker is
+  the low-latency path. Event-triggered recovery and a periodic floor guarantee
+  the work still happens if the process-local hint disappears.
 
   <Aside label="Recovery" summary="How the sweep rebuilds state after a crash">
     The recovery floor runs in `recoveryLoop`, which calls `sweepOnce` on a ticker
     at `defaultSweepInterval`, 30 seconds by default. It re-emits a pull-wake event
     that was armed but never written (`wake_event_sent_ns == 0`), expires a lease
     whose holder vanished, and re-wakes an idle subscription that has pending work.
-    The latency-sensitive cases are event-triggered (boot, reconnect, append
-    error), so the periodic floor only bounds the one eventless case. A crash
+    The latency-sensitive cases are event-triggered by boot, reconnect, dirty
+    processing error, overflow, and owner movement, so the periodic floor only
+    bounds the one eventless case. A crash
     between any two steps above is recoverable for this reason. The
-    [Subscriptions](./../subscriptions) reference walks the fencing and recovery in
+    [Subscriptions](../../subscriptions) reference walks the fencing and recovery in
     full.
   </Aside>
 

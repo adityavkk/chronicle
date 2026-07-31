@@ -28,6 +28,7 @@ import Aside from "../components/Aside.astro";
     <li><strong>The same four parts every time.</strong> The HTTP handler parses the request. The Go store frames bytes and owns typed results. Redis runs the required script. Pure Go functions define semantic decisions, and Lua mirrors the decisions that must run atomically.</li>
     <li><strong>Reads use bounded <code>ZRANGEBYLEX</code> pages.</strong> Frames are stored as <code>"&lt;offset&gt;|&lt;bytes&gt;"</code> members in a sorted set, zero-padded so byte order equals stream order. The first page captures the response tail. Redis fetches one candidate, then optionally bulk-fetches only the offset range that fits the remaining 1 MiB target. A separate 1,024-frame cap bounds the page.</li>
     <li><strong>Live tailing registers before the authoritative <code>offset=now</code> page.</strong> A confirmed subscription covers appends after that atomic page; its captured tail covers appends before it. Numeric long-poll offsets retain the read, subscribe, no-touch-recheck sequence. Every wake, poll, or timeout still ends in a typed durable page.</li>
+    <li><strong>An append response does not run subscription fanout.</strong> After a new append commits, the handler performs one bounded local dirty-queue transition. Subscriber lookup, cursor hydration, linked-tail reads, and wake arming run in a Manager-owned worker. Failed appends and producer duplicates create no dirty hint.</li>
     <li><strong>Ordinary persistent reads do not write.</strong> For a valid non-expiring stream, <code>GET</code>, <code>HEAD</code>, long-poll rechecks, and SSE refreshes issue no <code>HSET</code>, <code>HSETNX</code>, <code>PEXPIRE</code>, or <code>PERSIST</code>. Sliding TTL reads renew once at the first root snapshot. Lazy expiry cleanup and one-time legacy incarnation migration remain explicit write cases.</li>
   </ul>
 </Tldr>
@@ -192,6 +193,15 @@ import Aside from "../components/Aside.astro";
     caption="Every command runs inside one EVALSHA, so a concurrent reader can never observe a half-built stream: meta without frames, or frames without a tail."
   />
 
+  <Callout icon="info" label="Subscription hooks after create">
+    A genuinely new stream runs the pattern-linking hook after `create.lua`
+    commits. If the create has initial data, Chronicle runs that hook first, then
+    records exactly one dirty append hint. The background fanout
+    worker can therefore see subscriptions that match the new path. A repeated
+    idempotent `PUT` runs neither hook. Pattern linking remains part of the create
+    response path; the async queue changes append fanout only.
+  </Callout>
+
   <Complexity
     time="O(1) empty · O(k log k) with a k-message body"
     space="O(1) · O(b) for a b-byte body"
@@ -278,8 +288,19 @@ import Aside from "../components/Aside.astro";
   <Diagram
     name="seq-append"
     label="POST, append"
-    caption="On RETRY the store loops back to the HMGET snapshot and re-frames against the new tail. The loop is contention back-off. The script itself is always atomic."
+    caption="On RETRY the store loops back to the HMGET snapshot and re-frames against the new tail. Once a new append commits, the handler records one bounded local dirty hint and returns. Subscription fanout runs in the background."
   />
+
+  <Callout icon="arrow" label="The subscription boundary">
+    `Store.Append` is the durable commit point. A genuinely new append then calls
+    `OnStreamAppend`, which performs one fixed-capacity local queue transition
+    and one nonblocking worker signal. It does not call Redis, enumerate
+    subscribers, load subscription state, read linked tails, arm wakes, or
+    deliver a webhook. The HTTP response keeps its existing status, headers, and
+    body even if later fanout fails. The recovery sweep derives any missed wake
+    from the durable stream tail and subscription cursor. See [the complete
+    queue and failure policy](../performance-improvements/async-subscription-fanout).
+  </Callout>
 
   <RedisTrace
     script="append.lua"
@@ -298,9 +319,9 @@ import Aside from "../components/Aside.astro";
   />
 
   <Complexity
-    time="O(k log N)"
+    time="O(k log N) commit · O(1) subscription handoff"
     space="O(b)"
-    why="Each of the k messages in the batch is one skiplist insert into a <code>:msg</code> of current size N, which is O(log N) apiece. The tail update, the producer fence (<code>HGET</code>/<code>HSET</code> on <code>:prod</code>), and the wakeup are O(1), and the publish is O(S) in subscribers. Space grows by the b appended bytes. The optimistic retry loop multiplies the <em>number</em> of attempts under contention, not the cost of one."
+    why="Each of the k messages in the batch is one skiplist insert into a <code>:msg</code> of current size N, which is O(log N) apiece. The tail update and producer fence are O(1), and the Redis publish is O(S) in live stream waiters. After commit, the subscription hook performs one bounded map and ring transition whose cost does not grow with subscription fanout. Space grows by the b appended bytes. The optimistic retry loop multiplies the <em>number</em> of attempts under contention, not the cost of one."
   />
 
   ### With an <em>idempotent producer</em>
@@ -350,12 +371,19 @@ import Aside from "../components/Aside.astro";
     | **EpochSeq** | new epoch not starting at `seq 0` | `400 Bad Request` | none |
   </Table>
 
+  A producer **Accept** result records one dirty hint after commit. A
+  **Duplicate** returns before the hook because it wrote no new stream data. All
+  error verdicts also skip the hook, so subscription work cannot change append
+  error precedence.
+
   ### Append <em>and close</em>
 
   Add `Stream-Closed: true` to an append with a body and the same
   `append.lua` writes the final frame, flips the closed flag, and publishes
   `c` instead of `a` in one step. Readers see the last bytes and the EOF
-  together.
+  together. Because the tail moved, Chronicle records one dirty subscription
+  hint after the commit. The close-only endpoint below does not record an append
+  hint because it writes no data.
 </section>
 
 <section class="block" id="post-close">
@@ -576,7 +604,7 @@ import Aside from "../components/Aside.astro";
     ]}
   />
 
-  The [SSE fanout explainer](./performance-improvements/sse-fanout) compares the old and new
+  The [SSE fanout explainer](../performance-improvements/sse-fanout) compares the old and new
   architecture, including the attach race, bounded replay policy, fault tests,
   and measured read-amplification reduction.
 
