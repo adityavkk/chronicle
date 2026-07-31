@@ -50,7 +50,7 @@ import Aside from "../../components/Aside.astro";
     | [`protocol/`](https://github.com/adityavkk/chronicle/tree/main/protocol) | Pure core: header grammar, cursor math, SSE framing | [`ParseTTL`](https://github.com/adityavkk/chronicle/blob/main/protocol/parse.go#L27) |
     | [`store/`](https://github.com/adityavkk/chronicle/tree/main/store) | The storage contract + offset type + producer rules | [`store.Store`](https://github.com/adityavkk/chronicle/blob/main/store/store.go#L98) |
     | [`store/redis/`](https://github.com/adityavkk/chronicle/tree/main/store/redis) | The Redis backend: Lua mutations, key schema, pub/sub | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L523) |
-    | [`webhook/`](https://github.com/adityavkk/chronicle/tree/main/webhook) | Subscriptions: wakes, leases, signed delivery, recovery | [`Manager.OnStreamAppend`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L359) |
+    | [`webhook/`](https://github.com/adityavkk/chronicle/tree/main/webhook) | Subscriptions: bounded dirty handoff, async wakes, leases, recovery | [`Manager.OnStreamAppend`](https://github.com/adityavkk/chronicle/blob/main/webhook/manager.go#L537) |
     | [`cmd/chronicle/`](https://github.com/adityavkk/chronicle/tree/main/cmd/chronicle) | The binary: flags, wiring, the listener | `main` |
   </Table>
 
@@ -83,8 +83,9 @@ import Aside from "../../components/Aside.astro";
 
   <Diagram name="wiki-arch" label="System architecture" caption="A request enters the <strong>shell</strong> (<code>Handler.ServeHTTP</code>), consults the <strong>core</strong> for parsing and validation decisions, and calls the <strong>store.Store</strong> interface. The Redis backend turns each mutation into one Lua script. A durable append also fires the subscription hook into the webhook manager." />
 
-  The diagram reads left to right as control flow. A durable append also fires
-  the `OnStreamAppend` hook, which is where the subscription plane picks up.
+  The diagram reads left to right as control flow. After a durable append, the
+  `OnStreamAppend` hook records one path in a bounded local queue. The
+  subscription Manager performs fanout in its background worker.
 
   <Aside label="Live readers" summary="How a tailing read waits for the next append">
     For a live read the Redis backend, after running the read script, waits on a

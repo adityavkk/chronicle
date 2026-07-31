@@ -347,11 +347,11 @@ handler does not call `Store.Get` to reconstruct headers after waiting.
   generation counter fences every message, so a crash anywhere costs latency and
   not correctness.
 
-  <Diagram name="seq-trace-wake" label="Subscription wake · call stack" caption="Two delivery modes share one fencing model. <strong>Webhook</strong>: sign and POST, auto-ack on <code>{done:true}</code>. <strong>Pull-wake</strong>: append a wake event, let workers race to <code>claim</code> a lease. A periodic <code>sweepOnce</code> floor re-arms anything left stranded by a crash." />
+  <Diagram name="seq-trace-wake" label="Subscription wake · call stack" caption="The handler records one dirty path and returns. A Manager-owned worker evaluates subscribers and arms the wake later. <strong>Webhook</strong> signs and POSTs. <strong>Pull-wake</strong> appends a wake event for workers to claim. Recovery repairs any local hint or armed delivery left stranded." />
 
-  <Step n="1" fn="Handler.onStreamAppend" loc="handler.go:63" role="The exact call that closed the append trace. With no subscription layer wired, it is a no-op.">
+  <Step n="1" fn="Handler.onStreamAppend" loc="handler.go:146" role="The exact call that closes the append trace. With no subscription layer wired, it is a no-op.">
 
-```go title="handler.go" showLineNumbers startLineNumber=63
+```go title="handler.go" showLineNumbers startLineNumber=146
 func (h *Handler) onStreamAppend(path string) {
 	if h.SubHooks != nil {
 		h.SubHooks.OnStreamAppend(subStreamPath(path))
@@ -360,30 +360,65 @@ func (h *Handler) onStreamAppend(path string) {
 ```
 
 `subStreamPath` strips the leading slash to match the protocol's wire paths.
-This runs inline on the append's goroutine, right after the durable write. It is
-the best-effort, low-latency path into the subscription plane.
+This runs inline on the append goroutine, right after the durable write. The
+call returns after one bounded local handoff. It does not enumerate subscribers,
+load cursors, read linked tails, or arm a wake.
 
   </Step>
 
-  <Step n="2" fn="Manager.OnStreamAppend" loc="webhook/manager.go:359" role="Look up who is listening on this stream from the fan-out index, and wake each.">
+  <Step n="2" fn="Manager.OnStreamAppend" loc="webhook/manager.go:537" role="Add or coalesce the path in a fixed queue, expose the enqueue result, and signal the dirty worker without blocking.">
 
-```go title="webhook/manager.go" showLineNumbers startLineNumber=359
+```go title="webhook/manager.go (abridged)" showLineNumbers startLineNumber=537
 func (m *Manager) OnStreamAppend(path string) {
-	start := time.Now()
-	ids, slotsProbed, err := m.store.StreamSubscribers(path)
-	if err != nil {
+	now := m.now()
+	m.dirtyMu.Lock()
+	result, _ := m.dirty.enqueue(path, now)
+	stats := m.dirty.stats(now)
+	m.dirtyMu.Unlock()
+
+	m.metrics.DirtyEnqueue(result.String(), stats.depth, stats.capacity, stats.oldestAge)
+	if result == dirtyEnqueued || result == dirtyOverflowed {
+		m.signalDirty()
+	}
+}
 ```
 
-`StreamSubscribers` reads a Redis set kept per stream. That set is the index of
-who is listening. For each subscription, `maybeWake` checks that it is idle and
-that its cursor is behind the new tail, which means it has pending work, before
-arming anything. Arming a wake runs `arm_wake.lua`, which bumps the
-subscription's `generation` and stamps a fresh `wake_id`. The [modules
-page](./modules#subs) shows that script.
+Repeated appends to a queued path coalesce. An append that arrives while the
+path is processing marks it dirty again, so it returns once to the queue tail.
+If all 1,024 entries are occupied, an overflow epoch requests eager recovery.
+No enqueue result blocks the HTTP response.
 
   </Step>
 
-  <Step n="3" fn="claim.lua the pull-wake fence" loc="webhook/scripts/claim.lua:36" role="Two workers race to claim the wake. The lease compare-and-set picks one, and the fence rotates.">
+  <Step n="3" fn="Manager.processDirtyStream" loc="webhook/manager.go:625" role="The background worker looks up subscribers, hydrates their state, reads distinct linked tails in a batch, and applies the pure pending-work decision.">
+
+```go title="webhook/manager.go (abridged)" showLineNumbers startLineNumber=625
+ids, _, err := m.store.StreamSubscribers(path)
+subs, err := m.store.GetMany(ids)
+idle := make([]Subscription, 0, len(subs))
+for _, sub := range subs {
+	if sub.Phase == PhaseIdle {
+		idle = append(idle, sub)
+	}
+}
+paths := distinctLinkPaths(idle)
+tails, err := m.streams.TailOffsets(paths)
+for _, sub := range idle {
+	if HasPendingWorkFrom(sub.Links, tails) {
+		m.issueWakeResult(sub, path)
+	}
+}
+```
+
+`StreamSubscribers` reads a bounded occupied-slot bitmap, then pipelines one
+fanout-set read for each occupied subscription slot. `GetMany` pipelines state
+and cursor hydration. `TailOffsets` reads each distinct linked stream tail once.
+Arming an owed wake runs `arm_wake.lua`, which bumps the generation, stamps a
+fresh `wake_id`, and records the due mark atomically.
+
+  </Step>
+
+  <Step n="4" fn="claim.lua, the pull-wake fence" loc="webhook/scripts/claim.lua:36" role="Two workers race to claim the wake. The lease compare-and-set picks one, and the fence rotates.">
 
 ```lua title="webhook/scripts/claim.lua" showLineNumbers startLineNumber=36
 local gen = redis.call('HGET', sub, 'generation')
@@ -407,18 +442,20 @@ generation fence applied to a push instead of a pull.
 
   </Step>
 
-  A backstop keeps the whole plane working through crashes. The append-time hook
-  is the fast path, and a periodic floor guarantees the work still happens.
+  A backstop keeps the whole plane working through crashes. The dirty worker is
+  the low-latency path. Event-triggered recovery and a periodic floor guarantee
+  the work still happens if the process-local hint disappears.
 
   <Aside label="Recovery" summary="How the sweep rebuilds state after a crash">
     The recovery floor runs in `recoveryLoop`, which calls `sweepOnce` on a ticker
     at `defaultSweepInterval`, 30 seconds by default. It re-emits a pull-wake event
     that was armed but never written (`wake_event_sent_ns == 0`), expires a lease
     whose holder vanished, and re-wakes an idle subscription that has pending work.
-    The latency-sensitive cases are event-triggered (boot, reconnect, append
-    error), so the periodic floor only bounds the one eventless case. A crash
+    The latency-sensitive cases are event-triggered by boot, reconnect, dirty
+    processing error, overflow, and owner movement, so the periodic floor only
+    bounds the one eventless case. A crash
     between any two steps above is recoverable for this reason. The
-    [Subscriptions](./../subscriptions) reference walks the fencing and recovery in
+    [Subscriptions](../../subscriptions) reference walks the fencing and recovery in
     full.
   </Aside>
 

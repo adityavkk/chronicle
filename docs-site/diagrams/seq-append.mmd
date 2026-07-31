@@ -4,11 +4,17 @@ sequenceDiagram
     participant H as Handler
     participant S as Store
     participant R as Redis
+    participant M as Sub Manager
     C->>H: POST /chat + body
-    H->>S: Store.Append(path, data, opts) · handler.go:677
-    S->>R: HMGET :meta tail ct — snapshot · store.go:486
-    Note over S: frame bytes against the snapshot tail · store.go:505
-    S->>R: EVALSHA append.lua · store.go:519
+    H->>S: Store.Append(path, data, opts) · handler.go:906
+    S->>R: HMGET :meta tail ct · store.go:557
+    Note over S: frame bytes against the snapshot tail
+    S->>R: EVALSHA append.lua · store.go:590
     Note over R: validate → ZADD → HSET tail → PUBLISH
-    R-->>S: reply OK, newTail — or RETRY
+    R-->>S: OK, newTail, or RETRY
+    S-->>H: committed append result
+    H->>M: OnStreamAppend(path) · handler.go:975
+    Note over R,M: enqueue or coalesce one path<br/>fixed 1,024-entry local queue · no Redis call
+    M-->>H: bounded enqueue outcome
     H-->>C: 204 · Stream-Next-Offset 0_29
+    Note over R,M: Worker evaluates subscribers independently

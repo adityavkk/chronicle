@@ -1,14 +1,14 @@
 ---
 title: "Scaling subscriptions <em>across replicas</em>"
-summary: "Chronicle's subscription control plane lives in one Redis slot and sweeps in full on every replica, so adding replicas scales serving but not subscriptions. Option A keeps the single binary, shards the state across S slots, and shards the background work by a leased per-slot owner. The full sweep stays as the liveness floor. This page walks that design from end to end."
+summary: "Chronicle homes subscription state across 256 Redis slots, records owed wakes in per-slot due sets, and leases background work to one owner per slot. A committed append now hands off one bounded local hint before the response. This page explains the shipped design and the recovery floor beneath it."
 eyebrow: "Design"
 meta: "Horizontal scale · Option A"
-deck: "Chronicle runs as one stateless binary doing two jobs. It serves durable streams, and it runs the <code>__ds</code> subscription control plane. Adding replicas scales the serving and not the control plane. The control plane lives in a single Redis slot. Its recovery sweep runs in full on every replica, so N replicas do N times the same work. <strong>Option A</strong> keeps the single binary and fixes both halves. It shards subscription state across <code>S</code> slots, shards the background work by a leased per-slot owner, and keeps the full sweep as the liveness floor under it. This page walks that design from end to end."
+deck: "Chronicle runs as one stateless binary doing two jobs. It serves durable streams, and it runs the <code>__ds</code> subscription control plane. The shipped <strong>Option A</strong> design keeps that binary, homes each subscription in one of 256 application slots, divides due, lease, and retry work by a fenced slot owner, and keeps a full recovery sweep as the liveness floor. A committed append adds one bounded local dirty hint; fanout runs after the response. This page walks the design from its original ceiling through the current code."
 byline:
   - label: "Decision"
     value: "Option A · one binary"
   - label: "Status"
-    value: "design · numbers unmeasured"
+    value: "shipped · one cloud gap"
   - label: "Source"
     value: "docs/specs/horizontal-scale"
     href: "https://github.com/adityavkk/chronicle/tree/main/docs/specs/horizontal-scale"
@@ -24,28 +24,28 @@ import Complexity from "../components/Complexity.astro";
 import Step from "../components/Step.astro";
 import Aside from "../components/Aside.astro";
 
-<Callout icon="alert" label="A design, not shipped code">
-  Everything else on this site documents code that runs. This page documents a
-  *plan*. The single-slot control plane, the recovery sweep, and the generation
-  fence below are built and tested. **Slot-homing, the due-set, and leased slot
-  ownership are proposed.** They are Option A from the [horizontal-scale
-  research](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md).
-  The numbers the design rests on are not yet measured. §10 says which numbers,
-  and why they gate the build.
+<Callout icon="info" label="Implementation status">
+  Option A is built. Subscription state is slot-homed, armed wakes enter a
+  per-slot due set, and owner epochs fence lease, retry, and due workers. The
+  append path now hands fanout to a bounded process-local queue. The retained
+  full sweep still repairs an eventless gap. The named evidence gap is narrower:
+  fanout across a truly sharded managed-Redis cluster has not been measured in
+  the cloud. The local correctness gates and the cloud replica curve on
+  single-shard Redis passed.
 </Callout>
 
 <Tldr>
   <ul>
-    <li><strong>The control plane sits on one Redis slot.</strong> Every subscription key shares the fixed <code>{"{__ds}"}</code> hash tag, so all of it lands on one cluster slot. State capacity stops scaling there, no matter how many replicas serve traffic.</li>
-    <li><strong>Delivery is event-driven. The sweep only backstops crashes.</strong> A webhook fires the instant a matching append lands, in process, at append latency. It does not fire on a timer. The ~30s recovery sweep delivers nothing in steady state. It exists to re-derive a wake a crash dropped. It runs on every replica over every subscription, so the cost is its redundant <code>O(N·K)</code> read, not the wakes. Adding replicas multiplies that read instead of dividing it.</li>
-    <li><strong>Option A keeps one binary and shards two things.</strong> Slot-home each subscription's keys under <code>{"{__ds:h}"}</code> with <code>h = hash(id) % S</code> for state, and shard the background work by a leased per-slot owner for work. Capacity scales with S, and total sweep work drops to <code>O(owed)</code>.</li>
-    <li><strong>A load test found a third limit Option A does not touch.</strong> The agents runtime registers one subscription per entity <em>type</em>, so all of a type's entities and every replica contend for <em>one</em> single-holder lease. At 12 replicas that collapsed into fence rejections while every tier sat at ≤12% CPU. It was a contention collapse, not a capacity or sweep limit, and the fix sequences first. §01 says why.</li>
-    <li><strong>The fence is safety, not liveness, so the sweep stays.</strong> The generation fence makes a duplicate wake harmless. It does nothing for a <em>coverage gap</em> when a slot is briefly owned by nobody, so the full sweep stays as a backstop, demoted but never deleted. Splitting the binary is Option B, deferred until measurements force it. The one binary held at K=10k.</li>
+    <li><strong>The control plane is slot-homed.</strong> A subscription ID hashes to one of 256 <code>{"{__ds:h}"}</code> tags. Its state, links, due mark, schedules, and fanout membership stay together, so each correctness-critical Lua script remains single-slot.</li>
+    <li><strong>Delivery is event-driven and runs after the response.</strong> A committed append records or coalesces one local stream hint. A Manager-owned worker evaluates subscribers and arms owed wakes later. The 30-second recovery floor normally delivers nothing. It re-derives work after overload, shutdown, process death, or an eventless ownership gap.</li>
+    <li><strong>Option A keeps one binary and shards state and work.</strong> Slot-homing spreads state capacity. Per-slot due sets name owed work, and leased slot owners divide the due, lease, and retry workers without changing the public endpoint.</li>
+    <li><strong>Claim granularity addresses the third limit.</strong> The agents load test found one hot per-type subscription serializing on one lease. Chronicle now supports fenced per-<code>(subscription, shard)</code> claims. Clients opt into more than one claim shard when one logical subscription needs parallel workers.</li>
+    <li><strong>The fence is safety, not liveness, so the sweep stays.</strong> Generation and owner-epoch fences make duplicate work harmless. They do not discover a lost local hint by themselves. The full sweep remains the correctness backstop. Splitting the binary is still the deferred Option B.</li>
   </ul>
 </Tldr>
 
 <section class="block" id="ceiling">
-  <SectionHead num="01" label="The ceiling" title="Where one binary <em>stops scaling</em>" />
+  <SectionHead num="01" label="The original ceiling" title="Why the control plane <em>needed sharding</em>" />
 
   Chronicle is one Go binary. It serves the durable-streams API of append, read,
   long-poll, and SSE, and it runs the subscription control plane. The control
@@ -55,30 +55,30 @@ import Aside from "../components/Aside.astro";
   appends and reads against the per-stream log, which is already sharded across
   the cluster by each stream's own hash tag.
 
-  The control plane does not scale the same way, for three reasons. Two are
-  structural. A later load test forced the third.
+  The original control plane did not scale the same way, for three reasons. Two
+  were structural. A later load test exposed the third. The rest of this page
+  shows how the shipped design addresses them while retaining recovery.
 
-  First, **all of it lives in one slot.** Every subscription key shares the
+  First, **all of it lived in one slot.** Every subscription key shared the
   fixed `{__ds}` hash tag.[^slot] That covers the config hash, the cursor hash,
   the lease and retry schedules, and the fan-out index. Redis Cluster routes
-  every one to the same slot on the same node. This co-location is deliberate. It
-  lets the multi-key Lua scripts run as single-slot atomic scripts, e.g.
-  `ack.lua` touches 4 keys and `delete_sub.lua` touches 5. It also fixes
+  every one to the same slot on the same node. This co-location was deliberate.
+  It let the multi-key Lua scripts run as single-slot atomic scripts, e.g.
+  `ack.lua` touches 4 keys and `delete_sub.lua` touches 5. It also fixed
   subscription *state capacity*, meaning memory and the write throughput of one
-  primary, at one node's worth. No number of serving replicas moves it.
+  primary, at one node's worth. No number of serving replicas moved it.
 
-  Second, **every replica sweeps everything.** The recovery sweep is the
+  Second, **every replica swept everything.** The recovery sweep is the
   durability backstop. Every ~30s it walks all K subscriptions, re-derives pending
   work from each durable cursor, and re-fires any wake a crash dropped. It is
-  correct and necessary. But every replica runs the same sweep over the same K
-  subscriptions against the same slot, so the cost is `O(N·K)` for N replicas.
-  That is redundant work that grows with the cluster instead of being divided by
-  it.
+  correct and necessary. But every replica ran the same sweep over the same K
+  subscriptions against the same slot, so the cost was `O(N·K)` for N replicas.
+  That redundant work grew with the cluster instead of being divided by it.
 
   <Diagram
     name="seq-hs-ceiling"
     label="The O(N·K) sweep"
-    caption="Three replicas, each sweeping all K subscriptions every ~30s against the single {__ds} slot. The reads are redundant, because every replica re-derives the same owed work, and they all converge on one node. Scaling out the fleet scales the load on that one slot up, not down."
+    caption="The pre-sharding design: three replicas each sweep all K subscriptions every 30 seconds against one {__ds} slot. The reads are redundant and converge on one node. Slot-homing, per-slot due sets, and leased ownership remove this shape from the fast workers; the coarse full sweep remains only as a recovery floor."
   />
 
   Third, **a single hot subscription serializes on one lease.** A later load test
@@ -90,27 +90,28 @@ import Aside from "../components/Aside.astro";
   were rejected `FENCED`, and every tier sat at ≤12% CPU. Nothing was saturated.
   It was lock contention on one lease, and 2.5× the CPU made it worse.
 
-  <Callout icon="alert" label="Slot-homing does not fix this">
+  <Callout icon="info" label="Claim granularity fixes a different axis">
     `h = hash(id) % S` distributes *different* subscriptions across slots, but a
     single hot `"<type>-handler"` is still one id, one slot, and one lease, for
-    any S. Moves 1 to 3 below shard **keyspace and ownership**. They do not refine
-    **claim granularity**, which is what collapsed. The fix is a finer claim unit,
-    e.g. per-entity or per-shard-of-type leases. Because the collapse was on the
-    hot path it sequences *before* the sweep and state shards. See the
+    any S. Moves 1 to 3 below shard **keyspace and ownership**. Chronicle also
+    supports a finer claim unit: a worker claims one shard of a logical
+    subscription, and every shard has its own generation and wake fence. That
+    capability moves the contention knee when the client chooses more than one
+    shard. See the
     [third-axis section](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md#a-third-axis-per-type-claim-contention-from-the-load-test)
     of the research.
   </Callout>
 
-  The first two limits are structural: one slot for state, and `O(N·K)` for work.
-  Option A addresses both while keeping the single binary. The **third, per-type
-  claim contention, is the one Option A does *not* fix**, and it is what actually
-  collapsed the system under load.
+  The first two limits were structural: one slot for state, and `O(N·K)` for
+  background work. Option A addresses both while keeping the single binary. The
+  separate claim-shard capability addresses the per-type contention that
+  actually collapsed the agents workload.
 
   <Aside label="Detail" summary="Why batching pushed the sweep limit out but could not remove it">
     Pipelining the per-tick reads moved the sweep limit from a few thousand
     subscriptions to past 10k on one replica.[^batch] It moved the limit, it did
-    not remove it. The third limit, per-type claim contention, needs a finer claim
-    granularity, sequenced before the rest.
+    not remove it. Chronicle handles the third limit, per-type claim contention,
+    with the separate claim-shard capability.
   </Aside>
 </section>
 
@@ -119,12 +120,14 @@ import Aside from "../components/Aside.astro";
 
   Before sharding anything, be precise about what the sweep is *for*. It is easy
   to read §01 and conclude that the sweep delivers wakes, in ~30-second bursts. It
-  does not. On the happy path a webhook fires the instant a matching append lands,
-  and the sweep delivers nothing.
+  does not. On the happy path the accepting origin records one bounded dirty
+  stream hint, its background worker evaluates the linked subscriptions, and the
+  sweep delivers nothing.
 
-  An append is atomic with its wake signal. `append.lua` writes the durable frame,
-  advances the tail, and `PUBLISH`es the stream's notify channel in one
-  single-slot script, so the byte and the signal commit together or not at all.
+  An append is atomic with the stream-reader signal. `append.lua` writes the
+  durable frame, advances the tail, and `PUBLISH`es the stream's notify channel in
+  one single-slot script, so the byte and that reader signal commit together or
+  not at all.
 
   ```lua title="store/redis/scripts/append.lua — the frame and its wake signal commit together"
   redis.call('ZADD', KEYS[2], '0', frame)        -- the message, in the stream's ZSET
@@ -133,23 +136,47 @@ import Aside from "../components/Aside.astro";
   redis.call('PUBLISH', channel, closing and 'c' or 'a')  -- ds:notify:<path>
   ```
 
-  That `PUBLISH` wakes long-poll and SSE readers. Subscriptions wake through a
-  separate synchronous hook on the same request that committed the append.
+  That `PUBLISH` wakes long-poll and SSE readers. Subscription fanout is separate.
+  After the commit, the handler records the stream path in a fixed local queue,
+  then returns without reading subscription state.
 
-  <Step n={1} fn="Manager.OnStreamAppend" loc="webhook/manager.go:359" role="After a durable append the handler reads the stream's subscribers from the fan-out index and arms and delivers each idle one in process. No poll, no timer.">
-  ```go title="webhook/manager.go"
+  <Step n={1} fn="Manager.OnStreamAppend" loc="webhook/manager.go:537" role="After a durable append, apply one typed local queue transition and one nonblocking signal. This call does not touch Redis or wait for fanout.">
+  ```go title="webhook/manager.go (abridged)"
   func (m *Manager) OnStreamAppend(path string) {
-      ids, _ := m.store.StreamSubscribers(path) // the fan-out index for this stream
-      for _, id := range ids {
-          m.maybeWake(id, path) // idle with pending work? arm the wake, deliver now
+      m.dirtyMu.Lock()
+      result, _ := m.dirty.enqueue(path, m.now())
+      m.dirtyMu.Unlock()
+      if result == dirtyEnqueued || result == dirtyOverflowed {
+          m.signalDirty()
       }
   }
   ```
   </Step>
 
-  <Step n={2} fn="Manager.issueWake (pull-wake)" loc="webhook/manager.go:478-490" role="Pull-wake delivers through a durable record. The wake event is a transactional outbox. It writes a wake-typed event to the subscription's wake_stream, then records the emit fenced on (generation, wake_id) so the sweep never re-emits a delivered wake.">
+  <Step n={2} fn="Manager.processDirtyStream" loc="webhook/manager.go:625" role="The Manager-owned worker scatter-gathers the fanout index, pipelines subscription hydration, batches distinct linked-tail reads, and evaluates pending work after the response.">
+  ```go title="webhook/manager.go (abridged)"
+  ids, _, _ := m.store.StreamSubscribers(path)
+  subs, _ := m.store.GetMany(ids)
+  idle := make([]Subscription, 0, len(subs))
+  for _, sub := range subs {
+      if sub.Phase == PhaseIdle {
+          idle = append(idle, sub)
+      }
+  }
+  tails, _ := m.streams.TailOffsets(distinctLinkPaths(idle))
+  for _, sub := range idle {
+      if sub.Phase == PhaseIdle && HasPendingWorkFrom(sub.Links, tails) {
+          m.issueWakeResult(sub, path)
+      }
+  }
+  ```
+  </Step>
+
+  <Step n={3} fn="Manager.writeWakeEventExternalized" loc="webhook/manager.go:884" role="Pull-wake delivers through a durable record. It writes a wake-typed event to the subscription's wake_stream, then records the emit fenced on (generation, wake_id) so recovery never treats a confirmed event as unsent.">
   ```go title="webhook/manager.go"
-  if err := m.streams.AppendWakeEvent(sub.Config.WakeStream, data); err != nil {
+  if err := ext.RunExternalAction(func() error {
+      return m.streams.AppendWakeEvent(sub.Config.WakeStream, data)
+  }); err != nil {
       // Leave wake_event_sent_ns at 0 so the recovery sweep re-emits it.
       return
   }
@@ -160,25 +187,25 @@ import Aside from "../components/Aside.astro";
   <Diagram
     name="seq-hs-eventflow"
     label="The event-driven happy path (pull-wake)"
-    caption="The append commits the frame and the wake signal in one atomic script. The append-time hook writes a durable wake event to the wake_stream, the outbox, and a worker drains it. The recovery sweep fires nothing on this path. It exists only to re-emit a wake a crash left unsent."
+    caption="The append commits the frame, records one bounded local dirty hint, and returns. The Manager-owned worker then reads the fanout index, arms the wake and its due mark, and writes the pull-wake event. The recovery sweep fires nothing on this path."
   />
 
   So where does the ~30s sweep come in? **Only on failure.** If the appending
-  origin crashes between the durable append and the delivery, the wake is lost and
-  nothing else knows it was owed, so the sweep re-derives it from the durable
-  cursor. In steady state the sweep finds every cursor already at its tail and
+  origin crashes between the durable append and wake arming, its local hint is
+  lost, so the sweep re-derives the wake from the durable cursor. Once a wake is
+  armed, the per-slot due set records that it is owed. In steady state the sweep
+  finds every cursor already at its tail and
   fires nothing, yet still pays `O(K)` every tick to *check*, on every replica.
   That redundant check, not the wakes, is the `O(N·K)` cost §01 named. Removing it
   is what Move 2's due-set is for.
 
-  <Callout icon="info" label="Sweep, not outbox, for the webhook path for now">
-    The webhook path has no durable outbox today. Its recovery is the sweep. This
-    is a deliberate trade of one re-derivation pass for a dedicated delivery queue
-    and worker. The cost is recovery at sweep latency for a post-crash event. The
-    pull-wake `wake_stream` above is the durable-outbox shape already in the
-    codebase, and the [due-set](#move2) (§05) carries that shape onto the
-    work-sharded webhook path. The periodic sweep can then stop being the only
-    thing that finds owed work and shrink toward a pure crash backstop.
+  <Callout icon="info" label="The queue is a hint; the due set starts at arm">
+    The local dirty queue deliberately is not a durable outbox. A crash before
+    `arm_wake.lua` can discard the hint, so boot and periodic recovery compare
+    durable cursors with durable stream tails. Once `arm_wake.lua` runs, it also
+    writes the subscription's per-slot due mark atomically with the new generation.
+    The due worker can then re-fire unfinished delivery without scanning every
+    subscription.
   </Callout>
 </section>
 
@@ -197,7 +224,7 @@ import Aside from "../components/Aside.astro";
     | Every replica sweeps all K | redundant `O(N·K)` background work | **partition the work** by a per-slot owner |
   </Table>
 
-  Option A makes three moves on this shape, in order. **Move 1** slot-homes each
+  Option A made three moves on this shape, in order. **Move 1** slot-homes each
   whole subscription into one of `S` virtual slots, so state capacity scales with
   S. **Move 2** shards the schedules with the subscriptions and adds a
   per-subscription *due-set*, so a worker fires owed subscriptions directly
@@ -217,13 +244,13 @@ import Aside from "../components/Aside.astro";
 
   **None of the moves is a correctness dependency.** Each is an optimization
   layered over the existing, still-correct full sweep. §07 is where that claim is
-  paid for. The three moves come first.
+  paid for. They shipped in this order so each layer retained the same backstop.
 </section>
 
 <section class="block" id="move1">
   <SectionHead num="04" label="Move 1" title="Slot-home <em>whole</em> subscriptions" />
 
-  The single `{__ds}` tag becomes `S` tags of the form `{__ds:h}`, with `h =
+  The single `{__ds}` tag became `S` tags of the form `{__ds:h}`, with `h =
   fnv32a(id) % S`. Every key one subscription touches takes the *same* `h`. That
   covers its config hash, its cursor hash, its lease and retry schedules, its
   due-set, and its fan-out membership. The whole subscription homes in one slot,
@@ -265,18 +292,17 @@ import Aside from "../components/Aside.astro";
 
   State capacity now scales with S across the cluster's nodes, because the
   schedules shard *with* the subscriptions rather than staying one global ZSET.
-  The cost lands on one operation. `OnStreamAppend` could read the subscribers of
-  a stream with a single `SMEMBERS`. Once subscriptions spread across slots, the
-  fan-out membership spreads too, so an append must read up to `S` per-slot sets.
-  The mitigation is a per-stream "occupied-slots" bitmap so an append reads only
-  the slots that actually hold a subscriber. §10 measures the cost with and
-  without it.
+  The fanout cost lands on the asynchronous dirty worker. Once subscriptions
+  spread across slots, the fanout membership spreads too, so the worker may read
+  several per-slot sets for one stream. A per-stream occupied-slots bitmap limits
+  that scatter-gather to slots that have held a subscriber. The append response
+  still performs one bounded local queue transition.
 
   <Complexity
     label="Complexity, Move 1"
-    time="O(1) per single-subscription op · ~1 round trip per node to fan one append out"
+    time="response O(1) · async ~1 round trip per node to fan one stream out"
     space="O(K) state, now spread across S slots"
-    why="Every per-subscription script stays single-slot O(1) hash work plus an O(log L) schedule touch, unchanged because the keys co-tag. The one regression is <code>OnStreamAppend</code>: reading a stream's subscribers becomes S pipelined <code>SMEMBERS</code> instead of one, bounded by the occupied-slots bitmap to the slots that actually hold a subscriber rather than all S."
+    why="Every per-subscription script stays single-slot O(1) hash work plus an O(log L) schedule touch because the keys co-tag. The dirty worker reads the occupied bitmap and pipelines one <code>SMEMBERS</code> for each occupied slot. Subscriber and slot counts affect async completion, not the post-commit HTTP handoff."
   />
 </section>
 
@@ -294,7 +320,7 @@ import Aside from "../components/Aside.astro";
   `ack.lua` that advances the cursor also `ZREM`s it. A per-slot *due-worker*
   then reads what is due and fires it. That is `O(owed)` work, not `O(K)`.
 
-  ```lua title="Proposed: the due ZADD/ZREM fold into scripts that are already atomic"
+  ```lua title="Current: due ZADD and ZREM inside the existing atomic scripts"
   -- arm_wake.lua, ARMED branch — add one line (now takes the due ZSET as a key):
   redis.call('ZADD', KEYS[3], tonumber(ARGV[2]), ARGV[1])   -- :due ← now_ns
 
@@ -309,7 +335,7 @@ import Aside from "../components/Aside.astro";
   <RedisTrace
     script="claim_due.lua"
     source="webhook/scripts/claim_due.lua"
-    caption="The due-worker reuses claim_due.lua unchanged, with one key, run once per owned slot. It claims by re-scoring forward and never <code>ZREM</code>, so a worker that dies after claiming leaves the item to fall due again on the next owner. The same code already drains the lease and retry schedules today."
+    caption="The due-worker runs claim_due.lua with one key per owned slot. It claims by re-scoring forward and never <code>ZREM</code>, so a worker that dies after claiming leaves the item to fall due again on the next owner. The lease and retry schedules use the same pattern."
     steps={[
       { cmd: "ZRANGEBYSCORE", key: "ds:{__ds:h}:due 0 now", does: "Take the subscriptions whose owed-deadline has passed, meaning everything in the outbox that has not been acked away.", loc: "claim_due.lua:10", kind: "read" },
       { cmd: "ZADD", key: "ds:{__ds:h}:due now+visibility", does: "Re-score each claimed member forward, never <code>ZREM</code>. If this origin dies mid-delivery, the owed mark falls due again and another owner re-fires it, so delivery is at-least-once by construction.", loc: "claim_due.lua:13", kind: "write" },
@@ -492,26 +518,25 @@ import Aside from "../components/Aside.astro";
   <Diagram
     name="seq-hs-e2e"
     label="Steady state, append to delivery"
-    caption="The appending origin (A) computes the slot, arms the wake into slot h's due-set, and delivers on the fast path with one signed POST, unchanged from today except for the slot tag. The owner (B) finds the due-set already cleared by the ack, so it does no redundant work. Ownership is needed for the recovery path, not the happy one."
+    caption="Origin A commits the append, records one dirty hint, and returns. Its background worker finds sub-1, arms the wake into slot h's due set, and sends one signed POST. The owner B finds the due set already cleared by the ack, so it does no redundant work."
   />
 
   Step by step:
 
   1. **The append commits.** A client `POST`s to `events/abc` on Origin A. A runs
-     `append.lua`, the byte is durable, and the client gets its `204`. That `204`
-     is returned at the durable write. Everything below runs after the client has
-     its response.
-  2. **The fan-out finds the subscriber.** A's `OnStreamAppend` reads the
-     subscribers of `events/abc`. Under slot-homing that is `S` pipelined
-     `SMEMBERS`, narrowed by the occupied-slots bitmap to the slots that hold a
-     subscriber. It finds `sub-1` in slot `h`.
+     `append.lua`, the byte is durable, and `OnStreamAppend` records or coalesces
+     one local path before the client gets its `204`. No Redis call runs in that
+     hook.
+  2. **The async fanout finds the subscriber.** A's dirty worker reads the
+     occupied-slots bitmap, pipelines `SMEMBERS` only for those slots, hydrates
+     the matching subscriptions, and batches their linked-tail reads. It finds
+     `sub-1` in slot `h` and decides that its cursor is behind.
   3. **The wake arms into the slot.** A runs `arm_wake.lua` on `{__ds:h}`. It
      bumps the generation, mints a `wake_id`, and, for Move 2, `ZADD`s `sub-1`
      into `{__ds:h}:due` at `now_ns`, all in one atomic script.
-  4. **The fast path delivers.** Because A handled the append, A signs and POSTs
-     the wake immediately. One origin handled this append, so this delivery is not
-     redundant across the fleet. Ownership is not needed for a single fence-safe
-     POST.
+  4. **The worker delivers.** A signs and POSTs the wake after arming it. One
+     origin processed this dirty stream, so this delivery is not redundant across
+     the fleet. Ownership is not needed for a single fence-safe POST.
   5. **The ack clears the owed mark.** The receiver returns `{done:true}`. A runs
      `ack.lua`. It advances the cursor forward-only, releases the lease, and
      `ZREM`s `sub-1` from `{__ds:h}:due`. The subscription is idle and owes
@@ -544,21 +569,22 @@ import Aside from "../components/Aside.astro";
 </section>
 
 <section class="block" id="code">
-  <SectionHead num="09" label="In the code" title="What actually <em>changes</em>" />
+  <SectionHead num="09" label="In the code" title="What actually <em>changed</em>" />
 
-  The design maps onto specific changes in `webhook/`. None of the per-request
-  scripts changes shape. The background loops gain a slot dimension, and two new
-  scripts join the dozen already in `webhook/scripts/`.
+  The design maps onto specific code in `webhook/`. The background loops gained
+  a slot dimension, the wake scripts gained the due mark, and the append hook now
+  hands work to a bounded local queue.
 
   <Table wide>
-    | Loop · function | Today | Under Option A |
+    | Loop · function | Before | Current |
     | --- | --- | --- |
     | `leaseWorker` | one global lease ZSET | for each owned slot: `DueLeases(h)` → `ExpireLease`, which inlines the owner+epoch check |
     | `retryWorker` | one global retry ZSET | for each owned slot: `DueRetries(h)`; deliver only after `check_owner` returns `OWNER` |
-    | `dueWorker` *(new)* | none | for each owned slot: `claim_due` over `{__ds:h}:due` → `maybeWake` |
+    | `dueWorker` | none | for each owned slot: `claim_due` over `{__ds:h}:due` → fenced wake evaluation |
     | `recoverySweeper` · `sweepOnce` | `List()` over one slot | iterate **all** `h ∈ [0,S)`, owned or not, the unowned-slot backstop, no owner guard |
-    | `OnStreamAppend` | one `SMEMBERS` | `S` pipelined `SMEMBERS` over the occupied slots |
-    | `issueWake` · `maybeWake` | as-is | unchanged but for deriving keys from `slotTag(id)` |
+    | `OnStreamAppend` | synchronous fanout | one bounded local enqueue or coalesce transition |
+    | `dirtyWorker` | none | batches 64 paths; scatter-gathers occupied fanout slots, hydrates subscriptions, batches linked tails, then arms wakes |
+    | wake scripts | one fixed control-plane tag | derive one subscription's keys from `slotTag(id)` and mutate its due mark atomically |
   </Table>
 
   `ownedSlots()` is recomputed each reconcile tick from the rendezvous result
@@ -609,20 +635,17 @@ import Aside from "../components/Aside.astro";
     | 6 | ramp agents-server replicas 6→12+ against **one hot per-type subscription**; read `ALREADY_CLAIMED`/`FENCED`/lease-lapse rates and per-busy-agent throughput | **the actual collapse**: claim contention, not sweep or capacity | now, on the Electric rig; reproduces the 12-replica collapse |
   </Table>
 
-  Experiment 2 is the one that can sink the design. Slot-homing trades a single
-  `SMEMBERS` per append for up to `S` of them. If that fan-out regresses
-  append→wake p99 past budget on a real cluster, even with the occupied-slots
-  bitmap, the state shard is not worth its cost and the work-sharding (Moves 2 and
-  3) has to stand on the single slot. That is why the order is measure, then
-  build, not build, then measure.
+  Experiment 2 measures asynchronous append-to-wake latency now that slot-homing
+  trades a single `SMEMBERS` for a bounded scatter-gather over occupied slots. A
+  regression here delays wake availability and raises queue age, but no longer
+  delays the append response. The queue depth, oldest age, full processing time,
+  and recovery delay must be read with that latency.
 
   <Callout icon="alert" label="The standing cost">
-    Slot-homing makes the common path, one append fanning out, *more* expensive in
-    exchange for raising the capacity ceiling. The current single-slot design is
-    cheaper per append and adequate up to the point where one slot's memory or one
-    primary's write throughput is the bottleneck. Option A is the right trade only
-    past that point, and only if experiment 2 says the fan-out cost is affordable.
-    A design that raises a ceiling you have not hit is premature.
+    Slot-homing makes asynchronous fanout more expensive in exchange for raising
+    the capacity ceiling. The append response is insulated by the bounded local
+    handoff, but Redis load and wake completion time still rise. The occupied-slot
+    bitmap, dirty queue metrics, and recovery delay make that cost visible.
   </Callout>
 </section>
 
@@ -632,15 +655,15 @@ import Aside from "../components/Aside.astro";
   Option A keeps one binary. The alternative, Option B, splits serving from the
   control plane into two tiers and makes each subscription an actor owned by a
   coordinator. It is deliberately **not** chosen, only deferred. It buys three
-  things Option A cannot. First, a cross-instance fast wake. Today the append-time
-  hook is in process, so only the appending replica fires it. Second, CPU
+  things Option A cannot. First, a cross-instance fast wake. Today the dirty
+  queue is process-local, so only the appending replica receives that hint. Second, CPU
   isolation between serving and the control plane. Third, independent scaling of
   the two.
 
   The reason to defer it is that none of those three is known to be needed. The
   single binary held at K=10k, and the fast path is already adequate for an
   append-then-deliver on the same origin. A split adds a deployable, a pub/sub
-  wake channel, and a second failure surface. The parts Option A builds,
+  wake channel, and a second failure surface. The parts Option A built,
   namely slot-homing, the due-set, and the `claim_shard` CAS, are exactly what
   Option B would build on, so nothing done now is wasted if the split is later
   taken. The trigger is a measurement, not an intuition. Build Option B only when
@@ -655,7 +678,7 @@ import Aside from "../components/Aside.astro";
   docs carry the full keyspace, the adversarial review that tested the design,
   and the verification plan.
 
-  - [Subscriptions](./subscriptions). The control plane this scales: durable cursors, the fence, and the sweep.
+  - [Subscriptions](../subscriptions). The control plane this scales: durable cursors, the fence, and the sweep.
   - [research/README](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/README.md). The question, the prior art, and the headline findings.
   - [research/05, proposed architecture](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/05-proposed-architecture.md). Option A's full build spec, plus Option B.
   - [research/06, adversarial review](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/06-adversarial-review.md). Which claims survived scrutiny, and the corrections.
@@ -664,11 +687,11 @@ import Aside from "../components/Aside.astro";
 
 </section>
 
-[^subs]: The subscription control plane, namely durable cursors, generation fencing, the recovery sweep, and the lease and retry workers, is documented in full on the [Subscriptions](./subscriptions) page and implemented in [`webhook/`](https://github.com/adityavkk/chronicle/tree/main/webhook).
+[^subs]: The subscription control plane, namely durable cursors, generation fencing, the recovery sweep, and the lease and retry workers, is documented in full on the [Subscriptions](../subscriptions) page and implemented in [`webhook/`](https://github.com/adityavkk/chronicle/tree/main/webhook).
 
-[^slot]: The single fixed `{__ds}` hash tag is `dsTag` in [`webhook/keys.go`](https://github.com/adityavkk/chronicle/blob/main/webhook/keys.go). The decision to put the low-cardinality control plane under one slot is [`docs/research/09`](https://github.com/adityavkk/chronicle/blob/main/docs/research/09-subscription-implementation-plan.md) §2.
+[^slot]: The original fixed `{__ds}` hash tag remains only for cluster-wide singleton signing state in [`webhook/keys.go`](https://github.com/adityavkk/chronicle/blob/main/webhook/keys.go). Per-subscription state now uses `{__ds:h}`. The original single-slot decision is recorded in [`docs/research/09`](https://github.com/adityavkk/chronicle/blob/main/docs/research/09-subscription-implementation-plan.md) §2.
 
-[^batch]: The batched sweep and its measured speed-ups (87× to 354× over the per-link form) are on the [Subscriptions](./subscriptions) page, §10. The open `O(N·K)` case it leaves is §11.
+[^batch]: The batched sweep and its measured speed-ups (87× to 354× over the per-link form) are on the [Subscriptions](../subscriptions) page, §10. The open `O(N·K)` case it leaves is §11.
 
 [^priorart]: The repeated pattern across Redis Cluster, Kafka, NATS, Pulsar, Orleans, and Akka, namely partition, one owner per partition, and no central coordinator, is surveyed in [`research/03`](https://github.com/adityavkk/chronicle/blob/main/docs/specs/horizontal-scale/research/03-prior-art-redis-and-beyond.md). Orleans' Redis-backed grain directory is the managed-Redis precedent for owning placement in Redis.
 

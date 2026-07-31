@@ -1,0 +1,272 @@
+---
+title: "Commit the append, then <em>wake subscriptions asynchronously</em>"
+summary: "A successful append now records one bounded process-local dirty hint before returning. Subscriber lookup, state hydration, linked-tail reads, wake arming, and delivery run in a Manager-owned worker after the durable commit."
+eyebrow: "Architecture"
+meta: "Performance improvements · async subscription fanout"
+deck: "A stream append no longer waits for Chronicle to enumerate subscribers or decide which subscriptions need a wake. After Redis commits new data, the handler records the stream in a bounded local queue. A background worker evaluates subscriptions, while the durable recovery sweep repairs any hint lost to overload, shutdown, or process death."
+byline:
+  - label: "Synchronous hook"
+    value: "about 1 to 2 µs"
+  - label: "Dirty queue"
+    value: "1,024 streams"
+  - label: "Worker batch"
+    value: "64 streams"
+  - label: "Issue"
+    value: "subscription fanout #8"
+---
+
+import Tldr from "../components/Tldr.astro";
+import SectionHead from "../components/SectionHead.astro";
+import Callout from "../components/Callout.astro";
+import Table from "../components/Table.astro";
+import Diagram from "../components/Diagram.astro";
+import Complexity from "../components/Complexity.astro";
+import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
+
+<SimpleBeforeAfter
+  id="simple-explanation"
+  title="The append response no longer includes subscription fanout"
+  intro="The stream write is still durable before Chronicle answers. The response now waits only for one bounded local queue transition."
+  clientAction="Append data and treat the HTTP result exactly as before. No request or response field changed."
+  oldLabel="Append, then evaluate every subscriber"
+  oldSummary="The request goroutine performed all low-latency wake work before it wrote the response."
+  oldSteps={[
+    { actor: "Redis", action: "Commit the stream frames and new tail." },
+    { actor: "Handler", action: "Read the stream's subscriber index." },
+    { actor: "Manager", action: "Load each subscription and read every linked stream tail." },
+    { actor: "Manager", action: "Arm owed wakes one subscription at a time." },
+    { actor: "Handler", action: "Write the append response after fanout finishes." },
+  ]}
+  newLabel="Append, record one hint, return"
+  newSummary="The request goroutine records the dirty stream. A Manager-owned worker performs fanout later."
+  newSteps={[
+    { actor: "Redis", action: "Commit the stream frames and new tail." },
+    { actor: "Handler", action: "Add or coalesce one stream entry in a fixed local queue." },
+    { actor: "Handler", action: "Write the unchanged append response." },
+    { actor: "Worker", action: "Look up and hydrate subscribers in the background." },
+    { actor: "Worker", action: "Read distinct linked tails and arm the owed wakes." },
+  ]}
+  changed="Subscriber count and link count no longer determine append response time after the durable commit."
+  unchanged="Redis still commits the append before the response. Wake delivery remains at least once and uses the same cursor, generation, wake ID, lease, claim, acknowledgement, and owner fences."
+  downside="A wake can arrive later than the append response. Sustained overload can defer work to eager recovery or the 30 second recovery floor."
+/>
+
+<Tldr>
+  <ul>
+    <li><strong>Only new durable data creates a hint.</strong> Failed appends and idempotent producer duplicates enqueue nothing. A new stream with initial data runs its stream-creation hook first, then creates one append hint.</li>
+    <li><strong>The response handoff has a fixed bound.</strong> The handler takes a short mutex, applies one typed queue transition, records metrics, and attempts one nonblocking signal. It performs no Redis call.</li>
+    <li><strong>Repeated appends coalesce by stream.</strong> The queue holds at most 1,024 distinct stream paths. The worker takes at most 64 paths per batch.</li>
+    <li><strong>Overflow is visible and recoverable.</strong> The first overflow opens a recovery epoch. Later overflows coalesce until a successful sweep covers that epoch.</li>
+    <li><strong>The queue is not correctness storage.</strong> Durable stream tails and durable subscription cursors remain the source of truth. Boot, reconnect, eager, and periodic sweeps derive any wake that a local hint missed.</li>
+  </ul>
+</Tldr>
+
+<Callout icon="arrow" label="Public API">
+  No endpoint, status code, header, or body changed. The difference is when
+  subscription work runs. A successful append means the stream write committed.
+  It does not mean every owed subscription wake has already been armed or
+  delivered.
+</Callout>
+
+<section class="block" id="response-boundary">
+  <SectionHead num="01" label="Boundary" title="The response waits for <em>one local transition</em>" />
+
+  `Store.Append` remains the commit point. After it returns a genuinely new
+  result, the handler calls `OnStreamAppend`. That method does not enumerate
+  subscriptions. It records the stream path in the local dirty queue and tries
+  to wake the worker through a capacity-one signal channel. The handler then
+  writes the same protocol response it wrote before this change.
+
+  <Diagram
+    name="seq-append"
+    label="POST append · synchronous boundary"
+    caption="The subscription hook runs after the Redis commit and before the HTTP response, but it changes only bounded process-local state. The worker may start immediately or later. The response does not wait for subscriber lookup, linked-tail reads, wake arming, or delivery."
+  />
+
+  <Table>
+    | Append result | Stream changed | Dirty hint | Response |
+    | --- | --- | --- | --- |
+    | plain append accepted | yes | enqueue or coalesce | `204 No Content` |
+    | producer append accepted | yes | enqueue or coalesce | `200 OK` |
+    | producer duplicate | no | none | `204 No Content` |
+    | validation, fence, closure, or storage error | no | none | unchanged error response |
+    | new stream with initial data | yes | one hint after stream creation hooks | `201 Created` |
+  </Table>
+
+  <Complexity
+    time="O(1) after commit"
+    space="O(1) per handoff"
+    why="The response path performs one map lookup or insertion in a map capped at 1,024 entries, one bounded ring transition, fixed metric updates, and one nonblocking send to a capacity-one channel. It performs no subscriber or linked-stream operation."
+  />
+
+  <Callout icon="info" label="Create and delete scope">
+    Stream creation still runs its pattern-linking hook before an initial-data
+    hint is recorded. Stream deletion still runs its existing cleanup hook. This
+    change removes fanout from the append response path. It does not move every
+    stream lifecycle hook into this queue.
+  </Callout>
+</section>
+
+<section class="block" id="queue">
+  <SectionHead num="02" label="Queue" title="A small state machine <em>coalesces hot streams</em>" />
+
+  The queue stores paths, not append payloads and not subscription IDs. A path is
+  either queued or processing. Another append to a queued path changes no state.
+  Another append to a processing path marks it dirty again, so the worker returns
+  it to the queue tail after the current evaluation. Older paths therefore keep
+  making progress when one stream is hot.
+
+  <Table wide>
+    | Transition | Result metric | Next action |
+    | --- | --- | --- |
+    | absent path, capacity available | `enqueued` | add to the queue and signal the worker |
+    | path already queued | `coalesced-queued` | keep the existing entry |
+    | path currently processing | `coalesced-processing` | run it once more from the queue tail |
+    | queue full, first miss in an epoch | `overflow` | request eager recovery |
+    | queue full, recovery already pending | `overflow-coalesced` | keep one recovery request |
+    | Manager stopped | `stopped` | reject the local hint; restart recovery repairs durable work |
+  </Table>
+
+  The queue and signal channel have fixed capacities. `OnStreamAppend` never
+  waits for free space. A full queue does not silently drop correctness work.
+  Overflow changes a typed recovery state and requests the existing full sweep.
+  If another overflow happens while that sweep runs, Chronicle requires one more
+  successful sweep because the later append may be newer than the sweep snapshot.
+</section>
+
+<section class="block" id="worker">
+  <SectionHead num="03" label="Worker" title="Hydrate once, read distinct tails, <em>then decide</em>" />
+
+  The Manager owns one worker context and its lifecycle. `Start` and `Stop` are
+  idempotent. `Stop` closes the queue to new hints, cancels the loops, and waits
+  for its background loops to exit. The queue mutex is never held across Redis,
+  stream, webhook, or wake-stream calls.
+
+  For each dirty stream, the worker performs these steps:
+
+  1. It reads the occupied-slot bitmap and looks up the subscriptions linked to
+     the appended stream.
+  2. It hydrates the matching subscription records in a pipeline.
+  3. It collects every distinct linked stream path and reads those tails in one
+     batch.
+  4. It runs the pure pending-work decision against the loaded cursors and tails.
+  5. It uses the existing atomic wake scripts and delivery paths for each owed
+     idle subscription.
+
+  A batch contains at most 64 dirty streams. Work for one stream can cover many
+  appends because the decision compares the durable cursor with the latest
+  durable tail. It does not need one notification per append.
+
+  <Diagram
+    name="seq-sub-webhook"
+    label="Async fanout · webhook example"
+    caption="The handler performs only the bounded dirty handoff before replying. The Manager-owned worker performs subscriber lookup, hydration, linked-tail reads, wake arming, and delivery on its own schedule. Pull-wake uses the same queue and evaluation path, then appends a wake event instead of sending a webhook."
+  />
+</section>
+
+<section class="block" id="failure">
+  <SectionHead num="04" label="Failure" title="Hints may be lost; <em>owed work may not</em>" />
+
+  The append and the dirty hint are not one transaction. Stream keys use the
+  stream's Redis Cluster slot. Subscription state uses the subscription control
+  plane slots. The dirty queue exists only in the Chronicle process. Chronicle
+  does not claim atomicity across those locations and does not add a durable
+  broker or second dirty database.
+
+  <Table wide>
+    | Failure | Low-latency effect | Repair path |
+    | --- | --- | --- |
+    | repeated append | one path entry covers the latest tail | normal worker evaluation |
+    | queue overflow | the specific path may not enter the queue | coalesced eager full sweep |
+    | subscriber lookup, hydration, tail read, or wake-arm error | path returns to the queue tail | retry after the 250 ms worker tick plus eager recovery |
+    | Redis disconnect | local work may fail or wait | reconnect recovery plus queued retry |
+    | Chronicle shutdown or crash | process-local hints disappear | boot sweep on the next process |
+    | delivery owner movement | later lease, retry, or due work changes owner | owner reconcile and full recovery sweep |
+    | duplicate evaluation | the same subscription may be considered again | idle-phase compare-and-set and generation fences coalesce it safely |
+  </Table>
+
+  The periodic recovery floor remains 30 seconds. Event-triggered recovery runs
+  sooner on boot, Redis reconnect, dirty processing error, overflow, and owner
+  change. Chronicle did not reduce the sweep's coverage or frequency to improve
+  the append benchmark.
+</section>
+
+<section class="block" id="metrics">
+  <SectionHead num="05" label="Metrics" title="Measure the response boundary <em>and the deferred work</em>" />
+
+  The synchronous and asynchronous paths have separate metrics. None labels a
+  raw stream path or subscription ID.
+
+  <Table wide>
+    | Metric | What it answers |
+    | --- | --- |
+    | `chronicle_append_subscription_hook_seconds` | How long the response waited after the durable commit |
+    | `chronicle_subscription_dirty_enqueues_total{result}` | Whether a hint entered, coalesced, overflowed, or arrived after stop |
+    | `chronicle_subscription_dirty_queue_depth` | How many distinct streams are queued or processing |
+    | `chronicle_subscription_dirty_queue_capacity` | The fixed queue bound, currently 1,024 |
+    | `chronicle_subscription_dirty_oldest_age_seconds` | How long the oldest hint or overflow epoch has waited |
+    | `chronicle_fanout_seconds` | Subscriber-index lookup time inside async processing |
+    | `chronicle_subscription_dirty_processing_seconds{outcome}` | Full asynchronous batch processing time |
+    | `chronicle_subscription_dirty_subscribers_evaluated_total` | How many subscriptions the worker hydrated and evaluated |
+    | `chronicle_subscription_dirty_wakes_armed_total` | How many wakes the async path armed |
+    | `chronicle_subscription_dirty_duplicate_work_total` | How much duplicate or already-in-flight work it found |
+    | `chronicle_subscription_dirty_overflow_total` | How often capacity started a new overflow epoch |
+    | `chronicle_subscription_reconcile_requests_total{reason,result}` | Which failures requested recovery and whether requests coalesced |
+    | `chronicle_subscription_dirty_processing_errors_total{stage}` | Whether lookup, hydration, tail reads, or wake arming failed |
+    | `chronicle_subscription_dirty_recovery_delay_seconds` | Commit-to-evaluation or overflow-to-recovery delay |
+  </Table>
+</section>
+
+<section class="block" id="results">
+  <SectionHead num="06" label="Evidence" title="Response time stays flat as <em>fanout grows</em>" />
+
+  The benchmark compares the pinned baseline
+  `4c78ea9daef78278a73f1637dd41e3fbfca0d2cf` with the async implementation on
+  the same Apple M4 Pro and local Redis. Each iteration performs a durable
+  append, waits for complete fanout, verifies every owed pull-wake generation,
+  acknowledges it, and only then starts the next iteration. Every row produced
+  exactly one wake per subscription.
+
+  <Table wide>
+    | Subscribers | Links per subscription | Baseline append p50 / p99 | Async append p50 / p99 | Async hook p50 / p99 |
+    | ---: | ---: | ---: | ---: | ---: |
+    | 1 | 1 | 4.881 / 5.177 ms | 1.034 / 1.126 ms | 0.542 / 0.917 µs |
+    | 4 | 4 | 20.185 / 20.753 ms | 1.144 / 1.283 ms | 1.125 / 1.791 µs |
+    | 64 | 4 | 306.932 / 363.863 ms | 1.046 / 1.305 ms | 1.458 / 1.708 µs |
+    | 256 | 4 | 1217.907 / 1426.549 ms | 1.053 / 1.301 ms | 1.250 / 1.750 µs |
+    | 1,000 | 4 | 4870.577 / 5053.845 ms | 1.030 / 1.235 ms | 1.625 / 1.834 µs |
+  </Table>
+
+  Complete fanout still has a cost after the response. At 1,000 subscribers and
+  four links, completion p50 and p99 changed from 4869.509 and 5052.848 ms to
+  2269.114 and 2310.377 ms. Redis commands fell from 29,261 to 25,264 because
+  subscription hydration and distinct linked-tail reads are batched. The queue
+  depth stayed at one in this serial benchmark, so overflow and burst coalescing
+  are covered by separate saturation tests rather than these latency rows.
+
+  <Callout icon="info" label="Correctness gates">
+    The change passed all 332 Durable Streams conformance tests and the full Go
+    race suite. Targeted fault soaks covered lost and duplicate dirty hints,
+    overflow, reconnect, shutdown, and retry. The documented Jepsen lifecycle
+    recovered subscription cursors after all Chronicle origins died. Separate
+    Jepsen workloads verified Redis replacement for durable catch-up and SSE, and
+    linearizable ownership under concurrent claims and pauses. These tests prove
+    only the sampled histories. They do not prove exactly-once webhook delivery
+    or a cross-slot transaction.
+  </Callout>
+</section>
+
+<section class="block" id="further">
+  <SectionHead num="07" label="Further reading" title="Implementation, evidence, <em>and endpoint behavior</em>" />
+
+  - [Subscription reference](../../subscriptions). The cursor, queue, worker,
+    recovery sweep, delivery modes, and fences in one lifecycle.
+  - [Endpoint reference](../../endpoints#post-append). The exact `POST` behavior,
+    including accepted, duplicate, failed, and append-and-close requests.
+  - [Architecture plan](https://github.com/adityavkk/chronicle/blob/main/docs/PLAN.md#410-subscription-fan-out-after-append).
+    Queue bounds, lifecycle, overflow epochs, and recovery semantics.
+  - [Benchmark and acceptance record](https://github.com/adityavkk/chronicle/blob/main/docs/perf-async-subscription-fanout/results.md).
+    The complete matrix, Redis command deltas, memory diagnostics, and gate results.
+  - [Implementation research](https://github.com/adityavkk/chronicle/blob/main/docs/perf-async-subscription-fanout/research.md).
+    The old response path, design alternatives, and prior art.
+</section>

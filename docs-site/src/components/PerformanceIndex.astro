@@ -5,6 +5,7 @@ const links = {
   sse: `${base}/performance-improvements/sse-fanout`,
   segments: `${base}/performance-improvements/immutable-segments`,
   readOnly: `${base}/performance-improvements/read-only-fast-path`,
+  asyncSubscriptions: `${base}/performance-improvements/async-subscription-fanout`,
   scaling: `${base}/horizontal-scale`,
   loadTests: `${base}/load-testing`,
   issue4: "https://gecgithub01.walmart.com/GPA/chronicle/issues/4",
@@ -17,6 +18,7 @@ const links = {
   catchupEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md",
   segmentsEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-6-immutable-segments.md",
   readOnlyEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/research/12-read-only-fast-path-results.md",
+  asyncSubscriptionsEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/perf-async-subscription-fanout/results.md",
   comparison: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/ds-bench/configuration-comparison.md",
 };
 ---
@@ -101,9 +103,28 @@ const links = {
     </nav>
   </article>
 
-  <article class="improvement">
+  <article class="improvement featured">
     <div class="head">
       <span class="num">05</span>
+      <span class="status">validated</span>
+    </div>
+    <h3>Async subscription fanout</h3>
+    <p class="result">1,000-sub append p99: 5,053.845 to 1.235 ms</p>
+    <p>
+      <strong>Before:</strong> the append response waited for subscriber lookup,
+      hydration, linked-tail reads, and wake arming. <strong>Now:</strong> it waits
+      for one bounded local dirty-queue transition. A Manager-owned worker
+      performs fanout after the durable commit.
+    </p>
+    <nav aria-label="Async subscription fanout links">
+      <a class="primary" href={links.asyncSubscriptions}>Read the explainer <span aria-hidden="true">→</span></a>
+      <a href={links.asyncSubscriptionsEvidence}>Evidence report <span aria-hidden="true">↗</span></a>
+    </nav>
+  </article>
+
+  <article class="improvement">
+    <div class="head">
+      <span class="num">06</span>
       <span class="status">shipped</span>
     </div>
     <h3>Horizontal scale</h3>
@@ -121,7 +142,7 @@ const links = {
 
   <article class="improvement">
     <div class="head">
-      <span class="num">06</span>
+      <span class="num">07</span>
       <span class="status">measured</span>
     </div>
     <h3>Configurations and systems</h3>
