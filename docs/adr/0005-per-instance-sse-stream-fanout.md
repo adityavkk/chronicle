@@ -111,12 +111,13 @@ This optimization does not weaken the Durable Streams protocol.
   later shard-level subscription multiplexer can reduce that to connections per
   Redis shard.
 - The one-second correctness fallback performs an idle durable read for every
-  active hub. This preserves sliding TTL and lost-hint recovery, but high stream
-  counts may require a purpose-built atomic touch-and-tail operation or a shared
-  polling scheduler.
-- Initial client catch-up and the underlying Redis `ZRANGEBYLEX` read remain
-  unbounded. This ADR does not solve large historical replay or the transient
-  allocation from a hub catching up after a long outage.
+  active hub. It renews a sliding TTL once per hub refresh. Persistent and
+  absolute-expiry-only streams perform no read-side write. High stream counts may
+  still require a shared polling scheduler.
+- Initial client catch-up remains one read path per client. It now uses bounded
+  `ReadPage` calls with a 1 MiB target and a 1,024-frame cap, so Redis and
+  Chronicle no longer materialize the complete historical suffix at once. The
+  per-client work and socket bytes remain.
 - Hubs do not linger after the last client. The required 60-second SSE
   reconnect can therefore recreate a hub for a stream with only one client.
 

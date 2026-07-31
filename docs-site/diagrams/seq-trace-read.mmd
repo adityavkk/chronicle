@@ -6,16 +6,16 @@ sequenceDiagram
     participant P as Other writer
     C->>H: GET /events/x?offset=now&live=long-poll
     Note over H: handleRead · parse offset + cursor
-    H->>S: ReadPage → root snapshot + bounded ZRANGEBYLEX
-    S-->>H: empty — caller is at the tail
-    Note over H: at tail → WaitForMessages
-    H->>S: WaitForMessages · SUBSCRIBE ds:notify
-    Note over S: re-read once to close the missed-wakeup race
+    H->>S: ReadPage · one logical access + typed root snapshot
+    S-->>H: empty page · caller is at the tail
+    Note over H: at tail → WaitForPage with the first snapshot
+    H->>S: SUBSCRIBE ds:notify and confirm
+    Note over S: ReadPage NoTouch closes the attach race
     P->>S: POST append → append.lua PUBLISH 'a'
     S-->>H: wake
-    H->>S: ReadPage · capture a new tail snapshot
+    H->>S: ReadPage NoTouch · final authoritative snapshot
     loop bounded pages to that tail
         S-->>H: frame-aligned page
         H-->>C: write page and flush
     end
-    Note over H: no append before timeout → 204 No Content
+    Note over H,S: no metadata reload · no producer read · timeout returns the final page with 204 No Content

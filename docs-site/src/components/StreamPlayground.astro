@@ -216,7 +216,7 @@ import Demo from "./Demo.astro";
             trace: ["EVALSHA create.lua", "HGETALL :meta", "(config match → no-op)"] };
         exists = true; closed = false; frames = []; readSeq = 0; byteOff = 0; cursor = ""; nextTok = 0;
         return { code: 201, status: "CREATED", reply: "stream created", off: `Stream-Next-Offset: ${short(offset())}`,
-          trace: ["EVALSHA create.lua", "HGETALL :meta", "DEL :meta :msg :prod :forks", "HSET :meta ct tail createdAtNs", "PEXPIRE backstop"] };
+          trace: ["EVALSHA create.lua", "HGETALL :meta", "DEL :meta :msg :prod :forks", "HSET :meta ct tail createdAtNs", "PERSIST backstop keys (persistent stream)"] };
       },
       append() {
         if (!exists)
@@ -239,7 +239,7 @@ import Demo from "./Demo.astro";
           return { code: 404, status: "MISSING", reply: "no stream at /v1/stream/demo",
             trace: ["EVAL read.lua", "HGETALL :meta", "(nil → 404)"] };
         const unread = frames.filter((f) => cursor === "" || f.off > cursor);
-        const trace = ["EVAL read.lua", "HGETALL :meta", "HSET :meta accessedAtNs", `ZRANGEBYLEX :msg "(${cursor ? short(cursor) : "-"}…" "[snapshot-tail…" LIMIT 0 1`, "optional bounded bulk range · page cap 1024"];
+        const trace = ["EVALSHA read.lua · root", "HGETALL :meta once", "typed snapshot · no :prod · persistent → no write", "EVALSHA read.lua · range", `ZRANGEBYLEX :msg "(${cursor ? short(cursor) : "-"}…" "[snapshot-tail…" LIMIT 0 1`, "optional bounded bulk range · page cap 1024"];
         if (unread.length === 0)
           return { code: closed ? 204 : 204, status: "READ",
             reply: `up to date — nothing after the cursor${closed ? "; stream closed" : ""}`,
@@ -260,13 +260,13 @@ import Demo from "./Demo.astro";
         if (waiting) {
           waiting = false;
           return { code: 204, status: "WAIT", reply: "30 s elapsed with no data — long-poll timeout",
-            off: "Stream-Up-To-Date: true", trace: ["(timeout)", "UNSUBSCRIBE"] };
+            off: "Stream-Up-To-Date: true", trace: ["(timeout)", "ReadPage NoTouch · final typed page", "ReadWaitResult · no metadata reload", "UNSUBSCRIBE"] };
         }
         waiting = true;
         readerEl.hidden = true;
         return { code: 0, status: "WAIT",
           reply: "reader armed: nothing at the offset, so it SUBSCRIBEs and re-checks. Append (or close) to wake it; long-poll again to simulate the 30 s timeout.",
-          trace: ["EVAL read.lua", "(empty)", "SUBSCRIBE ds:notify:{…}", "EVAL read.lua (re-check)", "(wait…)"] };
+          trace: ["ReadPage · first logical read", "(empty typed page at tail)", "SUBSCRIBE ds:notify:{…}", "ReadPage NoTouch · attach recheck", "(wait…)"] };
       },
       close() {
         if (!exists)
