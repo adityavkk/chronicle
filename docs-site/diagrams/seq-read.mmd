@@ -5,25 +5,31 @@ sequenceDiagram
     participant S as Store
     participant R as Redis
     C->>H: GET /chat?offset=-1
-    H->>S: ReadPage(path, offset)
+    H->>H: authorize path · parse offset, cursor, conditional headers, and framing
+    H->>S: handleRead → ReadPage(path, offset)
     S->>R: EVALSHA read.lua · HGETALL :meta once
     Note over S,R: capture tail · validate · classify empty / inherited / root-owned
     opt first root snapshot has sliding TTL
         S->>R: HSET accessedAtNs · refresh exact key TTL
     end
-    S->>R: same EVALSHA · bounded ZRANGEBYLEX for a root-owned range
-    R-->>S: first frame-aligned page + typed snapshot
+    alt root-owned range
+        S->>R: same EVALSHA · bounded ZRANGEBYLEX on root :msg
+    else inherited fork prefix
+        S->>R: later source-slot EVALSHA calls in chronological order
+    else empty, at-tail, or beyond-tail range
+        Note over S,R: skip every message ZSET
+    end
+    R-->>S: frame-aligned page + typed fixed snapshot
     S-->>H: messages · next offset · fixed tail
-    H-->>C: write page and flush
+    H->>H: set status, type, ETag, cache, cursor, closure, and next-offset headers
+    H-->>C: write complete JSON or binary frames and flush
     loop until the captured tail
         H->>S: ReadPage with same snapshot · no touch
         S->>R: one EVALSHA · validate fixed tail + bounded root range
         S-->>H: messages · next offset · same snapshot
         H-->>C: write page and flush
     end
-    opt requested range is inherited from a fork source
-        S->>R: later source-slot EVALSHA calls in chronological order
-    end
-    Note over S,R: simple root-owned page = 1 EVALSHA · 1 metadata HGETALL · never :prod
+    H-->>C: finish the body at the fixed tail
+    Note over H,R: root-owned page = 1 EVALSHA · 1 metadata HGETALL · no :prod
     Note over H,S: persistent and absolute-expiry-only reads write nothing
     Note over H,S: exceptions: legacy incarnation migration and lazy expiry cleanup

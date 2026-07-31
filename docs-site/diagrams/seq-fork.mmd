@@ -6,11 +6,13 @@ sequenceDiagram
     participant Src as Source keys
     participant Fk as Fork keys
     C->>H: PUT /branch + Stream-Forked-From
-    H->>S: Store.Create(fork opts)
-    S->>Src: HGETALL source:meta — validate · store.go:220
-    S->>Src: EVALSHA incr_ref.lua · store.go:273
+    H->>H: authorize target · parse source, fork offset, sub-offset, TTL, and body
+    H->>S: handleCreate → Store.Create(fork opts)
+    S->>Src: HGETALL source:meta · validate and resolve the boundary
+    S->>Src: EVALSHA incr_ref.lua
     Note over Src: HINCRBY refCount +1 · SADD :forks · PERSIST ×4
     Src-->>S: reply OK, refCount
-    S->>Fk: EVALSHA create.lua — meta has forkedFrom + forkOff · store.go:319
+    S->>Fk: EVALSHA create.lua · meta has forkedFrom + forkOff
     Fk-->>S: reply CREATED
+    S-->>H: typed fork metadata and resolved tail
     H-->>C: 201 · Stream-Next-Offset = forkOff

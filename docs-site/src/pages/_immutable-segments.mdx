@@ -86,6 +86,14 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   The segment wrapper also delegates Redis notifications to the shared SSE hub.
   Segment files and caches never publish or interpret live wake events. Redis
   remains the notification authority as well as the append authority.[^integration]
+
+  For a new `offset=now` live read, the wrapper exposes the primary Redis
+  notification registration before it captures the first composite page. That
+  page fixes the stream incarnation and tail for both sealed and hot data. A new
+  SSE hub starts from the same page, so it does not run a second attach read.
+  Numeric long-poll requests retain their existing subscribe and no-touch
+  recheck order. The [endpoint reference](../../endpoints#get-sse) shows the
+  complete request sequence.
 </section>
 
 <section class="block" id="publication">

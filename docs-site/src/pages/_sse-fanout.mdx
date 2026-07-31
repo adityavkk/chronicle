@@ -179,6 +179,13 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
      client flush has a ten-second deadline. A lagging client disconnects and
      resumes from the last control offset it actually received.
 
+  Redis orders an append either before or after the registered first page. An
+  append before the page is inside its fixed catch-up tail. An append after the
+  page is covered by the confirmed subscription. The safety poll recovers a
+  lost notification, and the incarnation check fences a delete and recreation.
+  The [SSE endpoint sequence](../../endpoints#get-sse) follows the same request
+  from authorization through the final data and control events.
+
   <Callout icon="alert" label="Correctness gate">
     The optimization is allowed to change how work is shared. It is not allowed
     to change Durable Streams behavior. The complete conformance suite remains
@@ -285,8 +292,9 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Callout icon="arrow" label="Related performance work">
     Return to [Performance improvements](../) for the horizontal scaling report,
     load tests, and Chronicle, Ursula, Rust, and Node configuration comparison.
-    Track this fix in
-    [GPA/chronicle issue #4](https://gecgithub01.walmart.com/GPA/chronicle/issues/4).
+    Read the [registered first-page decision](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0007-fuse-root-pages-and-register-live-reads-first.md)
+    and track its follow-up in
+    [GitHub issue #172](https://github.com/adityavkk/chronicle/issues/172).
   </Callout>
 </section>
 

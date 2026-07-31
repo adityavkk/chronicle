@@ -1,9 +1,9 @@
 ---
-title: "Read a non-expiring stream, <em>without writing it back to Redis</em>"
-summary: "Ordinary reads used to update access metadata, run four PERSIST commands, and repeat metadata work. The read-only path removed the writes; the bounded-catch-up fast path now fuses a root-owned page into one atomic script."
+title: "Read a root page once, <em>without rewriting a persistent stream</em>"
+summary: "A root-owned page now returns its snapshot and bounded frames in one atomic script. Persistent reads issue no writes, and offset=now live reads register before they capture that page."
 eyebrow: "Architecture"
-meta: "Performance improvements · read-only fast path"
-deck: "A persistent stream does not need an access timestamp or a TTL refresh. Chronicle returns metadata and a bounded root-owned frame page from one atomic read, carries that typed snapshot through HTTP, long-poll, and SSE, and writes only when expiry or legacy migration requires it."
+meta: "Performance improvements · fused root reads"
+deck: "Chronicle returns metadata and a bounded root-owned frame page from one atomic read. The handler carries that typed page through HTTP, long-poll, and SSE. A persistent stream stays unchanged, while sliding expiry, lazy cleanup, and legacy migration retain their required writes."
 byline:
   - label: "GET HGETALL"
     value: "6 → 1"
@@ -11,9 +11,9 @@ byline:
     value: "5 → 0"
   - label: "GET AOF growth"
     value: "+86 B → 0"
-  - label: "Issue"
-    value: "GPA/chronicle#7"
-    href: "https://gecgithub01.walmart.com/GPA/chronicle/issues/7"
+  - label: "Fusion issue"
+    value: "GitHub #172"
+    href: "https://github.com/adityavkk/chronicle/issues/172"
 ---
 
 import Tldr from "../components/Tldr.astro";
@@ -57,7 +57,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     <li><strong>Before:</strong> a five-byte GET issued six <code>HGETALL</code> calls, one <code>HSET</code>, and four <code>PERSIST</code> commands.</li>
     <li><strong>Now:</strong> the same small root-owned GET issues one <code>EVALSHA</code>, one metadata <code>HGETALL</code>, one bounded <code>ZRANGEBYLEX</code>, and no Redis write command.</li>
     <li><strong>Expiry stays exact:</strong> a sliding TTL renews once at the first root snapshot. Absolute expiry, continuations, inherited ranges, sealing, repair, and wait rechecks do not renew it.</li>
-    <li><strong>Measured result:</strong> the focused same-container benchmark moved from two scripts to one and cut median time from 1.995 ms to 1.050 ms. This is a local mechanism benchmark, not production capacity.</li>
+    <li><strong>Measured result:</strong> the focused same-container benchmark moved from two scripts to one and cut median time from 1.603 ms to 0.660 ms. This is a local mechanism benchmark, not production capacity.</li>
   </ul>
 </Tldr>
 
@@ -116,7 +116,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Step
     n={1}
     fn="ReadSnapshotFromMetadata"
-    loc="store/page.go:53"
+    loc="store/page.go:100"
     role="Pure Go projects stream metadata into the fields a reader may use. Producer state does not cross this boundary."
   >
     Pointer fields are copied, so the snapshot owns its expiry and fork values.
@@ -136,7 +136,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Step
     n={3}
     fn="ShouldRenewReadAccess"
-    loc="store/page.go:82"
+    loc="store/page.go:129"
     role="The pure Go rule returns true only when the stream has a configured sliding TTL."
   >
     `should_touch_read` in `common.lua` mirrors this decision. Differential
@@ -161,10 +161,11 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     label="One bounded root page"
     steps={[
       { cmd: "HGETALL", key: "ds:{path}:meta", does: "Load metadata once for existence, expiry, incarnation, and the response snapshot.", loc: "common.lua:10", kind: "read" },
-      { cmd: "validate", does: "Apply lazy expiry, soft-deletion, and incarnation fencing before any frame is returned.", loc: "read.lua:29", kind: "flow" },
-      { cmd: "HSET + TTL", key: "stream keys", does: "Renew access and apply the exact PEXPIRE or PERSIST backstop required by the first root snapshot of a sliding-TTL read.", when: "sliding TTL only", loc: "read.lua:60", kind: "ttl" },
-      { cmd: "ZRANGEBYLEX", key: "ds:{path}:msg", does: "Read the bounded whole-frame range for this page.", when: "frames requested", loc: "read.lua:105", kind: "read" },
-      { cmd: "return map", does: "Return the metadata table already in Lua memory. No second Redis command is needed.", loc: "read.lua:158", kind: "flow" },
+      { cmd: "validate", does: "Apply lazy expiry, soft deletion, and incarnation fencing before any frame is returned.", loc: "read.lua:35", kind: "flow" },
+      { cmd: "HSET + TTL", key: "stream keys", does: "Renew access and apply the exact PEXPIRE or PERSIST backstop required by the first root snapshot of a sliding TTL read.", when: "sliding TTL only", loc: "read.lua:63", kind: "ttl" },
+      { cmd: "classify", does: "Classify the requested root range as empty, inherited, or root-owned with the same rule as the pure Go oracle.", loc: "read.lua:71", kind: "flow" },
+      { cmd: "ZRANGEBYLEX", key: "ds:{path}:msg", does: "Read the first candidate and optional bounded bulk range for a root-owned page in this same script.", when: "root-owned frames requested", loc: "read.lua:126", kind: "read" },
+      { cmd: "return map + frames", does: "Return the metadata already in Lua memory with the selected frames. No second root script or metadata command is needed.", loc: "read.lua:177", kind: "flow" },
     ]}
     caption="A persistent stream skips step three. Legacy incarnation migration and lazy expiry cleanup are separate, explicit write cases."
   />
@@ -215,7 +216,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Step
     n={1}
     fn="handleRead"
-    loc="handler.go:426"
+    loc="handler.go:445"
     role="One first page supplies content type, snapshot tail, closure, incarnation, and the next offset for plain reads and offset=now."
   >
     JSON envelopes, binary framing, cache headers, cursors, stale offsets,
@@ -223,10 +224,28 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     behavior.
   </Step>
 
+  ### Why registration before capture has no lost-append gap
+
+  Let `R` be the atomic page captured after Chronicle confirms the notification
+  registration. Redis orders each append either before or after `R`.
+
+  <Table>
+    | Append order | Where the bytes appear | Why the client cannot miss them |
+    | --- | --- | --- |
+    | Before `R` | Inside the fixed tail captured by `R` | Catch-up reads through that tail before the request attaches to live delivery |
+    | After `R` | After the fixed tail | The confirmed notification feed already covers the append, and the next no-touch durable page reads the bytes |
+    | Notification is lost | Durable Redis state still contains the append | The one-second safety poll runs the same no-touch page and recovers it |
+    | Path is deleted and recreated | The new stream has another incarnation | The fixed snapshot and hub reject the new lifetime instead of joining old and new bytes |
+  </Table>
+
+  This ordering applies to a new SSE hub and to `offset=now` long-poll. Numeric
+  long-poll offsets keep the earlier first read, subscribe, and no-touch recheck
+  because their requested position may already be behind the tail.
+
   <Step
     n={2}
-    fn="WaitForPage"
-    loc="store/redis/notify.go:100"
+    fn="waitForRegisteredPage"
+    loc="handler_stream.go:349"
     role="Numeric long-poll subscribes after its first page and performs the established no-touch race recheck. offset=now confirms registration first, then captures its authoritative page and skips that duplicate recheck."
   >
     The final typed page is authoritative on wake, close, or timeout. The
@@ -279,25 +298,36 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   multiplier. The Redis command, AOF, replication-offset, and key-expiry deltas
   are the evidence for the mechanism.
 
-  A follow-up issue 172 benchmark isolates one persistent, one-frame root-owned
-  `ReadPage` against the same Redis 8 container. Each version ran five samples
-  of 1,000 reads.
+  The issue 172 benchmark isolates one persistent, one-frame root-owned
+  `ReadPage` against the same Redis 8 container. Each version ran six samples
+  of 100 reads, and the official `benchstat` tool compared them.
 
   <Table>
     | Focused `ReadPage` signal | Before issue 172 | After |
     | --- | ---: | ---: |
     | Redis scripts per operation | 2.000 | **1.000** |
-    | Median time | 1.995 ms | **1.050 ms** |
-    | Allocations per operation | 220 | **120** |
-    | Allocated bytes per operation | 61,027 B | **30,825 B** |
+    | Median time | 1.603 ms | **0.660 ms** |
+    | Allocations per operation | 220 | **119** |
+    | Allocated bytes per operation | 59.58 KiB | **30.08 KiB** |
   </Table>
 
-  The median fell 47.4 percent in this local single-operation benchmark. The
-  exact script and allocation reductions explain the result; the timing is not
-  a service-throughput or cloud-capacity claim. A deterministic handler trace
-  also records one metadata-only script for a new empty SSE hub and two for an
-  `offset=now` long-poll timeout, with zero producer reads and zero stream
-  writes.
+  The median fell 58.85 percent with `p=0.002` in this local single-operation
+  benchmark. The exact script and allocation reductions explain the result.
+  The timing is not a service throughput or cloud capacity claim.
+
+  <Table wide>
+    | Live request | Before issue 172 | Final request path | Median time |
+    | --- | ---: | ---: | ---: |
+    | `offset=now` long-poll timeout | 3 read scripts | **2 pages and 2 scripts** | 7.224 → **6.214 ms** |
+    | `offset=now` long-poll wake | 4 read scripts | **2 pages and 2 scripts** | 7.431 → **5.995 ms** |
+    | SSE initial catch-up with a new hub | 2 pages and 3 scripts | **1 page and 1 script** | 4.883 → **3.241 ms** |
+    | Empty SSE attach with a new hub | 2 pages and 2 scripts | **1 page and 1 script** | 4.262 → **3.545 ms** |
+  </Table>
+
+  These live measurements use six samples of 50 operations. The deterministic
+  page and script counts are the primary evidence. The timing medians show that
+  the register-first order kept the expected savings on the local host. Every
+  final persistent case recorded zero producer reads and zero stream writes.
 </section>
 
 <section class="block" id="correctness">
@@ -350,7 +380,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   - **Producer mutations still fetch producer state.** Append and a
     producer-fenced close need the epoch and sequence fence. This change removes
     producer state only from non-producer read work.
-  - **The focused multiplier is narrow.** The 47.4 percent median reduction is
+  - **The focused multiplier is narrow.** The 58.85 percent median reduction is
     for one local root-owned `ReadPage`; it is not a production throughput or
     end-to-end latency claim.
 
@@ -358,8 +388,9 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     Return to [Performance improvements](../). Read the complete
     [measurement record](https://github.com/adityavkk/chronicle/blob/main/docs/research/12-read-only-fast-path-results.md),
     or track the work in
-    [issue #7](https://github.com/adityavkk/chronicle/issues/7) and the
-    follow-up [issue #172](https://github.com/adityavkk/chronicle/issues/172).
+    [original read-only issue #7](https://github.com/adityavkk/chronicle/issues/7)
+    and the fused-page follow-up
+    [issue #172](https://github.com/adityavkk/chronicle/issues/172).
   </Callout>
 </section>
 

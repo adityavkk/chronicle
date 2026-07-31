@@ -5,6 +5,7 @@ sequenceDiagram
     participant F as stream fanout hub
     participant R as Redis
     C->>H: GET offset and live=sse
+    H->>H: authorize · parse offset and cursor · choose event encoding
     H->>F: reserve existing hub or prepare a new one
     F->>R: SUBSCRIBE and confirm for a new hub
     H->>R: atomic first bounded page after registration
@@ -18,3 +19,4 @@ sequenceDiagram
     F->>R: read new durable suffix once
     F-->>H: shared immutable data event
     H-->>C: shared data then client control
+    Note over C,H: the client persists only complete control offsets for resume

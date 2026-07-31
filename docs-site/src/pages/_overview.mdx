@@ -30,6 +30,7 @@ import Aside from "../components/Aside.astro";
     <li><strong>The protocol is plain HTTP.</strong> A stream is a URL. <code>PUT</code> creates it, <code>POST</code> appends, and <code>GET</code> reads from any offset. Long-poll and SSE serve live tails.</li>
     <li><strong>Redis is the only dependency.</strong> Chronicle is one Go binary; stream data, producer state, and reader wakeups live in Redis 8.</li>
     <li><strong>Every mutation is one Lua script.</strong> Validation, write, tail update, and notification run atomically and serialized per stream. No partial appends and no lost wakeups.</li>
+    <li><strong>An ordinary root read is one atomic script.</strong> The script loads metadata once, fixes the response tail, classifies fork ownership, and returns the bounded root range. Persistent and absolute-expiry-only reads do not write Redis state.</li>
     <li><strong>It tracks the reference implementation.</strong> The store contract and handler mirror the upstream Caddy plugin, and ~330 official conformance tests gate every change.</li>
     <li><strong>The SSE live path now shares one read per stream.</strong> The original 1,000-client path measured 970.5 Redis reads per append. The exact-counter guard measured 1.000 after the fanout change. A separate local Kubernetes run delivered 49,616 events/s with zero request errors.</li>
   </ul>
@@ -266,6 +267,16 @@ import Aside from "../components/Aside.astro";
   shares the durable read and formatted data event. Client socket writes remain
   separate.
 
+  The issue #172 follow-up removed the remaining repeated work around the first
+  page. A one-frame root-owned page now uses one script instead of two. Six
+  paired local samples moved the median from 1.603 ms to 0.660 ms and cut
+  allocated bytes from 59.58 KiB to 30.08 KiB per operation. New SSE hubs now
+  start from one registered page instead of reading an immediate second page.
+  An `offset=now` long-poll timeout uses two pages instead of three. These are
+  local mechanism measurements, not production capacity claims. The
+  [fused root read explainer](./performance-improvements/read-only-fast-path)
+  records the command traces, live-read ordering proof, costs, and full gates.
+
   <Aside label="Mechanism" summary="What changed in the wake path">
     The old SSE loop owned one Pub/Sub wait and durable read per client. The new
     path owns one persistent subscription and one durable reader per active
@@ -304,9 +315,9 @@ import Aside from "../components/Aside.astro";
 
   ### Further <em>reading</em>
 
-  - [Endpoints &amp; Redis](./endpoints). Every endpoint walked one at a time: the request, the sequence diagram, and the exact Redis commands each Lua script runs.
+  - [Endpoints &amp; Redis](./endpoints). Every endpoint is walked one at a time from authorization and parsing through the store, Redis, response headers, body framing, and live handoff.
   - [Subscriptions](./subscriptions). The reserved `__ds` API: webhook and pull-wake delivery, generation fencing, and the recovery sweep that survives a restart.
-  - [Performance improvements](./performance-improvements). The SSE fanout fix, horizontal scaling work, cloud load tests, configuration comparisons, and their remaining limits.
+  - [Performance improvements](./performance-improvements). Bounded catch-up, fused root pages, register-first live reads, SSE fanout, horizontal scaling, cloud load tests, and their remaining limits.
   - [README](https://github.com/adityavkk/chronicle#readme). Quickstart, configuration, and development workflow.
   - [docs/PLAN.md](https://github.com/adityavkk/chronicle/blob/main/docs/PLAN.md). The architecture and its decision log.
   - [docs/spec/PROTOCOL.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/PROTOCOL.md). The vendored protocol spec.

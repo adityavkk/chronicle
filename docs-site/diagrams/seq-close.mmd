@@ -5,8 +5,11 @@ sequenceDiagram
     participant S as Store
     participant R as Redis
     C->>H: POST + Stream-Closed true (empty body)
-    H->>S: Store.CloseStream(path) · handler.go:636
-    S->>R: EVALSHA close.lua · store.go:837
+    H->>H: authorize path · parse closure and optional producer headers
+    H->>S: handleAppend → Store.CloseStream(path)
+    S->>R: EVALSHA close.lua
     Note over R: HGETALL → HSET closed 1 → PUBLISH c
     R-->>S: reply OK, tail, alreadyClosed
+    S-->>H: typed close result and unchanged tail
+    H->>H: map idempotent close or producer conflict
     H-->>C: 204 · Stream-Closed true · Stream-Next-Offset unchanged

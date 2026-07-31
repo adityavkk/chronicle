@@ -1,6 +1,6 @@
 ---
 title: "Performance improvements, <em>with evidence</em>"
-summary: "Chronicle performance work is grouped by mechanism, measured result, correctness gate, and remaining limit. This page links to bounded catch-up, shared SSE fanout, read-only Redis work, immutable sealed segments, horizontal scaling, cloud load tests, and the cross-system configuration report."
+summary: "Chronicle performance work is grouped by mechanism, measured result, correctness gate, and remaining limit. This page links each result to the endpoint sequence it changes."
 eyebrow: "Engineering"
 meta: "Performance improvements"
 deck: "Chronicle performance work starts with a measured source of repeated or serialized work. Each change names the mechanism, records the result, keeps the Durable Streams and Jepsen correctness gates, and states what remains slow."
@@ -9,8 +9,8 @@ byline:
     value: "0 complete → 435 measured"
   - label: "Live SSE reads"
     value: "970.5 → 1.000 per append"
-  - label: "Persistent GET writes"
-    value: "5 → 0"
+  - label: "Root page scripts"
+    value: "2 → 1"
   - label: "Protocol gate"
     value: "332 / 332"
 ---
@@ -26,7 +26,8 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
     <li><strong>Bounded catch-up removes whole-suffix reads and buffering.</strong> Redis fetches one frame, then optionally bulk-fetches only the range that fits the remaining 1 MiB target. A separate 1,024-frame cap bounds small-frame pages. Chronicle writes each frame directly to the socket.</li>
     <li><strong>The local 128-reader failure became measurable work.</strong> The old server completed no accepted 16 MiB replay at that concurrency. The paged server completed 435 body-verified responses with no server error in the final offered-window run.</li>
     <li><strong>SSE fanout removes duplicate live reads.</strong> One stream hub on each serving Chronicle replica reads Redis once and shares the formatted event with local clients. The exact-counter guard with 1,000 clients measured 1.000 live Redis reads per append, down from 970.5.</li>
-    <li><strong>Persistent reads no longer write access state.</strong> A five-byte GET fell from six to two <code>HGETALL</code> calls and from five read-side writes to zero. Sliding TTL renewal, legacy migration, and lazy expiry cleanup remain explicit write cases.</li>
+    <li><strong>Persistent root pages use one atomic read.</strong> A five-byte GET fell from six to one metadata <code>HGETALL</code>, from two read scripts to one, and from five read-side writes to zero. Sliding TTL renewal, legacy migration, and lazy expiry cleanup remain explicit write cases.</li>
+    <li><strong>Live reads register before they capture <code>offset=now</code>.</strong> A confirmed notification feed covers appends after the atomic page. The page tail includes appends that Redis ordered before it. New SSE hubs need one initial page instead of two, and long-poll no longer needs an immediate attach recheck.</li>
     <li><strong>Immutable segments move sealed replay bytes away from the frame ZSET.</strong> A manifest and sparse index select authenticated data blocks, while one fixed Redis snapshot supplies the hot tail and safe fallback. The retained local result is diagnostic and must be rerun after the integrated safety fixes.</li>
     <li><strong>Horizontal scaling separates subscription work by Redis slot.</strong> The measured append fanout p99 stayed between 12.48 and 12.61 milliseconds from 1 to 8 replicas. The exact 12 replica point and a cloud run with multiple shards remain open.</li>
     <li><strong>Correctness remains a release gate.</strong> A throughput gain does not excuse a Durable Streams conformance, Jepsen, or Porcupine regression.</li>
@@ -39,8 +40,28 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
   <PerformanceIndex />
 </section>
 
+<section class="block" id="request-paths">
+  <SectionHead num="02" label="Request paths" title="Which endpoint sequence <em>each read change affects</em>" />
+
+  The read changes save work at different points in an HTTP request. The
+  endpoint reference shows every handler, store, Redis, and response step.
+
+  <Table wide>
+    | Request | Ordered path | Performance change | Full sequence |
+    | --- | --- | --- | --- |
+    | `GET ?offset=<offset>` | authorize and parse → atomic bounded page → stream pages to the fixed tail → write headers and body | Root-owned pages combine snapshot capture and their bounded range in one `EVALSHA` | [Catch-up GET](../endpoints#get-catchup) |
+    | `GET ?offset=now&live=long-poll` | authorize and parse → confirm subscription → capture atomic page → wait → no-touch final page → response | Registration removes the immediate attach recheck | [Long-poll GET](../endpoints#get-longpoll) |
+    | `GET ?offset=now&live=sse` | authorize and parse → reserve a hub or confirm a subscription → capture first page → send catch-up → attach → share later pages | A new hub starts from the first page and skips a duplicate refresh | [SSE GET](../endpoints#get-sse) |
+    | `HEAD` | authorize → metadata-only page → map snapshot fields to headers | One metadata `HGETALL`; no frame or producer read | [HEAD](../endpoints#head) |
+  </Table>
+
+  Numeric long-poll offsets retain their established first read, subscribe,
+  and no-touch recheck order. Inherited fork prefixes retain their cross-stream
+  traversal. Those paths do not lose a Redis round trip from issue #172.
+</section>
+
 <section class="block" id="evidence">
-  <SectionHead num="02" label="Evidence" title="Every result needs <em>four checks</em>" />
+  <SectionHead num="03" label="Evidence" title="Every result needs <em>four checks</em>" />
 
   A performance result belongs here when the evidence names the mechanism and
   the test setup. The same record must state the correctness result and the
@@ -65,7 +86,7 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
 </section>
 
 <section class="block" id="reading">
-  <SectionHead num="03" label="Reading" title="Start with the result you <em>need to judge</em>" />
+  <SectionHead num="04" label="Reading" title="Start with the result you <em>need to judge</em>" />
 
   - Read [Bounded catch-up](./bounded-catchup) to understand the old suffix
     read, the new snapshot page contract, the 1 MiB returned target, the
@@ -73,9 +94,10 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
   - Read [SSE fanout](./sse-fanout) to understand the old per-client Redis read
     path, the shared stream hub, the safe attach sequence, and the measured
     before and after result.
-  - Read [Read-only fast path](./read-only-fast-path) to understand the typed
-    read snapshot, exact sliding-TTL decision, long-poll and SSE reuse, and the
-    measured command, AOF, and replication-offset deltas.
+  - Read [Read-only and fused root pages](./read-only-fast-path) to understand
+    the typed read snapshot, exact sliding TTL decision, root-range oracle,
+    register-first live handoff, and measured command, AOF, replication, and
+    latency deltas.
   - Read [Immutable segments](./immutable-segments) to understand how Chronicle
     copies a sealed prefix into authenticated blocks, joins it to one Redis
     snapshot, falls back safely, rolls back, and stops short of reclamation.

@@ -141,7 +141,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Step
     n={1}
     fn="ReadPageOptions"
-    loc="store/page.go:35-50"
+    loc="store/page.go:157"
     role="The first call has no snapshot. The store returns the tail, content type, closed state, and a random stream incarnation."
   >
     Later calls reuse the returned snapshot. The tail is the inclusive upper
@@ -151,7 +151,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Step
     n={2}
     fn="read.lua"
-    loc="store/redis/scripts/read.lua:32-65"
+    loc="store/redis/scripts/read.lua:35"
     role="After atomic root validation, Redis classifies the first range. A root-owned range fetches one candidate and optionally the end-offset range that fits the remaining target in that same script. Both calls have a <code>LIMIT</code>."
   >
     The script rejects a different incarnation before it returns data. It also
@@ -163,7 +163,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Step
     n={3}
     fn="streamCatchupResponse"
-    loc="handler_stream.go:200-258"
+    loc="handler_stream.go:412"
     role="The handler writes one page, flushes it, checks cancellation, and asks for the next page from the last returned offset."
   >
     The handler never constructs a second whole-response body. JSON punctuation,
@@ -173,7 +173,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   <Step
     n={4}
     fn="handleSSE"
-    loc="handler_sse.go:103"
+    loc="handler_sse.go:17"
     role="SSE catch-up starts with the page already captured by handleRead, then continues under the same snapshot before attaching to the shared stream hub."
   >
     Each page ends with a control event that carries the exact resume offset.

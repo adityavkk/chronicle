@@ -5,12 +5,14 @@ sequenceDiagram
     participant S as Store
     participant R as Redis
     C->>H: HEAD /chat
-    H->>S: ReadPage(offset=now, NoTouch) · handler_stream.go:43
+    H->>H: authorize path before revealing existence
+    H->>S: handleHead → ReadPage(offset=now, NoTouch)
     S->>R: EVALSHA read.lua · HGETALL :meta once
     Note over S,R: validate expiry · soft deletion · incarnation
     Note over S,R: no :prod · no :msg · no access touch
     R-->>S: typed metadata map
     S-->>H: ReadSnapshot · type · tail · expiry · closed
+    H->>H: map the snapshot to headers · never write a body
     H-->>C: 200 · Stream-Next-Offset · Stream-TTL · Cache-Control no-store
     Note over S,R: a current live stream is read-only
     Note over S,R: exceptions: legacy HSETNX and lazy expiry cleanup

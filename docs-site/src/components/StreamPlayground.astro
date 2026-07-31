@@ -237,7 +237,7 @@ import Demo from "./Demo.astro";
       read() {
         if (!exists)
           return { code: 404, status: "MISSING", reply: "no stream at /v1/stream/demo",
-            trace: ["EVAL read.lua", "HGETALL :meta", "(nil → 404)"] };
+            trace: ["EVALSHA read.lua", "HGETALL :meta", "(nil → 404)"] };
         const unread = frames.filter((f) => cursor === "" || f.off > cursor);
         const trace = ["EVALSHA read.lua · root", "HGETALL :meta once", "typed snapshot · no :prod · persistent → no write", "classify root-owned", `ZRANGEBYLEX :msg "(${cursor ? short(cursor) : "-"}…" "[snapshot-tail…" LIMIT 0 1 · same script`, "optional bounded bulk range · page cap 1024"];
         if (unread.length === 0)
@@ -251,12 +251,12 @@ import Demo from "./Demo.astro";
       poll() {
         if (!exists)
           return { code: 404, status: "MISSING", reply: "no stream at /v1/stream/demo",
-            trace: ["EVAL read.lua", "HGETALL :meta", "(nil → 404)"] };
+            trace: ["EVALSHA read.lua", "HGETALL :meta", "(nil → 404)"] };
         const unread = frames.filter((f) => cursor === "" || f.off > cursor);
         if (unread.length > 0) return actions.read();
         if (closed)
           return { code: 204, status: "CLOSED", reply: "at tail of a closed stream — immediate EOF",
-            off: "Stream-Closed: true", trace: ["EVAL read.lua", "(at tail, closed → 204)"] };
+            off: "Stream-Closed: true", trace: ["EVALSHA read.lua", "(at tail, closed → 204)"] };
         if (waiting) {
           waiting = false;
           return { code: 204, status: "WAIT", reply: "30 s elapsed with no data — long-poll timeout",

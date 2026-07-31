@@ -10,10 +10,11 @@ const links = {
   issue4: "https://gecgithub01.walmart.com/GPA/chronicle/issues/4",
   issue5: "https://gecgithub01.walmart.com/GPA/chronicle/issues/5",
   issue6: "https://gecgithub01.walmart.com/GPA/chronicle/issues/6",
-  issue7: "https://gecgithub01.walmart.com/GPA/chronicle/issues/7",
+  issue172: "https://github.com/adityavkk/chronicle/issues/172",
   catchupAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0004-bounded-read-pages-and-snapshot-catch-up.md",
   sseAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0005-per-instance-sse-stream-fanout.md",
   segmentsAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0006-immutable-segment-read-plane-prototype.md",
+  readOnlyAdr: "https://github.com/adityavkk/chronicle/blob/main/docs/adr/0007-fuse-root-pages-and-register-live-reads-first.md",
   catchupEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-5-bounded-catchup.md",
   segmentsEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-6-immutable-segments.md",
   readOnlyEvidence: "https://github.com/adityavkk/chronicle/blob/main/docs/research/12-read-only-fast-path-results.md",
@@ -86,17 +87,18 @@ const links = {
       <span class="num">04</span>
       <span class="status">validated</span>
     </div>
-    <h3>Read-only fast path</h3>
-    <p class="result">GET HGETALL calls 6 to 2; read-side writes 5 to 0</p>
+    <h3>Read-only and fused root pages</h3>
+    <p class="result">GET HGETALL calls 6 to 1; root-page scripts 2 to 1</p>
     <p>
       <strong>Before:</strong> persistent reads loaded producer state, loaded
-      metadata twice inside Lua, and touched Redis expiry state.
-      <strong>Now:</strong> one typed page carries the state that GET,
-      long-poll, and SSE need.
+      metadata repeatedly, and touched Redis expiry state.
+      <strong>Now:</strong> one atomic root page carries bounded frames and the
+      typed state that GET, long-poll, and SSE need.
     </p>
     <nav aria-label="Read-only fast path links">
       <a class="primary" href={links.readOnly}>Read the explainer <span aria-hidden="true">→</span></a>
-      <a href={links.issue7}>GPA/chronicle issue #7 <span aria-hidden="true">↗</span></a>
+      <a href={links.issue172}>GitHub issue #172 <span aria-hidden="true">↗</span></a>
+      <a href={links.readOnlyAdr}>Architecture decision <span aria-hidden="true">↗</span></a>
       <a href={links.readOnlyEvidence}>Evidence report <span aria-hidden="true">↗</span></a>
     </nav>
   </article>
