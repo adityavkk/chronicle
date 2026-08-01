@@ -1,0 +1,484 @@
+# HELP chronicle_coverage_gap_seconds Latency of a sweep wake for a subscription whose slot was unowned at append (gate #4).
+# TYPE chronicle_coverage_gap_seconds histogram
+chronicle_coverage_gap_seconds_bucket{le="0.005"} 0
+chronicle_coverage_gap_seconds_bucket{le="0.01"} 0
+chronicle_coverage_gap_seconds_bucket{le="0.025"} 0
+chronicle_coverage_gap_seconds_bucket{le="0.05"} 0
+chronicle_coverage_gap_seconds_bucket{le="0.1"} 0
+chronicle_coverage_gap_seconds_bucket{le="0.25"} 0
+chronicle_coverage_gap_seconds_bucket{le="0.5"} 0
+chronicle_coverage_gap_seconds_bucket{le="1"} 0
+chronicle_coverage_gap_seconds_bucket{le="2.5"} 0
+chronicle_coverage_gap_seconds_bucket{le="5"} 0
+chronicle_coverage_gap_seconds_bucket{le="10"} 0
+chronicle_coverage_gap_seconds_bucket{le="+Inf"} 0
+chronicle_coverage_gap_seconds_sum 0
+chronicle_coverage_gap_seconds_count 0
+# HELP chronicle_due_worker_fired Owed subscriptions fired per due-worker tick.
+# TYPE chronicle_due_worker_fired histogram
+chronicle_due_worker_fired_bucket{le="1"} 0
+chronicle_due_worker_fired_bucket{le="2"} 0
+chronicle_due_worker_fired_bucket{le="4"} 0
+chronicle_due_worker_fired_bucket{le="8"} 0
+chronicle_due_worker_fired_bucket{le="16"} 0
+chronicle_due_worker_fired_bucket{le="32"} 0
+chronicle_due_worker_fired_bucket{le="64"} 0
+chronicle_due_worker_fired_bucket{le="128"} 0
+chronicle_due_worker_fired_bucket{le="256"} 0
+chronicle_due_worker_fired_bucket{le="512"} 0
+chronicle_due_worker_fired_bucket{le="1024"} 0
+chronicle_due_worker_fired_bucket{le="2048"} 0
+chronicle_due_worker_fired_bucket{le="+Inf"} 0
+chronicle_due_worker_fired_sum 0
+chronicle_due_worker_fired_count 0
+# HELP chronicle_due_worker_tick_seconds Due-worker tick wall-clock duration over one owned slot.
+# TYPE chronicle_due_worker_tick_seconds histogram
+chronicle_due_worker_tick_seconds_bucket{le="0.0005"} 0
+chronicle_due_worker_tick_seconds_bucket{le="0.001"} 0
+chronicle_due_worker_tick_seconds_bucket{le="0.002"} 0
+chronicle_due_worker_tick_seconds_bucket{le="0.004"} 0
+chronicle_due_worker_tick_seconds_bucket{le="0.008"} 0
+chronicle_due_worker_tick_seconds_bucket{le="0.016"} 0
+chronicle_due_worker_tick_seconds_bucket{le="0.032"} 0
+chronicle_due_worker_tick_seconds_bucket{le="0.064"} 0
+chronicle_due_worker_tick_seconds_bucket{le="0.128"} 0
+chronicle_due_worker_tick_seconds_bucket{le="0.256"} 0
+chronicle_due_worker_tick_seconds_bucket{le="0.512"} 0
+chronicle_due_worker_tick_seconds_bucket{le="1.024"} 0
+chronicle_due_worker_tick_seconds_bucket{le="2.048"} 0
+chronicle_due_worker_tick_seconds_bucket{le="4.096"} 0
+chronicle_due_worker_tick_seconds_bucket{le="8.192"} 0
+chronicle_due_worker_tick_seconds_bucket{le="16.384"} 0
+chronicle_due_worker_tick_seconds_bucket{le="+Inf"} 0
+chronicle_due_worker_tick_seconds_sum 0
+chronicle_due_worker_tick_seconds_count 0
+# HELP chronicle_fanout_seconds OnStreamAppend fan-out wall-clock duration under slot-homing (gate #2).
+# TYPE chronicle_fanout_seconds histogram
+chronicle_fanout_seconds_bucket{le="0.005"} 0
+chronicle_fanout_seconds_bucket{le="0.01"} 0
+chronicle_fanout_seconds_bucket{le="0.025"} 0
+chronicle_fanout_seconds_bucket{le="0.05"} 0
+chronicle_fanout_seconds_bucket{le="0.1"} 0
+chronicle_fanout_seconds_bucket{le="0.25"} 0
+chronicle_fanout_seconds_bucket{le="0.5"} 0
+chronicle_fanout_seconds_bucket{le="1"} 0
+chronicle_fanout_seconds_bucket{le="2.5"} 0
+chronicle_fanout_seconds_bucket{le="5"} 0
+chronicle_fanout_seconds_bucket{le="10"} 0
+chronicle_fanout_seconds_bucket{le="+Inf"} 0
+chronicle_fanout_seconds_sum 0
+chronicle_fanout_seconds_count 0
+# HELP chronicle_fanout_slots_probed Slots probed per OnStreamAppend fan-out (occupied-slots bitmap effect).
+# TYPE chronicle_fanout_slots_probed histogram
+chronicle_fanout_slots_probed_bucket{le="1"} 0
+chronicle_fanout_slots_probed_bucket{le="2"} 0
+chronicle_fanout_slots_probed_bucket{le="4"} 0
+chronicle_fanout_slots_probed_bucket{le="8"} 0
+chronicle_fanout_slots_probed_bucket{le="16"} 0
+chronicle_fanout_slots_probed_bucket{le="32"} 0
+chronicle_fanout_slots_probed_bucket{le="64"} 0
+chronicle_fanout_slots_probed_bucket{le="128"} 0
+chronicle_fanout_slots_probed_bucket{le="256"} 0
+chronicle_fanout_slots_probed_bucket{le="+Inf"} 0
+chronicle_fanout_slots_probed_sum 0
+chronicle_fanout_slots_probed_count 0
+# HELP chronicle_fanout_subs Subscribers found per OnStreamAppend fan-out.
+# TYPE chronicle_fanout_subs histogram
+chronicle_fanout_subs_bucket{le="1"} 0
+chronicle_fanout_subs_bucket{le="2"} 0
+chronicle_fanout_subs_bucket{le="4"} 0
+chronicle_fanout_subs_bucket{le="8"} 0
+chronicle_fanout_subs_bucket{le="16"} 0
+chronicle_fanout_subs_bucket{le="32"} 0
+chronicle_fanout_subs_bucket{le="64"} 0
+chronicle_fanout_subs_bucket{le="128"} 0
+chronicle_fanout_subs_bucket{le="256"} 0
+chronicle_fanout_subs_bucket{le="512"} 0
+chronicle_fanout_subs_bucket{le="1024"} 0
+chronicle_fanout_subs_bucket{le="2048"} 0
+chronicle_fanout_subs_bucket{le="4096"} 0
+chronicle_fanout_subs_bucket{le="8192"} 0
+chronicle_fanout_subs_bucket{le="+Inf"} 0
+chronicle_fanout_subs_sum 0
+chronicle_fanout_subs_count 0
+# HELP chronicle_read_cancellations_total Catch-up cancellations by fixed processing phase.
+# TYPE chronicle_read_cancellations_total counter
+chronicle_read_cancellations_total{phase="write"} 268
+# HELP chronicle_read_discarded_bytes_total Fetched payload bytes discarded at a storage page boundary.
+# TYPE chronicle_read_discarded_bytes_total counter
+chronicle_read_discarded_bytes_total 0
+# HELP chronicle_read_fetched_bytes_total Message payload bytes fetched by bounded storage pages.
+# TYPE chronicle_read_fetched_bytes_total counter
+chronicle_read_fetched_bytes_total 4.35606045e+08
+# HELP chronicle_read_page_target_bytes Requested storage page byte target for catch-up reads.
+# TYPE chronicle_read_page_target_bytes histogram
+chronicle_read_page_target_bytes_bucket{le="65536"} 58461
+chronicle_read_page_target_bytes_bucket{le="131072"} 58461
+chronicle_read_page_target_bytes_bucket{le="262144"} 115057
+chronicle_read_page_target_bytes_bucket{le="524288"} 115057
+chronicle_read_page_target_bytes_bucket{le="1.048576e+06"} 188308
+chronicle_read_page_target_bytes_bucket{le="2.097152e+06"} 188308
+chronicle_read_page_target_bytes_bucket{le="4.194304e+06"} 188308
+chronicle_read_page_target_bytes_bucket{le="8.388608e+06"} 188308
+chronicle_read_page_target_bytes_bucket{le="+Inf"} 188308
+chronicle_read_page_target_bytes_sum 9.1645600861e+10
+chronicle_read_page_target_bytes_count 188308
+# HELP chronicle_read_pages_per_response Bounded storage pages evaluated per HTTP or SSE response.
+# TYPE chronicle_read_pages_per_response histogram
+chronicle_read_pages_per_response_bucket{le="1"} 71526
+chronicle_read_pages_per_response_bucket{le="2"} 71980
+chronicle_read_pages_per_response_bucket{le="4"} 72149
+chronicle_read_pages_per_response_bucket{le="8"} 72196
+chronicle_read_pages_per_response_bucket{le="16"} 72196
+chronicle_read_pages_per_response_bucket{le="32"} 72196
+chronicle_read_pages_per_response_bucket{le="64"} 72196
+chronicle_read_pages_per_response_bucket{le="128"} 72196
+chronicle_read_pages_per_response_bucket{le="256"} 72196
+chronicle_read_pages_per_response_bucket{le="512"} 72196
+chronicle_read_pages_per_response_bucket{le="1024"} 72196
+chronicle_read_pages_per_response_bucket{le="2048"} 72196
+chronicle_read_pages_per_response_bucket{le="+Inf"} 72196
+chronicle_read_pages_per_response_sum 73031
+chronicle_read_pages_per_response_count 72196
+# HELP chronicle_read_pages_total Bounded storage pages evaluated for HTTP and SSE catch-up.
+# TYPE chronicle_read_pages_total counter
+chronicle_read_pages_total 188308
+# HELP chronicle_read_redis_script_invocations_total Redis script invocations used by bounded storage pages.
+# TYPE chronicle_read_redis_script_invocations_total counter
+chronicle_read_redis_script_invocations_total 229863
+# HELP chronicle_read_redis_script_seconds Mean client-observed wall time per Redis script invocation within one bounded storage page, including pool and server queueing.
+# TYPE chronicle_read_redis_script_seconds histogram
+chronicle_read_redis_script_seconds_bucket{le="5e-05"} 0
+chronicle_read_redis_script_seconds_bucket{le="0.0001"} 0
+chronicle_read_redis_script_seconds_bucket{le="0.0002"} 0
+chronicle_read_redis_script_seconds_bucket{le="0.0004"} 54
+chronicle_read_redis_script_seconds_bucket{le="0.0008"} 21103
+chronicle_read_redis_script_seconds_bucket{le="0.0016"} 114580
+chronicle_read_redis_script_seconds_bucket{le="0.0032"} 156335
+chronicle_read_redis_script_seconds_bucket{le="0.0064"} 167339
+chronicle_read_redis_script_seconds_bucket{le="0.0128"} 173567
+chronicle_read_redis_script_seconds_bucket{le="0.0256"} 180153
+chronicle_read_redis_script_seconds_bucket{le="0.0512"} 185029
+chronicle_read_redis_script_seconds_bucket{le="0.1024"} 187251
+chronicle_read_redis_script_seconds_bucket{le="0.2048"} 187942
+chronicle_read_redis_script_seconds_bucket{le="0.4096"} 188272
+chronicle_read_redis_script_seconds_bucket{le="0.8192"} 188308
+chronicle_read_redis_script_seconds_bucket{le="1.6384"} 188308
+chronicle_read_redis_script_seconds_bucket{le="3.2768"} 188308
+chronicle_read_redis_script_seconds_bucket{le="6.5536"} 188308
+chronicle_read_redis_script_seconds_bucket{le="+Inf"} 188308
+chronicle_read_redis_script_seconds_sum 962.5685096820027
+chronicle_read_redis_script_seconds_count 188308
+# HELP chronicle_read_response_bytes_total HTTP and SSE catch-up response body bytes written.
+# TYPE chronicle_read_response_bytes_total counter
+chronicle_read_response_bytes_total 6.25582642e+08
+# HELP chronicle_read_returned_bytes_total Message payload bytes returned by bounded storage pages.
+# TYPE chronicle_read_returned_bytes_total counter
+chronicle_read_returned_bytes_total 4.35606045e+08
+# HELP chronicle_sse_clients SSE clients attached to shared fanout hubs on this Chronicle replica.
+# TYPE chronicle_sse_clients gauge
+chronicle_sse_clients 0
+# HELP chronicle_sse_events_total Bounded SSE recovery and disconnect events by reason.
+# TYPE chronicle_sse_events_total counter
+chronicle_sse_events_total{reason="protocol_reconnect"} 71886
+chronicle_sse_events_total{reason="write_timeout"} 269
+# HELP chronicle_sse_hub_messages_total Durable messages read once and offered to local SSE clients through a shared hub.
+# TYPE chronicle_sse_hub_messages_total counter
+chronicle_sse_hub_messages_total 38481
+# HELP chronicle_sse_hub_reads_total Durable stream reads performed by shared SSE hubs.
+# TYPE chronicle_sse_hub_reads_total counter
+chronicle_sse_hub_reads_total 56596
+# HELP chronicle_sse_hub_refresh_bytes_total Payload bytes consumed by bounded SSE hub refreshes, by cause.
+# TYPE chronicle_sse_hub_refresh_bytes_total counter
+chronicle_sse_hub_refresh_bytes_total{cause="hint"} 9.622784e+06
+chronicle_sse_hub_refresh_bytes_total{cause="initial"} 40704
+chronicle_sse_hub_refresh_bytes_total{cause="poll"} 187648
+# HELP chronicle_sse_hub_refresh_pages_total Storage pages consumed by bounded SSE hub refreshes, by cause.
+# TYPE chronicle_sse_hub_refresh_pages_total counter
+chronicle_sse_hub_refresh_pages_total{cause="hint"} 38559
+chronicle_sse_hub_refresh_pages_total{cause="initial"} 14293
+chronicle_sse_hub_refresh_pages_total{cause="poll"} 3744
+# HELP chronicle_sse_hub_refresh_seconds Duration of one exact-tail SSE hub refresh, by cause.
+# TYPE chronicle_sse_hub_refresh_seconds histogram
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="0.005"} 33374
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="0.01"} 37429
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="0.025"} 38073
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="0.05"} 38408
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="0.1"} 38561
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="0.25"} 38582
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="0.5"} 38582
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="1"} 38582
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="2.5"} 38582
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="5"} 38582
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="10"} 38582
+chronicle_sse_hub_refresh_seconds_bucket{cause="hint",le="+Inf"} 38582
+chronicle_sse_hub_refresh_seconds_sum{cause="hint"} 163.22971845500197
+chronicle_sse_hub_refresh_seconds_count{cause="hint"} 38582
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="0.005"} 12514
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="0.01"} 13059
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="0.025"} 13663
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="0.05"} 13980
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="0.1"} 14185
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="0.25"} 14288
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="0.5"} 14293
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="1"} 14293
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="2.5"} 14293
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="5"} 14293
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="10"} 14293
+chronicle_sse_hub_refresh_seconds_bucket{cause="initial",le="+Inf"} 14293
+chronicle_sse_hub_refresh_seconds_sum{cause="initial"} 74.77199460200004
+chronicle_sse_hub_refresh_seconds_count{cause="initial"} 14293
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="0.005"} 689
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="0.01"} 1030
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="0.025"} 1593
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="0.05"} 3088
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="0.1"} 3604
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="0.25"} 3746
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="0.5"} 3787
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="1"} 3787
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="2.5"} 3787
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="5"} 3787
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="10"} 3787
+chronicle_sse_hub_refresh_seconds_bucket{cause="poll",le="+Inf"} 3787
+chronicle_sse_hub_refresh_seconds_sum{cause="poll"} 136.57265614299996
+chronicle_sse_hub_refresh_seconds_count{cause="poll"} 3787
+# HELP chronicle_sse_hub_refreshes_total Bounded durable SSE hub refreshes by cause.
+# TYPE chronicle_sse_hub_refreshes_total counter
+chronicle_sse_hub_refreshes_total{cause="hint"} 38582
+chronicle_sse_hub_refreshes_total{cause="initial"} 14293
+chronicle_sse_hub_refreshes_total{cause="poll"} 3787
+# HELP chronicle_sse_hub_ring_bytes Exact raw plus wire plus boundary-index bytes retained in all shared SSE replay rings on this replica.
+# TYPE chronicle_sse_hub_ring_bytes gauge
+chronicle_sse_hub_ring_bytes 0
+# HELP chronicle_sse_hub_ring_index_bytes Offset-boundary index bytes retained in shared SSE replay rings on this replica.
+# TYPE chronicle_sse_hub_ring_index_bytes gauge
+chronicle_sse_hub_ring_index_bytes 0
+# HELP chronicle_sse_hub_ring_raw_bytes Raw payload bytes retained in shared SSE replay rings on this replica.
+# TYPE chronicle_sse_hub_ring_raw_bytes gauge
+chronicle_sse_hub_ring_raw_bytes 0
+# HELP chronicle_sse_hub_ring_wire_bytes Formatted SSE wire bytes retained in shared replay rings on this replica.
+# TYPE chronicle_sse_hub_ring_wire_bytes gauge
+chronicle_sse_hub_ring_wire_bytes 0
+# HELP chronicle_sse_hubs Active per-stream SSE fanout hubs on this Chronicle replica.
+# TYPE chronicle_sse_hubs gauge
+chronicle_sse_hubs 0
+# HELP chronicle_sse_lagged_disconnects_total SSE clients disconnected after falling behind the bounded shared replay window.
+# TYPE chronicle_sse_lagged_disconnects_total counter
+chronicle_sse_lagged_disconnects_total 0
+# HELP chronicle_sse_notification_connections Physical Redis Pub/Sub connections owned by the SSE notification multiplexer, by bounded topology.
+# TYPE chronicle_sse_notification_connections gauge
+chronicle_sse_notification_connections{topology="standalone"} 0
+# HELP chronicle_sse_page_bytes_total Returned payload bytes from bounded SSE storage pages by phase.
+# TYPE chronicle_sse_page_bytes_total counter
+chronicle_sse_page_bytes_total{phase="catchup"} 4.2575488e+08
+chronicle_sse_page_bytes_total{phase="confirm"} 0
+# HELP chronicle_sse_pages_total Bounded SSE storage pages by phase (catchup or confirm).
+# TYPE chronicle_sse_pages_total counter
+chronicle_sse_pages_total{phase="catchup"} 73250
+chronicle_sse_pages_total{phase="confirm"} 58461
+# HELP chronicle_sse_subscription_events_total Shared Redis notification subscription lifecycle events by event.
+# TYPE chronicle_sse_subscription_events_total counter
+chronicle_sse_subscription_events_total{event="acknowledged"} 14197
+chronicle_sse_subscription_events_total{event="closed"} 14293
+chronicle_sse_subscription_events_total{event="opened"} 14293
+chronicle_sse_subscription_events_total{event="physical_closed"} 121
+chronicle_sse_subscription_events_total{event="physical_opened"} 121
+chronicle_sse_subscription_events_total{event="read_error"} 137
+# HELP chronicle_sse_subscriptions Active logical stream notification registrations on this Chronicle replica.
+# TYPE chronicle_sse_subscriptions gauge
+chronicle_sse_subscriptions 0
+# HELP chronicle_sse_watcher_lookup_misses_total Exact replay boundaries absent from the retained indexed ring.
+# TYPE chronicle_sse_watcher_lookup_misses_total counter
+chronicle_sse_watcher_lookup_misses_total 0
+# HELP chronicle_sse_watcher_lookup_steps_total Indexed replay-boundary comparisons performed by watcher lookup.
+# TYPE chronicle_sse_watcher_lookup_steps_total counter
+chronicle_sse_watcher_lookup_steps_total 73903
+# HELP chronicle_sse_write_timeouts_total SSE clients disconnected after one data-and-control flush exceeded its write deadline.
+# TYPE chronicle_sse_write_timeouts_total counter
+chronicle_sse_write_timeouts_total 269
+# HELP chronicle_sweep_subs_evaluated Subscriptions evaluated per recovery sweep tick.
+# TYPE chronicle_sweep_subs_evaluated histogram
+chronicle_sweep_subs_evaluated_bucket{le="1"} 0
+chronicle_sweep_subs_evaluated_bucket{le="2"} 0
+chronicle_sweep_subs_evaluated_bucket{le="4"} 0
+chronicle_sweep_subs_evaluated_bucket{le="8"} 0
+chronicle_sweep_subs_evaluated_bucket{le="16"} 0
+chronicle_sweep_subs_evaluated_bucket{le="32"} 0
+chronicle_sweep_subs_evaluated_bucket{le="64"} 0
+chronicle_sweep_subs_evaluated_bucket{le="128"} 0
+chronicle_sweep_subs_evaluated_bucket{le="256"} 0
+chronicle_sweep_subs_evaluated_bucket{le="512"} 0
+chronicle_sweep_subs_evaluated_bucket{le="1024"} 0
+chronicle_sweep_subs_evaluated_bucket{le="2048"} 0
+chronicle_sweep_subs_evaluated_bucket{le="4096"} 0
+chronicle_sweep_subs_evaluated_bucket{le="8192"} 0
+chronicle_sweep_subs_evaluated_bucket{le="16384"} 0
+chronicle_sweep_subs_evaluated_bucket{le="32768"} 0
+chronicle_sweep_subs_evaluated_bucket{le="65536"} 0
+chronicle_sweep_subs_evaluated_bucket{le="131072"} 0
+chronicle_sweep_subs_evaluated_bucket{le="+Inf"} 0
+chronicle_sweep_subs_evaluated_sum 0
+chronicle_sweep_subs_evaluated_count 0
+# HELP chronicle_sweep_tails_batched Distinct stream tails read (batched) per recovery sweep tick.
+# TYPE chronicle_sweep_tails_batched histogram
+chronicle_sweep_tails_batched_bucket{le="1"} 0
+chronicle_sweep_tails_batched_bucket{le="2"} 0
+chronicle_sweep_tails_batched_bucket{le="4"} 0
+chronicle_sweep_tails_batched_bucket{le="8"} 0
+chronicle_sweep_tails_batched_bucket{le="16"} 0
+chronicle_sweep_tails_batched_bucket{le="32"} 0
+chronicle_sweep_tails_batched_bucket{le="64"} 0
+chronicle_sweep_tails_batched_bucket{le="128"} 0
+chronicle_sweep_tails_batched_bucket{le="256"} 0
+chronicle_sweep_tails_batched_bucket{le="512"} 0
+chronicle_sweep_tails_batched_bucket{le="1024"} 0
+chronicle_sweep_tails_batched_bucket{le="2048"} 0
+chronicle_sweep_tails_batched_bucket{le="4096"} 0
+chronicle_sweep_tails_batched_bucket{le="8192"} 0
+chronicle_sweep_tails_batched_bucket{le="16384"} 0
+chronicle_sweep_tails_batched_bucket{le="32768"} 0
+chronicle_sweep_tails_batched_bucket{le="65536"} 0
+chronicle_sweep_tails_batched_bucket{le="131072"} 0
+chronicle_sweep_tails_batched_bucket{le="262144"} 0
+chronicle_sweep_tails_batched_bucket{le="524288"} 0
+chronicle_sweep_tails_batched_bucket{le="+Inf"} 0
+chronicle_sweep_tails_batched_sum 0
+chronicle_sweep_tails_batched_count 0
+# HELP chronicle_sweep_tick_seconds Recovery sweep tick wall-clock duration.
+# TYPE chronicle_sweep_tick_seconds histogram
+chronicle_sweep_tick_seconds_bucket{le="0.0005"} 0
+chronicle_sweep_tick_seconds_bucket{le="0.001"} 0
+chronicle_sweep_tick_seconds_bucket{le="0.002"} 0
+chronicle_sweep_tick_seconds_bucket{le="0.004"} 0
+chronicle_sweep_tick_seconds_bucket{le="0.008"} 0
+chronicle_sweep_tick_seconds_bucket{le="0.016"} 0
+chronicle_sweep_tick_seconds_bucket{le="0.032"} 0
+chronicle_sweep_tick_seconds_bucket{le="0.064"} 0
+chronicle_sweep_tick_seconds_bucket{le="0.128"} 0
+chronicle_sweep_tick_seconds_bucket{le="0.256"} 0
+chronicle_sweep_tick_seconds_bucket{le="0.512"} 0
+chronicle_sweep_tick_seconds_bucket{le="1.024"} 0
+chronicle_sweep_tick_seconds_bucket{le="2.048"} 0
+chronicle_sweep_tick_seconds_bucket{le="4.096"} 0
+chronicle_sweep_tick_seconds_bucket{le="8.192"} 0
+chronicle_sweep_tick_seconds_bucket{le="16.384"} 0
+chronicle_sweep_tick_seconds_bucket{le="+Inf"} 0
+chronicle_sweep_tick_seconds_sum 0
+chronicle_sweep_tick_seconds_count 0
+# HELP chronicle_sweep_wakes_total Wakes issued by the recovery sweep.
+# TYPE chronicle_sweep_wakes_total counter
+chronicle_sweep_wakes_total 0
+# HELP go_gc_duration_seconds A summary of the wall-time pause (stop-the-world) duration in garbage collection cycles.
+# TYPE go_gc_duration_seconds summary
+go_gc_duration_seconds{quantile="0"} 2.6291e-05
+go_gc_duration_seconds{quantile="0.25"} 5.0542e-05
+go_gc_duration_seconds{quantile="0.5"} 6.8291e-05
+go_gc_duration_seconds{quantile="0.75"} 9.7375e-05
+go_gc_duration_seconds{quantile="1"} 0.000526541
+go_gc_duration_seconds_sum 0.219572359
+go_gc_duration_seconds_count 1835
+# HELP go_gc_gogc_percent Heap size target percentage configured by the user, otherwise 100. This value is set by the GOGC environment variable, and the runtime/debug.SetGCPercent function. Sourced from /gc/gogc:percent.
+# TYPE go_gc_gogc_percent gauge
+go_gc_gogc_percent 100
+# HELP go_gc_gomemlimit_bytes Go runtime memory limit configured by the user, otherwise math.MaxInt64. This value is set by the GOMEMLIMIT environment variable, and the runtime/debug.SetMemoryLimit function. Sourced from /gc/gomemlimit:bytes.
+# TYPE go_gc_gomemlimit_bytes gauge
+go_gc_gomemlimit_bytes 9.223372036854776e+18
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 11
+# HELP go_info Information about the Go environment.
+# TYPE go_info gauge
+go_info{version="go1.26.4"} 1
+# HELP go_memstats_alloc_bytes Number of bytes allocated in heap and currently in use. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_alloc_bytes gauge
+go_memstats_alloc_bytes 6.765992e+06
+# HELP go_memstats_alloc_bytes_total Total number of bytes allocated in heap until now, even if released already. Equals to /gc/heap/allocs:bytes.
+# TYPE go_memstats_alloc_bytes_total counter
+go_memstats_alloc_bytes_total 1.4843131056e+10
+# HELP go_memstats_buck_hash_sys_bytes Number of bytes used by the profiling bucket hash table. Equals to /memory/classes/profiling/buckets:bytes.
+# TYPE go_memstats_buck_hash_sys_bytes gauge
+go_memstats_buck_hash_sys_bytes 1.923452e+06
+# HELP go_memstats_frees_total Total number of heap objects frees. Equals to /gc/heap/frees:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_frees_total counter
+go_memstats_frees_total 5.3154243e+07
+# HELP go_memstats_gc_sys_bytes Number of bytes used for garbage collection system metadata. Equals to /memory/classes/metadata/other:bytes.
+# TYPE go_memstats_gc_sys_bytes gauge
+go_memstats_gc_sys_bytes 3.815168e+06
+# HELP go_memstats_heap_alloc_bytes Number of heap bytes allocated and currently in use, same as go_memstats_alloc_bytes. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_heap_alloc_bytes gauge
+go_memstats_heap_alloc_bytes 6.765992e+06
+# HELP go_memstats_heap_idle_bytes Number of heap bytes waiting to be used. Equals to /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_idle_bytes gauge
+go_memstats_heap_idle_bytes 2.9155328e+07
+# HELP go_memstats_heap_inuse_bytes Number of heap bytes that are in use. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes
+# TYPE go_memstats_heap_inuse_bytes gauge
+go_memstats_heap_inuse_bytes 9.838592e+06
+# HELP go_memstats_heap_objects Number of currently allocated objects. Equals to /gc/heap/objects:objects.
+# TYPE go_memstats_heap_objects gauge
+go_memstats_heap_objects 12424
+# HELP go_memstats_heap_released_bytes Number of heap bytes released to OS. Equals to /memory/classes/heap/released:bytes.
+# TYPE go_memstats_heap_released_bytes gauge
+go_memstats_heap_released_bytes 2.4240128e+07
+# HELP go_memstats_heap_sys_bytes Number of heap bytes obtained from system. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes + /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_sys_bytes gauge
+go_memstats_heap_sys_bytes 3.899392e+07
+# HELP go_memstats_last_gc_time_seconds Number of seconds since 1970 of last garbage collection.
+# TYPE go_memstats_last_gc_time_seconds gauge
+go_memstats_last_gc_time_seconds 1.785516811045356e+09
+# HELP go_memstats_mallocs_total Total number of heap objects allocated, both live and gc-ed. Semantically a counter version for go_memstats_heap_objects gauge. Equals to /gc/heap/allocs:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_mallocs_total counter
+go_memstats_mallocs_total 5.3166667e+07
+# HELP go_memstats_mcache_inuse_bytes Number of bytes in use by mcache structures. Equals to /memory/classes/metadata/mcache/inuse:bytes.
+# TYPE go_memstats_mcache_inuse_bytes gauge
+go_memstats_mcache_inuse_bytes 32144
+# HELP go_memstats_mcache_sys_bytes Number of bytes used for mcache structures obtained from system. Equals to /memory/classes/metadata/mcache/inuse:bytes + /memory/classes/metadata/mcache/free:bytes.
+# TYPE go_memstats_mcache_sys_bytes gauge
+go_memstats_mcache_sys_bytes 32144
+# HELP go_memstats_mspan_inuse_bytes Number of bytes in use by mspan structures. Equals to /memory/classes/metadata/mspan/inuse:bytes.
+# TYPE go_memstats_mspan_inuse_bytes gauge
+go_memstats_mspan_inuse_bytes 271360
+# HELP go_memstats_mspan_sys_bytes Number of bytes used for mspan structures obtained from system. Equals to /memory/classes/metadata/mspan/inuse:bytes + /memory/classes/metadata/mspan/free:bytes.
+# TYPE go_memstats_mspan_sys_bytes gauge
+go_memstats_mspan_sys_bytes 522240
+# HELP go_memstats_next_gc_bytes Number of heap bytes when next garbage collection will take place. Equals to /gc/heap/goal:bytes.
+# TYPE go_memstats_next_gc_bytes gauge
+go_memstats_next_gc_bytes 1.2769786e+07
+# HELP go_memstats_other_sys_bytes Number of bytes used for other system allocations. Equals to /memory/classes/other:bytes.
+# TYPE go_memstats_other_sys_bytes gauge
+go_memstats_other_sys_bytes 2.544396e+06
+# HELP go_memstats_stack_inuse_bytes Number of bytes obtained from system for stack allocator in non-CGO environments. Equals to /memory/classes/heap/stacks:bytes.
+# TYPE go_memstats_stack_inuse_bytes gauge
+go_memstats_stack_inuse_bytes 2.94912e+06
+# HELP go_memstats_stack_sys_bytes Number of bytes obtained from system for stack allocator. Equals to /memory/classes/heap/stacks:bytes + /memory/classes/os-stacks:bytes.
+# TYPE go_memstats_stack_sys_bytes gauge
+go_memstats_stack_sys_bytes 2.94912e+06
+# HELP go_memstats_sys_bytes Number of bytes obtained from system. Equals to /memory/classes/total:byte.
+# TYPE go_memstats_sys_bytes gauge
+go_memstats_sys_bytes 5.078044e+07
+# HELP go_sched_gomaxprocs_threads The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously. Sourced from /sched/gomaxprocs:threads.
+# TYPE go_sched_gomaxprocs_threads gauge
+go_sched_gomaxprocs_threads 14
+# HELP go_threads Number of OS threads created.
+# TYPE go_threads gauge
+go_threads 22
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 62.099656
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+process_max_fds 184320
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 77
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 2.4199168e+07
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1.785514758e+09
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+process_virtual_memory_bytes 4.5440712704e+11
+# HELP process_virtual_memory_max_bytes Maximum amount of virtual memory available in bytes.
+# TYPE process_virtual_memory_max_bytes gauge
+process_virtual_memory_max_bytes 9.223372036854776e+18

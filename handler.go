@@ -35,6 +35,12 @@ type AppendMetrics interface {
 	AppendSubscriptionHook(dur time.Duration)
 }
 
+// AppendLimitMetrics records requests rejected before Chronicle buffers an
+// operator-bounded create or append body.
+type AppendLimitMetrics interface {
+	AppendBodyRejected()
+}
+
 // Handler serves the Durable Streams protocol over HTTP.
 type Handler struct {
 	// Store is the stream storage backend.
@@ -50,6 +56,10 @@ type Handler struct {
 	// Zero uses store.DefaultReadPageBytes.
 	ReadPageBytes int
 
+	// MaxAppendBytes bounds create-with-data and append bodies before buffering.
+	// Zero preserves the protocol-compatible unlimited default.
+	MaxAppendBytes int64
+
 	// ReadMetrics receives bounded catch-up observations. Nil disables them.
 	ReadMetrics ReadMetrics
 
@@ -58,8 +68,9 @@ type Handler struct {
 	// last durable offset. Zero uses the 1 MiB default.
 	SSEHubReplayBytes int
 
-	// SSEHubBatchBytes bounds each shared live SSE data event by raw message
-	// bytes when message boundaries permit. Zero uses the 256 KiB default.
+	// SSEHubBatchBytes bounds each shared live SSE data batch by formatted wire
+	// plus boundary-index bytes when message boundaries permit. One oversized
+	// message remains whole. Zero uses the 256 KiB default.
 	SSEHubBatchBytes int
 
 	// SSEHubPollInterval is the durable fallback cadence when a Redis
@@ -89,6 +100,10 @@ type Handler struct {
 	// AppendMetrics receives the end-to-end synchronous subscription-hook time
 	// after a committed append. Nil disables it.
 	AppendMetrics AppendMetrics
+
+	// AppendLimitMetrics records configured body-ceiling rejections. Nil
+	// disables the observation without changing enforcement.
+	AppendLimitMetrics AppendLimitMetrics
 
 	// AuthMode selects authorization enforcement (issue #126). The zero value
 	// ModeInsecure evaluates decisions for telemetry only, so a base-protocol
@@ -226,6 +241,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
+		if errors.Is(err, http.ErrAbortHandler) {
+			// The response was already committed. Preserve net/http's abort
+			// semantics so no HTTP error payload is appended to an SSE stream.
+			panic(http.ErrAbortHandler)
+		}
 		h.writeError(w, err)
 	}
 }
@@ -283,14 +303,11 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 		expiresAt = &t
 	}
 
-	// Read optional initial body
-	var initialData []byte
-	if r.ContentLength > 0 {
-		var err error
-		initialData, err = io.ReadAll(r.Body)
-		if err != nil {
-			return newHTTPError(http.StatusBadRequest, "failed to read body")
-		}
+	// Read optional initial body through the same operator ceiling as append.
+	// The reader is bounded before allocation even when Content-Length is absent.
+	initialData, err := h.readAppendBody(w, r)
+	if err != nil {
+		return err
 	}
 
 	opts := store.CreateOptions{
@@ -518,6 +535,30 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	isNowOffset := offset.IsNow()
 
 	reader := h.pageReader()
+	var sseLease *sseHubLease
+	if liveMode == "sse" {
+		reader, err = h.ssePageReader()
+		if err != nil {
+			return err
+		}
+		// Registration acknowledgement is the attach-race barrier. It must be
+		// established before the first page captures an incarnation and tail.
+		sseLease = h.acquireSSEHubRegistration(path)
+		if err := sseLease.waitRegistered(r.Context()); err != nil {
+			sseLease.close()
+			return err
+		}
+	} else {
+		// A session belongs only to this HTTP response. SSE live delivery remains
+		// owned by the shared hub and must not acquire response-local planning state.
+		if factory, ok := h.Store.(store.PageReaderSessionFactory); ok {
+			pageSession := factory.NewPageReaderSession(path)
+			if pageSession != nil {
+				reader = pageSession
+				defer pageSession.Close()
+			}
+		}
+	}
 	pageOpts := store.ReadPageOptions{
 		TargetBytes: h.readPageBytes(),
 		MaxFrames:   store.DefaultReadPageFrames,
@@ -526,23 +567,15 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		pageOpts.MaxFrames = limit
 	}
 	if err := r.Context().Err(); err != nil {
+		if sseLease != nil {
+			sseLease.close()
+		}
 		h.observeReadCancellation("before_first_page")
 		return err
 	}
 
 	var liveSubscription store.NotificationSubscription
-	var sseLease *sseHubLease
-	if liveMode == "sse" {
-		// Keep an existing shared hub alive while this client captures its page.
-		// A new hub instead confirms its notification registration first.
-		sseLease = h.acquireExistingSSEHub(path)
-		if sseLease == nil {
-			liveSubscription, _, err = h.subscribeNotifications(r.Context(), path)
-			if err != nil {
-				return err
-			}
-		}
-	} else if liveMode == "long-poll" && isNowOffset {
+	if liveMode == "long-poll" && isNowOffset {
 		// offset=now has no historical page to inspect. Confirm registration
 		// before the authoritative first page and reuse it while blocked.
 		liveSubscription, _, err = h.subscribeNotifications(r.Context(), path)
@@ -564,6 +597,9 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 
 	firstPage, err := reader.ReadPage(r.Context(), path, offset, pageOpts)
 	if err != nil {
+		if sseLease != nil {
+			sseLease.close()
+		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			h.observeReadCancellation("storage")
 		}
@@ -577,43 +613,8 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	}()
 
 	if liveMode == "sse" {
-		if sseLease != nil {
-			if validationErr := sseLease.validateSnapshot(firstPage.Snapshot); validationErr != nil {
-				// The reserved hub belongs to an earlier lifetime. Establish the new
-				// registration before a fresh no-touch page, while fencing that page
-				// to the logical read already performed above.
-				sseLease.close()
-				sseLease = nil
-				ownsSSELease = false
-				var supported bool
-				liveSubscription, supported, err = h.subscribeNotifications(r.Context(), path)
-				if err != nil {
-					return err
-				}
-				if supported {
-					recheckOpts := pageOpts
-					recheckOpts.NoTouch = true
-					fresh, readErr := reader.ReadPage(r.Context(), path, offset, recheckOpts)
-					if readErr != nil {
-						return readPageError(readErr)
-					}
-					if !store.SameReadStream(firstPage.Snapshot, fresh.Snapshot) {
-						releaseReadSnapshot(reader, path, fresh.Snapshot)
-						return readPageError(store.ErrReadSnapshotChanged)
-					}
-					h.observeReadPage(firstPage)
-					releaseReadSnapshot(reader, path, firstPage.Snapshot)
-					firstPage = fresh
-				}
-			}
-		}
 		ct := strings.ToLower(store.ExtractMediaType(firstPage.Snapshot.ContentType))
 		useBase64 := !strings.HasPrefix(ct, "text/") && ct != "application/json"
-		if sseLease == nil {
-			sseLease = h.acquireSSEHub(path, firstPage.Snapshot, useBase64, liveSubscription)
-			liveSubscription = nil
-			ownsSSELease = true
-		}
 		sseOffset := offset
 		if sseOffset.IsNow() {
 			sseOffset = firstPage.Snapshot.Tail
@@ -824,9 +825,9 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 	// Buffer the body before the live claim fence. This keeps a slow request body
 	// from stretching the deposed-holder window; the residual fence-to-append
 	// race is the #169 same-commit fence follow-up.
-	body, err := io.ReadAll(r.Body)
+	body, err := h.readAppendBody(w, r)
 	if err != nil {
-		return newHTTPError(http.StatusBadRequest, "failed to read body")
+		return err
 	}
 
 	// Credential preflight runs before stream store access so an invalid token
@@ -1068,6 +1069,41 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 		w.WriteHeader(http.StatusNoContent)
 	}
 	return nil
+}
+
+func (h *Handler) readAppendBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	limit := h.MaxAppendBytes
+	if limit > 0 && r.ContentLength > limit {
+		h.observeAppendBodyRejected()
+		return nil, newHTTPError(http.StatusRequestEntityTooLarge, "request body exceeds configured append ceiling")
+	}
+	if r.Body == nil || r.ContentLength == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, newHTTPError(http.StatusBadRequest, "failed to read body")
+		}
+		return body, nil
+	}
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			h.observeAppendBodyRejected()
+			return nil, newHTTPError(http.StatusRequestEntityTooLarge, "request body exceeds configured append ceiling")
+		}
+		return nil, newHTTPError(http.StatusBadRequest, "failed to read body")
+	}
+	return body, nil
+}
+
+func (h *Handler) observeAppendBodyRejected() {
+	if h.AppendLimitMetrics != nil {
+		h.AppendLimitMetrics.AppendBodyRejected()
+	}
 }
 
 // handleDelete handles DELETE requests to delete a stream

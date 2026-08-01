@@ -47,6 +47,7 @@ func TestMuxEndpoints(t *testing.T) {
 	// value is observed).
 	p.FanOut(3*time.Millisecond, 4, 12)
 	p.AppendSubscriptionHook(20 * time.Microsecond)
+	p.AppendBodyRejected()
 	p.DirtyEnqueue("enqueued", 1, 1024, time.Millisecond)
 	p.DirtyQueue(1, 1024, time.Millisecond)
 	p.DirtyProcess(4*time.Millisecond, 12, 3, 2, "ok")
@@ -64,7 +65,13 @@ func TestMuxEndpoints(t *testing.T) {
 	p.SSEHubActive(1)
 	p.SSEClientActive(1)
 	p.SSEHubRead(7)
-	p.SSEHubRingBytes(4096)
+	p.SSEHubRingBytes(0, 3072, 1024)
+	p.SSEHubRefresh("hint", 2, 2048, time.Millisecond)
+	p.SSEPage("catchup", 1024)
+	p.SSEWatcherLookup(2, true)
+	p.SSEReason("protocol_reconnect")
+	p.NotificationPhysicalConnection("standalone", 1)
+	p.NotificationEvent("acknowledged")
 	p.SSEClientLagged()
 	p.SSEClientWriteTimeout()
 	p.SSESubscriptionActive(1)
@@ -108,6 +115,7 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_fanout_seconds",
 		"chronicle_fanout_slots_probed",
 		"chronicle_fanout_subs",
+		"chronicle_append_body_rejected_total",
 		"chronicle_append_subscription_hook_seconds",
 		"chronicle_subscription_dirty_enqueues_total",
 		"chronicle_subscription_dirty_queue_depth",
@@ -134,10 +142,23 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_sse_hub_reads_total",
 		"chronicle_sse_hub_messages_total",
 		"chronicle_sse_hub_ring_bytes",
+		"chronicle_sse_hub_ring_raw_bytes",
+		"chronicle_sse_hub_ring_wire_bytes",
+		"chronicle_sse_hub_ring_index_bytes",
+		"chronicle_sse_hub_refreshes_total",
+		"chronicle_sse_hub_refresh_pages_total",
+		"chronicle_sse_hub_refresh_bytes_total",
+		"chronicle_sse_hub_refresh_seconds",
+		"chronicle_sse_pages_total",
+		"chronicle_sse_page_bytes_total",
+		"chronicle_sse_watcher_lookup_steps_total",
+		"chronicle_sse_watcher_lookup_misses_total",
 		"chronicle_sse_lagged_disconnects_total",
 		"chronicle_sse_write_timeouts_total",
 		"chronicle_sse_subscriptions",
+		"chronicle_sse_notification_connections",
 		"chronicle_sse_subscription_events_total",
+		"chronicle_sse_events_total",
 	} {
 		if !strings.Contains(body, name) {
 			t.Errorf("/metrics output missing %q", name)

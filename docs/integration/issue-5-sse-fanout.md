@@ -61,14 +61,13 @@ Delete and recreate must remain terminal for the old request. Check the
 incarnation after hub readiness, on every storage page through
 `ReadSnapshot.Incarnation`, and before live attach.
 
-## Bound hub reads too
+## Bounded hub reads
 
-The fanout branch currently calls `Store.Read` in its initial catch-up and
-`sseHub.refresh`. After the rebase, no hub path may call that compatibility
-method for a stream suffix. `Store.Read` now concatenates bounded pages for
-legacy callers, but it still materializes the complete logical result in Go.
+No initial catch-up or hub refresh calls the compatibility `Store.Read` method
+for a stream suffix. `Store.Read` concatenates bounded pages for legacy callers,
+but it still materializes the complete logical result in Go.
 
-Change each hub refresh to:
+Each hub refresh:
 
 1. Capture one `ReadPage` snapshot at the hub's current offset.
 2. Drain that snapshot page by page.
@@ -84,6 +83,12 @@ This change preserves the fanout branch's main benefit: one durable page read
 and one formatted replay event per stream per replica, shared by all local
 clients. It also prevents a burst of missed notifications from becoming one
 unbounded hub read.
+
+Ordinary non-SSE fork responses may use a response-local Redis reader session
+to reuse their immutable ordered ancestry plan. SSE deliberately does not use
+that session. The hub remains the sole shared live-delivery mechanism, and
+every hub page continues to validate the root and selected source incarnation.
+There is no second hub, global fork cache, or session-owned goroutine.
 
 ## Conflict details
 
@@ -108,6 +113,11 @@ is no initial refresh. A stale-hub replacement page is no-touch because the
 client already performed its logical first read. Later shared hub refreshes
 count as active reads, but persistent and absolute-expiry-only streams still
 perform no read-side write.
+
+The 1 MiB page target remains independent from the size of one indivisible
+frame. Operators can set `--max-append-bytes` to make the oversized-first-frame
+exception finite. The compatible default remains zero. This request ceiling
+does not change page ordering, JSON or binary framing, or the hub replay bound.
 
 ## Combined tests
 

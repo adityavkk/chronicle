@@ -1,0 +1,59 @@
+goroutine profile: total 8
+1 @ 0x1003ccd0c 0x10040b4a4 0x1009f7704 0x1009f7530 0x1009f4d24 0x100a09ae4 0x100a0a354 0x10064ed78 0x100650760 0x10066be80 0x10064d1dc 0x100414234
+#	0x1009f7703	runtime/pprof.writeRuntimeProfile+0xb3	runtime/pprof/pprof.go:851
+#	0x1009f752f	runtime/pprof.writeGoroutine+0x4f	runtime/pprof/pprof.go:784
+#	0x1009f4d23	runtime/pprof.(*Profile).WriteTo+0x143	runtime/pprof/pprof.go:408
+#	0x100a09ae3	net/http/pprof.handler.ServeHTTP+0x413	net/http/pprof/pprof.go:273
+#	0x100a0a353	net/http/pprof.Index+0xa3		net/http/pprof/pprof.go:397
+#	0x10064ed77	net/http.HandlerFunc.ServeHTTP+0x37	net/http/server.go:2286
+#	0x10065075f	net/http.(*ServeMux).ServeHTTP+0x18f	net/http/server.go:2828
+#	0x10066be7f	net/http.serverHandler.ServeHTTP+0xaf	net/http/server.go:3311
+#	0x10064d1db	net/http.(*conn).serve+0x51b		net/http/server.go:2073
+
+1 @ 0x1003d1840 0x10040e9a8 0x10067920c 0x100414234
+#	0x10040e9a7	os/signal.signal_recv+0x107	runtime/sigqueue.go:149
+#	0x10067920b	os/signal.loop+0x1b		os/signal/signal_unix.go:23
+
+1 @ 0x10040c6ec 0x1003d0800 0x10040b900 0x100464428 0x1004655a4 0x100465595 0x100505908 0x100510414 0x100647a38 0x100414234
+#	0x10040b8ff	internal/poll.runtime_pollWait+0x9f		runtime/netpoll.go:351
+#	0x100464427	internal/poll.(*pollDesc).wait+0x27		internal/poll/fd_poll_runtime.go:84
+#	0x1004655a3	internal/poll.(*pollDesc).waitRead+0x233	internal/poll/fd_poll_runtime.go:89
+#	0x100465594	internal/poll.(*FD).Read+0x224			internal/poll/fd_unix.go:165
+#	0x100505907	net.(*netFD).Read+0x27				net/fd_posix.go:68
+#	0x100510413	net.(*conn).Read+0x33				net/net.go:196
+#	0x100647a37	net/http.(*connReader).backgroundRead+0x37	net/http/server.go:702
+
+1 @ 0x10040c6ec 0x1003d0800 0x10040b900 0x100464428 0x1004685d4 0x1004685c5 0x100507008 0x1005184d4 0x1005178dc 0x100652054 0x100651d10 0x100b09ab4 0x100414234
+#	0x10040b8ff	internal/poll.runtime_pollWait+0x9f		runtime/netpoll.go:351
+#	0x100464427	internal/poll.(*pollDesc).wait+0x27		internal/poll/fd_poll_runtime.go:84
+#	0x1004685d3	internal/poll.(*pollDesc).waitRead+0x213	internal/poll/fd_poll_runtime.go:89
+#	0x1004685c4	internal/poll.(*FD).Accept+0x204		internal/poll/fd_unix.go:613
+#	0x100507007	net.(*netFD).accept+0x27			net/fd_unix.go:150
+#	0x1005184d3	net.(*TCPListener).accept+0x23			net/tcpsock_posix.go:159
+#	0x1005178db	net.(*TCPListener).Accept+0x2b			net/tcpsock.go:387
+#	0x100652053	net/http.(*Server).Serve+0x243			net/http/server.go:3434
+#	0x100651d0f	net/http.(*Server).ListenAndServe+0x7f		net/http/server.go:3360
+#	0x100b09ab3	main.run.func4+0x23				gecgithub01.walmart.com/auk000v/chronicle/cmd/chronicle/main.go:428
+
+1 @ 0x10040c6ec 0x1003d0800 0x10040b900 0x100464428 0x1004685d4 0x1004685c5 0x100507008 0x1005184d4 0x1005178dc 0x100652054 0x100651d10 0x100b09b48 0x100414234
+#	0x10040b8ff	internal/poll.runtime_pollWait+0x9f		runtime/netpoll.go:351
+#	0x100464427	internal/poll.(*pollDesc).wait+0x27		internal/poll/fd_poll_runtime.go:84
+#	0x1004685d3	internal/poll.(*pollDesc).waitRead+0x213	internal/poll/fd_poll_runtime.go:89
+#	0x1004685c4	internal/poll.(*FD).Accept+0x204		internal/poll/fd_unix.go:613
+#	0x100507007	net.(*netFD).accept+0x27			net/fd_unix.go:150
+#	0x1005184d3	net.(*TCPListener).accept+0x23			net/tcpsock_posix.go:159
+#	0x1005178db	net.(*TCPListener).Accept+0x2b			net/tcpsock.go:387
+#	0x100652053	net/http.(*Server).Serve+0x243			net/http/server.go:3434
+#	0x100651d0f	net/http.(*Server).ListenAndServe+0x7f		net/http/server.go:3360
+#	0x100b09b47	main.run.func3+0x27				gecgithub01.walmart.com/auk000v/chronicle/cmd/chronicle/main.go:349
+
+1 @ 0x10040c6ec 0x1003eac5c 0x100678d54 0x100414234
+#	0x100678d53	os/signal.NotifyContext.func1+0x73	os/signal/signal.go:292
+
+1 @ 0x10040c6ec 0x1003eac5c 0x1009bec7c 0x100414234
+#	0x1009bec7b	gecgithub01.walmart.com/auk000v/chronicle/store/redis.(*notificationActor).run+0xcb	gecgithub01.walmart.com/auk000v/chronicle/store/redis/notify_mux.go:188
+
+1 @ 0x10040c6ec 0x1003eac5c 0x100b093d0 0x100b07b8c 0x1003d6f54 0x100414234
+#	0x100b093cf	main.run+0x17cf		gecgithub01.walmart.com/auk000v/chronicle/cmd/chronicle/main.go:442
+#	0x100b07b8b	main.main+0x1b		gecgithub01.walmart.com/auk000v/chronicle/cmd/chronicle/main.go:201
+#	0x1003d6f53	runtime.main+0x2b3	runtime/proc.go:290

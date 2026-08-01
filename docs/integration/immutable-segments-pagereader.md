@@ -49,6 +49,13 @@ subscribe-then-recheck path. Every discarded poll or race-recheck page is
 released through `PageSnapshotReleaser`, including its nested primary snapshot
 and manifest pin.
 
+The Redis primary's response-local fork-plan session is intentionally not
+lifted through the segment wrapper. The wrapper already owns a response-local
+manifest lease and primary snapshot, and every continuation must preserve that
+exact ordering. Direct Redis, non-SSE responses may use the optional session;
+segment-backed responses and SSE continue through their existing single
+bounded reader. This avoids a second cache or lifetime owner.
+
 ## First page
 
 After any live registration, the first page performs these operations:

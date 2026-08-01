@@ -36,6 +36,17 @@ func (h *Handler) pageReader() store.PageReader {
 	return legacyPageReader{store: h.Store}
 }
 
+func (h *Handler) ssePageReader() (store.PageReader, error) {
+	reader, ok := h.Store.(store.PageReader)
+	if !ok {
+		return nil, newHTTPError(
+			http.StatusInternalServerError,
+			"SSE requires a store.PageReader backend",
+		)
+	}
+	return reader, nil
+}
+
 func (h *Handler) captureReadSnapshot(
 	ctx context.Context,
 	path string,
@@ -315,6 +326,7 @@ func (h *Handler) waitForPage(
 		return store.ReadWaitResult{}, err
 	}
 	if !store.SameReadStream(initial, page.Snapshot) {
+		releaseReadSnapshot(reader, path, page.Snapshot)
 		return store.ReadWaitResult{}, store.ErrReadSnapshotChanged
 	}
 	return store.ReadWaitResult{Page: page, TimedOut: timedOut}, nil

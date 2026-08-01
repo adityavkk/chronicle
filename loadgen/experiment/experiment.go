@@ -53,6 +53,11 @@ type SUT struct {
 	Memory       string `yaml:"memory"`
 	// ReadPageBytes is the returned payload target for a catch-up storage page.
 	ReadPageBytes int `yaml:"read_page_bytes"`
+	// ReadPageLabel is derived for stable, unambiguous result directories.
+	ReadPageLabel string `yaml:"-"`
+	// MaxAppendBytes is the finite HTTP body bound used by production evidence.
+	// Zero leaves the server's protocol-compatible default disabled.
+	MaxAppendBytes int64 `yaml:"max_append_bytes"`
 	// Consistency / WaitReplicas / WaitTimeoutMs are the tunable-consistency tier
 	// (issue #16) injected as CHRONICLE_CONSISTENCY_TIER / _WAIT_REPLICAS /
 	// _WAIT_TIMEOUT_MS. Empty Consistency renders "" => chronicle defaults to Tier A
@@ -138,6 +143,9 @@ func (s Spec) validate() error {
 	if s.LoadgenImage == "" {
 		return fmt.Errorf("loadgen_image is required (the image carrying the sweepscale binary)")
 	}
+	if s.SUT.MaxAppendBytes < 0 {
+		return fmt.Errorf("sut.max_append_bytes must be non-negative")
+	}
 	if s.Catchup == nil {
 		if _, err := s.Workload.Prepared(); err != nil {
 			return fmt.Errorf("workload: %w", err)
@@ -220,6 +228,7 @@ type Rendered struct {
 
 // Render produces the SUT manifest, the load-job manifest, and the Terraform vars.
 func (s Spec) Render() (Rendered, error) {
+	s.SUT.ReadPageLabel = readPageLabel(s.SUT.ReadPageBytes)
 	if redisURL, err := url.Parse(s.SUT.RedisURL); err == nil {
 		s.SUT.RedisAddress = redisURL.Host
 	}
@@ -236,6 +245,16 @@ func (s Spec) Render() (Rendered, error) {
 		return Rendered{}, fmt.Errorf("tfvars: %w", err)
 	}
 	return Rendered{SUTManifest: sut, JobManifest: job, TFVars: tf}, nil
+}
+
+func readPageLabel(size int) string {
+	if size > 0 && size%(1<<20) == 0 {
+		return fmt.Sprintf("%dm", size/(1<<20))
+	}
+	if size > 0 && size%(1<<10) == 0 {
+		return fmt.Sprintf("%dk", size/(1<<10))
+	}
+	return fmt.Sprintf("%db", size)
 }
 
 func render(tmpl string, s Spec) (string, error) {

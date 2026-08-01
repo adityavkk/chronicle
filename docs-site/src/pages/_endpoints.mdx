@@ -285,6 +285,14 @@ import Aside from "../components/Aside.astro";
   (16 bytes), with end offsets `0_13` and `0_29`, so the tail advances to
   `0_29`.
 
+  <Callout icon="info" label="Optional append ceiling">
+    `--max-append-bytes` applies to this body and to a `PUT` body that creates
+    initial data. A declared excess body returns **413** before allocation or
+    store access; a chunked or HTTP/2 body is bounded while Chronicle reads it.
+    Zero keeps the compatible unlimited HTTP policy. The ceiling controls one
+    indivisible frame, not the returned page target.
+  </Callout>
+
   <Diagram
     name="seq-append"
     label="POST, append"
@@ -484,6 +492,14 @@ import Aside from "../components/Aside.astro";
     the separate source metadata and script work required across Redis slots.
   </Callout>
 
+  <Callout icon="info" label="Fork plan lifetime">
+    A direct Redis, non-SSE response can reuse its ordered fork plan between
+    pages. It still executes the root script on every page and the selected
+    source script with the captured source incarnation. Missing or recreated
+    ancestors fail loudly. A new response rebuilds the plan; SSE stays on the
+    shared hub and notification multiplexer.
+  </Callout>
+
   <Complexity
     time="O(log N + M) per storage page"
     space="O(M), one bounded storage page"
@@ -565,9 +581,10 @@ import Aside from "../components/Aside.astro";
 
   `GET {stream-url}?offset=<offset>&live=sse` keeps a Server-Sent Events
   stream open and pushes each batch as it arrives.[^sse] The handler flushes
-  the SSE headers, catches the client up from durable storage, then attaches it
-  to the stream's shared fanout hub. Every 60 seconds it cycles the connection
-  so a CDN can collapse concurrent tails.
+  the SSE headers, catches the client up from one exact durable tail snapshot,
+  then attaches it to the stream's shared fanout hub at the last control offset
+  it flushed. Every 60 seconds it cycles the connection so a CDN can collapse
+  concurrent tails.
 
   ```http title="SSE tail"
   GET /v1/stream/chat?offset=now&live=sse HTTP/1.1
@@ -593,13 +610,12 @@ import Aside from "../components/Aside.astro";
     script="—  handler + shared hub"
     source="handler_sse.go · sse_hub.go"
     steps={[
-      { cmd: "authorize + parse", does: "Authorize the path, validate offset and cursor state, require the SSE live mode, and choose text, JSON, or base64 event framing.", loc: "handler.go:445", kind: "flow" },
-      { cmd: "reserve or SUBSCRIBE", key: "ds:notify:{p}", does: "Reserve an existing compatible hub before the client page, or confirm a new notification subscription before reading durable state.", loc: "handler.go", kind: "read" },
-      { cmd: "ReadPage", key: "client first page", does: "Capture one typed page after registration. It supplies content type, tail, closure, incarnation, next offset, and first catch-up frames. A new hub is seeded from this same page and takes ownership of the confirmed subscription.", loc: "handler.go", kind: "read" },
-      { cmd: "hub ready", key: "exact stream lifetime", does: "A pre-registered new hub needs no duplicate empty no-touch refresh. A concurrent creator closes the redundant subscription and reuses the compatible hub. An old-incarnation reservation is replaced behind a fresh registration and no-touch incarnation fence.", loc: "sse_hub.go", kind: "flow" },
-      { cmd: "reuse first page", key: "client catch-up", does: "The handler emits the first page it already owns, then continuation pages under the same snapshot. It performs no extra initial bounded read and no metadata reload after catch-up.", loc: "handler_sse.go:103", kind: "read" },
-      { cmd: "shared live ReadPage", key: "bounded replay", does: "After each wake, the hub performs one logical durable refresh for all local clients, formats one immutable event, and retains it in the bounded replay window. A sliding TTL renews once per hub refresh. Persistent and absolute-expiry-only streams remain read-only.", loc: "sse_hub.go:505", kind: "read" },
-      { cmd: "write data + control", does: "Write each shared data event, then a client control event with the next durable offset and cursor. A final closed control ends the connection without reconnect.", loc: "handler_sse.go", kind: "flow" },
+      { cmd: "register + acknowledge", key: "ds:notify:{p}", does: "Create or reuse a provisional hub and register its logical channel with the store-owned multiplexer. The current physical connection generation must acknowledge the channel before storage captures the stream lifetime.", loc: "handler.go:505", kind: "flow" },
+      { cmd: "ReadPage", key: "client first page", does: "Capture the content type, exact tail, closure, incarnation, next offset, and first catch-up frames only after registration is ready. SSE requires <code>PageReader</code> and never falls back to <code>Store.Read</code>.", loc: "handler.go:526", kind: "read" },
+      { cmd: "initialize + ready", key: "authoritative first page", does: "Bind the provisional hub to the captured lifetime and report the first confirmed notification generation ready from that page. Do not reread the same offset for initial readiness.", loc: "sse_hub.go:413", kind: "flow" },
+      { cmd: "page + flush control", key: "client catch-up", does: "Emit the first page already held, then continuation pages under the same snapshot. Put each data and control flush under the client write deadline. Advance the attach offset only after the control flush succeeds.", loc: "handler_sse.go:105", kind: "read" },
+      { cmd: "confirm + indexed attach", key: "exact controlled offset", does: "Confirm the durable stream identity with one no-touch page, then find the exact controlled offset by sequence and boundary index. If the lifetime changed or replay eviction removed the boundary after headers were committed, abort the transport without appending an HTTP error payload; the client resumes instead of skipping ahead.", loc: "handler_sse.go:193", kind: "flow" },
+      { cmd: "shared live ReadPage", key: "bounded replay", does: "After each append or close hint, or a defensive poll, one hub pages through one captured tail for all local clients, formats one immutable event, and retains wire bytes plus a boundary index. Those ordinary reads preserve access-touch semantics. A reconnect generation instead forces an immediate no-touch durable refresh.", loc: "sse_hub.go:574", kind: "read" },
       { cmd: "every 60 s, return", does: "Cycle the connection so a CDN can collapse concurrent tails. The client reconnects from the last <code>streamNextOffset</code> it received.", loc: "handler_sse.go:203", kind: "flow" },
     ]}
   />
@@ -619,7 +635,7 @@ import Aside from "../components/Aside.astro";
   <Complexity
     time="live reads O(S·R) · socket writes O(C)"
     space="O(S·B + C)"
-    why="One hub refresh reads each active stream once on each serving Chronicle replica, then every client still receives its own socket write. <strong>S</strong> is active streams, <strong>R</strong> is serving replicas, <strong>C</strong> is clients, and <strong>B</strong> is the configured replay bound. Initial client catch-up remains one durable read path per client."
+    why="One hub refresh reads each active stream once on each serving Chronicle replica, then every client still receives its own socket write. One store-owned Pub/Sub connection carries all logical stream registrations by default. <strong>S</strong> is active streams, <strong>R</strong> is serving replicas, <strong>C</strong> is clients, and <strong>B</strong> is the configured replay bound. Initial client catch-up remains one durable read path per client."
   />
 </section>
 

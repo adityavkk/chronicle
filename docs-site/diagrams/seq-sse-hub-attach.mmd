@@ -3,20 +3,27 @@ sequenceDiagram
     participant C as SSE client
     participant H as HTTP handler
     participant F as stream fanout hub
+    participant M as notification multiplexer
+    participant S as PageReader
     participant R as Redis
     C->>H: GET offset and live=sse
-    H->>H: authorize · parse offset and cursor · choose event encoding
-    H->>F: reserve existing hub or prepare a new one
-    F->>R: SUBSCRIBE and confirm for a new hub
-    H->>R: atomic first bounded page after registration
-    H->>F: seed hub tail and incarnation from that page
-    F-->>H: hub ready without an attach reread
-    H->>R: continue catch-up to the fixed page tail
-    H-->>C: data then control offset
-    H->>F: attach watcher at sent offset
+    H->>F: acquire provisional stream hub
+    F->>M: register logical channel
+    M->>R: SUBSCRIBE on one physical connection
+    R-->>M: acknowledge current generation
+    M-->>F: registration ready
+    H->>S: first ReadPage captures incarnation and exact tail
+    H->>F: initialize with captured stream lifetime
+    F-->>H: hub ready from first page · no readiness reread
+    loop pages to captured tail
+        H->>S: continuation ReadPage with same snapshot
+        H-->>C: data then control offset under write deadline
+    end
+    H->>S: no-touch stream identity confirmation
+    H->>F: indexed attach at last flushed control offset
     Note over H,F: no gap between catch-up and live delivery
-    R-->>F: append wake hint
-    F->>R: read new durable suffix once
+    R-->>M: append wake hint
+    M-->>F: coalesced nonblocking wake
+    F->>S: page one new durable tail once
     F-->>H: shared immutable data event
     H-->>C: shared data then client control
-    Note over C,H: the client persists only complete control offsets for resume

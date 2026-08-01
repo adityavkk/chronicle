@@ -27,8 +27,10 @@ const (
 	EnvLongPollTimeout       = "CHRONICLE_LONG_POLL_TIMEOUT"
 	EnvSSEReconnectInterval  = "CHRONICLE_SSE_RECONNECT_INTERVAL"
 	EnvReadPageBytes         = "CHRONICLE_READ_PAGE_BYTES"
+	EnvMaxAppendBytes        = "CHRONICLE_MAX_APPEND_BYTES"
 	EnvSSEHubReplayBytes     = "CHRONICLE_SSE_HUB_REPLAY_BYTES"
 	EnvSSEHubBatchBytes      = "CHRONICLE_SSE_HUB_BATCH_BYTES"
+	EnvSSENotificationGroups = "CHRONICLE_SSE_NOTIFICATION_CONNECTIONS"
 	EnvSSEClientWriteTimeout = "CHRONICLE_SSE_CLIENT_WRITE_TIMEOUT"
 	EnvPublicURL             = "CHRONICLE_PUBLIC_URL"
 	EnvSubscriptions         = "CHRONICLE_SUBSCRIPTIONS"
@@ -129,6 +131,10 @@ type Config struct {
 	// The default is 1 MiB. One valid frame may exceed the target.
 	ReadPageBytes int
 
+	// MaxAppendBytes bounds an HTTP create or append body before it is buffered.
+	// Zero keeps the Durable Streams protocol's existing unlimited behavior.
+	MaxAppendBytes int64
+
 	// SSEHubReplayBytes bounds each active stream's shared live replay window.
 	// Clients that fall behind reconnect from their last durable offset.
 	SSEHubReplayBytes int
@@ -136,6 +142,10 @@ type Config struct {
 	// SSEHubBatchBytes is the target retained size of one shared SSE event.
 	// A single message may exceed it because Chronicle never splits a message.
 	SSEHubBatchBytes int
+
+	// SSENotificationGroups bounds the physical Redis Pub/Sub connections used
+	// by the store-owned SSE notification multiplexer. The default is one.
+	SSENotificationGroups int
 
 	// SSEClientWriteTimeout bounds one shared event flush to one SSE client.
 	SSEClientWriteTimeout time.Duration
@@ -298,8 +308,10 @@ func DefaultConfig() Config {
 		LongPollTimeout:       30 * time.Second,
 		SSEReconnectInterval:  60 * time.Second,
 		ReadPageBytes:         1 << 20,
+		MaxAppendBytes:        0,
 		SSEHubReplayBytes:     defaultSSEHubReplayBytes,
 		SSEHubBatchBytes:      defaultSSEHubBatchBytes,
+		SSENotificationGroups: 1,
 		SSEClientWriteTimeout: defaultSSEWriteTimeout,
 		PublicBaseURL:         "http://localhost:4437",
 		Subscriptions:         true,
@@ -386,6 +398,13 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 		}
 		c.ReadPageBytes = n
 	}
+	if v, ok := lookup(EnvMaxAppendBytes); ok {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			return fmt.Errorf("%s: must be a non-negative integer", EnvMaxAppendBytes)
+		}
+		c.MaxAppendBytes = n
+	}
 	if v, ok := lookup(EnvSSEHubReplayBytes); ok {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
@@ -399,6 +418,13 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: must be a positive integer", EnvSSEHubBatchBytes)
 		}
 		c.SSEHubBatchBytes = n
+	}
+	if v, ok := lookup(EnvSSENotificationGroups); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("%s: must be a positive integer", EnvSSENotificationGroups)
+		}
+		c.SSENotificationGroups = n
 	}
 	if v, ok := lookup(EnvSSEClientWriteTimeout); ok {
 		d, err := time.ParseDuration(v)

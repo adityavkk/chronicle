@@ -67,8 +67,10 @@ Flags take precedence over environment variables; both over defaults.
 | `--long-poll-timeout` | `CHRONICLE_LONG_POLL_TIMEOUT` | `30s` | How long `live=long-poll` waits before `204` |
 | `--sse-reconnect-interval` | `CHRONICLE_SSE_RECONNECT_INTERVAL` | `60s` | SSE connection cycling (enables CDN collapsing) |
 | `--read-page-bytes` | `CHRONICLE_READ_PAGE_BYTES` | `1048576` | Returned payload target for each HTTP and SSE catch-up storage page. One valid frame may exceed it |
+| `--max-append-bytes` | `CHRONICLE_MAX_APPEND_BYTES` | `0` | Maximum create-with-data or append body bytes; `0` preserves the unlimited HTTP policy. An excess body returns `413` |
 | `--sse-hub-replay-bytes` | `CHRONICLE_SSE_HUB_REPLAY_BYTES` | `1048576` | Replay memory retained for each active stream's shared SSE hub |
 | `--sse-hub-batch-bytes` | `CHRONICLE_SSE_HUB_BATCH_BYTES` | `262144` | Target retained bytes in one shared live SSE data event |
+| `--sse-notification-connections` | `CHRONICLE_SSE_NOTIFICATION_CONNECTIONS` | `1` | Maximum store-owned Redis Pub/Sub connections for SSE stream notifications |
 | `--sse-client-write-timeout` | `CHRONICLE_SSE_CLIENT_WRITE_TIMEOUT` | `10s` | Maximum time allowed to flush one SSE data-and-control update to one client |
 | `--metrics-listen` | `CHRONICLE_METRICS_LISTEN` | _(empty)_ | Separate listener for `/metrics`, `/healthz`, and `/readyz` |
 | `--metrics-pprof` | `CHRONICLE_METRICS_PPROF` | `false` | Expose Go profiles under `/debug/pprof/` on the observability listener |
@@ -94,11 +96,29 @@ and at most 1,024 frames. Chronicle never splits a durable frame, so an
 oversized first frame can exceed the byte target. Smaller pages lower
 per-reader memory use but add Redis round trips.
 
+The page target is not a maximum message size. Operators that require a finite
+bound for the indivisible oversized-first-frame exception can set
+`--max-append-bytes`. Chronicle applies that ceiling before buffering either a
+create body or append body. For Redis deployments, the configured value plus
+Chronicle's stored-frame prefix must fit `proto-max-bulk-len`; startup validates
+that relationship when the managed service permits `CONFIG GET`.
+
 Each Chronicle replica keeps one live SSE hub for each stream with connected
-clients. The hub holds one Redis notification subscription, reads each append
-once, and shares one formatted data event with local clients. Redis Pub/Sub is a
-wake hint. The hub rereads durable state every second, so a lost notification
-does not lose data and an active live reader renews a positive sliding TTL.
+clients. The Redis store multiplexes all logical stream registrations over one
+physical Pub/Sub connection by default. The same default uses Redis global
+Pub/Sub for the supported cluster topology. Set
+`--sse-notification-connections` above one only when notification actor load
+requires parallel connection groups. Each extra group can open one more
+physical Redis connection.
+
+The hub reads each append once and shares one formatted data event with local
+clients. Redis Pub/Sub is a wake hint. The hub rereads durable state every
+second, so a lost notification does not lose data and an active live reader
+renews a positive sliding TTL. A reconnect restores every desired channel and
+wakes each hub for an immediate durable no-touch refresh. The first confirmed
+notification generation starts from the register-first authoritative page
+without a duplicate readiness read; exact attach still performs a final
+bounded no-touch incarnation confirmation.
 
 Each client holds one coalesced wake signal, not a payload queue. The replay
 limit applies after a client reaches the live tail. A client that falls behind
@@ -108,9 +128,13 @@ received. Batches are split by retained message plus formatted-event bytes, and
 the batch target cannot exceed the replay limit. Chronicle never splits one
 durable message, so one message may exceed both byte targets.
 
-`/metrics` reports active hubs, clients, Redis subscriptions, shared reads,
-retained ring bytes, lagged disconnects, write timeouts, and subscription
-lifecycle events through the `chronicle_sse_*` metrics.
+`/metrics` reports logical registrations in `chronicle_sse_subscriptions` and
+physical connections in `chronicle_sse_notification_connections{topology}`.
+It also reports active hubs and clients, bounded refresh pages and bytes,
+catch-up and confirmation pages, exact raw, wire, index, and total ring bytes,
+indexed lookup work and misses, lagged disconnects, write timeouts, lifecycle
+events, and bounded recovery reasons through the `chronicle_sse_*` metrics.
+No SSE metric uses a stream path label.
 
 Runtime profiling is opt-in and requires `--metrics-listen`. Bind that listener
 only on a protected network: pprof data can reveal process internals, and block

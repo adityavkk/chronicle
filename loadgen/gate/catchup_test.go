@@ -22,8 +22,9 @@ func completeCatchupResult(completions int64) *run.Result {
 			},
 		},
 		Counters: map[string]int64{
-			"catchup_ok":    completions,
-			"catchup_bytes": completions * responseBytes,
+			"catchup_ok":           completions,
+			"catchup_integrity_ok": completions,
+			"catchup_bytes":        completions * responseBytes,
 		},
 		Metrics: map[string]stats.Quantiles{
 			string(stats.CatchupTTFB):  {Count: completions},
@@ -65,6 +66,15 @@ func TestCheckCatchupRejectsPartialBodyDespiteSuccessfulCount(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 	t.Logf("partial-body rejection: %v", err)
+}
+
+func TestCheckCatchupRejectsUnverifiedBodyIntegrity(t *testing.T) {
+	result := completeCatchupResult(8)
+	result.Counters["catchup_integrity_ok"] = 7
+	_, err := CheckCatchup(result, CatchupSLO{MinCompletions: 8})
+	if err == nil || !strings.Contains(err.Error(), "integrity completions 7") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 func TestCheckCatchupRejectsMissingTelemetry(t *testing.T) {

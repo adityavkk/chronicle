@@ -204,6 +204,21 @@ type PageReader interface {
 	ReadPage(ctx context.Context, path string, offset Offset, opts ReadPageOptions) (ReadPage, error)
 }
 
+// PageReaderSession is a response-local PageReader. Implementations may retain
+// an immutable fork plan between serial pages, but must still validate every
+// root and source incarnation on each storage access. It is never a global
+// cache or a live-delivery hub.
+type PageReaderSession interface {
+	PageReader
+	Close()
+}
+
+// PageReaderSessionFactory is an optional capability for multi-page HTTP
+// catch-up. Existing PageReader implementations remain source compatible.
+type PageReaderSessionFactory interface {
+	NewPageReaderSession(path string) PageReaderSession
+}
+
 // ReadWaitResult is the durable state observed when a long-poll wakes or
 // times out. Page is authoritative for response headers in either case.
 type ReadWaitResult struct {

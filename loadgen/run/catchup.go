@@ -2,8 +2,10 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,6 +49,7 @@ func (r *runner) catchupReader(ctx context.Context, wg *sync.WaitGroup, reader i
 		// reader-to-stream assignment can leave half the configured working set
 		// untouched when reader and stream counts differ.
 		stream := r.sc.StreamName((reader + attempt) % r.sc.Streams.Count)
+		expectedDigest := r.expectedCatchupDigest(stream)
 		attempt++
 		sendStart := time.Now()
 		eligible := r.measurementIncludes(sendStart)
@@ -55,21 +58,31 @@ func (r *runner) catchupReader(ctx context.Context, wg *sync.WaitGroup, reader i
 		cancel()
 		sec := r.sec()
 		r.col.Series.Add("catchup_sent", sec, 1)
-		r.recordCatchup(rec, resp, err, 0, sec, eligible)
+		r.recordCatchup(rec, resp, err, expectedDigest, 0, sec, eligible)
 	}
+}
+
+func (r *runner) expectedCatchupDigest(stream string) string {
+	if r.sc.Writers.PerStream > 0 && !r.sc.Writers.Rate.IsZero() {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.catchupSHA[stream]
 }
 
 func (r *runner) recordCatchup(
 	rec *stats.Recorder,
 	resp dsclient.Response,
 	err error,
+	expectedDigest string,
 	scheduleDelay time.Duration,
 	sec int,
 	eligible bool,
 ) {
 	var protocolErr error
 	if err == nil && resp.Status == 200 {
-		protocolErr = validateCatchupResponse(resp)
+		protocolErr = validateCatchupResponse(resp, expectedDigest)
 	}
 	switch {
 	case err != nil:
@@ -83,6 +96,14 @@ func (r *runner) recordCatchup(
 		rec.RecordEligible(eligible, stats.CatchupTotal, scheduleDelay+resp.Total)
 		rec.CountEligible(eligible, "catchup_ok", 1)
 		rec.CountEligible(eligible, "catchup_bytes", resp.BodyBytes)
+		// responseCountFrom reaches this point only after io.Copy has consumed the
+		// complete response body and computed its SHA-256. This remains meaningful
+		// under mixed writes, where the captured tail can legitimately differ on
+		// every request and therefore has no static pre-run digest.
+		rec.CountEligible(eligible, "catchup_body_read_ok", 1)
+		if expectedDigest != "" {
+			rec.CountEligible(eligible, "catchup_integrity_ok", 1)
+		}
 		r.col.Series.Add("catchup_ok", sec, 1)
 		r.col.Series.Add("catchup_bytes", sec, resp.BodyBytes)
 	default:
@@ -117,6 +138,7 @@ func (r *runner) catchupLoop(ctx context.Context, wg *sync.WaitGroup) {
 			continue
 		}
 		stream := sc.StreamName(rnd.Intn(sc.Streams.Count))
+		expectedDigest := r.expectedCatchupDigest(stream)
 		inFlight.Add(1)
 		go func() {
 			defer func() { <-r.catchupSem; inFlight.Done() }()
@@ -127,17 +149,23 @@ func (r *runner) catchupLoop(ctx context.Context, wg *sync.WaitGroup) {
 			schedDelay := sendStart.Sub(intended)
 			sec := r.sec()
 			r.col.Series.Add("catchup_sent", sec, 1)
-			r.recordCatchup(rec, resp, err, schedDelay, sec, eligible)
+			r.recordCatchup(rec, resp, err, expectedDigest, schedDelay, sec, eligible)
 		}()
 	}
 }
 
-func validateCatchupResponse(resp dsclient.Response) error {
+func validateCatchupResponse(resp dsclient.Response, expectedDigest string) error {
 	if resp.NextOffset == "" {
 		return fmt.Errorf("missing %s", dsclient.HeaderNextOffset)
 	}
 	if !resp.UpToDate {
 		return fmt.Errorf("missing or false %s", dsclient.HeaderUpToDate)
+	}
+	if resp.BodySHA256 == "" {
+		return errors.New("missing completed-body SHA-256")
+	}
+	if expectedDigest != "" && !strings.EqualFold(resp.BodySHA256, expectedDigest) {
+		return fmt.Errorf("catch-up body SHA-256 %q does not match expected %q", resp.BodySHA256, expectedDigest)
 	}
 	return nil
 }

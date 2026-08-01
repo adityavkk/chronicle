@@ -52,6 +52,7 @@ type Prometheus struct {
 	fanoutSlotsProbed prometheus.Histogram
 	fanoutSubs        prometheus.Histogram
 	appendHookSeconds prometheus.Histogram
+	appendRejected    prometheus.Counter
 	dirtyEnqueues     *prometheus.CounterVec
 	dirtyDepth        prometheus.Gauge
 	dirtyCapacity     prometheus.Gauge
@@ -73,15 +74,28 @@ type Prometheus struct {
 	claimContention   *prometheus.CounterVec
 	durabilityShort   *prometheus.CounterVec
 
-	sseHubs               prometheus.Gauge
-	sseClients            prometheus.Gauge
-	sseHubReads           prometheus.Counter
-	sseHubMessages        prometheus.Counter
-	sseHubRingBytes       prometheus.Gauge
-	sseLaggedDisconnects  prometheus.Counter
-	sseWriteTimeouts      prometheus.Counter
-	sseSubscriptions      prometheus.Gauge
-	sseSubscriptionEvents *prometheus.CounterVec
+	sseHubs                prometheus.Gauge
+	sseClients             prometheus.Gauge
+	sseHubReads            prometheus.Counter
+	sseHubMessages         prometheus.Counter
+	sseHubRingBytes        prometheus.Gauge
+	sseHubRingRawBytes     prometheus.Gauge
+	sseHubRingWireBytes    prometheus.Gauge
+	sseHubRingIndexBytes   prometheus.Gauge
+	sseHubRefreshes        *prometheus.CounterVec
+	sseHubRefreshPages     *prometheus.CounterVec
+	sseHubRefreshBytes     *prometheus.CounterVec
+	sseHubRefreshSeconds   *prometheus.HistogramVec
+	ssePages               *prometheus.CounterVec
+	ssePageBytes           *prometheus.CounterVec
+	sseWatcherLookupSteps  prometheus.Counter
+	sseWatcherLookupMisses prometheus.Counter
+	sseLaggedDisconnects   prometheus.Counter
+	sseWriteTimeouts       prometheus.Counter
+	sseSubscriptions       prometheus.Gauge
+	ssePhysicalConnections *prometheus.GaugeVec
+	sseSubscriptionEvents  *prometheus.CounterVec
+	sseReasons             *prometheus.CounterVec
 }
 
 // SegmentStatsSource is implemented by the feature-gated immutable read plane.
@@ -90,10 +104,11 @@ type SegmentStatsSource interface {
 }
 
 var (
-	_ webhook.Metrics         = (*Prometheus)(nil)
-	_ chronicle.AppendMetrics = (*Prometheus)(nil)
-	_ chronicle.ReadMetrics   = (*Prometheus)(nil)
-	_ chronicle.SSEMetrics    = (*Prometheus)(nil)
+	_ webhook.Metrics              = (*Prometheus)(nil)
+	_ chronicle.AppendMetrics      = (*Prometheus)(nil)
+	_ chronicle.AppendLimitMetrics = (*Prometheus)(nil)
+	_ chronicle.ReadMetrics        = (*Prometheus)(nil)
+	_ chronicle.SSEMetrics         = (*Prometheus)(nil)
 )
 
 // New builds a Prometheus recorder with its own registry, including the standard
@@ -204,6 +219,10 @@ func New() *Prometheus {
 			Help:    "Wall time from a successful append commit through all synchronous subscription hook work before the HTTP response.",
 			Buckets: prometheus.ExponentialBuckets(0.000001, 2, 20),
 		}),
+		appendRejected: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_append_body_rejected_total",
+			Help: "Create and append request bodies rejected by the configured byte ceiling.",
+		}),
 		dirtyEnqueues: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_subscription_dirty_enqueues_total",
 			Help: "Committed append dirty-handoff outcomes by bounded result.",
@@ -307,7 +326,52 @@ func New() *Prometheus {
 		}),
 		sseHubRingBytes: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "chronicle_sse_hub_ring_bytes",
-			Help: "Approximate bytes retained in all shared SSE replay rings on this replica.",
+			Help: "Exact raw plus wire plus boundary-index bytes retained in all shared SSE replay rings on this replica.",
+		}),
+		sseHubRingRawBytes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "chronicle_sse_hub_ring_raw_bytes",
+			Help: "Raw payload bytes retained in shared SSE replay rings on this replica.",
+		}),
+		sseHubRingWireBytes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "chronicle_sse_hub_ring_wire_bytes",
+			Help: "Formatted SSE wire bytes retained in shared replay rings on this replica.",
+		}),
+		sseHubRingIndexBytes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "chronicle_sse_hub_ring_index_bytes",
+			Help: "Offset-boundary index bytes retained in shared SSE replay rings on this replica.",
+		}),
+		sseHubRefreshes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_sse_hub_refreshes_total",
+			Help: "Bounded durable SSE hub refreshes by cause.",
+		}, []string{"cause"}),
+		sseHubRefreshPages: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_sse_hub_refresh_pages_total",
+			Help: "Storage pages consumed by bounded SSE hub refreshes, by cause.",
+		}, []string{"cause"}),
+		sseHubRefreshBytes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_sse_hub_refresh_bytes_total",
+			Help: "Payload bytes consumed by bounded SSE hub refreshes, by cause.",
+		}, []string{"cause"}),
+		sseHubRefreshSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "chronicle_sse_hub_refresh_seconds",
+			Help:    "Duration of one exact-tail SSE hub refresh, by cause.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"cause"}),
+		ssePages: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_sse_pages_total",
+			Help: "Bounded SSE storage pages by phase (catchup or confirm).",
+		}, []string{"phase"}),
+		ssePageBytes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_sse_page_bytes_total",
+			Help: "Returned payload bytes from bounded SSE storage pages by phase.",
+		}, []string{"phase"}),
+		sseWatcherLookupSteps: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_sse_watcher_lookup_steps_total",
+			Help: "Indexed replay-boundary comparisons performed by watcher lookup.",
+		}),
+		sseWatcherLookupMisses: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_sse_watcher_lookup_misses_total",
+			Help: "Exact replay boundaries absent from the retained indexed ring.",
 		}),
 		sseLaggedDisconnects: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "chronicle_sse_lagged_disconnects_total",
@@ -319,8 +383,16 @@ func New() *Prometheus {
 		}),
 		sseSubscriptions: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "chronicle_sse_subscriptions",
-			Help: "Active shared Redis notification subscriptions on this Chronicle replica.",
+			Help: "Active logical stream notification registrations on this Chronicle replica.",
 		}),
+		ssePhysicalConnections: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "chronicle_sse_notification_connections",
+			Help: "Physical Redis Pub/Sub connections owned by the SSE notification multiplexer, by bounded topology.",
+		}, []string{"topology"}),
+		sseReasons: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_sse_events_total",
+			Help: "Bounded SSE recovery and disconnect events by reason.",
+		}, []string{"reason"}),
 		sseSubscriptionEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_sse_subscription_events_total",
 			Help: "Shared Redis notification subscription lifecycle events by event.",
@@ -335,6 +407,7 @@ func New() *Prometheus {
 	)
 	reg.MustRegister(
 		p.fanoutSeconds, p.fanoutSlotsProbed, p.fanoutSubs, p.appendHookSeconds,
+		p.appendRejected,
 		p.dirtyEnqueues, p.dirtyDepth, p.dirtyCapacity, p.dirtyOldestAge,
 		p.dirtyProcess, p.dirtyProcessSubs, p.dirtyProcessWakes,
 		p.dirtyDuplicates, p.dirtyOverflows, p.reconcileRequests, p.dirtyErrors,
@@ -343,8 +416,12 @@ func New() *Prometheus {
 		p.slotOwnership, p.coverageGap, p.ownerFenced, p.claimContention,
 		p.durabilityShort,
 		p.sseHubs, p.sseClients, p.sseHubReads, p.sseHubMessages,
-		p.sseHubRingBytes, p.sseLaggedDisconnects, p.sseWriteTimeouts, p.sseSubscriptions,
-		p.sseSubscriptionEvents,
+		p.sseHubRingBytes, p.sseHubRingRawBytes, p.sseHubRingWireBytes,
+		p.sseHubRingIndexBytes, p.sseHubRefreshes, p.sseHubRefreshPages,
+		p.sseHubRefreshBytes, p.sseHubRefreshSeconds, p.ssePages,
+		p.ssePageBytes, p.sseWatcherLookupSteps, p.sseWatcherLookupMisses,
+		p.sseLaggedDisconnects, p.sseWriteTimeouts, p.sseSubscriptions,
+		p.ssePhysicalConnections, p.sseSubscriptionEvents, p.sseReasons,
 	)
 	return p
 }
@@ -471,6 +548,9 @@ func (p *Prometheus) AppendSubscriptionHook(dur time.Duration) {
 	p.appendHookSeconds.Observe(dur.Seconds())
 }
 
+// AppendBodyRejected implements chronicle.AppendLimitMetrics.
+func (p *Prometheus) AppendBodyRejected() { p.appendRejected.Inc() }
+
 // DirtyEnqueue implements webhook.Metrics.
 func (p *Prometheus) DirtyEnqueue(result string, depth, capacity int, oldestAge time.Duration) {
 	p.dirtyEnqueues.WithLabelValues(result).Inc()
@@ -572,8 +652,38 @@ func (p *Prometheus) SSEHubRead(messages int) {
 }
 
 // SSEHubRingBytes implements chronicle.SSEMetrics.
-func (p *Prometheus) SSEHubRingBytes(delta int) {
-	p.sseHubRingBytes.Add(float64(delta))
+func (p *Prometheus) SSEHubRingBytes(rawDelta, wireDelta, indexDelta int) {
+	p.sseHubRingRawBytes.Add(float64(rawDelta))
+	p.sseHubRingWireBytes.Add(float64(wireDelta))
+	p.sseHubRingIndexBytes.Add(float64(indexDelta))
+	p.sseHubRingBytes.Add(float64(rawDelta + wireDelta + indexDelta))
+}
+
+// SSEHubRefresh implements chronicle.SSEMetrics.
+func (p *Prometheus) SSEHubRefresh(cause string, pages, bytes int, duration time.Duration) {
+	p.sseHubRefreshes.WithLabelValues(cause).Inc()
+	p.sseHubRefreshPages.WithLabelValues(cause).Add(float64(pages))
+	p.sseHubRefreshBytes.WithLabelValues(cause).Add(float64(bytes))
+	p.sseHubRefreshSeconds.WithLabelValues(cause).Observe(duration.Seconds())
+}
+
+// SSEPage implements chronicle.SSEMetrics.
+func (p *Prometheus) SSEPage(phase string, bytes int) {
+	p.ssePages.WithLabelValues(phase).Inc()
+	p.ssePageBytes.WithLabelValues(phase).Add(float64(bytes))
+}
+
+// SSEWatcherLookup implements chronicle.SSEMetrics.
+func (p *Prometheus) SSEWatcherLookup(steps int, miss bool) {
+	p.sseWatcherLookupSteps.Add(float64(steps))
+	if miss {
+		p.sseWatcherLookupMisses.Inc()
+	}
+}
+
+// SSEReason implements chronicle.SSEMetrics.
+func (p *Prometheus) SSEReason(reason string) {
+	p.sseReasons.WithLabelValues(reason).Inc()
 }
 
 // SSEClientLagged implements chronicle.SSEMetrics.
@@ -593,6 +703,16 @@ func (p *Prometheus) SSESubscriptionActive(delta int) {
 
 // SSESubscriptionEvent implements chronicle.SSEMetrics.
 func (p *Prometheus) SSESubscriptionEvent(event string) {
+	p.sseSubscriptionEvents.WithLabelValues(event).Inc()
+}
+
+// NotificationPhysicalConnection implements store.NotificationMetrics.
+func (p *Prometheus) NotificationPhysicalConnection(topology string, delta int) {
+	p.ssePhysicalConnections.WithLabelValues(topology).Add(float64(delta))
+}
+
+// NotificationEvent implements store.NotificationMetrics.
+func (p *Prometheus) NotificationEvent(event string) {
 	p.sseSubscriptionEvents.WithLabelValues(event).Inc()
 }
 

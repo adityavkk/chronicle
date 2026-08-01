@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -55,7 +56,10 @@ func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEvent
 		if err := client.Ping(ctx).Err(); err != nil {
 			return nil, nil, nil, fmt.Errorf("redis unreachable at %s: %w", cfg.RedisURL, err)
 		}
-		rs := redisstore.New(client, redisstore.Options{Logger: logger})
+		rs := redisstore.New(client, redisstore.Options{
+			Logger:                       logger,
+			NotificationConnectionGroups: cfg.SSENotificationGroups,
+		})
 		mode, err := segments.ParseMode(cfg.SegmentMode)
 		if err != nil {
 			_ = client.Close()
@@ -194,6 +198,70 @@ func newRedisClient(rawURL string, poolSize int, redisEvents *redisEventSink) (g
 	return goredis.NewClient(opt), nil
 }
 
+type redisConfigGetter interface {
+	ConfigGet(ctx context.Context, parameter string) *goredis.MapStringStringCmd
+}
+
+func validateAppendCeiling(
+	parent context.Context,
+	client redisConfigGetter,
+	maxBodyBytes int64,
+	logger *slog.Logger,
+) error {
+	if maxBodyBytes == 0 {
+		return nil
+	}
+	if maxBodyBytes < 0 {
+		return errors.New("max append bytes must be non-negative")
+	}
+	if client == nil {
+		logger.Info("append body ceiling enabled", "max_append_bytes", maxBodyBytes, "redis_probe", "not_applicable")
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+	defer cancel()
+	values, err := client.ConfigGet(ctx, "proto-max-bulk-len").Result()
+	if err != nil {
+		if redisConfigProbeUnavailable(err) {
+			logger.Warn(
+				"Redis proto-max-bulk-len probe unavailable; deployment must enforce the append ceiling relationship",
+				"max_append_bytes", maxBodyBytes,
+				"error", err,
+			)
+			return nil
+		}
+		return fmt.Errorf("probe Redis proto-max-bulk-len: %w", err)
+	}
+	raw, ok := values["proto-max-bulk-len"]
+	if !ok {
+		return errors.New("redis CONFIG GET omitted proto-max-bulk-len")
+	}
+	protoMax, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parse Redis proto-max-bulk-len %q: %w", raw, err)
+	}
+	if err := redisstore.ValidateMaxAppendBytes(maxBodyBytes, protoMax); err != nil {
+		return fmt.Errorf("append ceiling: %w", err)
+	}
+	logger.Info(
+		"append body ceiling validated against Redis",
+		"max_append_bytes", maxBodyBytes,
+		"redis_proto_max_bulk_len", protoMax,
+	)
+	return nil
+}
+
+func redisConfigProbeUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToUpper(err.Error())
+	return strings.Contains(message, "NOPERM") ||
+		strings.Contains(message, "UNKNOWN COMMAND") ||
+		strings.Contains(message, "UNSUPPORTED COMMAND")
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "chronicle:", err)
@@ -223,8 +291,10 @@ func run() error {
 	flag.DurationVar(&cfg.LongPollTimeout, "long-poll-timeout", cfg.LongPollTimeout, "server-side long-poll timeout")
 	flag.DurationVar(&cfg.SSEReconnectInterval, "sse-reconnect-interval", cfg.SSEReconnectInterval, "SSE connection reconnect interval")
 	flag.IntVar(&cfg.ReadPageBytes, "read-page-bytes", cfg.ReadPageBytes, "catch-up returned page payload target in bytes")
+	flag.Int64Var(&cfg.MaxAppendBytes, "max-append-bytes", cfg.MaxAppendBytes, "maximum buffered create or append body bytes, 0 = unlimited")
 	flag.IntVar(&cfg.SSEHubReplayBytes, "sse-hub-replay-bytes", cfg.SSEHubReplayBytes, "per-stream SSE hub replay memory bound in bytes")
 	flag.IntVar(&cfg.SSEHubBatchBytes, "sse-hub-batch-bytes", cfg.SSEHubBatchBytes, "target retained bytes per shared SSE data event")
+	flag.IntVar(&cfg.SSENotificationGroups, "sse-notification-connections", cfg.SSENotificationGroups, "maximum physical Redis Pub/Sub connections for SSE notifications")
 	flag.DurationVar(&cfg.SSEClientWriteTimeout, "sse-client-write-timeout", cfg.SSEClientWriteTimeout, "maximum duration of one SSE client event flush")
 	flag.StringVar(&cfg.PublicBaseURL, "public-url", cfg.PublicBaseURL, "externally reachable origin for webhook callback/JWKS URLs")
 	flag.BoolVar(&cfg.Subscriptions, "subscriptions", cfg.Subscriptions, "enable the reserved __ds subscription APIs (redis backend only)")
@@ -240,6 +310,9 @@ func run() error {
 	flag.Parse()
 	if cfg.ReadPageBytes <= 0 {
 		return fmt.Errorf("-read-page-bytes must be positive")
+	}
+	if cfg.MaxAppendBytes < 0 {
+		return fmt.Errorf("-max-append-bytes must be non-negative")
 	}
 	if err := validateSegmentConfig(cfg); err != nil {
 		return err
@@ -263,12 +336,16 @@ func run() error {
 		return err
 	}
 	defer st.Close() //nolint:errcheck // best-effort release on shutdown
+	if err := validateAppendCeiling(context.Background(), client, cfg.MaxAppendBytes, logger); err != nil {
+		return err
+	}
 
 	handler := &chronicle.Handler{
 		Store:                 st,
 		LongPollTimeout:       cfg.LongPollTimeout,
 		SSEReconnectInterval:  cfg.SSEReconnectInterval,
 		ReadPageBytes:         cfg.ReadPageBytes,
+		MaxAppendBytes:        cfg.MaxAppendBytes,
 		SSEHubReplayBytes:     cfg.SSEHubReplayBytes,
 		SSEHubBatchBytes:      cfg.SSEHubBatchBytes,
 		SSEClientWriteTimeout: cfg.SSEClientWriteTimeout,
@@ -329,6 +406,7 @@ func run() error {
 		handler.ReadMetrics = prom
 		handler.SSEMetrics = prom
 		handler.AppendMetrics = prom
+		handler.AppendLimitMetrics = prom
 		ready := func() error { return nil }
 		if client != nil {
 			ready = func() error {
@@ -434,7 +512,8 @@ func run() error {
 		"ui", uiEnabled,
 		"auth_mode", cfg.AuthMode.String(),
 		"long_poll_timeout", cfg.LongPollTimeout,
-		"sse_reconnect_interval", cfg.SSEReconnectInterval)
+		"sse_reconnect_interval", cfg.SSEReconnectInterval,
+		"max_append_bytes", cfg.MaxAppendBytes)
 
 	select {
 	case err := <-errCh:
@@ -494,6 +573,9 @@ func validateSSEConfig(cfg chronicle.Config) error {
 	}
 	if cfg.SSEHubBatchBytes > cfg.SSEHubReplayBytes {
 		return fmt.Errorf("-sse-hub-batch-bytes must not exceed -sse-hub-replay-bytes")
+	}
+	if cfg.SSENotificationGroups <= 0 {
+		return fmt.Errorf("-sse-notification-connections must be positive")
 	}
 	if cfg.SSEClientWriteTimeout <= 0 {
 		return fmt.Errorf("-sse-client-write-timeout must be positive")

@@ -23,6 +23,7 @@ func main() {
 	redisURL := flag.String("redis-url", "", "override sut.redis_url (e.g. the provisioned Memorystore URL)")
 	image := flag.String("image", "", "override sut.image")
 	loadgenImage := flag.String("loadgen-image", "", "override loadgen_image")
+	readPageBytes := flag.Int("read-page-bytes", 0, "override sut.read_page_bytes; 0 keeps the spec value")
 	// replicas comes from the gate-#1 ramp (1->4), not the spec author, so ltctl
 	// can re-render the same spec at each N without hand-editing it. 0 = keep the
 	// spec's value.
@@ -61,6 +62,9 @@ func main() {
 	}
 	if *replicas > 0 {
 		spec.SUT.Replicas = *replicas
+	}
+	if *readPageBytes > 0 {
+		spec.SUT.ReadPageBytes = *readPageBytes
 	}
 	r, err := spec.Render()
 	if err != nil {
