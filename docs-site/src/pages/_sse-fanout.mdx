@@ -13,9 +13,6 @@ byline:
     value: "100 logical · 1 physical"
   - label: "Safety"
     value: "332/332 + Jepsen"
-  - label: "Issue"
-    value: "Shared-hub fanout"
-    href: ""
 ---
 
 import Tldr from "../components/Tldr.astro";
@@ -252,30 +249,30 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
 
   <SSEResults />
 
-  The issue 13 image was tested with one Chronicle replica, one Redis primary, and
+  The shared-hub image was tested with one Chronicle replica, one Redis primary, and
   AOF configured to sync every write. Chronicle had 2 vCPU and 4 GiB. Redis had
   2 vCPU and 12 GiB. The one-stream workload used 1,000 clients for 20 seconds.
   The 100-stream workload used 2,048 clients for 15 seconds. Each workload ran
-  three times from fresh result state. The table uses the component median.[^issue13]
+  three times from fresh result state. The table uses the component median.[^shared-hub]
 
   <Table wide>
     | Workload | Result | Delivered | Delivery rate | p50 | p99 | Completion | Errors |
     | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-    | 1 stream, 1,000 clients | issue 4 baseline | 992,320 | 49,616/s | 7.123 ms | 19.519 ms | 99.232% | 0 |
-    | 1 stream, 1,000 clients | issue 13 median | 981,983 | **49,099/s** | 5.047 ms | **8.591 ms** | 98.198% | 0 |
-    | 100 streams, 2,048 clients | issue 4 baseline | 1,173,067 | 78,204/s | 40.159 ms | 71.167 ms | 76.371% | 0 |
-    | 100 streams, 2,048 clients | issue 13 median | 1,495,527 | **99,702/s** | 23.967 ms | **51.903 ms** | 97.365% | 0 |
+    | 1 stream, 1,000 clients | per-client baseline | 992,320 | 49,616/s | 7.123 ms | 19.519 ms | 99.232% | 0 |
+    | 1 stream, 1,000 clients | shared-hub median | 981,983 | **49,099/s** | 5.047 ms | **8.591 ms** | 98.198% | 0 |
+    | 100 streams, 2,048 clients | per-client baseline | 1,173,067 | 78,204/s | 40.159 ms | 71.167 ms | 76.371% | 0 |
+    | 100 streams, 2,048 clients | shared-hub median | 1,495,527 | **99,702/s** | 23.967 ms | **51.903 ms** | 97.365% | 0 |
   </Table>
 
   The exact-counter guard opened 1,000 clients and waited for catch-up reads to
   settle. Redis `PUBLISH` then advanced from 3,480 to 3,580, while
   `ZRANGEBYLEX` advanced from 5,602 to 5,702. The instrumented hub also
   completed 100 `ReadPage` calls. The result was 1.000 Redis read command and
-  1.000 durable page per append, which passes the 1.2 gate.[^issue13]
+  1.000 durable page per append, which passes the 1.2 gate.[^shared-hub]
 
   The fused root-read follow-up supplies one authoritative first page after
   registration. The first confirmed hub generation becomes ready from that
-  page with no duplicate initial refresh. Issue 13 retains one final bounded
+  page with no duplicate initial refresh. The shared-hub evidence retains one final bounded
   no-touch identity confirmation immediately before indexed attach. It fences
   a delete/recreate race without delivering client data twice at the same
   offset. Reconnect generations also refresh durable state immediately with
@@ -290,10 +287,10 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   buffer reduced allocation from 905 to 216 bytes per update, a 76.1 percent
   reduction, while median time improved by 4.8 percent. A focused CPU profile
   then removed repeated Redis path-escaper construction. The 100-stream median
-  moved from a failing 75.647 ms p99 to 51.903 ms.[^issue13]
+  moved from a failing 75.647 ms p99 to 51.903 ms.[^shared-hub]
 
   <Aside label="How to read the throughput number" summary="The read ratio is the direct proof; the rate comparison is directional">
-    The issue 4 baseline and issue 13 image used the same local Kubernetes
+    The per-client baseline and shared-hub image used the same local Kubernetes
     workload shape and resource split, but they were not randomized on an
     untouched cluster. The exact page and Redis command counters prove the
     shared-read mechanism. The three-run medians reduce host noise without
@@ -330,7 +327,7 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
 
   The 30-minute active fault run kept 20 writers, 40 regular SSE clients, and
   one repeatedly throttled client active. The writer rate was one 256-byte
-  message per stream per second.[^issue13]
+  message per stream per second.[^shared-hub]
 
   <Table wide>
     | Signal | Measured result |
@@ -404,13 +401,11 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
     Read the [registered first-page decision](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0007-fuse-root-pages-and-register-live-reads-first.md)
     and track its follow-up in
     [GitHub issue #172](https://github.com/adityavkk/chronicle/issues/172).
-    Track SSE fanout in
-    the per-client baseline
-    and the hardening work in
-    the shared-hub implementation.
+    The [SSE fanout decision][adr] records the shared-hub design and its
+    remaining limits.
   </Callout>
 </section>
 
 [^adr]: [ADR-0005, Share live SSE reads through per-instance stream hubs](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0005-per-instance-sse-stream-fanout.md). It records the sealed before measurements, the decision, safety rules, and remaining limits.
-[^issue13]: The retained [`Issue 13 evidence`](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/sse-fanout/20260731-issue-13-local/README.md) includes all six final client JSON records, Redis and page counters, active and cleanup runtime samples, frame benchmarks, focused profiles, the 30-minute fault run, a manifest, and checksums.
+[^shared-hub]: The retained [shared-hub evidence](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/sse-fanout/20260731-shared-hub-local/README.md) includes all six final client JSON records, Redis and page counters, active and cleanup runtime samples, frame benchmarks, focused profiles, the 30-minute fault run, a manifest, and checksums.
 [^jepsen]: The [`sse-resume` scenario](https://github.com/adityavkk/chronicle/blob/main/jepsen/README.md) checks attach, resume, dropped and duplicate notifications, Redis and Chronicle replacement, bounded replay lag, write timeout, close ordering, and an independent durable-store oracle.

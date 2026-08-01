@@ -1,8 +1,7 @@
-# Issue 13 SSE fanout evidence
+# Shared-hub SSE fanout evidence
 
-This archive supports the local validation of
-the shared-hub implementation.
-It contains the small set of raw results needed to check the notification
+This archive supports the local validation of the shared-hub fanout path. It
+contains the small set of raw results needed to check the notification
 topology, durable read amplification, delivery rate, latency, frame encoding,
 and active fault memory claims.
 
@@ -37,7 +36,7 @@ therefore contain fresh client JSON and fresh HDR state. The gate uses the
 component median across all three repetitions. A lower latency is not treated as
 a regression.
 
-| Workload | Issue 4 baseline | Issue 13 median | Change | Gate |
+| Workload | Per-client baseline | Shared-hub median | Change | Gate |
 | --- | ---: | ---: | ---: | --- |
 | 1 stream, 1,000 clients, delivery rate | 49,616/s | 49,099.15/s | -1.04% | pass, within 5% |
 | 1 stream, 1,000 clients, p99 | 19.519 ms | 8.591 ms | -55.99% | pass |

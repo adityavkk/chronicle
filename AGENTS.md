@@ -146,6 +146,9 @@ its own built copy).
 - **Never commit the internal deploy paths** reserved in `.gitignore`
   (kitt/looper/Dockerfile.chronicle|dsui/deploy//sr.yaml/testburst.properties)
   or anything under `.copybara/` — see "The public ↔ internal mirror" above.
+- **Never link to Walmart endpoints from the public repository.** Run
+  `make public-link-check` before pushing documentation. The scheme-less Go
+  module path is part of the public build contract and is not an endpoint link.
 - `golangci-lint` must pass — CI gates on lint, test, and conformance.
 - Subscriptions require the redis backend; the `{__ds}` control plane lives in a
   single hash-tag slot (cluster-safe by construction).

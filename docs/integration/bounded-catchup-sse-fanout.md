@@ -2,7 +2,7 @@
 
 ## Status
 
-Issue 5's bounded page drain and the per-stream fanout hub are integrated on
+The bounded page drain and the per-stream fanout hub are integrated on
 `main`. Issue 172 refines their connection boundary: a new hub now confirms its
 notification registration before the authoritative first page, then uses that
 page to seed the hub instead of issuing a duplicate initial no-touch refresh.
@@ -89,14 +89,14 @@ unbounded hub read.
 
 The final `Handler` needs both groups of fields:
 
-- Issue 5: `ReadPageBytes` and `ReadMetrics`
+- Bounded catch-up: `ReadPageBytes` and `ReadMetrics`
 - Fanout: replay bytes, batch bytes, poll interval, client write timeout,
   fanout metrics, and the hub registry
 
 Keep the metric families separate. Page metrics describe storage and response
 work. Hub metrics describe shared live delivery and replay pressure.
 
-The issue 5 SSE writer streams JSON framing and base64 directly. Keep that
+The bounded catch-up SSE writer streams JSON framing and base64 directly. Keep that
 writer for initial catch-up. The fanout ring may retain formatted live events,
 but it must not build a second full catch-up body.
 

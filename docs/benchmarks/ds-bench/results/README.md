@@ -9,5 +9,5 @@ The checksum index records the omitted raw files and their digests, but
 `verify-seal` requires the full external archive and does not pass against this
 small documentation extract.
 
-The Issue 4 fanout measurements use a separate minimal raw evidence set under
+The per-client fanout measurements use a separate minimal raw evidence set under
 `docs/benchmarks/sse-fanout/20260729-local-kubernetes/`.

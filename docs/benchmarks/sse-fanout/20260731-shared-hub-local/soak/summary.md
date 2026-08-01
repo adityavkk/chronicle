@@ -1,4 +1,4 @@
-# issue13-sse-soak — issue13-stable
+# shared-hub-sse-soak
 
 Thirty-minute active SSE stability run with 20 streams, reconnect cycling, and a separately throttled client.
 
@@ -8,7 +8,7 @@ Thirty-minute active SSE stability run with 20 streams, reconnect cycling, and a
 
 ## Workload
 
-- Streams: 20 (`issue13/soak-*`, application/json)
+- Streams: 20 (`shared-hub/soak-*`, application/json)
 - Writers: 20 (1/stream) @ 1/s each, 256B messages, batch 1, producer none
 - Tailers: 2 SSE + 0 long-poll per stream (40 total), from `now`
 

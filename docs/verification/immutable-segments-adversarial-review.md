@@ -1,4 +1,4 @@
-# Issue 6 adversarial review and validation record
+# Immutable segment adversarial review and validation record
 
 ## Independent review scope
 

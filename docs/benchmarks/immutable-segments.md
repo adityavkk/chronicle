@@ -1,4 +1,4 @@
-# Issue 6 immutable segment evidence
+# Immutable segment evidence
 
 ## Result
 
@@ -32,7 +32,7 @@ Exact command:
 
 ```bash
 cd loadgen
-OUT=results/issue-6-local \
+OUT=results/immutable-segments-local \
 REDIS_CONTAINER=chronicle-p0-catchup-redis-1 \
 REDIS_DB=13 \
 ./scripts/bench-segments-local.sh
@@ -154,6 +154,6 @@ Do not enable any candidate by default. The blocking downsides are:
 
 ## Artifacts
 
-- [Working-session 32-cell machine summary](results/issue-6-local-summary.json)
-- [Run-wide Redis Lua-time summary](results/issue-6-script-time-summary.json)
-- `loadgen/results/issue-6-local/` contains ignored raw local artifacts from the working session. Later rejected diagnostics overwrote some accepted cells, including the off-mode 512-reader cell. The historical tables above were recorded before those overwrites, but the exact accepted machine inputs were not retained. The regenerated machine summary is therefore diagnostic only and does not support a cross-cell release claim. Another checkout cannot independently reproduce it. This is a release evidence gap.
+- [Working-session 32-cell machine summary](results/immutable-segments-local-summary.json)
+- [Run-wide Redis Lua-time summary](results/immutable-segments-script-time-summary.json)
+- `loadgen/results/immutable-segments-local/` contains ignored raw local artifacts from the working session. Later rejected diagnostics overwrote some accepted cells, including the off-mode 512-reader cell. The historical tables above were recorded before those overwrites, but the exact accepted machine inputs were not retained. The regenerated machine summary is therefore diagnostic only and does not support a cross-cell release claim. Another checkout cannot independently reproduce it. This is a release evidence gap.

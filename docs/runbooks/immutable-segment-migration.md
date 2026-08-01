@@ -1,6 +1,6 @@
 # Immutable segment migration and rollback
 
-The immutable read plane is experimental. Keep `CHRONICLE_SEGMENT_MODE=off` unless you are running the issue 6 gates. If a candidate mode is set, new manifests default to `shadow` and read-triggered sealing defaults to `false`.
+The immutable read plane is experimental. Keep `CHRONICLE_SEGMENT_MODE=off` unless you are running the immutable-segment gates. If a candidate mode is set, new manifests default to `shadow` and read-triggered sealing defaults to `false`.
 
 ## Preconditions
 

@@ -108,7 +108,7 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
   The client sees a broken stream and resumes from its last flushed control
   offset.
 
-  The retained issue 13 workload measured the following operating points.[^sse-evidence]
+  The retained shared-hub workload measured the following operating points.[^sse-evidence]
 
   <Table wide>
     | Check | Result | Boundary |
@@ -159,9 +159,7 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
     1,024-frame Redis limit, and the measured reader curves.
   - Read [SSE fanout](./sse-fanout) to understand the old per-client Redis read
     path, the shared stream hub, the notification multiplexer, the exact attach
-    sequence, and the measured before and after result. The work is tracked in
-    the per-client baseline and
-    the shared-hub implementation.
+    sequence, and the measured before and after result.
   - Read [Read-only and fused root pages](./read-only-fast-path) to understand
     the typed read snapshot, exact sliding TTL decision, root-range oracle,
     register-first live handoff, and measured command, AOF, replication, and
@@ -182,4 +180,4 @@ import PerformanceIndex from "../components/PerformanceIndex.astro";
     configurations.
 </section>
 
-[^sse-evidence]: The retained [issue 13 evidence](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/sse-fanout/20260731-issue-13-local/README.md) includes six final workload records, exact Redis and page counters, the frame benchmark, CPU profiles, the 30-minute active fault run, resource cleanup snapshots, a manifest, and checksums.
+[^sse-evidence]: The retained [shared-hub evidence](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/sse-fanout/20260731-shared-hub-local/README.md) includes six final workload records, exact Redis and page counters, the frame benchmark, CPU profiles, the 30-minute active fault run, resource cleanup snapshots, a manifest, and checksums.

@@ -3,7 +3,6 @@
 - **Status:** Accepted, amended 2026-07-31
 - **Date:** 2026-07-29
 - **Deciders:** @adityavkk
-- **Tracking issues:** the per-client baseline, the shared-hub implementation
 
 ## Context
 

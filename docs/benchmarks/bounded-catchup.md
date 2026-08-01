@@ -1,4 +1,4 @@
-# Issue 5 bounded catch-up evidence
+# Bounded catch-up evidence
 
 ## Result
 
@@ -60,7 +60,7 @@ Build and server commands:
 
 ```sh
 go build -o bin/chronicle ./cmd/chronicle
-(cd loadgen && go build -o /private/tmp/dsload-issue5 ./cmd/dsload)
+(cd loadgen && go build -o /private/tmp/dsload-bounded-catchup ./cmd/dsload)
 
 ./bin/chronicle \
   -listen 127.0.0.1:4447 \
@@ -74,10 +74,10 @@ One after-cell command, with `N` and the short-cell duration overrides changed
 by the matrix below:
 
 ```sh
-/private/tmp/dsload-issue5 run \
+/private/tmp/dsload-bounded-catchup run \
   -scenario loadgen/scenarios/catchup-paged.yaml \
   -label final-1m-rN \
-  -out /private/tmp/issue5-final-results \
+  -out /private/tmp/bounded-catchup-final-results \
   -base-url http://127.0.0.1:4447 \
   -duration DURATION -warmup 1s -catchup-readers N \
   -sample-pid chronicle=PID \
@@ -112,7 +112,7 @@ failed all 128 accepted requests with HTTP 500 after Redis read timeouts. The
 final paged cell completed 435 measured responses at that reader cap.
 
 Machine-readable results are in
-[`artifacts/issue-5-local-curves.tsv`](artifacts/issue-5-local-curves.tsv).
+[`artifacts/bounded-catchup-local-curves.tsv`](artifacts/bounded-catchup-local-curves.tsv).
 
 ## Final storage and runtime metrics
 
@@ -138,7 +138,7 @@ indivisible oversized frame can exceed the byte target, but a page cannot
 speculatively materialize hundreds of later oversized frames.
 
 Full compact metrics are in
-[`artifacts/issue-5-after-metrics.tsv`](artifacts/issue-5-after-metrics.tsv).
+[`artifacts/bounded-catchup-after-metrics.tsv`](artifacts/bounded-catchup-after-metrics.tsv).
 
 ## Returned page size choice
 
@@ -156,7 +156,7 @@ best production latency point. Managed-Valkey GKE data is still required for
 that claim.
 
 The exact values are in
-[`artifacts/issue-5-page-size.tsv`](artifacts/issue-5-page-size.tsv).
+[`artifacts/bounded-catchup-page-size.tsv`](artifacts/bounded-catchup-page-size.tsv).
 
 ## Mixed load
 

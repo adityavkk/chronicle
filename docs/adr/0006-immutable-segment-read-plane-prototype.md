@@ -8,7 +8,7 @@
 
 Chronicle stores each message as one member in a Redis lexicographic sorted set. A full replay asks Redis to find, copy, and return every matching member. The application then decodes every frame before writing the HTTP response. More Chronicle replicas do not remove that work from the Redis primary.
 
-The sealed configuration comparison supplied with issue 6 reported 57.6 MiB/s for one Chronicle and one Redis at 512 catch-up readers on 16 vCPUs. The strongest sharded Chronicle result was 109.9 MiB/s on a different 4 vCPU topology. Rust WAL, Node memory, and Ursula disk results in that study were about 2,600 to 2,800 MiB/s. Those results used different storage, durability, process, and hardware shapes. They show the size of the replay gap. They do not predict the result of this prototype.
+The sealed configuration comparison for the immutable-segment study reported 57.6 MiB/s for one Chronicle and one Redis at 512 catch-up readers on 16 vCPUs. The strongest sharded Chronicle result was 109.9 MiB/s on a different 4 vCPU topology. Rust WAL, Node memory, and Ursula disk results in that study were about 2,600 to 2,800 MiB/s. Those results used different storage, durability, process, and hardware shapes. They show the size of the replay gap. They do not predict the result of this prototype.
 
 Kafka uses one representation for stored and transmitted record batches. Its design relies on sequential files, the operating system page cache, and `sendfile` to avoid extra copies. [Kafka design documentation](https://kafka.apache.org/20/design/design/) describes that mechanism.
 

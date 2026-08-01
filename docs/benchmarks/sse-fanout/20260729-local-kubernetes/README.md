@@ -1,6 +1,6 @@
-# Issue 4 SSE fanout evidence
+# Per-client SSE fanout baseline
 
-This is the minimal retained evidence subset for the Issue 4 fanout validation.
+This is the minimal retained evidence subset for the per-client fanout baseline.
 The topology was local Kubernetes, not the paid GCP campaign, so its throughput
 and latency results are not directly comparable with the sealed cloud baseline.
 
@@ -23,7 +23,7 @@ and latency results are not directly comparable with the sealed cloud baseline.
 
 The original result root contained unrelated campaign artifacts and a stale
 top-level provenance file. Neither is retained here. This directory contains
-only the two Issue 4 cells, including client results, sampled Redis counters,
+only the two baseline cells, including client results, sampled Redis counters,
 RSS samples, runtime metrics, and CPU, allocation, heap, goroutine, block, and
 mutex profiles.
 

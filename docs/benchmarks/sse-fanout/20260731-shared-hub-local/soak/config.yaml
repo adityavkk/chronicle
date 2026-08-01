@@ -1,4 +1,4 @@
-name: issue13-sse-soak
+name: shared-hub-sse-soak
 description: >
   Thirty-minute active SSE stability run with 20 streams, reconnect cycling,
   and a separately throttled client.
@@ -7,7 +7,7 @@ warmup: 30s
 
 streams:
   count: 20
-  prefix: issue13/soak
+  prefix: shared-hub/soak
 
 writers:
   per_stream: 1

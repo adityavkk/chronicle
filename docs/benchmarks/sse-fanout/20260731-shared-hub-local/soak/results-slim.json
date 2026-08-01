@@ -1,7 +1,7 @@
 {
-  "label": "issue13-stable",
+  "label": "shared-hub-stable",
   "scenario": {
-    "Name": "issue13-sse-soak",
+    "Name": "shared-hub-sse-soak",
     "Description": "Thirty-minute active SSE stability run with 20 streams, reconnect cycling, and a separately throttled client.\n",
     "Target": {
       "BaseURL": "http://127.0.0.1:4439",
@@ -15,7 +15,7 @@
     },
     "Streams": {
       "Count": 20,
-      "Prefix": "issue13/soak",
+      "Prefix": "shared-hub/soak",
       "ContentType": "application/json",
       "Prefill": {
         "Messages": 0,

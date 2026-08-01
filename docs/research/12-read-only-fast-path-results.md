@@ -1,6 +1,6 @@
 # Read-only fast path results
 
-Issue 7 removes write commands and duplicate metadata loads from ordinary read
+The read-only fast path removes write commands and duplicate metadata loads from ordinary read
 work. These measurements compare commit
 `4c78ea9daef78278a73f1637dd41e3fbfca0d2cf` with the implementation on
 `perf/read-only-fast-path`.

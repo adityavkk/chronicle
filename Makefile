@@ -12,7 +12,7 @@ GO        ?= go
 BINARY    := bin/chronicle
 REDIS_URL ?= redis://localhost:6379
 
-.PHONY: all build run test test-unit test-integration conformance conformance-segments lint fmt tidy redis-up redis-down clean spec-check
+.PHONY: all build run test test-unit test-integration conformance conformance-segments lint fmt tidy redis-up redis-down clean spec-check public-link-check
 
 all: build
 
@@ -35,8 +35,8 @@ test-integration: redis-up
 conformance:
 	./scripts/conformance.sh
 
-# Explicit issue-6 gate: the unchanged default plus every claimed immutable
-# segment candidate. Uses only local Redis/filesystem object emulation.
+# Explicit immutable-segment gate: the unchanged default plus every claimed
+# candidate. Uses only local Redis/filesystem object emulation.
 conformance-segments:
 	./scripts/conformance-segments.sh
 
@@ -63,6 +63,10 @@ lint:
 # spec drift (issue #98). CI runs this in the `spec-version` job.
 spec-check:
 	./scripts/spec-version-check.sh
+
+# Reject links to internal Walmart endpoints before they reach public history.
+public-link-check:
+	./scripts/public-link-check.sh
 
 fmt:
 	gofumpt -l -w .

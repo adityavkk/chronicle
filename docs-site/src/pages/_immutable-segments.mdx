@@ -11,9 +11,6 @@ byline:
     value: "764 to 1,242 MiB/s"
   - label: "Release gate"
     value: "332/332 + Jepsen + Porcupine"
-  - label: "Issue"
-    value: "Immutable segments"
-    href: ""
 ---
 
 import Tldr from "../components/Tldr.astro";
@@ -313,8 +310,6 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
   </Callout>
 
   <Callout icon="arrow" label="Source records">
-    Track the work in
-    the immutable-segment prototype.
     Read the [architecture decision][adr], [performance evidence][evidence],
     [bounded page integration][integration], [fault matrix][faults], and
     [independent adversarial review][review] for the complete design and
@@ -323,13 +318,13 @@ import SimpleBeforeAfter from "../components/SimpleBeforeAfter.astro";
 </section>
 
 [^adr]: [ADR-0006, Prototype immutable sealed segments outside the Redis frame ZSET](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0006-immutable-segment-read-plane-prototype.md). It defines the storage formats, publication order, migration states, rollback policy, and disabled reclamation.
-[^evidence]: [Issue 6 immutable segment evidence](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-6-immutable-segments.md). It records the local matrix, method, exact tables, resource counters, and the retained raw-input gap.
+[^evidence]: [Immutable segment evidence](https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/immutable-segments.md). It records the local matrix, method, exact tables, resource counters, and the retained raw-input gap.
 [^integration]: [Immutable segments with bounded catch-up](https://github.com/adityavkk/chronicle/blob/main/docs/integration/immutable-segments-pagereader.md). It defines the PageReader, snapshot release, range authentication, hot-tail handoff, and Redis notification delegation.
 [^faults]: [Immutable segment fault matrix](https://github.com/adityavkk/chronicle/blob/main/docs/verification/immutable-segments-fault-matrix.md). It separates deterministic automated evidence from remaining process, object-service, and cross-replica gates.
-[^review]: [Issue 6 adversarial review and validation record](https://github.com/adityavkk/chronicle/blob/main/docs/verification/issue-6-adversarial-review.md). It records the attack-oriented findings, fixes, exact final checks, and remaining operational limits.
+[^review]: [Immutable segment adversarial review and validation record](https://github.com/adityavkk/chronicle/blob/main/docs/verification/immutable-segments-adversarial-review.md). It records the attack-oriented findings, fixes, exact final checks, and remaining operational limits.
 
 [adr]: https://github.com/adityavkk/chronicle/blob/main/docs/adr/0006-immutable-segment-read-plane-prototype.md
-[evidence]: https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/issue-6-immutable-segments.md
+[evidence]: https://github.com/adityavkk/chronicle/blob/main/docs/benchmarks/immutable-segments.md
 [integration]: https://github.com/adityavkk/chronicle/blob/main/docs/integration/immutable-segments-pagereader.md
 [faults]: https://github.com/adityavkk/chronicle/blob/main/docs/verification/immutable-segments-fault-matrix.md
-[review]: https://github.com/adityavkk/chronicle/blob/main/docs/verification/issue-6-adversarial-review.md
+[review]: https://github.com/adityavkk/chronicle/blob/main/docs/verification/immutable-segments-adversarial-review.md

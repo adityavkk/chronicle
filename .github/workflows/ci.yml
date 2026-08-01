@@ -380,5 +380,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Reject internal endpoint links
+        run: ./scripts/public-link-check.sh
       - name: Check SPEC_VERSION.md consistency + upstream drift
         run: ./scripts/spec-version-check.sh

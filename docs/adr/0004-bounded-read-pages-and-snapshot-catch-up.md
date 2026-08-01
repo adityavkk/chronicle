@@ -1,8 +1,7 @@
 # ADR 0004: Bounded read pages and snapshot catch-up
 
-- Status: Accepted, amended 2026-07-31 by issues 7 and 13
+- Status: Accepted, amended 2026-07-31
 - Date: 2026-07-29
-- Issues: bounded catch-up, the fused-read follow-up, the shared-hub implementation
 
 ## Context
 
@@ -54,9 +53,9 @@ whose end offset is above the captured tail.
 The first page of one logical client read will renew the root stream only when
 it has a sliding TTL. Persistent and absolute-expiry-only reads will not write.
 Continuation pages, long-poll rechecks, inherited source ranges, sealing,
-repair, and other internal reads will not renew a TTL. This rule was amended by
-issue 7. It replaces the original decision that every continuation page would
-renew the root.
+repair, and other internal reads will not renew a TTL. The fused-read follow-up
+amended this rule. It replaces the original decision that every continuation
+page would renew the root.
 
 Redis will fetch the first candidate alone. If it fits, Lua will derive a
 lexicographic end-offset bound from the remaining byte budget and bulk-fetch
@@ -128,7 +127,7 @@ applying the byte target and led to the first-candidate and end-offset bound
 above. Those figures describe the rejected candidate-fetch strategy, not the
 final one. The page size comparison
 and metric method are recorded in
-[`issue-5-bounded-catchup.md`](../benchmarks/issue-5-bounded-catchup.md).
+[`bounded-catchup.md`](../benchmarks/bounded-catchup.md).
 
 Small pages add Redis round trips and JSON punctuation writes. The frame cap can
 also stop a page below its byte target when records are small. Large pages use
@@ -166,5 +165,5 @@ Reading the complete suffix and slicing it in Go would leave Redis work and
 memory unbounded. It would not meet the issue.
 
 Moving payloads to chunked strings would allow exact byte range reads for large
-binary appends. That is a larger storage migration. Immutable segments and a
-new data layout belong to issue #6.
+binary appends. That is a larger storage migration. ADR 0006 covers the
+immutable-segment prototype and its new data layout.
