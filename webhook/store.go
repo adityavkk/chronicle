@@ -70,8 +70,10 @@ type Store interface {
 	// downgrade to the unscoped path.
 	ArmWakeOwned(scope OwnerScope, id string, now time.Time, leaseTTLMs int64, armLease bool, wakeID string) (ArmResult, error)
 
-	// Claim is the pull-wake compare-and-set claim (PROTOCOL §7.2).
-	Claim(id, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error)
+	// ClaimAuthorized is the pull-wake compare-and-set claim (PROTOCOL §7.2).
+	// The expectation is the exact subscription snapshot the route authorized;
+	// Redis compares it in the same atomic operation that grants the lease.
+	ClaimAuthorized(id, worker, wakeID string, expected ClaimExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error)
 
 	// CheckWriteFence verifies that a claim-scoped write token still names the
 	// live holder at append authorization time. It reads the current shard state
@@ -224,11 +226,22 @@ type ArmResult struct {
 	WakeID     string
 }
 
-// ClaimResult is the outcome of Claim.
+// ClaimExpectation binds a claim authorization decision to the immutable
+// subscription incarnation, owner, config, and current linked resource set.
+// Paths need not be sorted, but must be unique as they are in Subscription.Links.
+type ClaimExpectation struct {
+	Incarnation  string
+	OwnerSubject string
+	CfgHash      string
+	Paths        []string
+}
+
+// ClaimResult is the outcome of a claim attempt.
 type ClaimResult struct {
 	Claimed    bool
 	Busy       bool // another worker holds an unexpired lease
 	NoSub      bool
+	Forbidden  bool // the authorized subscription snapshot no longer matches
 	Generation int64
 	WakeID     string
 	Holder     string

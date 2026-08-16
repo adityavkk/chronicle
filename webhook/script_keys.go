@@ -90,19 +90,24 @@ type claimKeyVec struct {
 	LeaseZSet          string
 	IncarnationCounter string
 	ShardRegistry      string
+	Links              string
 }
 
 func (k claimKeyVec) redisKeys() []string {
-	return []string{k.SubConfig, k.ShardState, k.LeaseZSet, k.IncarnationCounter, k.ShardRegistry}
+	return []string{k.SubConfig, k.ShardState, k.LeaseZSet, k.IncarnationCounter, k.ShardRegistry, k.Links}
 }
 
 func (k claimKeyVec) keyRoles() []scriptKeyRole {
-	return []scriptKeyRole{"sub_config", "shardstate", "lease_zset", "incarnation_counter", "shard_registry"}
+	return []scriptKeyRole{"sub_config", "shardstate", "lease_zset", "incarnation_counter", "shard_registry", "links"}
 }
 
 func claimKeys(id string, g int) claimKeyVec {
 	h := slotOf(id)
-	return claimKeyVec{SubConfig: subKey(id), ShardState: subShardKey(id, g), LeaseZSet: leaseZKey(h), IncarnationCounter: subIncarnationKey(id), ShardRegistry: subShardRegistryKey(id)}
+	return claimKeyVec{
+		SubConfig: subKey(id), ShardState: subShardKey(id, g), LeaseZSet: leaseZKey(h),
+		IncarnationCounter: subIncarnationKey(id), ShardRegistry: subShardRegistryKey(id),
+		Links: linksKey(id),
+	}
 }
 
 type writeFenceKeyVec struct {

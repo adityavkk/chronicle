@@ -370,10 +370,11 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 }
 
 func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string) {
-	// The claim is where the callback and write capabilities are minted, so it
-	// requires an authenticated caller before any store access (issue #126,
-	// TB2 — closes the free-minting hole). Insecure mode is telemetry-only.
-	if !rt.authorizeClaim(w, r, id) {
+	// Authenticate before parsing or store access. In insecure mode an invalid
+	// credential remains telemetry-only for protocol compatibility.
+	caller, callerErr := rt.authenticateCaller(r)
+	if callerErr != nil &&
+		!rt.controlDeny(w, "claim", id, http.StatusUnauthorized, ErrCodeUnauthenticated, callerErr.Error()) {
 		return
 	}
 	var req ClaimRequest
@@ -390,12 +391,22 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		writeErr(w, http.StatusNotFound, ErrCodeNotFound)
 		return
 	}
+	if callerErr == nil {
+		if reason := claimAuthz(caller, sub); reason != "" &&
+			!rt.controlDeny(w, "claim", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+			return
+		}
+	}
+
 	wakeID, err := GenerateWakeID(randReader)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	res, err := rt.mgr.store.Claim(id, req.Worker, wakeID, time.Now(), sub.Config.LeaseTTLMs)
+	expected := claimExpectationFromSubscription(sub)
+	res, err := rt.mgr.store.ClaimAuthorized(
+		id, req.Worker, wakeID, expected, time.Now(), sub.Config.LeaseTTLMs,
+	)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -407,8 +418,16 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		}})
 	case res.NoSub:
 		writeErr(w, http.StatusNotFound, ErrCodeNotFound)
+	case res.Forbidden:
+		// The owner, incarnation, config, or linked path set changed after the
+		// route authorized it. Enforce mode denies; insecure mode records the
+		// denial but still returns a conflict because no lease was granted.
+		if rt.controlDeny(w, "claim", id, http.StatusForbidden, ErrCodeForbidden,
+			"subscription changed after claim authorization") {
+			writeErr(w, http.StatusConflict, ErrCodeFenced)
+		}
 	case res.Claimed:
-		// Re-read links for a fresh snapshot (tails may have advanced).
+		// Re-read links for a fresh cursor snapshot (tails may have advanced).
 		fresh, _, _ := rt.mgr.store.Get(id)
 		snap, _ := Snapshot(fresh.Links, rt.mgr.tailOf)
 		now := time.Now()

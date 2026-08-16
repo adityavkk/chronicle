@@ -667,23 +667,73 @@ func (s *RedisStore) armWake(id string, now time.Time, leaseTTLMs int64, armLeas
 	}
 }
 
-// Claim runs the pull-wake CAS claim on the subscription's single per-type lease
-// (shard 0) — today's behavior, kept on the Store interface unchanged.
-func (s *RedisStore) Claim(id, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
-	return s.ClaimShard(id, 0, worker, wakeID, now, leaseTTLMs)
+func claimExpectationFromSubscription(sub Subscription) ClaimExpectation {
+	paths := make([]string, len(sub.Links))
+	for i := range sub.Links {
+		paths[i] = sub.Links[i].Path
+	}
+	return ClaimExpectation{
+		Incarnation:  sub.Incarnation,
+		OwnerSubject: sub.OwnerSubject,
+		CfgHash:      sub.CfgHash,
+		Paths:        paths,
+	}
 }
 
-// ClaimShard runs the CAS claim against shard g of the subscription's claim space
-// (claim granularity, design 08 §4): the single-holder fence is per (id, g), so
-// concurrent claimants on different shards do not serialize. NOSUB keys off the
-// subscription config; the per-shard fence (KEYS[2]) is minted on first claim. g
-// == 0 is the bare per-type lease (== Claim), byte-for-byte today.
+// Claim is the trusted in-process convenience API. It snapshots the current
+// subscription and still binds that snapshot atomically at the grant. HTTP
+// callers use ClaimAuthorized with the snapshot they already authorized.
+func (s *RedisStore) Claim(id, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+	sub, ok, err := s.Get(id)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	if !ok {
+		return ClaimResult{NoSub: true}, nil
+	}
+	return s.ClaimAuthorized(id, worker, wakeID, claimExpectationFromSubscription(sub), now, leaseTTLMs)
+}
+
+// ClaimAuthorized grants shard 0 only if the subscription still matches the
+// exact owner, incarnation, config, and linked paths the caller authorized.
+func (s *RedisStore) ClaimAuthorized(id, worker, wakeID string, expected ClaimExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+	return s.claimShardAuthorized(id, 0, worker, wakeID, expected, now, leaseTTLMs)
+}
+
+// ClaimShard is the trusted in-process convenience API for claim shard g.
 func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
-	// h from the BASE id (slotOf strips the g-suffix), so the config hash, the
-	// per-(id,g) shard hash, incarnation counter, registry, and lease ZSET all
-	// share the sub's one slot — claim.lua stays single-slot for any g.
-	reply, conn, err := runMaybePinned(s, claimScript, claimKeys(id, g),
-		shardMember(id, g), worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10), wakeID, strconv.Itoa(g))
+	sub, ok, err := s.Get(id)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	if !ok {
+		return ClaimResult{NoSub: true}, nil
+	}
+	return s.claimShardAuthorized(id, g, worker, wakeID, claimExpectationFromSubscription(sub), now, leaseTTLMs)
+}
+
+func (s *RedisStore) claimShardAuthorized(id string, g int, worker, wakeID string, expected ClaimExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+	args := make([]any, 0, 10+len(expected.Paths))
+	args = append(args,
+		shardMember(id, g), worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10),
+		wakeID, strconv.Itoa(g), expected.OwnerSubject, expected.Incarnation,
+		expected.CfgHash, strconv.Itoa(len(expected.Paths)),
+	)
+	seen := make(map[string]struct{}, len(expected.Paths))
+	for _, path := range expected.Paths {
+		if path == "" {
+			return ClaimResult{}, errors.New("claim: empty expected path")
+		}
+		if _, duplicate := seen[path]; duplicate {
+			return ClaimResult{}, fmt.Errorf("claim: duplicate expected path %q", path)
+		}
+		seen[path] = struct{}{}
+		args = append(args, path)
+	}
+
+	// Every key derives from the base id, so the config, per-shard fence, linked
+	// paths, incarnation counter, registry, and lease ZSET share one Redis slot.
+	reply, conn, err := runMaybePinned(s, claimScript, claimKeys(id, g), args...)
 	if err != nil {
 		return ClaimResult{}, err
 	}
@@ -694,12 +744,8 @@ func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now tim
 	case claimClaimed:
 		s.recordContention("claimed", id)
 		res := ClaimResult{Claimed: true, Generation: r.Generation, WakeID: r.WakeID, Holder: r.Holder}
-		// Tier B: a claim grant rotates/confirms the fence generation (claim.lua:41)
-		// and arms the lease; block on WAITAOF so the worker proceeds only once the
-		// claim is durable (doc 05 Tier B). A short reply is surfaced as an error so a
-		// non-durable claim does not silently process — the lease self-heals via
-		// expiry + takeover. Durability only; the (gen,wake_id) fence still governs
-		// who may ack. BUSY/NOSUB hold no new grant, so they need no barrier.
+		// Tier B: the claim grant rotates/confirms the fence and arms the lease.
+		// Wait for durability before returning authority to the worker.
 		if conn == nil && s.durPlan.Wait {
 			return res, errors.New("webhook: Tier B durability missing pinned Redis connection")
 		}
@@ -718,6 +764,8 @@ func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now tim
 	case claimNoSub:
 		s.recordContention("nosub", id)
 		return ClaimResult{NoSub: true}, nil
+	case claimForbidden:
+		return ClaimResult{Forbidden: true}, nil
 	default:
 		return ClaimResult{}, fmt.Errorf("claim: unhandled reply %T", reply)
 	}
@@ -1526,6 +1574,7 @@ func subscriptionFromHash(id string, f map[string]string, linkFields map[string]
 		Generation:      atoi("generation"),
 		WakeID:          f["wake_id"],
 		OwnerSubject:    f["owner"],
+		Incarnation:     f["incarnation"],
 		Holder:          f["holder"] == "1",
 		HolderWorker:    f["holder_worker"],
 		LeaseUntilNs:    parseLeaseUntilNs(f["lease_until_ns"]),

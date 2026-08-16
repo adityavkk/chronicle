@@ -199,10 +199,10 @@ func armStatus(r ArmResult) string {
 	}
 }
 
-// Claim records claim.lua.
-func (t *TracingStore) Claim(id, worker, wakeID string, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+// ClaimAuthorized records claim.lua.
+func (t *TracingStore) ClaimAuthorized(id, worker, wakeID string, expected ClaimExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
 	pre := t.snap(id)
-	res, err := t.Store.Claim(id, worker, wakeID, now, leaseTTLMs)
+	res, err := t.Store.ClaimAuthorized(id, worker, wakeID, expected, now, leaseTTLMs)
 	if err != nil {
 		return res, err
 	}
@@ -223,6 +223,8 @@ func claimStatus(r ClaimResult) string {
 		return "BUSY"
 	case r.NoSub:
 		return "NOSUB"
+	case r.Forbidden:
+		return "FORBIDDEN"
 	default:
 		return "UNKNOWN"
 	}

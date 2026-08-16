@@ -56,8 +56,16 @@ var (
 	}, armWakeDecoder)
 	claimScript = newTypedScript[claimKeyVec, claimReply](scriptABI{
 		Name: "claim", File: "claim.lua",
-		Keys: []scriptKeySchema{keys("sub_config", "shardstate", "lease_zset", "incarnation_counter", "shard_registry")},
-		Args: exactArgs(arg("member", argString), arg("worker", argString), arg("now_ns", argUnixNS), arg("lease_ttl_ms", argInt), arg("new_wake_id", argString), arg("shard_index", argInt)),
+		Keys: []scriptKeySchema{keys("sub_config", "shardstate", "lease_zset", "incarnation_counter", "shard_registry", "links")},
+		Args: variadicArgs(
+			[]scriptArg{
+				arg("member", argString), arg("worker", argString), arg("now_ns", argUnixNS),
+				arg("lease_ttl_ms", argInt), arg("new_wake_id", argString), arg("shard_index", argInt),
+				arg("expected_owner", argString), arg("expected_incarnation", argString),
+				arg("expected_cfg_hash", argString), arg("num_paths", argInt),
+			},
+			[]scriptArg{arg("path", argString)}, nil,
+		),
 	}, claimDecoder)
 	writeFenceScript = newTypedScript[writeFenceKeyVec, writeFenceReply](scriptABI{
 		Name: "check_write_fence", File: "check_write_fence.lua",

@@ -58,3 +58,12 @@ func ownershipAuthz(storedOwner, callerSubject string) string {
 	}
 	return ""
 }
+
+// claimAuthz authorizes the complete subscription snapshot a successful claim
+// will expose and turn into callback, write, and wake capabilities.
+func claimAuthz(caller VerifiedCaller, sub Subscription) string {
+	if reason := ownershipAuthz(sub.OwnerSubject, caller.Subject()); reason != "" {
+		return reason
+	}
+	return linkAuthz(caller, sub.Config)
+}

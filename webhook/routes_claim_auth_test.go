@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -90,7 +91,7 @@ func TestClaimEnforceRequiresCaller(t *testing.T) {
 
 	// The allow path: a valid caller token claims, and the returned write
 	// token authorizes the TB1 append gate for exactly the claimed stream.
-	caller, err := GenerateCallerToken(mgr.activeSigningKey(), mgr.streamRootURL, "u:1", []string{"events"},
+	caller, err := GenerateCallerToken(mgr.activeSigningKey(), mgr.streamRootURL, "u:1", []string{"events", "wake"},
 		now, time.Hour, rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +131,108 @@ func TestClaimEnforceRequiresCaller(t *testing.T) {
 		`{"wake_id":"`+cr.WakeID+`","generation":`+jsonInt(cr.Generation)+`}`)
 	if okRec.Code != http.StatusOK {
 		t.Fatalf("ack with claim token = %d, body %q", okRec.Code, okRec.Body.String())
+	}
+}
+
+func TestClaimEnforceAuthorizesOwnerAndNamespaces(t *testing.T) {
+	mgr, store, _ := newAuthTestManager(t, auth.ModeEnforce)
+	rt := NewRoutes(mgr)
+	ownerSubject := "u:owner"
+	cfg := pullWakeCfg()
+	if _, _, err := store.CreateOrConfirmOwned("s1", cfg, nil, time.Now(), ownerSubject); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.Link("s1", "events/a", LinkExplicit, "0000000000000000_0000000000000000"); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	before, _, _ := store.Get("s1")
+
+	denies := []struct {
+		name  string
+		token string
+	}{
+		{"different owner", callerFor(t, mgr, "u:stranger", "events", "wake")},
+		{"owner outside namespace", callerFor(t, mgr, ownerSubject, "victim")},
+	}
+	for _, tc := range denies {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doDS(t, rt, http.MethodPost, subsPrefix+"s1/claim", tc.token, `{"worker":"attacker"}`)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("claim = %d, want 403; body=%q", rec.Code, rec.Body.String())
+			}
+			if code := errCodeOf(t, rec); code != ErrCodeForbidden {
+				t.Fatalf("code = %q, want %q", code, ErrCodeForbidden)
+			}
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode deny body: %v", err)
+			}
+			for _, field := range []string{"token", "write_token", "wake_token", "streams"} {
+				if _, ok := body[field]; ok {
+					t.Fatalf("denied claim returned %s: %v", field, body)
+				}
+			}
+			after, _, _ := store.Get("s1")
+			if after.Phase != before.Phase || after.Generation != before.Generation ||
+				after.WakeID != before.WakeID || after.Holder != before.Holder ||
+				after.HolderWorker != before.HolderWorker || after.LeaseUntilNs != before.LeaseUntilNs ||
+				!reflect.DeepEqual(after.Links, before.Links) {
+				t.Fatalf("denied claim mutated state: before=%+v after=%+v", before, after)
+			}
+		})
+	}
+
+	owner := callerFor(t, mgr, ownerSubject, "events", "wake")
+	rec := doDS(t, rt, http.MethodPost, subsPrefix+"s1/claim", owner, `{"worker":"worker-1"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authorized claim = %d, want 200; body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestClaimExpectationRejectsRecreatedOrRelinkedSubscription(t *testing.T) {
+	_, store, _ := newAuthTestManager(t, auth.ModeEnforce)
+	owner := "u:owner"
+	now := time.Now()
+	if _, _, err := store.CreateOrConfirmOwned("s1", pullWakeCfg(), nil, now, owner); err != nil {
+		t.Fatalf("create original: %v", err)
+	}
+	if err := store.Link("s1", "events/a", LinkExplicit, "0000000000000000_0000000000000000"); err != nil {
+		t.Fatalf("link original: %v", err)
+	}
+	original, _, _ := store.Get("s1")
+	expected := claimExpectationFromSubscription(original)
+
+	if err := store.Delete("s1"); err != nil {
+		t.Fatalf("delete original: %v", err)
+	}
+	if _, _, err := store.CreateOrConfirmOwned("s1", pullWakeCfg(), nil, now.Add(time.Second), owner); err != nil {
+		t.Fatalf("recreate: %v", err)
+	}
+	if err := store.Link("s1", "events/a", LinkExplicit, "0000000000000000_0000000000000000"); err != nil {
+		t.Fatalf("link replacement: %v", err)
+	}
+	replacement, _, _ := store.Get("s1")
+	if replacement.Incarnation == original.Incarnation {
+		t.Fatalf("replacement reused incarnation %q", replacement.Incarnation)
+	}
+	res, err := store.ClaimAuthorized("s1", "worker-1", "wake-new", expected, now.Add(2*time.Second), 1000)
+	if err != nil || !res.Forbidden {
+		t.Fatalf("claim with original expectation = %+v/%v, want forbidden", res, err)
+	}
+	after, _, _ := store.Get("s1")
+	if after.Phase != replacement.Phase || after.Generation != replacement.Generation ||
+		after.WakeID != replacement.WakeID || after.Holder != replacement.Holder ||
+		after.LeaseUntilNs != replacement.LeaseUntilNs {
+		t.Fatalf("recreated subscription mutated: before=%+v after=%+v", replacement, after)
+	}
+
+	relinkedExpected := claimExpectationFromSubscription(after)
+	if err := store.Link("s1", "events/b", LinkExplicit, "0000000000000000_0000000000000000"); err != nil {
+		t.Fatalf("relink replacement: %v", err)
+	}
+	res, err = store.ClaimAuthorized("s1", "worker-1", "wake-linked", relinkedExpected, now.Add(3*time.Second), 1000)
+	if err != nil || !res.Forbidden {
+		t.Fatalf("claim after link mutation = %+v/%v, want forbidden", res, err)
 	}
 }
 

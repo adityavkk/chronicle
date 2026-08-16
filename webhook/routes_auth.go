@@ -48,30 +48,3 @@ func (rt *Routes) controlDeny(w http.ResponseWriter, op, id string, status int, 
 		"subscription", id, "reason", reason)
 	return true
 }
-
-// authorizeClaim is the TB2 gate: it reports whether handleClaim may
-// proceed. It runs before any store access, so a denied claim reads nothing
-// and mints nothing. In enforce mode a missing or unverifiable credential
-// writes the 401 envelope; in the insecure default the decision is recorded
-// as telemetry and the request proceeds. The error is operator-facing and
-// never carries token material.
-func (rt *Routes) authorizeClaim(w http.ResponseWriter, r *http.Request, id string) bool {
-	token, ok := bearerToken(r)
-	var err error
-	if !ok {
-		err = errors.New("missing caller credential")
-	} else {
-		_, err = rt.mgr.verifyCaller(token, time.Now())
-	}
-	if err == nil {
-		return true
-	}
-	if rt.mgr.authMode == auth.ModeEnforce {
-		rt.mgr.log.Warn("claim denied", "subscription", id, "reason", err.Error())
-		writeErr(w, http.StatusUnauthorized, ErrCodeUnauthenticated)
-		return false
-	}
-	rt.mgr.log.Info("authz telemetry: claim would be denied",
-		"subscription", id, "reason", err.Error())
-	return true
-}
