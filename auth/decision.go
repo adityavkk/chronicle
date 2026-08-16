@@ -24,6 +24,29 @@ const (
 	ActionClaim
 )
 
+// AppendFence is the claim identity a stream mutation must compare with the
+// stream-slot lease marker in the same atomic commit. LeaseUntilNs is written
+// only by the subscription lifecycle; request tokens prove the other fields.
+type AppendFence struct {
+	SubscriptionID          string
+	SubscriptionIncarnation string
+	Shard                   int
+	Generation              int64
+	WakeID                  string
+	Holder                  string
+	LeaseUntilNs            int64
+}
+
+// Complete reports whether the fence identifies one live claim.
+func (f AppendFence) Complete() bool {
+	return f.SubscriptionID != "" &&
+		f.SubscriptionIncarnation != "" &&
+		f.Shard >= 0 &&
+		f.Generation > 0 &&
+		f.WakeID != "" &&
+		f.Holder != ""
+}
+
 func (a Action) String() string {
 	switch a {
 	case ActionRead:

@@ -3,6 +3,7 @@ package chronicle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -196,6 +197,18 @@ func (a streamAdapter) AppendWakeEvent(wakeStream string, data []byte) error {
 	return err
 }
 
+type redisFenceStreamAdapter struct {
+	streamAdapter
+}
+
+func (a redisFenceStreamAdapter) GrantAppendFence(path string, fence auth.AppendFence) (bool, error) {
+	return a.rs.GrantAppendFence(storePath(path), fence)
+}
+
+func (a redisFenceStreamAdapter) RevokeAppendFence(path string, fence auth.AppendFence) error {
+	return a.rs.RevokeAppendFence(storePath(path), fence)
+}
+
 // redisLister adapts the Redis stream store to webhook.StreamLister for pattern
 // backfill and recovery reconciliation.
 type redisLister struct {
@@ -225,8 +238,8 @@ func (l redisLister) ListStreams() ([]webhook.StreamMeta, error) {
 // the same persisted keys the mints use (issue #126) — hand it to the
 // Handler so the token gates and the mints can never disagree. streamRootURL is the public URL the protocol is served
 // under (scheme+host+root, trailing slash), used to build callback and JWKS
-// URLs. rs may be nil to disable pattern backfill of existing streams (new
-// streams are still linked as they are created).
+// URLs. In insecure mode rs may be nil to disable pattern backfill. Enforce
+// mode requires it because the Redis store owns the atomic append markers.
 func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs *redisstore.Store, streamRootURL string, allowPrivateWebhooks bool, tuning SubscriptionTuning, logger *slog.Logger) (SubscriptionRouter, SubscriptionService, *Authorizers, error) {
 	opts := webhook.ManagerOptions{
 		StreamRootURL:              streamRootURL,
@@ -247,6 +260,9 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 	}
 	if rs != nil {
 		opts.Lister = redisLister{rs: rs}
+	}
+	if tuning.AuthMode == auth.ModeEnforce && rs == nil {
+		return nil, nil, nil, fmt.Errorf("subscriptions: auth enforce requires Redis stream append fencing")
 	}
 	if tuning.KeysFile != "" {
 		src, err := webhook.NewFileKeyWatcher(tuning.KeysFile, tuning.KeysFileAllowGroupRead, logger)
@@ -277,7 +293,11 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 	if err := store.AssertAOFEnabled(tuning.Consistency, tuning.WaitReplicas); err != nil {
 		return nil, nil, nil, err
 	}
-	mgr, err := webhook.NewManager(store, streamAdapter{st: streamStore, rs: rs}, opts)
+	streams := webhook.Streams(streamAdapter{st: streamStore, rs: rs})
+	if rs != nil {
+		streams = redisFenceStreamAdapter{streamAdapter{st: streamStore, rs: rs}}
+	}
+	mgr, err := webhook.NewManager(store, streams, opts)
 	if err != nil {
 		return nil, nil, nil, err
 	}

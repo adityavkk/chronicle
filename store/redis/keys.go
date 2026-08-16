@@ -7,6 +7,7 @@
 package redis
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -23,6 +24,7 @@ const (
 	msgSuffix     = ":msg"
 	prodSuffix    = ":prod"
 	forksSuffix   = ":forks"
+	fenceSuffix   = ":append-fence:"
 	frameSep      = "|"
 	frameSepByte  = byte('|')
 	offsetStrLen  = 33 // len("%016d_%016d")
@@ -57,6 +59,16 @@ func prodKey(path string) string { return keyPrefix + tag(path) + prodSuffix }
 
 // forksKey returns the SET key registering fork paths of this stream.
 func forksKey(path string) string { return keyPrefix + tag(path) + forksSuffix }
+
+// appendFenceKey is the per-(stream, subscription incarnation, shard) lease
+// marker checked by append.lua and close.lua. The stream tag keeps the marker
+// in the exact Redis Cluster slot as the mutation it fences. Incarnation is
+// part of the key so a recreated subscription cannot revive an old claim.
+func appendFenceKey(path, subscriptionID, incarnation string, shard int) string {
+	identity := subscriptionID + "\x00" + incarnation
+	sub := base64.RawURLEncoding.EncodeToString([]byte(identity))
+	return keyPrefix + tag(path) + fenceSuffix + sub + ":" + fmt.Sprint(shard)
+}
 
 // notifyChannel returns the pub/sub channel for stream wakeups
 // ("a" append, "c" close, "d" delete).

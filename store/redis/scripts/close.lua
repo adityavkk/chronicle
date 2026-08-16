@@ -2,11 +2,12 @@
 -- including closedBy producer-tuple dedup. Mirrors MemoryStore: close does
 -- NOT refresh the sliding TTL and does NOT check softDeleted.
 --
--- KEYS: 1=meta 2=msg 3=prod 4=forks
+-- KEYS: 1=meta 2=msg 3=prod 4=forks 5=append-fence marker (when enabled)
 -- ARGV: 1=nowNs 2=notifyChannel 3=hasProducer('1'/'0')
---       4=producerId 5=producerEpoch 6=producerSeq
+-- 4=producerId 5=producerEpoch 6=producerSeq 7=hasFence('1'/'0')
+-- 8=fenceGeneration 9=fenceWakeId 10=fenceHolder
 --
--- Reply: make_reply; status one of OK|NOTFOUND|CLOSED|STALE_EPOCH|
+-- Reply: make_reply; status one of OK|FENCED|NOTFOUND|CLOSED|STALE_EPOCH|
 -- EPOCH_SEQ|SEQ_GAP. CLOSED = already closed by a different producer tuple.
 
 local now = tonumber(ARGV[1])
@@ -15,6 +16,7 @@ local has_producer = ARGV[3] == '1'
 local producer_id = ARGV[4]
 local p_epoch = ARGV[5]
 local p_seq = ARGV[6]
+local has_fence = ARGV[7] == '1'
 
 local m = meta_map(KEYS[1])
 if m == nil then return make_reply('NOTFOUND') end
@@ -22,6 +24,20 @@ if m == nil then return make_reply('NOTFOUND') end
 if is_expired(m, now) then
   expire_cleanup(m)
   return make_reply('NOTFOUND')
+end
+
+if has_fence then
+ local fence = redis.call('HMGET', KEYS[5],
+   'state', 'generation', 'wake_id', 'holder', 'lease_until_ns', 'stream_incarnation')
+ if fence[1] ~= 'live'
+   or fence[2] ~= ARGV[8]
+   or fence[3] ~= ARGV[9]
+   or fence[4] ~= ARGV[10]
+   or fence[5] == false
+   or tonumber(fence[5]) <= now
+   or fence[6] ~= m.incarnation then
+  return make_reply('FENCED', m.tail)
+ end
 end
 
 if m.closed == '1' then

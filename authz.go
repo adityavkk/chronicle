@@ -30,12 +30,11 @@ type AppendAuthorizer interface {
 }
 
 // AppendTwoPhaseAuthorizer lets the handler validate credentials before store
-// lookup, then re-check the live fence immediately before the mutation. This is
-// a window-minimizing mitigation for #143; the same-commit atomic fence lives in
-// follow-up #169.
+// lookup, then produce a live claim fence immediately before mutation. The
+// fence is passed to the store and compared inside the atomic stream commit.
 type AppendTwoPhaseAuthorizer interface {
 	AuthorizeAppendCredential(token string, path auth.StreamPath, now time.Time) auth.Decision
-	AuthorizeAppendFence(token string, path auth.StreamPath, now time.Time) auth.Decision
+	AuthorizeAppendFence(token string, path auth.StreamPath, now time.Time) (auth.Decision, *auth.AppendFence)
 }
 
 // ReadAuthorizer authorizes a data-plane read with a chronicle
@@ -180,28 +179,37 @@ func denyError(d auth.Decision) *authError {
 }
 
 func (h *Handler) authorizeAppendCredential(r *http.Request, rawPath string) error {
-	return h.authorizeAppendPhase(r, rawPath, appendPhaseCredential, "append credential")
+	_, err := h.authorizeAppendPhase(r, rawPath, appendPhaseCredential, "append credential")
+	return err
 }
 
-func (h *Handler) authorizeAppendFence(r *http.Request, rawPath string) error {
+func (h *Handler) authorizeAppendFence(r *http.Request, rawPath string) (*auth.AppendFence, error) {
 	return h.authorizeAppendPhase(r, rawPath, appendPhaseFence, "append fence")
 }
 
-func (h *Handler) authorizeAppendPhase(r *http.Request, rawPath string, phase appendAuthPhase, label string) error {
-	d := h.appendDecision(r, rawPath, phase)
+func (h *Handler) authorizeAppendPhase(
+	r *http.Request,
+	rawPath string,
+	phase appendAuthPhase,
+	label string,
+) (*auth.AppendFence, error) {
+	d, fence := h.appendDecision(r, rawPath, phase)
 	if d.Allowed() {
-		return nil
+		if h.AuthMode == auth.ModeEnforce {
+			return fence, nil
+		}
+		return nil, nil
 	}
 	if h.AuthMode == auth.ModeEnforce {
 		h.logger().Warn(label+" denied",
 			"path", rawPath, "reason", d.Reason().String(), "detail", d.Detail())
-		return denyError(d)
+		return nil, denyError(d)
 	}
 	// Telemetry (insecure mode): record what enforcement would deny so an
 	// operator can observe the blast radius before flipping AuthMode.
 	h.logger().Info("authz telemetry: "+label+" would be denied",
 		"path", rawPath, "reason", d.Reason().String(), "detail", d.Detail())
-	return nil
+	return nil, nil
 }
 
 type appendAuthPhase int
@@ -221,7 +229,11 @@ const (
 // validated entity authority, so a claim token riding alongside it is not
 // reinterpreted here. The service decision runs before the AppendAuth nil guard,
 // so a policy-authorized service can run without the subscription token layer.
-func (h *Handler) appendDecision(r *http.Request, rawPath string, phase appendAuthPhase) auth.Decision {
+func (h *Handler) appendDecision(
+	r *http.Request,
+	rawPath string,
+	phase appendAuthPhase,
+) (auth.Decision, *auth.AppendFence) {
 	// Normalize the EXACT store path (rawPath), not subStreamPath(rawPath):
 	// subStreamPath strips one leading slash and NormalizeStreamPath strips
 	// another, so the pair would double-strip and silently accept a
@@ -232,10 +244,10 @@ func (h *Handler) appendDecision(r *http.Request, rawPath string, phase appendAu
 	// string (§12.2).
 	path, err := auth.NormalizeStreamPath(rawPath)
 	if err != nil {
-		return auth.Deny(auth.ReasonForbidden, "invalid stream path")
+		return auth.Deny(auth.ReasonForbidden, "invalid stream path"), nil
 	}
 	if decision, routed := h.serviceDecision(r, path, auth.ActionAppend); routed {
-		return decision
+		return decision, nil
 	}
 	// A woken entity acting as itself appends on its wake_token alone — no
 	// claim needed (issue #126 TB6b); the claim-token path below remains the
@@ -244,22 +256,22 @@ func (h *Handler) appendDecision(r *http.Request, rawPath string, phase appendAu
 	// fails the HMAC path (pinned by test).
 	if bearer := bearerFromRequest(r); bearer != "" {
 		if d, routed := h.agentDecision(bearer, path); routed {
-			return d
+			return d, nil
 		}
 	}
 	if h.AppendAuth == nil {
-		return auth.Deny(auth.ReasonUnauthenticated, "no append authorizer configured")
+		return auth.Deny(auth.ReasonUnauthenticated, "no append authorizer configured"), nil
 	}
 	token := claimTokenFromRequest(r)
 	if tp, ok := h.AppendAuth.(AppendTwoPhaseAuthorizer); ok {
 		switch phase {
 		case appendPhaseCredential:
-			return tp.AuthorizeAppendCredential(token, path, time.Now())
+			return tp.AuthorizeAppendCredential(token, path, time.Now()), nil
 		case appendPhaseFence:
 			return tp.AuthorizeAppendFence(token, path, time.Now())
 		}
 	}
-	return h.AppendAuth.AuthorizeAppend(token, path, time.Now())
+	return h.AppendAuth.AuthorizeAppend(token, path, time.Now()), nil
 }
 
 // credentialPresented reports whether the request carries any read/mutate

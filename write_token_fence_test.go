@@ -5,15 +5,19 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/store"
+	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
@@ -52,6 +56,19 @@ func (writeFenceStreams) TailOffsets(paths []string) (map[string]string, error) 
 
 func (writeFenceStreams) BeginningOffset() string              { return "0000000000000000_0000000000000000" }
 func (writeFenceStreams) AppendWakeEvent(string, []byte) error { return nil }
+
+type pausedAppendStore struct {
+	store.Store
+	entered chan struct{}
+	resume  chan struct{}
+	once    sync.Once
+}
+
+func (s *pausedAppendStore) Append(path string, data []byte, opts store.AppendOptions) (store.AppendResult, error) {
+	s.once.Do(func() { close(s.entered) })
+	<-s.resume
+	return s.Store.Append(path, data, opts)
+}
 
 func newWriteFenceManager(t *testing.T) (*webhook.Manager, *webhook.RedisStore, func()) {
 	t.Helper()
@@ -246,5 +263,121 @@ func TestHeartbeatRefreshesWriteTokenForLongLiveHolder(t *testing.T) {
 	}, []byte(`{"ok":true}`))
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("append after long heartbeat = %d body %q, want 204", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleAppendReleaseRaceIsFencedInsideRedisCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Redis integration test in -short mode")
+	}
+	rawURL := os.Getenv("CHRONICLE_ITEST_REDIS_URL")
+	if rawURL == "" {
+		rawURL = "redis://localhost:6379/13"
+	}
+	options, err := goredis.ParseURL(rawURL)
+	if err != nil {
+		t.Fatalf("parse Redis URL: %v", err)
+	}
+	client := goredis.NewClient(options)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		t.Skipf("redis unreachable at %s: %v", rawURL, err)
+	}
+	if err := client.FlushDB(ctx).Err(); err != nil {
+		_ = client.Close()
+		t.Fatalf("flushdb: %v", err)
+	}
+
+	dataStore := redisstore.New(client, redisstore.Options{})
+	t.Cleanup(func() { _ = dataStore.Close() })
+	subStore := webhook.NewRedisStore(client)
+	streams := redisFenceStreamAdapter{streamAdapter{st: dataStore, rs: dataStore}}
+	mgr, err := webhook.NewManager(subStore, streams, webhook.ManagerOptions{
+		StreamRootURL: "http://x/v1/stream/",
+	})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	rt := webhook.NewRoutes(mgr)
+
+	paused := &pausedAppendStore{
+		Store:   dataStore,
+		entered: make(chan struct{}),
+		resume:  make(chan struct{}),
+	}
+	h := testHandler(time.Second, time.Second)
+	h.Store = paused
+	h.AuthMode = auth.ModeEnforce
+	h.AppendAuth = mgr.WriteAuthorizer()
+	createDirect(t, h, "/events/a", "application/json")
+	cr := claimForWriteFence(t, rt, subStore)
+	before := tailOf(t, h, "/events/a")
+
+	appendResult := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		appendResult <- do(h, http.MethodPost, "/events/a", map[string]string{
+			"Content-Type":   "application/json",
+			ClaimTokenHeader: cr.WriteToken,
+		}, []byte(`{"stale":true}`))
+	}()
+	select {
+	case <-paused.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("append did not reach the paused store commit")
+	}
+
+	releaseBody, err := json.Marshal(webhook.ReleaseRequest{
+		Generation: cr.Generation,
+		WakeID:     cr.WakeID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseReq := httptest.NewRequest(http.MethodPost, "/__ds/subscriptions/s1/release", bytes.NewReader(releaseBody))
+	releaseReq.Header.Set("Authorization", "Bearer "+cr.Token)
+	releaseRec := httptest.NewRecorder()
+	if !rt.HandleRequest(releaseRec, releaseReq) {
+		t.Fatal("release route did not handle request")
+	}
+	if releaseRec.Code != http.StatusNoContent {
+		t.Fatalf("release = %d body %q, want 204", releaseRec.Code, releaseRec.Body.String())
+	}
+
+	close(paused.resume)
+	var rec *httptest.ResponseRecorder
+	select {
+	case rec = <-appendResult:
+	case <-time.After(5 * time.Second):
+		t.Fatal("append did not return after release")
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("append after release linearized = %d body %q, want 409", rec.Code, rec.Body.String())
+	}
+	var body webhook.ErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Code != webhook.ErrCodeFenced {
+		t.Fatalf("error code = %q, want %q", body.Error.Code, webhook.ErrCodeFenced)
+	}
+	if after := tailOf(t, h, "/events/a"); !after.Equal(before) {
+		t.Fatalf("atomic append fence mutated stream: tail %s -> %s", before, after)
+	}
+}
+
+func TestNewSubscriptionsEnforceRequiresAtomicStreamStore(t *testing.T) {
+	_, _, _, err := NewSubscriptions(
+		nil,
+		store.NewMemoryStore(),
+		nil,
+		"http://x/v1/stream/",
+		false,
+		SubscriptionTuning{AuthMode: auth.ModeEnforce},
+		slog.Default(),
+	)
+	if err == nil {
+		t.Fatal("enforce mode accepted a stream store without Redis append fencing")
 	}
 }

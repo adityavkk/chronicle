@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
@@ -413,6 +414,20 @@ func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (stor
 // CloseStream closes the primary stream before best-effort sealing.
 func (s *Store) CloseStream(path string) (*store.CloseResult, error) {
 	result, err := s.primary.CloseStream(path)
+	if err == nil {
+		s.sealBestEffort(path)
+	}
+	return result, err
+}
+
+// CloseStreamFenced delegates the atomic claim check to the authoritative
+// primary before best-effort segment sealing.
+func (s *Store) CloseStreamFenced(path string, fence auth.AppendFence) (*store.CloseResult, error) {
+	closer, ok := s.primary.(store.FencedCloser)
+	if !ok {
+		return nil, store.ErrAppendFenced
+	}
+	result, err := closer.CloseStreamFenced(path, fence)
 	if err == nil {
 		s.sealBestEffort(path)
 	}

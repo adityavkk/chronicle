@@ -892,15 +892,20 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 	if len(body) == 0 && closeStream {
 		// Close-only - Content-Type validation is skipped per protocol Section 5.2
 		if hasAllProducerHeaders {
-			if err := h.authorizeAppendFence(r, path); err != nil {
+			fence, err := h.authorizeAppendFence(r, path)
+			if err != nil {
 				return err
 			}
 			result, err := h.Store.CloseStreamWithProducer(path, store.CloseProducerOptions{
 				ProducerId:    producerId,
 				ProducerEpoch: *producerEpoch,
 				ProducerSeq:   *producerSeq,
+				Fence:         fence,
 			})
 			if err != nil {
+				if errors.Is(err, store.ErrAppendFenced) {
+					return denyError(auth.Deny(auth.ReasonFenced, "write token claim is fenced"))
+				}
 				if errors.Is(err, store.ErrStreamNotFound) {
 					return newHTTPError(http.StatusNotFound, "stream not found")
 				}
@@ -934,11 +939,22 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 			return nil
 		}
 
-		if err := h.authorizeAppendFence(r, path); err != nil {
+		fence, err := h.authorizeAppendFence(r, path)
+		if err != nil {
 			return err
 		}
-		result, err := h.Store.CloseStream(path)
+		var result *store.CloseResult
+		if fence == nil {
+			result, err = h.Store.CloseStream(path)
+		} else if closer, ok := h.Store.(store.FencedCloser); ok {
+			result, err = closer.CloseStreamFenced(path, *fence)
+		} else {
+			return denyError(auth.Deny(auth.ReasonFenced, "atomic append fence unavailable"))
+		}
 		if err != nil {
+			if errors.Is(err, store.ErrAppendFenced) {
+				return denyError(auth.Deny(auth.ReasonFenced, "write token claim is fenced"))
+			}
 			if errors.Is(err, store.ErrStreamNotFound) {
 				return newHTTPError(http.StatusNotFound, "stream not found")
 			}
@@ -978,15 +994,20 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 		opts.ProducerSeq = producerSeq
 	}
 
-	// Window-minimizing mitigation for #143: body IO, metadata lookup, and parse
-	// work are already complete, so the live write-token fence runs immediately
-	// before Store.Append. The true atomic append+fence is tracked in #169.
-	if err := h.authorizeAppendFence(r, path); err != nil {
+	// Body IO, metadata lookup, and framing are complete. The authorization
+	// result now carries the live claim identity into Store.Append, whose Redis
+	// script compares it with the same-slot lease marker in the atomic commit.
+	fence, err := h.authorizeAppendFence(r, path)
+	if err != nil {
 		return err
 	}
+	opts.Fence = fence
 	result, err := h.Store.Append(path, body, opts)
 	appendReturnedAt := time.Now()
 	if err != nil {
+		if errors.Is(err, store.ErrAppendFenced) {
+			return denyError(auth.Deny(auth.ReasonFenced, "write token claim is fenced"))
+		}
 		if errors.Is(err, store.ErrStreamClosed) {
 			w.Header().Set(protocol.HeaderStreamClosed, "true")
 			w.Header().Set(protocol.HeaderStreamNextOffset, result.Offset.String())

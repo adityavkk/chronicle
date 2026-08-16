@@ -33,13 +33,15 @@ func loadScript(name string) *redis.Script {
 }
 
 var (
-	appendScript  = loadScript("append.lua")
-	createScript  = loadScript("create.lua")
-	closeScript   = loadScript("close.lua")
-	readScript    = loadScript("read.lua")
-	deleteScript  = loadScript("delete.lua")
-	incrRefScript = loadScript("incr_ref.lua")
-	decrRefScript = loadScript("decr_ref.lua")
+	appendScript            = loadScript("append.lua")
+	createScript            = loadScript("create.lua")
+	closeScript             = loadScript("close.lua")
+	readScript              = loadScript("read.lua")
+	deleteScript            = loadScript("delete.lua")
+	incrRefScript           = loadScript("incr_ref.lua")
+	decrRefScript           = loadScript("decr_ref.lua")
+	grantAppendFenceScript  = loadScript("grant_append_fence.lua")
+	revokeAppendFenceScript = loadScript("revoke_append_fence.lua")
 )
 
 // Status sentinels returned in reply[0] by the scripts.
@@ -47,6 +49,7 @@ const (
 	stOK          = "OK"
 	stValOnly     = "VALONLY"
 	stRetry       = "RETRY"
+	stFenced      = "FENCED"
 	stNotFound    = "NOTFOUND"
 	stSoftDel     = "SOFTDEL"
 	stClosed      = "CLOSED"

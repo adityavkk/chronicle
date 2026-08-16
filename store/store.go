@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 )
 
 // Common errors
@@ -25,6 +27,7 @@ var (
 	ErrInvalidJSON                    = errors.New("invalid JSON")
 	ErrStreamClosed                   = errors.New("stream is closed")
 	ErrNotificationSubscriptionClosed = errors.New("notification subscription closed")
+	ErrAppendFenced                   = errors.New("append claim is fenced")
 )
 
 // Producer validation errors
@@ -81,6 +84,7 @@ type CloseProducerOptions struct {
 	ProducerId    string
 	ProducerEpoch int64
 	ProducerSeq   int64
+	Fence         *auth.AppendFence
 }
 
 // CloseProducerResult contains the result of a close-only operation with producer headers.
@@ -150,6 +154,13 @@ type Store interface {
 
 	// Close releases any resources held by the store
 	Close() error
+}
+
+// FencedCloser is the optional same-slot close capability. A handler with a
+// claim fence must require this capability rather than falling back to the
+// unfenced CloseStream method.
+type FencedCloser interface {
+	CloseStreamFenced(path string, fence auth.AppendFence) (*CloseResult, error)
 }
 
 // NotificationSubscription is an optional long-lived notification feed. It
@@ -238,9 +249,10 @@ type AppendOptions struct {
 	Close       bool   // Close stream after append (Stream-Closed: true)
 
 	// Idempotent producer fields (all must be set together, or none)
-	ProducerId    string // Producer-Id header
-	ProducerEpoch *int64 // Producer-Epoch header
-	ProducerSeq   *int64 // Producer-Seq header
+	ProducerId    string            // Producer-Id header
+	ProducerEpoch *int64            // Producer-Epoch header
+	ProducerSeq   *int64            // Producer-Seq header
+	Fence         *auth.AppendFence // claim fence checked atomically with mutation
 }
 
 // HasProducerHeaders returns true if any producer headers are set

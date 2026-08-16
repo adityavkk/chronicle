@@ -206,6 +206,7 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string
 	}
 	var expected SubscriptionExpectation
 	hasExpected := false
+	var existing Subscription
 	if authnErr == nil {
 		sub, ok, err := rt.mgr.store.Get(id)
 		if err != nil {
@@ -214,6 +215,7 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string
 		}
 		reason := ""
 		if ok {
+			existing = sub
 			if caller.isService() {
 				reason = linkAuthz(caller, auth.ActionSubscribe, sub.Config)
 			}
@@ -236,6 +238,13 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		// Revoke before crossing to the control-plane slot. If the guarded
+		// mutation then loses a race, fail closed until the next generation
+		// rather than reviving a marker that a delayed request could reuse.
+		if err := rt.mgr.revokeWriteFences(existing); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		res, err := rt.mgr.store.DeleteAuthorized(id, expected)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -246,6 +255,23 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if !hasExpected {
+		var ok bool
+		var err error
+		existing, ok, err = rt.mgr.store.Get(id)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	if err := rt.mgr.revokeWriteFences(existing); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if err := rt.mgr.store.Delete(id); err != nil {
@@ -370,6 +396,14 @@ func (rt *Routes) handleRemoveStream(w http.ResponseWriter, r *http.Request, id,
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		// A retained glob link is still part of this claim's resource set.
+		// Otherwise revoke before the cross-slot unlink for fail-closed order.
+		if !stillGlob {
+			if err := rt.mgr.revokeWriteFencePath(sub, path); err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+		}
 		expected := subscriptionExpectationFromSubscription(sub)
 		res, err := rt.mgr.store.UnlinkAuthorized(id, path, stillGlob, expected)
 		if err != nil {
@@ -382,6 +416,12 @@ func (rt *Routes) handleRemoveStream(w http.ResponseWriter, r *http.Request, id,
 		}
 		w.WriteHeader(http.StatusNoContent)
 		return
+	}
+	if ok && !stillGlob {
+		if err := rt.mgr.revokeWriteFencePath(sub, path); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
 	if err := rt.mgr.store.Unlink(id, path, stillGlob); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -450,7 +490,10 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 			resp.Token = fresh
 		}
 	}
-	if wt, ok := rt.mgr.mintWriteTokenOnAck(id, req.Generation, req.WakeID, done, now); ok {
+	if wt, ok, err := rt.mgr.mintWriteTokenOnAck(id, req.Generation, req.WakeID, done, now); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	} else if ok {
 		resp.WriteToken = wt
 	}
 	// wake_token heartbeat refresh (#123/#126 TB6a): every successful non-done
@@ -523,20 +566,31 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 			writeErr(w, http.StatusConflict, ErrCodeFenced)
 		}
 	case res.Claimed:
-		// Re-read links for a fresh cursor snapshot (tails may have advanced).
-		fresh, _, _ := rt.mgr.store.Get(id)
+		// Re-read links and the committed lease for a fresh cursor snapshot.
+		fresh, ok, err := rt.mgr.store.Get(id)
+		if err != nil || !ok {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		snap, _ := Snapshot(fresh.Links, rt.mgr.tailOf)
 		now := time.Now()
-		token, err := GenerateToken(rt.mgr.tokenKey, id, res.Generation, now, rt.mgr.tokenTTL(sub), randReader)
+		if err := rt.mgr.grantWriteFences(fresh); err != nil {
+			_, _, _ = rt.mgr.applyRelease(id, ReleaseRequest{
+				Generation: res.Generation,
+				WakeID:     res.WakeID,
+			}, res.Generation)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		token, err := GenerateToken(rt.mgr.tokenKey, id, res.Generation, now, rt.mgr.tokenTTL(fresh), randReader)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		// The claim is where the write capability is born (issue #126): scope it
 		// to exactly the claimed streams and bind it to the live claim fence. The
-		// TTL tracks the lease plus a small fence-observation grace; the live
-		// generation/lease check below is the exclusivity mechanism, not exp.
-		writeToken, err := GenerateClaimWriteToken(rt.mgr.tokenKey, id, res.Generation, res.WakeID, res.Holder, 0, writeScope(snap), now, rt.mgr.writeTokenTTL(sub), randReader)
+		// marker above is installed before this token can leave Chronicle.
+		writeToken, err := GenerateClaimWriteToken(rt.mgr.tokenKey, id, fresh.Incarnation, res.Generation, res.WakeID, res.Holder, 0, writeScope(snap), now, rt.mgr.writeTokenTTL(fresh), randReader)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
