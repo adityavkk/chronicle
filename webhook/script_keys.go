@@ -38,19 +38,29 @@ func newCreateSubKeys(id string) createSubKeys {
 	return createSubKeys{Sub: subKey(id), SubsSet: subsKey(h), Links: linksKey(id), IncarnationCounter: subIncarnationKey(id)}
 }
 
-type linkStreamKeys struct{ Links string }
+type linkStreamKeys struct {
+	Sub   string
+	Links string
+}
 
-func (k linkStreamKeys) redisKeys() []string       { return []string{k.Links} }
-func (k linkStreamKeys) keyRoles() []scriptKeyRole { return []scriptKeyRole{"links"} }
+func (k linkStreamKeys) redisKeys() []string       { return []string{k.Sub, k.Links} }
+func (k linkStreamKeys) keyRoles() []scriptKeyRole { return []scriptKeyRole{"sub", "links"} }
 
-func newLinkStreamKeys(id string) linkStreamKeys { return linkStreamKeys{Links: linksKey(id)} }
+func newLinkStreamKeys(id string) linkStreamKeys {
+	return linkStreamKeys{Sub: subKey(id), Links: linksKey(id)}
+}
 
-type unlinkStreamKeys struct{ Links string }
+type unlinkStreamKeys struct {
+	Sub   string
+	Links string
+}
 
-func (k unlinkStreamKeys) redisKeys() []string       { return []string{k.Links} }
-func (k unlinkStreamKeys) keyRoles() []scriptKeyRole { return []scriptKeyRole{"links"} }
+func (k unlinkStreamKeys) redisKeys() []string       { return []string{k.Sub, k.Links} }
+func (k unlinkStreamKeys) keyRoles() []scriptKeyRole { return []scriptKeyRole{"sub", "links"} }
 
-func newUnlinkStreamKeys(id string) unlinkStreamKeys { return unlinkStreamKeys{Links: linksKey(id)} }
+func newUnlinkStreamKeys(id string) unlinkStreamKeys {
+	return unlinkStreamKeys{Sub: subKey(id), Links: linksKey(id)}
+}
 
 type armWakeKeyVec struct {
 	Sub       string
@@ -90,19 +100,24 @@ type claimKeyVec struct {
 	LeaseZSet          string
 	IncarnationCounter string
 	ShardRegistry      string
+	Links              string
 }
 
 func (k claimKeyVec) redisKeys() []string {
-	return []string{k.SubConfig, k.ShardState, k.LeaseZSet, k.IncarnationCounter, k.ShardRegistry}
+	return []string{k.SubConfig, k.ShardState, k.LeaseZSet, k.IncarnationCounter, k.ShardRegistry, k.Links}
 }
 
 func (k claimKeyVec) keyRoles() []scriptKeyRole {
-	return []scriptKeyRole{"sub_config", "shardstate", "lease_zset", "incarnation_counter", "shard_registry"}
+	return []scriptKeyRole{"sub_config", "shardstate", "lease_zset", "incarnation_counter", "shard_registry", "links"}
 }
 
 func claimKeys(id string, g int) claimKeyVec {
 	h := slotOf(id)
-	return claimKeyVec{SubConfig: subKey(id), ShardState: subShardKey(id, g), LeaseZSet: leaseZKey(h), IncarnationCounter: subIncarnationKey(id), ShardRegistry: subShardRegistryKey(id)}
+	return claimKeyVec{
+		SubConfig: subKey(id), ShardState: subShardKey(id, g), LeaseZSet: leaseZKey(h),
+		IncarnationCounter: subIncarnationKey(id), ShardRegistry: subShardRegistryKey(id),
+		Links: linksKey(id),
+	}
 }
 
 type writeFenceKeyVec struct {

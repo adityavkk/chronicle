@@ -67,6 +67,9 @@ type SubscriptionTuning struct {
 	// create/add-streams) follow the same telemetry-default posture as the
 	// data plane. One mode, never a second flag.
 	AuthMode auth.Mode
+	// ServiceAccess is the same service authenticator and policy evaluator used
+	// by the data-plane handler. Nil keeps caller-token-only control-plane auth.
+	ServiceAccess *auth.ServiceAccess
 
 	// ---- key custody (issues #123/#126) ----
 	// KeysFile, when non-empty, loads the Ed25519 signing key(s) and the HMAC
@@ -240,6 +243,7 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		SlotLeaseTTL:               tuning.SlotLeaseTTL,
 		SlotReconcileInterval:      tuning.SlotReconcileInterval,
 		AuthMode:                   tuning.AuthMode,
+		ServiceAccess:              tuning.ServiceAccess,
 	}
 	if rs != nil {
 		opts.Lister = redisLister{rs: rs}

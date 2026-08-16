@@ -145,19 +145,25 @@ type claimBusy struct {
 	Generation int64
 	Holder     string
 }
-type claimNoSub struct{}
+type (
+	claimNoSub     struct{}
+	claimForbidden struct{}
+)
 
-func (claimClaimed) claimReply()    {}
-func (claimBusy) claimReply()       {}
-func (claimNoSub) claimReply()      {}
-func (claimClaimed) status() string { return "CLAIMED" }
-func (claimBusy) status() string    { return "BUSY" }
-func (claimNoSub) status() string   { return "NOSUB" }
+func (claimClaimed) claimReply()      {}
+func (claimBusy) claimReply()         {}
+func (claimNoSub) claimReply()        {}
+func (claimForbidden) claimReply()    {}
+func (claimClaimed) status() string   { return "CLAIMED" }
+func (claimBusy) status() string      { return "BUSY" }
+func (claimNoSub) status() string     { return "NOSUB" }
+func (claimForbidden) status() string { return "FORBIDDEN" }
 
 var claimReplyVariants = []replyVariant{
 	{Status: "CLAIMED", Fields: []replyFieldKind{replyInteger, replyString, replyString}},
 	{Status: "BUSY", Fields: []replyFieldKind{replyInteger, replyString, replyString}},
 	{Status: "NOSUB"},
+	{Status: "FORBIDDEN"},
 }
 
 var claimDecoder = scriptDecoder[claimReply]{Variants: claimReplyVariants, Decode: decodeClaimReply}
@@ -207,6 +213,11 @@ func decodeClaimReply(r scriptReply) (claimReply, error) {
 			return nil, err
 		}
 		return claimNoSub{}, nil
+	case "FORBIDDEN":
+		if err := r.wantArity(1); err != nil {
+			return nil, err
+		}
+		return claimForbidden{}, nil
 	default:
 		return nil, fmt.Errorf("unhandled claim status %q", st)
 	}

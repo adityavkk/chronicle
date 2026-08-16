@@ -160,7 +160,7 @@ func TestTierBDurabilityBarrierPinnedToMintConnection(t *testing.T) {
 			name:  "claim shard",
 			reply: []any{"CLAIMED", int64(8), "wake-c", "worker-1"},
 			run: func(s *RedisStore) error {
-				_, err := s.ClaimShard("s1", 0, "worker-1", "wake-c", time.Now(), 1000)
+				_, err := s.claimShardAuthorized("s1", 0, "worker-1", "wake-c", SubscriptionExpectation{}, time.Now(), 1000)
 				return err
 			},
 		},

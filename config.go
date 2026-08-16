@@ -2,6 +2,7 @@ package chronicle
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,7 @@ const (
 	// Trusted service principals (issue #126 TB4, trusted-backend mode).
 	EnvServiceBearer          = "CHRONICLE_SERVICE_BEARER"            // "token" or "name:token[,name:token...]"
 	EnvTrustedSPIFFE          = "CHRONICLE_TRUSTED_SPIFFE_IDS"        // comma-separated spiffe:// allowlist (mesh add-on)
+	EnvServicePolicyFile      = "CHRONICLE_SERVICE_POLICY_FILE"       // mounted strict JSON service action/namespace policy
 	EnvXFCCRequiredHeader     = "CHRONICLE_XFCC_REQUIRED_HEADER"      // optional "Name: value" sidecar marker gating XFCC trust
 	EnvXFCCTrustWithoutMarker = "CHRONICLE_XFCC_TRUST_WITHOUT_MARKER" // explicit opt-in to trust XFCC with no marker (#130): fail-closed default requires it when TrustedSPIFFE is set without a marker
 	// Key custody (issues #123/#126): path to a mounted secrets file holding the
@@ -242,17 +244,21 @@ type Config struct {
 	// per-stage at the deployment layer, not in code.
 	AuthMode auth.Mode
 
-	// ServiceCredentials are the trusted-backend static bearer identities
-	// (issue #126 TB4): the Electric agents-server's DURABLE_STREAMS_BEARER,
-	// with comma-separated entries for rotation overlap. Empty disables the
-	// bearer path.
+	// ServiceCredentials are optional static-bearer compatibility identities.
+	// Each name must have an explicit ServicePolicies entry in enforce mode.
+	// Empty disables the bearer fallback.
 	ServiceCredentials []auth.ServiceCredential
 
-	// TrustedSPIFFEIDs is the in-mesh service allowlist matched against the
-	// sidecar-injected X-Forwarded-Client-Cert URI SAN (issue #126 TB4).
-	// Configure it only when a sidecar fronts chronicle and sanitizes
-	// inbound XFCC. Empty disables the mesh path.
+	// TrustedSPIFFEIDs is the exact in-mesh allowlist matched against the
+	// sidecar-attested XFCC URI SAN. Service policy SPIFFE identities are added
+	// automatically; the legacy env allowlist remains only as a compatibility
+	// input and grants no authority without a policy.
 	TrustedSPIFFEIDs []string
+
+	// ServicePolicyFile is the mounted strict JSON policy source. The parsed,
+	// normalized policy set is shared by data-plane and subscription routes.
+	ServicePolicyFile string
+	ServicePolicies   auth.ServicePolicies
 
 	// XFCCMarkerName / XFCCMarkerValue are the optional sidecar-marker gate
 	// (issue #126 hardening): when Name is set, an XFCC mesh identity is
@@ -518,6 +524,22 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 		}
 		c.TrustedSPIFFEIDs = ids
 	}
+	if v, ok := lookup(EnvServicePolicyFile); ok {
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("%s: path is empty", EnvServicePolicyFile)
+		}
+		data, err := os.ReadFile(v) // #nosec G304 -- the operator-configured policy mount path
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvServicePolicyFile, err)
+		}
+		policies, err := auth.ParseServicePolicies(data)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvServicePolicyFile, err)
+		}
+		c.ServicePolicyFile = v
+		c.ServicePolicies = policies
+		c.TrustedSPIFFEIDs = mergeStrings(c.TrustedSPIFFEIDs, policies.SPIFFEIdentities())
+	}
 	if v, ok := lookup(EnvXFCCRequiredHeader); ok {
 		name, value, found := strings.Cut(v, ":")
 		name = strings.TrimSpace(name)
@@ -538,14 +560,30 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	if v, ok := lookup(EnvKeysFileAllowGroupRead); ok {
 		c.KeysFileAllowGroupRead = v == "1" || v == "true"
 	}
+	if c.AuthMode == auth.ModeEnforce &&
+		(len(c.ServiceCredentials) > 0 || len(c.TrustedSPIFFEIDs) > 0) {
+		if c.ServicePolicies.Len() == 0 {
+			return fmt.Errorf("%s=enforce requires %s for configured service identities", EnvAuthMode, EnvServicePolicyFile)
+		}
+		for _, credential := range c.ServiceCredentials {
+			if !c.ServicePolicies.HasIdentity(credential.Name()) {
+				return fmt.Errorf("%s: no policy for bearer identity %q", EnvServicePolicyFile, credential.Name())
+			}
+		}
+		for _, identity := range c.TrustedSPIFFEIDs {
+			if !c.ServicePolicies.HasIdentity(identity) {
+				return fmt.Errorf("%s: no policy for SPIFFE identity %q", EnvServicePolicyFile, identity)
+			}
+		}
+	}
 	// Fail closed on the XFCC-spoof misconfiguration (issue #126 hardening,
 	// #130): a SPIFFE allowlist with no marker gate means raw client XFCC would
 	// be trusted if the sidecar ever failed to strip it. Refuse startup unless
 	// the operator either configures a marker or consciously accepts the
 	// marker-less posture — never silently default to trusting raw XFCC.
 	if len(c.TrustedSPIFFEIDs) > 0 && c.XFCCMarkerName == "" && !c.AllowXFCCWithoutMarker {
-		return fmt.Errorf("%s is set without %s: XFCC mesh identity would rest on raw client input — set %s to gate it, or set %s=true only if the sidecar provably strips inbound XFCC (Envoy forward_client_cert_details: SANITIZE_SET)",
-			EnvTrustedSPIFFE, EnvXFCCRequiredHeader, EnvXFCCRequiredHeader, EnvXFCCTrustWithoutMarker)
+		return fmt.Errorf("SPIFFE service identity is configured without %s: XFCC mesh identity would rest on raw client input — set %s to gate it, or set %s=true only if the sidecar provably strips inbound XFCC (Envoy forward_client_cert_details: SANITIZE_SET)",
+			EnvXFCCRequiredHeader, EnvXFCCRequiredHeader, EnvXFCCTrustWithoutMarker)
 	}
 	if v, ok := lookup(EnvWakeTokenAud); ok {
 		c.WakeTokenAudience = v
@@ -571,4 +609,19 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 		}
 	}
 	return nil
+}
+
+func mergeStrings(left, right []string) []string {
+	out := make([]string, 0, len(left)+len(right))
+	seen := make(map[string]struct{}, len(left)+len(right))
+	for _, values := range [][]string{left, right} {
+		for _, value := range values {
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			out = append(out, value)
+		}
+	}
+	return out
 }

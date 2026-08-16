@@ -119,6 +119,9 @@ type Subscription struct {
 	// identity, not config: it never participates in the config hash, so an
 	// idempotent re-confirm cannot be turned into an ownership transfer.
 	OwnerSubject string
+	// Incarnation is the immutable Redis-assigned identity of this subscription
+	// record. Deleting and recreating the same ID produces a different value.
+	Incarnation string
 
 	Status     Status
 	Phase      Phase

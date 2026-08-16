@@ -208,6 +208,54 @@ func TestStoreClaimCASAckFence(t *testing.T) {
 	}
 }
 
+func TestHeartbeatCannotReviveExpiredLease(t *testing.T) {
+	s, client := newTestStore(t)
+	base := time.Now()
+	_, _ = s.CreateOrConfirm("s1", pullWakeCfg(), nil, base)
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+
+	claim, err := s.Claim("s1", "worker-A", "w_a", base, 1000)
+	if err != nil || !claim.Claimed {
+		t.Fatalf("claim = %+v err=%v", claim, err)
+	}
+	before, ok, err := s.Get("s1")
+	if err != nil || !ok {
+		t.Fatalf("get before heartbeat: ok=%v err=%v", ok, err)
+	}
+	leaseScore, err := client.ZScore(context.Background(), leaseZKey(slotOf("s1")), "s1").Result()
+	if err != nil {
+		t.Fatalf("lease score before heartbeat: %v", err)
+	}
+
+	acks := []Ack{{Stream: "events/a", Offset: "0000000000000001_0000000000000050"}}
+	deadline := time.Unix(0, before.LeaseUntilNs)
+	status, err := s.AckUnscoped(
+		"s1", claim.Generation, claim.WakeID, claim.Generation, false, acks, deadline, 1000,
+	)
+	if err != nil || status != "FENCED" {
+		t.Fatalf("expired heartbeat = %q/%v, want FENCED", status, err)
+	}
+
+	got, ok, err := s.Get("s1")
+	if err != nil || !ok {
+		t.Fatalf("get after heartbeat: ok=%v err=%v", ok, err)
+	}
+	if got.Phase != before.Phase || got.Holder != before.Holder || got.LeaseUntilNs != before.LeaseUntilNs {
+		t.Fatalf("expired heartbeat changed lease state: before=%+v after=%+v", before, got)
+	}
+	if got.Links[0].AckedOffset != before.Links[0].AckedOffset {
+		t.Fatalf("expired heartbeat advanced cursor: before=%q after=%q",
+			before.Links[0].AckedOffset, got.Links[0].AckedOffset)
+	}
+	gotScore, err := client.ZScore(context.Background(), leaseZKey(slotOf("s1")), "s1").Result()
+	if err != nil {
+		t.Fatalf("lease score after heartbeat: %v", err)
+	}
+	if gotScore != leaseScore {
+		t.Fatalf("expired heartbeat changed lease score: before=%v after=%v", leaseScore, gotScore)
+	}
+}
+
 func TestStoreLeaseExpiryAndDueReScore(t *testing.T) {
 	s, client := newTestStore(t)
 	base := time.Now()

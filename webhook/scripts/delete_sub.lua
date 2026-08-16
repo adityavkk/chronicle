@@ -11,6 +11,24 @@ local k_retry_zset = KEYS[5]
 local k_due_zset = KEYS[6]
 local k_shard_registry = KEYS[7]
 local a_id = ARGV[1]
+local a_authorized = ARGV[2]
+local a_expected_owner = ARGV[3]
+local a_expected_incarnation = ARGV[4]
+local a_expected_cfg_hash = ARGV[5]
+local a_num_paths = ARGV[6]
+local i = 7
+local expected_paths = {}
+for _ = 1, tonumber(a_num_paths) or 0 do
+  expected_paths[#expected_paths + 1] = ARGV[i]
+  i = i + 1
+end
+if a_authorized == '1' then
+  local expectation = subscription_expectation_status(
+    k_sub, k_links, a_expected_owner, a_expected_incarnation,
+    a_expected_cfg_hash, a_num_paths, expected_paths)
+  if expectation == 'NOSUB' then return { 'NOSUB' } end
+  if expectation ~= 'MATCHED' then return { 'FORBIDDEN' } end
+end
 redis.call('DEL', k_sub)
 redis.call('DEL', k_links)
 redis.call('SREM', k_subs_set, a_id)

@@ -23,20 +23,41 @@ local k_shardstate = KEYS[2]
 local k_lease_zset = KEYS[3]
 local k_incarnation_counter = KEYS[4]
 local k_shard_registry = KEYS[5]
+local k_links = KEYS[6]
 local a_member = ARGV[1]
 local a_worker = ARGV[2]
 local a_now_ns = ARGV[3]
 local a_lease_ttl_ms = ARGV[4]
 local a_new_wake_id = ARGV[5]
 local a_shard_index = ARGV[6]
+local a_expected_owner = ARGV[7]
+local a_expected_incarnation = ARGV[8]
+local a_expected_cfg_hash = ARGV[9]
+local a_num_paths = ARGV[10]
+local i = 11
+local expected_paths = {}
+for _ = 1, tonumber(a_num_paths) or 0 do
+  expected_paths[#expected_paths + 1] = ARGV[i]
+  i = i + 1
+end
 local cfg = k_sub_config
 local sub = k_shardstate
-if redis.call('EXISTS', cfg) == 0 then
+-- Bind the route's authorization decision to the exact subscription object and
+-- protected resource set it inspected. No lease or fence state changes before
+-- this comparison. A delete/recreate or concurrent link mutation is denied
+-- rather than transferring the prior decision to a different resource set.
+local expectation = subscription_expectation_status(
+  cfg, k_links, a_expected_owner, a_expected_incarnation,
+  a_expected_cfg_hash, a_num_paths, expected_paths)
+if expectation == 'NOSUB' then
   return { 'NOSUB' }
 end
-local cfg_inc = redis.call('HGET', cfg, 'incarnation')
+if expectation ~= 'MATCHED' then
+  return { 'FORBIDDEN' }
+end
+local cfg_inc = a_expected_incarnation
 local shard_inc = redis.call('HGET', sub, 'incarnation')
-if k_sub_config ~= k_shardstate and cfg_inc ~= false and cfg_inc ~= '' and shard_inc ~= cfg_inc then
+if k_sub_config ~= k_shardstate and cfg_inc ~= '' and shard_inc ~= cfg_inc then
   redis.call('DEL', sub)
 end
 local phase = redis.call('HGET', sub, 'phase')

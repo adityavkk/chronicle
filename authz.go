@@ -1,7 +1,6 @@
 package chronicle
 
 import (
-	"crypto/subtle"
 	"net/http"
 	"strings"
 	"time"
@@ -90,95 +89,60 @@ func bearerFromRequest(r *http.Request) string {
 // peer certificate chain (TB4's in-mesh service identity).
 const xfccHeader = "X-Forwarded-Client-Cert"
 
-// ServiceAuth configures trusted service-principal authentication (issue
-// #126 TB4, the trusted-backend topology): a request from a verified service
-// principal — the Electric agents-server — is served pre-authorized, because
-// that server already ran per-entity authorization before forwarding (Q4,
-// decided). Nil disables service auth entirely.
-type ServiceAuth struct {
-	// Credentials are the static bearer identities (the required path: the
-	// stock agents-server presents exactly its DURABLE_STREAMS_BEARER on
-	// Authorization: Bearer, and nothing else).
-	Credentials []auth.ServiceCredential
-	// TrustedSPIFFEIDs is the in-mesh add-on: the X-Forwarded-Client-Cert
-	// SPIFFE allowlist. Configuring it asserts a sidecar fronts chronicle
-	// and sanitizes inbound XFCC; leave it empty otherwise.
-	TrustedSPIFFEIDs []string
+// ServiceAuth is the shared service authentication and explicit policy
+// evaluator used by the data plane and subscription control plane. SPIFFE is
+// primary; static bearer credentials are a compatibility fallback.
+type ServiceAuth = auth.ServiceAccess
 
-	// SidecarMarkerName / SidecarMarkerValue, when Name is non-empty, add a
-	// required-header gate in front of XFCC trust (issue #126 hardening,
-	// defense in depth against an XFCC-passthrough misconfiguration): an XFCC
-	// mesh identity is honored only when the request also carries this header
-	// with this exact value. The operator configures the sidecar to inject it
-	// on mTLS-verified traffic AND to strip any client-supplied copy, so an
-	// external peer that forges XFCC cannot also produce the marker.
-	SidecarMarkerName  string
-	SidecarMarkerValue string
-
-	// AllowXFCCWithoutMarker is the explicit, deliberate opt-out that lets XFCC
-	// trust rest on the sidecar-sanitization requirement alone, with no marker
-	// gate (issue #126 hardening, re-review of #130). It exists ONLY so an
-	// operator can consciously accept the marker-less posture; it is never the
-	// default. When TrustedSPIFFEIDs is set but no marker is configured, XFCC is
-	// trusted only if this is true — otherwise xfccGatePasses fails closed and
-	// raw client XFCC never authenticates. Set it via
-	// CHRONICLE_XFCC_TRUST_WITHOUT_MARKER, and only when the sidecar provably
-	// strips inbound XFCC (Envoy forward_client_cert_details: SANITIZE_SET).
-	AllowXFCCWithoutMarker bool
+// ServiceMetrics records low-cardinality service access outcomes.
+type ServiceMetrics interface {
+	ServiceSPIFFEAuthentication()
+	ServiceBearerAuthentication()
+	ServiceAuthenticationFailure()
+	ServiceAuthorizationFailure()
+	ServiceDelegatedGateway()
 }
 
-// xfccGatePasses reports whether the precondition for honoring an XFCC mesh
-// identity is met. Fail-closed by default (issue #126 hardening, #130): a
-// configured marker must match (constant time); with no marker, XFCC is
-// honored only when the operator explicitly opted into the marker-less posture
-// via AllowXFCCWithoutMarker — otherwise raw client XFCC is never trusted, so a
-// TrustedSPIFFEIDs-only config behind a non-sanitizing ingress cannot be
-// spoofed into minting a service principal.
-func (s *ServiceAuth) xfccGatePasses(r *http.Request) bool {
-	// A marker counts only when BOTH name and value are non-empty: an
-	// empty-value marker can't be checked (Header.Get can't distinguish an
-	// absent header from a present-empty one), so it must not stand in for a
-	// real gate — fall through to the explicit opt-in instead of silently
-	// passing. Config parsing rejects an empty value; this guards direct
-	// construction too (#130).
-	if s.SidecarMarkerName != "" && s.SidecarMarkerValue != "" {
-		got := r.Header.Get(s.SidecarMarkerName)
-		return subtle.ConstantTimeCompare([]byte(got), []byte(s.SidecarMarkerValue)) == 1
-	}
-	return s.AllowXFCCWithoutMarker
-}
-
-// resolvePrincipal extracts the verified caller principal from a request, or
-// the anonymous Principal when nothing verifies. TB4 resolves service
-// principals only (static bearer first — the required path — then mesh
-// XFCC); later bullets widen this to users (PingFed) and agents
-// (wake_token). It must run BEFORE any claim-token interpretation: the
-// service's Authorization: Bearer would otherwise be misread as a
-// claim-scoped write token and denied.
-func (h *Handler) resolvePrincipal(r *http.Request) auth.Principal {
+// serviceDecision resolves a service identity and evaluates its action and
+// namespace policy. routed is true when service authentication was attempted
+// or succeeded; callers must not fall through to another credential family in
+// that case.
+func (h *Handler) serviceDecision(r *http.Request, path auth.StreamPath, action auth.Action) (decision auth.Decision, routed bool) {
 	if h.ServiceAuth == nil {
-		return auth.Principal{}
+		return auth.Decision{}, false
 	}
-	if p, ok := auth.VerifyServiceBearer(bearerFromRequest(r), h.ServiceAuth.Credentials); ok {
-		return p
+	joinedXFCC := strings.Join(r.Header.Values(xfccHeader), ",")
+	marker := ""
+	if values := r.Header.Values(h.ServiceAuth.SidecarMarkerName); len(values) == 1 {
+		marker = values[0]
 	}
-	// Mesh identity (XFCC) is trusted only on the operator's assertion that a
-	// sidecar fronts chronicle and sanitizes inbound XFCC. Two hardenings make
-	// that assertion less fragile. First, join ALL X-Forwarded-Client-Cert
-	// header lines before VerifyXFCC selects the last element: HTTP treats
-	// repeated headers as one comma-joined value and Envoy appends its
-	// attested element last, so a client that injects its own XFCC line can
-	// never make its element the last one — whereas Header.Get (first line
-	// only) would let that injection win. Second, xfccGatePasses fails closed:
-	// without either a matching sidecar marker or an explicit
-	// AllowXFCCWithoutMarker opt-in, raw client XFCC is never trusted (#130).
-	if h.ServiceAuth.xfccGatePasses(r) {
-		joined := strings.Join(r.Header.Values(xfccHeader), ",")
-		if p, ok := auth.VerifyXFCC(joined, h.ServiceAuth.TrustedSPIFFEIDs); ok {
-			return p
+	principal, status := h.ServiceAuth.Authenticate(bearerFromRequest(r), joinedXFCC, marker)
+	switch status {
+	case auth.ServiceRejected:
+		if h.ServiceMetrics != nil {
+			h.ServiceMetrics.ServiceAuthenticationFailure()
 		}
+		return auth.Deny(auth.ReasonUnauthenticated, "invalid service identity"), true
+	case auth.ServiceAuthenticated:
+		if h.ServiceMetrics != nil {
+			if joinedXFCC != "" {
+				h.ServiceMetrics.ServiceSPIFFEAuthentication()
+			} else {
+				h.ServiceMetrics.ServiceBearerAuthentication()
+			}
+		}
+		decision, delegated := h.ServiceAuth.Authorize(principal, action, path)
+		if !decision.Allowed() {
+			if h.ServiceMetrics != nil {
+				h.ServiceMetrics.ServiceAuthorizationFailure()
+			}
+		} else if delegated && h.ServiceMetrics != nil {
+			h.ServiceMetrics.ServiceDelegatedGateway()
+		}
+		return decision, true
+	default:
+		return auth.Decision{}, false
 	}
-	return auth.Principal{}
 }
 
 // Authorization error codes in the JSON error envelope (the control-plane
@@ -251,14 +215,12 @@ const (
 // Every failure path is a Deny: an unnormalizable path, a missing authorizer
 // (nothing to prove a credential against), or a failed token check.
 //
-// A verified service principal is served pre-authorized without consulting
-// any electric-claim-token riding on the request (issue #126 Q4, decided):
-// in the trusted-backend topology the agents-server validated the claim
-// token against its own ClaimWriteTokenStore before forwarding, so the token
-// is meaningless to chronicle here. The service check therefore runs before
-// the claim-token path — and before the AppendAuth nil-guard, so a
-// trusted-backend-only deployment (no subscription layer) still serves its
-// service while denying everyone else.
+// A verified service principal is evaluated against its explicit append and
+// namespace policy before any claim-token interpretation. A trusted_gateway
+// policy still implements the delegated-backend topology: the upstream service
+// validated entity authority, so a claim token riding alongside it is not
+// reinterpreted here. The service decision runs before the AppendAuth nil guard,
+// so a policy-authorized service can run without the subscription token layer.
 func (h *Handler) appendDecision(r *http.Request, rawPath string, phase appendAuthPhase) auth.Decision {
 	// Normalize the EXACT store path (rawPath), not subStreamPath(rawPath):
 	// subStreamPath strips one leading slash and NormalizeStreamPath strips
@@ -272,8 +234,8 @@ func (h *Handler) appendDecision(r *http.Request, rawPath string, phase appendAu
 	if err != nil {
 		return auth.Deny(auth.ReasonForbidden, "invalid stream path")
 	}
-	if p := h.resolvePrincipal(r); p.Kind() == auth.KindService {
-		return auth.Allow()
+	if decision, routed := h.serviceDecision(r, path, auth.ActionAppend); routed {
+		return decision
 	}
 	// A woken entity acting as itself appends on its wake_token alone — no
 	// claim needed (issue #126 TB6b); the claim-token path below remains the
@@ -335,19 +297,19 @@ func (h *Handler) authorizeRead(r *http.Request, rawPath string) (private bool, 
 }
 
 // readDecision evaluates read authorization with no side effects. The order
-// mirrors the trust chain: a verified service principal is pre-authorized;
-// a token routed to the configured OIDC issuer becomes a user principal
-// whose namespace grant must cover the path; anything else must be a
-// chronicle read-capability JWS scoped to the path. The claim-scoped write
-// token is append-only — it is never consulted here, and presented as a
-// Bearer it fails JWS verification (401), never grants a read.
+// mirrors the trust chain: a verified service principal uses its explicit
+// action and namespace policy; a token routed to the configured OIDC issuer
+// becomes a user principal whose namespace grant must cover the path; anything
+// else must be a chronicle read-capability JWS scoped to the path. The
+// claim-scoped write token is append-only. It is never consulted here, and
+// presented as a Bearer it fails JWS verification (401), never granting a read.
 func (h *Handler) readDecision(r *http.Request, rawPath string) auth.Decision {
 	path, err := auth.NormalizeStreamPath(rawPath)
 	if err != nil {
 		return auth.Deny(auth.ReasonForbidden, "invalid stream path")
 	}
-	if p := h.resolvePrincipal(r); p.Kind() == auth.KindService {
-		return auth.Allow()
+	if decision, routed := h.serviceDecision(r, path, auth.ActionRead); routed {
+		return decision
 	}
 	bearer := bearerFromRequest(r)
 	if bearer == "" {
@@ -410,7 +372,7 @@ func (h *Handler) agentDecision(bearer string, path auth.StreamPath) (d auth.Dec
 // one enforcement seam). Same telemetry/enforce split as the other gates;
 // runs before any store access.
 func (h *Handler) authorizeMutate(r *http.Request, rawPath string, action auth.Action) error {
-	d := h.mutateDecision(r, rawPath)
+	d := h.mutateDecision(r, rawPath, action)
 	if d.Allowed() {
 		return nil
 	}
@@ -425,22 +387,22 @@ func (h *Handler) authorizeMutate(r *http.Request, rawPath string, action auth.A
 }
 
 // mutateDecision evaluates create/delete authorization: a verified service
-// principal is pre-authorized; an OIDC user's namespace grant must cover the
-// path; otherwise the bearer must be a chronicle caller token whose
-// namespaces cover the path — the same credential that authorizes linking
-// (TB3), because creating or deleting a stream is the same namespace-scoped
-// authority. Read capabilities and write tokens never authorize a mutation,
+// principal uses its explicit action and namespace policy; an OIDC user's
+// namespace grant must cover the path; otherwise the bearer must be a
+// chronicle caller token whose namespaces cover the path. Creating or deleting
+// a stream is namespace-scoped authority, like linking. Read capabilities and
+// write tokens never authorize a mutation,
 // and neither does a wake_token (issue #126 TB6b, deliberate): an entity
 // acts within its subtree but does not create or destroy entities, so there
 // is no agent arm here — a wake-typed bearer falls through to the caller
 // verifier and fails its typ pin (401).
-func (h *Handler) mutateDecision(r *http.Request, rawPath string) auth.Decision {
+func (h *Handler) mutateDecision(r *http.Request, rawPath string, action auth.Action) auth.Decision {
 	path, err := auth.NormalizeStreamPath(rawPath)
 	if err != nil {
 		return auth.Deny(auth.ReasonForbidden, "invalid stream path")
 	}
-	if p := h.resolvePrincipal(r); p.Kind() == auth.KindService {
-		return auth.Allow()
+	if decision, routed := h.serviceDecision(r, path, action); routed {
+		return decision
 	}
 	bearer := bearerFromRequest(r)
 	if bearer == "" {

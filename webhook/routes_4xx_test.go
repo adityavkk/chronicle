@@ -141,6 +141,55 @@ func TestAckStaleFenceReturns409(t *testing.T) {
 	}
 }
 
+func TestHeartbeatAfterLeaseExpiryReturnsFencedWithoutCredentials(t *testing.T) {
+	mgr, store, _ := newTestManager(t)
+	rt := NewRoutes(mgr)
+	const id = "expired-heartbeat"
+	base := time.Now().Add(-2 * time.Second)
+	if _, err := store.CreateOrConfirm(id, pullWakeCfg(), nil, base); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.Link(id, "events/a", LinkGlob, "0000000000000000_0000000000000000"); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	claim, err := store.Claim(id, "worker-A", "w_a", base, 1000)
+	if err != nil || !claim.Claimed {
+		t.Fatalf("claim = %+v err=%v", claim, err)
+	}
+	now := time.Now()
+	token, err := GenerateToken(mgr.tokenKey, id, claim.Generation, now, time.Hour, randReader)
+	if err != nil {
+		t.Fatalf("generate callback token: %v", err)
+	}
+	requestBody, err := json.Marshal(CallbackRequest{
+		Generation: claim.Generation,
+		WakeID:     claim.WakeID,
+		Acks: []Ack{{
+			Stream: "events/a",
+			Offset: "0000000000000001_0000000000000050",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("encode heartbeat: %v", err)
+	}
+	rec := doDS(t, rt, http.MethodPost, subsPrefix+id+"/ack", token, string(requestBody))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%q", rec.Code, rec.Body.String())
+	}
+	if code := errCodeOf(t, rec); code != ErrCodeFenced {
+		t.Fatalf("code = %q, want %q", code, ErrCodeFenced)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	for _, field := range []string{"token", "write_token", "wake_token"} {
+		if _, ok := response[field]; ok {
+			t.Fatalf("fenced heartbeat returned %s: %v", field, response)
+		}
+	}
+}
+
 // TestAckGoneSubscriptionReturns410 asserts a callback/ack targeting a deleted
 // subscription is a distinct 410 SUBSCRIPTION_GONE rather than a 409 FENCED.
 func TestAckGoneSubscriptionReturns410(t *testing.T) {

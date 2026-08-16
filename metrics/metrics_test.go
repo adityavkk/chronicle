@@ -61,6 +61,11 @@ func TestMuxEndpoints(t *testing.T) {
 	p.OwnerFenced("check_owner")
 	p.ClaimContention("already_claimed", "agent-handler")
 	p.DurabilityShort("WAITAOF")
+	p.ServiceSPIFFEAuthentication()
+	p.ServiceBearerAuthentication()
+	p.ServiceAuthenticationFailure()
+	p.ServiceAuthorizationFailure()
+	p.ServiceDelegatedGateway()
 	p.SSEHubActive(1)
 	p.SSEClientActive(1)
 	p.SSEHubRead(7)
@@ -135,6 +140,7 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_owner_fenced_total",
 		"chronicle_claim_contention_total",
 		"chronicle_durability_short_total",
+		"chronicle_service_access_total",
 		"chronicle_sse_hubs",
 		"chronicle_sse_clients",
 		"chronicle_sse_hub_reads_total",
@@ -160,6 +166,17 @@ func TestMuxEndpoints(t *testing.T) {
 	} {
 		if !strings.Contains(body, name) {
 			t.Errorf("/metrics output missing %q", name)
+		}
+	}
+	for _, result := range []string{
+		"spiffe_authenticated",
+		"bearer_authenticated",
+		"authentication_failure",
+		"authorization_failure",
+		"delegated_gateway",
+	} {
+		if !strings.Contains(body, `chronicle_service_access_total{result="`+result+`"} 1`) {
+			t.Errorf("/metrics output missing service result %q", result)
 		}
 	}
 }

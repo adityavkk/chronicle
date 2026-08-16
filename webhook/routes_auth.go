@@ -3,6 +3,7 @@ package webhook
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
@@ -23,15 +24,99 @@ func (m *Manager) verifyCaller(token string, now time.Time) (VerifiedCaller, err
 	return ValidateCallerToken(token, m.streamRootURL, m.callerKidResolver(now), now)
 }
 
-// authenticateCaller extracts and verifies the control-plane caller
-// credential from the request. The error is operator-facing and carries no
-// token material; the zero VerifiedCaller accompanies every error.
-func (rt *Routes) authenticateCaller(r *http.Request) (VerifiedCaller, error) {
-	token, ok := bearerToken(r)
-	if !ok {
-		return VerifiedCaller{}, errors.New("missing caller credential")
+type controlCaller struct {
+	caller           VerifiedCaller
+	servicePrincipal auth.Principal
+	serviceAccess    *auth.ServiceAccess
+}
+
+func (c controlCaller) Subject() string {
+	if c.servicePrincipal.Kind() == auth.KindService {
+		return c.servicePrincipal.Subject()
 	}
-	return rt.mgr.verifyCaller(token, time.Now())
+	return c.caller.Subject()
+}
+
+func (c controlCaller) authorize(action auth.Action, paths ...auth.StreamPath) auth.Decision {
+	if c.servicePrincipal.Kind() == auth.KindService {
+		decision, _ := c.serviceAccess.Authorize(c.servicePrincipal, action, paths...)
+		return decision
+	}
+	for _, path := range paths {
+		if !c.caller.MayLink(path) {
+			return auth.Deny(auth.ReasonForbidden, "caller namespaces do not cover this stream")
+		}
+	}
+	return auth.Allow()
+}
+
+func (c controlCaller) authorizeAction(action auth.Action) auth.Decision {
+	if c.servicePrincipal.Kind() == auth.KindService {
+		decision, _ := c.serviceAccess.AuthorizeAction(c.servicePrincipal, action)
+		return decision
+	}
+	return auth.Allow()
+}
+
+func (c controlCaller) trustedGateway() bool {
+	return c.servicePrincipal.Kind() == auth.KindService &&
+		c.serviceAccess.TrustedGateway(c.servicePrincipal)
+}
+
+func (c controlCaller) isService() bool {
+	return c.servicePrincipal.Kind() == auth.KindService
+}
+
+// authenticateCaller resolves mesh/static-bearer service identity first, then
+// falls back to the Chronicle caller-token family. XFCC rejection is terminal:
+// it can never downgrade to a bearer credential.
+func (rt *Routes) authenticateCaller(r *http.Request) (controlCaller, error) {
+	token, _ := bearerToken(r)
+	if access := rt.mgr.serviceAccess; access != nil {
+		joinedXFCC := strings.Join(r.Header.Values("X-Forwarded-Client-Cert"), ",")
+		marker := ""
+		if values := r.Header.Values(access.SidecarMarkerName); len(values) == 1 {
+			marker = values[0]
+		}
+		principal, status := access.Authenticate(token, joinedXFCC, marker)
+		switch status {
+		case auth.ServiceRejected:
+			rt.mgr.metrics.ServiceAuthenticationFailure()
+			return controlCaller{}, errors.New("invalid service identity")
+		case auth.ServiceAuthenticated:
+			if joinedXFCC != "" {
+				rt.mgr.metrics.ServiceSPIFFEAuthentication()
+			} else {
+				rt.mgr.metrics.ServiceBearerAuthentication()
+			}
+			return controlCaller{servicePrincipal: principal, serviceAccess: access}, nil
+		case auth.ServiceNotAttempted:
+			// Fall through to the caller-token credential family.
+		}
+	}
+	if token == "" {
+		return controlCaller{}, errors.New("missing caller credential")
+	}
+	caller, err := rt.mgr.verifyCaller(token, time.Now())
+	if err != nil {
+		return controlCaller{}, err
+	}
+	return controlCaller{caller: caller}, nil
+}
+
+func (rt *Routes) recordServiceAuthorization(caller controlCaller, op string, reason string) {
+	if !caller.isService() {
+		return
+	}
+	if reason != "" {
+		rt.mgr.metrics.ServiceAuthorizationFailure()
+		return
+	}
+	if caller.trustedGateway() {
+		rt.mgr.metrics.ServiceDelegatedGateway()
+		rt.mgr.log.Info("trusted gateway service authorized",
+			"operation", op, "subject", caller.Subject())
+	}
 }
 
 // controlDeny applies AuthMode to a control-plane denial on op/id: in
@@ -46,32 +131,5 @@ func (rt *Routes) controlDeny(w http.ResponseWriter, op, id string, status int, 
 	}
 	rt.mgr.log.Info("authz telemetry: "+op+" would be denied",
 		"subscription", id, "reason", reason)
-	return true
-}
-
-// authorizeClaim is the TB2 gate: it reports whether handleClaim may
-// proceed. It runs before any store access, so a denied claim reads nothing
-// and mints nothing. In enforce mode a missing or unverifiable credential
-// writes the 401 envelope; in the insecure default the decision is recorded
-// as telemetry and the request proceeds. The error is operator-facing and
-// never carries token material.
-func (rt *Routes) authorizeClaim(w http.ResponseWriter, r *http.Request, id string) bool {
-	token, ok := bearerToken(r)
-	var err error
-	if !ok {
-		err = errors.New("missing caller credential")
-	} else {
-		_, err = rt.mgr.verifyCaller(token, time.Now())
-	}
-	if err == nil {
-		return true
-	}
-	if rt.mgr.authMode == auth.ModeEnforce {
-		rt.mgr.log.Warn("claim denied", "subscription", id, "reason", err.Error())
-		writeErr(w, http.StatusUnauthorized, ErrCodeUnauthenticated)
-		return false
-	}
-	rt.mgr.log.Info("authz telemetry: claim would be denied",
-		"subscription", id, "reason", err.Error())
 	return true
 }

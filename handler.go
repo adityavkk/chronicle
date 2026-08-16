@@ -103,11 +103,13 @@ type Handler struct {
 	// logs.
 	AppendAuth AppendAuthorizer
 
-	// ServiceAuth authenticates trusted service principals (issue #126 TB4):
-	// a verified service request is served pre-authorized — the
-	// trusted-backend topology behind the Electric agents-server. Nil
-	// disables service auth.
+	// ServiceAuth authenticates SPIFFE or compatibility-bearer service
+	// principals and evaluates their explicit action and namespace policy.
+	// Nil disables service authentication.
 	ServiceAuth *ServiceAuth
+	// ServiceMetrics records service authentication, authorization, and
+	// delegated-gateway outcomes. Nil disables these counters.
+	ServiceMetrics ServiceMetrics
 
 	// ReadAuth authorizes data-plane reads with the chronicle
 	// read-capability JWS (issue #126 TB5). Nil means no capability
@@ -262,6 +264,20 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 	forkSubOffsetStr := ""
 	if forkSubOffsetPresent {
 		forkSubOffsetStr = forkSubOffsetVals[0]
+	}
+
+	if forkedFromStr != "" {
+		sourcePath, err := auth.NormalizeStreamPath(forkedFromStr)
+		if err != nil {
+			return newHTTPError(http.StatusBadRequest, "invalid Stream-Forked-From path")
+		}
+		// The store uses root-relative paths with one leading slash. Rebuild that
+		// canonical spelling from the same normalized value the read decision
+		// evaluates, so authorization and dereference cannot name different keys.
+		forkedFromStr = "/" + sourcePath.String()
+		if _, err := h.authorizeRead(r, forkedFromStr); err != nil {
+			return err
+		}
 	}
 
 	// Validate TTL and ExpiresAt aren't both provided

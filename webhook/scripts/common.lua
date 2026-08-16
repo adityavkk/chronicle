@@ -52,3 +52,32 @@ local function owner_fenced(slot, me, epoch)
   if redis.call('HGET', slot, 'owner_id') ~= me then return true end
   return redis.call('HGET', slot, 'owner_epoch') ~= epoch
 end
+
+-- subscription_expectation_status binds an authorization decision to the
+-- exact subscription object and protected resource set it inspected. The
+-- caller supplies owner, immutable incarnation, config hash, and every linked
+-- path. No protected mutation may occur unless all fields still match.
+local function subscription_expectation_status(sub, links, expected_owner,
+    expected_incarnation, expected_cfg_hash, num_paths, expected_paths)
+  if redis.call('EXISTS', sub) == 0 then return 'NOSUB' end
+  local incarnation = redis.call('HGET', sub, 'incarnation')
+  local owner = redis.call('HGET', sub, 'owner')
+  local cfg_hash = redis.call('HGET', sub, 'cfg_hash')
+  if incarnation == false then incarnation = '' end
+  if owner == false then owner = '' end
+  if cfg_hash == false then cfg_hash = '' end
+  local n = tonumber(num_paths)
+  if n == nil or #expected_paths ~= n or
+      incarnation ~= expected_incarnation or owner ~= expected_owner or
+      cfg_hash ~= expected_cfg_hash or redis.call('HLEN', links) ~= n then
+    return 'FORBIDDEN'
+  end
+  local seen = {}
+  for _, path in ipairs(expected_paths) do
+    if seen[path] or redis.call('HEXISTS', links, path) == 0 then
+      return 'FORBIDDEN'
+    end
+    seen[path] = true
+  end
+  return 'MATCHED'
+end

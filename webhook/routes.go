@@ -117,10 +117,14 @@ func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	if authnErr == nil {
-		if reason := linkAuthz(caller, cfg); reason != "" {
-			if !rt.controlDeny(w, "create", id, http.StatusForbidden, ErrCodeForbidden, reason) {
-				return
-			}
+		reason = linkAuthz(caller, auth.ActionSubscribe, cfg)
+		if reason == "" {
+			reason = linkAuthz(caller, auth.ActionLink, cfg)
+		}
+		rt.recordServiceAuthorization(caller, "create", reason)
+		if reason != "" &&
+			!rt.controlDeny(w, "create", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+			return
 		}
 	}
 	if cfg.Type == DispatchWebhook {
@@ -148,7 +152,8 @@ func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string
 	// 403 for both the matched and the conflicting config, so the response
 	// does not reveal whether their config matched the owner's.
 	if status != CreateCreated && authnErr == nil {
-		if reason := ownershipAuthz(storedOwner, caller.Subject()); reason != "" {
+		if reason := controlOwnershipAuthz(storedOwner, caller); reason != "" {
+			rt.recordServiceAuthorization(caller, "create", reason)
 			if !rt.controlDeny(w, "create", id, http.StatusForbidden, ErrCodeForbidden, reason) {
 				return
 			}
@@ -199,19 +204,49 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string
 			return
 		}
 	}
+	var expected SubscriptionExpectation
+	hasExpected := false
 	if authnErr == nil {
 		sub, ok, err := rt.mgr.store.Get(id)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		reason := ""
 		if ok {
-			if reason := ownershipAuthz(sub.OwnerSubject, caller.Subject()); reason != "" {
-				if !rt.controlDeny(w, "delete", id, http.StatusForbidden, ErrCodeForbidden, reason) {
-					return
-				}
+			if caller.isService() {
+				reason = linkAuthz(caller, auth.ActionSubscribe, sub.Config)
 			}
+			if reason == "" {
+				reason = controlOwnershipAuthz(sub.OwnerSubject, caller)
+			}
+			expected = subscriptionExpectationFromSubscription(sub)
+			hasExpected = true
+		} else if decision := caller.authorizeAction(auth.ActionSubscribe); !decision.Allowed() {
+			reason = decision.Detail()
 		}
+		rt.recordServiceAuthorization(caller, "delete", reason)
+		if reason != "" &&
+			!rt.controlDeny(w, "delete", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+			return
+		}
+	}
+	if rt.mgr.authMode == auth.ModeEnforce {
+		if !hasExpected {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		res, err := rt.mgr.store.DeleteAuthorized(id, expected)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if res.Forbidden {
+			writeErr(w, http.StatusForbidden, ErrCodeForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 	if err := rt.mgr.store.Delete(id); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -234,11 +269,13 @@ func (rt *Routes) handleAddStreams(w http.ResponseWriter, r *http.Request, id st
 		writeErr(w, http.StatusBadRequest, ErrCodeInvalidRequest)
 		return
 	}
+	var expected SubscriptionExpectation
 	if authnErr == nil {
-		if reason := linkPathsAuthz(caller, body.Streams); reason != "" {
-			if !rt.controlDeny(w, "add-streams", id, http.StatusForbidden, ErrCodeForbidden, reason) {
-				return
-			}
+		reason := linkPathsAuthz(caller, auth.ActionLink, body.Streams)
+		rt.recordServiceAuthorization(caller, "add-streams", reason)
+		if reason != "" &&
+			!rt.controlDeny(w, "add-streams", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+			return
 		}
 		// Subscription ownership (issue #126 TB3): extending someone else's
 		// subscription is the confused-deputy this bullet closes. The read is
@@ -254,9 +291,13 @@ func (rt *Routes) handleAddStreams(w http.ResponseWriter, r *http.Request, id st
 				writeErr(w, http.StatusNotFound, ErrCodeNotFound)
 				return
 			}
-		} else if reason := ownershipAuthz(sub.OwnerSubject, caller.Subject()); reason != "" {
-			if !rt.controlDeny(w, "add-streams", id, http.StatusForbidden, ErrCodeForbidden, reason) {
-				return
+		} else {
+			expected = subscriptionExpectationFromSubscription(sub)
+			if reason := controlOwnershipAuthz(sub.OwnerSubject, caller); reason != "" {
+				rt.recordServiceAuthorization(caller, "add-streams", reason)
+				if !rt.controlDeny(w, "add-streams", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+					return
+				}
 			}
 		}
 	}
@@ -268,6 +309,23 @@ func (rt *Routes) handleAddStreams(w http.ResponseWriter, r *http.Request, id st
 		off := rt.mgr.streams.BeginningOffset()
 		if tail, ok := rt.mgr.tailOf(path); ok {
 			off = tail
+		}
+		if rt.mgr.authMode == auth.ModeEnforce {
+			res, err := rt.mgr.store.LinkAuthorized(id, path, LinkExplicit, off, expected)
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			if res.NoSub {
+				writeErr(w, http.StatusNotFound, ErrCodeNotFound)
+				return
+			}
+			if res.Forbidden {
+				writeErr(w, http.StatusForbidden, ErrCodeForbidden)
+				return
+			}
+			addExpectedPath(&expected, path)
+			continue
 		}
 		if err := rt.mgr.store.Link(id, path, LinkExplicit, off); err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -285,24 +343,60 @@ func (rt *Routes) handleRemoveStream(w http.ResponseWriter, r *http.Request, id,
 		}
 	}
 	path = strings.Trim(path, "/")
+	if authnErr == nil && caller.isService() {
+		reason := linkPathsAuthz(caller, auth.ActionLink, []string{path})
+		rt.recordServiceAuthorization(caller, "remove-stream", reason)
+		if reason != "" &&
+			!rt.controlDeny(w, "remove-stream", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+			return
+		}
+	}
 	sub, ok, err := rt.mgr.store.Get(id)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if ok && authnErr == nil {
-		if reason := ownershipAuthz(sub.OwnerSubject, caller.Subject()); reason != "" {
+		if reason := controlOwnershipAuthz(sub.OwnerSubject, caller); reason != "" {
+			rt.recordServiceAuthorization(caller, "remove-stream", reason)
 			if !rt.controlDeny(w, "remove-stream", id, http.StatusForbidden, ErrCodeForbidden, reason) {
 				return
 			}
 		}
 	}
 	stillGlob := ok && sub.Config.Pattern != "" && GlobMatch(sub.Config.Pattern, path)
+	if rt.mgr.authMode == auth.ModeEnforce {
+		if !ok {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		expected := subscriptionExpectationFromSubscription(sub)
+		res, err := rt.mgr.store.UnlinkAuthorized(id, path, stillGlob, expected)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if res.Forbidden {
+			writeErr(w, http.StatusForbidden, ErrCodeForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err := rt.mgr.store.Unlink(id, path, stillGlob); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func addExpectedPath(expected *SubscriptionExpectation, path string) {
+	for _, existing := range expected.Paths {
+		if existing == path {
+			return
+		}
+	}
+	expected.Paths = append(expected.Paths, path)
 }
 
 // handleAckLike serves both the webhook callback and the pull-wake ack: both are
@@ -370,10 +464,11 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 }
 
 func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string) {
-	// The claim is where the callback and write capabilities are minted, so it
-	// requires an authenticated caller before any store access (issue #126,
-	// TB2 — closes the free-minting hole). Insecure mode is telemetry-only.
-	if !rt.authorizeClaim(w, r, id) {
+	// Authenticate before parsing or store access. In insecure mode an invalid
+	// credential remains telemetry-only for protocol compatibility.
+	caller, callerErr := rt.authenticateCaller(r)
+	if callerErr != nil &&
+		!rt.controlDeny(w, "claim", id, http.StatusUnauthorized, ErrCodeUnauthenticated, callerErr.Error()) {
 		return
 	}
 	var req ClaimRequest
@@ -390,12 +485,24 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		writeErr(w, http.StatusNotFound, ErrCodeNotFound)
 		return
 	}
+	if callerErr == nil {
+		reason := claimAuthz(caller, sub)
+		rt.recordServiceAuthorization(caller, "claim", reason)
+		if reason != "" &&
+			!rt.controlDeny(w, "claim", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+			return
+		}
+	}
+
 	wakeID, err := GenerateWakeID(randReader)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	res, err := rt.mgr.store.Claim(id, req.Worker, wakeID, time.Now(), sub.Config.LeaseTTLMs)
+	expected := subscriptionExpectationFromSubscription(sub)
+	res, err := rt.mgr.store.ClaimAuthorized(
+		id, req.Worker, wakeID, expected, time.Now(), sub.Config.LeaseTTLMs,
+	)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -407,8 +514,16 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		}})
 	case res.NoSub:
 		writeErr(w, http.StatusNotFound, ErrCodeNotFound)
+	case res.Forbidden:
+		// The owner, incarnation, config, or linked path set changed after the
+		// route authorized it. Enforce mode denies; insecure mode records the
+		// denial but still returns a conflict because no lease was granted.
+		if rt.controlDeny(w, "claim", id, http.StatusForbidden, ErrCodeForbidden,
+			"subscription changed after claim authorization") {
+			writeErr(w, http.StatusConflict, ErrCodeFenced)
+		}
 	case res.Claimed:
-		// Re-read links for a fresh snapshot (tails may have advanced).
+		// Re-read links for a fresh cursor snapshot (tails may have advanced).
 		fresh, _, _ := rt.mgr.store.Get(id)
 		snap, _ := Snapshot(fresh.Links, rt.mgr.tailOf)
 		now := time.Now()

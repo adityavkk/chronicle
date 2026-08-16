@@ -59,6 +59,30 @@ local wake = redis.call('HGET', sub, 'wake_id')
 if fenced(gen, wake, a_req_gen, a_req_wake, a_token_gen) then
   return { 'FENCED' }
 end
+-- A callback token deliberately outlives the lease. A heartbeat may renew only
+-- a lease that is still live at this instant; otherwise a late worker could
+-- revive it before the expiry worker or a takeover clears it. Pull-wake claims
+-- additionally require their holder state. Webhook delivery owns no holder and
+-- legitimately heartbeats from either waking or live phase.
+-- Done acknowledgements retain their existing fence-only behavior so a worker
+-- may still report completed work after its lease deadline.
+if a_done ~= '1' then
+  local dispatch_type = redis.call('HGET', k_sub_config, 'type')
+  local phase = redis.call('HGET', sub, 'phase')
+  local holder = redis.call('HGET', sub, 'holder')
+  local lease_until_ns = tonumber(redis.call('HGET', sub, 'lease_until_ns'))
+  local now_ns = tonumber(a_now_ns)
+  if lease_until_ns == nil or now_ns == nil or lease_until_ns <= now_ns then
+    return { 'FENCED' }
+  end
+  if dispatch_type == 'webhook' then
+    if (phase ~= 'waking' and phase ~= 'live') or holder ~= '0' then
+      return { 'FENCED' }
+    end
+  elseif phase ~= 'live' or holder ~= '1' then
+    return { 'FENCED' }
+  end
+end
 local n = tonumber(a_num_acks)
 local i = 9
 for _ = 1, n do

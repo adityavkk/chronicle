@@ -18,20 +18,26 @@ type linkStreamReply interface {
 	status() string
 }
 type (
-	linkStreamLinked   struct{}
-	linkStreamUpgraded struct{}
-	linkStreamExists   struct{}
+	linkStreamLinked    struct{}
+	linkStreamUpgraded  struct{}
+	linkStreamExists    struct{}
+	linkStreamNoSub     struct{}
+	linkStreamForbidden struct{}
 )
 
-func (linkStreamLinked) linkStreamReply()   {}
-func (linkStreamUpgraded) linkStreamReply() {}
-func (linkStreamExists) linkStreamReply()   {}
-func (linkStreamLinked) status() string     { return "LINKED" }
-func (linkStreamUpgraded) status() string   { return "UPGRADED" }
-func (linkStreamExists) status() string     { return "EXISTS" }
+func (linkStreamLinked) linkStreamReply()    {}
+func (linkStreamUpgraded) linkStreamReply()  {}
+func (linkStreamExists) linkStreamReply()    {}
+func (linkStreamNoSub) linkStreamReply()     {}
+func (linkStreamForbidden) linkStreamReply() {}
+func (linkStreamLinked) status() string      { return "LINKED" }
+func (linkStreamUpgraded) status() string    { return "UPGRADED" }
+func (linkStreamExists) status() string      { return "EXISTS" }
+func (linkStreamNoSub) status() string       { return "NOSUB" }
+func (linkStreamForbidden) status() string   { return "FORBIDDEN" }
 
 var (
-	linkStreamReplyVariants = []replyVariant{{Status: "LINKED"}, {Status: "UPGRADED"}, {Status: "EXISTS"}}
+	linkStreamReplyVariants = []replyVariant{{Status: "LINKED"}, {Status: "UPGRADED"}, {Status: "EXISTS"}, {Status: "NOSUB"}, {Status: "FORBIDDEN"}}
 	linkStreamDecoder       = scriptDecoder[linkStreamReply]{Variants: linkStreamReplyVariants, Decode: decodeLinkStreamReply}
 )
 
@@ -47,6 +53,10 @@ func decodeLinkStreamReply(r scriptReply) (linkStreamReply, error) {
 		return linkStreamUpgraded{}, nil
 	case "EXISTS":
 		return linkStreamExists{}, nil
+	case "NOSUB":
+		return linkStreamNoSub{}, nil
+	case "FORBIDDEN":
+		return linkStreamForbidden{}, nil
 	default:
 		return nil, fmt.Errorf("unhandled link_stream status %q", st)
 	}
@@ -57,20 +67,26 @@ type unlinkStreamReply interface {
 	status() string
 }
 type (
-	unlinkStreamRemoved struct{}
-	unlinkStreamGlob    struct{}
-	unlinkStreamGone    struct{}
+	unlinkStreamRemoved   struct{}
+	unlinkStreamGlob      struct{}
+	unlinkStreamGone      struct{}
+	unlinkStreamNoSub     struct{}
+	unlinkStreamForbidden struct{}
 )
 
-func (unlinkStreamRemoved) unlinkStreamReply() {}
-func (unlinkStreamGlob) unlinkStreamReply()    {}
-func (unlinkStreamGone) unlinkStreamReply()    {}
-func (unlinkStreamRemoved) status() string     { return "REMOVED" }
-func (unlinkStreamGlob) status() string        { return "GLOB" }
-func (unlinkStreamGone) status() string        { return "GONE" }
+func (unlinkStreamRemoved) unlinkStreamReply()   {}
+func (unlinkStreamGlob) unlinkStreamReply()      {}
+func (unlinkStreamGone) unlinkStreamReply()      {}
+func (unlinkStreamNoSub) unlinkStreamReply()     {}
+func (unlinkStreamForbidden) unlinkStreamReply() {}
+func (unlinkStreamRemoved) status() string       { return "REMOVED" }
+func (unlinkStreamGlob) status() string          { return "GLOB" }
+func (unlinkStreamGone) status() string          { return "GONE" }
+func (unlinkStreamNoSub) status() string         { return "NOSUB" }
+func (unlinkStreamForbidden) status() string     { return "FORBIDDEN" }
 
 var (
-	unlinkStreamReplyVariants = []replyVariant{{Status: "REMOVED"}, {Status: "GLOB"}, {Status: "GONE"}}
+	unlinkStreamReplyVariants = []replyVariant{{Status: "REMOVED"}, {Status: "GLOB"}, {Status: "GONE"}, {Status: "NOSUB"}, {Status: "FORBIDDEN"}}
 	unlinkStreamDecoder       = scriptDecoder[unlinkStreamReply]{Variants: unlinkStreamReplyVariants, Decode: decodeUnlinkStreamReply}
 )
 
@@ -86,6 +102,10 @@ func decodeUnlinkStreamReply(r scriptReply) (unlinkStreamReply, error) {
 		return unlinkStreamGlob{}, nil
 	case "GONE":
 		return unlinkStreamGone{}, nil
+	case "NOSUB":
+		return unlinkStreamNoSub{}, nil
+	case "FORBIDDEN":
+		return unlinkStreamForbidden{}, nil
 	default:
 		return nil, fmt.Errorf("unhandled unlink_stream status %q", st)
 	}
@@ -378,19 +398,37 @@ type deleteSubReply interface {
 	deleteSubReply()
 	status() string
 }
-type deleteSubOK struct{}
+type (
+	deleteSubOK        struct{}
+	deleteSubNoSub     struct{}
+	deleteSubForbidden struct{}
+)
 
-func (deleteSubOK) deleteSubReply() {}
-func (deleteSubOK) status() string  { return "OK" }
+func (deleteSubOK) deleteSubReply()        {}
+func (deleteSubNoSub) deleteSubReply()     {}
+func (deleteSubForbidden) deleteSubReply() {}
+func (deleteSubOK) status() string         { return "OK" }
+func (deleteSubNoSub) status() string      { return "NOSUB" }
+func (deleteSubForbidden) status() string  { return "FORBIDDEN" }
 
 var (
-	deleteSubReplyVariants = []replyVariant{{Status: "OK"}}
+	deleteSubReplyVariants = []replyVariant{{Status: "OK"}, {Status: "NOSUB"}, {Status: "FORBIDDEN"}}
 	deleteSubDecoder       = scriptDecoder[deleteSubReply]{Variants: deleteSubReplyVariants, Decode: decodeDeleteSubReply}
 )
 
 func decodeDeleteSubReply(r scriptReply) (deleteSubReply, error) {
-	if _, err := decodeUnitStatus(r, deleteSubReplyVariants); err != nil {
+	st, err := decodeUnitStatus(r, deleteSubReplyVariants)
+	if err != nil {
 		return nil, err
 	}
-	return deleteSubOK{}, nil
+	switch st {
+	case "OK":
+		return deleteSubOK{}, nil
+	case "NOSUB":
+		return deleteSubNoSub{}, nil
+	case "FORBIDDEN":
+		return deleteSubForbidden{}, nil
+	default:
+		return nil, fmt.Errorf("unhandled delete_sub status %q", st)
+	}
 }

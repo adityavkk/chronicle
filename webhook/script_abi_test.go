@@ -91,6 +91,13 @@ func TestScriptReplyDecodersKeepValidPayloads(t *testing.T) {
 	if !ok || claimed.Generation != 7 || claimed.WakeID != "wake-2" || claimed.Holder != "worker-1" {
 		t.Fatalf("decode claim = %#v", c)
 	}
+	forbidden, err := decodeClaimReply(scriptReply{"FORBIDDEN"})
+	if err != nil {
+		t.Fatalf("decode forbidden claim: %v", err)
+	}
+	if _, ok := forbidden.(claimForbidden); !ok {
+		t.Fatalf("decode forbidden claim = %#v", forbidden)
+	}
 }
 
 func TestScriptABIRejectsWrongCallArity(t *testing.T) {
@@ -107,6 +114,20 @@ func TestScriptABIRejectsWrongCallArity(t *testing.T) {
 	ackKeys := ackKeyVec{ShardState: "shard", Links: "links", LeaseZSet: "lease", RetryZSet: "retry", DueZSet: "due", SubConfig: "sub"}
 	if err := ackScript.abi.validateCall(ackKeys, []any{"member", "1", "wake", "1", "1", "1700000000", "1000", "1", "path-only", "replica", "1"}); err == nil {
 		t.Fatal("ack with incomplete variadic ack pair accepted")
+	}
+	claimKeys := claimKeyVec{
+		SubConfig: "sub", ShardState: "shard", LeaseZSet: "lease",
+		IncarnationCounter: "inc", ShardRegistry: "registry", Links: "links",
+	}
+	validClaimArgs := []any{
+		"member", "worker", "1700000000", "1000", "wake", "0",
+		"owner", "incarnation", "cfg-hash", "1", "events/a",
+	}
+	if err := claimScript.abi.validateCall(claimKeys, validClaimArgs); err != nil {
+		t.Fatalf("valid claim call rejected: %v", err)
+	}
+	if err := claimScript.abi.validateCall(claimKeys, validClaimArgs[:10]); err == nil {
+		t.Fatal("claim with missing expected path accepted")
 	}
 }
 

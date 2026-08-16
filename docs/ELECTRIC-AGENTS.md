@@ -130,6 +130,13 @@ Startup log must say `subscriptions enabled` and `subscriptions=true`.
 Smoke test: `curl -s http://localhost:4437/v1/stream/__ds/jwks.json` returns an
 Ed25519 key.
 
+This local recipe uses Chronicle's default insecure telemetry mode. In WCNP,
+use the agents-server SPIFFE identity, set `CHRONICLE_AUTH_MODE=enforce`, and
+mount an explicit service policy. Keep `CHRONICLE_SERVICE_BEARER` only as a
+compatibility fallback for a client that cannot use mesh identity. The complete
+marker, strict-mTLS, sidecar-bypass, policy, Akeyless, and rotation requirements
+are in [DEPLOYMENT.md](DEPLOYMENT.md#service-identity-and-access-policy).
+
 ### 2. Postgres (agents-server state plane)
 
 ```bash
