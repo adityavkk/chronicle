@@ -200,7 +200,7 @@ func TestClaimExpectationRejectsRecreatedOrRelinkedSubscription(t *testing.T) {
 		t.Fatalf("link original: %v", err)
 	}
 	original, _, _ := store.Get("s1")
-	expected := claimExpectationFromSubscription(original)
+	expected := subscriptionExpectationFromSubscription(original)
 
 	if err := store.Delete("s1"); err != nil {
 		t.Fatalf("delete original: %v", err)
@@ -226,7 +226,7 @@ func TestClaimExpectationRejectsRecreatedOrRelinkedSubscription(t *testing.T) {
 		t.Fatalf("recreated subscription mutated: before=%+v after=%+v", replacement, after)
 	}
 
-	relinkedExpected := claimExpectationFromSubscription(after)
+	relinkedExpected := subscriptionExpectationFromSubscription(after)
 	if err := store.Link("s1", "events/b", LinkExplicit, "0000000000000000_0000000000000000"); err != nil {
 		t.Fatalf("relink replacement: %v", err)
 	}
@@ -234,6 +234,81 @@ func TestClaimExpectationRejectsRecreatedOrRelinkedSubscription(t *testing.T) {
 	if err != nil || !res.Forbidden {
 		t.Fatalf("claim after link mutation = %+v/%v, want forbidden", res, err)
 	}
+}
+
+func TestAuthorizedControlMutationsRejectChangedSnapshot(t *testing.T) {
+	_, store, _ := newAuthTestManager(t, auth.ModeEnforce)
+	const off = "0000000000000000_0000000000000000"
+	create := func(t *testing.T, id string, now time.Time) Subscription {
+		t.Helper()
+		if _, _, err := store.CreateOrConfirmOwned(id, pullWakeCfg(), nil, now, "u:owner"); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if err := store.Link(id, "events/a", LinkExplicit, off); err != nil {
+			t.Fatalf("link a: %v", err)
+		}
+		sub, ok, err := store.Get(id)
+		if err != nil || !ok {
+			t.Fatalf("get: ok=%v err=%v", ok, err)
+		}
+		return sub
+	}
+	hasPath := func(sub Subscription, path string) bool {
+		for _, link := range sub.Links {
+			if link.Path == path {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("delete after relink", func(t *testing.T) {
+		sub := create(t, "delete-race", time.Now())
+		expected := subscriptionExpectationFromSubscription(sub)
+		if err := store.Link(sub.ID, "events/b", LinkExplicit, off); err != nil {
+			t.Fatalf("link b: %v", err)
+		}
+		res, err := store.DeleteAuthorized(sub.ID, expected)
+		if err != nil || !res.Forbidden {
+			t.Fatalf("delete = %+v/%v, want forbidden", res, err)
+		}
+		if _, ok, _ := store.Get(sub.ID); !ok {
+			t.Fatal("forbidden delete removed subscription")
+		}
+	})
+
+	t.Run("link after recreate", func(t *testing.T) {
+		sub := create(t, "link-race", time.Now())
+		expected := subscriptionExpectationFromSubscription(sub)
+		if err := store.Delete(sub.ID); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+		replacement := create(t, sub.ID, time.Now().Add(time.Second))
+		res, err := store.LinkAuthorized(sub.ID, "events/b", LinkExplicit, off, expected)
+		if err != nil || !res.Forbidden {
+			t.Fatalf("link = %+v/%v, want forbidden", res, err)
+		}
+		after, _, _ := store.Get(sub.ID)
+		if replacement.Incarnation == sub.Incarnation || hasPath(after, "events/b") {
+			t.Fatalf("forbidden link mutated replacement: %+v", after)
+		}
+	})
+
+	t.Run("unlink after relink", func(t *testing.T) {
+		sub := create(t, "unlink-race", time.Now())
+		expected := subscriptionExpectationFromSubscription(sub)
+		if err := store.Link(sub.ID, "events/b", LinkExplicit, off); err != nil {
+			t.Fatalf("link b: %v", err)
+		}
+		res, err := store.UnlinkAuthorized(sub.ID, "events/a", false, expected)
+		if err != nil || !res.Forbidden {
+			t.Fatalf("unlink = %+v/%v, want forbidden", res, err)
+		}
+		after, _, _ := store.Get(sub.ID)
+		if !hasPath(after, "events/a") {
+			t.Fatalf("forbidden unlink removed path: %+v", after.Links)
+		}
+	})
 }
 
 // TestClaimInsecureDefaultUnchanged pins the telemetry default: with no

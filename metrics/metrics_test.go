@@ -61,6 +61,8 @@ func TestMuxEndpoints(t *testing.T) {
 	p.OwnerFenced("check_owner")
 	p.ClaimContention("already_claimed", "agent-handler")
 	p.DurabilityShort("WAITAOF")
+	p.ServiceSPIFFEAuthentication()
+	p.ServiceBearerAuthentication()
 	p.ServiceAuthenticationFailure()
 	p.ServiceAuthorizationFailure()
 	p.ServiceDelegatedGateway()
@@ -164,6 +166,17 @@ func TestMuxEndpoints(t *testing.T) {
 	} {
 		if !strings.Contains(body, name) {
 			t.Errorf("/metrics output missing %q", name)
+		}
+	}
+	for _, result := range []string{
+		"spiffe_authenticated",
+		"bearer_authenticated",
+		"authentication_failure",
+		"authorization_failure",
+		"delegated_gateway",
+	} {
+		if !strings.Contains(body, `chronicle_service_access_total{result="`+result+`"} 1`) {
+			t.Errorf("/metrics output missing service result %q", result)
 		}
 	}
 }

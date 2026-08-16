@@ -104,6 +104,12 @@ type Metrics interface {
 	// the RedisStore (#43).
 	DurabilityShort(cmd string)
 
+	// ServiceSPIFFEAuthentication records successful mesh-attested service
+	// authentication.
+	ServiceSPIFFEAuthentication()
+	// ServiceBearerAuthentication records successful compatibility-bearer
+	// service authentication.
+	ServiceBearerAuthentication()
 	// ServiceAuthenticationFailure records an XFCC service identity that failed
 	// its sidecar attestation gate or exact allowlist.
 	ServiceAuthenticationFailure()
@@ -175,6 +181,12 @@ func (NopMetrics) ClaimContention(string, string) {}
 
 // DurabilityShort implements Metrics.
 func (NopMetrics) DurabilityShort(string) {}
+
+// ServiceSPIFFEAuthentication implements Metrics.
+func (NopMetrics) ServiceSPIFFEAuthentication() {}
+
+// ServiceBearerAuthentication implements Metrics.
+func (NopMetrics) ServiceBearerAuthentication() {}
 
 // ServiceAuthenticationFailure implements Metrics.
 func (NopMetrics) ServiceAuthenticationFailure() {}

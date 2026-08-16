@@ -204,6 +204,8 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string
 			return
 		}
 	}
+	var expected SubscriptionExpectation
+	hasExpected := false
 	if authnErr == nil {
 		sub, ok, err := rt.mgr.store.Get(id)
 		if err != nil {
@@ -218,6 +220,8 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string
 			if reason == "" {
 				reason = controlOwnershipAuthz(sub.OwnerSubject, caller)
 			}
+			expected = subscriptionExpectationFromSubscription(sub)
+			hasExpected = true
 		} else if decision := caller.authorizeAction(auth.ActionSubscribe); !decision.Allowed() {
 			reason = decision.Detail()
 		}
@@ -226,6 +230,23 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string
 			!rt.controlDeny(w, "delete", id, http.StatusForbidden, ErrCodeForbidden, reason) {
 			return
 		}
+	}
+	if rt.mgr.authMode == auth.ModeEnforce {
+		if !hasExpected {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		res, err := rt.mgr.store.DeleteAuthorized(id, expected)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if res.Forbidden {
+			writeErr(w, http.StatusForbidden, ErrCodeForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 	if err := rt.mgr.store.Delete(id); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -248,6 +269,7 @@ func (rt *Routes) handleAddStreams(w http.ResponseWriter, r *http.Request, id st
 		writeErr(w, http.StatusBadRequest, ErrCodeInvalidRequest)
 		return
 	}
+	var expected SubscriptionExpectation
 	if authnErr == nil {
 		reason := linkPathsAuthz(caller, auth.ActionLink, body.Streams)
 		rt.recordServiceAuthorization(caller, "add-streams", reason)
@@ -269,10 +291,13 @@ func (rt *Routes) handleAddStreams(w http.ResponseWriter, r *http.Request, id st
 				writeErr(w, http.StatusNotFound, ErrCodeNotFound)
 				return
 			}
-		} else if reason := controlOwnershipAuthz(sub.OwnerSubject, caller); reason != "" {
-			rt.recordServiceAuthorization(caller, "add-streams", reason)
-			if !rt.controlDeny(w, "add-streams", id, http.StatusForbidden, ErrCodeForbidden, reason) {
-				return
+		} else {
+			expected = subscriptionExpectationFromSubscription(sub)
+			if reason := controlOwnershipAuthz(sub.OwnerSubject, caller); reason != "" {
+				rt.recordServiceAuthorization(caller, "add-streams", reason)
+				if !rt.controlDeny(w, "add-streams", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+					return
+				}
 			}
 		}
 	}
@@ -284,6 +309,23 @@ func (rt *Routes) handleAddStreams(w http.ResponseWriter, r *http.Request, id st
 		off := rt.mgr.streams.BeginningOffset()
 		if tail, ok := rt.mgr.tailOf(path); ok {
 			off = tail
+		}
+		if rt.mgr.authMode == auth.ModeEnforce {
+			res, err := rt.mgr.store.LinkAuthorized(id, path, LinkExplicit, off, expected)
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			if res.NoSub {
+				writeErr(w, http.StatusNotFound, ErrCodeNotFound)
+				return
+			}
+			if res.Forbidden {
+				writeErr(w, http.StatusForbidden, ErrCodeForbidden)
+				return
+			}
+			addExpectedPath(&expected, path)
+			continue
 		}
 		if err := rt.mgr.store.Link(id, path, LinkExplicit, off); err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -323,11 +365,38 @@ func (rt *Routes) handleRemoveStream(w http.ResponseWriter, r *http.Request, id,
 		}
 	}
 	stillGlob := ok && sub.Config.Pattern != "" && GlobMatch(sub.Config.Pattern, path)
+	if rt.mgr.authMode == auth.ModeEnforce {
+		if !ok {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		expected := subscriptionExpectationFromSubscription(sub)
+		res, err := rt.mgr.store.UnlinkAuthorized(id, path, stillGlob, expected)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if res.Forbidden {
+			writeErr(w, http.StatusForbidden, ErrCodeForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err := rt.mgr.store.Unlink(id, path, stillGlob); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func addExpectedPath(expected *SubscriptionExpectation, path string) {
+	for _, existing := range expected.Paths {
+		if existing == path {
+			return
+		}
+	}
+	expected.Paths = append(expected.Paths, path)
 }
 
 // handleAckLike serves both the webhook callback and the pull-wake ack: both are
@@ -430,7 +499,7 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	expected := claimExpectationFromSubscription(sub)
+	expected := subscriptionExpectationFromSubscription(sub)
 	res, err := rt.mgr.store.ClaimAuthorized(
 		id, req.Worker, wakeID, expected, time.Now(), sub.Config.LeaseTTLMs,
 	)

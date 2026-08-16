@@ -200,7 +200,7 @@ func armStatus(r ArmResult) string {
 }
 
 // ClaimAuthorized records claim.lua.
-func (t *TracingStore) ClaimAuthorized(id, worker, wakeID string, expected ClaimExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+func (t *TracingStore) ClaimAuthorized(id, worker, wakeID string, expected SubscriptionExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
 	pre := t.snap(id)
 	res, err := t.Store.ClaimAuthorized(id, worker, wakeID, expected, now, leaseTTLMs)
 	if err != nil {

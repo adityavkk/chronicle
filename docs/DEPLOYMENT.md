@@ -175,6 +175,8 @@ Startup logs report the policy count, SPIFFE identity count, and exact
 `trusted_gateway` subjects. They never log bearer values. Prometheus exposes:
 
 ```text
+chronicle_service_access_total{result="spiffe_authenticated"}
+chronicle_service_access_total{result="bearer_authenticated"}
 chronicle_service_access_total{result="authentication_failure"}
 chronicle_service_access_total{result="authorization_failure"}
 chronicle_service_access_total{result="delegated_gateway"}

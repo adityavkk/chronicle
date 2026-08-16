@@ -35,6 +35,9 @@ type Store interface {
 
 	// Delete tombstones a subscription and removes its fan-out index entries.
 	Delete(id string) error
+	// DeleteAuthorized performs Delete only if the current subscription still
+	// matches the exact snapshot the route authorized.
+	DeleteAuthorized(id string, expected SubscriptionExpectation) (MutationResult, error)
 
 	// List returns all subscription ids (for the recovery sweep).
 	List() ([]string, error)
@@ -42,10 +45,16 @@ type Store interface {
 	// Link links a stream to a subscription at offset if absent; an explicit
 	// link upgrades an existing glob link. Maintains the fan-out index.
 	Link(id, path string, linkType LinkType, offset string) error
+	// LinkAuthorized performs Link only if the current subscription still
+	// matches the exact snapshot the route authorized.
+	LinkAuthorized(id, path string, linkType LinkType, offset string, expected SubscriptionExpectation) (MutationResult, error)
 
 	// Unlink removes an explicit link; if stillGlob the link is kept as a glob
 	// link (cursor preserved), else removed and de-indexed.
 	Unlink(id, path string, stillGlob bool) error
+	// UnlinkAuthorized performs Unlink only if the current subscription still
+	// matches the exact snapshot the route authorized.
+	UnlinkAuthorized(id, path string, stillGlob bool, expected SubscriptionExpectation) (MutationResult, error)
 
 	// StreamSubscribers returns the subscriber ids linked to a stream by
 	// scatter-gathering across the per-slot fan-out shards named in the stream's
@@ -73,7 +82,7 @@ type Store interface {
 	// ClaimAuthorized is the pull-wake compare-and-set claim (PROTOCOL §7.2).
 	// The expectation is the exact subscription snapshot the route authorized;
 	// Redis compares it in the same atomic operation that grants the lease.
-	ClaimAuthorized(id, worker, wakeID string, expected ClaimExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error)
+	ClaimAuthorized(id, worker, wakeID string, expected SubscriptionExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error)
 
 	// CheckWriteFence verifies that a claim-scoped write token still names the
 	// live holder at append authorization time. It reads the current shard state
@@ -226,14 +235,22 @@ type ArmResult struct {
 	WakeID     string
 }
 
-// ClaimExpectation binds a claim authorization decision to the immutable
+// SubscriptionExpectation binds an authorization decision to the immutable
 // subscription incarnation, owner, config, and current linked resource set.
 // Paths need not be sorted, but must be unique as they are in Subscription.Links.
-type ClaimExpectation struct {
+type SubscriptionExpectation struct {
 	Incarnation  string
 	OwnerSubject string
 	CfgHash      string
 	Paths        []string
+}
+
+// MutationResult reports whether an authorization-bound control-plane
+// mutation ran, found no subscription, or rejected a changed snapshot.
+type MutationResult struct {
+	Applied   bool
+	NoSub     bool
+	Forbidden bool
 }
 
 // ClaimResult is the outcome of a claim attempt.

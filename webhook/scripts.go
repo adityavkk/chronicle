@@ -41,13 +41,19 @@ var (
 	}, createSubDecoder)
 	linkStreamScript = newTypedScript[linkStreamKeys, linkStreamReply](scriptABI{
 		Name: "link_stream", File: "link_stream.lua",
-		Keys: []scriptKeySchema{keys("links")},
-		Args: exactArgs(arg("path", argString), arg("link_type", argString), arg("offset", argString)),
+		Keys: []scriptKeySchema{keys("sub", "links")},
+		Args: variadicArgs(
+			[]scriptArg{arg("path", argString), arg("link_type", argString), arg("offset", argString), arg("authorized", argBool01), arg("expected_owner", argString), arg("expected_incarnation", argString), arg("expected_cfg_hash", argString), arg("num_paths", argInt)},
+			[]scriptArg{arg("expected_path", argString)}, nil,
+		),
 	}, linkStreamDecoder)
 	unlinkStreamScript = newTypedScript[unlinkStreamKeys, unlinkStreamReply](scriptABI{
 		Name: "unlink_stream", File: "unlink_stream.lua",
-		Keys: []scriptKeySchema{keys("links")},
-		Args: exactArgs(arg("path", argString), arg("still_glob", argBool01)),
+		Keys: []scriptKeySchema{keys("sub", "links")},
+		Args: variadicArgs(
+			[]scriptArg{arg("path", argString), arg("still_glob", argBool01), arg("authorized", argBool01), arg("expected_owner", argString), arg("expected_incarnation", argString), arg("expected_cfg_hash", argString), arg("num_paths", argInt)},
+			[]scriptArg{arg("expected_path", argString)}, nil,
+		),
 	}, unlinkStreamDecoder)
 	armWakeScript = newTypedScript[armWakeKeyVec, armWakeReply](scriptABI{
 		Name: "arm_wake", File: "arm_wake.lua",
@@ -119,7 +125,10 @@ var (
 	deleteSubScript = newTypedScript[deleteSubKeys, deleteSubReply](scriptABI{
 		Name: "delete_sub", File: "delete_sub.lua",
 		Keys: []scriptKeySchema{keys("sub", "subs_set", "links", "lease_zset", "retry_zset", "due_zset", "shard_registry")},
-		Args: exactArgs(arg("id", argString)),
+		Args: variadicArgs(
+			[]scriptArg{arg("id", argString), arg("authorized", argBool01), arg("expected_owner", argString), arg("expected_incarnation", argString), arg("expected_cfg_hash", argString), arg("num_paths", argInt)},
+			[]scriptArg{arg("expected_path", argString)}, nil,
+		),
 	}, deleteSubDecoder)
 	getOrCreateKeyScript = newTypedScript[getOrCreateKeyKeys, keyMaterialReply](scriptABI{
 		Name: "get_or_create_key", File: "get_or_create_key.lua",

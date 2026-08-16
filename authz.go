@@ -96,6 +96,8 @@ type ServiceAuth = auth.ServiceAccess
 
 // ServiceMetrics records low-cardinality service access outcomes.
 type ServiceMetrics interface {
+	ServiceSPIFFEAuthentication()
+	ServiceBearerAuthentication()
 	ServiceAuthenticationFailure()
 	ServiceAuthorizationFailure()
 	ServiceDelegatedGateway()
@@ -122,6 +124,13 @@ func (h *Handler) serviceDecision(r *http.Request, path auth.StreamPath, action 
 		}
 		return auth.Deny(auth.ReasonUnauthenticated, "invalid service identity"), true
 	case auth.ServiceAuthenticated:
+		if h.ServiceMetrics != nil {
+			if joinedXFCC != "" {
+				h.ServiceMetrics.ServiceSPIFFEAuthentication()
+			} else {
+				h.ServiceMetrics.ServiceBearerAuthentication()
+			}
+		}
 		decision, delegated := h.ServiceAuth.Authorize(principal, action, path)
 		if !decision.Allowed() {
 			if h.ServiceMetrics != nil {

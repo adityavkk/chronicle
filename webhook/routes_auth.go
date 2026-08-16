@@ -84,6 +84,11 @@ func (rt *Routes) authenticateCaller(r *http.Request) (controlCaller, error) {
 			rt.mgr.metrics.ServiceAuthenticationFailure()
 			return controlCaller{}, errors.New("invalid service identity")
 		case auth.ServiceAuthenticated:
+			if joinedXFCC != "" {
+				rt.mgr.metrics.ServiceSPIFFEAuthentication()
+			} else {
+				rt.mgr.metrics.ServiceBearerAuthentication()
+			}
 			return controlCaller{servicePrincipal: principal, serviceAccess: access}, nil
 		case auth.ServiceNotAttempted:
 			// Fall through to the caller-token credential family.

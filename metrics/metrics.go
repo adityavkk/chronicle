@@ -306,7 +306,7 @@ func New() *Prometheus {
 		}, []string{"cmd"}),
 		serviceAccess: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_service_access_total",
-			Help: "Service access decisions by result: authentication_failure, authorization_failure, or delegated_gateway.",
+			Help: "Service authentication and authorization events by result: spiffe_authenticated, bearer_authenticated, authentication_failure, authorization_failure, or delegated_gateway.",
 		}, []string{"result"}),
 		sseHubs: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "chronicle_sse_hubs",
@@ -629,6 +629,18 @@ func (p *Prometheus) ClaimContention(status, _ string) {
 // holder/generation/ack count — correction #3.
 func (p *Prometheus) DurabilityShort(cmd string) {
 	p.durabilityShort.WithLabelValues(cmd).Inc()
+}
+
+// ServiceSPIFFEAuthentication implements webhook.Metrics and
+// chronicle.ServiceMetrics.
+func (p *Prometheus) ServiceSPIFFEAuthentication() {
+	p.serviceAccess.WithLabelValues("spiffe_authenticated").Inc()
+}
+
+// ServiceBearerAuthentication implements webhook.Metrics and
+// chronicle.ServiceMetrics.
+func (p *Prometheus) ServiceBearerAuthentication() {
+	p.serviceAccess.WithLabelValues("bearer_authenticated").Inc()
 }
 
 // ServiceAuthenticationFailure implements webhook.Metrics and

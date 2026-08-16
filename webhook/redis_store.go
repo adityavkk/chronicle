@@ -421,24 +421,45 @@ func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 	return out, nil
 }
 
-// Delete removes the subscription and de-indexes its streams. Links are read
-// first so the fan-out entries can be cleaned up. h once per id keeps delete_sub.lua
-// single-slot.
+// Delete removes the subscription and de-indexes its streams.
 func (s *RedisStore) Delete(id string) error {
+	_, err := s.delete(id, nil)
+	return err
+}
+
+// DeleteAuthorized performs Delete only while expected still matches.
+func (s *RedisStore) DeleteAuthorized(id string, expected SubscriptionExpectation) (MutationResult, error) {
+	return s.delete(id, &expected)
+}
+
+func (s *RedisStore) delete(id string, expected *SubscriptionExpectation) (MutationResult, error) {
 	links, err := s.client.HKeys(s.ctx(), linksKey(id)).Result()
 	if err != nil {
-		return err
+		return MutationResult{}, err
 	}
-	if _, err := deleteSubScript.run(s.ctx(), s.client,
-		newDeleteSubKeys(id), id); err != nil {
-		return err
+	args, err := authorizedMutationArgs([]any{id}, expected, "delete")
+	if err != nil {
+		return MutationResult{}, err
 	}
-	for _, path := range links {
-		if err := s.deindexStream(path, id); err != nil {
-			return err
+	reply, err := deleteSubScript.run(s.ctx(), s.client, newDeleteSubKeys(id), args...)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	switch reply.(type) {
+	case deleteSubOK:
+		for _, path := range links {
+			if err := s.deindexStream(path, id); err != nil {
+				return MutationResult{}, err
+			}
 		}
+		return MutationResult{Applied: true}, nil
+	case deleteSubNoSub:
+		return MutationResult{NoSub: true}, nil
+	case deleteSubForbidden:
+		return MutationResult{Forbidden: true}, nil
+	default:
+		return MutationResult{}, fmt.Errorf("delete_sub: unhandled reply %T", reply)
 	}
-	return nil
 }
 
 // List returns all subscription ids, UNIONed across the S per-slot id-sets (GAP4):
@@ -482,29 +503,77 @@ func (s *RedisStore) List() ([]string, error) {
 
 // Link links a stream and maintains the fan-out index.
 func (s *RedisStore) Link(id, path string, linkType LinkType, offset string) error {
-	if _, err := linkStreamScript.run(s.ctx(), s.client, newLinkStreamKeys(id), path, string(linkType), offset); err != nil {
-		return err
+	_, err := s.link(id, path, linkType, offset, nil)
+	return err
+}
+
+// LinkAuthorized performs Link only while expected still matches.
+func (s *RedisStore) LinkAuthorized(id, path string, linkType LinkType, offset string, expected SubscriptionExpectation) (MutationResult, error) {
+	return s.link(id, path, linkType, offset, &expected)
+}
+
+func (s *RedisStore) link(id, path string, linkType LinkType, offset string, expected *SubscriptionExpectation) (MutationResult, error) {
+	args, err := authorizedMutationArgs([]any{path, string(linkType), offset}, expected, "link")
+	if err != nil {
+		return MutationResult{}, err
 	}
-	return s.indexStream(path, id)
+	reply, err := linkStreamScript.run(s.ctx(), s.client, newLinkStreamKeys(id), args...)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	switch reply.(type) {
+	case linkStreamLinked, linkStreamUpgraded, linkStreamExists:
+		if err := s.indexStream(path, id); err != nil {
+			return MutationResult{}, err
+		}
+		return MutationResult{Applied: true}, nil
+	case linkStreamNoSub:
+		return MutationResult{NoSub: true}, nil
+	case linkStreamForbidden:
+		return MutationResult{Forbidden: true}, nil
+	default:
+		return MutationResult{}, fmt.Errorf("link_stream: unhandled reply %T", reply)
+	}
 }
 
 // Unlink removes an explicit link; de-indexes only when the link is gone.
 func (s *RedisStore) Unlink(id, path string, stillGlob bool) error {
+	_, err := s.unlink(id, path, stillGlob, nil)
+	return err
+}
+
+// UnlinkAuthorized performs Unlink only while expected still matches.
+func (s *RedisStore) UnlinkAuthorized(id, path string, stillGlob bool, expected SubscriptionExpectation) (MutationResult, error) {
+	return s.unlink(id, path, stillGlob, &expected)
+}
+
+func (s *RedisStore) unlink(id, path string, stillGlob bool, expected *SubscriptionExpectation) (MutationResult, error) {
 	flag := "0"
 	if stillGlob {
 		flag = "1"
 	}
-	reply, err := unlinkStreamScript.run(s.ctx(), s.client, newUnlinkStreamKeys(id), path, flag)
+	args, err := authorizedMutationArgs([]any{path, flag}, expected, "unlink")
 	if err != nil {
-		return err
+		return MutationResult{}, err
+	}
+	reply, err := unlinkStreamScript.run(s.ctx(), s.client, newUnlinkStreamKeys(id), args...)
+	if err != nil {
+		return MutationResult{}, err
 	}
 	switch reply.(type) {
 	case unlinkStreamRemoved:
-		return s.deindexStream(path, id)
+		if err := s.deindexStream(path, id); err != nil {
+			return MutationResult{}, err
+		}
+		return MutationResult{Applied: true}, nil
 	case unlinkStreamGlob, unlinkStreamGone:
-		return nil
+		return MutationResult{Applied: true}, nil
+	case unlinkStreamNoSub:
+		return MutationResult{NoSub: true}, nil
+	case unlinkStreamForbidden:
+		return MutationResult{Forbidden: true}, nil
 	default:
-		return fmt.Errorf("unlink_stream: unhandled reply %T", reply)
+		return MutationResult{}, fmt.Errorf("unlink_stream: unhandled reply %T", reply)
 	}
 }
 
@@ -667,12 +736,36 @@ func (s *RedisStore) armWake(id string, now time.Time, leaseTTLMs int64, armLeas
 	}
 }
 
-func claimExpectationFromSubscription(sub Subscription) ClaimExpectation {
+func appendSubscriptionExpectation(args []any, expected SubscriptionExpectation, op string) ([]any, error) {
+	args = append(args, expected.OwnerSubject, expected.Incarnation, expected.CfgHash, strconv.Itoa(len(expected.Paths)))
+	seen := make(map[string]struct{}, len(expected.Paths))
+	for _, path := range expected.Paths {
+		if path == "" {
+			return nil, fmt.Errorf("%s: empty expected path", op)
+		}
+		if _, duplicate := seen[path]; duplicate {
+			return nil, fmt.Errorf("%s: duplicate expected path %q", op, path)
+		}
+		seen[path] = struct{}{}
+		args = append(args, path)
+	}
+	return args, nil
+}
+
+func authorizedMutationArgs(prefix []any, expected *SubscriptionExpectation, op string) ([]any, error) {
+	if expected == nil {
+		return append(prefix, "0", "", "", "", "0"), nil
+	}
+	prefix = append(prefix, "1")
+	return appendSubscriptionExpectation(prefix, *expected, op)
+}
+
+func subscriptionExpectationFromSubscription(sub Subscription) SubscriptionExpectation {
 	paths := make([]string, len(sub.Links))
 	for i := range sub.Links {
 		paths[i] = sub.Links[i].Path
 	}
-	return ClaimExpectation{
+	return SubscriptionExpectation{
 		Incarnation:  sub.Incarnation,
 		OwnerSubject: sub.OwnerSubject,
 		CfgHash:      sub.CfgHash,
@@ -691,12 +784,12 @@ func (s *RedisStore) Claim(id, worker, wakeID string, now time.Time, leaseTTLMs 
 	if !ok {
 		return ClaimResult{NoSub: true}, nil
 	}
-	return s.ClaimAuthorized(id, worker, wakeID, claimExpectationFromSubscription(sub), now, leaseTTLMs)
+	return s.ClaimAuthorized(id, worker, wakeID, subscriptionExpectationFromSubscription(sub), now, leaseTTLMs)
 }
 
 // ClaimAuthorized grants shard 0 only if the subscription still matches the
 // exact owner, incarnation, config, and linked paths the caller authorized.
-func (s *RedisStore) ClaimAuthorized(id, worker, wakeID string, expected ClaimExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+func (s *RedisStore) ClaimAuthorized(id, worker, wakeID string, expected SubscriptionExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
 	return s.claimShardAuthorized(id, 0, worker, wakeID, expected, now, leaseTTLMs)
 }
 
@@ -709,26 +802,19 @@ func (s *RedisStore) ClaimShard(id string, g int, worker, wakeID string, now tim
 	if !ok {
 		return ClaimResult{NoSub: true}, nil
 	}
-	return s.claimShardAuthorized(id, g, worker, wakeID, claimExpectationFromSubscription(sub), now, leaseTTLMs)
+	return s.claimShardAuthorized(id, g, worker, wakeID, subscriptionExpectationFromSubscription(sub), now, leaseTTLMs)
 }
 
-func (s *RedisStore) claimShardAuthorized(id string, g int, worker, wakeID string, expected ClaimExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
+func (s *RedisStore) claimShardAuthorized(id string, g int, worker, wakeID string, expected SubscriptionExpectation, now time.Time, leaseTTLMs int64) (ClaimResult, error) {
 	args := make([]any, 0, 10+len(expected.Paths))
-	args = append(args,
+	args = append(
+		args,
 		shardMember(id, g), worker, nsArg(now), strconv.FormatInt(leaseTTLMs, 10),
-		wakeID, strconv.Itoa(g), expected.OwnerSubject, expected.Incarnation,
-		expected.CfgHash, strconv.Itoa(len(expected.Paths)),
+		wakeID, strconv.Itoa(g),
 	)
-	seen := make(map[string]struct{}, len(expected.Paths))
-	for _, path := range expected.Paths {
-		if path == "" {
-			return ClaimResult{}, errors.New("claim: empty expected path")
-		}
-		if _, duplicate := seen[path]; duplicate {
-			return ClaimResult{}, fmt.Errorf("claim: duplicate expected path %q", path)
-		}
-		seen[path] = struct{}{}
-		args = append(args, path)
+	args, err := appendSubscriptionExpectation(args, expected, "claim")
+	if err != nil {
+		return ClaimResult{}, err
 	}
 
 	// Every key derives from the base id, so the config, per-shard fence, linked

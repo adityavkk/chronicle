@@ -34,34 +34,28 @@ local a_expected_owner = ARGV[7]
 local a_expected_incarnation = ARGV[8]
 local a_expected_cfg_hash = ARGV[9]
 local a_num_paths = ARGV[10]
-local cfg = k_sub_config
-local sub = k_shardstate
-if redis.call('EXISTS', cfg) == 0 then
-  return { 'NOSUB' }
-end
--- Bind the route's authorization decision to the exact subscription object and
--- protected resource set it inspected. No lease or fence state changes before
--- these comparisons. A delete/recreate or concurrent link mutation is denied
--- rather than transferring the prior decision to a different resource set.
-local cfg_inc = redis.call('HGET', cfg, 'incarnation')
-local cfg_owner = redis.call('HGET', cfg, 'owner')
-local cfg_hash = redis.call('HGET', cfg, 'cfg_hash')
-if cfg_inc == false then cfg_inc = '' end
-if cfg_owner == false then cfg_owner = '' end
-if cfg_hash == false then cfg_hash = '' end
-local n = tonumber(a_num_paths)
-if n == nil or cfg_inc ~= a_expected_incarnation or
-    cfg_owner ~= a_expected_owner or cfg_hash ~= a_expected_cfg_hash or
-    redis.call('HLEN', k_links) ~= n then
-  return { 'FORBIDDEN' }
-end
 local i = 11
-for _ = 1, n do
-  if redis.call('HEXISTS', k_links, ARGV[i]) == 0 then
-    return { 'FORBIDDEN' }
-  end
+local expected_paths = {}
+for _ = 1, tonumber(a_num_paths) or 0 do
+  expected_paths[#expected_paths + 1] = ARGV[i]
   i = i + 1
 end
+local cfg = k_sub_config
+local sub = k_shardstate
+-- Bind the route's authorization decision to the exact subscription object and
+-- protected resource set it inspected. No lease or fence state changes before
+-- this comparison. A delete/recreate or concurrent link mutation is denied
+-- rather than transferring the prior decision to a different resource set.
+local expectation = subscription_expectation_status(
+  cfg, k_links, a_expected_owner, a_expected_incarnation,
+  a_expected_cfg_hash, a_num_paths, expected_paths)
+if expectation == 'NOSUB' then
+  return { 'NOSUB' }
+end
+if expectation ~= 'MATCHED' then
+  return { 'FORBIDDEN' }
+end
+local cfg_inc = a_expected_incarnation
 local shard_inc = redis.call('HGET', sub, 'incarnation')
 if k_sub_config ~= k_shardstate and cfg_inc ~= '' and shard_inc ~= cfg_inc then
   redis.call('DEL', sub)

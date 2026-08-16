@@ -19,11 +19,15 @@ const (
 
 type serviceRecordingMetrics struct {
 	NopMetrics
+	spiffeAuthentications  int
+	bearerAuthentications  int
 	authenticationFailures int
 	authorizationFailures  int
 	delegatedGateways      int
 }
 
+func (m *serviceRecordingMetrics) ServiceSPIFFEAuthentication()  { m.spiffeAuthentications++ }
+func (m *serviceRecordingMetrics) ServiceBearerAuthentication()  { m.bearerAuthentications++ }
 func (m *serviceRecordingMetrics) ServiceAuthenticationFailure() { m.authenticationFailures++ }
 func (m *serviceRecordingMetrics) ServiceAuthorizationFailure()  { m.authorizationFailures++ }
 func (m *serviceRecordingMetrics) ServiceDelegatedGateway()      { m.delegatedGateways++ }
@@ -140,6 +144,12 @@ func TestServicePolicyAppliesToSubscriptionRoutes(t *testing.T) {
 		}
 	})
 
+	if metrics.spiffeAuthentications == 0 {
+		t.Fatal("mesh-authenticated service requests were not recorded")
+	}
+	if metrics.bearerAuthentications != 0 {
+		t.Fatalf("bearer authentications = %d, want 0 in mesh-only test", metrics.bearerAuthentications)
+	}
 	if metrics.authenticationFailures < 2 {
 		t.Fatalf("service authentication failures = %d, want at least 2", metrics.authenticationFailures)
 	}
