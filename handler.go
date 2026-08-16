@@ -264,6 +264,20 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 		forkSubOffsetStr = forkSubOffsetVals[0]
 	}
 
+	if forkedFromStr != "" {
+		sourcePath, err := auth.NormalizeStreamPath(forkedFromStr)
+		if err != nil {
+			return newHTTPError(http.StatusBadRequest, "invalid Stream-Forked-From path")
+		}
+		// The store uses root-relative paths with one leading slash. Rebuild that
+		// canonical spelling from the same normalized value the read decision
+		// evaluates, so authorization and dereference cannot name different keys.
+		forkedFromStr = "/" + sourcePath.String()
+		if _, err := h.authorizeRead(r, forkedFromStr); err != nil {
+			return err
+		}
+	}
+
 	// Validate TTL and ExpiresAt aren't both provided
 	if ttlStr != "" && expiresAtStr != "" {
 		return newHTTPError(http.StatusBadRequest, "cannot specify both Stream-TTL and Stream-Expires-At")

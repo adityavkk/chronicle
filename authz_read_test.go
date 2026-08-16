@@ -1,12 +1,14 @@
 package chronicle
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +16,8 @@ import (
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
+	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
@@ -363,6 +367,103 @@ func TestOIDCUserReadAndMutate(t *testing.T) {
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("%s = %d, want 401", name, rec.Code)
 		}
+	}
+}
+
+func TestOIDCForkRequiresSourceReadAuthorization(t *testing.T) {
+	h, _, _ := tb5Handler(t)
+	idp := newTB5IdP(t)
+	h.UserAuth = idp.userAuth(t)
+
+	const secret = "tenant-b-secret"
+	if _, _, err := h.Store.Create("/tenant-b/secret", store.CreateOptions{
+		ContentType: "text/plain",
+		InitialData: []byte(secret),
+	}); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	before, err := h.Store.Get("/tenant-b/secret")
+	if err != nil {
+		t.Fatalf("get source before fork: %v", err)
+	}
+
+	tenantA := idp.mint(t, "idp-k1", []string{"tenant-a"}, "chronicle", time.Now().Add(time.Hour))
+	headers := map[string]string{"Authorization": "Bearer " + tenantA}
+	rec := do(h, http.MethodGet, "/tenant-b/secret", headers, nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("direct source read = %d, want 403; body=%q", rec.Code, rec.Body.String())
+	}
+
+	rec = do(h, http.MethodPut, "/tenant-a/copied-secret", map[string]string{
+		"Authorization":                 "Bearer " + tenantA,
+		"Content-Type":                  "text/plain",
+		protocol.HeaderStreamForkedFrom: "/tenant-b/secret",
+	}, nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-namespace fork = %d, want 403; body=%q", rec.Code, rec.Body.String())
+	}
+	if got := decodeEnvelope(t, rec).Error.Code; got != errCodeForbidden {
+		t.Fatalf("cross-namespace fork code = %q, want %q", got, errCodeForbidden)
+	}
+	existingDeny := rec.Body.String()
+	rec = do(h, http.MethodPut, "/tenant-a/copied-missing", map[string]string{
+		"Authorization":                 "Bearer " + tenantA,
+		"Content-Type":                  "text/plain",
+		protocol.HeaderStreamForkedFrom: "/tenant-b/missing",
+	}, nil)
+	if rec.Code != http.StatusForbidden || rec.Body.String() != existingDeny {
+		t.Fatalf("missing source denial differs from existing source: status=%d body=%q, want 403 %q",
+			rec.Code, rec.Body.String(), existingDeny)
+	}
+
+	after, err := h.Store.Get("/tenant-b/secret")
+	if err != nil {
+		t.Fatalf("get source after denied fork: %v", err)
+	}
+	if after.RefCount != before.RefCount {
+		t.Fatalf("denied fork changed source refcount: before=%d after=%d", before.RefCount, after.RefCount)
+	}
+	for _, destination := range []string{"/tenant-a/copied-secret", "/tenant-a/copied-missing"} {
+		if _, err := h.Store.Get(destination); !errors.Is(err, store.ErrStreamNotFound) {
+			t.Fatalf("denied fork created %s: err=%v", destination, err)
+		}
+	}
+
+	rec = do(h, http.MethodGet, "/tenant-a/copied-secret", headers, nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("read denied destination = %d, want 404; body=%q", rec.Code, rec.Body.String())
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte(secret)) {
+		t.Fatalf("denied fork exposed inherited bytes: %q", rec.Body.String())
+	}
+}
+
+func TestOIDCForkAllowsAuthorizedSource(t *testing.T) {
+	h, _, _ := tb5Handler(t)
+	idp := newTB5IdP(t)
+	h.UserAuth = idp.userAuth(t)
+
+	const payload = "authorized-source"
+	if _, _, err := h.Store.Create("/tenant-a/source", store.CreateOptions{
+		ContentType: "text/plain",
+		InitialData: []byte(payload),
+	}); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	token := idp.mint(t, "idp-k1", []string{"tenant-a"}, "chronicle", time.Now().Add(time.Hour))
+	headers := map[string]string{
+		"Authorization":                 "Bearer " + token,
+		"Content-Type":                  "text/plain",
+		protocol.HeaderStreamForkedFrom: "/tenant-a/source",
+	}
+	rec := do(h, http.MethodPut, "/tenant-a/copy", headers, nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("authorized fork = %d, want 201; body=%q", rec.Code, rec.Body.String())
+	}
+	rec = do(h, http.MethodGet, "/tenant-a/copy",
+		map[string]string{"Authorization": "Bearer " + token}, nil)
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(payload)) {
+		t.Fatalf("authorized fork read = %d body=%q, want inherited payload", rec.Code, rec.Body.String())
 	}
 }
 
