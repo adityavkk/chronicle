@@ -12,8 +12,9 @@ import (
 // its inputs and safe to share across goroutines. chronicle's Handler
 // enforces with it through the AppendAuthorizer interface.
 type WriteTokenAuthorizer struct {
-	key   []byte
-	store Store
+	key    []byte
+	store  Store
+	atomic bool
 }
 
 // NewWriteTokenAuthorizer builds an authorizer around an HMAC token key.
@@ -26,7 +27,7 @@ func NewWriteTokenAuthorizer(key []byte) WriteTokenAuthorizer {
 // authorizer the HTTP handler enforces with. One shared key means the claim
 // mint and the append gate can never disagree about what a token proves.
 func (m *Manager) WriteAuthorizer() WriteTokenAuthorizer {
-	return WriteTokenAuthorizer{key: m.tokenKey, store: m.store}
+	return WriteTokenAuthorizer{key: m.tokenKey, store: m.store, atomic: m.writeFences != nil}
 }
 
 // AuthorizeAppend maps a presented (possibly absent) claim token to the
@@ -34,10 +35,8 @@ func (m *Manager) WriteAuthorizer() WriteTokenAuthorizer {
 // is unexpired, and carries path in its scope allows; every other outcome —
 // including an empty or misconfigured key — denies.
 func (a WriteTokenAuthorizer) AuthorizeAppend(token string, path auth.StreamPath, now time.Time) auth.Decision {
-	if d := a.AuthorizeAppendCredential(token, path, now); !d.Allowed() {
-		return d
-	}
-	return a.AuthorizeAppendFence(token, path, now)
+	d, _ := a.AuthorizeAppendFence(token, path, now)
+	return d
 }
 
 // AuthorizeAppendCredential validates the non-live-token properties. It is safe
@@ -61,25 +60,39 @@ func (a WriteTokenAuthorizer) AuthorizeAppendCredential(token string, path auth.
 	}
 }
 
-// AuthorizeAppendFence revalidates the token and checks live claim state. The
-// handler calls this immediately before the append mutation after body buffering.
-func (a WriteTokenAuthorizer) AuthorizeAppendFence(token string, path auth.StreamPath, now time.Time) auth.Decision {
+// AuthorizeAppendFence revalidates the token and checks live claim state. When
+// the manager's stream store supports same-slot markers, it also returns the
+// identity the data store must compare inside the append transaction.
+func (a WriteTokenAuthorizer) AuthorizeAppendFence(token string, path auth.StreamPath, now time.Time) (auth.Decision, *auth.AppendFence) {
 	if d := a.AuthorizeAppendCredential(token, path, now); !d.Allowed() {
-		return d
+		return d, nil
 	}
 	v := ValidateWriteToken(a.key, token, path, now)
 	if a.store == nil {
-		return auth.Allow()
+		return auth.Allow(), nil
 	}
 	if v.WakeID == "" || v.Holder == "" {
-		return auth.Deny(auth.ReasonFenced, "write token is not bound to a live claim")
+		return auth.Deny(auth.ReasonFenced, "write token is not bound to a live claim"), nil
 	}
 	status, err := a.store.CheckWriteFence(v.SubID, v.Shard, v.Generation, v.WakeID, v.Holder, now)
 	if err != nil {
-		return auth.Deny(auth.ReasonUnauthenticated, "write token fence unavailable")
+		return auth.Deny(auth.ReasonUnauthenticated, "write token fence unavailable"), nil
 	}
 	if status != "OK" {
-		return auth.Deny(auth.ReasonFenced, "write token claim is fenced")
+		return auth.Deny(auth.ReasonFenced, "write token claim is fenced"), nil
 	}
-	return auth.Allow()
+	if !a.atomic {
+		return auth.Allow(), nil
+	}
+	if v.Incarnation == "" {
+		return auth.Deny(auth.ReasonFenced, "write token has no subscription incarnation"), nil
+	}
+	return auth.Allow(), &auth.AppendFence{
+		SubscriptionID:          v.SubID,
+		SubscriptionIncarnation: v.Incarnation,
+		Shard:                   v.Shard,
+		Generation:              v.Generation,
+		WakeID:                  v.WakeID,
+		Holder:                  v.Holder,
+	}
 }

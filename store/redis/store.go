@@ -11,6 +11,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
@@ -549,6 +550,9 @@ func (s *Store) resolveForkSubOffset(ctx context.Context, srcPath string, srcMet
 // atomic Lua script; frames are pre-encoded against a tail snapshot and the
 // script returns RETRY when the tail moved.
 func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (store.AppendResult, error) {
+	if opts.Fence != nil && !opts.Fence.Complete() {
+		return store.AppendResult{}, store.ErrAppendFenced
+	}
 	if opts.HasProducerHeaders() && !opts.HasAllProducerHeaders() {
 		return store.AppendResult{}, store.ErrPartialProducer
 	}
@@ -569,6 +573,21 @@ func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (stor
 		hasProd, pid = "1", opts.ProducerId
 		epochArg = strconv.FormatInt(*opts.ProducerEpoch, 10)
 		seqArg = strconv.FormatInt(*opts.ProducerSeq, 10)
+	}
+
+	appendKeys := keysFor(path)
+	hasFence, fenceGeneration, fenceWakeID, fenceHolder := "0", "0", "", ""
+	if opts.Fence != nil {
+		hasFence = "1"
+		fenceGeneration = strconv.FormatInt(opts.Fence.Generation, 10)
+		fenceWakeID = opts.Fence.WakeID
+		fenceHolder = opts.Fence.Holder
+		appendKeys = append(appendKeys, appendFenceKey(
+			path,
+			opts.Fence.SubscriptionID,
+			opts.Fence.SubscriptionIncarnation,
+			opts.Fence.Shard,
+		))
 	}
 
 	for attempt := 0; attempt < maxAppendRetries; attempt++ {
@@ -603,9 +622,10 @@ func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (stor
 			s.nowNsArg(), notifyChannel(path), reqCT, opts.Seq, closeArg,
 			hasProd, pid, epochArg, seqArg,
 			base.String(), newTail.String(), valOnly,
+			hasFence, fenceGeneration, fenceWakeID, fenceHolder,
 		}, frames...)
 
-		raw, err := appendScript.Run(ctx, s.client, keysFor(path), args...).Result()
+		raw, err := appendScript.Run(ctx, s.client, appendKeys, args...).Result()
 		if err != nil {
 			return store.AppendResult{}, err
 		}
@@ -648,6 +668,8 @@ func (s *Store) mapAppendReply(r *scriptReply) (store.AppendResult, error) {
 		}, nil
 	case stNotFound:
 		return store.AppendResult{}, store.ErrStreamNotFound
+	case stFenced:
+		return store.AppendResult{}, store.ErrAppendFenced
 	case stSoftDel:
 		return store.AppendResult{}, store.ErrStreamSoftDeleted
 	case stClosed:
@@ -1191,13 +1213,28 @@ func (s *Store) releaseRef(ctx context.Context, parent, child string) error {
 // CloseStream closes a stream without appending. Idempotent; does not set
 // ClosedBy and does not refresh the sliding TTL (mirrors MemoryStore).
 func (s *Store) CloseStream(path string) (*store.CloseResult, error) {
-	r, err := s.runCloseScript(context.Background(), path, "0", "", "0", "0")
+	return s.closeStream(path, nil)
+}
+
+// CloseStreamFenced closes a stream only while the supplied claim still owns
+// its live stream-slot fence.
+func (s *Store) CloseStreamFenced(path string, fence auth.AppendFence) (*store.CloseResult, error) {
+	if !fence.Complete() {
+		return nil, store.ErrAppendFenced
+	}
+	return s.closeStream(path, &fence)
+}
+
+func (s *Store) closeStream(path string, fence *auth.AppendFence) (*store.CloseResult, error) {
+	r, err := s.runCloseScript(context.Background(), path, "0", "", "0", "0", fence)
 	if err != nil {
 		return nil, err
 	}
 	switch r.Status {
 	case stNotFound:
 		return nil, store.ErrStreamNotFound
+	case stFenced:
+		return nil, store.ErrAppendFenced
 	case stOK:
 		tail, err := store.ParseOffset(r.Tail)
 		if err != nil {
@@ -1212,13 +1249,19 @@ func (s *Store) CloseStream(path string) (*store.CloseResult, error) {
 // CloseStreamWithProducer closes a stream using producer headers for
 // idempotent sequencing (closedBy tuple dedup).
 func (s *Store) CloseStreamWithProducer(path string, opts store.CloseProducerOptions) (*store.CloseProducerResult, error) {
+	if opts.Fence != nil && !opts.Fence.Complete() {
+		return nil, store.ErrAppendFenced
+	}
 	r, err := s.runCloseScript(context.Background(), path, "1", opts.ProducerId,
-		strconv.FormatInt(opts.ProducerEpoch, 10), strconv.FormatInt(opts.ProducerSeq, 10))
+		strconv.FormatInt(opts.ProducerEpoch, 10), strconv.FormatInt(opts.ProducerSeq, 10), opts.Fence)
 	if err != nil {
 		return nil, err
 	}
 	if r.Status == stNotFound {
 		return nil, store.ErrStreamNotFound
+	}
+	if r.Status == stFenced {
+		return nil, store.ErrAppendFenced
 	}
 	tail, err := store.ParseOffset(r.Tail)
 	if err != nil {
@@ -1250,9 +1293,28 @@ func (s *Store) CloseStreamWithProducer(path string, opts store.CloseProducerOpt
 	}
 }
 
-func (s *Store) runCloseScript(ctx context.Context, path, hasProd, pid, epoch, seq string) (*scriptReply, error) {
-	raw, err := closeScript.Run(ctx, s.client, keysFor(path),
-		s.nowNsArg(), notifyChannel(path), hasProd, pid, epoch, seq).Result()
+func (s *Store) runCloseScript(
+	ctx context.Context,
+	path, hasProd, pid, epoch, seq string,
+	fence *auth.AppendFence,
+) (*scriptReply, error) {
+	keys := keysFor(path)
+	hasFence, fenceGeneration, fenceWakeID, fenceHolder := "0", "0", "", ""
+	if fence != nil {
+		hasFence = "1"
+		fenceGeneration = strconv.FormatInt(fence.Generation, 10)
+		fenceWakeID = fence.WakeID
+		fenceHolder = fence.Holder
+		keys = append(keys, appendFenceKey(
+			path,
+			fence.SubscriptionID,
+			fence.SubscriptionIncarnation,
+			fence.Shard,
+		))
+	}
+	raw, err := closeScript.Run(ctx, s.client, keys,
+		s.nowNsArg(), notifyChannel(path), hasProd, pid, epoch, seq,
+		hasFence, fenceGeneration, fenceWakeID, fenceHolder).Result()
 	if err != nil {
 		return nil, err
 	}

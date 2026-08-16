@@ -455,6 +455,9 @@ func (s *MemoryStore) CloseStream(path string) (*CloseResult, error) {
 
 // CloseStreamWithProducer closes a stream without appending data, using producer headers.
 func (s *MemoryStore) CloseStreamWithProducer(path string, opts CloseProducerOptions) (*CloseProducerResult, error) {
+	if opts.Fence != nil {
+		return nil, ErrAppendFenced
+	}
 	// Acquire per-producer lock for serialization
 	producerLock := s.getProducerLock(path, opts.ProducerId)
 	producerLock.Lock()
@@ -550,6 +553,9 @@ func (s *MemoryStore) CloseStreamWithProducer(path string, opts CloseProducerOpt
 
 // Append implements Store.
 func (s *MemoryStore) Append(path string, data []byte, opts AppendOptions) (AppendResult, error) {
+	if opts.Fence != nil {
+		return AppendResult{}, ErrAppendFenced
+	}
 	// Validate producer headers - must be all or none
 	if opts.HasProducerHeaders() && !opts.HasAllProducerHeaders() {
 		return AppendResult{}, ErrPartialProducer

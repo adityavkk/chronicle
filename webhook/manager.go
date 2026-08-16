@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -40,6 +41,14 @@ type Streams interface {
 	BeginningOffset() string
 	// AppendWakeEvent appends a JSON wake event to a pull-wake wake stream.
 	AppendWakeEvent(wakeStream string, data []byte) error
+}
+
+// WriteFenceStreams replicates one live subscription claim into each linked
+// stream's Redis Cluster slot. The data-plane store checks the same marker in
+// its atomic append or close transaction.
+type WriteFenceStreams interface {
+	GrantAppendFence(path string, fence auth.AppendFence) (bool, error)
+	RevokeAppendFence(path string, fence auth.AppendFence) error
 }
 
 // StreamMeta is a stream's path, current tail, and creation time — the inputs the
@@ -186,6 +195,7 @@ type Manager struct {
 	streams       Streams
 	lister        StreamLister
 	streamRootURL string // normalized in NewManager to end in exactly one "/"
+	writeFences   WriteFenceStreams
 	client        *http.Client
 	resolver      IPResolver
 	wakeTokenAud  string
@@ -294,6 +304,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		return nil, fmt.Errorf("webhook: wake-token key equals the envelope signing key (kid %s)", wakeKey.Kid)
 	}
 	runCtx, cancelRun := context.WithCancel(context.Background())
+	writeFences, _ := streams.(WriteFenceStreams)
 	m := &Manager{
 		store:                 store,
 		keys:                  keys,
@@ -301,6 +312,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		keysReloadInterval:    opts.KeysReloadInterval,
 		keyRotationOverlap:    opts.KeyRotationOverlap,
 		streams:               streams,
+		writeFences:           writeFences,
 		lister:                opts.Lister,
 		streamRootURL:         normalizeStreamRootURL(opts.StreamRootURL),
 		client:                opts.HTTPClient,
@@ -1096,24 +1108,120 @@ func (m *Manager) writeTokenTTL(sub Subscription) time.Duration {
 
 const writeTokenFenceGrace = 5 * time.Second
 
+func appendFenceFor(sub Subscription) auth.AppendFence {
+	return auth.AppendFence{
+		SubscriptionID:          sub.ID,
+		SubscriptionIncarnation: sub.Incarnation,
+		Generation:              sub.Generation,
+		WakeID:                  sub.WakeID,
+		Holder:                  sub.HolderWorker,
+		LeaseUntilNs:            sub.LeaseUntilNs,
+	}
+}
+
+func (m *Manager) grantWriteFences(sub Subscription) error {
+	if m.writeFences == nil {
+		return nil
+	}
+	fence := appendFenceFor(sub)
+	if !sub.Holder || sub.Phase != PhaseLive || !fence.Complete() || fence.LeaseUntilNs <= 0 {
+		return fmt.Errorf("webhook: cannot grant append fence for non-live claim %q", sub.ID)
+	}
+	granted := make([]string, 0, len(sub.Links))
+	for _, link := range sub.Links {
+		installed, err := m.writeFences.GrantAppendFence(link.Path, fence)
+		if err != nil {
+			for _, path := range granted {
+				_ = m.writeFences.RevokeAppendFence(path, fence)
+			}
+			return fmt.Errorf("webhook: grant append fence for %q on %q: %w", sub.ID, link.Path, err)
+		}
+		if installed {
+			granted = append(granted, link.Path)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) revokeWriteFences(sub Subscription) error {
+	if m.writeFences == nil || !sub.Holder {
+		return nil
+	}
+	fence := appendFenceFor(sub)
+	if !fence.Complete() {
+		return nil
+	}
+	var errs []error
+	for _, link := range sub.Links {
+		if err := m.writeFences.RevokeAppendFence(link.Path, fence); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", link.Path, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (m *Manager) revokeWriteFencePath(sub Subscription, path string) error {
+	if m.writeFences == nil || !sub.Holder {
+		return nil
+	}
+	linked := false
+	for _, link := range sub.Links {
+		if link.Path == path {
+			linked = true
+			break
+		}
+	}
+	if !linked {
+		return nil
+	}
+	fence := appendFenceFor(sub)
+	if !fence.Complete() {
+		return nil
+	}
+	return m.writeFences.RevokeAppendFence(path, fence)
+}
+
+func (m *Manager) revokeWriteFencesIfCurrent(
+	id string,
+	generation int64,
+	wakeID string,
+	tokenGeneration int64,
+) error {
+	sub, ok, err := m.store.Get(id)
+	if err != nil || !ok {
+		return err
+	}
+	if !sub.Holder ||
+		sub.Phase != PhaseLive ||
+		sub.Generation != generation ||
+		sub.Generation != tokenGeneration ||
+		sub.WakeID != wakeID {
+		return nil
+	}
+	return m.revokeWriteFences(sub)
+}
+
 // mintWriteTokenOnAck refreshes a current holder's data-plane write capability
 // when the ack response is already refreshing credentials. Done acks end the
 // lease, so they mint nothing and preserve the conformance suite's
 // {ok,next_wake} done-ack body shape.
-func (m *Manager) mintWriteTokenOnAck(id string, generation int64, wakeID string, done bool, now time.Time) (string, bool) {
+func (m *Manager) mintWriteTokenOnAck(id string, generation int64, wakeID string, done bool, now time.Time) (string, bool, error) {
 	if done {
-		return "", false
+		return "", false, nil
 	}
 	sub, ok, err := m.store.Get(id)
 	if err != nil || !ok || sub.Config.Type != DispatchPullWake || sub.Phase != PhaseLive || sub.WakeID != wakeID || sub.Generation != generation || !sub.Holder {
-		return "", false
+		return "", false, err
+	}
+	if err := m.grantWriteFences(sub); err != nil {
+		return "", false, err
 	}
 	scope := writeScopeFromLinks(sub.Links)
-	tok, err := GenerateClaimWriteToken(m.tokenKey, id, generation, wakeID, sub.HolderWorker, 0, scope, now, m.writeTokenTTL(sub), randReader)
+	tok, err := GenerateClaimWriteToken(m.tokenKey, id, sub.Incarnation, generation, wakeID, sub.HolderWorker, 0, scope, now, m.writeTokenTTL(sub), randReader)
 	if err != nil {
-		return "", false
+		return "", false, err
 	}
-	return tok, true
+	return tok, true, nil
 }
 
 // mintToken mints a fresh callback/claim token for a subscription at the given
@@ -2142,6 +2250,11 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 		return false, true, false, nil
 	}
 	done := req.Done != nil && *req.Done
+	if done {
+		if err := m.revokeWriteFencesIfCurrent(id, req.Generation, req.WakeID, tokenGeneration); err != nil {
+			return false, false, false, err
+		}
+	}
 	status, aerr := m.ackUnscoped(id, req.Generation, req.WakeID, tokenGeneration, done, req.Acks, time.Now(), sub.Config.LeaseTTLMs)
 	if aerr != nil {
 		return false, false, false, aerr
@@ -2160,6 +2273,9 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 
 // applyRelease fences and releases the lease, re-waking if pending (PROTOCOL §7.2).
 func (m *Manager) applyRelease(id string, req ReleaseRequest, tokenGeneration int64) (fenced, gone bool, err error) {
+	if err := m.revokeWriteFencesIfCurrent(id, req.Generation, req.WakeID, tokenGeneration); err != nil {
+		return false, false, err
+	}
 	status, rerr := m.release(id, req.Generation, req.WakeID, tokenGeneration)
 	if rerr != nil {
 		return false, false, rerr
