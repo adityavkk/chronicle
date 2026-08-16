@@ -117,10 +117,14 @@ func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	if authnErr == nil {
-		if reason := linkAuthz(caller, cfg); reason != "" {
-			if !rt.controlDeny(w, "create", id, http.StatusForbidden, ErrCodeForbidden, reason) {
-				return
-			}
+		reason = linkAuthz(caller, auth.ActionSubscribe, cfg)
+		if reason == "" {
+			reason = linkAuthz(caller, auth.ActionLink, cfg)
+		}
+		rt.recordServiceAuthorization(caller, "create", reason)
+		if reason != "" &&
+			!rt.controlDeny(w, "create", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+			return
 		}
 	}
 	if cfg.Type == DispatchWebhook {
@@ -148,7 +152,8 @@ func (rt *Routes) handleCreate(w http.ResponseWriter, r *http.Request, id string
 	// 403 for both the matched and the conflicting config, so the response
 	// does not reveal whether their config matched the owner's.
 	if status != CreateCreated && authnErr == nil {
-		if reason := ownershipAuthz(storedOwner, caller.Subject()); reason != "" {
+		if reason := controlOwnershipAuthz(storedOwner, caller); reason != "" {
+			rt.recordServiceAuthorization(caller, "create", reason)
 			if !rt.controlDeny(w, "create", id, http.StatusForbidden, ErrCodeForbidden, reason) {
 				return
 			}
@@ -205,12 +210,21 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		reason := ""
 		if ok {
-			if reason := ownershipAuthz(sub.OwnerSubject, caller.Subject()); reason != "" {
-				if !rt.controlDeny(w, "delete", id, http.StatusForbidden, ErrCodeForbidden, reason) {
-					return
-				}
+			if caller.isService() {
+				reason = linkAuthz(caller, auth.ActionSubscribe, sub.Config)
 			}
+			if reason == "" {
+				reason = controlOwnershipAuthz(sub.OwnerSubject, caller)
+			}
+		} else if decision := caller.authorizeAction(auth.ActionSubscribe); !decision.Allowed() {
+			reason = decision.Detail()
+		}
+		rt.recordServiceAuthorization(caller, "delete", reason)
+		if reason != "" &&
+			!rt.controlDeny(w, "delete", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+			return
 		}
 	}
 	if err := rt.mgr.store.Delete(id); err != nil {
@@ -235,10 +249,11 @@ func (rt *Routes) handleAddStreams(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 	if authnErr == nil {
-		if reason := linkPathsAuthz(caller, body.Streams); reason != "" {
-			if !rt.controlDeny(w, "add-streams", id, http.StatusForbidden, ErrCodeForbidden, reason) {
-				return
-			}
+		reason := linkPathsAuthz(caller, auth.ActionLink, body.Streams)
+		rt.recordServiceAuthorization(caller, "add-streams", reason)
+		if reason != "" &&
+			!rt.controlDeny(w, "add-streams", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+			return
 		}
 		// Subscription ownership (issue #126 TB3): extending someone else's
 		// subscription is the confused-deputy this bullet closes. The read is
@@ -254,7 +269,8 @@ func (rt *Routes) handleAddStreams(w http.ResponseWriter, r *http.Request, id st
 				writeErr(w, http.StatusNotFound, ErrCodeNotFound)
 				return
 			}
-		} else if reason := ownershipAuthz(sub.OwnerSubject, caller.Subject()); reason != "" {
+		} else if reason := controlOwnershipAuthz(sub.OwnerSubject, caller); reason != "" {
+			rt.recordServiceAuthorization(caller, "add-streams", reason)
 			if !rt.controlDeny(w, "add-streams", id, http.StatusForbidden, ErrCodeForbidden, reason) {
 				return
 			}
@@ -285,13 +301,22 @@ func (rt *Routes) handleRemoveStream(w http.ResponseWriter, r *http.Request, id,
 		}
 	}
 	path = strings.Trim(path, "/")
+	if authnErr == nil && caller.isService() {
+		reason := linkPathsAuthz(caller, auth.ActionLink, []string{path})
+		rt.recordServiceAuthorization(caller, "remove-stream", reason)
+		if reason != "" &&
+			!rt.controlDeny(w, "remove-stream", id, http.StatusForbidden, ErrCodeForbidden, reason) {
+			return
+		}
+	}
 	sub, ok, err := rt.mgr.store.Get(id)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if ok && authnErr == nil {
-		if reason := ownershipAuthz(sub.OwnerSubject, caller.Subject()); reason != "" {
+		if reason := controlOwnershipAuthz(sub.OwnerSubject, caller); reason != "" {
+			rt.recordServiceAuthorization(caller, "remove-stream", reason)
 			if !rt.controlDeny(w, "remove-stream", id, http.StatusForbidden, ErrCodeForbidden, reason) {
 				return
 			}
@@ -392,7 +417,9 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 	if callerErr == nil {
-		if reason := claimAuthz(caller, sub); reason != "" &&
+		reason := claimAuthz(caller, sub)
+		rt.recordServiceAuthorization(caller, "claim", reason)
+		if reason != "" &&
 			!rt.controlDeny(w, "claim", id, http.StatusForbidden, ErrCodeForbidden, reason) {
 			return
 		}

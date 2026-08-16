@@ -72,6 +72,7 @@ type Prometheus struct {
 	ownerFenced       *prometheus.CounterVec
 	claimContention   *prometheus.CounterVec
 	durabilityShort   *prometheus.CounterVec
+	serviceAccess     *prometheus.CounterVec
 
 	sseHubs                prometheus.Gauge
 	sseClients             prometheus.Gauge
@@ -103,10 +104,11 @@ type SegmentStatsSource interface {
 }
 
 var (
-	_ webhook.Metrics         = (*Prometheus)(nil)
-	_ chronicle.AppendMetrics = (*Prometheus)(nil)
-	_ chronicle.ReadMetrics   = (*Prometheus)(nil)
-	_ chronicle.SSEMetrics    = (*Prometheus)(nil)
+	_ webhook.Metrics          = (*Prometheus)(nil)
+	_ chronicle.AppendMetrics  = (*Prometheus)(nil)
+	_ chronicle.ReadMetrics    = (*Prometheus)(nil)
+	_ chronicle.ServiceMetrics = (*Prometheus)(nil)
+	_ chronicle.SSEMetrics     = (*Prometheus)(nil)
 )
 
 // New builds a Prometheus recorder with its own registry, including the standard
@@ -302,6 +304,10 @@ func New() *Prometheus {
 			Name: "chronicle_durability_short_total",
 			Help: "Tier B fence-minting writes that reached the primary but could not prove durability within the WAIT/WAITAOF timeout, by command (WAITAOF|WAIT) — the RPO-exposure signal (issue #43, INV-DUR-01). Durability only: carries no holder/generation/exclusivity.",
 		}, []string{"cmd"}),
+		serviceAccess: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_service_access_total",
+			Help: "Service access decisions by result: authentication_failure, authorization_failure, or delegated_gateway.",
+		}, []string{"result"}),
 		sseHubs: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "chronicle_sse_hubs",
 			Help: "Active per-stream SSE fanout hubs on this Chronicle replica.",
@@ -407,7 +413,7 @@ func New() *Prometheus {
 		p.dirtyRecovery,
 		p.dueSetMutations, p.dueWorkerSeconds, p.dueWorkerFired,
 		p.slotOwnership, p.coverageGap, p.ownerFenced, p.claimContention,
-		p.durabilityShort,
+		p.durabilityShort, p.serviceAccess,
 		p.sseHubs, p.sseClients, p.sseHubReads, p.sseHubMessages,
 		p.sseHubRingBytes, p.sseHubRingRawBytes, p.sseHubRingWireBytes,
 		p.sseHubRingIndexBytes, p.sseHubRefreshes, p.sseHubRefreshPages,
@@ -623,6 +629,24 @@ func (p *Prometheus) ClaimContention(status, _ string) {
 // holder/generation/ack count — correction #3.
 func (p *Prometheus) DurabilityShort(cmd string) {
 	p.durabilityShort.WithLabelValues(cmd).Inc()
+}
+
+// ServiceAuthenticationFailure implements webhook.Metrics and
+// chronicle.ServiceMetrics.
+func (p *Prometheus) ServiceAuthenticationFailure() {
+	p.serviceAccess.WithLabelValues("authentication_failure").Inc()
+}
+
+// ServiceAuthorizationFailure implements webhook.Metrics and
+// chronicle.ServiceMetrics.
+func (p *Prometheus) ServiceAuthorizationFailure() {
+	p.serviceAccess.WithLabelValues("authorization_failure").Inc()
+}
+
+// ServiceDelegatedGateway implements webhook.Metrics and
+// chronicle.ServiceMetrics.
+func (p *Prometheus) ServiceDelegatedGateway() {
+	p.serviceAccess.WithLabelValues("delegated_gateway").Inc()
 }
 
 // SSEHubActive implements chronicle.SSEMetrics.

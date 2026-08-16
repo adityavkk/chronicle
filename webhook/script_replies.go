@@ -145,8 +145,10 @@ type claimBusy struct {
 	Generation int64
 	Holder     string
 }
-type claimNoSub struct{}
-type claimForbidden struct{}
+type (
+	claimNoSub     struct{}
+	claimForbidden struct{}
+)
 
 func (claimClaimed) claimReply()      {}
 func (claimBusy) claimReply()         {}

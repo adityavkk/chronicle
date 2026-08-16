@@ -59,10 +59,10 @@ func (p Principal) Subject() string { return p.subject }
 // IsAnonymous reports whether no identity was verified.
 func (p Principal) IsAnonymous() bool { return p.kind == KindAnonymous }
 
-// Namespaces returns the normalized namespace prefixes the principal was
-// granted (user principals carry them from the IdP's namespace claim), as a
-// defensive copy. Service principals carry none — they are pre-authorized at
-// the gate, not namespace-scoped.
+// Namespaces returns the normalized namespace prefixes carried by the
+// principal itself, as a defensive copy. User principals carry these from the
+// IdP. Service namespaces remain in the explicit service policy so identity
+// verification cannot imply authority.
 func (p Principal) Namespaces() []StreamPath {
 	out := make([]StreamPath, len(p.namespaces))
 	copy(out, p.namespaces)

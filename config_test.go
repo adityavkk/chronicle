@@ -1,6 +1,9 @@
 package chronicle
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -274,6 +277,67 @@ func TestLoadEnvKeysFileAllowGroupRead(t *testing.T) {
 	}
 	if !c.KeysFileAllowGroupRead {
 		t.Fatal("CHRONICLE_KEYS_FILE_ALLOW_GROUP_READ=true must set the flag")
+	}
+}
+
+func TestLoadEnvServicePolicy(t *testing.T) {
+	env := func(vars map[string]string) func(string) (string, bool) {
+		return func(k string) (string, bool) { v, ok := vars[k]; return v, ok }
+	}
+	const spiffe = "spiffe://cluster.local/ns/electric/sa/reader"
+	path := filepath.Join(t.TempDir(), "service-policy.json")
+	if err := os.WriteFile(path, []byte(`{"services":[{"identity":"`+spiffe+`","actions":["read"],"namespaces":["tenant-a"]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := DefaultConfig()
+	if err := cfg.LoadEnv(env(map[string]string{
+		EnvAuthMode:           "enforce",
+		EnvServicePolicyFile:  path,
+		EnvXFCCRequiredHeader: "X-Chronicle-Sidecar: verified",
+	})); err != nil {
+		t.Fatalf("SPIFFE policy without static bearer must load: %v", err)
+	}
+	if cfg.ServicePolicies.Len() != 1 || len(cfg.TrustedSPIFFEIDs) != 1 ||
+		cfg.TrustedSPIFFEIDs[0] != spiffe {
+		t.Fatalf("loaded policy = %d policies, SPIFFE IDs %v", cfg.ServicePolicies.Len(), cfg.TrustedSPIFFEIDs)
+	}
+
+	cfg = DefaultConfig()
+	err := cfg.LoadEnv(env(map[string]string{
+		EnvAuthMode:      "enforce",
+		EnvServiceBearer: "reader:secret",
+	}))
+	if err == nil || !strings.Contains(err.Error(), EnvServicePolicyFile) {
+		t.Fatalf("enforce service auth without policy error = %v", err)
+	}
+
+	cfg = DefaultConfig()
+	err = cfg.LoadEnv(env(map[string]string{
+		EnvAuthMode:           "enforce",
+		EnvServicePolicyFile:  path,
+		EnvServiceBearer:      "other:secret",
+		EnvXFCCRequiredHeader: "X-Chronicle-Sidecar: verified",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "no policy for bearer identity") {
+		t.Fatalf("unmapped bearer identity error = %v", err)
+	}
+}
+
+func TestLoadEnvRejectsMalformedServicePolicy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "service-policy.json")
+	if err := os.WriteFile(path, []byte(`{"services":[{"identity":"svc","actions":["root"]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := DefaultConfig()
+	err := cfg.LoadEnv(func(key string) (string, bool) {
+		if key == EnvServicePolicyFile {
+			return path, true
+		}
+		return "", false
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown action") {
+		t.Fatalf("malformed service policy error = %v", err)
 	}
 }
 

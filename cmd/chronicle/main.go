@@ -280,25 +280,27 @@ func run() error {
 		AuthMode:              cfg.AuthMode,
 	}
 
-	// Trusted-backend service principals (issue #126 TB4). Counts only in the
-	// log — credential material must never reach a log line.
+	// Service principals (#180): mesh-attested SPIFFE is primary. Static bearer
+	// remains an optional compatibility fallback. Both use the same explicit
+	// action/namespace policy; credential material never reaches logs.
+	var serviceAccess *chronicle.ServiceAuth
 	if len(cfg.ServiceCredentials) > 0 || len(cfg.TrustedSPIFFEIDs) > 0 {
-		handler.ServiceAuth = &chronicle.ServiceAuth{
+		serviceAccess = &chronicle.ServiceAuth{
 			Credentials:            cfg.ServiceCredentials,
 			TrustedSPIFFEIDs:       cfg.TrustedSPIFFEIDs,
+			Policies:               cfg.ServicePolicies,
 			SidecarMarkerName:      cfg.XFCCMarkerName,
 			SidecarMarkerValue:     cfg.XFCCMarkerValue,
 			AllowXFCCWithoutMarker: cfg.AllowXFCCWithoutMarker,
 		}
+		handler.ServiceAuth = serviceAccess
 		logger.Info("service principal auth enabled",
+			"primary", "spiffe",
 			"bearer_credentials", len(cfg.ServiceCredentials),
 			"trusted_spiffe_ids", len(cfg.TrustedSPIFFEIDs),
+			"policies", cfg.ServicePolicies.Len(),
+			"trusted_gateways", cfg.ServicePolicies.TrustedGatewayIdentities(),
 			"xfcc_marker", cfg.XFCCMarkerName != "")
-		// LoadEnv already fails closed on a SPIFFE allowlist with neither a
-		// marker nor the explicit opt-in (#130), so reaching here without a
-		// marker means the operator consciously accepted the marker-less
-		// posture — surface it loudly, since XFCC trust then rests entirely on
-		// the sidecar sanitizing inbound XFCC (issue #126 hardening).
 		if len(cfg.TrustedSPIFFEIDs) > 0 && cfg.XFCCMarkerName == "" {
 			logger.Warn("XFCC mesh identity trusted WITHOUT a sidecar marker (CHRONICLE_XFCC_TRUST_WITHOUT_MARKER set): the sidecar MUST strip client-supplied X-Forwarded-Client-Cert (Envoy forward_client_cert_details SANITIZE_SET), else an external client can forge a service principal; set CHRONICLE_XFCC_REQUIRED_HEADER for defense in depth")
 		}
@@ -333,6 +335,7 @@ func run() error {
 		handler.ReadMetrics = prom
 		handler.SSEMetrics = prom
 		handler.AppendMetrics = prom
+		handler.ServiceMetrics = prom
 		ready := func() error { return nil }
 		if client != nil {
 			ready = func() error {
@@ -373,6 +376,7 @@ func run() error {
 			WaitReplicas:           cfg.WaitReplicas,
 			WaitTimeoutMs:          cfg.WaitTimeoutMs,
 			AuthMode:               cfg.AuthMode,
+			ServiceAccess:          serviceAccess,
 			KeysFile:               cfg.KeysFile,
 			KeysFileAllowGroupRead: cfg.KeysFileAllowGroupRead,
 			KeyRotationOverlap:     cfg.KeyRotationOverlap,

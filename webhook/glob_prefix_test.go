@@ -96,7 +96,7 @@ func TestLinkAuthz(t *testing.T) {
 		{"empty config allowed", Config{}, false}, // structural validity is ValidateConfig's job
 	}
 	for _, c := range cases {
-		reason := linkAuthz(caller, c.cfg)
+		reason := linkAuthz(controlCaller{caller: caller}, auth.ActionLink, c.cfg)
 		if (reason != "") != c.deny {
 			t.Errorf("%s: linkAuthz = %q, want deny=%v", c.name, reason, c.deny)
 		}

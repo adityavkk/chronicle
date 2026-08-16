@@ -103,6 +103,16 @@ type Metrics interface {
 	// it," nothing more. Wired at the awaitDurable/ArmWake/Claim short-reply site in
 	// the RedisStore (#43).
 	DurabilityShort(cmd string)
+
+	// ServiceAuthenticationFailure records an XFCC service identity that failed
+	// its sidecar attestation gate or exact allowlist.
+	ServiceAuthenticationFailure()
+	// ServiceAuthorizationFailure records a verified service identity denied by
+	// its action or namespace policy.
+	ServiceAuthorizationFailure()
+	// ServiceDelegatedGateway records an accepted decision from the exact
+	// service identity carrying trusted_gateway.
+	ServiceDelegatedGateway()
 }
 
 // NopMetrics is the no-op Metrics used when none is configured. The Manager
@@ -165,3 +175,12 @@ func (NopMetrics) ClaimContention(string, string) {}
 
 // DurabilityShort implements Metrics.
 func (NopMetrics) DurabilityShort(string) {}
+
+// ServiceAuthenticationFailure implements Metrics.
+func (NopMetrics) ServiceAuthenticationFailure() {}
+
+// ServiceAuthorizationFailure implements Metrics.
+func (NopMetrics) ServiceAuthorizationFailure() {}
+
+// ServiceDelegatedGateway implements Metrics.
+func (NopMetrics) ServiceDelegatedGateway() {}

@@ -9,9 +9,9 @@ import (
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
-// The TB4 acceptance suite (issue #126): trusted-backend service principals
-// end to end through the real handler. A verified service request is served
-// pre-authorized; everything else falls through to the TB1 claim-token path.
+// Service-principal acceptance suite through the real handler. Every verified
+// identity is evaluated against an explicit action and namespace policy before
+// any fallback to the claim-token path.
 
 const (
 	tb4AgentsID  = "spiffe://cluster.local/ns/electric/sa/agents-server"
@@ -19,6 +19,19 @@ const (
 	tb4XFCCHdr   = "X-Forwarded-Client-Cert"
 	tb4SvcBearer = "svc-bearer-token-1"
 )
+
+func gatewayPolicies(t *testing.T, identities ...string) auth.ServicePolicies {
+	t.Helper()
+	configs := make([]auth.ServicePolicyConfig, len(identities))
+	for i, identity := range identities {
+		configs[i] = auth.ServicePolicyConfig{Identity: identity, TrustedGateway: true}
+	}
+	policies, err := auth.NewServicePolicies(configs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return policies
+}
 
 // serviceHandler is an enforce-mode handler trusting tb4SvcBearer and
 // tb4AgentsID, with the TB1 claim-token authorizer wired under key. It sets
@@ -36,8 +49,71 @@ func serviceHandler(t *testing.T, key []byte) (*Handler, *hookRecorder) {
 		Credentials:            creds,
 		TrustedSPIFFEIDs:       []string{tb4AgentsID},
 		AllowXFCCWithoutMarker: true,
+		Policies:               gatewayPolicies(t, "agents-server", tb4AgentsID),
 	}
 	return h, rec
+}
+
+func TestServicePolicyScopesActionsAndNamespacesForMeshAndBearer(t *testing.T) {
+	const markerName, markerValue = "X-Chronicle-Sidecar", "verified"
+	creds, err := auth.ParseServiceBearerConfig("reader:" + tb4SvcBearer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policies, err := auth.NewServicePolicies([]auth.ServicePolicyConfig{
+		{Identity: "reader", Actions: []auth.Action{auth.ActionRead}, Namespaces: []string{"tenant-a"}},
+		{Identity: tb4AgentsID, Actions: []auth.Action{auth.ActionRead}, Namespaces: []string{"tenant-a"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := testHandler(time.Second, time.Second)
+	h.AuthMode = auth.ModeEnforce
+	h.ServiceAuth = &ServiceAuth{
+		Credentials:        creds,
+		TrustedSPIFFEIDs:   []string{tb4AgentsID},
+		Policies:           policies,
+		SidecarMarkerName:  markerName,
+		SidecarMarkerValue: markerValue,
+	}
+	createDirect(t, h, "/tenant-a/events", "application/json")
+	createDirect(t, h, "/tenant-ab/events", "application/json")
+
+	credentials := []struct {
+		name    string
+		headers map[string]string
+	}{
+		{"mesh", map[string]string{tb4XFCCHdr: "URI=" + tb4AgentsID, markerName: markerValue}},
+		{"bearer", map[string]string{"Authorization": "Bearer " + tb4SvcBearer}},
+	}
+	for _, credential := range credentials {
+		t.Run(credential.name, func(t *testing.T) {
+			rec := do(h, http.MethodGet, "/tenant-a/events", credential.headers, nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("authorized read = %d, want 200", rec.Code)
+			}
+			rec = do(h, http.MethodGet, "/tenant-ab/events", credential.headers, nil)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("cross-namespace read = %d, want 403", rec.Code)
+			}
+			appendHeaders := map[string]string{"Content-Type": "application/json"}
+			for key, value := range credential.headers {
+				appendHeaders[key] = value
+			}
+			rec = do(h, http.MethodPost, "/tenant-a/events", appendHeaders, []byte(`{"n":1}`))
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("append without action = %d, want 403", rec.Code)
+			}
+			rec = do(h, http.MethodPut, "/tenant-a/new", appendHeaders, nil)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("create without action = %d, want 403", rec.Code)
+			}
+			rec = do(h, http.MethodDelete, "/tenant-a/events", credential.headers, nil)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("delete without action = %d, want 403", rec.Code)
+			}
+		})
+	}
 }
 
 func TestServiceBearerAppendServedPreAuthorized(t *testing.T) {
@@ -166,7 +242,10 @@ func TestXFCCIgnoredWhenNotConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.ServiceAuth = &ServiceAuth{Credentials: creds} // no TrustedSPIFFEIDs
+	h.ServiceAuth = &ServiceAuth{
+		Credentials: creds,
+		Policies:    gatewayPolicies(t, "agents-server"),
+	} // no TrustedSPIFFEIDs
 	createDirect(t, h, "/events/a", "application/json")
 
 	rec := do(h, http.MethodPost, "/events/a", map[string]string{
@@ -195,6 +274,7 @@ func TestXFCCFailsClosedWithoutMarkerOrOptIn(t *testing.T) {
 	h.ServiceAuth = &ServiceAuth{
 		Credentials:      creds,
 		TrustedSPIFFEIDs: []string{tb4AgentsID},
+		Policies:         gatewayPolicies(t, "agents-server", tb4AgentsID),
 	}
 	createDirect(t, h, "/events/a", "application/json")
 	before := tailOf(t, h, "/events/a")
@@ -226,10 +306,9 @@ func TestXFCCFailsClosedWithoutMarkerOrOptIn(t *testing.T) {
 	}
 }
 
-// TestServiceAuthWithoutAppendAuthorizer: a trusted-backend-only deployment
-// (no subscription layer, so no claim-token authorizer) serves its service
-// and denies everyone else — the service check runs before the
-// no-authorizer fail-closed guard.
+// TestServiceAuthWithoutAppendAuthorizer pins a service-only deployment: its
+// explicit trusted-gateway policy authorizes appends without the claim-token
+// authorizer, while everyone else fails closed.
 func TestServiceAuthWithoutAppendAuthorizer(t *testing.T) {
 	h := testHandler(time.Second, time.Second)
 	h.AuthMode = auth.ModeEnforce
@@ -237,7 +316,10 @@ func TestServiceAuthWithoutAppendAuthorizer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.ServiceAuth = &ServiceAuth{Credentials: creds}
+	h.ServiceAuth = &ServiceAuth{
+		Credentials: creds,
+		Policies:    gatewayPolicies(t, "service"),
+	}
 	createDirect(t, h, "/events/a", "application/json")
 
 	rec := do(h, http.MethodPost, "/events/a", map[string]string{
@@ -267,7 +349,10 @@ func TestServiceAuthInsecureModeStaysTelemetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.ServiceAuth = &ServiceAuth{Credentials: creds}
+	h.ServiceAuth = &ServiceAuth{
+		Credentials: creds,
+		Policies:    gatewayPolicies(t, "agents-server"),
+	}
 	mustCreate(t, h, "/events/a", "application/json", nil)
 
 	rec := do(h, http.MethodPost, "/events/a",

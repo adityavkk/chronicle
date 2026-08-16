@@ -171,6 +171,9 @@ type ManagerOptions struct {
 	// fails closed before any store access. One mode shared with the data
 	// plane — never a second flag.
 	AuthMode auth.Mode
+	// ServiceAccess is the shared SPIFFE/static-bearer service authenticator and
+	// explicit policy evaluator. Nil keeps control-plane caller-token auth only.
+	ServiceAccess *auth.ServiceAccess
 }
 
 // Manager orchestrates the subscription control plane: stream hooks, webhook
@@ -207,7 +210,8 @@ type Manager struct {
 	metrics            Metrics
 
 	// authMode is the shared #126 enforcement toggle (see ManagerOptions).
-	authMode auth.Mode
+	authMode      auth.Mode
+	serviceAccess *auth.ServiceAccess
 
 	// ---- leased slot ownership (issue #14) ----
 	replicaID             ReplicaID
@@ -311,6 +315,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		allowPrivate:          opts.AllowPrivateWebhookTargets,
 		metrics:               opts.Metrics,
 		authMode:              opts.AuthMode,
+		serviceAccess:         opts.ServiceAccess,
 		memberLeaseTTL:        opts.MemberLeaseTTL,
 		heartbeatInterval:     opts.HeartbeatInterval,
 		slotLeaseTTL:          opts.SlotLeaseTTL,

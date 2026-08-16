@@ -7,15 +7,92 @@ import (
 	"strings"
 )
 
-// This file is the service-principal half of the pure core (issue #126 TB4):
-// verifying the two credentials a trusted upstream (the Electric
-// agents-server) can present. The static bearer is the required path — the
-// stock agents-server sends exactly one application-layer credential, its
-// DURABLE_STREAMS_BEARER, on Authorization: Bearer. Istio mesh identity
-// (X-Forwarded-Client-Cert / SPIFFE) is the in-mesh add-on, honored only when
-// the operator explicitly configures a trust list. Both verifiers are the
-// only constructors of a service Principal: a raw header string can never
-// stand in for a verified identity.
+// This file contains the service-principal authentication core. Mesh-attested
+// SPIFFE workload identity is the primary service credential. Static bearers
+// remain an optional compatibility fallback. Both verifiers are the only
+// constructors of a service Principal: a raw header string can never stand in
+// for a verified identity.
+
+// ServiceAccess is the shared service authentication and authorization
+// configuration used by the data plane and subscription control plane.
+// Mesh-attested SPIFFE is evaluated before the static-bearer compatibility
+// fallback. The zero value authenticates and authorizes nothing.
+type ServiceAccess struct {
+	Credentials            []ServiceCredential
+	TrustedSPIFFEIDs       []string
+	Policies               ServicePolicies
+	SidecarMarkerName      string
+	SidecarMarkerValue     string
+	AllowXFCCWithoutMarker bool
+}
+
+// ServiceAuthenticationStatus describes whether service authentication was
+// applicable and whether it succeeded.
+type ServiceAuthenticationStatus uint8
+
+const (
+	// ServiceNotAttempted means no service credential family matched.
+	ServiceNotAttempted ServiceAuthenticationStatus = iota
+	// ServiceAuthenticated means a service credential verified.
+	ServiceAuthenticated
+	// ServiceRejected means XFCC was presented but failed its attestation gate
+	// or exact identity allowlist.
+	ServiceRejected
+)
+
+// Authenticate resolves one service principal from request credential
+// primitives. joinedXFCC must contain every XFCC header line joined in HTTP
+// order. marker is accepted only when the caller observed exactly one marker
+// header value.
+func (s *ServiceAccess) Authenticate(bearer, joinedXFCC, marker string) (Principal, ServiceAuthenticationStatus) {
+	if s == nil {
+		return Principal{}, ServiceNotAttempted
+	}
+	// SPIFFE is first-class. If XFCC is present, a failed mesh attestation is a
+	// terminal service-authentication failure, never a downgrade to bearer.
+	if joinedXFCC != "" {
+		if !s.xfccGatePasses(marker) {
+			return Principal{}, ServiceRejected
+		}
+		if principal, ok := VerifyXFCC(joinedXFCC, s.TrustedSPIFFEIDs); ok {
+			return principal, ServiceAuthenticated
+		}
+		return Principal{}, ServiceRejected
+	}
+	if principal, ok := VerifyServiceBearer(bearer, s.Credentials); ok {
+		return principal, ServiceAuthenticated
+	}
+	return Principal{}, ServiceNotAttempted
+}
+
+func (s *ServiceAccess) xfccGatePasses(marker string) bool {
+	if s.SidecarMarkerName != "" && s.SidecarMarkerValue != "" {
+		return subtle.ConstantTimeCompare([]byte(marker), []byte(s.SidecarMarkerValue)) == 1
+	}
+	return s.AllowXFCCWithoutMarker
+}
+
+// Authorize evaluates the verified service against its explicit policy.
+func (s *ServiceAccess) Authorize(principal Principal, action Action, paths ...StreamPath) (Decision, bool) {
+	if s == nil {
+		return Deny(ReasonUnauthenticated, "service authorization is not configured"), false
+	}
+	return s.Policies.Authorize(principal, action, paths...)
+}
+
+// AuthorizeAction evaluates an action when no target path exists to inspect.
+func (s *ServiceAccess) AuthorizeAction(principal Principal, action Action) (Decision, bool) {
+	if s == nil {
+		return Deny(ReasonUnauthenticated, "service authorization is not configured"), false
+	}
+	return s.Policies.AuthorizeAction(principal, action)
+}
+
+// TrustedGateway reports whether principal is the exact identity carrying the
+// explicit delegated-gateway policy.
+func (s *ServiceAccess) TrustedGateway(principal Principal) bool {
+	return s != nil && s.Policies.TrustedGateway(principal)
+}
 
 // ServiceCredential is one configured service identity: a subject name and
 // its static bearer token. The token is sealed — no accessor, and the

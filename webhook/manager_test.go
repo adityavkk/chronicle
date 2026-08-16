@@ -474,6 +474,9 @@ func (f *fakeMetrics) DurabilityShort(cmd string) {
 	}
 	f.durShort[cmd]++
 }
+func (f *fakeMetrics) ServiceAuthenticationFailure() {}
+func (f *fakeMetrics) ServiceAuthorizationFailure()  {}
+func (f *fakeMetrics) ServiceDelegatedGateway()      {}
 
 func (f *fakeMetrics) durabilityShorts(cmd string) int {
 	f.mu.Lock()

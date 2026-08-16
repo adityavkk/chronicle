@@ -103,11 +103,13 @@ type Handler struct {
 	// logs.
 	AppendAuth AppendAuthorizer
 
-	// ServiceAuth authenticates trusted service principals (issue #126 TB4):
-	// a verified service request is served pre-authorized — the
-	// trusted-backend topology behind the Electric agents-server. Nil
-	// disables service auth.
+	// ServiceAuth authenticates SPIFFE or compatibility-bearer service
+	// principals and evaluates their explicit action and namespace policy.
+	// Nil disables service authentication.
 	ServiceAuth *ServiceAuth
+	// ServiceMetrics records service authentication, authorization, and
+	// delegated-gateway outcomes. Nil disables these counters.
+	ServiceMetrics ServiceMetrics
 
 	// ReadAuth authorizes data-plane reads with the chronicle
 	// read-capability JWS (issue #126 TB5). Nil means no capability

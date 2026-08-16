@@ -61,6 +61,9 @@ func TestMuxEndpoints(t *testing.T) {
 	p.OwnerFenced("check_owner")
 	p.ClaimContention("already_claimed", "agent-handler")
 	p.DurabilityShort("WAITAOF")
+	p.ServiceAuthenticationFailure()
+	p.ServiceAuthorizationFailure()
+	p.ServiceDelegatedGateway()
 	p.SSEHubActive(1)
 	p.SSEClientActive(1)
 	p.SSEHubRead(7)
@@ -135,6 +138,7 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_owner_fenced_total",
 		"chronicle_claim_contention_total",
 		"chronicle_durability_short_total",
+		"chronicle_service_access_total",
 		"chronicle_sse_hubs",
 		"chronicle_sse_clients",
 		"chronicle_sse_hub_reads_total",

@@ -163,7 +163,10 @@ func TestReadServicePrincipalServed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.ServiceAuth = &ServiceAuth{Credentials: creds}
+	h.ServiceAuth = &ServiceAuth{
+		Credentials: creds,
+		Policies:    gatewayPolicies(t, "agents-server"),
+	}
 	seedStream(t, h, sk, "/events/a")
 
 	rec := do(h, http.MethodGet, "/events/a", map[string]string{"Authorization": "Bearer " + tb5SvcToken}, nil)
@@ -562,7 +565,10 @@ func TestCreateDeleteGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.ServiceAuth = &ServiceAuth{Credentials: creds}
+	h.ServiceAuth = &ServiceAuth{
+		Credentials: creds,
+		Policies:    gatewayPolicies(t, "service"),
+	}
 	rec = do(h, http.MethodPut, "/anything/at/all", map[string]string{
 		"Content-Type": "application/json", "Authorization": "Bearer " + tb5SvcToken,
 	}, nil)
