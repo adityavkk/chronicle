@@ -137,6 +137,21 @@ older `CHRONICLE_TRUSTED_SPIFFE_IDS` input still works, but every listed identit
 must also have a policy when enforcement is on. An allowlist alone grants
 nothing.
 
+**Write-fenced streams** ([docs/spec/WRITE-FENCING.md](spec/WRITE-FENCING.md))
+keep their fence in both modes: on a stream created with `Write-Fence: true`,
+write-token validity, the mandatory producer headers, and the in-slot
+marker/seal/epoch/bound checks bind even under `CHRONICLE_AUTH_MODE=insecure`,
+and a wake-token bearer is always refused — a deposed or token-less runtime
+fails closed on a shadow deployment exactly as in production. Only the *open*
+class follows the mode: in `enforce` an unauthenticated open write to a fenced
+stream is `401 fenced stream requires an authenticated principal`, while in
+`insecure` it proceeds with a telemetry log line, the same posture as unfenced
+streams. Two operational notes: creating a fenced stream on a server with no
+append authorizer configured warn-logs at create (every fenced write will fail
+closed until one is wired), and watch
+`chronicle_append_fence_rejections_total{reason}` — sustained `marker`/`sealed`
+rejections are deposed writers being stopped, which is the fence doing its job.
+
 ### WCNP mesh contract
 
 Chronicle's header checks are one part of the boundary. The deployment must

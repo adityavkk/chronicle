@@ -1,15 +1,15 @@
 ---
 title: "Three requests, <em>followed end to end</em>"
-summary: "Code walkthroughs of three chronicle requests: a write, a long-polling read, and a subscription wake. Each one is followed function by function from the HTTP edge through the store to Redis and back, with the real source lines at every step."
+summary: "Code walkthroughs of four chronicle requests: a write, a long-polling read, a subscription wake, and a fenced write on a write-fenced stream. Each one is followed function by function from the HTTP edge through the store to Redis and back, with the real source lines at every step."
 eyebrow: "Code Wiki"
 meta: "Request walkthroughs"
-deck: "Each walkthrough follows one request all the way down. There are three. A <strong>write</strong> that lands, a <strong>read</strong> that blocks for the next write, and a <strong>subscription wake</strong> that delivers a durable append to a worker. Each step is the real function, the real lines, and what it passes to the next."
+deck: "Each walkthrough follows one request all the way down. There are four. A <strong>write</strong> that lands, a <strong>read</strong> that blocks for the next write, a <strong>subscription wake</strong> that delivers a durable append to a worker, and a <strong>fenced write</strong> that only the current claim holder can land. Each step is the real function, the real lines, and what it passes to the next."
 byline:
   - label: "Reading"
     value: "source at main"
     href: "https://github.com/adityavkk/chronicle"
   - label: "Flows"
-    value: "append · read · wake"
+    value: "append · read · wake · fenced write"
 ---
 import SectionHead from "../../components/SectionHead.astro";
 import Diagram from "../../components/Diagram.astro";
@@ -474,4 +474,179 @@ generation fence applied to a push instead of a pull.
   </Aside>
 
   [^perf]: Both the append throughput drop and the wakeup-latency floor are measured and explained in the [benchmark report](https://github.com/adityavkk/chronicle/blob/loadgen/docs/benchmarks/2026-06-10/REPORT.md). The [Overview](./../#performance) summarizes them.
+</section>
+
+<section class="block" id="fenced-write">
+  <SectionHead num="04" label="POST + Write-Token" title="A fenced write <em>lands</em>" />
+
+  The wake walkthrough ended with a worker holding a claim: a `generation`, a
+  `wake_id`, a lease — and, on a write-fenced stream, a **write token**. This
+  walkthrough follows that worker's append down to the Lua rung that decides
+  it, then shows what the same path does to a zombie — the previous holder
+  retrying with a stale token, or a writer with the same `Producer-Id` and no
+  token at all. The wire contract is
+  [WRITE-FENCING.md](https://github.com/adityavkk/chronicle/blob/main/docs/spec/WRITE-FENCING.md);
+  the request carries `Write-Token`, `Producer-Id`, `Producer-Epoch` equal to
+  the claim generation, and `Producer-Seq`.
+
+  <Step n="1" fn="Handler.authorizeAppendCredential" loc="authz_write_fence.go:125" role="Phase 1, before any store access: route the credential, read the write-token carriers, enforce the header-only rules.">
+
+```go title="handler.go" showLineNumbers startLineNumber=870
+	// Credential preflight runs before stream store access so an invalid token
+	// still cannot probe stream existence. The live fence is repeated below,
+	// immediately before the mutation.
+	cred, err := h.authorizeAppendCredential(r, path)
+	if err != nil {
+		return err
+	}
+```
+
+The carriers are read in order — `Write-Token`, `electric-claim-token`, then
+`Authorization: Bearer` unless the bearer already authenticated as a service or
+wake credential. A duplicated or empty carrier is presented-but-invalid: fail
+closed, never fall through. Two rules bind here on any stream in any mode: a
+POST asserting `Write-Fence: true` without a token is `401`, and a token minted
+for a shard other than 0 is `401`. An invalid token still cannot probe stream
+existence — this phase touches no store.
+
+  </Step>
+
+  <Step n="2" fn="Handler.classifyFencedStream" loc="authz_write_fence.go:164" role="After Store.Get, only when the meta says the stream is fenced: derive the write class, once, for every POST shape.">
+
+```go title="handler.go" showLineNumbers startLineNumber=890
+	// On a fenced stream every POST — append, append-and-close, close-only —
+	// is classed once, here, before any branch (#183 E.1 step c1). A stream
+	// that never opted in is never classed and takes today's path.
+	var class writeClass
+	if meta.WriteFence {
+		if class, err = h.classifyFencedStream(path, cred); err != nil {
+			return err
+		}
+	}
+```
+
+Token or assertion ⇒ **fenced** class, and the token must verify even when a
+service principal also authenticated — both valid, in every auth mode. No
+carrier ⇒ **open** class: a wake-typed bearer is `403` (liveness is not
+capability), a service principal proceeds under its policy, and an anonymous
+write needs a principal per `CHRONICLE_AUTH_MODE`. Our worker is fenced class.
+
+  </Step>
+
+  <Step n="3" fn="the mandatory producer triple" loc="handler.go:947" role="The fenced class binds Producer-Epoch to the claim generation, so the headers that carry it are not optional.">
+
+```go title="handler.go" showLineNumbers startLineNumber=947
+	if class == writeClassFenced && !hasAllProducerHeaders {
+		h.countFenceRejection(string(store.FenceProducerRequired))
+		return newHTTPError(http.StatusBadRequest, "fenced write requires Producer-Id, Producer-Epoch, and Producer-Seq")
+	}
+```
+
+Phase 2 (`authorizeAppendFence`, `authz_write_fence.go:204`) then re-verifies
+the token immediately before the mutation and demands the in-slot fence: an
+authorizer that cannot produce one is `409 reason=store`, never a silent
+downgrade to an unfenced write.
+
+  </Step>
+
+  <Step n="4" fn="fence_rung, inside append.lua" loc="store/redis/scripts/append.lua:54" role="The decision, atomic with the write. Step 4 of the append ladder: after expiry, before closed / content-type / producer / Stream-Seq.">
+
+```lua title="store/redis/scripts/append.lua" showLineNumbers startLineNumber=54
+-- 4. Write fence: seal, claim marker, epoch binding, bound producer — one
+-- transaction with the write (#183). fence_rung reads the marker at KEYS[5]
+-- (the stream's Redis Cluster slot) and everything else from the meta hash,
+-- so KEYS and ARGV are unchanged; the Go oracle is store.EvaluateWriteFence.
+local reason, d_gen, d_holder = fence_rung(m, has_fence, ARGV[14], ARGV[15], ARGV[16],
+  now, has_producer, producer_id, p_epoch)
+if reason ~= '' then return fence_reply(reason, m.tail, d_gen, d_holder) end
+```
+
+First hit wins: `sealed` (generation at or below this authority's seal),
+`marker` (absent, revoked, different `(generation, wake_id, holder)`, lapsed
+lease, or an older stream incarnation — the #169 claim fence, unchanged),
+`producer_required`, `epoch` (`Producer-Epoch` ≠ claim generation), `bound`
+(an open-class write naming a producer id the fence owns). On a stream that
+never opted in, only `marker` can fire — exactly the pre-#183 behavior.
+`TestWriteFenceDifferential` holds the Lua and the Go oracle together.
+
+  </Step>
+
+  <Step n="5" fn="fence_bind" loc="store/redis/scripts/common.lua:329" role="The write is accepted. Two meta fields record what the fence now owns.">
+
+```lua title="store/redis/scripts/common.lua" showLineNumbers startLineNumber=329
+local function fence_bind(hset, m, has_fence, producer_id, f_gen, off)
+  if not (has_fence and m.wf == '1') then return end
+  hset[#hset + 1] = 'wfLastOff'
+  hset[#hset + 1] = off
+  hset[#hset + 1] = 'wfbind:' .. producer_id
+  hset[#hset + 1] = f_gen
+end
+```
+
+`wfLastOff` is the fenced class's last offset — what a seal will fix as the
+generation's definite end, never a later open-class tail. `wfbind:<id>` is the
+producer binding: from now on an open write naming this `Producer-Id` — even a
+byte-identical replay of an accepted tuple — is `409 reason=bound`. The zombie
+that lost its token cannot keep its identity going unfenced.
+
+  </Step>
+
+  <Step n="6" fn="Manager.sealWriteFencesIfCurrent" loc="webhook/manager.go:2360" role="The worker finishes. done seals the generation on every linked fenced stream before ack.lua idles the claim.">
+
+```go title="webhook/manager.go" showLineNumbers startLineNumber=2356
+	done := req.Done != nil && *req.Done
+	if done {
+		// Seal before ack.lua idles the claim (#183): a seal error is a 500 and
+		// the subscription stays held, so the worker's retried done re-seals.
+		if err := m.sealWriteFencesIfCurrent(id, req.Generation, req.WakeID, tokenGeneration); err != nil {
+			return false, false, false, err
+		}
+	}
+```
+
+`seal_append_fence.lua` tombstones the marker and writes
+`wfseal:<authority> = <gen>:<wake>:<wfLastOff>` in one script; the redelivered
+`done` re-seals idempotently (`already`). A successor's grant seals a live
+predecessor the same way (supersession), and both grant and append refuse any
+generation at or below the seal — per authority, so a recreated subscription
+starts unsealed. `HEAD` now answers `Write-Fence-Sealed-Generation` and
+`Write-Fence-Sealed-Offset`. The webhook path is symmetric: the wake
+notification carries the token (granted-then-minted), callback heartbeats
+re-mint it, and the `{done:true}` auto-ack runs this same seal.
+
+  </Step>
+
+  <Step n="7" fn="Handler.writeError" loc="handler.go:1219" role="What the zombie sees. One sink maps every fence rejection to the wire — and counts it exactly once.">
+
+```go title="handler.go" showLineNumbers startLineNumber=1219
+			if authErr.status == http.StatusConflict && f.HasProducer {
+				if f.Generation != 0 {
+					w.Header().Set(protocol.HeaderProducerEpoch, strconv.FormatInt(f.Generation, 10))
+				}
+				seq := strconv.FormatInt(f.ReqSeq, 10)
+				w.Header().Set(protocol.HeaderProducerExpectedSeq, seq)
+				w.Header().Set(protocol.HeaderProducerReceivedSeq, seq)
+			}
+			detail.Reason, detail.CurrentHolder, detail.Generation = f.Reason, f.Holder, f.Generation
+			h.countFenceRejection(f.Reason)
+```
+
+The `409 FENCED` body names the `reason`, the current `generation`, and the
+live `current_holder`; the headers echo `Producer-Epoch` and set the terminal
+gap pair `Producer-Expected-Seq == Producer-Received-Seq == <request seq>` — a
+shape a real sequence gap can never produce (expected is always *less* than
+received), so the pinned `IdempotentProducer` throws its gap error and reports
+`WRITE_FAILED` on the first response. No retry loop, no read-back, and never a
+`Stream-Next-Offset`: a deposed writer stands down. Every rejection increments
+`chronicle_append_fence_rejections_total{reason}` exactly once.
+
+  </Step>
+
+  <Aside label="Reference" summary="The two-class model, the seal timeline, and the Electric pass-through in full">
+    The [write-fencing reference](../../write-fencing) covers what this tracer
+    compresses: how the two write classes are derived, why the seal is per
+    authority, the formal model (`WriteFence.tla`, INV-FENCE-05/06) with its
+    fault configs, and the five-line Electric-side change that turns the fence
+    on for activation output.
+  </Aside>
 </section>
