@@ -477,10 +477,24 @@ plane is abstracted to what the stream slot observes (a minimal
 `(gen, wake, holder, phase)` copy of the subscription fence); the stream slot
 carries the claim **marker**, the per-authority **seal** (`wfseal:<auth>`), the
 per-producer-id state + `wfbind`, and the log of accepted fenced appends. Two
-claimants race one stream under exhaustive interleaving of the lease lapse, the
-`expire_lease` idle, the tombstone reaper, the delayed-grant EVAL race
-(`mintWriteTokenOnAck`'s snapshot), the seal-before-ack done sequence, and
-worker crashes. `SubscriptionFence.tla` and `FenceCore.tla` are untouched.
+claimants race one stream under exhaustive interleaving of the subscription
+lease lapse, the marker's own lease lapse, the `expire_lease` idle, the
+tombstone reaper, the delayed-grant EVAL race (`mintWriteTokenOnAck`'s
+snapshot), the delayed-seal EVAL race (`sealWriteFencesIfCurrent`'s snapshot),
+the seal-before-ack done sequence, and origin crashes. `SubscriptionFence.tla`
+and `FenceCore.tla` are untouched.
+
+The model is **time-free**: `lease_until_ns > now` is a boolean per claim (the
+subscription lease) and one on the marker (its own deadline), each flipped by
+a nondeterministic lapse. Two facts of the real clock are kept as guards: a
+marker's deadline never exceeds its holder's subscription deadline (the
+heartbeat extends the sub lease in `ack.lua` *before* the re-grant extends the
+marker, so `Lapse` lapses the holder's marker too, while `MarkerLapse` may
+run alone — the failed-re-grant path), and on one authority a newer claim's
+deadline is later than every deadline an older claim ever had (the same lease
+TTL, set later), so an older claim's lease never outlives a newer one's. Every
+other ordering the clock would impose is left open — an over-approximation,
+conservative for the safety verdict.
 
 Each claimant writes under its **own producer id**: a shared id would add the
 base producer state machine's per-id epoch order on top of the fence and could
@@ -491,40 +505,78 @@ per id, unchanged).
 ## How to run
 
 ```sh
-make fence               # parse + the faithful 1x2 config (the PR gate; part of `make tlc`)
-make fence-2x2           # two authorities on one stream: seal isolation (nightly)
-make fence-fault-toctou  # NEGATIVE: out-of-slot check (pre-#169) MUST violate EpochsDoNotInterleave
-make fence-fault-nobind  # NEGATIVE: no producer binding MUST violate BoundProducerNeverOpen
-make fence-fault-lazyseal # NEGATIVE: idle-before-seal MUST violate SealPrecedesIdle
-make fence-fault-noseal  # NEGATIVE: tombstone-only done MUST violate EpochsDoNotInterleave via DelayedGrant
-make fence-coverage      # non-vacuity: W5..W8 MUST each be reached
+make fence                  # parse + the faithful 1x2 config (the PR gate; part of `make tlc`)
+make fence-2x2              # two authorities on one stream (nightly)
+make fence-fault-toctou     # NEGATIVE: out-of-slot check (pre-#169) MUST violate EpochsDoNotInterleave
+make fence-fault-nobind     # NEGATIVE: no producer binding MUST violate BoundProducerNeverOpen
+make fence-fault-lazyseal   # NEGATIVE: idle-before-seal MUST violate SealPrecedesIdle
+make fence-fault-globalseal # NEGATIVE: a generation-only seal MUST violate SealIsolation (two authorities)
+make fence-fault-noseal     # NEGATIVE: tombstone-only done MUST violate EpochsDoNotInterleave via DelayedGrant
+make fence-coverage         # non-vacuity: W5..W10 MUST each be reached (W7, W9 are step witnesses)
+make fence-fault-check      # self-test: every fence-fault-* target MUST fail on the faithful config
 ```
 
 ## Results (TLC 2.19, tla2tools v1.7.4)
 
-| Config | Instance | States (distinct) | Depth | Verdict |
+| Config | Instance | Distinct states | Depth | Verdict |
 |---|---|---|---|---|
-| `WriteFence_1x2.cfg` | 1 authority × 2 workers, MaxGen=3 MaxSeq=2 MaxCrashes=1 | 583,639 | 24 | `Inv` + both action props HOLD (~5 s) |
-| `WriteFence_2x2.cfg` | 2 authorities × 2 workers, MaxGen=2 MaxSeq=1 MaxCrashes=1 | 14,229,721 | 26 | `Inv` + both action props HOLD (~3 min on 10 cores) |
-| `WriteFence_fault_toctou.cfg` | 1×2, `CheckInSlot=FALSE` | ~5.4k to CEX | 7 | **EpochsDoNotInterleave VIOLATED** (intended) |
-| `WriteFence_fault_nobind.cfg` | 1×2, `BindProducers=FALSE` | 60 to CEX | 3 | **BoundProducerNeverOpen VIOLATED** (intended) |
-| `WriteFence_fault_lazyseal.cfg` | 1×2, `SealBeforeIdle=FALSE` | 46 to CEX | 2 | **SealPrecedesIdle VIOLATED** (intended) |
-| `WriteFence_fault_noseal.cfg` | 1×2, `SealOnRevoke=FALSE` | ~50k to CEX | 10 | **EpochsDoNotInterleave VIOLATED** through `DelayedGrant` (intended) |
-| `WriteFence_coverage_W{5..8}.cfg` | 1×2 | — | — | each `NotWx` VIOLATED ⇒ witness reached |
+| `WriteFence_1x2.cfg` | 1 authority × 2 workers, MaxGen=3 MaxSeq=2 MaxCrashes=1 | 477,672 | 24 | `Inv` + both action props HOLD (~8 s wall on 14 cores) |
+| `WriteFence_2x2.cfg` | 2 authorities × 2 workers, MaxGen=2 MaxSeq=1 MaxCrashes=1 | 10,807,012 | 26 | `Inv` + both action props HOLD (3 min 14 s wall on 14 cores) |
+| `WriteFence_fault_toctou.cfg` | 1×2, `CheckInSlot=FALSE`, no crashes | 9,149 to the CEX | 8 | **EpochsDoNotInterleave VIOLATED** (intended) |
+| `WriteFence_fault_nobind.cfg` | 1×2, `BindProducers=FALSE`, no crashes | 60 to the CEX | 4 | **BoundProducerNeverOpen VIOLATED** (intended) |
+| `WriteFence_fault_lazyseal.cfg` | 1×2, `SealBeforeIdle=FALSE` | 19 to the CEX | 3 | **SealPrecedesIdle VIOLATED** (intended) |
+| `WriteFence_fault_globalseal.cfg` | 2×2, `SealKeyedByAuth=FALSE`, no crashes | 17 to the CEX | 3 | **SealIsolation VIOLATED** (intended) |
+| `WriteFence_fault_noseal.cfg` | 1×2, `SealOnRevoke=FALSE`, no crashes | 43,007 to the CEX | 11 | **EpochsDoNotInterleave VIOLATED** through `DelayedGrant` (intended) |
+| `WriteFence_coverage_W{5..10}.cfg` | 1×2 | — | 3–6 | each `NotWx` VIOLATED ⇒ witness reached (traces below) |
+
+For the two faithful runs "depth" is the diameter of the complete state graph.
+For the controls and the witnesses it is the number of states in the reported
+counterexample, and "distinct states" is how many TLC had visited when it found
+it. Both are deterministic because those runs use **one TLC worker** (`TLC1`
+in the Makefile): TLC's parallel BFS can report a counterexample a step longer
+than the shortest — a level-boundary race between workers, seen on this model
+as a stray `MarkerLapse` in the noseal trace and a 4-state globalseal trace
+where the 3-state `Claim · SealMarker` one exists — and the visit count depends
+on the interleaving. The controls are small (≤ 45k states), so the sequential
+run costs nothing and every trace quoted below is the shortest one.
 
 `Inv == TypeOK ∧ EpochsDoNotInterleave ∧ BoundProducerNeverOpen ∧
 SealPrecedesIdle ∧ SealIsolation`. The two action properties are
 `GenMonotoneProp == [][GenMonotone]_vars` and
 `SealedIsFinalProp == [][SealedIsFinal]_vars`.
 
-The `fault_noseal` counterexample is the K.4 shape: `Claim(w1)[1] ·
-SealMarker(w1) · Reap · Idle(w1) · Claim(w2)[2] · AppendFenced(w2,2,0) ·
-Lapse(w2) · Reap · DelayedGrant(w1) · AppendFenced(w1,1,0)` — with done only
-tombstoning, the reaped tombstone leaves nothing to refuse the deposed
-holder's delayed grant, which reinstalls generation 1's marker and admits a
-generation-1 write after generation 2's. In the faithful spec the same
-`DelayedGrant(w1)` is refused by the seal (`1 <= sealGen`), and `make
+The `fault_noseal` counterexample TLC reports is the K.4 shape of the design's
+I.1 trace, one write shorter (11 states): `Claim(w1)[1] · SealMarker(w1) ·
+Reap · Idle(w1) · Claim(w2)[2] · AppendFenced(w2,2,0) · SealMarker(w2) · Reap ·
+DelayedGrant(w1) · AppendFenced(w1,1,0)` — with done only tombstoning, both
+reaped tombstones leave nothing to refuse the deposed holder's delayed grant
+(its lease never lapsed; no clock ordering is bent), which reinstalls
+generation 1's marker and admits a generation-1 write after generation 2's.
+The supersession seal at grant (`GrantSeal`) stays on under this fault, so the
+control also shows supersession alone is not enough: the tombstone
+`Claim(w2)` would have superseded was reaped first. In the faithful spec the
+same `DelayedGrant(w1)` is refused by the seal (`1 <= sealGen`), and `make
 fence-fault-noseal` fails unless the trace passes through `DelayedGrant`.
+
+Every `fence-fault-*` target greps for its violation **by name** (`Invariant X
+is violated`) and fails on either way a control can go vacuous: a run that
+prints `No error has been found` (the hole did not break the invariant), and a
+run that prints neither line (TLC never model-checked — a misspelled
+invariant, an unloadable jar, a parse error). `make fence-fault-check` is the
+self-test: it points every control at the faithful `WriteFence_1x2.cfg` (via
+`FAULT_CFG`, with every worker since no trace is reported) and requires each
+of the five to fail (~40 s).
+
+**Action coverage.** `tlc2.TLC -coverage 1` on the faithful 1x2 shows every
+faithful-lane action generating states (`AppendCheck` / `AppendCommit` are
+`CheckInSlot=FALSE` only). Two of them discover no *new* state — `Renew` and
+`DelayedGrant`, 94,106 successors each — because their only non-stuttering
+effect in the faithful lane is a repair: re-arming a marker whose own lease
+lapsed, or reinstalling a reaped one, back to an earlier state (W9 is that
+step). A delayed grant that lands after its claim ended is refused — by the
+seal (W8), by the successor's marker, or by the lease — and a FENCED reply is
+a stutter; the delayed grant *lands* only under `fault_noseal`, where it is
+the violating action.
 
 ## Invariant ⇆ catalog map (#183 additions)
 
@@ -534,9 +586,9 @@ fence-fault-noseal` fails unless the trace passes through `DelayedGrant`.
 | `SealedIsFinal` (action) | INV-FENCE-06 | The seal is monotone per authority, and every append accepted in a step lies strictly above its authority's seal as it stood when the write was admitted: after a seal at `g`, no append with generation ≤ `g` of that authority is ever accepted. |
 | `SealPrecedesIdle` | INV-FENCE-06 (ordering clause) | An idle authority never leaves a live, unexpired marker: the seal (revoke + `wfseal`) is durable before `ack.lua` idles, and a lease lapse disarms the marker before `expire_lease.lua` idles — there is never a claimable subscription with a marker that still authorizes writes. |
 | `BoundProducerNeverOpen` | INV-FENCE-05 (rule 5) | Once a producer id is bound by an accepted fenced write, only fenced writes advance it — its `(epoch, lastSeq)` is exactly the last fenced entry's. |
-| `SealIsolation` | INV-FENCE-06 (2x2) | An authority's seal never runs ahead of its own fence register: `wfseal:<auth>` is keyed by the marker's authority suffix, so two authorities on one stream cannot seal each other. |
+| `SealIsolation` | INV-FENCE-06 | An authority's seal never runs ahead of its own fence register (`sealGen[a] <= ctl[a].gen`): `wfseal:<auth>` is keyed by the marker's authority suffix, so one authority's done cannot seal another's future generations. Unfalsifiable with the per-authority key by construction — its negative control is `fault_globalseal` (the generation-only seal the design rejected, Q5), where one authority's done seals the other at a generation it never reached: `Claim(a1) · SealMarker(a1)` puts the seal at 1 on `a2` while `a2` is at generation 0, so `a2`'s first claim is refused. |
 | `GenMonotone` (action) | INV-FENCE-02 | Each authority's generation is non-decreasing across every step (the control-plane copy). |
-| `CheckInSlot` / `BindProducers` / `SealBeforeIdle` / `SealOnRevoke` toggles | INV-FENCE-05/06 negative controls | Each `FALSE` injects one named hole and MUST break the invariant it is paired with above (`make fence-fault-*`). |
+| `CheckInSlot` / `BindProducers` / `SealBeforeIdle` / `SealOnRevoke` / `SealKeyedByAuth` toggles | INV-FENCE-05/06 negative controls | Each `FALSE` injects one named hole and MUST break the invariant it is paired with above (`make fence-fault-*`). |
 
 ## Action ⇆ shipped source mirror (#183 additions)
 
@@ -548,36 +600,44 @@ action is a state change.
 | Spec action | Source mirror | Guard transcribed |
 |---|---|---|
 | `Claim(a,w)` | `webhook/scripts/claim.lua` + `store/redis/scripts/grant_append_fence.lua` (`handleClaim`) | BUSY iff a live holder's lease is unexpired; else rotate (`HINCRBY +1`, fresh wake, holder, live) and grant the marker at the new generation **before any token leaves**: refused when `generation <= seal`; supersession fixes the predecessor marker's seal; installs `(gen, wake, holder)` live under an unexpired lease. |
-| `Renew(a,w)` | `manager.go mintWriteTokenOnAck → grantWriteFences` (heartbeat) | the current holder's non-done ack inside its lease re-runs the grant at the same `(gen, wake, holder)`: a no-op on the live marker, a reinstall of a reaped one, FENCED (ack 500) once sealed or superseded. |
-| `DelayedGrant(a,w)` | the `mintWriteTokenOnAck` snapshot race (`manager.go:1213-1218`) | a grant EVAL decided against a stale view lands late with the snapshot's `(gen, wake, holder, lease)`: enabled while that deadline is unexpired, it re-runs `grant_append_fence.lua`'s guard — the per-authority seal refuses it for every past generation (K.4). |
-| `Lapse(a,w)` | the wall clock (`lease_until_ns <= now`) | no script: the deadline carried by `w`'s claim passes; the marker now refuses `w` (rule 2) and its delayed grant is FENCED. |
+| `Renew(a,w)` | `manager.go mintWriteTokenOnAck → grantWriteFences` (heartbeat) | the current holder's non-done ack inside its lease re-runs the grant at the same `(gen, wake, holder)`: extends a live marker's lease, re-arms one whose own lease lapsed, reinstalls a reaped one (K.12; the W9 step `Claim · MarkerLapse · Reap · Renew`), FENCED (ack 500) once sealed or superseded. |
+| `DelayedGrant(a,w)` | the `mintWriteTokenOnAck` snapshot race (`manager.go:1213-1218`) | a grant EVAL decided against a stale view lands late with the snapshot's `(gen, wake, holder, lease)`: enabled while that deadline is unexpired, it re-runs `grant_append_fence.lua`'s guard — the per-authority seal refuses it for every past generation (K.4). In the faithful lane every delayed grant that lands after its claim ended is refused (W8 is the seal's refusal) — a stutter, as a FENCED reply must be — and one landing under the current claim is a re-grant, as `Renew`; under `fault_noseal` it is the violating action. |
+| `Lapse(a,w)` | the wall clock (the subscription's `lease_until_ns <= now`) | no script: the deadline carried by `w`'s claim passes, and with it `w`'s marker (its deadline never exceeds the subscription's); `w`'s delayed grant is FENCED. Guarded by the clock's ordering fact: older claims on the authority lapse first. |
+| `MarkerLapse(a)` | the wall clock (the marker's `lease_until_ns <= now`) | no script: the marker's deadline, fixed at the last *successful* grant, passes under a still-live claim (a run of failed heartbeat re-grants); the holder's writes are `marker` until `Renew`. |
 | `ExpireLease(a)` | `webhook/scripts/expire_lease.lua` (server step) | a live claim whose lease lapsed is idled, gen **unchanged** (INV-FENCE-04); the marker is untouched (its own `lease_until_ns` fences the holder). |
 | `Reap(a)` | the marker key's `PEXPIRE` | a revoked tombstone after `retentionMs`; a live marker after `(lease_until_ns - now) + retentionMs`, i.e. only once its holder's lease lapsed. |
 | `AppendFenced(a,w,epoch,seq)` | `store/redis/scripts/append.lua` step 4 (`common.lua evaluate_write_fence`, rules 1-2 + 4) then `validate_producer` | one script: `generation > seal`, marker present/live/exact `(gen, wake, holder)`/unexpired, `Producer-Epoch = generation`, then the base producer SM; an accepted write appends to the log, advances the producer id and binds it (`wfbind`). |
-| `AppendCheck` / `AppendCommit` | the pre-#169 out-of-slot check (`CheckInSlot=FALSE` only) | the same admission decided outside the slot, then the write committed without re-checking — the TOCTOU #169 closed. |
+| `AppendCheck` / `AppendCommit` | the pre-#169 out-of-slot check (`CheckInSlot=FALSE` only) | `AppendFenced` cut in two, nothing else changed: `AppendCheck` is its fence block (rules 1-2 + 4) decided outside the slot; `AppendCommit` is the rest of `append.lua` — `validate_producer`, then the write — landing later without re-running the fence (a write the producer state machine rejects is dropped, as the 4xx it was) — the TOCTOU #169 closed. |
 | `AppendOpen(p,epoch,seq)` | `append.lua` open class, rule 5 | no token: refused iff the producer id is bound (`wfbind`); otherwise PROTOCOL.md §5.2 byte-for-byte; not in the fenced log. |
-| `SealMarker(a,w)` | `manager.go sealWriteFencesIfCurrent` → `store/redis/scripts/seal_append_fence.lua` | the holder's done at the current `(gen, wake)` (accepted after the deadline like `ack.lua` done) tombstones the marker (STALE against a newer marker is a no-op) and records the per-authority seal at the claim generation, monotone and idempotent (`already` on redelivery). |
+| `SealMarker(a,w)` | `manager.go sealWriteFencesIfCurrent` → `store/redis/scripts/seal_append_fence.lua` | the holder's done at the current `(gen, wake)` (accepted after the deadline like `ack.lua` done) tombstones the marker and records the per-authority seal at the claim generation, monotone and idempotent (`already` on redelivery; `recovered` when the redelivery follows an origin crash that lost the follow-up). |
+| `DelayedSeal(a,w)` | the `sealWriteFencesIfCurrent` snapshot race | the seal EVAL decided against a `Get` snapshot lands after the claim was idled (`expire_lease.lua`) or superseded: STALE against a newer marker it mutates nothing (`seal_append_fence.lua`'s first check); otherwise it tombstones and seals a generation that already ended — over-sealing, never unsafe (K.6). The follow-up `ack.lua` is FENCED. |
 | `Idle(a,w)` | `webhook/scripts/ack.lua` done='1' | fence-only: idles the claim, clears wake/holder, gen unchanged; faithfully only after this claim's seal committed. The token is **not** dropped: its bytes outlive the claim and the fence must refuse them. |
-| `Crash(w)` | the non-atomic Go orchestration | drops `w`'s in-memory tokens and out-of-slot in-flight appends, and loses every owed done follow-up; the durable ctl / marker / seal / producer / log survive (K.1). |
+| `Crash` | the origin restarts (K.1 / K.2 / K.5 are origin crashes) | loses every owed done follow-up (a sealed-but-unacked done becomes `lost`, to be redelivered) and every out-of-slot in-flight append; the workers' bearer tokens and the durable ctl / marker / seal / producer / log survive (K.1). A worker's own crash is dominated by its stuttering and is not a separate action. |
 
 `Sealed` / `MarkerOK` mirror `EvaluateWriteFence` rules 1-2; `ProdAccepts`
 mirrors `store.ValidateProducer`; `Grantable` / `GrantSeal` mirror
 `grant_append_fence.lua`'s check order (lease → seal → marker generation →
 same-generation exactness → supersession); `SealStale` mirrors
-`seal_append_fence.lua`'s staleness test.
+`seal_append_fence.lua`'s staleness test; only `DelayedSeal` can take it (a
+current holder's seal is never stale), and W10 (`Claim(w1) · Lapse(w1) ·
+Claim(w2)`) witnesses the STALE landing.
 
 ## Crash windows ⇆ recovery (#183 additions)
 
-Each witness predicate is TRUE exactly in a state the safety argument must
-genuinely reach; `make fence-coverage` proves each is reached on the 1x2
-instance (its `NotWx` MUST be violated).
+Each witness is a state (W5, W6, W8, W10) or a step (W7, W9) the safety
+argument must genuinely reach. `make fence-coverage` proves each is reached on
+the 1x2 instance — its `NotWx` MUST be violated, an `INVARIANT` for a state
+witness and an action `PROPERTY` for a step witness — and echoes each witness
+trace (one worker: the shortest).
 
 | Window | Spec witness | Recovery / why it fails closed |
 |---|---|---|
 | **W5** seal-before-ack (K.1), recovered | `WindowW5`: one authority has accepted appends at two generations | the crash between `seal_append_fence.lua` and `ack.lua` leaves the holder sealed and the sub live; the lease lapses ⇒ `expire_lease` idles ⇒ the successor claims at `g+1` and genuinely writes (`EpochsDoNotInterleave` is not vacuous). |
-| **W6** grant-before-POST (K.2) / the deposed holder's late write | `WindowW6`: a worker still carries a token the fence refuses | a granted marker whose token never left, or a token whose claim was superseded, sealed, reaped, or lapsed: the write is `FENCED` in the slot; nothing revives it. |
-| **W7** seal redelivery (K.1) | `WindowW7`: `pending = "already"` — a done whose seal committed but whose `ack.lua` never ran was redelivered and re-sealed idempotently | the redelivered done finds `wfseal >= g` (`already`), tombstones again, and idles; over-sealing is never unsafe (K.6). |
+| **W6** the deposed holder's late write | `WindowW6`: a worker still carries a token the fence refuses | a token whose claim was superseded, sealed, reaped, or lapsed: the write is `FENCED` in the slot; nothing revives it. (K.2, a granted marker whose token never left, is closed trivially — `Claim` grants and mints atomically — and is not modeled.) |
+| **W7** seal redelivery (K.1), entered and recovered | `RecoveredIdle` (a step): the origin crashed with the seal committed and `ack.lua` owed (`Crash` while `sealing` ⇒ `lost`, the K.1 window), the holder redelivered its done, the re-seal found `wfseal >= g` (`already` ⇒ `recovered`), and the step is `Idle` out of `recovered` | the redelivered done tombstones again and `ack.lua` idles the claim: the window entered and recovered by redelivery; over-sealing is never unsafe (K.6). Witness trace: `Claim · SealMarker · Crash · SealMarker · Idle`. |
 | **W8** delayed grant (K.4) | `WindowW8`: a worker holds a token under an unexpired deadline whose generation is sealed | the grant EVAL from the old snapshot passes the lease test and is refused by the seal — independent of the tombstone's retention. |
+| **W9** marker reaped under a live claim (K.12), repaired | `ReapedReinstall` (a step): the holder's subscription lease is live, its generation unsealed, its marker gone, and the step is `Renew` over the absent marker | the marker's own lease (fixed at the last successful grant) lapsed and the key was reaped while the heartbeats kept the subscription lease live; the holder's writes are `marker` (fail closed) until its next heartbeat re-grant reinstalls the marker — that re-grant is the witnessed step. Witness trace: `Claim · MarkerLapse · Reap · Renew`. |
+| **W10** delayed seal lands STALE | `WindowW10`: a worker carries a token whose claim ended and whose authority's marker names a newer claim | the seal EVAL from the old snapshot (`DelayedSeal`) takes `seal_append_fence.lua`'s STALE branch and mutates nothing — a predecessor's late done never tombstones the successor's marker. Witness trace: `Claim(w1) · Lapse(w1) · Claim(w2)`. |
 
 ## Bounds rationale
 
@@ -587,12 +647,16 @@ instance (its `NotWx` MUST be violated).
   under `Permutations(Workers)`.
 - **1 authority** for the PR gate: the invariants are per authority (K.10 —
   cross-authority ordering is not claimed; one authority per fenced stream is
-  a MUST of the extension). The **2-authority** nightly run shares the stream
-  and the log and checks that the per-authority seals and markers are isolated
-  (`SealIsolation`) under the cross-authority interleaving.
+  a MUST of the extension). The **2-authority** nightly run checks the same
+  per-authority invariants under cross-authority interleaving of the shared
+  producer state and log (`BoundProducerNeverOpen`, `EpochsDoNotInterleave`);
+  it cannot falsify `SealIsolation` by itself (every writer of `sealGen[a]` is
+  bounded by `ctl[a].gen` with the per-authority key) — that is what the
+  two-authority `fault_globalseal` control is for, and it is part of the PR
+  gate.
 - **MaxGen / MaxSeq / MaxCrashes** are state-space ceilings enforced by both
   per-action guards and `CONSTRAINT StateConstraint`. The 1x2 lane uses 3/2/1
-  (≈584k distinct states, seconds); the 2x2 lane uses 2/1/1 to keep the
+  (≈478k distinct states, seconds); the 2x2 lane uses 2/1/1 to keep the
   exhaustive run inside the nightly budget.
 - The Apalache lane (`make apalache`, `FenceCore.tla`, #41) is unchanged by
   #183 and now runs nightly (`formal-nightly.yml`, `apalache` job): the
@@ -602,12 +666,13 @@ instance (its `NotWx` MUST be violated).
 
 ## #183 files
 
-- `WriteFence.tla` — the module (state, the twelve actions + `Crash`, the four
-  safety operators + `SealIsolation`, two action properties, four witnesses,
-  four fault toggles).
+- `WriteFence.tla` — the module (state, the fourteen actions + `Crash`, the
+  four safety operators + `SealIsolation`, two action properties, six
+  witnesses (W5..W10; W7 and W9 are step witnesses), five fault toggles).
 - `MC_WriteFence.tla` — the TLC harness (symmetry over Workers ∪ Auths).
 - `WriteFence_1x2.cfg` (PR gate) / `WriteFence_2x2.cfg` (nightly).
-- `WriteFence_fault_{toctou,nobind,lazyseal,noseal}.cfg` — negative controls.
-- `WriteFence_coverage_W{5..8}.cfg` — non-vacuity witnesses.
+- `WriteFence_fault_{toctou,nobind,lazyseal,globalseal,noseal}.cfg` — negative
+  controls.
+- `WriteFence_coverage_W{5..10}.cfg` — non-vacuity witnesses.
 - `Makefile` — `make fence` (in `make tlc`), `fence-2x2`, `fence-fault-*`,
-  `fence-coverage`.
+  `fence-fault-check`, `fence-coverage`.
