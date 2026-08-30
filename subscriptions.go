@@ -37,6 +37,8 @@ type SubscriptionTuning struct {
 	// the client that performs webhook deliveries and the policy that admits
 	// its one private route. Nil keeps the default client and the SSRF rules
 	// alone; the protocol core owns the envelope body and signature either way.
+	// A supplied client is used as-is, its own timeout included — see
+	// webhook.ManagerOptions.HTTPClient.
 	WebhookHTTPClient   *http.Client
 	WebhookTargetPolicy webhook.TargetPolicy
 

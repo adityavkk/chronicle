@@ -10,7 +10,8 @@ import (
 // webhookEgress is the webhook egress adapter active in this process: the
 // webhook.TargetPolicy that admits its one narrowly allowed private route and
 // the HTTP client that reaches it (nil keeps the Manager's default client).
-// The zero value means no adapter is configured.
+// The zero value means no adapter is configured. name is stamped by
+// foldWebhookEgress from the loader's registration; a loader leaves it zero.
 type webhookEgress struct {
 	name   string
 	policy webhook.TargetPolicy

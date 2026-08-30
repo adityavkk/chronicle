@@ -254,11 +254,6 @@ func run() error {
 	if err := validateObservabilityConfig(cfg); err != nil {
 		return err
 	}
-	egress, err := loadWebhookEgress(cfg.WebhookAllowPrivate, os.LookupEnv)
-	if err != nil {
-		return err
-	}
-
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(logLevel)); err != nil {
 		return fmt.Errorf("invalid -log-level %q: %w", logLevel, err)
@@ -369,6 +364,14 @@ func run() error {
 	if cfg.Subscriptions {
 		if client == nil {
 			return fmt.Errorf("subscriptions require the redis backend")
+		}
+		// The egress adapters are folded here, not at boot: an adapter exists
+		// only to route webhook deliveries, so with subscriptions disabled its
+		// configuration (and any misconfiguration) is ignored, like the rest
+		// of the subscription flags.
+		egress, err := loadWebhookEgress(cfg.WebhookAllowPrivate, os.LookupEnv)
+		if err != nil {
+			return err
 		}
 		streamRootURL := strings.TrimSuffix(cfg.PublicBaseURL, "/") + cfg.StreamRoot
 		tuning := chronicle.SubscriptionTuning{
