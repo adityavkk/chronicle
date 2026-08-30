@@ -218,10 +218,14 @@ type ErrorBody struct {
 }
 
 // ErrorDetail carries the error code plus the optional fields used by specific
-// errors (current_holder/generation for ALREADY_CLAIMED).
+// errors: current_holder/generation for ALREADY_CLAIMED and for a data-plane
+// FENCED rejection, whose Reason names the fence rule that refused the write
+// (#183: credential, shard, producer_required, principal, wake_token, precheck,
+// marker, sealed, epoch, bound, or store).
 type ErrorDetail struct {
 	Code          string `json:"code"`
 	Message       string `json:"message,omitempty"`
+	Reason        string `json:"reason,omitempty"`
 	CurrentHolder string `json:"current_holder,omitempty"`
 	Generation    int64  `json:"generation,omitempty"`
 }

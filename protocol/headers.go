@@ -32,3 +32,14 @@ const (
 	HeaderStreamForkOffset    = "Stream-Fork-Offset"
 	HeaderStreamForkSubOffset = "Stream-Fork-Sub-Offset"
 )
+
+// Write-fencing extension headers (#183, PROTOCOL §11.1). Write-Fence declares
+// a fenced stream on PUT and asserts the fenced class on POST; Write-Token
+// carries the claim-scoped write token; the sealed pair is HEAD's summary of
+// the most recent seal.
+const (
+	HeaderWriteFence                 = "Write-Fence"
+	HeaderWriteToken                 = "Write-Token"
+	HeaderWriteFenceSealedGeneration = "Write-Fence-Sealed-Generation"
+	HeaderWriteFenceSealedOffset     = "Write-Fence-Sealed-Offset"
+)

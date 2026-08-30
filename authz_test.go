@@ -227,17 +227,29 @@ func TestAppendDeniedFailClosed(t *testing.T) {
 
 // TestAppendDenyDoesNotLeakExistence: an unauthenticated append to a stream
 // that does not exist is the same 401 as to one that does — the gate runs
-// before the store lookup (§12.2).
+// before the store lookup (§12.2). The same holds for a request asserting the
+// fenced class (#183): declared without a token, or with one that does not
+// verify, it is refused before the lookup with an identical envelope.
 func TestAppendDenyDoesNotLeakExistence(t *testing.T) {
 	key := testAuthKey(t)
 	h, _ := enforcedHandler(t, key)
 	createDirect(t, h, "/events/exists", "application/json")
 
-	for _, path := range []string{"/events/exists", "/events/missing"} {
-		rec := do(h, http.MethodPost, path,
-			map[string]string{"Content-Type": "application/json"}, []byte(`{"n":1}`))
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("append %s = %d, want identical 401", path, rec.Code)
+	for name, headers := range map[string]map[string]string{
+		"anonymous":                   {"Content-Type": "application/json"},
+		"declared without token":      {"Content-Type": "application/json", "Write-Fence": "true"},
+		"declared with garbage token": {"Content-Type": "application/json", "Write-Fence": "true", WriteTokenHeader: "garbage"},
+	} {
+		bodies := map[string]string{}
+		for _, path := range []string{"/events/exists", "/events/missing"} {
+			rec := do(h, http.MethodPost, path, headers, []byte(`{"n":1}`))
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("%s: append %s = %d, want identical 401", name, path, rec.Code)
+			}
+			bodies[path] = rec.Body.String()
+		}
+		if bodies["/events/exists"] != bodies["/events/missing"] {
+			t.Fatalf("%s: envelopes differ by existence: %q vs %q", name, bodies["/events/exists"], bodies["/events/missing"])
 		}
 	}
 }

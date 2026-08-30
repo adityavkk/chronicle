@@ -336,6 +336,7 @@ func run() error {
 		handler.SSEMetrics = prom
 		handler.AppendMetrics = prom
 		handler.ServiceMetrics = prom
+		handler.FenceMetrics = prom
 		ready := func() error { return nil }
 		if client != nil {
 			ready = func() error {

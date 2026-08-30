@@ -39,13 +39,24 @@ func (a WriteTokenAuthorizer) AuthorizeAppend(token string, path auth.StreamPath
 	return d
 }
 
+// DetailWriteTokenShard is the denial detail of a write token minted for a
+// shard other than 0 (#183, A.0 Q9). Both mints hardcode shard 0 and no marker
+// is ever granted elsewhere, so such a token can only be a forgery or a drift;
+// the handler reports the rejection under reason "shard".
+const DetailWriteTokenShard = "write token shard is not fenceable"
+
 // AuthorizeAppendCredential validates the non-live-token properties. It is safe
 // to run before stream metadata lookup: no Redis access and no existence leak.
+// A MAC-proven token naming a shard other than 0 is refused before its status
+// is read: the stream-slot fence exists for shard 0 only.
 func (a WriteTokenAuthorizer) AuthorizeAppendCredential(token string, path auth.StreamPath, now time.Time) auth.Decision {
 	if token == "" {
 		return auth.Deny(auth.ReasonUnauthenticated, "missing write credential")
 	}
 	v := ValidateWriteToken(a.key, token, path, now)
+	if v.Status != WriteTokenInvalid && v.Shard != 0 {
+		return auth.Deny(auth.ReasonUnauthenticated, DetailWriteTokenShard)
+	}
 	switch v.Status {
 	case WriteTokenValid:
 		return auth.Allow()
