@@ -538,6 +538,20 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		}
 	}
 
+	// The claim is the §7.2 pull-wake acquisition. A webhook-dispatch
+	// subscription is dispatched by the server and held by its in-flight wake
+	// (claimHolder), a shape the fence layer deliberately refuses for a
+	// worker-held claim: ack.lua's heartbeat branch and check_write_fence.lua
+	// both require holder '0' on webhook dispatch, so a claimed webhook
+	// subscription could neither heartbeat nor use its write token (#183,
+	// ADR-0008 decision 7). Refuse the category error up front, before any
+	// lease is granted.
+	if sub.Config.Type == DispatchWebhook {
+		writeErrMsg(w, ErrCodeInvalidRequest,
+			"claim applies to pull-wake subscriptions; this subscription is webhook-dispatch")
+		return
+	}
+
 	wakeID, err := GenerateWakeID(randReader)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
