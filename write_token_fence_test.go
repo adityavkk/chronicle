@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -638,4 +640,484 @@ func TestNewSubscriptionsEnforceRequiresAtomicStreamStore(t *testing.T) {
 	if err == nil {
 		t.Fatal("enforce mode accepted a stream store without Redis append fencing")
 	}
+}
+
+// ---- webhook parity and the seal at done (#183, design §D) ----
+
+// fenceFixture is the real write-fence stack a control-plane test drives
+// end to end: a Redis data store with the fence capability, the subscription
+// Manager over it, an enforce-mode Handler gated by the Manager's write
+// authorizer, and — when respond is set — an httptest webhook receiver that
+// decodes each WakeNotification, answers with respond's status and body, and
+// then hands the notification to notifs.
+type fenceFixture struct {
+	h      *Handler
+	mgr    *webhook.Manager
+	rt     *webhook.Routes
+	subs   *webhook.RedisStore
+	data   *redisstore.Store
+	url    string
+	notifs chan webhook.WakeNotification
+}
+
+type fenceFixtureOptions struct {
+	// respond answers a webhook delivery; nil starts no receiver.
+	respond func(webhook.WakeNotification) (int, string)
+	// streams wraps the Redis fence adapter the Manager is built on; nil uses it as is.
+	streams func(redisFenceStreamAdapter) webhook.Streams
+}
+
+func newFenceFixture(t *testing.T, opts fenceFixtureOptions) *fenceFixture {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping Redis integration test in -short mode")
+	}
+	rawURL := os.Getenv("CHRONICLE_ITEST_REDIS_URL")
+	if rawURL == "" {
+		rawURL = "redis://localhost:6379/13"
+	}
+	options, err := goredis.ParseURL(rawURL)
+	if err != nil {
+		t.Fatalf("parse Redis URL: %v", err)
+	}
+	client := goredis.NewClient(options)
+	t.Cleanup(func() { _ = client.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		t.Skipf("redis unreachable at %s: %v", rawURL, err)
+	}
+	if err := client.FlushDB(ctx).Err(); err != nil {
+		t.Fatalf("flushdb: %v", err)
+	}
+	f := &fenceFixture{
+		data:   redisstore.New(client, redisstore.Options{}),
+		subs:   webhook.NewRedisStore(client),
+		notifs: make(chan webhook.WakeNotification, 8),
+	}
+	t.Cleanup(func() { _ = f.data.Close() })
+	if opts.respond != nil {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var n webhook.WakeNotification
+			if err := json.NewDecoder(r.Body).Decode(&n); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			status, body := opts.respond(n)
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, body)
+			f.notifs <- n
+		}))
+		t.Cleanup(srv.Close)
+		f.url = srv.URL
+	}
+	adapter := redisFenceStreamAdapter{streamAdapter{st: f.data, rs: f.data}}
+	var streams webhook.Streams = adapter
+	if opts.streams != nil {
+		streams = opts.streams(adapter)
+	}
+	f.mgr, err = webhook.NewManager(f.subs, streams, webhook.ManagerOptions{
+		StreamRootURL:              "http://x/v1/stream/",
+		AllowPrivateWebhookTargets: true,
+		Logger:                     slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	f.rt = webhook.NewRoutes(f.mgr)
+	f.h = testHandler(time.Second, time.Second)
+	f.h.Store = f.data
+	f.h.AuthMode = auth.ModeEnforce
+	f.h.AppendAuth = f.mgr.WriteAuthorizer()
+	f.h.SubHooks = f.mgr
+	return f
+}
+
+// createFenced creates a write-fenced JSON stream through the store: the
+// Write-Fence create header is the handler's (WP3), the opt-in itself is the
+// store's (WP1), and this package only needs the fenced stream to exist.
+func (f *fenceFixture) createFenced(t *testing.T, path string) {
+	t.Helper()
+	if _, _, err := f.data.Create(path, store.CreateOptions{ContentType: "application/json", WriteFence: true}); err != nil {
+		t.Fatalf("create %s: %v", path, err)
+	}
+}
+
+// seed appends one open-class event straight through the store so path has
+// pending work for its subscription.
+func (f *fenceFixture) seed(t *testing.T, path string) {
+	t.Helper()
+	if _, err := f.data.Append(path, []byte(`{"seed":true}`), store.AppendOptions{ContentType: "application/json"}); err != nil {
+		t.Fatalf("seed %s: %v", path, err)
+	}
+}
+
+// link creates subscription id with cfg and links every path at the beginning.
+func (f *fenceFixture) link(t *testing.T, id string, cfg webhook.Config, linkType webhook.LinkType, paths ...string) {
+	t.Helper()
+	if _, err := f.subs.CreateOrConfirm(id, cfg, nil, time.Now()); err != nil {
+		t.Fatalf("create sub %s: %v", id, err)
+	}
+	for _, p := range paths {
+		if err := f.subs.Link(id, p, linkType, store.ZeroOffset.String()); err != nil {
+			t.Fatalf("link %s: %v", p, err)
+		}
+	}
+}
+
+// webhookSub links a webhook subscription to the receiver for paths.
+func (f *fenceFixture) webhookSub(t *testing.T, paths ...string) {
+	t.Helper()
+	f.link(t, "s1", webhook.Config{Type: webhook.DispatchWebhook, Pattern: "events/*", WebhookURL: f.url, LeaseTTLMs: 30_000}, webhook.LinkGlob, paths...)
+}
+
+// claim creates pull-wake subscription s1 over paths and claims it over HTTP.
+func (f *fenceFixture) claim(t *testing.T, paths ...string) webhook.ClaimResponse {
+	t.Helper()
+	f.link(t, "s1", webhook.Config{Type: webhook.DispatchPullWake, Streams: paths, WakeStream: "wake/pool", LeaseTTLMs: 30_000}, webhook.LinkExplicit, paths...)
+	rec := f.control(http.MethodPost, "/__ds/subscriptions/s1/claim", "", `{"worker":"worker-A"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("claim = %d body %q", rec.Code, rec.Body.String())
+	}
+	var cr webhook.ClaimResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &cr); err != nil {
+		t.Fatal(err)
+	}
+	if cr.WriteToken == "" {
+		t.Fatal("claim response missing write token")
+	}
+	return cr
+}
+
+// wake runs the recovery sweep, which arms and delivers the pending wake, and
+// returns the notification the receiver saw.
+func (f *fenceFixture) wake(t *testing.T) webhook.WakeNotification {
+	t.Helper()
+	f.mgr.RunSweep()
+	select {
+	case n := <-f.notifs:
+		return n
+	case <-time.After(5 * time.Second):
+		t.Fatal("webhook receiver saw no notification")
+		return webhook.WakeNotification{}
+	}
+}
+
+// control sends one __ds control-plane request with an optional bearer.
+func (f *fenceFixture) control(method, target, bearer, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	rec := httptest.NewRecorder()
+	f.rt.HandleRequest(rec, req)
+	return rec
+}
+
+// ack posts a heartbeat (done false) or a done for the wake, acking every
+// stream at its current tail so the done body's next_wake is false.
+func (f *fenceFixture) ack(t *testing.T, bearer string, generation int64, wakeID string, done bool, paths ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := webhook.CallbackRequest{WakeID: wakeID, Generation: generation}
+	if done {
+		req.Done = &done
+		for _, p := range paths {
+			req.Acks = append(req.Acks, webhook.Ack{Stream: strings.TrimPrefix(p, "/"), Offset: tailOf(t, f.h, p).String()})
+		}
+	}
+	body, _ := json.Marshal(req)
+	return f.control(http.MethodPost, "/__ds/subscriptions/s1/ack", bearer, string(body))
+}
+
+// fencedAppend is a fenced-class append through the Handler: the write token
+// plus the producer triple at epoch == generation (design §B.1).
+func (f *fenceFixture) fencedAppend(path, token string, generation, seq int64) *httptest.ResponseRecorder {
+	return do(f.h, http.MethodPost, path, map[string]string{
+		"Content-Type":   "application/json",
+		ClaimTokenHeader: token,
+		"Producer-Id":    "entity-" + strings.TrimPrefix(path, "/"),
+		"Producer-Epoch": strconv.FormatInt(generation, 10),
+		"Producer-Seq":   strconv.FormatInt(seq, 10),
+	}, []byte(`{"turn":`+strconv.FormatInt(seq, 10)+`}`))
+}
+
+// assertFencedUnchanged asserts a 409 FENCED envelope and an unmoved tail.
+func (f *fenceFixture) assertFencedUnchanged(t *testing.T, label string, rec *httptest.ResponseRecorder, path string, before store.Offset) {
+	t.Helper()
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("%s = %d body %q, want 409", label, rec.Code, rec.Body.String())
+	}
+	if eb := decodeEnvelope(t, rec); eb.Error.Code != webhook.ErrCodeFenced {
+		t.Fatalf("%s code = %q, want FENCED", label, eb.Error.Code)
+	}
+	if after := tailOf(t, f.h, path); !after.Equal(before) {
+		t.Fatalf("%s mutated stream: tail %s -> %s", label, before, after)
+	}
+}
+
+// seal reads the stream's HEAD-visible seal summary.
+func (f *fenceFixture) seal(t *testing.T, path string) (int64, *store.Offset) {
+	t.Helper()
+	meta, err := f.data.Get(path)
+	if err != nil {
+		t.Fatalf("get %s: %v", path, err)
+	}
+	return meta.SealedGeneration, meta.SealedOffset
+}
+
+// awaitIdle waits for the auto-ack path to idle s1.
+func (f *fenceFixture) awaitIdle(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if sub, ok, err := f.subs.Get("s1"); err == nil && ok && sub.Phase == webhook.PhaseIdle {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("subscription did not return to idle")
+}
+
+// TestDeliverWebhookGrantsMarkerBeforePost pins webhook parity end to end
+// (#183, design §D.2, WF-27): the wake's marker is installed on the linked
+// fenced stream before the notification leaves, so the receiver can append
+// with the write_token from inside its own handler — during the POST — and
+// the write lands, bound to the derived holder wake:<wake_id>.
+func TestDeliverWebhookGrantsMarkerBeforePost(t *testing.T) {
+	var f *fenceFixture
+	codes := make(chan int, 1)
+	f = newFenceFixture(t, fenceFixtureOptions{respond: func(n webhook.WakeNotification) (int, string) {
+		codes <- f.fencedAppend("/events/a", n.WriteToken, n.Generation, 0).Code
+		return http.StatusOK, `{}`
+	}})
+	f.createFenced(t, "/events/a")
+	f.webhookSub(t, "events/a")
+	f.seed(t, "/events/a")
+	before := tailOf(t, f.h, "/events/a")
+
+	n := f.wake(t)
+	if n.WriteToken == "" {
+		t.Fatalf("notification missing write_token: %+v", n)
+	}
+	if code := <-codes; code != http.StatusOK {
+		t.Fatalf("append from inside the receiver = %d, want 200", code)
+	}
+	if after := tailOf(t, f.h, "/events/a"); !before.LessThan(after) {
+		t.Fatalf("receiver's fenced append did not land: tail %s -> %s", before, after)
+	}
+	d, fence := f.mgr.WriteAuthorizer().AuthorizeAppendFence(n.WriteToken, mustStreamPath(t, "events/a"), time.Now())
+	if !d.Allowed() || fence == nil || fence.Holder != webhook.WebhookHolder(n.WakeID) {
+		t.Fatalf("authorizer = allowed:%v fence:%+v (%s), want the derived holder %s", d.Allowed(), fence, d.Detail(), webhook.WebhookHolder(n.WakeID))
+	}
+	// A wrong epoch is refused in the stream slot even with the live token.
+	f.assertFencedUnchanged(t, "append at epoch != generation", f.fencedAppend("/events/a", n.WriteToken, n.Generation+1, 0), "/events/a", tailOf(t, f.h, "/events/a"))
+}
+
+// TestWebhookCallbackHeartbeatRefreshesWriteToken pins the callback rows of
+// design §D.2 (#183): a webhook heartbeat callback re-mints the write_token
+// (markers renewed) and the refreshed token writes; the done callback keeps
+// the base {ok,next_wake} body, seals the stream at the generation, and the
+// token that was live a moment earlier is refused with the tail unchanged.
+func TestWebhookCallbackHeartbeatRefreshesWriteToken(t *testing.T) {
+	f := newFenceFixture(t, fenceFixtureOptions{respond: func(webhook.WakeNotification) (int, string) {
+		return http.StatusOK, `{}`
+	}})
+	f.createFenced(t, "/events/a")
+	f.webhookSub(t, "events/a")
+	f.seed(t, "/events/a")
+	n := f.wake(t)
+
+	hb := f.ack(t, n.CallbackToken, n.Generation, n.WakeID, false)
+	if hb.Code != http.StatusOK {
+		t.Fatalf("heartbeat = %d body %q", hb.Code, hb.Body.String())
+	}
+	var resp webhook.AckResponse
+	if err := json.Unmarshal(hb.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.WriteToken == "" || resp.WriteToken == n.WriteToken {
+		t.Fatalf("heartbeat must re-mint the write_token: %s", hb.Body.String())
+	}
+	if rec := f.fencedAppend("/events/a", resp.WriteToken, n.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("append with the refreshed token = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	tail := tailOf(t, f.h, "/events/a")
+
+	done := f.ack(t, n.CallbackToken, n.Generation, n.WakeID, true, "/events/a")
+	if done.Code != http.StatusOK {
+		t.Fatalf("done = %d body %q", done.Code, done.Body.String())
+	}
+	if got := strings.TrimSpace(done.Body.String()); got != `{"ok":true,"next_wake":false}` {
+		t.Fatalf("done-ack body = %s, want the base {ok,next_wake} shape", got)
+	}
+	if gen, off := f.seal(t, "/events/a"); gen != n.Generation || off == nil || !off.Equal(tail) {
+		t.Fatalf("seal = (%d, %v), want (%d, %s)", gen, off, n.Generation, tail)
+	}
+	f.assertFencedUnchanged(t, "append after done", f.fencedAppend("/events/a", resp.WriteToken, n.Generation, 1), "/events/a", tail)
+}
+
+// TestWebhookAutoAckDoneSeals pins the auto-ack row of design §D.2 (#183): a
+// 2xx {done:true} seals the linked fenced stream at the wake's generation
+// before the subscription idles, so the notification's write_token is refused
+// afterwards and the seal records the definite last offset.
+func TestWebhookAutoAckDoneSeals(t *testing.T) {
+	f := newFenceFixture(t, fenceFixtureOptions{respond: func(webhook.WakeNotification) (int, string) {
+		return http.StatusOK, `{"done":true}`
+	}})
+	f.createFenced(t, "/events/a")
+	f.webhookSub(t, "events/a")
+	f.seed(t, "/events/a")
+	n := f.wake(t)
+	f.awaitIdle(t)
+
+	tail := tailOf(t, f.h, "/events/a")
+	if gen, off := f.seal(t, "/events/a"); gen != n.Generation || off == nil || !off.Equal(tail) {
+		t.Fatalf("seal = (%d, %v), want (%d, %s)", gen, off, n.Generation, tail)
+	}
+	f.assertFencedUnchanged(t, "append after auto-ack done", f.fencedAppend("/events/a", n.WriteToken, n.Generation, 0), "/events/a", tail)
+}
+
+// TestDeleteSubscriptionSealsLinkedStreams pins the delete row of design §D.2
+// (#183): deleting a subscription mid-claim seals its generation on every
+// linked fenced stream — the seal is visible on the stream and the claim's
+// fence is refused in the slot as sealed, not merely as a missing marker.
+func TestDeleteSubscriptionSealsLinkedStreams(t *testing.T) {
+	f := newFenceFixture(t, fenceFixtureOptions{})
+	f.createFenced(t, "/events/a")
+	cr := f.claim(t, "events/a")
+	sub, _, err := f.subs.Get("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("holder append = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	tail := tailOf(t, f.h, "/events/a")
+
+	if rec := f.control(http.MethodDelete, "/__ds/subscriptions/s1", "", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d body %q, want 204", rec.Code, rec.Body.String())
+	}
+	if gen, off := f.seal(t, "/events/a"); gen != cr.Generation || off == nil || !off.Equal(tail) {
+		t.Fatalf("seal = (%d, %v), want (%d, %s)", gen, off, cr.Generation, tail)
+	}
+	f.assertFencedUnchanged(t, "append after delete", f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 1), "/events/a", tail)
+	// Straight at the store, bypassing the control-plane pre-check: sealed.
+	epoch, seq := cr.Generation, int64(1)
+	res, err := f.data.Append("/events/a", []byte(`{}`), store.AppendOptions{
+		ContentType: "application/json", ProducerId: "entity-events/a", ProducerEpoch: &epoch, ProducerSeq: &seq,
+		Fence: &auth.AppendFence{
+			SubscriptionID: "s1", SubscriptionIncarnation: sub.Incarnation,
+			Generation: cr.Generation, WakeID: cr.WakeID, Holder: "worker-A",
+		},
+	})
+	if !errors.Is(err, store.ErrAppendFenced) || res.FenceReason != store.FenceSealed || res.FenceGeneration != cr.Generation {
+		t.Fatalf("in-slot append after delete = %v (%q, %d), want ErrAppendFenced sealed at %d", err, res.FenceReason, res.FenceGeneration, cr.Generation)
+	}
+}
+
+// TestRemoveStreamSealsPath pins the unlink row of design §D.2 (#183):
+// unlinking one explicit stream from a live claim seals only that stream at
+// the claim's generation; the claim keeps writing its other links.
+func TestRemoveStreamSealsPath(t *testing.T) {
+	f := newFenceFixture(t, fenceFixtureOptions{})
+	f.createFenced(t, "/events/a")
+	f.createFenced(t, "/events/b")
+	cr := f.claim(t, "events/a", "events/b")
+	for _, p := range []string{"/events/a", "/events/b"} {
+		if rec := f.fencedAppend(p, cr.WriteToken, cr.Generation, 0); rec.Code != http.StatusOK {
+			t.Fatalf("holder append %s = %d body %q, want 200", p, rec.Code, rec.Body.String())
+		}
+	}
+	tailA := tailOf(t, f.h, "/events/a")
+
+	if rec := f.control(http.MethodDelete, "/__ds/subscriptions/s1/streams/events/a", "", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("remove stream = %d body %q, want 204", rec.Code, rec.Body.String())
+	}
+	if gen, off := f.seal(t, "/events/a"); gen != cr.Generation || off == nil || !off.Equal(tailA) {
+		t.Fatalf("events/a seal = (%d, %v), want (%d, %s)", gen, off, cr.Generation, tailA)
+	}
+	if gen, _ := f.seal(t, "/events/b"); gen != 0 {
+		t.Fatalf("events/b sealed at %d, want unsealed", gen)
+	}
+	f.assertFencedUnchanged(t, "append to the unlinked stream", f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 1), "/events/a", tailA)
+	if rec := f.fencedAppend("/events/b", cr.WriteToken, cr.Generation, 1); rec.Code != http.StatusOK {
+		t.Fatalf("append to the retained link = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+}
+
+// crashAfterSealStreams is the fence adapter with the K.1 crash window made
+// visible: the first seal runs for real, then blocks until resumed and returns
+// an error — the process died between seal_append_fence.lua and ack.lua.
+type crashAfterSealStreams struct {
+	redisFenceStreamAdapter
+	entered chan struct{}
+	resume  chan struct{}
+	armed   atomic.Bool
+}
+
+func (s *crashAfterSealStreams) SealAppendFence(path string, fence auth.AppendFence) (store.SealResult, error) {
+	res, err := s.redisFenceStreamAdapter.SealAppendFence(path, fence)
+	if err == nil && s.armed.CompareAndSwap(true, false) {
+		close(s.entered)
+		<-s.resume
+		return store.SealResult{}, errors.New("crash between seal and ack.lua")
+	}
+	return res, err
+}
+
+// TestDoneSealCrashWindowFailsClosed pins crash window K.1 (#183,
+// INV-FENCE-06): with the seal applied but ack.lua not yet run, a heartbeat
+// in the window is a 500 (its re-grant is refused for the sealed generation),
+// the holder's token is refused in the slot, the interrupted done is a 500
+// that leaves the claim held, the redelivered done is a 200 with the base
+// body (the re-seal is idempotent), and the deposed token stays refused.
+func TestDoneSealCrashWindowFailsClosed(t *testing.T) {
+	crash := &crashAfterSealStreams{entered: make(chan struct{}), resume: make(chan struct{})}
+	crash.armed.Store(true)
+	f := newFenceFixture(t, fenceFixtureOptions{streams: func(a redisFenceStreamAdapter) webhook.Streams {
+		crash.redisFenceStreamAdapter = a
+		return crash
+	}})
+	f.createFenced(t, "/events/a")
+	cr := f.claim(t, "events/a")
+	if rec := f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("holder append = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	tail := tailOf(t, f.h, "/events/a")
+
+	firstDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { firstDone <- f.ack(t, cr.Token, cr.Generation, cr.WakeID, true, "/events/a") }()
+	select {
+	case <-crash.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("done did not reach the seal")
+	}
+
+	if rec := f.ack(t, cr.Token, cr.Generation, cr.WakeID, false); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("heartbeat inside the crash window = %d body %q, want 500", rec.Code, rec.Body.String())
+	}
+	f.assertFencedUnchanged(t, "append inside the crash window", f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 1), "/events/a", tail)
+
+	close(crash.resume)
+	if rec := <-firstDone; rec.Code != http.StatusInternalServerError {
+		t.Fatalf("interrupted done = %d body %q, want 500", rec.Code, rec.Body.String())
+	}
+	if sub, _, _ := f.subs.Get("s1"); sub.Phase != webhook.PhaseLive || sub.WakeID != cr.WakeID {
+		t.Fatalf("interrupted done must leave the claim held, got phase=%s wake=%q", sub.Phase, sub.WakeID)
+	}
+
+	redelivered := f.ack(t, cr.Token, cr.Generation, cr.WakeID, true, "/events/a")
+	if redelivered.Code != http.StatusOK {
+		t.Fatalf("redelivered done = %d body %q, want 200", redelivered.Code, redelivered.Body.String())
+	}
+	if got := strings.TrimSpace(redelivered.Body.String()); got != `{"ok":true,"next_wake":false}` {
+		t.Fatalf("redelivered done body = %s, want the base {ok,next_wake} shape", got)
+	}
+	if sub, _, _ := f.subs.Get("s1"); sub.Phase != webhook.PhaseIdle {
+		t.Fatalf("redelivered done must idle the claim, got phase %s", sub.Phase)
+	}
+	if gen, off := f.seal(t, "/events/a"); gen != cr.Generation || off == nil || !off.Equal(tail) {
+		t.Fatalf("seal = (%d, %v), want (%d, %s)", gen, off, cr.Generation, tail)
+	}
+	f.assertFencedUnchanged(t, "deposed token after the redelivered done", f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 1), "/events/a", tail)
 }

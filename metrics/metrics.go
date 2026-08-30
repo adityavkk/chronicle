@@ -73,7 +73,6 @@ type Prometheus struct {
 	claimContention   *prometheus.CounterVec
 	durabilityShort   *prometheus.CounterVec
 	serviceAccess     *prometheus.CounterVec
-
 	appendFenceRejections    *prometheus.CounterVec
 	appendFenceSeals         *prometheus.CounterVec
 	appendFenceGrantFailures *prometheus.CounterVec

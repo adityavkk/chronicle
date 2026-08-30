@@ -209,6 +209,10 @@ func (a redisFenceStreamAdapter) RevokeAppendFence(path string, fence auth.Appen
 	return a.rs.RevokeAppendFence(storePath(path), fence)
 }
 
+func (a redisFenceStreamAdapter) SealAppendFence(path string, fence auth.AppendFence) (store.SealResult, error) {
+	return a.rs.SealAppendFence(storePath(path), fence)
+}
+
 // redisLister adapts the Redis stream store to webhook.StreamLister for pattern
 // backfill and recovery reconciliation.
 type redisLister struct {

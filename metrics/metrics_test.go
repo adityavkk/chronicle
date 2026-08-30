@@ -185,6 +185,14 @@ func TestMuxEndpoints(t *testing.T) {
 			t.Errorf("/metrics output missing service result %q", result)
 		}
 	}
+	for _, series := range []string{
+		`chronicle_append_fence_seals_total{outcome="sealed"} 1`,
+		`chronicle_append_fence_grant_failures_total{site="webhook"} 1`,
+	} {
+		if !strings.Contains(body, series) {
+			t.Errorf("/metrics output missing fence series %q", series)
+		}
+	}
 }
 
 // TestFenceMetricsGolden pins the three write-fence counters (#183, design §F):

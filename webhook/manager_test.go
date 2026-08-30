@@ -400,6 +400,8 @@ type fakeMetrics struct {
 	ownerFenced map[string]int // OwnerFenced scopes (inline|check_owner), #14
 	coverageGap int            // CoverageGap samples, #14
 	durShort    map[string]int // DurabilityShort by cmd (WAITAOF|WAIT), #43
+	fenceSeals  map[string]int // AppendFenceSeal by outcome, #183
+	grantFails  map[string]int // AppendFenceGrantFailed by site, #183
 }
 
 func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
@@ -482,6 +484,24 @@ func (f *fakeMetrics) ServiceDelegatedGateway()      {}
 func (f *fakeMetrics) AppendFenceRejection(string)   {}
 func (f *fakeMetrics) AppendFenceSeal(string)        {}
 func (f *fakeMetrics) AppendFenceGrantFailed(string) {}
+
+func (f *fakeMetrics) AppendFenceSeal(outcome string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fenceSeals == nil {
+		f.fenceSeals = map[string]int{}
+	}
+	f.fenceSeals[outcome]++
+}
+
+func (f *fakeMetrics) AppendFenceGrantFailed(site string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.grantFails == nil {
+		f.grantFails = map[string]int{}
+	}
+	f.grantFails[site]++
+}
 
 func (f *fakeMetrics) durabilityShorts(cmd string) int {
 	f.mu.Lock()
