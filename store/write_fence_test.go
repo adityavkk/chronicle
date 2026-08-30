@@ -285,10 +285,31 @@ func TestEvaluateWriteFenceTable(t *testing.T) {
 	}
 }
 
-// writeFenceInputGen draws a WriteFenceInput biased so every rule fires: the
-// marker and seal are drawn near the fence identity (same generation, ±1,
-// boundary int64s), the lease near now, and the incarnation and producer epoch
-// either matching or not.
+// mostly draws true with probability 3/4, for the inputs a rule needs before
+// it can fire at all — the fenced class, the fenced stream, producer headers
+// on the open class — so no rule waits on a run of coin flips.
+func mostly(t *rapid.T, label string) bool {
+	return rapid.IntRange(0, 3).Draw(t, label) != 0
+}
+
+// other draws a value from choices that differs from v.
+func other(t *rapid.T, label string, choices []string, v string) string {
+	return rapid.SampledFrom(choices).Filter(func(c string) bool { return c != v }).Draw(t, label)
+}
+
+// writeFenceInputGen draws a WriteFenceInput stratified over the rung's
+// outcomes, so rules 3 and 4 and the fenced-class accept path — reachable only
+// through the fence's own live, unsealed marker with producer headers at
+// epoch == generation — fire at the default check budget rather than by
+// coincidence (TestWriteFenceGeneratorCoverage pins it). The fenced class
+// starts from that accept shape and disturbs at most one input: the seal (at
+// the generation, next to it, or anywhere), one marker field (absent, revoked,
+// generation, wake, holder, a lapsed lease, incarnation), or the producer
+// headers (absent, or the epoch off the generation); one arm draws marker,
+// seal and producer independently so unrelated combinations stay covered.
+// Generations are small or at the int64 sentinels, neighbours are ±1 with
+// saturation, and the lease sits within two of now. The open class draws its
+// bound generation zero, positive or anywhere.
 func writeFenceInputGen() *rapid.Generator[WriteFenceInput] {
 	return rapid.Custom(func(t *rapid.T) WriteFenceInput {
 		gen := rapid.OneOf(
@@ -296,43 +317,85 @@ func writeFenceInputGen() *rapid.Generator[WriteFenceInput] {
 			rapid.SampledFrom([]int64{0, -1, math.MaxInt64, math.MinInt64, 1 << 53, 1e14}),
 		).Draw(t, "generation")
 		near := func(label string) int64 {
-			return rapid.OneOf(
-				rapid.SampledFrom(saturatingNeighbors(gen)),
-				rapid.Int64(),
-			).Draw(t, label)
+			return rapid.OneOf(rapid.SampledFrom(saturatingNeighbors(gen)), rapid.Int64()).Draw(t, label)
 		}
 		now := rapid.Int64Range(0, 1<<40).Draw(t, "now")
-		inc := rapid.SampledFrom([]string{"inc-1", "inc-2", ""}).Draw(t, "incarnation")
+		ids := []string{"w_a", "w_b"}
+		holders := []string{"worker-a", "worker-b"}
+		incs := []string{"inc-1", "inc-2", ""}
 		in := WriteFenceInput{
-			StreamFenced:      rapid.Bool().Draw(t, "streamFenced"),
-			StreamIncarnation: inc,
+			StreamIncarnation: rapid.SampledFrom(incs).Draw(t, "incarnation"),
 			NowNs:             now,
-			HasProducer:       rapid.Bool().Draw(t, "hasProducer"),
-			ProducerEpoch:     near("producerEpoch"),
-			BoundGeneration:   near("boundGeneration"),
 		}
-		if rapid.Bool().Draw(t, "fenced") {
-			in.Fence = &auth.AppendFence{
-				SubscriptionID:          "sub",
-				SubscriptionIncarnation: "sub-inc",
-				Generation:              gen,
-				WakeID:                  rapid.SampledFrom([]string{"w_a", "w_b"}).Draw(t, "wake"),
-				Holder:                  rapid.SampledFrom([]string{"worker-a", "worker-b"}).Draw(t, "holder"),
+		if !mostly(t, "fencedClass") {
+			in.StreamFenced = mostly(t, "streamFenced")
+			in.HasProducer = mostly(t, "hasProducer")
+			in.ProducerEpoch = near("producerEpoch")
+			in.BoundGeneration = rapid.OneOf(
+				rapid.Just(int64(0)), rapid.Int64Range(1, math.MaxInt64), rapid.Int64(),
+			).Draw(t, "boundGeneration")
+			return in
+		}
+
+		fence := auth.AppendFence{
+			SubscriptionID:          "sub",
+			SubscriptionIncarnation: "sub-inc",
+			Generation:              gen,
+			WakeID:                  rapid.SampledFrom(ids).Draw(t, "wake"),
+			Holder:                  rapid.SampledFrom(holders).Draw(t, "holder"),
+		}
+		in.Fence = &fence
+		in.StreamFenced = mostly(t, "streamFenced")
+		in.HasProducer, in.ProducerEpoch = true, gen
+		in.BoundGeneration = near("boundGeneration") // ignored on the fenced class; drawn to prove it
+		in.Marker = WriteFenceMarker{
+			Present: true, State: WriteFenceMarkerLive, Generation: gen, WakeID: fence.WakeID,
+			Holder: fence.Holder, LeaseUntilNs: now + 1, StreamIncarnation: in.StreamIncarnation,
+		}
+		switch rapid.SampledFrom([]string{"none", "seal", "marker", "producer", "unrelated"}).Draw(t, "disturb") {
+		case "seal":
+			in.Seal = WriteFenceSeal{Present: true, WakeID: "w_s", Generation: rapid.OneOf(
+				rapid.Just(gen), rapid.SampledFrom(saturatingNeighbors(gen)), rapid.Int64(),
+			).Draw(t, "sealGeneration")}
+		case "marker":
+			m := &in.Marker
+			switch rapid.SampledFrom([]string{"absent", "state", "generation", "wake", "holder", "lease", "incarnation"}).Draw(t, "markerField") {
+			case "absent":
+				*m = WriteFenceMarker{}
+			case "state":
+				m.State = WriteFenceMarkerRevoked
+			case "generation":
+				m.Generation = near("markerGeneration")
+			case "wake":
+				m.WakeID = other(t, "markerWake", ids, m.WakeID)
+			case "holder":
+				m.Holder = other(t, "markerHolder", holders, m.Holder)
+			case "lease":
+				m.LeaseUntilNs = rapid.Int64Range(now-2, now).Draw(t, "lease")
+			case "incarnation":
+				m.StreamIncarnation = other(t, "markerIncarnation", incs, m.StreamIncarnation)
 			}
-		}
-		if rapid.Bool().Draw(t, "markerPresent") {
-			in.Marker = WriteFenceMarker{
-				Present:           true,
-				State:             rapid.SampledFrom([]string{WriteFenceMarkerLive, WriteFenceMarkerRevoked}).Draw(t, "state"),
-				Generation:        near("markerGeneration"),
-				WakeID:            rapid.SampledFrom([]string{"w_a", "w_b"}).Draw(t, "markerWake"),
-				Holder:            rapid.SampledFrom([]string{"worker-a", "worker-b"}).Draw(t, "markerHolder"),
-				LeaseUntilNs:      rapid.Int64Range(now-2, now+2).Draw(t, "lease"),
-				StreamIncarnation: rapid.SampledFrom([]string{"inc-1", "inc-2", ""}).Draw(t, "markerIncarnation"),
+		case "producer":
+			in.HasProducer = rapid.Bool().Draw(t, "hasProducer")
+			in.ProducerEpoch = near("producerEpoch")
+		case "unrelated":
+			in.HasProducer = rapid.Bool().Draw(t, "hasProducer")
+			in.ProducerEpoch = near("producerEpoch")
+			in.Marker = WriteFenceMarker{}
+			if rapid.Bool().Draw(t, "markerPresent") {
+				in.Marker = WriteFenceMarker{
+					Present:           true,
+					State:             rapid.SampledFrom([]string{WriteFenceMarkerLive, WriteFenceMarkerRevoked}).Draw(t, "state"),
+					Generation:        near("markerGeneration"),
+					WakeID:            rapid.SampledFrom(ids).Draw(t, "markerWake"),
+					Holder:            rapid.SampledFrom(holders).Draw(t, "markerHolder"),
+					LeaseUntilNs:      rapid.Int64Range(now-2, now+2).Draw(t, "lease"),
+					StreamIncarnation: rapid.SampledFrom(incs).Draw(t, "markerIncarnation"),
+				}
 			}
-		}
-		if rapid.Bool().Draw(t, "sealPresent") {
-			in.Seal = WriteFenceSeal{Present: true, Generation: near("sealGeneration"), WakeID: "w_s"}
+			if rapid.Bool().Draw(t, "sealPresent") {
+				in.Seal = WriteFenceSeal{Present: true, Generation: near("sealGeneration"), WakeID: "w_s"}
+			}
 		}
 		return in
 	})
@@ -408,6 +471,53 @@ func TestEvaluateWriteFenceProperty(t *testing.T) {
 			}
 		}
 	})
+}
+
+// writeFenceOutcomeLabel names the bucket a generated input landed in: the
+// refusal reason, or which accept path — the open class; the fenced class on a
+// fenced stream, the only route through rules 3 and 4; or the fenced class on
+// a stream that never opted in.
+func writeFenceOutcomeLabel(in WriteFenceInput, out WriteFenceOutcome) string {
+	switch {
+	case out.Reason != FenceNone:
+		return string(out.Reason)
+	case in.Fence == nil:
+		return "accept-open"
+	case in.StreamFenced:
+		return "accept-fenced"
+	default:
+		return "accept-unfenced-stream"
+	}
+}
+
+// writeFenceOutcomeLabels is every bucket a write-fence input generator must
+// reach: the five refusals and the three accept paths.
+var writeFenceOutcomeLabels = []string{
+	string(FenceSealed), string(FenceMarker), string(FenceProducerRequired), string(FenceEpoch),
+	string(FenceBound), "accept-open", "accept-fenced", "accept-unfenced-stream",
+}
+
+// TestWriteFenceGeneratorCoverage confirms writeFenceInputGen reaches every
+// outcome TestEvaluateWriteFenceProperty's clauses depend on — each refusal
+// and each accept path, including the fenced class on a fenced stream, which
+// is the only route through rules 3 and 4 — rather than by uniform luck. It
+// samples a FIXED number of deterministic examples (via Generator.Example) so
+// the assertion is independent of the rapid check budget, which shrinks under
+// -short. Pure probe, runs under -short.
+func TestWriteFenceGeneratorCoverage(t *testing.T) {
+	const samples = 500
+	gen := writeFenceInputGen()
+	seen := map[string]int{}
+	for i := 0; i < samples; i++ {
+		in := gen.Example(i)
+		seen[writeFenceOutcomeLabel(in, EvaluateWriteFence(in))]++
+	}
+	for _, want := range writeFenceOutcomeLabels {
+		if seen[want] == 0 {
+			t.Errorf("generator never reached %s", want)
+		}
+	}
+	t.Logf("coverage over %d examples: %v", samples, seen)
 }
 
 // TestFenceAuthorityIdentity pins the authority encoding shared by the marker
