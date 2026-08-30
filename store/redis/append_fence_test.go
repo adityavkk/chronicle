@@ -449,8 +449,9 @@ func TestAppendFenceGrantRefusesSealedGenerationAfterTombstoneReap(t *testing.T)
 }
 
 // TestAppendFenceGrantRenewalNeverShortensLease pins that a same-claim re-grant
-// (the heartbeat) only ever extends the marker lease: a delayed older re-grant
-// landing after a newer one is harmless.
+// (the heartbeat) only ever extends the marker lease, and that the key TTL —
+// computed in Lua from the retained lease, and the marker's only reaper —
+// follows it: a delayed older re-grant landing after a newer one is harmless.
 func TestAppendFenceGrantRenewalNeverShortensLease(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
@@ -462,23 +463,79 @@ func TestAppendFenceGrantRenewalNeverShortensLease(t *testing.T) {
 		f.LeaseUntilNs = base.Add(d).UnixNano()
 		return f
 	}
-	markerLease := func() int64 {
-		v, err := testClient.HGet(ctx, appendFenceKey(path, f), "lease_until_ns").Int64()
+	assertMarker := func(label string, want auth.AppendFence) {
+		t.Helper()
+		got, err := testClient.HGet(ctx, appendFenceKey(path, f), "lease_until_ns").Int64()
 		if err != nil {
-			t.Fatalf("read marker lease: %v", err)
+			t.Fatalf("%s: read marker lease: %v", label, err)
 		}
-		return v
+		if got != want.LeaseUntilNs {
+			t.Fatalf("%s: marker lease = %d, want %d", label, got, want.LeaseUntilNs)
+		}
+		pttl, err := testClient.PTTL(ctx, appendFenceKey(path, f)).Result()
+		if err != nil {
+			t.Fatalf("%s: read marker TTL: %v", label, err)
+		}
+		wantTTL := time.Until(time.Unix(0, want.LeaseUntilNs)) + appendFenceRetention
+		if d := pttl - wantTTL; d < -time.Second || d > time.Second {
+			t.Fatalf("%s: marker TTL = %v, want %v (the retained lease plus retention)", label, pttl, wantTTL)
+		}
 	}
 	long := leaseAt(time.Minute)
 	mustGrant(t, s, path, long)
 	mustGrant(t, s, path, leaseAt(30*time.Second)) // delayed, older re-grant
-	if got := markerLease(); got != long.LeaseUntilNs {
-		t.Fatalf("renewal shortened the lease: %d, want %d", got, long.LeaseUntilNs)
-	}
+	assertMarker("after the shorter re-grant", long)
 	longer := leaseAt(90 * time.Second)
 	mustGrant(t, s, path, longer)
-	if got := markerLease(); got != longer.LeaseUntilNs {
-		t.Fatalf("renewal did not extend the lease: %d, want %d", got, longer.LeaseUntilNs)
+	assertMarker("after the longer re-grant", longer)
+}
+
+// TestCreateForkDoesNotInheritWriteFence pins C.1: the write fence is a
+// property of one stream's create, never inherited by a fork. A fork of a
+// fenced source with a bound producer starts unfenced (no wf field) and
+// unbound, so the open class naming the bound producer id is accepted on the
+// fork while the source still refuses it as "bound"; a fork that declares the
+// opt-in itself is fenced, and still unbound.
+func TestCreateForkDoesNotInheritWriteFence(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	src := testPath("wf-fork-src")
+	mustCreate(t, s, src, store.CreateOptions{ContentType: "application/json", WriteFence: true})
+	f1 := claimFence(1, "w_1", "worker-a")
+	mustGrant(t, s, src, f1)
+	mustFencedAppend(t, s, src, f1, 0)
+	openAppend := func(path string) (store.AppendResult, error) {
+		epoch, seq := int64(2), int64(0)
+		return s.Append(path, []byte(`{"open":true}`), store.AppendOptions{
+			ContentType: "application/json", ProducerId: "p", ProducerEpoch: &epoch, ProducerSeq: &seq,
+		})
+	}
+	got, err := openAppend(src)
+	assertFenced(t, "bound producer on the source", got, err, store.FenceBound, 1, "")
+
+	for _, tt := range []struct {
+		name string
+		opts store.CreateOptions
+		want bool
+	}{
+		{"fork inherits nothing", store.CreateOptions{ForkedFrom: src}, false},
+		{"fork declares its own", store.CreateOptions{ForkedFrom: src, WriteFence: true}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fork := testPath("wf-fork")
+			if meta := mustCreate(t, s, fork, tt.opts); meta.WriteFence != tt.want {
+				t.Fatalf("fork WriteFence = %t, want %t", meta.WriteFence, tt.want)
+			}
+			if wf, err := testClient.HExists(ctx, metaKey(fork), fWriteFence).Result(); err != nil || wf != tt.want {
+				t.Fatalf("fork wf field present = %t, %v; want %t", wf, err, tt.want)
+			}
+			if bound, err := testClient.HExists(ctx, metaKey(fork), fBindPrefix+"p").Result(); err != nil || bound {
+				t.Fatalf("fork carries the source's binding: %t, %v", bound, err)
+			}
+			if _, err := openAppend(fork); err != nil {
+				t.Fatalf("open-class append of the source's bound producer on the fork: %v", err)
+			}
+		})
 	}
 }
 

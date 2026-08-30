@@ -270,30 +270,36 @@ func configProbeArgs(s *Store, path string, opts store.CreateOptions) []any {
 }
 
 // TestDifferentialConfigMatchesWriteFence drives the write-fence leg of
-// INV-CFG-01 (#183) through the live config_matches explicitly, in both orders:
-// a fenced stream re-PUT without Write-Fence and a plain stream re-PUT with it
-// MISMATCH; a fenced stream re-PUT with it MATCHES. Each row asserts the live
-// Lua reply equals the Go oracle, so the wf probe (ARGV[10]) cannot drift.
+// INV-CFG-01 (#183) through the live config_matches in both orders, on top of
+// generated base options (content type, TTL, expiry, closed, fork shape) that
+// otherwise match: a fenced stream re-PUT without Write-Fence and a plain
+// stream re-PUT with it MISMATCH; agreeing flags MATCH. Each row asserts the
+// expected verdict and that the live Lua reply equals the Go oracle, so the wf
+// probe (ARGV[10]) can neither drift nor be ignored by both sides at once.
 func TestDifferentialConfigMatchesWriteFence(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	fenced := store.CreateOptions{ContentType: "application/json", WriteFence: true}
-	plain := store.CreateOptions{ContentType: "application/json"}
 
 	rapid.Check(t, func(t *rapid.T) {
+		base := configDiffOptsGen().Draw(t, "base")
 		for _, tt := range []struct {
-			name string
-			meta store.StreamMetadata
-			opts store.CreateOptions
+			name           string
+			metaWF, optsWF bool
 		}{
-			{"fenced-vs-fenced", metaFromOptsRedis(fenced, false, false), fenced},
-			{"fenced-vs-plain", metaFromOptsRedis(fenced, false, false), plain},
-			{"plain-vs-fenced", metaFromOptsRedis(plain, false, false), fenced},
-			{"plain-vs-plain", metaFromOptsRedis(plain, false, false), plain},
+			{"fenced-vs-fenced", true, true},
+			{"fenced-vs-plain", true, false},
+			{"plain-vs-fenced", false, true},
+			{"plain-vs-plain", false, false},
 		} {
-			want := tt.meta.ConfigMatches(tt.opts)
-			path := seedMeta(t, s, ctx, tt.meta)
-			raw, err := createScript.Run(ctx, s.client, keysFor(path), configProbeArgs(s, path, tt.opts)...).Result()
+			stored, opts := base, base
+			stored.WriteFence, opts.WriteFence = tt.metaWF, tt.optsWF
+			meta := metaFromOptsRedis(stored, false, false)
+			want := meta.ConfigMatches(opts)
+			if want != (tt.metaWF == tt.optsWF) {
+				t.Fatalf("%s: Go ConfigMatches = %v, want %v", tt.name, want, tt.metaWF == tt.optsWF)
+			}
+			path := seedMeta(t, s, ctx, meta)
+			raw, err := createScript.Run(ctx, s.client, keysFor(path), configProbeArgs(s, path, opts)...).Result()
 			if err != nil {
 				t.Fatalf("%s: createScript probe: %v", tt.name, err)
 			}
