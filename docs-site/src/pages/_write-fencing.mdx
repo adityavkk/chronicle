@@ -25,7 +25,7 @@ import Step from "../components/Step.astro";
 <Tldr>
   <ul>
     <li><strong>Opt-in per stream.</strong> <code>PUT</code> with <code>Write-Fence: true</code> creates a fenced stream. The flag is config-matched on idempotent re-<code>PUT</code>, echoed on <code>PUT</code>/<code>HEAD</code>, never fork-inherited. Streams that never opt in are byte-for-byte unchanged — the pinned conformance suite stays 332/332.</li>
-    <li><strong>Two write classes, derived server-side.</strong> A POST is <strong>fenced</strong> iff it presents a write-token carrier, asserts <code>Write-Fence: true</code>, or names a bound producer id; <strong>open</strong> otherwise. Command writers (inbox, wake, manifest) keep their pass-through untouched.</li>
+    <li><strong>Two write classes, derived server-side.</strong> The class is <strong>fenced</strong> iff the request presents a write-token carrier or asserts the class with <code>Write-Fence: true</code>; it is <strong>open</strong> otherwise — an open write naming a bound producer id stays open and is refused in-slot. Command writers (inbox, wake, manifest) keep their pass-through untouched.</li>
     <li><strong>The fence runs in the stream slot.</strong> Seal, marker, producer-required, epoch ≡ generation, and bound-producer checks execute inside <code>append.lua</code>/<code>close.lua</code>, atomically with the write. A deposed writer's bytes cannot land, ever.</li>
     <li><strong>Completion is as final as deposition.</strong> <code>done</code>/release/supersession <em>seal</em> the generation per authority before the subscription idles; <code>HEAD</code> exposes the sealed generation and the definite last fenced offset.</li>
     <li><strong>Deposed writers stop on the first response.</strong> <code>409 FENCED</code> carries the reason, the current generation and holder, and the terminal gap pair <code>Producer-Expected-Seq == Producer-Received-Seq</code> — a shape the base protocol can never produce, which the pinned client library treats as a clean stop.</li>
@@ -62,7 +62,7 @@ import Step from "../components/Step.astro";
   <Table>
     | | **Fenced class** | **Open class** |
     | --- | --- | --- |
-    | Taken when | a write-token carrier is presented, `Write-Fence: true` is asserted, or the `Producer-Id` is bound | otherwise |
+    | Taken when | a write-token carrier is presented or `Write-Fence: true` is asserted | otherwise (a bound `Producer-Id` stays open — and is refused in-slot) |
     | Credential | the claim's write token — valid, unexpired, scoped to this path; binds in **every** auth mode | an authenticated principal per `CHRONICLE_AUTH_MODE` (telemetry-only in `insecure`) |
     | Producer headers | **mandatory** (400 without), `Producer-Epoch` **must equal** the claim generation | base §5.2.1, unchanged for unbound ids |
     | In-slot checks | seal → marker → producer-required → epoch, then `validate_producer` | bound-producer refusal only |
@@ -240,7 +240,7 @@ import Step from "../components/Step.astro";
   <Table>
     | Metric | Labels | Meaning |
     | --- | --- | --- |
-    | `chronicle_append_fence_rejections_total` | `reason` ∈ credential · shard · producer_required · principal · wake_token · precheck · marker · sealed · epoch · bound · store | the primary zombie-writer signal — every refused write, counted once at the response sink |
+    | `chronicle_append_fence_rejections_total` | `reason` ∈ credential · shard · producer_required · wake_token · precheck · marker · sealed · epoch · bound · store | the primary zombie-writer signal — every refused write, counted once at the response sink |
     | `chronicle_append_fence_seals_total` | `outcome` ∈ sealed · already · stale · notfound · unfenced · error | seal writes per linked stream; `already` is the idempotent redelivery |
     | `chronicle_append_fence_grant_failures_total` | `site` ∈ claim · heartbeat · webhook | a marker could not be installed; `webhook` is the fail-open-delivery signal |
   </Table>

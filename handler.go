@@ -36,8 +36,11 @@ type AppendMetrics interface {
 }
 
 // FenceMetrics records data-plane write-fence rejections by reason (#183):
-// credential, shard, producer_required, principal, wake_token, precheck,
-// marker, sealed, epoch, bound, or store. metrics.Prometheus implements it.
+// credential, shard, producer_required, wake_token, precheck, marker, sealed,
+// epoch, bound, or store. (reason "principal" exists in code as a classify
+// backstop only; the shipped phase-1 gate refuses an anonymous write before
+// the stream lookup, so it is never emitted — ADR-0008 decision 9.)
+// metrics.Prometheus implements it.
 type FenceMetrics interface {
 	AppendFenceRejection(reason string)
 }

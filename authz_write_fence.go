@@ -65,10 +65,14 @@ const (
 const (
 	reasonCredential = "credential"
 	reasonShard      = "shard"
-	reasonPrincipal  = "principal"
-	reasonWakeToken  = "wake_token"
-	reasonPrecheck   = "precheck"
-	reasonStore      = "store"
+	// reasonPrincipal is a classify backstop that the shipped phase-1 gate
+	// makes unreachable: an anonymous write is refused before the stream
+	// lookup as the base 401 with no fence disclosure (ADR-0008 decision 9),
+	// so this reason is never emitted on the wire.
+	reasonPrincipal = "principal"
+	reasonWakeToken = "wake_token"
+	reasonPrecheck  = "precheck"
+	reasonStore     = "store"
 )
 
 // fenceDisclosure is what a fence rejection reveals to the writer so it stands

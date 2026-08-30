@@ -41,10 +41,12 @@ plus the #183 design record; this ADR records the decisions and their costs.
    idempotent-create comparison, echoed on `PUT`/`HEAD`, and never
    fork-inherited. No namespace-level default.
 2. **Server-derived write class, default open.** On a fenced stream every
-   POST is classed server-side: **fenced** iff it presents a write-token
-   carrier, asserts `Write-Fence: true`, or names a bound producer id;
-   **open** otherwise. Command writers keep their 3-line pass-through; no
-   client negotiates a mode.
+   POST is classed server-side. The class is **fenced** iff the request
+   presents a write-token carrier or asserts the class with `Write-Fence:
+   true`; it is **open** otherwise. A bound producer id does not change the
+   class: an open write naming one stays open and is refused in-slot
+   (decision 3). Command writers keep their 3-line pass-through; no client
+   negotiates a mode.
 3. **Producer binding.** A producer id accepted on the fenced class is bound
    (`wfbind:<id>` in meta): an open write naming it is `409 FENCED
    reason=bound`. This closes the real zombie shape — a stable
@@ -52,7 +54,11 @@ plus the #183 design record; this ADR records the decisions and their costs.
 4. **The assertion header.** `Write-Fence: true` on POST demands a valid
    write token on any stream in any mode (`401` without one), so a gateway
    can make a lost token loud instead of silently downgrading to an open
-   write.
+   write. When the assertion rides with a routed service principal, both
+   must verify; the principal is evaluated first, so a denied principal is
+   reported as its own `401`/`403` and the token arm runs only for an
+   allowed principal (a deliberate ordering deviation from the design's
+   "both valid" phrasing — the request is refused either way).
 5. **Writer epoch ≡ claim generation.** `Producer-Epoch` on the fenced class
    must equal the token's generation, compared in the stream slot before
    `validate_producer`. No second epoch register.
@@ -66,7 +72,13 @@ plus the #183 design record; this ADR records the decisions and their costs.
    `wake:<wake_id>` (derived in Go; no control-plane Lua change), giving
    webhook consumers full token parity: minted before delivery, refreshed on
    callback heartbeats, sealed at done — fail-open delivery, fail-closed
-   token.
+   token. Consequently an explicit `POST /claim` on a webhook-dispatch
+   subscription is refused `400 INVALID_REQUEST` before any lease is
+   granted: the claim is the §7.2 pull-wake acquisition, and a worker-held
+   webhook claim is a shape the fence liveness rules (ack.lua heartbeats,
+   `check_write_fence.lua`) deliberately reject. Before #183 such a claim
+   answered 200 with a write token; that token now could never verify, so
+   the category error is made explicit.
 8. **`409 FENCED` with disclosure.** Fence rejections are `409` with the JSON
    envelope (`reason`, `generation`, `current_holder`) and — when producer
    headers were sent — `Producer-Epoch: <current generation>` plus the
@@ -78,7 +90,12 @@ plus the #183 design record; this ADR records the decisions and their costs.
    marker/seal/epoch/bound checks, the wake-token 403) bind in every
    `CHRONICLE_AUTH_MODE`; only the open-class principal requirement follows
    the mode (telemetry in `insecure`). A MAC-valid token on an *unfenced*
-   stream keeps today's mode-dependent posture.
+   stream keeps today's mode-dependent posture. In `enforce` the anonymous
+   open write is refused by the base phase-1 credential gate *before* the
+   stream lookup, so it is the plain `401` with no fence disclosure — no
+   `reason=principal` is ever emitted (WF-26: an unauthenticated caller
+   learns nothing about the stream); the wire vocabulary of WF-24 therefore
+   omits `principal`, and the code keeps it only as a classify backstop.
 10. **Shard 0 only.** Both token mints hardcode shard 0; a token naming any
     other shard is refused in phase 1 and no marker is ever granted for it.
 11. **Wrap, never modify, `ValidateProducer`.** The fence is a rung *before*

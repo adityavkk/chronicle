@@ -146,7 +146,9 @@ Rules for the open class on a fenced stream:
 - An open write MUST be attributable to an authenticated principal; the
   authentication mechanism is implementation-defined per §12.1 of the base
   protocol. An unauthenticated open write on a fenced stream MUST be rejected
-  `401` when the server enforces authentication. **[WF-14]**
+  `401` when the server enforces authentication; the rejection is the base
+  authentication failure and carries no fence disclosure (see §8
+  [WF-26]). **[WF-14]**
 - A credential that proves only wake or callback identity (liveness, not the
   claim capability) MUST NOT write a fenced stream: reject `403`. **[WF-15]**
 - Otherwise the open class is the base protocol, byte-for-byte: §5.2 body and
@@ -199,8 +201,10 @@ torn down — the generation is **sealed** on every linked fenced stream:
   subscription MUST NOT be bricked by its predecessor's seals. **[WF-23]**
 
 The seal gives readers a truncation guarantee: after `done` at generation *g*,
-the offset in the seal is the last byte generation *g* wrote, and nothing of
-generation ≤ *g* of that authority can ever append after it.
+the offset in the seal is the last byte the fenced class had written when the
+seal was recorded — when the class never wrote, it falls back to the stream
+tail at the seal — and nothing of generation ≤ *g* of that authority can ever
+append after it.
 
 ## 8. Rejection disclosure
 
@@ -224,9 +228,10 @@ A fence rejection tells the writer enough to stand down without a read:
   }
   ```
 
-  `reason` values: `credential`, `producer_required`, `principal`,
-  `wake_token`, `precheck`, `marker`, `sealed`, `epoch`, `bound`, `store`
-  (implementations MAY add values). **[WF-24]**
+  `reason` values: `credential`, `producer_required`, `wake_token`,
+  `precheck`, `marker`, `sealed`, `epoch`, `bound`, `store` (implementations
+  MAY add values; the WF-14 `401` is a base authentication failure and
+  carries no `reason`). **[WF-24]**
 - When the rejected request carried producer headers, a `409 FENCED` MUST also
   carry `Producer-Epoch: <current generation>` (when known) and the **terminal
   gap pair** `Producer-Expected-Seq` == `Producer-Received-Seq` == the
