@@ -114,7 +114,10 @@ type ManagerOptions struct {
 	Resolver      IPResolver
 	// HTTPClient performs webhook deliveries. Nil uses a default client bounded
 	// by the delivery timeout; a deployment egress adapter may supply its own
-	// (a pinned transport, no proxy, no redirects).
+	// (a pinned transport, no proxy, no redirects). A supplied client is used
+	// as-is — the adapter owns the delivery deadline, so it MUST bound its
+	// client (Timeout or a transport deadline): an unbounded delivery would
+	// hold its retry slot until the receiver hangs up.
 	HTTPClient *http.Client
 	// TargetPolicy admits one narrowly allowed private webhook route ahead of
 	// the SSRF rules and prepares every delivery to it (see TargetPolicy). Nil
@@ -1031,6 +1034,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	if m.targetPolicy != nil {
 		if err := m.targetPolicy.PrepareRequest(req); err != nil {
 			m.log.Warn("webhook: target policy rejected delivery", "sub", id, "error", err)
+			m.metrics.WakeDelivery(0, "rejected")
 			m.recordFailure(id, generation, wakeID, owner)
 			return
 		}

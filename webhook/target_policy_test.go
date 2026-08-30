@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -235,11 +236,16 @@ func TestDeliverWebhookFailsAttemptOnPrepareRequestError(t *testing.T) {
 	receiver := newEgressReceiver(t, log, 0)
 	policy := &recordingTargetPolicy{log: log, prepareErr: errors.New("route not ready")}
 	mgr, store := newEgressTestManager(t, policy, receiver)
+	metrics := &fakeMetrics{}
+	mgr.metrics = metrics
 	arm := createAndArm(t, NewRoutes(mgr), store, "s1")
 
 	mgr.deliverWebhook("s1", arm.Generation, arm.WakeID, nil)
 	if n := log.received(); n != 0 {
 		t.Fatalf("receiver was dialed %d times after the policy rejected the delivery", n)
+	}
+	if got := metrics.delivered(); !maps.Equal(got, map[string]int{"rejected": 1}) {
+		t.Fatalf("WakeDelivery outcomes after the rejection = %v, want {rejected: 1}", got)
 	}
 	sub, _, _ := store.Get("s1")
 	if sub.RetryCount != 1 || sub.NextAttemptNs == 0 {
@@ -250,6 +256,9 @@ func TestDeliverWebhookFailsAttemptOnPrepareRequestError(t *testing.T) {
 	mgr.deliverWebhook("s1", arm.Generation, arm.WakeID, nil)
 	if n := retryCountOf(t, store, "s1"); n != 0 {
 		t.Fatalf("retry_count after the admitted retry = %d, want 0", n)
+	}
+	if got := metrics.delivered(); !maps.Equal(got, map[string]int{"rejected": 1, "ok": 1}) {
+		t.Fatalf("WakeDelivery outcomes after the admitted retry = %v, want {rejected: 1, ok: 1}", got)
 	}
 	want := []string{
 		"allow:" + admittedHost,

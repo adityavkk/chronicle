@@ -17,7 +17,9 @@ type Metrics interface {
 	// how many wakes it issued.
 	SweepTick(dur time.Duration, subs, tails, wakes int)
 	// WakeDelivery records a webhook delivery attempt: the round-trip duration and
-	// its outcome ("ok", "failed", or "error").
+	// its outcome — "ok", "failed" (non-2xx), "error" (transport), or "rejected"
+	// (the egress target policy refused the prepared request; nothing was
+	// dialed, so the duration is zero).
 	WakeDelivery(dur time.Duration, outcome string)
 	// WakeEvent records a pull-wake event append to a wake stream: the duration
 	// and its outcome ("ok" or "error").
