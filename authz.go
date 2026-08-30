@@ -180,26 +180,25 @@ func denyError(d auth.Decision) *authError {
 
 // authorizeAppendPhase evaluates one append phase in today's routing order and
 // applies AuthMode to it: an allowed decision yields its fence only when it is
-// enforced, and a denial is an error only when it is enforced. bind enforces
-// regardless of AuthMode — the write-fence rules that hold in every mode
-// (#183); the base gates pass false. A pre-store fence denial carries its
-// disclosure reason so the 409 counts and, from handleAppend, echoes the
-// producer pair.
+// enforced, and a denial is an error only when it is enforced. It serves the
+// base gates and the open class; the paths that bind regardless of AuthMode —
+// the write-fence rules that hold in every mode (#183) — call
+// enforceOrTelemetry directly. A pre-store fence denial carries its disclosure
+// reason so the 409 counts and, from handleAppend, echoes the producer pair.
 func (h *Handler) authorizeAppendPhase(
 	r *http.Request,
 	rawPath string,
 	phase appendAuthPhase,
 	label string,
-	bind bool,
 ) (*auth.AppendFence, error) {
 	d, fence, _ := h.appendDecision(r, rawPath, phase)
 	if d.Allowed() {
-		if bind || h.AuthMode == auth.ModeEnforce {
+		if h.AuthMode == auth.ModeEnforce {
 			return fence, nil
 		}
 		return nil, nil
 	}
-	if !h.enforceOrTelemetry(rawPath, label, d, bind) {
+	if !h.enforceOrTelemetry(rawPath, label, d, false) {
 		return nil, nil
 	}
 	if d.Reason() == auth.ReasonFenced {
