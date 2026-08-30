@@ -10,6 +10,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 )
 
 func TestMemoryStore_CreateAndGet(t *testing.T) {
@@ -898,5 +900,573 @@ func TestMemoryStore_ExpiresAtExpiry(t *testing.T) {
 	// Should be expired
 	if s.Has("/expiring") {
 		t.Error("stream should not exist after expiry")
+	}
+}
+
+// ---- write fence (#183) ----
+
+// fenceFixture is one write-fence scenario's store at a frozen clock, with
+// the helpers store/redis/append_fence_test.go uses against live Redis, so
+// both backends are held to the same steps.
+type fenceFixture struct {
+	t     *testing.T
+	s     *MemoryStore
+	clock *FakeClock
+	path  string
+}
+
+// fence is a complete fence of subscription "sub" / incarnation "inc-a" at gen
+// whose lease runs one minute past the frozen now.
+func (f *fenceFixture) fence(gen int64, wake, holder string) auth.AppendFence {
+	return auth.AppendFence{
+		SubscriptionID:          "sub",
+		SubscriptionIncarnation: "inc-a",
+		Generation:              gen,
+		WakeID:                  wake,
+		Holder:                  holder,
+		LeaseUntilNs:            f.clock.Now().Add(time.Minute).UnixNano(),
+	}
+}
+
+func (f *fenceFixture) create(opts CreateOptions) {
+	f.t.Helper()
+	if _, _, err := f.s.Create(f.path, opts); err != nil {
+		f.t.Fatalf("create: %v", err)
+	}
+}
+
+func (f *fenceFixture) grant(fence auth.AppendFence) {
+	f.t.Helper()
+	if installed, err := f.s.GrantAppendFence(f.path, fence); err != nil || !installed {
+		f.t.Fatalf("grant generation %d = installed:%t err:%v, want true/nil", fence.Generation, installed, err)
+	}
+}
+
+func (f *fenceFixture) refuseGrant(label string, fence auth.AppendFence) {
+	f.t.Helper()
+	if _, err := f.s.GrantAppendFence(f.path, fence); !errors.Is(err, ErrAppendFenced) {
+		f.t.Fatalf("%s = %v, want ErrAppendFenced", label, err)
+	}
+}
+
+// fencedAppendAs is a fenced-class append naming producer at epoch == gen.
+func (f *fenceFixture) fencedAppendAs(fence auth.AppendFence, producer string, seq int64) (AppendResult, error) {
+	epoch := fence.Generation
+	return f.s.Append(f.path, []byte("x"), AppendOptions{
+		ContentType: "text/plain", Fence: &fence, ProducerId: producer, ProducerEpoch: &epoch, ProducerSeq: &seq,
+	})
+}
+
+func (f *fenceFixture) fencedAppend(fence auth.AppendFence, seq int64) Offset {
+	f.t.Helper()
+	res, err := f.fencedAppendAs(fence, "p", seq)
+	if err != nil {
+		f.t.Fatalf("fenced append generation %d seq %d: %v", fence.Generation, seq, err)
+	}
+	return res.Offset
+}
+
+// openAppendAs is an open-class append naming producer at epoch.
+func (f *fenceFixture) openAppendAs(producer string, epoch, seq int64) (AppendResult, error) {
+	return f.s.Append(f.path, []byte("open"), AppendOptions{
+		ContentType: "text/plain", ProducerId: producer, ProducerEpoch: &epoch, ProducerSeq: &seq,
+	})
+}
+
+func (f *fenceFixture) seal(fence auth.AppendFence) SealResult {
+	f.t.Helper()
+	res, err := f.s.SealAppendFence(f.path, fence)
+	if err != nil {
+		f.t.Fatalf("seal generation %d: %v", fence.Generation, err)
+	}
+	return res
+}
+
+func (f *fenceFixture) assertSeal(label string, got SealResult, outcome SealOutcome, gen int64, off Offset) {
+	f.t.Helper()
+	if got.Outcome != outcome || got.Generation != gen || !got.FinalOffset.Equal(off) {
+		f.t.Fatalf("%s = %+v, want %s/%d/%v", label, got, outcome, gen, off)
+	}
+}
+
+// assertFenced asserts a refusal carrying the expected disclosure and no tail.
+func (f *fenceFixture) assertFenced(label string, res AppendResult, err error, reason FenceReason, gen int64, holder string) {
+	f.t.Helper()
+	if !errors.Is(err, ErrAppendFenced) {
+		f.t.Fatalf("%s = %v, want ErrAppendFenced", label, err)
+	}
+	if res.FenceReason != reason || res.FenceGeneration != gen || res.FenceHolder != holder || !res.Offset.Equal(Offset{}) {
+		f.t.Fatalf("%s disclosure = (%q, %d, %q, tail %v), want (%q, %d, %q, no tail)",
+			label, res.FenceReason, res.FenceGeneration, res.FenceHolder, res.Offset, reason, gen, holder)
+	}
+}
+
+// assertSummary asserts the HEAD seal summary Get reports; gen 0 means none.
+func (f *fenceFixture) assertSummary(label string, gen int64, off Offset) {
+	f.t.Helper()
+	meta, err := f.s.Get(f.path)
+	if err != nil {
+		f.t.Fatalf("%s: get: %v", label, err)
+	}
+	if meta.SealedGeneration != gen || (meta.SealedOffset == nil) != (gen == 0) ||
+		(gen != 0 && !meta.SealedOffset.Equal(off)) {
+		f.t.Fatalf("%s: seal summary = gen:%d off:%v, want %d/%v", label, meta.SealedGeneration, meta.SealedOffset, gen, off)
+	}
+}
+
+// sealOf reads one authority's recorded seal, as the Redis tests HGET wfseal.
+func (f *fenceFixture) sealOf(fence auth.AppendFence) WriteFenceSeal {
+	return f.s.streams[f.path].seals[FenceAuthority(fence)]
+}
+
+// markerOf reads one authority's marker entry, as the Redis tests HGET the key.
+func (f *fenceFixture) markerOf(fence auth.AppendFence) memoryMarker {
+	return f.s.markers[f.path][FenceAuthority(fence)]
+}
+
+// reap drops one authority's marker as the Redis key TTL would.
+func (f *fenceFixture) reap(fence auth.AppendFence) {
+	delete(f.s.markers[f.path], FenceAuthority(fence))
+}
+
+// TestMemoryStoreWriteFenceParity pins the MemoryStore as the in-process
+// oracle of the write-fence extension (#183, C.7): every outcome and check
+// order of grant_append_fence.lua, revoke_append_fence.lua,
+// seal_append_fence.lua and the fence rung of append.lua / close.lua, with
+// EvaluateWriteFence as the one source of truth. Each row is a scenario
+// store/redis/append_fence_test.go pins against live Redis, so the two
+// backends are held to the same table; the reaper (the Redis marker key TTL)
+// is simulated by dropping the marker.
+func TestMemoryStoreWriteFenceParity(t *testing.T) {
+	ttl := int64(60)
+	plain := CreateOptions{ContentType: "text/plain"}
+	fenced := CreateOptions{ContentType: "text/plain", WriteFence: true}
+	fencedTTL := CreateOptions{ContentType: "text/plain", WriteFence: true, TTLSeconds: &ttl}
+
+	// sealedAfterReap pins K.4 / INV-FENCE-06 for one way of writing the seal:
+	// a delayed grant of a sealed generation is refused even after its marker
+	// tombstone has been reaped, and so is its write.
+	sealedAfterReap := func(seal func(f *fenceFixture, f1, f2 auth.AppendFence)) func(f *fenceFixture) {
+		return func(f *fenceFixture) {
+			f1, f2 := f.fence(1, "w_1", "worker-a"), f.fence(2, "w_2", "worker-b")
+			f.grant(f1)
+			f.fencedAppend(f1, 0)
+			seal(f, f1, f2)
+			f.reap(f1)
+			f.refuseGrant("delayed grant of the sealed generation after reap", f1)
+			res, err := f.fencedAppendAs(f1, "p", 1)
+			f.assertFenced("sealed generation after reap", res, err, FenceSealed, 1, "")
+			f.grant(f2)
+			f.fencedAppend(f2, 0)
+		}
+	}
+
+	tests := []struct {
+		name string
+		opts CreateOptions
+		run  func(f *fenceFixture)
+	}{
+		{"incomplete and lapsed claims are refused before the ladder", plain, func(f *fenceFixture) {
+			var none auth.AppendFence
+			if _, err := f.s.Append(f.path, []byte("x"), AppendOptions{Fence: &none}); !errors.Is(err, ErrAppendFenced) {
+				f.t.Fatalf("append with an incomplete fence = %v, want ErrAppendFenced", err)
+			}
+			if _, err := f.s.CloseStreamFenced(f.path, none); !errors.Is(err, ErrAppendFenced) {
+				f.t.Fatalf("fenced close with an incomplete fence = %v, want ErrAppendFenced", err)
+			}
+			if _, err := f.s.CloseStreamWithProducer(f.path, CloseProducerOptions{ProducerId: "p", Fence: &none}); !errors.Is(err, ErrAppendFenced) {
+				f.t.Fatalf("producer close with an incomplete fence = %v, want ErrAppendFenced", err)
+			}
+			f.refuseGrant("grant of an incomplete fence", none)
+			if err := f.s.RevokeAppendFence(f.path, none); !errors.Is(err, ErrAppendFenced) {
+				f.t.Fatalf("revoke of an incomplete fence = %v, want ErrAppendFenced", err)
+			}
+			if _, err := f.s.SealAppendFence(f.path, none); !errors.Is(err, ErrAppendFenced) {
+				f.t.Fatalf("seal of an incomplete fence = %v, want ErrAppendFenced", err)
+			}
+			atNow := f.fence(1, "w_1", "worker-a")
+			atNow.LeaseUntilNs = f.clock.Now().UnixNano()
+			f.refuseGrant("grant with a lease at now", atNow)
+			if f.s.Has(f.path) != true || len(f.s.markers[f.path]) != 0 {
+				f.t.Fatal("a refused grant wrote a marker")
+			}
+		}},
+		{"absent stream is not granted but its marker is tombstoned by a seal", plain, func(f *fenceFixture) {
+			f1 := f.fence(1, "w_1", "worker-a")
+			if installed, err := f.s.GrantAppendFence("/absent", f1); err != nil || installed {
+				f.t.Fatalf("grant on an absent stream = installed:%t err:%v, want false/nil", installed, err)
+			}
+			if res, err := f.s.SealAppendFence("/absent", f1); err != nil || res.Outcome != SealNotFound {
+				f.t.Fatalf("seal on an absent stream = %+v, %v; want notfound", res, err)
+			}
+			if m := f.s.markers["/absent"][FenceAuthority(f1)]; m.State != WriteFenceMarkerRevoked || m.Generation != 1 {
+				f.t.Fatalf("seal on an absent stream left marker %+v, want a generation-1 tombstone", m.WriteFenceMarker)
+			}
+		}},
+		{"claim lifecycle on an unfenced stream", plain, func(f *fenceFixture) {
+			appendWith := func(fence auth.AppendFence) (AppendResult, error) {
+				return f.s.Append(f.path, []byte("x"), AppendOptions{ContentType: "text/plain", Fence: &fence})
+			}
+			f1 := f.fence(1, "w_a", "worker-a")
+			res, err := appendWith(f1)
+			f.assertFenced("append before grant", res, err, FenceMarker, 0, "")
+			f.grant(f1)
+			if _, err := appendWith(f1); err != nil {
+				f.t.Fatalf("append generation 1: %v", err)
+			}
+			if err := f.s.RevokeAppendFence(f.path, f1); err != nil {
+				f.t.Fatalf("revoke generation 1: %v", err)
+			}
+			res, err = appendWith(f1)
+			f.assertFenced("append after revoke", res, err, FenceMarker, 1, "")
+			f.refuseGrant("same-generation regrant against the tombstone", f1)
+
+			f2 := f.fence(2, "w_b", "worker-b")
+			f.grant(f2)
+			if err := f.s.RevokeAppendFence(f.path, f1); err != nil {
+				f.t.Fatalf("delayed generation 1 revoke: %v", err)
+			}
+			if _, err := appendWith(f2); err != nil {
+				f.t.Fatalf("append generation 2 after the stale revoke: %v", err)
+			}
+			res, err = appendWith(f1)
+			f.assertFenced("append with the stale generation", res, err, FenceMarker, 2, "worker-b")
+
+			f.clock.Advance(time.Minute) // now == lease: lapsed (strict >), like the stream expiry boundary
+			res, err = appendWith(f2)
+			f.assertFenced("append after the lease lapsed", res, err, FenceMarker, 2, "")
+			f.grant(f.fence(2, "w_b", "worker-b")) // the heartbeat renewal from the advanced clock
+			if _, err := appendWith(f2); err != nil {
+				f.t.Fatalf("append after renewal: %v", err)
+			}
+			if _, err := f.s.CloseStreamFenced(f.path, f2); err != nil {
+				f.t.Fatalf("fenced close: %v", err)
+			}
+		}},
+		{"seal refuses the sealed generation and discloses the successor", fenced, func(f *fenceFixture) {
+			f1 := f.fence(1, "w_1", "worker-a")
+			f.grant(f1)
+			tail1 := f.fencedAppend(f1, 0)
+			f.assertSeal("seal", f.seal(f1), SealSealed, 1, tail1)
+			res, err := f.fencedAppendAs(f1, "p", 1)
+			f.assertFenced("append after seal", res, err, FenceSealed, 1, "")
+			if tail, _ := f.s.GetCurrentOffset(f.path); !tail.Equal(tail1) {
+				f.t.Fatalf("tail moved after a sealed write: %v != %v", tail, tail1)
+			}
+			if meta, err := f.s.Get(f.path); err != nil || !meta.WriteFence {
+				f.t.Fatalf("metadata = %+v, %v; want write-fenced", meta, err)
+			}
+			f.assertSummary("after the seal", 1, tail1)
+			f.refuseGrant("regrant of the sealed generation", f1)
+
+			f2 := f.fence(2, "w_2", "worker-b")
+			f.grant(f2)
+			f.fencedAppend(f2, 0)
+			res, err = f.fencedAppendAs(f1, "p", 1)
+			f.assertFenced("sealed generation behind a successor", res, err, FenceSealed, 2, "worker-b")
+		}},
+		{"seal redelivery is idempotent before and after the tombstone reap", fenced, func(f *fenceFixture) {
+			f1 := f.fence(1, "w_1", "worker-a")
+			f.grant(f1)
+			tail1 := f.fencedAppend(f1, 0)
+			f.assertSeal("first seal", f.seal(f1), SealSealed, 1, tail1)
+			f.assertSeal("redelivered seal, tombstone present", f.seal(f1), SealAlready, 1, tail1)
+			f.reap(f1)
+			f.assertSeal("redelivered seal, tombstone reaped", f.seal(f1), SealAlready, 1, tail1)
+		}},
+		{"stale seal mutates nothing", fenced, func(f *fenceFixture) {
+			f2 := f.fence(2, "w_2", "worker-b")
+			f.grant(f2)
+			otherWake := f2
+			otherWake.WakeID = "w_other"
+			for i, tt := range []struct {
+				name  string
+				fence auth.AppendFence
+			}{
+				{"older generation", f.fence(1, "w_1", "worker-a")},
+				{"same generation, different wake", otherWake},
+			} {
+				f.assertSeal(tt.name, f.seal(tt.fence), SealStale, 0, Offset{})
+				if f.sealOf(tt.fence).Present {
+					f.t.Fatalf("%s: a stale seal wrote a seal", tt.name)
+				}
+				f.fencedAppend(f2, int64(i)) // the live marker keeps accepting
+			}
+		}},
+		{"unfenced stream seals tombstone only", plain, func(f *fenceFixture) {
+			f1 := f.fence(1, "w_1", "worker-a")
+			f.grant(f1)
+			f.fencedAppend(f1, 0)
+			f.assertSeal("seal on an unfenced stream", f.seal(f1), SealUnfenced, 0, Offset{})
+			res, err := f.fencedAppendAs(f1, "p", 1)
+			f.assertFenced("append after tombstone", res, err, FenceMarker, 1, "")
+			if f.sealOf(f1).Present {
+				f.t.Fatal("unfenced stream carries a seal")
+			}
+			f.assertSummary("unfenced", 0, Offset{})
+			f.refuseGrant("regrant against the tombstone", f1)
+			f.reap(f1)
+			f.grant(f1) // the tombstone-only residual on unfenced streams
+		}},
+		{"supersession seals the predecessor at its last fenced offset", fenced, func(f *fenceFixture) {
+			f1 := f.fence(1, "w_1", "worker-a")
+			f.grant(f1)
+			fencedTail := f.fencedAppend(f1, 0)
+			open, err := f.s.Append(f.path, []byte("inbox"), AppendOptions{ContentType: "text/plain"})
+			if err != nil || open.Offset.Equal(fencedTail) {
+				f.t.Fatalf("open-class append = %+v, %v; want the tail moved", open, err)
+			}
+			f2 := f.fence(2, "w_2", "worker-b")
+			f.grant(f2)
+			if got, want := f.sealOf(f1), (WriteFenceSeal{Present: true, Generation: 1, WakeID: "w_1", Offset: fencedTail}); got != want {
+				f.t.Fatalf("supersession seal = %+v, want %+v", got, want)
+			}
+			f.assertSummary("after supersession", 1, fencedTail)
+			res, err := f.fencedAppendAs(f1, "p", 1)
+			f.assertFenced("predecessor after supersession", res, err, FenceSealed, 2, "worker-b")
+			f.fencedAppend(f2, 0)
+		}},
+		{"sealed by done is refused after the tombstone reap", fenced, sealedAfterReap(func(f *fenceFixture, f1, _ auth.AppendFence) {
+			if res := f.seal(f1); res.Outcome != SealSealed {
+				f.t.Fatalf("seal = %+v, want sealed", res)
+			}
+		})},
+		{"sealed by supersession is refused after the tombstone reap", fenced, sealedAfterReap(func(f *fenceFixture, _, f2 auth.AppendFence) {
+			f.grant(f2)
+		})},
+		{"renewal never shortens the lease", fenced, func(f *fenceFixture) {
+			base := f.clock.Now()
+			leaseAt := func(d time.Duration) auth.AppendFence {
+				fence := f.fence(1, "w_1", "worker-a")
+				fence.LeaseUntilNs = base.Add(d).UnixNano()
+				return fence
+			}
+			assertMarker := func(label string, want auth.AppendFence) {
+				f.t.Helper()
+				m := f.markerOf(want)
+				if m.LeaseUntilNs != want.LeaseUntilNs {
+					f.t.Fatalf("%s: marker lease = %d, want %d", label, m.LeaseUntilNs, want.LeaseUntilNs)
+				}
+				// The retention runs from the retained lease, on the wall clock.
+				wantExpiry := time.Now().Add(time.Duration(want.LeaseUntilNs - base.UnixNano())).Add(appendFenceRetention)
+				if d := m.expiresAt.Sub(wantExpiry); d < -time.Second || d > time.Second {
+					f.t.Fatalf("%s: marker expires at %v, want %v (the retained lease plus retention)", label, m.expiresAt, wantExpiry)
+				}
+			}
+			long := leaseAt(time.Minute)
+			f.grant(long)
+			f.grant(leaseAt(30 * time.Second)) // delayed, older re-grant
+			assertMarker("after the shorter re-grant", long)
+			longer := leaseAt(90 * time.Second)
+			f.grant(longer)
+			assertMarker("after the longer re-grant", longer)
+		}},
+		{"seals are per authority", fenced, func(f *fenceFixture) {
+			old := f.fence(5, "w_5", "worker-a")
+			recreated := f.fence(1, "w_1", "worker-a")
+			recreated.SubscriptionIncarnation = "inc-b"
+
+			f.grant(old)
+			oldTail := f.fencedAppend(old, 0)
+			f.assertSeal("seal old incarnation", f.seal(old), SealSealed, 5, oldTail)
+
+			f.grant(recreated) // generation 1 < 5, but its own namespace
+			// Producer "p" keeps epoch 5 from the old incarnation: its stale-epoch
+			// refusal at epoch 1 is the documented K.9 limitation, so a fresh id.
+			res, err := f.fencedAppendAs(recreated, "p-recreated", 0)
+			if err != nil {
+				f.t.Fatalf("recreated incarnation append: %v", err)
+			}
+			newTail := res.Offset
+			f.refuseGrant("old incarnation regrant", old)
+			f.assertSummary("after the old seal", 5, oldTail)
+
+			f.assertSeal("seal recreated incarnation", f.seal(recreated), SealSealed, 1, newTail)
+			if got, want := f.sealOf(old), (WriteFenceSeal{Present: true, Generation: 5, WakeID: "w_5", Offset: oldTail}); got != want {
+				f.t.Fatalf("old incarnation seal disturbed: %+v, want %+v", got, want)
+			}
+			if got, want := f.sealOf(recreated), (WriteFenceSeal{Present: true, Generation: 1, WakeID: "w_1", Offset: newTail}); got != want {
+				f.t.Fatalf("recreated incarnation seal = %+v, want %+v", got, want)
+			}
+			f.assertSummary("after the newer seal", 1, newTail)
+			res, err = f.fencedAppendAs(old, "p", 1)
+			f.assertFenced("old incarnation after both seals", res, err, FenceSealed, 5, "")
+			if m := f.markerOf(recreated); m.State != WriteFenceMarkerRevoked || m.expiresAt.After(time.Now().Add(appendFenceRetention)) {
+				f.t.Fatalf("sealed marker = %+v expiring %v, want a tombstone within %v", m.WriteFenceMarker, m.expiresAt, appendFenceRetention)
+			}
+		}},
+		{"recreated stream matches no marker", plain, func(f *fenceFixture) {
+			f1 := f.fence(1, "w_1", "worker-a")
+			f.grant(f1)
+			if err := f.s.Delete(f.path); err != nil {
+				f.t.Fatalf("delete: %v", err)
+			}
+			f.create(plain)
+			res, err := f.s.Append(f.path, []byte("x"), AppendOptions{ContentType: "text/plain", Fence: &f1})
+			f.assertFenced("append to the recreated stream", res, err, FenceMarker, 1, "worker-a")
+		}},
+		{"fork does not inherit the fence", fenced, func(f *fenceFixture) {
+			f1 := f.fence(1, "w_1", "worker-a")
+			f.grant(f1)
+			f.fencedAppend(f1, 0)
+			res, err := f.openAppendAs("p", 2, 0)
+			f.assertFenced("bound producer on the source", res, err, FenceBound, 1, "")
+			for _, tt := range []struct {
+				name string
+				opts CreateOptions
+				want bool
+			}{
+				{"inherits nothing", CreateOptions{ForkedFrom: f.path}, false},
+				{"declares its own", CreateOptions{ForkedFrom: f.path, WriteFence: true}, true},
+			} {
+				fork := f.path + "/" + tt.name
+				meta, created, err := f.s.Create(fork, tt.opts)
+				if err != nil || !created {
+					f.t.Fatalf("%s: create fork = created:%t err:%v", tt.name, created, err)
+				}
+				if meta.WriteFence != tt.want {
+					f.t.Fatalf("%s: fork WriteFence = %t, want %t", tt.name, meta.WriteFence, tt.want)
+				}
+				if st := f.s.streams[fork]; st.bound != nil || st.lastFencedOff != nil || st.seals != nil {
+					f.t.Fatalf("%s: fork carries the source's fence state", tt.name)
+				}
+				epoch, seq := int64(2), int64(0)
+				if _, err := f.s.Append(fork, []byte("open"), AppendOptions{ContentType: "text/plain", ProducerId: "p", ProducerEpoch: &epoch, ProducerSeq: &seq}); err != nil {
+					f.t.Fatalf("%s: open-class append of the source's bound producer on the fork: %v", tt.name, err)
+				}
+			}
+		}},
+		{"rung precedes the TTL touch and the closed check", fencedTTL, func(f *fenceFixture) {
+			created := f.s.streams[f.path].metadata.LastAccessedAt
+			if _, err := f.s.CloseStream(f.path); err != nil {
+				f.t.Fatalf("close: %v", err)
+			}
+			f.clock.Advance(10 * time.Second)
+			f1 := f.fence(1, "w_1", "worker-a")
+			res, err := f.fencedAppendAs(f1, "p", 0)
+			f.assertFenced("ungranted claim on a closed stream", res, err, FenceMarker, 0, "")
+			if got := f.s.streams[f.path].metadata.LastAccessedAt; !got.Equal(created) {
+				f.t.Fatalf("a fence refusal touched the sliding TTL: %v != %v", got, created)
+			}
+			f.grant(f1)
+			if _, err := f.fencedAppendAs(f1, "p", 0); !errors.Is(err, ErrStreamClosed) {
+				f.t.Fatalf("accepted claim on a closed stream = %v, want ErrStreamClosed", err)
+			}
+			if got := f.s.streams[f.path].metadata.LastAccessedAt; !got.Equal(f.clock.Now()) {
+				f.t.Fatalf("an accepted claim did not touch the sliding TTL before the closed check: %v", got)
+			}
+		}},
+		{"fenced stream rung outcomes and the producer binding", fenced, func(f *fenceFixture) {
+			f1 := f.fence(1, "w_1", "worker-a")
+			f.grant(f1)
+			res, err := f.s.Append(f.path, []byte("x"), AppendOptions{ContentType: "text/plain", Fence: &f1})
+			f.assertFenced("fenced class without producer headers", res, err, FenceProducerRequired, 1, "worker-a")
+			epoch, seq := int64(2), int64(0)
+			res, err = f.s.Append(f.path, []byte("x"), AppendOptions{ContentType: "text/plain", Fence: &f1, ProducerId: "p", ProducerEpoch: &epoch, ProducerSeq: &seq})
+			f.assertFenced("fenced class at the wrong epoch", res, err, FenceEpoch, 1, "worker-a")
+			tail := f.fencedAppend(f1, 0)
+			if st := f.s.streams[f.path]; st.bound["p"] != 1 || st.lastFencedOff == nil || !st.lastFencedOff.Equal(tail) {
+				f.t.Fatalf("accepted fenced write recorded bound=%v lastFencedOff=%v, want p:1 / %v", st.bound, st.lastFencedOff, tail)
+			}
+			res, err = f.openAppendAs("p", 2, 0)
+			f.assertFenced("open class naming the bound producer", res, err, FenceBound, 1, "")
+			res, err = f.openAppendAs("p", 1, 0) // WF-17: the accepted tuple replayed without the credential
+			f.assertFenced("open class replaying the bound tuple", res, err, FenceBound, 1, "")
+			if _, err := f.openAppendAs("q", 1, 0); err != nil {
+				f.t.Fatalf("unbound producer on the open class: %v", err)
+			}
+			if _, err := f.s.Append(f.path, []byte("x"), AppendOptions{ContentType: "text/plain"}); err != nil {
+				f.t.Fatalf("open class without producer headers: %v", err)
+			}
+			if st := f.s.streams[f.path]; !st.lastFencedOff.Equal(tail) || len(st.bound) != 1 {
+				f.t.Fatalf("open-class writes moved the fence state: lastFencedOff=%v bound=%v", st.lastFencedOff, st.bound)
+			}
+		}},
+		{"fenced close binds and fixes the last fenced offset", fenced, func(f *fenceFixture) {
+			f1 := f.fence(1, "w_1", "worker-a")
+			f.grant(f1)
+			open, err := f.s.Append(f.path, []byte("open"), AppendOptions{ContentType: "text/plain"})
+			if err != nil {
+				f.t.Fatalf("open-class append: %v", err)
+			}
+			cres, err := f.s.CloseStreamFenced(f.path, f1)
+			if !errors.Is(err, ErrAppendFenced) || cres == nil || cres.FenceReason != FenceProducerRequired ||
+				cres.FenceGeneration != 1 || cres.FenceHolder != "worker-a" || !cres.FinalOffset.Equal(Offset{}) {
+				f.t.Fatalf("fenced close without producer headers = %+v, %v; want producer_required/1/worker-a, no tail", cres, err)
+			}
+			pres, err := f.s.CloseStreamWithProducer(f.path, CloseProducerOptions{ProducerId: "p", ProducerEpoch: 1, ProducerSeq: 0, Fence: &f1})
+			if err != nil || !pres.StreamClosed || pres.ProducerResult != ProducerResultAccepted {
+				f.t.Fatalf("fenced producer close = %+v, %v; want accepted and closed", pres, err)
+			}
+			if st := f.s.streams[f.path]; st.bound["p"] != 1 || st.lastFencedOff == nil || !st.lastFencedOff.Equal(open.Offset) {
+				f.t.Fatalf("fenced close recorded bound=%v lastFencedOff=%v, want p:1 / %v", st.bound, st.lastFencedOff, open.Offset)
+			}
+			f.assertSeal("seal after the fenced close", f.seal(f1), SealSealed, 1, open.Offset)
+			pres, err = f.s.CloseStreamWithProducer(f.path, CloseProducerOptions{ProducerId: "p", ProducerEpoch: 1, ProducerSeq: 0, Fence: &f1})
+			if !errors.Is(err, ErrAppendFenced) || pres == nil || pres.FenceReason != FenceSealed || pres.FenceGeneration != 1 || pres.StreamClosed {
+				f.t.Fatalf("sealed claim's close = %+v, %v; want sealed/1 before the closed check", pres, err)
+			}
+			if _, err := f.s.CloseStream(f.path); err != nil {
+				f.t.Fatalf("open-class close on a fenced stream: %v", err)
+			}
+		}},
+		{"reaped tombstone reads as absent", plain, func(f *fenceFixture) {
+			f1 := f.fence(1, "w_1", "worker-a")
+			f.grant(f1)
+			if err := f.s.RevokeAppendFence(f.path, f1); err != nil {
+				f.t.Fatalf("revoke: %v", err)
+			}
+			res, err := f.fencedAppendAs(f1, "p", 0)
+			f.assertFenced("tombstone present", res, err, FenceMarker, 1, "")
+			m := f.markerOf(f1)
+			m.expiresAt = time.Now().Add(-time.Second)
+			f.s.markers[f.path][FenceAuthority(f1)] = m
+			res, err = f.fencedAppendAs(f1, "p", 0)
+			f.assertFenced("tombstone reaped", res, err, FenceMarker, 0, "")
+			if _, ok := f.s.markers[f.path][FenceAuthority(f1)]; ok {
+				f.t.Fatal("a reaped marker was kept")
+			}
+			f.grant(f1) // on an unfenced stream the generation is grantable again
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := NewFakeClock(time.Unix(100, 0))
+			f := &fenceFixture{t: t, s: NewMemoryStore(WithClock(clock)), clock: clock, path: "/fenced"}
+			f.create(tt.opts)
+			tt.run(f)
+		})
+	}
+}
+
+// TestMemoryStoreCreateWriteFenceConfigMatches pins C.1 on the MemoryStore:
+// the write-fence opt-in is part of the idempotent-create comparison, so a
+// re-PUT must agree with the stream's declaration in both directions, and a
+// matching re-PUT reports the fence back.
+func TestMemoryStoreCreateWriteFenceConfigMatches(t *testing.T) {
+	tests := []struct {
+		name         string
+		first, again bool
+		wantErr      error
+	}{
+		{"fenced then fenced matches", true, true, nil},
+		{"plain then plain matches", false, false, nil},
+		{"fenced then plain mismatches", true, false, ErrConfigMismatch},
+		{"plain then fenced mismatches", false, true, ErrConfigMismatch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewMemoryStore()
+			if _, _, err := s.Create("/wf", CreateOptions{ContentType: "text/plain", WriteFence: tt.first}); err != nil {
+				t.Fatalf("first create: %v", err)
+			}
+			meta, created, err := s.Create("/wf", CreateOptions{ContentType: "text/plain", WriteFence: tt.again})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("re-create = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr == nil && (created || meta.WriteFence != tt.first) {
+				t.Fatalf("re-create = created:%t WriteFence:%t, want false/%t", created, meta.WriteFence, tt.first)
+			}
+		})
 	}
 }
