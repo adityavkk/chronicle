@@ -203,7 +203,7 @@ func (h *Handler) classifyFencedStream(rawPath string, cred appendCredential) (w
 // is a rejection, never a silent downgrade to an unfenced write.
 func (h *Handler) authorizeAppendFence(r *http.Request, rawPath string, cred appendCredential, class writeClass) (*auth.AppendFence, error) {
 	if class != writeClassFenced {
-		return h.authorizeAppendPhase(r, rawPath, appendPhaseFence, "append fence", false)
+		return h.authorizeAppendPhase(r, rawPath, appendPhaseFence, "append fence")
 	}
 	d, fence := h.tokenDecision(cred.token, cred.malformed, cred.path, appendPhaseFence)
 	var reason string
@@ -233,8 +233,13 @@ func fenceDenied(d auth.Decision, reason string) *authError {
 // fencedError maps an in-slot fence rejection (store.ErrAppendFenced) to the
 // 409 FENCED envelope with full disclosure (design §B.4): the reason and
 // message, the current generation and live holder the store reported, and the
-// request's producer headers for the terminal gap pair.
+// request's producer headers for the terminal gap pair. A backend that
+// reports ErrAppendFenced with no reason (both shipped backends always set
+// one) still yields a well-formed 409: the generic marker refusal.
 func fencedError(reason store.FenceReason, generation int64, holder string, hasProducer bool, reqSeq int64) *authError {
+	if reason == store.FenceNone {
+		reason = store.FenceMarker
+	}
 	return &authError{
 		status: http.StatusConflict,
 		code:   errCodeFenced,
@@ -260,9 +265,7 @@ func fenceMessage(reason store.FenceReason) string {
 		return "producer epoch must equal the claim generation"
 	case store.FenceBound:
 		return "producer is bound to the write fence"
-	case store.FenceMarker, store.FenceNone:
-		return "write token claim is fenced"
-	default:
+	default: // FenceMarker, and any reason this build does not know
 		return "write token claim is fenced"
 	}
 }
@@ -279,8 +282,8 @@ func producerDisclosure(err error, hasProducer bool, reqSeq int64) error {
 }
 
 // countFenceRejection records one fence rejection. Every rejection that leaves
-// the handler as an error counts in writeError, the single sink; the one
-// plaintext 400 (producer headers missing on the fenced class) counts here.
+// the handler as an error counts in writeError, the single sink; the plaintext
+// 400s (producer headers missing or partial on the fenced class) count here.
 func (h *Handler) countFenceRejection(reason string) {
 	if h.FenceMetrics != nil {
 		h.FenceMetrics.AppendFenceRejection(reason)

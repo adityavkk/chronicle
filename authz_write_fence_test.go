@@ -588,6 +588,16 @@ func TestHandleAppendFencedDisclosure(t *testing.T) {
 			want{409, 0, "marker", "write token claim is fenced", "", "", true},
 		},
 		{
+			"no disclosure from the backend", func(f *fenceFixture) { f.store.reject(store.FenceNone, 0, "") },
+			func(_ *fenceFixture, tok string) ([]byte, []hdr) {
+				return []byte(`{"n":1}`), jsonAppend(append(producerAt("8", "4"), hdr{WriteTokenHeader, tok})...)
+			},
+			// A backend that reports ErrAppendFenced with zero disclosure fields
+			// still yields a well-formed 409: the generic marker refusal, no
+			// generation, no holder, no epoch echo, the terminal pair intact.
+			want{409, 0, "marker", "write token claim is fenced", "", "", true},
+		},
+		{
 			"epoch", func(f *fenceFixture) { f.store.reject(store.FenceEpoch, 8, "worker-A") },
 			func(_ *fenceFixture, tok string) ([]byte, []hdr) {
 				return []byte(`{"n":1}`), jsonAppend(append(producerAt("9", "0"), hdr{WriteTokenHeader, tok})...)
@@ -998,6 +1008,38 @@ func TestAppendFenceRejectionCountedOnce(t *testing.T) {
 			f.counter.only(t, c.reason)
 		})
 	}
+}
+
+// TestAppendFencedClassPartialProducerHeadersCounted pins the partial-triple
+// shape of the missing-producer-headers rejection on the fenced class (#183
+// polish): the wire response is the base all-or-nothing 400 byte for byte —
+// it runs before the complete-absence 400 — and the rejection counts under
+// producer_required exactly once. The same partial triple on the open class
+// keeps the base 400 uncounted.
+func TestAppendFencedClassPartialProducerHeadersCounted(t *testing.T) {
+	const path = "/agents/e1/session"
+	const allOrNothing = "all producer headers (Producer-Id, Producer-Epoch, Producer-Seq) must be provided together"
+	partial := []hdr{{"Producer-Id", "entity-agents/e1"}, {"Producer-Seq", "0"}}
+
+	f := newFenceFixture(t, auth.ModeEnforce)
+	f.create(t, path, true)
+	tok := f.claimToken(t, 8, "worker-A", "agents/e1/session")
+	rec := f.post(path, []byte(`{"n":1}`), jsonAppend(append(partial, hdr{WriteTokenHeader, tok})...)...)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body %q, want 400", rec.Code, rec.Body.String())
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != allOrNothing {
+		t.Errorf("400 body = %q, want %q", got, allOrNothing)
+	}
+	f.counter.only(t, "producer_required")
+
+	open := newFenceFixture(t, auth.ModeEnforce)
+	open.create(t, path, true)
+	rec = open.post(path, []byte(`{"n":1}`), jsonAppend(append(partial, hdr{"Authorization", "Bearer " + tb4SvcBearer})...)...)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("open-class status = %d body %q, want 400", rec.Code, rec.Body.String())
+	}
+	open.counter.only(t, "")
 }
 
 // TestCORSListsWriteFenceHeaders pins the addendum rule that every new
