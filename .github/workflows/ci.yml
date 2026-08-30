@@ -278,8 +278,8 @@ jobs:
 
   # TLA+ model-check of the subscription-fence concurrent protocol (issue #37)
   # and its data-plane sibling, the write-fence append capability (issue #183,
-  # INV-FENCE-05/06: `make tlc` runs the 1x2 write-fence gate; the four fault
-  # configs MUST each violate their invariant and the W5..W8 witnesses MUST be
+  # INV-FENCE-05/06: `make tlc` runs the 1x2 write-fence gate; the five fault
+  # configs MUST each violate their invariant and the W5..W10 witnesses MUST be
   # reached). Its own job, NOT a step in the Go `test` job, so it never blocks
   # ordinary Go CI. Pins tla2tools.jar to a release and fails on any invariant
   # violation or an undeclared deadlock (the spec runs TLC with -deadlock off
@@ -327,22 +327,12 @@ jobs:
         run: make fence-fault-nobind
       - name: Write-fence negative test — idle-before-seal MUST violate SealPrecedesIdle (INV-FENCE-06)
         run: make fence-fault-lazyseal
+      - name: Write-fence negative test — generation-only seal MUST violate SealIsolation on two authorities (INV-FENCE-06)
+        run: make fence-fault-globalseal
       - name: Write-fence negative test — tombstone-only done MUST violate EpochsDoNotInterleave through DelayedGrant (INV-FENCE-06)
         run: make fence-fault-noseal
-      - name: Write-fence non-vacuity — each of W5..W8 MUST be reached on 1x2
-        run: |
-          fail=0
-          for W in 5 6 7 8; do
-            out=$(java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -deadlock -workers auto \
-                    -config WriteFence_coverage_W${W}.cfg MC_WriteFence.tla 2>&1 || true)
-            if echo "$out" | grep -q "Invariant NotW${W} is violated"; then
-              echo "W${W}: reached"
-            else
-              echo "::error::write-fence witness W${W} was NOT reached on the 1x2 config"
-              fail=1
-            fi
-          done
-          exit $fail
+      - name: Write-fence non-vacuity — each of W5..W10 MUST be reached on 1x2
+        run: make fence-coverage
       - name: Token-refresh liveness (#77) — leads-to + witness + negative control
         run: make token-refresh
 

@@ -10,8 +10,10 @@ name: Formal (nightly)
 #   - make tlc40       : the membership / HRW convergence spec and the L3
 #                        lease-tail refinement (#40).
 #   - make fence-2x2   : the write-fence append capability with TWO authorities
-#                        on one stream (#183, seal isolation), ~14.2M distinct
-#                        states; the 1x2 PR gate runs in ci.yml.
+#                        on one stream (#183: the per-authority invariants under
+#                        cross-authority interleaving of the shared producer
+#                        state and log), ~10.8M distinct states; the 1x2 PR gate
+#                        and the fault controls run in ci.yml.
 #   - apalache         : the #41 inductive-invariant proof of []SingleHolder
 #                        (FenceCore.tla); apalache-mc is downloaded to /tmp by
 #                        formal/tla/apalache/run.sh and never committed. Green
@@ -43,7 +45,7 @@ jobs:
         with:
           path: formal/tla/tla2tools.jar
           key: tla2tools-v1.7.4
-      - name: TLA+ heavy — scaled 2/2/2 layering proof (#38) + membership/HRW convergence (#40) + write-fence 2-authority seal isolation (#183)
+      - name: TLA+ heavy — scaled 2/2/2 layering proof (#38) + membership/HRW convergence (#40) + write-fence two authorities on one stream (#183)
         run: make tlc38-heavy tlc40 fence-2x2
 
   # The Apalache lane (issue #41): the three inductive obligations, the scope
