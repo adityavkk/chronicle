@@ -48,31 +48,31 @@ type Prometheus struct {
 	// "New metrics"). Appended after the original set; see webhook.Metrics for the
 	// append-only contract (GAP2). No-ops until the matching mechanism (#12–#15)
 	// wires them to real call sites.
-	fanoutSeconds     prometheus.Histogram
-	fanoutSlotsProbed prometheus.Histogram
-	fanoutSubs        prometheus.Histogram
-	appendHookSeconds prometheus.Histogram
-	dirtyEnqueues     *prometheus.CounterVec
-	dirtyDepth        prometheus.Gauge
-	dirtyCapacity     prometheus.Gauge
-	dirtyOldestAge    prometheus.Gauge
-	dirtyProcess      *prometheus.HistogramVec
-	dirtyProcessSubs  prometheus.Counter
-	dirtyProcessWakes prometheus.Counter
-	dirtyDuplicates   prometheus.Counter
-	dirtyOverflows    prometheus.Counter
-	reconcileRequests *prometheus.CounterVec
-	dirtyErrors       *prometheus.CounterVec
-	dirtyRecovery     prometheus.Histogram
-	dueSetMutations   *prometheus.CounterVec
-	dueWorkerSeconds  prometheus.Histogram
-	dueWorkerFired    prometheus.Histogram
-	slotOwnership     *prometheus.CounterVec
-	coverageGap       prometheus.Histogram
-	ownerFenced       *prometheus.CounterVec
-	claimContention   *prometheus.CounterVec
-	durabilityShort   *prometheus.CounterVec
-	serviceAccess     *prometheus.CounterVec
+	fanoutSeconds            prometheus.Histogram
+	fanoutSlotsProbed        prometheus.Histogram
+	fanoutSubs               prometheus.Histogram
+	appendHookSeconds        prometheus.Histogram
+	dirtyEnqueues            *prometheus.CounterVec
+	dirtyDepth               prometheus.Gauge
+	dirtyCapacity            prometheus.Gauge
+	dirtyOldestAge           prometheus.Gauge
+	dirtyProcess             *prometheus.HistogramVec
+	dirtyProcessSubs         prometheus.Counter
+	dirtyProcessWakes        prometheus.Counter
+	dirtyDuplicates          prometheus.Counter
+	dirtyOverflows           prometheus.Counter
+	reconcileRequests        *prometheus.CounterVec
+	dirtyErrors              *prometheus.CounterVec
+	dirtyRecovery            prometheus.Histogram
+	dueSetMutations          *prometheus.CounterVec
+	dueWorkerSeconds         prometheus.Histogram
+	dueWorkerFired           prometheus.Histogram
+	slotOwnership            *prometheus.CounterVec
+	coverageGap              prometheus.Histogram
+	ownerFenced              *prometheus.CounterVec
+	claimContention          *prometheus.CounterVec
+	durabilityShort          *prometheus.CounterVec
+	serviceAccess            *prometheus.CounterVec
 	appendFenceRejections    *prometheus.CounterVec
 	appendFenceSeals         *prometheus.CounterVec
 	appendFenceGrantFailures *prometheus.CounterVec
