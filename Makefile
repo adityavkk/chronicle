@@ -12,7 +12,7 @@ GO        ?= go
 BINARY    := bin/chronicle
 REDIS_URL ?= redis://localhost:6379
 
-.PHONY: all build run test test-unit test-integration conformance conformance-segments lint fmt tidy redis-up redis-down clean spec-check public-link-check
+.PHONY: all build run test test-unit test-integration conformance conformance-segments conformance-ext lint fmt tidy redis-up redis-down clean spec-check public-link-check
 
 all: build
 
@@ -39,6 +39,13 @@ conformance:
 # candidate. Uses only local Redis/filesystem object emulation.
 conformance-segments:
 	./scripts/conformance-segments.sh
+
+# Write Fencing extension conformance suite (chronicle-owned, unpinned;
+# test/conformance-ext — WF-01..28, NC-01..04, and the pinned-client control).
+# Fault-injection: CHRONICLE_BUILD_TAGS=fence_fault_{nobind,noseal,nopair}
+# builds a deliberately broken server whose named test must fail.
+conformance-ext:
+	./scripts/conformance-ext.sh
 
 # Filtered conformance run, e.g.: make conformance-filter FILTER="Idempotent Producer"
 conformance-filter:
