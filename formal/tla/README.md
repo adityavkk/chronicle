@@ -22,7 +22,7 @@ Java 11+ is required. The toolbox jar is pinned and downloaded on demand; it is
 
 ```sh
 # from this directory (formal/tla):
-make tlc          # parse + both faithful configs (the CI lane)
+make tlc          # parse + both faithful configs + the #183 write-fence gate (the CI lane)
 make tlc-1x1      # 1 sub x 1 worker fast lane (smoke)
 make tlc-2x2      # 2 sub x 2 worker exhaustive interleaving
 make fault-expire # INV-FENCE-04 negative test: MUST violate SingleHolder
@@ -462,3 +462,152 @@ what is inductive is the fence-safety core only.**
   harness.
 - `spectacle/render_frames.sh` + `spectacle/frames/` + `spectacle/README.md` —
   the offline filmstrips and the browser load recipe / share links.
+
+---
+
+# WriteFence — the write-fence append capability (issue #183)
+
+Issue #183 · discharges INV-FENCE-05 / INV-FENCE-06 (catalog rows) and wires the
+#41 Apalache lane into `formal-nightly.yml`.
+
+`SubscriptionFence.tla` (#37) proves the **control-plane** claim is single-holder.
+`WriteFence.tla` is its **data-plane** sibling: on one write-fenced stream, can
+the accepted fenced appends of two writer epochs ever *interleave*? The control
+plane is abstracted to what the stream slot observes (a minimal
+`(gen, wake, holder, phase)` copy of the subscription fence); the stream slot
+carries the claim **marker**, the per-authority **seal** (`wfseal:<auth>`), the
+per-producer-id state + `wfbind`, and the log of accepted fenced appends. Two
+claimants race one stream under exhaustive interleaving of the lease lapse, the
+`expire_lease` idle, the tombstone reaper, the delayed-grant EVAL race
+(`mintWriteTokenOnAck`'s snapshot), the seal-before-ack done sequence, and
+worker crashes. `SubscriptionFence.tla` and `FenceCore.tla` are untouched.
+
+Each claimant writes under its **own producer id**: a shared id would add the
+base producer state machine's per-id epoch order on top of the fence and could
+mask a fence hole, so per-claimant ids are the weaker, cover-all assumption
+(the fence must order the generations by itself; the producer SM still runs
+per id, unchanged).
+
+## How to run
+
+```sh
+make fence               # parse + the faithful 1x2 config (the PR gate; part of `make tlc`)
+make fence-2x2           # two authorities on one stream: seal isolation (nightly)
+make fence-fault-toctou  # NEGATIVE: out-of-slot check (pre-#169) MUST violate EpochsDoNotInterleave
+make fence-fault-nobind  # NEGATIVE: no producer binding MUST violate BoundProducerNeverOpen
+make fence-fault-lazyseal # NEGATIVE: idle-before-seal MUST violate SealPrecedesIdle
+make fence-fault-noseal  # NEGATIVE: tombstone-only done MUST violate EpochsDoNotInterleave via DelayedGrant
+make fence-coverage      # non-vacuity: W5..W8 MUST each be reached
+```
+
+## Results (TLC 2.19, tla2tools v1.7.4)
+
+| Config | Instance | States (distinct) | Depth | Verdict |
+|---|---|---|---|---|
+| `WriteFence_1x2.cfg` | 1 authority × 2 workers, MaxGen=3 MaxSeq=2 MaxCrashes=1 | 583,639 | 24 | `Inv` + both action props HOLD (~5 s) |
+| `WriteFence_2x2.cfg` | 2 authorities × 2 workers, MaxGen=2 MaxSeq=1 MaxCrashes=1 | 14,229,721 | 26 | `Inv` + both action props HOLD (~3 min on 10 cores) |
+| `WriteFence_fault_toctou.cfg` | 1×2, `CheckInSlot=FALSE` | ~5.4k to CEX | 7 | **EpochsDoNotInterleave VIOLATED** (intended) |
+| `WriteFence_fault_nobind.cfg` | 1×2, `BindProducers=FALSE` | 60 to CEX | 3 | **BoundProducerNeverOpen VIOLATED** (intended) |
+| `WriteFence_fault_lazyseal.cfg` | 1×2, `SealBeforeIdle=FALSE` | 46 to CEX | 2 | **SealPrecedesIdle VIOLATED** (intended) |
+| `WriteFence_fault_noseal.cfg` | 1×2, `SealOnRevoke=FALSE` | ~50k to CEX | 10 | **EpochsDoNotInterleave VIOLATED** through `DelayedGrant` (intended) |
+| `WriteFence_coverage_W{5..8}.cfg` | 1×2 | — | — | each `NotWx` VIOLATED ⇒ witness reached |
+
+`Inv == TypeOK ∧ EpochsDoNotInterleave ∧ BoundProducerNeverOpen ∧
+SealPrecedesIdle ∧ SealIsolation`. The two action properties are
+`GenMonotoneProp == [][GenMonotone]_vars` and
+`SealedIsFinalProp == [][SealedIsFinal]_vars`.
+
+The `fault_noseal` counterexample is the K.4 shape: `Claim(w1)[1] ·
+SealMarker(w1) · Reap · Idle(w1) · Claim(w2)[2] · AppendFenced(w2,2,0) ·
+Lapse(w2) · Reap · DelayedGrant(w1) · AppendFenced(w1,1,0)` — with done only
+tombstoning, the reaped tombstone leaves nothing to refuse the deposed
+holder's delayed grant, which reinstalls generation 1's marker and admits a
+generation-1 write after generation 2's. In the faithful spec the same
+`DelayedGrant(w1)` is refused by the seal (`1 <= sealGen`), and `make
+fence-fault-noseal` fails unless the trace passes through `DelayedGrant`.
+
+## Invariant ⇆ catalog map (#183 additions)
+
+| Spec operator | Catalog | Statement |
+|---|---|---|
+| `EpochsDoNotInterleave` | INV-FENCE-05 | Per authority, the accepted fenced appends are totally ordered by writer epoch = claim generation in stream order, and an epoch-equal run has one holder. The central data-plane safety property. |
+| `SealedIsFinal` (action) | INV-FENCE-06 | The seal is monotone per authority, and every append accepted in a step lies strictly above its authority's seal as it stood when the write was admitted: after a seal at `g`, no append with generation ≤ `g` of that authority is ever accepted. |
+| `SealPrecedesIdle` | INV-FENCE-06 (ordering clause) | An idle authority never leaves a live, unexpired marker: the seal (revoke + `wfseal`) is durable before `ack.lua` idles, and a lease lapse disarms the marker before `expire_lease.lua` idles — there is never a claimable subscription with a marker that still authorizes writes. |
+| `BoundProducerNeverOpen` | INV-FENCE-05 (rule 5) | Once a producer id is bound by an accepted fenced write, only fenced writes advance it — its `(epoch, lastSeq)` is exactly the last fenced entry's. |
+| `SealIsolation` | INV-FENCE-06 (2x2) | An authority's seal never runs ahead of its own fence register: `wfseal:<auth>` is keyed by the marker's authority suffix, so two authorities on one stream cannot seal each other. |
+| `GenMonotone` (action) | INV-FENCE-02 | Each authority's generation is non-decreasing across every step (the control-plane copy). |
+| `CheckInSlot` / `BindProducers` / `SealBeforeIdle` / `SealOnRevoke` toggles | INV-FENCE-05/06 negative controls | Each `FALSE` injects one named hole and MUST break the invariant it is paired with above (`make fence-fault-*`). |
+
+## Action ⇆ shipped source mirror (#183 additions)
+
+A non-granting reply (`FENCED` with `reason ∈ {sealed, marker, epoch, bound}`,
+`STALE`, a producer rejection, a duplicate) is a stuttering no-op — it grants
+nothing and mutates no durable state — so only the **accepting** branch of each
+action is a state change.
+
+| Spec action | Source mirror | Guard transcribed |
+|---|---|---|
+| `Claim(a,w)` | `webhook/scripts/claim.lua` + `store/redis/scripts/grant_append_fence.lua` (`handleClaim`) | BUSY iff a live holder's lease is unexpired; else rotate (`HINCRBY +1`, fresh wake, holder, live) and grant the marker at the new generation **before any token leaves**: refused when `generation <= seal`; supersession fixes the predecessor marker's seal; installs `(gen, wake, holder)` live under an unexpired lease. |
+| `Renew(a,w)` | `manager.go mintWriteTokenOnAck → grantWriteFences` (heartbeat) | the current holder's non-done ack inside its lease re-runs the grant at the same `(gen, wake, holder)`: a no-op on the live marker, a reinstall of a reaped one, FENCED (ack 500) once sealed or superseded. |
+| `DelayedGrant(a,w)` | the `mintWriteTokenOnAck` snapshot race (`manager.go:1213-1218`) | a grant EVAL decided against a stale view lands late with the snapshot's `(gen, wake, holder, lease)`: enabled while that deadline is unexpired, it re-runs `grant_append_fence.lua`'s guard — the per-authority seal refuses it for every past generation (K.4). |
+| `Lapse(a,w)` | the wall clock (`lease_until_ns <= now`) | no script: the deadline carried by `w`'s claim passes; the marker now refuses `w` (rule 2) and its delayed grant is FENCED. |
+| `ExpireLease(a)` | `webhook/scripts/expire_lease.lua` (server step) | a live claim whose lease lapsed is idled, gen **unchanged** (INV-FENCE-04); the marker is untouched (its own `lease_until_ns` fences the holder). |
+| `Reap(a)` | the marker key's `PEXPIRE` | a revoked tombstone after `retentionMs`; a live marker after `(lease_until_ns - now) + retentionMs`, i.e. only once its holder's lease lapsed. |
+| `AppendFenced(a,w,epoch,seq)` | `store/redis/scripts/append.lua` step 4 (`common.lua evaluate_write_fence`, rules 1-2 + 4) then `validate_producer` | one script: `generation > seal`, marker present/live/exact `(gen, wake, holder)`/unexpired, `Producer-Epoch = generation`, then the base producer SM; an accepted write appends to the log, advances the producer id and binds it (`wfbind`). |
+| `AppendCheck` / `AppendCommit` | the pre-#169 out-of-slot check (`CheckInSlot=FALSE` only) | the same admission decided outside the slot, then the write committed without re-checking — the TOCTOU #169 closed. |
+| `AppendOpen(p,epoch,seq)` | `append.lua` open class, rule 5 | no token: refused iff the producer id is bound (`wfbind`); otherwise PROTOCOL.md §5.2 byte-for-byte; not in the fenced log. |
+| `SealMarker(a,w)` | `manager.go sealWriteFencesIfCurrent` → `store/redis/scripts/seal_append_fence.lua` | the holder's done at the current `(gen, wake)` (accepted after the deadline like `ack.lua` done) tombstones the marker (STALE against a newer marker is a no-op) and records the per-authority seal at the claim generation, monotone and idempotent (`already` on redelivery). |
+| `Idle(a,w)` | `webhook/scripts/ack.lua` done='1' | fence-only: idles the claim, clears wake/holder, gen unchanged; faithfully only after this claim's seal committed. The token is **not** dropped: its bytes outlive the claim and the fence must refuse them. |
+| `Crash(w)` | the non-atomic Go orchestration | drops `w`'s in-memory tokens and out-of-slot in-flight appends, and loses every owed done follow-up; the durable ctl / marker / seal / producer / log survive (K.1). |
+
+`Sealed` / `MarkerOK` mirror `EvaluateWriteFence` rules 1-2; `ProdAccepts`
+mirrors `store.ValidateProducer`; `Grantable` / `GrantSeal` mirror
+`grant_append_fence.lua`'s check order (lease → seal → marker generation →
+same-generation exactness → supersession); `SealStale` mirrors
+`seal_append_fence.lua`'s staleness test.
+
+## Crash windows ⇆ recovery (#183 additions)
+
+Each witness predicate is TRUE exactly in a state the safety argument must
+genuinely reach; `make fence-coverage` proves each is reached on the 1x2
+instance (its `NotWx` MUST be violated).
+
+| Window | Spec witness | Recovery / why it fails closed |
+|---|---|---|
+| **W5** seal-before-ack (K.1), recovered | `WindowW5`: one authority has accepted appends at two generations | the crash between `seal_append_fence.lua` and `ack.lua` leaves the holder sealed and the sub live; the lease lapses ⇒ `expire_lease` idles ⇒ the successor claims at `g+1` and genuinely writes (`EpochsDoNotInterleave` is not vacuous). |
+| **W6** grant-before-POST (K.2) / the deposed holder's late write | `WindowW6`: a worker still carries a token the fence refuses | a granted marker whose token never left, or a token whose claim was superseded, sealed, reaped, or lapsed: the write is `FENCED` in the slot; nothing revives it. |
+| **W7** seal redelivery (K.1) | `WindowW7`: `pending = "already"` — a done whose seal committed but whose `ack.lua` never ran was redelivered and re-sealed idempotently | the redelivered done finds `wfseal >= g` (`already`), tombstones again, and idles; over-sealing is never unsafe (K.6). |
+| **W8** delayed grant (K.4) | `WindowW8`: a worker holds a token under an unexpired deadline whose generation is sealed | the grant EVAL from the old snapshot passes the lease test and is refused by the seal — independent of the tombstone's retention. |
+
+## Bounds rationale
+
+- **2 workers** is the cover-all scope for one authority's marker: the marker
+  register holds a single `(gen, wake, holder)`, every hole needs a deposed
+  writer and a successor, and a third claimant is symmetric to the second
+  under `Permutations(Workers)`.
+- **1 authority** for the PR gate: the invariants are per authority (K.10 —
+  cross-authority ordering is not claimed; one authority per fenced stream is
+  a MUST of the extension). The **2-authority** nightly run shares the stream
+  and the log and checks that the per-authority seals and markers are isolated
+  (`SealIsolation`) under the cross-authority interleaving.
+- **MaxGen / MaxSeq / MaxCrashes** are state-space ceilings enforced by both
+  per-action guards and `CONSTRAINT StateConstraint`. The 1x2 lane uses 3/2/1
+  (≈584k distinct states, seconds); the 2x2 lane uses 2/1/1 to keep the
+  exhaustive run inside the nightly budget.
+- The Apalache lane (`make apalache`, `FenceCore.tla`, #41) is unchanged by
+  #183 and now runs nightly (`formal-nightly.yml`, `apalache` job): the
+  webhook holder is Go-side, `WakingHasNoHolder` still holds, and no
+  control-plane variable changed. A `WriteFenceCore` inductive variant is a
+  filed follow-up, not a gate.
+
+## #183 files
+
+- `WriteFence.tla` — the module (state, the twelve actions + `Crash`, the four
+  safety operators + `SealIsolation`, two action properties, four witnesses,
+  four fault toggles).
+- `MC_WriteFence.tla` — the TLC harness (symmetry over Workers ∪ Auths).
+- `WriteFence_1x2.cfg` (PR gate) / `WriteFence_2x2.cfg` (nightly).
+- `WriteFence_fault_{toctou,nobind,lazyseal,noseal}.cfg` — negative controls.
+- `WriteFence_coverage_W{5..8}.cfg` — non-vacuity witnesses.
+- `Makefile` — `make fence` (in `make tlc`), `fence-2x2`, `fence-fault-*`,
+  `fence-coverage`.
