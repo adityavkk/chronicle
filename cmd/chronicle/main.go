@@ -254,6 +254,10 @@ func run() error {
 	if err := validateObservabilityConfig(cfg); err != nil {
 		return err
 	}
+	egress, err := loadWebhookEgress(cfg.WebhookAllowPrivate, os.LookupEnv)
+	if err != nil {
+		return err
+	}
 
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(logLevel)); err != nil {
@@ -373,6 +377,8 @@ func run() error {
 			SweepBatch:             cfg.SweepBatch,
 			Metrics:                subMetrics,
 			WakeTokenAudience:      cfg.WakeTokenAudience,
+			WebhookHTTPClient:      egress.client,
+			WebhookTargetPolicy:    egress.policy,
 			Consistency:            cfg.Consistency,
 			WaitReplicas:           cfg.WaitReplicas,
 			WaitTimeoutMs:          cfg.WaitTimeoutMs,
@@ -405,6 +411,9 @@ func run() error {
 		defer stopPromotionSignals()
 		subscriptionsEnabled = true
 		logger.Info("subscriptions enabled", "stream_root_url", streamRootURL)
+		if egress.policy != nil {
+			logger.Info("webhook egress adapter enabled", "adapter", egress.name)
+		}
 	}
 
 	api, err := chronicle.Mount(cfg.StreamRoot, handler)

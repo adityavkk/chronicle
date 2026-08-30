@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -111,9 +112,16 @@ type ManagerOptions struct {
 	StreamRootURL string
 	Lister        StreamLister
 	Resolver      IPResolver
-	HTTPClient    *http.Client
-	Logger        *slog.Logger
-	WorkerTick    time.Duration
+	// HTTPClient performs webhook deliveries. Nil uses a default client bounded
+	// by the delivery timeout; a deployment egress adapter may supply its own
+	// (a pinned transport, no proxy, no redirects).
+	HTTPClient *http.Client
+	// TargetPolicy admits one narrowly allowed private webhook route ahead of
+	// the SSRF rules and prepares every delivery to it (see TargetPolicy). Nil
+	// leaves the SSRF rules alone.
+	TargetPolicy TargetPolicy
+	Logger       *slog.Logger
+	WorkerTick   time.Duration
 	// SweepInterval is the coarse recovery FLOOR — how often the full cursor
 	// reconcile runs on a timer with no triggering event (issue #13). It is NOT a
 	// fast 2s sweep: the latency-sensitive cases are event-triggered (boot, a Redis
@@ -204,6 +212,7 @@ type Manager struct {
 	writeFences   WriteFenceStreams
 	client        *http.Client
 	resolver      IPResolver
+	targetPolicy  TargetPolicy
 	wakeTokenAud  string
 	tokenKey      []byte
 
@@ -323,6 +332,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		streamRootURL:         normalizeStreamRootURL(opts.StreamRootURL),
 		client:                opts.HTTPClient,
 		resolver:              opts.Resolver,
+		targetPolicy:          opts.TargetPolicy,
 		wakeTokenAud:          opts.WakeTokenAudience,
 		tokenKey:              tokenKey,
 		log:                   opts.Logger,
@@ -1014,6 +1024,17 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		return
 	}
 	req.Header.Set("Webhook-Signature", SignWebhookPayload(signing, body, time.Now()))
+	// The deployment egress adapter sees the final, signed request immediately
+	// before it enters the transport — on every attempt, so a retry is prepared
+	// afresh. A rejection fails this attempt like a transport error: nothing is
+	// dialed and the normal retry is scheduled.
+	if m.targetPolicy != nil {
+		if err := m.targetPolicy.PrepareRequest(req); err != nil {
+			m.log.Warn("webhook: target policy rejected delivery", "sub", id, "error", err)
+			m.recordFailure(id, generation, wakeID, owner)
+			return
+		}
+	}
 
 	postStart := time.Now()
 	resp, err := m.doWebhookRequest(req)
@@ -2305,8 +2326,16 @@ func (m *Manager) reconcileOnce() {
 func (m *Manager) RunReconcile() { m.reconcileOnce() }
 
 // validateWebhookURL applies the SSRF rules and returns the rejection reason, or
-// "" when the URL is acceptable.
+// "" when the URL is acceptable. A deployment TargetPolicy may admit its one
+// private route ahead of the rules; every other URL is classified as usual, so
+// a target the policy does not admit is rejected exactly like any private
+// address.
 func (m *Manager) validateWebhookURL(rawURL string) string {
+	if m.targetPolicy != nil {
+		if target, err := url.Parse(rawURL); err == nil && m.targetPolicy.AllowTarget(target) {
+			return ""
+		}
+	}
 	if ok, reason := ClassifyWebhookURL(rawURL, m.resolver, m.allowPrivate); !ok {
 		return reason
 	}
