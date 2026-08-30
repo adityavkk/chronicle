@@ -7,10 +7,10 @@
 package redis
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strings"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
@@ -62,12 +62,12 @@ func forksKey(path string) string { return keyPrefix + tag(path) + forksSuffix }
 
 // appendFenceKey is the per-(stream, subscription incarnation, shard) lease
 // marker checked by append.lua and close.lua. The stream tag keeps the marker
-// in the exact Redis Cluster slot as the mutation it fences. Incarnation is
-// part of the key so a recreated subscription cannot revive an old claim.
-func appendFenceKey(path, subscriptionID, incarnation string, shard int) string {
-	identity := subscriptionID + "\x00" + incarnation
-	sub := base64.RawURLEncoding.EncodeToString([]byte(identity))
-	return keyPrefix + tag(path) + fenceSuffix + sub + ":" + fmt.Sprint(shard)
+// in the exact Redis Cluster slot as the mutation it fences. The suffix is
+// store.FenceAuthority (incarnation included, so a recreated subscription
+// cannot revive an old claim); fence_auth in common.lua recovers it from the
+// key, which makes it the seal field name of the same authority.
+func appendFenceKey(path string, fence auth.AppendFence) string {
+	return keyPrefix + tag(path) + fenceSuffix + store.FenceAuthority(fence)
 }
 
 // notifyChannel returns the pub/sub channel for stream wakeups

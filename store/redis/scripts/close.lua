@@ -9,6 +9,7 @@
 --
 -- Reply: make_reply; status one of OK|FENCED|NOTFOUND|CLOSED|STALE_EPOCH|
 -- EPOCH_SEQ|SEQ_GAP. CLOSED = already closed by a different producer tuple.
+-- FENCED replies carry [10]=reason [11]=generation [12]=holder (fence_reply).
 
 local now = tonumber(ARGV[1])
 local channel = ARGV[2]
@@ -26,18 +27,25 @@ if is_expired(m, now) then
   return make_reply('NOTFOUND')
 end
 
-if has_fence then
- local fence = redis.call('HMGET', KEYS[5],
-   'state', 'generation', 'wake_id', 'holder', 'lease_until_ns', 'stream_incarnation')
- if fence[1] ~= 'live'
-   or fence[2] ~= ARGV[8]
-   or fence[3] ~= ARGV[9]
-   or fence[4] ~= ARGV[10]
-   or fence[5] == false
-   or tonumber(fence[5]) <= now
-   or fence[6] ~= m.incarnation then
-  return make_reply('FENCED', m.tail)
- end
+-- Write fence (#183): the same rung as append.lua step 4, one transaction
+-- with the close. A holder's close is not a seal.
+local stream_fenced = m.wf == '1'
+if has_fence or stream_fenced then
+  local fence_row, seal_present, seal_gen = nil, false, '0'
+  if has_fence then
+    fence_row = redis.call('HMGET', KEYS[5],
+      'state', 'generation', 'wake_id', 'holder', 'lease_until_ns', 'stream_incarnation')
+    local seal = m['wfseal:' .. fence_auth(KEYS[5])]
+    if seal then seal_present, seal_gen = true, (seal_parts(seal)) end
+  end
+  local bound_gen = '0'
+  if stream_fenced and has_producer and not has_fence then
+    bound_gen = m['wfbind:' .. producer_id] or '0'
+  end
+  local reason, d_gen, d_holder = evaluate_write_fence(stream_fenced, m.incarnation or '',
+    has_fence, ARGV[8], ARGV[9], ARGV[10], fence_row, seal_present, seal_gen,
+    now, has_producer, p_epoch, bound_gen)
+  if reason ~= '' then return fence_reply(reason, m.tail, d_gen, d_holder) end
 end
 
 if m.closed == '1' then
@@ -67,11 +75,20 @@ if has_producer then
   elseif outcome == 'SEQ_GAP' then
     return make_reply('SEQ_GAP', m.tail, nil, nil, d1, d2)
   end
-  -- Accepted: commit producer state, close, record the closing tuple.
+  -- Accepted: commit producer state, close, record the closing tuple. An
+  -- accepted fenced-class close also fixes the class's last offset and binds
+  -- the producer id, exactly as an accepted fenced append does.
   redis.call('HSET', KEYS[3], producer_id,
     ARGV[5] .. ':' .. ARGV[6] .. ':' .. string.format('%.0f', math.floor(now / 1e9)))
-  redis.call('HSET', KEYS[1], 'closed', '1',
-    'cbId', producer_id, 'cbEpoch', ARGV[5], 'cbSeq', ARGV[6])
+  local hset = { 'HSET', KEYS[1], 'closed', '1',
+    'cbId', producer_id, 'cbEpoch', ARGV[5], 'cbSeq', ARGV[6] }
+  if has_fence and stream_fenced then
+    hset[#hset + 1] = 'wfLastOff'
+    hset[#hset + 1] = m.tail
+    hset[#hset + 1] = 'wfbind:' .. producer_id
+    hset[#hset + 1] = ARGV[8]
+  end
+  redis.call(unpack(hset))
   refresh_backstop(m, now)
   redis.call('PUBLISH', channel, 'c')
   return make_reply('OK', m.tail, '1', nil, nil, nil, ARGV[6], '1', '0')

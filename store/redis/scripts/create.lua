@@ -7,8 +7,9 @@
 --       config-match probe (vs an existing stream, mirroring ConfigMatches):
 --       3=normCT 4=ttl(''=nil) 5=expAtNs(''=nil) 6=closed('1'/'0')
 --       7=forkedFrom 8=forkOffRequested(''=omitted) 9=forkSubOff
---       10=N (meta field pair count) 11..10+2N=meta field/value pairs
---       11+2N..=initial frames (pre-encoded "<offset>|<data>")
+--       10=writeFence('1'/'0')
+--       11=N (meta field pair count) 12..11+2N=meta field/value pairs
+--       12+2N..=initial frames (pre-encoded "<offset>|<data>")
 --
 -- Reply: {'EXISTS'} | {'MISMATCH'} | {'MATCHED', metaFlat, prodFlat} |
 --        {'CREATED'}
@@ -24,6 +25,8 @@ local function config_matches(m)
   if (m.expAtNs or '') ~= ARGV[5] then return false end
   local closed = (m.closed == '1') and '1' or '0'
   if closed ~= ARGV[6] then return false end
+  local wf = (m.wf == '1') and '1' or '0'
+  if wf ~= ARGV[10] then return false end
   if (m.forkedFrom or '') ~= ARGV[7] then return false end
   if ARGV[7] ~= '' then
     if ARGV[8] ~= '' then
@@ -56,12 +59,12 @@ end
 -- Fresh create. DEL is defensive (expired leftovers are already gone).
 redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
 
-local n = tonumber(ARGV[10])
+local n = tonumber(ARGV[11])
 local hset = { 'HSET', KEYS[1] }
-for i = 11, 10 + 2 * n do hset[#hset + 1] = ARGV[i] end
+for i = 12, 11 + 2 * n do hset[#hset + 1] = ARGV[i] end
 redis.call(unpack(hset))
 
-local first_frame = 11 + 2 * n
+local first_frame = 12 + 2 * n
 if #ARGV >= first_frame then
   local i = first_frame
   while i <= #ARGV do

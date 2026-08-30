@@ -18,7 +18,10 @@
 --
 -- Reply: make_reply (see common.lua); status one of OK|VALONLY|RETRY|
 -- FENCED|NOTFOUND|SOFTDEL|CLOSED|CTMISMATCH|SEQCONFLICT|STALE_EPOCH|
--- EPOCH_SEQ|SEQ_GAP.
+-- EPOCH_SEQ|SEQ_GAP. FENCED replies carry [10]=reason [11]=generation
+-- [12]=holder (fence_reply). Write-fenced streams (meta wf='1') read their
+-- seal (wfseal:<auth>) and bindings (wfbind:<producer_id>) from the meta hash
+-- and write wfLastOff / wfbind:<producer_id> on an accepted fenced write.
 
 local now = tonumber(ARGV[1])
 local channel = ARGV[2]
@@ -47,20 +50,28 @@ if is_expired(m, now) then
   return make_reply('NOTFOUND')
 end
 
--- 4. Claim fence. The marker key shares the stream's Redis Cluster slot, so
--- this check and the append below are one indivisible Redis transaction.
-if has_fence then
-  local fence = redis.call('HMGET', KEYS[5],
-    'state', 'generation', 'wake_id', 'holder', 'lease_until_ns', 'stream_incarnation')
-  if fence[1] ~= 'live'
-    or fence[2] ~= ARGV[14]
-    or fence[3] ~= ARGV[15]
-    or fence[4] ~= ARGV[16]
-    or fence[5] == false
-    or tonumber(fence[5]) <= now
-    or fence[6] ~= m.incarnation then
-    return make_reply('FENCED', m.tail)
+-- 4. Write fence: seal, claim marker, epoch binding, bound producer — one
+-- transaction with the write (#183). The marker key shares the stream's Redis
+-- Cluster slot; everything else is read from the meta hash or derived from
+-- the marker key, so KEYS and ARGV are unchanged. The Go oracle is
+-- store.EvaluateWriteFence (see evaluate_write_fence in common.lua).
+local stream_fenced = m.wf == '1'
+if has_fence or stream_fenced then
+  local fence_row, seal_present, seal_gen = nil, false, '0'
+  if has_fence then
+    fence_row = redis.call('HMGET', KEYS[5],
+      'state', 'generation', 'wake_id', 'holder', 'lease_until_ns', 'stream_incarnation')
+    local seal = m['wfseal:' .. fence_auth(KEYS[5])]
+    if seal then seal_present, seal_gen = true, (seal_parts(seal)) end
   end
+  local bound_gen = '0'
+  if stream_fenced and has_producer and not has_fence then
+    bound_gen = m['wfbind:' .. producer_id] or '0'
+  end
+  local reason, d_gen, d_holder = evaluate_write_fence(stream_fenced, m.incarnation or '',
+    has_fence, ARGV[14], ARGV[15], ARGV[16], fence_row, seal_present, seal_gen,
+    now, has_producer, p_epoch, bound_gen)
+  if reason ~= '' then return fence_reply(reason, m.tail, d_gen, d_holder) end
 end
 
 -- 5. Sliding-TTL touch (upstream touches before the closed check, so even
@@ -143,6 +154,15 @@ if closing then
     hset[#hset + 1] = 'cbSeq'
     hset[#hset + 1] = ARGV[9]
   end
+end
+if has_fence and stream_fenced then
+  -- Accepted fenced-class write: record the class's last offset (the seal
+  -- fixes this, not a later open-class tail) and bind the producer id to the
+  -- fence at this generation. Producer headers are mandatory here (rule 3).
+  hset[#hset + 1] = 'wfLastOff'
+  hset[#hset + 1] = new_tail
+  hset[#hset + 1] = 'wfbind:' .. producer_id
+  hset[#hset + 1] = ARGV[14]
 end
 if #hset > 0 then redis.call('HSET', KEYS[1], unpack(hset)) end
 
