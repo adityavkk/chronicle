@@ -28,6 +28,7 @@ var (
 	ErrStreamClosed                   = errors.New("stream is closed")
 	ErrNotificationSubscriptionClosed = errors.New("notification subscription closed")
 	ErrAppendFenced                   = errors.New("append claim is fenced")
+	ErrWriteFenceUnsupported          = errors.New("write fencing is not supported by this store")
 )
 
 // Producer validation errors
@@ -71,12 +72,22 @@ type AppendResult struct {
 	ReceivedSeq    int64 // Received seq on gap error
 	LastSeq        int64 // Highest accepted seq (for duplicates and success)
 	StreamClosed   bool  // Stream is now closed (either by this request or previously)
+
+	// Write-fence disclosure, set only alongside ErrAppendFenced (#183).
+	FenceReason     FenceReason // why the fence refused the write
+	FenceGeneration int64       // current generation, 0 when unknown
+	FenceHolder     string      // live holder, "" when none
 }
 
 // CloseResult contains the result of a close operation
 type CloseResult struct {
 	FinalOffset   Offset
 	AlreadyClosed bool
+
+	// Write-fence disclosure, set only alongside ErrAppendFenced (#183).
+	FenceReason     FenceReason
+	FenceGeneration int64
+	FenceHolder     string
 }
 
 // CloseProducerOptions contains producer headers for close-only operations.
@@ -97,6 +108,11 @@ type CloseProducerResult struct {
 	LastSeq        int64 // Highest accepted seq (for duplicates and success)
 	StreamClosed   bool  // Stream is now closed
 	AlreadyClosed  bool  // Stream was already closed
+
+	// Write-fence disclosure, set only alongside ErrAppendFenced (#183).
+	FenceReason     FenceReason
+	FenceGeneration int64
+	FenceHolder     string
 }
 
 // Store is the interface for durable stream storage
@@ -161,6 +177,44 @@ type Store interface {
 // unfenced CloseStream method.
 type FencedCloser interface {
 	CloseStreamFenced(path string, fence auth.AppendFence) (*CloseResult, error)
+}
+
+// SealOutcome classifies one SealAppendFence call.
+type SealOutcome string
+
+const (
+	// SealSealed means the seal was recorded for this generation.
+	SealSealed SealOutcome = "sealed"
+	// SealAlready means this or a newer generation of the authority was already
+	// sealed (an idempotent redelivery of done).
+	SealAlready SealOutcome = "already"
+	// SealStale means the marker names a newer generation, or a different wake
+	// or holder at this one; nothing was mutated.
+	SealStale SealOutcome = "stale"
+	// SealNotFound means the stream is absent; the marker was tombstoned anyway.
+	SealNotFound SealOutcome = "notfound"
+	// SealUnfenced means the stream is not write-fenced: tombstone only.
+	SealUnfenced SealOutcome = "unfenced"
+)
+
+// SealResult reports a seal: the generation it closed and the definite last
+// fenced-class offset it fixed (both zero unless Outcome is SealSealed or
+// SealAlready).
+type SealResult struct {
+	Outcome     SealOutcome
+	Generation  int64
+	FinalOffset Offset
+}
+
+// WriteFenceStore is the optional write-fence capability (#183): stream-slot
+// claim markers installed before a write token leaves, tombstoned on rollback,
+// and sealed per authority at done so no later write of that generation can
+// land. A store without it cannot create a write-fenced stream
+// (ErrWriteFenceUnsupported).
+type WriteFenceStore interface {
+	GrantAppendFence(path string, fence auth.AppendFence) (bool, error)
+	RevokeAppendFence(path string, fence auth.AppendFence) error
+	SealAppendFence(path string, fence auth.AppendFence) (SealResult, error)
 }
 
 // NotificationSubscription is an optional long-lived notification feed. It
@@ -237,6 +291,7 @@ type CreateOptions struct {
 	ExpiresAt     *time.Time
 	InitialData   []byte
 	Closed        bool    // Create stream in closed state
+	WriteFence    bool    // Create the stream write-fenced (Write-Fence: true); never fork-inherited
 	ForkedFrom    string  // Source stream path (fork creation)
 	ForkOffset    *Offset // Fork offset (nil = source's current tail)
 	ForkSubOffset *uint64 // Sub-position past ForkOffset (nil = 0). Bytes for non-JSON, message count for JSON.
@@ -291,6 +346,9 @@ type StreamMetadata struct {
 	ForkSubOffset       uint64                    // User-supplied Stream-Fork-Sub-Offset value: bytes for non-JSON forks, flattened message count for JSON forks (0 = no sub-offset slice). Stored verbatim for idempotent re-creation matching.
 	RefCount            int32                     // Number of forks referencing this stream
 	SoftDeleted         bool                      // Logically deleted but retained for fork readers
+	WriteFence          bool                      // Stream is write-fenced (#183); part of the idempotent-create comparison
+	SealedGeneration    int64                     // Most recent write-fence seal generation on this stream (0 = none)
+	SealedOffset        *Offset                   // Definite last fenced-class offset of that seal (nil = none)
 }
 
 // SameIncarnation reports whether two metadata snapshots refer to the same
@@ -373,6 +431,11 @@ func (m *StreamMetadata) ConfigMatches(opts CreateOptions) bool {
 
 	// Closed status must match
 	if m.Closed != opts.Closed {
+		return false
+	}
+
+	// Write-fence opt-in must match (mirrored by config_matches in create.lua)
+	if m.WriteFence != opts.WriteFence {
 		return false
 	}
 
