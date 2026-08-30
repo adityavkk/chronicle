@@ -912,8 +912,14 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 	hasProducerHeaders := producerId != "" || producerEpochStr != "" || producerSeqStr != ""
 	hasAllProducerHeaders := producerId != "" && producerEpochStr != "" && producerSeqStr != ""
 
-	// Validate producer headers - all or none
+	// Validate producer headers - all or none. On the fenced class a partial
+	// triple is one more shape of the missing-producer-headers rejection, so it
+	// counts under producer_required like the complete-absence 400 below; the
+	// wire response stays the base 400 byte for byte (#183 polish).
 	if hasProducerHeaders && !hasAllProducerHeaders {
+		if class == writeClassFenced {
+			h.countFenceRejection(string(store.FenceProducerRequired))
+		}
 		return newHTTPError(http.StatusBadRequest, "all producer headers (Producer-Id, Producer-Epoch, Producer-Seq) must be provided together")
 	}
 
