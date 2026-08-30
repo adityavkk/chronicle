@@ -27,10 +27,13 @@ SANY               = $(JAVA) -cp $(JAR) tla2sany.SANY
         tlc40 parse40 membership-safety membership-convergence membership-nofair \
         membership-witness leasetail leasetail-witness alloy \
         tlc41 apalache \
-        token-refresh parse-token-refresh token-refresh-live token-refresh-witness token-refresh-norecover
+        token-refresh parse-token-refresh token-refresh-live token-refresh-witness token-refresh-norecover \
+        fence parse-fence fence-1x2 fence-2x2 fence-fault-toctou fence-fault-nobind \
+        fence-fault-lazyseal fence-fault-noseal fence-coverage
 
-# The CI target (issue #37): parse, then both faithful safety configs.
-tlc: jar parse tlc-1x1 tlc-2x2
+# The CI target (issue #37): parse, then both faithful safety configs, plus the
+# write-fence PR gate (issue #183, `fence` below).
+tlc: jar parse tlc-1x1 tlc-2x2 fence
 
 # --- issue #77: in-band callback-token refresh liveness -----------------------
 #
@@ -241,6 +244,62 @@ coverage: jar
 		echo "=== Window W$$W reachability (must be VIOLATED) ==="; \
 		$(TLC) -config SubscriptionFence_coverage_W$$W.cfg MC_2x2.tla 2>&1 | grep -E "Invariant NotW$$W is violated|No error has been found"; \
 	done
+
+# --- issue #183: the write-fence append capability ---------------------------
+#
+# WriteFence.tla is the DATA-plane sibling of SubscriptionFence.tla: the
+# stream-slot claim marker, the per-authority seal, and the producer binding
+# that together decide whether a fenced append is accepted (INV-FENCE-05/06).
+# `make fence` is the PR gate (1 authority x 2 workers, ~584k distinct states,
+# seconds); the 2-authority seal-isolation run (`fence-2x2`) is nightly.
+#   fence-fault-toctou   : NEGATIVE: the out-of-slot check (pre-#169) MUST violate EpochsDoNotInterleave
+#   fence-fault-nobind   : NEGATIVE: no producer binding MUST violate BoundProducerNeverOpen
+#   fence-fault-lazyseal : NEGATIVE: idle-before-seal MUST violate SealPrecedesIdle
+#   fence-fault-noseal   : NEGATIVE: tombstone-only done MUST violate EpochsDoNotInterleave,
+#                          and the counterexample MUST pass through DelayedGrant (K.4)
+#   fence-coverage       : non-vacuity: each of the W5..W8 witnesses MUST be reached
+fence: jar parse-fence fence-1x2
+
+parse-fence: jar
+	$(SANY) WriteFence.tla
+	$(SANY) MC_WriteFence.tla
+
+fence-1x2: jar
+	$(TLC) -config WriteFence_1x2.cfg MC_WriteFence.tla
+
+fence-2x2: jar
+	$(TLC) -config WriteFence_2x2.cfg MC_WriteFence.tla
+
+fence-fault-toctou: jar
+	@! $(TLC) -config WriteFence_fault_toctou.cfg MC_WriteFence.tla 2>&1 | tee /dev/stderr | grep -q 'No error has been found' \
+		|| (echo "FAIL: toctou fault did NOT violate EpochsDoNotInterleave" && exit 1)
+
+fence-fault-nobind: jar
+	@! $(TLC) -config WriteFence_fault_nobind.cfg MC_WriteFence.tla 2>&1 | tee /dev/stderr | grep -q 'No error has been found' \
+		|| (echo "FAIL: nobind fault did NOT violate BoundProducerNeverOpen" && exit 1)
+
+fence-fault-lazyseal: jar
+	@! $(TLC) -config WriteFence_fault_lazyseal.cfg MC_WriteFence.tla 2>&1 | tee /dev/stderr | grep -q 'No error has been found' \
+		|| (echo "FAIL: lazyseal fault did NOT violate SealPrecedesIdle" && exit 1)
+
+# The K.4 shape: the violation must be the delayed grant reviving a reaped,
+# unsealed generation, so the trace is required to contain a DelayedGrant step.
+fence-fault-noseal: jar
+	@out=$$(mktemp); \
+	$(TLC) -config WriteFence_fault_noseal.cfg MC_WriteFence.tla 2>&1 | tee $$out /dev/stderr | grep -q 'No error has been found' \
+		&& { echo "FAIL: noseal fault did NOT violate EpochsDoNotInterleave"; rm -f $$out; exit 1; }; \
+	grep -q '<DelayedGrant ' $$out \
+		|| { echo "FAIL: noseal counterexample does not pass through DelayedGrant (K.4)"; rm -f $$out; exit 1; }; \
+	rm -f $$out
+
+# Non-vacuity witnesses: each NotWx invariant MUST be violated (window reached).
+fence-coverage: jar
+	@fail=0; for W in 5 6 7 8; do \
+		echo "=== Window W$$W reachability (must be VIOLATED) ==="; \
+		out=$$($(TLC) -config WriteFence_coverage_W$$W.cfg MC_WriteFence.tla 2>&1); \
+		echo "$$out" | grep -E "Invariant NotW$$W is violated|No error has been found"; \
+		echo "$$out" | grep -q "Invariant NotW$$W is violated" || { echo "FAIL: window W$$W was NOT reached"; fail=1; }; \
+	done; exit $$fail
 
 # --- issue #39: trace validation (the CCF "smart casual verification" bridge) -
 #
