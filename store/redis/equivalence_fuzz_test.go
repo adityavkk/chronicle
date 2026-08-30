@@ -5,6 +5,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -36,6 +40,15 @@ import (
 //   - gap-at-lastSeq+1           -> store.ErrProducerSeqGap        (INV-PROD-08)
 //   - fork-sub-offset overshoot  -> store.ErrInvalidForkSubOffset  (INV-CFG-01)
 //   - close-by-producer duplicate-> ProducerResultDuplicate close  (INV-FENCE-03)
+//
+// and, since the write fence (#183, INV-DIFF-02 rung 3b), the fence-rung
+// outcomes the short uniform state-machine runs under-sample: the accepted
+// fenced-class write (which binds its producer and fixes the class's last
+// offset), the sealed / epoch / producer_required / bound refusals, the
+// supersession seal at grant, and the idempotent redelivered seal. Every
+// hand-named branch-* fixture in the committed corpus is pinned by
+// TestFuzzStoreEquivalenceCorpusReachesBranches below, so the corpus cannot
+// silently go vacuous.
 //
 // Regime split (issue #42 deliverable): the PR gate runs the fast rapid.Check
 // property over the committed testdata/fuzz/ corpus (Go replays every corpus
@@ -138,6 +151,77 @@ func FuzzStoreEquivalence(f *testing.F) {
 	f.Fuzz(rapid.MakeFuzz(func(t *rapid.T) {
 		runEquivalenceModel(t, base)
 	}))
+}
+
+// corpusBranches names the branch each hand-named corpus fixture under
+// testdata/fuzz/FuzzStoreEquivalence/ was harvested to reach, as the
+// fenceTally key its replay must record.
+var corpusBranches = map[string]string{
+	"branch-epoch-bump-at-nonzero-seq":   "epoch_seq",
+	"branch-seq-gap-at-boundary":         "seq_gap",
+	"branch-close-by-producer-duplicate": "close_duplicate",
+	"branch-fork-suboffset-overshoot":    "fork_suboffset_overshoot",
+	"branch-fence-accept":                "fence:accept",
+	"branch-fence-marker":                "fence:marker",
+	"branch-fence-sealed":                "fence:sealed",
+	"branch-fence-epoch":                 "fence:epoch",
+	"branch-fence-producer-required":     "fence:producer_required",
+	"branch-fence-bound":                 "fence:bound",
+	"branch-fence-superseded-grant":      "grant:superseded",
+	"branch-fence-seal-already":          "seal:already",
+}
+
+// TestFuzzStoreEquivalenceCorpusReachesBranches replays every hand-named
+// corpus fixture through the identical fuzz bridge with a tallying model and
+// asserts it still reaches the branch it is named for. A generator change
+// that redecodes the bitstream fails here loudly instead of silently turning
+// the fixture into a plain regression input, so the corpus never goes
+// vacuous; the fix is to re-harvest the named fixtures from a fuzz run.
+func TestFuzzStoreEquivalenceCorpusReachesBranches(t *testing.T) {
+	base := newTestStore(t)
+	names := make([]string, 0, len(corpusBranches))
+	for name := range corpusBranches {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			input := readFuzzCorpus(t, filepath.Join("testdata", "fuzz", "FuzzStoreEquivalence", name))
+			tally := newFenceTally()
+			// A replay that ends by exhausting its input mid-draw is reported
+			// as a skip by the fuzz bridge; every step before that point has
+			// run and tallied. The replay gets its own subtest so the skip
+			// cannot swallow the assertion — which is the whole probe.
+			if !t.Run("replay", func(t *testing.T) {
+				rapid.MakeFuzz(func(t *rapid.T) {
+					runEquivalenceModelWith(t, base, tally)
+				})(t, input)
+			}) {
+				t.Fatal("replay failed")
+			}
+			tally.reached(t, corpusBranches[name])
+		})
+	}
+}
+
+// readFuzzCorpus decodes one `go test fuzz v1` corpus file holding a single
+// []byte value: the raw bitstream the fuzz bridge feeds rapid.
+func readFuzzCorpus(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read corpus fixture: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 2 || lines[0] != "go test fuzz v1" {
+		t.Fatalf("corpus fixture %s is not a go test fuzz v1 single-value file", path)
+	}
+	lit := strings.TrimSuffix(strings.TrimPrefix(lines[1], "[]byte("), ")")
+	s, err := strconv.Unquote(lit)
+	if err != nil {
+		t.Fatalf("corpus fixture %s: bad []byte literal: %v", path, err)
+	}
+	return []byte(s)
 }
 
 // fuzzWorkerOnce / fuzzClient / fuzzErr give the fuzz target its OWN one-time
