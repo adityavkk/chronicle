@@ -234,6 +234,68 @@ jobs:
           CHRONICLE_REDIS_URL: redis://localhost:6379/15
         run: make conformance-segments
 
+  # Write Fencing extension conformance (#183, test/conformance-ext): the
+  # chronicle-owned WF/NC suite plus the pinned-client control against an
+  # enforce-mode server, then the three fault-injection controls — each builds
+  # a deliberately broken server and MUST fail its named test, proving the
+  # suite detects a server that drops that one mechanism.
+  conformance-ext:
+    needs: conformance
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    env:
+      CHRONICLE_SKIP_REDIS_START: "1"
+      CHRONICLE_REDIS_URL: redis://localhost:6379/11
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Redis client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-tools
+      - name: Run the extension conformance suite
+        run: make conformance-ext
+      - name: Fault control fence_fault_nobind (WF-16 must fail)
+        env:
+          CHRONICLE_BUILD_TAGS: fence_fault_nobind
+        run: |
+          if ./scripts/conformance-ext.sh -t "WF-16" > fault.log 2>&1; then
+            echo "fence_fault_nobind server passed WF-16 — the binding control is dead" >&2
+            cat fault.log; exit 1
+          fi
+          grep -q "WF-16" fault.log
+      - name: Fault control fence_fault_noseal (WF-19 must fail)
+        env:
+          CHRONICLE_BUILD_TAGS: fence_fault_noseal
+        run: |
+          if ./scripts/conformance-ext.sh -t "WF-19" > fault.log 2>&1; then
+            echo "fence_fault_noseal server passed WF-19 — the seal control is dead" >&2
+            cat fault.log; exit 1
+          fi
+          grep -q "WF-19" fault.log
+      - name: Fault control fence_fault_nopair (client test must fail)
+        env:
+          CHRONICLE_BUILD_TAGS: fence_fault_nopair
+        run: |
+          if ./scripts/conformance-ext.sh client.test.ts > fault.log 2>&1; then
+            echo "fence_fault_nopair server passed the pinned-client test — the pair control is dead" >&2
+            cat fault.log; exit 1
+          fi
+          grep -q "client.test.ts" fault.log
+
   # Lean pure-core proofs (issue #30 / P1.1). Separate from the Go jobs and gated
   # on `lean/` changes so routine Go CI never invokes Lean. The toolchain is pinned
   # by lean/lean-toolchain (leanprover/lean4:v4.31.0); mathlib oleans are fetched
