@@ -27,10 +27,14 @@ SANY               = $(JAVA) -cp $(JAR) tla2sany.SANY
         tlc40 parse40 membership-safety membership-convergence membership-nofair \
         membership-witness leasetail leasetail-witness alloy \
         tlc41 apalache \
-        token-refresh parse-token-refresh token-refresh-live token-refresh-witness token-refresh-norecover
+        token-refresh parse-token-refresh token-refresh-live token-refresh-witness token-refresh-norecover \
+        fence parse-fence fence-1x2 fence-2x2 fence-fault-toctou fence-fault-nobind \
+        fence-fault-lazyseal fence-fault-globalseal fence-fault-noseal fence-coverage \
+        fence-fault-check
 
-# The CI target (issue #37): parse, then both faithful safety configs.
-tlc: jar parse tlc-1x1 tlc-2x2
+# The CI target (issue #37): parse, then both faithful safety configs, plus the
+# write-fence PR gate (issue #183, `fence` below).
+tlc: jar parse tlc-1x1 tlc-2x2 fence
 
 # --- issue #77: in-band callback-token refresh liveness -----------------------
 #
@@ -241,6 +245,100 @@ coverage: jar
 		echo "=== Window W$$W reachability (must be VIOLATED) ==="; \
 		$(TLC) -config SubscriptionFence_coverage_W$$W.cfg MC_2x2.tla 2>&1 | grep -E "Invariant NotW$$W is violated|No error has been found"; \
 	done
+
+# --- issue #183: the write-fence append capability ---------------------------
+#
+# WriteFence.tla is the DATA-plane sibling of SubscriptionFence.tla: the
+# stream-slot claim marker, the per-authority seal, and the producer binding
+# that together decide whether a fenced append is accepted (INV-FENCE-05/06).
+# `make fence` is the PR gate (1 authority x 2 workers, ~478k distinct states,
+# seconds); the 2-authority run (`fence-2x2`, the shared producer state and log
+# under cross-authority interleaving) is nightly.
+#   fence-fault-toctou     : NEGATIVE: the out-of-slot check (pre-#169) MUST violate EpochsDoNotInterleave
+#   fence-fault-nobind     : NEGATIVE: no producer binding MUST violate BoundProducerNeverOpen
+#   fence-fault-lazyseal   : NEGATIVE: idle-before-seal MUST violate SealPrecedesIdle
+#   fence-fault-globalseal : NEGATIVE: a generation-only seal (design Q5) MUST violate SealIsolation
+#   fence-fault-noseal     : NEGATIVE: tombstone-only done MUST violate EpochsDoNotInterleave,
+#                            and the counterexample MUST pass through DelayedGrant (K.4)
+#   fence-coverage         : non-vacuity: each of the W5..W10 witnesses MUST be reached
+#   fence-fault-check      : self-test: a fault target MUST fail on a config that violates nothing
+fence: jar parse-fence fence-1x2
+
+parse-fence: jar
+	$(SANY) WriteFence.tla
+	$(SANY) MC_WriteFence.tla
+
+fence-1x2: jar
+	$(TLC) -config WriteFence_1x2.cfg MC_WriteFence.tla
+
+fence-2x2: jar
+	$(TLC) -config WriteFence_2x2.cfg MC_WriteFence.tla
+
+# The negative controls and the witnesses run with ONE worker. TLC's parallel
+# BFS can report a counterexample a step longer than the shortest (a level-
+# boundary race between workers: on this model a stray MarkerLapse in the
+# noseal trace, a 4-state globalseal trace where a 3-state one exists). These
+# runs are small (< 100k states), and one worker makes every reported trace
+# the deterministic shortest one -- the traces README.md quotes. FENCE_WORKERS
+# overrides the count for a run whose trace does not matter (the self-test).
+FENCE_WORKERS     ?= 1
+TLC1               = $(JAVA) -XX:+UseParallelGC -cp $(JAR) tlc2.TLC -deadlock -workers $(FENCE_WORKERS) -metadir states/run-$$$$-$$RANDOM
+
+# Negative tests: each MUST report ITS violation by name -- the fault-expire
+# idiom above, sharpened. A run that prints "No error has been found" fails
+# as "did NOT violate"; a run that prints NEITHER line -- TLC never model-
+# checked (a misspelled invariant, an unloadable jar, a parse error) -- fails
+# too instead of passing vacuously.
+#   $(call fence-fault-check,<fault>,<invariant>,<tlc output file>)
+define fence-fault-check
+if grep -q 'No error has been found' $(3); then \
+    echo "FAIL: $(1) fault did NOT violate $(2)"; rm -f $(3); exit 1; fi; \
+grep -q 'Invariant $(2) is violated' $(3) \
+    || { echo "FAIL: $(1) fault run reported no '$(2)' violation (did TLC run?)"; rm -f $(3); exit 1; }
+endef
+
+fence-fault-toctou:     FAULT_INV = EpochsDoNotInterleave
+fence-fault-nobind:     FAULT_INV = BoundProducerNeverOpen
+fence-fault-lazyseal:   FAULT_INV = SealPrecedesIdle
+fence-fault-globalseal: FAULT_INV = SealIsolation
+# FAULT_CFG is overridable so the self-test below can point a control at a
+# config that violates nothing and prove the control fails.
+fence-fault-toctou fence-fault-nobind fence-fault-lazyseal fence-fault-globalseal: fence-fault-%: jar
+	@out=$$(mktemp); $(TLC1) -config $${FAULT_CFG:-WriteFence_fault_$*.cfg} MC_WriteFence.tla 2>&1 | tee $$out; \
+	$(call fence-fault-check,$*,$(FAULT_INV),$$out); \
+	rm -f $$out
+
+# The K.4 shape: the violation must be the delayed grant reviving a reaped,
+# unsealed generation, so the trace is required to contain a DelayedGrant step.
+fence-fault-noseal: jar
+	@out=$$(mktemp); $(TLC1) -config $${FAULT_CFG:-WriteFence_fault_noseal.cfg} MC_WriteFence.tla 2>&1 | tee $$out; \
+	$(call fence-fault-check,noseal,EpochsDoNotInterleave,$$out); \
+	grep -q '<DelayedGrant ' $$out \
+	    || { echo "FAIL: noseal counterexample does not pass through DelayedGrant (K.4)"; rm -f $$out; exit 1; }; \
+	rm -f $$out
+
+# Self-test of the controls: pointed at the faithful PR-gate config (which
+# violates nothing) every fence-fault-* target MUST fail. Not part of `make
+# tlc`; run it after touching the recipes above. Each run explores the
+# faithful config in full and reports no trace, so it uses every worker.
+fence-fault-check: jar
+	@for t in toctou nobind lazyseal globalseal noseal; do \
+	    if FAULT_CFG=WriteFence_1x2.cfg $(MAKE) --no-print-directory FENCE_WORKERS=auto fence-fault-$$t >/dev/null 2>&1; then \
+	        echo "FAIL: fence-fault-$$t passed on the faithful config (vacuous control)"; exit 1; \
+	    else echo "ok: fence-fault-$$t fails on the faithful config"; fi; \
+	done
+
+# Non-vacuity witnesses: each NotWx MUST be violated (window reached) -- an
+# invariant for a state witness, an action property for a step witness (W7,
+# W9). The one-line action sequence of each witness trace is echoed.
+fence-coverage: jar
+	@fail=0; for W in 5 6 7 8 9 10; do \
+	    echo "=== Window W$$W reachability (must be VIOLATED) ==="; \
+	    out=$$($(TLC1) -config WriteFence_coverage_W$$W.cfg MC_WriteFence.tla 2>&1); \
+	    echo "$$out" | grep -E "(Invariant|Action property) NotW$$W is violated|No error has been found"; \
+	    echo "$$out" | grep -qE "(Invariant|Action property) NotW$$W is violated" || { echo "FAIL: window W$$W was NOT reached"; fail=1; }; \
+	    echo "trace: $$(echo "$$out" | grep -oE '^State [0-9]+: <[A-Za-z]+' | sed -E 's/^State [0-9]+: <//' | tr '\n' ' ')"; \
+	done; exit $$fail
 
 # --- issue #39: trace validation (the CCF "smart casual verification" bridge) -
 #

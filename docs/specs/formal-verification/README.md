@@ -23,6 +23,7 @@ the two git worktrees this work lives in.
 | [`FINDINGS.md`](./FINDINGS.md) | Concrete findings, including **confirmed latent bugs** (the `%016d` offset-width hazard and its `Stream-Seq` sibling) and the scope gaps the adversarial critic surfaced |
 | [`ROADMAP.md`](./ROADMAP.md) | The phased execution plan (P0–P4), the ranked tool stack, and the risk register — the backbone of the GitHub epic |
 | [ADR-0002](../../adr/0002-formal-verification-and-property-testing-strategy.md) | The decision record for the tool choices |
+| [`formal/tla/`](../../../formal/tla/) | The TLA+ models and their CI lanes: the subscription fence (#37), ownership / layering / liveness (#38), membership convergence (#40), the Apalache inductive core (#41, nightly), and the write-fence append capability (#183, INV-FENCE-05/06) with its fault-injection controls |
 
 ## Worktrees
 
