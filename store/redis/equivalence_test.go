@@ -534,6 +534,9 @@ func (m *chronicleModel) drawWrite(t *rapid.T, path string, headersRequired bool
 	}
 	_, fence := m.drawClaim(t, path)
 	w.fence = &fence
+	// The fenced class draws its producer id too, so a run can bind a second
+	// id and exercise the per-id binding map on both backends.
+	id := rapid.SampledFrom([]string{"p", "q"}).Draw(t, "fencedProducerId")
 	shapes := []string{"accept", "accept", "epoch off by one", "boundary", "no producer"}
 	if headersRequired {
 		shapes = shapes[:4]
@@ -541,11 +544,11 @@ func (m *chronicleModel) drawWrite(t *rapid.T, path string, headersRequired bool
 	switch rapid.SampledFrom(shapes).Draw(t, "fencedShape") {
 	case "accept":
 		w.acceptShape = true
-		tuple("p", fence.Generation, m.nextSeq(path, "p", fence.Generation))
+		tuple(id, fence.Generation, m.nextSeq(path, id, fence.Generation))
 	case "epoch off by one":
-		tuple("p", fence.Generation+1, 0)
+		tuple(id, fence.Generation+1, 0)
 	case "boundary":
-		boundary("p")
+		boundary(id)
 	}
 	return w
 }
