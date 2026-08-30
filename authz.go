@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
@@ -16,10 +17,15 @@ import (
 // the remaining actions (read, create, delete) and real principals. The
 // decision logic itself lives in the pure auth and webhook packages.
 
-// ClaimTokenHeader is the header Electric producers present the claim-scoped
-// write token in, with Authorization: Bearer as the fallback (Electric's
-// claimTokenFromRequest order).
-const ClaimTokenHeader = "electric-claim-token"
+// Carriers of the claim-scoped write token, in the order they are read:
+// WriteTokenHeader is the write-fencing extension's own header (#183),
+// ClaimTokenHeader the compatibility alias Electric producers present, and
+// Authorization: Bearer the fallback for both (Electric's claimTokenFromRequest
+// order). See presentedWriteToken for the fail-closed presentation rule.
+const (
+	ClaimTokenHeader = "electric-claim-token"
+	WriteTokenHeader = protocol.HeaderWriteToken
+)
 
 // AppendAuthorizer authorizes a data-plane append with a claim-scoped write
 // token. webhook.WriteTokenAuthorizer implements it; the interface lives here
@@ -64,16 +70,6 @@ type Authorizers struct {
 	Read   ReadAuthorizer
 	Caller CallerAuthorizer
 	Entity EntityAuthorizer
-}
-
-// claimTokenFromRequest extracts the presented write credential:
-// electric-claim-token first, then Authorization: Bearer. Empty means no
-// credential was presented.
-func claimTokenFromRequest(r *http.Request) string {
-	if t := r.Header.Get(ClaimTokenHeader); t != "" {
-		return t
-	}
-	return bearerFromRequest(r)
 }
 
 // bearerFromRequest returns the Authorization: Bearer value, or "".
@@ -152,13 +148,17 @@ const (
 	errCodeFenced          = webhook.ErrCodeFenced
 )
 
-// authError is a denial mapped to HTTP: 401 UNAUTHENTICATED or 403 FORBIDDEN,
-// written by writeError as the JSON error envelope rather than the plaintext
-// http.Error the base protocol paths use.
+// authError is a denial mapped to HTTP: 401 UNAUTHENTICATED, 403 FORBIDDEN, or
+// 409 FENCED, written by writeError as the JSON error envelope rather than the
+// plaintext http.Error the base protocol paths use. fence is set on every
+// write-fence rejection (#183): it adds the reason, generation, and holder to
+// the envelope, the producer disclosure headers to a 409, and the rejection to
+// the counter.
 type authError struct {
 	status int
 	code   string
 	msg    string
+	fence  *fenceDisclosure
 }
 
 func (e *authError) Error() string { return e.msg }
@@ -178,38 +178,50 @@ func denyError(d auth.Decision) *authError {
 	}
 }
 
-func (h *Handler) authorizeAppendCredential(r *http.Request, rawPath string) error {
-	_, err := h.authorizeAppendPhase(r, rawPath, appendPhaseCredential, "append credential")
-	return err
-}
-
-func (h *Handler) authorizeAppendFence(r *http.Request, rawPath string) (*auth.AppendFence, error) {
-	return h.authorizeAppendPhase(r, rawPath, appendPhaseFence, "append fence")
-}
-
+// authorizeAppendPhase evaluates one append phase in today's routing order and
+// applies AuthMode to it: an allowed decision yields its fence only when it is
+// enforced, and a denial is an error only when it is enforced. bind enforces
+// regardless of AuthMode — the write-fence rules that hold in every mode
+// (#183); the base gates pass false. A pre-store fence denial carries its
+// disclosure reason so the 409 counts and, from handleAppend, echoes the
+// producer pair.
 func (h *Handler) authorizeAppendPhase(
 	r *http.Request,
 	rawPath string,
 	phase appendAuthPhase,
 	label string,
+	bind bool,
 ) (*auth.AppendFence, error) {
-	d, fence := h.appendDecision(r, rawPath, phase)
+	d, fence, _ := h.appendDecision(r, rawPath, phase)
 	if d.Allowed() {
-		if h.AuthMode == auth.ModeEnforce {
+		if bind || h.AuthMode == auth.ModeEnforce {
 			return fence, nil
 		}
 		return nil, nil
 	}
-	if h.AuthMode == auth.ModeEnforce {
+	if !h.enforceOrTelemetry(rawPath, label, d, bind) {
+		return nil, nil
+	}
+	if d.Reason() == auth.ReasonFenced {
+		return nil, fenceDenied(d, reasonPrecheck)
+	}
+	return nil, denyError(d)
+}
+
+// enforceOrTelemetry reports whether a denial is enforced — always when bind
+// is set, otherwise only in ModeEnforce — logging it as a warning when it is.
+// In insecure mode an unbound denial is telemetry only: the log records what
+// enforcement would deny so an operator can observe the blast radius before
+// flipping AuthMode.
+func (h *Handler) enforceOrTelemetry(rawPath, label string, d auth.Decision, bind bool) bool {
+	if bind || h.AuthMode == auth.ModeEnforce {
 		h.logger().Warn(label+" denied",
 			"path", rawPath, "reason", d.Reason().String(), "detail", d.Detail())
-		return nil, denyError(d)
+		return true
 	}
-	// Telemetry (insecure mode): record what enforcement would deny so an
-	// operator can observe the blast radius before flipping AuthMode.
 	h.logger().Info("authz telemetry: "+label+" would be denied",
 		"path", rawPath, "reason", d.Reason().String(), "detail", d.Detail())
-	return nil, nil
+	return false
 }
 
 type appendAuthPhase int
@@ -219,21 +231,17 @@ const (
 	appendPhaseFence
 )
 
-// appendDecision evaluates the append authorization with no side effects.
-// Every failure path is a Deny: an unnormalizable path, a missing authorizer
-// (nothing to prove a credential against), or a failed token check.
-//
-// A verified service principal is evaluated against its explicit append and
-// namespace policy before any claim-token interpretation. A trusted_gateway
+// routeAppend resolves the credential family of an append with no side
+// effects, in the trust-chain order: an unnormalizable path routes nowhere; a
+// verified service principal is evaluated against its explicit append and
+// namespace policy before any claim-token interpretation (a trusted_gateway
 // policy still implements the delegated-backend topology: the upstream service
 // validated entity authority, so a claim token riding alongside it is not
-// reinterpreted here. The service decision runs before the AppendAuth nil guard,
-// so a policy-authorized service can run without the subscription token layer.
-func (h *Handler) appendDecision(
-	r *http.Request,
-	rawPath string,
-	phase appendAuthPhase,
-) (auth.Decision, *auth.AppendFence) {
+// reinterpreted here); a wake-typed Bearer is a woken entity acting as itself
+// (issue #126 TB6b), routed by JOSE typ from the Bearer only, so a wake token
+// on a write-token carrier is not a write token and fails the HMAC path;
+// anything else is the claim family, decided by the token arm.
+func (h *Handler) routeAppend(r *http.Request, rawPath string) (auth.StreamPath, appendCredentialFamily, auth.Decision) {
 	// Normalize the EXACT store path (rawPath), not subStreamPath(rawPath):
 	// subStreamPath strips one leading slash and NormalizeStreamPath strips
 	// another, so the pair would double-strip and silently accept a
@@ -244,25 +252,49 @@ func (h *Handler) appendDecision(
 	// string (§12.2).
 	path, err := auth.NormalizeStreamPath(rawPath)
 	if err != nil {
-		return auth.Deny(auth.ReasonForbidden, "invalid stream path"), nil
+		return path, familyNone, auth.Deny(auth.ReasonForbidden, "invalid stream path")
 	}
 	if decision, routed := h.serviceDecision(r, path, auth.ActionAppend); routed {
-		return decision, nil
+		return path, familyService, decision
 	}
-	// A woken entity acting as itself appends on its wake_token alone — no
-	// claim needed (issue #126 TB6b); the claim-token path below remains the
-	// producer contract. Routed by JOSE typ from the Bearer only: a wake
-	// token on the electric-claim-token header is not a write token and
-	// fails the HMAC path (pinned by test).
 	if bearer := bearerFromRequest(r); bearer != "" {
 		if d, routed := h.agentDecision(bearer, path); routed {
-			return d, nil
+			return path, familyAgent, d
 		}
 	}
+	return path, familyClaim, auth.Decision{}
+}
+
+// appendDecision evaluates the append authorization of one phase with no side
+// effects: the routed family's decision, or the token arm for the claim
+// family. Every failure path is a Deny: an unnormalizable path, a missing
+// authorizer (nothing to prove a credential against), or a failed token check.
+// The service decision runs before the AppendAuth nil guard, so a
+// policy-authorized service can run without the subscription token layer.
+func (h *Handler) appendDecision(
+	r *http.Request,
+	rawPath string,
+	phase appendAuthPhase,
+) (auth.Decision, *auth.AppendFence, appendCredentialFamily) {
+	path, fam, d := h.routeAppend(r, rawPath)
+	if fam != familyClaim {
+		return d, nil, fam
+	}
+	token, malformed := presentedWriteToken(r, fam)
+	d, fence := h.tokenDecision(token, malformed, path, phase)
+	return d, fence, fam
+}
+
+// tokenDecision is the token arm of one phase: the claim-scoped write token
+// checked by AppendAuth. A malformed carrier is a presented credential that can
+// never verify, refused here rather than read as absent.
+func (h *Handler) tokenDecision(token string, malformed bool, path auth.StreamPath, phase appendAuthPhase) (auth.Decision, *auth.AppendFence) {
 	if h.AppendAuth == nil {
 		return auth.Deny(auth.ReasonUnauthenticated, "no append authorizer configured"), nil
 	}
-	token := claimTokenFromRequest(r)
+	if malformed {
+		return auth.Deny(auth.ReasonUnauthenticated, "malformed write token header"), nil
+	}
 	if tp, ok := h.AppendAuth.(AppendTwoPhaseAuthorizer); ok {
 		switch phase {
 		case appendPhaseCredential:
@@ -275,12 +307,13 @@ func (h *Handler) appendDecision(
 }
 
 // credentialPresented reports whether the request carries any read/mutate
-// credential (a Bearer, a mesh identity, or a claim token). It drives the
-// Q3 cache posture: a response to a credentialed request is never shared-
-// cacheable, mode-independent — while uncredentialed insecure-mode responses
-// keep today's headers byte for byte.
+// credential (a Bearer, a mesh identity, or a write token on either carrier).
+// It drives the Q3 cache posture: a response to a credentialed request is
+// never shared-cacheable, mode-independent — while uncredentialed
+// insecure-mode responses keep today's headers byte for byte.
 func (h *Handler) credentialPresented(r *http.Request) bool {
 	return bearerFromRequest(r) != "" ||
+		r.Header.Get(WriteTokenHeader) != "" ||
 		r.Header.Get(ClaimTokenHeader) != "" ||
 		r.Header.Get(xfccHeader) != ""
 }
