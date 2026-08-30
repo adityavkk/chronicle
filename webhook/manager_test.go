@@ -482,8 +482,6 @@ func (f *fakeMetrics) ServiceAuthenticationFailure() {}
 func (f *fakeMetrics) ServiceAuthorizationFailure()  {}
 func (f *fakeMetrics) ServiceDelegatedGateway()      {}
 func (f *fakeMetrics) AppendFenceRejection(string)   {}
-func (f *fakeMetrics) AppendFenceSeal(string)        {}
-func (f *fakeMetrics) AppendFenceGrantFailed(string) {}
 
 func (f *fakeMetrics) AppendFenceSeal(outcome string) {
 	f.mu.Lock()

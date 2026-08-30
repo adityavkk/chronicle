@@ -219,6 +219,18 @@ func (c *fenceCounter) only(t *testing.T, reason string) {
 	}
 }
 
+// fencelessStore hides the wrapped store's write-fence capability while
+// keeping the page-snapshot surface the segments wrapper requires, so a
+// handler (or segments primary) over it sees a store with no fence support.
+type fencelessStore struct {
+	store.Store
+	store.PageReader
+}
+
+func newFencelessStore(ms *store.MemoryStore) fencelessStore {
+	return fencelessStore{Store: ms, PageReader: ms}
+}
+
 // fenceFixture is a handler over a fencedStore with every credential family
 // wired: the token arm under key, the service bearer tb4SvcBearer (a trusted
 // gateway), a wake-token entity arm under wakeKey, a rejection counter, and a
@@ -854,11 +866,14 @@ func TestHandleCreateWriteFence(t *testing.T) {
 	})
 
 	t.Run("501 without the capability", func(t *testing.T) {
+		// MemoryStore itself implements store.WriteFenceStore (the WP2 parity
+		// oracle), so the capability-less primary is an interface-only shim
+		// that hides everything but store.Store.
 		backend, err := segments.NewFileBackend(segments.ModeLocalFiles, t.TempDir(), 1<<20, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		segmented, err := segments.New(store.NewMemoryStore(), segments.Options{Backend: backend, InitialState: segments.StateServing}, nil)
+		segmented, err := segments.New(newFencelessStore(store.NewMemoryStore()), segments.Options{Backend: backend, InitialState: segments.StateServing}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -867,7 +882,7 @@ func TestHandleCreateWriteFence(t *testing.T) {
 			name string
 			st   store.Store
 		}{
-			{"memory store", store.NewMemoryStore()},
+			{"store without the capability", newFencelessStore(store.NewMemoryStore())},
 			{"segments over a primary without it", segmented},
 		} {
 			t.Run(c.name, func(t *testing.T) {

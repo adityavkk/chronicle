@@ -644,13 +644,13 @@ func TestNewSubscriptionsEnforceRequiresAtomicStreamStore(t *testing.T) {
 
 // ---- webhook parity and the seal at done (#183, design §D) ----
 
-// fenceFixture is the real write-fence stack a control-plane test drives
+// parityFixture is the real write-fence stack a control-plane test drives
 // end to end: a Redis data store with the fence capability, the subscription
 // Manager over it, an enforce-mode Handler gated by the Manager's write
 // authorizer, and — when respond is set — an httptest webhook receiver that
 // decodes each WakeNotification, answers with respond's status and body, and
 // then hands the notification to notifs.
-type fenceFixture struct {
+type parityFixture struct {
 	h      *Handler
 	mgr    *webhook.Manager
 	rt     *webhook.Routes
@@ -660,14 +660,14 @@ type fenceFixture struct {
 	notifs chan webhook.WakeNotification
 }
 
-type fenceFixtureOptions struct {
+type parityFixtureOptions struct {
 	// respond answers a webhook delivery; nil starts no receiver.
 	respond func(webhook.WakeNotification) (int, string)
 	// streams wraps the Redis fence adapter the Manager is built on; nil uses it as is.
 	streams func(redisFenceStreamAdapter) webhook.Streams
 }
 
-func newFenceFixture(t *testing.T, opts fenceFixtureOptions) *fenceFixture {
+func newParityFixture(t *testing.T, opts parityFixtureOptions) *parityFixture {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping Redis integration test in -short mode")
@@ -690,7 +690,7 @@ func newFenceFixture(t *testing.T, opts fenceFixtureOptions) *fenceFixture {
 	if err := client.FlushDB(ctx).Err(); err != nil {
 		t.Fatalf("flushdb: %v", err)
 	}
-	f := &fenceFixture{
+	f := &parityFixture{
 		data:   redisstore.New(client, redisstore.Options{}),
 		subs:   webhook.NewRedisStore(client),
 		notifs: make(chan webhook.WakeNotification, 8),
@@ -736,7 +736,7 @@ func newFenceFixture(t *testing.T, opts fenceFixtureOptions) *fenceFixture {
 // createFenced creates a write-fenced JSON stream through the store: the
 // Write-Fence create header is the handler's (WP3), the opt-in itself is the
 // store's (WP1), and this package only needs the fenced stream to exist.
-func (f *fenceFixture) createFenced(t *testing.T, path string) {
+func (f *parityFixture) createFenced(t *testing.T, path string) {
 	t.Helper()
 	if _, _, err := f.data.Create(path, store.CreateOptions{ContentType: "application/json", WriteFence: true}); err != nil {
 		t.Fatalf("create %s: %v", path, err)
@@ -745,7 +745,7 @@ func (f *fenceFixture) createFenced(t *testing.T, path string) {
 
 // seed appends one open-class event straight through the store so path has
 // pending work for its subscription.
-func (f *fenceFixture) seed(t *testing.T, path string) {
+func (f *parityFixture) seed(t *testing.T, path string) {
 	t.Helper()
 	if _, err := f.data.Append(path, []byte(`{"seed":true}`), store.AppendOptions{ContentType: "application/json"}); err != nil {
 		t.Fatalf("seed %s: %v", path, err)
@@ -753,7 +753,7 @@ func (f *fenceFixture) seed(t *testing.T, path string) {
 }
 
 // link creates subscription id with cfg and links every path at the beginning.
-func (f *fenceFixture) link(t *testing.T, id string, cfg webhook.Config, linkType webhook.LinkType, paths ...string) {
+func (f *parityFixture) link(t *testing.T, id string, cfg webhook.Config, linkType webhook.LinkType, paths ...string) {
 	t.Helper()
 	if _, err := f.subs.CreateOrConfirm(id, cfg, nil, time.Now()); err != nil {
 		t.Fatalf("create sub %s: %v", id, err)
@@ -766,13 +766,13 @@ func (f *fenceFixture) link(t *testing.T, id string, cfg webhook.Config, linkTyp
 }
 
 // webhookSub links a webhook subscription to the receiver for paths.
-func (f *fenceFixture) webhookSub(t *testing.T, paths ...string) {
+func (f *parityFixture) webhookSub(t *testing.T, paths ...string) {
 	t.Helper()
 	f.link(t, "s1", webhook.Config{Type: webhook.DispatchWebhook, Pattern: "events/*", WebhookURL: f.url, LeaseTTLMs: 30_000}, webhook.LinkGlob, paths...)
 }
 
 // claim creates pull-wake subscription s1 over paths and claims it over HTTP.
-func (f *fenceFixture) claim(t *testing.T, paths ...string) webhook.ClaimResponse {
+func (f *parityFixture) claim(t *testing.T, paths ...string) webhook.ClaimResponse {
 	t.Helper()
 	f.link(t, "s1", webhook.Config{Type: webhook.DispatchPullWake, Streams: paths, WakeStream: "wake/pool", LeaseTTLMs: 30_000}, webhook.LinkExplicit, paths...)
 	rec := f.control(http.MethodPost, "/__ds/subscriptions/s1/claim", "", `{"worker":"worker-A"}`)
@@ -791,7 +791,7 @@ func (f *fenceFixture) claim(t *testing.T, paths ...string) webhook.ClaimRespons
 
 // wake runs the recovery sweep, which arms and delivers the pending wake, and
 // returns the notification the receiver saw.
-func (f *fenceFixture) wake(t *testing.T) webhook.WakeNotification {
+func (f *parityFixture) wake(t *testing.T) webhook.WakeNotification {
 	t.Helper()
 	f.mgr.RunSweep()
 	select {
@@ -804,7 +804,7 @@ func (f *fenceFixture) wake(t *testing.T) webhook.WakeNotification {
 }
 
 // control sends one __ds control-plane request with an optional bearer.
-func (f *fenceFixture) control(method, target, bearer, body string) *httptest.ResponseRecorder {
+func (f *parityFixture) control(method, target, bearer, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
@@ -816,7 +816,7 @@ func (f *fenceFixture) control(method, target, bearer, body string) *httptest.Re
 
 // ack posts a heartbeat (done false) or a done for the wake, acking every
 // stream at its current tail so the done body's next_wake is false.
-func (f *fenceFixture) ack(t *testing.T, bearer string, generation int64, wakeID string, done bool, paths ...string) *httptest.ResponseRecorder {
+func (f *parityFixture) ack(t *testing.T, bearer string, generation int64, wakeID string, done bool, paths ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := webhook.CallbackRequest{WakeID: wakeID, Generation: generation}
 	if done {
@@ -831,7 +831,7 @@ func (f *fenceFixture) ack(t *testing.T, bearer string, generation int64, wakeID
 
 // fencedAppend is a fenced-class append through the Handler: the write token
 // plus the producer triple at epoch == generation (design §B.1).
-func (f *fenceFixture) fencedAppend(path, token string, generation, seq int64) *httptest.ResponseRecorder {
+func (f *parityFixture) fencedAppend(path, token string, generation, seq int64) *httptest.ResponseRecorder {
 	return do(f.h, http.MethodPost, path, map[string]string{
 		"Content-Type":   "application/json",
 		ClaimTokenHeader: token,
@@ -842,7 +842,7 @@ func (f *fenceFixture) fencedAppend(path, token string, generation, seq int64) *
 }
 
 // assertFencedUnchanged asserts a 409 FENCED envelope and an unmoved tail.
-func (f *fenceFixture) assertFencedUnchanged(t *testing.T, label string, rec *httptest.ResponseRecorder, path string, before store.Offset) {
+func (f *parityFixture) assertFencedUnchanged(t *testing.T, label string, rec *httptest.ResponseRecorder, path string, before store.Offset) {
 	t.Helper()
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("%s = %d body %q, want 409", label, rec.Code, rec.Body.String())
@@ -856,7 +856,7 @@ func (f *fenceFixture) assertFencedUnchanged(t *testing.T, label string, rec *ht
 }
 
 // seal reads the stream's HEAD-visible seal summary.
-func (f *fenceFixture) seal(t *testing.T, path string) (int64, *store.Offset) {
+func (f *parityFixture) seal(t *testing.T, path string) (int64, *store.Offset) {
 	t.Helper()
 	meta, err := f.data.Get(path)
 	if err != nil {
@@ -866,7 +866,7 @@ func (f *fenceFixture) seal(t *testing.T, path string) (int64, *store.Offset) {
 }
 
 // awaitIdle waits for the auto-ack path to idle s1.
-func (f *fenceFixture) awaitIdle(t *testing.T) {
+func (f *parityFixture) awaitIdle(t *testing.T) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -884,9 +884,9 @@ func (f *fenceFixture) awaitIdle(t *testing.T) {
 // with the write_token from inside its own handler — during the POST — and
 // the write lands, bound to the derived holder wake:<wake_id>.
 func TestDeliverWebhookGrantsMarkerBeforePost(t *testing.T) {
-	var f *fenceFixture
+	var f *parityFixture
 	codes := make(chan int, 1)
-	f = newFenceFixture(t, fenceFixtureOptions{respond: func(n webhook.WakeNotification) (int, string) {
+	f = newParityFixture(t, parityFixtureOptions{respond: func(n webhook.WakeNotification) (int, string) {
 		codes <- f.fencedAppend("/events/a", n.WriteToken, n.Generation, 0).Code
 		return http.StatusOK, `{}`
 	}})
@@ -919,7 +919,7 @@ func TestDeliverWebhookGrantsMarkerBeforePost(t *testing.T) {
 // the base {ok,next_wake} body, seals the stream at the generation, and the
 // token that was live a moment earlier is refused with the tail unchanged.
 func TestWebhookCallbackHeartbeatRefreshesWriteToken(t *testing.T) {
-	f := newFenceFixture(t, fenceFixtureOptions{respond: func(webhook.WakeNotification) (int, string) {
+	f := newParityFixture(t, parityFixtureOptions{respond: func(webhook.WakeNotification) (int, string) {
 		return http.StatusOK, `{}`
 	}})
 	f.createFenced(t, "/events/a")
@@ -961,7 +961,7 @@ func TestWebhookCallbackHeartbeatRefreshesWriteToken(t *testing.T) {
 // before the subscription idles, so the notification's write_token is refused
 // afterwards and the seal records the definite last offset.
 func TestWebhookAutoAckDoneSeals(t *testing.T) {
-	f := newFenceFixture(t, fenceFixtureOptions{respond: func(webhook.WakeNotification) (int, string) {
+	f := newParityFixture(t, parityFixtureOptions{respond: func(webhook.WakeNotification) (int, string) {
 		return http.StatusOK, `{"done":true}`
 	}})
 	f.createFenced(t, "/events/a")
@@ -982,7 +982,7 @@ func TestWebhookAutoAckDoneSeals(t *testing.T) {
 // linked fenced stream — the seal is visible on the stream and the claim's
 // fence is refused in the slot as sealed, not merely as a missing marker.
 func TestDeleteSubscriptionSealsLinkedStreams(t *testing.T) {
-	f := newFenceFixture(t, fenceFixtureOptions{})
+	f := newParityFixture(t, parityFixtureOptions{})
 	f.createFenced(t, "/events/a")
 	cr := f.claim(t, "events/a")
 	sub, _, err := f.subs.Get("s1")
@@ -1019,7 +1019,7 @@ func TestDeleteSubscriptionSealsLinkedStreams(t *testing.T) {
 // unlinking one explicit stream from a live claim seals only that stream at
 // the claim's generation; the claim keeps writing its other links.
 func TestRemoveStreamSealsPath(t *testing.T) {
-	f := newFenceFixture(t, fenceFixtureOptions{})
+	f := newParityFixture(t, parityFixtureOptions{})
 	f.createFenced(t, "/events/a")
 	f.createFenced(t, "/events/b")
 	cr := f.claim(t, "events/a", "events/b")
@@ -1074,7 +1074,7 @@ func (s *crashAfterSealStreams) SealAppendFence(path string, fence auth.AppendFe
 func TestDoneSealCrashWindowFailsClosed(t *testing.T) {
 	crash := &crashAfterSealStreams{entered: make(chan struct{}), resume: make(chan struct{})}
 	crash.armed.Store(true)
-	f := newFenceFixture(t, fenceFixtureOptions{streams: func(a redisFenceStreamAdapter) webhook.Streams {
+	f := newParityFixture(t, parityFixtureOptions{streams: func(a redisFenceStreamAdapter) webhook.Streams {
 		crash.redisFenceStreamAdapter = a
 		return crash
 	}})
