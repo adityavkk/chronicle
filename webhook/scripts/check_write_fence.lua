@@ -4,6 +4,13 @@
 -- (generation, wake_id, holder) against the current shard state and reject a
 -- deposed or expired holder (PROTOCOL §7.3).
 --
+-- The holder is dispatch-specific (#183 webhook parity): a pull-wake claim is
+-- held by its worker (holder_worker); a webhook wake owns no worker, so its
+-- holder is the wake itself, 'wake:' .. wake_id, and the wake is live from
+-- either phase (waking or live) inside its lease — the same liveness shape as
+-- ack.lua's heartbeat branch. Mirrored by webhook.WriteFenceDecision (state.go)
+-- and bound to it by TestCheckWriteFenceWebhookBranch.
+--
 -- KEYS: 1=shardstate 2=sub_config
 -- ARGV: 1=now_ns 2=generation 3=wake_id 4=holder
 -- Reply: OK | FENCED | NOSUB
@@ -41,6 +48,20 @@ local holder_worker = redis.call('HGET', k_shardstate, 'holder_worker')
 local gen = redis.call('HGET', k_shardstate, 'generation')
 local wake = redis.call('HGET', k_shardstate, 'wake_id')
 local lease_until = tonumber(redis.call('HGET', k_shardstate, 'lease_until_ns')) or 0
+
+local dispatch = redis.call('HGET', k_sub_config, 'type')
+if dispatch == 'webhook' then
+  if (phase ~= 'waking' and phase ~= 'live') or holder ~= '0' or lease_until <= now then
+    return { 'FENCED' }
+  end
+  if gen ~= a_generation or wake == false or wake == '' or wake ~= a_wake_id then
+    return { 'FENCED' }
+  end
+  if a_holder ~= ('wake:' .. wake) then
+    return { 'FENCED' }
+  end
+  return { 'OK' }
+end
 
 if phase ~= 'live' or holder ~= '1' or lease_until <= now then
   return { 'FENCED' }
