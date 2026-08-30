@@ -276,7 +276,9 @@ jobs:
             echo "fence_fault_nobind server passed WF-16 — the binding control is dead" >&2
             cat fault.log; exit 1
           fi
-          grep -q "WF-16" fault.log
+          # Anchor on the vitest failure line: a skipped/listed mention of the
+          # test id (e.g. an infra error before it ran) must not satisfy this.
+          grep -qE "(×|✗|FAIL).*WF-16" fault.log
       - name: Fault control fence_fault_noseal (WF-19 must fail)
         env:
           CHRONICLE_BUILD_TAGS: fence_fault_noseal
@@ -285,7 +287,7 @@ jobs:
             echo "fence_fault_noseal server passed WF-19 — the seal control is dead" >&2
             cat fault.log; exit 1
           fi
-          grep -q "WF-19" fault.log
+          grep -qE "(×|✗|FAIL).*WF-19" fault.log
       - name: Fault control fence_fault_nopair (client test must fail)
         env:
           CHRONICLE_BUILD_TAGS: fence_fault_nopair
@@ -294,7 +296,7 @@ jobs:
             echo "fence_fault_nopair server passed the pinned-client test — the pair control is dead" >&2
             cat fault.log; exit 1
           fi
-          grep -q "client.test.ts" fault.log
+          grep -qE "FAIL.*client\.test\.ts" fault.log
 
   # Lean pure-core proofs (issue #30 / P1.1). Separate from the Go jobs and gated
   # on `lean/` changes so routine Go CI never invokes Lean. The toolchain is pinned

@@ -4,6 +4,7 @@ package redis
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -20,30 +21,34 @@ import (
 // (test/conformance-ext/write-fencing.test.ts) MUST fail. The tag is off by
 // default: the shipped build never compiles this file, and the scripts load
 // unmodified from scripts/*.lua.
+//
+// The fault is cut out of common.lua's real fence_bind (the same pattern as
+// fence_fault_noseal): the binding write is textually removed from the shared
+// prelude, and a prelude where the site no longer matches panics at init, so
+// the fault can never drift away from the shipped function silently.
 func init() {
-	const shim = `
--- fence_fault_nobind: the producer-binding HSET is disabled; wfLastOff kept.
-local function fence_bind(hset, m, has_fence, producer_id, f_gen, off)
-  if not (has_fence and m.wf == '1') then return end
-  hset[#hset + 1] = 'wfLastOff'
-  hset[#hset + 1] = off
-end
-`
-	appendScript = loadScriptShimmed("append.lua", shim)
-	closeScript = loadScriptShimmed("close.lua", shim)
+	// The producer-binding half of fence_bind in scripts/common.lua, verbatim.
+	const bindWrite = `  hset[#hset + 1] = 'wfbind:' .. producer_id
+  hset[#hset + 1] = f_gen`
+	appendScript = loadScriptNoBind("append.lua", bindWrite)
+	closeScript = loadScriptNoBind("close.lua", bindWrite)
 }
 
-// loadScriptShimmed is loadScript with a fault shim spliced between the shared
-// prelude and the script body: the shim's local declarations lexically shadow
-// the prelude's for everything the body calls.
-func loadScriptShimmed(name, shim string) *redis.Script {
+// loadScriptNoBind is loadScript with the producer-binding write stripped from
+// the shared prelude the script body calls into.
+func loadScriptNoBind(name, bindWrite string) *redis.Script {
 	prelude, err := scriptFS.ReadFile("scripts/common.lua")
 	if err != nil {
 		panic(fmt.Sprintf("chronicle redis: embedded common.lua missing: %v", err))
+	}
+	faulted := strings.Replace(string(prelude), bindWrite,
+		"  -- fence_fault_nobind: the producer-binding HSET is disabled; wfLastOff kept.", 1)
+	if faulted == string(prelude) {
+		panic("fence_fault_nobind: binding write site not found in common.lua — realign the fault with fence_bind")
 	}
 	body, err := scriptFS.ReadFile("scripts/" + name)
 	if err != nil {
 		panic(fmt.Sprintf("chronicle redis: embedded script %s missing: %v", name, err))
 	}
-	return redis.NewScript(string(prelude) + "\n" + shim + "\n" + string(body))
+	return redis.NewScript(faulted + "\n" + string(body))
 }

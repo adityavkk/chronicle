@@ -427,8 +427,8 @@ func (f *fakeMetrics) delivered() map[string]int {
 	defer f.mu.Unlock()
 	return maps.Clone(f.deliveries)
 }
-func (f *fakeMetrics) WakeEvent(time.Duration, string)    {}
-func (f *fakeMetrics) WorkerTick(string, int)             {}
+func (f *fakeMetrics) WakeEvent(time.Duration, string) {}
+func (f *fakeMetrics) WorkerTick(string, int)          {}
 
 func (f *fakeMetrics) FanOut(time.Duration, int, int)               {}
 func (f *fakeMetrics) DirtyEnqueue(string, int, int, time.Duration) {}
