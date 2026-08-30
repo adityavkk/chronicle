@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"pgregory.net/rapid"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
@@ -29,6 +32,17 @@ import (
 // lazy-expiry / sliding-TTL / is_expired decisions are reproducible at a frozen
 // now and never depend on independently-sampled wall clocks (the AdvanceClock
 // action moves the shared clock; INV-DIFF-06, INV-EXP-01).
+//
+// Write fence (#183): the model also drives the WriteFenceStore capability —
+// grant / renew / revoke / seal of claim markers for a pool of two authorities
+// (one subscription and its recreated incarnation), fenced-class appends and
+// closes presenting those claims, and fenced creates — so the fence rung
+// (INV-DIFF-02 rung 3b), the per-authority seal and the producer binding are
+// diffed between the Go oracle and the Lua mirror step for step. Marker
+// retention is the one reaper the shared FakeClock does not drive: on Redis it
+// is a wall-clock key TTL, on the MemoryStore a wall-clock expiresAt, both two
+// minutes past any lease and so far beyond one run that neither backend reaps
+// a marker mid-sequence.
 //
 // Scope: NON-JSON content only. JSON-mode flattening (ProcessJSONAppend,
 // fork-sub-offset arithmetic) is a separate issue (#44) and is deliberately
@@ -69,13 +83,69 @@ var boundaryEpochSeq = [][2]int64{
 
 // chronicleModel is the rapid state machine. The oracle and subject share one
 // FakeClock; paths records every stream created so far (for fork sources and
-// the cross-stream Check).
+// the cross-stream Check); claims records every claim fence granted on a path
+// per pooled authority, so later ops can present a claim the stream slot has
+// actually seen (accepted, renewed, sealed or superseded) rather than only
+// fresh draws, and claimed lists those paths in a deterministic order.
 type chronicleModel struct {
 	oracle  *store.MemoryStore
 	subject *Store
 	clock   *store.FakeClock
+	tally   *fenceTally // outcomes reached; nil records nothing
 
-	paths []string // every path ever created (may be deleted/expired)
+	paths   []string                              // every path ever created (may be deleted/expired)
+	claims  map[string]map[int][]auth.AppendFence // path -> claimPool index -> granted fences
+	claimed []string                              // every path with a granted claim, in grant order
+}
+
+// fenceTally counts the outcomes a property run reached, by key, so a probe
+// can refuse a corpus fixture or a generator that no longer reaches the
+// branch it is meant to — the vacuity a fence generator drawing every input
+// independently falls into, since the accept shape is a conjunction of them.
+type fenceTally struct {
+	mu   sync.Mutex
+	seen map[string]int
+}
+
+func newFenceTally() *fenceTally { return &fenceTally{seen: make(map[string]int)} }
+
+// hit records one occurrence of key; a nil tally records nothing.
+func (c *fenceTally) hit(key string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.seen[key]++
+}
+
+// reached asserts every key was hit at least once and reports the full tally
+// on failure.
+func (c *fenceTally) reached(t testing.TB, keys ...string) {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, key := range keys {
+		if c.seen[key] == 0 {
+			t.Errorf("outcome %q never reached; tally: %v", key, c.seen)
+		}
+	}
+}
+
+// String renders the tally with its keys sorted.
+func (c *fenceTally) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	keys := make([]string, 0, len(c.seen))
+	for k := range c.seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b []byte
+	for _, k := range keys {
+		b = fmt.Appendf(b, "%s=%d ", k, c.seen[k])
+	}
+	return string(b)
 }
 
 // Check is the after-every-action invariant: for every known path, the oracle
@@ -194,6 +264,8 @@ func (m *chronicleModel) ForkCreate(t *rapid.T) {
 		sub := rapid.Uint64Range(0, 8).Draw(t, "forkSub")
 		opts.ForkSubOffset = &sub
 	}
+	// A fork never inherits the write fence; it declares its own (C.1).
+	opts.WriteFence = rapid.Bool().Draw(t, "forkWriteFence")
 	m.applyCreate(t, path, opts)
 }
 
@@ -201,6 +273,7 @@ func (m *chronicleModel) drawCreateOpts(t *rapid.T) store.CreateOptions {
 	opts := store.CreateOptions{
 		ContentType: contentTypeGen().Draw(t, "contentType"),
 		Closed:      rapid.Bool().Draw(t, "createClosed"),
+		WriteFence:  rapid.Bool().Draw(t, "createWriteFence"),
 	}
 	switch rapid.SampledFrom([]string{"none", "ttl", "expiresAt"}).Draw(t, "expiryKind") {
 	case "ttl":
@@ -226,28 +299,32 @@ func (m *chronicleModel) applyCreate(t *rapid.T, path string, opts store.CreateO
 	if oErr == nil {
 		m.paths = append(m.paths, path)
 	}
+	if errors.Is(oErr, store.ErrInvalidForkSubOffset) {
+		m.tally.hit("fork_suboffset_overshoot")
+	}
 }
 
-// Append appends generated data with optional Stream-Seq, producer epoch/seq,
-// and Close, diffing the full AppendResult and error.
+// Append appends generated data with optional Stream-Seq and Close as a drawn
+// write — open or fenced class, with or without a producer tuple — and diffs
+// the full AppendResult, the fence disclosure included, and error.
 func (m *chronicleModel) Append(t *rapid.T) {
-	path := m.pickPath(t)
+	path := m.pickFencePath(t)
 	data := dataGen().Draw(t, "data")
+	w := m.drawWrite(t, path, false)
 	opts := store.AppendOptions{
-		ContentType: contentTypeGen().Draw(t, "appendContentType"),
-		Close:       rapid.Bool().Draw(t, "appendClose"),
+		Close:         rapid.Bool().Draw(t, "appendClose"),
+		ProducerId:    w.producerID,
+		ProducerEpoch: w.epoch,
+		ProducerSeq:   w.seq,
+		Fence:         w.fence,
+	}
+	if !w.acceptShape {
+		opts.ContentType = contentTypeGen().Draw(t, "appendContentType")
 	}
 	if rapid.Bool().Draw(t, "withStreamSeq") {
 		// Stream-Seq is compared lexicographically; small zero-padded strings
 		// keep the comparison meaningful without tripping LB-2 here.
 		opts.Seq = fmt.Sprintf("%04d", rapid.IntRange(0, 50).Draw(t, "streamSeq"))
-	}
-	if rapid.Bool().Draw(t, "withProducer") {
-		es := rapid.SampledFrom(boundaryEpochSeq).Draw(t, "epochSeq")
-		epoch, seq := es[0], es[1]
-		opts.ProducerId = rapid.SampledFrom([]string{"p", "q"}).Draw(t, "producerId")
-		opts.ProducerEpoch = &epoch
-		opts.ProducerSeq = &seq
 	}
 
 	oRes, oErr := m.oracle.Append(path, data, opts)
@@ -255,6 +332,7 @@ func (m *chronicleModel) Append(t *rapid.T) {
 	if m.diffErr(t, "Append", path, oErr, sErr) {
 		m.diffAppendResult(t, path, oRes, sRes)
 	}
+	m.tallyWrite(path, opts.Fence, oRes.FenceReason, oErr)
 }
 
 // Read draws a starting offset (zero, the current tail, or a generated earlier
@@ -288,31 +366,53 @@ func (m *chronicleModel) CloseStream(t *rapid.T) {
 	path := m.pickPath(t)
 	oRes, oErr := m.oracle.CloseStream(path)
 	sRes, sErr := m.subject.CloseStream(path)
-	if m.diffErr(t, "CloseStream", path, oErr, sErr) && oErr == nil {
-		if oRes.AlreadyClosed != sRes.AlreadyClosed {
-			t.Fatalf("CloseStream(%s) alreadyClosed mismatch: oracle=%v subject=%v", path, oRes.AlreadyClosed, sRes.AlreadyClosed)
-		}
-		if !oRes.FinalOffset.Equal(sRes.FinalOffset) {
-			t.Fatalf("CloseStream(%s) finalOffset mismatch: oracle=%v subject=%v", path, oRes.FinalOffset, sRes.FinalOffset)
-		}
+	if m.diffErr(t, "CloseStream", path, oErr, sErr) {
+		m.diffCloseResult(t, "CloseStream", path, oRes, sRes)
 	}
 }
 
-// CloseStreamWithProducer closes with producer headers (closedBy tuple dedup)
-// and diffs the full CloseProducerResult + error.
+// CloseStreamFenced closes through the claim rung (FencedCloser) with a drawn
+// claim and diffs the CloseResult — the fence disclosure on refusal included —
+// and error.
+func (m *chronicleModel) CloseStreamFenced(t *rapid.T) {
+	path := m.pickFencePath(t)
+	_, fence := m.drawClaim(t, path)
+	oRes, oErr := m.oracle.CloseStreamFenced(path, fence)
+	sRes, sErr := m.subject.CloseStreamFenced(path, fence)
+	if m.diffErr(t, "CloseStreamFenced", path, oErr, sErr) {
+		m.diffCloseResult(t, "CloseStreamFenced", path, oRes, sRes)
+	}
+	var reason store.FenceReason
+	if oRes != nil {
+		reason = oRes.FenceReason
+	}
+	m.tallyWrite(path, &fence, reason, oErr)
+}
+
+// CloseStreamWithProducer closes with a drawn producer tuple (closedBy tuple
+// dedup) of either class and diffs the full CloseProducerResult + error.
 func (m *chronicleModel) CloseStreamWithProducer(t *rapid.T) {
-	path := m.pickPath(t)
-	es := rapid.SampledFrom(boundaryEpochSeq).Draw(t, "closeEpochSeq")
+	path := m.pickFencePath(t)
+	w := m.drawWrite(t, path, true)
 	opts := store.CloseProducerOptions{
-		ProducerId:    rapid.SampledFrom([]string{"p", "q"}).Draw(t, "closeProducerId"),
-		ProducerEpoch: es[0],
-		ProducerSeq:   es[1],
+		ProducerId:    w.producerID,
+		ProducerEpoch: *w.epoch,
+		ProducerSeq:   *w.seq,
+		Fence:         w.fence,
 	}
 	oRes, oErr := m.oracle.CloseStreamWithProducer(path, opts)
 	sRes, sErr := m.subject.CloseStreamWithProducer(path, opts)
 	if m.diffErr(t, "CloseStreamWithProducer", path, oErr, sErr) {
 		m.diffCloseProducerResult(t, path, oRes, sRes)
 	}
+	var reason store.FenceReason
+	if oRes != nil {
+		reason = oRes.FenceReason
+		if oRes.ProducerResult == store.ProducerResultDuplicate {
+			m.tally.hit("close_duplicate")
+		}
+	}
+	m.tallyWrite(path, opts.Fence, reason, oErr)
 }
 
 // Delete deletes a stream (soft-delete when forks reference it, hard delete
@@ -350,6 +450,255 @@ func (m *chronicleModel) GetCurrentOffset(t *rapid.T) {
 func (m *chronicleModel) AdvanceClock(t *rapid.T) {
 	secs := rapid.Int64Range(0, 90).Draw(t, "advanceSeconds")
 	m.clock.Advance(time.Duration(secs) * time.Second)
+}
+
+// ---- write fence actions (#183) ----
+
+// claimPool is the two fence authorities every fence op draws from: one
+// subscription and its recreated incarnation, so per-authority seal isolation
+// is exercised next to generation takeover within one authority. Generation,
+// wake id and holder are drawn per op from small sets, so a fresh draw
+// collides with an installed claim often enough to renew or supersede it, and
+// misses it often enough to be refused as another claim.
+var claimPool = []auth.AppendFence{
+	{SubscriptionID: "sub", SubscriptionIncarnation: "inc-1"},
+	{SubscriptionID: "sub", SubscriptionIncarnation: "inc-2"},
+}
+
+// pickFencePath draws a path for an op that presents or meets a claim,
+// preferring one a claim has been granted on (three draws in four, when any)
+// so the fenced class finds a marker the stream slot has actually installed
+// and the open class finds a producer it has actually bound.
+func (m *chronicleModel) pickFencePath(t *rapid.T) string {
+	if len(m.claimed) > 0 && rapid.IntRange(0, 3).Draw(t, "claimedPath") != 0 {
+		return rapid.SampledFrom(m.claimed).Draw(t, "claimed")
+	}
+	return m.pickPath(t)
+}
+
+// drawFreshClaim draws a complete claim fence of one pooled authority with a
+// fresh generation / wake / holder. The lease is the caller's to set; the
+// rung never reads it.
+func drawFreshClaim(t *rapid.T) (int, auth.AppendFence) {
+	id := rapid.IntRange(0, len(claimPool)-1).Draw(t, "claim")
+	f := claimPool[id]
+	f.Generation = rapid.Int64Range(1, 3).Draw(t, "generation")
+	f.WakeID = rapid.SampledFrom([]string{"w_1", "w_2"}).Draw(t, "wakeID")
+	f.Holder = rapid.SampledFrom([]string{"worker-a", "worker-b"}).Draw(t, "holder")
+	return id, f
+}
+
+// drawClaim draws a claim fence for path: one granted there before (three
+// draws in four, when any — the accept, renewal, sealed and superseded
+// paths), else a fresh one.
+func (m *chronicleModel) drawClaim(t *rapid.T, path string) (int, auth.AppendFence) {
+	id, fresh := drawFreshClaim(t)
+	if granted := m.claims[path][id]; len(granted) > 0 && rapid.IntRange(0, 3).Draw(t, "grantedClaim") != 0 {
+		return id, rapid.SampledFrom(granted).Draw(t, "grantedFence")
+	}
+	return id, fresh
+}
+
+// writeDraw is one drawn write: its class (fence nil = open) and its producer
+// tuple (epoch nil = no producer headers). acceptShape marks a fenced write
+// left in the accept shape, which presents no content type so the rung, not
+// the media type, decides it.
+type writeDraw struct {
+	fence       *auth.AppendFence
+	producerID  string
+	epoch, seq  *int64
+	acceptShape bool
+}
+
+// drawWrite draws the class and producer tuple of an append or close on
+// path. The open class (two draws in three, so the base ladder keeps its
+// coverage) carries the boundary (epoch, seq) table on half of its writes, or
+// on all of them when the op requires headers. The fenced class starts from
+// the accept shape — a drawn claim, producer "p" at the claim generation and
+// the sequence the oracle expects next — and disturbs at most one input: the
+// headers dropped (producer_required on a fenced stream), the epoch off by
+// one (epoch), or the boundary table instead (the producer ladder behind the
+// rung). The claim itself supplies the marker, seal and lease outcomes.
+func (m *chronicleModel) drawWrite(t *rapid.T, path string, headersRequired bool) writeDraw {
+	var w writeDraw
+	tuple := func(id string, epoch, seq int64) { w.producerID, w.epoch, w.seq = id, &epoch, &seq }
+	boundary := func(id string) {
+		es := rapid.SampledFrom(boundaryEpochSeq).Draw(t, "epochSeq")
+		tuple(id, es[0], es[1])
+	}
+	if rapid.IntRange(0, 2).Draw(t, "writeClass") != 0 {
+		if headersRequired || rapid.Bool().Draw(t, "withProducer") {
+			boundary(rapid.SampledFrom([]string{"p", "q"}).Draw(t, "producerId"))
+		}
+		return w
+	}
+	_, fence := m.drawClaim(t, path)
+	w.fence = &fence
+	shapes := []string{"accept", "accept", "epoch off by one", "boundary", "no producer"}
+	if headersRequired {
+		shapes = shapes[:4]
+	}
+	switch rapid.SampledFrom(shapes).Draw(t, "fencedShape") {
+	case "accept":
+		w.acceptShape = true
+		tuple("p", fence.Generation, m.nextSeq(path, "p", fence.Generation))
+	case "epoch off by one":
+		tuple("p", fence.Generation+1, 0)
+	case "boundary":
+		boundary("p")
+	}
+	return w
+}
+
+// nextSeq is the sequence the oracle accepts next from producer at epoch: the
+// last accepted plus one at the producer's current epoch, else 0 (a first
+// contact, an epoch bump, or a stale epoch the ladder refuses).
+func (m *chronicleModel) nextSeq(path, producer string, epoch int64) int64 {
+	meta, err := m.oracle.Get(path)
+	if err != nil {
+		return 0
+	}
+	if st := meta.Producers[producer]; st != nil && st.Epoch == epoch {
+		return st.LastSeq + 1
+	}
+	return 0
+}
+
+// fenced reports whether the oracle sees path as a live write-fenced stream.
+func (m *chronicleModel) fenced(path string) bool {
+	meta, err := m.oracle.Get(path)
+	return err == nil && meta.WriteFence
+}
+
+// sealedGeneration is the oracle's HEAD seal summary for path (0 when none or
+// not live).
+func (m *chronicleModel) sealedGeneration(path string) int64 {
+	meta, err := m.oracle.Get(path)
+	if err != nil {
+		return 0
+	}
+	return meta.SealedGeneration
+}
+
+// tallyWrite records a write's outcome: a fence refusal by reason, the base
+// producer refusals the corpus fixtures are named for, or the acceptance of a
+// fenced-class write on a write-fenced stream (the rung's accept path, which
+// binds the producer and fixes the class's last offset).
+func (m *chronicleModel) tallyWrite(path string, fence *auth.AppendFence, reason store.FenceReason, err error) {
+	switch {
+	case errors.Is(err, store.ErrAppendFenced):
+		m.tally.hit("fence:" + string(reason))
+	case errors.Is(err, store.ErrInvalidEpochSeq):
+		m.tally.hit("epoch_seq")
+	case errors.Is(err, store.ErrProducerSeqGap):
+		m.tally.hit("seq_gap")
+	case err == nil && fence != nil && m.fenced(path):
+		m.tally.hit("fence:accept")
+	}
+}
+
+// drawLease draws a marker lease relative to the shared clock: already lapsed
+// (the grant refuses it), the boundary now itself, or live for a window a
+// later AdvanceClock may or may not outrun.
+func (m *chronicleModel) drawLease(t *rapid.T) int64 {
+	secs := rapid.SampledFrom([]int64{-1, 0, 1, 45, 100}).Draw(t, "leaseSeconds")
+	return m.clock.Now().Add(time.Duration(secs) * time.Second).UnixNano()
+}
+
+// recordClaim remembers a fence granted on path for its authority, once per
+// (generation, wake, holder): a renewal changes only the lease.
+func (m *chronicleModel) recordClaim(path string, id int, fence auth.AppendFence) {
+	if m.claims[path] == nil {
+		m.claims[path] = make(map[int][]auth.AppendFence)
+		m.claimed = append(m.claimed, path)
+	}
+	for _, g := range m.claims[path][id] {
+		if g.Generation == fence.Generation && g.WakeID == fence.WakeID && g.Holder == fence.Holder {
+			return
+		}
+	}
+	m.claims[path][id] = append(m.claims[path][id], fence)
+}
+
+// applyGrant runs GrantAppendFence on both backends and diffs (installed,
+// error). Like Delete, the diff is gated on observable liveness:
+// grant_append_fence.lua consults the meta hash as it stands, so on an expired
+// stream the two backends see the documented expiry-cleanup-timing asymmetry
+// (see Check). A claim both backends installed is recorded for later ops.
+func (m *chronicleModel) applyGrant(t *rapid.T, path string, id int, fence auth.AppendFence) {
+	live := m.oracle.Has(path) && m.subject.Has(path)
+	sealedBefore := m.sealedGeneration(path)
+	oOK, oErr := m.oracle.GrantAppendFence(path, fence)
+	sOK, sErr := m.subject.GrantAppendFence(path, fence)
+	if live && m.diffErr(t, "GrantAppendFence", path, oErr, sErr) && oOK != sOK {
+		t.Fatalf("GrantAppendFence(%s) installed mismatch: oracle=%v subject=%v", path, oOK, sOK)
+	}
+	switch {
+	case oOK && sOK:
+		m.recordClaim(path, id, fence)
+		m.tally.hit("grant:installed")
+		if m.sealedGeneration(path) != sealedBefore {
+			m.tally.hit("grant:superseded")
+		}
+	case errors.Is(oErr, store.ErrAppendFenced):
+		m.tally.hit("grant:fenced")
+	}
+}
+
+// GrantFence installs a fresh claim marker on a drawn path: an install, a
+// takeover with the supersession seal, a renewal when the draw lands on the
+// installed claim, or a refusal as an older, sealed or foreign claim.
+func (m *chronicleModel) GrantFence(t *rapid.T) {
+	path := m.pickPath(t)
+	id, fence := drawFreshClaim(t)
+	fence.LeaseUntilNs = m.drawLease(t)
+	m.applyGrant(t, path, id, fence)
+}
+
+// RenewFence re-grants a claim granted on a claimed path before with a new
+// lease: the heartbeat renewal, which never shortens the marker lease and is
+// refused once the claim is revoked, sealed or superseded.
+func (m *chronicleModel) RenewFence(t *rapid.T) {
+	if len(m.claimed) == 0 {
+		t.Skip("no claim granted yet")
+	}
+	path := rapid.SampledFrom(m.claimed).Draw(t, "claimed")
+	id := rapid.IntRange(0, len(claimPool)-1).Draw(t, "claim")
+	granted := m.claims[path][id]
+	if len(granted) == 0 {
+		t.Skip("no claim of this authority here")
+	}
+	fence := rapid.SampledFrom(granted).Draw(t, "grantedFence")
+	fence.LeaseUntilNs = m.drawLease(t)
+	m.applyGrant(t, path, id, fence)
+}
+
+// RevokeFence tombstones a drawn claim's marker without sealing and diffs the
+// error. The marker lives beside the stream on both backends, so the diff
+// needs no liveness gate.
+func (m *chronicleModel) RevokeFence(t *rapid.T) {
+	path := m.pickFencePath(t)
+	_, fence := m.drawClaim(t, path)
+	m.diffErr(t, "RevokeAppendFence", path,
+		m.oracle.RevokeAppendFence(path, fence), m.subject.RevokeAppendFence(path, fence))
+}
+
+// SealFence tombstones a drawn claim's marker and, on a fenced stream, seals
+// its generation for its authority; it diffs the SealResult and error,
+// liveness-gated as applyGrant is.
+func (m *chronicleModel) SealFence(t *rapid.T) {
+	path := m.pickFencePath(t)
+	_, fence := m.drawClaim(t, path)
+	live := m.oracle.Has(path) && m.subject.Has(path)
+	oRes, oErr := m.oracle.SealAppendFence(path, fence)
+	sRes, sErr := m.subject.SealAppendFence(path, fence)
+	if live && m.diffErr(t, "SealAppendFence", path, oErr, sErr) &&
+		(oRes.Outcome != sRes.Outcome || oRes.Generation != sRes.Generation || !oRes.FinalOffset.Equal(sRes.FinalOffset)) {
+		t.Fatalf("SealAppendFence(%s) result mismatch: oracle=%+v subject=%+v", path, oRes, sRes)
+	}
+	if oErr == nil {
+		m.tally.hit("seal:" + string(oRes.Outcome))
+	}
 }
 
 // ---- diff helpers ----
@@ -411,6 +760,29 @@ func (m *chronicleModel) diffAppendResult(t *rapid.T, path string, o, s store.Ap
 	if o.StreamClosed != s.StreamClosed {
 		t.Fatalf("Append(%s) streamClosed mismatch: oracle=%v subject=%v", path, o.StreamClosed, s.StreamClosed)
 	}
+	if o.FenceReason != s.FenceReason || o.FenceGeneration != s.FenceGeneration || o.FenceHolder != s.FenceHolder {
+		t.Fatalf("Append(%s) fence disclosure mismatch: oracle=%+v subject=%+v", path, o, s)
+	}
+}
+
+// diffCloseResult diffs a CloseResult: nil-ness, the final offset and
+// already-closed flag on success, the fence disclosure on refusal.
+func (m *chronicleModel) diffCloseResult(t *rapid.T, op, path string, o, s *store.CloseResult) {
+	if (o == nil) != (s == nil) {
+		t.Fatalf("%s(%s) nil-result mismatch: oracle=%v subject=%v", op, path, o, s)
+	}
+	if o == nil {
+		return
+	}
+	if o.AlreadyClosed != s.AlreadyClosed {
+		t.Fatalf("%s(%s) alreadyClosed mismatch: oracle=%v subject=%v", op, path, o.AlreadyClosed, s.AlreadyClosed)
+	}
+	if !o.FinalOffset.Equal(s.FinalOffset) {
+		t.Fatalf("%s(%s) finalOffset mismatch: oracle=%v subject=%v", op, path, o.FinalOffset, s.FinalOffset)
+	}
+	if o.FenceReason != s.FenceReason || o.FenceGeneration != s.FenceGeneration || o.FenceHolder != s.FenceHolder {
+		t.Fatalf("%s(%s) fence disclosure mismatch: oracle=%+v subject=%+v", op, path, o, s)
+	}
 }
 
 func (m *chronicleModel) diffCloseProducerResult(t *rapid.T, path string, o, s *store.CloseProducerResult) {
@@ -429,6 +801,9 @@ func (m *chronicleModel) diffCloseProducerResult(t *rapid.T, path string, o, s *
 	}
 	if o.StreamClosed != s.StreamClosed || o.AlreadyClosed != s.AlreadyClosed {
 		t.Fatalf("CloseStreamWithProducer(%s) close-flag mismatch: oracle=%+v subject=%+v", path, o, s)
+	}
+	if o.FenceReason != s.FenceReason || o.FenceGeneration != s.FenceGeneration || o.FenceHolder != s.FenceHolder {
+		t.Fatalf("CloseStreamWithProducer(%s) fence disclosure mismatch: oracle=%+v subject=%+v", path, o, s)
 	}
 }
 
@@ -498,6 +873,16 @@ func (m *chronicleModel) assertMetaAgrees(t *rapid.T, path string) {
 	if oMeta.ClosedBy != nil && *oMeta.ClosedBy != *sMeta.ClosedBy {
 		t.Fatalf("Get(%s) closedBy mismatch: oracle=%+v subject=%+v", path, *oMeta.ClosedBy, *sMeta.ClosedBy)
 	}
+	if oMeta.WriteFence != sMeta.WriteFence {
+		t.Fatalf("Get(%s) writeFence mismatch: oracle=%v subject=%v", path, oMeta.WriteFence, sMeta.WriteFence)
+	}
+	if oMeta.SealedGeneration != sMeta.SealedGeneration {
+		t.Fatalf("Get(%s) sealedGeneration mismatch: oracle=%d subject=%d", path, oMeta.SealedGeneration, sMeta.SealedGeneration)
+	}
+	if (oMeta.SealedOffset == nil) != (sMeta.SealedOffset == nil) ||
+		(oMeta.SealedOffset != nil && !oMeta.SealedOffset.Equal(*sMeta.SealedOffset)) {
+		t.Fatalf("Get(%s) sealedOffset mismatch: oracle=%v subject=%v", path, oMeta.SealedOffset, sMeta.SealedOffset)
+	}
 }
 
 // normContentType applies the same normalization both backends use for
@@ -531,6 +916,8 @@ var storeSentinels = []error{
 	store.ErrInvalidForkOffset,
 	store.ErrInvalidForkSubOffset,
 	store.ErrRefCountUnderflow,
+	store.ErrAppendFenced,
+	store.ErrWriteFenceUnsupported,
 }
 
 // TestEquivalenceMemoryVsRedis is the rapid state-machine harness. It is
@@ -541,9 +928,15 @@ var storeSentinels = []error{
 func TestEquivalenceMemoryVsRedis(t *testing.T) {
 	base := newTestStore(t) // skips under -short / unreachable Redis
 
+	tally := newFenceTally()
 	rapid.Check(t, func(t *rapid.T) {
-		runEquivalenceModel(t, base)
+		runEquivalenceModelWith(t, base, tally)
 	})
+	t.Logf("outcomes reached: %v", tally)
+	// The fence outcomes the generators reach in every default run by a wide
+	// margin; the rarer ones are pinned deterministically by the corpus probe
+	// (TestFuzzStoreEquivalenceCorpusReachesBranches).
+	tally.reached(t, "grant:installed", "grant:fenced", "fence:marker", "seal:unfenced", "seal:sealed")
 }
 
 // runEquivalenceModel is the ONE state-machine property body driven by both the
@@ -557,6 +950,12 @@ func TestEquivalenceMemoryVsRedis(t *testing.T) {
 // MakeFuzz bridge (issue #42): one model serves both regimes, so a fuzz-found
 // divergence is byte-for-byte the same failure the property runner would report.
 func runEquivalenceModel(t *rapid.T, base *Store) {
+	runEquivalenceModelWith(t, base, nil)
+}
+
+// runEquivalenceModelWith is runEquivalenceModel recording the outcomes the
+// sequence reaches in tally (nil records nothing).
+func runEquivalenceModelWith(t *rapid.T, base *Store, tally *fenceTally) {
 	// Anchor the shared clock at the Unix epoch so every UnixNano timestamp
 	// the harness produces stays well below 2^53 and is therefore EXACTLY
 	// representable as a Lua double. Redis's is_expired runs in Lua (doubles)
@@ -573,6 +972,8 @@ func runEquivalenceModel(t *rapid.T, base *Store) {
 		oracle:  oracle,
 		subject: subject,
 		clock:   clock,
+		tally:   tally,
+		claims:  make(map[string]map[int][]auth.AppendFence),
 	}
 
 	// Bootstrap one baseline stream so the model's initial state is non-degenerate
