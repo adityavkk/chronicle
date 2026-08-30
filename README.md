@@ -200,6 +200,13 @@ fence reuse, missed glob links, and a dropped fan-out index — as designed in
 and recorded as built in
 [docs/research/11-subscription-hardening-implemented.md](docs/research/11-subscription-hardening-implemented.md).
 
+Beyond the pinned base suite, chronicle's own **write-fencing extension**
+([docs/spec/WRITE-FENCING.md](docs/spec/WRITE-FENCING.md), a §11.1
+pure-superset extension) has a separate conformance suite — `make
+conformance-ext` runs its WF-01…WF-28 obligations against a live server in
+enforce mode. It is deliberately kept out of the base run so the certified
+332/332 count stays a statement about the unmodified protocol.
+
 ## Integrations
 
 - **ElectricSQL Agents** — chronicle works as a drop-in Durable Streams backend

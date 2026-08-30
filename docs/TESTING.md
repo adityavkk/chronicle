@@ -59,7 +59,12 @@ are required to match: the pure Go function (the oracle), the Lua script Redis
 runs (the mirror), and the Lean model compiled to C (the proof, see kind 9). The
 producer state machine, the fence and slot predicates, the content-type and
 config normalizers, the `Stream-Seq` comparison, and the JSON flatten path each
-have a differential test.
+have a differential test. The write-fence rung has its own pair:
+`TestWriteFenceDifferential` drives `store.EvaluateWriteFence` (the Go oracle)
+and `evaluate_write_fence` in `common.lua` over the stratified fence-state
+generators, and `TestFenceAuthorityDifferential` pins that `FenceAuthority`
+and Lua's `fence_auth` derive the same per-authority seal key from adversarial
+marker-key paths.
 
 This gives you confidence that the three copies of a rule have not drifted apart.
 A differential test found the fixed `10^14` producer-reply bug (issue #47): the
@@ -69,8 +74,10 @@ disagreement; if all three copies share the same wrong assumption, they agree an
 the test passes. That residual gap is covered by the independent properties and
 the proofs.
 
-Where: `store/redis/differential_*.go`, `webhook/predicate_differential_test.go`,
-`store/leanoracle` (the compiled-Lean oracle, behind the `leanoracle` build tag).
+Where: `store/redis/differential_*.go`,
+`store/redis/write_fence_differential_test.go`,
+`webhook/predicate_differential_test.go`, `store/leanoracle` (the
+compiled-Lean oracle, behind the `leanoracle` build tag).
 
 ### 4. Property-based and model-based tests
 
@@ -148,7 +155,18 @@ idempotent producers, closure, forks, JSON mode, SSE, and the subscription APIs.
 This gives you protocol compliance independent of the implementation. The downside
 is that it sees only the HTTP surface, not the internal state.
 
-Run: `make conformance` (needs Redis and a built server).
+The write-fencing extension ([docs/spec/WRITE-FENCING.md](spec/WRITE-FENCING.md))
+has a second, chronicle-owned suite in `test/conformance-ext/`: one black-box
+test per WF-01…WF-28 obligation plus negative controls, run against a live
+server in enforce mode. It is a separate directory with its own runner so the
+pinned base suite never collects it and the certified 332/332 stays a
+statement about the unmodified protocol. Fault-injection build tags
+(`fence_fault_nobind`, `fence_fault_noseal`, `fence_fault_nopair`) each remove
+one fence write and must make their designated test fail — proof the checks
+are load-bearing, in the same spirit as the TLA+ fault configs.
+
+Run: `make conformance` (needs Redis and a built server); the extension suite
+is `make conformance-ext`.
 
 ### 9. Machine-checked proofs in Lean 4
 
@@ -267,6 +285,7 @@ method and the intended fix.
 make test-unit                 # pure cores, no infrastructure
 make redis-up && make test     # unit and integration against Redis
 make conformance               # the black-box protocol suite
+make conformance-ext           # the write-fencing extension suite (WF-01…WF-28)
 cd lean && lake build          # the Lean proofs
 cd formal/tla && make tlc      # the TLA+ model checks
 cd formal/tla && make apalache # the Apalache inductive proof

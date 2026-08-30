@@ -228,6 +228,66 @@ to get real replies.
 
 ---
 
+## Turning the write fence on
+
+chronicle's write-fencing extension
+([docs/spec/WRITE-FENCING.md](spec/WRITE-FENCING.md)) makes activation-output
+streams accept a runtime's writes only under the current claim's write token.
+With fencing off (no `Write-Fence` header anywhere), nothing above changes —
+the agents-server never sends the extension headers and the additive
+`write_token` JSON fields are ignored. Turning it on for activation output is
+a five-step pass-through against the pinned `0.6.3` sources (file/line cites
+below are into `packages/agents-server` and `packages/agents-runtime` at that
+version):
+
+1. **Create entity session streams fenced.** The agents-server's
+   entity-manager create path issues the stream `PUT`; add
+   `Write-Fence: true`. The re-`PUT` on entity reuse stays idempotent because
+   the header is sent both times (it is part of chronicle's config-match).
+2. **Forward the runtime's token on the append route.** In
+   `src/routing/durable-streams-router.ts:599-616` the runtime-facing append
+   proxy calls `forwardFetchRequest` with `durableStreamsBearerMode:
+   'overwrite'`, and `src/utils/server-utils.ts:465` then overwrites
+   `Authorization` with the gateway's own bearer — which would silently drop
+   the runtime's capability. Before that overwrite, copy the runtime's bearer
+   (read exactly as `writeTokenFromHeaders` does in
+   `src/routing/stream-append.ts:190-199`) into `Write-Token`, and set
+   `Write-Fence: true` on the forwarded request. Two lines: the gateway keeps
+   authenticating itself, the runtime's token rides untouched, and a runtime
+   that lost its token becomes a loud `401` instead of an unfenced write.
+3. **Return chronicle's write token from the claim callback.** Both claim
+   replies in `src/routing/internal-router.ts` — the local reply at
+   `:714-726` and the forwarded-claim decoration at `:779-790` — call
+   `mintClaimWriteToken(...)` (`:904`) to fabricate a gateway-local token.
+   Return chronicle's instead: `WakeNotification.write_token` in webhook
+   mode, `ClaimResponse.write_token` in pull mode. `isValidWriteToken`
+   becomes a shape check (chronicle validates), and the gateway's
+   `ClaimWriteTokenStore` can be deleted.
+4. **Refresh the token from heartbeat replies.** The runtime captures
+   `writeToken` once per wake (`src/process-wake.ts:1225` in
+   `agents-runtime`) and its heartbeat handler (`:1245-1261`) already reads
+   the reply body; also map chronicle's re-minted `write_token`
+   (`AckResponse.write_token`) into that variable — one assignment. Required:
+   chronicle's write-token TTL is lease + 5 s (35 s at the default lease)
+   while activations run longer. The producer identity already matches the
+   fenced class: `Producer-Id: entity-<url>` with `epoch = generation`
+   (`src/process-wake.ts:536-538`) and `Producer-Seq` from 0 per wake.
+5. **Leave command appends alone.** Inbox, wake, signal, manifest, and
+   shared-state writes carry the agents-server's service identity and are the
+   **open** class on a fenced stream — no change. Shared-state streams stay
+   unfenced until opted in the same way (fenced `PUT` + the token forwarded
+   as in step 2).
+
+Roll chronicle fully before step 1 (an old replica ignores the header and
+would create the stream unfenced — verify with the `HEAD` echo), and see
+[docs/adr/0008-write-fencing-extension.md](adr/0008-write-fencing-extension.md)
+for the recreated-subscription epoch caveat: after deleting and recreating an
+entity's subscription, activations with the old stable producer id fail with
+the base stale-epoch `403` until the new subscription's generation passes the
+stored epoch.
+
+---
+
 ## Gotchas (don't repeat these)
 
 | Symptom | Cause | Fix |
