@@ -8,5 +8,10 @@ Copied from https://github.com/durable-streams/durable-streams at commit 82f9963
 - IMPLEMENTATION_TESTING.md — how to run the conformance suites
 - CHRONICLE-NOTES.md — Chronicle's own annotations on the spec above, kept
   out of PROTOCOL.md so vendoring stays pristine
+- WRITE-FENCING.md — Chronicle's write-fencing extension (issue #183), written
+  as a §11.1 pure-superset extension spec: fenced streams, the claim-scoped
+  write token, server-derived write classes, and the per-authority seal. Not
+  vendored — this one is Chronicle's own, drafted so it can be proposed
+  upstream verbatim
 
 See [`/SPEC_VERSION.md`](../../SPEC_VERSION.md) for the pinned upstream commit, conformance suite version, and certified pass count.
