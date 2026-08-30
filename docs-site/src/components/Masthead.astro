@@ -9,6 +9,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const home = `${base}/`;
 const endpoints = `${base}/endpoints`;
 const subscriptions = `${base}/subscriptions`;
+const writeFencing = `${base}/write-fencing`;
 const performance = `${base}/performance-improvements`;
 const testing = `${base}/testing`;
 const catalog = `${base}/test-catalog`;
@@ -22,6 +23,7 @@ const rel = import.meta.env.BASE_URL
   : Astro.url.pathname.replace(/\/$/, "");
 const onEndpoints = rel === "/endpoints";
 const onSubscriptions = rel === "/subscriptions";
+const onWriteFencing = rel === "/write-fencing";
 const onScaling = rel === "/horizontal-scale";
 const onTesting = rel === "/testing";
 const onCatalog = rel === "/test-catalog";
@@ -44,6 +46,7 @@ const onHome = rel === "" || rel === "/";
     <a href={home} class:list={["link", { active: onHome }]} aria-current={onHome ? "page" : undefined}>Overview</a>
     <a href={endpoints} class:list={["link", { active: onEndpoints }]} aria-current={onEndpoints ? "page" : undefined}>Endpoints</a>
     <a href={subscriptions} class:list={["link", { active: onSubscriptions }]} aria-current={onSubscriptions ? "page" : undefined}>Subscriptions</a>
+    <a href={writeFencing} class:list={["link", { active: onWriteFencing }]} aria-current={onWriteFencing ? "page" : undefined}>Fencing</a>
     <a href={performance} class:list={["link", { active: onPerformance }]} aria-current={rel === "/performance-improvements" ? "page" : undefined}>Performance</a>
     <a href={testing} class:list={["link", { active: onTesting }]} aria-current={onTesting ? "page" : undefined}>Testing</a>
     <a href={catalog} class:list={["link", { active: onCatalog }]} aria-current={onCatalog ? "page" : undefined}>Catalog</a>

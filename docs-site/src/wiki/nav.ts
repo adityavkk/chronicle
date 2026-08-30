@@ -51,6 +51,7 @@ export const WIKI_NAV: WikiPage[] = [
       { id: "append", label: "A write lands" },
       { id: "read", label: "A reader tails" },
       { id: "wake", label: "A subscription wakes" },
+      { id: "fenced-write", label: "A fenced write lands" },
     ],
   },
 ];
