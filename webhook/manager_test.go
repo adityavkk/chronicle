@@ -412,6 +412,7 @@ func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
 	f.sweeps++
 	f.lastSubs, f.lastTails, f.lastWakes = subs, tails, wakes
 }
+
 func (f *fakeMetrics) WakeDelivery(_ time.Duration, outcome string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -427,6 +428,7 @@ func (f *fakeMetrics) delivered() map[string]int {
 	defer f.mu.Unlock()
 	return maps.Clone(f.deliveries)
 }
+
 func (f *fakeMetrics) WakeEvent(time.Duration, string) {}
 func (f *fakeMetrics) WorkerTick(string, int)          {}
 
