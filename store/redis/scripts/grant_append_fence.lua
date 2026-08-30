@@ -19,8 +19,11 @@ local lease_until_ns, now_ns, retention_ms = ARGV[4], tonumber(ARGV[5]), tonumbe
 
 if tonumber(lease_until_ns) <= now_ns then return { 'FENCED' } end
 
+-- A legacy meta hash without an incarnation (read.lua backfills it lazily;
+-- appends never do) cannot carry a marker, exactly as before #183: the caller
+-- treats NOTFOUND as an absent stream and the claim proceeds without one.
 local m = meta_map(KEYS[1])
-if m == nil then return { 'NOTFOUND' } end
+if m == nil or m.incarnation == nil then return { 'NOTFOUND' } end
 
 local auth = fence_auth(KEYS[2])
 local seal = m['wfseal:' .. auth]

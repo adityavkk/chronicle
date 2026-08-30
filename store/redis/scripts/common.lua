@@ -255,7 +255,9 @@ end
 --   holder  — disclosed holder of a live, unexpired marker, else ''
 -- Generations and epochs compare as decimal strings via int_cmp
 -- (INV-PROD-08); lease_until_ns goes through tonumber as the lease check
--- always has. Absent marker fields read as '' so the Go zero values agree.
+-- always has. Absent marker fields read as '' (the Go zero value); the stream
+-- incarnation is compared as stored, so a legacy hash without one (nil)
+-- matches no marker — the strictness the claim fence has always had.
 local function evaluate_write_fence(stream_fenced, incarnation, has_fence,
     f_gen, f_wake, f_holder, fence_row, seal_present, seal_gen, now,
     has_producer, p_epoch, bound_gen)
@@ -290,6 +292,46 @@ local function evaluate_write_fence(stream_fenced, incarnation, has_fence,
   if stream_fenced and not has_producer then return 'producer_required', d_gen, d_holder end
   if stream_fenced and int_cmp(p_epoch, f_gen) ~= 0 then return 'epoch', d_gen, d_holder end
   return '', d_gen, d_holder
+end
+
+-- fence_rung is the write-fence rung shared by append.lua and close.lua
+-- (#183): it gathers evaluate_write_fence's inputs from the loaded meta hash m
+-- and, for the fenced class, from the request authority's marker at KEYS[5]
+-- (the stream's own Redis Cluster slot) and its seal, whose meta field name is
+-- derived from that key (fence_auth) — so KEYS and ARGV need nothing new.
+-- Returns evaluate_write_fence's (reason, gen, holder); reason '' accepts, at
+-- once when the request carries no fence and the stream never opted in.
+local function fence_rung(m, has_fence, f_gen, f_wake, f_holder, now,
+    has_producer, producer_id, p_epoch)
+  local stream_fenced = m.wf == '1'
+  if not has_fence and not stream_fenced then return '', '0', '' end
+  local fence_row, seal_present, seal_gen = nil, false, '0'
+  if has_fence then
+    fence_row = redis.call('HMGET', KEYS[5],
+      'state', 'generation', 'wake_id', 'holder', 'lease_until_ns', 'stream_incarnation')
+    local seal = m['wfseal:' .. fence_auth(KEYS[5])]
+    if seal then seal_present, seal_gen = true, (seal_parts(seal)) end
+  end
+  local bound_gen = '0'
+  if stream_fenced and has_producer and not has_fence then
+    bound_gen = m['wfbind:' .. producer_id] or '0'
+  end
+  return evaluate_write_fence(stream_fenced, m.incarnation, has_fence, f_gen, f_wake,
+    f_holder, fence_row, seal_present, seal_gen, now, has_producer, p_epoch, bound_gen)
+end
+
+-- fence_bind appends the bookkeeping of an accepted fenced-class write on a
+-- write-fenced stream to an HSET field list: wfLastOff, the class's last
+-- offset (what a seal fixes — never a later open-class tail), and
+-- wfbind:<producer_id>, the producer id bound to the fence at this generation.
+-- Producer headers are mandatory on such a write (rule 3), so producer_id is
+-- set. A no-op for the open class and on streams that never opted in.
+local function fence_bind(hset, m, has_fence, producer_id, f_gen, off)
+  if not (has_fence and m.wf == '1') then return end
+  hset[#hset + 1] = 'wfLastOff'
+  hset[#hset + 1] = off
+  hset[#hset + 1] = 'wfbind:' .. producer_id
+  hset[#hset + 1] = f_gen
 end
 
 -- fence_reply is make_reply('FENCED', tail) extended with the write-fence

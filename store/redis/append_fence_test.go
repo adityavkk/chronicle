@@ -155,6 +155,52 @@ func TestAppendFenceLifecycle(t *testing.T) {
 	}
 }
 
+// TestAppendFenceGrantLegacyStreamNotInstalled pins the base-protocol shape a
+// legacy stream keeps (#169, unchanged by #183): a meta hash that predates the
+// incarnation field (read.lua backfills it lazily; appends never do) cannot be
+// granted a marker — GrantAppendFence reports (false, nil), never an error, so
+// a claim linked to such a stream still succeeds — and no marker, however it
+// was built, matches it: the fenced class is refused as "marker" whether the
+// marker lacks stream_incarnation or carries an empty one.
+func TestAppendFenceGrantLegacyStreamNotInstalled(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	path := testPath("wf-legacy")
+	mustCreate(t, s, path, store.CreateOptions{ContentType: "application/json"})
+	if err := testClient.HDel(ctx, metaKey(path), fIncarnation).Err(); err != nil {
+		t.Fatalf("drop incarnation: %v", err)
+	}
+	f1 := claimFence(1, "w_1", "worker-a")
+	if installed, err := s.GrantAppendFence(path, f1); err != nil || installed {
+		t.Fatalf("grant on a legacy stream = installed:%t err:%v, want false/nil", installed, err)
+	}
+	if n, err := testClient.Exists(ctx, appendFenceKey(path, f1)).Result(); err != nil || n != 0 {
+		t.Fatalf("grant on a legacy stream wrote a marker: exists=%d, %v", n, err)
+	}
+
+	liveRow := []any{
+		"state", store.WriteFenceMarkerLive, "generation", "1", "wake_id", "w_1",
+		"holder", "worker-a", "lease_until_ns", f1.LeaseUntilNs,
+	}
+	for _, tt := range []struct {
+		name   string
+		marker []any
+		want   store.WriteFenceOutcome
+	}{
+		{"no marker", nil, store.WriteFenceOutcome{Reason: store.FenceMarker}},
+		{"marker without stream_incarnation", liveRow, store.WriteFenceOutcome{Reason: store.FenceMarker, Generation: 1, Holder: "worker-a"}},
+		{"marker with an empty stream_incarnation", append(liveRow, "stream_incarnation", ""), store.WriteFenceOutcome{Reason: store.FenceMarker, Generation: 1, Holder: "worker-a"}},
+	} {
+		if tt.marker != nil {
+			if err := testClient.HSet(ctx, appendFenceKey(path, f1), tt.marker...).Err(); err != nil {
+				t.Fatalf("%s: seed marker: %v", tt.name, err)
+			}
+		}
+		got, err := fencedAppend(s, path, f1, 0)
+		assertFenced(t, tt.name, got, err, tt.want.Reason, tt.want.Generation, tt.want.Holder)
+	}
+}
+
 func TestAppendFenceRejectsRecreatedStream(t *testing.T) {
 	s := newTestStore(t)
 	path := testPath("append-fence-recreate")

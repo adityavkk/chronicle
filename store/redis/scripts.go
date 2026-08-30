@@ -6,6 +6,8 @@ import (
 	"strconv"
 
 	"github.com/redis/go-redis/v9"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
 //go:embed scripts/*.lua
@@ -89,7 +91,7 @@ type scriptReply struct {
 	Closed        bool
 	AlreadyClosed bool
 
-	FenceReason     string
+	FenceReason     store.FenceReason
 	FenceGeneration int64
 	FenceHolder     string
 }
@@ -119,10 +121,11 @@ func decodeScriptReply(v any) (*scriptReply, error) {
 		s[i] = str
 	}
 	r := &scriptReply{Status: s[0], Tail: s[1], Closed: s[7] == "1", AlreadyClosed: s[8] == "1"}
-	numeric := []struct {
+	type numField struct {
 		dst *int64
 		src string
-	}{
+	}
+	numeric := []numField{
 		{&r.ProducerRes, s[2]},
 		{&r.CurrentEpoch, s[3]},
 		{&r.ExpectedSeq, s[4]},
@@ -130,11 +133,8 @@ func decodeScriptReply(v any) (*scriptReply, error) {
 		{&r.LastSeq, s[6]},
 	}
 	if n == scriptReplyFenceLen {
-		r.FenceReason, r.FenceHolder = s[9], s[11]
-		numeric = append(numeric, struct {
-			dst *int64
-			src string
-		}{&r.FenceGeneration, s[10]})
+		r.FenceReason, r.FenceHolder = store.FenceReason(s[9]), s[11]
+		numeric = append(numeric, numField{&r.FenceGeneration, s[10]})
 	}
 	for _, f := range numeric {
 		n, err := strconv.ParseInt(f.src, 10, 64)

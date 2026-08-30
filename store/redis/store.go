@@ -669,7 +669,7 @@ func (s *Store) mapAppendReply(r *scriptReply) (store.AppendResult, error) {
 	case stFenced:
 		// The tail is deliberately not disclosed: a deposed writer stands down.
 		return store.AppendResult{
-			FenceReason:     store.FenceReason(r.FenceReason),
+			FenceReason:     r.FenceReason,
 			FenceGeneration: r.FenceGeneration,
 			FenceHolder:     r.FenceHolder,
 		}, store.ErrAppendFenced
@@ -1238,7 +1238,7 @@ func (s *Store) closeStream(path string, fence *auth.AppendFence) (*store.CloseR
 		return nil, store.ErrStreamNotFound
 	case stFenced:
 		return &store.CloseResult{
-			FenceReason:     store.FenceReason(r.FenceReason),
+			FenceReason:     r.FenceReason,
 			FenceGeneration: r.FenceGeneration,
 			FenceHolder:     r.FenceHolder,
 		}, store.ErrAppendFenced
@@ -1269,7 +1269,7 @@ func (s *Store) CloseStreamWithProducer(path string, opts store.CloseProducerOpt
 	}
 	if r.Status == stFenced {
 		return &store.CloseProducerResult{
-			FenceReason:     store.FenceReason(r.FenceReason),
+			FenceReason:     r.FenceReason,
 			FenceGeneration: r.FenceGeneration,
 			FenceHolder:     r.FenceHolder,
 		}, store.ErrAppendFenced
