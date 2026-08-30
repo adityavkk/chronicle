@@ -1198,6 +1198,12 @@ func newHTTPError(status int, message string) *httpError {
 	return &httpError{status: status, message: message}
 }
 
+// fenceFaultNoPair suppresses writeError's terminal gap pair on 409 FENCED
+// when built with `-tags fence_fault_nopair` (fence_fault_nopair.go) — the
+// fault-injection control proving the extension conformance client test
+// detects a server that omits the pair. Always false in untagged builds.
+var fenceFaultNoPair bool
+
 func (h *Handler) writeError(w http.ResponseWriter, err error) {
 	// Authorization denials use the JSON error envelope shared with the
 	// control plane (issue #126) rather than the base protocol's plaintext
@@ -1220,9 +1226,11 @@ func (h *Handler) writeError(w http.ResponseWriter, err error) {
 				if f.Generation != 0 {
 					w.Header().Set(protocol.HeaderProducerEpoch, strconv.FormatInt(f.Generation, 10))
 				}
-				seq := strconv.FormatInt(f.ReqSeq, 10)
-				w.Header().Set(protocol.HeaderProducerExpectedSeq, seq)
-				w.Header().Set(protocol.HeaderProducerReceivedSeq, seq)
+				if !fenceFaultNoPair {
+					seq := strconv.FormatInt(f.ReqSeq, 10)
+					w.Header().Set(protocol.HeaderProducerExpectedSeq, seq)
+					w.Header().Set(protocol.HeaderProducerReceivedSeq, seq)
+				}
 			}
 			detail.Reason, detail.CurrentHolder, detail.Generation = f.Reason, f.Holder, f.Generation
 			h.countFenceRejection(f.Reason)
