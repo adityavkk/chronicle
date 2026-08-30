@@ -73,6 +73,10 @@ type Prometheus struct {
 	claimContention   *prometheus.CounterVec
 	durabilityShort   *prometheus.CounterVec
 	serviceAccess     *prometheus.CounterVec
+	// Write-fence lifecycle counters (#183): seal outcomes per linked stream at
+	// done/release/delete/unlink, and marker grant failures by site.
+	appendFenceSeals         *prometheus.CounterVec
+	appendFenceGrantFailures *prometheus.CounterVec
 
 	sseHubs                prometheus.Gauge
 	sseClients             prometheus.Gauge
@@ -308,6 +312,14 @@ func New() *Prometheus {
 			Name: "chronicle_service_access_total",
 			Help: "Service authentication and authorization events by result: spiffe_authenticated, bearer_authenticated, authentication_failure, authorization_failure, or delegated_gateway.",
 		}, []string{"result"}),
+		appendFenceSeals: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_append_fence_seals_total",
+			Help: "Write-fence seals per linked stream at done/release/delete/unlink by outcome (sealed|already|stale|notfound|unfenced|error) — #183.",
+		}, []string{"outcome"}),
+		appendFenceGrantFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_append_fence_grant_failures_total",
+			Help: "Failed stream-slot marker grants by site (claim|heartbeat|webhook); the webhook site is the fail-open-delivery signal — #183.",
+		}, []string{"site"}),
 		sseHubs: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "chronicle_sse_hubs",
 			Help: "Active per-stream SSE fanout hubs on this Chronicle replica.",
@@ -414,6 +426,7 @@ func New() *Prometheus {
 		p.dueSetMutations, p.dueWorkerSeconds, p.dueWorkerFired,
 		p.slotOwnership, p.coverageGap, p.ownerFenced, p.claimContention,
 		p.durabilityShort, p.serviceAccess,
+		p.appendFenceSeals, p.appendFenceGrantFailures,
 		p.sseHubs, p.sseClients, p.sseHubReads, p.sseHubMessages,
 		p.sseHubRingBytes, p.sseHubRingRawBytes, p.sseHubRingWireBytes,
 		p.sseHubRingIndexBytes, p.sseHubRefreshes, p.sseHubRefreshPages,
@@ -659,6 +672,16 @@ func (p *Prometheus) ServiceAuthorizationFailure() {
 // chronicle.ServiceMetrics.
 func (p *Prometheus) ServiceDelegatedGateway() {
 	p.serviceAccess.WithLabelValues("delegated_gateway").Inc()
+}
+
+// AppendFenceSeal implements webhook.Metrics.
+func (p *Prometheus) AppendFenceSeal(outcome string) {
+	p.appendFenceSeals.WithLabelValues(outcome).Inc()
+}
+
+// AppendFenceGrantFailed implements webhook.Metrics.
+func (p *Prometheus) AppendFenceGrantFailed(site string) {
+	p.appendFenceGrantFailures.WithLabelValues(site).Inc()
 }
 
 // SSEHubActive implements chronicle.SSEMetrics.

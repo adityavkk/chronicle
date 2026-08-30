@@ -66,6 +66,8 @@ func TestMuxEndpoints(t *testing.T) {
 	p.ServiceAuthenticationFailure()
 	p.ServiceAuthorizationFailure()
 	p.ServiceDelegatedGateway()
+	p.AppendFenceSeal("sealed")
+	p.AppendFenceGrantFailed("webhook")
 	p.SSEHubActive(1)
 	p.SSEClientActive(1)
 	p.SSEHubRead(7)
@@ -141,6 +143,8 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_claim_contention_total",
 		"chronicle_durability_short_total",
 		"chronicle_service_access_total",
+		"chronicle_append_fence_seals_total",
+		"chronicle_append_fence_grant_failures_total",
 		"chronicle_sse_hubs",
 		"chronicle_sse_clients",
 		"chronicle_sse_hub_reads_total",
@@ -177,6 +181,14 @@ func TestMuxEndpoints(t *testing.T) {
 	} {
 		if !strings.Contains(body, `chronicle_service_access_total{result="`+result+`"} 1`) {
 			t.Errorf("/metrics output missing service result %q", result)
+		}
+	}
+	for _, series := range []string{
+		`chronicle_append_fence_seals_total{outcome="sealed"} 1`,
+		`chronicle_append_fence_grant_failures_total{site="webhook"} 1`,
+	} {
+		if !strings.Contains(body, series) {
+			t.Errorf("/metrics output missing fence series %q", series)
 		}
 	}
 }

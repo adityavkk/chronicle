@@ -119,6 +119,15 @@ type Metrics interface {
 	// ServiceDelegatedGateway records an accepted decision from the exact
 	// service identity carrying trusted_gateway.
 	ServiceDelegatedGateway()
+
+	// AppendFenceSeal records one SealAppendFence call on one linked stream at
+	// done, release, delete, or unlink (#183): outcome is "sealed", "already",
+	// "stale", "notfound", "unfenced", or "error".
+	AppendFenceSeal(outcome string)
+	// AppendFenceGrantFailed records a failed stream-slot marker grant by site:
+	// "claim", "heartbeat", or "webhook" (#183). The webhook site is the
+	// fail-open-delivery signal: the notification went out without a write_token.
+	AppendFenceGrantFailed(site string)
 }
 
 // NopMetrics is the no-op Metrics used when none is configured. The Manager
@@ -196,3 +205,9 @@ func (NopMetrics) ServiceAuthorizationFailure() {}
 
 // ServiceDelegatedGateway implements Metrics.
 func (NopMetrics) ServiceDelegatedGateway() {}
+
+// AppendFenceSeal implements Metrics.
+func (NopMetrics) AppendFenceSeal(string) {}
+
+// AppendFenceGrantFailed implements Metrics.
+func (NopMetrics) AppendFenceGrantFailed(string) {}
