@@ -1103,6 +1103,22 @@ func TestMemoryStoreWriteFenceParity(t *testing.T) {
 				f.t.Fatalf("seal on an absent stream left marker %+v, want a generation-1 tombstone", m.WriteFenceMarker)
 			}
 		}},
+		{"legacy stream (no incarnation) is not granted, claim proceeds", plain, func(f *fenceFixture) {
+			// The parity row of grant_append_fence.lua's legacy guard (and
+			// TestAppendFenceGrantLegacyStreamNotInstalled on Redis): a stream
+			// that predates the incarnation field cannot carry a marker —
+			// (false, nil), never an error, so a claim linked to it still
+			// succeeds uninstalled. MemoryStore always assigns incarnations,
+			// so the shape is forged for the mirror.
+			f.s.streams[f.path].metadata.Incarnation = ""
+			f1 := f.fence(1, "w_1", "worker-a")
+			if installed, err := f.s.GrantAppendFence(f.path, f1); err != nil || installed {
+				f.t.Fatalf("grant on a legacy stream = installed:%t err:%v, want false/nil", installed, err)
+			}
+			if len(f.s.markers[f.path]) != 0 {
+				f.t.Fatal("grant on a legacy stream wrote a marker")
+			}
+		}},
 		{"claim lifecycle on an unfenced stream", plain, func(f *fenceFixture) {
 			appendWith := func(fence auth.AppendFence) (AppendResult, error) {
 				return f.s.Append(f.path, []byte("x"), AppendOptions{ContentType: "text/plain", Fence: &fence})
