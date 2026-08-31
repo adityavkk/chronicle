@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
@@ -154,6 +155,39 @@ func TestFrameLexOrderEqualsStreamOrder(t *testing.T) {
 		}
 		if o.ByteOffset != wantOrder[i] {
 			t.Errorf("position %d: got offset %d want %d", i, o.ByteOffset, wantOrder[i])
+		}
+	}
+}
+
+// TestAppendFenceKeysShareStreamSlot pins the single-slot rule for every fence
+// lifecycle script (grant, revoke, seal) and the fence rung itself: the claim
+// marker key carries exactly the stream's hash tag, so it lands in the same
+// Redis Cluster slot as the meta hash it is checked against, and its suffix is
+// store.FenceAuthority verbatim (the seal field name of the same authority),
+// even for paths that contain braces, percent signs or a literal
+// ":append-fence:".
+func TestAppendFenceKeysShareStreamSlot(t *testing.T) {
+	fence := auth.AppendFence{SubscriptionID: "sub-e1", SubscriptionIncarnation: "7", Shard: 0}
+	hashTag := func(key string) string {
+		open, close := strings.Index(key, "{"), strings.Index(key, "}")
+		if open < 0 || close < open {
+			t.Fatalf("key %q has no hash tag", key)
+		}
+		return key[open : close+1]
+	}
+	for _, path := range []string{"/v1/s", "/a{b}c", "/x:append-fence:zz:1", "/100%", "/a}b"} {
+		keys := fenceKeys(path, fence)
+		if keys[0] != metaKey(path) || keys[1] != appendFenceKey(path, fence) {
+			t.Fatalf("fenceKeys(%q) = %v", path, keys)
+		}
+		if hashTag(keys[1]) != hashTag(keys[0]) {
+			t.Errorf("marker %q is not in the stream slot of %q", keys[1], keys[0])
+		}
+		if strings.Count(keys[1], "}") != 1 {
+			t.Errorf("marker key %q has more than one hash-tag closer", keys[1])
+		}
+		if want := fenceSuffix + store.FenceAuthority(fence); !strings.HasSuffix(keys[1], want) {
+			t.Errorf("marker key %q does not end with %q", keys[1], want)
 		}
 	}
 }

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 )
 
 // MemoryStore is an in-memory implementation of Store for testing
@@ -32,11 +34,20 @@ type MemoryStore struct {
 	// Key: "{streamPath}:{producerId}"
 	producerLocks   map[string]*sync.Mutex
 	producerLocksMu sync.Mutex
+
+	// markers holds the stream-slot claim markers by path, then by
+	// FenceAuthority (#183). Like the Redis marker keys they live beside the
+	// stream, not inside it: a delete or expiry reaps the stream's seals and
+	// bindings but leaves its markers, whose stream incarnation then matches
+	// no recreated stream.
+	markers map[string]map[string]memoryMarker
 }
 
 var (
 	_ PageWaiter             = (*MemoryStore)(nil)
 	_ NotificationSubscriber = (*MemoryStore)(nil)
+	_ FencedCloser           = (*MemoryStore)(nil)
+	_ WriteFenceStore        = (*MemoryStore)(nil)
 )
 
 // MemoryStoreOption configures a MemoryStore at construction.
@@ -57,6 +68,12 @@ type memoryStream struct {
 	metadata StreamMetadata
 	messages []Message
 	data     []byte // Raw accumulated data for non-JSON streams
+
+	// Write-fence state of a fenced stream (#183): the counterpart of the
+	// wfseal:<auth>, wfbind:<producer_id> and wfLastOff meta fields on Redis.
+	seals         map[string]WriteFenceSeal // per FenceAuthority
+	bound         map[string]int64          // producer id -> generation of its last accepted fenced write
+	lastFencedOff *Offset                   // tail after the last accepted fenced-class write; nil = none
 }
 
 type longPollManager struct {
@@ -82,6 +99,7 @@ func NewMemoryStore(opts ...MemoryStoreOption) *MemoryStore {
 		},
 		clock:         RealClock(),
 		producerLocks: make(map[string]*sync.Mutex),
+		markers:       make(map[string]map[string]memoryMarker),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -232,7 +250,8 @@ func (s *MemoryStore) Create(path string, opts CreateOptions) (*StreamMetadata, 
 		ContentType:    contentType,
 		CreatedAt:      now,
 		LastAccessedAt: now,
-		Closed:         opts.Closed, // Support creating stream in closed state
+		Closed:         opts.Closed,     // Support creating stream in closed state
+		WriteFence:     opts.WriteFence, // Never inherited: a fork declares its own (#183)
 	}
 
 	if isFork {
@@ -428,6 +447,19 @@ func (s *MemoryStore) deleteWithCascade(path string) error {
 
 // CloseStream closes a stream without appending data
 func (s *MemoryStore) CloseStream(path string) (*CloseResult, error) {
+	return s.closeStream(path, nil)
+}
+
+// CloseStreamFenced closes a stream only while the supplied claim still owns
+// its live stream-slot fence (FencedCloser), through the same rung as Append.
+func (s *MemoryStore) CloseStreamFenced(path string, fence auth.AppendFence) (*CloseResult, error) {
+	if !fence.Complete() {
+		return nil, ErrAppendFenced
+	}
+	return s.closeStream(path, &fence)
+}
+
+func (s *MemoryStore) closeStream(path string, fence *auth.AppendFence) (*CloseResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -439,6 +471,13 @@ func (s *MemoryStore) CloseStream(path string) (*CloseResult, error) {
 	// Check if stream has expired
 	if s.isExpired(&stream.metadata) {
 		return nil, ErrStreamNotFound
+	}
+
+	// Write fence (#183): the same rung as Append, one decision with the
+	// close; a holder's close is not a seal. The final offset is not
+	// disclosed on refusal.
+	if out := s.fenceRung(path, stream, fence, "", nil); out.Reason != FenceNone {
+		return &CloseResult{FenceReason: out.Reason, FenceGeneration: out.Generation, FenceHolder: out.Holder}, ErrAppendFenced
 	}
 
 	alreadyClosed := stream.metadata.Closed
@@ -455,7 +494,7 @@ func (s *MemoryStore) CloseStream(path string) (*CloseResult, error) {
 
 // CloseStreamWithProducer closes a stream without appending data, using producer headers.
 func (s *MemoryStore) CloseStreamWithProducer(path string, opts CloseProducerOptions) (*CloseProducerResult, error) {
-	if opts.Fence != nil {
+	if opts.Fence != nil && !opts.Fence.Complete() {
 		return nil, ErrAppendFenced
 	}
 	// Acquire per-producer lock for serialization
@@ -474,6 +513,12 @@ func (s *MemoryStore) CloseStreamWithProducer(path string, opts CloseProducerOpt
 	// Check if stream has expired
 	if s.isExpired(&stream.metadata) {
 		return nil, ErrStreamNotFound
+	}
+
+	// Write fence (#183): seal, claim marker, epoch binding, bound producer,
+	// decided before the closed check exactly as in close.lua.
+	if out := s.fenceRung(path, stream, opts.Fence, opts.ProducerId, &opts.ProducerEpoch); out.Reason != FenceNone {
+		return &CloseProducerResult{FenceReason: out.Reason, FenceGeneration: out.Generation, FenceHolder: out.Holder}, ErrAppendFenced
 	}
 
 	// If already closed, check if this is a duplicate of the closing request
@@ -538,6 +583,7 @@ func (s *MemoryStore) CloseStreamWithProducer(path string, opts CloseProducerOpt
 		Epoch:      opts.ProducerEpoch,
 		Seq:        opts.ProducerSeq,
 	}
+	stream.bind(opts.Fence, opts.ProducerId, stream.metadata.CurrentOffset)
 
 	// Notify pending long-polls that stream is closed
 	s.longPoll.notifyClosed(path)
@@ -553,7 +599,7 @@ func (s *MemoryStore) CloseStreamWithProducer(path string, opts CloseProducerOpt
 
 // Append implements Store.
 func (s *MemoryStore) Append(path string, data []byte, opts AppendOptions) (AppendResult, error) {
-	if opts.Fence != nil {
+	if opts.Fence != nil && !opts.Fence.Complete() {
 		return AppendResult{}, ErrAppendFenced
 	}
 	// Validate producer headers - must be all or none
@@ -584,6 +630,14 @@ func (s *MemoryStore) Append(path string, data []byte, opts AppendOptions) (Appe
 	// Check if stream has expired
 	if s.isExpired(&stream.metadata) {
 		return AppendResult{}, ErrStreamNotFound
+	}
+
+	// Write fence (#183): seal, claim marker, epoch binding, bound producer,
+	// decided before the sliding-TTL touch so a refusal leaves the window as
+	// it was (append.lua step 4). The tail is not disclosed on refusal: a
+	// deposed writer stands down.
+	if out := s.fenceRung(path, stream, opts.Fence, opts.ProducerId, opts.ProducerEpoch); out.Reason != FenceNone {
+		return AppendResult{FenceReason: out.Reason, FenceGeneration: out.Generation, FenceHolder: out.Holder}, ErrAppendFenced
 	}
 
 	// Refresh TTL sliding window
@@ -655,6 +709,7 @@ func (s *MemoryStore) Append(path string, data []byte, opts AppendOptions) (Appe
 	}
 
 	stream.metadata.CurrentOffset = newOffset
+	stream.bind(opts.Fence, opts.ProducerId, newOffset)
 	if opts.Seq != "" {
 		stream.metadata.LastSeq = opts.Seq
 	}
@@ -1142,6 +1197,230 @@ func (s *MemoryStore) FormatResponse(path string, messages []Message) ([]byte, e
 		buf.Write(msg.Data)
 	}
 	return buf.Bytes(), nil
+}
+
+// ---- write fence (#183) ----
+
+// appendFenceRetention keeps a revoked marker beyond the longest accepted
+// write-token lifetime: the value the Redis backend uses for its marker key
+// TTL (store/redis/append_fence.go). It only bounds stale marker cleanup. The
+// live fence is the marker lease, and on a write-fenced stream the
+// per-authority seal is what keeps a sealed generation from being re-granted.
+const appendFenceRetention = 2 * time.Minute
+
+// memoryMarker is one stream-slot claim marker with its reaper deadline. On
+// Redis the marker is reaped by a key TTL on the server's wall clock, never by
+// the scripts' now argument, so expiresAt is wall-clock here too: the injected
+// Clock drives the lease (the live fence), not the retention. Tests simulate
+// the reaper by dropping the entry, as the Redis tests DEL the key.
+type memoryMarker struct {
+	WriteFenceMarker
+	expiresAt time.Time
+}
+
+// marker returns one authority's marker on path as the fence rung reads it,
+// reaping it lazily once its retention has lapsed. Caller holds s.mu.
+func (s *MemoryStore) marker(path, authority string) WriteFenceMarker {
+	m, ok := s.markers[path][authority]
+	if !ok {
+		return WriteFenceMarker{}
+	}
+	if time.Now().After(m.expiresAt) {
+		delete(s.markers[path], authority)
+		return WriteFenceMarker{}
+	}
+	return m.WriteFenceMarker
+}
+
+// setMarker installs or overwrites one authority's marker on path, retained
+// until expiresAt. Caller holds s.mu.
+func (s *MemoryStore) setMarker(path, authority string, m WriteFenceMarker, expiresAt time.Time) {
+	if s.markers[path] == nil {
+		s.markers[path] = make(map[string]memoryMarker)
+	}
+	m.Present = true
+	s.markers[path][authority] = memoryMarker{WriteFenceMarker: m, expiresAt: expiresAt}
+}
+
+// tombstone revokes one authority's marker on path at fence's generation,
+// unless a newer generation, or another claim at this one, holds it: the
+// STALE reply of revoke_append_fence.lua and seal_append_fence.lua, which
+// mutates nothing. It reports whether the tombstone was written. Caller holds
+// s.mu.
+func (s *MemoryStore) tombstone(path, authority string, fence auth.AppendFence) bool {
+	cur := s.marker(path, authority)
+	if cur.Present && (fence.Generation < cur.Generation ||
+		(fence.Generation == cur.Generation && (cur.WakeID != fence.WakeID || cur.Holder != fence.Holder))) {
+		return false
+	}
+	s.setMarker(path, authority, WriteFenceMarker{
+		State:             WriteFenceMarkerRevoked,
+		Generation:        fence.Generation,
+		WakeID:            fence.WakeID,
+		Holder:            fence.Holder,
+		StreamIncarnation: cur.StreamIncarnation, // the scripts' HSET leaves this field as it was
+	}, time.Now().Add(appendFenceRetention))
+	return true
+}
+
+// seal records authority's seal at generation on the stream's definite last
+// fenced-class offset (the tail when the class never wrote) and refreshes the
+// HEAD summary, as the seal writers do on Redis.
+func (st *memoryStream) seal(authority string, generation int64, wakeID string) WriteFenceSeal {
+	off := st.metadata.CurrentOffset
+	if st.lastFencedOff != nil {
+		off = *st.lastFencedOff
+	}
+	if st.seals == nil {
+		st.seals = make(map[string]WriteFenceSeal)
+	}
+	sealed := WriteFenceSeal{Present: true, Generation: generation, WakeID: wakeID, Offset: off}
+	st.seals[authority] = sealed
+	st.metadata.SealedGeneration = generation
+	st.metadata.SealedOffset = &off
+	return sealed
+}
+
+// bind records an accepted fenced-class write on a write-fenced stream: the
+// class's last offset (what a seal fixes — never a later open-class tail) and
+// the producer id bound to the fence at this generation, as fence_bind in
+// common.lua does. A no-op for the open class and on streams that never opted
+// in.
+func (st *memoryStream) bind(fence *auth.AppendFence, producerID string, off Offset) {
+	if fence == nil || !st.metadata.WriteFence {
+		return
+	}
+	st.lastFencedOff = &off
+	if st.bound == nil {
+		st.bound = make(map[string]int64)
+	}
+	st.bound[producerID] = fence.Generation
+}
+
+// fenceRung is the write-fence rung of the append ladder, shared by Append and
+// the close paths as fence_rung in common.lua is shared by append.lua and
+// close.lua: it gathers EvaluateWriteFence's inputs — the request authority's
+// marker and seal for the fenced class, the producer's binding for the open
+// class — and returns the decision. epoch is nil when the request carries no
+// producer headers. Caller holds s.mu.
+func (s *MemoryStore) fenceRung(path string, stream *memoryStream, fence *auth.AppendFence, producerID string, epoch *int64) WriteFenceOutcome {
+	in := WriteFenceInput{
+		StreamFenced:      stream.metadata.WriteFence,
+		StreamIncarnation: stream.metadata.Incarnation,
+		Fence:             fence,
+		NowNs:             s.now().UnixNano(),
+		HasProducer:       epoch != nil,
+	}
+	if fence == nil && !in.StreamFenced {
+		return WriteFenceOutcome{}
+	}
+	if in.HasProducer {
+		in.ProducerEpoch = *epoch
+	}
+	switch {
+	case fence != nil:
+		authority := FenceAuthority(*fence)
+		in.Marker = s.marker(path, authority)
+		in.Seal = stream.seals[authority]
+	case in.StreamFenced && in.HasProducer:
+		in.BoundGeneration = stream.bound[producerID]
+	}
+	return EvaluateWriteFence(in)
+}
+
+// GrantAppendFence installs or renews the stream-slot marker for one live
+// subscription claim, mirroring grant_append_fence.lua check for check: lease,
+// stream existence, the authority's seal, marker generation, same-generation
+// exactness (a renewal never shortens the lease), the supersession seal on a
+// write-fenced stream, install. A sealed generation is never re-granted
+// (ErrAppendFenced); an absent stream reports (false, nil).
+func (s *MemoryStore) GrantAppendFence(path string, fence auth.AppendFence) (bool, error) {
+	nowNs := s.now().UnixNano()
+	if !fence.Complete() || fence.LeaseUntilNs <= nowNs {
+		return false, ErrAppendFenced
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Expiry is not consulted: the scripts grant against the meta hash as it
+	// stands, and a stream that predates incarnations cannot carry a marker.
+	stream, ok := s.streams[path]
+	if !ok || stream.metadata.Incarnation == "" {
+		return false, nil
+	}
+	authority := FenceAuthority(fence)
+	seal := stream.seals[authority]
+	if seal.Present && fence.Generation <= seal.Generation {
+		return false, ErrAppendFenced
+	}
+	lease := fence.LeaseUntilNs
+	if cur := s.marker(path, authority); cur.Present {
+		switch {
+		case fence.Generation < cur.Generation:
+			return false, ErrAppendFenced
+		case fence.Generation == cur.Generation:
+			if cur.State != WriteFenceMarkerLive || cur.WakeID != fence.WakeID || cur.Holder != fence.Holder {
+				return false, ErrAppendFenced
+			}
+			lease = max(lease, cur.LeaseUntilNs)
+		case stream.metadata.WriteFence && (!seal.Present || cur.Generation > seal.Generation):
+			// Supersession: fix the predecessor's definite last fenced offset.
+			stream.seal(authority, cur.Generation, cur.WakeID)
+		}
+	}
+	s.setMarker(path, authority, WriteFenceMarker{
+		State:             WriteFenceMarkerLive,
+		Generation:        fence.Generation,
+		WakeID:            fence.WakeID,
+		Holder:            fence.Holder,
+		LeaseUntilNs:      lease,
+		StreamIncarnation: stream.metadata.Incarnation,
+	}, time.Now().Add(time.Duration(lease-nowNs)).Add(appendFenceRetention))
+	return true, nil
+}
+
+// RevokeAppendFence tombstones the named claim marker without sealing,
+// mirroring revoke_append_fence.lua: the rollback of a partially granted
+// claim. A delayed revocation of an older generation, or of another claim at
+// the same one, is a harmless no-op.
+func (s *MemoryStore) RevokeAppendFence(path string, fence auth.AppendFence) error {
+	if !fence.Complete() {
+		return ErrAppendFenced
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tombstone(path, FenceAuthority(fence), fence)
+	return nil
+}
+
+// SealAppendFence tombstones the named claim marker and, on a write-fenced
+// stream, seals its generation for its authority at the definite last
+// fenced-class offset, mirroring seal_append_fence.lua check for check: marker
+// staleness (nothing mutated on SealStale), tombstone, stream existence,
+// fenced, seal monotone per authority (a redelivered done is SealAlready).
+func (s *MemoryStore) SealAppendFence(path string, fence auth.AppendFence) (SealResult, error) {
+	if !fence.Complete() {
+		return SealResult{}, ErrAppendFenced
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	authority := FenceAuthority(fence)
+	if !s.tombstone(path, authority, fence) {
+		return SealResult{Outcome: SealStale}, nil
+	}
+	stream, ok := s.streams[path]
+	switch {
+	case !ok:
+		return SealResult{Outcome: SealNotFound}, nil
+	case !stream.metadata.WriteFence:
+		return SealResult{Outcome: SealUnfenced}, nil
+	}
+	if seal := stream.seals[authority]; seal.Present && fence.Generation <= seal.Generation {
+		return SealResult{Outcome: SealAlready, Generation: seal.Generation, FinalOffset: seal.Offset}, nil
+	}
+	sealed := stream.seal(authority, fence.Generation, fence.WakeID)
+	return SealResult{Outcome: SealSealed, Generation: sealed.Generation, FinalOffset: sealed.Offset}, nil
 }
 
 // Long-poll manager methods

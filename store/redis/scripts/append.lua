@@ -18,7 +18,11 @@
 --
 -- Reply: make_reply (see common.lua); status one of OK|VALONLY|RETRY|
 -- FENCED|NOTFOUND|SOFTDEL|CLOSED|CTMISMATCH|SEQCONFLICT|STALE_EPOCH|
--- EPOCH_SEQ|SEQ_GAP.
+-- EPOCH_SEQ|SEQ_GAP. FENCED replies carry [10]=reason [11]=generation
+-- [12]=holder (fence_reply). Write-fenced streams (meta wf='1') read their
+-- seal (wfseal:<auth>) and bindings (wfbind:<producer_id>) from the meta hash
+-- (fence_rung) and write wfLastOff / wfbind:<producer_id> on an accepted
+-- fenced write (fence_bind).
 
 local now = tonumber(ARGV[1])
 local channel = ARGV[2]
@@ -47,21 +51,13 @@ if is_expired(m, now) then
   return make_reply('NOTFOUND')
 end
 
--- 4. Claim fence. The marker key shares the stream's Redis Cluster slot, so
--- this check and the append below are one indivisible Redis transaction.
-if has_fence then
-  local fence = redis.call('HMGET', KEYS[5],
-    'state', 'generation', 'wake_id', 'holder', 'lease_until_ns', 'stream_incarnation')
-  if fence[1] ~= 'live'
-    or fence[2] ~= ARGV[14]
-    or fence[3] ~= ARGV[15]
-    or fence[4] ~= ARGV[16]
-    or fence[5] == false
-    or tonumber(fence[5]) <= now
-    or fence[6] ~= m.incarnation then
-    return make_reply('FENCED', m.tail)
-  end
-end
+-- 4. Write fence: seal, claim marker, epoch binding, bound producer — one
+-- transaction with the write (#183). fence_rung reads the marker at KEYS[5]
+-- (the stream's Redis Cluster slot) and everything else from the meta hash,
+-- so KEYS and ARGV are unchanged; the Go oracle is store.EvaluateWriteFence.
+local reason, d_gen, d_holder = fence_rung(m, has_fence, ARGV[14], ARGV[15], ARGV[16],
+  now, has_producer, producer_id, p_epoch)
+if reason ~= '' then return fence_reply(reason, m.tail, d_gen, d_holder) end
 
 -- 5. Sliding-TTL touch (upstream touches before the closed check, so even
 -- rejected appends refresh the window).
@@ -144,6 +140,7 @@ if closing then
     hset[#hset + 1] = ARGV[9]
   end
 end
+fence_bind(hset, m, has_fence, producer_id, ARGV[14], new_tail)
 if #hset > 0 then redis.call('HSET', KEYS[1], unpack(hset)) end
 
 local result_last_seq = '0'

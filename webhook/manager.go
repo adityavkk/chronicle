@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
 // Streams is the seam over the durable stream store the subscription Manager
@@ -45,10 +47,15 @@ type Streams interface {
 
 // WriteFenceStreams replicates one live subscription claim into each linked
 // stream's Redis Cluster slot. The data-plane store checks the same marker in
-// its atomic append or close transaction.
+// its atomic append or close transaction. SealAppendFence closes a generation
+// in that slot when its wake is done (#183): the marker is tombstoned and, on a
+// write-fenced stream, the generation is sealed at its last fenced offset so a
+// late write of it is refused atomically with the append. RevokeAppendFence
+// only tombstones and is the rollback of a partially granted claim.
 type WriteFenceStreams interface {
 	GrantAppendFence(path string, fence auth.AppendFence) (bool, error)
 	RevokeAppendFence(path string, fence auth.AppendFence) error
+	SealAppendFence(path string, fence auth.AppendFence) (store.SealResult, error)
 }
 
 // StreamMeta is a stream's path, current tail, and creation time — the inputs the
@@ -105,9 +112,19 @@ type ManagerOptions struct {
 	StreamRootURL string
 	Lister        StreamLister
 	Resolver      IPResolver
-	HTTPClient    *http.Client
-	Logger        *slog.Logger
-	WorkerTick    time.Duration
+	// HTTPClient performs webhook deliveries. Nil uses a default client bounded
+	// by the delivery timeout; a deployment egress adapter may supply its own
+	// (a pinned transport, no proxy, no redirects). A supplied client is used
+	// as-is — the adapter owns the delivery deadline, so it MUST bound its
+	// client (Timeout or a transport deadline): an unbounded delivery would
+	// hold its retry slot until the receiver hangs up.
+	HTTPClient *http.Client
+	// TargetPolicy admits one narrowly allowed private webhook route ahead of
+	// the SSRF rules and prepares every delivery to it (see TargetPolicy). Nil
+	// leaves the SSRF rules alone.
+	TargetPolicy TargetPolicy
+	Logger       *slog.Logger
+	WorkerTick   time.Duration
 	// SweepInterval is the coarse recovery FLOOR — how often the full cursor
 	// reconcile runs on a timer with no triggering event (issue #13). It is NOT a
 	// fast 2s sweep: the latency-sensitive cases are event-triggered (boot, a Redis
@@ -198,6 +215,7 @@ type Manager struct {
 	writeFences   WriteFenceStreams
 	client        *http.Client
 	resolver      IPResolver
+	targetPolicy  TargetPolicy
 	wakeTokenAud  string
 	tokenKey      []byte
 
@@ -317,6 +335,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		streamRootURL:         normalizeStreamRootURL(opts.StreamRootURL),
 		client:                opts.HTTPClient,
 		resolver:              opts.Resolver,
+		targetPolicy:          opts.TargetPolicy,
 		wakeTokenAud:          opts.WakeTokenAudience,
 		tokenKey:              tokenKey,
 		log:                   opts.Logger,
@@ -959,7 +978,8 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		return
 	}
 	snapshot, _ := Snapshot(sub.Links, m.tailOf)
-	token, err := GenerateToken(m.tokenKey, id, generation, time.Now(), m.tokenTTL(sub), rand.Reader)
+	now := time.Now()
+	token, err := GenerateToken(m.tokenKey, id, generation, now, m.tokenTTL(sub), rand.Reader)
 	if err != nil {
 		m.log.Warn("webhook: mint callback token", "sub", id, "error", err)
 		return
@@ -976,8 +996,16 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	// signed notification when the subscription names a single entity.
 	// Additive — receivers read fields, and the envelope signature covers
 	// whatever body is marshaled.
-	if wt, ok := m.mintWakeTokenFor(sub, generation, wakeID, time.Now()); ok {
+	if wt, ok := m.mintWakeTokenFor(sub, generation, wakeID, now); ok {
 		notif.WakeToken = wt
+	}
+	// write_token (#183 webhook parity): the wake's append capability, minted
+	// only for the wake this delivery names — a retry that raced a newer arm
+	// carries none — and only after its markers are installed (a retry of the
+	// same wake renews them). Fail-open delivery, fail-closed token: a grant
+	// failure leaves the field empty and the POST still goes out.
+	if sub.Generation == generation && sub.WakeID == wakeID {
+		notif.WriteToken = m.mintWebhookWriteToken(sub, snapshot, now)
 	}
 	body, err := json.Marshal(notif)
 	if err != nil {
@@ -999,6 +1027,18 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		return
 	}
 	req.Header.Set("Webhook-Signature", SignWebhookPayload(signing, body, time.Now()))
+	// The deployment egress adapter sees the final, signed request immediately
+	// before it enters the transport — on every attempt, so a retry is prepared
+	// afresh. A rejection fails this attempt like a transport error: nothing is
+	// dialed and the normal retry is scheduled.
+	if m.targetPolicy != nil {
+		if err := m.targetPolicy.PrepareRequest(req); err != nil {
+			m.log.Warn("webhook: target policy rejected delivery", "sub", id, "error", err)
+			m.metrics.WakeDelivery(0, "rejected")
+			m.recordFailure(id, generation, wakeID, owner)
+			return
+		}
+	}
 
 	postStart := time.Now()
 	resp, err := m.doWebhookRequest(req)
@@ -1031,6 +1071,14 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	}
 	if parsed.Done != nil && *parsed.Done {
 		acks := acksFromSnapshot(snapshot)
+		// Seal before the done-ack idles the subscription (#183, INV-FENCE-06):
+		// a seal error leaves the wake in flight, so a retry re-delivers it and
+		// its re-grant is refused on the sealed streams; the lease lapses and
+		// the next wake arms at the next generation. Sealing is at-least-once.
+		if err := m.sealWriteFencesIfCurrent(id, generation, wakeID, generation); err != nil {
+			m.log.Warn("webhook: seal append fences before auto-ack", "sub", id, "error", err)
+			return
+		}
 		// The auto-ack(done) is a schedule/due-mutating write, so it carries the
 		// retry worker's owner scope: a deposed owner's done-ack (it released/ZREMed
 		// a slot it no longer owns) is FENCED inline, atomically with the write — the
@@ -1108,23 +1156,30 @@ func (m *Manager) writeTokenTTL(sub Subscription) time.Duration {
 
 const writeTokenFenceGrace = 5 * time.Second
 
+// appendFenceFor is the stream-slot identity of sub's current claim: the
+// holder is the pull-wake worker or, for webhook delivery, the derived
+// WebhookHolder of the in-flight wake.
 func appendFenceFor(sub Subscription) auth.AppendFence {
 	return auth.AppendFence{
 		SubscriptionID:          sub.ID,
 		SubscriptionIncarnation: sub.Incarnation,
 		Generation:              sub.Generation,
 		WakeID:                  sub.WakeID,
-		Holder:                  sub.HolderWorker,
+		Holder:                  claimHolder(sub),
 		LeaseUntilNs:            sub.LeaseUntilNs,
 	}
 }
 
+// grantWriteFences installs (or renews) the current claim's marker on every
+// linked stream. It requires a live claim inside its lease — a pull-wake holder
+// or an in-flight webhook wake — and rolls back the markers it installed when
+// one grant fails, so no token is ever minted against a partial set.
 func (m *Manager) grantWriteFences(sub Subscription) error {
 	if m.writeFences == nil {
 		return nil
 	}
 	fence := appendFenceFor(sub)
-	if !sub.Holder || sub.Phase != PhaseLive || !fence.Complete() || fence.LeaseUntilNs <= 0 {
+	if !claimLive(sub, m.now()) || !fence.Complete() {
 		return fmt.Errorf("webhook: cannot grant append fence for non-live claim %q", sub.ID)
 	}
 	granted := make([]string, 0, len(sub.Links))
@@ -1143,8 +1198,15 @@ func (m *Manager) grantWriteFences(sub Subscription) error {
 	return nil
 }
 
-func (m *Manager) revokeWriteFences(sub Subscription) error {
-	if m.writeFences == nil || !sub.Holder {
+// sealWriteFences closes sub's current generation on every linked stream
+// (#183, INV-FENCE-06): each marker is tombstoned and, on a write-fenced
+// stream, the generation is sealed at its last fenced offset. It runs before
+// the control-plane idle at done, release, and delete, and fails closed: an
+// error on any stream is returned so the caller answers 500 before ack.lua or
+// release.lua runs, the worker retries its done, and the redelivered seal is
+// idempotent ("already"). Over-sealing is never unsafe.
+func (m *Manager) sealWriteFences(sub Subscription) error {
+	if m.writeFences == nil || !claimHolds(sub) {
 		return nil
 	}
 	fence := appendFenceFor(sub)
@@ -1153,15 +1215,17 @@ func (m *Manager) revokeWriteFences(sub Subscription) error {
 	}
 	var errs []error
 	for _, link := range sub.Links {
-		if err := m.writeFences.RevokeAppendFence(link.Path, fence); err != nil {
+		if err := m.sealWriteFence(link.Path, fence); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", link.Path, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func (m *Manager) revokeWriteFencePath(sub Subscription, path string) error {
-	if m.writeFences == nil || !sub.Holder {
+// sealWriteFencePath is sealWriteFences for one linked stream that is about to
+// be unlinked: the claim's generation gets its definite last offset there.
+func (m *Manager) sealWriteFencePath(sub Subscription, path string) error {
+	if m.writeFences == nil || !claimHolds(sub) {
 		return nil
 	}
 	linked := false
@@ -1178,10 +1242,24 @@ func (m *Manager) revokeWriteFencePath(sub Subscription, path string) error {
 	if !fence.Complete() {
 		return nil
 	}
-	return m.writeFences.RevokeAppendFence(path, fence)
+	return m.sealWriteFence(path, fence)
 }
 
-func (m *Manager) revokeWriteFencesIfCurrent(
+// sealWriteFence seals one stream and records the outcome, once per stream.
+func (m *Manager) sealWriteFence(path string, fence auth.AppendFence) error {
+	res, err := m.writeFences.SealAppendFence(path, fence)
+	if err != nil {
+		m.metrics.AppendFenceSeal("error")
+		return err
+	}
+	m.metrics.AppendFenceSeal(string(res.Outcome))
+	return nil
+}
+
+// sealWriteFencesIfCurrent seals the claim a done or release names, but only
+// while the subscription still holds exactly that claim: a stale request seals
+// nothing (ack.lua fences it next), so a successor's markers are never touched.
+func (m *Manager) sealWriteFencesIfCurrent(
 	id string,
 	generation int64,
 	wakeID string,
@@ -1191,37 +1269,59 @@ func (m *Manager) revokeWriteFencesIfCurrent(
 	if err != nil || !ok {
 		return err
 	}
-	if !sub.Holder ||
-		sub.Phase != PhaseLive ||
+	if !claimHolds(sub) ||
 		sub.Generation != generation ||
 		sub.Generation != tokenGeneration ||
 		sub.WakeID != wakeID {
 		return nil
 	}
-	return m.revokeWriteFences(sub)
+	return m.sealWriteFences(sub)
 }
 
-// mintWriteTokenOnAck refreshes a current holder's data-plane write capability
-// when the ack response is already refreshing credentials. Done acks end the
-// lease, so they mint nothing and preserve the conformance suite's
-// {ok,next_wake} done-ack body shape.
+// mintWriteTokenOnAck refreshes a current claim's data-plane write capability
+// when the ack response is already refreshing credentials: the markers are
+// re-granted (a renewal, never shortening their lease) and the token re-minted
+// for the claim's holder — the worker for pull-wake, WebhookHolder for a
+// webhook callback (#183 parity). Done acks end the lease, so they mint nothing
+// and preserve the conformance suite's {ok,next_wake} done-ack body shape.
 func (m *Manager) mintWriteTokenOnAck(id string, generation int64, wakeID string, done bool, now time.Time) (string, bool, error) {
 	if done {
 		return "", false, nil
 	}
 	sub, ok, err := m.store.Get(id)
-	if err != nil || !ok || sub.Config.Type != DispatchPullWake || sub.Phase != PhaseLive || sub.WakeID != wakeID || sub.Generation != generation || !sub.Holder {
+	if err != nil || !ok || !claimLive(sub, now) || sub.WakeID != wakeID || sub.Generation != generation {
 		return "", false, err
 	}
 	if err := m.grantWriteFences(sub); err != nil {
+		m.metrics.AppendFenceGrantFailed("heartbeat")
 		return "", false, err
 	}
 	scope := writeScopeFromLinks(sub.Links)
-	tok, err := GenerateClaimWriteToken(m.tokenKey, id, sub.Incarnation, generation, wakeID, sub.HolderWorker, 0, scope, now, m.writeTokenTTL(sub), randReader)
+	tok, err := GenerateClaimWriteToken(m.tokenKey, id, sub.Incarnation, generation, wakeID, claimHolder(sub), 0, scope, now, m.writeTokenTTL(sub), randReader)
 	if err != nil {
 		return "", false, err
 	}
 	return tok, true, nil
+}
+
+// mintWebhookWriteToken installs the in-flight wake's markers on its linked
+// streams and mints the write token a WakeNotification carries (#183 webhook
+// parity), scoped to the notified snapshot and bound to WebhookHolder. A grant
+// failure is logged and counted and yields "": the delivery fails open (the
+// POST goes out) while the token fails closed (a receiver without one cannot
+// write the fenced class).
+func (m *Manager) mintWebhookWriteToken(sub Subscription, snapshot []StreamSnapshot, now time.Time) string {
+	if err := m.grantWriteFences(sub); err != nil {
+		m.log.Warn("webhook: grant append fence before delivery", "sub", sub.ID, "error", err)
+		m.metrics.AppendFenceGrantFailed("webhook")
+		return ""
+	}
+	tok, err := GenerateClaimWriteToken(m.tokenKey, sub.ID, sub.Incarnation, sub.Generation, sub.WakeID, claimHolder(sub), 0, writeScope(snapshot), now, m.writeTokenTTL(sub), randReader)
+	if err != nil {
+		m.log.Warn("webhook: mint write token", "sub", sub.ID, "error", err)
+		return ""
+	}
+	return tok
 }
 
 // mintToken mints a fresh callback/claim token for a subscription at the given
@@ -2230,8 +2330,16 @@ func (m *Manager) reconcileOnce() {
 func (m *Manager) RunReconcile() { m.reconcileOnce() }
 
 // validateWebhookURL applies the SSRF rules and returns the rejection reason, or
-// "" when the URL is acceptable.
+// "" when the URL is acceptable. A deployment TargetPolicy may admit its one
+// private route ahead of the rules; every other URL is classified as usual, so
+// a target the policy does not admit is rejected exactly like any private
+// address.
 func (m *Manager) validateWebhookURL(rawURL string) string {
+	if m.targetPolicy != nil {
+		if target, err := url.Parse(rawURL); err == nil && m.targetPolicy.AllowTarget(target) {
+			return ""
+		}
+	}
 	if ok, reason := ClassifyWebhookURL(rawURL, m.resolver, m.allowPrivate); !ok {
 		return reason
 	}
@@ -2251,7 +2359,9 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 	}
 	done := req.Done != nil && *req.Done
 	if done {
-		if err := m.revokeWriteFencesIfCurrent(id, req.Generation, req.WakeID, tokenGeneration); err != nil {
+		// Seal before ack.lua idles the claim (#183): a seal error is a 500 and
+		// the subscription stays held, so the worker's retried done re-seals.
+		if err := m.sealWriteFencesIfCurrent(id, req.Generation, req.WakeID, tokenGeneration); err != nil {
 			return false, false, false, err
 		}
 	}
@@ -2273,7 +2383,7 @@ func (m *Manager) applyAck(id string, req CallbackRequest, tokenGeneration int64
 
 // applyRelease fences and releases the lease, re-waking if pending (PROTOCOL §7.2).
 func (m *Manager) applyRelease(id string, req ReleaseRequest, tokenGeneration int64) (fenced, gone bool, err error) {
-	if err := m.revokeWriteFencesIfCurrent(id, req.Generation, req.WakeID, tokenGeneration); err != nil {
+	if err := m.sealWriteFencesIfCurrent(id, req.Generation, req.WakeID, tokenGeneration); err != nil {
 		return false, false, err
 	}
 	status, rerr := m.release(id, req.Generation, req.WakeID, tokenGeneration)

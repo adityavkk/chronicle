@@ -17,3 +17,4 @@ Naming: `NNNN-short-title.md`, zero-padded, monotonically increasing.
 | [0005](0005-per-instance-sse-stream-fanout.md) | Accepted | Share live SSE reads and formatting through one bounded per-stream hub on each Chronicle replica |
 | [0006](0006-immutable-segment-read-plane-prototype.md) | Accepted for prototype | Copy sealed prefixes into range-authenticated immutable segments while Redis remains authoritative |
 | [0007](0007-fuse-root-pages-and-register-live-reads-first.md) | Accepted | Fuse bounded root-owned frames into the atomic root read and register new live readers before their authoritative page |
+| [0008](0008-write-fencing-extension.md) | Accepted | Make the claim-bound append fence a §11.1 protocol extension: fenced streams, server-derived write classes, producer binding, epoch ≡ generation, per-authority seal at done |

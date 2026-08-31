@@ -48,31 +48,34 @@ type Prometheus struct {
 	// "New metrics"). Appended after the original set; see webhook.Metrics for the
 	// append-only contract (GAP2). No-ops until the matching mechanism (#12–#15)
 	// wires them to real call sites.
-	fanoutSeconds     prometheus.Histogram
-	fanoutSlotsProbed prometheus.Histogram
-	fanoutSubs        prometheus.Histogram
-	appendHookSeconds prometheus.Histogram
-	dirtyEnqueues     *prometheus.CounterVec
-	dirtyDepth        prometheus.Gauge
-	dirtyCapacity     prometheus.Gauge
-	dirtyOldestAge    prometheus.Gauge
-	dirtyProcess      *prometheus.HistogramVec
-	dirtyProcessSubs  prometheus.Counter
-	dirtyProcessWakes prometheus.Counter
-	dirtyDuplicates   prometheus.Counter
-	dirtyOverflows    prometheus.Counter
-	reconcileRequests *prometheus.CounterVec
-	dirtyErrors       *prometheus.CounterVec
-	dirtyRecovery     prometheus.Histogram
-	dueSetMutations   *prometheus.CounterVec
-	dueWorkerSeconds  prometheus.Histogram
-	dueWorkerFired    prometheus.Histogram
-	slotOwnership     *prometheus.CounterVec
-	coverageGap       prometheus.Histogram
-	ownerFenced       *prometheus.CounterVec
-	claimContention   *prometheus.CounterVec
-	durabilityShort   *prometheus.CounterVec
-	serviceAccess     *prometheus.CounterVec
+	fanoutSeconds            prometheus.Histogram
+	fanoutSlotsProbed        prometheus.Histogram
+	fanoutSubs               prometheus.Histogram
+	appendHookSeconds        prometheus.Histogram
+	dirtyEnqueues            *prometheus.CounterVec
+	dirtyDepth               prometheus.Gauge
+	dirtyCapacity            prometheus.Gauge
+	dirtyOldestAge           prometheus.Gauge
+	dirtyProcess             *prometheus.HistogramVec
+	dirtyProcessSubs         prometheus.Counter
+	dirtyProcessWakes        prometheus.Counter
+	dirtyDuplicates          prometheus.Counter
+	dirtyOverflows           prometheus.Counter
+	reconcileRequests        *prometheus.CounterVec
+	dirtyErrors              *prometheus.CounterVec
+	dirtyRecovery            prometheus.Histogram
+	dueSetMutations          *prometheus.CounterVec
+	dueWorkerSeconds         prometheus.Histogram
+	dueWorkerFired           prometheus.Histogram
+	slotOwnership            *prometheus.CounterVec
+	coverageGap              prometheus.Histogram
+	ownerFenced              *prometheus.CounterVec
+	claimContention          *prometheus.CounterVec
+	durabilityShort          *prometheus.CounterVec
+	serviceAccess            *prometheus.CounterVec
+	appendFenceRejections    *prometheus.CounterVec
+	appendFenceSeals         *prometheus.CounterVec
+	appendFenceGrantFailures *prometheus.CounterVec
 
 	sseHubs                prometheus.Gauge
 	sseClients             prometheus.Gauge
@@ -108,6 +111,7 @@ var (
 	_ chronicle.AppendMetrics  = (*Prometheus)(nil)
 	_ chronicle.ReadMetrics    = (*Prometheus)(nil)
 	_ chronicle.ServiceMetrics = (*Prometheus)(nil)
+	_ chronicle.FenceMetrics   = (*Prometheus)(nil)
 	_ chronicle.SSEMetrics     = (*Prometheus)(nil)
 )
 
@@ -308,6 +312,18 @@ func New() *Prometheus {
 			Name: "chronicle_service_access_total",
 			Help: "Service authentication and authorization events by result: spiffe_authenticated, bearer_authenticated, authentication_failure, authorization_failure, or delegated_gateway.",
 		}, []string{"result"}),
+		appendFenceRejections: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_append_fence_rejections_total",
+			Help: "Data-plane write-fence rejections by reason (credential|shard|producer_required|wake_token|precheck|marker|sealed|epoch|bound|store) — the primary zombie-writer signal (#183, ADR-0003 c8).",
+		}, []string{"reason"}),
+		appendFenceSeals: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_append_fence_seals_total",
+			Help: "Per-stream write-fence seals at done/release/delete/unlink by outcome (sealed|already|stale|notfound|unfenced|error) (#183).",
+		}, []string{"outcome"}),
+		appendFenceGrantFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_append_fence_grant_failures_total",
+			Help: "Claim-marker grant failures by site (claim|heartbeat|webhook); the webhook site is the fail-open-delivery signal (#183).",
+		}, []string{"site"}),
 		sseHubs: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "chronicle_sse_hubs",
 			Help: "Active per-stream SSE fanout hubs on this Chronicle replica.",
@@ -414,6 +430,7 @@ func New() *Prometheus {
 		p.dueSetMutations, p.dueWorkerSeconds, p.dueWorkerFired,
 		p.slotOwnership, p.coverageGap, p.ownerFenced, p.claimContention,
 		p.durabilityShort, p.serviceAccess,
+		p.appendFenceRejections, p.appendFenceSeals, p.appendFenceGrantFailures,
 		p.sseHubs, p.sseClients, p.sseHubReads, p.sseHubMessages,
 		p.sseHubRingBytes, p.sseHubRingRawBytes, p.sseHubRingWireBytes,
 		p.sseHubRingIndexBytes, p.sseHubRefreshes, p.sseHubRefreshPages,
@@ -659,6 +676,21 @@ func (p *Prometheus) ServiceAuthorizationFailure() {
 // chronicle.ServiceMetrics.
 func (p *Prometheus) ServiceDelegatedGateway() {
 	p.serviceAccess.WithLabelValues("delegated_gateway").Inc()
+}
+
+// AppendFenceRejection implements webhook.Metrics and chronicle.FenceMetrics.
+func (p *Prometheus) AppendFenceRejection(reason string) {
+	p.appendFenceRejections.WithLabelValues(reason).Inc()
+}
+
+// AppendFenceSeal implements webhook.Metrics.
+func (p *Prometheus) AppendFenceSeal(outcome string) {
+	p.appendFenceSeals.WithLabelValues(outcome).Inc()
+}
+
+// AppendFenceGrantFailed implements webhook.Metrics.
+func (p *Prometheus) AppendFenceGrantFailed(site string) {
+	p.appendFenceGrantFailures.WithLabelValues(site).Inc()
 }
 
 // SSEHubActive implements chronicle.SSEMetrics.

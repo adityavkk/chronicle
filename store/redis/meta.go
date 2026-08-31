@@ -32,6 +32,15 @@ const (
 	fClosedById  = "cbId"       // closedBy tuple; presence keyed on cbEpoch
 	fClosedByEp  = "cbEpoch"
 	fClosedBySeq = "cbSeq"
+
+	// Write-fence fields (#183). Only wf is written by Go; the rest are owned
+	// by the Lua scripts (append/close/grant/seal) and merely read here.
+	fWriteFence    = "wf"        // "1" when the stream is write-fenced (config-matched)
+	fSealGen       = "wfSealGen" // most recent seal generation on this stream (HEAD summary)
+	fSealOff       = "wfSealOff" // offset recorded by that seal
+	fLastFencedOff = "wfLastOff" // tail after the last accepted fenced-class write
+	fSealPrefix    = "wfseal:"   // + authority: "<gen>:<wake_id>:<offset>", one per authority
+	fBindPrefix    = "wfbind:"   // + producer id: generation of its last accepted fenced write
 )
 
 // metaToFields flattens metadata into HSET field/value pairs. Optional
@@ -51,6 +60,9 @@ func metaToFields(m *store.StreamMetadata) map[string]string {
 	}
 	if m.Closed {
 		f[fClosed] = "1"
+	}
+	if m.WriteFence {
+		f[fWriteFence] = "1"
 	}
 	if m.TTLSeconds != nil {
 		f[fTTL] = strconv.FormatInt(*m.TTLSeconds, 10)
@@ -103,6 +115,7 @@ func metaFromFields(path string, fields map[string]string) (*store.StreamMetadat
 		LastSeq:       fields[fLastSeq],
 		Closed:        fields[fClosed] == "1",
 		SoftDeleted:   fields[fSoftDel] == "1",
+		WriteFence:    fields[fWriteFence] == "1",
 		ForkedFrom:    fields[fForkedFrom],
 		Producers:     make(map[string]*store.ProducerState),
 	}
@@ -168,6 +181,18 @@ func metaFromFields(path string, fields map[string]string) (*store.StreamMetadat
 			Epoch:      ep,
 			Seq:        seq,
 		}
+	}
+	if v, ok := fields[fSealGen]; ok {
+		if m.SealedGeneration, err = strconv.ParseInt(v, 10, 64); err != nil {
+			return nil, fmt.Errorf("meta %s: bad wfSealGen %q", path, v)
+		}
+	}
+	if v, ok := fields[fSealOff]; ok {
+		o, err := store.ParseOffset(v)
+		if err != nil {
+			return nil, fmt.Errorf("meta %s: bad wfSealOff: %w", path, err)
+		}
+		m.SealedOffset = &o
 	}
 	return m, nil
 }

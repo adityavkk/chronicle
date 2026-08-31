@@ -120,8 +120,13 @@ func linkViews(links []StreamLink) []StreamLinkView {
 // WakeNotification is the signed body POSTed to a webhook receiver (PROTOCOL
 // §7.1). WakeToken is the optional entity-identity assertion (#123/#126): an
 // EdDSA JWS (typ=application/wake+jwt) under the wake-token key, present only
-// when the subscription names a single entity. Additive per §11.1 — receivers
-// read fields, and the envelope signature covers the marshaled body.
+// when the subscription names a single entity. WriteToken is the claim-scoped
+// write token of this wake (#183 webhook parity): the append capability for
+// exactly the notified streams, bound to the derived holder WebhookHolder and
+// minted only after the wake's stream-slot markers are installed; absent when
+// the markers could not be granted (delivery fails open, the token fails
+// closed). Both are additive per §11.1 — receivers read fields, and the
+// envelope signature covers the marshaled body.
 type WakeNotification struct {
 	SubscriptionID string           `json:"subscription_id"`
 	WakeID         string           `json:"wake_id"`
@@ -130,6 +135,7 @@ type WakeNotification struct {
 	CallbackURL    string           `json:"callback_url"`
 	CallbackToken  string           `json:"callback_token"`
 	WakeToken      string           `json:"wake_token,omitempty"`
+	WriteToken     string           `json:"write_token,omitempty"`
 }
 
 // CallbackRequest is the body of a webhook callback or a pull-wake ack
@@ -145,10 +151,13 @@ type CallbackRequest struct {
 // the in-band refreshed callback token (issue #77): it is set ONLY when a
 // successful callback re-mints a near-expiry token, and `omitempty` keeps the
 // no-refresh response byte-identical to {ok,next_wake} — the shape the conformance
-// suite deep-equals. WakeToken is the heartbeat-refreshed entity-identity
-// assertion (#123/#126): set only on a successful non-done ack of a
-// single-entity subscription (ShouldRefreshWakeToken), so a done ack — the
-// only kind the conformance suite sends — never gains a field.
+// suite deep-equals. WriteToken is the re-minted claim-scoped write token
+// (#126, #183): set on every successful non-done ack or callback of a live
+// claim, pull-wake and webhook alike, after its stream-slot markers are
+// renewed. WakeToken is the heartbeat-refreshed entity-identity assertion
+// (#123/#126): set only on a successful non-done ack of a single-entity
+// subscription (ShouldRefreshWakeToken). A done ack — the only kind the
+// conformance suite sends — never gains a field.
 type AckResponse struct {
 	OK         bool   `json:"ok"`
 	NextWake   bool   `json:"next_wake"`
@@ -218,10 +227,15 @@ type ErrorBody struct {
 }
 
 // ErrorDetail carries the error code plus the optional fields used by specific
-// errors (current_holder/generation for ALREADY_CLAIMED).
+// errors: current_holder/generation for ALREADY_CLAIMED and for a data-plane
+// FENCED rejection, whose Reason names the fence rule that refused the write
+// (#183: credential, shard, producer_required, wake_token, precheck, marker,
+// sealed, epoch, bound, or store; "principal" exists in code as a classify
+// backstop only and is never emitted — ADR-0008 decision 9).
 type ErrorDetail struct {
 	Code          string `json:"code"`
 	Message       string `json:"message,omitempty"`
+	Reason        string `json:"reason,omitempty"`
 	CurrentHolder string `json:"current_holder,omitempty"`
 	Generation    int64  `json:"generation,omitempty"`
 }

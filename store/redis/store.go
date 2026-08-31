@@ -55,9 +55,11 @@ type Store struct {
 }
 
 var (
-	_ store.Store      = (*Store)(nil)
-	_ store.PageReader = (*Store)(nil)
-	_ store.PageWaiter = (*Store)(nil)
+	_ store.Store           = (*Store)(nil)
+	_ store.PageReader      = (*Store)(nil)
+	_ store.PageWaiter      = (*Store)(nil)
+	_ store.FencedCloser    = (*Store)(nil)
+	_ store.WriteFenceStore = (*Store)(nil)
 )
 
 // New wraps a go-redis client as a store.Store. The store takes ownership
@@ -301,6 +303,7 @@ func (s *Store) Create(path string, opts store.CreateOptions) (*store.StreamMeta
 		CreatedAt:      now,
 		LastAccessedAt: now,
 		Closed:         opts.Closed,
+		WriteFence:     opts.WriteFence, // never inherited: a fork declares its own
 		Producers:      map[string]*store.ProducerState{},
 	}
 
@@ -461,10 +464,10 @@ func (s *Store) createArgs(meta *store.StreamMetadata, opts store.CreateOptions,
 	}
 
 	fields := metaToFields(meta)
-	args := make([]any, 0, 10+2*len(fields)+len(frames))
+	args := make([]any, 0, 11+2*len(fields)+len(frames))
 	args = append(args, s.nowNsArg(), notifyChannel(meta.Path),
 		normalizeCT(opts.ContentType), probeTTL, probeExp, probeClosed,
-		opts.ForkedFrom, probeForkOff, probeSubOff,
+		opts.ForkedFrom, probeForkOff, probeSubOff, boolArg(opts.WriteFence),
 		strconv.Itoa(len(fields)))
 	for k, v := range fields {
 		args = append(args, k, v)
@@ -582,12 +585,7 @@ func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (stor
 		fenceGeneration = strconv.FormatInt(opts.Fence.Generation, 10)
 		fenceWakeID = opts.Fence.WakeID
 		fenceHolder = opts.Fence.Holder
-		appendKeys = append(appendKeys, appendFenceKey(
-			path,
-			opts.Fence.SubscriptionID,
-			opts.Fence.SubscriptionIncarnation,
-			opts.Fence.Shard,
-		))
+		appendKeys = append(appendKeys, appendFenceKey(path, *opts.Fence))
 	}
 
 	for attempt := 0; attempt < maxAppendRetries; attempt++ {
@@ -669,7 +667,12 @@ func (s *Store) mapAppendReply(r *scriptReply) (store.AppendResult, error) {
 	case stNotFound:
 		return store.AppendResult{}, store.ErrStreamNotFound
 	case stFenced:
-		return store.AppendResult{}, store.ErrAppendFenced
+		// The tail is deliberately not disclosed: a deposed writer stands down.
+		return store.AppendResult{
+			FenceReason:     r.FenceReason,
+			FenceGeneration: r.FenceGeneration,
+			FenceHolder:     r.FenceHolder,
+		}, store.ErrAppendFenced
 	case stSoftDel:
 		return store.AppendResult{}, store.ErrStreamSoftDeleted
 	case stClosed:
@@ -1234,7 +1237,11 @@ func (s *Store) closeStream(path string, fence *auth.AppendFence) (*store.CloseR
 	case stNotFound:
 		return nil, store.ErrStreamNotFound
 	case stFenced:
-		return nil, store.ErrAppendFenced
+		return &store.CloseResult{
+			FenceReason:     r.FenceReason,
+			FenceGeneration: r.FenceGeneration,
+			FenceHolder:     r.FenceHolder,
+		}, store.ErrAppendFenced
 	case stOK:
 		tail, err := store.ParseOffset(r.Tail)
 		if err != nil {
@@ -1261,7 +1268,11 @@ func (s *Store) CloseStreamWithProducer(path string, opts store.CloseProducerOpt
 		return nil, store.ErrStreamNotFound
 	}
 	if r.Status == stFenced {
-		return nil, store.ErrAppendFenced
+		return &store.CloseProducerResult{
+			FenceReason:     r.FenceReason,
+			FenceGeneration: r.FenceGeneration,
+			FenceHolder:     r.FenceHolder,
+		}, store.ErrAppendFenced
 	}
 	tail, err := store.ParseOffset(r.Tail)
 	if err != nil {
@@ -1305,12 +1316,7 @@ func (s *Store) runCloseScript(
 		fenceGeneration = strconv.FormatInt(fence.Generation, 10)
 		fenceWakeID = fence.WakeID
 		fenceHolder = fence.Holder
-		keys = append(keys, appendFenceKey(
-			path,
-			fence.SubscriptionID,
-			fence.SubscriptionIncarnation,
-			fence.Shard,
-		))
+		keys = append(keys, appendFenceKey(path, *fence))
 	}
 	raw, err := closeScript.Run(ctx, s.client, keys,
 		s.nowNsArg(), notifyChannel(path), hasProd, pid, epoch, seq,

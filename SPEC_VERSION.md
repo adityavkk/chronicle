@@ -11,6 +11,7 @@ independent Rust server).
 - **Conformance suite:** `@durable-streams/server-conformance-tests@0.3.5`,
   pinned in `test/conformance/package.json`.
 - **Certified result:** 332/332 at 0.3.5.
+- **Extension suite:** Write Fencing, `test/conformance-ext` (chronicle-owned, unpinned; CI's `conformance-ext` job).
 
 The suite runs against chronicle + a live Redis in CI's `conformance` job
 (`.github/workflows/ci.yml`); see `docs/spec/IMPLEMENTATION_TESTING.md` for

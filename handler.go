@@ -35,6 +35,16 @@ type AppendMetrics interface {
 	AppendSubscriptionHook(dur time.Duration)
 }
 
+// FenceMetrics records data-plane write-fence rejections by reason (#183):
+// credential, shard, producer_required, wake_token, precheck, marker, sealed,
+// epoch, bound, or store. (reason "principal" exists in code as a classify
+// backstop only; the shipped phase-1 gate refuses an anonymous write before
+// the stream lookup, so it is never emitted — ADR-0008 decision 9.)
+// metrics.Prometheus implements it.
+type FenceMetrics interface {
+	AppendFenceRejection(reason string)
+}
+
 // Handler serves the Durable Streams protocol over HTTP.
 type Handler struct {
 	// Store is the stream storage backend.
@@ -110,6 +120,9 @@ type Handler struct {
 	// ServiceMetrics records service authentication, authorization, and
 	// delegated-gateway outcomes. Nil disables these counters.
 	ServiceMetrics ServiceMetrics
+	// FenceMetrics records write-fence rejections on the append path, exactly
+	// once per rejected request (#183). Nil disables the counter.
+	FenceMetrics FenceMetrics
 
 	// ReadAuth authorizes data-plane reads with the chronicle
 	// read-capability JWS (issue #126 TB5). Nil means no capability
@@ -176,8 +189,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Set CORS headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, HEAD, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Stream-Seq, Stream-TTL, Stream-Expires-At, Stream-Closed, If-None-Match, Producer-Id, Producer-Epoch, Producer-Seq, Stream-Forked-From, Stream-Fork-Offset, Stream-Fork-Sub-Offset, Authorization, electric-claim-token")
-	w.Header().Set("Access-Control-Expose-Headers", "Stream-Next-Offset, Stream-Cursor, Stream-Up-To-Date, Stream-Closed, Stream-Envelope, ETag, Location, Producer-Epoch, Producer-Seq, Producer-Expected-Seq, Producer-Received-Seq")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Stream-Seq, Stream-TTL, Stream-Expires-At, Stream-Closed, If-None-Match, Producer-Id, Producer-Epoch, Producer-Seq, Stream-Forked-From, Stream-Fork-Offset, Stream-Fork-Sub-Offset, Authorization, electric-claim-token, Write-Fence, Write-Token")
+	w.Header().Set("Access-Control-Expose-Headers", "Stream-Next-Offset, Stream-Cursor, Stream-Up-To-Date, Stream-Closed, Stream-Envelope, ETag, Location, Producer-Epoch, Producer-Seq, Producer-Expected-Seq, Producer-Received-Seq, Write-Fence, Write-Fence-Sealed-Generation, Write-Fence-Sealed-Offset")
 
 	// Browser security headers (Protocol Section 10.7)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -255,6 +268,16 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 	// Parse Stream-Closed header
 	createClosed := closedStr == "true"
 
+	// Write-Fence: true creates the stream write-fenced (#183). The fence lives
+	// in the store's stream slot, so a store without the capability cannot
+	// honor the opt-in; refusing here keeps a base client's create unchanged.
+	writeFence := r.Header.Get(protocol.HeaderWriteFence) == "true"
+	if writeFence {
+		if _, ok := h.Store.(store.WriteFenceStore); !ok {
+			return newHTTPError(http.StatusNotImplemented, store.ErrWriteFenceUnsupported.Error())
+		}
+	}
+
 	// Parse fork headers
 	forkedFromStr := r.Header.Get(protocol.HeaderStreamForkedFrom)
 	forkOffsetStr := r.Header.Get(protocol.HeaderStreamForkOffset)
@@ -321,6 +344,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 		ExpiresAt:   expiresAt,
 		InitialData: initialData,
 		Closed:      createClosed,
+		WriteFence:  writeFence,
 		ForkedFrom:  forkedFromStr,
 	}
 
@@ -369,6 +393,9 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 		if errors.Is(err, store.ErrContentTypeMismatch) {
 			return newHTTPError(http.StatusConflict, "fork content type does not match source stream")
 		}
+		if errors.Is(err, store.ErrWriteFenceUnsupported) {
+			return newHTTPError(http.StatusNotImplemented, err.Error())
+		}
 		return err
 	}
 
@@ -382,6 +409,11 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 	// Notify the subscription layer of a new stream (and its initial append, if
 	// any) so matching subscriptions are linked and woken.
 	if wasCreated {
+		if opts.WriteFence && h.AppendAuth == nil {
+			// The fenced class needs the write token; without an authorizer every
+			// fenced write fails closed (design K.16), which is worth saying once.
+			h.logger().Warn("write-fenced stream created with no append authorizer configured", "path", path)
+		}
 		h.onStreamCreated(path)
 		if len(initialData) > 0 {
 			h.onStreamAppend(path)
@@ -396,6 +428,9 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 	// Include Stream-Closed header if stream is closed
 	if meta.Closed {
 		w.Header().Set(protocol.HeaderStreamClosed, "true")
+	}
+	if meta.WriteFence {
+		w.Header().Set(protocol.HeaderWriteFence, "true")
 	}
 
 	if wasCreated {
@@ -457,6 +492,16 @@ func (h *Handler) handleHead(w http.ResponseWriter, r *http.Request, path string
 	// Include Stream-Closed header if stream is closed
 	if snapshot.Closed {
 		w.Header().Set(protocol.HeaderStreamClosed, "true")
+	}
+
+	// Write-fence echo and the most recent seal (#183 B.2): a successor reads
+	// the predecessor's definite last fenced offset from HEAD.
+	if snapshot.WriteFence {
+		w.Header().Set(protocol.HeaderWriteFence, "true")
+		if snapshot.SealedGeneration > 0 && snapshot.SealedOffset != nil {
+			w.Header().Set(protocol.HeaderWriteFenceSealedGeneration, strconv.FormatInt(snapshot.SealedGeneration, 10))
+			w.Header().Set(protocol.HeaderWriteFenceSealedOffset, snapshot.SealedOffset.String())
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -828,7 +873,8 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 	// Credential preflight runs before stream store access so an invalid token
 	// still cannot probe stream existence. The live fence is repeated below,
 	// immediately before the mutation.
-	if err := h.authorizeAppendCredential(r, path); err != nil {
+	cred, err := h.authorizeAppendCredential(r, path)
+	if err != nil {
 		return err
 	}
 
@@ -842,6 +888,16 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 			return newHTTPError(http.StatusGone, "stream has been deleted")
 		}
 		return err
+	}
+
+	// On a fenced stream every POST — append, append-and-close, close-only —
+	// is classed once, here, before any branch (#183 E.1 step c1). A stream
+	// that never opted in is never classed and takes today's path.
+	var class writeClass
+	if meta.WriteFence {
+		if class, err = h.classifyFencedStream(path, cred); err != nil {
+			return err
+		}
 	}
 
 	// Parse Stream-Closed header
@@ -859,8 +915,14 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 	hasProducerHeaders := producerId != "" || producerEpochStr != "" || producerSeqStr != ""
 	hasAllProducerHeaders := producerId != "" && producerEpochStr != "" && producerSeqStr != ""
 
-	// Validate producer headers - all or none
+	// Validate producer headers - all or none. On the fenced class a partial
+	// triple is one more shape of the missing-producer-headers rejection, so it
+	// counts under producer_required like the complete-absence 400 below; the
+	// wire response stays the base 400 byte for byte (#183 polish).
 	if hasProducerHeaders && !hasAllProducerHeaders {
+		if class == writeClassFenced {
+			h.countFenceRejection(string(store.FenceProducerRequired))
+		}
 		return newHTTPError(http.StatusBadRequest, "all producer headers (Producer-Id, Producer-Epoch, Producer-Seq) must be provided together")
 	}
 
@@ -888,13 +950,25 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 		producerSeq = &seq
 	}
 
+	// The fenced class binds Producer-Epoch to the claim generation, so the
+	// producer headers are mandatory on it (#183 E.1 step g1; the Lua rung is
+	// the backstop). The disclosure a 409 would carry needs the same headers.
+	if class == writeClassFenced && !hasAllProducerHeaders {
+		h.countFenceRejection(string(store.FenceProducerRequired))
+		return newHTTPError(http.StatusBadRequest, "fenced write requires Producer-Id, Producer-Epoch, and Producer-Seq")
+	}
+	var reqSeq int64
+	if hasAllProducerHeaders {
+		reqSeq = *producerSeq
+	}
+
 	// Handle close-only request (empty body with Stream-Closed: true)
 	if len(body) == 0 && closeStream {
 		// Close-only - Content-Type validation is skipped per protocol Section 5.2
 		if hasAllProducerHeaders {
-			fence, err := h.authorizeAppendFence(r, path)
+			fence, err := h.authorizeAppendFence(r, path, cred, class)
 			if err != nil {
-				return err
+				return producerDisclosure(err, true, reqSeq)
 			}
 			result, err := h.Store.CloseStreamWithProducer(path, store.CloseProducerOptions{
 				ProducerId:    producerId,
@@ -904,7 +978,11 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 			})
 			if err != nil {
 				if errors.Is(err, store.ErrAppendFenced) {
-					return denyError(auth.Deny(auth.ReasonFenced, "write token claim is fenced"))
+					var d store.CloseProducerResult
+					if result != nil {
+						d = *result
+					}
+					return fencedError(d.FenceReason, d.FenceGeneration, d.FenceHolder, true, reqSeq)
 				}
 				if errors.Is(err, store.ErrStreamNotFound) {
 					return newHTTPError(http.StatusNotFound, "stream not found")
@@ -939,9 +1017,9 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 			return nil
 		}
 
-		fence, err := h.authorizeAppendFence(r, path)
+		fence, err := h.authorizeAppendFence(r, path, cred, class)
 		if err != nil {
-			return err
+			return producerDisclosure(err, false, 0)
 		}
 		var result *store.CloseResult
 		if fence == nil {
@@ -949,11 +1027,15 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 		} else if closer, ok := h.Store.(store.FencedCloser); ok {
 			result, err = closer.CloseStreamFenced(path, *fence)
 		} else {
-			return denyError(auth.Deny(auth.ReasonFenced, "atomic append fence unavailable"))
+			return fenceDenied(auth.Deny(auth.ReasonFenced, "atomic append fence unavailable"), reasonStore)
 		}
 		if err != nil {
 			if errors.Is(err, store.ErrAppendFenced) {
-				return denyError(auth.Deny(auth.ReasonFenced, "write token claim is fenced"))
+				var d store.CloseResult
+				if result != nil {
+					d = *result
+				}
+				return fencedError(d.FenceReason, d.FenceGeneration, d.FenceHolder, false, 0)
 			}
 			if errors.Is(err, store.ErrStreamNotFound) {
 				return newHTTPError(http.StatusNotFound, "stream not found")
@@ -997,16 +1079,16 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 	// Body IO, metadata lookup, and framing are complete. The authorization
 	// result now carries the live claim identity into Store.Append, whose Redis
 	// script compares it with the same-slot lease marker in the atomic commit.
-	fence, err := h.authorizeAppendFence(r, path)
+	fence, err := h.authorizeAppendFence(r, path, cred, class)
 	if err != nil {
-		return err
+		return producerDisclosure(err, hasAllProducerHeaders, reqSeq)
 	}
 	opts.Fence = fence
 	result, err := h.Store.Append(path, body, opts)
 	appendReturnedAt := time.Now()
 	if err != nil {
 		if errors.Is(err, store.ErrAppendFenced) {
-			return denyError(auth.Deny(auth.ReasonFenced, "write token claim is fenced"))
+			return fencedError(result.FenceReason, result.FenceGeneration, result.FenceHolder, hasAllProducerHeaders, reqSeq)
 		}
 		if errors.Is(err, store.ErrStreamClosed) {
 			w.Header().Set(protocol.HeaderStreamClosed, "true")
@@ -1125,6 +1207,12 @@ func newHTTPError(status int, message string) *httpError {
 	return &httpError{status: status, message: message}
 }
 
+// fenceFaultNoPair suppresses writeError's terminal gap pair on 409 FENCED
+// when built with `-tags fence_fault_nopair` (fence_fault_nopair.go) — the
+// fault-injection control proving the extension conformance client test
+// detects a server that omits the pair. Always false in untagged builds.
+var fenceFaultNoPair bool
+
 func (h *Handler) writeError(w http.ResponseWriter, err error) {
 	// Authorization denials use the JSON error envelope shared with the
 	// control plane (issue #126) rather than the base protocol's plaintext
@@ -1135,11 +1223,30 @@ func (h *Handler) writeError(w http.ResponseWriter, err error) {
 			// RFC 6750 §3: challenge the client for a Bearer credential.
 			w.Header().Set("WWW-Authenticate", `Bearer realm="chronicle"`)
 		}
+		detail := webhook.ErrorDetail{Code: authErr.code, Message: authErr.msg}
+		if f := authErr.fence; f != nil {
+			// A write-fence rejection (#183 B.2/B.4). On a 409 with producer
+			// headers, Producer-Epoch echoes the current generation when the
+			// stream slot knew one, and the terminal gap pair Expected == Received
+			// == the request's seq stops the pinned Electric producer on its first
+			// response. Never Stream-Next-Offset: a deposed writer does not resume.
+			// This is the single counting site, so every rejection counts once.
+			if authErr.status == http.StatusConflict && f.HasProducer {
+				if f.Generation != 0 {
+					w.Header().Set(protocol.HeaderProducerEpoch, strconv.FormatInt(f.Generation, 10))
+				}
+				if !fenceFaultNoPair {
+					seq := strconv.FormatInt(f.ReqSeq, 10)
+					w.Header().Set(protocol.HeaderProducerExpectedSeq, seq)
+					w.Header().Set(protocol.HeaderProducerReceivedSeq, seq)
+				}
+			}
+			detail.Reason, detail.CurrentHolder, detail.Generation = f.Reason, f.Holder, f.Generation
+			h.countFenceRejection(f.Reason)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(authErr.status)
-		_ = json.NewEncoder(w).Encode(webhook.ErrorBody{
-			Error: webhook.ErrorDetail{Code: authErr.code, Message: authErr.msg},
-		})
+		_ = json.NewEncoder(w).Encode(webhook.ErrorBody{Error: detail})
 		return
 	}
 

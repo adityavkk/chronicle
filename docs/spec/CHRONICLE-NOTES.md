@@ -34,3 +34,35 @@ invariant itself is cataloged as `INV-DIFF-03` in
 [docs/specs/formal-verification/INVARIANTS.md](../specs/formal-verification/INVARIANTS.md)
 and enforced identically by `store/redis/scripts/append.lua` and
 `store/memory_store.go`.
+
+## Section 5.2.1, Idempotent Producers — epoch establishment on a write-fenced stream
+
+Annotates the client-declared-epoch design in
+[PROTOCOL.md §5.2.1](./PROTOCOL.md#521-idempotent-producers).
+
+On a stream created with `Write-Fence: true`, the fenced write class gates
+epoch establishment by the §7.3 claim generation: `Producer-Epoch` **must
+equal** the generation of the presented write token, so a fenced writer cannot
+self-declare an epoch the control plane did not grant it, and a producer id an
+accepted fenced write has bound cannot advance its epoch as an open write —
+see [WRITE-FENCING.md §5–§6](./WRITE-FENCING.md#5-write-classes). **This
+changes nothing in the base protocol**: on streams that never opt in — and for
+unbound producer ids on the open class of streams that do — the §5.2.1 state
+machine (client-declared epochs, auto-claim, sequence rules, all four
+producer response headers) is unchanged, byte for byte.
+
+## Section 7.3, Generation Fencing and Leases — the append-side fence
+
+Annotates the fencing rules of
+[PROTOCOL.md §7.3](./PROTOCOL.md#73-generation-fencing-and-leases).
+
+§7.3 fences the *control plane*: callbacks, acks, and releases are judged
+against the current `(generation, wake_id)`. Chronicle's write-fencing
+extension extends the same fence to the *data plane* on streams that opt in:
+the claim mints a write token, appends under it are checked against the live
+claim marker atomically with the write, and `done`/release/supersession seal
+the generation per authority — see
+[WRITE-FENCING.md §4 and §7](./WRITE-FENCING.md#4-the-write-token). **This
+changes nothing in the base protocol**: §7.3's rejection rules, lease
+semantics, and `409 FENCED` control-plane responses are untouched, and a
+subscription over streams that never opt in behaves exactly as before.

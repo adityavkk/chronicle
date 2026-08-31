@@ -32,6 +32,15 @@ type SubscriptionTuning struct {
 	// Metrics, if set, receives sweep/delivery/worker observations from the
 	// Manager. Nil leaves the Manager on its no-op recorder.
 	Metrics webhook.Metrics
+	// WebhookHTTPClient and WebhookTargetPolicy are the deployment egress seam
+	// (webhook.ManagerOptions.HTTPClient / TargetPolicy): an adapter may supply
+	// the client that performs webhook deliveries and the policy that admits
+	// its one private route. Nil keeps the default client and the SSRF rules
+	// alone; the protocol core owns the envelope body and signature either way.
+	// A supplied client is used as-is, its own timeout included — see
+	// webhook.ManagerOptions.HTTPClient.
+	WebhookHTTPClient   *http.Client
+	WebhookTargetPolicy webhook.TargetPolicy
 
 	// WakeTokenAudience is the aud claim minted into wake_tokens (#123/#126
 	// TB6a). Empty mints wake_tokens without an aud claim.
@@ -209,6 +218,10 @@ func (a redisFenceStreamAdapter) RevokeAppendFence(path string, fence auth.Appen
 	return a.rs.RevokeAppendFence(storePath(path), fence)
 }
 
+func (a redisFenceStreamAdapter) SealAppendFence(path string, fence auth.AppendFence) (store.SealResult, error) {
+	return a.rs.SealAppendFence(storePath(path), fence)
+}
+
 // redisLister adapts the Redis stream store to webhook.StreamLister for pattern
 // backfill and recovery reconciliation.
 type redisLister struct {
@@ -244,6 +257,8 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 	opts := webhook.ManagerOptions{
 		StreamRootURL:              streamRootURL,
 		Logger:                     logger,
+		HTTPClient:                 tuning.WebhookHTTPClient,
+		TargetPolicy:               tuning.WebhookTargetPolicy,
 		AllowPrivateWebhookTargets: allowPrivateWebhooks,
 		SweepInterval:              tuning.SweepInterval,
 		ReconcileInterval:          tuning.ReconcileInterval,

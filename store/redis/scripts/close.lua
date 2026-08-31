@@ -9,6 +9,7 @@
 --
 -- Reply: make_reply; status one of OK|FENCED|NOTFOUND|CLOSED|STALE_EPOCH|
 -- EPOCH_SEQ|SEQ_GAP. CLOSED = already closed by a different producer tuple.
+-- FENCED replies carry [10]=reason [11]=generation [12]=holder (fence_reply).
 
 local now = tonumber(ARGV[1])
 local channel = ARGV[2]
@@ -26,19 +27,11 @@ if is_expired(m, now) then
   return make_reply('NOTFOUND')
 end
 
-if has_fence then
- local fence = redis.call('HMGET', KEYS[5],
-   'state', 'generation', 'wake_id', 'holder', 'lease_until_ns', 'stream_incarnation')
- if fence[1] ~= 'live'
-   or fence[2] ~= ARGV[8]
-   or fence[3] ~= ARGV[9]
-   or fence[4] ~= ARGV[10]
-   or fence[5] == false
-   or tonumber(fence[5]) <= now
-   or fence[6] ~= m.incarnation then
-  return make_reply('FENCED', m.tail)
- end
-end
+-- Write fence (#183): the same rung as append.lua step 4 (fence_rung), one
+-- transaction with the close. A holder's close is not a seal.
+local reason, d_gen, d_holder = fence_rung(m, has_fence, ARGV[8], ARGV[9], ARGV[10],
+  now, has_producer, producer_id, p_epoch)
+if reason ~= '' then return fence_reply(reason, m.tail, d_gen, d_holder) end
 
 if m.closed == '1' then
   if has_producer then
@@ -67,11 +60,15 @@ if has_producer then
   elseif outcome == 'SEQ_GAP' then
     return make_reply('SEQ_GAP', m.tail, nil, nil, d1, d2)
   end
-  -- Accepted: commit producer state, close, record the closing tuple.
+  -- Accepted: commit producer state, close, record the closing tuple. An
+  -- accepted fenced-class close also fixes the class's last offset and binds
+  -- the producer id (fence_bind), exactly as an accepted fenced append does.
   redis.call('HSET', KEYS[3], producer_id,
     ARGV[5] .. ':' .. ARGV[6] .. ':' .. string.format('%.0f', math.floor(now / 1e9)))
-  redis.call('HSET', KEYS[1], 'closed', '1',
-    'cbId', producer_id, 'cbEpoch', ARGV[5], 'cbSeq', ARGV[6])
+  local hset = { 'HSET', KEYS[1], 'closed', '1',
+    'cbId', producer_id, 'cbEpoch', ARGV[5], 'cbSeq', ARGV[6] }
+  fence_bind(hset, m, has_fence, producer_id, ARGV[8], m.tail)
+  redis.call(unpack(hset))
   refresh_backstop(m, now)
   redis.call('PUBLISH', channel, 'c')
   return make_reply('OK', m.tail, '1', nil, nil, nil, ARGV[6], '1', '0')

@@ -3,19 +3,25 @@ package chronicle
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
@@ -103,13 +109,23 @@ func newWriteFenceManager(t *testing.T) (*webhook.Manager, *webhook.RedisStore, 
 
 func claimForWriteFence(t *testing.T, rt *webhook.Routes, subStore *webhook.RedisStore) webhook.ClaimResponse {
 	t.Helper()
+	return claimForWriteFenceOn(t, rt, subStore, "events/a")
+}
+
+// claimForWriteFenceOn creates subscription s1 linked to paths and claims it
+// through the routes as worker-A, so every linked stream that exists gets its
+// marker and the write token is scoped to exactly those paths.
+func claimForWriteFenceOn(t *testing.T, rt *webhook.Routes, subStore *webhook.RedisStore, paths ...string) webhook.ClaimResponse {
+	t.Helper()
 	now := time.Now()
 	cfg := webhook.Config{Type: webhook.DispatchPullWake, Pattern: "events/*", WakeStream: "wake/pool", LeaseTTLMs: 1000}
 	if _, err := subStore.CreateOrConfirm("s1", cfg, nil, now); err != nil {
 		t.Fatalf("create sub: %v", err)
 	}
-	if err := subStore.Link("s1", "events/a", webhook.LinkGlob, "0000000000000000_0000000000000000"); err != nil {
-		t.Fatalf("link: %v", err)
+	for _, path := range paths {
+		if err := subStore.Link("s1", path, webhook.LinkGlob, "0000000000000000_0000000000000000"); err != nil {
+			t.Fatalf("link %s: %v", path, err)
+		}
 	}
 	req := httptest.NewRequest(http.MethodPost, "/__ds/subscriptions/s1/claim", bytes.NewReader([]byte(`{"worker":"worker-A"}`)))
 	rec := httptest.NewRecorder()
@@ -169,6 +185,75 @@ func TestHandleAppendRejectsDeposedWriteToken(t *testing.T) {
 	}
 }
 
+// TestHandleCloseRejectsDeposedWriteToken pins A.0 Q7 (addendum §1): a
+// close-only POST is classed and fenced like any append, so a deposed
+// holder's token cannot close a stream — 409 FENCED, the stream stays open,
+// the tail is unchanged, and with producer headers the terminal pair is
+// carried — while the live holder's close-only lands (the positive control).
+func TestHandleCloseRejectsDeposedWriteToken(t *testing.T) {
+	mgr, subStore, cleanup := newWriteFenceManager(t)
+	defer cleanup()
+	rt := webhook.NewRoutes(mgr)
+	crA := claimForWriteFenceOn(t, rt, subStore, "events/a", "events/b")
+
+	h := testHandler(time.Second, time.Second)
+	h.AuthMode = auth.ModeEnforce
+	h.AppendAuth = mgr.WriteAuthorizer()
+	createDirect(t, h, "/events/a", "application/json")
+	createDirect(t, h, "/events/b", "application/json")
+
+	rec := do(h, http.MethodPost, "/events/b", map[string]string{"Stream-Closed": "true", ClaimTokenHeader: crA.WriteToken}, nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("live holder close-only = %d body %q, want 204", rec.Code, rec.Body.String())
+	}
+	if meta, _ := h.Store.Get("/events/b"); !meta.Closed {
+		t.Fatal("live holder close-only did not close the stream")
+	}
+	before := tailOf(t, h, "/events/a")
+
+	takeoverAt := time.Now().Add(2 * time.Second)
+	crB, err := subStore.Claim("s1", "worker-B", "w_b", takeoverAt, 1000)
+	if err != nil || !crB.Claimed || crB.Generation == crA.Generation {
+		t.Fatalf("takeover claim = %+v err=%v", crB, err)
+	}
+	if st, _ := subStore.AckUnscoped("s1", crB.Generation, crB.WakeID, crB.Generation, true, nil, takeoverAt, 1000); st != "OK" {
+		t.Fatalf("current holder ack = %q, want OK", st)
+	}
+
+	for _, c := range []struct {
+		name    string
+		headers map[string]string
+		seq     string // "" = no producer headers, hence no terminal pair
+	}{
+		{"without producer headers", map[string]string{}, ""},
+		{"with producer headers", map[string]string{"Producer-Id": "p1", "Producer-Epoch": "1", "Producer-Seq": "3"}, "3"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			headers := map[string]string{"Stream-Closed": "true", ClaimTokenHeader: crA.WriteToken}
+			for k, v := range c.headers {
+				headers[k] = v
+			}
+			rec := do(h, http.MethodPost, "/events/a", headers, nil)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("deposed close-only = %d body %q, want 409", rec.Code, rec.Body.String())
+			}
+			eb := decodeEnvelope(t, rec)
+			if eb.Error.Code != webhook.ErrCodeFenced || eb.Error.Reason != "precheck" {
+				t.Fatalf("envelope = %+v, want FENCED/precheck", eb.Error)
+			}
+			if exp, rcv := rec.Header().Get("Producer-Expected-Seq"), rec.Header().Get("Producer-Received-Seq"); exp != c.seq || rcv != c.seq {
+				t.Errorf("terminal pair = (%q, %q), want both %q", exp, rcv, c.seq)
+			}
+			if meta, _ := h.Store.Get("/events/a"); meta.Closed {
+				t.Fatal("deposed close-only closed the stream")
+			}
+			if after := tailOf(t, h, "/events/a"); !after.Equal(before) {
+				t.Fatalf("deposed close-only mutated stream: tail %s -> %s", before, after)
+			}
+		})
+	}
+}
+
 func TestHandleAppendAllowsCurrentWriteToken(t *testing.T) {
 	mgr, subStore, cleanup := newWriteFenceManager(t)
 	defer cleanup()
@@ -223,16 +308,50 @@ func TestHandleAppendFencesAfterBodyRead(t *testing.T) {
 	}
 }
 
+// writeTokenExp parses the exp claim out of a write token's opaque body — the
+// test's window into re-minting without waiting out a real TTL.
+func writeTokenExp(t *testing.T, token string) int64 {
+	t.Helper()
+	body, _, ok := strings.Cut(token, ".")
+	if !ok {
+		t.Fatalf("write token has no body.sig shape: %q", token)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(body)
+	if err != nil {
+		t.Fatalf("write token body: %v", err)
+	}
+	var p struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Exp == 0 {
+		t.Fatalf("write token carries no exp: %s", raw)
+	}
+	return p.Exp
+}
+
+// TestHeartbeatRefreshesWriteTokenForLongLiveHolder pins the spec §9 refresh:
+// every ack heartbeat re-mints the write token, so a long-lived holder that
+// heartbeats within its lease outlives the token TTL. Rather than polling
+// wall-clock past a real expiry (~7s), the test heartbeats across one
+// exp-granularity second and asserts the refreshed token's exp moved forward
+// — the re-mint that, repeated, carries the holder indefinitely — and that
+// the refreshed token still appends.
 func TestHeartbeatRefreshesWriteTokenForLongLiveHolder(t *testing.T) {
 	mgr, subStore, cleanup := newWriteFenceManager(t)
 	defer cleanup()
 	rt := webhook.NewRoutes(mgr)
 	cr := claimForWriteFence(t, rt, subStore)
+	firstExp := writeTokenExp(t, cr.WriteToken)
 	currentWriteToken := cr.WriteToken
 
-	deadline := time.Now().Add(7 * time.Second)
-	for time.Now().Before(deadline) {
-		time.Sleep(500 * time.Millisecond)
+	// Two heartbeats 550ms apart: each lands inside the 1s lease it renews,
+	// and the >1s total guarantees a re-minted now+TTL exp is strictly later
+	// than the claim's at unix-second granularity.
+	for range 2 {
+		time.Sleep(550 * time.Millisecond)
 		body, _ := json.Marshal(webhook.CallbackRequest{WakeID: cr.WakeID, Generation: cr.Generation})
 		req := httptest.NewRequest(http.MethodPost, "/__ds/subscriptions/s1/ack", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+cr.Token)
@@ -252,6 +371,9 @@ func TestHeartbeatRefreshesWriteTokenForLongLiveHolder(t *testing.T) {
 		}
 		currentWriteToken = resp.WriteToken
 	}
+	if refreshed := writeTokenExp(t, currentWriteToken); refreshed <= firstExp {
+		t.Fatalf("heartbeat write token exp = %d, want later than the claim's %d (re-minted, not echoed)", refreshed, firstExp)
+	}
 
 	h := testHandler(time.Second, time.Second)
 	h.AuthMode = auth.ModeEnforce
@@ -262,11 +384,25 @@ func TestHeartbeatRefreshesWriteTokenForLongLiveHolder(t *testing.T) {
 		ClaimTokenHeader: currentWriteToken,
 	}, []byte(`{"ok":true}`))
 	if rec.Code != http.StatusNoContent {
-		t.Fatalf("append after long heartbeat = %d body %q, want 204", rec.Code, rec.Body.String())
+		t.Fatalf("append with refreshed write token = %d body %q, want 204", rec.Code, rec.Body.String())
 	}
 }
 
-func TestHandleAppendReleaseRaceIsFencedInsideRedisCommit(t *testing.T) {
+// redisFenceStack is the root integration fixture of the write fence on live
+// Redis (db13): the Redis stream store is both the handler's store and the
+// manager's fence-capable streams, so a claim through the routes grants the
+// stream-slot marker and every append runs the Lua rung. The handler enforces,
+// verifies write tokens under the manager's key, and trusts tb4SvcBearer as a
+// gateway service principal for open-class writes.
+type redisFenceStack struct {
+	h        *Handler
+	rt       *webhook.Routes
+	subStore *webhook.RedisStore
+	data     *redisstore.Store
+}
+
+func newRedisFenceStack(t *testing.T) *redisFenceStack {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping Redis integration test in -short mode")
 	}
@@ -291,7 +427,10 @@ func TestHandleAppendReleaseRaceIsFencedInsideRedisCommit(t *testing.T) {
 	}
 
 	dataStore := redisstore.New(client, redisstore.Options{})
-	t.Cleanup(func() { _ = dataStore.Close() })
+	t.Cleanup(func() {
+		_ = dataStore.Close()
+		_ = client.Close()
+	})
 	subStore := webhook.NewRedisStore(client)
 	streams := redisFenceStreamAdapter{streamAdapter{st: dataStore, rs: dataStore}}
 	mgr, err := webhook.NewManager(subStore, streams, webhook.ManagerOptions{
@@ -300,17 +439,177 @@ func TestHandleAppendReleaseRaceIsFencedInsideRedisCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
-	rt := webhook.NewRoutes(mgr)
+	creds, err := auth.ParseServiceBearerConfig("agents-server:" + tb4SvcBearer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := testHandler(time.Second, time.Second)
+	h.Store = dataStore
+	h.AuthMode = auth.ModeEnforce
+	h.AppendAuth = mgr.WriteAuthorizer()
+	h.ServiceAuth = &ServiceAuth{Credentials: creds, Policies: gatewayPolicies(t, "agents-server")}
+	return &redisFenceStack{h: h, rt: webhook.NewRoutes(mgr), subStore: subStore, data: dataStore}
+}
 
+// createFenced seeds a write-fenced stream through the Redis store.
+func (s *redisFenceStack) createFenced(t *testing.T, path string) {
+	t.Helper()
+	if _, _, err := s.data.Create(path, store.CreateOptions{ContentType: "application/json", WriteFence: true}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestHandleAppendFencedStreamRequiresProducerEpochEqualGeneration pins WF-10
+// and WF-11 end to end on Redis: on a fenced stream the holder's write lands
+// only with all three producer headers and Producer-Epoch equal to its claim
+// generation (positive control first, then the idempotent retry), a different
+// epoch is 409 epoch with the generation, the holder, the Producer-Epoch echo
+// and the terminal pair, and missing producer headers are the 400 — with the
+// tail unchanged on every refusal.
+func TestHandleAppendFencedStreamRequiresProducerEpochEqualGeneration(t *testing.T) {
+	s := newRedisFenceStack(t)
+	s.createFenced(t, "/events/a")
+	cr := claimForWriteFence(t, s.rt, s.subStore)
+	gen := strconv.FormatInt(cr.Generation, 10)
+	holder := func(epoch, seq string) map[string]string {
+		return map[string]string{
+			"Content-Type": "application/json", WriteTokenHeader: cr.WriteToken,
+			"Producer-Id": "entity-events/a", "Producer-Epoch": epoch, "Producer-Seq": seq,
+		}
+	}
+
+	rec := do(s.h, http.MethodPost, "/events/a", holder(gen, "0"), []byte(`{"turn":1}`))
+	if rec.Code != http.StatusOK || rec.Header().Get("Producer-Epoch") != gen {
+		t.Fatalf("holder append at epoch == generation = %d body %q Producer-Epoch %q, want 200 at %s", rec.Code, rec.Body.String(), rec.Header().Get("Producer-Epoch"), gen)
+	}
+	if rec = do(s.h, http.MethodPost, "/events/a", holder(gen, "0"), []byte(`{"turn":1}`)); rec.Code != http.StatusNoContent {
+		t.Fatalf("holder retry = %d, want 204", rec.Code)
+	}
+	before := tailOf(t, s.h, "/events/a")
+
+	rec = do(s.h, http.MethodPost, "/events/a", holder(strconv.FormatInt(cr.Generation+1, 10), "0"), []byte(`{"turn":2}`))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("holder append at epoch != generation = %d body %q, want 409", rec.Code, rec.Body.String())
+	}
+	eb := decodeEnvelope(t, rec)
+	if eb.Error.Code != webhook.ErrCodeFenced || eb.Error.Reason != "epoch" || eb.Error.Generation != cr.Generation || eb.Error.CurrentHolder != "worker-A" {
+		t.Fatalf("envelope = %+v, want FENCED/epoch at generation %d held by worker-A", eb.Error, cr.Generation)
+	}
+	if got := rec.Header().Get("Producer-Epoch"); got != gen {
+		t.Errorf("Producer-Epoch = %q, want %s", got, gen)
+	}
+	if exp, rcv := rec.Header().Get("Producer-Expected-Seq"), rec.Header().Get("Producer-Received-Seq"); exp != "0" || rcv != "0" {
+		t.Errorf("terminal pair = (%q, %q), want (0, 0)", exp, rcv)
+	}
+	if v := rec.Header().Get("Stream-Next-Offset"); v != "" {
+		t.Errorf("Stream-Next-Offset = %q on a fenced 409, want absent", v)
+	}
+	if after := tailOf(t, s.h, "/events/a"); !after.Equal(before) {
+		t.Fatalf("epoch-refused append mutated stream: tail %s -> %s", before, after)
+	}
+
+	rec = do(s.h, http.MethodPost, "/events/a", map[string]string{"Content-Type": "application/json", WriteTokenHeader: cr.WriteToken}, []byte(`{"turn":3}`))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "fenced write requires Producer-Id, Producer-Epoch, and Producer-Seq") {
+		t.Fatalf("holder append without producer headers = %d body %q, want 400", rec.Code, rec.Body.String())
+	}
+	if after := tailOf(t, s.h, "/events/a"); !after.Equal(before) {
+		t.Fatalf("producer-less fenced append mutated stream: tail %s -> %s", before, after)
+	}
+}
+
+// TestHandleAppendBoundProducerFencedInSlot pins rule 5 of the rung through
+// the handler on Redis (WF-16/WF-18): after the holder's fenced write binds
+// its producer id, a service principal's open-class write naming that id is
+// 409 bound with the bound generation as Producer-Epoch and the terminal pair
+// — even at a higher epoch, the auto-claim shape — while the same principal
+// establishing an unbound producer id on the fenced stream is accepted.
+func TestHandleAppendBoundProducerFencedInSlot(t *testing.T) {
+	s := newRedisFenceStack(t)
+	s.createFenced(t, "/events/a")
+	cr := claimForWriteFence(t, s.rt, s.subStore)
+	gen := strconv.FormatInt(cr.Generation, 10)
+	service := map[string]string{"Content-Type": "application/json", "Authorization": "Bearer " + tb4SvcBearer}
+	open := func(id, epoch string) map[string]string {
+		h := map[string]string{"Producer-Id": id, "Producer-Epoch": epoch, "Producer-Seq": "0"}
+		for k, v := range service {
+			h[k] = v
+		}
+		return h
+	}
+
+	rec := do(s.h, http.MethodPost, "/events/a", map[string]string{
+		"Content-Type": "application/json", WriteTokenHeader: cr.WriteToken,
+		"Producer-Id": "entity-events/a", "Producer-Epoch": gen, "Producer-Seq": "0",
+	}, []byte(`{"turn":1}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("holder append = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	if rec = do(s.h, http.MethodPost, "/events/a", open("wake-reg-7", "0"), []byte(`{"cmd":"inbox"}`)); rec.Code != http.StatusOK {
+		t.Fatalf("open-class append with an unbound producer = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	before := tailOf(t, s.h, "/events/a")
+
+	rec = do(s.h, http.MethodPost, "/events/a", open("entity-events/a", strconv.FormatInt(cr.Generation+1, 10)), []byte(`{"zombie":true}`))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("open-class append with the bound producer = %d body %q, want 409", rec.Code, rec.Body.String())
+	}
+	eb := decodeEnvelope(t, rec)
+	if eb.Error.Code != webhook.ErrCodeFenced || eb.Error.Reason != "bound" || eb.Error.Generation != cr.Generation || eb.Error.CurrentHolder != "" {
+		t.Fatalf("envelope = %+v, want FENCED/bound at generation %d with no holder", eb.Error, cr.Generation)
+	}
+	if got := rec.Header().Get("Producer-Epoch"); got != gen {
+		t.Errorf("Producer-Epoch = %q, want %s", got, gen)
+	}
+	if exp, rcv := rec.Header().Get("Producer-Expected-Seq"), rec.Header().Get("Producer-Received-Seq"); exp != "0" || rcv != "0" {
+		t.Errorf("terminal pair = (%q, %q), want (0, 0)", exp, rcv)
+	}
+	if after := tailOf(t, s.h, "/events/a"); !after.Equal(before) {
+		t.Fatalf("bound-refused append mutated stream: tail %s -> %s", before, after)
+	}
+}
+
+// TestHandleCreateWriteFenceEchoesOnRedis pins WF-01/WF-02 on the Redis store:
+// Write-Fence: true is config-matched by create.lua's probe and echoed on
+// PUT 201/200 and HEAD 200 (with no sealed headers before any seal), and a
+// stream that never opted in carries none of the three.
+func TestHandleCreateWriteFenceEchoesOnRedis(t *testing.T) {
+	s := newRedisFenceStack(t)
+	s.h.AuthMode = auth.ModeInsecure
+	fenced := map[string]string{"Content-Type": "application/json", "Write-Fence": "true"}
+	plain := map[string]string{"Content-Type": "application/json"}
+
+	if rec := do(s.h, http.MethodPut, "/events/a", fenced, nil); rec.Code != http.StatusCreated || rec.Header().Get("Write-Fence") != "true" {
+		t.Fatalf("fenced create = %d Write-Fence %q, want 201 true", rec.Code, rec.Header().Get("Write-Fence"))
+	}
+	if rec := do(s.h, http.MethodPut, "/events/a", fenced, nil); rec.Code != http.StatusOK || rec.Header().Get("Write-Fence") != "true" {
+		t.Fatalf("fenced re-create = %d Write-Fence %q, want 200 true", rec.Code, rec.Header().Get("Write-Fence"))
+	}
+	if rec := do(s.h, http.MethodPut, "/events/a", plain, nil); rec.Code != http.StatusConflict {
+		t.Fatalf("re-create without Write-Fence = %d body %q, want 409", rec.Code, rec.Body.String())
+	}
+	if rec := do(s.h, http.MethodPut, "/events/plain", plain, nil); rec.Code != http.StatusCreated || rec.Header().Get("Write-Fence") != "" {
+		t.Fatalf("plain create = %d Write-Fence %q, want 201 and no echo", rec.Code, rec.Header().Get("Write-Fence"))
+	}
+	for path, want := range map[string]string{"/events/a": "true", "/events/plain": ""} {
+		rec := do(s.h, http.MethodHead, path, nil, nil)
+		if rec.Code != http.StatusOK || rec.Header().Get("Write-Fence") != want {
+			t.Fatalf("HEAD %s = %d Write-Fence %q, want 200 %q", path, rec.Code, rec.Header().Get("Write-Fence"), want)
+		}
+		if g, o := rec.Header().Get("Write-Fence-Sealed-Generation"), rec.Header().Get("Write-Fence-Sealed-Offset"); g != "" || o != "" {
+			t.Errorf("HEAD %s sealed headers = (%q, %q) before any seal, want absent", path, g, o)
+		}
+	}
+}
+
+func TestHandleAppendReleaseRaceIsFencedInsideRedisCommit(t *testing.T) {
+	s := newRedisFenceStack(t)
 	paused := &pausedAppendStore{
-		Store:   dataStore,
+		Store:   s.data,
 		entered: make(chan struct{}),
 		resume:  make(chan struct{}),
 	}
-	h := testHandler(time.Second, time.Second)
+	h, rt, subStore := s.h, s.rt, s.subStore
 	h.Store = paused
-	h.AuthMode = auth.ModeEnforce
-	h.AppendAuth = mgr.WriteAuthorizer()
 	createDirect(t, h, "/events/a", "application/json")
 	cr := claimForWriteFence(t, rt, subStore)
 	before := tailOf(t, h, "/events/a")
@@ -359,8 +658,8 @@ func TestHandleAppendReleaseRaceIsFencedInsideRedisCommit(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Error.Code != webhook.ErrCodeFenced {
-		t.Fatalf("error code = %q, want %q", body.Error.Code, webhook.ErrCodeFenced)
+	if body.Error.Code != webhook.ErrCodeFenced || body.Error.Reason != "marker" {
+		t.Fatalf("error = %+v, want %s from the in-slot marker check", body.Error, webhook.ErrCodeFenced)
 	}
 	if after := tailOf(t, h, "/events/a"); !after.Equal(before) {
 		t.Fatalf("atomic append fence mutated stream: tail %s -> %s", before, after)
@@ -379,5 +678,883 @@ func TestNewSubscriptionsEnforceRequiresAtomicStreamStore(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("enforce mode accepted a stream store without Redis append fencing")
+	}
+}
+
+// ---- webhook parity and the seal at done (#183, design §D) ----
+
+// parityFixture is the real write-fence stack a control-plane test drives
+// end to end: a Redis data store with the fence capability, the subscription
+// Manager over it, an enforce-mode Handler gated by the Manager's write
+// authorizer, and — when respond is set — an httptest webhook receiver that
+// decodes each WakeNotification, answers with respond's status and body, and
+// then hands the notification to notifs.
+type parityFixture struct {
+	h      *Handler
+	mgr    *webhook.Manager
+	rt     *webhook.Routes
+	subs   *webhook.RedisStore
+	data   *redisstore.Store
+	url    string
+	notifs chan webhook.WakeNotification
+}
+
+type parityFixtureOptions struct {
+	// respond answers a webhook delivery; nil starts no receiver.
+	respond func(webhook.WakeNotification) (int, string)
+	// streams wraps the Redis fence adapter the Manager is built on; nil uses it as is.
+	streams func(redisFenceStreamAdapter) webhook.Streams
+}
+
+func newParityFixture(t *testing.T, opts parityFixtureOptions) *parityFixture {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping Redis integration test in -short mode")
+	}
+	rawURL := os.Getenv("CHRONICLE_ITEST_REDIS_URL")
+	if rawURL == "" {
+		rawURL = "redis://localhost:6379/13"
+	}
+	options, err := goredis.ParseURL(rawURL)
+	if err != nil {
+		t.Fatalf("parse Redis URL: %v", err)
+	}
+	client := goredis.NewClient(options)
+	t.Cleanup(func() { _ = client.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		t.Skipf("redis unreachable at %s: %v", rawURL, err)
+	}
+	if err := client.FlushDB(ctx).Err(); err != nil {
+		t.Fatalf("flushdb: %v", err)
+	}
+	f := &parityFixture{
+		data:   redisstore.New(client, redisstore.Options{}),
+		subs:   webhook.NewRedisStore(client),
+		notifs: make(chan webhook.WakeNotification, 8),
+	}
+	t.Cleanup(func() { _ = f.data.Close() })
+	if opts.respond != nil {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var n webhook.WakeNotification
+			if err := json.NewDecoder(r.Body).Decode(&n); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			status, body := opts.respond(n)
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, body)
+			f.notifs <- n
+		}))
+		t.Cleanup(srv.Close)
+		f.url = srv.URL
+	}
+	adapter := redisFenceStreamAdapter{streamAdapter{st: f.data, rs: f.data}}
+	var streams webhook.Streams = adapter
+	if opts.streams != nil {
+		streams = opts.streams(adapter)
+	}
+	f.mgr, err = webhook.NewManager(f.subs, streams, webhook.ManagerOptions{
+		StreamRootURL:              "http://x/v1/stream/",
+		AllowPrivateWebhookTargets: true,
+		Logger:                     slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	f.rt = webhook.NewRoutes(f.mgr)
+	f.h = testHandler(time.Second, time.Second)
+	f.h.Store = f.data
+	f.h.AuthMode = auth.ModeEnforce
+	f.h.AppendAuth = f.mgr.WriteAuthorizer()
+	f.h.SubHooks = f.mgr
+	return f
+}
+
+// createFenced creates a write-fenced JSON stream through the store: the
+// Write-Fence create header is the handler's (WP3), the opt-in itself is the
+// store's (WP1), and this package only needs the fenced stream to exist.
+func (f *parityFixture) createFenced(t *testing.T, path string) {
+	t.Helper()
+	if _, _, err := f.data.Create(path, store.CreateOptions{ContentType: "application/json", WriteFence: true}); err != nil {
+		t.Fatalf("create %s: %v", path, err)
+	}
+}
+
+// seed appends one open-class event straight through the store so path has
+// pending work for its subscription.
+func (f *parityFixture) seed(t *testing.T, path string) {
+	t.Helper()
+	if _, err := f.data.Append(path, []byte(`{"seed":true}`), store.AppendOptions{ContentType: "application/json"}); err != nil {
+		t.Fatalf("seed %s: %v", path, err)
+	}
+}
+
+// link creates subscription id with cfg and links every path at the beginning.
+func (f *parityFixture) link(t *testing.T, id string, cfg webhook.Config, linkType webhook.LinkType, paths ...string) {
+	t.Helper()
+	if _, err := f.subs.CreateOrConfirm(id, cfg, nil, time.Now()); err != nil {
+		t.Fatalf("create sub %s: %v", id, err)
+	}
+	for _, p := range paths {
+		if err := f.subs.Link(id, p, linkType, store.ZeroOffset.String()); err != nil {
+			t.Fatalf("link %s: %v", p, err)
+		}
+	}
+}
+
+// webhookSub links a webhook subscription to the receiver for paths.
+func (f *parityFixture) webhookSub(t *testing.T, paths ...string) {
+	t.Helper()
+	f.link(t, "s1", webhook.Config{Type: webhook.DispatchWebhook, Pattern: "events/*", WebhookURL: f.url, LeaseTTLMs: 30_000}, webhook.LinkGlob, paths...)
+}
+
+// claim creates pull-wake subscription s1 over paths and claims it over HTTP.
+func (f *parityFixture) claim(t *testing.T, paths ...string) webhook.ClaimResponse {
+	t.Helper()
+	f.link(t, "s1", webhook.Config{Type: webhook.DispatchPullWake, Streams: paths, WakeStream: "wake/pool", LeaseTTLMs: 30_000}, webhook.LinkExplicit, paths...)
+	rec := f.control(http.MethodPost, "/__ds/subscriptions/s1/claim", "", `{"worker":"worker-A"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("claim = %d body %q", rec.Code, rec.Body.String())
+	}
+	var cr webhook.ClaimResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &cr); err != nil {
+		t.Fatal(err)
+	}
+	if cr.WriteToken == "" {
+		t.Fatal("claim response missing write token")
+	}
+	return cr
+}
+
+// wake runs the recovery sweep, which arms and delivers the pending wake, and
+// returns the notification the receiver saw.
+func (f *parityFixture) wake(t *testing.T) webhook.WakeNotification {
+	t.Helper()
+	f.mgr.RunSweep()
+	select {
+	case n := <-f.notifs:
+		return n
+	case <-time.After(5 * time.Second):
+		t.Fatal("webhook receiver saw no notification")
+		return webhook.WakeNotification{}
+	}
+}
+
+// control sends one __ds control-plane request with an optional bearer.
+func (f *parityFixture) control(method, target, bearer, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	rec := httptest.NewRecorder()
+	f.rt.HandleRequest(rec, req)
+	return rec
+}
+
+// ack posts a heartbeat (done false) or a done for the wake, acking every
+// stream at its current tail so the done body's next_wake is false.
+func (f *parityFixture) ack(t *testing.T, bearer string, generation int64, wakeID string, done bool, paths ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := webhook.CallbackRequest{WakeID: wakeID, Generation: generation}
+	if done {
+		req.Done = &done
+		for _, p := range paths {
+			req.Acks = append(req.Acks, webhook.Ack{Stream: strings.TrimPrefix(p, "/"), Offset: tailOf(t, f.h, p).String()})
+		}
+	}
+	body, _ := json.Marshal(req)
+	return f.control(http.MethodPost, "/__ds/subscriptions/s1/ack", bearer, string(body))
+}
+
+// fencedAppend is a fenced-class append through the Handler: the write token
+// plus the producer triple at epoch == generation (design §B.1).
+func (f *parityFixture) fencedAppend(path, token string, generation, seq int64) *httptest.ResponseRecorder {
+	return do(f.h, http.MethodPost, path, map[string]string{
+		"Content-Type":   "application/json",
+		ClaimTokenHeader: token,
+		"Producer-Id":    "entity-" + strings.TrimPrefix(path, "/"),
+		"Producer-Epoch": strconv.FormatInt(generation, 10),
+		"Producer-Seq":   strconv.FormatInt(seq, 10),
+	}, []byte(`{"turn":`+strconv.FormatInt(seq, 10)+`}`))
+}
+
+// assertFencedUnchanged asserts a 409 FENCED envelope and an unmoved tail.
+func (f *parityFixture) assertFencedUnchanged(t *testing.T, label string, rec *httptest.ResponseRecorder, path string, before store.Offset) {
+	t.Helper()
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("%s = %d body %q, want 409", label, rec.Code, rec.Body.String())
+	}
+	if eb := decodeEnvelope(t, rec); eb.Error.Code != webhook.ErrCodeFenced {
+		t.Fatalf("%s code = %q, want FENCED", label, eb.Error.Code)
+	}
+	if after := tailOf(t, f.h, path); !after.Equal(before) {
+		t.Fatalf("%s mutated stream: tail %s -> %s", label, before, after)
+	}
+}
+
+// seal reads the stream's HEAD-visible seal summary.
+func (f *parityFixture) seal(t *testing.T, path string) (int64, *store.Offset) {
+	t.Helper()
+	meta, err := f.data.Get(path)
+	if err != nil {
+		t.Fatalf("get %s: %v", path, err)
+	}
+	return meta.SealedGeneration, meta.SealedOffset
+}
+
+// awaitIdle waits for the auto-ack path to idle s1.
+func (f *parityFixture) awaitIdle(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if sub, ok, err := f.subs.Get("s1"); err == nil && ok && sub.Phase == webhook.PhaseIdle {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("subscription did not return to idle")
+}
+
+// TestDeliverWebhookGrantsMarkerBeforePost pins webhook parity end to end
+// (#183, design §D.2, WF-27): the wake's marker is installed on the linked
+// fenced stream before the notification leaves, so the receiver can append
+// with the write_token from inside its own handler — during the POST — and
+// the write lands, bound to the derived holder wake:<wake_id>.
+func TestDeliverWebhookGrantsMarkerBeforePost(t *testing.T) {
+	var f *parityFixture
+	codes := make(chan int, 1)
+	f = newParityFixture(t, parityFixtureOptions{respond: func(n webhook.WakeNotification) (int, string) {
+		codes <- f.fencedAppend("/events/a", n.WriteToken, n.Generation, 0).Code
+		return http.StatusOK, `{}`
+	}})
+	f.createFenced(t, "/events/a")
+	f.webhookSub(t, "events/a")
+	f.seed(t, "/events/a")
+	before := tailOf(t, f.h, "/events/a")
+
+	n := f.wake(t)
+	if n.WriteToken == "" {
+		t.Fatalf("notification missing write_token: %+v", n)
+	}
+	if code := <-codes; code != http.StatusOK {
+		t.Fatalf("append from inside the receiver = %d, want 200", code)
+	}
+	if after := tailOf(t, f.h, "/events/a"); !before.LessThan(after) {
+		t.Fatalf("receiver's fenced append did not land: tail %s -> %s", before, after)
+	}
+	d, fence := f.mgr.WriteAuthorizer().AuthorizeAppendFence(n.WriteToken, mustStreamPath(t, "events/a"), time.Now())
+	if !d.Allowed() || fence == nil || fence.Holder != webhook.WebhookHolder(n.WakeID) {
+		t.Fatalf("authorizer = allowed:%v fence:%+v (%s), want the derived holder %s", d.Allowed(), fence, d.Detail(), webhook.WebhookHolder(n.WakeID))
+	}
+	// A wrong epoch is refused in the stream slot even with the live token.
+	f.assertFencedUnchanged(t, "append at epoch != generation", f.fencedAppend("/events/a", n.WriteToken, n.Generation+1, 0), "/events/a", tailOf(t, f.h, "/events/a"))
+}
+
+// TestWebhookCallbackHeartbeatRefreshesWriteToken pins the callback rows of
+// design §D.2 (#183): a webhook heartbeat callback re-mints the write_token
+// (markers renewed) and the refreshed token writes; the done callback keeps
+// the base {ok,next_wake} body, seals the stream at the generation, and the
+// token that was live a moment earlier is refused with the tail unchanged.
+func TestWebhookCallbackHeartbeatRefreshesWriteToken(t *testing.T) {
+	f := newParityFixture(t, parityFixtureOptions{respond: func(webhook.WakeNotification) (int, string) {
+		return http.StatusOK, `{}`
+	}})
+	f.createFenced(t, "/events/a")
+	f.webhookSub(t, "events/a")
+	f.seed(t, "/events/a")
+	n := f.wake(t)
+
+	hb := f.ack(t, n.CallbackToken, n.Generation, n.WakeID, false)
+	if hb.Code != http.StatusOK {
+		t.Fatalf("heartbeat = %d body %q", hb.Code, hb.Body.String())
+	}
+	var resp webhook.AckResponse
+	if err := json.Unmarshal(hb.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.WriteToken == "" || resp.WriteToken == n.WriteToken {
+		t.Fatalf("heartbeat must re-mint the write_token: %s", hb.Body.String())
+	}
+	if rec := f.fencedAppend("/events/a", resp.WriteToken, n.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("append with the refreshed token = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	tail := tailOf(t, f.h, "/events/a")
+
+	done := f.ack(t, n.CallbackToken, n.Generation, n.WakeID, true, "/events/a")
+	if done.Code != http.StatusOK {
+		t.Fatalf("done = %d body %q", done.Code, done.Body.String())
+	}
+	if got := strings.TrimSpace(done.Body.String()); got != `{"ok":true,"next_wake":false}` {
+		t.Fatalf("done-ack body = %s, want the base {ok,next_wake} shape", got)
+	}
+	if gen, off := f.seal(t, "/events/a"); gen != n.Generation || off == nil || !off.Equal(tail) {
+		t.Fatalf("seal = (%d, %v), want (%d, %s)", gen, off, n.Generation, tail)
+	}
+	f.assertFencedUnchanged(t, "append after done", f.fencedAppend("/events/a", resp.WriteToken, n.Generation, 1), "/events/a", tail)
+}
+
+// TestWebhookAutoAckDoneSeals pins the auto-ack row of design §D.2 (#183): a
+// 2xx {done:true} seals the linked fenced stream at the wake's generation
+// before the subscription idles, so the notification's write_token is refused
+// afterwards and the seal records the definite last offset.
+func TestWebhookAutoAckDoneSeals(t *testing.T) {
+	f := newParityFixture(t, parityFixtureOptions{respond: func(webhook.WakeNotification) (int, string) {
+		return http.StatusOK, `{"done":true}`
+	}})
+	f.createFenced(t, "/events/a")
+	f.webhookSub(t, "events/a")
+	f.seed(t, "/events/a")
+	n := f.wake(t)
+	f.awaitIdle(t)
+
+	tail := tailOf(t, f.h, "/events/a")
+	if gen, off := f.seal(t, "/events/a"); gen != n.Generation || off == nil || !off.Equal(tail) {
+		t.Fatalf("seal = (%d, %v), want (%d, %s)", gen, off, n.Generation, tail)
+	}
+	f.assertFencedUnchanged(t, "append after auto-ack done", f.fencedAppend("/events/a", n.WriteToken, n.Generation, 0), "/events/a", tail)
+}
+
+// TestDeleteSubscriptionSealsLinkedStreams pins the delete row of design §D.2
+// (#183): deleting a subscription mid-claim seals its generation on every
+// linked fenced stream — the seal is visible on the stream and the claim's
+// fence is refused in the slot as sealed, not merely as a missing marker.
+func TestDeleteSubscriptionSealsLinkedStreams(t *testing.T) {
+	f := newParityFixture(t, parityFixtureOptions{})
+	f.createFenced(t, "/events/a")
+	cr := f.claim(t, "events/a")
+	sub, _, err := f.subs.Get("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("holder append = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	tail := tailOf(t, f.h, "/events/a")
+
+	if rec := f.control(http.MethodDelete, "/__ds/subscriptions/s1", "", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d body %q, want 204", rec.Code, rec.Body.String())
+	}
+	if gen, off := f.seal(t, "/events/a"); gen != cr.Generation || off == nil || !off.Equal(tail) {
+		t.Fatalf("seal = (%d, %v), want (%d, %s)", gen, off, cr.Generation, tail)
+	}
+	f.assertFencedUnchanged(t, "append after delete", f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 1), "/events/a", tail)
+	// Straight at the store, bypassing the control-plane pre-check: sealed.
+	epoch, seq := cr.Generation, int64(1)
+	res, err := f.data.Append("/events/a", []byte(`{}`), store.AppendOptions{
+		ContentType: "application/json", ProducerId: "entity-events/a", ProducerEpoch: &epoch, ProducerSeq: &seq,
+		Fence: &auth.AppendFence{
+			SubscriptionID: "s1", SubscriptionIncarnation: sub.Incarnation,
+			Generation: cr.Generation, WakeID: cr.WakeID, Holder: "worker-A",
+		},
+	})
+	if !errors.Is(err, store.ErrAppendFenced) || res.FenceReason != store.FenceSealed || res.FenceGeneration != cr.Generation {
+		t.Fatalf("in-slot append after delete = %v (%q, %d), want ErrAppendFenced sealed at %d", err, res.FenceReason, res.FenceGeneration, cr.Generation)
+	}
+}
+
+// TestRemoveStreamSealsPath pins the unlink row of design §D.2 (#183):
+// unlinking one explicit stream from a live claim seals only that stream at
+// the claim's generation; the claim keeps writing its other links.
+func TestRemoveStreamSealsPath(t *testing.T) {
+	f := newParityFixture(t, parityFixtureOptions{})
+	f.createFenced(t, "/events/a")
+	f.createFenced(t, "/events/b")
+	cr := f.claim(t, "events/a", "events/b")
+	for _, p := range []string{"/events/a", "/events/b"} {
+		if rec := f.fencedAppend(p, cr.WriteToken, cr.Generation, 0); rec.Code != http.StatusOK {
+			t.Fatalf("holder append %s = %d body %q, want 200", p, rec.Code, rec.Body.String())
+		}
+	}
+	tailA := tailOf(t, f.h, "/events/a")
+
+	if rec := f.control(http.MethodDelete, "/__ds/subscriptions/s1/streams/events/a", "", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("remove stream = %d body %q, want 204", rec.Code, rec.Body.String())
+	}
+	if gen, off := f.seal(t, "/events/a"); gen != cr.Generation || off == nil || !off.Equal(tailA) {
+		t.Fatalf("events/a seal = (%d, %v), want (%d, %s)", gen, off, cr.Generation, tailA)
+	}
+	if gen, _ := f.seal(t, "/events/b"); gen != 0 {
+		t.Fatalf("events/b sealed at %d, want unsealed", gen)
+	}
+	f.assertFencedUnchanged(t, "append to the unlinked stream", f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 1), "/events/a", tailA)
+	if rec := f.fencedAppend("/events/b", cr.WriteToken, cr.Generation, 1); rec.Code != http.StatusOK {
+		t.Fatalf("append to the retained link = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+}
+
+// crashAfterSealStreams is the fence adapter with the K.1 crash window made
+// visible: the first seal runs for real, then blocks until resumed and returns
+// an error — the process died between seal_append_fence.lua and ack.lua.
+type crashAfterSealStreams struct {
+	redisFenceStreamAdapter
+	entered chan struct{}
+	resume  chan struct{}
+	armed   atomic.Bool
+}
+
+func (s *crashAfterSealStreams) SealAppendFence(path string, fence auth.AppendFence) (store.SealResult, error) {
+	res, err := s.redisFenceStreamAdapter.SealAppendFence(path, fence)
+	if err == nil && s.armed.CompareAndSwap(true, false) {
+		close(s.entered)
+		<-s.resume
+		return store.SealResult{}, errors.New("crash between seal and ack.lua")
+	}
+	return res, err
+}
+
+// TestDoneSealCrashWindowFailsClosed pins crash window K.1 (#183,
+// INV-FENCE-06): with the seal applied but ack.lua not yet run, a heartbeat
+// in the window is a 500 (its re-grant is refused for the sealed generation),
+// the holder's token is refused in the slot, the interrupted done is a 500
+// that leaves the claim held, the redelivered done is a 200 with the base
+// body (the re-seal is idempotent), and the deposed token stays refused.
+func TestDoneSealCrashWindowFailsClosed(t *testing.T) {
+	crash := &crashAfterSealStreams{entered: make(chan struct{}), resume: make(chan struct{})}
+	crash.armed.Store(true)
+	f := newParityFixture(t, parityFixtureOptions{streams: func(a redisFenceStreamAdapter) webhook.Streams {
+		crash.redisFenceStreamAdapter = a
+		return crash
+	}})
+	f.createFenced(t, "/events/a")
+	cr := f.claim(t, "events/a")
+	if rec := f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("holder append = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	tail := tailOf(t, f.h, "/events/a")
+
+	firstDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { firstDone <- f.ack(t, cr.Token, cr.Generation, cr.WakeID, true, "/events/a") }()
+	select {
+	case <-crash.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("done did not reach the seal")
+	}
+
+	if rec := f.ack(t, cr.Token, cr.Generation, cr.WakeID, false); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("heartbeat inside the crash window = %d body %q, want 500", rec.Code, rec.Body.String())
+	}
+	f.assertFencedUnchanged(t, "append inside the crash window", f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 1), "/events/a", tail)
+
+	close(crash.resume)
+	if rec := <-firstDone; rec.Code != http.StatusInternalServerError {
+		t.Fatalf("interrupted done = %d body %q, want 500", rec.Code, rec.Body.String())
+	}
+	if sub, _, _ := f.subs.Get("s1"); sub.Phase != webhook.PhaseLive || sub.WakeID != cr.WakeID {
+		t.Fatalf("interrupted done must leave the claim held, got phase=%s wake=%q", sub.Phase, sub.WakeID)
+	}
+
+	redelivered := f.ack(t, cr.Token, cr.Generation, cr.WakeID, true, "/events/a")
+	if redelivered.Code != http.StatusOK {
+		t.Fatalf("redelivered done = %d body %q, want 200", redelivered.Code, redelivered.Body.String())
+	}
+	if got := strings.TrimSpace(redelivered.Body.String()); got != `{"ok":true,"next_wake":false}` {
+		t.Fatalf("redelivered done body = %s, want the base {ok,next_wake} shape", got)
+	}
+	if sub, _, _ := f.subs.Get("s1"); sub.Phase != webhook.PhaseIdle {
+		t.Fatalf("redelivered done must idle the claim, got phase %s", sub.Phase)
+	}
+	if gen, off := f.seal(t, "/events/a"); gen != cr.Generation || off == nil || !off.Equal(tail) {
+		t.Fatalf("seal = (%d, %v), want (%d, %s)", gen, off, cr.Generation, tail)
+	}
+	f.assertFencedUnchanged(t, "deposed token after the redelivered done", f.fencedAppend("/events/a", cr.WriteToken, cr.Generation, 1), "/events/a", tail)
+}
+
+// ---- WP5 seal-dependent integration cases (#183, design §H.2) ----
+
+// control sends one __ds control-plane request through the stack's routes
+// with an optional bearer.
+func (s *redisFenceStack) control(method, target, bearer, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	rec := httptest.NewRecorder()
+	s.rt.HandleRequest(rec, req)
+	return rec
+}
+
+// fencedAppend is a fenced-class append through the Handler: the write token
+// plus the producer triple at the given epoch (design §B.1).
+func (s *redisFenceStack) fencedAppend(path, token, producerID string, epoch, seq int64) *httptest.ResponseRecorder {
+	return do(s.h, http.MethodPost, path, map[string]string{
+		"Content-Type":   "application/json",
+		WriteTokenHeader: token,
+		"Producer-Id":    producerID,
+		"Producer-Epoch": strconv.FormatInt(epoch, 10),
+		"Producer-Seq":   strconv.FormatInt(seq, 10),
+	}, []byte(`{"seq":`+strconv.FormatInt(seq, 10)+`}`))
+}
+
+// done posts the wake's done-ack, acking every path at its current tail.
+func (s *redisFenceStack) done(t *testing.T, cr webhook.ClaimResponse, paths ...string) {
+	t.Helper()
+	req := webhook.CallbackRequest{WakeID: cr.WakeID, Generation: cr.Generation}
+	yes := true
+	req.Done = &yes
+	for _, p := range paths {
+		req.Acks = append(req.Acks, webhook.Ack{Stream: strings.TrimPrefix(p, "/"), Offset: tailOf(t, s.h, p).String()})
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := s.control(http.MethodPost, "/__ds/subscriptions/s1/ack", cr.Token, string(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("done = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+}
+
+// head issues HEAD as the trusted service principal and returns the recorder.
+func (s *redisFenceStack) head(t *testing.T, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := do(s.h, http.MethodHead, path, map[string]string{"Authorization": "Bearer " + tb4SvcBearer}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HEAD %s = %d body %q, want 200", path, rec.Code, rec.Body.String())
+	}
+	return rec
+}
+
+// sealHeaders reads HEAD's Write-Fence-Sealed-Generation/-Offset pair.
+func (s *redisFenceStack) sealHeaders(t *testing.T, path string) (string, string) {
+	t.Helper()
+	rec := s.head(t, path)
+	return rec.Header().Get(protocol.HeaderWriteFenceSealedGeneration),
+		rec.Header().Get(protocol.HeaderWriteFenceSealedOffset)
+}
+
+// TestHandleAppendSealedAfterDone pins WF-19/WF-20 end to end on Redis
+// (#183, INV-FENCE-06): done seals the holder's generation on the linked
+// fenced stream — the deposed token's HTTP append is refused with the tail
+// unchanged (the control-plane pre-check, reason precheck, with the terminal
+// pair and no epoch echo), the in-slot rung refuses the same identity as
+// sealed at the generation, and HEAD exposes the seal's generation and
+// definite last fenced offset.
+func TestHandleAppendSealedAfterDone(t *testing.T) {
+	s := newRedisFenceStack(t)
+	counter := &fenceCounter{}
+	s.h.FenceMetrics = counter
+	s.createFenced(t, "/events/a")
+	cr := claimForWriteFence(t, s.rt, s.subStore)
+	sub, ok, err := s.subStore.Get("s1")
+	if err != nil || !ok {
+		t.Fatalf("get sub: %v ok=%v", err, ok)
+	}
+
+	if rec := s.fencedAppend("/events/a", cr.WriteToken, "entity-events/a", cr.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("holder append = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	tail := tailOf(t, s.h, "/events/a")
+	s.done(t, cr, "/events/a")
+
+	rec := s.fencedAppend("/events/a", cr.WriteToken, "entity-events/a", cr.Generation, 1)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("append after done = %d body %q, want 409", rec.Code, rec.Body.String())
+	}
+	eb := decodeEnvelope(t, rec)
+	if eb.Error.Code != webhook.ErrCodeFenced || eb.Error.Reason != "precheck" {
+		t.Fatalf("envelope = %+v, want FENCED/precheck from the control-plane gate", eb.Error)
+	}
+	if exp, rcv := rec.Header().Get("Producer-Expected-Seq"), rec.Header().Get("Producer-Received-Seq"); exp != "1" || rcv != "1" {
+		t.Errorf("terminal pair = (%q, %q), want (1, 1)", exp, rcv)
+	}
+	if got := rec.Header().Get("Producer-Epoch"); got != "" {
+		t.Errorf("Producer-Epoch = %q on a precheck 409, want absent (no slot state consulted)", got)
+	}
+	if after := tailOf(t, s.h, "/events/a"); !after.Equal(tail) {
+		t.Fatalf("sealed append mutated stream: tail %s -> %s", tail, after)
+	}
+	counter.only(t, "precheck")
+
+	// The in-slot rung, bypassing the pre-check: the exact claim identity is
+	// refused as sealed at its own generation (the seal, not a reaped marker,
+	// is what outlives the claim).
+	epoch, seq := cr.Generation, int64(1)
+	res, err := s.data.Append("/events/a", []byte(`{}`), store.AppendOptions{
+		ContentType: "application/json", ProducerId: "entity-events/a", ProducerEpoch: &epoch, ProducerSeq: &seq,
+		Fence: &auth.AppendFence{
+			SubscriptionID: "s1", SubscriptionIncarnation: sub.Incarnation,
+			Generation: cr.Generation, WakeID: cr.WakeID, Holder: "worker-A",
+		},
+	})
+	if !errors.Is(err, store.ErrAppendFenced) || res.FenceReason != store.FenceSealed || res.FenceGeneration != cr.Generation {
+		t.Fatalf("in-slot append after done = %v (%q, %d), want ErrAppendFenced sealed at %d", err, res.FenceReason, res.FenceGeneration, cr.Generation)
+	}
+
+	gen, off := s.sealHeaders(t, "/events/a")
+	if gen != strconv.FormatInt(cr.Generation, 10) || off != tail.String() {
+		t.Fatalf("HEAD seal = (%q, %q), want (%d, %s)", gen, off, cr.Generation, tail)
+	}
+}
+
+// TestHandleAppendSupersessionRecordsFinalFencedOffset pins WF-21 (#183,
+// R3.3): when a successor claims over a lapsed lease, the grant seals the
+// predecessor's generation at its last *fenced* offset — not at the stream
+// tail a later open-class write moved — and the successor keeps writing.
+func TestHandleAppendSupersessionRecordsFinalFencedOffset(t *testing.T) {
+	s := newRedisFenceStack(t)
+	counter := &fenceCounter{}
+	s.h.FenceMetrics = counter
+	s.createFenced(t, "/events/a")
+	crA := claimForWriteFence(t, s.rt, s.subStore) // 1s lease
+
+	if rec := s.fencedAppend("/events/a", crA.WriteToken, "entity-events/a", crA.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("holder append = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	fencedTail := tailOf(t, s.h, "/events/a")
+	rec := do(s.h, http.MethodPost, "/events/a", map[string]string{
+		"Content-Type": "application/json", "Authorization": "Bearer " + tb4SvcBearer,
+	}, []byte(`{"cmd":"inbox"}`))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("open-class service append = %d body %q, want 204", rec.Code, rec.Body.String())
+	}
+	openTail := tailOf(t, s.h, "/events/a")
+	if !fencedTail.LessThan(openTail) {
+		t.Fatalf("open-class append did not move the tail past %s", fencedTail)
+	}
+
+	time.Sleep(1200 * time.Millisecond) // the 1s lease lapses; nothing seals yet
+	claimRec := s.control(http.MethodPost, "/__ds/subscriptions/s1/claim", "", `{"worker":"worker-B"}`)
+	if claimRec.Code != http.StatusOK {
+		t.Fatalf("takeover claim = %d body %q, want 200", claimRec.Code, claimRec.Body.String())
+	}
+	var crB webhook.ClaimResponse
+	if err := json.Unmarshal(claimRec.Body.Bytes(), &crB); err != nil {
+		t.Fatal(err)
+	}
+	if crB.Generation <= crA.Generation {
+		t.Fatalf("takeover generation = %d, want > %d", crB.Generation, crA.Generation)
+	}
+
+	gen, off := s.sealHeaders(t, "/events/a")
+	if gen != strconv.FormatInt(crA.Generation, 10) || off != fencedTail.String() {
+		t.Fatalf("supersession seal = (%q, %q), want (%d, %s) — the fenced tail, not the open tail %s",
+			gen, off, crA.Generation, fencedTail, openTail)
+	}
+
+	if rec := s.fencedAppend("/events/a", crB.WriteToken, "entity-events/a", crB.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("successor append = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	before := tailOf(t, s.h, "/events/a")
+	rec = s.fencedAppend("/events/a", crA.WriteToken, "entity-events/a", crA.Generation, 1)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("superseded append = %d body %q, want 409", rec.Code, rec.Body.String())
+	}
+	if after := tailOf(t, s.h, "/events/a"); !after.Equal(before) {
+		t.Fatalf("superseded append mutated stream: tail %s -> %s", before, after)
+	}
+	counter.only(t, "precheck")
+}
+
+// TestHandleAppendRecreatedSubscriptionStartsUnsealed pins WF-23 and the
+// documented K.9 limitation (#183): a recreated subscription is a new
+// authority with an empty seal namespace — its claim is granted and a fresh
+// producer id writes at epoch 1 — while the *old* producer id still carries
+// the predecessor's higher epoch, so its fenced write is the base 403
+// STALE_EPOCH with the stored epoch echoed, and the auto-claim bump that
+// follows is refused by the rung as epoch with the terminal pair (the
+// documented clean stop, pinned so the control-plane follow-up can flip it).
+func TestHandleAppendRecreatedSubscriptionStartsUnsealed(t *testing.T) {
+	s := newRedisFenceStack(t)
+	counter := &fenceCounter{}
+	s.h.FenceMetrics = counter
+	s.createFenced(t, "/events/a")
+
+	// First incarnation: reach generation 2, write at epoch 2, then done.
+	cr1 := claimForWriteFence(t, s.rt, s.subStore)
+	releaseBody, err := json.Marshal(webhook.ReleaseRequest{WakeID: cr1.WakeID, Generation: cr1.Generation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := s.control(http.MethodPost, "/__ds/subscriptions/s1/release", cr1.Token, string(releaseBody)); rec.Code != http.StatusNoContent {
+		t.Fatalf("release = %d body %q, want 204", rec.Code, rec.Body.String())
+	}
+	claimRec := s.control(http.MethodPost, "/__ds/subscriptions/s1/claim", "", `{"worker":"worker-A"}`)
+	if claimRec.Code != http.StatusOK {
+		t.Fatalf("second claim = %d body %q", claimRec.Code, claimRec.Body.String())
+	}
+	var cr2 webhook.ClaimResponse
+	if err := json.Unmarshal(claimRec.Body.Bytes(), &cr2); err != nil {
+		t.Fatal(err)
+	}
+	if rec := s.fencedAppend("/events/a", cr2.WriteToken, "entity-events/a", cr2.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("holder append at generation %d = %d body %q, want 200", cr2.Generation, rec.Code, rec.Body.String())
+	}
+	s.done(t, cr2, "/events/a")
+
+	// Delete and recreate: a new incarnation, a new (empty) seal namespace.
+	if rec := s.control(http.MethodDelete, "/__ds/subscriptions/s1", "", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d body %q, want 204", rec.Code, rec.Body.String())
+	}
+	crNew := claimForWriteFence(t, s.rt, s.subStore)
+	if crNew.Generation >= cr2.Generation {
+		t.Fatalf("recreated claim generation = %d, want a restart below %d", crNew.Generation, cr2.Generation)
+	}
+
+	// WF-23 positive control: the new authority is unsealed — a fresh
+	// producer id establishes its epoch at the new generation and lands.
+	if rec := s.fencedAppend("/events/a", crNew.WriteToken, "entity-events/a-v2", crNew.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("recreated-claim append = %d body %q, want 200 (the new authority must start unsealed)", rec.Code, rec.Body.String())
+	}
+	before := tailOf(t, s.h, "/events/a")
+
+	// K.9: the old producer id still holds epoch 2 in the producer hash, so
+	// epoch == generation (1) is the base stale-epoch 403 with the echo.
+	rec := s.fencedAppend("/events/a", crNew.WriteToken, "entity-events/a", crNew.Generation, 0)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "producer epoch is stale") {
+		t.Fatalf("old producer at the recreated generation = %d body %q, want 403 STALE_EPOCH", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Producer-Epoch"), strconv.FormatInt(cr2.Generation, 10); got != want {
+		t.Errorf("stale-epoch echo = %q, want the stored epoch %s", got, want)
+	}
+	// The pinned producer's autoClaim bump retries at stored+1: the rung
+	// refuses epoch != generation with the terminal pair — a clean stop.
+	rec = s.fencedAppend("/events/a", crNew.WriteToken, "entity-events/a", cr2.Generation+1, 0)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("auto-claim bump = %d body %q, want 409", rec.Code, rec.Body.String())
+	}
+	eb := decodeEnvelope(t, rec)
+	if eb.Error.Code != webhook.ErrCodeFenced || eb.Error.Reason != "epoch" || eb.Error.Generation != crNew.Generation {
+		t.Fatalf("envelope = %+v, want FENCED/epoch at generation %d", eb.Error, crNew.Generation)
+	}
+	if exp, rcv := rec.Header().Get("Producer-Expected-Seq"), rec.Header().Get("Producer-Received-Seq"); exp != "0" || rcv != "0" {
+		t.Errorf("terminal pair = (%q, %q), want (0, 0)", exp, rcv)
+	}
+	if after := tailOf(t, s.h, "/events/a"); !after.Equal(before) {
+		t.Fatalf("refused appends mutated stream: tail %s -> %s", before, after)
+	}
+	counter.only(t, "epoch")
+}
+
+// TestHandleAppendSealLinearizedInsidePausedAppend pins the seal's
+// linearization point (#183, INV-FENCE-06): an append that passed the
+// control-plane pre-check and then stalled before its Redis commit is refused
+// by the in-slot rung as sealed when a done lands in the window — with the
+// generation, the epoch echo, the terminal pair, and the tail unchanged.
+func TestHandleAppendSealLinearizedInsidePausedAppend(t *testing.T) {
+	s := newRedisFenceStack(t)
+	counter := &fenceCounter{}
+	s.h.FenceMetrics = counter
+	s.createFenced(t, "/events/a")
+	cr := claimForWriteFence(t, s.rt, s.subStore)
+	paused := &pausedAppendStore{Store: s.data, entered: make(chan struct{}), resume: make(chan struct{})}
+	s.h.Store = paused
+	before := tailOf(t, s.h, "/events/a")
+
+	appendResult := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		appendResult <- s.fencedAppend("/events/a", cr.WriteToken, "entity-events/a", cr.Generation, 0)
+	}()
+	select {
+	case <-paused.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("append did not reach the paused store commit")
+	}
+	s.done(t, cr, "/events/a")
+
+	close(paused.resume)
+	var rec *httptest.ResponseRecorder
+	select {
+	case rec = <-appendResult:
+	case <-time.After(5 * time.Second):
+		t.Fatal("append did not return after done")
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("append after done linearized = %d body %q, want 409", rec.Code, rec.Body.String())
+	}
+	eb := decodeEnvelope(t, rec)
+	if eb.Error.Code != webhook.ErrCodeFenced || eb.Error.Reason != "sealed" || eb.Error.Generation != cr.Generation || eb.Error.CurrentHolder != "" {
+		t.Fatalf("envelope = %+v, want FENCED/sealed at generation %d with no live holder", eb.Error, cr.Generation)
+	}
+	if got, want := rec.Header().Get("Producer-Epoch"), strconv.FormatInt(cr.Generation, 10); got != want {
+		t.Errorf("Producer-Epoch = %q, want %s", got, want)
+	}
+	if exp, rcv := rec.Header().Get("Producer-Expected-Seq"), rec.Header().Get("Producer-Received-Seq"); exp != "0" || rcv != "0" {
+		t.Errorf("terminal pair = (%q, %q), want (0, 0)", exp, rcv)
+	}
+	if after := tailOf(t, s.h, "/events/a"); !after.Equal(before) {
+		t.Fatalf("sealed append mutated stream: tail %s -> %s", before, after)
+	}
+	counter.only(t, "sealed")
+}
+
+// TestFencedStreamBindsInInsecureModeOnRedis pins the A.0 insecure-mode split
+// on live Redis (#183): on a fenced stream the fence semantics bind in every
+// AuthMode — an invalid token is 401 and a deposed one 409, each with the
+// tail unchanged and one rejection counted — while the open class keeps
+// today's posture: an anonymous append proceeds with one telemetry line, and
+// the same invalid token on an unfenced stream stays a 204.
+func TestFencedStreamBindsInInsecureModeOnRedis(t *testing.T) {
+	s := newRedisFenceStack(t)
+	s.h.AuthMode = auth.ModeInsecure
+	counter := &fenceCounter{}
+	s.h.FenceMetrics = counter
+	var logs bytes.Buffer
+	s.h.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	s.createFenced(t, "/events/a")
+	createDirect(t, s.h, "/events/plain", "application/json")
+	cr := claimForWriteFence(t, s.rt, s.subStore)
+
+	// Positive control: the holder's fenced write lands in insecure mode.
+	if rec := s.fencedAppend("/events/a", cr.WriteToken, "entity-events/a", cr.Generation, 0); rec.Code != http.StatusOK {
+		t.Fatalf("holder append = %d body %q, want 200", rec.Code, rec.Body.String())
+	}
+	before := tailOf(t, s.h, "/events/a")
+
+	rec := do(s.h, http.MethodPost, "/events/a", map[string]string{
+		"Content-Type": "application/json", WriteTokenHeader: "garbage",
+	}, []byte(`{"n":1}`))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid token on the fenced stream = %d body %q, want 401 in insecure mode", rec.Code, rec.Body.String())
+	}
+	if eb := decodeEnvelope(t, rec); eb.Error.Code != "UNAUTHENTICATED" || eb.Error.Reason != "credential" {
+		t.Fatalf("envelope = %+v, want UNAUTHENTICATED/credential", eb.Error)
+	}
+	if after := tailOf(t, s.h, "/events/a"); !after.Equal(before) {
+		t.Fatalf("invalid-token append mutated stream: tail %s -> %s", before, after)
+	}
+
+	takeoverAt := time.Now().Add(2 * time.Second)
+	crB, err := s.subStore.Claim("s1", "worker-B", "w_b", takeoverAt, 1000)
+	if err != nil || !crB.Claimed || crB.Generation == cr.Generation {
+		t.Fatalf("takeover claim = %+v err=%v", crB, err)
+	}
+	rec = s.fencedAppend("/events/a", cr.WriteToken, "entity-events/a", cr.Generation, 1)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("deposed token in insecure mode = %d body %q, want 409", rec.Code, rec.Body.String())
+	}
+	if after := tailOf(t, s.h, "/events/a"); !after.Equal(before) {
+		t.Fatalf("deposed append mutated stream: tail %s -> %s", before, after)
+	}
+
+	// Open class, anonymous: today's insecure posture — the write proceeds
+	// and the would-be denial is telemetry, not enforcement.
+	logs.Reset()
+	rec = do(s.h, http.MethodPost, "/events/a", map[string]string{"Content-Type": "application/json"}, []byte(`{"cmd":"inbox"}`))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("anonymous open-class append = %d body %q, want 204", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(logs.String(), "authz telemetry") {
+		t.Errorf("anonymous open-class append logged no telemetry line: %s", logs.String())
+	}
+
+	// The same invalid token on a stream that never opted in keeps today's
+	// mode-dependent posture: telemetry, then a 204.
+	rec = do(s.h, http.MethodPost, "/events/plain", map[string]string{
+		"Content-Type": "application/json", WriteTokenHeader: "garbage",
+	}, []byte(`{"n":1}`))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("invalid token on the unfenced stream = %d body %q, want 204 in insecure mode", rec.Code, rec.Body.String())
+	}
+
+	counter.mu.Lock()
+	got := map[string]int{}
+	for k, v := range counter.reasons {
+		got[k] = v
+	}
+	counter.mu.Unlock()
+	if got["credential"] != 1 || got["precheck"] != 1 || len(got) != 2 {
+		t.Fatalf("fence rejections = %v, want exactly {credential:1, precheck:1}", got)
 	}
 }

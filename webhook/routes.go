@@ -238,10 +238,11 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		// Revoke before crossing to the control-plane slot. If the guarded
-		// mutation then loses a race, fail closed until the next generation
-		// rather than reviving a marker that a delayed request could reuse.
-		if err := rt.mgr.revokeWriteFences(existing); err != nil {
+		// Seal before crossing to the control-plane slot: the deleted
+		// generation gets a definite last offset, and if the guarded mutation
+		// then loses a race it fails closed until the next generation rather
+		// than reviving a marker that a delayed request could reuse.
+		if err := rt.mgr.sealWriteFences(existing); err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -270,7 +271,7 @@ func (rt *Routes) handleDelete(w http.ResponseWriter, r *http.Request, id string
 			return
 		}
 	}
-	if err := rt.mgr.revokeWriteFences(existing); err != nil {
+	if err := rt.mgr.sealWriteFences(existing); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -397,9 +398,9 @@ func (rt *Routes) handleRemoveStream(w http.ResponseWriter, r *http.Request, id,
 			return
 		}
 		// A retained glob link is still part of this claim's resource set.
-		// Otherwise revoke before the cross-slot unlink for fail-closed order.
+		// Otherwise seal before the cross-slot unlink for fail-closed order.
 		if !stillGlob {
-			if err := rt.mgr.revokeWriteFencePath(sub, path); err != nil {
+			if err := rt.mgr.sealWriteFencePath(sub, path); err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
@@ -418,7 +419,7 @@ func (rt *Routes) handleRemoveStream(w http.ResponseWriter, r *http.Request, id,
 		return
 	}
 	if ok && !stillGlob {
-		if err := rt.mgr.revokeWriteFencePath(sub, path); err != nil {
+		if err := rt.mgr.sealWriteFencePath(sub, path); err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -537,6 +538,20 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		}
 	}
 
+	// The claim is the §7.2 pull-wake acquisition. A webhook-dispatch
+	// subscription is dispatched by the server and held by its in-flight wake
+	// (claimHolder), a shape the fence layer deliberately refuses for a
+	// worker-held claim: ack.lua's heartbeat branch and check_write_fence.lua
+	// both require holder '0' on webhook dispatch, so a claimed webhook
+	// subscription could neither heartbeat nor use its write token (#183,
+	// ADR-0008 decision 7). Refuse the category error up front, before any
+	// lease is granted.
+	if sub.Config.Type == DispatchWebhook {
+		writeErrMsg(w, ErrCodeInvalidRequest,
+			"claim applies to pull-wake subscriptions; this subscription is webhook-dispatch")
+		return
+	}
+
 	wakeID, err := GenerateWakeID(randReader)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -575,6 +590,7 @@ func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string)
 		snap, _ := Snapshot(fresh.Links, rt.mgr.tailOf)
 		now := time.Now()
 		if err := rt.mgr.grantWriteFences(fresh); err != nil {
+			rt.mgr.metrics.AppendFenceGrantFailed("claim")
 			_, _, _ = rt.mgr.applyRelease(id, ReleaseRequest{
 				Generation: res.Generation,
 				WakeID:     res.WakeID,

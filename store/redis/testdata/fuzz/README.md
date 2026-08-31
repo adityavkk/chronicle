@@ -53,19 +53,38 @@ deterministic seed; rapid's integrated shrinking provides both automatically.
 
 ## Fixtures in this corpus
 
-Hand-named, self-documenting fixtures (verified to reach each of the four named
-rare branches the issue calls out — each was harvested by replaying inputs
-through the model and confirming the branch fires):
+Hand-named, self-documenting fixtures, each pinned by
+`TestFuzzStoreEquivalenceCorpusReachesBranches` (equivalence_fuzz_test.go): the
+probe replays every fixture through the fuzz bridge with a tallying model and
+fails if it stops reaching the branch it is named for, so a generator change
+cannot silently turn a fixture into a plain regression input. When the probe
+fails, re-harvest the named fixtures from a fuzz run.
+
+Base producer and fork branches (INV-PROD-08, INV-FENCE-03, INV-CFG-01):
 
 - `branch-epoch-bump-at-nonzero-seq` — reaches `store.ErrInvalidEpochSeq`
-  (producer.go: epoch bump must start at seq 0). [INV-PROD-08]
+  (producer.go: epoch bump must start at seq 0).
 - `branch-seq-gap-at-boundary` — reaches `store.ErrProducerSeqGap`
-  (producer.go: gap at `lastSeq + 1`). [INV-PROD-08]
+  (producer.go: gap at `lastSeq + 1`).
 - `branch-close-by-producer-duplicate` — reaches
   `store.ProducerResultDuplicate` (idempotent duplicate producer op).
-  [INV-FENCE-03]
 - `branch-fork-suboffset-overshoot` — reaches `store.ErrInvalidForkSubOffset`
-  (`resolveForkSubOffset` overshoot). [INV-CFG-01]
+  (`resolveForkSubOffset` overshoot).
+
+Write-fence branches (#183, INV-DIFF-02 rung 3b, INV-FENCE-05/06):
+
+- `branch-fence-accept` — an accepted fenced-class write on a write-fenced
+  stream: the rung's accept path, which binds the producer and fixes the
+  class's last offset.
+- `branch-fence-marker` — a fenced-class write refused as `marker`.
+- `branch-fence-sealed` — a write of a sealed generation refused as `sealed`.
+- `branch-fence-epoch` — Producer-Epoch != claim generation, refused `epoch`.
+- `branch-fence-producer-required` — a fenced-class write without producer
+  headers on a fenced stream.
+- `branch-fence-bound` — an open-class write naming a bound producer id.
+- `branch-fence-superseded-grant` — a higher-generation grant sealing its
+  predecessor (the supersession seal).
+- `branch-fence-seal-already` — a redelivered seal reporting the standing one.
 
 Regression fixtures pinning a defect the fuzzer surfaced and we fixed:
 

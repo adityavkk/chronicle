@@ -52,6 +52,7 @@ func metaFromOptsRedis(o store.CreateOptions, advanceForkOff, recordRequested bo
 		CreatedAt:      now,
 		LastAccessedAt: now,
 		Closed:         o.Closed,
+		WriteFence:     o.WriteFence,
 		ForkedFrom:     o.ForkedFrom,
 		Producers:      map[string]*store.ProducerState{},
 	}
@@ -105,7 +106,8 @@ func configDiffOptsGen() *rapid.Generator[store.CreateOptions] {
 				"application/json", "Application/JSON", "text/plain",
 				"text/plain; charset=utf-8", "image/png", "application/octet-stream",
 			}).Draw(t, "ct"),
-			Closed: rapid.Bool().Draw(t, "closed"),
+			Closed:     rapid.Bool().Draw(t, "closed"),
+			WriteFence: rapid.Bool().Draw(t, "writeFence"),
 		}
 		if rapid.Bool().Draw(t, "hasTTL") {
 			// TTL >= 1 for the SEEDED stream: a 0-second TTL means "expire
@@ -170,7 +172,7 @@ func configDiffCaseGen() *rapid.Generator[configDiffCase] {
 // requirement is that the perturbation is valid for the shape (no impossible
 // forks). It deliberately includes the two subtle fork branches.
 func perturbConfigOpts(t *rapid.T, m *store.StreamMetadata, o *store.CreateOptions) {
-	choices := []string{"ct", "ttl", "exp", "closed"}
+	choices := []string{"ct", "ttl", "exp", "closed", "writeFence"}
 	if o.ForkedFrom != "" {
 		choices = append(choices, "forkSubOff", "forkedFromChange")
 		if o.ForkOffset != nil {
@@ -198,6 +200,8 @@ func perturbConfigOpts(t *rapid.T, m *store.StreamMetadata, o *store.CreateOptio
 		}
 	case "closed":
 		o.Closed = !m.Closed
+	case "writeFence":
+		o.WriteFence = !m.WriteFence
 	case "forkSubOff":
 		v := m.ForkSubOffset + 1
 		o.ForkSubOffset = &v
@@ -232,7 +236,7 @@ func seedMeta(t *rapid.T, s *Store, ctx context.Context, m store.StreamMetadata)
 }
 
 // configProbeArgs builds the create.lua argument list for a config-match probe:
-// the same ARGV[3..9] the production createArgs assembles, then N=0 meta fields
+// the same ARGV[3..10] the production createArgs assembles, then N=0 meta fields
 // (the write path is never reached because the stream exists and matches or
 // mismatches). It does NOT reuse createArgs because that bundles a full meta
 // write; the probe only needs the comparison ARGVs.
@@ -260,9 +264,57 @@ func configProbeArgs(s *Store, path string, opts store.CreateOptions) []any {
 	return []any{
 		s.nowNsArg(), notifyChannel(path),
 		normalizeCT(opts.ContentType), probeTTL, probeExp, probeClosed,
-		opts.ForkedFrom, probeForkOff, probeSubOff,
+		opts.ForkedFrom, probeForkOff, probeSubOff, boolArg(opts.WriteFence),
 		"0", // N = 0 meta fields (write path unreached)
 	}
+}
+
+// TestDifferentialConfigMatchesWriteFence drives the write-fence leg of
+// INV-CFG-01 (#183) through the live config_matches in both orders, on top of
+// generated base options (content type, TTL, expiry, closed, fork shape) that
+// otherwise match: a fenced stream re-PUT without Write-Fence and a plain
+// stream re-PUT with it MISMATCH; agreeing flags MATCH. Each row asserts the
+// expected verdict and that the live Lua reply equals the Go oracle, so the wf
+// probe (ARGV[10]) can neither drift nor be ignored by both sides at once.
+func TestDifferentialConfigMatchesWriteFence(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	rapid.Check(t, func(t *rapid.T) {
+		base := configDiffOptsGen().Draw(t, "base")
+		for _, tt := range []struct {
+			name           string
+			metaWF, optsWF bool
+		}{
+			{"fenced-vs-fenced", true, true},
+			{"fenced-vs-plain", true, false},
+			{"plain-vs-fenced", false, true},
+			{"plain-vs-plain", false, false},
+		} {
+			stored, opts := base, base
+			stored.WriteFence, opts.WriteFence = tt.metaWF, tt.optsWF
+			meta := metaFromOptsRedis(stored, false, false)
+			want := meta.ConfigMatches(opts)
+			if want != (tt.metaWF == tt.optsWF) {
+				t.Fatalf("%s: Go ConfigMatches = %v, want %v", tt.name, want, tt.metaWF == tt.optsWF)
+			}
+			path := seedMeta(t, s, ctx, meta)
+			raw, err := createScript.Run(ctx, s.client, keysFor(path), configProbeArgs(s, path, opts)...).Result()
+			if err != nil {
+				t.Fatalf("%s: createScript probe: %v", tt.name, err)
+			}
+			status, _, err := decodeStatusReply(raw)
+			if err != nil {
+				t.Fatalf("%s: decode reply: %v", tt.name, err)
+			}
+			if status != stMatched && status != stMismatch {
+				t.Fatalf("%s: unexpected status %q (setup error)", tt.name, status)
+			}
+			if got := status == stMatched; got != want {
+				t.Fatalf("INV-CFG-01 %s DIVERGENCE: live MATCHED=%v but Go ConfigMatches=%v", tt.name, got, want)
+			}
+		}
+	})
 }
 
 // TestDifferentialConfigMatches cross-checks the Go ConfigMatches verdict against

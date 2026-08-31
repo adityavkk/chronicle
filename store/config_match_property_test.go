@@ -61,7 +61,8 @@ func baseOptsGen() *rapid.Generator[CreateOptions] {
 				"", "application/json", "Application/JSON",
 				"text/plain", "text/plain; charset=utf-8", "image/png",
 			}).Draw(t, "ct"),
-			Closed: rapid.Bool().Draw(t, "closed"),
+			Closed:     rapid.Bool().Draw(t, "closed"),
+			WriteFence: rapid.Bool().Draw(t, "writeFence"),
 		}
 		if rapid.Bool().Draw(t, "hasTTL") {
 			o.TTLSeconds = i64(rapid.Int64Range(0, 1<<40).Draw(t, "ttl"))
@@ -108,6 +109,7 @@ func metaFromOpts(o CreateOptions, advanceForkOff bool, recordRequested bool) St
 	m := StreamMetadata{
 		ContentType: o.ContentType,
 		Closed:      o.Closed,
+		WriteFence:  o.WriteFence,
 		ForkedFrom:  o.ForkedFrom,
 	}
 	if o.TTLSeconds != nil {
@@ -178,7 +180,7 @@ func configCaseGen() *rapid.Generator[configCase] {
 // field. It picks only from perturbations valid for the current shape (e.g. it
 // won't perturb a fork-only field on a non-fork case).
 func perturbConfig(t *rapid.T, m *StreamMetadata, o *CreateOptions) string {
-	choices := []string{"ct", "ttlValue", "ttlNil", "expValue", "expNil", "closed"}
+	choices := []string{"ct", "ttlValue", "ttlNil", "expValue", "expNil", "closed", "writeFence"}
 	if o.ForkedFrom != "" {
 		choices = append(choices, "forkSubOff")
 		if o.ForkOffset != nil {
@@ -233,6 +235,10 @@ func perturbConfig(t *rapid.T, m *StreamMetadata, o *CreateOptions) string {
 		// Flip O's Closed relative to M so the comparison differs.
 		o.Closed = !m.Closed
 		return "closed"
+	case "writeFence":
+		// Flip the write-fence opt-in relative to M (#183): a re-PUT must agree.
+		o.WriteFence = !m.WriteFence
+		return "writeFence"
 	case "forkSubOff":
 		// Make O's sub-offset differ from M's stored value by a guaranteed delta.
 		o.ForkSubOffset = u64(m.ForkSubOffset + 1)
@@ -267,6 +273,53 @@ func TestConfigMatchesSoundness(t *testing.T) {
 				got, c.shouldMatch, c.perturbed, c.meta, c.opts)
 		}
 	})
+}
+
+// TestConfigMatchesWriteFence pins the write-fence leg of INV-CFG-01 (#183):
+// the Write-Fence opt-in is part of the idempotent-create comparison in both
+// directions (fenced-vs-plain and plain-vs-fenced mismatch; fenced-vs-fenced
+// matches), and a fork does not inherit it — a fork re-PUT compares only what
+// the fork PUT itself declared.
+func TestConfigMatchesWriteFence(t *testing.T) {
+	tests := []struct {
+		name string
+		meta StreamMetadata
+		opts CreateOptions
+		want bool
+	}{
+		{
+			name: "fenced stream re-PUT with Write-Fence matches",
+			meta: StreamMetadata{ContentType: "application/json", WriteFence: true},
+			opts: CreateOptions{ContentType: "application/json", WriteFence: true},
+			want: true,
+		},
+		{
+			name: "fenced stream re-PUT without Write-Fence mismatches",
+			meta: StreamMetadata{ContentType: "application/json", WriteFence: true},
+			opts: CreateOptions{ContentType: "application/json"},
+			want: false,
+		},
+		{
+			name: "plain stream re-PUT with Write-Fence mismatches",
+			meta: StreamMetadata{ContentType: "application/json"},
+			opts: CreateOptions{ContentType: "application/json", WriteFence: true},
+			want: false,
+		},
+		{
+			name: "fork created without Write-Fence matches its own plain re-PUT",
+			meta: StreamMetadata{ContentType: "application/json", ForkedFrom: "/src", ForkOffset: off(0)},
+			opts: CreateOptions{ContentType: "application/json", ForkedFrom: "/src", ForkOffset: offp(0)},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.meta.ConfigMatches(tt.opts); got != tt.want {
+				t.Fatalf("INV-CFG-01 write-fence: ConfigMatches = %v, want %v\n  meta=%+v\n  opts=%+v",
+					got, tt.want, tt.meta, tt.opts)
+			}
+		})
+	}
 }
 
 // TestConfigMatchesForkOffsetFallback pins the ForkOffsetRequested-vs-ForkOffset

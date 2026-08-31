@@ -2,6 +2,7 @@ package redis
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ func TestMetaRoundTripFull(t *testing.T) {
 		ForkSubOffset:       2,
 		RefCount:            3,
 		SoftDeleted:         true,
+		WriteFence:          true,
 	}
 	out, err := metaFromFields(in.Path, metaToFields(in))
 	if err != nil {
@@ -55,7 +57,7 @@ func TestMetaRoundTripMinimal(t *testing.T) {
 		Producers:      map[string]*store.ProducerState{},
 	}
 	fields := metaToFields(in)
-	for _, absent := range []string{fLastSeq, fClosed, fTTL, fExpAt, fForkedFrom, fForkOff, fForkSubOff, fRefCount, fSoftDel, fClosedByEp} {
+	for _, absent := range []string{fLastSeq, fClosed, fTTL, fExpAt, fForkedFrom, fForkOff, fForkSubOff, fRefCount, fSoftDel, fClosedByEp, fWriteFence, fSealGen, fSealOff} {
 		if _, ok := fields[absent]; ok {
 			t.Errorf("optional field %q should be absent", absent)
 		}
@@ -140,5 +142,50 @@ func TestMetaExpiryFidelity(t *testing.T) {
 	}
 	if !out.ConfigMatches(store.CreateOptions{ContentType: "text/plain", TTLSeconds: &ttl}) {
 		t.Error("ConfigMatches must hold after round trip")
+	}
+}
+
+// TestMetaFromFieldsWriteFenceSeal pins the write-fence meta schema (#183):
+// wf, wfSealGen and wfSealOff are read by name (an old replica ignores them),
+// and the seal fields are Lua-owned — metaToFields never writes them, so a Go
+// round trip can neither forge nor erase a seal.
+func TestMetaFromFieldsWriteFenceSeal(t *testing.T) {
+	fields := map[string]string{
+		fCT: "application/json", fTail: off(30).String(), fIncarnation: "abc",
+		fCreatedAt: "1765000000000000000", fAccessedAt: "1765000000000000000",
+		fWriteFence: "1", fSealGen: "7", fSealOff: off(21).String(),
+		fSealPrefix + "QUJD:0":    "7:w_7:" + off(21).String(),
+		fBindPrefix + "entity-e1": "7",
+		fLastFencedOff:            off(21).String(),
+	}
+	m, err := metaFromFields("/v1/fenced", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.WriteFence || m.SealedGeneration != 7 || m.SealedOffset == nil || !m.SealedOffset.Equal(off(21)) {
+		t.Fatalf("write-fence fields = wf:%t gen:%d off:%v", m.WriteFence, m.SealedGeneration, m.SealedOffset)
+	}
+	out := metaToFields(m)
+	if out[fWriteFence] != "1" {
+		t.Errorf("wf not written: %v", out)
+	}
+	for _, luaOwned := range []string{fSealGen, fSealOff, fLastFencedOff} {
+		if _, ok := out[luaOwned]; ok {
+			t.Errorf("Lua-owned field %q written by metaToFields", luaOwned)
+		}
+	}
+	for k := range out {
+		if strings.HasPrefix(k, fSealPrefix) || strings.HasPrefix(k, fBindPrefix) {
+			t.Errorf("Lua-owned field %q written by metaToFields", k)
+		}
+	}
+	for _, bad := range []map[string]string{{fSealGen: "x"}, {fSealOff: "nope"}} {
+		f := map[string]string{fTail: off(0).String(), fCreatedAt: "1", fAccessedAt: "1"}
+		for k, v := range bad {
+			f[k] = v
+		}
+		if _, err := metaFromFields("/v1/bad", f); err == nil {
+			t.Errorf("malformed %v decoded without error", bad)
+		}
 	}
 }

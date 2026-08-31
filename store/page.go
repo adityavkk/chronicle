@@ -42,6 +42,9 @@ type ReadSnapshot struct {
 	ForkOffset          Offset
 	ForkOffsetRequested *Offset
 	ForkSubOffset       uint64
+	WriteFence          bool
+	SealedGeneration    int64
+	SealedOffset        *Offset
 	// StoreToken is an opaque, process-local storage generation identifier.
 	// Handlers pass it back only through ReadPageOptions.Snapshot; it is never
 	// serialized into the Durable Streams wire protocol.
@@ -113,6 +116,9 @@ func ReadSnapshotFromMetadata(meta *StreamMetadata) ReadSnapshot {
 		ForkOffset:          meta.ForkOffset,
 		ForkOffsetRequested: cloneOffset(meta.ForkOffsetRequested),
 		ForkSubOffset:       meta.ForkSubOffset,
+		WriteFence:          meta.WriteFence,
+		SealedGeneration:    meta.SealedGeneration,
+		SealedOffset:        cloneOffset(meta.SealedOffset),
 	}
 }
 

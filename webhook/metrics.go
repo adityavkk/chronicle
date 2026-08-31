@@ -17,7 +17,9 @@ type Metrics interface {
 	// how many wakes it issued.
 	SweepTick(dur time.Duration, subs, tails, wakes int)
 	// WakeDelivery records a webhook delivery attempt: the round-trip duration and
-	// its outcome ("ok", "failed", or "error").
+	// its outcome — "ok", "failed" (non-2xx), "error" (transport), or "rejected"
+	// (the egress target policy refused the prepared request; nothing was
+	// dialed, so the duration is zero).
 	WakeDelivery(dur time.Duration, outcome string)
 	// WakeEvent records a pull-wake event append to a wake stream: the duration
 	// and its outcome ("ok" or "error").
@@ -119,6 +121,21 @@ type Metrics interface {
 	// ServiceDelegatedGateway records an accepted decision from the exact
 	// service identity carrying trusted_gateway.
 	ServiceDelegatedGateway()
+
+	// AppendFenceRejection records one data-plane write-fence rejection by the
+	// rule that refused it (#183): credential, shard, producer_required,
+	// wake_token, precheck, marker, sealed, epoch, bound, or store ("principal"
+	// exists in code as a classify backstop only and is never counted —
+	// ADR-0008 decision 9). The primary zombie-writer signal (ADR-0003 c8).
+	// Wired at the handler's single error sink, so every rejection counts
+	// exactly once.
+	AppendFenceRejection(reason string)
+	// AppendFenceSeal records one per-stream seal at done/release/delete/unlink
+	// by outcome: sealed, already, stale, notfound, unfenced, or error.
+	AppendFenceSeal(outcome string)
+	// AppendFenceGrantFailed records a claim-marker grant failure by site: claim,
+	// heartbeat, or webhook (the fail-open-delivery signal).
+	AppendFenceGrantFailed(site string)
 }
 
 // NopMetrics is the no-op Metrics used when none is configured. The Manager
@@ -196,3 +213,12 @@ func (NopMetrics) ServiceAuthorizationFailure() {}
 
 // ServiceDelegatedGateway implements Metrics.
 func (NopMetrics) ServiceDelegatedGateway() {}
+
+// AppendFenceRejection implements Metrics.
+func (NopMetrics) AppendFenceRejection(string) {}
+
+// AppendFenceSeal implements Metrics.
+func (NopMetrics) AppendFenceSeal(string) {}
+
+// AppendFenceGrantFailed implements Metrics.
+func (NopMetrics) AppendFenceGrantFailed(string) {}

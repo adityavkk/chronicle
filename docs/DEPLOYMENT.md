@@ -67,6 +67,24 @@ The protocol is designed for CDNs/proxies (cursor-based collapsing, ETags,
   creation are correct.
 - TLS termination is the proxy's job; chronicle speaks plain HTTP.
 
+## Webhook egress adapters
+
+Webhook delivery is governed by the SSRF rules in `webhook/ssrf.go`: a private
+target is rejected at subscription create unless the whole process opts into
+`--webhook-allow-private`. A deployment that needs exactly one private route
+(an in-cluster receiver reached through platform routing) plugs in an egress
+adapter instead: a `webhook.TargetPolicy` whose `AllowTarget` admits that one
+target ahead of the SSRF rules and whose `PrepareRequest` sees every signed
+delivery — retries included — immediately before it enters the HTTP client,
+where it may add platform-owned routing headers but never touches the body or
+the `Webhook-Signature`; and, optionally, the `*http.Client` that performs the
+deliveries. Adapters live in their own `cmd/chronicle` files and register from
+`init()` by appending to `webhookEgressLoaders`; `main` folds them at startup,
+refuses two active adapters, and refuses an adapter combined with
+`--webhook-allow-private`, because the adapter exists to make that broad mode
+unnecessary. Every other target still goes through the normal SSRF rules and is
+rejected with `400 WEBHOOK_URL_REJECTED`.
+
 ## Service identity and access policy
 
 Use mesh-attested SPIFFE identity for service-to-service calls in production.
@@ -118,6 +136,22 @@ SPIFFE identities in the policy become Chronicle's exact XFCC allowlist. The
 older `CHRONICLE_TRUSTED_SPIFFE_IDS` input still works, but every listed identity
 must also have a policy when enforcement is on. An allowlist alone grants
 nothing.
+
+**Write-fenced streams** ([docs/spec/WRITE-FENCING.md](spec/WRITE-FENCING.md))
+keep their fence in both modes: on a stream created with `Write-Fence: true`,
+write-token validity, the mandatory producer headers, and the in-slot
+marker/seal/epoch/bound checks bind even under `CHRONICLE_AUTH_MODE=insecure`,
+and a wake-token bearer is always refused — a deposed or token-less runtime
+fails closed on a shadow deployment exactly as in production. Only the *open*
+class follows the mode: in `enforce` an unauthenticated open write never
+reaches the fence — the base credential gate refuses it before the stream
+lookup (`401 missing write credential`, with no fence disclosure) — while in
+`insecure` it proceeds with a telemetry log line, the same posture as unfenced
+streams. Two operational notes: creating a fenced stream on a server with no
+append authorizer configured warn-logs at create (every fenced write will fail
+closed until one is wired), and watch
+`chronicle_append_fence_rejections_total{reason}` — sustained `marker`/`sealed`
+rejections are deposed writers being stopped, which is the fence doing its job.
 
 ### WCNP mesh contract
 

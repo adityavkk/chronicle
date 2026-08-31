@@ -79,6 +79,7 @@ var (
 	_ store.PageWaiter                     = (*Store)(nil)
 	_ store.PageSnapshotReleaser           = (*Store)(nil)
 	_ store.NotificationSubscriberProvider = (*Store)(nil)
+	_ store.WriteFenceStore                = (*Store)(nil)
 )
 
 // New wraps primary with a feature-gated immutable read plane.
@@ -366,8 +367,16 @@ func forkReference(snapshot store.ReadSnapshot) *ForkReference {
 	return ref
 }
 
-// Create delegates stream creation to the authoritative primary.
+// Create delegates stream creation to the authoritative primary. A
+// write-fenced create needs the primary's fence capability: the marker, seal
+// and binding checks run in its stream slot, so a primary without them cannot
+// honor the opt-in (ErrWriteFenceUnsupported, the handler's 501).
 func (s *Store) Create(path string, opts store.CreateOptions) (*store.StreamMetadata, bool, error) {
+	if opts.WriteFence {
+		if _, err := s.writeFenceStore(); err != nil {
+			return nil, false, err
+		}
+	}
 	meta, created, err := s.primary.Create(path, opts)
 	if err == nil && created {
 		s.clearKnown(path)
@@ -441,6 +450,44 @@ func (s *Store) CloseStreamWithProducer(path string, opts store.CloseProducerOpt
 		s.sealBestEffort(path)
 	}
 	return result, err
+}
+
+// writeFenceStore returns the primary's write-fence capability, or
+// ErrWriteFenceUnsupported when it has none. Segments carry no claim state;
+// the fence lives entirely in the authoritative primary's stream slot.
+func (s *Store) writeFenceStore() (store.WriteFenceStore, error) {
+	wf, ok := s.primary.(store.WriteFenceStore)
+	if !ok {
+		return nil, store.ErrWriteFenceUnsupported
+	}
+	return wf, nil
+}
+
+// GrantAppendFence delegates the claim marker install to the primary.
+func (s *Store) GrantAppendFence(path string, fence auth.AppendFence) (bool, error) {
+	wf, err := s.writeFenceStore()
+	if err != nil {
+		return false, err
+	}
+	return wf.GrantAppendFence(path, fence)
+}
+
+// RevokeAppendFence delegates the claim marker tombstone to the primary.
+func (s *Store) RevokeAppendFence(path string, fence auth.AppendFence) error {
+	wf, err := s.writeFenceStore()
+	if err != nil {
+		return err
+	}
+	return wf.RevokeAppendFence(path, fence)
+}
+
+// SealAppendFence delegates the per-authority seal to the primary.
+func (s *Store) SealAppendFence(path string, fence auth.AppendFence) (store.SealResult, error) {
+	wf, err := s.writeFenceStore()
+	if err != nil {
+		return store.SealResult{}, err
+	}
+	return wf.SealAppendFence(path, fence)
 }
 
 func (s *Store) sealBestEffort(path string) {

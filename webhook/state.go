@@ -125,6 +125,59 @@ func FenceDecision(cur Subscription, reqGeneration int64, reqWakeID string, toke
 	return ""
 }
 
+// WebhookHolder is the derived holder identity of an in-flight webhook wake
+// (#183 webhook parity): a webhook subscription owns no holder_worker, so the
+// wake itself is the holder. It is what a webhook claim's stream-slot markers
+// and write token carry where a pull-wake claim carries the worker name.
+func WebhookHolder(wakeID string) string { return "wake:" + wakeID } //nolint:revive // the extension's name; a bare Holder would read as Subscription.Holder
+
+// claimHolder is the holder identity sub's current claim binds its markers and
+// write token to: the pull-wake worker, or the derived webhook holder.
+func claimHolder(sub Subscription) string {
+	if sub.Config.Type == DispatchWebhook {
+		return WebhookHolder(sub.WakeID)
+	}
+	return sub.HolderWorker
+}
+
+// claimLive reports whether sub currently owns a fenceable claim inside its
+// lease: a pull-wake holder in phase live, or a webhook wake in flight (waking
+// or live). It is the precondition for granting or renewing stream-slot markers
+// and mirrors the non-done liveness branch of ack.lua.
+func claimLive(sub Subscription, now time.Time) bool {
+	return claimHolds(sub) && sub.LeaseUntilNs > now.UnixNano()
+}
+
+// claimHolds is claimLive without the lease test. A done or release is accepted
+// after the lease deadline (ack.lua's done branch is fence-only), so the seal
+// guards use this shape: the generation a late done names is still closed.
+func claimHolds(sub Subscription) bool {
+	if sub.WakeID == "" {
+		return false
+	}
+	if sub.Config.Type == DispatchWebhook {
+		return !sub.Holder && (sub.Phase == PhaseWaking || sub.Phase == PhaseLive)
+	}
+	return sub.Holder && sub.Phase == PhaseLive
+}
+
+// WriteFenceDecision is the pure mirror of check_write_fence.lua's live-state
+// branches: it returns "" when a write token bound to (generation, wakeID,
+// holder) still names sub's current claim, or ErrCodeFenced when the claim is
+// not live inside its lease, names another generation or wake, or the holder is
+// not the claim's (the worker for pull-wake, WebhookHolder for webhook). The
+// authoritative, atomic check runs in Lua; this exists for unit tests and the
+// differential, and must be changed together with check_write_fence.lua.
+func WriteFenceDecision(sub Subscription, generation int64, wakeID, holder string, now time.Time) string {
+	if !claimLive(sub, now) ||
+		generation != sub.Generation ||
+		wakeID == "" || wakeID != sub.WakeID ||
+		holder == "" || holder != claimHolder(sub) {
+		return ErrCodeFenced
+	}
+	return ""
+}
+
 // ClaimDecision is the pure mirror of claim.lua's conflict check: a pull-wake
 // claim is rejected with ALREADY_CLAIMED while another worker holds an unexpired
 // lease (PROTOCOL §7.2). It returns ("", "") when the claim may proceed, or the

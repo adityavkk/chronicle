@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -400,6 +401,9 @@ type fakeMetrics struct {
 	ownerFenced map[string]int // OwnerFenced scopes (inline|check_owner), #14
 	coverageGap int            // CoverageGap samples, #14
 	durShort    map[string]int // DurabilityShort by cmd (WAITAOF|WAIT), #43
+	fenceSeals  map[string]int // AppendFenceSeal by outcome, #183
+	grantFails  map[string]int // AppendFenceGrantFailed by site, #183
+	deliveries  map[string]int // WakeDelivery attempts by outcome
 }
 
 func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
@@ -408,9 +412,25 @@ func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
 	f.sweeps++
 	f.lastSubs, f.lastTails, f.lastWakes = subs, tails, wakes
 }
-func (f *fakeMetrics) WakeDelivery(time.Duration, string) {}
-func (f *fakeMetrics) WakeEvent(time.Duration, string)    {}
-func (f *fakeMetrics) WorkerTick(string, int)             {}
+
+func (f *fakeMetrics) WakeDelivery(_ time.Duration, outcome string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.deliveries == nil {
+		f.deliveries = map[string]int{}
+	}
+	f.deliveries[outcome]++
+}
+
+// delivered snapshots the WakeDelivery outcome counts.
+func (f *fakeMetrics) delivered() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return maps.Clone(f.deliveries)
+}
+
+func (f *fakeMetrics) WakeEvent(time.Duration, string) {}
+func (f *fakeMetrics) WorkerTick(string, int)          {}
 
 func (f *fakeMetrics) FanOut(time.Duration, int, int)               {}
 func (f *fakeMetrics) DirtyEnqueue(string, int, int, time.Duration) {}
@@ -479,6 +499,25 @@ func (f *fakeMetrics) ServiceBearerAuthentication()  {}
 func (f *fakeMetrics) ServiceAuthenticationFailure() {}
 func (f *fakeMetrics) ServiceAuthorizationFailure()  {}
 func (f *fakeMetrics) ServiceDelegatedGateway()      {}
+func (f *fakeMetrics) AppendFenceRejection(string)   {}
+
+func (f *fakeMetrics) AppendFenceSeal(outcome string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fenceSeals == nil {
+		f.fenceSeals = map[string]int{}
+	}
+	f.fenceSeals[outcome]++
+}
+
+func (f *fakeMetrics) AppendFenceGrantFailed(site string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.grantFails == nil {
+		f.grantFails = map[string]int{}
+	}
+	f.grantFails[site]++
+}
 
 func (f *fakeMetrics) durabilityShorts(cmd string) int {
 	f.mu.Lock()

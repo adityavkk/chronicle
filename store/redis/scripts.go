@@ -6,6 +6,8 @@ import (
 	"strconv"
 
 	"github.com/redis/go-redis/v9"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
 //go:embed scripts/*.lua
@@ -42,6 +44,7 @@ var (
 	decrRefScript           = loadScript("decr_ref.lua")
 	grantAppendFenceScript  = loadScript("grant_append_fence.lua")
 	revokeAppendFenceScript = loadScript("revoke_append_fence.lua")
+	sealAppendFenceScript   = loadScript("seal_append_fence.lua")
 )
 
 // Status sentinels returned in reply[0] by the scripts.
@@ -69,11 +72,14 @@ const (
 	stCascade     = "CASCADE"
 	stSnapshot    = "SNAPSHOT"
 	stMissing     = "MISSING"
+	stStale       = "STALE"
+	stSuperseded  = "SUPERSEDED"
 )
 
 // scriptReply is the decoded fixed-shape array reply of the append/close
 // scripts: {status, tail, producerResult, currentEpoch, expectedSeq,
-// receivedSeq, lastSeq, closed, alreadyClosed}.
+// receivedSeq, lastSeq, closed, alreadyClosed}, optionally extended by the
+// write-fence disclosure {reason, generation, holder} of a FENCED reply.
 type scriptReply struct {
 	Status        string
 	Tail          string
@@ -84,14 +90,29 @@ type scriptReply struct {
 	LastSeq       int64
 	Closed        bool
 	AlreadyClosed bool
+
+	FenceReason     store.FenceReason
+	FenceGeneration int64
+	FenceHolder     string
 }
+
+// scriptReplyLen is the fixed make_reply width; scriptReplyFenceLen is the
+// width of a fence_reply, whose extra elements older replies simply lack.
+const (
+	scriptReplyLen      = 9
+	scriptReplyFenceLen = 12
+)
 
 func decodeScriptReply(v any) (*scriptReply, error) {
 	arr, ok := v.([]any)
-	if !ok || len(arr) < 9 {
+	if !ok || len(arr) < scriptReplyLen {
 		return nil, fmt.Errorf("unexpected script reply %T %v", v, v)
 	}
-	s := make([]string, 9)
+	n := scriptReplyLen
+	if len(arr) >= scriptReplyFenceLen {
+		n = scriptReplyFenceLen
+	}
+	s := make([]string, n)
 	for i := range s {
 		str, ok := arr[i].(string)
 		if !ok {
@@ -100,16 +121,22 @@ func decodeScriptReply(v any) (*scriptReply, error) {
 		s[i] = str
 	}
 	r := &scriptReply{Status: s[0], Tail: s[1], Closed: s[7] == "1", AlreadyClosed: s[8] == "1"}
-	for _, f := range []struct {
+	type numField struct {
 		dst *int64
 		src string
-	}{
+	}
+	numeric := []numField{
 		{&r.ProducerRes, s[2]},
 		{&r.CurrentEpoch, s[3]},
 		{&r.ExpectedSeq, s[4]},
 		{&r.ReceivedSeq, s[5]},
 		{&r.LastSeq, s[6]},
-	} {
+	}
+	if n == scriptReplyFenceLen {
+		r.FenceReason, r.FenceHolder = store.FenceReason(s[9]), s[11]
+		numeric = append(numeric, numField{&r.FenceGeneration, s[10]})
+	}
+	for _, f := range numeric {
 		n, err := strconv.ParseInt(f.src, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("unexpected numeric reply %q: %w", f.src, err)

@@ -60,6 +60,38 @@ func setupClaim(t *testing.T, rt *Routes, store *RedisStore, id string) ClaimRes
 	return cr
 }
 
+// TestClaimOnWebhookDispatchReturns400 pins the claim contract for
+// webhook-dispatch subscriptions (#183 polish, ADR-0008 decision 7): POST
+// /claim is the PROTOCOL §7.2 pull-wake acquisition, and a webhook
+// subscription's lease is held by its in-flight wake, not a worker — a
+// worker-held webhook claim is a shape ack.lua's heartbeat branch and
+// check_write_fence.lua both refuse. The route answers an explicit 400
+// INVALID_REQUEST before any lease is granted, so the subscription state is
+// untouched (no transient claim-then-release, no 500).
+func TestClaimOnWebhookDispatchReturns400(t *testing.T) {
+	mgr, store, _ := newTestManager(t)
+	rt := NewRoutes(mgr)
+	if _, err := store.CreateOrConfirm("wh1", webhookCfg("http://receiver/hook"), nil, time.Now()); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	rec := doDS(t, rt, http.MethodPost, subsPrefix+"wh1/claim", "", `{"worker":"w1"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%q", rec.Code, rec.Body.String())
+	}
+	if code := errCodeOf(t, rec); code != ErrCodeInvalidRequest {
+		t.Fatalf("code = %q, want %q", code, ErrCodeInvalidRequest)
+	}
+
+	sub, ok, err := store.Get("wh1")
+	if err != nil || !ok {
+		t.Fatalf("get after refused claim: ok=%t err=%v", ok, err)
+	}
+	if sub.Holder || sub.Phase != PhaseIdle || sub.Generation != 0 || sub.WakeID != "" || sub.LeaseUntilNs != 0 {
+		t.Fatalf("refused claim mutated subscription state: %+v", sub)
+	}
+}
+
 // TestAckMissingFieldsReturns400 asserts that a callback/ack body missing the
 // required fenced fields is a 400 INVALID_REQUEST before the request reaches the
 // fence — an absent field is a malformed request, not a stale one.
