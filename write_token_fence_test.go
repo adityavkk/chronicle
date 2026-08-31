@@ -3,6 +3,7 @@ package chronicle
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -307,16 +308,50 @@ func TestHandleAppendFencesAfterBodyRead(t *testing.T) {
 	}
 }
 
+// writeTokenExp parses the exp claim out of a write token's opaque body — the
+// test's window into re-minting without waiting out a real TTL.
+func writeTokenExp(t *testing.T, token string) int64 {
+	t.Helper()
+	body, _, ok := strings.Cut(token, ".")
+	if !ok {
+		t.Fatalf("write token has no body.sig shape: %q", token)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(body)
+	if err != nil {
+		t.Fatalf("write token body: %v", err)
+	}
+	var p struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Exp == 0 {
+		t.Fatalf("write token carries no exp: %s", raw)
+	}
+	return p.Exp
+}
+
+// TestHeartbeatRefreshesWriteTokenForLongLiveHolder pins the spec §9 refresh:
+// every ack heartbeat re-mints the write token, so a long-lived holder that
+// heartbeats within its lease outlives the token TTL. Rather than polling
+// wall-clock past a real expiry (~7s), the test heartbeats across one
+// exp-granularity second and asserts the refreshed token's exp moved forward
+// — the re-mint that, repeated, carries the holder indefinitely — and that
+// the refreshed token still appends.
 func TestHeartbeatRefreshesWriteTokenForLongLiveHolder(t *testing.T) {
 	mgr, subStore, cleanup := newWriteFenceManager(t)
 	defer cleanup()
 	rt := webhook.NewRoutes(mgr)
 	cr := claimForWriteFence(t, rt, subStore)
+	firstExp := writeTokenExp(t, cr.WriteToken)
 	currentWriteToken := cr.WriteToken
 
-	deadline := time.Now().Add(7 * time.Second)
-	for time.Now().Before(deadline) {
-		time.Sleep(500 * time.Millisecond)
+	// Two heartbeats 550ms apart: each lands inside the 1s lease it renews,
+	// and the >1s total guarantees a re-minted now+TTL exp is strictly later
+	// than the claim's at unix-second granularity.
+	for range 2 {
+		time.Sleep(550 * time.Millisecond)
 		body, _ := json.Marshal(webhook.CallbackRequest{WakeID: cr.WakeID, Generation: cr.Generation})
 		req := httptest.NewRequest(http.MethodPost, "/__ds/subscriptions/s1/ack", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+cr.Token)
@@ -336,6 +371,9 @@ func TestHeartbeatRefreshesWriteTokenForLongLiveHolder(t *testing.T) {
 		}
 		currentWriteToken = resp.WriteToken
 	}
+	if refreshed := writeTokenExp(t, currentWriteToken); refreshed <= firstExp {
+		t.Fatalf("heartbeat write token exp = %d, want later than the claim's %d (re-minted, not echoed)", refreshed, firstExp)
+	}
 
 	h := testHandler(time.Second, time.Second)
 	h.AuthMode = auth.ModeEnforce
@@ -346,7 +384,7 @@ func TestHeartbeatRefreshesWriteTokenForLongLiveHolder(t *testing.T) {
 		ClaimTokenHeader: currentWriteToken,
 	}, []byte(`{"ok":true}`))
 	if rec.Code != http.StatusNoContent {
-		t.Fatalf("append after long heartbeat = %d body %q, want 204", rec.Code, rec.Body.String())
+		t.Fatalf("append with refreshed write token = %d body %q, want 204", rec.Code, rec.Body.String())
 	}
 }
 

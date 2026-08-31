@@ -753,7 +753,15 @@ func TestHandleAppendOpenClassOnFencedStream(t *testing.T) {
 					t.Fatalf("status = %d body %q, want %d", rec.Code, rec.Body.String(), c.wantStatus)
 				}
 				if rec.Code >= http.StatusBadRequest {
-					decodeFenceEnvelope(t, rec, c.wantStatus, c.wantReason)
+					detail := decodeFenceEnvelope(t, rec, c.wantStatus, c.wantReason)
+					if mode == auth.ModeEnforce && c.name == "anonymous" {
+						// The wire message DEPLOYMENT.md quotes: phase 1's base
+						// credential gate answers before the stream lookup
+						// (ADR-0008 decision 9), never the classify backstop.
+						if detail.Message != "missing write credential" {
+							t.Errorf("anonymous enforce message = %q, want %q", detail.Message, "missing write credential")
+						}
+					}
 					f.counter.only(t, c.wantReason)
 					if after := tailOf(t, f.h, path); !after.Equal(before) {
 						t.Fatalf("denied write mutated the stream: %s -> %s", before, after)
@@ -768,6 +776,32 @@ func TestHandleAppendOpenClassOnFencedStream(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestHandleAppendContentTypeAnswersBeforeFence pins the delivered precedence
+// the spec's §8 note scopes: the base §5.2 content-type check runs before
+// phase 2 and the store commit, so a fenced-class write with a mismatched
+// Content-Type gets the base plaintext 409 — no FENCED envelope, nothing
+// counted, the slot never consulted — even when the slot would also have
+// refused the write.
+func TestHandleAppendContentTypeAnswersBeforeFence(t *testing.T) {
+	const path = "/agents/e1/session"
+	f := newFenceFixture(t, auth.ModeEnforce)
+	f.create(t, path, true)
+	f.store.reject(store.FenceEpoch, 9, "worker-B")
+	tok := f.claimToken(t, 8, "worker-A", "agents/e1/session")
+	headers := append(producerAt("8", "0"), hdr{WriteTokenHeader, tok}, hdr{"Content-Type", "text/plain"})
+	rec := f.post(path, []byte(`{"n":1}`), headers...)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d body %q, want 409", rec.Code, rec.Body.String())
+	}
+	if body := strings.TrimSpace(rec.Body.String()); body != "content type mismatch" {
+		t.Errorf("body = %q, want the base plaintext content-type mismatch", body)
+	}
+	f.counter.only(t, "")
+	if fence, ok := f.store.lastFence(); ok {
+		t.Errorf("mismatched Content-Type reached the store (fence %v), want no store call", fence)
 	}
 }
 
