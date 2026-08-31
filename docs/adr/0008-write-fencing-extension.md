@@ -58,7 +58,11 @@ plus the #183 design record; this ADR records the decisions and their costs.
    must verify; the principal is evaluated first, so a denied principal is
    reported as its own `401`/`403` and the token arm runs only for an
    allowed principal (a deliberate ordering deviation from the design's
-   "both valid" phrasing — the request is refused either way).
+   "both valid" phrasing — the request is refused either way). That principal
+   refusal is reported and counted as a service denial — no fence `reason`,
+   no `chronicle_append_fence_rejections_total` increment — a further
+   deviation from the design's rule that every refusal of a declared fenced
+   write counts as a fence rejection.
 5. **Writer epoch ≡ claim generation.** `Producer-Epoch` on the fenced class
    must equal the token's generation, compared in the stream slot before
    `validate_producer`. No second epoch register.
@@ -89,7 +93,9 @@ plus the #183 design record; this ADR records the decisions and their costs.
 9. **Mode split.** Fence semantics (token validity, producer rules,
    marker/seal/epoch/bound checks, the wake-token 403) bind in every
    `CHRONICLE_AUTH_MODE`; only the open-class principal requirement follows
-   the mode (telemetry in `insecure`). A MAC-valid token on an *unfenced*
+   the mode (telemetry in `insecure`, where an anonymous open write logs one
+   telemetry line per gate it passes — credential, classify, phase 2 —
+   rather than exactly one). A MAC-valid token on an *unfenced*
    stream keeps today's mode-dependent posture. In `enforce` the anonymous
    open write is refused by the base phase-1 credential gate *before* the
    stream lookup, so it is the plain `401` with no fence disclosure — no

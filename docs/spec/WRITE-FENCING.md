@@ -134,7 +134,8 @@ Rules for the fenced class:
   plane did not grant it. **[WF-11]**
 - The server MUST evaluate the fence **atomically with the write**, against
   current fence state: a token whose claim is no longer the stream's live,
-  unexpired claim marker MUST be rejected `409` (reason `marker`) with the
+  unexpired claim marker MUST be rejected `409` (reason `marker`, or
+  `precheck` when a cross-slot pre-check answers before the commit) with the
   stream tail unchanged. **[WF-12]** A claim whose lease has lapsed MUST be
   fenced the same way, judged against the same clock as the append itself.
   **[WF-13]**
@@ -184,7 +185,8 @@ torn down — the generation is **sealed** on every linked fenced stream:
   **before** the control plane completes the `done`/release and the
   subscription becomes claimable again. After the seal, any write presenting
   that generation (or an earlier one) of that authority MUST be rejected `409`
-  (reason `sealed`). **[WF-19]**
+  (reason `sealed`, or `precheck` when a cross-slot pre-check answers before
+  the commit). **[WF-19]**
 - `HEAD` on a fenced stream with at least one seal MUST expose the latest seal
   as `Write-Fence-Sealed-Generation` and `Write-Fence-Sealed-Offset` — the
   definite last offset the sealed generation's fenced class reached.
@@ -228,7 +230,7 @@ A fence rejection tells the writer enough to stand down without a read:
   }
   ```
 
-  `reason` values: `credential`, `producer_required`, `wake_token`,
+  `reason` values: `credential`, `shard`, `producer_required`, `wake_token`,
   `precheck`, `marker`, `sealed`, `epoch`, `bound`, `store` (implementations
   MAY add values; the WF-14 `401` is a base authentication failure and
   carries no `reason`). **[WF-24]**
@@ -245,9 +247,11 @@ A fence rejection tells the writer enough to stand down without a read:
 - A `409 FENCED` MUST NOT carry `Stream-Next-Offset`: a deposed writer stands
   down; it does not resume.
 
-Precedence on a fenced stream: the fence is evaluated before the base closed,
-content-type, producer, and `Stream-Seq` checks, so a deposed writer always
-learns it is fenced rather than a coincidental base error.
+Precedence on a fenced stream: within the atomic commit the fence is
+evaluated before the base closed, §5.2.1 producer, and `Stream-Seq` checks,
+so a deposed writer learns it is fenced rather than a coincidental base
+error. The base §5.2 content-type check is not so ordered: a server MAY
+answer the plain `409` content-type mismatch before evaluating the fence.
 
 ## 9. Subscription delivery additions
 

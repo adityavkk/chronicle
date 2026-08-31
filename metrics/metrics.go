@@ -314,7 +314,7 @@ func New() *Prometheus {
 		}, []string{"result"}),
 		appendFenceRejections: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_append_fence_rejections_total",
-			Help: "Data-plane write-fence rejections by reason (credential|shard|producer_required|principal|wake_token|precheck|marker|sealed|epoch|bound|store) — the primary zombie-writer signal (#183, ADR-0003 c8).",
+			Help: "Data-plane write-fence rejections by reason (credential|shard|producer_required|wake_token|precheck|marker|sealed|epoch|bound|store) — the primary zombie-writer signal (#183, ADR-0003 c8).",
 		}, []string{"reason"}),
 		appendFenceSeals: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_append_fence_seals_total",

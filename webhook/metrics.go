@@ -124,9 +124,11 @@ type Metrics interface {
 
 	// AppendFenceRejection records one data-plane write-fence rejection by the
 	// rule that refused it (#183): credential, shard, producer_required,
-	// principal, wake_token, precheck, marker, sealed, epoch, bound, or store.
-	// The primary zombie-writer signal (ADR-0003 c8). Wired at the handler's
-	// single error sink, so every rejection counts exactly once.
+	// wake_token, precheck, marker, sealed, epoch, bound, or store ("principal"
+	// exists in code as a classify backstop only and is never counted —
+	// ADR-0008 decision 9). The primary zombie-writer signal (ADR-0003 c8).
+	// Wired at the handler's single error sink, so every rejection counts
+	// exactly once.
 	AppendFenceRejection(reason string)
 	// AppendFenceSeal records one per-stream seal at done/release/delete/unlink
 	// by outcome: sealed, already, stale, notfound, unfenced, or error.

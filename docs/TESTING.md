@@ -169,8 +169,9 @@ Run: `make conformance` (needs Redis and a built server); the extension suite
 is `make conformance-ext`. Its runner (`scripts/conformance-ext.sh`) starts two
 servers on their own Redis databases: the enforce-mode target on db 11
 (`CHRONICLE_REDIS_DB`) and the insecure-mode negative-control server on db 10
-(`CHRONICLE_EXT_INSECURE_DB`) — both flushed per run, so keep them clear of
-the base suite's assignments.
+(`CHRONICLE_EXT_INSECURE_DB`) — both flushed per run on the Redis named by
+`CHRONICLE_REDIS_URL` (defaulting to `localhost:6379`, the base runner's
+convention), so keep dbs 10 and 11 clear of the base suite's assignments.
 
 ### 9. Machine-checked proofs in Lean 4
 

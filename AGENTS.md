@@ -52,7 +52,10 @@ make spec-check               # SPEC_VERSION.md consistency + upstream-spec-drif
 
 Run `go test ./...` **without** a global `REDIS_URL` override: the webhook (db14)
 and store/redis (db15) packages default to different dbs; pointing both at one db
-makes their parallel `FlushDB`s wipe each other (a confusing false failure).
+makes their parallel `FlushDB`s wipe each other (a confusing false failure). Also
+run it with no chronicle server live against the same Redis instance — pub/sub
+channels are not db-scoped, so a server on another db can wake the webhook
+manager tests mid-run.
 
 CI also gates the **dsui** front-end (`ui/` — `typecheck` + `biome` + `vitest`,
 see `ui/AGENTS.md`) and the spec provenance (the `spec-version` job runs

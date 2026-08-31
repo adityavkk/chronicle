@@ -143,8 +143,9 @@ write-token validity, the mandatory producer headers, and the in-slot
 marker/seal/epoch/bound checks bind even under `CHRONICLE_AUTH_MODE=insecure`,
 and a wake-token bearer is always refused — a deposed or token-less runtime
 fails closed on a shadow deployment exactly as in production. Only the *open*
-class follows the mode: in `enforce` an unauthenticated open write to a fenced
-stream is `401 fenced stream requires an authenticated principal`, while in
+class follows the mode: in `enforce` an unauthenticated open write never
+reaches the fence — the base credential gate refuses it before the stream
+lookup (`401 missing write credential`, with no fence disclosure) — while in
 `insecure` it proceeds with a telemetry log line, the same posture as unfenced
 streams. Two operational notes: creating a fenced stream on a server with no
 append authorizer configured warn-logs at create (every fenced write will fail
