@@ -31,3 +31,12 @@ docs-site/.astro/
 /deploy/
 /sr.yaml
 /testburst.properties
+# Deployment-specific webhook egress adapters and internal orientation notes —
+# GEC-internal leaf files compiled against the public egress seam
+# (cmd/chronicle/webhook_egress.go); reserved here for the same reason.
+/internal/wcnpwebhook/
+/internal/devwebhook/
+/cmd/chronicle/wcnp_webhook.go
+/cmd/chronicle/dev_webhook.go
+/.dockerignore
+/CONTEXT.md
