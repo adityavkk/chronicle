@@ -508,7 +508,7 @@ test("WF-28 pull-wake parity end to end: heartbeat refresh, done seals", async (
 
 // -- §9.1 Verifying a write token -------------------------------------------
 
-test("WF-29 verify answers as an append would, without a write", async () => {
+test("WF-29 verify evaluates a write token claim without a write", async () => {
   // The states that take wall-clock time are started first and checked last,
   // so the whole matrix fits one lease-and-token-expiry window (~8 s).
   const expPath = uniq("wf29-exp")
@@ -522,6 +522,7 @@ test("WF-29 verify answers as an append would, without a write", async () => {
   const expCr = await pullWakeSub(expSub, expPath, 1000) // token TTL = lease + 5s
   const depCr = await pullWakeSub(depSub, depPath, 1000)
   const lapseCr = await pullWakeSub(lapseSub, lapsePath, 1000)
+  const lapseStarted = Date.now()
 
   // Live claim: 200 with the claim facts — the token's exact scope, not a
   // snapshot — and the append it vouches for lands.
@@ -548,14 +549,14 @@ test("WF-29 verify answers as an append would, without a write", async () => {
   expect(malformed.json().error.code).toBe("TOKEN_INVALID")
 
   // Not a usable credential — malformed, the callback token, another
-  // subscription's token — is 401 TOKEN_INVALID; the append under the same
-  // bytes is 401 too (the other subscription's token is refused by the
-  // per-subscription route, while the append judges it against its own
-  // subscription).
+  // subscription's token, or a wake token — is 401 TOKEN_INVALID. Append
+  // routing intentionally differs for the two typed credentials: the foreign
+  // write token is 403 outside its scope, and the wake token is 403 on a
+  // fenced stream. WF-29 parity is scoped to a write token minted for {id}.
   const otherPath = uniq("wf29-other")
   await createStream(otherPath, { "Write-Fence": "true" })
   const other = await pullWakeSub(subId("s"), otherPath)
-  for (const bad of ["not-a-token", cr.token, other.write_token!]) {
+  for (const bad of ["not-a-token", cr.token, other.write_token!, cr.wake_token!]) {
     const res = await verify(sub, bad)
     expect(res.status).toBe(401)
     expect(res.json().error.code).toBe("TOKEN_INVALID")
@@ -563,6 +564,8 @@ test("WF-29 verify answers as an append would, without a write", async () => {
   for (const bad of ["not-a-token", cr.token]) {
     expect((await post(path, producer(bad, "entity-wf29", cr.generation, 1))).status).toBe(401)
   }
+  expect((await post(path, producer(other.write_token!, "entity-wf29-other", other.generation, 0))).status).toBe(403)
+  expect((await post(path, { Authorization: `Bearer ${cr.wake_token}` })).status).toBe(403)
 
   // No side effects: the subscription view is byte-identical across repeated
   // verifies, and a heartbeat afterwards still finds the claim live.
@@ -592,7 +595,7 @@ test("WF-29 verify answers as an append would, without a write", async () => {
 
   // Deposed at g+1 and a lapsed lease with no successor: both 409 precheck,
   // and the append agrees.
-  await sleep(Math.max(0, 1400 - (Date.now() - started)))
+  await sleep(Math.max(0, 1400 - (Date.now() - lapseStarted)))
   const depB = await claim(depSub, "worker-B")
   expect(depB.generation).toBeGreaterThan(depCr.generation)
   for (const [s, p, c] of [

@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -205,9 +206,10 @@ func fenceStackClient(t *testing.T) *goredis.Client {
 	return client
 }
 
-// redisSnapshot dumps every key of the database by type. Keys carrying a TTL
-// are listed by name only: their expiry is the clock's doing, not the route's,
-// and comparing their values would make the pin flake at the expiry instant.
+// redisSnapshot dumps every key of the database by type. It compares values
+// for TTL-bearing keys too, while deliberately ignoring the TTL itself. This
+// makes marker grants or lease-field renewal visible without treating ordinary
+// clock-driven expiry countdown as a route side effect.
 func redisSnapshot(t *testing.T, c *goredis.Client) map[string]any {
 	t.Helper()
 	ctx := context.Background()
@@ -217,12 +219,6 @@ func redisSnapshot(t *testing.T, c *goredis.Client) map[string]any {
 	}
 	out := make(map[string]any, len(keys))
 	for _, k := range keys {
-		if ttl, err := c.TTL(ctx, k).Result(); err != nil {
-			t.Fatal(err)
-		} else if ttl > 0 {
-			out[k] = "ttl"
-			continue
-		}
 		typ, err := c.Type(ctx, k).Result()
 		if err != nil {
 			t.Fatal(err)
@@ -307,18 +303,24 @@ func TestClaimVerifyHasNoSideEffects(t *testing.T) {
 // TestClaimVerifyLinearizedWithDeposition pins the linearizability clause of
 // WF-29: while goroutines hammer verify with A's token, worker-B's takeover
 // commits; no verify that started after the takeover returned answers 200 for
-// A's token, every 200 names A's generation, and answers never flip back —
-// the property of running the predicate as the same single slot-homed EVAL
-// that claim.lua mutates, rather than a read followed by a decision.
+// A's token, every 200 names A's generation and A's lease deadline, and
+// answers never flip back. TestVerifyClaimUsesOneAtomicStoreRead separately
+// pins that the decision and lease come from the one slot-homed EVAL.
 func TestClaimVerifyLinearizedWithDeposition(t *testing.T) {
 	s := newRedisFenceStack(t)
 	s.createFenced(t, "/events/a")
 	cr := claimForWriteFence(t, s.rt, s.subStore)
+	subA, ok, err := s.subStore.Get("s1")
+	if err != nil || !ok {
+		t.Fatalf("get s1 = ok:%v err=%v", ok, err)
+	}
+	wantLeaseUntilMs := subA.LeaseUntilNs / int64(time.Millisecond)
 
 	type sample struct {
 		before, after time.Time
 		code          int
 		generation    int64
+		leaseUntilMs  int64
 	}
 	const workers = 8
 	samples := make([][]sample, workers)
@@ -341,6 +343,7 @@ func TestClaimVerifyLinearizedWithDeposition(t *testing.T) {
 					var res webhook.ClaimVerifyResponse
 					if err := json.Unmarshal(rec.Body.Bytes(), &res); err == nil {
 						sm.generation = res.Generation
+						sm.leaseUntilMs = res.LeaseUntilMs
 					}
 				}
 				samples[i] = append(samples[i], sm)
@@ -369,6 +372,9 @@ func TestClaimVerifyLinearizedWithDeposition(t *testing.T) {
 				}
 				if sm.generation != cr.Generation {
 					t.Fatalf("worker %d: 200 named generation %d, want A's %d", i, sm.generation, cr.Generation)
+				}
+				if sm.leaseUntilMs != wantLeaseUntilMs {
+					t.Fatalf("worker %d: 200 named lease %d, want A's %d", i, sm.leaseUntilMs, wantLeaseUntilMs)
 				}
 				if seenFenced {
 					t.Fatalf("worker %d: a 200 after a 409 — answers must not flip back", i)
@@ -432,5 +438,34 @@ func TestClaimVerifyNeverRenews(t *testing.T) {
 	}
 	if after, _, _ := s.subStore.Get("s1"); after.LeaseUntilNs != sub.LeaseUntilNs {
 		t.Fatalf("lease_until_ns moved %d -> %d under verify polling", sub.LeaseUntilNs, after.LeaseUntilNs)
+	}
+}
+
+// TestClaimVerifyDoesNotConsultServiceIdentity pins the deliberate boundary of
+// §9.1: a named write token is verified on its own, while the same request's
+// rejected service bearer remains terminal on the append path's phase-1 gate.
+func TestClaimVerifyDoesNotConsultServiceIdentity(t *testing.T) {
+	s := newRedisFenceStack(t)
+	s.createFenced(t, "/events/a")
+	cr := claimForWriteFence(t, s.rt, s.subStore)
+
+	verifyReq := httptest.NewRequest(http.MethodPost, verifyTarget, nil)
+	verifyReq.Header.Set(WriteTokenHeader, cr.WriteToken)
+	verifyReq.Header.Set(tb4XFCCHdr, "URI="+tb4OtherID)
+	verifyRec := httptest.NewRecorder()
+	if !s.rt.HandleRequest(verifyRec, verifyReq) || verifyRec.Code != http.StatusOK {
+		t.Fatalf("verify with rejected service bearer = %d %s, want 200", verifyRec.Code, verifyRec.Body.String())
+	}
+
+	appendRec := do(s.h, http.MethodPost, "/events/a", map[string]string{
+		"Content-Type":   "application/json",
+		WriteTokenHeader: cr.WriteToken,
+		tb4XFCCHdr:       "URI=" + tb4OtherID,
+		"Producer-Id":    "entity-service-boundary",
+		"Producer-Epoch": strconv.FormatInt(cr.Generation, 10),
+		"Producer-Seq":   "0",
+	}, []byte(`{"seq":0}`))
+	if appendRec.Code != http.StatusUnauthorized {
+		t.Fatalf("append with rejected service bearer = %d %s, want 401", appendRec.Code, appendRec.Body.String())
 	}
 }

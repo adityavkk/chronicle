@@ -13,11 +13,12 @@ sections 1–11 can be proposed upstream verbatim.
 ## 1. Scope and conformance language
 
 This extension is a **pure superset** of the base protocol in the sense of
-§11.1: every rule below is conditional on a stream that was created with the
-`Write-Fence: true` header, and base protocol operations remain functional
-without extension support. On a stream that never opts in, a conforming server
-behaves byte-for-byte as the base protocol requires, and a base client never
-observes this extension.
+§11.1: every rule below either is conditional on a stream that was created
+with the `Write-Fence: true` header or adds an operation that a base client
+never invokes, and base protocol operations remain functional without
+extension support. On a stream that never opts in, a conforming server behaves
+byte-for-byte as the base protocol requires, and a base client never observes
+this extension.
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD",
 "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be
@@ -281,26 +282,38 @@ alone holds, so a client that must act on one without writing — a
 control-plane operation that proves the holder is still current before it
 delegates, signals, or spawns — has nothing to defer to, and accepting the
 token on shape alone would be impersonation. This subsection gives such a
-client the append gate's answer without the append.
+client the append gate's credential and live-claim answer without the append.
+The route is available whenever the server mints write tokens (§4), for claims
+whose linked streams are fenced, unfenced, or a mixture; it is additive and a
+base client never invokes it.
 
-**Request.** `POST /__ds/subscriptions/{id}/claim/verify` with no body (a
-body, if sent, is ignored). The write token is the sole credential, presented
-as on a fenced write — `Write-Token` or `Authorization: Bearer`, with the
-malformed-carrier rule of §4. No other principal is consulted, and the rule
-binds in every access-control mode, exactly as the fenced write class (§5).
+**Request.** `POST {stream-url}/__ds/subscriptions/:id/claim/verify` with no
+body (a body, if sent, is ignored). The write token is the sole credential,
+presented as on a fenced write — `Write-Token` or `Authorization: Bearer`, with
+the malformed-carrier rule of §4. No service or agent principal is consulted.
+When the server enforces authentication, this token check still binds exactly
+as the fenced write class's token phase does (§5).
 
-**Semantics.** The server MUST evaluate exactly the predicate a fenced write
-under the same token would be judged by before its commit — token validity
-and expiry, the subscription and its incarnation, generation, `wake_id`,
-holder, and lease — and MUST answer with the status such a write would
-receive at that instant: `200` when the token names the subscription's live
-claim, `401` when the token is not a usable credential, `409` when it is the
-server's but no longer names the current claim (deposed, released, completed,
-lapsed, or the subscription is gone). The decision MUST be linearizable with
-claim transitions: once a deposition commits, no verify that starts afterwards
-answers `200` for the superseded token. Verify MUST NOT append, advance a
-cursor, renew a lease or fence state, mint or refresh any token, or change
-any subscription state. **[WF-29]**
+**Semantics.** For a write token minted for `{id}`, the server MUST evaluate
+the credential and live-claim predicate that a fenced write to a stream in the
+token's scope would evaluate before its commit: token validity and expiry, the
+subscription and its incarnation, generation, `wake_id`, holder, and lease.
+It MUST answer `200` when the token names the subscription's live claim, `401`
+when the token is not a usable credential, and `409` when it is the server's
+but no longer names the current claim (deposed, released, completed, lapsed,
+or the subscription is gone). A credential that is not a write token, or a
+write token minted for another subscription, is `401` regardless of how an
+append under those bytes would be classified. The decision MUST be
+linearizable with claim transitions: once a deposition commits, no verify
+that starts afterwards answers `200` for the superseded token. Verify MUST NOT
+append, advance a cursor, mint or refresh any token, or change subscription or
+fence state. **[WF-29]**
+
+The predicate is the pre-commit claim predicate only. It does not consult a
+service identity carried beside the token or per-stream seal state. A `200`
+therefore says the token names the live claim; it does not guarantee that a
+later append will pass a service-policy gate or the stream-slot seal and
+producer checks.
 
 **Responses.**
 
@@ -308,25 +321,35 @@ any subscription state. **[WF-29]**
   the claim's generation, wake, and holder identity, the token's exact stream
   scope (normalized paths — no stream is read), and the lease deadline in
   unix milliseconds as the fence state holds it.
-- `401` `TOKEN_INVALID` — malformed, a foreign MAC, not a write token, minted
-  for another subscription, or naming an unfenceable shard.
-- `401` `TOKEN_EXPIRED` — the server's token, past expiry. The body MUST NOT
-  carry a refreshed token: verify mints nothing.
-- `409` `{"error":{"code":"FENCED","reason":"precheck","message":"write token claim is fenced"}}`
-  — the pre-check's own envelope (§8): no generation or holder is disclosed.
-  A subscription that no longer exists is `409`, never `404`.
+- `401` with the §7.2 error envelope — malformed, a foreign MAC, not a write
+  token, minted for another subscription, or expired. A server SHOULD
+  distinguish an expired write token from an otherwise unusable one via
+  `code`; an expired answer MUST NOT carry a refreshed token because verify
+  mints nothing.
+- `409` with `code: "FENCED"` and `reason: "precheck"` — the message is the
+  pre-check's refusal text, normally `write token claim is fenced`; a token
+  not bound to a claim or carrying no incarnation can instead report
+  `write token is not bound to a live claim` or
+  `write token has no subscription incarnation`. No generation or holder is
+  disclosed. A subscription that no longer exists is `409`, never `404`.
+- `5xx` — the server could not evaluate the predicate. It MUST NOT report a
+  store failure as `401` or `409`. A client MUST treat this as neither a
+  positive nor a negative answer and MUST NOT cache it. This is the one
+  deliberate status difference from a fenced append, whose fail-closed data
+  plane can report a credential refusal when its fence store is unavailable.
 
 **Caching.** A client MAY cache a `200` answer no longer than the smaller of
 its own heartbeat interval — the cadence at which it extends the claim with
 non-`done` acks — and the remaining lease (`lease_until_ms` minus now); it
-MUST NOT cache a `401` or `409`. The server SHOULD answer with
-`Cache-Control: no-store`, and verify itself MUST NOT extend the lease:
-polling it does not keep a claim alive. **[WF-30]**
+MUST NOT cache a `401`, `409`, or `5xx`. The server SHOULD answer with
+`Cache-Control: no-store`. Verify MUST NOT extend the lease: polling it does
+not keep a claim alive. **[WF-30]**
 
-**Discovery and fallback.** A server that does not implement this subsection
-answers the path with `404`. Because an implementing server never answers
-`404` here — an unknown subscription is `409` — a client MUST treat `404` as
-"verification unavailable" and apply its local policy.
+**Discovery and fallback.** A client MUST treat `404`, `405`, or `501` from
+this path as "verification unavailable" and apply its local policy; the base
+protocol does not prescribe how a server handles an unknown extension route.
+A server implementing this subsection never answers those statuses here — an
+unknown subscription is `409`.
 
 ## 10. Security considerations
 
@@ -377,13 +400,18 @@ Everything above is implementation-independent. This appendix records how
 [Chronicle](https://github.com/adityavkk/chronicle) implements the extension,
 and the limits of that implementation.
 
-- **Carrier alias.** Chronicle also accepts the write token in the
-  `electric-claim-token` header (the pre-extension spelling of its Electric
-  integration). Carrier order: `Write-Token`, `electric-claim-token`, then
-  `Authorization: Bearer` — the bearer only when it was not already consumed
-  as a service or wake credential. The malformed-carrier rule of §4 applies to
-  both named headers. The claim/verify route (§9.1) reads the same carriers in
-  the same order.
+- **Carrier alias and verification errors.** Chronicle also accepts the write
+  token in the `electric-claim-token` header (the pre-extension spelling of
+  its Electric integration). Carrier order: `Write-Token`,
+  `electric-claim-token`, then `Authorization: Bearer` — the bearer only when
+  it was not already consumed as a service or wake credential on append. The
+  malformed-carrier rule of §4 applies to both named headers. The
+  `claim/verify` route (§9.1) reads the same carriers in the same order but,
+  because it deliberately does not route service or wake principals, always
+  treats the bearer as the candidate write token. Chronicle uses
+  `TOKEN_INVALID` for unusable credentials (including a write token for
+  another subscription or an unfenceable shard) and `TOKEN_EXPIRED` for an
+  expired write token.
 - **Shard 0 only.** Chronicle's fence state lives in the stream slot of claim
   shard 0, and both token mints hardcode shard 0. A write token naming any
   other shard is refused `401 write token shard is not fenceable`
@@ -422,12 +450,17 @@ and the limits of that implementation.
   `check_write_fence.lua` — the append pre-check — in one atomic Redis step
   that also yields the claim's lease, so it cannot observe a partially
   updated claim and its `lease_until_ms` belongs to the claim it accepted. It
-  does not consult the stream-slot seal: in the at-least-once window between
-  a `done`'s seal and the control-plane idle (§10), verify answers `200`
-  while the append answers `409 sealed`. The in-slot rung remains the
-  authority, and WF-30's cache bound covers the window. A store failure is a
-  `500`, never a credential answer. The route binds in every
-  `CHRONICLE_AUTH_MODE` and emits no metrics of its own yet
+  does not consult a routed service identity or the per-stream seal. Thus a
+  rejected or unauthorized service identity beside a valid named write token
+  can receive `200` here and `401`/`403` on append. A path sealed while its
+  claim remains live also receives `200` here and `409 sealed` on append. The
+  latter happens in steady state when a linked stream is explicitly removed,
+  and in the at-least-once window between a `done` seal and the control-plane
+  idle (§10). That crash window is bounded by the lease TTL or a successful
+  `done` retry, not by a client's WF-30 cache bound. The stream-slot rung
+  remains authoritative. A store failure is `500`, never a credential answer.
+  Invalid, expired, and fenced answers emit a structured warning but no metric
+  of their own yet
   ([ADR-0009](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0009-claim-verify-route.md)).
 - **Departures from its consumer contract** are recorded in
   [ADR-0008](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0008-write-fencing-extension.md);
@@ -472,5 +505,5 @@ names the in-repo Go test that pins the same rule where one exists.
 | WF-26 | no fence disclosure on the pre-credential 401 | `TestHandleAppendFencedDisclosure` |
 | WF-27 | webhook end-to-end parity | `TestWebhookCallbackHeartbeatRefreshesWriteToken`, `TestWebhookAutoAckDoneSeals` |
 | WF-28 | pull-wake end-to-end | `TestHeartbeatRefreshesWriteTokenForLongLiveHolder` |
-| WF-29 | verify answers as an append would, without a write | `TestClaimVerifyAgreesWithAppend`, `TestClaimVerifyHasNoSideEffects`, `TestClaimVerifyLinearizedWithDeposition` |
-| WF-30 | positive answer cacheable ≤ min(heartbeat, lease); verify never renews | `TestClaimVerifyNeverRenews` |
+| WF-29 | verify evaluates the token and live-claim pre-commit predicate without a write | `TestVerifyClaimUsesOneAtomicStoreRead`, `TestClaimVerifyAgreesWithAppend`, `TestClaimVerifyHasNoSideEffects`, `TestClaimVerifyLinearizedWithDeposition` |
+| WF-30 | verify never renews; the cache bound is a client obligation | `TestClaimVerifyNeverRenews`; consumer tests pin the client-side cache policy |

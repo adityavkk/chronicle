@@ -511,11 +511,12 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 
 // handleClaimVerify serves POST /__ds/subscriptions/{id}/claim/verify
 // (WRITE-FENCING.md §9.1, WF-29): does the presented write token name {id}'s
-// live claim, judged exactly as the append pre-check would judge a fenced
-// write under it. The token is the whole credential — the fenced write
-// class's rule: it is read from the append gate's carriers, no service or
-// agent principal is consulted, there is no controlDeny telemetry path, and
-// the answer binds in every AuthMode. The route is read-only: no lease
+// live claim, judged by the credential and live-claim parts of the append
+// pre-check. The token is the whole credential: it is read from the append
+// gate's carriers, no service or agent principal is consulted, there is no
+// controlDeny telemetry path, and the token check binds in every AuthMode.
+// A 200 therefore does not promise that a later append will pass a separate
+// service-policy gate or the stream-slot seal and producer checks. The route is read-only: no lease
 // renewal, no marker grant, no cursor move, and no mint or refresh — the
 // TOKEN_EXPIRED answer deliberately bypasses writeTokenRejected, which mints.
 // A request body is ignored. Answers: 200 the live claim; 401 TOKEN_INVALID
@@ -528,6 +529,7 @@ func (rt *Routes) handleClaimVerify(w http.ResponseWriter, r *http.Request, id s
 	w.Header().Set("Cache-Control", "no-store")
 	token, malformed := presentedVerifyToken(r)
 	if malformed || token == "" {
+		rt.logClaimVerifyRefusal(id, "invalid", "missing or malformed write token")
 		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
 		return
 	}
@@ -556,16 +558,28 @@ func (rt *Routes) handleClaimVerify(w http.ResponseWriter, r *http.Request, id s
 			LeaseUntilMs: res.LeaseUntilNs / int64(time.Millisecond),
 		})
 	case ClaimVerifyExpired:
+		rt.logClaimVerifyRefusal(id, "expired", res.Detail)
 		writeErr(w, http.StatusUnauthorized, ErrCodeTokenExpired)
 	case ClaimVerifyFenced:
+		rt.logClaimVerifyRefusal(id, "fenced", res.Detail)
 		writeJSON(w, http.StatusConflict, ErrorBody{Error: ErrorDetail{
 			Code: ErrCodeFenced, Message: res.Detail, Reason: FenceReasonPrecheck,
 		}})
 	case ClaimVerifyInvalid:
+		rt.logClaimVerifyRefusal(id, "invalid", res.Detail)
 		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
 	default:
+		rt.logClaimVerifyRefusal(id, "invalid", "unknown verification outcome")
 		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
 	}
+}
+
+func (rt *Routes) logClaimVerifyRefusal(id, outcome, detail string) {
+	if rt.mgr.log == nil {
+		return
+	}
+	rt.mgr.log.Warn("claim verify denied",
+		"subscription", id, "outcome", outcome, "detail", detail)
 }
 
 // presentedVerifyToken reads the write token the way the append gate does:

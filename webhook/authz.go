@@ -162,7 +162,8 @@ func (a WriteTokenAuthorizer) liveClaimDecision(v WriteTokenValidation, now time
 
 // ClaimVerifyStatus classifies a claim verification (WRITE-FENCING.md §9.1).
 // The route maps it to HTTP: Invalid and Expired are a 401, Fenced a 409, OK
-// a 200 — the statuses a fenced write under the same token would receive.
+// a 200. These are the write-token credential and live-claim pre-check
+// outcomes; service routing and stream-slot checks are outside this result.
 type ClaimVerifyStatus int
 
 const (
@@ -176,8 +177,8 @@ const (
 	// subscription's live claim: deposed, released, completed, lapsed, or the
 	// subscription is gone.
 	ClaimVerifyFenced
-	// ClaimVerifyOK names the live claim: a fenced write under the token would
-	// pass the pre-check at this instant.
+	// ClaimVerifyOK names the live claim: the token passes the credential and
+	// live-claim pre-check at this instant.
 	ClaimVerifyOK
 )
 
@@ -195,8 +196,8 @@ type ClaimVerification struct {
 	LeaseUntilNs int64
 }
 
-// VerifyClaim answers whether token is the live claim of subID exactly as the
-// append pre-check would judge a fenced write under it (WF-29): the same
+// VerifyClaim answers whether token is the live claim of subID using the
+// append gate's write-token credential and live-state arms (WF-29): the same
 // parser, the same shard rule, and the same live-state arm as
 // AuthorizeAppendFence — and no write of any kind. A token minted for another
 // subscription is refused as unproven, like ValidateToken's subject binding,

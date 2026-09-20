@@ -433,21 +433,29 @@ func newRedisFenceStack(t *testing.T) *redisFenceStack {
 	})
 	subStore := webhook.NewRedisStore(client)
 	streams := redisFenceStreamAdapter{streamAdapter{st: dataStore, rs: dataStore}}
-	mgr, err := webhook.NewManager(subStore, streams, webhook.ManagerOptions{
-		StreamRootURL: "http://x/v1/stream/",
-	})
-	if err != nil {
-		t.Fatalf("new manager: %v", err)
-	}
 	creds, err := auth.ParseServiceBearerConfig("agents-server:" + tb4SvcBearer)
 	if err != nil {
 		t.Fatal(err)
+	}
+	serviceAccess := &ServiceAuth{
+		Credentials:            creds,
+		TrustedSPIFFEIDs:       []string{tb4AgentsID},
+		AllowXFCCWithoutMarker: true,
+		Policies:               gatewayPolicies(t, "agents-server", tb4AgentsID),
+	}
+	mgr, err := webhook.NewManager(subStore, streams, webhook.ManagerOptions{
+		StreamRootURL: "http://x/v1/stream/",
+		ServiceAccess: serviceAccess,
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
 	}
 	h := testHandler(time.Second, time.Second)
 	h.Store = dataStore
 	h.AuthMode = auth.ModeEnforce
 	h.AppendAuth = mgr.WriteAuthorizer()
-	h.ServiceAuth = &ServiceAuth{Credentials: creds, Policies: gatewayPolicies(t, "agents-server")}
+	h.ServiceAuth = serviceAccess
 	return &redisFenceStack{h: h, rt: webhook.NewRoutes(mgr), subStore: subStore, data: dataStore}
 }
 

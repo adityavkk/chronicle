@@ -529,6 +529,7 @@ import Step from "../components/Step.astro";
     | `POST` | `__ds/subscriptions/:id/claim` | pull-wake claim | `200` | `409 ALREADY_CLAIMED` · `404 NOT_FOUND` |
     | `POST` | `__ds/subscriptions/:id/ack` | pull-wake ack / heartbeat | `200` | `409 FENCED` · `401 TOKEN_INVALID` |
     | `POST` | `__ds/subscriptions/:id/release` | pull-wake release | `204` | `409 FENCED` · `401 TOKEN_INVALID` |
+    | `POST` | `__ds/subscriptions/:id/claim/verify` | verify a write token's claim (read-only, WF-29) | `200` | `409 FENCED` · `401 TOKEN_INVALID` · `401 TOKEN_EXPIRED` · `500` unavailable |
     | `GET` | `__ds/jwks.json` | webhook signing keys | `200` | none |
   </Table>
 
@@ -543,6 +544,7 @@ import Step from "../components/Step.astro";
     | `POST …/callback` · `…/ack` | `O(A + log L)` | `O(1)` | A cursor `HSET`s + one lease `ZADD`/`ZREM` |
     | `POST …/claim` | `O(log L)` | `O(1)` | the lease `ZADD` (the CAS) |
     | `POST …/release` | `O(log L)` | `O(1)` | two schedule `ZREM`s |
+    | `POST …/claim/verify` | `O(1)` | `O(1)` | one `EVAL` (`check_write_fence`) on the subscription hash |
     | `GET …/jwks.json` | `O(1)` | `O(1)` | bounded `HGETALL :jwks` |
   </Table>
 

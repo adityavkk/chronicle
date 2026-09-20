@@ -2,12 +2,66 @@ package webhook
 
 import (
 	"crypto/rand"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 )
+
+type verifyCallStore struct {
+	Store
+	verifyCalls int
+	getCalls    int
+	checkCalls  int
+	reply       WriteFenceCheck
+	err         error
+}
+
+func (s *verifyCallStore) VerifyWriteFence(string, int, int64, string, string, time.Time) (WriteFenceCheck, error) {
+	s.verifyCalls++
+	return s.reply, s.err
+}
+
+func (s *verifyCallStore) Get(string) (Subscription, bool, error) {
+	s.getCalls++
+	return Subscription{}, false, errors.New("unexpected Get")
+}
+
+func (s *verifyCallStore) CheckWriteFence(string, int, int64, string, string, time.Time) (string, error) {
+	s.checkCalls++
+	return "", errors.New("unexpected CheckWriteFence")
+}
+
+// TestVerifyClaimUsesOneAtomicStoreRead pins the structural half of WF-29:
+// VerifyClaim obtains both the decision and lease from one VerifyWriteFence
+// call and never reconstructs either through Get or CheckWriteFence.
+func TestVerifyClaimUsesOneAtomicStoreRead(t *testing.T) {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	scope := []auth.StreamPath{mustPath(t, "events/a")}
+	token, err := GenerateClaimWriteToken(key, "s1", "inc-1", 7, "w_a", "worker-A", 0, scope, now, time.Minute, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLease := now.Add(37 * time.Second).UnixNano()
+	store := &verifyCallStore{reply: WriteFenceCheck{Status: "OK", LeaseUntilNs: wantLease}}
+	a := WriteTokenAuthorizer{key: key, store: store, atomic: true}
+	got, err := a.VerifyClaim(token, "s1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.verifyCalls != 1 || store.getCalls != 0 || store.checkCalls != 0 {
+		t.Fatalf("store calls = verify:%d get:%d check:%d, want 1/0/0", store.verifyCalls, store.getCalls, store.checkCalls)
+	}
+	if got.Status != ClaimVerifyOK || got.LeaseUntilNs != wantLease {
+		t.Fatalf("verification = %+v, want OK with lease %d", got, wantLease)
+	}
+}
 
 // TestParseWriteTokenSharesValidateRules pins the parser split behind the
 // claim/verify route (#192): ValidateWriteToken is ParseWriteToken plus the

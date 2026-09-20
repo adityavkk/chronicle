@@ -1,8 +1,12 @@
 package webhook
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -160,6 +164,22 @@ func TestHandleClaimVerifyRoute(t *testing.T) {
 		}
 	}
 
+	// A MAC-valid legacy write token with no claim binding reaches the shared
+	// pre-check arm and preserves its specific refusal text in the 409 envelope.
+	unbound, err := GenerateWriteToken(mgr.tokenKey, "s1", cr.Generation, scope, time.Now(), time.Minute, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unboundRec := doVerify(t, rt, http.MethodPost, bearerHeader(unbound), "")
+	var unboundBody ErrorBody
+	if err := json.Unmarshal(unboundRec.Body.Bytes(), &unboundBody); err != nil {
+		t.Fatal(err)
+	}
+	wantUnbound := ErrorBody{Error: ErrorDetail{Code: ErrCodeFenced, Message: "write token is not bound to a live claim", Reason: FenceReasonPrecheck}}
+	if unboundRec.Code != http.StatusConflict || !reflect.DeepEqual(unboundBody, wantUnbound) {
+		t.Fatalf("unbound verify = %d %s, want 409 %+v", unboundRec.Code, unboundRec.Body.String(), wantUnbound)
+	}
+
 	// Expired: TOKEN_EXPIRED and nothing minted — contrast the ack route,
 	// whose expired-token answer carries a fresh callback token in band.
 	rec := doVerify(t, rt, http.MethodPost, bearerHeader(mint("s1", 0, time.Now().Add(-time.Hour))), "")
@@ -223,4 +243,89 @@ func TestHandleClaimVerifyRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireFenced("deleted subscription", doVerify(t, rt, http.MethodPost, bearerHeader(cr.WriteToken), ""))
+}
+
+type failingVerifyStore struct {
+	Store
+	err error
+}
+
+func (s *failingVerifyStore) VerifyWriteFence(string, int, int64, string, string, time.Time) (WriteFenceCheck, error) {
+	return WriteFenceCheck{}, s.err
+}
+
+func TestHandleClaimVerifyStoreFailureIsUnavailable(t *testing.T) {
+	base, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	failed := errors.New("verify store unavailable")
+	mgr, err := NewManager(&failingVerifyStore{Store: base, err: failed}, fs, ManagerOptions{
+		StreamRootURL: "http://x/v1/stream/",
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := NewRoutes(mgr)
+	cr := setupLongClaim(t, rt, base, "s1")
+
+	rec := doVerify(t, rt, http.MethodPost, bearerHeader(cr.WriteToken), "")
+	requireNoStore(t, "store failure", rec)
+	if rec.Code != http.StatusInternalServerError || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") || rec.Body.String() != "internal error\n" {
+		t.Fatalf("verify store failure = %d %q %q, want plain 500", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
+	}
+
+	d, _ := mgr.WriteAuthorizer().AuthorizeAppendFence(cr.WriteToken, mustPath(t, "events/a"), time.Now())
+	if d.Allowed() || d.Reason() != auth.ReasonUnauthenticated || d.Detail() != "write token fence unavailable" {
+		t.Fatalf("append decision = allowed:%v reason:%s detail:%q", d.Allowed(), d.Reason(), d.Detail())
+	}
+}
+
+func TestHandleClaimVerifyLogsRefusalsWithoutCredential(t *testing.T) {
+	base, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	var logs bytes.Buffer
+	mgr, err := NewManager(base, fs, ManagerOptions{
+		StreamRootURL: "http://x/v1/stream/",
+		Logger:        slog.New(slog.NewTextHandler(&logs, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := NewRoutes(mgr)
+	cr := setupLongClaim(t, rt, base, "s1")
+	sub, ok, err := base.Get("s1")
+	if err != nil || !ok {
+		t.Fatalf("get s1 = ok:%v err:%v", ok, err)
+	}
+	scope := []auth.StreamPath{mustPath(t, "events/a")}
+	expired, err := GenerateClaimWriteToken(mgr.tokenKey, "s1", sub.Incarnation, cr.Generation, cr.WakeID, "w1", 0, scope, time.Now().Add(-time.Hour), time.Minute, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "credential-bytes-must-not-appear"
+	if rec := doVerify(t, rt, http.MethodPost, bearerHeader(secret), ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid verify = %d", rec.Code)
+	}
+	if rec := doVerify(t, rt, http.MethodPost, bearerHeader(expired), ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expired verify = %d", rec.Code)
+	}
+	takeoverAt := time.Now().Add(31 * time.Second)
+	if crB, err := base.Claim("s1", "w2", "w_b", takeoverAt, 1000); err != nil || !crB.Claimed {
+		t.Fatalf("takeover = %+v err=%v", crB, err)
+	}
+	if rec := doVerify(t, rt, http.MethodPost, bearerHeader(cr.WriteToken), ""); rec.Code != http.StatusConflict {
+		t.Fatalf("fenced verify = %d", rec.Code)
+	}
+
+	got := logs.String()
+	for _, outcome := range []string{"outcome=invalid", "outcome=expired", "outcome=fenced"} {
+		if !strings.Contains(got, outcome) {
+			t.Fatalf("logs missing %q: %s", outcome, got)
+		}
+	}
+	for _, credential := range []string{secret, expired, cr.WriteToken} {
+		if strings.Contains(got, credential) {
+			t.Fatalf("logs contain credential bytes %q: %s", credential, got)
+		}
+	}
 }
