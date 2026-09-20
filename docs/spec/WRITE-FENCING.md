@@ -274,6 +274,60 @@ A failure to mint the token for a webhook delivery SHOULD NOT abort the
 delivery (fail-open delivery, fail-closed token): the notification goes out
 without `write_token`, and the consumer's fenced writes fail closed.
 
+### 9.1 Verifying a write token
+
+A write token is server-verifiable only: it is a MAC under a key the server
+alone holds, so a client that must act on one without writing — a
+control-plane operation that proves the holder is still current before it
+delegates, signals, or spawns — has nothing to defer to, and accepting the
+token on shape alone would be impersonation. This subsection gives such a
+client the append gate's answer without the append.
+
+**Request.** `POST /__ds/subscriptions/{id}/claim/verify` with no body (a
+body, if sent, is ignored). The write token is the sole credential, presented
+as on a fenced write — `Write-Token` or `Authorization: Bearer`, with the
+malformed-carrier rule of §4. No other principal is consulted, and the rule
+binds in every access-control mode, exactly as the fenced write class (§5).
+
+**Semantics.** The server MUST evaluate exactly the predicate a fenced write
+under the same token would be judged by before its commit — token validity
+and expiry, the subscription and its incarnation, generation, `wake_id`,
+holder, and lease — and MUST answer with the status such a write would
+receive at that instant: `200` when the token names the subscription's live
+claim, `401` when the token is not a usable credential, `409` when it is the
+server's but no longer names the current claim (deposed, released, completed,
+lapsed, or the subscription is gone). The decision MUST be linearizable with
+claim transitions: once a deposition commits, no verify that starts afterwards
+answers `200` for the superseded token. Verify MUST NOT append, advance a
+cursor, renew a lease or fence state, mint or refresh any token, or change
+any subscription state. **[WF-29]**
+
+**Responses.**
+
+- `200` — `{"generation", "wake_id", "holder", "streams", "lease_until_ms"}`:
+  the claim's generation, wake, and holder identity, the token's exact stream
+  scope (normalized paths — no stream is read), and the lease deadline in
+  unix milliseconds as the fence state holds it.
+- `401` `TOKEN_INVALID` — malformed, a foreign MAC, not a write token, minted
+  for another subscription, or naming an unfenceable shard.
+- `401` `TOKEN_EXPIRED` — the server's token, past expiry. The body MUST NOT
+  carry a refreshed token: verify mints nothing.
+- `409` `{"error":{"code":"FENCED","reason":"precheck","message":"write token claim is fenced"}}`
+  — the pre-check's own envelope (§8): no generation or holder is disclosed.
+  A subscription that no longer exists is `409`, never `404`.
+
+**Caching.** A client MAY cache a `200` answer no longer than the smaller of
+its own heartbeat interval — the cadence at which it extends the claim with
+non-`done` acks — and the remaining lease (`lease_until_ms` minus now); it
+MUST NOT cache a `401` or `409`. The server SHOULD answer with
+`Cache-Control: no-store`, and verify itself MUST NOT extend the lease:
+polling it does not keep a claim alive. **[WF-30]**
+
+**Discovery and fallback.** A server that does not implement this subsection
+answers the path with `404`. Because an implementing server never answers
+`404` here — an unknown subscription is `409` — a client MUST treat `404` as
+"verification unavailable" and apply its local policy.
+
 ## 10. Security considerations
 
 **Token custody.** The write token is a bearer capability for the fenced
@@ -328,7 +382,8 @@ and the limits of that implementation.
   integration). Carrier order: `Write-Token`, `electric-claim-token`, then
   `Authorization: Bearer` — the bearer only when it was not already consumed
   as a service or wake credential. The malformed-carrier rule of §4 applies to
-  both named headers.
+  both named headers. The claim/verify route (§9.1) reads the same carriers in
+  the same order.
 - **Shard 0 only.** Chronicle's fence state lives in the stream slot of claim
   shard 0, and both token mints hardcode shard 0. A write token naming any
   other shard is refused `401 write token shard is not fenceable`
@@ -363,6 +418,17 @@ and the limits of that implementation.
   new authority's generation passes the stored epoch — a liveness (not
   safety) limitation. The planned fix is control-plane: seed a recreated
   subscription's generation above its predecessor's.
+- **Claim verification.** `claim/verify` (§9.1) answers from
+  `check_write_fence.lua` — the append pre-check — in one atomic Redis step
+  that also yields the claim's lease, so it cannot observe a partially
+  updated claim and its `lease_until_ms` belongs to the claim it accepted. It
+  does not consult the stream-slot seal: in the at-least-once window between
+  a `done`'s seal and the control-plane idle (§10), verify answers `200`
+  while the append answers `409 sealed`. The in-slot rung remains the
+  authority, and WF-30's cache bound covers the window. A store failure is a
+  `500`, never a credential answer. The route binds in every
+  `CHRONICLE_AUTH_MODE` and emits no metrics of its own yet
+  ([ADR-0009](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0009-claim-verify-route.md)).
 - **Departures from its consumer contract** are recorded in
   [ADR-0008](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0008-write-fencing-extension.md);
   the formal model and invariants (INV-FENCE-05/06/07) in
@@ -406,3 +472,5 @@ names the in-repo Go test that pins the same rule where one exists.
 | WF-26 | no fence disclosure on the pre-credential 401 | `TestHandleAppendFencedDisclosure` |
 | WF-27 | webhook end-to-end parity | `TestWebhookCallbackHeartbeatRefreshesWriteToken`, `TestWebhookAutoAckDoneSeals` |
 | WF-28 | pull-wake end-to-end | `TestHeartbeatRefreshesWriteTokenForLongLiveHolder` |
+| WF-29 | verify answers as an append would, without a write | `TestClaimVerifyAgreesWithAppend`, `TestClaimVerifyHasNoSideEffects`, `TestClaimVerifyLinearizedWithDeposition` |
+| WF-30 | positive answer cacheable ≤ min(heartbeat, lease); verify never renews | `TestClaimVerifyNeverRenews` |

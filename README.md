@@ -203,7 +203,7 @@ and recorded as built in
 Beyond the pinned base suite, chronicle's own **write-fencing extension**
 ([docs/spec/WRITE-FENCING.md](docs/spec/WRITE-FENCING.md), a §11.1
 pure-superset extension) has a separate conformance suite — `make
-conformance-ext` runs its WF-01…WF-28 obligations against a live server in
+conformance-ext` runs its WF-01…WF-30 obligations against a live server in
 enforce mode. It is deliberately kept out of the base run so the certified
 332/332 count stays a statement about the unmodified protocol.
 

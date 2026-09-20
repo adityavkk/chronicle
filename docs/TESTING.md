@@ -157,7 +157,7 @@ is that it sees only the HTTP surface, not the internal state.
 
 The write-fencing extension ([docs/spec/WRITE-FENCING.md](spec/WRITE-FENCING.md))
 has a second, chronicle-owned suite in `test/conformance-ext/`: one black-box
-test per WF-01…WF-28 obligation plus negative controls, run against a live
+test per WF-01…WF-30 obligation plus negative controls, run against a live
 server in enforce mode. It is a separate directory with its own runner so the
 pinned base suite never collects it and the certified 332/332 stays a
 statement about the unmodified protocol. Fault-injection build tags
@@ -290,7 +290,7 @@ method and the intended fix.
 make test-unit                 # pure cores, no infrastructure
 make redis-up && make test     # unit and integration against Redis
 make conformance               # the black-box protocol suite
-make conformance-ext           # the write-fencing extension suite (WF-01…WF-28)
+make conformance-ext           # the write-fencing extension suite (WF-01…WF-30)
 cd lean && lake build          # the Lean proofs
 cd formal/tla && make tlc      # the TLA+ model checks
 cd formal/tla && make apalache # the Apalache inductive proof

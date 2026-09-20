@@ -41,7 +41,7 @@ conformance-segments:
 	./scripts/conformance-segments.sh
 
 # Write Fencing extension conformance suite (chronicle-owned, unpinned;
-# test/conformance-ext — WF-01..28, NC-01..04, and the pinned-client control).
+# test/conformance-ext — WF-01..30, NC-01..04, and the pinned-client control).
 # Fault-injection: CHRONICLE_BUILD_TAGS=fence_fault_{nobind,noseal,nopair}
 # builds a deliberately broken server whose named test must fail.
 conformance-ext:
