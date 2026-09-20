@@ -189,6 +189,21 @@ type ClaimResponse struct {
 	LeaseTTLMs int64            `json:"lease_ttl_ms"`
 }
 
+// ClaimVerifyResponse is the 200 body of POST /__ds/subscriptions/{id}/claim/verify
+// (WRITE-FENCING.md §9.1, WF-29): the live claim the presented write token
+// names, read in the same atomic step as the fence predicate. Streams is the
+// token's exact scope (normalized paths), not a snapshot — verify reads no
+// stream tails — and LeaseUntilMs is the claim's lease deadline as the fence
+// state holds it (unix milliseconds), the bound WF-30 lets a client cache
+// against.
+type ClaimVerifyResponse struct {
+	Generation   int64    `json:"generation"`
+	WakeID       string   `json:"wake_id"`
+	Holder       string   `json:"holder"`
+	Streams      []string `json:"streams"`
+	LeaseUntilMs int64    `json:"lease_until_ms"`
+}
+
 // ReleaseRequest is the pull-wake release body (PROTOCOL §7.2).
 type ReleaseRequest struct {
 	WakeID     string `json:"wake_id"`
@@ -231,7 +246,9 @@ type ErrorBody struct {
 // FENCED rejection, whose Reason names the fence rule that refused the write
 // (#183: credential, shard, producer_required, wake_token, precheck, marker,
 // sealed, epoch, bound, or store; "principal" exists in code as a classify
-// backstop only and is never emitted — ADR-0008 decision 9).
+// backstop only and is never emitted — ADR-0008 decision 9). The claim/verify
+// route's 409 carries Reason "precheck" with no generation or holder — the
+// append pre-check's own envelope (WRITE-FENCING.md §9.1).
 type ErrorDetail struct {
 	Code          string `json:"code"`
 	Message       string `json:"message,omitempty"`

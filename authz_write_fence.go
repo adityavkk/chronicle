@@ -71,7 +71,7 @@ const (
 	// so this reason is never emitted on the wire.
 	reasonPrincipal = "principal"
 	reasonWakeToken = "wake_token"
-	reasonPrecheck  = "precheck"
+	reasonPrecheck  = webhook.FenceReasonPrecheck
 	reasonStore     = "store"
 )
 
