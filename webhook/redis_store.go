@@ -857,25 +857,36 @@ func (s *RedisStore) claimShardAuthorized(id string, g int, worker, wakeID strin
 	}
 }
 
-// CheckWriteFence verifies the append capability against current live claim
-// state. It is a single slot-homed Lua read of the shard fence, so the decision
-// cannot observe a partially-updated claim record.
-func (s *RedisStore) CheckWriteFence(id string, shard int, generation int64, wakeID, holder string, now time.Time) (string, error) {
+// VerifyWriteFence verifies the append capability against current live claim
+// state and, when it holds, returns the claim's lease deadline with it. It is
+// a single slot-homed Lua read of the shard fence, so the decision cannot
+// observe a partially-updated claim record — and the deadline is the accepted
+// claim's, which is what lets the claim/verify route answer without a second,
+// racing read (WRITE-FENCING.md §9.1).
+func (s *RedisStore) VerifyWriteFence(id string, shard int, generation int64, wakeID, holder string, now time.Time) (WriteFenceCheck, error) {
 	reply, err := writeFenceScript.run(s.ctx(), s.client, newWriteFenceKeys(id, shard),
 		nsArg(now), strconv.FormatInt(generation, 10), wakeID, holder)
 	if err != nil {
-		return "", err
+		return WriteFenceCheck{}, err
 	}
-	switch reply.(type) {
+	switch reply := reply.(type) {
 	case writeFenceOK:
-		return "OK", nil
+		return WriteFenceCheck{Status: "OK", LeaseUntilNs: reply.LeaseUntilNs}, nil
 	case writeFenceFenced:
-		return "FENCED", nil
+		return WriteFenceCheck{Status: "FENCED"}, nil
 	case writeFenceNoSub:
-		return "NOSUB", nil
+		return WriteFenceCheck{Status: "NOSUB"}, nil
 	default:
-		return "", fmt.Errorf("check_write_fence: unhandled reply %T", reply)
+		return WriteFenceCheck{}, fmt.Errorf("check_write_fence: unhandled reply %T", reply)
 	}
+}
+
+// CheckWriteFence is VerifyWriteFence's status alone: the append pre-check's
+// contract, unchanged. Both run the same script on the same keys, so the
+// pre-check and the verify route cannot drift.
+func (s *RedisStore) CheckWriteFence(id string, shard int, generation int64, wakeID, holder string, now time.Time) (string, error) {
+	check, err := s.VerifyWriteFence(id, shard, generation, wakeID, holder, now)
+	return check.Status, err
 }
 
 // recordContention reports a claim/ack/release lease outcome to the contention

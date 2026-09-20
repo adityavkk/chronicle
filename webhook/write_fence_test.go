@@ -342,6 +342,19 @@ func TestCheckWriteFenceWebhookBranch(t *testing.T) {
 		if err != nil || status == "NOSUB" {
 			rt.Fatalf("check_write_fence = %q err=%v", status, err)
 		}
+		// The verify form is the same script: same status, plus the seeded
+		// lease deadline with an OK and nothing with a FENCED (#192).
+		check, err := s.VerifyWriteFence(id, 0, reqGen, reqWake, reqHolder, now)
+		if err != nil || check.Status != status {
+			rt.Fatalf("verify_write_fence = %+v err=%v, check_write_fence = %q", check, err, status)
+		}
+		wantLease := int64(0)
+		if status == "OK" {
+			wantLease = lease
+		}
+		if check.LeaseUntilNs != wantLease {
+			rt.Fatalf("verify_write_fence lease = %d, want %d (status %s)", check.LeaseUntilNs, wantLease, status)
+		}
 		luaFenced := status == "FENCED"
 		if goFenced != luaFenced {
 			rt.Fatalf("divergence on sub=%s phase=%s holder=%s gen=%d wake=%q worker=%q lease-now=%d req=(%d,%q,%q): Go fenced=%v, Lua fenced=%v",
@@ -360,6 +373,55 @@ func TestCheckWriteFenceWebhookBranch(t *testing.T) {
 				id, phase, holderFlag, gen, wake, worker, lease-nowNs, reqGen, reqWake, reqHolder, goFenced, wantProceed)
 		}
 	})
+}
+
+// TestVerifyWriteFenceReturnsLease pins the additive OK reply of
+// check_write_fence.lua (#192): VerifyWriteFence answers a live claim with the
+// lease deadline the fence hash holds, read in the same script step as the
+// predicate; after a takeover the answer is a bare FENCED and for a missing
+// subscription a bare NOSUB, with no lease disclosed; and CheckWriteFence
+// keeps its status-only contract over the same call.
+func TestVerifyWriteFenceReturnsLease(t *testing.T) {
+	s, _ := newTestStore(t)
+	now := time.Now()
+	if _, err := s.CreateOrConfirm("s1", pullWakeCfg(), nil, now); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	cr, err := s.Claim("s1", "worker-A", "w_a", now, 1000)
+	if err != nil || !cr.Claimed {
+		t.Fatalf("claim = %+v err=%v", cr, err)
+	}
+	sub, ok, err := s.Get("s1")
+	if err != nil || !ok {
+		t.Fatalf("get = ok:%v err:%v", ok, err)
+	}
+	check, err := s.VerifyWriteFence("s1", 0, cr.Generation, cr.WakeID, "worker-A", now)
+	if err != nil || check.Status != "OK" {
+		t.Fatalf("live verify = %+v err=%v, want OK", check, err)
+	}
+	if check.LeaseUntilNs != sub.LeaseUntilNs || check.LeaseUntilNs <= now.UnixNano() {
+		t.Fatalf("live verify lease = %d, want the hash's %d (> now %d)", check.LeaseUntilNs, sub.LeaseUntilNs, now.UnixNano())
+	}
+	if st, err := s.CheckWriteFence("s1", 0, cr.Generation, cr.WakeID, "worker-A", now); err != nil || st != "OK" {
+		t.Fatalf("live check = %q err=%v, want OK", st, err)
+	}
+
+	later := now.Add(2 * time.Second)
+	crB, err := s.Claim("s1", "worker-B", "w_b", later, 1000)
+	if err != nil || !crB.Claimed || crB.Generation == cr.Generation {
+		t.Fatalf("takeover = %+v err=%v", crB, err)
+	}
+	check, err = s.VerifyWriteFence("s1", 0, cr.Generation, cr.WakeID, "worker-A", later)
+	if err != nil || check != (WriteFenceCheck{Status: "FENCED"}) {
+		t.Fatalf("deposed verify = %+v err=%v, want bare FENCED", check, err)
+	}
+	if st, err := s.CheckWriteFence("s1", 0, cr.Generation, cr.WakeID, "worker-A", later); err != nil || st != "FENCED" {
+		t.Fatalf("deposed check = %q err=%v, want FENCED", st, err)
+	}
+	check, err = s.VerifyWriteFence("nope", 0, cr.Generation, cr.WakeID, "worker-A", now)
+	if err != nil || check != (WriteFenceCheck{Status: "NOSUB"}) {
+		t.Fatalf("missing verify = %+v err=%v, want bare NOSUB", check, err)
+	}
 }
 
 // TestDeliverWebhookMintsWriteTokenAfterGrant pins the webhook half of design

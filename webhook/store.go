@@ -90,6 +90,12 @@ type Store interface {
 	// holder all match, and the lease has not expired.
 	CheckWriteFence(id string, shard int, generation int64, wakeID, holder string, now time.Time) (string, error)
 
+	// VerifyWriteFence is CheckWriteFence plus the claim's lease deadline, read
+	// in the same atomic script step. The claim/verify route (WRITE-FENCING.md
+	// §9.1) builds its 200 body from it so the deadline it reports belongs to
+	// the claim the predicate accepted, never to a later one.
+	VerifyWriteFence(id string, shard int, generation int64, wakeID, holder string, now time.Time) (WriteFenceCheck, error)
+
 	// AckUnscoped fences then applies acks forward-only; done releases the lease,
 	// else it extends the lease as a heartbeat (PROTOCOL §7.1, §7.2). This is the
 	// external callback/pull-ack API.
@@ -251,6 +257,14 @@ type MutationResult struct {
 	Applied   bool
 	NoSub     bool
 	Forbidden bool
+}
+
+// WriteFenceCheck is the outcome of VerifyWriteFence: the pre-check's status
+// ("OK", "FENCED", or "NOSUB") and, with OK only, the accepted claim's
+// lease_until_ns as the fence state holds it.
+type WriteFenceCheck struct {
+	Status       string
+	LeaseUntilNs int64
 }
 
 // ClaimResult is the outcome of a claim attempt.

@@ -116,7 +116,9 @@ type writeFenceReply interface {
 	status() string
 }
 type (
-	writeFenceOK     struct{}
+	// writeFenceOK carries the claim's lease deadline, read in the same
+	// script step as the predicate, for the claim/verify route's body.
+	writeFenceOK     struct{ LeaseUntilNs int64 }
 	writeFenceFenced struct{}
 	writeFenceNoSub  struct{}
 )
@@ -129,21 +131,34 @@ func (writeFenceFenced) status() string   { return "FENCED" }
 func (writeFenceNoSub) status() string    { return "NOSUB" }
 
 var (
-	writeFenceReplyVariants = []replyVariant{{Status: "OK"}, {Status: "FENCED"}, {Status: "NOSUB"}}
+	writeFenceReplyVariants = []replyVariant{{Status: "OK", Fields: []replyFieldKind{replyNS}}, {Status: "FENCED"}, {Status: "NOSUB"}}
 	writeFenceDecoder       = scriptDecoder[writeFenceReply]{Variants: writeFenceReplyVariants, Decode: decodeWriteFenceReply}
 )
 
 func decodeWriteFenceReply(r scriptReply) (writeFenceReply, error) {
-	st, err := decodeUnitStatus(r, writeFenceReplyVariants)
+	st, err := decodeStatus(r, writeFenceReplyVariants)
 	if err != nil {
 		return nil, err
 	}
 	switch st {
 	case "OK":
-		return writeFenceOK{}, nil
+		if err := r.wantArity(2); err != nil {
+			return nil, err
+		}
+		leaseUntil, err := r.nsAt(1)
+		if err != nil {
+			return nil, err
+		}
+		return writeFenceOK{LeaseUntilNs: leaseUntil}, nil
 	case "FENCED":
+		if err := r.wantArity(1); err != nil {
+			return nil, err
+		}
 		return writeFenceFenced{}, nil
 	case "NOSUB":
+		if err := r.wantArity(1); err != nil {
+			return nil, err
+		}
 		return writeFenceNoSub{}, nil
 	default:
 		return nil, fmt.Errorf("unhandled check_write_fence status %q", st)
