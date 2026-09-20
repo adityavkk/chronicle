@@ -1,5 +1,5 @@
 // Black-box conformance for the Write Fencing extension (docs/spec/WRITE-FENCING.md,
-// design §G.1 / §H.3): WF-01…WF-28 pin each MUST of the extension text against a
+// design §G.1 / §H.3): WF-01…WF-30 pin each MUST of the extension text against a
 // live enforce-mode chronicle; NC-01…NC-04 are the negative controls that pin what
 // the extension must NOT change about the base protocol. One test() per id.
 //
@@ -18,6 +18,7 @@ import {
   createSub,
   deleteSub,
   done,
+  getSub,
   head,
   post,
   producer,
@@ -27,6 +28,8 @@ import {
   svc,
   tail,
   uniq,
+  verify,
+  verifyWith,
 } from "./client.ts"
 
 // -- §3 Creating a fenced stream -------------------------------------------
@@ -502,6 +505,152 @@ test("WF-28 pull-wake parity end to end: heartbeat refresh, done seals", async (
   }
   expect(await tail(path)).toBe(sealedTail)
 })
+
+// -- §9.1 Verifying a write token -------------------------------------------
+
+test("WF-29 verify answers as an append would, without a write", async () => {
+  // The states that take wall-clock time are started first and checked last,
+  // so the whole matrix fits one lease-and-token-expiry window (~8 s).
+  const expPath = uniq("wf29-exp")
+  const depPath = uniq("wf29-dep")
+  const lapsePath = uniq("wf29-lapse")
+  for (const p of [expPath, depPath, lapsePath]) await createStream(p, { "Write-Fence": "true" })
+  const expSub = subId("s")
+  const depSub = subId("s")
+  const lapseSub = subId("s")
+  const started = Date.now()
+  const expCr = await pullWakeSub(expSub, expPath, 1000) // token TTL = lease + 5s
+  const depCr = await pullWakeSub(depSub, depPath, 1000)
+  const lapseCr = await pullWakeSub(lapseSub, lapsePath, 1000)
+
+  // Live claim: 200 with the claim facts — the token's exact scope, not a
+  // snapshot — and the append it vouches for lands.
+  const path = uniq("wf29")
+  await createStream(path, { "Write-Fence": "true" })
+  const sub = subId("s")
+  const cr = await pullWakeSub(sub, path)
+  const live = await verify(sub, cr.write_token!)
+  expect(live.status).toBe(200)
+  expect(live.headers.get("Cache-Control")).toBe("no-store")
+  const facts = live.json()
+  expect(facts.generation).toBe(cr.generation)
+  expect(facts.wake_id).toBe(cr.wake_id)
+  expect(facts.holder).toBe("worker-A")
+  expect(facts.streams).toEqual([path])
+  expect(facts.lease_until_ms).toBeGreaterThan(Date.now())
+  expect((await post(path, producer(cr.write_token!, "entity-wf29", cr.generation, 0))).status).toBe(200)
+
+  // Same carriers as the append: the named header verifies; a presented but
+  // empty one is a 401 that never falls through to the bearer.
+  expect((await verifyWith(sub, { "Write-Token": cr.write_token! })).status).toBe(200)
+  const malformed = await verifyWith(sub, { "Write-Token": "", Authorization: `Bearer ${cr.write_token}` })
+  expect(malformed.status).toBe(401)
+  expect(malformed.json().error.code).toBe("TOKEN_INVALID")
+
+  // Not a usable credential — malformed, the callback token, another
+  // subscription's token — is 401 TOKEN_INVALID; the append under the same
+  // bytes is 401 too (the other subscription's token is refused by the
+  // per-subscription route, while the append judges it against its own
+  // subscription).
+  const otherPath = uniq("wf29-other")
+  await createStream(otherPath, { "Write-Fence": "true" })
+  const other = await pullWakeSub(subId("s"), otherPath)
+  for (const bad of ["not-a-token", cr.token, other.write_token!]) {
+    const res = await verify(sub, bad)
+    expect(res.status).toBe(401)
+    expect(res.json().error.code).toBe("TOKEN_INVALID")
+  }
+  for (const bad of ["not-a-token", cr.token]) {
+    expect((await post(path, producer(bad, "entity-wf29", cr.generation, 1))).status).toBe(401)
+  }
+
+  // No side effects: the subscription view is byte-identical across repeated
+  // verifies, and a heartbeat afterwards still finds the claim live.
+  const before = await getSub(sub)
+  expect(before.status).toBe(200)
+  for (let i = 0; i < 5; i++) expect((await verify(sub, cr.write_token!)).status).toBe(200)
+  expect((await getSub(sub)).json()).toEqual(before.json())
+  const hb = await ack(sub, cr.token, { wake_id: cr.wake_id, generation: cr.generation })
+  expect(hb.status).toBe(200)
+  expect(hb.json().write_token).toBeTruthy()
+
+  // Released by done: 409 FENCED reason precheck — the pre-check's envelope —
+  // and the append is the same 409; a deleted subscription is 409 too, never
+  // 404, so 404 stays the "route absent" signal.
+  const dnPath = uniq("wf29-done")
+  await createStream(dnPath, { "Write-Fence": "true" })
+  const dnSub = subId("s")
+  const dnCr = await pullWakeSub(dnSub, dnPath)
+  expect((await done(dnSub, dnCr, dnPath)).status).toBe(200)
+  const released = await verify(dnSub, dnCr.write_token!)
+  expect(released.status).toBe(409)
+  expect(released.json().error).toEqual({ code: "FENCED", reason: "precheck", message: "write token claim is fenced" })
+  expect((await post(dnPath, producer(dnCr.write_token!, "entity-wf29", dnCr.generation, 1))).status).toBe(409)
+  expect((await deleteSub(dnSub)).status).toBe(204)
+  expect((await verify(dnSub, dnCr.write_token!)).status).toBe(409)
+  expect((await post(dnPath, producer(dnCr.write_token!, "entity-wf29", dnCr.generation, 2))).status).toBe(409)
+
+  // Deposed at g+1 and a lapsed lease with no successor: both 409 precheck,
+  // and the append agrees.
+  await sleep(Math.max(0, 1400 - (Date.now() - started)))
+  const depB = await claim(depSub, "worker-B")
+  expect(depB.generation).toBeGreaterThan(depCr.generation)
+  for (const [s, p, c] of [
+    [depSub, depPath, depCr],
+    [lapseSub, lapsePath, lapseCr],
+  ] as const) {
+    const res = await verify(s, c.write_token!)
+    expect(res.status).toBe(409)
+    expect(res.json().error.reason).toBe("precheck")
+    expect((await post(p, producer(c.write_token!, "entity-wf29", c.generation, 1))).status).toBe(409)
+  }
+
+  // Expired: 401 TOKEN_EXPIRED with no refreshed token, and the append is 401.
+  await sleep(Math.max(0, 8000 - (Date.now() - started)))
+  const expired = await verify(expSub, expCr.write_token!)
+  expect(expired.status).toBe(401)
+  expect(expired.json().error.code).toBe("TOKEN_EXPIRED")
+  expect(expired.json().token).toBeUndefined()
+  expect((await post(expPath, producer(expCr.write_token!, "entity-wf29", expCr.generation, 1))).status).toBe(401)
+}, 20_000)
+
+test("WF-30 verify never renews: repeated positive answers do not extend the lease or refresh the token", async () => {
+  const path = uniq("wf30")
+  await createStream(path, { "Write-Fence": "true" })
+  const sub = subId("s")
+  const started = Date.now()
+  const cr = await pullWakeSub(sub, path, 1000)
+  const first = await verify(sub, cr.write_token!)
+  expect(first.status).toBe(200)
+  const leaseUntil = first.json().lease_until_ms as number
+  // Poll faster than the lease. A heartbeat at this cadence would keep the
+  // claim live; verify must not, so the deadline never moves and the answer
+  // flips to 409 when the lease lapses — a client may therefore cache a 200
+  // no longer than min(its heartbeat interval, lease_until_ms - now).
+  const answers: number[] = []
+  const deadlines = new Set<number>()
+  for (let i = 0; i < 8; i++) {
+    await sleep(200)
+    const res = await verify(sub, cr.write_token!)
+    answers.push(res.status)
+    if (res.status === 200) deadlines.add(res.json().lease_until_ms)
+  }
+  expect(answers[0]).toBe(200)
+  expect(answers[answers.length - 1]).toBe(409)
+  const firstFenced = answers.indexOf(409)
+  expect(answers.slice(firstFenced).every((s) => s === 409)).toBe(true)
+  expect([...deadlines]).toEqual([leaseUntil])
+  expect((await verify(sub, cr.write_token!)).json().error.reason).toBe("precheck")
+  expect((await post(path, producer(cr.write_token!, "entity-wf30", cr.generation, 0))).status).toBe(409)
+  // Past the token's own TTL (lease + 5 s, unix-second exp): TOKEN_EXPIRED
+  // and no token in the body — verify never mints, so there is nothing for a
+  // client to cache or retry with.
+  await sleep(Math.max(0, 8000 - (Date.now() - started)))
+  const expired = await verify(sub, cr.write_token!)
+  expect(expired.status).toBe(401)
+  expect(expired.json().error.code).toBe("TOKEN_EXPIRED")
+  expect(expired.json().token).toBeUndefined()
+}, 20_000)
 
 // -- Negative controls (base behavior the extension must not change) --------
 

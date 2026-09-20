@@ -5,7 +5,9 @@
 // service policy (CONFORMANCE_EXT_URL) and an insecure-mode one for the
 // negative controls that need today's open posture (CONFORMANCE_EXT_INSECURE_URL).
 // Every stream and subscription name is unique per test, so tests are
-// order-independent and the two vitest files can run in parallel.
+// order-independent and the two vitest files can run in parallel. Besides the
+// stream and subscription drivers it exposes verify(), the §9.1 read-only
+// claim check a holder makes with nothing but its write token.
 
 export const BASE = process.env.CONFORMANCE_EXT_URL ?? "http://localhost:4439"
 export const INSECURE_BASE =
@@ -185,6 +187,26 @@ export async function done(id: string, cr: ClaimResponse, path: string): Promise
     acks: [{ stream: path, offset: await tail(path) }],
     done: true,
   })
+}
+
+/** verify asks whether writeToken is the live claim of subscription id
+ *  (WRITE-FENCING.md §9.1): read-only, the write token as the sole credential. */
+export function verify(id: string, writeToken: string, base = BASE): Promise<Res> {
+  return verifyWith(id, { Authorization: `Bearer ${writeToken}` }, base)
+}
+
+/** verifyWith is verify() with an explicit header set, for carrier cases. */
+export function verifyWith(
+  id: string,
+  headers: Record<string, string>,
+  base = BASE,
+): Promise<Res> {
+  return request("POST", `${base}/v1/stream/__ds/subscriptions/${id}/claim/verify`, headers)
+}
+
+/** getSub reads the subscription view as the service principal. */
+export function getSub(id: string): Promise<Res> {
+  return request("GET", `${BASE}/v1/stream/__ds/subscriptions/${id}`, { ...svc })
 }
 
 /** deleteSub deletes a subscription as the owning service principal. */
