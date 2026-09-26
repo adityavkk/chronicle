@@ -1,6 +1,8 @@
 package webhook
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -158,5 +160,77 @@ func TestServicePolicyAppliesToSubscriptionRoutes(t *testing.T) {
 	}
 	if metrics.delegatedGateways != 1 {
 		t.Fatalf("delegated gateway decisions = %d, want 1", metrics.delegatedGateways)
+	}
+}
+
+// TestMalformedXFCCRefusedOnControlPlane: the subscription control plane
+// shares auth's XFCC parser, so a client prefix with an unbalanced quote that
+// used to run across the comma before the sidecar's appended element is
+// refused here too — 401 UNAUTHENTICATED on the wire, the distinct reason in
+// the denial log line (the control-plane envelope carries codes only), no
+// store mutation, one authentication failure — while a well-formed prefix
+// leaves the appended element governing.
+func TestMalformedXFCCRefusedOnControlPlane(t *testing.T) {
+	mgr, store, _ := newAuthTestManager(t, auth.ModeEnforce)
+	policies, err := auth.NewServicePolicies([]auth.ServicePolicyConfig{
+		{Identity: operatorSPIFFE, Actions: []auth.Action{auth.ActionSubscribe, auth.ActionLink, auth.ActionClaim}, Namespaces: []string{"tenant-a"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics := &serviceRecordingMetrics{}
+	mgr.metrics = metrics
+	var logs bytes.Buffer
+	mgr.log = slog.New(slog.NewTextHandler(&logs, nil))
+	mgr.serviceAccess = &auth.ServiceAccess{
+		TrustedSPIFFEIDs:   []string{operatorSPIFFE},
+		Policies:           policies,
+		SidecarMarkerName:  serviceMarkerName,
+		SidecarMarkerValue: serviceMarkerValue,
+	}
+	rt := NewRoutes(mgr)
+
+	create := func(t *testing.T, id string, xfcc string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, subsPrefix+id, strings.NewReader(pullWakeBody("tenant-a/wake", "tenant-a/events")))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Add("X-Forwarded-Client-Cert", xfcc)
+		req.Header.Set(serviceMarkerName, serviceMarkerValue)
+		rec := httptest.NewRecorder()
+		if !rt.HandleRequest(rec, req) {
+			t.Fatalf("route %s was not handled", subsPrefix+id)
+		}
+		return rec
+	}
+
+	// The client's prefix plants the trusted operator and opens a quote it
+	// never closes; the sidecar appends an untrusted peer.
+	rec := create(t, "forged-quote", "URI="+operatorSPIFFE+`;Subject="oops,URI=`+readerSPIFFE)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("forged-quote create = %d, want 401; body %q", rec.Code, rec.Body.String())
+	}
+	if body := strings.TrimSpace(rec.Body.String()); body != `{"error":{"code":"UNAUTHENTICATED"}}` {
+		t.Fatalf("body %q, want the bare UNAUTHENTICATED envelope", body)
+	}
+	if !strings.Contains(logs.String(), "malformed X-Forwarded-Client-Cert: unterminated quoted value") {
+		t.Fatalf("denial log %q lacks the distinct malformed-header reason", logs.String())
+	}
+	if strings.Contains(logs.String(), "spiffe://") {
+		t.Fatalf("denial log %q echoes header content", logs.String())
+	}
+	if _, ok, _ := store.Get("forged-quote"); ok {
+		t.Fatal("a refused header mutated the subscription store")
+	}
+	if metrics.authenticationFailures != 1 || metrics.spiffeAuthentications != 0 {
+		t.Fatalf("metrics = %d failures, %d spiffe authentications; want 1 and 0", metrics.authenticationFailures, metrics.spiffeAuthentications)
+	}
+
+	// Well-formed prefix, trusted appended element: the appended element governs.
+	rec = create(t, "well-formed", `Subject="a,URI=`+readerSPIFFE+`";URI=`+readerSPIFFE+",URI="+operatorSPIFFE)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("well-formed create = %d, want 201; body %q", rec.Code, rec.Body.String())
+	}
+	if sub, ok, err := store.Get("well-formed"); err != nil || !ok || sub.OwnerSubject != operatorSPIFFE {
+		t.Fatalf("well-formed subscription = ok %v err %v owner %q", ok, err, sub.OwnerSubject)
 	}
 }

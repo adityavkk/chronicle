@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
@@ -175,4 +176,135 @@ func TestXFCCSidecarMarkerGate(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestXFCCMalformedQuotingFailsClosed pins the fix for the APPEND_FORWARD
+// boundary finding of the 2026-09 review: a client prefix with an unbalanced
+// quote used to run across the comma before the sidecar's appended element,
+// so the client's trusted URI counted as part of the "last" element. Such a
+// header is now refused as a whole with a distinct 401 detail, a well-formed
+// prefix keeps the appended element governing, and the marker gate is
+// unaffected: it still runs first and a set marker is still required.
+func TestXFCCMalformedQuotingFailsClosed(t *testing.T) {
+	key := testAuthKey(t)
+	const malformedDetail = "malformed X-Forwarded-Client-Cert"
+	forgedTrusted := "URI=" + tb4AgentsID + `;Subject="oops`
+	forgedUntrusted := "URI=" + tb4OtherID + `;Subject="oops`
+	body := []byte(`{"n":1}`)
+	headers := map[string]string{"Content-Type": "application/json"}
+
+	post := func(t *testing.T, h *Handler, xfccLines ...string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := rawRequest(http.MethodPost, "/events/a", headers, body)
+		for _, line := range xfccLines {
+			req.Header.Add(tb4XFCCHdr, line)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	refused := func(t *testing.T, rec *httptest.ResponseRecorder, hooks *hookRecorder) {
+		t.Helper()
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body %q", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), malformedDetail) {
+			t.Fatalf("body %q lacks the distinct detail %q", rec.Body.String(), malformedDetail)
+		}
+		if strings.Contains(rec.Body.String(), "spiffe://") {
+			t.Fatalf("body %q echoes header content", rec.Body.String())
+		}
+		if hooks.appendCount() != 0 {
+			t.Fatalf("append hook fired %d times on a refused request", hooks.appendCount())
+		}
+	}
+
+	t.Run("forged unterminated quote in a leading header line", func(t *testing.T) {
+		h, hooks := serviceHandler(t, key)
+		createDirect(t, h, "/events/a", "application/json")
+		refused(t, post(t, h, forgedTrusted, "URI="+tb4OtherID), hooks)
+	})
+
+	t.Run("forged unterminated quote in one header value", func(t *testing.T) {
+		h, hooks := serviceHandler(t, key)
+		createDirect(t, h, "/events/a", "application/json")
+		refused(t, post(t, h, forgedTrusted+",URI="+tb4OtherID), hooks)
+	})
+
+	t.Run("malformed prefix fails closed even with a trusted appended element", func(t *testing.T) {
+		h, hooks := serviceHandler(t, key)
+		createDirect(t, h, "/events/a", "application/json")
+		refused(t, post(t, h, forgedUntrusted, "URI="+tb4AgentsID), hooks)
+	})
+
+	t.Run("well-formed prefix planting a trusted URI loses to the appended element", func(t *testing.T) {
+		h, hooks := serviceHandler(t, key)
+		createDirect(t, h, "/events/a", "application/json")
+		rec := post(t, h, `Subject="a,URI=`+tb4AgentsID+`";URI=`+tb4AgentsID, "Hash=bb;URI="+tb4OtherID)
+		if rec.Code != http.StatusUnauthorized || hooks.appendCount() != 0 {
+			t.Fatalf("status = %d, appends %d; the untrusted appended element must govern", rec.Code, hooks.appendCount())
+		}
+		if strings.Contains(rec.Body.String(), malformedDetail) {
+			t.Fatalf("a well-formed header was reported as malformed: %q", rec.Body.String())
+		}
+	})
+
+	t.Run("well-formed prefix keeps the trusted appended element", func(t *testing.T) {
+		h, hooks := serviceHandler(t, key)
+		createDirect(t, h, "/events/a", "application/json")
+		rec := post(t, h, `Subject="a,URI=`+tb4AgentsID+`";URI=`+tb4OtherID, "Hash=bb;URI="+tb4AgentsID)
+		if rec.Code != http.StatusNoContent || hooks.appendCount() != 1 {
+			t.Fatalf("status = %d, appends %d, want 204 and one append; body %q", rec.Code, hooks.appendCount(), rec.Body.String())
+		}
+	})
+
+	t.Run("marker gate is unaffected", func(t *testing.T) {
+		const markerName, markerValue = "X-Chronicle-Sidecar", "verified"
+		newHandler := func(t *testing.T) (*Handler, *hookRecorder) {
+			h, hooks := serviceHandler(t, key)
+			h.ServiceAuth.SidecarMarkerName = markerName
+			h.ServiceAuth.SidecarMarkerValue = markerValue
+			h.ServiceAuth.AllowXFCCWithoutMarker = false
+			createDirect(t, h, "/events/a", "application/json")
+			return h, hooks
+		}
+		withMarker := func(value string) map[string]string {
+			m := map[string]string{"Content-Type": "application/json"}
+			if value != "" {
+				m[markerName] = value
+			}
+			return m
+		}
+
+		h, hooks := newHandler(t)
+		req := rawRequest(http.MethodPost, "/events/a", withMarker(markerValue), body)
+		req.Header.Add(tb4XFCCHdr, forgedTrusted)
+		req.Header.Add(tb4XFCCHdr, "URI="+tb4OtherID)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		refused(t, rec, hooks)
+
+		h, hooks = newHandler(t)
+		req = rawRequest(http.MethodPost, "/events/a", withMarker(""), body)
+		req.Header.Add(tb4XFCCHdr, forgedTrusted)
+		req.Header.Add(tb4XFCCHdr, "URI="+tb4AgentsID)
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized || hooks.appendCount() != 0 {
+			t.Fatalf("missing marker: status = %d, appends %d, want 401 and none", rec.Code, hooks.appendCount())
+		}
+		if strings.Contains(rec.Body.String(), malformedDetail) {
+			t.Fatalf("the gate must run before the parser; body %q", rec.Body.String())
+		}
+
+		h, hooks = newHandler(t)
+		req = rawRequest(http.MethodPost, "/events/a", withMarker(markerValue), body)
+		req.Header.Add(tb4XFCCHdr, `Subject="a,b";URI=`+tb4OtherID)
+		req.Header.Add(tb4XFCCHdr, "URI="+tb4AgentsID)
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent || hooks.appendCount() != 1 {
+			t.Fatalf("correct marker + well-formed header: status = %d, appends %d, want 204 and one; body %q", rec.Code, hooks.appendCount(), rec.Body.String())
+		}
+	})
 }

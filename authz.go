@@ -111,13 +111,15 @@ func (h *Handler) serviceDecision(r *http.Request, path auth.StreamPath, action 
 	if values := r.Header.Values(h.ServiceAuth.SidecarMarkerName); len(values) == 1 {
 		marker = values[0]
 	}
-	principal, status := h.ServiceAuth.Authenticate(bearerFromRequest(r), joinedXFCC, marker)
+	principal, status, detail := h.ServiceAuth.AuthenticateDetail(bearerFromRequest(r), joinedXFCC, marker)
 	switch status {
 	case auth.ServiceRejected:
 		if h.ServiceMetrics != nil {
 			h.ServiceMetrics.ServiceAuthenticationFailure()
 		}
-		return auth.Deny(auth.ReasonUnauthenticated, "invalid service identity"), true
+		// detail distinguishes a header the XFCC parser refused from a gate
+		// failure or allowlist miss; it never carries header material.
+		return auth.Deny(auth.ReasonUnauthenticated, detail), true
 	case auth.ServiceAuthenticated:
 		if h.ServiceMetrics != nil {
 			if joinedXFCC != "" {

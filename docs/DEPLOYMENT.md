@@ -381,8 +381,12 @@ also enforce all of these controls:
    expected caller SPIFFE identities. Chronicle's policy is not a replacement
    for the network policy.
 6. Verify the deployed path. A request sent directly to the application with a
-   forged XFCC header must fail with `401`. The same request through an approved
-   mTLS caller must carry the sidecar marker and resolve to its exact SPIFFE
+   forged XFCC header must fail with `401`. A header whose quoting is unbalanced
+   or misplaced is refused outright (`401`, reason
+   `malformed X-Forwarded-Client-Cert`) before any element is read; Chronicle's
+   last-element rule covers well-formed input only and does not replace
+   `SANITIZE_SET` or the marker. The same request through an approved mTLS
+   caller must carry the sidecar marker and resolve to its exact SPIFFE
    subject.
 
 Do not set `CHRONICLE_XFCC_TRUST_WITHOUT_MARKER` in production. It is a
