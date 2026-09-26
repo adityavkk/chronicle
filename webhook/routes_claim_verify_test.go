@@ -272,7 +272,7 @@ type failingVerifyStore struct {
 	err error
 }
 
-func (s *failingVerifyStore) VerifyWriteFence(string, int, int64, string, string, time.Time) (WriteFenceCheck, error) {
+func (s *failingVerifyStore) VerifyWriteFence(string, int, string, int64, string, string, time.Time) (WriteFenceCheck, error) {
 	return WriteFenceCheck{}, s.err
 }
 

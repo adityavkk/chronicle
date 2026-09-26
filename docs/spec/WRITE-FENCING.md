@@ -296,8 +296,14 @@ as the fenced write class's token phase does (§5).
 
 **Semantics.** For a write token minted for `{id}`, the server MUST evaluate
 the credential and live-claim predicate that a fenced write to a stream in the
-token's scope would evaluate before its commit: token validity and expiry, the
-subscription and its incarnation, generation, `wake_id`, holder, and lease.
+token's scope would evaluate before its commit: token validity and expiry;
+the subscription's existence; the token's subscription incarnation against
+the subscription's current one; and the claim's generation, `wake_id`,
+holder, and lease. The incarnation predicate is not implied by the others: a
+deleted and recreated subscription is a new incarnation that restarts at
+generation 0, so a predecessor's token can carry the current claim's exact
+generation, `wake_id`, and holder and MUST still be refused — the same
+identity keys the stream-slot marker a fenced append is judged against.
 It MUST answer `200` when the token names the subscription's live claim, `401`
 when the token is not a usable credential, and `409` when it is the server's
 but no longer names the current claim (deposed, released, completed, lapsed,
@@ -457,14 +463,19 @@ and the limits of that implementation.
   stable producer id then hits the base `403` stale-epoch response until the
   new authority's generation passes the stored epoch — a liveness (not
   safety) limitation. The planned fix is control-plane: seed a recreated
-  subscription's generation above its predecessor's.
+  subscription's generation above its predecessor's. The predecessor's write
+  tokens are fenced by incarnation regardless (§9.1, WF-29).
 - **Claim verification.** `claim/verify` (§9.1) answers from
   `check_write_fence.lua` — the append pre-check — in one atomic Redis step
   that also yields the claim's lease, so it cannot observe a partially
   updated claim and its `lease_until_ms` belongs to the claim it accepted;
   `lease_remaining_ms` is that deadline minus the `now` the script judged
   the lease against, so a consumer's WF-30 ceiling rests on the server clock
-  alone. It
+  alone. The same script compares the token's subscription incarnation with
+  the configuration's current one ahead of the generation, wake, and holder
+  predicates, so a deleted-and-recreated subscription fences its
+  predecessor's tokens even when the rest of the tuple coincides — the
+  identity the stream-slot marker key carries. It
   does not consult a routed service identity or the per-stream seal. Thus a
   rejected or unauthorized service identity beside a valid named write token
   can receive `200` here and `401`/`403` on append. A path sealed while its
@@ -520,5 +531,5 @@ names the in-repo Go test that pins the same rule where one exists.
 | WF-26 | no fence disclosure on the pre-credential 401 | `TestHandleAppendFencedDisclosure` |
 | WF-27 | webhook end-to-end parity | `TestWebhookCallbackHeartbeatRefreshesWriteToken`, `TestWebhookAutoAckDoneSeals` |
 | WF-28 | pull-wake end-to-end | `TestHeartbeatRefreshesWriteTokenForLongLiveHolder` |
-| WF-29 | verify evaluates the token and live-claim pre-commit predicate without a write | `TestVerifyClaimUsesOneAtomicStoreRead`, `TestClaimVerifyAgreesWithAppend`, `TestClaimVerifyHasNoSideEffects`, `TestClaimVerifyLinearizedWithDeposition` |
+| WF-29 | verify evaluates the token and live-claim pre-commit predicate — incarnation included — without a write | `TestVerifyClaimUsesOneAtomicStoreRead`, `TestClaimVerifyAgreesWithAppend`, `TestClaimVerifyHasNoSideEffects`, `TestClaimVerifyLinearizedWithDeposition`, `TestVerifyClaimFencesRecreatedIncarnation`, `TestClaimVerifyFencesRecreatedIncarnation` |
 | WF-30 | verify never renews, answers `Cache-Control: no-store`, and reports a server-relative `lease_remaining_ms` bounded by the lease TTL that never grows across answers; deriving the cache ceiling from it is a consumer obligation | `TestClaimVerifyNeverRenews`, `TestClaimVerifyReportsServerRelativeLease`, `TestHandleClaimVerifyRoute`; consumer tests pin the client-side cache policy |

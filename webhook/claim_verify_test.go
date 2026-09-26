@@ -19,7 +19,7 @@ type verifyCallStore struct {
 	err         error
 }
 
-func (s *verifyCallStore) VerifyWriteFence(string, int, int64, string, string, time.Time) (WriteFenceCheck, error) {
+func (s *verifyCallStore) VerifyWriteFence(string, int, string, int64, string, string, time.Time) (WriteFenceCheck, error) {
 	s.verifyCalls++
 	return s.reply, s.err
 }
@@ -29,7 +29,7 @@ func (s *verifyCallStore) Get(string) (Subscription, bool, error) {
 	return Subscription{}, false, errors.New("unexpected Get")
 }
 
-func (s *verifyCallStore) CheckWriteFence(string, int, int64, string, string, time.Time) (string, error) {
+func (s *verifyCallStore) CheckWriteFence(string, int, string, int64, string, string, time.Time) (string, error) {
 	s.checkCalls++
 	return "", errors.New("unexpected CheckWriteFence")
 }
@@ -252,5 +252,93 @@ func TestVerifyClaimAgreesWithAppendFence(t *testing.T) {
 
 	if _, err := NewWriteTokenAuthorizer(mgr.tokenKey).VerifyClaim(cr.WriteToken, "s1", now); err == nil {
 		t.Fatal("verify without a claim store must be an error, not a decision")
+	}
+}
+
+// TestVerifyClaimFencesRecreatedIncarnation is the deterministic regression
+// for the incarnation predicate (#192 follow-up): a subscription is claimed,
+// deleted, recreated under the same id, and claimed again with the same
+// worker and wake id, so the new claim's (generation, wake_id, holder) equal
+// the predecessor's exactly and only the incarnation differs. The
+// predecessor's token must then be fenced by verify and by the append
+// pre-check alike — through check_write_fence.lua, not a second read — while
+// a token minted for the new incarnation passes both.
+func TestVerifyClaimFencesRecreatedIncarnation(t *testing.T) {
+	mgr, store, _ := newTestManager(t)
+	az := mgr.WriteAuthorizer()
+	now := time.Now()
+	path := mustPath(t, "events/a")
+	scope := []auth.StreamPath{path}
+	begin := "0000000000000000_0000000000000000"
+
+	claimAs := func(label string) (ClaimResult, Subscription) {
+		t.Helper()
+		if _, err := store.CreateOrConfirm("s1", pullWakeCfg(), nil, now); err != nil {
+			t.Fatalf("%s: create: %v", label, err)
+		}
+		if err := store.Link("s1", "events/a", LinkGlob, begin); err != nil {
+			t.Fatalf("%s: link: %v", label, err)
+		}
+		cr, err := store.Claim("s1", "w1", "w_same", now, 30_000)
+		if err != nil || !cr.Claimed {
+			t.Fatalf("%s: claim = %+v err=%v", label, cr, err)
+		}
+		sub, ok, err := store.Get("s1")
+		if err != nil || !ok || sub.Incarnation == "" {
+			t.Fatalf("%s: get s1 = %+v ok:%v err:%v", label, sub, ok, err)
+		}
+		return cr, sub
+	}
+	mint := func(sub Subscription, cr ClaimResult) string {
+		t.Helper()
+		tok, err := GenerateClaimWriteToken(mgr.tokenKey, "s1", sub.Incarnation, cr.Generation, cr.WakeID, "w1", 0, scope, now, time.Minute, rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	expect := func(label, token string, want ClaimVerifyStatus) {
+		t.Helper()
+		res, err := az.VerifyClaim(token, "s1", now)
+		if err != nil || res.Status != want {
+			t.Fatalf("%s: verify = %+v err=%v, want status %d", label, res, err, want)
+		}
+		d, _ := az.AuthorizeAppendFence(token, path, now)
+		if d.Allowed() != (want == ClaimVerifyOK) {
+			t.Fatalf("%s: append pre-check allowed=%v %s %q, want allowed=%v", label, d.Allowed(), d.Reason(), d.Detail(), want == ClaimVerifyOK)
+		}
+		if want == ClaimVerifyFenced && (d.Reason() != auth.ReasonFenced || d.Detail() != res.Detail || res.Detail != "write token claim is fenced") {
+			t.Fatalf("%s: fenced detail = verify %q / append %s %q, want the bare pre-check detail on both", label, res.Detail, d.Reason(), d.Detail())
+		}
+	}
+
+	crA, subA := claimAs("first incarnation")
+	old := mint(subA, crA)
+	expect("live predecessor", old, ClaimVerifyOK)
+
+	if err := store.Delete("s1"); err != nil {
+		t.Fatal(err)
+	}
+	crB, subB := claimAs("recreated incarnation")
+	// The collision under test: identical fence tuple, different incarnation.
+	if crB.Generation != crA.Generation || crB.WakeID != crA.WakeID || crB.Holder != crA.Holder {
+		t.Fatalf("precondition: recreated claim %+v must repeat the predecessor's tuple %+v", crB, crA)
+	}
+	if subB.Incarnation == subA.Incarnation {
+		t.Fatalf("precondition: recreate kept incarnation %q", subA.Incarnation)
+	}
+
+	expect("predecessor token after recreate", old, ClaimVerifyFenced)
+	expect("token for the new incarnation", mint(subB, crB), ClaimVerifyOK)
+
+	// The store-level predicate, isolated: only the token's own incarnation is
+	// compared; an empty one asserts none and is left to the Go arm.
+	for _, tc := range []struct {
+		inc  string
+		want string
+	}{{subA.Incarnation, "FENCED"}, {subB.Incarnation, "OK"}, {"", "OK"}} {
+		if st, err := store.CheckWriteFence("s1", 0, tc.inc, crB.Generation, crB.WakeID, "w1", now); err != nil || st != tc.want {
+			t.Fatalf("check_write_fence(incarnation %q) = %q err=%v, want %s", tc.inc, st, err, tc.want)
+		}
 	}
 }

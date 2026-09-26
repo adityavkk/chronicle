@@ -20,8 +20,16 @@
 -- FENCED and NOSUB stay bare: the pre-check discloses nothing about the
 -- current holder (ADR-0008 decision 13).
 --
+-- The token's subscription incarnation (ARGV[5]) is compared here too, in the
+-- same EVAL and before the generation/wake/holder predicates: a deleted and
+-- recreated subscription starts a new authority at generation 0, so a
+-- predecessor's (generation, wake_id, holder) can coincide with the current
+-- claim's and only the incarnation tells them apart — the identity the
+-- stream-slot marker key carries. A token that carries no incarnation ('')
+-- asserts none; the Go arm refuses it under an atomic stream store.
+--
 -- KEYS: 1=shardstate 2=sub_config
--- ARGV: 1=now_ns 2=generation 3=wake_id 4=holder
+-- ARGV: 1=now_ns 2=generation 3=wake_id 4=holder 5=incarnation
 -- Reply: {OK, lease_until_ns} | FENCED | NOSUB
 
 local k_shardstate = KEYS[1]
@@ -30,6 +38,7 @@ local a_now_ns = ARGV[1]
 local a_generation = ARGV[2]
 local a_wake_id = ARGV[3]
 local a_holder = ARGV[4]
+local a_incarnation = ARGV[5]
 local now = tonumber(a_now_ns)
 
 if redis.call('EXISTS', k_shardstate) == 0 then
@@ -49,6 +58,10 @@ else
   if cfg_inc ~= false and cfg_inc ~= '' and shard_inc ~= cfg_inc then
     return { 'FENCED' }
   end
+end
+-- The token's incarnation must be the configuration's current one (WF-29).
+if a_incarnation ~= '' and a_incarnation ~= cfg_inc then
+  return { 'FENCED' }
 end
 
 local phase = redis.call('HGET', k_shardstate, 'phase')

@@ -162,14 +162,17 @@ func claimHolds(sub Subscription) bool {
 }
 
 // WriteFenceDecision is the pure mirror of check_write_fence.lua's live-state
-// branches: it returns "" when a write token bound to (generation, wakeID,
-// holder) still names sub's current claim, or ErrCodeFenced when the claim is
-// not live inside its lease, names another generation or wake, or the holder is
-// not the claim's (the worker for pull-wake, WebhookHolder for webhook). The
-// authoritative, atomic check runs in Lua; this exists for unit tests and the
-// differential, and must be changed together with check_write_fence.lua.
-func WriteFenceDecision(sub Subscription, generation int64, wakeID, holder string, now time.Time) string {
-	if !claimLive(sub, now) ||
+// branches: it returns "" when a write token bound to (incarnation,
+// generation, wakeID, holder) still names sub's current claim, or
+// ErrCodeFenced when the token's incarnation is not the subscription's (an
+// empty one asserts none), the claim is not live inside its lease, names
+// another generation or wake, or the holder is not the claim's (the worker for
+// pull-wake, WebhookHolder for webhook). The authoritative, atomic check runs
+// in Lua; this exists for unit tests and the differential, and must be changed
+// together with check_write_fence.lua.
+func WriteFenceDecision(sub Subscription, incarnation string, generation int64, wakeID, holder string, now time.Time) string {
+	if (incarnation != "" && incarnation != sub.Incarnation) ||
+		!claimLive(sub, now) ||
 		generation != sub.Generation ||
 		wakeID == "" || wakeID != sub.WakeID ||
 		holder == "" || holder != claimHolder(sub) {

@@ -39,14 +39,19 @@ every append.
    token phase: a service identity beside the token can still make a later
    append fail its separate phase-1 gate. No new principal class.
 2. **The predicate is the append pre-check.** Verify runs
-   `check_write_fence.lua` — incarnation, dispatch type, phase, holder,
+   `check_write_fence.lua` — the token's subscription incarnation against
+   the configuration's current one, dispatch type, phase, holder,
    generation, `wake_id`, lease — through the same `ParseWriteToken` parser
-   and the same live-state arm as `AuthorizeAppendFence`. The script's `OK`
-   reply gains the claim's `lease_until_ns` (additive; `FENCED` and `NOSUB`
-   stay bare) so the `200` body is built from the same atomic read as the
-   decision, never from a second `Get`. That single slot-homed `EVAL` is the
-   linearizability argument: it shares the atomicity domain of `claim.lua`,
-   `ack.lua`, and `release.lua`.
+   and the same live-state arm as `AuthorizeAppendFence`. The incarnation is
+   compared in the script, ahead of the rest: a recreated subscription
+   restarts at generation 0, so a predecessor's token can repeat the current
+   claim's generation, wake, and holder exactly, and the incarnation — the
+   identity the stream-slot marker key carries — is what tells them apart.
+   The script's `OK` reply gains the claim's `lease_until_ns` (additive;
+   `FENCED` and `NOSUB` stay bare) so the `200` body is built from the same
+   atomic read as the decision, never from a second `Get`. That single
+   slot-homed `EVAL` is the linearizability argument: it shares the
+   atomicity domain of `claim.lua`, `ack.lua`, and `release.lua`.
 3. **Scoped status parity, control-plane vocabulary.** For a write token
    minted for the route's subscription, `200`, `401`, and `409` are the
    statuses the append credential and live-claim pre-check would produce
@@ -95,11 +100,14 @@ every append.
 
 ## Consequences
 
-- **`check_write_fence` reply ABI.** The `OK` variant declares one
-  `unix_ns` field; the decoder and the ABI differential (`script_abi_test`)
-  changed with it, and `Store` gained `VerifyWriteFence` (status plus lease)
-  with `CheckWriteFence` as its status-only view over the same `EVAL`. Any
-  `Store` double that does not embed the interface must add the method.
+- **`check_write_fence` ABI.** The `OK` variant declares one `unix_ns`
+  field, and the call takes the token's incarnation as its fifth argument
+  (an empty string asserts none, which the Go arm refuses under an atomic
+  stream store); the decoder, the ABI differential (`script_abi_test`), and
+  the Go mirror `WriteFenceDecision` changed with it. `Store` gained
+  `VerifyWriteFence` (status plus lease) with `CheckWriteFence` as its
+  status-only view over the same `EVAL`, both taking the incarnation. Any
+  `Store` double that does not embed the interface must add the methods.
 - **Per-stream seals are a documented residual.** The pre-check does not
   consult stream-slot seals. If an explicit link is removed while its claim is
   live, verify continues to answer `200` from the token's mint-time scope while

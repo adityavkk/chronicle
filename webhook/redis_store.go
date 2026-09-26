@@ -863,9 +863,9 @@ func (s *RedisStore) claimShardAuthorized(id string, g int, worker, wakeID strin
 // observe a partially-updated claim record — and the deadline is the accepted
 // claim's, which is what lets the claim/verify route answer without a second,
 // racing read (WRITE-FENCING.md §9.1).
-func (s *RedisStore) VerifyWriteFence(id string, shard int, generation int64, wakeID, holder string, now time.Time) (WriteFenceCheck, error) {
+func (s *RedisStore) VerifyWriteFence(id string, shard int, incarnation string, generation int64, wakeID, holder string, now time.Time) (WriteFenceCheck, error) {
 	reply, err := writeFenceScript.run(s.ctx(), s.client, newWriteFenceKeys(id, shard),
-		nsArg(now), strconv.FormatInt(generation, 10), wakeID, holder)
+		nsArg(now), strconv.FormatInt(generation, 10), wakeID, holder, incarnation)
 	if err != nil {
 		return WriteFenceCheck{}, err
 	}
@@ -884,8 +884,8 @@ func (s *RedisStore) VerifyWriteFence(id string, shard int, generation int64, wa
 // CheckWriteFence is VerifyWriteFence's status alone: the append pre-check's
 // contract, unchanged. Both run the same script on the same keys, so the
 // pre-check and the verify route cannot drift.
-func (s *RedisStore) CheckWriteFence(id string, shard int, generation int64, wakeID, holder string, now time.Time) (string, error) {
-	check, err := s.VerifyWriteFence(id, shard, generation, wakeID, holder, now)
+func (s *RedisStore) CheckWriteFence(id string, shard int, incarnation string, generation int64, wakeID, holder string, now time.Time) (string, error) {
+	check, err := s.VerifyWriteFence(id, shard, incarnation, generation, wakeID, holder, now)
 	return check.Status, err
 }
 

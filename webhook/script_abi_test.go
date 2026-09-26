@@ -151,6 +151,19 @@ func TestScriptABIRejectsWrongCallArity(t *testing.T) {
 	if err := ackScript.abi.validateCall(ackKeys, []any{"member", "1", "wake", "1", "1", "1700000000", "1000", "1", "path-only", "replica", "1"}); err == nil {
 		t.Fatal("ack with incomplete variadic ack pair accepted")
 	}
+	// check_write_fence takes the token's incarnation as its fifth argument
+	// (an empty string asserts none); the four-argument pre-#192 shape is gone.
+	fenceKeys := newWriteFenceKeys("s1", 0)
+	validFenceArgs := []any{"1700000000", "1", "w_a", "worker-A", "inc-1"}
+	if err := writeFenceScript.abi.validateCall(fenceKeys, validFenceArgs); err != nil {
+		t.Fatalf("valid check_write_fence call rejected: %v", err)
+	}
+	if err := writeFenceScript.abi.validateCall(fenceKeys, []any{"1700000000", "1", "w_a", "worker-A", ""}); err != nil {
+		t.Fatalf("check_write_fence with an empty incarnation rejected: %v", err)
+	}
+	if err := writeFenceScript.abi.validateCall(fenceKeys, validFenceArgs[:4]); err == nil {
+		t.Fatal("check_write_fence without the token incarnation accepted")
+	}
 	claimKeys := claimKeyVec{
 		SubConfig: "sub", ShardState: "shard", LeaseZSet: "lease",
 		IncarnationCounter: "inc", ShardRegistry: "registry", Links: "links",

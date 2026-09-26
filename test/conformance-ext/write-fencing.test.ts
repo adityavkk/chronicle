@@ -596,6 +596,18 @@ test("WF-29 verify evaluates a write token claim without a write", async () => {
   expect((await deleteSub(dnSub)).status).toBe(204)
   expect((await verify(dnSub, dnCr.write_token!)).status).toBe(409)
   expect((await post(dnPath, producer(dnCr.write_token!, "entity-wf29", dnCr.generation, 2))).status).toBe(409)
+  // Recreated under the same id, the subscription is a new incarnation that
+  // restarts its generations, so the predecessor's token stays 409 precheck
+  // even at an equal generation, while the new claim's own token is 200.
+  // (The in-repo pin forces the wake id and holder to coincide as well.)
+  const dnCr2 = await pullWakeSub(dnSub, dnPath)
+  expect(dnCr2.generation).toBe(dnCr.generation)
+  const stale = await verify(dnSub, dnCr.write_token!)
+  expect(stale.status).toBe(409)
+  expect(stale.json().error.reason).toBe("precheck")
+  const fresh = await verify(dnSub, dnCr2.write_token!)
+  expect(fresh.status).toBe(200)
+  expect(fresh.json().wake_id).toBe(dnCr2.wake_id)
 
   // Deposed at g+1 and a lapsed lease with no successor: both 409 precheck,
   // and the append agrees.

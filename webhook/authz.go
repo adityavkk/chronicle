@@ -138,16 +138,18 @@ func (a WriteTokenAuthorizer) AuthorizeAppendFence(token string, path auth.Strea
 // liveClaimDecision is the live-state arm shared by the append pre-check and
 // claim verification, written once so the two cannot drift (WF-29): the token
 // must be bound to a claim, that claim must be the subscription's live one
-// (check_write_fence.lua, one atomic read that also yields the lease), and
-// under an atomic stream store the token must carry the subscription
-// incarnation the in-slot rung compares. A store error is returned rather than
-// mapped so each caller keeps its own posture: the append gate denies
-// unauthenticated, verify reports a server error.
+// (check_write_fence.lua, one atomic read that also yields the lease and
+// compares the token's subscription incarnation with the current one, so a
+// recreated subscription fences its predecessor's tokens even when
+// generation, wake, and holder coincide), and under an atomic stream store
+// the token must carry the incarnation the in-slot rung compares. A store
+// error is returned rather than mapped so each caller keeps its own posture:
+// the append gate denies unauthenticated, verify reports a server error.
 func (a WriteTokenAuthorizer) liveClaimDecision(v WriteTokenValidation, now time.Time) (auth.Decision, WriteFenceCheck, error) {
 	if v.WakeID == "" || v.Holder == "" {
 		return auth.Deny(auth.ReasonFenced, "write token is not bound to a live claim"), WriteFenceCheck{}, nil
 	}
-	check, err := a.store.VerifyWriteFence(v.SubID, v.Shard, v.Generation, v.WakeID, v.Holder, now)
+	check, err := a.store.VerifyWriteFence(v.SubID, v.Shard, v.Incarnation, v.Generation, v.WakeID, v.Holder, now)
 	if err != nil {
 		return auth.Decision{}, WriteFenceCheck{}, err
 	}

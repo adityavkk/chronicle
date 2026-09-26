@@ -400,6 +400,77 @@ func TestClaimVerifyLinearizedWithDeposition(t *testing.T) {
 	}
 }
 
+// TestClaimVerifyFencesRecreatedIncarnation pins the incarnation predicate on
+// the full Redis stack (#192 follow-up): s1 is claimed through the routes (its
+// marker granted), deleted through the raw store — the crash-window shape in
+// which no revoke ran — and recreated under the same id, then claimed again
+// with the same worker and wake id so generation, wake_id, and holder repeat
+// exactly. The predecessor's token is then 409 on verify and 409 on the
+// fenced append with the tail unchanged, while a token for the new incarnation
+// verifies 200 with the new claim's facts.
+func TestClaimVerifyFencesRecreatedIncarnation(t *testing.T) {
+	s := newRedisFenceStack(t)
+	s.createFenced(t, "/events/a")
+	cr := claimForWriteFence(t, s.rt, s.subStore)
+	subA, ok, err := s.subStore.Get("s1")
+	if err != nil || !ok {
+		t.Fatalf("get s1 = ok:%v err:%v", ok, err)
+	}
+	if v := s.verify(cr.WriteToken); v.Code != http.StatusOK {
+		t.Fatalf("live verify = %d %s", v.Code, v.Body.String())
+	}
+	if a := s.fencedAppend("/events/a", cr.WriteToken, "entity-recreate", cr.Generation, 0); a.Code != http.StatusOK {
+		t.Fatalf("live append = %d %s", a.Code, a.Body.String())
+	}
+	before := tailOf(t, s.h, "/events/a")
+
+	if err := s.subStore.Delete("s1"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	cfg := webhook.Config{Type: webhook.DispatchPullWake, Pattern: "events/*", WakeStream: "wake/pool", LeaseTTLMs: 1000}
+	if _, err := s.subStore.CreateOrConfirm("s1", cfg, nil, now); err != nil {
+		t.Fatalf("recreate: %v", err)
+	}
+	if err := s.subStore.Link("s1", "events/a", webhook.LinkGlob, "0000000000000000_0000000000000000"); err != nil {
+		t.Fatalf("relink: %v", err)
+	}
+	crB, err := s.subStore.Claim("s1", "worker-A", cr.WakeID, now, 1000)
+	if err != nil || !crB.Claimed {
+		t.Fatalf("reclaim = %+v err=%v", crB, err)
+	}
+	subB, ok, err := s.subStore.Get("s1")
+	if err != nil || !ok {
+		t.Fatalf("get recreated s1 = ok:%v err:%v", ok, err)
+	}
+	if crB.Generation != cr.Generation || crB.WakeID != cr.WakeID || subB.Incarnation == subA.Incarnation {
+		t.Fatalf("precondition: recreated claim gen %d wake %q inc %q must repeat gen %d wake %q under a new incarnation (%q)",
+			crB.Generation, crB.WakeID, subB.Incarnation, cr.Generation, cr.WakeID, subA.Incarnation)
+	}
+
+	v := s.verify(cr.WriteToken)
+	a := s.fencedAppend("/events/a", cr.WriteToken, "entity-recreate", cr.Generation, 1)
+	if v.Code != http.StatusConflict || a.Code != http.StatusConflict {
+		t.Fatalf("predecessor token after recreate: verify = %d %s; append = %d %s; want both 409", v.Code, v.Body.String(), a.Code, a.Body.String())
+	}
+	wantEnvelope := webhook.ErrorDetail{Code: webhook.ErrCodeFenced, Message: "write token claim is fenced", Reason: webhook.FenceReasonPrecheck}
+	if ve, ae := decodeEnvelope(t, v), decodeEnvelope(t, a); ve.Error != wantEnvelope || ae.Error != wantEnvelope {
+		t.Fatalf("verify envelope = %+v; append envelope = %+v; want both %+v", ve.Error, ae.Error, wantEnvelope)
+	}
+	if after := tailOf(t, s.h, "/events/a"); !after.Equal(before) {
+		t.Fatalf("fenced append moved the tail %s -> %s", before, after)
+	}
+
+	fresh := s.mintWriteToken(t, webhook.ClaimResponse{Generation: crB.Generation, WakeID: crB.WakeID}, 0, now, time.Minute)
+	rec := s.verify(fresh)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("new incarnation verify = %d %s", rec.Code, rec.Body.String())
+	}
+	if got := decodeVerifyBody(t, rec); got.Generation != crB.Generation || got.WakeID != crB.WakeID || got.Holder != "worker-A" {
+		t.Fatalf("new incarnation facts = %+v, want gen %d wake %q holder worker-A", got, crB.Generation, crB.WakeID)
+	}
+}
+
 // requireRemainingLease pins a 200's lease_remaining_ms against the request
 // window it was answered in: it is the deadline minus the server's own now,
 // so it lies between lease_until_ms minus the client's time after the answer

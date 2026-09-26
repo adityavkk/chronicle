@@ -86,15 +86,18 @@ type Store interface {
 
 	// CheckWriteFence verifies that a claim-scoped write token still names the
 	// live holder at append authorization time. It reads the current shard state
-	// atomically in Redis and returns OK only when phase=live, generation+wake and
-	// holder all match, and the lease has not expired.
-	CheckWriteFence(id string, shard int, generation int64, wakeID, holder string, now time.Time) (string, error)
+	// atomically in Redis and returns OK only when the token's incarnation is
+	// the subscription's current one (an empty incarnation asserts none),
+	// phase=live, generation+wake and holder all match, and the lease has not
+	// expired. The incarnation predicate is what fences a predecessor's token
+	// after a delete-and-recreate whose generation, wake, and holder coincide.
+	CheckWriteFence(id string, shard int, incarnation string, generation int64, wakeID, holder string, now time.Time) (string, error)
 
 	// VerifyWriteFence is CheckWriteFence plus the claim's lease deadline, read
 	// in the same atomic script step. The claim/verify route (WRITE-FENCING.md
 	// §9.1) builds its 200 body from it so the deadline it reports belongs to
 	// the claim the predicate accepted, never to a later one.
-	VerifyWriteFence(id string, shard int, generation int64, wakeID, holder string, now time.Time) (WriteFenceCheck, error)
+	VerifyWriteFence(id string, shard int, incarnation string, generation int64, wakeID, holder string, now time.Time) (WriteFenceCheck, error)
 
 	// AckUnscoped fences then applies acks forward-only; done releases the lease,
 	// else it extends the lease as a heartbeat (PROTOCOL §7.1, §7.2). This is the
