@@ -86,6 +86,25 @@ func requireNoStore(t *testing.T, label string, rec *httptest.ResponseRecorder) 
 	}
 }
 
+// requireServerRelativeLease pins the WF-30 shape of a 200's lease_remaining_ms
+// for a request that ran between before and after: it is bounded by the
+// subscription's lease TTL, and it equals lease_until_ms minus the server's
+// own now — so it can be no more than the deadline minus the client's time
+// before the request, and no less than the deadline minus the client's time
+// after it (one millisecond of slack for the floor). It returns the body with
+// the field zeroed so the caller can compare the rest exactly.
+func requireServerRelativeLease(t *testing.T, label string, got ClaimVerifyResponse, before, after time.Time, leaseTTLMs int64) ClaimVerifyResponse {
+	t.Helper()
+	hi := got.LeaseUntilMs - before.UnixMilli()
+	lo := got.LeaseUntilMs - after.UnixMilli() - 1
+	if got.LeaseRemainingMs <= 0 || got.LeaseRemainingMs > leaseTTLMs || got.LeaseRemainingMs > hi || got.LeaseRemainingMs < lo {
+		t.Fatalf("%s: lease_remaining_ms = %d, want in (0, %d] and within [%d, %d] of lease_until_ms %d",
+			label, got.LeaseRemainingMs, leaseTTLMs, lo, hi, got.LeaseUntilMs)
+	}
+	got.LeaseRemainingMs = 0
+	return got
+}
+
 // TestHandleClaimVerifyRoute pins the HTTP surface of claim verification
 // (WRITE-FENCING.md §9.1, #192): the token is the sole credential and is read
 // from the append gate's carriers with the malformed-carrier rule; a live
@@ -116,12 +135,15 @@ func TestHandleClaimVerifyRoute(t *testing.T) {
 		{ClaimTokenHeader: {cr.WriteToken}},
 		{WriteTokenHeader: {cr.WriteToken}, "Authorization": {"Bearer " + cr.Token}},
 	} {
+		before := time.Now()
 		rec := doVerify(t, rt, http.MethodPost, carrier, "")
+		after := time.Now()
 		requireNoStore(t, "live", rec)
 		if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 			t.Fatalf("live Content-Type = %q", ct)
 		}
-		if got := decodeVerify(t, rec); !reflect.DeepEqual(got, want) {
+		got := requireServerRelativeLease(t, "live", decodeVerify(t, rec), before, after, 30_000)
+		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("live verify over %v = %+v, want %+v", carrier, got, want)
 		}
 	}

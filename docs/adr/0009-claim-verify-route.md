@@ -66,12 +66,19 @@ every append.
    its local policy. If a deleted subscription's token also drew `404`, the
    client could not distinguish it from one common route-absence signal and
    might fall back to accepting a dead token.
-6. **`Cache-Control: no-store`, and a client cache bound (WF-30).** A client
-   may cache a positive answer no longer than the smaller of its own
-   heartbeat interval and the remaining lease from `lease_until_ms`; it
-   never caches a `401`, `409`, or `5xx`. Verify does not extend the lease,
-   so polling it cannot keep a claim alive. The no-renewal rule is WF-30's
-   distinct server obligation; the cache policy is a consumer obligation.
+6. **`Cache-Control: no-store`, a server-relative cache bound (WF-30).** The
+   `200` body carries `lease_remaining_ms` — the accepted claim's deadline
+   minus the `now` the pre-check judged the lease against, floored at zero —
+   beside the informational `lease_until_ms`. A client may cache a positive
+   answer no longer than the smaller of its own heartbeat interval and
+   `lease_remaining_ms` less its round-trip and drift allowance, and never
+   derives the bound from `lease_until_ms` and a local clock: lease expiry is
+   judged on the server's clock, and a lagging client would otherwise trust a
+   claim the fence had already withdrawn. It never caches a `401`, `409`, or
+   `5xx`. Verify does not extend the lease, so polling it cannot keep a claim
+   alive, and the remaining lease never grows across answers. The no-renewal,
+   `no-store`, and remaining-lease rules are WF-30's server obligations; the
+   cache policy itself stays a consumer obligation.
 7. **`streams` is the token's scope.** The `200` body lists the token's
    normalized scope paths, not stream snapshots: verify reads no stream
    tails, so its cost does not grow with the number of links.
@@ -113,7 +120,8 @@ every append.
   rather than asserted. Structurally the route costs one `EVAL` on a
   slot-homed hash, the same as the pre-check it reuses.
 - **Consumer coupling.** The consuming platform's patch must treat
-  `TOKEN_EXPIRED` without a token as terminal, cache `200` no longer than
+  `TOKEN_EXPIRED` without a token as terminal, bound its positive cache by
+  `lease_remaining_ms` (not by `lease_until_ms` against its own clock) as
   WF-30 allows, never cache `401`/`409`/`5xx`, and treat `404`, `405`, or
   `501` as "verify unavailable". Landing upstream first keeps its copy of
   WRITE-FENCING.md a verbatim mirror.

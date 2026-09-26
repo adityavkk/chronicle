@@ -193,15 +193,19 @@ type ClaimResponse struct {
 // (WRITE-FENCING.md §9.1, WF-29): the live claim the presented write token
 // names, read in the same atomic step as the fence predicate. Streams is the
 // token's exact scope (normalized paths), not a snapshot — verify reads no
-// stream tails — and LeaseUntilMs is the claim's lease deadline as the fence
-// state holds it (unix milliseconds), the bound WF-30 lets a client cache
-// against.
+// stream tails. LeaseUntilMs is the claim's lease deadline as the fence state
+// holds it (unix milliseconds, informational); LeaseRemainingMs is the lease
+// left at the instant of the read as judged on the server clock, floored at
+// zero — the only figure WF-30 lets a client derive its cache ceiling from,
+// because the server clock is the one that fences the append and a client's
+// may lag it.
 type ClaimVerifyResponse struct {
-	Generation   int64    `json:"generation"`
-	WakeID       string   `json:"wake_id"`
-	Holder       string   `json:"holder"`
-	Streams      []string `json:"streams"`
-	LeaseUntilMs int64    `json:"lease_until_ms"`
+	Generation       int64    `json:"generation"`
+	WakeID           string   `json:"wake_id"`
+	Holder           string   `json:"holder"`
+	Streams          []string `json:"streams"`
+	LeaseUntilMs     int64    `json:"lease_until_ms"`
+	LeaseRemainingMs int64    `json:"lease_remaining_ms"`
 }
 
 // ReleaseRequest is the pull-wake release body (PROTOCOL §7.2).

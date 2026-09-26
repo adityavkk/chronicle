@@ -317,10 +317,17 @@ producer checks.
 
 **Responses.**
 
-- `200` — `{"generation", "wake_id", "holder", "streams", "lease_until_ms"}`:
-  the claim's generation, wake, and holder identity, the token's exact stream
-  scope (normalized paths — no stream is read), and the lease deadline in
-  unix milliseconds as the fence state holds it.
+- `200` — `{"generation", "wake_id", "holder", "streams", "lease_until_ms",
+  "lease_remaining_ms"}`: the claim's generation, wake, and holder identity,
+  the token's exact stream scope (normalized paths — no stream is read), the
+  lease deadline in unix milliseconds as the fence state holds it
+  (informational), and the lease remaining at the instant the predicate was
+  evaluated, in milliseconds, as judged on the server's clock — the same
+  clock that fences the append. `lease_remaining_ms` MUST be computed from
+  the deadline the predicate accepted and the server time it accepted it at,
+  MUST NOT exceed the subscription's `lease_ttl_ms`, and is `0` when the
+  claim was live at evaluation but its lease has since been exhausted to the
+  millisecond.
 - `401` with the §7.2 error envelope — malformed, a foreign MAC, not a write
   token, minted for another subscription, or expired. A server SHOULD
   distinguish an expired write token from an otherwise unusable one via
@@ -338,12 +345,17 @@ producer checks.
   deliberate status difference from a fenced append, whose fail-closed data
   plane can report a credential refusal when its fence store is unavailable.
 
-**Caching.** A client MAY cache a `200` answer no longer than the smaller of
+**Caching.** Lease expiry is judged on the server's clock, so a client MUST
+NOT derive a cache bound from `lease_until_ms` and its own clock — a client
+that lags the server would keep trusting a claim the fence has already
+withdrawn. A client MAY cache a `200` answer no longer than the smaller of
 its own heartbeat interval — the cadence at which it extends the claim with
-non-`done` acks — and the remaining lease (`lease_until_ms` minus now); it
-MUST NOT cache a `401`, `409`, or `5xx`. The server SHOULD answer with
-`Cache-Control: no-store`. Verify MUST NOT extend the lease: polling it does
-not keep a claim alive. **[WF-30]**
+non-`done` acks — and `lease_remaining_ms` less a conservative allowance for
+the round trip and its own clock drift; not caching at all is conforming. It
+MUST NOT cache a `401`, `409`, or `5xx`. The server MUST answer with
+`Cache-Control: no-store`, MUST NOT extend the lease — polling verify does not
+keep a claim alive — and, because it does not, `lease_remaining_ms` MUST
+never grow from one `200` to the next for the same claim. **[WF-30]**
 
 **Discovery and fallback.** A client MUST treat `404`, `405`, or `501` from
 this path as "verification unavailable" and apply its local policy; the base
@@ -449,7 +461,10 @@ and the limits of that implementation.
 - **Claim verification.** `claim/verify` (§9.1) answers from
   `check_write_fence.lua` — the append pre-check — in one atomic Redis step
   that also yields the claim's lease, so it cannot observe a partially
-  updated claim and its `lease_until_ms` belongs to the claim it accepted. It
+  updated claim and its `lease_until_ms` belongs to the claim it accepted;
+  `lease_remaining_ms` is that deadline minus the `now` the script judged
+  the lease against, so a consumer's WF-30 ceiling rests on the server clock
+  alone. It
   does not consult a routed service identity or the per-stream seal. Thus a
   rejected or unauthorized service identity beside a valid named write token
   can receive `200` here and `401`/`403` on append. A path sealed while its
@@ -506,4 +521,4 @@ names the in-repo Go test that pins the same rule where one exists.
 | WF-27 | webhook end-to-end parity | `TestWebhookCallbackHeartbeatRefreshesWriteToken`, `TestWebhookAutoAckDoneSeals` |
 | WF-28 | pull-wake end-to-end | `TestHeartbeatRefreshesWriteTokenForLongLiveHolder` |
 | WF-29 | verify evaluates the token and live-claim pre-commit predicate without a write | `TestVerifyClaimUsesOneAtomicStoreRead`, `TestClaimVerifyAgreesWithAppend`, `TestClaimVerifyHasNoSideEffects`, `TestClaimVerifyLinearizedWithDeposition` |
-| WF-30 | verify never renews; the cache bound is a client obligation | `TestClaimVerifyNeverRenews`; consumer tests pin the client-side cache policy |
+| WF-30 | verify never renews, answers `Cache-Control: no-store`, and reports a server-relative `lease_remaining_ms` bounded by the lease TTL that never grows across answers; deriving the cache ceiling from it is a consumer obligation | `TestClaimVerifyNeverRenews`, `TestClaimVerifyReportsServerRelativeLease`, `TestHandleClaimVerifyRoute`; consumer tests pin the client-side cache policy |

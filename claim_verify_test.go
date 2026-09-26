@@ -152,7 +152,9 @@ func TestClaimVerifyAgreesWithAppend(t *testing.T) {
 			token := st.token(t, s, cr)
 			before := tailOf(t, s.h, "/events/a")
 
+			sentAt := time.Now()
 			v := s.verify(token)
+			answeredAt := time.Now()
 			a := s.fencedAppend("/events/a", token, "entity-verify", cr.Generation, 0)
 			if v.Code != st.want || a.Code != st.want {
 				t.Fatalf("verify = %d %s; append = %d %s; want both %d", v.Code, v.Body.String(), a.Code, a.Body.String(), st.want)
@@ -170,7 +172,10 @@ func TestClaimVerifyAgreesWithAppend(t *testing.T) {
 					Generation: cr.Generation, WakeID: cr.WakeID, Holder: "worker-A",
 					Streams: []string{"events/a"}, LeaseUntilMs: sub.LeaseUntilNs / int64(time.Millisecond),
 				}
-				if got := decodeVerifyBody(t, v); !reflect.DeepEqual(got, want) {
+				got := decodeVerifyBody(t, v)
+				requireRemainingLease(t, got, sentAt, answeredAt, 1000)
+				got.LeaseRemainingMs = 0
+				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("verify body = %+v, want %+v", got, want)
 				}
 			case http.StatusConflict:
@@ -392,6 +397,67 @@ func TestClaimVerifyLinearizedWithDeposition(t *testing.T) {
 	}
 	if okBefore == 0 || fencedAfter == 0 {
 		t.Fatalf("inconclusive race: %d live answers before, %d fenced answers after the takeover", okBefore, fencedAfter)
+	}
+}
+
+// requireRemainingLease pins a 200's lease_remaining_ms against the request
+// window it was answered in: it is the deadline minus the server's own now,
+// so it lies between lease_until_ms minus the client's time after the answer
+// (one millisecond of slack for the floor) and lease_until_ms minus the
+// client's time before the request, and never exceeds the lease TTL.
+func requireRemainingLease(t *testing.T, got webhook.ClaimVerifyResponse, sentAt, answeredAt time.Time, leaseTTLMs int64) {
+	t.Helper()
+	hi := got.LeaseUntilMs - sentAt.UnixMilli()
+	lo := got.LeaseUntilMs - answeredAt.UnixMilli() - 1
+	if got.LeaseRemainingMs < 0 || got.LeaseRemainingMs > leaseTTLMs || got.LeaseRemainingMs > hi || got.LeaseRemainingMs < lo {
+		t.Fatalf("lease_remaining_ms = %d, want in [0, %d] and within [%d, %d] of lease_until_ms %d",
+			got.LeaseRemainingMs, leaseTTLMs, lo, hi, got.LeaseUntilMs)
+	}
+}
+
+// TestClaimVerifyReportsServerRelativeLease is WF-30's cache-bound half on the
+// server side: every 200 across a 1 s lease carries lease_remaining_ms that is
+// the fixed deadline minus the server's now at the read — bounded by the lease
+// TTL, consistent with the request window, and never growing from one answer
+// to the next (a renewal would make it grow) — so a client bounding its cache
+// by it needs no clock of its own. The first 409 ends the series.
+func TestClaimVerifyReportsServerRelativeLease(t *testing.T) {
+	s := newRedisFenceStack(t)
+	s.createFenced(t, "/events/a")
+	cr := claimForWriteFence(t, s.rt, s.subStore)
+	sub, ok, err := s.subStore.Get("s1")
+	if err != nil || !ok {
+		t.Fatalf("get s1 = ok:%v err:%v", ok, err)
+	}
+	wantUntil := sub.LeaseUntilNs / int64(time.Millisecond)
+
+	var live int
+	prev := int64(-1)
+	deadline := time.Now().Add(2500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		sentAt := time.Now()
+		rec := s.verify(cr.WriteToken)
+		answeredAt := time.Now()
+		if rec.Code == http.StatusConflict {
+			break
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("verify = %d %s", rec.Code, rec.Body.String())
+		}
+		got := decodeVerifyBody(t, rec)
+		if got.LeaseUntilMs != wantUntil {
+			t.Fatalf("lease_until_ms = %d, want the granted %d", got.LeaseUntilMs, wantUntil)
+		}
+		requireRemainingLease(t, got, sentAt, answeredAt, sub.Config.LeaseTTLMs)
+		if prev >= 0 && got.LeaseRemainingMs > prev {
+			t.Fatalf("lease_remaining_ms grew %d -> %d across verifies of one claim", prev, got.LeaseRemainingMs)
+		}
+		prev = got.LeaseRemainingMs
+		live++
+		time.Sleep(50 * time.Millisecond)
+	}
+	if live < 2 {
+		t.Fatalf("inconclusive: %d live answers across the lease", live)
 	}
 }
 

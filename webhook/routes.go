@@ -551,11 +551,12 @@ func (rt *Routes) handleClaimVerify(w http.ResponseWriter, r *http.Request, id s
 			streams = []string{}
 		}
 		writeJSON(w, http.StatusOK, ClaimVerifyResponse{
-			Generation:   res.Generation,
-			WakeID:       res.WakeID,
-			Holder:       res.Holder,
-			Streams:      streams,
-			LeaseUntilMs: res.LeaseUntilNs / int64(time.Millisecond),
+			Generation:       res.Generation,
+			WakeID:           res.WakeID,
+			Holder:           res.Holder,
+			Streams:          streams,
+			LeaseUntilMs:     res.LeaseUntilNs / int64(time.Millisecond),
+			LeaseRemainingMs: res.LeaseRemainingNs / int64(time.Millisecond),
 		})
 	case ClaimVerifyExpired:
 		rt.logClaimVerifyRefusal(id, "expired", res.Detail)

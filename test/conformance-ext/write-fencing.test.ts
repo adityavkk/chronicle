@@ -539,6 +539,10 @@ test("WF-29 verify evaluates a write token claim without a write", async () => {
   expect(facts.holder).toBe("worker-A")
   expect(facts.streams).toEqual([path])
   expect(facts.lease_until_ms).toBeGreaterThan(Date.now())
+  // The cache bound is server-relative (WF-30): remaining lease as the server
+  // judged it, within the 30 s lease, never a figure the client must clock.
+  expect(facts.lease_remaining_ms).toBeGreaterThan(0)
+  expect(facts.lease_remaining_ms).toBeLessThanOrEqual(30_000)
   expect((await post(path, producer(cr.write_token!, "entity-wf29", cr.generation, 0))).status).toBe(200)
 
   // Same carriers as the append: the named header verifies; a presented but
@@ -626,17 +630,28 @@ test("WF-30 verify never renews: repeated positive answers do not extend the lea
   const first = await verify(sub, cr.write_token!)
   expect(first.status).toBe(200)
   const leaseUntil = first.json().lease_until_ms as number
+  let remaining = first.json().lease_remaining_ms as number
+  expect(remaining).toBeGreaterThan(0)
+  expect(remaining).toBeLessThanOrEqual(1000)
   // Poll faster than the lease. A heartbeat at this cadence would keep the
-  // claim live; verify must not, so the deadline never moves and the answer
-  // flips to 409 when the lease lapses — a client may therefore cache a 200
-  // no longer than min(its heartbeat interval, lease_until_ms - now).
+  // claim live; verify must not, so the deadline never moves, the
+  // server-relative remaining lease never grows, and the answer flips to 409
+  // when the lease lapses — a client may therefore cache a 200 no longer
+  // than min(its heartbeat interval, lease_remaining_ms less its own RTT and
+  // drift allowance), and needs no clock of its own to do so.
   const answers: number[] = []
   const deadlines = new Set<number>()
   for (let i = 0; i < 8; i++) {
     await sleep(200)
     const res = await verify(sub, cr.write_token!)
     answers.push(res.status)
-    if (res.status === 200) deadlines.add(res.json().lease_until_ms)
+    if (res.status === 200) {
+      const facts = res.json()
+      deadlines.add(facts.lease_until_ms)
+      expect(facts.lease_remaining_ms).toBeGreaterThanOrEqual(0)
+      expect(facts.lease_remaining_ms).toBeLessThanOrEqual(remaining)
+      remaining = facts.lease_remaining_ms
+    }
   }
   expect(answers[0]).toBe(200)
   expect(answers[answers.length - 1]).toBe(409)

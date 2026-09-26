@@ -529,7 +529,7 @@ import Step from "../components/Step.astro";
     | `POST` | `__ds/subscriptions/:id/claim` | pull-wake claim | `200` | `409 ALREADY_CLAIMED` · `404 NOT_FOUND` |
     | `POST` | `__ds/subscriptions/:id/ack` | pull-wake ack / heartbeat | `200` | `409 FENCED` · `401 TOKEN_INVALID` |
     | `POST` | `__ds/subscriptions/:id/release` | pull-wake release | `204` | `409 FENCED` · `401 TOKEN_INVALID` |
-    | `POST` | `__ds/subscriptions/:id/claim/verify` | verify a write token's claim (read-only, WF-29) | `200` | `409 FENCED` · `401 TOKEN_INVALID` · `401 TOKEN_EXPIRED` · `500` unavailable |
+    | `POST` | `__ds/subscriptions/:id/claim/verify` | verify a write token's claim (read-only, WF-29); the `200` carries the server-relative `lease_remaining_ms` a client bounds its cache by (WF-30) | `200` | `409 FENCED` · `401 TOKEN_INVALID` · `401 TOKEN_EXPIRED` · `500` unavailable |
     | `GET` | `__ds/jwks.json` | webhook signing keys | `200` | none |
   </Table>
 

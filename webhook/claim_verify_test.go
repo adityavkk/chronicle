@@ -61,6 +61,15 @@ func TestVerifyClaimUsesOneAtomicStoreRead(t *testing.T) {
 	if got.Status != ClaimVerifyOK || got.LeaseUntilNs != wantLease {
 		t.Fatalf("verification = %+v, want OK with lease %d", got, wantLease)
 	}
+	// The remaining lease is the same read's deadline minus the now the
+	// predicate ran at — server-relative, never a second read or clock.
+	if got.LeaseRemainingNs != 37*time.Second.Nanoseconds() {
+		t.Fatalf("remaining lease = %d, want %d", got.LeaseRemainingNs, 37*time.Second.Nanoseconds())
+	}
+	store.reply = WriteFenceCheck{Status: "OK", LeaseUntilNs: now.Add(-time.Millisecond).UnixNano()}
+	if got, err := a.VerifyClaim(token, "s1", now); err != nil || got.Status != ClaimVerifyOK || got.LeaseRemainingNs != 0 {
+		t.Fatalf("remaining lease past the deadline = %+v err=%v, want OK floored at 0", got, err)
+	}
 }
 
 // TestParseWriteTokenSharesValidateRules pins the parser split behind the
@@ -206,7 +215,7 @@ func TestVerifyClaimAgreesWithAppendFence(t *testing.T) {
 	live := agree("live", cr.WriteToken, now, ClaimVerifyOK)
 	want := ClaimVerification{
 		Status: ClaimVerifyOK, Generation: cr.Generation, WakeID: cr.WakeID, Holder: "w1",
-		Streams: []string{"events/a"}, LeaseUntilNs: sub.LeaseUntilNs,
+		Streams: []string{"events/a"}, LeaseUntilNs: sub.LeaseUntilNs, LeaseRemainingNs: sub.LeaseUntilNs - now.UnixNano(),
 	}
 	if !reflect.DeepEqual(live, want) {
 		t.Fatalf("live verification = %+v, want %+v", live, want)

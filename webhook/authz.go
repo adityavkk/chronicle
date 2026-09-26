@@ -184,16 +184,21 @@ const (
 
 // ClaimVerification is VerifyClaim's answer. Detail is the operator-facing
 // refusal text (never credential material). The claim fields, Streams (the
-// token's exact scope), and LeaseUntilNs are set with OK only, and the lease
-// comes from the same atomic read as the decision.
+// token's exact scope), LeaseUntilNs, and LeaseRemainingNs are set with OK
+// only, and the lease comes from the same atomic read as the decision.
+// LeaseRemainingNs is the lease left as judged on the server clock at the
+// instant of that read — LeaseUntilNs minus the now the predicate was
+// evaluated at, floored at zero — so a consumer bounds its WF-30 cache on the
+// clock that fences the append rather than on its own.
 type ClaimVerification struct {
-	Status       ClaimVerifyStatus
-	Detail       string
-	Generation   int64
-	WakeID       string
-	Holder       string
-	Streams      []string
-	LeaseUntilNs int64
+	Status           ClaimVerifyStatus
+	Detail           string
+	Generation       int64
+	WakeID           string
+	Holder           string
+	Streams          []string
+	LeaseUntilNs     int64
+	LeaseRemainingNs int64
 }
 
 // VerifyClaim answers whether token is the live claim of subID using the
@@ -228,12 +233,20 @@ func (a WriteTokenAuthorizer) VerifyClaim(token, subID string, now time.Time) (C
 	if !d.Allowed() {
 		return ClaimVerification{Status: ClaimVerifyFenced, Detail: d.Detail()}, nil
 	}
+	// The remaining lease is server-relative by construction: the predicate
+	// accepted the claim against this same now, so the difference is the time
+	// the fence itself still grants, independent of any client clock (WF-30).
+	remaining := check.LeaseUntilNs - now.UnixNano()
+	if remaining < 0 {
+		remaining = 0
+	}
 	return ClaimVerification{
-		Status:       ClaimVerifyOK,
-		Generation:   v.Generation,
-		WakeID:       v.WakeID,
-		Holder:       v.Holder,
-		Streams:      v.Streams,
-		LeaseUntilNs: check.LeaseUntilNs,
+		Status:           ClaimVerifyOK,
+		Generation:       v.Generation,
+		WakeID:           v.WakeID,
+		Holder:           v.Holder,
+		Streams:          v.Streams,
+		LeaseUntilNs:     check.LeaseUntilNs,
+		LeaseRemainingNs: remaining,
 	}, nil
 }
