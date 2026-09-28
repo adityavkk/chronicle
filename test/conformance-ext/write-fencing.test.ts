@@ -5,7 +5,9 @@
 //
 // Fault sensitivity (design §H.3): under `-tags fence_fault_nobind` WF-16 must
 // fail (the producer binding is never written); under `-tags fence_fault_noseal`
-// WF-19 must fail (done tombstones but records no seal, so HEAD shows none).
+// WF-19 must fail (done tombstones but records no seal, so HEAD shows none);
+// under `-tags fence_fault_verifystale` WF-29 must fail (verify no longer binds
+// the answer to the token's identity, so a predecessor's token verifies 200).
 import http from "node:http"
 import type { AddressInfo } from "node:net"
 import { expect, test } from "vitest"
@@ -599,7 +601,9 @@ test("WF-29 verify evaluates a write token claim without a write", async () => {
   // Recreated under the same id, the subscription is a new incarnation that
   // restarts its generations, so the predecessor's token stays 409 precheck
   // even at an equal generation, while the new claim's own token is 200.
-  // (The in-repo pin forces the wake id and holder to coincide as well.)
+  // (The in-repo pin forces the wake id and holder to coincide as well.) A
+  // server that no longer binds verify to the token's identity answers 200
+  // here (fence_fault_verifystale must make this line fail).
   const dnCr2 = await pullWakeSub(dnSub, dnPath)
   expect(dnCr2.generation).toBe(dnCr.generation)
   const stale = await verify(dnSub, dnCr.write_token!)

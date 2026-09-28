@@ -161,9 +161,11 @@ test per WF-01…WF-30 obligation plus negative controls, run against a live
 server in enforce mode. It is a separate directory with its own runner so the
 pinned base suite never collects it and the certified 332/332 stays a
 statement about the unmodified protocol. Fault-injection build tags
-(`fence_fault_nobind`, `fence_fault_noseal`, `fence_fault_nopair`) each remove
-one fence write and must make their designated test fail — proof the checks
-are load-bearing, in the same spirit as the TLA+ fault configs.
+(`fence_fault_nobind`, `fence_fault_noseal`, `fence_fault_nopair`,
+`fence_fault_verifystale`) each remove one fence mechanism — a fence write,
+the terminal gap pair, or the verify route's token-identity predicate — and
+must make their designated test fail — proof the checks are load-bearing, in
+the same spirit as the TLA+ fault configs.
 
 Run: `make conformance` (needs Redis and a built server); the extension suite
 is `make conformance-ext`. Its runner (`scripts/conformance-ext.sh`) starts two

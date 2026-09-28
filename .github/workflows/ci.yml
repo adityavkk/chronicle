@@ -236,7 +236,7 @@ jobs:
 
   # Write Fencing extension conformance (#183, test/conformance-ext): the
   # chronicle-owned WF/NC suite plus the pinned-client control against an
-  # enforce-mode server, then the three fault-injection controls — each builds
+  # enforce-mode server, then the four fault-injection controls — each builds
   # a deliberately broken server and MUST fail its named test, proving the
   # suite detects a server that drops that one mechanism.
   conformance-ext:
@@ -297,6 +297,15 @@ jobs:
             cat fault.log; exit 1
           fi
           grep -qE "FAIL.*client\.test\.ts" fault.log
+      - name: Fault control fence_fault_verifystale (WF-29 must fail)
+        env:
+          CHRONICLE_BUILD_TAGS: fence_fault_verifystale
+        run: |
+          if ./scripts/conformance-ext.sh -t "WF-29" > fault.log 2>&1; then
+            echo "fence_fault_verifystale server passed WF-29 — the verify identity control is dead" >&2
+            cat fault.log; exit 1
+          fi
+          grep -qE "(×|✗|FAIL).*WF-29" fault.log
 
   # Lean pure-core proofs (issue #30 / P1.1). Separate from the Go jobs and gated
   # on `lean/` changes so routine Go CI never invokes Lean. The toolchain is pinned
