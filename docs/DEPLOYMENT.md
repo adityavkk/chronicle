@@ -237,10 +237,14 @@ the resource.
 **What is traced.** Each request to the main listener is one server span named
 `chronicle.<operation>` (`append`, `read`, `create`, `delete`, `subscription`
 for the `__ds` routes, `other` for the console), a child of the caller's
-`traceparent` when one arrives. Redis commands issued under a traced request
-are its children, without the statement, so no key (and no stream path) leaves
-the process; Redis work that no request caused (slot ownership, the recovery
-sweep, queue polling) is dropped rather than exported as one-span traces. A
+`traceparent` when one arrives. Redis commands on paths that pass the request
+context to the store (today reads and live waits) are children of the request
+span, without the statement, so no key (and no stream path) leaves the process;
+the append and create store calls do not yet carry it, so their Redis work is
+not in the trace (see the consequences in
+[ADR-0011](adr/0011-tracing-fails-open-and-samples-by-operation.md)). Redis
+work that no request caused (slot ownership, the recovery sweep, queue polling)
+is dropped rather than exported as one-span traces. A
 webhook delivery attempt is a `chronicle.delivery` client span: a child of the
 append that armed the wake while the delivering replica remembers it (the same
 bounded memory that holds the request id above), the root of a new trace

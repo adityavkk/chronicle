@@ -1,4 +1,4 @@
-# ADR-0009: Tracing fails open, samples its own roots by operation, and hands receivers an unsigned `traceparent`
+# ADR-0011: Tracing fails open, samples its own roots by operation, and hands receivers an unsigned `traceparent`
 
 - **Status:** Accepted
 - **Date:** 2026-09-28
