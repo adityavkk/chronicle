@@ -631,19 +631,22 @@ func (m *Manager) OnStreamAppend(ctx context.Context, path string) {
 	m.dirtyMu.Unlock()
 
 	m.metrics.DirtyEnqueue(result.String(), stats.depth, stats.capacity, stats.oldestAge)
-	// One Debug line per append. The first overflow of an epoch is the one an
+	// One Debug line per append, guarded so the append path allocates nothing
+	// for it while Debug is off. The first overflow of an epoch is the one an
 	// operator needs to see, so it alone is a Warn; the rest of the epoch is
 	// carried by the metric.
 	level := slog.LevelDebug
 	if requestRecovery {
 		level = slog.LevelWarn
 	}
-	m.log.Log(ctx, level, "webhook append hint queued",
-		"event", "append_hint_queued",
-		"request_id", origin.requestID,
-		"stream_path", path,
-		"outcome", result.String(),
-		"queue_depth", stats.depth)
+	if m.log.Enabled(ctx, level) {
+		m.log.Log(ctx, level, "webhook append hint queued",
+			"event", "append_hint_queued",
+			"request_id", origin.requestID,
+			"stream_path", path,
+			"outcome", result.String(),
+			"queue_depth", stats.depth)
+	}
 	switch result {
 	case dirtyEnqueued:
 		failpoint(fpDirtyAfterEnqueueBeforeSignal)
