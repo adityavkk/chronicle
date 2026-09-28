@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
@@ -46,6 +47,10 @@ const (
 	EnvSweepBatch            = "CHRONICLE_SWEEP_BATCH"
 	EnvMetricsListen         = "CHRONICLE_METRICS_LISTEN"
 	EnvMetricsPprof          = "CHRONICLE_METRICS_PPROF"
+
+	EnvRequestIDHeader = "CHRONICLE_REQUEST_ID_HEADER" // correlation header read, echoed and sent on webhook deliveries; default X-Request-ID
+	EnvLogLevel        = "CHRONICLE_LOG_LEVEL"         // debug | info | warn | error; the -log-level flag overrides
+	EnvLogFormat       = "CHRONICLE_LOG_FORMAT"        // text | json; the -log-format flag overrides
 	// Tunable-consistency surface (issue #16, doc 05 "Tunable consistency").
 	EnvConsistencyTier = "CHRONICLE_CONSISTENCY_TIER" // A (default) | B | C
 	EnvWaitReplicas    = "CHRONICLE_WAIT_REPLICAS"    // Tier B WAITAOF numreplicas (1 on STANDARD_HA, 0 on a single Redis)
@@ -251,6 +256,12 @@ type Config struct {
 	// rotation overlap window (#123). Zero keeps the per-family defaults.
 	KeyRotationOverlap time.Duration
 
+	// RequestIDHeader names the correlation header Chronicle reads, echoes and
+	// sends on webhook deliveries: correlation.DefaultHeader unless
+	// CHRONICLE_REQUEST_ID_HEADER names a platform-owned header. Its value is a
+	// log-join hint, unsigned and never identity.
+	RequestIDHeader string
+
 	// AuthMode selects stream authn/authz enforcement (issue #126). The default
 	// auth.ModeInsecure evaluates decisions for telemetry only, so a base
 	// protocol client keeps working and a deploy sync can never auto-enforce;
@@ -335,6 +346,7 @@ func DefaultConfig() Config {
 		Consistency:           webhook.TierA, // no WAIT by default — best latency, at-least-once
 		WaitReplicas:          1,             // the realistic Redis Software HA ceiling (06:70), used only by Tier B
 		WaitTimeoutMs:         1000,
+		RequestIDHeader:       correlation.DefaultHeader,
 		AuthMode:              auth.ModeInsecure, // telemetry-first: enforcement is an explicit per-stage opt-in (issue #126)
 	}
 }
@@ -532,6 +544,13 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvKeyRotationOverlap, err)
 		}
 		c.KeyRotationOverlap = d
+	}
+	if v, ok := lookup(EnvRequestIDHeader); ok {
+		name := strings.TrimSpace(v)
+		if !correlation.ValidHeaderName(name) {
+			return fmt.Errorf("%s: want an HTTP header field name, got %q", EnvRequestIDHeader, v)
+		}
+		c.RequestIDHeader = name
 	}
 	if v, ok := lookup(EnvAuthMode); ok {
 		mode, err := auth.ParseMode(v)

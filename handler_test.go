@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
@@ -1619,5 +1620,31 @@ func TestMountValidatesRoot(t *testing.T) {
 	}
 	if _, err := Mount("/", h); err != nil {
 		t.Errorf("Mount(\"/\") should succeed, got %v", err)
+	}
+}
+
+// TestCORSListsRequestIDHeader pins that the correlation header, under its
+// default or its configured name, is both accepted from and exposed to a
+// browser client, so a page can send one and read the echo.
+func TestCORSListsRequestIDHeader(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured string
+		want       string
+	}{
+		{"default", "", correlation.DefaultHeader},
+		{"configured", "My-Platform-Request-ID", "My-Platform-Request-ID"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := testHandler(time.Second, time.Second)
+			h.RequestIDHeader = tc.configured
+			rec := do(h, http.MethodOptions, "/agents/e1/session", nil, nil)
+			for _, list := range []string{"Access-Control-Allow-Headers", "Access-Control-Expose-Headers"} {
+				if got := rec.Header().Get(list); !strings.Contains(got, tc.want) {
+					t.Errorf("%s = %q, missing %s", list, got, tc.want)
+				}
+			}
+		})
 	}
 }

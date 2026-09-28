@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
@@ -96,6 +97,11 @@ type Handler struct {
 	// SubHooks, when set, receives stream lifecycle events so the subscription
 	// layer can wake subscribers after a durable write. Nil disables the hooks.
 	SubHooks SubscriptionHooks
+
+	// RequestIDHeader is the correlation header name the CORS lists allow and
+	// expose (correlation.DefaultHeader when empty). RequestLoggingMiddleware
+	// reads and echoes it; the handler only advertises it to browsers.
+	RequestIDHeader string
 
 	// AppendMetrics receives the end-to-end synchronous subscription-hook time
 	// after a committed append. Nil disables it.
@@ -177,6 +183,13 @@ func (h *Handler) onStreamDeleted(path string) {
 	}
 }
 
+func (h *Handler) requestIDHeader() string {
+	if h.RequestIDHeader != "" {
+		return h.RequestIDHeader
+	}
+	return correlation.DefaultHeader
+}
+
 func (h *Handler) logger() *slog.Logger {
 	if h.Logger != nil {
 		return h.Logger
@@ -189,8 +202,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Set CORS headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, HEAD, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Stream-Seq, Stream-TTL, Stream-Expires-At, Stream-Closed, If-None-Match, Producer-Id, Producer-Epoch, Producer-Seq, Stream-Forked-From, Stream-Fork-Offset, Stream-Fork-Sub-Offset, Authorization, electric-claim-token, Write-Fence, Write-Token")
-	w.Header().Set("Access-Control-Expose-Headers", "Stream-Next-Offset, Stream-Cursor, Stream-Up-To-Date, Stream-Closed, Stream-Envelope, ETag, Location, Producer-Epoch, Producer-Seq, Producer-Expected-Seq, Producer-Received-Seq, Write-Fence, Write-Fence-Sealed-Generation, Write-Fence-Sealed-Offset")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Stream-Seq, Stream-TTL, Stream-Expires-At, Stream-Closed, If-None-Match, Producer-Id, Producer-Epoch, Producer-Seq, Stream-Forked-From, Stream-Fork-Offset, Stream-Fork-Sub-Offset, Authorization, electric-claim-token, Write-Fence, Write-Token, "+h.requestIDHeader())
+	w.Header().Set("Access-Control-Expose-Headers", "Stream-Next-Offset, Stream-Cursor, Stream-Up-To-Date, Stream-Closed, Stream-Envelope, ETag, Location, Producer-Epoch, Producer-Seq, Producer-Expected-Seq, Producer-Received-Seq, Write-Fence, Write-Fence-Sealed-Generation, Write-Fence-Sealed-Offset, "+h.requestIDHeader())
 
 	// Browser security headers (Protocol Section 10.7)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -222,7 +235,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.logger().Debug("handling request",
 		"method", r.Method,
 		"path", streamPath,
-		"query", r.URL.RawQuery)
+		"request_id", correlation.RequestID(r.Context()))
 
 	var err error
 	switch r.Method {

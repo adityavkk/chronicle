@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -230,6 +231,32 @@ func TestRedisReconnectTriggersSubscriptionService(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("Redis reconnect did not notify subscription service (count=%d)", svc.reconnects.Load())
 		case <-tick.C:
+		}
+	}
+}
+
+func TestNewLogger(t *testing.T) {
+	var buf bytes.Buffer
+	logger, err := newLogger(&buf, "warn", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.Info("filtered")
+	logger.Warn("kept", "k", "v")
+	if got := strings.TrimSpace(buf.String()); !strings.HasPrefix(got, "{") || !strings.Contains(got, `"msg":"kept"`) || strings.Contains(got, "filtered") {
+		t.Fatalf("json logger at warn wrote %q", got)
+	}
+	buf.Reset()
+	if logger, err = newLogger(&buf, "info", "text"); err != nil {
+		t.Fatal(err)
+	}
+	logger.Info("kept")
+	if got := buf.String(); strings.HasPrefix(got, "{") || !strings.Contains(got, "msg=kept") {
+		t.Fatalf("text logger wrote %q", got)
+	}
+	for _, bad := range [][2]string{{"loud", "text"}, {"info", "xml"}, {"info", ""}} {
+		if _, err := newLogger(&buf, bad[0], bad[1]); err == nil {
+			t.Errorf("newLogger(%q, %q) must fail", bad[0], bad[1])
 		}
 	}
 }

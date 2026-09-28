@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 )
 
 func TestLoadEnvReadPageBytes(t *testing.T) {
@@ -377,6 +378,32 @@ func TestLoadEnvImmutableSegments(t *testing.T) {
 		c = DefaultConfig()
 		if err := c.LoadEnv(env(map[string]string{tc.key: tc.value})); err == nil {
 			t.Fatalf("%s=%q must fail", tc.key, tc.value)
+		}
+	}
+}
+
+func TestLoadEnvRequestIDHeader(t *testing.T) {
+	env := func(vars map[string]string) func(string) (string, bool) {
+		return func(k string) (string, bool) { v, ok := vars[k]; return v, ok }
+	}
+
+	c := DefaultConfig()
+	if c.RequestIDHeader != correlation.DefaultHeader {
+		t.Fatalf("default RequestIDHeader = %q, want %q", c.RequestIDHeader, correlation.DefaultHeader)
+	}
+
+	c = DefaultConfig()
+	if err := c.LoadEnv(env(map[string]string{EnvRequestIDHeader: " My-Platform-Request-ID "})); err != nil {
+		t.Fatalf("a token header name must load: %v", err)
+	}
+	if c.RequestIDHeader != "My-Platform-Request-ID" {
+		t.Fatalf("RequestIDHeader = %q, want the trimmed configured name", c.RequestIDHeader)
+	}
+
+	for _, bad := range []string{"", "X Request ID", "X-Request-ID:", "X-Réquest"} {
+		c = DefaultConfig()
+		if err := c.LoadEnv(env(map[string]string{EnvRequestIDHeader: bad})); err == nil {
+			t.Errorf("%s=%q must refuse startup: a name that is not a header token cannot be read or echoed", EnvRequestIDHeader, bad)
 		}
 	}
 }

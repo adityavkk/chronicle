@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	chronicle "gecgithub01.walmart.com/auk000v/chronicle"
+	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 	"gecgithub01.walmart.com/auk000v/chronicle/metrics"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
@@ -130,6 +132,34 @@ func (s *redisEventSink) OnConnect(_ context.Context, _ *goredis.Conn) error {
 	return nil
 }
 
+// envOr returns the environment value for key, or fallback when it is unset
+// or empty. It seeds the defaults of flags that have no Config field.
+func envOr(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		return v
+	}
+	return fallback
+}
+
+// newLogger builds the process logger. level is debug, info, warn or error;
+// format is text (the development default) or json (one record per line for
+// a log pipeline). Both are chosen by flag, seeded from the environment.
+func newLogger(w io.Writer, level, format string) (*slog.Logger, error) {
+	var lvl slog.Level
+	if err := lvl.UnmarshalText([]byte(level)); err != nil {
+		return nil, fmt.Errorf("invalid -log-level %q: %w", level, err)
+	}
+	opts := &slog.HandlerOptions{Level: lvl}
+	switch format {
+	case "text":
+		return slog.New(slog.NewTextHandler(w, opts)), nil
+	case "json":
+		return slog.New(slog.NewJSONHandler(w, opts)), nil
+	default:
+		return nil, fmt.Errorf("invalid -log-format %q: want text or json", format)
+	}
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "chronicle:", err)
@@ -143,7 +173,8 @@ func run() error {
 		return err
 	}
 
-	logLevel := "info"
+	logLevel := envOr(chronicle.EnvLogLevel, "info")
+	logFormat := envOr(chronicle.EnvLogFormat, "text")
 	flag.StringVar(&cfg.Listen, "listen", cfg.Listen, "HTTP listen address")
 	flag.StringVar(&cfg.StreamRoot, "stream-root", cfg.StreamRoot, "URL prefix the protocol is served under")
 	flag.StringVar(&cfg.RedisURL, "redis-url", cfg.RedisURL, "redis connection URL (redis backend)")
@@ -168,15 +199,20 @@ func run() error {
 	flag.BoolVar(&cfg.UI, "ui", cfg.UI, "serve the embedded dsui console alongside the API (false = backend API only)")
 	flag.StringVar(&cfg.UIServer, "ui-server", cfg.UIServer, "server URL the served console prefills (empty = same-origin)")
 	flag.BoolVar(&cfg.WebhookAllowPrivate, "webhook-allow-private", cfg.WebhookAllowPrivate, "accept webhook URLs on private/RFC1918 addresses (trusted networks only)")
+	flag.StringVar(&cfg.RequestIDHeader, "request-id-header", cfg.RequestIDHeader, "correlation header read on requests, echoed on responses and sent on webhook deliveries")
 	flag.DurationVar(&cfg.SweepInterval, "sweep-interval", cfg.SweepInterval, "recovery sweep interval (subscriptions)")
 	flag.DurationVar(&cfg.ReconcileInterval, "reconcile-interval", cfg.ReconcileInterval, "slow reconcile loop interval (subscriptions)")
 	flag.IntVar(&cfg.SweepBatch, "sweep-batch", cfg.SweepBatch, "max subscriptions evaluated per sweep tick, 0 = no cap (subscriptions)")
 	flag.StringVar(&cfg.MetricsListen, "metrics-listen", cfg.MetricsListen, "address for /metrics + /healthz + /readyz, e.g. :9090 (empty disables)")
 	flag.BoolVar(&cfg.MetricsPprof, "metrics-pprof", cfg.MetricsPprof, "expose Go runtime profiles on the protected metrics listener")
 	flag.StringVar(&logLevel, "log-level", logLevel, "log level: debug, info, warn or error")
+	flag.StringVar(&logFormat, "log-format", logFormat, "log format: text or json")
 	flag.Parse()
 	if cfg.ReadPageBytes <= 0 {
 		return fmt.Errorf("-read-page-bytes must be positive")
+	}
+	if !correlation.ValidHeaderName(cfg.RequestIDHeader) {
+		return fmt.Errorf("-request-id-header: want an HTTP header field name, got %q", cfg.RequestIDHeader)
 	}
 	if err := validateSegmentConfig(cfg); err != nil {
 		return err
@@ -187,11 +223,10 @@ func run() error {
 	if err := validateObservabilityConfig(cfg); err != nil {
 		return err
 	}
-	var level slog.Level
-	if err := level.UnmarshalText([]byte(logLevel)); err != nil {
-		return fmt.Errorf("invalid -log-level %q: %w", logLevel, err)
+	logger, err := newLogger(os.Stderr, logLevel, logFormat)
+	if err != nil {
+		return err
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
 	redisEvents := &redisEventSink{}
 	st, rs, client, err := newStore(cfg, logger, redisEvents)
@@ -210,6 +245,7 @@ func run() error {
 		SSEClientWriteTimeout: cfg.SSEClientWriteTimeout,
 		Logger:                logger,
 		AuthMode:              cfg.AuthMode,
+		RequestIDHeader:       cfg.RequestIDHeader,
 	}
 
 	// Service principals (#180): mesh-attested SPIFFE is primary. Static bearer
@@ -363,6 +399,9 @@ func run() error {
 	// when -ui=false (backend-only) or the UI was not built into this binary — the
 	// UI is fully optional and decoupled from the backend.
 	root, uiEnabled := withUI(cfg.StreamRoot, api, cfg.UI, cfg.UIServer, logger)
+	// Every request, API and console alike, gets one correlation id and one
+	// completion event; the id also rides the append hook into webhook delivery.
+	root = chronicle.RequestLoggingMiddleware(logger, cfg.RequestIDHeader, root)
 
 	srv := &http.Server{
 		Addr:    cfg.Listen,
