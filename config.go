@@ -697,14 +697,14 @@ func (c *Config) checkXFCCPosture() error {
 	dev := c.Environment == DevEnvironment
 	if len(c.TrustedSPIFFEIDs) > 0 && c.XFCCMarkerName == "" && !c.AllowXFCCWithoutMarker {
 		if !dev {
-			return fmt.Errorf("SPIFFE service identity is configured without %s: outside dev, set %s to a marker that only the sidecar injects with overwrite semantics, and configure the inbound listener so the last XFCC element comes from the verified peer (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD); %s is refused when %s is not %q; see docs/DEPLOYMENT.md \"WCNP mesh contract\"",
+			return fmt.Errorf("SPIFFE service identity is configured without %s: outside dev, set %s to a marker that only the sidecar injects with overwrite semantics, and configure the inbound listener so the last XFCC element comes from the verified peer (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD); %s is refused when %s is not %q; see docs/DEPLOYMENT.md \"Mesh sidecar contract\"",
 				EnvXFCCRequiredHeader, EnvXFCCRequiredHeader, EnvXFCCTrustWithoutMarker, EnvEnvironment, DevEnvironment)
 		}
 		return fmt.Errorf("SPIFFE service identity is configured without %s: XFCC mesh identity would rest on raw client input; set %s to gate it, or set %s=true only in dev and only if the sidecar makes the last XFCC element the verified peer's (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD)",
 			EnvXFCCRequiredHeader, EnvXFCCRequiredHeader, EnvXFCCTrustWithoutMarker)
 	}
 	if c.AllowXFCCWithoutMarker && !dev {
-		return fmt.Errorf("%s=true is a dev-only escape hatch and is refused when %s=%q (want %q): outside dev, XFCC mesh identity must be gated by %s, a header only the sidecar injects with overwrite semantics; the inbound listener must also make the last XFCC element the verified peer's (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD, never FORWARD_ONLY); see docs/DEPLOYMENT.md \"WCNP mesh contract\"",
+		return fmt.Errorf("%s=true is a dev-only escape hatch and is refused when %s=%q (want %q): outside dev, XFCC mesh identity must be gated by %s, a header only the sidecar injects with overwrite semantics; the inbound listener must also make the last XFCC element the verified peer's (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD, never FORWARD_ONLY); see docs/DEPLOYMENT.md \"Mesh sidecar contract\"",
 			EnvXFCCTrustWithoutMarker, EnvEnvironment, c.Environment, DevEnvironment, EnvXFCCRequiredHeader)
 	}
 	return nil

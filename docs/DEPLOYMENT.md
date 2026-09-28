@@ -367,7 +367,7 @@ closed until one is wired), and watch
 `chronicle_append_fence_rejections_total{reason}` — sustained `marker`/`sealed`
 rejections are deposed writers being stopped, which is the fence doing its job.
 
-### WCNP mesh contract
+### Mesh sidecar contract
 
 Chronicle checks the marker and XFCC headers. The deployment must also enforce
 all of these controls:
@@ -414,14 +414,14 @@ accepts it only when `CHRONICLE_ENVIRONMENT=dev`. A non-dev deployment with a
 SPIFFE allowlist and no marker fails first on the older #130 guard:
 
 ```text
-chronicle: SPIFFE service identity is configured without CHRONICLE_XFCC_REQUIRED_HEADER: outside dev, set CHRONICLE_XFCC_REQUIRED_HEADER to a marker that only the sidecar injects with overwrite semantics, and configure the inbound listener so the last XFCC element comes from the verified peer (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD); CHRONICLE_XFCC_TRUST_WITHOUT_MARKER is refused when CHRONICLE_ENVIRONMENT is not "dev"; see docs/DEPLOYMENT.md "WCNP mesh contract"
+chronicle: SPIFFE service identity is configured without CHRONICLE_XFCC_REQUIRED_HEADER: outside dev, set CHRONICLE_XFCC_REQUIRED_HEADER to a marker that only the sidecar injects with overwrite semantics, and configure the inbound listener so the last XFCC element comes from the verified peer (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD); CHRONICLE_XFCC_TRUST_WITHOUT_MARKER is refused when CHRONICLE_ENVIRONMENT is not "dev"; see docs/DEPLOYMENT.md "Mesh sidecar contract"
 ```
 
 If an operator sets the dev-only opt-in outside dev, startup fails with this
 second error, whether or not a marker is also set:
 
 ```text
-chronicle: CHRONICLE_XFCC_TRUST_WITHOUT_MARKER=true is a dev-only escape hatch and is refused when CHRONICLE_ENVIRONMENT="stage" (want "dev"): outside dev, XFCC mesh identity must be gated by CHRONICLE_XFCC_REQUIRED_HEADER, a header only the sidecar injects with overwrite semantics; the inbound listener must also make the last XFCC element the verified peer's (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD, never FORWARD_ONLY); see docs/DEPLOYMENT.md "WCNP mesh contract"
+chronicle: CHRONICLE_XFCC_TRUST_WITHOUT_MARKER=true is a dev-only escape hatch and is refused when CHRONICLE_ENVIRONMENT="stage" (want "dev"): outside dev, XFCC mesh identity must be gated by CHRONICLE_XFCC_REQUIRED_HEADER, a header only the sidecar injects with overwrite semantics; the inbound listener must also make the last XFCC element the verified peer's (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD, never FORWARD_ONLY); see docs/DEPLOYMENT.md "Mesh sidecar contract"
 ```
 
 `SANITIZE_SET` without `CHRONICLE_XFCC_REQUIRED_HEADER` does not satisfy the
