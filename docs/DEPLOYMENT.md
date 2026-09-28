@@ -158,6 +158,53 @@ refuses two active adapters, and refuses an adapter combined with
 unnecessary. Every other target still goes through the normal SSRF rules and is
 rejected with `400 WEBHOOK_URL_REJECTED`.
 
+## Request correlation and logging
+
+Every request gets one correlation id and one completion log record.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `CHRONICLE_REQUEST_ID_HEADER` / `-request-id-header` | `X-Request-ID` | The header Chronicle reads on requests, echoes on responses and sends on webhook deliveries. Must be an RFC 9110 field name; startup refuses anything else. |
+| `CHRONICLE_LOG_FORMAT` / `-log-format` | `text` | `text` for development, `json` (one record per line) for a log pipeline. |
+| `CHRONICLE_LOG_LEVEL` / `-log-level` | `info` | `debug`, `info`, `warn` or `error`. |
+
+A platform that already owns a request-id header names it here and keeps it
+end to end, for example:
+
+```text
+CHRONICLE_REQUEST_ID_HEADER=My-Platform-Request-ID
+CHRONICLE_LOG_FORMAT=json
+```
+
+A caller value is kept when it is 1 to 128 bytes of `[A-Za-z0-9._:-]` starting
+with an alphanumeric; anything else, or no value, is replaced by a fresh UUID
+(the request still succeeds). The id reaches the webhook a stream append
+causes: it is sent as the same header on the wake's `POST` and every retry,
+and logged on the delivery, the callback or ack and the release. The
+semantics a receiver can rely on, including which append's id a coalesced
+wake carries and when a wake falls back to `wake-<wake_id>`, are in
+[docs/spec/CHRONICLE-NOTES.md](spec/CHRONICLE-NOTES.md#section-71-webhook-delivery-and-callback--the-request-correlation-header).
+
+**The header is unsigned and never identity.** It is outside
+`Webhook-Signature` and no authentication or authorization decision reads it.
+Treat it as a hint for joining logs, on both sides.
+
+Log records are `event`-keyed with an `outcome`: `http_request_completed` per
+request (Info; Error on a 5xx or a panic), `webhook_delivery_completed` per
+delivery attempt, `pull_wake_delivery_completed` per wake event,
+`subscription_ack_completed` and `subscription_release_completed` per callback,
+ack and release. The request start line, the armed-wake trace and the per-append
+hint are Debug; the first dirty-queue overflow of an epoch is a Warn. URL paths
+are logged (stream paths can name your entities), query strings, bodies and
+headers never are.
+
+Chronicle remembers which request id armed each in-flight wake in a bounded,
+process-local memory: an entry lapses after the subscription's lease plus the
+longest retry gap (60 s) of no use, and at most 16384 entries are held, the
+one nearest expiry going first. `chronicle_wake_correlation_evictions_total`
+counts live entries dropped at capacity; a sustained rate means the replica's
+in-flight wakes exceed the memory and those wakes log `wake-<wake_id>`.
+
 ## Service identity and access policy
 
 Use mesh-attested SPIFFE identity for service-to-service calls in production.
