@@ -12,10 +12,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
 	"strings"
-	"sync/atomic"
-	"time"
 )
 
 // DefaultHeader is the HTTP header Chronicle reads and echoes when a
@@ -27,8 +24,6 @@ const DefaultHeader = "X-Request-ID"
 const MaxLength = 128
 
 type requestIDKey struct{}
-
-var fallbackCounter atomic.Uint64
 
 // Valid reports whether value satisfies the request-id grammar: 1 to
 // MaxLength bytes, the first alphanumeric, the rest alphanumeric or one of
@@ -62,14 +57,13 @@ func Normalize(value string) string {
 	return newRequestID()
 }
 
-// newRequestID mints a random UUIDv4 string, which the grammar accepts. The
-// clock-and-counter fallback only fires when the platform's random source is
-// unavailable and is still unique within a process.
+// newRequestID mints a random UUIDv4 string, which the grammar accepts.
+// Since Go 1.24 crypto/rand.Read never returns an error (it terminates the
+// process if the platform's random source is unusable), so there is no
+// fallback to take.
 func newRequestID() string {
 	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return fmt.Sprintf("req-%d-%d", time.Now().UnixNano(), fallbackCounter.Add(1))
-	}
+	_, _ = rand.Read(raw[:])
 	raw[6] = raw[6]&0x0f | 0x40
 	raw[8] = raw[8]&0x3f | 0x80
 	return hex.EncodeToString(raw[0:4]) + "-" +

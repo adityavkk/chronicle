@@ -17,9 +17,9 @@ import (
 // completion event.
 //
 // The id is read from header (correlation.DefaultHeader when header is empty),
-// normalized by correlation.Normalize, stored on the request context, written
-// back onto the request header so downstream code sees the normalized value,
-// and echoed on the response. The completion event (http_request_completed)
+// normalized once as it is stored on the request context (correlation.WithRequestID),
+// written back onto the request header so downstream code sees the normalized
+// value, and echoed on the response. The completion event (http_request_completed)
 // carries request_id, method, path, http_status, outcome and duration_ms at
 // Info; at Error when the handler failed or panicked; at Warn when it aborted
 // a committed stream (http.ErrAbortHandler), or Info if that client had
@@ -33,8 +33,8 @@ func RequestLoggingMiddleware(logger *slog.Logger, header string, next http.Hand
 		header = correlation.DefaultHeader
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := correlation.Normalize(r.Header.Get(header))
-		ctx := correlation.WithRequestID(r.Context(), requestID)
+		ctx := correlation.WithRequestID(r.Context(), r.Header.Get(header))
+		requestID := correlation.RequestID(ctx)
 		r = r.WithContext(ctx)
 		r.Header.Set(header, requestID)
 		w.Header().Set(header, requestID)
