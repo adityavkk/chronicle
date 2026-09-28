@@ -117,7 +117,6 @@ func loadRedisCredentials(path, configuredUsername string, allowGroupRead bool) 
 	if err != nil {
 		return redisCredentials{}, err
 	}
-	defer clear(raw)
 	fileUsername, password, err := parseRedisCredentials(raw)
 	if err != nil {
 		return redisCredentials{}, err
@@ -164,11 +163,9 @@ func readRedisCredentialFile(path string, allowGroupRead bool) ([]byte, error) {
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, maximumRedisCredentialFileBytes+1))
 	if err != nil {
-		clear(raw)
 		return nil, fmt.Errorf("redis credential file: %w", err)
 	}
 	if int64(len(raw)) > maximumRedisCredentialFileBytes {
-		clear(raw)
 		return nil, errors.New("redis credential file is too large")
 	}
 	return raw, nil

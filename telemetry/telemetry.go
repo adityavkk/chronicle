@@ -17,6 +17,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/url"
@@ -286,10 +287,16 @@ func basicAuthorization(cfg config) (string, error) {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password)), nil
 }
 
-// readCredential reads one trimmed, non-empty, bounded credential. Errors
-// name the variable and the path, never the content.
+// readCredential reads one trimmed, non-empty credential, bounded before it
+// is read rather than after, as the Redis credential loader does. Errors name
+// the variable and the path, never the content.
 func readCredential(env, path string) (string, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path) // #nosec G304 -- the operator-configured secret mount path
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", env, err)
+	}
+	defer file.Close() //nolint:errcheck // read-only; the read error is the one that matters
+	data, err := io.ReadAll(io.LimitReader(file, maxCredentialBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", env, err)
 	}
