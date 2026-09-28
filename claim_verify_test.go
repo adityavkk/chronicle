@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +27,12 @@ import (
 // no-side-effects invariant at the byte level of the Redis keyspace; the
 // linearization of verify with a deposition; and WF-30's server half — verify
 // never renews.
+//
+// Three tests here let the wall clock run on purpose. The claim, the verify
+// and the fence check all read time.Now() (webhook/routes.go), and the lease
+// deadline is compared against that clock inside the store's atomic read, so
+// on this stack a lease lapses only by letting the fixture's 1 s lease pass;
+// those tests pay it once. Coordination between goroutines never sleeps.
 
 const verifyTarget = "/__ds/subscriptions/s1/claim/verify"
 
@@ -330,11 +337,19 @@ func TestClaimVerifyLinearizedWithDeposition(t *testing.T) {
 	const workers = 8
 	samples := make([][]sample, workers)
 	stop := make(chan struct{})
+	// Each worker reports once when it holds its first answer, and once more
+	// when it has completed a verify that started after the takeover
+	// committed (committedNs, published by the test after the claim). The
+	// test waits on both handoffs instead of guessing a duration.
+	var committedNs atomic.Int64
+	started := make(chan struct{}, workers)
+	answeredAfter := make(chan struct{}, workers)
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			reported := false
 			for {
 				select {
 				case <-stop:
@@ -352,17 +367,29 @@ func TestClaimVerifyLinearizedWithDeposition(t *testing.T) {
 					}
 				}
 				samples[i] = append(samples[i], sm)
+				if len(samples[i]) == 1 {
+					started <- struct{}{}
+				}
+				if c := committedNs.Load(); c != 0 && !reported && before.UnixNano() > c {
+					reported = true
+					answeredAfter <- struct{}{}
+				}
 			}
 		}(i)
 	}
-	time.Sleep(100 * time.Millisecond)
+	for range workers {
+		<-started
+	}
 	takeoverAt := time.Now().Add(2 * time.Second)
 	crB, err := s.subStore.Claim("s1", "worker-B", "w_b", takeoverAt, 1000)
 	committed := time.Now()
 	if err != nil || !crB.Claimed || crB.Generation == cr.Generation {
 		t.Fatalf("takeover claim = %+v err=%v", crB, err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	committedNs.Store(committed.UnixNano())
+	for range workers {
+		<-answeredAfter
+	}
 	close(stop)
 	wg.Wait()
 

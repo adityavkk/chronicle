@@ -581,9 +581,6 @@ func (rt *Routes) handleClaimVerify(w http.ResponseWriter, r *http.Request, id s
 // (chronicle_claim_verify_total) and logs it without the credential bytes.
 func (rt *Routes) recordClaimVerifyRefusal(id, outcome, detail string) {
 	rt.mgr.metrics.ClaimVerify(outcome)
-	if rt.mgr.log == nil {
-		return
-	}
 	rt.mgr.log.Warn("claim verify denied",
 		"subscription", id, "outcome", outcome, "detail", detail)
 }
