@@ -11,10 +11,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -345,5 +347,45 @@ func TestHandlerReportsFlushErrors(t *testing.T) {
 	handler.ServeHTTP(&flushFailingRecorder{httptest.NewRecorder(), deadline}, httptest.NewRequest(http.MethodGet, "/v1/stream/a", nil))
 	if !errors.Is(got, deadline) {
 		t.Fatalf("flush through the tracing handler = %v, want the connection's %v", got, deadline)
+	}
+}
+
+func TestHandlerEndsTheSpanWhenTheHandlerPanics(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   any
+		errored bool
+	}{
+		{"a panic marks the span", errors.New("boom"), true},
+		{"an SSE abort is not an error", http.ErrAbortHandler, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tracing, exporter := newTestTracing(t)
+			handler := tracing.Handler("/v1/stream/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("partial"))
+				panic(tc.value)
+			}))
+			func() {
+				defer func() {
+					if recover() != tc.value {
+						t.Fatal("tracing handler must re-raise the panic unchanged")
+					}
+				}()
+				handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/stream/a", nil))
+			}()
+			spans := exporter.GetSpans()
+			if len(spans) != 1 || spans[0].Name != "chronicle.read" {
+				t.Fatalf("spans = %+v, want one chronicle.read", spans)
+			}
+			if got := spans[0].Status.Code == codes.Error; got != tc.errored {
+				t.Fatalf("span errored = %v, want %v (status %+v)", got, tc.errored, spans[0].Status)
+			}
+			if !slices.ContainsFunc(spans[0].Attributes, func(a attribute.KeyValue) bool {
+				return a.Key == "http.response.body.size" && a.Value.AsInt64() == int64(len("partial"))
+			}) {
+				t.Fatalf("attributes = %v, want the bytes written before the panic", spans[0].Attributes)
+			}
+		})
 	}
 }

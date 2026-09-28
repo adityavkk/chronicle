@@ -2,6 +2,7 @@ package chronicle
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -181,6 +182,41 @@ func TestRequestLoggingMiddlewareOutcomes(t *testing.T) {
 		lines := logLines(t, &logs)
 		if len(lines) != 1 || lines[0]["level"] != "ERROR" || lines[0]["outcome"] != "panicked" {
 			t.Fatalf("panic completion = %#v", lines)
+		}
+	})
+	// The SSE paths abort a committed stream with http.ErrAbortHandler, which
+	// net/http itself never logs: a client that went away is routine, a write
+	// that timed out on a live client is worth a Warn, neither is an Error.
+	abort := func(t *testing.T, ctx context.Context) []map[string]any {
+		t.Helper()
+		var logs bytes.Buffer
+		handler := RequestLoggingMiddleware(slog.New(slog.NewJSONHandler(&logs, nil)), "",
+			http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("data: 1\n\n"))
+				panic(http.ErrAbortHandler)
+			}))
+		func() {
+			defer func() {
+				if recover() != http.ErrAbortHandler {
+					t.Fatal("middleware must re-raise http.ErrAbortHandler unchanged")
+				}
+			}()
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/stream/example", nil).WithContext(ctx))
+		}()
+		return logLines(t, &logs)
+	}
+	t.Run("abort of a committed stream is a WARN aborted event", func(t *testing.T) {
+		lines := abort(t, context.Background())
+		if len(lines) != 1 || lines[0]["level"] != "WARN" || lines[0]["outcome"] != "aborted" || lines[0]["http_status"] != float64(http.StatusOK) {
+			t.Fatalf("abort completion = %#v", lines)
+		}
+	})
+	t.Run("abort after the client went away is INFO", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		lines := abort(t, ctx)
+		if len(lines) != 1 || lines[0]["level"] != "INFO" || lines[0]["outcome"] != "aborted" {
+			t.Fatalf("abort completion = %#v", lines)
 		}
 	})
 }

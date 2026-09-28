@@ -30,21 +30,30 @@ func (t *Tracing) Handler(streamRoot string, next http.Handler) http.Handler {
 		ctx, span := tracer.Start(ctx, correlation.SpanName(operationFor(streamRoot, r)),
 			trace.WithSpanKind(trace.SpanKindServer),
 			trace.WithAttributes(attribute.String("http.request.method", r.Method)))
-		defer span.End()
-
 		tracked := responsewriter.Track(w)
+		defer func() {
+			recovered := recover()
+			span.SetAttributes(
+				attribute.Int("http.response.status_code", tracked.Status()),
+				attribute.Int64("http.response.body.size", tracked.Written()),
+			)
+			switch {
+			case recovered != nil && recovered != http.ErrAbortHandler:
+				// An abort is how the SSE paths end a committed stream they
+				// cannot finish; any other panic is a failure of the request.
+				span.SetStatus(codes.Error, "panic")
+			case tracked.Status() >= http.StatusInternalServerError:
+				span.SetStatus(codes.Error, "server error")
+			}
+			if r.Context().Err() != nil {
+				span.SetAttributes(attribute.Bool("chronicle.cancelled", true))
+			}
+			span.End()
+			if recovered != nil {
+				panic(recovered)
+			}
+		}()
 		next.ServeHTTP(tracked, r.WithContext(ctx))
-
-		span.SetAttributes(
-			attribute.Int("http.response.status_code", tracked.Status()),
-			attribute.Int64("http.response.body.size", tracked.Written()),
-		)
-		if tracked.Status() >= http.StatusInternalServerError {
-			span.SetStatus(codes.Error, "server error")
-		}
-		if r.Context().Err() != nil {
-			span.SetAttributes(attribute.Bool("chronicle.cancelled", true))
-		}
 	})
 }
 

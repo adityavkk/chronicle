@@ -190,7 +190,8 @@ wake carries and when a wake falls back to `wake-<wake_id>`, are in
 Treat it as a hint for joining logs, on both sides.
 
 Log records are `event`-keyed with an `outcome`: `http_request_completed` per
-request (Info; Error on a 5xx or a panic), `webhook_delivery_completed` per
+request (Info; Error on a 5xx or a panic; Warn when a committed SSE stream is
+aborted, Info when its client had already gone), `webhook_delivery_completed` per
 delivery attempt, `pull_wake_delivery_completed` per wake event,
 `subscription_ack_completed` and `subscription_release_completed` per callback,
 ack and release. The request start line, the armed-wake trace and the per-append
