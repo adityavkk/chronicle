@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -12,7 +11,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -32,12 +30,8 @@ import (
 
 // newStore builds the stream store. For the redis backend it also returns the
 // concrete Redis store and the shared client so the subscription layer can run
-// on the same Redis; both are nil for the memory backend.
-//
-// Two URL schemes are supported:
-//   - redis://host:port/db — standalone (Memorystore STANDARD_HA or single node)
-//   - redis+cluster://host1:port,host2:port,... — sharded cluster
-//     (Memorystore for Redis Cluster; gate #2 cross-node RTT testing)
+// on the same Redis; both are nil for the memory backend. newRedisClient lists
+// the supported Redis URL schemes.
 func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEventSink) (store.Store, *redisstore.Store, goredis.UniversalClient, error) {
 	switch cfg.StoreBackend {
 	case "memory":
@@ -46,14 +40,15 @@ func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEvent
 		}
 		return store.NewMemoryStore(), nil, nil, nil
 	case "redis":
-		client, err := newRedisClient(cfg.RedisURL, cfg.RedisPoolSize, redisEvents)
+		client, err := newRedisClient(cfg, redisEvents)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := client.Ping(ctx).Err(); err != nil {
-			return nil, nil, nil, fmt.Errorf("redis unreachable at %s: %w", cfg.RedisURL, err)
+			_ = client.Close()
+			return nil, nil, nil, fmt.Errorf("redis unreachable: %w", err)
 		}
 		rs := redisstore.New(client, redisstore.Options{
 			Logger:                       logger,
@@ -129,72 +124,6 @@ func (s *redisEventSink) OnConnect(_ context.Context, _ *goredis.Conn) error {
 		service.OnRedisReconnect()
 	}
 	return nil
-}
-
-// newRedisClient parses a Redis URL and creates the appropriate client.
-// redis://host:port/db creates a standalone client; redis+cluster://h1,h2,h3
-// creates a ClusterClient that speaks the Redis Cluster protocol (required for
-// Memorystore for Redis Cluster, which shards keys across nodes — gate #2).
-func newRedisClient(rawURL string, poolSize int, redisEvents *redisEventSink) (goredis.UniversalClient, error) {
-	// rediss+cluster:// = Redis Cluster over TLS; redis+cluster:// = plaintext.
-	useTLS := strings.HasPrefix(rawURL, "rediss+cluster://")
-	if useTLS || strings.HasPrefix(rawURL, "redis+cluster://") {
-		rest := strings.TrimPrefix(strings.TrimPrefix(rawURL, "rediss+cluster://"), "redis+cluster://")
-		// Optional user:pass@ credentials precede the comma-separated seed list.
-		// Managed Redis Cluster (e.g. the squiggly ms-df-redis cluster) requires
-		// AUTH; the standalone path gets creds via ParseURL, so parse them here too.
-		var username, password string
-		if at := strings.LastIndex(rest, "@"); at >= 0 {
-			cred := rest[:at]
-			rest = rest[at+1:]
-			if c := strings.IndexByte(cred, ':'); c >= 0 {
-				username = cred[:c]
-				if pw, err := url.QueryUnescape(cred[c+1:]); err == nil {
-					password = pw
-				} else {
-					password = cred[c+1:]
-				}
-			} else {
-				username = cred
-			}
-		}
-		// Strip any /db suffix — cluster mode ignores DB selection.
-		if i := strings.LastIndex(rest, "/"); i >= 0 {
-			rest = rest[:i]
-		}
-		seeds := strings.Split(rest, ",")
-		for i := range seeds {
-			seeds[i] = strings.TrimSpace(seeds[i])
-		}
-		opts := &goredis.ClusterOptions{
-			Addrs:    seeds,
-			Username: username,
-			Password: password,
-		}
-		if poolSize > 0 {
-			opts.PoolSize = poolSize
-		}
-		if redisEvents != nil {
-			opts.OnConnect = redisEvents.OnConnect
-		}
-		if useTLS {
-			// ms-df-redis requires TLS. Cluster node addrs come from CLUSTER SLOTS
-			// and won't match the cert SAN, so skip hostname verification.
-			opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true} // #nosec G402
-		}
-		return goredis.NewClusterClient(opts), nil
-	}
-	opt, err := goredis.ParseURL(rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid redis URL: %w", err)
-	}
-	if redisEvents != nil {
-		opt.OnConnect = redisEvents.OnConnect
-	}
-	if poolSize > 0 {
-		opt.PoolSize = poolSize
-	}
-	return goredis.NewClient(opt), nil
 }
 
 func main() {

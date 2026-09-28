@@ -26,6 +26,46 @@ what the Redis deployment must provide and what guarantees you get back.
   two single-slot steps; the in-between window is reconciled via the fork
   registry set.
 
+### Connecting and authenticating
+
+Set the endpoint with `CHRONICLE_REDIS_URL` (or `--redis-url`):
+
+| URL | Client |
+| --- | --- |
+| `redis://host:6379/0`, `rediss://host:6380/0` | standalone |
+| `redis+cluster://h1:6379,h2:6379`, `rediss+cluster://h1:6379,h2:6379` | Redis Cluster, seeded from every listed node |
+
+The URL never carries credentials. Chronicle refuses a URL that contains `@`,
+so the URL is safe to log and no error message repeats it. Supply
+authentication separately:
+
+```text
+REDIS_USERNAME=chronicle                              # optional ACL user
+CHRONICLE_REDIS_CREDENTIAL_FILE=/etc/secrets/redis    # absolute path to a mounted secret
+```
+
+The credential file holds `KEY=VALUE` lines. Chronicle reads exactly one
+`REDIS_PASSWORD` and at most one `REDIS_USERNAME`, and ignores other keys, so a
+shared mounted secret works:
+
+```text
+REDIS_USERNAME=chronicle
+REDIS_PASSWORD=example-password
+OTHER_SERVICE_TOKEN=ignored
+```
+
+Startup fails, without echoing any value, when the file is missing or not a
+regular file (a symlink to one, as Kubernetes projects secrets, is fine), is
+group- or world-writable or executable, exceeds 64 KiB, lacks a password,
+repeats a Redis key, has an empty value or CRLF line endings, spells a Redis
+key another way (`export REDIS_PASSWORD=…`), or names a username that differs
+from `REDIS_USERNAME`. The file is read once at startup, so restart chronicle
+after rotating the password.
+
+Upgrading from a URL with embedded `user:password@`: move the password into the
+credential file and the username into `REDIS_USERNAME`; the old URL now refuses
+startup.
+
 ## Durability and consistency guarantees
 
 Within a healthy Redis primary:

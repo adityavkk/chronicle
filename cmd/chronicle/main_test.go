@@ -188,7 +188,7 @@ func TestRedisReconnectTriggersSubscriptionService(t *testing.T) {
 	defer cancel()
 
 	events := &redisEventSink{}
-	client, err := newRedisClient(rawURL, 0, events)
+	client, err := newRedisClient(chronicle.Config{RedisURL: rawURL}, events)
 	if err != nil {
 		t.Fatalf("new redis client: %v", err)
 	}

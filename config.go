@@ -17,6 +17,8 @@ const (
 	EnvListen                = "CHRONICLE_LISTEN"
 	EnvRedisURL              = "CHRONICLE_REDIS_URL"
 	EnvRedisPoolSize         = "CHRONICLE_REDIS_POOL_SIZE"
+	EnvRedisUsername         = "REDIS_USERNAME" // unprefixed: the name existing deployments already set
+	EnvRedisCredentialFile   = "CHRONICLE_REDIS_CREDENTIAL_FILE"
 	EnvStore                 = "CHRONICLE_STORE"
 	EnvSegmentMode           = "CHRONICLE_SEGMENT_MODE"
 	EnvSegmentDir            = "CHRONICLE_SEGMENT_DIR"
@@ -95,6 +97,11 @@ type Config struct {
 	RedisURL string
 	// RedisPoolSize overrides go-redis' per-node connection pool size when >0.
 	RedisPoolSize int
+	// RedisUsername is the Redis ACL username. RedisCredentialFile is an
+	// absolute path to a KEY=VALUE file with REDIS_PASSWORD and an optional
+	// REDIS_USERNAME, which must agree with RedisUsername when both are set.
+	RedisUsername       string
+	RedisCredentialFile string
 
 	// StoreBackend selects the storage backend: "redis" or "memory".
 	StoreBackend string
@@ -340,6 +347,12 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvRedisPoolSize, err)
 		}
 		c.RedisPoolSize = n
+	}
+	if v, ok := lookup(EnvRedisUsername); ok {
+		c.RedisUsername = v
+	}
+	if v, ok := lookup(EnvRedisCredentialFile); ok {
+		c.RedisCredentialFile = v
 	}
 	if v, ok := lookup(EnvStore); ok {
 		c.StoreBackend = v
