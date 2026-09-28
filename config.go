@@ -67,6 +67,16 @@ const (
 	EnvServicePolicyFile      = "CHRONICLE_SERVICE_POLICY_FILE"       // mounted strict JSON service action/namespace policy
 	EnvXFCCRequiredHeader     = "CHRONICLE_XFCC_REQUIRED_HEADER"      // optional "Name: value" sidecar marker gating XFCC trust
 	EnvXFCCTrustWithoutMarker = "CHRONICLE_XFCC_TRUST_WITHOUT_MARKER" // explicit opt-in to trust XFCC with no marker (#130): fail-closed default requires it when TrustedSPIFFE is set without a marker
+	// EnvEnvironment is the free-form label of the deployment environment
+	// ("dev", "stage", "prod", ...). It grants nothing by itself: the only
+	// thing keyed on it is whether dev-only escape hatches are accepted, and
+	// only the literal "dev" (after trim and lower-casing) accepts them.
+	// Unset counts as non-dev, so an undeclared environment fails closed
+	// (ADR-0010).
+	EnvEnvironment = "CHRONICLE_ENVIRONMENT"
+	// DevEnvironment is the only EnvEnvironment value that permits dev-only
+	// escape hatches such as EnvXFCCTrustWithoutMarker.
+	DevEnvironment = "dev"
 	// Key custody (issues #123/#126): path to a mounted secrets file holding the
 	// Ed25519 signing key(s) + HMAC token key. Unset = keys live in Redis.
 	EnvKeysFile = "CHRONICLE_KEYS_FILE"
@@ -309,8 +319,15 @@ type Config struct {
 	// NOT trusted and LoadEnv refuses startup — an operator must either set a
 	// marker (CHRONICLE_XFCC_REQUIRED_HEADER) or consciously accept the
 	// marker-less posture here (CHRONICLE_XFCC_TRUST_WITHOUT_MARKER), which is
-	// only safe behind a sidecar that strips inbound XFCC (SANITIZE_SET).
+	// only safe behind a sidecar that makes the last XFCC element the verified
+	// peer's (SANITIZE_SET or APPEND_FORWARD, never a forward-only mode). The
+	// opt-in is dev-only: LoadEnv refuses it unless Environment is "dev"
+	// (ADR-0010).
 	AllowXFCCWithoutMarker bool
+
+	// Environment is the trimmed, lower-cased CHRONICLE_ENVIRONMENT label.
+	// Empty means "not declared", which the dev-only checks treat as non-dev.
+	Environment string
 
 	// WakeTokenAudience is the aud claim minted into wake_tokens (#123/#126
 	// TB6a): the egress gateway the token is intended for. Empty (the
@@ -614,6 +631,9 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	if v, ok := lookup(EnvXFCCTrustWithoutMarker); ok {
 		c.AllowXFCCWithoutMarker = v == "1" || v == "true"
 	}
+	if v, ok := lookup(EnvEnvironment); ok {
+		c.Environment = strings.ToLower(strings.TrimSpace(v))
+	}
 	if err := c.CheckRequestIDHeader(); err != nil {
 		return fmt.Errorf("%s: %w", EnvRequestIDHeader, err)
 	}
@@ -636,14 +656,8 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			}
 		}
 	}
-	// Fail closed on the XFCC-spoof misconfiguration (issue #126 hardening,
-	// #130): a SPIFFE allowlist with no marker gate means raw client XFCC would
-	// be trusted if the sidecar ever failed to strip it. Refuse startup unless
-	// the operator either configures a marker or consciously accepts the
-	// marker-less posture — never silently default to trusting raw XFCC.
-	if len(c.TrustedSPIFFEIDs) > 0 && c.XFCCMarkerName == "" && !c.AllowXFCCWithoutMarker {
-		return fmt.Errorf("SPIFFE service identity is configured without %s: XFCC mesh identity would rest on raw client input — set %s to gate it, or set %s=true only if the sidecar provably strips inbound XFCC (Envoy forward_client_cert_details: SANITIZE_SET)",
-			EnvXFCCRequiredHeader, EnvXFCCRequiredHeader, EnvXFCCTrustWithoutMarker)
+	if err := c.checkXFCCPosture(); err != nil {
+		return err
 	}
 	if v, ok := lookup(EnvWakeTokenAud); ok {
 		c.WakeTokenAudience = v
@@ -667,6 +681,31 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 		if err := c.OIDC.Validate(); err != nil {
 			return fmt.Errorf("%s/%s/%s: %w", EnvOIDCIssuer, EnvOIDCAudience, EnvOIDCNSClaim, err)
 		}
+	}
+	return nil
+}
+
+// checkXFCCPosture refuses startup on an XFCC trust posture that would let raw
+// client input name a service (issue #126 hardening, #130, ADR-0010). A SPIFFE
+// allowlist needs a sidecar marker, or, in dev only, the explicit marker-less
+// opt-in. The opt-in is refused outside dev whether or not a marker or an
+// allowlist is also set: a stale "true" in stage or prod is a
+// misconfiguration worth stopping the pod for, never a harmless redundancy.
+// The binary can enforce the marker but cannot see the listener mode, so the
+// errors name both halves of the production posture.
+func (c *Config) checkXFCCPosture() error {
+	dev := c.Environment == DevEnvironment
+	if len(c.TrustedSPIFFEIDs) > 0 && c.XFCCMarkerName == "" && !c.AllowXFCCWithoutMarker {
+		if !dev {
+			return fmt.Errorf("SPIFFE service identity is configured without %s: outside dev, set %s to a marker that only the sidecar injects with overwrite semantics, and configure the inbound listener so the last XFCC element comes from the verified peer (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD); %s is refused when %s is not %q; see docs/DEPLOYMENT.md \"WCNP mesh contract\"",
+				EnvXFCCRequiredHeader, EnvXFCCRequiredHeader, EnvXFCCTrustWithoutMarker, EnvEnvironment, DevEnvironment)
+		}
+		return fmt.Errorf("SPIFFE service identity is configured without %s: XFCC mesh identity would rest on raw client input; set %s to gate it, or set %s=true only in dev and only if the sidecar makes the last XFCC element the verified peer's (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD)",
+			EnvXFCCRequiredHeader, EnvXFCCRequiredHeader, EnvXFCCTrustWithoutMarker)
+	}
+	if c.AllowXFCCWithoutMarker && !dev {
+		return fmt.Errorf("%s=true is a dev-only escape hatch and is refused when %s=%q (want %q): outside dev, XFCC mesh identity must be gated by %s, a header only the sidecar injects with overwrite semantics; the inbound listener must also make the last XFCC element the verified peer's (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD, never FORWARD_ONLY); see docs/DEPLOYMENT.md \"WCNP mesh contract\"",
+			EnvXFCCTrustWithoutMarker, EnvEnvironment, c.Environment, DevEnvironment, EnvXFCCRequiredHeader)
 	}
 	return nil
 }
