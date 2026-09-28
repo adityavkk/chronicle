@@ -237,6 +237,22 @@ func TestXFCCMalformedQuotingFailsClosed(t *testing.T) {
 		refused(t, post(t, h, forgedUntrusted, "URI="+tb4AgentsID), hooks)
 	})
 
+	t.Run("malformed header beside a valid service bearer is not downgraded to the bearer", func(t *testing.T) {
+		h, hooks := serviceHandler(t, key)
+		createDirect(t, h, "/events/a", "application/json")
+		bearer := map[string]string{"Content-Type": "application/json", "Authorization": "Bearer " + tb4SvcBearer}
+		req := rawRequest(http.MethodPost, "/events/a", bearer, body)
+		req.Header.Add(tb4XFCCHdr, forgedTrusted)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		refused(t, rec, hooks)
+		// The same bearer alone is served, so the refusal is the XFCC
+		// verdict, not a bad credential.
+		if rec := do(h, http.MethodPost, "/events/a", bearer, body); rec.Code != http.StatusNoContent {
+			t.Fatalf("bearer alone = %d, want 204; body %q", rec.Code, rec.Body.String())
+		}
+	})
+
 	t.Run("well-formed prefix planting a trusted URI loses to the appended element", func(t *testing.T) {
 		h, hooks := serviceHandler(t, key)
 		createDirect(t, h, "/events/a", "application/json")
