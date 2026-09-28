@@ -1,6 +1,34 @@
 package webhook
 
-import "time"
+import (
+	"time"
+
+	"go.opentelemetry.io/otel/trace"
+
+	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
+)
+
+// appendOrigin is what a hint, and later the wake it arms, remembers of the
+// append that caused it: the request's correlation id ("" when it had none)
+// and its trace identity (invalid when the request was not traced). trace
+// holds the trace id, span id and flags only; trace state, whose size a
+// caller controls, is never kept.
+type appendOrigin struct {
+	requestID string
+	trace     trace.SpanContext
+}
+
+// known reports whether the origin carries anything worth remembering.
+func (o appendOrigin) known() bool { return o.requestID != "" || o.trace.IsValid() }
+
+// wakeRequestID is the id a wake armed by this origin logs and sends: the
+// caller's request id, or the stable wake-<id> fallback when it had none.
+func (o appendOrigin) wakeRequestID(wakeID string) string {
+	if o.requestID != "" {
+		return o.requestID
+	}
+	return correlation.WakeRequestID(wakeID)
+}
 
 // dirtyQueue is the process-local latency hint between a committed append and
 // subscription fan-out. Durable cursors and the recovery sweep remain the
@@ -31,9 +59,9 @@ type dirtyEntry struct {
 	state      dirtyEntryState
 	since      time.Time
 	dirtyAgain bool
-	// requestID is the correlation id of the append the hint was queued with,
-	// or of the append that arrived while it was processing; "" when none.
-	requestID string
+	// origin is the append the hint was queued with, or the append that
+	// arrived while it was processing.
+	origin appendOrigin
 }
 
 // dirtyEnqueueResult makes overload and coalescing visible to both control flow
@@ -76,9 +104,9 @@ const (
 )
 
 type dirtyWork struct {
-	path      string
-	since     time.Time
-	requestID string
+	path   string
+	since  time.Time
+	origin appendOrigin
 }
 
 type dirtyQueueStats struct {
@@ -116,22 +144,22 @@ func newDirtyQueue(capacity int) dirtyQueue {
 	}
 }
 
-// enqueue adds one stream hint carrying the append's request id ("" when the
-// append had none). Appends coalesced onto a queued hint share the id it was
-// queued with; an append that lands while the hint is processing re-queues it
-// under that newer id, and an append without an id never erases one.
-// requestRecovery is true only for the first overflow in an epoch; repeated
-// overflow remains represented by the state machine without producing an
-// unbounded signal storm.
-func (q *dirtyQueue) enqueue(path string, now time.Time, requestID string) (result dirtyEnqueueResult, requestRecovery bool) {
+// enqueue adds one stream hint carrying the append's origin (its request id
+// and trace, either of which may be absent). Appends coalesced onto a queued
+// hint share the origin it was queued with; an append that lands while the
+// hint is processing re-queues it under that newer origin, and an append with
+// nothing known about it never erases one. requestRecovery is true only for
+// the first overflow in an epoch; repeated overflow remains represented by the
+// state machine without producing an unbounded signal storm.
+func (q *dirtyQueue) enqueue(path string, now time.Time, origin appendOrigin) (result dirtyEnqueueResult, requestRecovery bool) {
 	if entry, ok := q.entries[path]; ok {
 		switch entry.state {
 		case dirtyQueued:
 			return dirtyCoalescedQueued, false
 		case dirtyProcessing:
 			entry.dirtyAgain = true
-			if requestID != "" {
-				entry.requestID = requestID
+			if origin.known() {
+				entry.origin = origin
 			}
 			q.entries[path] = entry
 			return dirtyCoalescedProcessing, false
@@ -144,7 +172,7 @@ func (q *dirtyQueue) enqueue(path string, now time.Time, requestID string) (resu
 		return q.noteOverflow(now)
 	}
 
-	q.entries[path] = dirtyEntry{state: dirtyQueued, since: now, requestID: requestID}
+	q.entries[path] = dirtyEntry{state: dirtyQueued, since: now, origin: origin}
 	q.push(path)
 	if q.oldest.IsZero() || now.Before(q.oldest) {
 		q.oldest = now
@@ -186,7 +214,7 @@ func (q *dirtyQueue) take(limit int) []dirtyWork {
 		}
 		entry.state = dirtyProcessing
 		q.entries[path] = entry
-		work = append(work, dirtyWork{path: path, since: entry.since, requestID: entry.requestID})
+		work = append(work, dirtyWork{path: path, since: entry.since, origin: entry.origin})
 	}
 	return work
 }

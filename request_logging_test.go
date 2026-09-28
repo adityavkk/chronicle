@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 )
 
@@ -180,4 +182,35 @@ func TestRequestLoggingMiddlewareOutcomes(t *testing.T) {
 			t.Fatalf("panic completion = %#v", lines)
 		}
 	})
+}
+
+func TestRequestLoggingMiddlewareLogsTheTraceID(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	handler := RequestLoggingMiddleware(logger, "", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	traceID, _ := trace.TraceIDFromHex("11111111111111111111111111111111")
+	spanID, _ := trace.SpanIDFromHex("2222222222222222")
+	span := trace.NewSpanContext(trace.SpanContextConfig{TraceID: traceID, SpanID: spanID, TraceFlags: trace.FlagsSampled})
+	req := httptest.NewRequest(http.MethodGet, "/v1/stream/example", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), req.WithContext(trace.ContextWithSpanContext(req.Context(), span)))
+
+	lines := logLines(t, &logs)
+	if len(lines) != 2 {
+		t.Fatalf("log lines = %d, want start + completion: %s", len(lines), logs.String())
+	}
+	for _, line := range lines {
+		if line["trace_id"] != "11111111111111111111111111111111" {
+			t.Fatalf("%s lacks the trace id: %#v", line["event"], line)
+		}
+	}
+
+	logs.Reset()
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/stream/example", nil))
+	for _, line := range logLines(t, &logs) {
+		if _, ok := line["trace_id"]; ok {
+			t.Fatalf("an untraced request logged a trace_id: %#v", line)
+		}
+	}
 }

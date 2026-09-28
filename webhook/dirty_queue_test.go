@@ -9,10 +9,10 @@ func TestDirtyQueueTransitions(t *testing.T) {
 	t0 := time.Unix(100, 0)
 	q := newDirtyQueue(2)
 
-	if got, recover := q.enqueue("a", t0, ""); got != dirtyEnqueued || recover {
+	if got, recover := q.enqueue("a", t0, appendOrigin{}); got != dirtyEnqueued || recover {
 		t.Fatalf("enqueue a = (%v, %v)", got, recover)
 	}
-	if got, _ := q.enqueue("a", t0.Add(time.Second), ""); got != dirtyCoalescedQueued {
+	if got, _ := q.enqueue("a", t0.Add(time.Second), appendOrigin{}); got != dirtyCoalescedQueued {
 		t.Fatalf("queued duplicate = %v", got)
 	}
 
@@ -20,7 +20,7 @@ func TestDirtyQueueTransitions(t *testing.T) {
 	if len(work) != 1 || work[0].path != "a" || !work[0].since.Equal(t0) {
 		t.Fatalf("take = %+v", work)
 	}
-	if got, _ := q.enqueue("a", t0.Add(2*time.Second), ""); got != dirtyCoalescedProcessing {
+	if got, _ := q.enqueue("a", t0.Add(2*time.Second), appendOrigin{}); got != dirtyCoalescedProcessing {
 		t.Fatalf("processing duplicate = %v", got)
 	}
 	q.complete("a", dirtySucceeded)
@@ -38,12 +38,12 @@ func TestDirtyQueueTransitions(t *testing.T) {
 func TestDirtyQueueBoundAndOverflowEpoch(t *testing.T) {
 	t0 := time.Unix(100, 0)
 	q := newDirtyQueue(1)
-	_, _ = q.enqueue("a", t0, "")
+	_, _ = q.enqueue("a", t0, appendOrigin{})
 
-	if got, recover := q.enqueue("b", t0.Add(time.Second), ""); got != dirtyOverflowed || !recover {
+	if got, recover := q.enqueue("b", t0.Add(time.Second), appendOrigin{}); got != dirtyOverflowed || !recover {
 		t.Fatalf("first overflow = (%v, %v)", got, recover)
 	}
-	if got, recover := q.enqueue("c", t0.Add(2*time.Second), ""); got != dirtyOverflowCoalesced || recover {
+	if got, recover := q.enqueue("c", t0.Add(2*time.Second), appendOrigin{}); got != dirtyOverflowCoalesced || recover {
 		t.Fatalf("coalesced overflow = (%v, %v)", got, recover)
 	}
 	if stats := q.stats(t0.Add(3 * time.Second)); stats.depth != 1 || stats.capacity != 1 || stats.oldestAge != 3*time.Second {
@@ -56,7 +56,7 @@ func TestDirtyQueueBoundAndOverflowEpoch(t *testing.T) {
 	}
 	// This append committed after the recovery snapshot may have begun. It must
 	// leave a second overflow epoch behind.
-	if got, recover := q.enqueue("d", t0.Add(4*time.Second), ""); got != dirtyOverflowCoalesced || recover {
+	if got, recover := q.enqueue("d", t0.Add(4*time.Second), appendOrigin{}); got != dirtyOverflowCoalesced || recover {
 		t.Fatalf("overflow during reconcile = (%v, %v)", got, recover)
 	}
 	if again := q.completeReconcile(true); !again || !q.hasPendingOverflow() {
@@ -73,12 +73,12 @@ func TestDirtyQueueBoundAndOverflowEpoch(t *testing.T) {
 func TestDirtyQueueFailedReconcileRetries(t *testing.T) {
 	q := newDirtyQueue(1)
 	t0 := time.Unix(100, 0)
-	_, _ = q.enqueue("a", t0, "")
-	_, _ = q.enqueue("b", t0.Add(time.Second), "")
+	_, _ = q.enqueue("a", t0, appendOrigin{})
+	_, _ = q.enqueue("b", t0.Add(time.Second), appendOrigin{})
 	if _, ok := q.beginReconcile(); !ok {
 		t.Fatal("overflow reconcile was not pending")
 	}
-	_, _ = q.enqueue("c", t0.Add(2*time.Second), "")
+	_, _ = q.enqueue("c", t0.Add(2*time.Second), appendOrigin{})
 	if again := q.completeReconcile(false); !again || !q.hasPendingOverflow() {
 		t.Fatal("failed reconcile must remain pending")
 	}
@@ -94,7 +94,7 @@ func TestDirtyQueueRetryAndFairness(t *testing.T) {
 	q := newDirtyQueue(3)
 	t0 := time.Unix(100, 0)
 	for i, path := range []string{"hot", "b", "c"} {
-		_, _ = q.enqueue(path, t0.Add(time.Duration(i)*time.Second), "")
+		_, _ = q.enqueue(path, t0.Add(time.Duration(i)*time.Second), appendOrigin{})
 	}
 
 	first := q.take(1)
@@ -122,29 +122,31 @@ func TestDirtyQueueCapacityMustBePositive(t *testing.T) {
 	_ = newDirtyQueue(0)
 }
 
-// TestDirtyQueueCoalescedHintsKeepTheFirstRequestID pins the correlation rule
-// a receiver can rely on: appends coalesced onto a queued hint share the id the
-// hint was queued with; an append that lands while the hint is processing
-// re-queues it under that newer id; an append with no id never erases one.
-func TestDirtyQueueCoalescedHintsKeepTheFirstRequestID(t *testing.T) {
+// TestDirtyQueueCoalescedHintsKeepTheFirstOrigin pins the correlation rule a
+// receiver can rely on: appends coalesced onto a queued hint share the origin
+// (request id and trace) the hint was queued with; an append that lands while
+// the hint is processing re-queues it under that newer origin; an append with
+// nothing known about it never erases one.
+func TestDirtyQueueCoalescedHintsKeepTheFirstOrigin(t *testing.T) {
 	t0 := time.Unix(100, 0)
 	q := newDirtyQueue(2)
+	first := appendOriginFrom(tracedAppendContext(t, "req-1"))
 
-	q.enqueue("a", t0, "req-1")
-	q.enqueue("a", t0, "req-2")
-	if work := q.take(1); len(work) != 1 || work[0].requestID != "req-1" {
-		t.Fatalf("queued coalescing take = %+v, want req-1", work)
+	q.enqueue("a", t0, first)
+	q.enqueue("a", t0, appendOrigin{requestID: "req-2"})
+	if work := q.take(1); len(work) != 1 || work[0].origin.requestID != "req-1" || !work[0].origin.trace.Equal(first.trace) {
+		t.Fatalf("queued coalescing take = %+v, want req-1 with its trace", work)
 	}
-	q.enqueue("a", t0, "req-3")
-	q.enqueue("a", t0, "")
+	q.enqueue("a", t0, appendOrigin{requestID: "req-3"})
+	q.enqueue("a", t0, appendOrigin{})
 	q.complete("a", dirtySucceeded)
-	if work := q.take(1); len(work) != 1 || work[0].requestID != "req-3" {
-		t.Fatalf("processing coalescing take = %+v, want req-3", work)
+	if work := q.take(1); len(work) != 1 || work[0].origin.requestID != "req-3" || work[0].origin.trace.IsValid() {
+		t.Fatalf("processing coalescing take = %+v, want req-3 and no trace", work)
 	}
 	q.complete("a", dirtySucceeded)
 
-	q.enqueue("b", t0, "")
-	if work := q.take(1); len(work) != 1 || work[0].requestID != "" {
-		t.Fatalf("hint without an id = %+v, want an empty request id", work)
+	q.enqueue("b", t0, appendOrigin{})
+	if work := q.take(1); len(work) != 1 || work[0].origin.known() {
+		t.Fatalf("hint without an origin = %+v, want none", work)
 	}
 }

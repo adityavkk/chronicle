@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 )
 
@@ -54,8 +56,8 @@ func (w *requestStatusWriter) Unwrap() http.ResponseWriter { return w.ResponseWr
 // and echoed on the response. The completion event (http_request_completed)
 // carries request_id, method, path, http_status, outcome and duration_ms at
 // Info, or at Error when the handler failed or panicked; a start line is
-// emitted at Debug only. URLs are logged as their path: never the query
-// string, a body or a header.
+// emitted at Debug only. Both carry trace_id when the request is traced. URLs
+// are logged as their path: never the query string, a body or a header.
 func RequestLoggingMiddleware(logger *slog.Logger, header string, next http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -71,11 +73,12 @@ func RequestLoggingMiddleware(logger *slog.Logger, header string, next http.Hand
 		w.Header().Set(header, requestID)
 
 		startedAt := time.Now()
-		logger.DebugContext(ctx, "http request started",
-			"event", "http_request_started",
-			"request_id", requestID,
-			"method", r.Method,
-			"path", r.URL.Path)
+		logger.LogAttrs(ctx, slog.LevelDebug, "http request started",
+			slog.String("event", "http_request_started"),
+			slog.String("request_id", requestID),
+			traceAttr(ctx),
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path))
 
 		tracked := &requestStatusWriter{ResponseWriter: w}
 		complete := func(level slog.Level, outcome string) {
@@ -86,6 +89,7 @@ func RequestLoggingMiddleware(logger *slog.Logger, header string, next http.Hand
 			logger.LogAttrs(ctx, level, "http request completed",
 				slog.String("event", "http_request_completed"),
 				slog.String("request_id", requestID),
+				traceAttr(ctx),
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
 				slog.Int("http_status", status),
@@ -109,4 +113,13 @@ func RequestLoggingMiddleware(logger *slog.Logger, header string, next http.Hand
 
 		next.ServeHTTP(tracked, r)
 	})
+}
+
+// traceAttr is the trace_id attribute of a traced request, or the empty Attr,
+// which slog handlers omit, for an untraced one.
+func traceAttr(ctx context.Context) slog.Attr {
+	if sc := trace.SpanContextFromContext(ctx); sc.HasTraceID() {
+		return slog.String("trace_id", sc.TraceID().String())
+	}
+	return slog.Attr{}
 }

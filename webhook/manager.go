@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
@@ -175,6 +177,12 @@ type ManagerOptions struct {
 	// does not know it. It is a log-join hint: unsigned, outside the envelope
 	// signature, never identity.
 	RequestIDHeader string
+	// Tracer, when set, starts one client span per webhook delivery attempt,
+	// a child of the append that armed the wake, and sends its W3C trace
+	// context (traceparent) on the POST. Nil, the default, starts no span and
+	// sends no trace header: a receiver sees traceparent only from a
+	// deployment that turned tracing on.
+	Tracer trace.Tracer
 
 	// KeysReloadInterval bounds how stale this replica's key snapshot may be:
 	// rotations, denylist entries, and keys-file replacements land within one
@@ -233,6 +241,8 @@ type Manager struct {
 
 	// requestIDHeader is ManagerOptions.RequestIDHeader with its default applied.
 	requestIDHeader string
+	// tracer is ManagerOptions.Tracer; nil means deliveries are not traced.
+	tracer trace.Tracer
 
 	// keySnap is the atomically-swapped view of both Ed25519 families + the
 	// kid denylist (#123 rotation): every mint, verification, and JWKS read
@@ -287,10 +297,11 @@ type Manager struct {
 	dirtyClosed bool
 	now         func() time.Time
 
-	// wakeCorrelation remembers which request id armed each in-flight wake, so
-	// its delivery, retries and acknowledgement log and send the same id. It
-	// is process-local and bounded (see wakeCorrelation): another replica, or
-	// this one after a restart or an expiry, falls back to the stable wake-<id>.
+	// wakeCorrelation remembers which append (request id and trace) armed each
+	// in-flight wake, so its delivery, retries and acknowledgement log and
+	// send the same id and its spans join the same trace. It is process-local
+	// and bounded (see wakeCorrelation): another replica, or this one after a
+	// restart or an expiry, falls back to the stable wake-<id>.
 	wakeCorrelation wakeCorrelation
 
 	// runCtx owns every Manager background loop. The lifecycle state makes Start
@@ -359,6 +370,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		targetPolicy:          opts.TargetPolicy,
 		wakeTokenAud:          opts.WakeTokenAudience,
 		requestIDHeader:       opts.RequestIDHeader,
+		tracer:                opts.Tracer,
 		tokenKey:              tokenKey,
 		log:                   opts.Logger,
 		workerTick:            opts.WorkerTick,
@@ -593,19 +605,19 @@ func (m *Manager) OnStreamCreated(path string) {
 }
 
 // OnStreamAppend records one process-local dirty hint after a durable append.
-// ctx carries the append's request id (correlation.RequestID), which rides the
-// hint to the wake it arms; nothing else is read from it and its cancellation
-// is never honored, because the hint outlives the request. The handoff is
-// bounded by dirtyQueueCapacity and never calls Redis, reads a stream tail,
-// delivers a wake, or starts a goroutine. The recovery sweep is the durable
-// backstop if this hint is lost to shutdown or overflow.
+// ctx carries the append's request id (correlation.RequestID) and its trace,
+// which ride the hint to the wake it arms; nothing else is read from it and
+// its cancellation is never honored, because the hint outlives the request.
+// The handoff is bounded by dirtyQueueCapacity and never calls Redis, reads a
+// stream tail, delivers a wake, or starts a goroutine. The recovery sweep is
+// the durable backstop if this hint is lost to shutdown or overflow.
 func (m *Manager) OnStreamAppend(ctx context.Context, path string) {
-	requestID := correlation.RequestID(ctx)
+	origin := appendOriginFrom(ctx)
 	now := m.now()
 	m.dirtyMu.Lock()
 	result, requestRecovery := dirtyStopped, false
 	if !m.dirtyClosed {
-		result, requestRecovery = m.dirty.enqueue(path, now, requestID)
+		result, requestRecovery = m.dirty.enqueue(path, now, origin)
 	}
 	stats := m.dirty.stats(now)
 	m.dirtyMu.Unlock()
@@ -620,7 +632,7 @@ func (m *Manager) OnStreamAppend(ctx context.Context, path string) {
 	}
 	m.log.Log(ctx, level, "webhook append hint queued",
 		"event", "append_hint_queued",
-		"request_id", requestID,
+		"request_id", origin.requestID,
 		"stream_path", path,
 		"outcome", result.String(),
 		"queue_depth", stats.depth)
@@ -635,6 +647,16 @@ func (m *Manager) OnStreamAppend(ctx context.Context, path string) {
 		if requestRecovery {
 			panic("webhook: dirty recovery request without enqueue outcome")
 		}
+	}
+}
+
+// appendOriginFrom reads what a hint keeps of the append's context: its
+// request id and its trace identity, without the trace state a caller
+// controls the size of.
+func appendOriginFrom(ctx context.Context) appendOrigin {
+	return appendOrigin{
+		requestID: correlation.RequestID(ctx),
+		trace:     trace.SpanContextFromContext(ctx).WithTraceState(trace.TraceState{}),
 	}
 }
 
@@ -701,7 +723,7 @@ type dirtyProcessResult struct {
 // replica that accepted the stream append observes it, and it must cover every
 // subscriber slot. Generation and owner fences remain in the existing arm and
 // worker paths.
-func (m *Manager) processDirtyStream(path, requestID string) (dirtyProcessResult, dirtyProcessStage, error) {
+func (m *Manager) processDirtyStream(path string, origin appendOrigin) (dirtyProcessResult, dirtyProcessStage, error) {
 	lookupStart := m.now()
 	ids, slotsProbed, err := m.store.StreamSubscribers(path)
 	if err != nil {
@@ -739,7 +761,7 @@ func (m *Manager) processDirtyStream(path, requestID string) (dirtyProcessResult
 		if !HasPendingWorkFrom(sub.Links, tails) {
 			continue
 		}
-		switch m.issueWakeResult(sub, path, requestID) {
+		switch m.issueWakeResult(sub, path, origin) {
 		case wakeIssueArmed:
 			result.wakes++
 		case wakeIssueDuplicate:
@@ -767,7 +789,7 @@ func (m *Manager) processDirtyBatch() (processed int, hadError bool) {
 	start := m.now()
 	total := dirtyProcessResult{}
 	for _, item := range work {
-		result, stage, err := m.processDirtyStream(item.path, item.requestID)
+		result, stage, err := m.processDirtyStream(item.path, item.origin)
 		total.subs += result.subs
 		total.wakes += result.wakes
 		total.duplicates += result.duplicates
@@ -882,32 +904,41 @@ func (m *Manager) maybeWake(id, triggerStream string) {
 	m.issueWake(sub, triggerStream)
 }
 
-// rememberWakeRequestID stores requestID against wakeID when it is a real
-// caller id and returns the id every later step of this wake logs and sends:
-// the stored id, or the stable wake-<id> when the append carried none (which
-// is also what any other replica derives, so nothing is stored for it). The
-// memory lasts while the wake is in use and lapses after the subscription's
-// lease plus the longest retry gap pass with no delivery, heartbeat or ack
-// touching it: by then the wake is done, released, expired or someone else's.
-func (m *Manager) rememberWakeRequestID(wakeID, requestID string, leaseTTLMs int64) string {
-	if !correlation.Valid(requestID) {
-		return correlation.WakeRequestID(wakeID)
+// rememberWakeOrigin stores what is known of the append that armed wakeID (a
+// real caller id, a trace, or both) and returns the id every later step of
+// this wake logs and sends: the caller's, or the stable wake-<id> when the
+// append carried none (which is also what any other replica derives, so an
+// origin with nothing known is not stored). The memory lasts while the wake
+// is in use and lapses after the subscription's lease plus the longest retry
+// gap pass with no delivery, heartbeat or ack touching it: by then the wake
+// is done, released, expired or someone else's.
+func (m *Manager) rememberWakeOrigin(wakeID string, origin appendOrigin, leaseTTLMs int64) string {
+	if !correlation.Valid(origin.requestID) {
+		origin.requestID = ""
 	}
-	ttl := time.Duration(leaseTTLMs)*time.Millisecond + maxRetryDelay
-	if m.wakeCorrelation.remember(wakeID, requestID, ttl, m.now()) {
-		m.metrics.WakeCorrelationEvicted()
+	if origin.known() {
+		ttl := time.Duration(leaseTTLMs)*time.Millisecond + maxRetryDelay
+		if m.wakeCorrelation.remember(wakeID, origin, ttl, m.now()) {
+			m.metrics.WakeCorrelationEvicted()
+		}
 	}
-	return requestID
+	return origin.wakeRequestID(wakeID)
 }
 
 // requestIDForWake is the id this wake's delivery, retry and acknowledgement
 // log and send: the remembered caller id, or wake-<id> when this process never
 // armed the wake or no longer remembers it.
 func (m *Manager) requestIDForWake(wakeID string) string {
-	if requestID, ok := m.wakeCorrelation.lookup(wakeID, m.now()); ok {
-		return requestID
-	}
-	return correlation.WakeRequestID(wakeID)
+	origin, _ := m.wakeCorrelation.lookup(wakeID, m.now())
+	return origin.wakeRequestID(wakeID)
+}
+
+// traceForWake is the trace of the append that armed wakeID, or an invalid
+// context when this process never knew or no longer remembers it, in which
+// case a delivery starts a trace of its own.
+func (m *Manager) traceForWake(wakeID string) trace.SpanContext {
+	origin, _ := m.wakeCorrelation.lookup(wakeID, m.now())
+	return origin.trace
 }
 
 // forgetWakeRequestID drops a wake's id once its outcome is final here.
@@ -934,7 +965,8 @@ func (m *Manager) wakeLogger(event, id string, generation int64, wakeID string) 
 		"subscription_id", id,
 		"wake_id", wakeID,
 		"generation", generation,
-		"request_id", m.requestIDForWake(wakeID))
+		"request_id", m.requestIDForWake(wakeID),
+	)
 }
 
 func msSince(start time.Time) int64 { return time.Since(start).Milliseconds() }
@@ -951,14 +983,14 @@ const (
 // event). For webhook the lease is armed at issue; for pull-wake the lease waits
 // for a claim (PROTOCOL §7.3).
 func (m *Manager) issueWake(sub Subscription, triggerStream string) bool {
-	return m.issueWakeResult(sub, triggerStream, "") == wakeIssueArmed
+	return m.issueWakeResult(sub, triggerStream, appendOrigin{}) == wakeIssueArmed
 }
 
-// issueWakeResult arms a wake for sub. requestID is the id of the append that
-// prompted it ("" for sweep, recovery and re-wake paths); it is remembered
-// against the new wake id so delivery, retries and acknowledgement can log
-// and send it.
-func (m *Manager) issueWakeResult(sub Subscription, triggerStream, requestID string) wakeIssueResult {
+// issueWakeResult arms a wake for sub. origin is the append that prompted it
+// (unknown for sweep, recovery and re-wake paths); it is remembered against
+// the new wake id so delivery, retries and acknowledgement can log and send
+// its request id and continue its trace.
+func (m *Manager) issueWakeResult(sub Subscription, triggerStream string, origin appendOrigin) wakeIssueResult {
 	wakeID, err := GenerateWakeID(rand.Reader)
 	if err != nil {
 		m.log.Warn("webhook: generate wake id", "error", err)
@@ -973,7 +1005,7 @@ func (m *Manager) issueWakeResult(sub Subscription, triggerStream, requestID str
 	if !res.Armed {
 		return wakeIssueDuplicate // already in flight (coalesced) or gone
 	}
-	m.logWakeArmed(sub, res, m.rememberWakeRequestID(res.WakeID, requestID, sub.Config.LeaseTTLMs))
+	m.logWakeArmed(sub, res, m.rememberWakeOrigin(res.WakeID, origin, sub.Config.LeaseTTLMs))
 	// The arm→emit surgical window (07 honest-gap #2): the fence is minted but the
 	// wake is not yet emitted. A no-op in production; a test failpoint can crash/stall
 	// here to exercise the stranded-wake recovery the host nemesis cannot pin down.
@@ -1139,22 +1171,33 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		log.Error("webhook delivery failed", "outcome", "encode_failed", "error", err)
 		return
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, sub.Config.WebhookURL, bytes.NewReader(body))
+	// One client span per attempt, a child of the append that armed this wake
+	// when this process still remembers it (see deliveryTrace); inert without
+	// a Tracer.
+	attempt := m.startDelivery(id, generation, wakeID)
+	if attempt.traceID != "" {
+		log = log.With("trace_id", attempt.traceID)
+	}
+	req, err := http.NewRequestWithContext(attempt.ctx, http.MethodPost, sub.Config.WebhookURL, bytes.NewReader(body))
 	if err != nil {
+		attempt.end(0, "request_build_failed")
 		log.Warn("webhook delivery failed", "outcome", "request_build_failed", "error", err)
 		m.recordFailure(id, generation, wakeID, owner)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// The correlation header is a log-join hint for the receiver: the id of the
-	// append that armed this wake, or wake-<id>. It is unsigned, outside the
-	// envelope signature, and never identity.
+	// The correlation header and traceparent are log-join hints for the
+	// receiver: the id and the trace of the append that armed this wake, or
+	// wake-<id> and a trace of this delivery's own. Both are unsigned, outside
+	// the envelope signature, and never identity.
 	req.Header.Set(m.requestIDHeader, m.requestIDForWake(wakeID))
+	attempt.inject(req.Header)
 	signing := m.keySnapshot().webhook.active
 	if signing.Kid == "" {
 		// Emergency stop (#123): the active envelope kid is denylisted with no
 		// successor. An unsigned or mis-signed wake must not go out; the retry
 		// worker re-attempts after rotation restores a mint key.
+		attempt.end(0, "signing_key_unavailable")
 		log.Error("webhook delivery deferred", "outcome", "signing_key_unavailable")
 		m.recordFailure(id, generation, wakeID, owner)
 		return
@@ -1166,6 +1209,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	// dialed and the normal retry is scheduled.
 	if m.targetPolicy != nil {
 		if err := m.targetPolicy.PrepareRequest(req); err != nil {
+			attempt.end(0, "target_rejected")
 			log.Warn("webhook delivery rejected", "outcome", "target_rejected", "error", err)
 			m.metrics.WakeDelivery(0, "rejected")
 			m.recordFailure(id, generation, wakeID, owner)
@@ -1176,6 +1220,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	postStart := time.Now()
 	resp, err := m.doWebhookRequest(req)
 	if err != nil {
+		attempt.end(0, "transport_error")
 		m.metrics.WakeDelivery(time.Since(postStart), "error")
 		log.Warn("webhook delivery failed", "outcome", "transport_error", "duration_ms", msSince(postStart), "error", err)
 		m.recordFailure(id, generation, wakeID, owner)
@@ -1184,11 +1229,13 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	defer func() { _ = resp.Body.Close() }()
 	log = log.With("http_status", resp.StatusCode)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		attempt.end(resp.StatusCode, "non_success_status")
 		m.metrics.WakeDelivery(time.Since(postStart), "failed")
 		log.Warn("webhook delivery failed", "outcome", "non_success_status", "duration_ms", msSince(postStart))
 		m.recordFailure(id, generation, wakeID, owner)
 		return
 	}
+	attempt.end(resp.StatusCode, "")
 	m.metrics.WakeDelivery(time.Since(postStart), "ok")
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))

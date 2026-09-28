@@ -6,10 +6,11 @@ import (
 )
 
 // wakeCorrelation is the Manager's bounded, process-local memory of which
-// request id armed each in-flight wake, so the wake's delivery, retries and
-// acknowledgement log and send the id of the append that caused it. It is a
-// hint cache, never state: a miss falls back to the stable wake-<id>, which is
-// what any other replica derives anyway.
+// append armed each in-flight wake (its request id and its trace), so the
+// wake's delivery, retries and acknowledgement log and send the id of the
+// append that caused it and its delivery spans join the caller's trace. It is
+// a hint cache, never state: a miss falls back to the stable wake-<id> and a
+// trace of the delivery's own, which is what any other replica does anyway.
 //
 // Two bounds keep it from growing with wakes whose end this replica never
 // sees (a callback that lands on another replica, a lease that lapses, a slot
@@ -24,7 +25,7 @@ type wakeCorrelation struct {
 }
 
 type wakeCorrelationEntry struct {
-	requestID string
+	origin    appendOrigin
 	ttl       time.Duration
 	expiresAt time.Time
 }
@@ -36,10 +37,10 @@ func newWakeCorrelation(capacity int) wakeCorrelation {
 	return wakeCorrelation{capacity: capacity, entries: make(map[string]wakeCorrelationEntry)}
 }
 
-// remember stores requestID for wakeID until it goes unused for ttl. It
-// reports whether a live entry had to be evicted to stay within capacity;
-// expired entries are reclaimed first and do not count.
-func (c *wakeCorrelation) remember(wakeID, requestID string, ttl time.Duration, now time.Time) (evicted bool) {
+// remember stores origin for wakeID until it goes unused for ttl. It reports
+// whether a live entry had to be evicted to stay within capacity; expired
+// entries are reclaimed first and do not count.
+func (c *wakeCorrelation) remember(wakeID string, origin appendOrigin, ttl time.Duration, now time.Time) (evicted bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, known := c.entries[wakeID]; !known && len(c.entries) >= c.capacity {
@@ -48,22 +49,23 @@ func (c *wakeCorrelation) remember(wakeID, requestID string, ttl time.Duration, 
 			evicted = true
 		}
 	}
-	c.entries[wakeID] = wakeCorrelationEntry{requestID: requestID, ttl: ttl, expiresAt: now.Add(ttl)}
+	c.entries[wakeID] = wakeCorrelationEntry{origin: origin, ttl: ttl, expiresAt: now.Add(ttl)}
 	return evicted
 }
 
-// lookup returns the id remembered for wakeID and refreshes its idle window.
-// An entry whose window has lapsed is a miss even before a sweep removes it.
-func (c *wakeCorrelation) lookup(wakeID string, now time.Time) (string, bool) {
+// lookup returns the origin remembered for wakeID and refreshes its idle
+// window. An entry whose window has lapsed is a miss even before a sweep
+// removes it; a miss is the zero origin.
+func (c *wakeCorrelation) lookup(wakeID string, now time.Time) (appendOrigin, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.entries[wakeID]
 	if !ok || !entry.expiresAt.After(now) {
-		return "", false
+		return appendOrigin{}, false
 	}
 	entry.expiresAt = now.Add(entry.ttl)
 	c.entries[wakeID] = entry
-	return entry.requestID, true
+	return entry.origin, true
 }
 
 // forget drops wakeID once its outcome is final on this replica.

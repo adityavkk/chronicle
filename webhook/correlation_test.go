@@ -52,7 +52,7 @@ type recordingTransport struct {
 	settled  chan struct{}
 	once     sync.Once
 	mu       sync.Mutex
-	values   []string
+	headers  []http.Header
 }
 
 func newRecordingTransport(header string, statuses ...int) *recordingTransport {
@@ -68,8 +68,8 @@ func (b settleOnClose) Close() error { b.settle(); return nil }
 
 func (t *recordingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.mu.Lock()
-	call := len(t.values)
-	t.values = append(t.values, r.Header.Get(t.header))
+	call := len(t.headers)
+	t.headers = append(t.headers, r.Header.Clone())
 	status := http.StatusOK
 	if call < len(t.statuses) {
 		status = t.statuses[call]
@@ -82,10 +82,20 @@ func (t *recordingTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 	}, nil
 }
 
+// headerValues returns the value of header on each POST so far.
 func (t *recordingTransport) headerValues() []string {
+	values := make([]string, 0, len(t.headers))
+	for _, h := range t.postHeaders() {
+		values = append(values, h.Get(t.header))
+	}
+	return values
+}
+
+// postHeaders returns the full header set of each POST so far.
+func (t *recordingTransport) postHeaders() []http.Header {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return append([]string(nil), t.values...)
+	return append([]http.Header(nil), t.headers...)
 }
 
 func (t *recordingTransport) waitSettled(t0 *testing.T) {
@@ -101,6 +111,13 @@ func (t *recordingTransport) waitSettled(t0 *testing.T) {
 // worker with the given request id and returns the Manager and the store.
 func webhookFixture(t *testing.T, opts ManagerOptions, requestID string) (*Manager, *RedisStore) {
 	t.Helper()
+	return armWebhookFixture(t, opts, correlation.WithRequestID(context.Background(), requestID))
+}
+
+// armWebhookFixture is webhookFixture for an append whose context is given:
+// its request id, its trace, or neither.
+func armWebhookFixture(t *testing.T, opts ManagerOptions, appendCtx context.Context) (*Manager, *RedisStore) {
+	t.Helper()
 	base, _ := newTestStore(t)
 	streams := &fakeStreams{tails: map[string]string{"events/a": "0000000000000001_0000000000000000"}}
 	opts.StreamRootURL = "http://x/v1/stream/"
@@ -114,7 +131,7 @@ func webhookFixture(t *testing.T, opts ManagerOptions, requestID string) (*Manag
 	if err := base.Link("s1", "events/a", LinkGlob, streams.BeginningOffset()); err != nil {
 		t.Fatal(err)
 	}
-	mgr.OnStreamAppend(correlation.WithRequestID(context.Background(), requestID), "events/a")
+	mgr.OnStreamAppend(appendCtx, "events/a")
 	if got := mgr.RunDirtyWorker(); got != 1 {
 		t.Fatalf("dirty worker processed %d hints, want 1", got)
 	}

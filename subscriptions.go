@@ -11,6 +11,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
@@ -49,6 +51,9 @@ type SubscriptionTuning struct {
 	// RequestIDHeader names the correlation header sent on webhook deliveries
 	// (webhook.ManagerOptions.RequestIDHeader); empty keeps the default.
 	RequestIDHeader string
+	// Tracer starts the webhook delivery spans and sends their trace context
+	// on the POST (webhook.ManagerOptions.Tracer); nil sends none.
+	Tracer trace.Tracer
 
 	// ---- leased slot ownership (issue #14) ----
 	// ReplicaID is this process's membership identity; empty makes the Manager
@@ -273,6 +278,7 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		Metrics:                    tuning.Metrics,
 		WakeTokenAudience:          tuning.WakeTokenAudience,
 		RequestIDHeader:            tuning.RequestIDHeader,
+		Tracer:                     tuning.Tracer,
 		ReplicaID:                  tuning.ReplicaID,
 		MemberLeaseTTL:             tuning.MemberLeaseTTL,
 		HeartbeatInterval:          tuning.HeartbeatInterval,
