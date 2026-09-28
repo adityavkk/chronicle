@@ -247,6 +247,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// semantics so no HTTP error payload is appended to an SSE stream.
 			panic(http.ErrAbortHandler)
 		}
+		// A caller cancelling a read or long poll is not a backend failure.
+		// Require both errors to match so an independent storage cancellation
+		// or failure remains visible, even if the caller has disconnected.
+		if errors.Is(err, context.Canceled) && errors.Is(r.Context().Err(), context.Canceled) {
+			h.logger().Debug("request canceled", "method", r.Method)
+			return
+		}
 		h.writeError(w, err)
 	}
 }
