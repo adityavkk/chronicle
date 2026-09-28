@@ -39,7 +39,7 @@ func newRedisClient(cfg chronicle.Config, redisEvents *redisEventSink) (goredis.
 	if strings.Contains(cfg.RedisURL, "@") {
 		return nil, errors.New("redis URL must not contain credentials; set REDIS_USERNAME and CHRONICLE_REDIS_CREDENTIAL_FILE instead")
 	}
-	credentials, err := loadRedisCredentials(cfg.RedisCredentialFile, cfg.RedisUsername)
+	credentials, err := loadRedisCredentials(cfg.RedisCredentialFile, cfg.RedisUsername, cfg.RedisCredentialFileAllowGroupRead)
 	if err != nil {
 		return nil, err
 	}
@@ -109,11 +109,11 @@ func withoutURL(err error) error {
 // must agree with a configured username. The file may carry unrelated
 // KEY=VALUE entries (a shared mounted secret); they are ignored. Every failure
 // refuses startup, and no error echoes file content.
-func loadRedisCredentials(path, configuredUsername string) (redisCredentials, error) {
+func loadRedisCredentials(path, configuredUsername string, allowGroupRead bool) (redisCredentials, error) {
 	if path == "" {
 		return redisCredentials{username: configuredUsername}, nil
 	}
-	raw, err := readRedisCredentialFile(path)
+	raw, err := readRedisCredentialFile(path, allowGroupRead)
 	if err != nil {
 		return redisCredentials{}, err
 	}
@@ -134,9 +134,9 @@ func loadRedisCredentials(path, configuredUsername string) (redisCredentials, er
 
 // readRedisCredentialFile enforces custody on the mounted secret before
 // reading it: an absolute path to a regular file (a Kubernetes projected
-// symlink is followed) that no group or other user can write and that is not
-// executable. The opened file must be the one that was checked.
-func readRedisCredentialFile(path string) ([]byte, error) {
+// symlink is followed) whose mode passes checkRedisCredentialFileMode. The
+// opened file must be the one that was checked.
+func readRedisCredentialFile(path string, allowGroupRead bool) ([]byte, error) {
 	if !filepath.IsAbs(path) {
 		return nil, errors.New("redis credential file path must be absolute")
 	}
@@ -147,8 +147,8 @@ func readRedisCredentialFile(path string) ([]byte, error) {
 	if !before.Mode().IsRegular() {
 		return nil, errors.New("redis credential file must be a regular file")
 	}
-	if perm := before.Mode().Perm(); perm&0o022 != 0 || perm&0o111 != 0 {
-		return nil, fmt.Errorf("redis credential file permissions %04o are unsafe: it must not be group- or world-writable or executable", perm)
+	if err := checkRedisCredentialFileMode(before.Mode().Perm(), allowGroupRead); err != nil {
+		return nil, err
 	}
 	if before.Size() > maximumRedisCredentialFileBytes {
 		return nil, errors.New("redis credential file is too large")
@@ -172,6 +172,26 @@ func readRedisCredentialFile(path string) ([]byte, error) {
 		return nil, errors.New("redis credential file is too large")
 	}
 	return raw, nil
+}
+
+// checkRedisCredentialFileMode is the keys file's custody rule applied to the
+// Redis password, which guards every stream and, without CHRONICLE_KEYS_FILE,
+// the signing keys stored in Redis. World access and group write are never
+// defensible, an execute bit marks the wrong file, and group read on a shared
+// group is read-to-connect, so it needs the explicit fsGroup opt-in: mount
+// the file 0400, or 0440 with CHRONICLE_REDIS_CREDENTIAL_FILE_ALLOW_GROUP_READ.
+func checkRedisCredentialFileMode(perm os.FileMode, allowGroupRead bool) error {
+	switch {
+	case perm&0o007 != 0:
+		return fmt.Errorf("redis credential file permissions %04o are unsafe: it must not be readable, writable or executable by other; set the mount to 0400 or 0600", perm)
+	case perm&0o020 != 0:
+		return fmt.Errorf("redis credential file permissions %04o are unsafe: it must not be group-writable; set the mount to 0400 or 0600", perm)
+	case perm&0o111 != 0:
+		return fmt.Errorf("redis credential file permissions %04o are unsafe: it must not be executable", perm)
+	case perm&0o040 != 0 && !allowGroupRead:
+		return fmt.Errorf("redis credential file permissions %04o are unsafe: it must not be group-readable; set the mount to 0400 or 0600, or set %s=true only if a non-root container reads it through a dedicated fsGroup", perm, chronicle.EnvRedisCredentialFileAllowGroupRead)
+	}
+	return nil
 }
 
 // parseRedisCredentials reads REDIS_USERNAME and REDIS_PASSWORD from literal

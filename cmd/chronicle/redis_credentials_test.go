@@ -32,7 +32,7 @@ func TestRedisConfigurationErrorsDoNotExposeCredentials(t *testing.T) {
 func TestRedisCredentialsLoadFromFileIntoBothClientModes(t *testing.T) {
 	username := "appuser"
 	password := strings.Repeat("p", 47)
-	path := writeCredentialFile(t, "UNRELATED_LEGACY_KEY=ignored\nREDIS_PASSWORD="+password+"\n", 0o444)
+	path := writeCredentialFile(t, "UNRELATED_LEGACY_KEY=ignored\nREDIS_PASSWORD="+password+"\n", 0o400)
 
 	for _, rawURL := range []string{
 		"rediss://redis.example:6379/0",
@@ -64,7 +64,7 @@ func TestRedisCredentialFileUsername(t *testing.T) {
 	password := strings.Repeat("q", 29)
 	path := writeCredentialFile(t, "REDIS_USERNAME=appuser\nREDIS_PASSWORD="+password+"\n", 0o400)
 	for _, configured := range []string{"", "appuser"} {
-		credentials, err := loadRedisCredentials(path, configured)
+		credentials, err := loadRedisCredentials(path, configured, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,7 +72,7 @@ func TestRedisCredentialFileUsername(t *testing.T) {
 			t.Fatalf("configured username %q: file-backed username was not used", configured)
 		}
 	}
-	credentials, err := loadRedisCredentials("", "appuser")
+	credentials, err := loadRedisCredentials("", "appuser", false)
 	if err != nil || credentials != (redisCredentials{username: "appuser"}) {
 		t.Fatalf("username without a credential file = %+v, %v", credentials, err)
 	}
@@ -85,21 +85,25 @@ func TestRedisCredentialFileFailsClosedWithoutExposingValues(t *testing.T) {
 		contents    string
 		permissions os.FileMode
 	}{
-		{name: "missing password", contents: "REDIS_USERNAME=appuser\n", permissions: 0o444},
-		{name: "empty password", contents: "REDIS_PASSWORD=\n", permissions: 0o444},
-		{name: "duplicate password", contents: "REDIS_PASSWORD=" + password + "\nREDIS_PASSWORD=" + password + "\n", permissions: 0o444},
-		{name: "carriage return", contents: "REDIS_PASSWORD=" + password + "\r\n", permissions: 0o444},
-		{name: "nul byte", contents: "REDIS_PASSWORD=" + password + "\x00\n", permissions: 0o444},
-		{name: "malformed password", contents: "REDIS_PASSWORD " + password + "\n", permissions: 0o444},
-		{name: "shell export password", contents: "export REDIS_PASSWORD=" + password + "\n", permissions: 0o444},
-		{name: "username mismatch", contents: "REDIS_USERNAME=other\nREDIS_PASSWORD=" + password + "\n", permissions: 0o444},
+		{name: "missing password", contents: "REDIS_USERNAME=appuser\n", permissions: 0o400},
+		{name: "empty password", contents: "REDIS_PASSWORD=\n", permissions: 0o400},
+		{name: "duplicate password", contents: "REDIS_PASSWORD=" + password + "\nREDIS_PASSWORD=" + password + "\n", permissions: 0o400},
+		{name: "carriage return", contents: "REDIS_PASSWORD=" + password + "\r\n", permissions: 0o400},
+		{name: "nul byte", contents: "REDIS_PASSWORD=" + password + "\x00\n", permissions: 0o400},
+		{name: "malformed password", contents: "REDIS_PASSWORD " + password + "\n", permissions: 0o400},
+		{name: "shell export password", contents: "export REDIS_PASSWORD=" + password + "\n", permissions: 0o400},
+		{name: "username mismatch", contents: "REDIS_USERNAME=other\nREDIS_PASSWORD=" + password + "\n", permissions: 0o400},
+		// Custody is the keys-file rule: no world access, no group write, no
+		// execute bit, and group read only by explicit opt-in.
+		{name: "world readable", contents: "REDIS_PASSWORD=" + password + "\n", permissions: 0o444},
+		{name: "group readable without the opt-in", contents: "REDIS_PASSWORD=" + password + "\n", permissions: 0o440},
 		{name: "group writable", contents: "REDIS_PASSWORD=" + password + "\n", permissions: 0o660},
 		{name: "executable", contents: "REDIS_PASSWORD=" + password + "\n", permissions: 0o500},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			path := writeCredentialFile(t, test.contents, test.permissions)
-			_, err := loadRedisCredentials(path, "appuser")
+			_, err := loadRedisCredentials(path, "appuser", false)
 			if err == nil {
 				t.Fatal("invalid Redis credential file was accepted")
 			}
@@ -111,25 +115,25 @@ func TestRedisCredentialFileFailsClosedWithoutExposingValues(t *testing.T) {
 }
 
 func TestRedisCredentialFileRejectsUnsafePaths(t *testing.T) {
-	if _, err := loadRedisCredentials("relative/secrets", ""); err == nil {
+	if _, err := loadRedisCredentials("relative/secrets", "", false); err == nil {
 		t.Fatal("relative credential file path was accepted")
 	}
-	if _, err := loadRedisCredentials(t.TempDir(), ""); err == nil {
+	if _, err := loadRedisCredentials(t.TempDir(), "", false); err == nil {
 		t.Fatal("directory credential file path was accepted")
 	}
-	if _, err := loadRedisCredentials(filepath.Join(t.TempDir(), "missing"), ""); err == nil {
+	if _, err := loadRedisCredentials(filepath.Join(t.TempDir(), "missing"), "", false); err == nil {
 		t.Fatal("missing credential file was accepted")
 	}
 }
 
 func TestRedisCredentialFileAcceptsKubernetesProjectedSymlink(t *testing.T) {
 	password := strings.Repeat("z", 31)
-	target := writeCredentialFile(t, "REDIS_PASSWORD="+password+"\n", 0o444)
+	target := writeCredentialFile(t, "REDIS_PASSWORD="+password+"\n", 0o400)
 	link := filepath.Join(t.TempDir(), "secrets")
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	credentials, err := loadRedisCredentials(link, "appuser")
+	credentials, err := loadRedisCredentials(link, "appuser", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,10 +142,28 @@ func TestRedisCredentialFileAcceptsKubernetesProjectedSymlink(t *testing.T) {
 	}
 }
 
+// TestRedisCredentialFileGroupReadOptIn pins the one documented exception, the
+// same as the keys file's: a non-root container reading a root-owned secret
+// through a dedicated fsGroup needs the group-read bit (0440). The opt-in
+// permits exactly that bit and nothing else.
+func TestRedisCredentialFileGroupReadOptIn(t *testing.T) {
+	password := strings.Repeat("g", 37)
+	contents := "REDIS_PASSWORD=" + password + "\n"
+	credentials, err := loadRedisCredentials(writeCredentialFile(t, contents, 0o440), "appuser", true)
+	if err != nil || credentials.password != password {
+		t.Fatalf("group-readable file with the opt-in = %+v, %v; want it loaded", credentials, err)
+	}
+	for _, perm := range []os.FileMode{0o444, 0o460, 0o550} {
+		if _, err := loadRedisCredentials(writeCredentialFile(t, contents, perm), "appuser", true); err == nil {
+			t.Errorf("mode %04o was accepted under the group-read opt-in; only the group-read bit is permitted", perm)
+		}
+	}
+}
+
 func TestRedisCredentialFileRejectsOversizeFiles(t *testing.T) {
 	oversizeValue := strings.Repeat("x", int(maximumRedisCredentialFileBytes))
-	path := writeCredentialFile(t, "REDIS_PASSWORD="+oversizeValue+"\n", 0o444)
-	if _, err := loadRedisCredentials(path, "appuser"); err == nil {
+	path := writeCredentialFile(t, "REDIS_PASSWORD="+oversizeValue+"\n", 0o400)
+	if _, err := loadRedisCredentials(path, "appuser", false); err == nil {
 		t.Fatal("oversize Redis credential file was accepted")
 	} else if strings.Contains(err.Error(), oversizeValue) {
 		t.Fatal("Redis credential size error exposed credential material")

@@ -49,6 +49,9 @@ func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEvent
 		if cfg.RedisTLSInsecureSkipVerify {
 			logger.Warn("redis TLS certificate verification is DISABLED by CHRONICLE_REDIS_TLS_INSECURE_SKIP_VERIFY: an on-path attacker can impersonate Redis and read its password and all stream data; set CHRONICLE_REDIS_CA_FILE instead")
 		}
+		if cfg.RedisCredentialFile != "" && cfg.RedisCredentialFileAllowGroupRead {
+			logger.Warn("redis credential file may be group-readable, permitted by CHRONICLE_REDIS_CREDENTIAL_FILE_ALLOW_GROUP_READ: the group must be a dedicated single-reader fsGroup, never a shared login group")
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := client.Ping(ctx).Err(); err != nil {

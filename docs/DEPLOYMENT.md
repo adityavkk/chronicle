@@ -55,16 +55,26 @@ OTHER_SERVICE_TOKEN=ignored
 ```
 
 Startup fails, without echoing any value, when the file is missing or not a
-regular file (a symlink to one, as Kubernetes projects secrets, is fine), is
-group- or world-writable or executable, exceeds 64 KiB, lacks a password,
-repeats a Redis key, has an empty value or CRLF line endings, spells a Redis
-key another way (`export REDIS_PASSWORD=…`), or names a username that differs
-from `REDIS_USERNAME`. The file is read once at startup, so restart chronicle
-after rotating the password.
+regular file (a symlink to one, as Kubernetes projects secrets, is fine), fails
+the mode rule below, exceeds 64 KiB, lacks a password, repeats a Redis key, has
+an empty value or CRLF line endings, spells a Redis key another way
+(`export REDIS_PASSWORD=…`), or names a username that differs from
+`REDIS_USERNAME`. The file is read once at startup, so restart chronicle after
+rotating the password.
+
+The file's mode follows the keys file's rule (`CHRONICLE_KEYS_FILE`): mount it
+`0400` or `0600` (Kubernetes: secret volume `defaultMode: 0400`). Any access by
+other, a group-write bit or an execute bit refuses startup. Group read is
+refused too, unless `CHRONICLE_REDIS_CREDENTIAL_FILE_ALLOW_GROUP_READ=true`
+names the one documented exception: a non-root container reading a root-owned
+secret through a dedicated `fsGroup`, where `0400` is unreadable and `0440` is
+the minimum. The opt-in permits the group-read bit alone and is logged as a
+warning at every start.
 
 Upgrading from a URL with embedded `user:password@`: move the password into the
 credential file and the username into `REDIS_USERNAME`; the old URL now refuses
-startup.
+startup. A credential file mounted with Kubernetes' default `0644` also refuses
+startup until the mount is `0400`.
 
 At startup chronicle logs `redis connected` with the mode, the address or seed
 list, and whether TLS is on, all read from the constructed client. With

@@ -15,38 +15,42 @@ import (
 // Environment variables recognized by Config.LoadEnv. Precedence in
 // cmd/chronicle is flags over environment over defaults.
 const (
-	EnvListen                = "CHRONICLE_LISTEN"
-	EnvRedisURL              = "CHRONICLE_REDIS_URL"
-	EnvRedisPoolSize         = "CHRONICLE_REDIS_POOL_SIZE"
-	EnvRedisUsername         = "REDIS_USERNAME" // unprefixed: the name existing deployments already set
-	EnvRedisCredentialFile   = "CHRONICLE_REDIS_CREDENTIAL_FILE"
-	EnvRedisCAFile           = "CHRONICLE_REDIS_CA_FILE"
-	EnvRedisTLSInsecure      = "CHRONICLE_REDIS_TLS_INSECURE_SKIP_VERIFY"
-	EnvStore                 = "CHRONICLE_STORE"
-	EnvSegmentMode           = "CHRONICLE_SEGMENT_MODE"
-	EnvSegmentDir            = "CHRONICLE_SEGMENT_DIR"
-	EnvSegmentTargetBytes    = "CHRONICLE_SEGMENT_TARGET_BYTES"
-	EnvSegmentIndexStride    = "CHRONICLE_SEGMENT_INDEX_STRIDE"
-	EnvSegmentCacheBytes     = "CHRONICLE_SEGMENT_CACHE_BYTES"
-	EnvSegmentAutoSealRead   = "CHRONICLE_SEGMENT_AUTO_SEAL_READ"
-	EnvSegmentInitialState   = "CHRONICLE_SEGMENT_INITIAL_STATE"
-	EnvLongPollTimeout       = "CHRONICLE_LONG_POLL_TIMEOUT"
-	EnvSSEReconnectInterval  = "CHRONICLE_SSE_RECONNECT_INTERVAL"
-	EnvReadPageBytes         = "CHRONICLE_READ_PAGE_BYTES"
-	EnvSSEHubReplayBytes     = "CHRONICLE_SSE_HUB_REPLAY_BYTES"
-	EnvSSEHubBatchBytes      = "CHRONICLE_SSE_HUB_BATCH_BYTES"
-	EnvSSENotificationGroups = "CHRONICLE_SSE_NOTIFICATION_CONNECTIONS"
-	EnvSSEClientWriteTimeout = "CHRONICLE_SSE_CLIENT_WRITE_TIMEOUT"
-	EnvPublicURL             = "CHRONICLE_PUBLIC_URL"
-	EnvSubscriptions         = "CHRONICLE_SUBSCRIPTIONS"
-	EnvUI                    = "CHRONICLE_UI"
-	EnvUIServer              = "CHRONICLE_UI_SERVER"
-	EnvWebhookAllowPrivate   = "CHRONICLE_WEBHOOK_ALLOW_PRIVATE"
-	EnvSweepInterval         = "CHRONICLE_SWEEP_INTERVAL"
-	EnvReconcileInterval     = "CHRONICLE_RECONCILE_INTERVAL"
-	EnvSweepBatch            = "CHRONICLE_SWEEP_BATCH"
-	EnvMetricsListen         = "CHRONICLE_METRICS_LISTEN"
-	EnvMetricsPprof          = "CHRONICLE_METRICS_PPROF"
+	EnvListen              = "CHRONICLE_LISTEN"
+	EnvRedisURL            = "CHRONICLE_REDIS_URL"
+	EnvRedisPoolSize       = "CHRONICLE_REDIS_POOL_SIZE"
+	EnvRedisUsername       = "REDIS_USERNAME" // unprefixed: the name existing deployments already set
+	EnvRedisCredentialFile = "CHRONICLE_REDIS_CREDENTIAL_FILE"
+	// EnvRedisCredentialFileAllowGroupRead is the credential file's
+	// counterpart of EnvKeysFileAllowGroupRead: the same custody rule, the
+	// same one exception.
+	EnvRedisCredentialFileAllowGroupRead = "CHRONICLE_REDIS_CREDENTIAL_FILE_ALLOW_GROUP_READ"
+	EnvRedisCAFile                       = "CHRONICLE_REDIS_CA_FILE"
+	EnvRedisTLSInsecure                  = "CHRONICLE_REDIS_TLS_INSECURE_SKIP_VERIFY"
+	EnvStore                             = "CHRONICLE_STORE"
+	EnvSegmentMode                       = "CHRONICLE_SEGMENT_MODE"
+	EnvSegmentDir                        = "CHRONICLE_SEGMENT_DIR"
+	EnvSegmentTargetBytes                = "CHRONICLE_SEGMENT_TARGET_BYTES"
+	EnvSegmentIndexStride                = "CHRONICLE_SEGMENT_INDEX_STRIDE"
+	EnvSegmentCacheBytes                 = "CHRONICLE_SEGMENT_CACHE_BYTES"
+	EnvSegmentAutoSealRead               = "CHRONICLE_SEGMENT_AUTO_SEAL_READ"
+	EnvSegmentInitialState               = "CHRONICLE_SEGMENT_INITIAL_STATE"
+	EnvLongPollTimeout                   = "CHRONICLE_LONG_POLL_TIMEOUT"
+	EnvSSEReconnectInterval              = "CHRONICLE_SSE_RECONNECT_INTERVAL"
+	EnvReadPageBytes                     = "CHRONICLE_READ_PAGE_BYTES"
+	EnvSSEHubReplayBytes                 = "CHRONICLE_SSE_HUB_REPLAY_BYTES"
+	EnvSSEHubBatchBytes                  = "CHRONICLE_SSE_HUB_BATCH_BYTES"
+	EnvSSENotificationGroups             = "CHRONICLE_SSE_NOTIFICATION_CONNECTIONS"
+	EnvSSEClientWriteTimeout             = "CHRONICLE_SSE_CLIENT_WRITE_TIMEOUT"
+	EnvPublicURL                         = "CHRONICLE_PUBLIC_URL"
+	EnvSubscriptions                     = "CHRONICLE_SUBSCRIPTIONS"
+	EnvUI                                = "CHRONICLE_UI"
+	EnvUIServer                          = "CHRONICLE_UI_SERVER"
+	EnvWebhookAllowPrivate               = "CHRONICLE_WEBHOOK_ALLOW_PRIVATE"
+	EnvSweepInterval                     = "CHRONICLE_SWEEP_INTERVAL"
+	EnvReconcileInterval                 = "CHRONICLE_RECONCILE_INTERVAL"
+	EnvSweepBatch                        = "CHRONICLE_SWEEP_BATCH"
+	EnvMetricsListen                     = "CHRONICLE_METRICS_LISTEN"
+	EnvMetricsPprof                      = "CHRONICLE_METRICS_PPROF"
 
 	EnvRequestIDHeader = "CHRONICLE_REQUEST_ID_HEADER" // correlation header read, echoed and sent on webhook deliveries; default X-Request-ID
 	EnvLogLevel        = "CHRONICLE_LOG_LEVEL"         // debug | info | warn | error; the -log-level flag overrides
@@ -109,6 +113,11 @@ type Config struct {
 	// REDIS_USERNAME, which must agree with RedisUsername when both are set.
 	RedisUsername       string
 	RedisCredentialFile string
+	// RedisCredentialFileAllowGroupRead is the explicit opt-in to load a
+	// group-readable credential file, the same fsGroup exception as
+	// KeysFileAllowGroupRead. Parsed from
+	// CHRONICLE_REDIS_CREDENTIAL_FILE_ALLOW_GROUP_READ.
+	RedisCredentialFileAllowGroupRead bool
 	// RedisCAFile is a PEM bundle that replaces the system roots when
 	// verifying a TLS Redis server. RedisTLSInsecureSkipVerify disables that
 	// verification entirely: an explicit, logged opt-out, never a default.
@@ -372,6 +381,9 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvRedisCredentialFile); ok {
 		c.RedisCredentialFile = v
+	}
+	if v, ok := lookup(EnvRedisCredentialFileAllowGroupRead); ok {
+		c.RedisCredentialFileAllowGroupRead = v == "1" || v == "true"
 	}
 	if v, ok := lookup(EnvRedisCAFile); ok {
 		c.RedisCAFile = v
