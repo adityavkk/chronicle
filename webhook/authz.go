@@ -243,7 +243,10 @@ func (a WriteTokenAuthorizer) VerifyClaim(token, subID string, now time.Time) (C
 	// The deadline was written on the clock of the replica that granted or
 	// last extended the claim, and this replica's clock may lag it, so the
 	// difference is capped at the configured TTL — the most any claim can
-	// hold — which is what makes §9.1's bound hold across replicas.
+	// hold — which is what makes §9.1's "MUST NOT exceed lease_ttl_ms" hold
+	// across replicas. The cap is absolute, not a skew correction: within the
+	// TTL a lagging replica still over-reports by up to the inter-replica
+	// skew, which §9.1 leaves to the consumer's allowance.
 	remaining := check.LeaseUntilNs - now.UnixNano()
 	if ttl := check.LeaseTTLMs * int64(time.Millisecond); remaining > ttl {
 		remaining = ttl

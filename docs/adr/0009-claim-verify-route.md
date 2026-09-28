@@ -81,9 +81,10 @@ every append.
    judged on the server's clock, and a lagging client would otherwise trust a
    claim the fence had already withdrawn. It never caches a `401`, `409`, or
    `5xx`. Verify does not extend the lease, so polling it cannot keep a claim
-   alive, and the remaining lease never grows across answers. The no-renewal,
-   `no-store`, and remaining-lease rules are WF-30's server obligations; the
-   cache policy itself stays a consumer obligation.
+   alive, and the remaining lease does not grow across answers of an
+   unextended claim beyond the server's inter-replica skew bound. The
+   no-renewal, `no-store`, and remaining-lease rules are WF-30's server
+   obligations; the cache policy itself stays a consumer obligation.
 7. **`streams` is the token's scope.** The `200` body lists the token's
    normalized scope paths, not stream snapshots: verify reads no stream
    tails, so its cost does not grow with the number of links.

@@ -334,12 +334,16 @@ producer checks.
   MUST NOT exceed the subscription's `lease_ttl_ms`, and is `0` when the
   claim was live at evaluation but its lease has since been exhausted to the
   millisecond. A server with several replicas judges the lease on the clock
-  of the replica that answers while the deadline was written by the replica
-  that granted or last extended the claim, so the `lease_ttl_ms` bound is
-  what keeps `lease_remaining_ms` safe across their skew; the client's
-  ceiling stays the smaller of its heartbeat interval and
-  `lease_remaining_ms` less a fixed drift allowance, never `lease_until_ms`
-  against a local clock (see Caching).
+  of the replica that answers, while the deadline was written on the clock
+  of the replica that granted or last extended the claim and a takeover is
+  judged on the clock of the replica that serves it. The `lease_ttl_ms`
+  bound caps the figure absolutely but does not remove that skew: a replica
+  whose clock lags can still over-report by up to the skew. A multi-replica
+  server therefore assumes its replicas' clocks agree within a bound it
+  documents, and the client's allowance covers that bound (see Caching); the
+  client's ceiling stays the smaller of its heartbeat interval and
+  `lease_remaining_ms` less that allowance, never `lease_until_ms` against a
+  local clock.
 - `401` with the §7.2 error envelope — malformed, a foreign MAC, not a write
   token, minted for another subscription, or expired. A server SHOULD
   distinguish an expired write token from an otherwise unusable one via
@@ -363,11 +367,14 @@ that lags the server would keep trusting a claim the fence has already
 withdrawn. A client MAY cache a `200` answer no longer than the smaller of
 its own heartbeat interval — the cadence at which it extends the claim with
 non-`done` acks — and `lease_remaining_ms` less a conservative allowance for
-the round trip and its own clock drift; not caching at all is conforming. It
-MUST NOT cache a `401`, `409`, or `5xx`. The server MUST answer with
+the round trip, its own clock drift, and the server's inter-replica
+clock-skew bound (see the `200` response); not caching at all is conforming.
+It MUST NOT cache a `401`, `409`, or `5xx`. The server MUST answer with
 `Cache-Control: no-store`, MUST NOT extend the lease — polling verify does not
-keep a claim alive — and, because it does not, `lease_remaining_ms` MUST
-never grow from one `200` to the next for the same claim. **[WF-30]**
+keep a claim alive — and, because it does not, `lease_remaining_ms` MUST NOT
+grow from one `200` to the next for the same claim, except by a lease
+extension the holder made in between or, across replicas, by at most the
+server's inter-replica skew bound. **[WF-30]**
 
 **Discovery and fallback.** A client MUST treat `404`, `405`, or `501` from
 this path as "verification unavailable" and apply its local policy; the base
@@ -479,7 +486,9 @@ and the limits of that implementation.
   the lease against, clamped to the subscription's `lease_ttl_ms` read in the
   same step — the deadline was written on the granting replica's clock, and
   no answering replica may report more lease than the configuration grants —
-  so a consumer's WF-30 ceiling rests on the server clocks alone. The same
+  so a consumer's WF-30 ceiling rests on the server's clocks, within their
+  skew bound: the clamp is absolute and does not remove inter-replica skew,
+  which the consumer's allowance covers. The same
   script compares the token's subscription incarnation with
   the configuration's current one ahead of the generation, wake, and holder
   predicates, so a deleted-and-recreated subscription fences its
@@ -544,4 +553,4 @@ names the in-repo Go test that pins the same rule where one exists.
 | WF-27 | webhook end-to-end parity | `TestWebhookCallbackHeartbeatRefreshesWriteToken`, `TestWebhookAutoAckDoneSeals` |
 | WF-28 | pull-wake end-to-end | `TestHeartbeatRefreshesWriteTokenForLongLiveHolder` |
 | WF-29 | verify evaluates the token and live-claim pre-commit predicate — incarnation included — without a write | `TestVerifyClaimUsesOneAtomicStoreRead`, `TestClaimVerifyAgreesWithAppend`, `TestClaimVerifyHasNoSideEffects`, `TestClaimVerifyLinearizedWithDeposition`, `TestVerifyClaimFencesRecreatedIncarnation`, `TestClaimVerifyFencesRecreatedIncarnation` |
-| WF-30 | verify never renews, answers `Cache-Control: no-store`, and reports a server-relative `lease_remaining_ms` bounded by the lease TTL that never grows across answers; deriving the cache ceiling from it is a consumer obligation | `TestClaimVerifyNeverRenews`, `TestClaimVerifyReportsServerRelativeLease`, `TestVerifyClaimClampsRemainingLeaseToTTL`, `TestHandleClaimVerifyRoute`; consumer tests pin the client-side cache policy |
+| WF-30 | verify never renews, answers `Cache-Control: no-store`, and reports a server-relative `lease_remaining_ms` bounded by the lease TTL that does not grow across answers for an unextended claim; deriving the cache ceiling from it is a consumer obligation | `TestClaimVerifyNeverRenews`, `TestClaimVerifyReportsServerRelativeLease`, `TestVerifyClaimClampsRemainingLeaseToTTL`, `TestHandleClaimVerifyRoute`; consumer tests pin the client-side cache policy |
