@@ -24,12 +24,13 @@
 -- (ADR-0008 decision 13).
 --
 -- The token's subscription incarnation (ARGV[5]) is compared here too, in the
--- same EVAL and before the generation/wake/holder predicates: a deleted and
--- recreated subscription starts a new authority at generation 0, so a
--- predecessor's (generation, wake_id, holder) can coincide with the current
--- claim's and only the incarnation tells them apart — the identity the
--- stream-slot marker key carries. A token that carries no incarnation ('')
--- asserts none; the Go arm refuses it under an atomic stream store.
+-- same EVAL, as the first of the identity predicates beside generation, wake,
+-- and holder: a deleted and recreated subscription starts a new authority at
+-- generation 0, so a predecessor's (generation, wake_id, holder) can coincide
+-- with the current claim's and only the incarnation tells them apart — the
+-- identity the stream-slot marker key carries. A token that carries no
+-- incarnation ('') asserts none; the Go arm refuses it under an atomic stream
+-- store.
 --
 -- KEYS: 1=shardstate 2=sub_config
 -- ARGV: 1=now_ns 2=generation 3=wake_id 4=holder 5=incarnation
@@ -62,10 +63,6 @@ else
     return { 'FENCED' }
   end
 end
--- The token's incarnation must be the configuration's current one (WF-29).
-if a_incarnation ~= '' and a_incarnation ~= cfg_inc then
-  return { 'FENCED' }
-end
 
 local phase = redis.call('HGET', k_shardstate, 'phase')
 local holder = redis.call('HGET', k_shardstate, 'holder')
@@ -74,30 +71,33 @@ local gen = redis.call('HGET', k_shardstate, 'generation')
 local wake = redis.call('HGET', k_shardstate, 'wake_id')
 local lease_until_ns = redis.call('HGET', k_shardstate, 'lease_until_ns')
 local lease_until = tonumber(lease_until_ns) or 0
-
 local lease_ttl_ms = redis.call('HGET', k_sub_config, 'lease_ttl_ms')
 
+-- Liveness: a claim must be in flight inside its lease, in the shape its
+-- dispatch gives it — a webhook wake from either phase with no worker holder,
+-- a pull-wake worker in phase live (ack.lua's heartbeat branch).
 local dispatch = redis.call('HGET', k_sub_config, 'type')
 if dispatch == 'webhook' then
   if (phase ~= 'waking' and phase ~= 'live') or holder ~= '0' or lease_until <= now then
     return { 'FENCED' }
   end
-  if gen ~= a_generation or wake == false or wake == '' or wake ~= a_wake_id then
-    return { 'FENCED' }
-  end
-  if a_holder ~= ('wake:' .. wake) then
-    return { 'FENCED' }
-  end
-  return { 'OK', lease_until_ns, lease_ttl_ms }
+elseif phase ~= 'live' or holder ~= '1' or lease_until <= now then
+  return { 'FENCED' }
+end
+if wake == false or wake == '' then
+  return { 'FENCED' }
+end
+local claim_holder = holder_worker
+if dispatch == 'webhook' then
+  claim_holder = 'wake:' .. wake
 end
 
-if phase ~= 'live' or holder ~= '1' or lease_until <= now then
-  return { 'FENCED' }
-end
-if gen ~= a_generation or wake == false or wake == '' or wake ~= a_wake_id then
-  return { 'FENCED' }
-end
-if a_holder == '' or holder_worker ~= a_holder then
+-- Identity: the token must name this claim exactly — its subscription
+-- incarnation (an empty one asserts none, WF-29), generation, wake, and
+-- holder. This block is the one mechanism fence_fault_verifystale removes.
+if (a_incarnation ~= '' and a_incarnation ~= cfg_inc)
+  or gen ~= a_generation or wake ~= a_wake_id
+  or a_holder == '' or a_holder ~= claim_holder then
   return { 'FENCED' }
 end
 
