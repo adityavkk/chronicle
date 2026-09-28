@@ -71,7 +71,21 @@ func TestScriptReplyDecodersRejectMalformedReplies(t *testing.T) {
 			decode: func(r scriptReply) (any, error) {
 				return decodeWriteFenceReply(r)
 			},
-			raw: []any{"OK", "soon"},
+			raw: []any{"OK", "soon", "1000"},
+		},
+		{
+			name: "write fence OK without its lease TTL",
+			decode: func(r scriptReply) (any, error) {
+				return decodeWriteFenceReply(r)
+			},
+			raw: []any{"OK", "1700000000123456789"},
+		},
+		{
+			name: "write fence OK bad lease TTL",
+			decode: func(r scriptReply) (any, error) {
+				return decodeWriteFenceReply(r)
+			},
+			raw: []any{"OK", "1700000000123456789", "long"},
 		},
 		{
 			name: "write fence FENCED with a payload",
@@ -120,13 +134,14 @@ func TestScriptReplyDecodersKeepValidPayloads(t *testing.T) {
 		t.Fatalf("decode forbidden claim = %#v", forbidden)
 	}
 
-	// check_write_fence's OK is the one status that carries a field: the
-	// claim's lease_until_ns, returned as the raw hash string (#192).
-	wf, err := decodeWriteFenceReply(scriptReply{"OK", "1700000000123456789"})
+	// check_write_fence's OK is the one status that carries fields: the
+	// claim's lease_until_ns and the subscription's lease_ttl_ms, returned as
+	// the raw hash strings (#192).
+	wf, err := decodeWriteFenceReply(scriptReply{"OK", "1700000000123456789", "30000"})
 	if err != nil {
 		t.Fatalf("decode write fence OK: %v", err)
 	}
-	if ok, isOK := wf.(writeFenceOK); !isOK || ok.LeaseUntilNs != 1700000000123456789 {
+	if ok, isOK := wf.(writeFenceOK); !isOK || ok.LeaseUntilNs != 1700000000123456789 || ok.LeaseTTLMs != 30000 {
 		t.Fatalf("decode write fence OK = %#v", wf)
 	}
 	for _, raw := range []scriptReply{{"FENCED"}, {"NOSUB"}} {
@@ -538,7 +553,7 @@ func luaReplyFieldKind(expr string) replyFieldKind {
 	if strings.Contains(expr, "lease_expiry_ns") || strings.Contains(expr, "until_ns") || strings.Contains(expr, "first") {
 		return replyNS
 	}
-	if strings.Contains(expr, "gen") || strings.Contains(expr, "generation") || strings.Contains(expr, "retry_count") || strings.Contains(expr, "owner_epoch") || strings.Contains(expr, "epoch") {
+	if strings.Contains(expr, "gen") || strings.Contains(expr, "generation") || strings.Contains(expr, "retry_count") || strings.Contains(expr, "owner_epoch") || strings.Contains(expr, "epoch") || strings.Contains(expr, "ttl_ms") {
 		return replyInteger
 	}
 	return replyString

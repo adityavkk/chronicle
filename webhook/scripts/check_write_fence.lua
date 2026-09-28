@@ -14,11 +14,14 @@
 -- Two callers ask this question: the append pre-check (AuthorizeAppendFence)
 -- and the read-only claim/verify route (WRITE-FENCING.md §9.1, WF-29), which
 -- must answer exactly as the pre-check would. OK carries the claim's lease
--- deadline — the raw lease_until_ns string, so every number in the reply
--- stays a string — because the verify body is built from this same atomic
--- read; a second HGET after the predicate could describe a later claim.
--- FENCED and NOSUB stay bare: the pre-check discloses nothing about the
--- current holder (ADR-0008 decision 13).
+-- deadline and the subscription's lease_ttl_ms — the raw hash strings, so
+-- every number in the reply stays a string — because the verify body is built
+-- from this same atomic read; a second HGET after the predicate could describe
+-- a later claim. The TTL is the bound the route clamps the remaining lease to:
+-- the deadline was written on the granting replica's clock, and no answering
+-- replica may report more lease than the configuration grants. FENCED and
+-- NOSUB stay bare: the pre-check discloses nothing about the current holder
+-- (ADR-0008 decision 13).
 --
 -- The token's subscription incarnation (ARGV[5]) is compared here too, in the
 -- same EVAL and before the generation/wake/holder predicates: a deleted and
@@ -30,7 +33,7 @@
 --
 -- KEYS: 1=shardstate 2=sub_config
 -- ARGV: 1=now_ns 2=generation 3=wake_id 4=holder 5=incarnation
--- Reply: {OK, lease_until_ns} | FENCED | NOSUB
+-- Reply: {OK, lease_until_ns, lease_ttl_ms} | FENCED | NOSUB
 
 local k_shardstate = KEYS[1]
 local k_sub_config = KEYS[2]
@@ -72,6 +75,8 @@ local wake = redis.call('HGET', k_shardstate, 'wake_id')
 local lease_until_ns = redis.call('HGET', k_shardstate, 'lease_until_ns')
 local lease_until = tonumber(lease_until_ns) or 0
 
+local lease_ttl_ms = redis.call('HGET', k_sub_config, 'lease_ttl_ms')
+
 local dispatch = redis.call('HGET', k_sub_config, 'type')
 if dispatch == 'webhook' then
   if (phase ~= 'waking' and phase ~= 'live') or holder ~= '0' or lease_until <= now then
@@ -83,7 +88,7 @@ if dispatch == 'webhook' then
   if a_holder ~= ('wake:' .. wake) then
     return { 'FENCED' }
   end
-  return { 'OK', lease_until_ns }
+  return { 'OK', lease_until_ns, lease_ttl_ms }
 end
 
 if phase ~= 'live' or holder ~= '1' or lease_until <= now then
@@ -96,4 +101,4 @@ if a_holder == '' or holder_worker ~= a_holder then
   return { 'FENCED' }
 end
 
-return { 'OK', lease_until_ns }
+return { 'OK', lease_until_ns, lease_ttl_ms }

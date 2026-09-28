@@ -49,7 +49,7 @@ func TestVerifyClaimUsesOneAtomicStoreRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantLease := now.Add(37 * time.Second).UnixNano()
-	store := &verifyCallStore{reply: WriteFenceCheck{Status: "OK", LeaseUntilNs: wantLease}}
+	store := &verifyCallStore{reply: WriteFenceCheck{Status: "OK", LeaseUntilNs: wantLease, LeaseTTLMs: 60_000}}
 	a := WriteTokenAuthorizer{key: key, store: store, atomic: true}
 	got, err := a.VerifyClaim(token, "s1", now)
 	if err != nil {
@@ -66,9 +66,55 @@ func TestVerifyClaimUsesOneAtomicStoreRead(t *testing.T) {
 	if got.LeaseRemainingNs != 37*time.Second.Nanoseconds() {
 		t.Fatalf("remaining lease = %d, want %d", got.LeaseRemainingNs, 37*time.Second.Nanoseconds())
 	}
-	store.reply = WriteFenceCheck{Status: "OK", LeaseUntilNs: now.Add(-time.Millisecond).UnixNano()}
+	store.reply = WriteFenceCheck{Status: "OK", LeaseUntilNs: now.Add(-time.Millisecond).UnixNano(), LeaseTTLMs: 60_000}
 	if got, err := a.VerifyClaim(token, "s1", now); err != nil || got.Status != ClaimVerifyOK || got.LeaseRemainingNs != 0 {
 		t.Fatalf("remaining lease past the deadline = %+v err=%v, want OK floored at 0", got, err)
+	}
+}
+
+// TestVerifyClaimClampsRemainingLeaseToTTL pins §9.1's "MUST NOT exceed the
+// subscription's lease_ttl_ms" by construction. The deadline was written by
+// whichever replica handled the last claim or heartbeat, on that replica's
+// clock; a replica whose clock lags it would otherwise report more remaining
+// lease than the subscription can grant. The TTL arrives in the same atomic
+// read as the deadline and caps the remaining lease; a deadline inside the
+// TTL is reported as is, and lease_until itself is never adjusted.
+func TestVerifyClaimClampsRemainingLeaseToTTL(t *testing.T) {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	scope := []auth.StreamPath{mustPath(t, "events/a")}
+	token, err := GenerateClaimWriteToken(key, "s1", "inc-1", 7, "w_a", "worker-A", 0, scope, now, time.Minute, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &verifyCallStore{}
+	a := WriteTokenAuthorizer{key: key, store: store, atomic: true}
+	for _, tc := range []struct {
+		name  string
+		until time.Duration // deadline relative to now
+		ttlMs int64
+		want  time.Duration
+	}{
+		{"deadline inside the TTL", 12 * time.Second, 30_000, 12 * time.Second},
+		{"deadline exactly the TTL", 30 * time.Second, 30_000, 30 * time.Second},
+		{"deadline written by a clock ahead of ours", 30*time.Second + 250*time.Millisecond, 30_000, 30 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store.reply = WriteFenceCheck{Status: "OK", LeaseUntilNs: now.Add(tc.until).UnixNano(), LeaseTTLMs: tc.ttlMs}
+			got, err := a.VerifyClaim(token, "s1", now)
+			if err != nil || got.Status != ClaimVerifyOK {
+				t.Fatalf("verify = %+v err=%v, want OK", got, err)
+			}
+			if got.LeaseRemainingNs != tc.want.Nanoseconds() {
+				t.Fatalf("remaining lease = %d, want %d", got.LeaseRemainingNs, tc.want.Nanoseconds())
+			}
+			if got.LeaseUntilNs != store.reply.LeaseUntilNs {
+				t.Fatalf("lease_until = %d, want the deadline %d reported unclamped", got.LeaseUntilNs, store.reply.LeaseUntilNs)
+			}
+		})
 	}
 }
 

@@ -333,7 +333,13 @@ producer checks.
   the deadline the predicate accepted and the server time it accepted it at,
   MUST NOT exceed the subscription's `lease_ttl_ms`, and is `0` when the
   claim was live at evaluation but its lease has since been exhausted to the
-  millisecond.
+  millisecond. A server with several replicas judges the lease on the clock
+  of the replica that answers while the deadline was written by the replica
+  that granted or last extended the claim, so the `lease_ttl_ms` bound is
+  what keeps `lease_remaining_ms` safe across their skew; the client's
+  ceiling stays the smaller of its heartbeat interval and
+  `lease_remaining_ms` less a fixed drift allowance, never `lease_until_ms`
+  against a local clock (see Caching).
 - `401` with the §7.2 error envelope — malformed, a foreign MAC, not a write
   token, minted for another subscription, or expired. A server SHOULD
   distinguish an expired write token from an otherwise unusable one via
@@ -470,8 +476,11 @@ and the limits of that implementation.
   that also yields the claim's lease, so it cannot observe a partially
   updated claim and its `lease_until_ms` belongs to the claim it accepted;
   `lease_remaining_ms` is that deadline minus the `now` the script judged
-  the lease against, so a consumer's WF-30 ceiling rests on the server clock
-  alone. The same script compares the token's subscription incarnation with
+  the lease against, clamped to the subscription's `lease_ttl_ms` read in the
+  same step — the deadline was written on the granting replica's clock, and
+  no answering replica may report more lease than the configuration grants —
+  so a consumer's WF-30 ceiling rests on the server clocks alone. The same
+  script compares the token's subscription incarnation with
   the configuration's current one ahead of the generation, wake, and holder
   predicates, so a deleted-and-recreated subscription fences its
   predecessor's tokens even when the rest of the tuple coincides — the

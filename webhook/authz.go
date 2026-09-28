@@ -190,8 +190,10 @@ const (
 // only, and the lease comes from the same atomic read as the decision.
 // LeaseRemainingNs is the lease left as judged on the server clock at the
 // instant of that read — LeaseUntilNs minus the now the predicate was
-// evaluated at, floored at zero — so a consumer bounds its WF-30 cache on the
-// clock that fences the append rather than on its own.
+// evaluated at, floored at zero and capped at the subscription's lease TTL
+// from the same read — so a consumer bounds its WF-30 cache on the clock that
+// fences the append rather than on its own, and never on more lease than the
+// configuration can grant.
 type ClaimVerification struct {
 	Status           ClaimVerifyStatus
 	Detail           string
@@ -238,7 +240,14 @@ func (a WriteTokenAuthorizer) VerifyClaim(token, subID string, now time.Time) (C
 	// The remaining lease is server-relative by construction: the predicate
 	// accepted the claim against this same now, so the difference is the time
 	// the fence itself still grants, independent of any client clock (WF-30).
+	// The deadline was written on the clock of the replica that granted or
+	// last extended the claim, and this replica's clock may lag it, so the
+	// difference is capped at the configured TTL — the most any claim can
+	// hold — which is what makes §9.1's bound hold across replicas.
 	remaining := check.LeaseUntilNs - now.UnixNano()
+	if ttl := check.LeaseTTLMs * int64(time.Millisecond); remaining > ttl {
+		remaining = ttl
+	}
 	if remaining < 0 {
 		remaining = 0
 	}

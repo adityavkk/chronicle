@@ -264,10 +264,12 @@ type MutationResult struct {
 
 // WriteFenceCheck is the outcome of VerifyWriteFence: the pre-check's status
 // ("OK", "FENCED", or "NOSUB") and, with OK only, the accepted claim's
-// lease_until_ns as the fence state holds it.
+// lease_until_ns as the fence state holds it and the subscription's
+// lease_ttl_ms from the same read — the bound a remaining lease is clamped to.
 type WriteFenceCheck struct {
 	Status       string
 	LeaseUntilNs int64
+	LeaseTTLMs   int64
 }
 
 // ClaimResult is the outcome of a claim attempt.

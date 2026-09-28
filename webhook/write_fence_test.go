@@ -368,17 +368,18 @@ func TestCheckWriteFenceWebhookBranch(t *testing.T) {
 			rt.Fatalf("check_write_fence = %q err=%v", status, err)
 		}
 		// The verify form is the same script: same status, plus the seeded
-		// lease deadline with an OK and nothing with a FENCED (#192).
+		// lease deadline and the configured lease TTL with an OK and nothing
+		// with a FENCED (#192).
 		check, err := s.VerifyWriteFence(id, 0, reqInc, reqGen, reqWake, reqHolder, now)
 		if err != nil || check.Status != status {
 			rt.Fatalf("verify_write_fence = %+v err=%v, check_write_fence = %q", check, err, status)
 		}
-		wantLease := int64(0)
+		wantLease, wantTTL := int64(0), int64(0)
 		if status == "OK" {
-			wantLease = lease
+			wantLease, wantTTL = lease, sub.Config.LeaseTTLMs
 		}
-		if check.LeaseUntilNs != wantLease {
-			rt.Fatalf("verify_write_fence lease = %d, want %d (status %s)", check.LeaseUntilNs, wantLease, status)
+		if check.LeaseUntilNs != wantLease || check.LeaseTTLMs != wantTTL {
+			rt.Fatalf("verify_write_fence lease = %d ttl = %d, want %d / %d (status %s)", check.LeaseUntilNs, check.LeaseTTLMs, wantLease, wantTTL, status)
 		}
 		luaFenced := status == "FENCED"
 		if goFenced != luaFenced {
@@ -403,10 +404,11 @@ func TestCheckWriteFenceWebhookBranch(t *testing.T) {
 
 // TestVerifyWriteFenceReturnsLease pins the additive OK reply of
 // check_write_fence.lua (#192): VerifyWriteFence answers a live claim with the
-// lease deadline the fence hash holds, read in the same script step as the
-// predicate; after a takeover the answer is a bare FENCED and for a missing
-// subscription a bare NOSUB, with no lease disclosed; and CheckWriteFence
-// keeps its status-only contract over the same call.
+// lease deadline the fence hash holds and the subscription's configured lease
+// TTL, both read in the same script step as the predicate; after a takeover
+// the answer is a bare FENCED and for a missing subscription a bare NOSUB,
+// with no lease disclosed; and CheckWriteFence keeps its status-only contract
+// over the same call.
 func TestVerifyWriteFenceReturnsLease(t *testing.T) {
 	s, _ := newTestStore(t)
 	now := time.Now()
@@ -428,14 +430,17 @@ func TestVerifyWriteFenceReturnsLease(t *testing.T) {
 	if check.LeaseUntilNs != sub.LeaseUntilNs || check.LeaseUntilNs <= now.UnixNano() {
 		t.Fatalf("live verify lease = %d, want the hash's %d (> now %d)", check.LeaseUntilNs, sub.LeaseUntilNs, now.UnixNano())
 	}
+	if check.LeaseTTLMs != sub.Config.LeaseTTLMs {
+		t.Fatalf("live verify lease ttl = %d, want the configuration's %d", check.LeaseTTLMs, sub.Config.LeaseTTLMs)
+	}
 	if st, err := s.CheckWriteFence("s1", 0, sub.Incarnation, cr.Generation, cr.WakeID, "worker-A", now); err != nil || st != "OK" {
 		t.Fatalf("live check = %q err=%v, want OK", st, err)
 	}
 	// A token asserting no incarnation passes this arm unchanged (the Go
 	// authorizer refuses it under an atomic stream store); a predecessor
 	// incarnation is a bare FENCED with no lease disclosed.
-	if check, err := s.VerifyWriteFence("s1", 0, "", cr.Generation, cr.WakeID, "worker-A", now); err != nil || check.Status != "OK" || check.LeaseUntilNs != sub.LeaseUntilNs {
-		t.Fatalf("no-incarnation verify = %+v err=%v, want OK with the lease", check, err)
+	if check, err := s.VerifyWriteFence("s1", 0, "", cr.Generation, cr.WakeID, "worker-A", now); err != nil || check.Status != "OK" || check.LeaseUntilNs != sub.LeaseUntilNs || check.LeaseTTLMs != sub.Config.LeaseTTLMs {
+		t.Fatalf("no-incarnation verify = %+v err=%v, want OK with the lease and its ttl", check, err)
 	}
 	if check, err := s.VerifyWriteFence("s1", 0, "stale-"+sub.Incarnation, cr.Generation, cr.WakeID, "worker-A", now); err != nil || check != (WriteFenceCheck{Status: "FENCED"}) {
 		t.Fatalf("stale-incarnation verify = %+v err=%v, want bare FENCED", check, err)

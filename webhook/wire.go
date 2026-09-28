@@ -196,9 +196,10 @@ type ClaimResponse struct {
 // stream tails. LeaseUntilMs is the claim's lease deadline as the fence state
 // holds it (unix milliseconds, informational); LeaseRemainingMs is the lease
 // left at the instant of the read as judged on the server clock, floored at
-// zero — the only figure WF-30 lets a client derive its cache ceiling from,
-// because the server clock is the one that fences the append and a client's
-// may lag it.
+// zero and capped at the subscription's lease_ttl_ms — the only figure WF-30
+// lets a client derive its cache ceiling from, because the server clock is
+// the one that fences the append and a client's may lag it, and because no
+// replica's clock may report more lease than the configuration grants.
 type ClaimVerifyResponse struct {
 	Generation       int64    `json:"generation"`
 	WakeID           string   `json:"wake_id"`

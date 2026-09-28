@@ -858,11 +858,12 @@ func (s *RedisStore) claimShardAuthorized(id string, g int, worker, wakeID strin
 }
 
 // VerifyWriteFence verifies the append capability against current live claim
-// state and, when it holds, returns the claim's lease deadline with it. It is
-// a single slot-homed Lua read of the shard fence, so the decision cannot
-// observe a partially-updated claim record — and the deadline is the accepted
-// claim's, which is what lets the claim/verify route answer without a second,
-// racing read (WRITE-FENCING.md §9.1).
+// state and, when it holds, returns the claim's lease deadline and the
+// subscription's lease TTL with it. It is a single slot-homed Lua read of the
+// shard fence, so the decision cannot observe a partially-updated claim
+// record — and the deadline is the accepted claim's, which is what lets the
+// claim/verify route answer without a second, racing read (WRITE-FENCING.md
+// §9.1).
 func (s *RedisStore) VerifyWriteFence(id string, shard int, incarnation string, generation int64, wakeID, holder string, now time.Time) (WriteFenceCheck, error) {
 	reply, err := writeFenceScript.run(s.ctx(), s.client, newWriteFenceKeys(id, shard),
 		nsArg(now), strconv.FormatInt(generation, 10), wakeID, holder, incarnation)
@@ -871,7 +872,7 @@ func (s *RedisStore) VerifyWriteFence(id string, shard int, incarnation string, 
 	}
 	switch reply := reply.(type) {
 	case writeFenceOK:
-		return WriteFenceCheck{Status: "OK", LeaseUntilNs: reply.LeaseUntilNs}, nil
+		return WriteFenceCheck{Status: "OK", LeaseUntilNs: reply.LeaseUntilNs, LeaseTTLMs: reply.LeaseTTLMs}, nil
 	case writeFenceFenced:
 		return WriteFenceCheck{Status: "FENCED"}, nil
 	case writeFenceNoSub:
