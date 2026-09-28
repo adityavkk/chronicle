@@ -218,6 +218,27 @@ func TestFenceMetricsGolden(t *testing.T) {
 	}
 }
 
+func TestMuxPprofIsDisabledByDefault(t *testing.T) {
+	p := New()
+	mux := p.Mux(nil)
+	for _, path := range []string{
+		"/debug/pprof/",
+		"/debug/pprof/cmdline",
+		"/debug/pprof/profile",
+		"/debug/pprof/symbol",
+		"/debug/pprof/trace",
+		"/debug/pprof/goroutine?debug=1",
+	} {
+		t.Run(path, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+			if rr.Code != http.StatusNotFound {
+				t.Fatalf("%s = %d, want 404", path, rr.Code)
+			}
+		})
+	}
+}
+
 func TestMuxPprofIsExplicitlyEnabled(t *testing.T) {
 	p := New()
 	mux := p.Mux(nil, true)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -21,6 +23,24 @@ type recordingSubscriptionService struct {
 	reconnected chan struct{}
 	promotes    atomic.Int64
 	promoted    chan struct{}
+}
+
+func TestWithUIDisabledReturnsAPIUnchanged(t *testing.T) {
+	api := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	got, enabled := withUI("/v1/stream/", api, false, "", logger)
+	if enabled {
+		t.Fatal("withUI reported enabled")
+	}
+	for _, path := range []string{"/", "/dsui-config.json", "/v1/stream/orders"} {
+		rr := httptest.NewRecorder()
+		got.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("%s reached wrapper instead of API: status %d", path, rr.Code)
+		}
+	}
 }
 
 func TestValidateSegmentConfig(t *testing.T) {

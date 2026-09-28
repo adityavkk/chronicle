@@ -39,6 +39,7 @@ func main() {
 	// env-driven helm chart as well as from the command line.
 	listen := flag.String("listen", envOr("DSUI_LISTEN", ":4438"), "address for the dsui web server")
 	server := flag.String("server", envOr("DSUI_SERVER", ""), "default Durable Streams server URL to prefill (e.g. http://localhost:4437)")
+	jwksURL := flag.String("jwks-url", envOr("DSUI_JWKS_URL", ""), "Chronicle JWKS URL used to verify captured webhooks (default derived from --server)")
 	captureBase := flag.String("capture-base", envOr("DSUI_CAPTURE_BASE", ""), "base URL the chronicle server uses to reach this binary's webhook-capture endpoint (default derived from --listen, e.g. http://localhost:4438)")
 	open := flag.Bool("open", envBool("DSUI_OPEN", true), "open the UI in a browser on start")
 	flag.Parse()
@@ -50,13 +51,22 @@ func main() {
 	fileServer := http.FileServer(http.FS(webRoot))
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", handleHealth)
 
 	// The built-in webhook-capture endpoint (/__hooks/{id}). A webhook
 	// subscription's webhook_url points at <captureBase>/__hooks/<id>; chronicle
 	// POSTs signed wakes there, this binary buffers them and relays to the browser
 	// over SSE (the browser cannot host an inbound endpoint itself).
 	captureStore := newCaptureStore()
-	registerCaptureRoutes(mux, captureStore)
+	resolvedJWKSURL := *jwksURL
+	if resolvedJWKSURL == "" {
+		resolvedJWKSURL = defaultJWKSURL(*server)
+	}
+	if resolvedJWKSURL == "" {
+		registerCaptureRoutes(mux, captureStore)
+	} else {
+		registerCaptureRoutes(mux, captureStore, newJWKSCaptureVerifier(resolvedJWKSURL))
+	}
 
 	// The base URL the chronicle server uses to reach this capture endpoint. The
 	// browser builds a webhook_url as <captureBase>/__hooks/<id> from this, so it
@@ -96,6 +106,12 @@ func main() {
 	}
 	srv := &http.Server{Addr: *listen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	log.Fatal(srv.ListenAndServe())
+}
+
+func handleHealth(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok\n"))
 }
 
 func serveIndex(w http.ResponseWriter, webRoot fs.FS) {
