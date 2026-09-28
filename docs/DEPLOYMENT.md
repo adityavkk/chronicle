@@ -275,9 +275,12 @@ exporter cannot be built, Chronicle logs one `tracing_disabled` warning whose
 `chronicle_tracing_setup_failures_total{reason}` and serves without traces:
 alert on that counter. A malformed value (a plaintext remote endpoint,
 credentials in the URL, a ratio outside 0..1, an unknown operation) still
-refuses startup, like any other flag. At runtime an export failure is a
-`tracing_export_failed` warning; the export queue is bounded (2048 spans) and
-a slow destination drops spans rather than slowing a request.
+refuses startup, like any other flag. At runtime a destination that refuses
+batches is one `tracing_export_failed` warning when the refusals start, one
+`tracing_export_recovered` line when they stop, and
+`chronicle_tracing_export_failures_total` counting every refused batch in
+between: alert on that counter too. The export queue is bounded (2048 spans)
+and a slow destination drops spans rather than slowing a request.
 
 **Logs join traces.** `http_request_started` and `http_request_completed` carry
 `trace_id` on a traced request, and `webhook_delivery_completed` carries the

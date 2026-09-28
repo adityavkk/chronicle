@@ -79,6 +79,7 @@ const maxCredentialBytes = 4096
 // tracing is off or failed open. The zero value is off.
 type Tracing struct {
 	provider *sdktrace.TracerProvider
+	exports  *observedExporter
 	failure  string
 	logger   *slog.Logger
 }
@@ -129,21 +130,24 @@ func Start(ctx context.Context, lookup func(string) (string, bool), logger *slog
 	if err != nil {
 		return t.failOpen(ReasonExporterUnavailable, err), nil
 	}
+	t.exports = observeExports(exporter, logger)
 	t.provider = sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(newSampler(cfg.ratio, cfg.always...)),
 		sdktrace.WithResource(serviceResource()),
 		// The queue is the memory bound; a slow destination drops spans, never
 		// blocks a request.
-		sdktrace.WithBatcher(exporter,
+		sdktrace.WithBatcher(t.exports,
 			sdktrace.WithMaxQueueSize(2048),
 			sdktrace.WithMaxExportBatchSize(256),
 			sdktrace.WithBatchTimeout(time.Second),
 			sdktrace.WithExportTimeout(5*time.Second)),
 	)
-	// Export failures surface through the process logger rather than the
-	// SDK's default stderr printer.
+	// The SDK reports every export error to its global handler as well;
+	// observedExporter already counts and logs them on transitions, so the
+	// handler only keeps the SDK's default stderr printer quiet and leaves
+	// the detail at Debug.
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
-		logger.Warn("tracing export failed", "event", "tracing_export_failed", "error", err)
+		logger.Debug("tracing sdk error", "event", "tracing_sdk_error", "error", err)
 	}))
 	logger.Info("tracing enabled",
 		"event", "tracing_enabled",
@@ -175,6 +179,16 @@ func (t *Tracing) Enabled() bool { return t.provider != nil }
 // for the metric that makes the fail-open visible.
 func (t *Tracing) FailedOpen() (reason string, failed bool) {
 	return t.failure, t.failure != ""
+}
+
+// ExportFailures is the number of span batches the destination has refused
+// since startup, for chronicle_tracing_export_failures_total; 0 while tracing
+// is off.
+func (t *Tracing) ExportFailures() uint64 {
+	if t.exports == nil {
+		return 0
+	}
+	return t.exports.Failures()
 }
 
 // Tracer starts Chronicle's own spans, or is nil when tracing is off so that

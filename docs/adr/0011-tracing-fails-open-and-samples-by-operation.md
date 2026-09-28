@@ -30,9 +30,12 @@ the memory does not have it.
 2. **Fail open, loudly.** An unusable credential or CA file, or an exporter
    that cannot be built, disables tracing with one `tracing_disabled` warning
    and `chronicle_tracing_setup_failures_total{reason}`, and the server starts.
-   A malformed configuration value is still a startup error. This is the only
-   Chronicle subsystem allowed to fail open; authentication, fencing and TLS
-   fail closed.
+   A malformed configuration value is still a startup error. At runtime a
+   destination that refuses batches is counted
+   (`chronicle_tracing_export_failures_total`) and logged on transitions
+   only, once when the refusals start and once when they stop, never per
+   batch. This is the only Chronicle subsystem allowed to fail open;
+   authentication, fencing and TLS fail closed.
 3. **Roots are Chronicle's decision, parents are the caller's.** Every span
    with a parent follows the parent's sampled flag. A root Chronicle starts is
    named `chronicle.<operation>` and is kept by an always-list of operations or

@@ -608,6 +608,17 @@ func (p *Prometheus) TracingSetupFailed(reason string) {
 	p.tracingSetupFailures.WithLabelValues(reason).Inc()
 }
 
+// TrackTracingExportFailures exposes chronicle_tracing_export_failures_total
+// from the tracing subsystem's own counter (telemetry.Tracing.ExportFailures),
+// so a destination that refuses batches at runtime is visible next to the
+// setup failures. Called once, when tracing is enabled.
+func (p *Prometheus) TrackTracingExportFailures(count func() uint64) {
+	p.reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: "chronicle_tracing_export_failures_total",
+		Help: "Span batches the tracing destination refused at runtime; their spans were dropped.",
+	}, func() float64 { return float64(count()) }))
+}
+
 // ReconcileRequest implements webhook.Metrics.
 func (p *Prometheus) ReconcileRequest(scope, result string) {
 	p.reconcileRequests.WithLabelValues(scope, result).Inc()

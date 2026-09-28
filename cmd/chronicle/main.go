@@ -324,6 +324,9 @@ func run() error {
 		if reason, failed := tracing.FailedOpen(); failed {
 			prom.TracingSetupFailed(reason)
 		}
+		if tracing.Enabled() {
+			prom.TrackTracingExportFailures(tracing.ExportFailures)
+		}
 		subMetrics = prom
 		handler.ReadMetrics = prom
 		handler.SSEMetrics = prom
