@@ -925,20 +925,22 @@ func (m *Manager) rememberWakeOrigin(wakeID string, origin appendOrigin, leaseTT
 	return origin.wakeRequestID(wakeID)
 }
 
-// requestIDForWake is the id this wake's delivery, retry and acknowledgement
-// log and send: the remembered caller id, or wake-<id> when this process never
-// armed the wake or no longer remembers it.
-func (m *Manager) requestIDForWake(wakeID string) string {
+// originOfWake is what this process remembers of the append that armed
+// wakeID: the zero origin when it never armed the wake or no longer remembers
+// it, in which case the wake logs and sends wake-<id> and a delivery starts a
+// trace of its own. A delivery attempt looks it up once and threads the result
+// through its logger, its span and its headers, so the three agree even if
+// the entry is evicted while the attempt is in flight.
+func (m *Manager) originOfWake(wakeID string) appendOrigin {
 	origin, _ := m.wakeCorrelation.lookup(wakeID, m.now())
-	return origin.wakeRequestID(wakeID)
+	return origin
 }
 
-// traceForWake is the trace of the append that armed wakeID, or an invalid
-// context when this process never knew or no longer remembers it, in which
-// case a delivery starts a trace of its own.
-func (m *Manager) traceForWake(wakeID string) trace.SpanContext {
-	origin, _ := m.wakeCorrelation.lookup(wakeID, m.now())
-	return origin.trace
+// requestIDForWake is the id this wake logs and sends: the remembered caller
+// id, or wake-<id> when this process never armed the wake or no longer
+// remembers it.
+func (m *Manager) requestIDForWake(wakeID string) string {
+	return m.originOfWake(wakeID).wakeRequestID(wakeID)
 }
 
 // forgetWakeRequestID drops a wake's id once its outcome is final here.
@@ -957,15 +959,15 @@ func (m *Manager) logWakeArmed(sub Subscription, res ArmResult, requestID string
 }
 
 // wakeLogger is the logger every record about one wake shares: its completion
-// event name, the subscription, generation and wake id, and the request id
+// event name, the subscription, generation and wake id, and requestID, the id
 // that armed the wake (or wake-<id> when this process does not know it).
-func (m *Manager) wakeLogger(event, id string, generation int64, wakeID string) *slog.Logger {
+func (m *Manager) wakeLogger(event, id string, generation int64, wakeID, requestID string) *slog.Logger {
 	return m.log.With(
 		"event", event,
 		"subscription_id", id,
 		"wake_id", wakeID,
 		"generation", generation,
-		"request_id", m.requestIDForWake(wakeID),
+		"request_id", requestID,
 	)
 }
 
@@ -1042,7 +1044,9 @@ func (m *Manager) issueWakeOwned(scope OwnerScope, sub Subscription, triggerStre
 	if !res.Armed {
 		return false
 	}
-	m.logWakeArmed(sub, res, m.requestIDForWake(res.WakeID))
+	// A freshly minted wake with no append behind it: nothing is remembered,
+	// so its id is the fallback by construction.
+	m.logWakeArmed(sub, res, correlation.WakeRequestID(res.WakeID))
 	failpoint(fpArmedBeforeEmit)
 	switch sub.Config.Type {
 	case DispatchWebhook:
@@ -1063,7 +1067,7 @@ func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generat
 }
 
 func (m *Manager) writeWakeEventExternalized(ext DurableExternalization, sub Subscription, triggerStream string, generation int64, wakeID string) {
-	log := m.wakeLogger("pull_wake_delivery_completed", sub.ID, generation, wakeID)
+	log := m.wakeLogger("pull_wake_delivery_completed", sub.ID, generation, wakeID, m.requestIDForWake(wakeID))
 	if triggerStream == "" && len(sub.Links) > 0 {
 		triggerStream = sub.Links[0].Path
 	}
@@ -1106,7 +1110,9 @@ func (m *Manager) deliverWebhookOwned(scope OwnerScope, id string, generation in
 // non-2xx or transport error schedules a retry (PROTOCOL §7.1). Every attempt
 // ends in exactly one webhook_delivery_completed record whose outcome says how.
 func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, owner *OwnerScope) {
-	log := m.wakeLogger("webhook_delivery_completed", id, generation, wakeID)
+	origin := m.originOfWake(wakeID)
+	requestID := origin.wakeRequestID(wakeID)
+	log := m.wakeLogger("webhook_delivery_completed", id, generation, wakeID, requestID)
 	// Owner-epoch fence for the EXTERNAL POST (issue #14): the retry worker drives
 	// this for a slot it owns, so verify ownership via check_owner immediately
 	// before the POST — the one schedule write that cannot inline the check, since
@@ -1174,7 +1180,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	// One client span per attempt, a child of the append that armed this wake
 	// when this process still remembers it (see deliveryTrace); inert without
 	// a Tracer.
-	attempt := m.startDelivery(id, generation, wakeID)
+	attempt := m.startDelivery(id, generation, wakeID, origin.trace)
 	if attempt.traceID != "" {
 		log = log.With("trace_id", attempt.traceID)
 	}
@@ -1182,7 +1188,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	if err != nil {
 		attempt.end(0, "request_build_failed")
 		log.Warn("webhook delivery failed", "outcome", "request_build_failed", "error", err)
-		m.recordFailure(id, generation, wakeID, owner)
+		m.recordFailure(id, generation, wakeID, owner, requestID)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -1190,7 +1196,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	// receiver: the id and the trace of the append that armed this wake, or
 	// wake-<id> and a trace of this delivery's own. Both are unsigned, outside
 	// the envelope signature, and never identity.
-	req.Header.Set(m.requestIDHeader, m.requestIDForWake(wakeID))
+	req.Header.Set(m.requestIDHeader, requestID)
 	attempt.inject(req.Header)
 	signing := m.keySnapshot().webhook.active
 	if signing.Kid == "" {
@@ -1199,7 +1205,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		// worker re-attempts after rotation restores a mint key.
 		attempt.end(0, "signing_key_unavailable")
 		log.Error("webhook delivery deferred", "outcome", "signing_key_unavailable")
-		m.recordFailure(id, generation, wakeID, owner)
+		m.recordFailure(id, generation, wakeID, owner, requestID)
 		return
 	}
 	req.Header.Set("Webhook-Signature", SignWebhookPayload(signing, body, time.Now()))
@@ -1212,7 +1218,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 			attempt.end(0, "target_rejected")
 			log.Warn("webhook delivery rejected", "outcome", "target_rejected", "error", err)
 			m.metrics.WakeDelivery(0, "rejected")
-			m.recordFailure(id, generation, wakeID, owner)
+			m.recordFailure(id, generation, wakeID, owner, requestID)
 			return
 		}
 	}
@@ -1223,7 +1229,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		attempt.end(0, "transport_error")
 		m.metrics.WakeDelivery(time.Since(postStart), "error")
 		log.Warn("webhook delivery failed", "outcome", "transport_error", "duration_ms", msSince(postStart), "error", err)
-		m.recordFailure(id, generation, wakeID, owner)
+		m.recordFailure(id, generation, wakeID, owner, requestID)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -1232,7 +1238,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 		attempt.end(resp.StatusCode, "non_success_status")
 		m.metrics.WakeDelivery(time.Since(postStart), "failed")
 		log.Warn("webhook delivery failed", "outcome", "non_success_status", "duration_ms", msSince(postStart))
-		m.recordFailure(id, generation, wakeID, owner)
+		m.recordFailure(id, generation, wakeID, owner, requestID)
 		return
 	}
 	attempt.end(resp.StatusCode, "")
@@ -1306,8 +1312,10 @@ func (m *Manager) recordSuccessWithOwner(owner *OwnerScope, id string, generatio
 	return m.store.RecordSuccessUnscoped(id, generation, wakeID)
 }
 
-func (m *Manager) recordFailure(id string, generation int64, wakeID string, owner *OwnerScope) {
-	log := m.wakeLogger("webhook_retry_schedule_completed", id, generation, wakeID)
+// recordFailure schedules the retry of a failed attempt; requestID is the id
+// the attempt logged and sent, so the retry record joins it.
+func (m *Manager) recordFailure(id string, generation int64, wakeID string, owner *OwnerScope, requestID string) {
+	log := m.wakeLogger("webhook_retry_schedule_completed", id, generation, wakeID, requestID)
 	sub, ok, err := m.store.Get(id)
 	if err != nil {
 		log.Warn("webhook retry not scheduled", "outcome", "subscription_lookup_failed", "error", err)

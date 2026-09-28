@@ -876,7 +876,7 @@ func TestRecordFailureFencesAfterSuccessAck(t *testing.T) {
 			if err != nil {
 				t.Fatalf("new manager: %v", err)
 			}
-			mgr.recordFailure("s1", arm.Generation, arm.WakeID, owner)
+			mgr.recordFailure("s1", arm.Generation, arm.WakeID, owner, mgr.requestIDForWake(arm.WakeID))
 
 			sub, _, _ := base.Get("s1")
 			if sub.Phase != PhaseIdle || sub.Status != StatusActive || sub.RetryCount != 0 || sub.NextAttemptNs != 0 {

@@ -143,15 +143,15 @@ func TestWakeOriginIsRememberedUntilForgotten(t *testing.T) {
 	if got := mgr.rememberWakeOrigin("w1", origin, DefaultLeaseTTLMs); got != "gateway-request-123" {
 		t.Fatalf("rememberWakeOrigin = %q", got)
 	}
-	if !mgr.traceForWake("w1").Equal(origin.trace) {
+	if !mgr.originOfWake("w1").trace.Equal(origin.trace) {
 		t.Fatal("the wake lost the append's trace")
 	}
 	// A traced append without a valid request id is still worth remembering.
-	if got := mgr.rememberWakeOrigin("w2", appendOrigin{trace: origin.trace}, DefaultLeaseTTLMs); got != "wake-w2" || !mgr.traceForWake("w2").IsValid() {
-		t.Fatalf("trace-only origin: id %q, trace valid %v", got, mgr.traceForWake("w2").IsValid())
+	if got := mgr.rememberWakeOrigin("w2", appendOrigin{trace: origin.trace}, DefaultLeaseTTLMs); got != "wake-w2" || !mgr.originOfWake("w2").trace.IsValid() {
+		t.Fatalf("trace-only origin: id %q, trace valid %v", got, mgr.originOfWake("w2").trace.IsValid())
 	}
 	mgr.forgetWakeRequestID("w1")
-	if mgr.traceForWake("w1").IsValid() {
+	if mgr.originOfWake("w1").trace.IsValid() {
 		t.Fatal("a forgotten wake still has a trace")
 	}
 }

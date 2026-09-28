@@ -22,16 +22,17 @@ type deliveryTrace struct {
 	traceID string     // "" when tracing is off
 }
 
-// startDelivery opens the span for one attempt at delivering wakeID, a child
-// of the append that armed it when this process still remembers that append
-// and the root of a new trace otherwise. Its attributes are the safe
-// identifiers a receiver can join on; the target URL is not among them.
-func (m *Manager) startDelivery(id string, generation int64, wakeID string) deliveryTrace {
+// startDelivery opens the span for one attempt at delivering wakeID: a child
+// of parent, the trace of the append that armed it, when this process still
+// remembers that append, and the root of a new trace when parent is invalid.
+// Its attributes are the safe identifiers a receiver can join on; the target
+// URL is not among them.
+func (m *Manager) startDelivery(id string, generation int64, wakeID string, parent trace.SpanContext) deliveryTrace {
 	if m.tracer == nil {
 		return deliveryTrace{ctx: context.Background()}
 	}
-	parent := trace.ContextWithSpanContext(context.Background(), m.traceForWake(wakeID))
-	ctx, span := m.tracer.Start(parent, correlation.SpanName(correlation.OperationDelivery),
+	ctx, span := m.tracer.Start(trace.ContextWithSpanContext(context.Background(), parent),
+		correlation.SpanName(correlation.OperationDelivery),
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
 			attribute.String("chronicle.subscription_id", id),
