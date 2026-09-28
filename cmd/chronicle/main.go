@@ -50,6 +50,7 @@ func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEvent
 			_ = client.Close()
 			return nil, nil, nil, fmt.Errorf("redis unreachable: %w", err)
 		}
+		logRedisConnected(logger, client)
 		rs := redisstore.New(client, redisstore.Options{
 			Logger:                       logger,
 			NotificationConnectionGroups: cfg.SSENotificationGroups,
@@ -272,6 +273,7 @@ func run() error {
 				defer cancel()
 				return client.Ping(ctx).Err()
 			}
+			ready = redisReadiness(logger, ready)
 		}
 		metricsSrv = &http.Server{
 			Addr:              cfg.MetricsListen,

@@ -66,6 +66,12 @@ Upgrading from a URL with embedded `user:password@`: move the password into the
 credential file and the username into `REDIS_USERNAME`; the old URL now refuses
 startup.
 
+At startup chronicle logs `redis connected` with the mode, the address or seed
+list, and whether TLS is on, all read from the constructed client. With
+`--metrics-listen` set, `/readyz` pings Redis; chronicle logs
+`redis readiness failed` once when the ping starts failing and
+`redis readiness recovered` when it succeeds again, never the raw error.
+
 ## Durability and consistency guarantees
 
 Within a healthy Redis primary:
