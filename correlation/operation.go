@@ -16,10 +16,14 @@ const (
 	OperationOther        = "other"
 )
 
-// Operations lists every operation, in documentation order.
-var Operations = []string{
-	OperationAppend, OperationRead, OperationCreate, OperationDelete,
-	OperationSubscription, OperationDelivery, OperationOther,
+// Operations lists every operation, in documentation order. The vocabulary
+// is closed: the constants above are the only members, and IsOperation is
+// the membership test.
+func Operations() []string {
+	return []string{
+		OperationAppend, OperationRead, OperationCreate, OperationDelete,
+		OperationSubscription, OperationDelivery, OperationOther,
+	}
 }
 
 // spanPrefix marks a span Chronicle started for one of its operations, as
@@ -41,10 +45,10 @@ func OperationOf(spanName string) (string, bool) {
 
 // IsOperation reports whether name is one of Operations.
 func IsOperation(name string) bool {
-	for _, operation := range Operations {
-		if name == operation {
-			return true
-		}
+	switch name {
+	case OperationAppend, OperationRead, OperationCreate, OperationDelete,
+		OperationSubscription, OperationDelivery, OperationOther:
+		return true
 	}
 	return false
 }

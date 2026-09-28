@@ -55,7 +55,7 @@ const (
 	// EnvSampleRatio is the fraction, 0 to 1, of Chronicle's root spans kept;
 	// a caller's sampled flag always wins over it. Default 1.
 	EnvSampleRatio = "CHRONICLE_TRACE_SAMPLE_RATIO"
-	// EnvSampleAlways lists operations (correlation.Operations, comma
+	// EnvSampleAlways lists operations (correlation.Operations(), comma
 	// separated) whose root spans are kept regardless of the ratio.
 	EnvSampleAlways = "CHRONICLE_TRACE_SAMPLE_ALWAYS"
 )
@@ -250,7 +250,7 @@ func loadConfig(lookup func(string) (string, bool)) (config, bool, error) {
 			continue
 		}
 		if !correlation.IsOperation(operation) {
-			return config{}, false, fmt.Errorf("%s: unknown operation %q, want one of %s", EnvSampleAlways, operation, strings.Join(correlation.Operations, ", "))
+			return config{}, false, fmt.Errorf("%s: unknown operation %q, want one of %s", EnvSampleAlways, operation, strings.Join(correlation.Operations(), ", "))
 		}
 		cfg.always = append(cfg.always, operation)
 	}
