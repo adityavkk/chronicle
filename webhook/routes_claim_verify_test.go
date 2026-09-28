@@ -267,13 +267,19 @@ func TestHandleClaimVerifyRoute(t *testing.T) {
 	requireFenced("deleted subscription", doVerify(t, rt, http.MethodPost, bearerHeader(cr.WriteToken), ""))
 }
 
+// failingVerifyStore fails VerifyWriteFence with err, and delegates to the
+// embedded Store while err is nil, so a test can make the fence store
+// unavailable for one answer.
 type failingVerifyStore struct {
 	Store
 	err error
 }
 
-func (s *failingVerifyStore) VerifyWriteFence(string, int, string, int64, string, string, time.Time) (WriteFenceCheck, error) {
-	return WriteFenceCheck{}, s.err
+func (s *failingVerifyStore) VerifyWriteFence(id string, shard int, incarnation string, generation int64, wakeID, holder string, now time.Time) (WriteFenceCheck, error) {
+	if s.err != nil {
+		return WriteFenceCheck{}, s.err
+	}
+	return s.Store.VerifyWriteFence(id, shard, incarnation, generation, wakeID, holder, now)
 }
 
 func TestHandleClaimVerifyStoreFailureIsUnavailable(t *testing.T) {
@@ -299,6 +305,59 @@ func TestHandleClaimVerifyStoreFailureIsUnavailable(t *testing.T) {
 	d, _ := mgr.WriteAuthorizer().AuthorizeAppendFence(cr.WriteToken, mustPath(t, "events/a"), time.Now())
 	if d.Allowed() || d.Reason() != auth.ReasonUnauthenticated || d.Detail() != "write token fence unavailable" {
 		t.Fatalf("append decision = allowed:%v reason:%s detail:%q", d.Allowed(), d.Reason(), d.Detail())
+	}
+}
+
+// TestHandleClaimVerifyRecordsOutcomes pins chronicle_claim_verify_total's
+// closed vocabulary at the route (#192): every answer is counted exactly once
+// under the outcome a consumer's fallback rate is read from — ok; invalid for
+// a missing, malformed, or unproven token; expired; fenced for a deposed or
+// gone claim; and unavailable for the store failure a consumer must not cache.
+func TestHandleClaimVerifyRecordsOutcomes(t *testing.T) {
+	base, _ := newTestStore(t)
+	fs := &fakeStreams{tails: map[string]string{}}
+	fm := &fakeMetrics{}
+	store := &failingVerifyStore{Store: base}
+	mgr, err := NewManager(store, fs, ManagerOptions{
+		StreamRootURL: "http://x/v1/stream/",
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Metrics:       fm,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := NewRoutes(mgr)
+	cr := setupLongClaim(t, rt, base, "s1")
+	sub, ok, err := base.Get("s1")
+	if err != nil || !ok {
+		t.Fatalf("get s1 = ok:%v err:%v", ok, err)
+	}
+	scope := []auth.StreamPath{mustPath(t, "events/a")}
+	expired, err := GenerateClaimWriteToken(mgr.tokenKey, "s1", sub.Incarnation, cr.Generation, cr.WakeID, "w1", 0, scope, time.Now().Add(-time.Hour), time.Minute, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := func(label string, headers http.Header, want int) {
+		t.Helper()
+		if rec := doVerify(t, rt, http.MethodPost, headers, ""); rec.Code != want {
+			t.Fatalf("%s = %d %s, want %d", label, rec.Code, rec.Body.String(), want)
+		}
+	}
+	answer("live", bearerHeader(cr.WriteToken), http.StatusOK)
+	answer("no credential", http.Header{}, http.StatusUnauthorized)
+	answer("malformed token", bearerHeader("not-a-token"), http.StatusUnauthorized)
+	answer("expired", bearerHeader(expired), http.StatusUnauthorized)
+	store.err = errors.New("verify store unavailable")
+	answer("store failure", bearerHeader(cr.WriteToken), http.StatusInternalServerError)
+	store.err = nil
+	if crB, err := base.Claim("s1", "w2", "w_b", time.Now().Add(31*time.Second), 1000); err != nil || !crB.Claimed {
+		t.Fatalf("takeover = %+v err=%v", crB, err)
+	}
+	answer("deposed", bearerHeader(cr.WriteToken), http.StatusConflict)
+
+	want := map[string]int{"ok": 1, "invalid": 2, "expired": 1, "unavailable": 1, "fenced": 1}
+	if got := fm.claimVerifies(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ClaimVerify outcomes = %v, want %v", got, want)
 	}
 }
 

@@ -494,9 +494,12 @@ and the limits of that implementation.
   idle (§10). That crash window is bounded by the lease TTL or a successful
   `done` retry, not by a client's WF-30 cache bound. The stream-slot rung
   remains authoritative. A store failure is `500`, never a credential answer.
-  Invalid, expired, and fenced answers emit a structured warning but no metric
-  of their own yet
-  ([ADR-0009](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0009-claim-verify-route.md)).
+  Every answer is counted in `chronicle_claim_verify_total{outcome}` (`ok`,
+  `invalid`, `expired`, `fenced`, `unavailable`), so a consumer's fallback
+  rate is observable from the server side; invalid, expired, and fenced
+  answers also emit a structured warning that omits the credential bytes
+  ([ADR-0009](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0009-claim-verify-route.md)
+  shipped the route without the counter).
 - **Departures from its consumer contract** are recorded in
   [ADR-0008](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0008-write-fencing-extension.md);
   the formal model and invariants (INV-FENCE-05/06/07) in

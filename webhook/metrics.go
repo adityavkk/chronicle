@@ -136,6 +136,11 @@ type Metrics interface {
 	// AppendFenceGrantFailed records a claim-marker grant failure by site: claim,
 	// heartbeat, or webhook (the fail-open-delivery signal).
 	AppendFenceGrantFailed(site string)
+	// ClaimVerify records one claim/verify answer (WRITE-FENCING.md §9.1) by
+	// outcome: ok, invalid, expired, fenced, or unavailable (the store could
+	// not answer, a 500). The negative outcomes are a consumer's fallback
+	// rate; unavailable is the one a consumer must not cache.
+	ClaimVerify(outcome string)
 }
 
 // NopMetrics is the no-op Metrics used when none is configured. The Manager
@@ -222,3 +227,6 @@ func (NopMetrics) AppendFenceSeal(string) {}
 
 // AppendFenceGrantFailed implements Metrics.
 func (NopMetrics) AppendFenceGrantFailed(string) {}
+
+// ClaimVerify implements Metrics.
+func (NopMetrics) ClaimVerify(string) {}

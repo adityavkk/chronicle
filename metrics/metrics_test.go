@@ -69,6 +69,7 @@ func TestMuxEndpoints(t *testing.T) {
 	p.AppendFenceRejection("marker")
 	p.AppendFenceSeal("sealed")
 	p.AppendFenceGrantFailed("webhook")
+	p.ClaimVerify("fenced")
 	p.SSEHubActive(1)
 	p.SSEClientActive(1)
 	p.SSEHubRead(7)
@@ -147,6 +148,7 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_append_fence_rejections_total",
 		"chronicle_append_fence_seals_total",
 		"chronicle_append_fence_grant_failures_total",
+		"chronicle_claim_verify_total",
 		"chronicle_sse_hubs",
 		"chronicle_sse_clients",
 		"chronicle_sse_hub_reads_total",
@@ -195,15 +197,16 @@ func TestMuxEndpoints(t *testing.T) {
 	}
 }
 
-// TestFenceMetricsGolden pins the three write-fence counters (#183, design §F):
-// their names, their label keys, and one observed label value each, so the
-// closed vocabularies the handler and the control plane record under are
-// exposed under exactly these series.
+// TestFenceMetricsGolden pins the write-fence counters (#183, design §F) and
+// the claim/verify counter (#192): their names, their label keys, and one
+// observed label value each, so the closed vocabularies the handler and the
+// control plane record under are exposed under exactly these series.
 func TestFenceMetricsGolden(t *testing.T) {
 	p := New()
 	p.AppendFenceRejection("sealed")
 	p.AppendFenceSeal("already")
 	p.AppendFenceGrantFailed("heartbeat")
+	p.ClaimVerify("unavailable")
 	rr := httptest.NewRecorder()
 	p.Mux(nil).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	body := rr.Body.String()
@@ -211,6 +214,7 @@ func TestFenceMetricsGolden(t *testing.T) {
 		`chronicle_append_fence_rejections_total{reason="sealed"} 1`,
 		`chronicle_append_fence_seals_total{outcome="already"} 1`,
 		`chronicle_append_fence_grant_failures_total{site="heartbeat"} 1`,
+		`chronicle_claim_verify_total{outcome="unavailable"} 1`,
 	} {
 		if !strings.Contains(body, sample) {
 			t.Errorf("/metrics output missing %q", sample)

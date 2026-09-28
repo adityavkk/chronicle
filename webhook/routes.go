@@ -529,7 +529,7 @@ func (rt *Routes) handleClaimVerify(w http.ResponseWriter, r *http.Request, id s
 	w.Header().Set("Cache-Control", "no-store")
 	token, malformed := presentedVerifyToken(r)
 	if malformed || token == "" {
-		rt.logClaimVerifyRefusal(id, "invalid", "missing or malformed write token")
+		rt.recordClaimVerifyRefusal(id, "invalid", "missing or malformed write token")
 		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
 		return
 	}
@@ -540,12 +540,14 @@ func (rt *Routes) handleClaimVerify(w http.ResponseWriter, r *http.Request, id s
 	if err != nil {
 		// A server-side failure, never a credential answer: a client must not
 		// cache "unavailable" as a definitive negative (WF-30).
+		rt.mgr.metrics.ClaimVerify("unavailable")
 		rt.mgr.log.Warn("claim verify unavailable", "sub", id, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	switch res.Status {
 	case ClaimVerifyOK:
+		rt.mgr.metrics.ClaimVerify("ok")
 		streams := res.Streams
 		if streams == nil {
 			streams = []string{}
@@ -559,23 +561,26 @@ func (rt *Routes) handleClaimVerify(w http.ResponseWriter, r *http.Request, id s
 			LeaseRemainingMs: res.LeaseRemainingNs / int64(time.Millisecond),
 		})
 	case ClaimVerifyExpired:
-		rt.logClaimVerifyRefusal(id, "expired", res.Detail)
+		rt.recordClaimVerifyRefusal(id, "expired", res.Detail)
 		writeErr(w, http.StatusUnauthorized, ErrCodeTokenExpired)
 	case ClaimVerifyFenced:
-		rt.logClaimVerifyRefusal(id, "fenced", res.Detail)
+		rt.recordClaimVerifyRefusal(id, "fenced", res.Detail)
 		writeJSON(w, http.StatusConflict, ErrorBody{Error: ErrorDetail{
 			Code: ErrCodeFenced, Message: res.Detail, Reason: FenceReasonPrecheck,
 		}})
 	case ClaimVerifyInvalid:
-		rt.logClaimVerifyRefusal(id, "invalid", res.Detail)
+		rt.recordClaimVerifyRefusal(id, "invalid", res.Detail)
 		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
 	default:
-		rt.logClaimVerifyRefusal(id, "invalid", "unknown verification outcome")
+		rt.recordClaimVerifyRefusal(id, "invalid", "unknown verification outcome")
 		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
 	}
 }
 
-func (rt *Routes) logClaimVerifyRefusal(id, outcome, detail string) {
+// recordClaimVerifyRefusal counts a refused verify under its outcome
+// (chronicle_claim_verify_total) and logs it without the credential bytes.
+func (rt *Routes) recordClaimVerifyRefusal(id, outcome, detail string) {
+	rt.mgr.metrics.ClaimVerify(outcome)
 	if rt.mgr.log == nil {
 		return
 	}
