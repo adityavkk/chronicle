@@ -51,6 +51,7 @@ func TestMuxEndpoints(t *testing.T) {
 	p.DirtyQueue(1, 1024, time.Millisecond)
 	p.DirtyProcess(4*time.Millisecond, 12, 3, 2, "ok")
 	p.DirtyOverflow()
+	p.WakeCorrelationEvicted()
 	p.ReconcileRequest("dirty-overflow", "enqueued")
 	p.DirtyProcessingError("lookup")
 	p.DirtyRecoveryDelay(5 * time.Millisecond)
@@ -132,6 +133,7 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_subscription_dirty_wakes_armed_total",
 		"chronicle_subscription_dirty_duplicate_work_total",
 		"chronicle_subscription_dirty_overflow_total",
+		"chronicle_wake_correlation_evictions_total",
 		"chronicle_subscription_reconcile_requests_total",
 		"chronicle_subscription_dirty_processing_errors_total",
 		"chronicle_subscription_dirty_recovery_delay_seconds",

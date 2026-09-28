@@ -438,6 +438,7 @@ func (f *fakeMetrics) DirtyQueue(int, int, time.Duration)           {}
 func (f *fakeMetrics) DirtyProcess(time.Duration, int, int, int, string) {
 }
 func (f *fakeMetrics) DirtyOverflow()                   {}
+func (f *fakeMetrics) WakeCorrelationEvicted()          {}
 func (f *fakeMetrics) ReconcileRequest(string, string)  {}
 func (f *fakeMetrics) DirtyProcessingError(string)      {}
 func (f *fakeMetrics) DirtyRecoveryDelay(time.Duration) {}

@@ -91,6 +91,10 @@ const (
 	dueClaimLimit            = 256
 	dirtyQueueCapacity       = 1024
 	dirtyBatchSize           = 64
+	// wakeCorrelationCapacity bounds how many in-flight wakes this replica can
+	// remember a request id for (see wakeCorrelation); beyond it the wake
+	// nearest expiry falls back to wake-<id> and WakeCorrelationEvicted counts.
+	wakeCorrelationCapacity = 16384
 
 	// Leased slot-ownership timers (issue #14, 05:502-505). A DIFFERENT lease layer
 	// from the per-subscription webhook lease_ttl_ms — these govern which replica
@@ -283,12 +287,11 @@ type Manager struct {
 	dirtyClosed bool
 	now         func() time.Time
 
-	// wakeRequestIDs remembers which request id armed each in-flight wake, so
+	// wakeCorrelation remembers which request id armed each in-flight wake, so
 	// its delivery, retries and acknowledgement log and send the same id. It
-	// is process-local: another replica, or this one after a restart, falls
-	// back to the stable wake-<id>. Guarded by corrMu.
-	corrMu         sync.Mutex
-	wakeRequestIDs map[string]string
+	// is process-local and bounded (see wakeCorrelation): another replica, or
+	// this one after a restart or an expiry, falls back to the stable wake-<id>.
+	wakeCorrelation wakeCorrelation
 
 	// runCtx owns every Manager background loop. The lifecycle state makes Start
 	// and Stop race-safe and idempotent without holding lifeMu across I/O.
@@ -374,7 +377,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		reconcileC:            make(chan scope, 1),
 		dirty:                 newDirtyQueue(dirtyQueueCapacity),
 		dirtyNotify:           make(chan struct{}, 1),
-		wakeRequestIDs:        make(map[string]string),
+		wakeCorrelation:       newWakeCorrelation(wakeCorrelationCapacity),
 		now:                   time.Now,
 		runCtx:                runCtx,
 		cancelRun:             cancelRun,
@@ -807,11 +810,18 @@ func (m *Manager) dirtyOverflowPending() bool {
 	return pending
 }
 
-// RunDirtyWorker processes one bounded dirty batch immediately. It is the
+// RunDirtyWorker runs one dirty worker tick immediately. It is the
 // deterministic test and benchmark seam, parallel to RunSweep and RunDueWorker.
 func (m *Manager) RunDirtyWorker() int {
-	processed, _ := m.processDirtyBatch()
+	processed, _ := m.dirtyTick()
 	return processed
+}
+
+// dirtyTick is one worker tick: the sweep of idle wake correlation entries and
+// one bounded dirty batch.
+func (m *Manager) dirtyTick() (processed int, hadError bool) {
+	m.wakeCorrelation.sweep(m.now())
+	return m.processDirtyBatch()
 }
 
 // OnRedisReconnect signals that the Redis connection healed after a drop, so any
@@ -875,14 +885,18 @@ func (m *Manager) maybeWake(id, triggerStream string) {
 // rememberWakeRequestID stores requestID against wakeID when it is a real
 // caller id and returns the id every later step of this wake logs and sends:
 // the stored id, or the stable wake-<id> when the append carried none (which
-// is also what any other replica derives, so nothing is stored for it).
-func (m *Manager) rememberWakeRequestID(wakeID, requestID string) string {
+// is also what any other replica derives, so nothing is stored for it). The
+// memory lasts while the wake is in use and lapses after the subscription's
+// lease plus the longest retry gap pass with no delivery, heartbeat or ack
+// touching it: by then the wake is done, released, expired or someone else's.
+func (m *Manager) rememberWakeRequestID(wakeID, requestID string, leaseTTLMs int64) string {
 	if !correlation.Valid(requestID) {
 		return correlation.WakeRequestID(wakeID)
 	}
-	m.corrMu.Lock()
-	m.wakeRequestIDs[wakeID] = requestID
-	m.corrMu.Unlock()
+	ttl := time.Duration(leaseTTLMs)*time.Millisecond + maxRetryDelay
+	if m.wakeCorrelation.remember(wakeID, requestID, ttl, m.now()) {
+		m.metrics.WakeCorrelationEvicted()
+	}
 	return requestID
 }
 
@@ -890,21 +904,14 @@ func (m *Manager) rememberWakeRequestID(wakeID, requestID string) string {
 // log and send: the remembered caller id, or wake-<id> when this process never
 // armed the wake or no longer remembers it.
 func (m *Manager) requestIDForWake(wakeID string) string {
-	m.corrMu.Lock()
-	requestID, ok := m.wakeRequestIDs[wakeID]
-	m.corrMu.Unlock()
-	if ok {
+	if requestID, ok := m.wakeCorrelation.lookup(wakeID, m.now()); ok {
 		return requestID
 	}
 	return correlation.WakeRequestID(wakeID)
 }
 
 // forgetWakeRequestID drops a wake's id once its outcome is final here.
-func (m *Manager) forgetWakeRequestID(wakeID string) {
-	m.corrMu.Lock()
-	delete(m.wakeRequestIDs, wakeID)
-	m.corrMu.Unlock()
-}
+func (m *Manager) forgetWakeRequestID(wakeID string) { m.wakeCorrelation.forget(wakeID) }
 
 // logWakeArmed is the Debug trace of a freshly minted generation; the Info
 // record of a wake is its delivery's completion event.
@@ -966,7 +973,7 @@ func (m *Manager) issueWakeResult(sub Subscription, triggerStream, requestID str
 	if !res.Armed {
 		return wakeIssueDuplicate // already in flight (coalesced) or gone
 	}
-	m.logWakeArmed(sub, res, m.rememberWakeRequestID(res.WakeID, requestID))
+	m.logWakeArmed(sub, res, m.rememberWakeRequestID(res.WakeID, requestID, sub.Config.LeaseTTLMs))
 	// The arm→emit surgical window (07 honest-gap #2): the fence is minted but the
 	// wake is not yet emitted. A no-op in production; a test failpoint can crash/stall
 	// here to exercise the stranded-wake recovery the host nemesis cannot pin down.
@@ -1737,7 +1744,7 @@ func (m *Manager) dirtyWorker() {
 				m.triggerReconcile(scopeDirtyOverflow)
 			}
 		case <-ticker.C:
-			_, retrying = m.processDirtyBatch()
+			_, retrying = m.dirtyTick()
 			if m.dirtyOverflowPending() {
 				m.triggerReconcile(scopeDirtyOverflow)
 			}

@@ -61,6 +61,7 @@ type Prometheus struct {
 	dirtyProcessWakes        prometheus.Counter
 	dirtyDuplicates          prometheus.Counter
 	dirtyOverflows           prometheus.Counter
+	wakeCorrelationEvictions prometheus.Counter
 	reconcileRequests        *prometheus.CounterVec
 	dirtyErrors              *prometheus.CounterVec
 	dirtyRecovery            prometheus.Histogram
@@ -260,6 +261,10 @@ func New() *Prometheus {
 			Name: "chronicle_subscription_dirty_overflow_total",
 			Help: "Process-local dirty queue overflow epochs that requested eager recovery.",
 		}),
+		wakeCorrelationEvictions: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "chronicle_wake_correlation_evictions_total",
+			Help: "Live wake request ids dropped because the process-local correlation memory was at capacity.",
+		}),
 		reconcileRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_subscription_reconcile_requests_total",
 			Help: "Eager recovery requests by bounded reason and enqueue result.",
@@ -425,7 +430,7 @@ func New() *Prometheus {
 		p.fanoutSeconds, p.fanoutSlotsProbed, p.fanoutSubs, p.appendHookSeconds,
 		p.dirtyEnqueues, p.dirtyDepth, p.dirtyCapacity, p.dirtyOldestAge,
 		p.dirtyProcess, p.dirtyProcessSubs, p.dirtyProcessWakes,
-		p.dirtyDuplicates, p.dirtyOverflows, p.reconcileRequests, p.dirtyErrors,
+		p.dirtyDuplicates, p.dirtyOverflows, p.wakeCorrelationEvictions, p.reconcileRequests, p.dirtyErrors,
 		p.dirtyRecovery,
 		p.dueSetMutations, p.dueWorkerSeconds, p.dueWorkerFired,
 		p.slotOwnership, p.coverageGap, p.ownerFenced, p.claimContention,
@@ -587,6 +592,9 @@ func (p *Prometheus) DirtyProcess(dur time.Duration, subs, wakes, duplicates int
 
 // DirtyOverflow implements webhook.Metrics.
 func (p *Prometheus) DirtyOverflow() { p.dirtyOverflows.Inc() }
+
+// WakeCorrelationEvicted implements webhook.Metrics.
+func (p *Prometheus) WakeCorrelationEvicted() { p.wakeCorrelationEvictions.Inc() }
 
 // ReconcileRequest implements webhook.Metrics.
 func (p *Prometheus) ReconcileRequest(scope, result string) {
