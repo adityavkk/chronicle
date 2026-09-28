@@ -71,7 +71,6 @@ local gen = redis.call('HGET', k_shardstate, 'generation')
 local wake = redis.call('HGET', k_shardstate, 'wake_id')
 local lease_until_ns = redis.call('HGET', k_shardstate, 'lease_until_ns')
 local lease_until = tonumber(lease_until_ns) or 0
-local lease_ttl_ms = redis.call('HGET', k_sub_config, 'lease_ttl_ms')
 
 -- Liveness: a claim must be in flight inside its lease, in the shape its
 -- dispatch gives it — a webhook wake from either phase with no worker holder,
@@ -101,4 +100,6 @@ if (a_incarnation ~= '' and a_incarnation ~= cfg_inc)
   return { 'FENCED' }
 end
 
+-- Read only for an accepted token: refusals stay bare and skip the read.
+local lease_ttl_ms = redis.call('HGET', k_sub_config, 'lease_ttl_ms')
 return { 'OK', lease_until_ns, lease_ttl_ms }
