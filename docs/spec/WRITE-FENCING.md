@@ -507,8 +507,7 @@ and the limits of that implementation.
   `invalid`, `expired`, `fenced`, `unavailable`), so a consumer's fallback
   rate is observable from the server side; invalid, expired, and fenced
   answers also emit a structured warning that omits the credential bytes
-  ([ADR-0009](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0009-claim-verify-route.md)
-  shipped the route without the counter).
+  ([ADR-0009](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0009-claim-verify-route.md)).
 - **Departures from its consumer contract** are recorded in
   [ADR-0008](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0008-write-fencing-extension.md);
   the formal model and invariants (INV-FENCE-05/06/07) in

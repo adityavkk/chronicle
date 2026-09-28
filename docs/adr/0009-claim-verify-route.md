@@ -101,8 +101,11 @@ every append.
 
 ## Consequences
 
-- **`check_write_fence` ABI.** The `OK` variant declares one `unix_ns`
-  field, and the call takes the token's incarnation as its fifth argument
+- **`check_write_fence` ABI.** The `OK` variant declares two fields — the
+  claim's `lease_until_ns` (`unix_ns`) and the subscription's `lease_ttl_ms`
+  (`int`), read in the same `EVAL` and the bound the route clamps
+  `lease_remaining_ms` to — and the call takes the token's incarnation as its
+  fifth argument
   (an empty string asserts none, which the Go arm refuses under an atomic
   stream store); the decoder, the ABI differential (`script_abi_test`), and
   the Go mirror `WriteFenceDecision` changed with it. `Store` gained
@@ -118,11 +121,13 @@ every append.
   client's WF-30 cache bound. The in-slot rung remains authoritative. A
   per-stream read-only seal probe (one round-trip per linked stream) could
   close both cases later without changing the route's contract.
-- **Metrics are deferred.** A `chronicle_claim_verify_total{outcome}` counter
-  would touch every `Metrics` fake and adapter; the route ships without one.
-  Invalid, expired, and fenced answers do emit a structured warning that omits
-  credential bytes, while the consumer's aggregate fallback rate remains
-  observable only from its own side.
+- **One counter.** `chronicle_claim_verify_total{outcome}` counts every
+  answer once at the route — `ok`, `invalid`, `expired`, `fenced`,
+  `unavailable`, with no subscription label, so cardinality is bounded — which
+  makes a consumer's fallback rate observable from the server side. Adding it
+  touched `Metrics`, `NopMetrics`, the Prometheus adapter, its golden test,
+  and the webhook fake in one change. Invalid, expired, and fenced answers
+  also emit a structured warning that omits credential bytes.
 - **No latency acceptance clause.** The issue asked for p99 within the
   append pre-check budget on the ds-bench configuration, but no such budget
   or fence scenario exists in `benchmarks/ds-bench`; the clause is dropped
