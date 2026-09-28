@@ -62,6 +62,7 @@ type Prometheus struct {
 	dirtyDuplicates          prometheus.Counter
 	dirtyOverflows           prometheus.Counter
 	wakeCorrelationEvictions prometheus.Counter
+	tracingSetupFailures     *prometheus.CounterVec
 	reconcileRequests        *prometheus.CounterVec
 	dirtyErrors              *prometheus.CounterVec
 	dirtyRecovery            prometheus.Histogram
@@ -265,6 +266,10 @@ func New() *Prometheus {
 			Name: "chronicle_wake_correlation_evictions_total",
 			Help: "Live wake request ids dropped because the process-local correlation memory was at capacity.",
 		}),
+		tracingSetupFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_tracing_setup_failures_total",
+			Help: "Times tracing was configured but disabled at startup because its destination was unusable, by reason.",
+		}, []string{"reason"}),
 		reconcileRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_subscription_reconcile_requests_total",
 			Help: "Eager recovery requests by bounded reason and enqueue result.",
@@ -430,7 +435,7 @@ func New() *Prometheus {
 		p.fanoutSeconds, p.fanoutSlotsProbed, p.fanoutSubs, p.appendHookSeconds,
 		p.dirtyEnqueues, p.dirtyDepth, p.dirtyCapacity, p.dirtyOldestAge,
 		p.dirtyProcess, p.dirtyProcessSubs, p.dirtyProcessWakes,
-		p.dirtyDuplicates, p.dirtyOverflows, p.wakeCorrelationEvictions, p.reconcileRequests, p.dirtyErrors,
+		p.dirtyDuplicates, p.dirtyOverflows, p.wakeCorrelationEvictions, p.tracingSetupFailures, p.reconcileRequests, p.dirtyErrors,
 		p.dirtyRecovery,
 		p.dueSetMutations, p.dueWorkerSeconds, p.dueWorkerFired,
 		p.slotOwnership, p.coverageGap, p.ownerFenced, p.claimContention,
@@ -595,6 +600,13 @@ func (p *Prometheus) DirtyOverflow() { p.dirtyOverflows.Inc() }
 
 // WakeCorrelationEvicted implements webhook.Metrics.
 func (p *Prometheus) WakeCorrelationEvicted() { p.wakeCorrelationEvictions.Inc() }
+
+// TracingSetupFailed records that tracing was configured but failed open at
+// startup for reason (a telemetry.Reason* value), so an operator can alert on
+// a deployment that silently serves without the traces it asked for.
+func (p *Prometheus) TracingSetupFailed(reason string) {
+	p.tracingSetupFailures.WithLabelValues(reason).Inc()
+}
 
 // ReconcileRequest implements webhook.Metrics.
 func (p *Prometheus) ReconcileRequest(scope, result string) {
