@@ -84,8 +84,9 @@ func (t *recordingTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 
 // headerValues returns the value of header on each POST so far.
 func (t *recordingTransport) headerValues() []string {
-	values := make([]string, 0, len(t.headers))
-	for _, h := range t.postHeaders() {
+	headers := t.postHeaders()
+	values := make([]string, 0, len(headers))
+	for _, h := range headers {
 		values = append(values, h.Get(t.header))
 	}
 	return values
