@@ -265,7 +265,13 @@ What a receiver may rely on is in
 **Sampling.** A caller's sampled flag always wins: a sampled `traceparent` is
 continued, an unsampled one is recorded nowhere and costs nothing. Chronicle
 decides only the roots it starts itself, by the ratio and the always list, and
-a wake armed by a traced append inherits that append's decision.
+a wake armed by a traced append inherits that append's decision. The flip side
+is that `traceparent` is unauthenticated: any caller that can reach the listener
+can have its own requests traced in full (one server span plus one Redis span
+per command) regardless of the ratio. That is a volume exposure, bounded by the
+2048-span export queue, not an integrity one; where untrusted callers reach the
+listener, have the gateway strip or set `traceparent`
+([ADR-0011](adr/0011-tracing-fails-open-and-samples-by-operation.md)).
 
 **Fails open, loudly.** Tracing is the one subsystem allowed to. If a
 credential or CA file is missing, unreadable or empty at startup, or the

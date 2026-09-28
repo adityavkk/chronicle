@@ -40,7 +40,17 @@ the memory does not have it.
    with a parent follows the parent's sampled flag. A root Chronicle starts is
    named `chronicle.<operation>` and is kept by an always-list of operations or
    by a trace-id ratio; a root that is not a Chronicle operation, meaning an
-   instrumentation span from background Redis work, is dropped.
+   instrumentation span from background Redis work, is dropped. Honouring a
+   remote parent is what the W3C contract asks for, and it is an exposure a
+   deployment must know about: any caller that can reach the listener can
+   send a sampled `traceparent` and have its own requests traced in full,
+   one server span plus one Redis child span per command, whatever
+   `CHRONICLE_TRACE_SAMPLE_RATIO` says. `traceparent` is unauthenticated, so
+   this is a volume vector, never an integrity one, bounded by the 2048-span
+   export queue, which drops silently. Where untrusted callers reach the
+   listener, the gateway in front of Chronicle strips or sets `traceparent`;
+   Chronicle does not second-guess a parent, because a caller's trace that
+   breaks at Chronicle is worth less than the ratio saved.
 4. **The trace rides the append origin.** The dirty-queue hint and the bounded
    wake memory remember an `appendOrigin`, request id and trace identity
    together, under one coalescing rule and one idle TTL. Trace state, whose
@@ -52,6 +62,12 @@ the memory does not have it.
    subscription id, wake id and generation. Never a URL path or query, a body,
    a header value, a Redis statement or a webhook target URL. A test asserts
    that neither the path nor the query string of a request is exported.
+   Request logs apply a looser rule on purpose: `http_request_completed`
+   carries the URL path at Info, because a stream path is the operator's own
+   entity name and is what an operator searches their logs by, and the log
+   pipeline is the deployment's own. A trace leaves for a destination the
+   operator may not own, so the path stays out of it. Query strings, bodies
+   and header values are in neither.
 6. **Unsigned, never identity.** Like the request id, `traceparent` is outside
    `Webhook-Signature` and no authorization reads it. Receivers choose parent
    or link (`docs/spec/CHRONICLE-NOTES.md` §7.1).
