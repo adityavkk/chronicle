@@ -12,7 +12,7 @@ the cheat sheets, and how to pick up the open work. For *using* chronicle see
 | Storage contract + Redis backend | `store/`, `store/redis/` — Lua scripts, frames, pub/sub (mirrors the Caddy plugin) |
 | HTTP layer | `handler.go`, `mount.go` |
 | Subscriptions (`__ds`) | `subscriptions.go`, `webhook/` — webhook + pull-wake, fencing, leases, the recovery sweep |
-| Observability | `metrics/` — Prometheus `/metrics` + `/healthz` + `/readyz` (enable with `-metrics-listen`) |
+| Observability | `metrics/` — Prometheus `/metrics` + `/healthz` + `/readyz` (enable with `-metrics-listen`); `telemetry/` — opt-in OTLP tracing (enable with `CHRONICLE_OTLP_ENDPOINT`; fails open) |
 | Server binary | `cmd/chronicle/` |
 | Load-test rig | `loadtest/`, `loadgen/` — GKE + managed Redis, the sweep-scale driver |
 | Fault injection | `jepsen/` — k3d durability harness |

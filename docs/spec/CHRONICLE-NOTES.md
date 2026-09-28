@@ -118,3 +118,38 @@ tokens carry identity, the correlation header carries a log-join hint. A
 receiver **MUST NOT** derive trust from it, and **SHOULD** echo the value it
 received on the callback so Chronicle's ack record and the receiver's own
 records carry the same `request_id`.
+
+## Section 7.1, Webhook Delivery and Callback — the `traceparent` header
+
+Annotates the webhook `POST` and its callback in
+[PROTOCOL.md §7.1](./PROTOCOL.md#71-webhook-delivery-and-callback). Like the
+correlation header above this is an implementation addition (§11.1 pure
+superset): the protocol defines no trace context and nothing below changes any
+protocol rule.
+
+**When it is sent.** Only by a Chronicle whose operator turned tracing on
+([DEPLOYMENT.md](../DEPLOYMENT.md#tracing)). A deployment with tracing off sends
+no `traceparent` at all, and no Chronicle ever sends `tracestate`.
+
+**What it names.** The header is a W3C Trace Context `traceparent` whose
+trace id is that of the append that armed the wake, when the delivering replica
+still remembers it, and of a new trace otherwise; its parent id is the span of
+this delivery attempt. The append's identity follows the request id's rules
+exactly, because the two are remembered together: a wake carries the trace of
+*one* of the appends it covers (the coalescing rule above), and the same
+conditions that make a wake fall back to `wake-<wake_id>` make it start a new
+trace. A retry of the same wake carries the same trace id under a new parent
+id, one span per attempt. The sampled flag is the caller's decision carried
+through: an unsampled append yields an unsampled delivery.
+
+**What a receiver does with it.** A receiver **MAY** continue the trace by
+parenting its own span on the header, which joins the delivery to the append
+that caused it end to end, or **MAY** start its own trace and record the header
+as a link, which is the safer reading when the receiver treats one wake as
+covering many appends. Either is conformant; Chronicle does not care which. The
+callback the receiver then makes carries the receiver's own `traceparent`, and
+Chronicle's callback span is a child of that.
+
+**Not signed, never identity.** `traceparent` is outside `Webhook-Signature`,
+which covers only the timestamp and the body (§7.1), and no authentication or
+authorization decision reads it. A receiver **MUST NOT** derive trust from it.

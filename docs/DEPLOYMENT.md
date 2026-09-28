@@ -205,6 +205,70 @@ one nearest expiry going first. `chronicle_wake_correlation_evictions_total`
 counts live entries dropped at capacity; a sustained rate means the replica's
 in-flight wakes exceed the memory and those wakes log `wake-<wake_id>`.
 
+## Tracing
+
+Tracing is off until `CHRONICLE_OTLP_ENDPOINT` is set. Chronicle then continues
+the W3C `traceparent` a caller sends, traces every request and every webhook
+delivery, and exports over OTLP/HTTP. Spans carry shapes (method, status, byte
+counts) and Chronicle's own identifiers (subscription id, wake id, generation):
+never a URL path or query string, a body, a header value or a Redis statement.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `CHRONICLE_OTLP_ENDPOINT` | _(unset: tracing off)_ | The OTLP/HTTP traces URL, e.g. `https://traces.example.com/v1/traces`. `https` is required; plain `http` is accepted only to a loopback address (a local collector). No credentials, query or fragment. |
+| `CHRONICLE_OTLP_USERNAME_FILE`, `CHRONICLE_OTLP_PASSWORD_FILE` | _(unset: no credential)_ | Files holding an HTTP basic-auth username and password, sent as `Authorization: Basic …`. Set both or neither; mount them as secrets, never pass them in the environment. |
+| `CHRONICLE_OTLP_CA_FILE` | _(unset: system roots)_ | A PEM bundle that verifies the destination in place of the system roots. |
+| `CHRONICLE_TRACE_SAMPLE_RATIO` | `1` | The fraction, 0 to 1, of Chronicle's root spans that are kept. |
+| `CHRONICLE_TRACE_SAMPLE_ALWAYS` | _(empty)_ | Operations whose root spans are kept regardless of the ratio, comma separated: `append`, `read`, `create`, `delete`, `subscription`, `delivery`, `other`. |
+
+```text
+CHRONICLE_OTLP_ENDPOINT=https://traces.example.com/v1/traces
+CHRONICLE_OTLP_USERNAME_FILE=/etc/secrets/otlp-username
+CHRONICLE_OTLP_PASSWORD_FILE=/etc/secrets/otlp-password
+CHRONICLE_TRACE_SAMPLE_RATIO=0.1
+CHRONICLE_TRACE_SAMPLE_ALWAYS=append,subscription,delivery
+```
+
+The service is reported as `service.name=chronicle`; the standard
+`OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` variables override or extend
+the resource.
+
+**What is traced.** Each request to the main listener is one server span named
+`chronicle.<operation>` (`append`, `read`, `create`, `delete`, `subscription`
+for the `__ds` routes, `other` for the console), a child of the caller's
+`traceparent` when one arrives. Redis commands issued under a traced request
+are its children, without the statement, so no key (and no stream path) leaves
+the process; Redis work that no request caused (slot ownership, the recovery
+sweep, queue polling) is dropped rather than exported as one-span traces. A
+webhook delivery attempt is a `chronicle.delivery` client span: a child of the
+append that armed the wake while the delivering replica remembers it (the same
+bounded memory that holds the request id above), the root of a new trace
+otherwise. The `POST` carries `traceparent`; `tracestate` is never forwarded.
+What a receiver may rely on is in
+[docs/spec/CHRONICLE-NOTES.md](spec/CHRONICLE-NOTES.md#section-71-webhook-delivery-and-callback--the-traceparent-header).
+
+**Sampling.** A caller's sampled flag always wins: a sampled `traceparent` is
+continued, an unsampled one is recorded nowhere and costs nothing. Chronicle
+decides only the roots it starts itself, by the ratio and the always list, and
+a wake armed by a traced append inherits that append's decision.
+
+**Fails open, loudly.** Tracing is the one subsystem allowed to. If a
+credential or CA file is missing, unreadable or empty at startup, or the
+exporter cannot be built, Chronicle logs one `tracing_disabled` warning whose
+`reason` is `credentials_unavailable`, `ca_unavailable` or
+`exporter_unavailable`, increments
+`chronicle_tracing_setup_failures_total{reason}` and serves without traces:
+alert on that counter. A malformed value (a plaintext remote endpoint,
+credentials in the URL, a ratio outside 0..1, an unknown operation) still
+refuses startup, like any other flag. At runtime an export failure is a
+`tracing_export_failed` warning; the export queue is bounded (2048 spans) and
+a slow destination drops spans rather than slowing a request.
+
+**Logs join traces.** `http_request_started` and `http_request_completed` carry
+`trace_id` on a traced request, and `webhook_delivery_completed` carries the
+`trace_id` of the delivery, so a trace finds its log lines and a log line its
+trace.
+
 ## Service identity and access policy
 
 Use mesh-attested SPIFFE identity for service-to-service calls in production.

@@ -27,6 +27,7 @@ import (
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
 	"gecgithub01.walmart.com/auk000v/chronicle/store/segments"
+	"gecgithub01.walmart.com/auk000v/chronicle/telemetry"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
@@ -227,6 +228,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Tracing is opt-in (CHRONICLE_OTLP_ENDPOINT) and the one subsystem that
+	// fails open: an unusable destination is a warning and a metric, not a
+	// refused start (see package telemetry).
+	tracing, err := telemetry.Start(context.Background(), os.LookupEnv, logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tracing.Shutdown(ctx); err != nil {
+			logger.Warn("tracing shutdown incomplete", "error", err)
+		}
+	}()
 
 	redisEvents := &redisEventSink{}
 	st, rs, client, err := newStore(cfg, logger, redisEvents)
@@ -234,6 +249,11 @@ func run() error {
 		return err
 	}
 	defer st.Close() //nolint:errcheck // best-effort release on shutdown
+	if client != nil {
+		if err := tracing.InstrumentRedis(client); err != nil {
+			return err
+		}
+	}
 
 	handler := &chronicle.Handler{
 		Store:                 st,
@@ -299,6 +319,9 @@ func run() error {
 		if source, ok := st.(metrics.SegmentStatsSource); ok {
 			prom.RegisterSegments(source)
 		}
+		if reason, failed := tracing.FailedOpen(); failed {
+			prom.TracingSetupFailed(reason)
+		}
 		subMetrics = prom
 		handler.ReadMetrics = prom
 		handler.SSEMetrics = prom
@@ -351,6 +374,7 @@ func run() error {
 			Metrics:                subMetrics,
 			WakeTokenAudience:      cfg.WakeTokenAudience,
 			RequestIDHeader:        cfg.RequestIDHeader,
+			Tracer:                 tracing.Tracer(),
 			WebhookHTTPClient:      egress.client,
 			WebhookTargetPolicy:    egress.policy,
 			Consistency:            cfg.Consistency,
@@ -403,6 +427,10 @@ func run() error {
 	// Every request, API and console alike, gets one correlation id and one
 	// completion event; the id also rides the append hook into webhook delivery.
 	root = chronicle.RequestLoggingMiddleware(logger, cfg.RequestIDHeader, root)
+	// Tracing sits outermost so the logger sees the span's trace id and an
+	// append's context carries the span to the webhook it causes. With tracing
+	// off, Handler returns root unwrapped.
+	root = tracing.Handler(cfg.StreamRoot, root)
 
 	srv := &http.Server{
 		Addr:    cfg.Listen,
@@ -426,6 +454,7 @@ func run() error {
 		"segment_mode", cfg.SegmentMode,
 		"segment_state", cfg.SegmentInitialState,
 		"subscriptions", subscriptionsEnabled,
+		"tracing", tracing.Enabled(),
 		"ui", uiEnabled,
 		"auth_mode", cfg.AuthMode.String(),
 		"long_poll_timeout", cfg.LongPollTimeout,
