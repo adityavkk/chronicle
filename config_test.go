@@ -406,4 +406,13 @@ func TestLoadEnvRequestIDHeader(t *testing.T) {
 			t.Errorf("%s=%q must refuse startup: a name that is not a header token cannot be read or echoed", EnvRequestIDHeader, bad)
 		}
 	}
+	// A header Chronicle already interprets would be overwritten with the
+	// request id on every request; naming one is a misconfiguration, not a
+	// correlation header.
+	for _, reserved := range []string{"Authorization", "cookie", "Producer-Id", "Write-Token", "electric-claim-token", "traceparent", "x-forwarded-client-cert", "Content-Type"} {
+		c = DefaultConfig()
+		if err := c.LoadEnv(env(map[string]string{EnvRequestIDHeader: reserved})); err == nil {
+			t.Errorf("%s=%q must refuse startup: the header already has a meaning", EnvRequestIDHeader, reserved)
+		}
+	}
 }

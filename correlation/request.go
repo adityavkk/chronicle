@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strings"
 )
 
@@ -96,10 +97,24 @@ func WakeRequestID(wakeID string) string {
 	return newRequestID()
 }
 
-// ValidHeaderName reports whether name is an RFC 9110 field-name token, the
-// check a configured correlation header name must pass before Chronicle will
-// read, echo or send it.
-func ValidHeaderName(name string) bool {
+// CheckHeaderName is the check a configured correlation header name must
+// pass before Chronicle will read, echo or send it: an RFC 9110 field-name
+// token that Chronicle does not already interpret. The middleware overwrites
+// the configured header on every request, so a credential, framing, trace
+// context or caller-identity header, or one of the protocol's own families,
+// would stop meaning what it means; startup refuses the name instead.
+func CheckHeaderName(name string) error {
+	if !validHeaderName(name) {
+		return fmt.Errorf("%q is not an HTTP header field name", name)
+	}
+	if reservedHeader(name) {
+		return fmt.Errorf("%q already has a meaning to Chronicle and cannot carry the request id", name)
+	}
+	return nil
+}
+
+// validHeaderName reports whether name is an RFC 9110 field-name token.
+func validHeaderName(name string) bool {
 	if name == "" {
 		return false
 	}
@@ -109,6 +124,23 @@ func ValidHeaderName(name string) bool {
 		}
 	}
 	return true
+}
+
+// reservedHeader reports whether Chronicle or HTTP already gives name a
+// meaning. Header names are case-insensitive, so the comparison is too.
+func reservedHeader(name string) bool {
+	lower := strings.ToLower(name)
+	for _, family := range []string{"stream-", "producer-", "write-", "webhook-"} {
+		if strings.HasPrefix(lower, family) {
+			return true
+		}
+	}
+	switch lower {
+	case "authorization", "cookie", "content-type", "content-length", "host",
+		"traceparent", "tracestate", "x-forwarded-client-cert", "electric-claim-token":
+		return true
+	}
+	return false
 }
 
 // tokenByte reports whether b is an RFC 9110 tchar.

@@ -330,6 +330,14 @@ const (
 // custody with a mounted secrets file (#123/#126: then nothing here writes
 // key material to Redis).
 func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, error) {
+	// Checked before anything is loaded: an invalid field name would end every
+	// delivery as a transport error (net/http refuses it) and a reserved one
+	// would be overwritten on every delivery.
+	if opts.RequestIDHeader != "" {
+		if err := correlation.CheckHeaderName(opts.RequestIDHeader); err != nil {
+			return nil, fmt.Errorf("webhook: request id header: %w", err)
+		}
+	}
 	now := time.Now()
 	keys := opts.Keys
 	if keys == nil {

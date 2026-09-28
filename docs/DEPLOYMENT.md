@@ -164,7 +164,7 @@ Every request gets one correlation id and one completion log record.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `CHRONICLE_REQUEST_ID_HEADER` / `-request-id-header` | `X-Request-ID` | The header Chronicle reads on requests, echoes on responses and sends on webhook deliveries. Must be an RFC 9110 field name; startup refuses anything else. |
+| `CHRONICLE_REQUEST_ID_HEADER` / `-request-id-header` | `X-Request-ID` | The header Chronicle reads on requests, echoes on responses and sends on webhook deliveries. Must be an RFC 9110 field name that Chronicle does not already interpret: credential (`Authorization`, `Cookie`), framing (`Content-Type`, `Content-Length`, `Host`), trace-context (`traceparent`, `tracestate`), caller-identity (`X-Forwarded-Client-Cert`, `electric-claim-token`) and the protocol's `Stream-*`, `Producer-*`, `Write-*` and `Webhook-*` headers are refused, since the configured header is overwritten on every request. Startup refuses anything else too. |
 | `CHRONICLE_LOG_FORMAT` / `-log-format` | `text` | `text` for development, `json` (one record per line) for a log pipeline. |
 | `CHRONICLE_LOG_LEVEL` / `-log-level` | `info` | `debug`, `info`, `warn` or `error`. |
 

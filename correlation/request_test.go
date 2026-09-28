@@ -88,23 +88,40 @@ func TestWakeRequestID(t *testing.T) {
 	}
 }
 
-func TestValidHeaderName(t *testing.T) {
+func TestCheckHeaderName(t *testing.T) {
 	cases := []struct {
-		name string
-		want bool
+		name    string
+		wantErr bool
 	}{
-		{DefaultHeader, true},
-		{"My-Platform-Request-ID", true},
-		{"x-request-id", true},
-		{"", false},
-		{"X Request ID", false},
-		{"X-Request-ID:", false},
-		{"X-Request-ID\r\n", false},
-		{"X-Réquest", false},
+		{DefaultHeader, false},
+		{"My-Platform-Request-ID", false},
+		{"x-request-id", false},
+		{"Stream", false}, // the protocol families are prefixes with the dash
+		{"", true},
+		{"X Request ID", true},
+		{"X-Request-ID:", true},
+		{"X-Request-ID\r\n", true},
+		{"X-Réquest", true},
+		// Reserved: Chronicle reads or writes these for another purpose.
+		{"Authorization", true},
+		{"authorization", true},
+		{"Cookie", true},
+		{"Content-Type", true},
+		{"Content-Length", true},
+		{"Host", true},
+		{"traceparent", true},
+		{"TraceState", true},
+		{"X-Forwarded-Client-Cert", true},
+		{"electric-claim-token", true},
+		{"Stream-Seq", true},
+		{"producer-id", true},
+		{"Write-Token", true},
+		{"Webhook-Signature", true},
 	}
 	for _, tc := range cases {
-		if got := ValidHeaderName(tc.name); got != tc.want {
-			t.Errorf("ValidHeaderName(%q) = %v, want %v", tc.name, got, tc.want)
+		err := CheckHeaderName(tc.name)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("CheckHeaderName(%q) = %v, want error %v", tc.name, err, tc.wantErr)
 		}
 	}
 }

@@ -212,8 +212,8 @@ func run() error {
 	if cfg.ReadPageBytes <= 0 {
 		return fmt.Errorf("-read-page-bytes must be positive")
 	}
-	if !correlation.ValidHeaderName(cfg.RequestIDHeader) {
-		return fmt.Errorf("-request-id-header: want an HTTP header field name, got %q", cfg.RequestIDHeader)
+	if err := correlation.CheckHeaderName(cfg.RequestIDHeader); err != nil {
+		return fmt.Errorf("-request-id-header: %w", err)
 	}
 	if err := validateSegmentConfig(cfg); err != nil {
 		return err

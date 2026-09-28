@@ -1331,3 +1331,15 @@ func TestPromoteDrivesEagerReconcile(t *testing.T) {
 		t.Fatalf("the restored lease entry must be visible to the lease worker, got due=%v", due)
 	}
 }
+
+func TestNewManagerRefusesAnUnusableRequestIDHeader(t *testing.T) {
+	// The check runs before anything is loaded, so a library caller learns of
+	// the misconfiguration from the constructor rather than from every
+	// delivery ending as a transport error (net/http refuses an invalid field
+	// name) or from a protocol header being overwritten.
+	for _, bad := range []string{"X Request ID", "Authorization", "Producer-Id"} {
+		if _, err := NewManager(nil, nil, ManagerOptions{RequestIDHeader: bad}); err == nil {
+			t.Errorf("NewManager with RequestIDHeader %q must fail", bad)
+		}
+	}
+}

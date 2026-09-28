@@ -547,8 +547,8 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvRequestIDHeader); ok {
 		name := strings.TrimSpace(v)
-		if !correlation.ValidHeaderName(name) {
-			return fmt.Errorf("%s: want an HTTP header field name, got %q", EnvRequestIDHeader, v)
+		if err := correlation.CheckHeaderName(name); err != nil {
+			return fmt.Errorf("%s: %w", EnvRequestIDHeader, err)
 		}
 		c.RequestIDHeader = name
 	}
