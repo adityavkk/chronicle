@@ -44,6 +44,9 @@ func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEvent
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		if cfg.RedisTLSInsecureSkipVerify {
+			logger.Warn("redis TLS certificate verification is DISABLED by CHRONICLE_REDIS_TLS_INSECURE_SKIP_VERIFY: an on-path attacker can impersonate Redis and read its password and all stream data; set CHRONICLE_REDIS_CA_FILE instead")
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := client.Ping(ctx).Err(); err != nil {

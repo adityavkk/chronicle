@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -56,10 +55,15 @@ func newRedisClient(cfg chronicle.Config, redisEvents *redisEventSink) (goredis.
 		for i := range seeds {
 			seeds[i] = strings.TrimSpace(seeds[i])
 		}
+		tlsConfig, err := redisTLSConfig(useTLS, redisHosts(seeds...), cfg)
+		if err != nil {
+			return nil, err
+		}
 		opts := &goredis.ClusterOptions{
-			Addrs:    seeds,
-			Username: credentials.username,
-			Password: credentials.password,
+			Addrs:     seeds,
+			Username:  credentials.username,
+			Password:  credentials.password,
+			TLSConfig: tlsConfig,
 		}
 		if cfg.RedisPoolSize > 0 {
 			opts.PoolSize = cfg.RedisPoolSize
@@ -67,16 +71,17 @@ func newRedisClient(cfg chronicle.Config, redisEvents *redisEventSink) (goredis.
 		if redisEvents != nil {
 			opts.OnConnect = redisEvents.OnConnect
 		}
-		if useTLS {
-			// Cluster node addresses come from CLUSTER SLOTS and need not match
-			// the certificate SAN, so certificate verification is skipped.
-			opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true} // #nosec G402
-		}
 		return goredis.NewClusterClient(opts), nil
 	}
 	opt, err := goredis.ParseURL(cfg.RedisURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid redis URL: %w", withoutURL(err))
+	}
+	if opt.TLSConfig != nil && opt.TLSConfig.InsecureSkipVerify {
+		return nil, errors.New("redis URL skip_verify is not supported; set CHRONICLE_REDIS_TLS_INSECURE_SKIP_VERIFY=true to disable verification deliberately")
+	}
+	if opt.TLSConfig, err = redisTLSConfig(opt.TLSConfig != nil, redisHosts(opt.Addr), cfg); err != nil {
+		return nil, err
 	}
 	opt.Username = credentials.username
 	opt.Password = credentials.password

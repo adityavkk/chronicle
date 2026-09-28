@@ -19,6 +19,8 @@ const (
 	EnvRedisPoolSize         = "CHRONICLE_REDIS_POOL_SIZE"
 	EnvRedisUsername         = "REDIS_USERNAME" // unprefixed: the name existing deployments already set
 	EnvRedisCredentialFile   = "CHRONICLE_REDIS_CREDENTIAL_FILE"
+	EnvRedisCAFile           = "CHRONICLE_REDIS_CA_FILE"
+	EnvRedisTLSInsecure      = "CHRONICLE_REDIS_TLS_INSECURE_SKIP_VERIFY"
 	EnvStore                 = "CHRONICLE_STORE"
 	EnvSegmentMode           = "CHRONICLE_SEGMENT_MODE"
 	EnvSegmentDir            = "CHRONICLE_SEGMENT_DIR"
@@ -102,6 +104,11 @@ type Config struct {
 	// REDIS_USERNAME, which must agree with RedisUsername when both are set.
 	RedisUsername       string
 	RedisCredentialFile string
+	// RedisCAFile is a PEM bundle that replaces the system roots when
+	// verifying a TLS Redis server. RedisTLSInsecureSkipVerify disables that
+	// verification entirely: an explicit, logged opt-out, never a default.
+	RedisCAFile                string
+	RedisTLSInsecureSkipVerify bool
 
 	// StoreBackend selects the storage backend: "redis" or "memory".
 	StoreBackend string
@@ -353,6 +360,16 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvRedisCredentialFile); ok {
 		c.RedisCredentialFile = v
+	}
+	if v, ok := lookup(EnvRedisCAFile); ok {
+		c.RedisCAFile = v
+	}
+	if v, ok := lookup(EnvRedisTLSInsecure); ok {
+		insecure, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvRedisTLSInsecure, err)
+		}
+		c.RedisTLSInsecureSkipVerify = insecure
 	}
 	if v, ok := lookup(EnvStore); ok {
 		c.StoreBackend = v

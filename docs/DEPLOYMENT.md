@@ -72,6 +72,33 @@ list, and whether TLS is on, all read from the constructed client. With
 `redis readiness failed` once when the ping starts failing and
 `redis readiness recovered` when it succeeds again, never the raw error.
 
+### TLS
+
+`rediss://` and `rediss+cluster://` connect over TLS 1.2 or later, and chronicle
+verifies the server by default: the certificate chain against the system roots,
+and the certificate's names against the host in the URL. A cluster client
+reaches nodes at the addresses `CLUSTER SLOTS` reports, which the certificate
+usually does not name, so chronicle checks every node's certificate against the
+seed hosts listed in the URL rather than the address it dialed. That is the only
+mismatch it tolerates: each node must present a certificate that chains to a
+trusted root and names one of the seeds.
+
+For a private CA, give chronicle its PEM bundle, which replaces the system
+roots:
+
+```text
+CHRONICLE_REDIS_URL=rediss+cluster://redis.example.com:6379
+CHRONICLE_REDIS_CA_FILE=/etc/redis-ca/ca.pem
+```
+
+`CHRONICLE_REDIS_TLS_INSECURE_SKIP_VERIFY=true` turns verification off
+entirely. It lets a deployment whose Redis CA is not yet known keep running
+deliberately, and chronicle logs a warning at every start while it is set:
+without verification, anyone on the network path can impersonate Redis and read
+its password and every stream. Startup fails when either setting is used with a
+plaintext URL, when both are set, when the CA file holds no certificate, or when
+the URL carries go-redis's `skip_verify` parameter.
+
 ## Durability and consistency guarantees
 
 Within a healthy Redis primary:
