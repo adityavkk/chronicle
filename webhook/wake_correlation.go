@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"container/list"
 	"sync"
 	"time"
 )
@@ -15,16 +16,21 @@ import (
 // Two bounds keep it from growing with wakes whose end this replica never
 // sees (a callback that lands on another replica, a lease that lapses, a slot
 // that changes owner): an idle TTL per entry, refreshed on every use and swept
-// on the dirty worker's tick, and a hard capacity that evicts the entry
-// nearest its expiry. Like dirtyQueue it is a pure structure; the Manager
-// performs every external action after releasing its mutex.
+// on the dirty worker's tick, and a hard capacity that evicts the entry used
+// least recently. Entries sit in one list ordered by last use, so every
+// operation, including eviction at capacity, is constant time under the
+// mutex that every delivery and acknowledgement lookup shares. Like dirtyQueue
+// it is a pure structure; the Manager performs every external action after
+// releasing its mutex.
 type wakeCorrelation struct {
 	mu       sync.Mutex
 	capacity int
-	entries  map[string]wakeCorrelationEntry
+	entries  map[string]*list.Element // wake id -> its element in order
+	order    *list.List               // *wakeCorrelationEntry, least recently used at the front
 }
 
 type wakeCorrelationEntry struct {
+	wakeID    string
 	origin    appendOrigin
 	ttl       time.Duration
 	expiresAt time.Time
@@ -34,7 +40,7 @@ func newWakeCorrelation(capacity int) wakeCorrelation {
 	if capacity <= 0 {
 		panic("webhook: wake correlation capacity must be positive")
 	}
-	return wakeCorrelation{capacity: capacity, entries: make(map[string]wakeCorrelationEntry)}
+	return wakeCorrelation{capacity: capacity, entries: make(map[string]*list.Element), order: list.New()}
 }
 
 // remember stores origin for wakeID until it goes unused for ttl. It reports
@@ -43,13 +49,17 @@ func newWakeCorrelation(capacity int) wakeCorrelation {
 func (c *wakeCorrelation) remember(wakeID string, origin appendOrigin, ttl time.Duration, now time.Time) (evicted bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, known := c.entries[wakeID]; !known && len(c.entries) >= c.capacity {
-		if c.sweepLocked(now) == 0 {
-			c.evictNearestExpiryLocked()
-			evicted = true
-		}
+	entry := &wakeCorrelationEntry{wakeID: wakeID, origin: origin, ttl: ttl, expiresAt: now.Add(ttl)}
+	if el, known := c.entries[wakeID]; known {
+		el.Value = entry
+		c.order.MoveToBack(el)
+		return false
 	}
-	c.entries[wakeID] = wakeCorrelationEntry{origin: origin, ttl: ttl, expiresAt: now.Add(ttl)}
+	if len(c.entries) >= c.capacity && c.sweepLocked(now) == 0 {
+		c.dropLocked(c.order.Front())
+		evicted = true
+	}
+	c.entries[wakeID] = c.order.PushBack(entry)
 	return evicted
 }
 
@@ -59,23 +69,30 @@ func (c *wakeCorrelation) remember(wakeID string, origin appendOrigin, ttl time.
 func (c *wakeCorrelation) lookup(wakeID string, now time.Time) (appendOrigin, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	entry, ok := c.entries[wakeID]
-	if !ok || !entry.expiresAt.After(now) {
+	el, ok := c.entries[wakeID]
+	if !ok {
+		return appendOrigin{}, false
+	}
+	entry := el.Value.(*wakeCorrelationEntry)
+	if !entry.expiresAt.After(now) {
 		return appendOrigin{}, false
 	}
 	entry.expiresAt = now.Add(entry.ttl)
-	c.entries[wakeID] = entry
+	c.order.MoveToBack(el)
 	return entry.origin, true
 }
 
 // forget drops wakeID once its outcome is final on this replica.
 func (c *wakeCorrelation) forget(wakeID string) {
 	c.mu.Lock()
-	delete(c.entries, wakeID)
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	if el, ok := c.entries[wakeID]; ok {
+		c.dropLocked(el)
+	}
 }
 
-// sweep drops every entry whose idle window has lapsed and returns how many.
+// sweep drops every lapsed entry at the least recently used end and returns
+// how many.
 func (c *wakeCorrelation) sweep(now time.Time) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -88,27 +105,19 @@ func (c *wakeCorrelation) size() int {
 	return len(c.entries)
 }
 
+// sweepLocked pops lapsed entries from the front of the order and stops at
+// the first live one. An entry with a shorter lease behind a longer-lived one
+// waits there until the front lapses or is used; that costs memory within the
+// capacity and nothing else, because lookup checks expiry itself.
 func (c *wakeCorrelation) sweepLocked(now time.Time) int {
 	dropped := 0
-	for wakeID, entry := range c.entries {
-		if !entry.expiresAt.After(now) {
-			delete(c.entries, wakeID)
-			dropped++
-		}
+	for el := c.order.Front(); el != nil && !el.Value.(*wakeCorrelationEntry).expiresAt.After(now); el = c.order.Front() {
+		c.dropLocked(el)
+		dropped++
 	}
 	return dropped
 }
 
-// evictNearestExpiryLocked removes the live entry that would expire first.
-// It scans the map, which only happens once the cache is full of live wakes,
-// a load where one scan per arm is cheap next to the arm's own Redis write.
-func (c *wakeCorrelation) evictNearestExpiryLocked() {
-	var victim string
-	var nearest time.Time
-	for wakeID, entry := range c.entries {
-		if victim == "" || entry.expiresAt.Before(nearest) {
-			victim, nearest = wakeID, entry.expiresAt
-		}
-	}
-	delete(c.entries, victim)
+func (c *wakeCorrelation) dropLocked(el *list.Element) {
+	delete(c.entries, c.order.Remove(el).(*wakeCorrelationEntry).wakeID)
 }

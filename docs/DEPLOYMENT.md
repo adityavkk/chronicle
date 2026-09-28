@@ -202,7 +202,7 @@ headers never are.
 Chronicle remembers which request id armed each in-flight wake in a bounded,
 process-local memory: an entry lapses after the subscription's lease plus the
 longest retry gap (60 s) of no use, and at most 16384 entries are held, the
-one nearest expiry going first. `chronicle_wake_correlation_evictions_total`
+one used least recently going first. `chronicle_wake_correlation_evictions_total`
 counts live entries dropped at capacity; a sustained rate means the replica's
 in-flight wakes exceed the memory and those wakes log `wake-<wake_id>`.
 

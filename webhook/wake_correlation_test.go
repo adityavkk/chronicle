@@ -34,33 +34,48 @@ func TestWakeCorrelationIdleTTL(t *testing.T) {
 	}
 }
 
-func TestWakeCorrelationCapacityEvictsNearestExpiry(t *testing.T) {
+func TestWakeCorrelationCapacityEvictsTheLeastRecentlyUsed(t *testing.T) {
 	t0 := time.Unix(1_000, 0)
 	c := newWakeCorrelation(3)
-	for i, ttl := range []time.Duration{3 * time.Minute, time.Minute, 2 * time.Minute} {
-		if evicted := c.remember(fmt.Sprintf("w%d", i), appendOrigin{requestID: fmt.Sprintf("req-%d", i)}, ttl, t0); evicted {
+	// w0 has the longest lease but is the least recently used; w1 and w2 are
+	// fresher with short leases.
+	for i, ttl := range []time.Duration{10 * time.Minute, time.Minute, time.Minute} {
+		at := t0.Add(time.Duration(i) * time.Second)
+		if evicted := c.remember(fmt.Sprintf("w%d", i), appendOrigin{requestID: fmt.Sprintf("req-%d", i)}, ttl, at); evicted {
 			t.Fatalf("remember %d evicted while under capacity", i)
 		}
 	}
-	// Full, nothing expired: the entry nearest its expiry (w1, one minute) goes.
-	if evicted := c.remember("w3", appendOrigin{requestID: "req-3"}, time.Minute, t0); !evicted || c.size() != 3 {
+	// Full, nothing expired: the entry used least recently goes, however long
+	// its lease; the policy is recency of use, not remaining time.
+	if evicted := c.remember("w3", appendOrigin{requestID: "req-3"}, time.Minute, t0.Add(3*time.Second)); !evicted || c.size() != 3 {
 		t.Fatalf("remember at capacity evicted=%v size=%d, want true and 3", evicted, c.size())
 	}
-	if _, ok := c.lookup("w1", t0); ok {
-		t.Fatal("the entry nearest expiry must be the one evicted")
+	if _, ok := c.lookup("w0", t0.Add(3*time.Second)); ok {
+		t.Fatal("the least recently used entry must be the one evicted")
 	}
-	for _, id := range []string{"w0", "w2", "w3"} {
-		if _, ok := c.lookup(id, t0); !ok {
-			t.Fatalf("%s must survive the eviction", id)
-		}
+	// A use is what protects an entry: w1 is touched, so the next eviction takes w2.
+	if _, ok := c.lookup("w1", t0.Add(4*time.Second)); !ok {
+		t.Fatal("w1 must survive the eviction")
 	}
-	// Full with an expired entry: expiry is reclaimed first and nothing live is evicted.
-	if evicted := c.remember("w4", appendOrigin{requestID: "req-4"}, time.Minute, t0.Add(90*time.Second)); evicted || c.size() != 3 {
-		t.Fatalf("remember with an expired entry present evicted=%v size=%d, want false and 3", evicted, c.size())
+	if evicted := c.remember("w4", appendOrigin{requestID: "req-4"}, time.Minute, t0.Add(5*time.Second)); !evicted {
+		t.Fatal("remember at capacity must evict")
 	}
-	// Re-remembering a known wake never evicts.
-	if evicted := c.remember("w4", appendOrigin{requestID: "req-4b"}, time.Minute, t0.Add(90*time.Second)); evicted {
-		t.Fatal("remembering a known wake evicted another")
+	if _, ok := c.lookup("w2", t0.Add(5*time.Second)); ok {
+		t.Fatal("w2, unused since it was remembered, must be the one evicted")
+	}
+	// Full with expired entries: they are reclaimed first and nothing live is
+	// evicted or counted.
+	if evicted := c.remember("w5", appendOrigin{requestID: "req-5"}, time.Minute, t0.Add(90*time.Second)); evicted || c.size() != 1 {
+		t.Fatalf("remember with expired entries present evicted=%v size=%d, want false and 1", evicted, c.size())
+	}
+	// Re-remembering a known wake updates it in place and never evicts.
+	c.remember("w6", appendOrigin{requestID: "req-6"}, time.Minute, t0.Add(90*time.Second))
+	c.remember("w7", appendOrigin{requestID: "req-7"}, time.Minute, t0.Add(90*time.Second))
+	if evicted := c.remember("w5", appendOrigin{requestID: "req-5b"}, time.Minute, t0.Add(90*time.Second)); evicted || c.size() != 3 {
+		t.Fatalf("remembering a known wake at capacity evicted=%v size=%d, want false and 3", evicted, c.size())
+	}
+	if got, ok := c.lookup("w5", t0.Add(91*time.Second)); !ok || got.requestID != "req-5b" {
+		t.Fatalf("re-remembered origin = %q/%v, want req-5b", got.requestID, ok)
 	}
 }
 

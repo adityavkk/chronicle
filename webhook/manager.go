@@ -94,8 +94,8 @@ const (
 	dirtyQueueCapacity       = 1024
 	dirtyBatchSize           = 64
 	// wakeCorrelationCapacity bounds how many in-flight wakes this replica can
-	// remember a request id for (see wakeCorrelation); beyond it the wake
-	// nearest expiry falls back to wake-<id> and WakeCorrelationEvicted counts.
+	// remember a request id for (see wakeCorrelation); beyond it the wake used
+	// least recently falls back to wake-<id> and WakeCorrelationEvicted counts.
 	wakeCorrelationCapacity = 16384
 
 	// Leased slot-ownership timers (issue #14, 05:502-505). A DIFFERENT lease layer
