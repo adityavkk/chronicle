@@ -22,7 +22,6 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	chronicle "gecgithub01.walmart.com/auk000v/chronicle"
-	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 	"gecgithub01.walmart.com/auk000v/chronicle/metrics"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
@@ -212,7 +211,7 @@ func run() error {
 	if cfg.ReadPageBytes <= 0 {
 		return fmt.Errorf("-read-page-bytes must be positive")
 	}
-	if err := correlation.CheckHeaderName(cfg.RequestIDHeader); err != nil {
+	if err := cfg.CheckRequestIDHeader(); err != nil {
 		return fmt.Errorf("-request-id-header: %w", err)
 	}
 	if err := validateSegmentConfig(cfg); err != nil {

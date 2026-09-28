@@ -546,11 +546,7 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 		c.KeyRotationOverlap = d
 	}
 	if v, ok := lookup(EnvRequestIDHeader); ok {
-		name := strings.TrimSpace(v)
-		if err := correlation.CheckHeaderName(name); err != nil {
-			return fmt.Errorf("%s: %w", EnvRequestIDHeader, err)
-		}
-		c.RequestIDHeader = name
+		c.RequestIDHeader = strings.TrimSpace(v)
 	}
 	if v, ok := lookup(EnvAuthMode); ok {
 		mode, err := auth.ParseMode(v)
@@ -606,6 +602,9 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	if v, ok := lookup(EnvXFCCTrustWithoutMarker); ok {
 		c.AllowXFCCWithoutMarker = v == "1" || v == "true"
 	}
+	if err := c.CheckRequestIDHeader(); err != nil {
+		return fmt.Errorf("%s: %w", EnvRequestIDHeader, err)
+	}
 	if v, ok := lookup(EnvKeysFileAllowGroupRead); ok {
 		c.KeysFileAllowGroupRead = v == "1" || v == "true"
 	}
@@ -656,6 +655,25 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 		if err := c.OIDC.Validate(); err != nil {
 			return fmt.Errorf("%s/%s/%s: %w", EnvOIDCIssuer, EnvOIDCAudience, EnvOIDCNSClaim, err)
 		}
+	}
+	return nil
+}
+
+// CheckRequestIDHeader is the check the correlation header name must pass
+// once the whole configuration is known: correlation.CheckHeaderName, plus
+// the one reserved name only the configuration knows, the XFCC marker. The
+// request-logging middleware overwrites the configured header on every
+// request, so a marker under that name would arrive at the gate as a request
+// id and every mesh-attested request would fail it: a fail-closed outage of
+// mesh identity rather than a spoof, and still a misconfiguration worth
+// refusing at startup. LoadEnv runs it; cmd/chronicle runs it again after the
+// -request-id-header flag is applied.
+func (c *Config) CheckRequestIDHeader() error {
+	if err := correlation.CheckHeaderName(c.RequestIDHeader); err != nil {
+		return err
+	}
+	if strings.EqualFold(c.RequestIDHeader, c.XFCCMarkerName) {
+		return fmt.Errorf("%q is the XFCC marker header named by %s and would be overwritten with the request id on every request", c.RequestIDHeader, EnvXFCCRequiredHeader)
 	}
 	return nil
 }

@@ -415,4 +415,30 @@ func TestLoadEnvRequestIDHeader(t *testing.T) {
 			t.Errorf("%s=%q must refuse startup: the header already has a meaning", EnvRequestIDHeader, reserved)
 		}
 	}
+	// The XFCC marker is the one reserved header only the configuration knows
+	// the name of. The middleware would replace the sidecar's marker with the
+	// request id on every request, so every mesh-attested request would fail
+	// the marker gate: a fail-closed outage of mesh identity, not a spoof.
+	marker := map[string]string{EnvXFCCRequiredHeader: "X-Mesh-Marker: mesh v1"}
+	for _, name := range []string{"X-Mesh-Marker", "x-mesh-marker"} {
+		c = DefaultConfig()
+		err := c.LoadEnv(env(map[string]string{EnvRequestIDHeader: name, EnvXFCCRequiredHeader: marker[EnvXFCCRequiredHeader]}))
+		if err == nil || !strings.Contains(err.Error(), EnvRequestIDHeader) || !strings.Contains(err.Error(), EnvXFCCRequiredHeader) {
+			t.Errorf("%s=%q with the marker under that name must refuse startup naming both variables, got %v", EnvRequestIDHeader, name, err)
+		}
+	}
+	// cmd/chronicle applies -request-id-header after LoadEnv, so the same
+	// check must be callable on the finished configuration.
+	c = DefaultConfig()
+	if err := c.LoadEnv(env(marker)); err != nil {
+		t.Fatal(err)
+	}
+	c.RequestIDHeader = "X-Mesh-Marker"
+	if err := c.CheckRequestIDHeader(); err == nil {
+		t.Error("CheckRequestIDHeader must refuse the marker name set by a flag")
+	}
+	c.RequestIDHeader = "X-Request-ID"
+	if err := c.CheckRequestIDHeader(); err != nil {
+		t.Errorf("CheckRequestIDHeader(%q) = %v, want nil", c.RequestIDHeader, err)
+	}
 }
