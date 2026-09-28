@@ -21,7 +21,7 @@ func newCaptureServer(t *testing.T) (*httptest.Server, *captureStore) {
 	t.Helper()
 	store := newCaptureStore()
 	mux := http.NewServeMux()
-	registerCaptureRoutes(mux, store)
+	registerCaptureRoutes(mux, store, nil)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, store
@@ -239,7 +239,7 @@ func TestCapturePostRejectsOversizedBody(t *testing.T) {
 	req.SetPathValue("id", "large")
 	rec := httptest.NewRecorder()
 
-	handleCapturePost(store, rec, req)
+	handleCapturePost(store, rec, req, nil)
 
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized POST status = %d, want 413", rec.Code)
@@ -259,7 +259,7 @@ func TestCapturePostAcceptsBodyAtLimit(t *testing.T) {
 	req.SetPathValue("id", "exact")
 	rec := httptest.NewRecorder()
 
-	handleCapturePost(store, rec, req)
+	handleCapturePost(store, rec, req, nil)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("exact-limit POST status = %d, want 200", rec.Code)
@@ -280,7 +280,7 @@ func TestCapturePostRetainsOnlySafeHeaders(t *testing.T) {
 	req.Header.Set("X-Forwarded-Client-Cert", "credential-like metadata")
 	rec := httptest.NewRecorder()
 
-	handleCapturePost(store, rec, req)
+	handleCapturePost(store, rec, req, nil)
 
 	got := store.list("headers")
 	if len(got) != 1 {
@@ -301,7 +301,7 @@ func TestCaptureIDLengthBounded(t *testing.T) {
 	req.SetPathValue("id", strings.Repeat("x", maxCaptureIDBytes+1))
 	rec := httptest.NewRecorder()
 
-	handleCapturePost(store, rec, req)
+	handleCapturePost(store, rec, req, nil)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("long-id POST status = %d, want 400", rec.Code)
@@ -450,7 +450,7 @@ func TestCaptureMissingIdRejected(t *testing.T) {
 	// Call the handler directly with no path value set.
 	req := httptest.NewRequest(http.MethodPost, "/__hooks/", strings.NewReader("{}"))
 	rec := httptest.NewRecorder()
-	handleCapturePost(store, rec, req)
+	handleCapturePost(store, rec, req, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing-id POST status = %d, want 400", rec.Code)
 	}

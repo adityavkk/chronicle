@@ -194,12 +194,8 @@ func (s *captureStore) unsubscribe(id string, ch chan Delivery) {
 
 // registerCaptureRoutes wires the capture endpoint onto a mux. It is split out of
 // main so it can be unit-tested against a stand-alone mux + httptest server with
-// no chronicle and no embedded UI.
-func registerCaptureRoutes(mux *http.ServeMux, store *captureStore, verifiers ...captureVerifier) {
-	var verifier captureVerifier
-	if len(verifiers) > 0 {
-		verifier = verifiers[0]
-	}
+// no chronicle and no embedded UI. A nil verifier records deliveries unverified.
+func registerCaptureRoutes(mux *http.ServeMux, store *captureStore, verifier captureVerifier) {
 	// Go 1.22+ pattern routing gives us the {id} wildcard and method matching, so
 	// the stream and list/post routes split cleanly without manual path parsing.
 	mux.HandleFunc("POST /__hooks/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -233,11 +229,7 @@ func captureID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return id, true
 }
 
-func handleCapturePost(store *captureStore, w http.ResponseWriter, r *http.Request, verifiers ...captureVerifier) {
-	var verifier captureVerifier
-	if len(verifiers) > 0 {
-		verifier = verifiers[0]
-	}
+func handleCapturePost(store *captureStore, w http.ResponseWriter, r *http.Request, verifier captureVerifier) {
 	id, ok := captureID(w, r)
 	if !ok {
 		return

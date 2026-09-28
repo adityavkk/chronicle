@@ -217,3 +217,20 @@ chronicle_service_access_total{result="delegated_gateway"}
 ```
 
 These labels are fixed and do not contain subjects, paths, or credentials.
+
+## dsui console
+
+`dsui` is an optional developer console, separate from the chronicle binary.
+Its webhook-capture endpoint (`POST /__hooks/{id}`) verifies every delivery's
+`Webhook-Signature` against chronicle's JWKS before recording it:
+
+```text
+DSUI_SERVER=https://chronicle.example.com
+# Optional: defaults to $DSUI_SERVER/v1/stream/__ds/jwks.json
+DSUI_JWKS_URL=https://chronicle.example.com/v1/stream/__ds/jwks.json
+```
+
+A bad signature answers `401`; an unreachable key set answers `503`. When
+neither variable is set, captures are unverified and dsui logs a warning at
+startup, which is acceptable only on a developer machine. `GET /healthz` is the
+probe endpoint.

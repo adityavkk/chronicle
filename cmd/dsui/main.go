@@ -57,16 +57,18 @@ func main() {
 	// subscription's webhook_url points at <captureBase>/__hooks/<id>; chronicle
 	// POSTs signed wakes there, this binary buffers them and relays to the browser
 	// over SSE (the browser cannot host an inbound endpoint itself).
-	captureStore := newCaptureStore()
+	var verifier captureVerifier
 	resolvedJWKSURL := *jwksURL
 	if resolvedJWKSURL == "" {
 		resolvedJWKSURL = defaultJWKSURL(*server)
 	}
-	if resolvedJWKSURL == "" {
-		registerCaptureRoutes(mux, captureStore)
+	if resolvedJWKSURL != "" {
+		verifier = newJWKSCaptureVerifier(resolvedJWKSURL)
+		log.Printf("dsui: verifying captured webhooks against %s", resolvedJWKSURL)
 	} else {
-		registerCaptureRoutes(mux, captureStore, newJWKSCaptureVerifier(resolvedJWKSURL))
+		log.Printf("dsui: WARNING: captured webhooks are not signature-verified; set --jwks-url or --server")
 	}
+	registerCaptureRoutes(mux, newCaptureStore(), verifier)
 
 	// The base URL the chronicle server uses to reach this capture endpoint. The
 	// browser builds a webhook_url as <captureBase>/__hooks/<id> from this, so it
