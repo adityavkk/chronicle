@@ -2,6 +2,7 @@ package chronicle
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -434,9 +435,9 @@ type countingHooks struct {
 	created, appended, deleted int
 }
 
-func (c *countingHooks) OnStreamCreated(string) { c.created++ }
-func (c *countingHooks) OnStreamAppend(string)  { c.appended++ }
-func (c *countingHooks) OnStreamDeleted(string) { c.deleted++ }
+func (c *countingHooks) OnStreamCreated(string)                 { c.created++ }
+func (c *countingHooks) OnStreamAppend(context.Context, string) { c.appended++ }
+func (c *countingHooks) OnStreamDeleted(string)                 { c.deleted++ }
 
 type countingAppendMetrics struct{ calls int }
 

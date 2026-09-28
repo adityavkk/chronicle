@@ -31,6 +31,9 @@ type dirtyEntry struct {
 	state      dirtyEntryState
 	since      time.Time
 	dirtyAgain bool
+	// requestID is the correlation id of the append the hint was queued with,
+	// or of the append that arrived while it was processing; "" when none.
+	requestID string
 }
 
 // dirtyEnqueueResult makes overload and coalescing visible to both control flow
@@ -73,8 +76,9 @@ const (
 )
 
 type dirtyWork struct {
-	path  string
-	since time.Time
+	path      string
+	since     time.Time
+	requestID string
 }
 
 type dirtyQueueStats struct {
@@ -112,16 +116,23 @@ func newDirtyQueue(capacity int) dirtyQueue {
 	}
 }
 
-// enqueue adds one stream hint. requestRecovery is true only for the first
-// overflow in an epoch; repeated overflow remains represented by the state
-// machine without producing an unbounded signal storm.
-func (q *dirtyQueue) enqueue(path string, now time.Time) (result dirtyEnqueueResult, requestRecovery bool) {
+// enqueue adds one stream hint carrying the append's request id ("" when the
+// append had none). Appends coalesced onto a queued hint share the id it was
+// queued with; an append that lands while the hint is processing re-queues it
+// under that newer id, and an append without an id never erases one.
+// requestRecovery is true only for the first overflow in an epoch; repeated
+// overflow remains represented by the state machine without producing an
+// unbounded signal storm.
+func (q *dirtyQueue) enqueue(path string, now time.Time, requestID string) (result dirtyEnqueueResult, requestRecovery bool) {
 	if entry, ok := q.entries[path]; ok {
 		switch entry.state {
 		case dirtyQueued:
 			return dirtyCoalescedQueued, false
 		case dirtyProcessing:
 			entry.dirtyAgain = true
+			if requestID != "" {
+				entry.requestID = requestID
+			}
 			q.entries[path] = entry
 			return dirtyCoalescedProcessing, false
 		default:
@@ -133,7 +144,7 @@ func (q *dirtyQueue) enqueue(path string, now time.Time) (result dirtyEnqueueRes
 		return q.noteOverflow(now)
 	}
 
-	q.entries[path] = dirtyEntry{state: dirtyQueued, since: now}
+	q.entries[path] = dirtyEntry{state: dirtyQueued, since: now, requestID: requestID}
 	q.push(path)
 	if q.oldest.IsZero() || now.Before(q.oldest) {
 		q.oldest = now
@@ -175,7 +186,7 @@ func (q *dirtyQueue) take(limit int) []dirtyWork {
 		}
 		entry.state = dirtyProcessing
 		q.entries[path] = entry
-		work = append(work, dirtyWork{path: path, since: entry.since})
+		work = append(work, dirtyWork{path: path, since: entry.since, requestID: entry.requestID})
 	}
 	return work
 }

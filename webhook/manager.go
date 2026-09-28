@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
@@ -164,6 +165,13 @@ type ManagerOptions struct {
 	// once a deployment configures it (CHRONICLE_WAKE_TOKEN_AUD).
 	WakeTokenAudience string
 
+	// RequestIDHeader names the correlation header sent on every webhook
+	// delivery (correlation.DefaultHeader when empty). Its value is the request
+	// id of the append that armed the wake, or wake-<wake_id> when this process
+	// does not know it. It is a log-join hint: unsigned, outside the envelope
+	// signature, never identity.
+	RequestIDHeader string
+
 	// KeysReloadInterval bounds how stale this replica's key snapshot may be:
 	// rotations, denylist entries, and keys-file replacements land within one
 	// interval (#123 rotation). Zero defaults to 15s.
@@ -219,6 +227,9 @@ type Manager struct {
 	wakeTokenAud  string
 	tokenKey      []byte
 
+	// requestIDHeader is ManagerOptions.RequestIDHeader with its default applied.
+	requestIDHeader string
+
 	// keySnap is the atomically-swapped view of both Ed25519 families + the
 	// kid denylist (#123 rotation): every mint, verification, and JWKS read
 	// goes through it, and keysReloadLoop refreshes it, so no key is ever
@@ -271,6 +282,13 @@ type Manager struct {
 	dirtyNotify chan struct{}
 	dirtyClosed bool
 	now         func() time.Time
+
+	// wakeRequestIDs remembers which request id armed each in-flight wake, so
+	// its delivery, retries and acknowledgement log and send the same id. It
+	// is process-local: another replica, or this one after a restart, falls
+	// back to the stable wake-<id>. Guarded by corrMu.
+	corrMu         sync.Mutex
+	wakeRequestIDs map[string]string
 
 	// runCtx owns every Manager background loop. The lifecycle state makes Start
 	// and Stop race-safe and idempotent without holding lifeMu across I/O.
@@ -337,6 +355,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		resolver:              opts.Resolver,
 		targetPolicy:          opts.TargetPolicy,
 		wakeTokenAud:          opts.WakeTokenAudience,
+		requestIDHeader:       opts.RequestIDHeader,
 		tokenKey:              tokenKey,
 		log:                   opts.Logger,
 		workerTick:            opts.WorkerTick,
@@ -355,6 +374,7 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 		reconcileC:            make(chan scope, 1),
 		dirty:                 newDirtyQueue(dirtyQueueCapacity),
 		dirtyNotify:           make(chan struct{}, 1),
+		wakeRequestIDs:        make(map[string]string),
 		now:                   time.Now,
 		runCtx:                runCtx,
 		cancelRun:             cancelRun,
@@ -371,6 +391,9 @@ func NewManager(store Store, streams Streams, opts ManagerOptions) (*Manager, er
 	}
 	if m.log == nil {
 		m.log = slog.Default()
+	}
+	if m.requestIDHeader == "" {
+		m.requestIDHeader = correlation.DefaultHeader
 	}
 	if m.workerTick == 0 {
 		m.workerTick = defaultWorkerTick
@@ -567,20 +590,37 @@ func (m *Manager) OnStreamCreated(path string) {
 }
 
 // OnStreamAppend records one process-local dirty hint after a durable append.
-// The handoff is bounded by dirtyQueueCapacity and never calls Redis, reads a
-// stream tail, delivers a wake, or starts a goroutine. The recovery sweep is the
-// durable backstop if this hint is lost to shutdown or overflow.
-func (m *Manager) OnStreamAppend(path string) {
+// ctx carries the append's request id (correlation.RequestID), which rides the
+// hint to the wake it arms; nothing else is read from it and its cancellation
+// is never honored, because the hint outlives the request. The handoff is
+// bounded by dirtyQueueCapacity and never calls Redis, reads a stream tail,
+// delivers a wake, or starts a goroutine. The recovery sweep is the durable
+// backstop if this hint is lost to shutdown or overflow.
+func (m *Manager) OnStreamAppend(ctx context.Context, path string) {
+	requestID := correlation.RequestID(ctx)
 	now := m.now()
 	m.dirtyMu.Lock()
 	result, requestRecovery := dirtyStopped, false
 	if !m.dirtyClosed {
-		result, requestRecovery = m.dirty.enqueue(path, now)
+		result, requestRecovery = m.dirty.enqueue(path, now, requestID)
 	}
 	stats := m.dirty.stats(now)
 	m.dirtyMu.Unlock()
 
 	m.metrics.DirtyEnqueue(result.String(), stats.depth, stats.capacity, stats.oldestAge)
+	// One Debug line per append. The first overflow of an epoch is the one an
+	// operator needs to see, so it alone is a Warn; the rest of the epoch is
+	// carried by the metric.
+	level := slog.LevelDebug
+	if requestRecovery {
+		level = slog.LevelWarn
+	}
+	m.log.Log(ctx, level, "webhook append hint queued",
+		"event", "append_hint_queued",
+		"request_id", requestID,
+		"stream_path", path,
+		"outcome", result.String(),
+		"queue_depth", stats.depth)
 	switch result {
 	case dirtyEnqueued:
 		failpoint(fpDirtyAfterEnqueueBeforeSignal)
@@ -658,7 +698,7 @@ type dirtyProcessResult struct {
 // replica that accepted the stream append observes it, and it must cover every
 // subscriber slot. Generation and owner fences remain in the existing arm and
 // worker paths.
-func (m *Manager) processDirtyStream(path string) (dirtyProcessResult, dirtyProcessStage, error) {
+func (m *Manager) processDirtyStream(path, requestID string) (dirtyProcessResult, dirtyProcessStage, error) {
 	lookupStart := m.now()
 	ids, slotsProbed, err := m.store.StreamSubscribers(path)
 	if err != nil {
@@ -696,7 +736,7 @@ func (m *Manager) processDirtyStream(path string) (dirtyProcessResult, dirtyProc
 		if !HasPendingWorkFrom(sub.Links, tails) {
 			continue
 		}
-		switch m.issueWakeResult(sub, path) {
+		switch m.issueWakeResult(sub, path, requestID) {
 		case wakeIssueArmed:
 			result.wakes++
 		case wakeIssueDuplicate:
@@ -724,7 +764,7 @@ func (m *Manager) processDirtyBatch() (processed int, hadError bool) {
 	start := m.now()
 	total := dirtyProcessResult{}
 	for _, item := range work {
-		result, stage, err := m.processDirtyStream(item.path)
+		result, stage, err := m.processDirtyStream(item.path, item.requestID)
 		total.subs += result.subs
 		total.wakes += result.wakes
 		total.duplicates += result.duplicates
@@ -832,6 +872,66 @@ func (m *Manager) maybeWake(id, triggerStream string) {
 	m.issueWake(sub, triggerStream)
 }
 
+// rememberWakeRequestID stores requestID against wakeID when it is a real
+// caller id and returns the id every later step of this wake logs and sends:
+// the stored id, or the stable wake-<id> when the append carried none (which
+// is also what any other replica derives, so nothing is stored for it).
+func (m *Manager) rememberWakeRequestID(wakeID, requestID string) string {
+	if !correlation.Valid(requestID) {
+		return correlation.WakeRequestID(wakeID)
+	}
+	m.corrMu.Lock()
+	m.wakeRequestIDs[wakeID] = requestID
+	m.corrMu.Unlock()
+	return requestID
+}
+
+// requestIDForWake is the id this wake's delivery, retry and acknowledgement
+// log and send: the remembered caller id, or wake-<id> when this process never
+// armed the wake or no longer remembers it.
+func (m *Manager) requestIDForWake(wakeID string) string {
+	m.corrMu.Lock()
+	requestID, ok := m.wakeRequestIDs[wakeID]
+	m.corrMu.Unlock()
+	if ok {
+		return requestID
+	}
+	return correlation.WakeRequestID(wakeID)
+}
+
+// forgetWakeRequestID drops a wake's id once its outcome is final here.
+func (m *Manager) forgetWakeRequestID(wakeID string) {
+	m.corrMu.Lock()
+	delete(m.wakeRequestIDs, wakeID)
+	m.corrMu.Unlock()
+}
+
+// logWakeArmed is the Debug trace of a freshly minted generation; the Info
+// record of a wake is its delivery's completion event.
+func (m *Manager) logWakeArmed(sub Subscription, res ArmResult, requestID string) {
+	m.log.Debug("webhook wake armed",
+		"event", "wake_armed",
+		"request_id", requestID,
+		"subscription_id", sub.ID,
+		"wake_id", res.WakeID,
+		"generation", res.Generation,
+		"dispatch", sub.Config.Type)
+}
+
+// wakeLogger is the logger every record about one wake shares: its completion
+// event name, the subscription, generation and wake id, and the request id
+// that armed the wake (or wake-<id> when this process does not know it).
+func (m *Manager) wakeLogger(event, id string, generation int64, wakeID string) *slog.Logger {
+	return m.log.With(
+		"event", event,
+		"subscription_id", id,
+		"wake_id", wakeID,
+		"generation", generation,
+		"request_id", m.requestIDForWake(wakeID))
+}
+
+func msSince(start time.Time) int64 { return time.Since(start).Milliseconds() }
+
 type wakeIssueResult uint8
 
 const (
@@ -844,10 +944,14 @@ const (
 // event). For webhook the lease is armed at issue; for pull-wake the lease waits
 // for a claim (PROTOCOL §7.3).
 func (m *Manager) issueWake(sub Subscription, triggerStream string) bool {
-	return m.issueWakeResult(sub, triggerStream) == wakeIssueArmed
+	return m.issueWakeResult(sub, triggerStream, "") == wakeIssueArmed
 }
 
-func (m *Manager) issueWakeResult(sub Subscription, triggerStream string) wakeIssueResult {
+// issueWakeResult arms a wake for sub. requestID is the id of the append that
+// prompted it ("" for sweep, recovery and re-wake paths); it is remembered
+// against the new wake id so delivery, retries and acknowledgement can log
+// and send it.
+func (m *Manager) issueWakeResult(sub Subscription, triggerStream, requestID string) wakeIssueResult {
 	wakeID, err := GenerateWakeID(rand.Reader)
 	if err != nil {
 		m.log.Warn("webhook: generate wake id", "error", err)
@@ -862,6 +966,7 @@ func (m *Manager) issueWakeResult(sub Subscription, triggerStream string) wakeIs
 	if !res.Armed {
 		return wakeIssueDuplicate // already in flight (coalesced) or gone
 	}
+	m.logWakeArmed(sub, res, m.rememberWakeRequestID(res.WakeID, requestID))
 	// The arm→emit surgical window (07 honest-gap #2): the fence is minted but the
 	// wake is not yet emitted. A no-op in production; a test failpoint can crash/stall
 	// here to exercise the stranded-wake recovery the host nemesis cannot pin down.
@@ -898,6 +1003,7 @@ func (m *Manager) issueWakeOwned(scope OwnerScope, sub Subscription, triggerStre
 	if !res.Armed {
 		return false
 	}
+	m.logWakeArmed(sub, res, m.requestIDForWake(res.WakeID))
 	failpoint(fpArmedBeforeEmit)
 	switch sub.Config.Type {
 	case DispatchWebhook:
@@ -918,11 +1024,13 @@ func (m *Manager) writeWakeEvent(sub Subscription, triggerStream string, generat
 }
 
 func (m *Manager) writeWakeEventExternalized(ext DurableExternalization, sub Subscription, triggerStream string, generation int64, wakeID string) {
+	log := m.wakeLogger("pull_wake_delivery_completed", sub.ID, generation, wakeID)
 	if triggerStream == "" && len(sub.Links) > 0 {
 		triggerStream = sub.Links[0].Path
 	}
 	data, err := NewWakeEvent(sub.ID, triggerStream, generation, time.Now())
 	if err != nil {
+		log.Error("pull wake delivery failed", "outcome", "encode_failed", "error", err)
 		return
 	}
 	appendStart := time.Now()
@@ -931,7 +1039,7 @@ func (m *Manager) writeWakeEventExternalized(ext DurableExternalization, sub Sub
 		// Leave wake_event_sent_ns at 0 so the recovery sweep re-emits, and trigger
 		// an eager reconcile so it re-emits now rather than on the coarse floor
 		// (doc-05 correction #2, the delivery-path error event).
-		m.log.Warn("webhook: write wake event", "sub", sub.ID, "wake_stream", sub.Config.WakeStream, "error", err)
+		log.Warn("pull wake delivery failed", "outcome", "append_failed", "wake_stream", sub.Config.WakeStream, "duration_ms", msSince(appendStart), "error", err)
 		m.triggerReconcile(scopeAppendError)
 		return
 	}
@@ -939,8 +1047,10 @@ func (m *Manager) writeWakeEventExternalized(ext DurableExternalization, sub Sub
 	// Record the durable emit, fenced on (generation, wake), so the sweep does
 	// not re-emit a wake that was already delivered.
 	if err := m.store.RecordWakeEventSent(sub.ID, generation, wakeID, time.Now()); err != nil {
-		m.log.Warn("webhook: record wake event sent", "sub", sub.ID, "error", err)
+		log.Warn("pull wake delivery completed", "outcome", "appended_unrecorded", "duration_ms", msSince(appendStart), "error", err)
+		return
 	}
+	log.Info("pull wake delivery completed", "outcome", "appended", "duration_ms", msSince(appendStart))
 }
 
 func (m *Manager) deliverWebhookUnscoped(id string, generation int64, wakeID string) {
@@ -954,8 +1064,10 @@ func (m *Manager) deliverWebhookOwned(scope OwnerScope, id string, generation in
 // deliverWebhook signs and POSTs a wake notification, then handles the response:
 // a 2xx {done:true} auto-acks the snapshot and releases; any other 2xx clears
 // the failure state and leaves the wake in flight for an async callback; a
-// non-2xx or transport error schedules a retry (PROTOCOL §7.1).
+// non-2xx or transport error schedules a retry (PROTOCOL §7.1). Every attempt
+// ends in exactly one webhook_delivery_completed record whose outcome says how.
 func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, owner *OwnerScope) {
+	log := m.wakeLogger("webhook_delivery_completed", id, generation, wakeID)
 	// Owner-epoch fence for the EXTERNAL POST (issue #14): the retry worker drives
 	// this for a slot it owns, so verify ownership via check_owner immediately
 	// before the POST — the one schedule write that cannot inline the check, since
@@ -965,23 +1077,31 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	if owner != nil {
 		chk, cerr := m.store.CheckOwner(owner.SlotKey, owner.ReplicaID, owner.Epoch)
 		if cerr != nil {
-			m.log.Warn("webhook: check owner before delivery", "sub", id, "error", cerr)
+			log.Warn("webhook delivery skipped", "outcome", "owner_check_failed", "error", cerr)
 			return
 		}
 		if !chk.OK() {
 			m.metrics.OwnerFenced("check_owner")
+			log.Info("webhook delivery skipped", "outcome", "owner_fenced")
 			return
 		}
 	}
 	sub, ok, err := m.store.Get(id)
-	if err != nil || !ok {
+	if err != nil {
+		log.Warn("webhook delivery skipped", "outcome", "subscription_lookup_failed", "error", err)
 		return
 	}
+	if !ok {
+		log.Info("webhook delivery skipped", "outcome", "subscription_gone")
+		m.forgetWakeRequestID(wakeID)
+		return
+	}
+	log = log.With("retry_attempt", sub.RetryCount+1)
 	snapshot, _ := Snapshot(sub.Links, m.tailOf)
 	now := time.Now()
 	token, err := GenerateToken(m.tokenKey, id, generation, now, m.tokenTTL(sub), rand.Reader)
 	if err != nil {
-		m.log.Warn("webhook: mint callback token", "sub", id, "error", err)
+		log.Warn("webhook delivery failed", "outcome", "callback_token_failed", "error", err)
 		return
 	}
 	notif := WakeNotification{
@@ -1009,20 +1129,26 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	}
 	body, err := json.Marshal(notif)
 	if err != nil {
+		log.Error("webhook delivery failed", "outcome", "encode_failed", "error", err)
 		return
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, sub.Config.WebhookURL, bytes.NewReader(body))
 	if err != nil {
+		log.Warn("webhook delivery failed", "outcome", "request_build_failed", "error", err)
 		m.recordFailure(id, generation, wakeID, owner)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// The correlation header is a log-join hint for the receiver: the id of the
+	// append that armed this wake, or wake-<id>. It is unsigned, outside the
+	// envelope signature, and never identity.
+	req.Header.Set(m.requestIDHeader, m.requestIDForWake(wakeID))
 	signing := m.keySnapshot().webhook.active
 	if signing.Kid == "" {
 		// Emergency stop (#123): the active envelope kid is denylisted with no
 		// successor. An unsigned or mis-signed wake must not go out; the retry
 		// worker re-attempts after rotation restores a mint key.
-		m.log.Error("webhook: envelope signing key unavailable (denylisted); delivery deferred", "sub", id)
+		log.Error("webhook delivery deferred", "outcome", "signing_key_unavailable")
 		m.recordFailure(id, generation, wakeID, owner)
 		return
 	}
@@ -1033,7 +1159,7 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	// dialed and the normal retry is scheduled.
 	if m.targetPolicy != nil {
 		if err := m.targetPolicy.PrepareRequest(req); err != nil {
-			m.log.Warn("webhook: target policy rejected delivery", "sub", id, "error", err)
+			log.Warn("webhook delivery rejected", "outcome", "target_rejected", "error", err)
 			m.metrics.WakeDelivery(0, "rejected")
 			m.recordFailure(id, generation, wakeID, owner)
 			return
@@ -1044,12 +1170,15 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 	resp, err := m.doWebhookRequest(req)
 	if err != nil {
 		m.metrics.WakeDelivery(time.Since(postStart), "error")
+		log.Warn("webhook delivery failed", "outcome", "transport_error", "duration_ms", msSince(postStart), "error", err)
 		m.recordFailure(id, generation, wakeID, owner)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
+	log = log.With("http_status", resp.StatusCode)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		m.metrics.WakeDelivery(time.Since(postStart), "failed")
+		log.Warn("webhook delivery failed", "outcome", "non_success_status", "duration_ms", msSince(postStart))
 		m.recordFailure(id, generation, wakeID, owner)
 		return
 	}
@@ -1063,40 +1192,47 @@ func (m *Manager) deliverWebhook(id string, generation int64, wakeID string, own
 
 	status, err := m.recordSuccessWithOwner(owner, id, generation, wakeID)
 	if err != nil {
-		m.log.Warn("webhook: record success", "sub", id, "error", err)
+		log.Warn("webhook delivery state update failed", "outcome", "success_record_failed", "error", err)
 		return
 	}
 	if status != "OK" {
+		log.Info("webhook delivery state unchanged", "outcome", "stale_or_fenced", "duration_ms", msSince(postStart))
 		return
 	}
-	if parsed.Done != nil && *parsed.Done {
-		acks := acksFromSnapshot(snapshot)
-		// Seal before the done-ack idles the subscription (#183, INV-FENCE-06):
-		// a seal error leaves the wake in flight, so a retry re-delivers it and
-		// its re-grant is refused on the sealed streams; the lease lapses and
-		// the next wake arms at the next generation. Sealing is at-least-once.
-		if err := m.sealWriteFencesIfCurrent(id, generation, wakeID, generation); err != nil {
-			m.log.Warn("webhook: seal append fences before auto-ack", "sub", id, "error", err)
-			return
-		}
-		// The auto-ack(done) is a schedule/due-mutating write, so it carries the
-		// retry worker's owner scope: a deposed owner's done-ack (it released/ZREMed
-		// a slot it no longer owns) is FENCED inline, atomically with the write — the
-		// same TOCTOU resolution the expire path uses. The append-path caller passes
-		// no scope, so its auto-ack stays unfenced (the (gen,wake_id) fence guards it).
-		status, err := m.ackWithOwner(owner, id, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs)
-		if err != nil {
-			m.log.Warn("webhook: auto-ack done", "sub", id, "error", err)
-			return
-		}
-		if status == "OK" {
-			if owner != nil {
-				m.rewakeIfPendingOwned(*owner, id)
-			} else {
-				m.rewakeIfPendingUnscoped(id)
-			}
-		}
+	if parsed.Done == nil || !*parsed.Done {
+		log.Info("webhook delivery completed", "outcome", "callback_pending", "duration_ms", msSince(postStart))
+		return
 	}
+	acks := acksFromSnapshot(snapshot)
+	// Seal before the done-ack idles the subscription (#183, INV-FENCE-06):
+	// a seal error leaves the wake in flight, so a retry re-delivers it and
+	// its re-grant is refused on the sealed streams; the lease lapses and
+	// the next wake arms at the next generation. Sealing is at-least-once.
+	if err := m.sealWriteFencesIfCurrent(id, generation, wakeID, generation); err != nil {
+		log.Warn("webhook auto-ack failed", "outcome", "auto_ack_seal_failed", "error", err)
+		return
+	}
+	// The auto-ack(done) is a schedule/due-mutating write, so it carries the
+	// retry worker's owner scope: a deposed owner's done-ack (it released/ZREMed
+	// a slot it no longer owns) is FENCED inline, atomically with the write — the
+	// same TOCTOU resolution the expire path uses. The append-path caller passes
+	// no scope, so its auto-ack stays unfenced (the (gen,wake_id) fence guards it).
+	status, err = m.ackWithOwner(owner, id, generation, wakeID, generation, true, acks, time.Now(), sub.Config.LeaseTTLMs)
+	if err != nil {
+		log.Warn("webhook auto-ack failed", "outcome", "auto_ack_failed", "error", err)
+		return
+	}
+	if status != "OK" {
+		log.Info("webhook delivery state unchanged", "outcome", "auto_ack_stale_or_fenced", "duration_ms", msSince(postStart))
+		return
+	}
+	if owner != nil {
+		m.rewakeIfPendingOwned(*owner, id)
+	} else {
+		m.rewakeIfPendingUnscoped(id)
+	}
+	m.forgetWakeRequestID(wakeID)
+	log.Info("webhook delivery completed", "outcome", "auto_acknowledged", "duration_ms", msSince(postStart))
 }
 
 func (m *Manager) doWebhookRequest(req *http.Request) (*http.Response, error) {
@@ -1117,13 +1253,22 @@ func (m *Manager) recordSuccessWithOwner(owner *OwnerScope, id string, generatio
 }
 
 func (m *Manager) recordFailure(id string, generation int64, wakeID string, owner *OwnerScope) {
+	log := m.wakeLogger("webhook_retry_schedule_completed", id, generation, wakeID)
 	sub, ok, err := m.store.Get(id)
-	if err != nil || !ok {
+	if err != nil {
+		log.Warn("webhook retry not scheduled", "outcome", "subscription_lookup_failed", "error", err)
+		return
+	}
+	if !ok {
+		log.Debug("webhook retry not scheduled", "outcome", "subscription_gone")
+		m.forgetWakeRequestID(wakeID)
 		return
 	}
 	// GC a webhook that has been failing past the window (mirrors Caddy).
 	if sub.FirstFailNs != 0 && time.Since(time.Unix(0, sub.FirstFailNs)) > gcFailureWindow {
 		_ = m.store.Delete(id)
+		m.forgetWakeRequestID(wakeID)
+		log.Warn("webhook retry abandoned", "outcome", "failure_window_exceeded", "retry_count", sub.RetryCount)
 		return
 	}
 	next := time.Now().Add(RetryDelay(sub.RetryCount+1, jitterFraction()))
@@ -1133,15 +1278,22 @@ func (m *Manager) recordFailure(id string, generation int64, wakeID string, owne
 	// delivery's (generation, wakeID), so a duplicate failure cannot resurrect retry
 	// state after a concurrent success/ack has cleared the wake. The append-path
 	// caller passes no scope (unfenced).
+	var scheduled int
 	var schedErr error
 	if owner != nil {
-		_, schedErr = m.store.ScheduleRetryOwned(*owner, id, generation, wakeID, time.Now(), next)
+		scheduled, schedErr = m.store.ScheduleRetryOwned(*owner, id, generation, wakeID, time.Now(), next)
 	} else {
-		_, schedErr = m.store.ScheduleRetryUnscoped(id, generation, wakeID, time.Now(), next)
+		scheduled, schedErr = m.store.ScheduleRetryUnscoped(id, generation, wakeID, time.Now(), next)
 	}
 	if schedErr != nil {
-		m.log.Warn("webhook: schedule retry", "sub", id, "error", schedErr)
+		log.Warn("webhook retry not scheduled", "outcome", "schedule_failed", "error", schedErr)
+		return
 	}
+	outcome := "stale_or_fenced"
+	if scheduled == 1 {
+		outcome = "scheduled"
+	}
+	log.Debug("webhook retry scheduled", "outcome", outcome, "retry_attempt", sub.RetryCount+1, "next_attempt_at", next)
 }
 
 func (m *Manager) tokenTTL(sub Subscription) time.Duration {

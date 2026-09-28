@@ -350,6 +350,7 @@ func run() error {
 			SweepBatch:             cfg.SweepBatch,
 			Metrics:                subMetrics,
 			WakeTokenAudience:      cfg.WakeTokenAudience,
+			RequestIDHeader:        cfg.RequestIDHeader,
 			WebhookHTTPClient:      egress.client,
 			WebhookTargetPolicy:    egress.policy,
 			Consistency:            cfg.Consistency,

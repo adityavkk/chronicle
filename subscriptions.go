@@ -46,6 +46,10 @@ type SubscriptionTuning struct {
 	// TB6a). Empty mints wake_tokens without an aud claim.
 	WakeTokenAudience string
 
+	// RequestIDHeader names the correlation header sent on webhook deliveries
+	// (webhook.ManagerOptions.RequestIDHeader); empty keeps the default.
+	RequestIDHeader string
+
 	// ---- leased slot ownership (issue #14) ----
 	// ReplicaID is this process's membership identity; empty makes the Manager
 	// generate it (POD_NAME + a crypto/rand nonce). MemberLeaseTTL /
@@ -119,10 +123,13 @@ type SubscriptionRouter interface {
 }
 
 // SubscriptionHooks receives stream lifecycle events so the subscription layer
-// can wake subscribers. *webhook.Manager satisfies it.
+// can wake subscribers. *webhook.Manager satisfies it. OnStreamAppend's ctx
+// carries the append's request id (correlation.RequestID) for the wake it may
+// cause; the hook reads nothing else from it and never honors its cancellation,
+// because the hint outlives the request.
 type SubscriptionHooks interface {
 	OnStreamCreated(path string)
-	OnStreamAppend(path string)
+	OnStreamAppend(ctx context.Context, path string)
 	OnStreamDeleted(path string)
 }
 
@@ -265,6 +272,7 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		SweepBatch:                 tuning.SweepBatch,
 		Metrics:                    tuning.Metrics,
 		WakeTokenAudience:          tuning.WakeTokenAudience,
+		RequestIDHeader:            tuning.RequestIDHeader,
 		ReplicaID:                  tuning.ReplicaID,
 		MemberLeaseTTL:             tuning.MemberLeaseTTL,
 		HeartbeatInterval:          tuning.HeartbeatInterval,

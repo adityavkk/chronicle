@@ -133,12 +133,12 @@ func TestValidateObservabilityConfig(t *testing.T) {
 	}
 }
 
-func (s *recordingSubscriptionService) OnStreamCreated(string) {}
-func (s *recordingSubscriptionService) OnStreamAppend(string)  {}
-func (s *recordingSubscriptionService) OnStreamDeleted(string) {}
-func (s *recordingSubscriptionService) Start()                 {}
-func (s *recordingSubscriptionService) Stop()                  {}
-func (s *recordingSubscriptionService) RunSweep()              {}
+func (s *recordingSubscriptionService) OnStreamCreated(string)                 {}
+func (s *recordingSubscriptionService) OnStreamAppend(context.Context, string) {}
+func (s *recordingSubscriptionService) OnStreamDeleted(string)                 {}
+func (s *recordingSubscriptionService) Start()                                 {}
+func (s *recordingSubscriptionService) Stop()                                  {}
+func (s *recordingSubscriptionService) RunSweep()                              {}
 
 func (s *recordingSubscriptionService) Promote() {
 	s.promotes.Add(1)

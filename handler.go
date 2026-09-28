@@ -165,9 +165,9 @@ func (h *Handler) onStreamCreated(path string) {
 	}
 }
 
-func (h *Handler) onStreamAppend(path string) {
+func (h *Handler) onStreamAppend(ctx context.Context, path string) {
 	if h.SubHooks != nil {
-		h.SubHooks.OnStreamAppend(subStreamPath(path))
+		h.SubHooks.OnStreamAppend(ctx, subStreamPath(path))
 	}
 }
 
@@ -436,7 +436,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 		}
 		h.onStreamCreated(path)
 		if len(initialData) > 0 {
-			h.onStreamAppend(path)
+			h.onStreamAppend(r.Context(), path)
 			h.observeAppendSubscriptionHook(createReturnedAt)
 		}
 	}
@@ -1176,7 +1176,7 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 	// is the backstop if this is lost to a crash). This fires only for a
 	// genuinely new append — a deduplicated producer retry wrote no new data,
 	// so waking subscribers for it would be spurious.
-	h.onStreamAppend(path)
+	h.onStreamAppend(r.Context(), path)
 	h.observeAppendSubscriptionHook(appendReturnedAt)
 
 	// For non-producer appends, return 204 No Content

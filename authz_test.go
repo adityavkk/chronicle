@@ -1,6 +1,7 @@
 package chronicle
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"net/http"
@@ -48,7 +49,7 @@ type hookRecorder struct {
 
 func (r *hookRecorder) OnStreamCreated(string) {}
 func (r *hookRecorder) OnStreamDeleted(string) {}
-func (r *hookRecorder) OnStreamAppend(path string) {
+func (r *hookRecorder) OnStreamAppend(_ context.Context, path string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.appends = append(r.appends, path)
