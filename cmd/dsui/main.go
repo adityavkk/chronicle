@@ -35,13 +35,14 @@ func envBool(key string, def bool) bool {
 }
 
 func main() {
-	// Flags default from env vars (DSUI_*) so the binary works under WCNP's
-	// env-driven helm chart as well as from the command line.
+	// Flags default from env vars (DSUI_*) so the binary works under an
+	// env-driven deployment as well as from the command line.
 	listen := flag.String("listen", envOr("DSUI_LISTEN", ":4438"), "address for the dsui web server")
 	server := flag.String("server", envOr("DSUI_SERVER", ""), "default Durable Streams server URL to prefill (e.g. http://localhost:4437)")
 	jwksURL := flag.String("jwks-url", envOr("DSUI_JWKS_URL", ""), "Chronicle JWKS URL used to verify captured webhooks (default derived from --server)")
 	captureBase := flag.String("capture-base", envOr("DSUI_CAPTURE_BASE", ""), "base URL the chronicle server uses to reach this binary's webhook-capture endpoint (default derived from --listen, e.g. http://localhost:4438)")
 	open := flag.Bool("open", envBool("DSUI_OPEN", true), "open the UI in a browser on start")
+	insecureUnverified := flag.Bool("insecure-unverified", envBool("DSUI_INSECURE_UNVERIFIED", false), "record captured webhooks without verifying their signatures (developer machines only)")
 	flag.Parse()
 
 	webRoot, err := fs.Sub(embeddedFS, "embedded")
@@ -57,16 +58,17 @@ func main() {
 	// subscription's webhook_url points at <captureBase>/__hooks/<id>; chronicle
 	// POSTs signed wakes there, this binary buffers them and relays to the browser
 	// over SSE (the browser cannot host an inbound endpoint itself).
-	var verifier captureVerifier
-	resolvedJWKSURL := *jwksURL
-	if resolvedJWKSURL == "" {
-		resolvedJWKSURL = defaultJWKSURL(*server)
+	verifier, resolvedJWKSURL, err := captureVerifierFor(*server, *jwksURL, *insecureUnverified)
+	if err != nil {
+		log.Fatalf("dsui: %v", err)
 	}
-	if resolvedJWKSURL != "" {
-		verifier = newJWKSCaptureVerifier(resolvedJWKSURL)
+	switch {
+	case verifier == nil:
+		log.Printf("dsui: WARNING: captured webhooks are recorded UNVERIFIED (--insecure-unverified); developer machines only")
+	case plainHTTPToRemote(resolvedJWKSURL):
+		log.Printf("dsui: verifying captured webhooks against %s; WARNING: plain http to a remote host, an on-path attacker could substitute the keys", resolvedJWKSURL)
+	default:
 		log.Printf("dsui: verifying captured webhooks against %s", resolvedJWKSURL)
-	} else {
-		log.Printf("dsui: WARNING: captured webhooks are not signature-verified; set --jwks-url or --server")
 	}
 	registerCaptureRoutes(mux, newCaptureStore(), verifier)
 

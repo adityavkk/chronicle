@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -17,8 +19,12 @@ import (
 const (
 	captureSignatureMaxAge = 5 * time.Minute
 	jwksCacheTTL           = 5 * time.Minute
-	jwksFetchTimeout       = 5 * time.Second
-	maxJWKSBody            = 1 << 20
+	// forcedRefreshInterval bounds how often an unknown kid may force a JWKS
+	// fetch: rotation makes one unknown kid expected, an unauthenticated POST
+	// must not make this binary fetch on demand.
+	forcedRefreshInterval = 30 * time.Second
+	jwksFetchTimeout      = 5 * time.Second
+	maxJWKSBody           = 1 << 20
 )
 
 var errJWKSUnavailable = errors.New("webhook verification keys unavailable")
@@ -35,6 +41,7 @@ type jwksCaptureVerifier struct {
 	mu        sync.Mutex
 	keys      webhook.JWKS
 	refreshAt time.Time
+	forcedAt  time.Time
 }
 
 func newJWKSCaptureVerifier(url string) *jwksCaptureVerifier {
@@ -50,6 +57,41 @@ func defaultJWKSURL(serverURL string) string {
 		return ""
 	}
 	return strings.TrimRight(serverURL, "/") + "/v1/stream/__ds/jwks.json"
+}
+
+// captureVerifierFor resolves how captured webhooks are verified: against the
+// JWKS at jwksURL, else the one derived from serverURL, else, only when
+// insecureUnverified is set, not at all. The unverified mode is a choice the
+// operator states, never a default that a missing flag falls into. The
+// returned URL is the one the verifier fetches, for the startup log.
+func captureVerifierFor(serverURL, jwksURL string, insecureUnverified bool) (captureVerifier, string, error) {
+	resolved := strings.TrimSpace(jwksURL)
+	if resolved == "" {
+		resolved = defaultJWKSURL(serverURL)
+	}
+	if resolved == "" {
+		if !insecureUnverified {
+			return nil, "", errors.New("captured webhooks would not be signature-verified: set --server or --jwks-url, or --insecure-unverified to record unverified captures on a developer machine")
+		}
+		return nil, "", nil
+	}
+	return newJWKSCaptureVerifier(resolved), resolved, nil
+}
+
+// plainHTTPToRemote reports whether rawURL fetches over plain http from a
+// non-loopback host, where an on-path attacker could substitute the keys
+// that verify captured deliveries.
+func plainHTTPToRemote(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip == nil || !ip.IsLoopback()
 }
 
 func (v *jwksCaptureVerifier) Verify(header string, body []byte) error {
@@ -77,6 +119,11 @@ func (v *jwksCaptureVerifier) cachedKeys(force bool) (webhook.JWKS, error) {
 	if !force && len(v.keys.Keys) > 0 && now.Before(v.refreshAt) {
 		return v.keys, nil
 	}
+	if force && now.Before(v.forcedAt.Add(forcedRefreshInterval)) {
+		// Throttled: the caller re-verifies against the cached set and fails
+		// with the key error it already has.
+		return v.keys, nil
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), jwksFetchTimeout)
 	defer cancel()
@@ -102,5 +149,8 @@ func (v *jwksCaptureVerifier) cachedKeys(force bool) (webhook.JWKS, error) {
 	}
 	v.keys = keys
 	v.refreshAt = now.Add(jwksCacheTTL)
+	if force {
+		v.forcedAt = now
+	}
 	return keys, nil
 }

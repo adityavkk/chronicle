@@ -499,9 +499,11 @@ and bounded, so it survives only as long as the binary runs.
 Each captured delivery's `Webhook-Signature` is verified against chronicle's JWKS
 at `--jwks-url` (`DSUI_JWKS_URL`), which defaults to
 `<server>/v1/stream/__ds/jwks.json` when `--server` is set. A bad signature
-answers `401` and unreachable keys answer `503`, so nothing unverified is shown.
-With neither flag set, deliveries are recorded unverified and dsui logs a warning
-at startup. Bodies over 2 MiB answer `413`, and only `Content-Type` and
+answers `401` and unreachable keys answer `503`, so nothing unverified is shown;
+an unknown key id refreshes the keys at most once per 30 s. With neither flag
+set, dsui refuses to start unless `--insecure-unverified` says deliveries are to
+be recorded unverified, a developer-machine setting. Bodies over 2 MiB answer
+`413`, and only `Content-Type` and
 `Webhook-Signature` are kept from the request headers. `GET /healthz` answers
 `ok` for probes.
 

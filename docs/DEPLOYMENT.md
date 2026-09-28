@@ -438,7 +438,10 @@ DSUI_SERVER=https://chronicle.example.com
 DSUI_JWKS_URL=https://chronicle.example.com/v1/stream/__ds/jwks.json
 ```
 
-A bad signature answers `401`; an unreachable key set answers `503`. When
-neither variable is set, captures are unverified and dsui logs a warning at
-startup, which is acceptable only on a developer machine. `GET /healthz` is the
-probe endpoint.
+A bad signature answers `401`; an unreachable key set answers `503`; an unknown
+key id refreshes the key set at most once per 30 s. With neither variable set,
+dsui refuses to start unless `--insecure-unverified`
+(`DSUI_INSECURE_UNVERIFIED=true`) states that captures are to be recorded
+unverified, which is acceptable only on a developer machine. A JWKS URL fetched
+over plain `http` from a non-loopback host is logged as a warning at startup.
+`GET /healthz` is the probe endpoint.
