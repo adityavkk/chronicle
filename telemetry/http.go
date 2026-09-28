@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
+	"gecgithub01.walmart.com/auk000v/chronicle/internal/responsewriter"
 )
 
 // Handler traces every request to the main listener as one server span named
@@ -31,18 +32,14 @@ func (t *Tracing) Handler(streamRoot string, next http.Handler) http.Handler {
 			trace.WithAttributes(attribute.String("http.request.method", r.Method)))
 		defer span.End()
 
-		tracked := &spanWriter{ResponseWriter: w}
+		tracked := responsewriter.Track(w)
 		next.ServeHTTP(tracked, r.WithContext(ctx))
 
-		status := tracked.status
-		if status == 0 {
-			status = http.StatusOK
-		}
 		span.SetAttributes(
-			attribute.Int("http.response.status_code", status),
-			attribute.Int64("http.response.body.size", tracked.written),
+			attribute.Int("http.response.status_code", tracked.Status()),
+			attribute.Int64("http.response.body.size", tracked.Written()),
 		)
-		if status >= http.StatusInternalServerError {
+		if tracked.Status() >= http.StatusInternalServerError {
 			span.SetStatus(codes.Error, "server error")
 		}
 		if r.Context().Err() != nil {
@@ -74,41 +71,3 @@ func operationFor(streamRoot string, r *http.Request) string {
 		return correlation.OperationOther
 	}
 }
-
-// spanWriter records the committed status and the bytes written. Like the
-// request logger's writer it implements Flush and Unwrap explicitly, so the
-// SSE paths that assert http.Flusher keep streaming through it.
-type spanWriter struct {
-	http.ResponseWriter
-	status  int
-	written int64
-}
-
-func (w *spanWriter) WriteHeader(status int) {
-	if w.status != 0 {
-		return
-	}
-	w.status = status
-	w.ResponseWriter.WriteHeader(status)
-}
-
-func (w *spanWriter) Write(body []byte) (int, error) {
-	if w.status == 0 {
-		w.WriteHeader(http.StatusOK)
-	}
-	n, err := w.ResponseWriter.Write(body)
-	w.written += int64(n)
-	return n, err
-}
-
-// Flush commits a 200 if nothing was written yet, then flushes the underlying
-// writer through the response controller.
-func (w *spanWriter) Flush() {
-	if w.status == 0 {
-		w.WriteHeader(http.StatusOK)
-	}
-	_ = http.NewResponseController(w.ResponseWriter).Flush()
-}
-
-// Unwrap exposes the underlying writer to http.ResponseController.
-func (w *spanWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

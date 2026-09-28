@@ -10,42 +10,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
+	"gecgithub01.walmart.com/auk000v/chronicle/internal/responsewriter"
 )
-
-// requestStatusWriter records the status a handler committed so the completion
-// event can report it. It keeps Chronicle's streaming contract intact: several
-// SSE paths assert http.Flusher directly, so Unwrap alone is not enough.
-type requestStatusWriter struct {
-	http.ResponseWriter
-	status int
-}
-
-func (w *requestStatusWriter) WriteHeader(status int) {
-	if w.status != 0 {
-		return
-	}
-	w.status = status
-	w.ResponseWriter.WriteHeader(status)
-}
-
-func (w *requestStatusWriter) Write(body []byte) (int, error) {
-	if w.status == 0 {
-		w.WriteHeader(http.StatusOK)
-	}
-	return w.ResponseWriter.Write(body)
-}
-
-// Flush commits a 200 if nothing was written yet, then flushes the underlying
-// writer through the response controller.
-func (w *requestStatusWriter) Flush() {
-	if w.status == 0 {
-		w.WriteHeader(http.StatusOK)
-	}
-	_ = http.NewResponseController(w.ResponseWriter).Flush()
-}
-
-// Unwrap exposes the underlying writer to http.ResponseController.
-func (w *requestStatusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // RequestLoggingMiddleware gives every request one correlation id and one
 // completion event.
@@ -80,19 +46,15 @@ func RequestLoggingMiddleware(logger *slog.Logger, header string, next http.Hand
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path))
 
-		tracked := &requestStatusWriter{ResponseWriter: w}
+		tracked := responsewriter.Track(w)
 		complete := func(level slog.Level, outcome string) {
-			status := tracked.status
-			if status == 0 {
-				status = http.StatusOK
-			}
 			logger.LogAttrs(ctx, level, "http request completed",
 				slog.String("event", "http_request_completed"),
 				slog.String("request_id", requestID),
 				traceAttr(ctx),
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
-				slog.Int("http_status", status),
+				slog.Int("http_status", tracked.Status()),
 				slog.String("outcome", outcome),
 				slog.Int64("duration_ms", time.Since(startedAt).Milliseconds()))
 		}
@@ -104,7 +66,7 @@ func RequestLoggingMiddleware(logger *slog.Logger, header string, next http.Hand
 			switch {
 			case errors.Is(ctx.Err(), context.Canceled):
 				complete(slog.LevelInfo, "cancelled")
-			case tracked.status >= http.StatusInternalServerError:
+			case tracked.Status() >= http.StatusInternalServerError:
 				complete(slog.LevelError, "failed")
 			default:
 				complete(slog.LevelInfo, "completed")

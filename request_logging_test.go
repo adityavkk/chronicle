@@ -3,6 +3,7 @@ package chronicle
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -212,5 +213,27 @@ func TestRequestLoggingMiddlewareLogsTheTraceID(t *testing.T) {
 		if _, ok := line["trace_id"]; ok {
 			t.Fatalf("an untraced request logged a trace_id: %#v", line)
 		}
+	}
+}
+
+// flushFailingRecorder is a writer whose connection-level flush fails, the
+// way the SSE write deadline makes the real connection's fail.
+type flushFailingRecorder struct {
+	*httptest.ResponseRecorder
+	err error
+}
+
+func (r *flushFailingRecorder) FlushError() error { return r.err }
+
+func TestRequestLoggingMiddlewareReportsFlushErrors(t *testing.T) {
+	deadline := errors.New("write deadline exceeded")
+	var got error
+	handler := RequestLoggingMiddleware(slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)), "",
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			got = http.NewResponseController(w).Flush()
+		}))
+	handler.ServeHTTP(&flushFailingRecorder{httptest.NewRecorder(), deadline}, httptest.NewRequest(http.MethodGet, "/v1/stream/example", nil))
+	if !errors.Is(got, deadline) {
+		t.Fatalf("flush through the middleware = %v, want the connection's %v: the SSE write timeout is reported through it", got, deadline)
 	}
 }

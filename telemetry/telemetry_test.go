@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -322,5 +323,27 @@ func TestOperationFor(t *testing.T) {
 		if got := operationFor("/v1/stream/", httptest.NewRequest(tc.method, tc.path, nil)); got != tc.want {
 			t.Errorf("operationFor(%s %s) = %s, want %s", tc.method, tc.path, got, tc.want)
 		}
+	}
+}
+
+// flushFailingRecorder is a writer whose connection-level flush fails, the
+// way the SSE write deadline makes the real connection's fail.
+type flushFailingRecorder struct {
+	*httptest.ResponseRecorder
+	err error
+}
+
+func (r *flushFailingRecorder) FlushError() error { return r.err }
+
+func TestHandlerReportsFlushErrors(t *testing.T) {
+	tracing, _ := newTestTracing(t)
+	deadline := errors.New("write deadline exceeded")
+	var got error
+	handler := tracing.Handler("/v1/stream/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		got = http.NewResponseController(w).Flush()
+	}))
+	handler.ServeHTTP(&flushFailingRecorder{httptest.NewRecorder(), deadline}, httptest.NewRequest(http.MethodGet, "/v1/stream/a", nil))
+	if !errors.Is(got, deadline) {
+		t.Fatalf("flush through the tracing handler = %v, want the connection's %v", got, deadline)
 	}
 }
