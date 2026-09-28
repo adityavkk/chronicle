@@ -197,7 +197,7 @@ func TestRequestLoggingMiddlewareOutcomes(t *testing.T) {
 			}))
 		func() {
 			defer func() {
-				if recover() != http.ErrAbortHandler {
+				if err, ok := recover().(error); !ok || !errors.Is(err, http.ErrAbortHandler) {
 					t.Fatal("middleware must re-raise http.ErrAbortHandler unchanged")
 				}
 			}()

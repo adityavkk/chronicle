@@ -62,7 +62,7 @@ func RequestLoggingMiddleware(logger *slog.Logger, header string, next http.Hand
 		defer func() {
 			recovered := recover()
 			switch {
-			case recovered == http.ErrAbortHandler:
+			case isAbort(recovered):
 				// The SSE paths end a committed stream they cannot finish this
 				// way, and net/http stays silent about it: a client that went
 				// away is routine, a write that timed out on a live one is
@@ -88,6 +88,13 @@ func RequestLoggingMiddleware(logger *slog.Logger, header string, next http.Hand
 
 		next.ServeHTTP(tracked, r)
 	})
+}
+
+// isAbort reports whether a recovered panic value is http.ErrAbortHandler,
+// the sentinel the SSE paths raise to end a committed stream.
+func isAbort(recovered any) bool {
+	err, ok := recovered.(error)
+	return ok && errors.Is(err, http.ErrAbortHandler)
 }
 
 // traceAttr is the trace_id attribute of a traced request, or the empty Attr,

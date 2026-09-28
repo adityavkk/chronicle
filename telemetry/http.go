@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -38,7 +39,7 @@ func (t *Tracing) Handler(streamRoot string, next http.Handler) http.Handler {
 				attribute.Int64("http.response.body.size", tracked.Written()),
 			)
 			switch {
-			case recovered != nil && recovered != http.ErrAbortHandler:
+			case recovered != nil && !isAbort(recovered):
 				// An abort is how the SSE paths end a committed stream they
 				// cannot finish; any other panic is a failure of the request.
 				span.SetStatus(codes.Error, "panic")
@@ -55,6 +56,13 @@ func (t *Tracing) Handler(streamRoot string, next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(tracked, r.WithContext(ctx))
 	})
+}
+
+// isAbort reports whether a recovered panic value is http.ErrAbortHandler,
+// the sentinel the SSE paths raise to end a committed stream.
+func isAbort(recovered any) bool {
+	err, ok := recovered.(error)
+	return ok && errors.Is(err, http.ErrAbortHandler)
 }
 
 // operationFor classifies a request by method and by whether it targets the
