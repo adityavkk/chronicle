@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -21,6 +24,24 @@ type recordingSubscriptionService struct {
 	reconnected chan struct{}
 	promotes    atomic.Int64
 	promoted    chan struct{}
+}
+
+func TestWithUIDisabledReturnsAPIUnchanged(t *testing.T) {
+	api := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	got, enabled := withUI("/v1/stream/", api, false, "", logger)
+	if enabled {
+		t.Fatal("withUI reported enabled")
+	}
+	for _, path := range []string{"/", "/dsui-config.json", "/v1/stream/orders"} {
+		rr := httptest.NewRecorder()
+		got.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("%s reached wrapper instead of API: status %d", path, rr.Code)
+		}
+	}
 }
 
 func TestValidateSegmentConfig(t *testing.T) {
@@ -112,12 +133,12 @@ func TestValidateObservabilityConfig(t *testing.T) {
 	}
 }
 
-func (s *recordingSubscriptionService) OnStreamCreated(string) {}
-func (s *recordingSubscriptionService) OnStreamAppend(string)  {}
-func (s *recordingSubscriptionService) OnStreamDeleted(string) {}
-func (s *recordingSubscriptionService) Start()                 {}
-func (s *recordingSubscriptionService) Stop()                  {}
-func (s *recordingSubscriptionService) RunSweep()              {}
+func (s *recordingSubscriptionService) OnStreamCreated(string)                 {}
+func (s *recordingSubscriptionService) OnStreamAppend(context.Context, string) {}
+func (s *recordingSubscriptionService) OnStreamDeleted(string)                 {}
+func (s *recordingSubscriptionService) Start()                                 {}
+func (s *recordingSubscriptionService) Stop()                                  {}
+func (s *recordingSubscriptionService) RunSweep()                              {}
 
 func (s *recordingSubscriptionService) Promote() {
 	s.promotes.Add(1)
@@ -168,7 +189,7 @@ func TestRedisReconnectTriggersSubscriptionService(t *testing.T) {
 	defer cancel()
 
 	events := &redisEventSink{}
-	client, err := newRedisClient(rawURL, 0, events)
+	client, err := newRedisClient(chronicle.Config{RedisURL: rawURL}, events)
 	if err != nil {
 		t.Fatalf("new redis client: %v", err)
 	}
@@ -210,6 +231,32 @@ func TestRedisReconnectTriggersSubscriptionService(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("Redis reconnect did not notify subscription service (count=%d)", svc.reconnects.Load())
 		case <-tick.C:
+		}
+	}
+}
+
+func TestNewLogger(t *testing.T) {
+	var buf bytes.Buffer
+	logger, err := newLogger(&buf, "warn", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.Info("filtered")
+	logger.Warn("kept", "k", "v")
+	if got := strings.TrimSpace(buf.String()); !strings.HasPrefix(got, "{") || !strings.Contains(got, `"msg":"kept"`) || strings.Contains(got, "filtered") {
+		t.Fatalf("json logger at warn wrote %q", got)
+	}
+	buf.Reset()
+	if logger, err = newLogger(&buf, "info", "text"); err != nil {
+		t.Fatal(err)
+	}
+	logger.Info("kept")
+	if got := buf.String(); strings.HasPrefix(got, "{") || !strings.Contains(got, "msg=kept") {
+		t.Fatalf("text logger wrote %q", got)
+	}
+	for _, bad := range [][2]string{{"loud", "text"}, {"info", "xml"}, {"info", ""}} {
+		if _, err := newLogger(&buf, bad[0], bad[1]); err == nil {
+			t.Errorf("newLogger(%q, %q) must fail", bad[0], bad[1])
 		}
 	}
 }

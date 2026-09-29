@@ -4,15 +4,14 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -27,17 +26,14 @@ import (
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
 	"gecgithub01.walmart.com/auk000v/chronicle/store/segments"
+	"gecgithub01.walmart.com/auk000v/chronicle/telemetry"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
 // newStore builds the stream store. For the redis backend it also returns the
 // concrete Redis store and the shared client so the subscription layer can run
-// on the same Redis; both are nil for the memory backend.
-//
-// Two URL schemes are supported:
-//   - redis://host:port/db — standalone (Memorystore STANDARD_HA or single node)
-//   - redis+cluster://host1:port,host2:port,... — sharded cluster
-//     (Memorystore for Redis Cluster; gate #2 cross-node RTT testing)
+// on the same Redis; both are nil for the memory backend. newRedisClient lists
+// the supported Redis URL schemes.
 func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEventSink) (store.Store, *redisstore.Store, goredis.UniversalClient, error) {
 	switch cfg.StoreBackend {
 	case "memory":
@@ -46,15 +42,23 @@ func newStore(cfg chronicle.Config, logger *slog.Logger, redisEvents *redisEvent
 		}
 		return store.NewMemoryStore(), nil, nil, nil
 	case "redis":
-		client, err := newRedisClient(cfg.RedisURL, cfg.RedisPoolSize, redisEvents)
+		client, err := newRedisClient(cfg, redisEvents)
 		if err != nil {
 			return nil, nil, nil, err
+		}
+		if cfg.RedisTLSInsecureSkipVerify {
+			logger.Warn("redis TLS certificate verification is DISABLED by CHRONICLE_REDIS_TLS_INSECURE_SKIP_VERIFY: an on-path attacker can impersonate Redis and read its password and all stream data; set CHRONICLE_REDIS_CA_FILE instead")
+		}
+		if cfg.RedisCredentialFile != "" && cfg.RedisCredentialFileAllowGroupRead {
+			logger.Warn("redis credential file may be group-readable, permitted by CHRONICLE_REDIS_CREDENTIAL_FILE_ALLOW_GROUP_READ: the group must be a dedicated single-reader fsGroup, never a shared login group")
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := client.Ping(ctx).Err(); err != nil {
-			return nil, nil, nil, fmt.Errorf("redis unreachable at %s: %w", cfg.RedisURL, err)
+			_ = client.Close()
+			return nil, nil, nil, fmt.Errorf("redis unreachable: %w", err)
 		}
+		logRedisConnected(logger, client)
 		rs := redisstore.New(client, redisstore.Options{
 			Logger:                       logger,
 			NotificationConnectionGroups: cfg.SSENotificationGroups,
@@ -131,70 +135,32 @@ func (s *redisEventSink) OnConnect(_ context.Context, _ *goredis.Conn) error {
 	return nil
 }
 
-// newRedisClient parses a Redis URL and creates the appropriate client.
-// redis://host:port/db creates a standalone client; redis+cluster://h1,h2,h3
-// creates a ClusterClient that speaks the Redis Cluster protocol (required for
-// Memorystore for Redis Cluster, which shards keys across nodes — gate #2).
-func newRedisClient(rawURL string, poolSize int, redisEvents *redisEventSink) (goredis.UniversalClient, error) {
-	// rediss+cluster:// = Redis Cluster over TLS; redis+cluster:// = plaintext.
-	useTLS := strings.HasPrefix(rawURL, "rediss+cluster://")
-	if useTLS || strings.HasPrefix(rawURL, "redis+cluster://") {
-		rest := strings.TrimPrefix(strings.TrimPrefix(rawURL, "rediss+cluster://"), "redis+cluster://")
-		// Optional user:pass@ credentials precede the comma-separated seed list.
-		// Managed Redis Cluster (e.g. the squiggly ms-df-redis cluster) requires
-		// AUTH; the standalone path gets creds via ParseURL, so parse them here too.
-		var username, password string
-		if at := strings.LastIndex(rest, "@"); at >= 0 {
-			cred := rest[:at]
-			rest = rest[at+1:]
-			if c := strings.IndexByte(cred, ':'); c >= 0 {
-				username = cred[:c]
-				if pw, err := url.QueryUnescape(cred[c+1:]); err == nil {
-					password = pw
-				} else {
-					password = cred[c+1:]
-				}
-			} else {
-				username = cred
-			}
-		}
-		// Strip any /db suffix — cluster mode ignores DB selection.
-		if i := strings.LastIndex(rest, "/"); i >= 0 {
-			rest = rest[:i]
-		}
-		seeds := strings.Split(rest, ",")
-		for i := range seeds {
-			seeds[i] = strings.TrimSpace(seeds[i])
-		}
-		opts := &goredis.ClusterOptions{
-			Addrs:    seeds,
-			Username: username,
-			Password: password,
-		}
-		if poolSize > 0 {
-			opts.PoolSize = poolSize
-		}
-		if redisEvents != nil {
-			opts.OnConnect = redisEvents.OnConnect
-		}
-		if useTLS {
-			// ms-df-redis requires TLS. Cluster node addrs come from CLUSTER SLOTS
-			// and won't match the cert SAN, so skip hostname verification.
-			opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true} // #nosec G402
-		}
-		return goredis.NewClusterClient(opts), nil
+// envOr returns the environment value for key, or fallback when it is unset
+// or empty. It seeds the defaults of flags that have no Config field.
+func envOr(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		return v
 	}
-	opt, err := goredis.ParseURL(rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid redis URL: %w", err)
+	return fallback
+}
+
+// newLogger builds the process logger. level is debug, info, warn or error;
+// format is text (the development default) or json (one record per line for
+// a log pipeline). Both are chosen by flag, seeded from the environment.
+func newLogger(w io.Writer, level, format string) (*slog.Logger, error) {
+	var lvl slog.Level
+	if err := lvl.UnmarshalText([]byte(level)); err != nil {
+		return nil, fmt.Errorf("invalid -log-level %q: %w", level, err)
 	}
-	if redisEvents != nil {
-		opt.OnConnect = redisEvents.OnConnect
+	opts := &slog.HandlerOptions{Level: lvl}
+	switch format {
+	case "text":
+		return slog.New(slog.NewTextHandler(w, opts)), nil
+	case "json":
+		return slog.New(slog.NewJSONHandler(w, opts)), nil
+	default:
+		return nil, fmt.Errorf("invalid -log-format %q: want text or json", format)
 	}
-	if poolSize > 0 {
-		opt.PoolSize = poolSize
-	}
-	return goredis.NewClient(opt), nil
 }
 
 func main() {
@@ -210,7 +176,8 @@ func run() error {
 		return err
 	}
 
-	logLevel := "info"
+	logLevel := envOr(chronicle.EnvLogLevel, "info")
+	logFormat := envOr(chronicle.EnvLogFormat, "text")
 	flag.StringVar(&cfg.Listen, "listen", cfg.Listen, "HTTP listen address")
 	flag.StringVar(&cfg.StreamRoot, "stream-root", cfg.StreamRoot, "URL prefix the protocol is served under")
 	flag.StringVar(&cfg.RedisURL, "redis-url", cfg.RedisURL, "redis connection URL (redis backend)")
@@ -235,15 +202,20 @@ func run() error {
 	flag.BoolVar(&cfg.UI, "ui", cfg.UI, "serve the embedded dsui console alongside the API (false = backend API only)")
 	flag.StringVar(&cfg.UIServer, "ui-server", cfg.UIServer, "server URL the served console prefills (empty = same-origin)")
 	flag.BoolVar(&cfg.WebhookAllowPrivate, "webhook-allow-private", cfg.WebhookAllowPrivate, "accept webhook URLs on private/RFC1918 addresses (trusted networks only)")
+	flag.StringVar(&cfg.RequestIDHeader, "request-id-header", cfg.RequestIDHeader, "correlation header read on requests, echoed on responses and sent on webhook deliveries")
 	flag.DurationVar(&cfg.SweepInterval, "sweep-interval", cfg.SweepInterval, "recovery sweep interval (subscriptions)")
 	flag.DurationVar(&cfg.ReconcileInterval, "reconcile-interval", cfg.ReconcileInterval, "slow reconcile loop interval (subscriptions)")
 	flag.IntVar(&cfg.SweepBatch, "sweep-batch", cfg.SweepBatch, "max subscriptions evaluated per sweep tick, 0 = no cap (subscriptions)")
 	flag.StringVar(&cfg.MetricsListen, "metrics-listen", cfg.MetricsListen, "address for /metrics + /healthz + /readyz, e.g. :9090 (empty disables)")
 	flag.BoolVar(&cfg.MetricsPprof, "metrics-pprof", cfg.MetricsPprof, "expose Go runtime profiles on the protected metrics listener")
 	flag.StringVar(&logLevel, "log-level", logLevel, "log level: debug, info, warn or error")
+	flag.StringVar(&logFormat, "log-format", logFormat, "log format: text or json")
 	flag.Parse()
 	if cfg.ReadPageBytes <= 0 {
 		return fmt.Errorf("-read-page-bytes must be positive")
+	}
+	if err := cfg.CheckRequestIDHeader(); err != nil {
+		return fmt.Errorf("-request-id-header: %w", err)
 	}
 	if err := validateSegmentConfig(cfg); err != nil {
 		return err
@@ -254,11 +226,24 @@ func run() error {
 	if err := validateObservabilityConfig(cfg); err != nil {
 		return err
 	}
-	var level slog.Level
-	if err := level.UnmarshalText([]byte(logLevel)); err != nil {
-		return fmt.Errorf("invalid -log-level %q: %w", logLevel, err)
+	logger, err := newLogger(os.Stderr, logLevel, logFormat)
+	if err != nil {
+		return err
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	// Tracing is opt-in (CHRONICLE_OTLP_ENDPOINT) and the one subsystem that
+	// fails open: an unusable destination is a warning and a metric, not a
+	// refused start (see package telemetry).
+	tracing, err := telemetry.Start(context.Background(), os.LookupEnv, logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tracing.Shutdown(ctx); err != nil {
+			logger.Warn("tracing shutdown incomplete", "error", err)
+		}
+	}()
 
 	redisEvents := &redisEventSink{}
 	st, rs, client, err := newStore(cfg, logger, redisEvents)
@@ -266,6 +251,11 @@ func run() error {
 		return err
 	}
 	defer st.Close() //nolint:errcheck // best-effort release on shutdown
+	if client != nil {
+		if err := tracing.InstrumentRedis(client); err != nil {
+			return err
+		}
+	}
 
 	handler := &chronicle.Handler{
 		Store:                 st,
@@ -277,6 +267,7 @@ func run() error {
 		SSEClientWriteTimeout: cfg.SSEClientWriteTimeout,
 		Logger:                logger,
 		AuthMode:              cfg.AuthMode,
+		RequestIDHeader:       cfg.RequestIDHeader,
 	}
 
 	// Service principals (#180): mesh-attested SPIFFE is primary. Static bearer
@@ -330,6 +321,12 @@ func run() error {
 		if source, ok := st.(metrics.SegmentStatsSource); ok {
 			prom.RegisterSegments(source)
 		}
+		if reason, failed := tracing.FailedOpen(); failed {
+			prom.TracingSetupFailed(reason)
+		}
+		if tracing.Enabled() {
+			prom.TrackTracingExportFailures(tracing.ExportFailures)
+		}
 		subMetrics = prom
 		handler.ReadMetrics = prom
 		handler.SSEMetrics = prom
@@ -343,6 +340,7 @@ func run() error {
 				defer cancel()
 				return client.Ping(ctx).Err()
 			}
+			ready = redisReadiness(logger, ready)
 		}
 		metricsSrv = &http.Server{
 			Addr:              cfg.MetricsListen,
@@ -380,6 +378,8 @@ func run() error {
 			SweepBatch:             cfg.SweepBatch,
 			Metrics:                subMetrics,
 			WakeTokenAudience:      cfg.WakeTokenAudience,
+			RequestIDHeader:        cfg.RequestIDHeader,
+			Tracer:                 tracing.Tracer(),
 			WebhookHTTPClient:      egress.client,
 			WebhookTargetPolicy:    egress.policy,
 			Consistency:            cfg.Consistency,
@@ -429,6 +429,13 @@ func run() error {
 	// when -ui=false (backend-only) or the UI was not built into this binary — the
 	// UI is fully optional and decoupled from the backend.
 	root, uiEnabled := withUI(cfg.StreamRoot, api, cfg.UI, cfg.UIServer, logger)
+	// Every request, API and console alike, gets one correlation id and one
+	// completion event; the id also rides the append hook into webhook delivery.
+	root = chronicle.RequestLoggingMiddleware(logger, cfg.RequestIDHeader, root)
+	// Tracing sits outermost so the logger sees the span's trace id and an
+	// append's context carries the span to the webhook it causes. With tracing
+	// off, Handler returns root unwrapped.
+	root = tracing.Handler(cfg.StreamRoot, root)
 
 	srv := &http.Server{
 		Addr:    cfg.Listen,
@@ -452,6 +459,7 @@ func run() error {
 		"segment_mode", cfg.SegmentMode,
 		"segment_state", cfg.SegmentInitialState,
 		"subscriptions", subscriptionsEnabled,
+		"tracing", tracing.Enabled(),
 		"ui", uiEnabled,
 		"auth_mode", cfg.AuthMode.String(),
 		"long_poll_timeout", cfg.LongPollTimeout,

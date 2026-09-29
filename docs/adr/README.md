@@ -19,3 +19,4 @@ Naming: `NNNN-short-title.md`, zero-padded, monotonically increasing.
 | [0007](0007-fuse-root-pages-and-register-live-reads-first.md) | Accepted | Fuse bounded root-owned frames into the atomic root read and register new live readers before their authoritative page |
 | [0008](0008-write-fencing-extension.md) | Accepted | Make the claim-bound append fence a §11.1 protocol extension: fenced streams, server-derived write classes, producer binding, epoch ≡ generation, per-authority seal at done |
 | [0009](0009-claim-verify-route.md) | Accepted | Add a read-only claim/verify route (WF-29/WF-30) that answers with the append pre-check's decision |
+| [0011](0011-tracing-fails-open-and-samples-by-operation.md) | Accepted | Opt-in OTLP tracing that fails open loudly, samples only Chronicle's own roots by operation or ratio, and carries the append's trace to the webhook as an unsigned `traceparent` |

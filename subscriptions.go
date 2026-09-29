@@ -11,6 +11,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
@@ -45,6 +47,13 @@ type SubscriptionTuning struct {
 	// WakeTokenAudience is the aud claim minted into wake_tokens (#123/#126
 	// TB6a). Empty mints wake_tokens without an aud claim.
 	WakeTokenAudience string
+
+	// RequestIDHeader names the correlation header sent on webhook deliveries
+	// (webhook.ManagerOptions.RequestIDHeader); empty keeps the default.
+	RequestIDHeader string
+	// Tracer starts the webhook delivery spans and sends their trace context
+	// on the POST (webhook.ManagerOptions.Tracer); nil sends none.
+	Tracer trace.Tracer
 
 	// ---- leased slot ownership (issue #14) ----
 	// ReplicaID is this process's membership identity; empty makes the Manager
@@ -119,10 +128,13 @@ type SubscriptionRouter interface {
 }
 
 // SubscriptionHooks receives stream lifecycle events so the subscription layer
-// can wake subscribers. *webhook.Manager satisfies it.
+// can wake subscribers. *webhook.Manager satisfies it. OnStreamAppend's ctx
+// carries the append's request id (correlation.RequestID) for the wake it may
+// cause; the hook reads nothing else from it and never honors its cancellation,
+// because the hint outlives the request.
 type SubscriptionHooks interface {
 	OnStreamCreated(path string)
-	OnStreamAppend(path string)
+	OnStreamAppend(ctx context.Context, path string)
 	OnStreamDeleted(path string)
 }
 
@@ -265,6 +277,8 @@ func NewSubscriptions(client redis.UniversalClient, streamStore store.Store, rs 
 		SweepBatch:                 tuning.SweepBatch,
 		Metrics:                    tuning.Metrics,
 		WakeTokenAudience:          tuning.WakeTokenAudience,
+		RequestIDHeader:            tuning.RequestIDHeader,
+		Tracer:                     tuning.Tracer,
 		ReplicaID:                  tuning.ReplicaID,
 		MemberLeaseTTL:             tuning.MemberLeaseTTL,
 		HeartbeatInterval:          tuning.HeartbeatInterval,

@@ -187,7 +187,7 @@ func TestOnStreamAppendIsOnlyBoundedHandoff(t *testing.T) {
 
 	returned := make(chan struct{})
 	go func() {
-		mgr.OnStreamAppend("events/a")
+		mgr.OnStreamAppend(context.Background(), "events/a")
 		close(returned)
 	}()
 	select {
@@ -221,7 +221,7 @@ func TestManagerDirtyBurstCoalesces(t *testing.T) {
 	mgr.dirtyMu.Unlock()
 
 	for range 100 {
-		mgr.OnStreamAppend("events/hot")
+		mgr.OnStreamAppend(context.Background(), "events/hot")
 	}
 	mgr.dirtyMu.Lock()
 	stats := mgr.dirty.stats(mgr.now())
@@ -266,7 +266,7 @@ func TestDirtyFanoutBatchesHydrationAndDistinctLinkedTails(t *testing.T) {
 		}
 	}
 
-	mgr.OnStreamAppend("events/a")
+	mgr.OnStreamAppend(context.Background(), "events/a")
 	if got := mgr.RunDirtyWorker(); got != 1 {
 		t.Fatalf("processed streams = %d, want 1", got)
 	}
@@ -299,7 +299,7 @@ func TestDirtyFanoutPreservesWebhookDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mgr.OnStreamAppend("events/a")
+	mgr.OnStreamAppend(context.Background(), "events/a")
 	mgr.RunDirtyWorker()
 	select {
 	case <-post.entered:
@@ -325,7 +325,7 @@ func TestConcurrentDirtyAppendsCoalesceRaceFree(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			mgr.OnStreamAppend("events/a")
+			mgr.OnStreamAppend(context.Background(), "events/a")
 		}()
 	}
 	wg.Wait()
@@ -349,7 +349,7 @@ func TestDeletedStreamHintDoesNotWake(t *testing.T) {
 	fs.tails["events/a"] = "0000000000000001_0000000000000000"
 	fs.mu.Unlock()
 
-	mgr.OnStreamAppend("events/a")
+	mgr.OnStreamAppend(context.Background(), "events/a")
 	mgr.OnStreamDeleted("events/a")
 	mgr.RunDirtyWorker()
 	if fs.count() != 0 {
@@ -377,7 +377,7 @@ func TestDirtyFanoutSurvivesConcurrentOwnerTransfer(t *testing.T) {
 		t.Fatalf("owner A claim = %+v err=%v", claim, err)
 	}
 
-	mgr.OnStreamAppend("events/a")
+	mgr.OnStreamAppend(context.Background(), "events/a")
 	done := make(chan int, 1)
 	go func() { done <- mgr.RunDirtyWorker() }()
 	select {
@@ -424,8 +424,8 @@ func TestDirtyOverflowUsesRecoveryWithoutLosingWake(t *testing.T) {
 		}
 	}
 
-	mgr.OnStreamAppend("events/a")
-	mgr.OnStreamAppend("events/b") // capacity one: represented by overflow epoch
+	mgr.OnStreamAppend(context.Background(), "events/a")
+	mgr.OnStreamAppend(context.Background(), "events/b") // capacity one: represented by overflow epoch
 	mgr.reconcile(scopeDirtyOverflow)
 
 	if fs.count() != 2 {
@@ -469,7 +469,7 @@ func TestDirtyWorkerErrorRetriesAndRequestsRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mgr.OnStreamAppend("events/a")
+	mgr.OnStreamAppend(context.Background(), "events/a")
 	if got := mgr.RunDirtyWorker(); got != 1 {
 		t.Fatalf("failed pass processed = %d", got)
 	}
@@ -509,7 +509,7 @@ func TestManagerStopDuringDirtyWorkIsIdempotent(t *testing.T) {
 	}
 	mgr.Start()
 	mgr.Start()
-	mgr.OnStreamAppend("events/a")
+	mgr.OnStreamAppend(context.Background(), "events/a")
 	select {
 	case <-barrier.entered:
 	case <-time.After(time.Second):
@@ -536,7 +536,7 @@ func TestManagerStopDuringDirtyWorkIsIdempotent(t *testing.T) {
 
 	// A stopped manager rejects later low-latency hints without panicking. The
 	// next process boot sweep remains the durable repair path.
-	mgr.OnStreamAppend("events/after-stop")
+	mgr.OnStreamAppend(context.Background(), "events/after-stop")
 }
 
 func TestStopRacingStartDoesNotLeakWorker(t *testing.T) {
@@ -590,7 +590,7 @@ func TestLostDirtyHintRecoversAfterManagerRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.OnStreamAppend("events/a")
+	first.OnStreamAppend(context.Background(), "events/a")
 	first.Stop() // crash boundary: queued latency hint is abandoned
 	if fs.count() != 0 {
 		t.Fatal("stopped manager unexpectedly processed its dirty hint")
@@ -648,7 +648,7 @@ func TestRedisDisconnectReconnectRecoversLostDirtyHint(t *testing.T) {
 	if err := store.Link("s1", "events/a", LinkGlob, fs.BeginningOffset()); err != nil {
 		t.Fatal(err)
 	}
-	mgr.OnStreamAppend("events/a")
+	mgr.OnStreamAppend(context.Background(), "events/a")
 
 	oldID, err := client.ClientID(ctx).Result()
 	if err != nil {

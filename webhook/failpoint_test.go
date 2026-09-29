@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -83,7 +84,7 @@ func TestFailpointDirtyHintLostBeforeSignalRecoversAfterRestart(t *testing.T) {
 	t.Cleanup(func() { FailpointHook = nil })
 	func() {
 		defer func() { _ = recover() }()
-		first.OnStreamAppend("events/a")
+		first.OnStreamAppend(context.Background(), "events/a")
 	}()
 	if !fired {
 		t.Fatal("dirty-boundary failpoint did not fire")

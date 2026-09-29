@@ -1,13 +1,16 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 )
 
 // Routes is the HTTP surface of the reserved subscription APIs (PROTOCOL §6–7).
@@ -67,9 +70,9 @@ func (rt *Routes) handleSubscription(w http.ResponseWriter, r *http.Request, res
 	case strings.HasPrefix(action, "streams/") && r.Method == http.MethodDelete:
 		rt.handleRemoveStream(w, r, id, strings.TrimPrefix(action, "streams/"))
 	case action == "callback" && r.Method == http.MethodPost:
-		rt.handleAckLike(w, r, id)
+		rt.handleAckLike(w, r, id, "callback")
 	case action == "ack" && r.Method == http.MethodPost:
-		rt.handleAckLike(w, r, id)
+		rt.handleAckLike(w, r, id, "ack")
 	case action == "claim/verify" && r.Method == http.MethodPost:
 		rt.handleClaimVerify(w, r, id)
 	case action == "claim" && r.Method == http.MethodPost:
@@ -447,7 +450,7 @@ func addExpectedPath(expected *SubscriptionExpectation, path string) {
 // {ok, next_wake}. A body missing the fenced fields is 400 INVALID_REQUEST; a
 // subscription that no longer exists is 410 SUBSCRIPTION_GONE; a present-but-
 // stale (generation, wake_id) is 409 FENCED (PROTOCOL §7.1, §7.2).
-func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id string) {
+func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id, operation string) {
 	token, ok := bearerToken(r)
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
@@ -469,20 +472,29 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 		writeErrMsg(w, ErrCodeInvalidRequest, "missing required field: "+missing)
 		return
 	}
+	done := req.Done != nil && *req.Done
+	ackMode := "heartbeat"
+	if done {
+		ackMode = "done"
+	}
+	log := rt.wakeRequestLogger(r.Context(), "subscription_ack_completed", id, req.Generation, req.WakeID).
+		With("operation", operation, "ack_mode", ackMode)
 	fenced, gone, nextWake, err := rt.mgr.applyAck(id, req, tv.Generation)
 	if err != nil {
+		log.Warn("subscription acknowledgement failed", "outcome", "internal_error", "http_status", http.StatusInternalServerError, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if gone {
+		log.Info("subscription acknowledgement completed", "outcome", "subscription_gone", "http_status", http.StatusGone)
 		writeErr(w, http.StatusGone, ErrCodeSubscriptionGone)
 		return
 	}
 	if fenced {
+		log.Info("subscription acknowledgement completed", "outcome", "fenced", "http_status", http.StatusConflict)
 		writeErr(w, http.StatusConflict, ErrCodeFenced)
 		return
 	}
-	done := req.Done != nil && *req.Done
 	resp := AckResponse{OK: true, NextWake: nextWake}
 	// In-band refresh (issue #77): a successful callback whose token is within the
 	// refresh threshold of expiry re-mints it and returns it in the "token" field.
@@ -494,6 +506,7 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 		}
 	}
 	if wt, ok, err := rt.mgr.mintWriteTokenOnAck(id, req.Generation, req.WakeID, done, now); err != nil {
+		log.Warn("subscription acknowledgement failed", "outcome", "write_token_failed", "http_status", http.StatusInternalServerError, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	} else if ok {
@@ -506,7 +519,32 @@ func (rt *Routes) handleAckLike(w http.ResponseWriter, r *http.Request, id strin
 	if wt, ok := rt.mgr.mintWakeTokenOnAck(id, req.Generation, req.WakeID, done, now); ok {
 		resp.WakeToken = wt
 	}
+	if done {
+		rt.mgr.forgetWakeRequestID(req.WakeID)
+	}
+	log.Info("subscription acknowledgement completed", "outcome", "accepted", "http_status", http.StatusOK)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// wakeRequestLogger is the logger a callback, ack or release completion record
+// uses. request_id is the incoming request's own id, or the wake's when the
+// request carries none (a Routes mounted without RequestLoggingMiddleware);
+// wake_request_id is the id that armed the wake, or wake-<id> when this replica
+// never armed it or no longer remembers it. Carrying both joins the two sides
+// of a delivery even when the receiver does not echo the header it was sent.
+func (rt *Routes) wakeRequestLogger(ctx context.Context, event, id string, generation int64, wakeID string) *slog.Logger {
+	wakeRequestID := rt.mgr.requestIDForWake(wakeID)
+	requestID := correlation.RequestID(ctx)
+	if requestID == "" {
+		requestID = wakeRequestID
+	}
+	return rt.mgr.log.With(
+		"event", event,
+		"request_id", requestID,
+		"wake_request_id", wakeRequestID,
+		"subscription_id", id,
+		"wake_id", wakeID,
+		"generation", generation)
 }
 
 // handleClaimVerify serves POST /__ds/subscriptions/{id}/claim/verify
@@ -744,19 +782,25 @@ func (rt *Routes) handleRelease(w http.ResponseWriter, r *http.Request, id strin
 		writeErrMsg(w, ErrCodeInvalidRequest, "missing required field: "+missing)
 		return
 	}
+	log := rt.wakeRequestLogger(r.Context(), "subscription_release_completed", id, req.Generation, req.WakeID)
 	fenced, gone, err := rt.mgr.applyRelease(id, req, tv.Generation)
 	if err != nil {
+		log.Warn("subscription release failed", "outcome", "internal_error", "http_status", http.StatusInternalServerError, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if gone {
+		log.Info("subscription release completed", "outcome", "subscription_gone", "http_status", http.StatusGone)
 		writeErr(w, http.StatusGone, ErrCodeSubscriptionGone)
 		return
 	}
 	if fenced {
+		log.Info("subscription release completed", "outcome", "fenced", "http_status", http.StatusConflict)
 		writeErr(w, http.StatusConflict, ErrCodeFenced)
 		return
 	}
+	rt.mgr.forgetWakeRequestID(req.WakeID)
+	log.Info("subscription release completed", "outcome", "released", "http_status", http.StatusNoContent)
 	w.WriteHeader(http.StatusNoContent)
 }
 

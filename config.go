@@ -8,40 +8,53 @@ import (
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
 // Environment variables recognized by Config.LoadEnv. Precedence in
 // cmd/chronicle is flags over environment over defaults.
 const (
-	EnvListen                = "CHRONICLE_LISTEN"
-	EnvRedisURL              = "CHRONICLE_REDIS_URL"
-	EnvRedisPoolSize         = "CHRONICLE_REDIS_POOL_SIZE"
-	EnvStore                 = "CHRONICLE_STORE"
-	EnvSegmentMode           = "CHRONICLE_SEGMENT_MODE"
-	EnvSegmentDir            = "CHRONICLE_SEGMENT_DIR"
-	EnvSegmentTargetBytes    = "CHRONICLE_SEGMENT_TARGET_BYTES"
-	EnvSegmentIndexStride    = "CHRONICLE_SEGMENT_INDEX_STRIDE"
-	EnvSegmentCacheBytes     = "CHRONICLE_SEGMENT_CACHE_BYTES"
-	EnvSegmentAutoSealRead   = "CHRONICLE_SEGMENT_AUTO_SEAL_READ"
-	EnvSegmentInitialState   = "CHRONICLE_SEGMENT_INITIAL_STATE"
-	EnvLongPollTimeout       = "CHRONICLE_LONG_POLL_TIMEOUT"
-	EnvSSEReconnectInterval  = "CHRONICLE_SSE_RECONNECT_INTERVAL"
-	EnvReadPageBytes         = "CHRONICLE_READ_PAGE_BYTES"
-	EnvSSEHubReplayBytes     = "CHRONICLE_SSE_HUB_REPLAY_BYTES"
-	EnvSSEHubBatchBytes      = "CHRONICLE_SSE_HUB_BATCH_BYTES"
-	EnvSSENotificationGroups = "CHRONICLE_SSE_NOTIFICATION_CONNECTIONS"
-	EnvSSEClientWriteTimeout = "CHRONICLE_SSE_CLIENT_WRITE_TIMEOUT"
-	EnvPublicURL             = "CHRONICLE_PUBLIC_URL"
-	EnvSubscriptions         = "CHRONICLE_SUBSCRIPTIONS"
-	EnvUI                    = "CHRONICLE_UI"
-	EnvUIServer              = "CHRONICLE_UI_SERVER"
-	EnvWebhookAllowPrivate   = "CHRONICLE_WEBHOOK_ALLOW_PRIVATE"
-	EnvSweepInterval         = "CHRONICLE_SWEEP_INTERVAL"
-	EnvReconcileInterval     = "CHRONICLE_RECONCILE_INTERVAL"
-	EnvSweepBatch            = "CHRONICLE_SWEEP_BATCH"
-	EnvMetricsListen         = "CHRONICLE_METRICS_LISTEN"
-	EnvMetricsPprof          = "CHRONICLE_METRICS_PPROF"
+	EnvListen              = "CHRONICLE_LISTEN"
+	EnvRedisURL            = "CHRONICLE_REDIS_URL"
+	EnvRedisPoolSize       = "CHRONICLE_REDIS_POOL_SIZE"
+	EnvRedisUsername       = "REDIS_USERNAME" // unprefixed: the name existing deployments already set
+	EnvRedisCredentialFile = "CHRONICLE_REDIS_CREDENTIAL_FILE"
+	// EnvRedisCredentialFileAllowGroupRead is the credential file's
+	// counterpart of EnvKeysFileAllowGroupRead: the same custody rule, the
+	// same one exception.
+	EnvRedisCredentialFileAllowGroupRead = "CHRONICLE_REDIS_CREDENTIAL_FILE_ALLOW_GROUP_READ"
+	EnvRedisCAFile                       = "CHRONICLE_REDIS_CA_FILE"
+	EnvRedisTLSInsecure                  = "CHRONICLE_REDIS_TLS_INSECURE_SKIP_VERIFY"
+	EnvStore                             = "CHRONICLE_STORE"
+	EnvSegmentMode                       = "CHRONICLE_SEGMENT_MODE"
+	EnvSegmentDir                        = "CHRONICLE_SEGMENT_DIR"
+	EnvSegmentTargetBytes                = "CHRONICLE_SEGMENT_TARGET_BYTES"
+	EnvSegmentIndexStride                = "CHRONICLE_SEGMENT_INDEX_STRIDE"
+	EnvSegmentCacheBytes                 = "CHRONICLE_SEGMENT_CACHE_BYTES"
+	EnvSegmentAutoSealRead               = "CHRONICLE_SEGMENT_AUTO_SEAL_READ"
+	EnvSegmentInitialState               = "CHRONICLE_SEGMENT_INITIAL_STATE"
+	EnvLongPollTimeout                   = "CHRONICLE_LONG_POLL_TIMEOUT"
+	EnvSSEReconnectInterval              = "CHRONICLE_SSE_RECONNECT_INTERVAL"
+	EnvReadPageBytes                     = "CHRONICLE_READ_PAGE_BYTES"
+	EnvSSEHubReplayBytes                 = "CHRONICLE_SSE_HUB_REPLAY_BYTES"
+	EnvSSEHubBatchBytes                  = "CHRONICLE_SSE_HUB_BATCH_BYTES"
+	EnvSSENotificationGroups             = "CHRONICLE_SSE_NOTIFICATION_CONNECTIONS"
+	EnvSSEClientWriteTimeout             = "CHRONICLE_SSE_CLIENT_WRITE_TIMEOUT"
+	EnvPublicURL                         = "CHRONICLE_PUBLIC_URL"
+	EnvSubscriptions                     = "CHRONICLE_SUBSCRIPTIONS"
+	EnvUI                                = "CHRONICLE_UI"
+	EnvUIServer                          = "CHRONICLE_UI_SERVER"
+	EnvWebhookAllowPrivate               = "CHRONICLE_WEBHOOK_ALLOW_PRIVATE"
+	EnvSweepInterval                     = "CHRONICLE_SWEEP_INTERVAL"
+	EnvReconcileInterval                 = "CHRONICLE_RECONCILE_INTERVAL"
+	EnvSweepBatch                        = "CHRONICLE_SWEEP_BATCH"
+	EnvMetricsListen                     = "CHRONICLE_METRICS_LISTEN"
+	EnvMetricsPprof                      = "CHRONICLE_METRICS_PPROF"
+
+	EnvRequestIDHeader = "CHRONICLE_REQUEST_ID_HEADER" // correlation header read, echoed and sent on webhook deliveries; default X-Request-ID
+	EnvLogLevel        = "CHRONICLE_LOG_LEVEL"         // debug | info | warn | error; the -log-level flag overrides
+	EnvLogFormat       = "CHRONICLE_LOG_FORMAT"        // text | json; the -log-format flag overrides
 	// Tunable-consistency surface (issue #16, doc 05 "Tunable consistency").
 	EnvConsistencyTier = "CHRONICLE_CONSISTENCY_TIER" // A (default) | B | C
 	EnvWaitReplicas    = "CHRONICLE_WAIT_REPLICAS"    // Tier B WAITAOF numreplicas (1 on STANDARD_HA, 0 on a single Redis)
@@ -95,6 +108,21 @@ type Config struct {
 	RedisURL string
 	// RedisPoolSize overrides go-redis' per-node connection pool size when >0.
 	RedisPoolSize int
+	// RedisUsername is the Redis ACL username. RedisCredentialFile is an
+	// absolute path to a KEY=VALUE file with REDIS_PASSWORD and an optional
+	// REDIS_USERNAME, which must agree with RedisUsername when both are set.
+	RedisUsername       string
+	RedisCredentialFile string
+	// RedisCredentialFileAllowGroupRead is the explicit opt-in to load a
+	// group-readable credential file, the same fsGroup exception as
+	// KeysFileAllowGroupRead. Parsed from
+	// CHRONICLE_REDIS_CREDENTIAL_FILE_ALLOW_GROUP_READ.
+	RedisCredentialFileAllowGroupRead bool
+	// RedisCAFile is a PEM bundle that replaces the system roots when
+	// verifying a TLS Redis server. RedisTLSInsecureSkipVerify disables that
+	// verification entirely: an explicit, logged opt-out, never a default.
+	RedisCAFile                string
+	RedisTLSInsecureSkipVerify bool
 
 	// StoreBackend selects the storage backend: "redis" or "memory".
 	StoreBackend string
@@ -237,6 +265,12 @@ type Config struct {
 	// rotation overlap window (#123). Zero keeps the per-family defaults.
 	KeyRotationOverlap time.Duration
 
+	// RequestIDHeader names the correlation header Chronicle reads, echoes and
+	// sends on webhook deliveries: correlation.DefaultHeader unless
+	// CHRONICLE_REQUEST_ID_HEADER names a platform-owned header. Its value is a
+	// log-join hint, unsigned and never identity.
+	RequestIDHeader string
+
 	// AuthMode selects stream authn/authz enforcement (issue #126). The default
 	// auth.ModeInsecure evaluates decisions for telemetry only, so a base
 	// protocol client keeps working and a deploy sync can never auto-enforce;
@@ -321,6 +355,7 @@ func DefaultConfig() Config {
 		Consistency:           webhook.TierA, // no WAIT by default — best latency, at-least-once
 		WaitReplicas:          1,             // the realistic Redis Software HA ceiling (06:70), used only by Tier B
 		WaitTimeoutMs:         1000,
+		RequestIDHeader:       correlation.DefaultHeader,
 		AuthMode:              auth.ModeInsecure, // telemetry-first: enforcement is an explicit per-stage opt-in (issue #126)
 	}
 }
@@ -340,6 +375,25 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 			return fmt.Errorf("%s: %w", EnvRedisPoolSize, err)
 		}
 		c.RedisPoolSize = n
+	}
+	if v, ok := lookup(EnvRedisUsername); ok {
+		c.RedisUsername = v
+	}
+	if v, ok := lookup(EnvRedisCredentialFile); ok {
+		c.RedisCredentialFile = v
+	}
+	if v, ok := lookup(EnvRedisCredentialFileAllowGroupRead); ok {
+		c.RedisCredentialFileAllowGroupRead = v == "1" || v == "true"
+	}
+	if v, ok := lookup(EnvRedisCAFile); ok {
+		c.RedisCAFile = v
+	}
+	if v, ok := lookup(EnvRedisTLSInsecure); ok {
+		insecure, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvRedisTLSInsecure, err)
+		}
+		c.RedisTLSInsecureSkipVerify = insecure
 	}
 	if v, ok := lookup(EnvStore); ok {
 		c.StoreBackend = v
@@ -503,6 +557,9 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 		}
 		c.KeyRotationOverlap = d
 	}
+	if v, ok := lookup(EnvRequestIDHeader); ok {
+		c.RequestIDHeader = strings.TrimSpace(v)
+	}
 	if v, ok := lookup(EnvAuthMode); ok {
 		mode, err := auth.ParseMode(v)
 		if err != nil {
@@ -557,6 +614,9 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	if v, ok := lookup(EnvXFCCTrustWithoutMarker); ok {
 		c.AllowXFCCWithoutMarker = v == "1" || v == "true"
 	}
+	if err := c.CheckRequestIDHeader(); err != nil {
+		return fmt.Errorf("%s: %w", EnvRequestIDHeader, err)
+	}
 	if v, ok := lookup(EnvKeysFileAllowGroupRead); ok {
 		c.KeysFileAllowGroupRead = v == "1" || v == "true"
 	}
@@ -607,6 +667,25 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 		if err := c.OIDC.Validate(); err != nil {
 			return fmt.Errorf("%s/%s/%s: %w", EnvOIDCIssuer, EnvOIDCAudience, EnvOIDCNSClaim, err)
 		}
+	}
+	return nil
+}
+
+// CheckRequestIDHeader is the check the correlation header name must pass
+// once the whole configuration is known: correlation.CheckHeaderName, plus
+// the one reserved name only the configuration knows, the XFCC marker. The
+// request-logging middleware overwrites the configured header on every
+// request, so a marker under that name would arrive at the gate as a request
+// id and every mesh-attested request would fail it: a fail-closed outage of
+// mesh identity rather than a spoof, and still a misconfiguration worth
+// refusing at startup. LoadEnv runs it; cmd/chronicle runs it again after the
+// -request-id-header flag is applied.
+func (c *Config) CheckRequestIDHeader() error {
+	if err := correlation.CheckHeaderName(c.RequestIDHeader); err != nil {
+		return err
+	}
+	if strings.EqualFold(c.RequestIDHeader, c.XFCCMarkerName) {
+		return fmt.Errorf("%q is the XFCC marker header named by %s and would be overwritten with the request id on every request", c.RequestIDHeader, EnvXFCCRequiredHeader)
 	}
 	return nil
 }

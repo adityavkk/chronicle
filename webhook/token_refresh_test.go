@@ -41,7 +41,7 @@ func postHeartbeat(t *testing.T, rt *Routes, id, token string, gen int64, wakeID
 	r := httptest.NewRequest(http.MethodPost, "/__ds/subscriptions/"+id+"/callback", bytes.NewReader(body))
 	r.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
-	rt.handleAckLike(w, r, id)
+	rt.handleAckLike(w, r, id, "callback")
 	return w
 }
 
