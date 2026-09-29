@@ -290,9 +290,13 @@ func run() error {
 			"trusted_spiffe_ids", len(cfg.TrustedSPIFFEIDs),
 			"policies", cfg.ServicePolicies.Len(),
 			"trusted_gateways", cfg.ServicePolicies.TrustedGatewayIdentities(),
-			"xfcc_marker", cfg.XFCCMarkerName != "")
+			"xfcc_marker", cfg.XFCCMarkerName != "",
+			"environment", cfg.Environment)
+		// Reachable only in dev: LoadEnv refuses the marker-less opt-in when
+		// CHRONICLE_ENVIRONMENT is anything else (ADR-0010), so this line
+		// must never be read as an accepted production posture.
 		if len(cfg.TrustedSPIFFEIDs) > 0 && cfg.XFCCMarkerName == "" {
-			logger.Warn("XFCC mesh identity trusted WITHOUT a sidecar marker (CHRONICLE_XFCC_TRUST_WITHOUT_MARKER set): the sidecar MUST strip client-supplied X-Forwarded-Client-Cert (Envoy forward_client_cert_details SANITIZE_SET), else an external client can forge a service principal; set CHRONICLE_XFCC_REQUIRED_HEADER for defense in depth")
+			logger.Warn("XFCC mesh identity trusted WITHOUT a sidecar marker (dev-only escape hatch CHRONICLE_XFCC_TRUST_WITHOUT_MARKER; refused at startup when CHRONICLE_ENVIRONMENT is not dev): the sidecar MUST make the last X-Forwarded-Client-Cert element the verified peer's (Envoy forward_client_cert_details SANITIZE_SET or APPEND_FORWARD, never FORWARD_ONLY or ALWAYS_FORWARD_ONLY), else an external client can forge a service principal; set CHRONICLE_XFCC_REQUIRED_HEADER for defense in depth")
 		}
 	}
 

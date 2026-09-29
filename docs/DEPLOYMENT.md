@@ -315,10 +315,16 @@ and subscription control routes.
 Set:
 
 ```text
+CHRONICLE_ENVIRONMENT=prod
 CHRONICLE_AUTH_MODE=enforce
 CHRONICLE_SERVICE_POLICY_FILE=/etc/chronicle/service-policy.json
 CHRONICLE_XFCC_REQUIRED_HEADER=X-Chronicle-Sidecar: verified
 ```
+
+`CHRONICLE_ENVIRONMENT` is the deployment label (`dev`, `stage`, `prod`, …).
+It grants nothing by itself: it only decides whether dev-only escape hatches
+are accepted, and only the literal `dev` accepts them. Set it to the real
+environment everywhere; unset counts as non-dev.
 
 The policy file is strict JSON. Unknown fields, unknown actions, duplicate
 identities, malformed namespaces, and empty policies stop startup.
@@ -373,33 +379,70 @@ closed until one is wired), and watch
 `chronicle_append_fence_rejections_total{reason}` — sustained `marker`/`sealed`
 rejections are deposed writers being stopped, which is the fence doing its job.
 
-### WCNP mesh contract
+### Mesh sidecar contract
 
-Chronicle's header checks are one part of the boundary. The deployment must
-also enforce all of these controls:
+Chronicle checks the marker and XFCC headers. The deployment must also enforce
+all of these controls:
 
 1. Enable Istio sidecar injection for the Chronicle workload and callers.
 2. Require strict mTLS for traffic to Chronicle.
-3. Configure the Chronicle sidecar to remove client-supplied
-   `X-Forwarded-Client-Cert`, set it from the verified immediate peer
-   (`forward_client_cert_details: SANITIZE_SET` or the managed equivalent), and
-   inject the exact marker named by `CHRONICLE_XFCC_REQUIRED_HEADER`. The
-   sidecar must also remove any client-supplied copy of that marker.
-4. Expose only the mesh-routed Service port. Do not expose the application port
+3. Configure the Chronicle sidecar so the last XFCC element comes from the
+   verified immediate peer. `forward_client_cert_details: SANITIZE_SET` is the
+   preferred mode because it replaces client input. A verified `APPEND_FORWARD`
+   listener is also compatible because Chronicle reads only the last element
+   of a well-formed header and refuses a header whose quoting is unbalanced or
+   misplaced (`401`, reason `malformed X-Forwarded-Client-Cert`) instead of
+   guessing where the sidecar's element starts. That rule covers well-formed
+   client input only; it does not replace `SANITIZE_SET` or the marker.
+   Never use `FORWARD_ONLY` or `ALWAYS_FORWARD_ONLY`.
+4. Inject the exact marker named by `CHRONICLE_XFCC_REQUIRED_HEADER`. The
+   sidecar must remove any client copy of that marker and set one value with
+   overwrite semantics. Chronicle rejects a missing, wrong, or duplicate
+   marker.
+5. Capture `istioctl proxy-config listeners <pod> -o json` for every inbound
+   listener that reaches the application port and for every ingress route that
+   reaches the pod. Record `forward_client_cert_details` and the gateway to
+   sidecar TLS mode.
+6. Expose only the mesh-routed Service port. Do not expose the application port
    through a host port, node port, alternate ingress, or direct load balancer.
-   Apply NetworkPolicy or the WCNP equivalent so only the approved mesh path can
-   reach the pod.
-5. Apply Service Registry or mesh authorization policy that permits only the
-   expected caller SPIFFE identities. Chronicle's policy is not a replacement
-   for the network policy.
-6. Verify the deployed path. A request sent directly to the application with a
+   Apply NetworkPolicy or the platform equivalent so only the approved mesh
+   path can reach the pod.
+7. Apply Service Registry or mesh authorization policy that permits only the
+   expected caller SPIFFE identities. Chronicle's policy does not replace the
+   network policy. With a `STRICT` `PeerAuthentication`, `source.principals`
+   rules enforce the mTLS peer independently of XFCC.
+8. Verify the deployed path. A request sent directly to the application with a
    forged XFCC header must fail with `401`. The same request through an approved
    mTLS caller must carry the sidecar marker and resolve to its exact SPIFFE
-   subject.
+   subject. Capture the listener dump and the negative probe in the same session.
 
-Do not set `CHRONICLE_XFCC_TRUST_WITHOUT_MARKER` in production. It is a
-development escape hatch for a sidecar that can prove inbound XFCC is always
-sanitized.
+Outside dev, both the marker and the listener posture are required. The binary
+can enforce the marker, but it cannot inspect the live listener mode. A marker
+on a `FORWARD_ONLY` listener proves sidecar traversal but does not prove XFCC
+sanitization.
+
+`CHRONICLE_XFCC_TRUST_WITHOUT_MARKER` is a dev-only escape hatch. Chronicle
+accepts it only when `CHRONICLE_ENVIRONMENT=dev`. A non-dev deployment with a
+SPIFFE allowlist and no marker fails first on the older #130 guard:
+
+```text
+chronicle: SPIFFE service identity is configured without CHRONICLE_XFCC_REQUIRED_HEADER: outside dev, set CHRONICLE_XFCC_REQUIRED_HEADER to a marker that only the sidecar injects with overwrite semantics, and configure the inbound listener so the last XFCC element comes from the verified peer (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD); CHRONICLE_XFCC_TRUST_WITHOUT_MARKER is refused when CHRONICLE_ENVIRONMENT is not "dev"; see docs/DEPLOYMENT.md "Mesh sidecar contract"
+```
+
+If an operator sets the dev-only opt-in outside dev, startup fails with this
+second error, whether or not a marker is also set:
+
+```text
+chronicle: CHRONICLE_XFCC_TRUST_WITHOUT_MARKER=true is a dev-only escape hatch and is refused when CHRONICLE_ENVIRONMENT="stage" (want "dev"): outside dev, XFCC mesh identity must be gated by CHRONICLE_XFCC_REQUIRED_HEADER, a header only the sidecar injects with overwrite semantics; the inbound listener must also make the last XFCC element the verified peer's (forward_client_cert_details SANITIZE_SET or APPEND_FORWARD, never FORWARD_ONLY); see docs/DEPLOYMENT.md "Mesh sidecar contract"
+```
+
+`SANITIZE_SET` without `CHRONICLE_XFCC_REQUIRED_HEADER` does not satisfy the
+startup guard outside dev. A marker satisfies the guard, but hold a non-dev
+release until the listener evidence and the negative probe also pass. Releasing
+before the marker exists, with a single replica and a recreate rollout, stops
+the running pod, starts a replacement that exits on the guard, and leaves the
+environment unavailable until rollback, which restores the previous posture. See
+[ADR-0010](adr/0010-caller-identity-only-from-sidecar-sanitized-xfcc.md).
 
 ### Static bearer compatibility
 
