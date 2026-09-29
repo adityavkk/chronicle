@@ -1,10 +1,43 @@
 package webhook
 
 import (
+	"errors"
+	"net/http"
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 )
+
+// Carriers of the claim-scoped write token, in the order they are read:
+// WriteTokenHeader is the write-fencing extension's own header (#183),
+// ClaimTokenHeader the compatibility alias Electric producers present, and
+// Authorization: Bearer the fallback for both (Electric's claimTokenFromRequest
+// order). The append gate and the claim/verify route both read the named
+// carriers through NamedWriteTokenCarrier, so WF-29 parity holds on the
+// carrier as well as on the decision.
+const (
+	WriteTokenHeader = protocol.HeaderWriteToken
+	ClaimTokenHeader = "electric-claim-token"
+)
+
+// NamedWriteTokenCarrier reads the write token from its named carriers in
+// order: Write-Token, then electric-claim-token. present is false when neither
+// header is set, and the caller may then fall back to Authorization: Bearer.
+// A duplicated or empty named header is presented-but-malformed
+// (WRITE-FENCING.md §4): it is reported as such and never falls through to
+// the next carrier or downgrades the request.
+func NamedWriteTokenCarrier(r *http.Request) (token string, present, malformed bool) {
+	for _, name := range []string{WriteTokenHeader, ClaimTokenHeader} {
+		if values := r.Header.Values(name); len(values) > 0 {
+			if len(values) > 1 || values[0] == "" {
+				return "", true, true
+			}
+			return values[0], true, false
+		}
+	}
+	return "", false, false
+}
 
 // WriteTokenAuthorizer authorizes data-plane appends by validating the
 // claim-scoped write token against the subscription layer's HMAC token key.
@@ -82,21 +115,15 @@ func (a WriteTokenAuthorizer) AuthorizeAppendFence(token string, path auth.Strea
 	if a.store == nil {
 		return auth.Allow(), nil
 	}
-	if v.WakeID == "" || v.Holder == "" {
-		return auth.Deny(auth.ReasonFenced, "write token is not bound to a live claim"), nil
-	}
-	status, err := a.store.CheckWriteFence(v.SubID, v.Shard, v.Generation, v.WakeID, v.Holder, now)
+	d, _, err := a.liveClaimDecision(v, now)
 	if err != nil {
 		return auth.Deny(auth.ReasonUnauthenticated, "write token fence unavailable"), nil
 	}
-	if status != "OK" {
-		return auth.Deny(auth.ReasonFenced, "write token claim is fenced"), nil
+	if !d.Allowed() {
+		return d, nil
 	}
 	if !a.atomic {
 		return auth.Allow(), nil
-	}
-	if v.Incarnation == "" {
-		return auth.Deny(auth.ReasonFenced, "write token has no subscription incarnation"), nil
 	}
 	return auth.Allow(), &auth.AppendFence{
 		SubscriptionID:          v.SubID,
@@ -106,4 +133,134 @@ func (a WriteTokenAuthorizer) AuthorizeAppendFence(token string, path auth.Strea
 		WakeID:                  v.WakeID,
 		Holder:                  v.Holder,
 	}
+}
+
+// liveClaimDecision is the live-state arm shared by the append pre-check and
+// claim verification, written once so the two cannot drift (WF-29): the token
+// must be bound to a claim, that claim must be the subscription's live one
+// (check_write_fence.lua, one atomic read that also yields the lease and
+// compares the token's subscription incarnation with the current one, so a
+// recreated subscription fences its predecessor's tokens even when
+// generation, wake, and holder coincide), and under an atomic stream store
+// the token must carry the incarnation the in-slot rung compares. A store
+// error is returned rather than mapped so each caller keeps its own posture:
+// the append gate denies unauthenticated, verify reports a server error.
+func (a WriteTokenAuthorizer) liveClaimDecision(v WriteTokenValidation, now time.Time) (auth.Decision, WriteFenceCheck, error) {
+	if v.WakeID == "" || v.Holder == "" {
+		return auth.Deny(auth.ReasonFenced, "write token is not bound to a live claim"), WriteFenceCheck{}, nil
+	}
+	check, err := a.store.VerifyWriteFence(v.SubID, v.Shard, v.Incarnation, v.Generation, v.WakeID, v.Holder, now)
+	if err != nil {
+		return auth.Decision{}, WriteFenceCheck{}, err
+	}
+	if check.Status != "OK" {
+		return auth.Deny(auth.ReasonFenced, "write token claim is fenced"), check, nil
+	}
+	if a.atomic && v.Incarnation == "" {
+		return auth.Deny(auth.ReasonFenced, "write token has no subscription incarnation"), check, nil
+	}
+	return auth.Allow(), check, nil
+}
+
+// ClaimVerifyStatus classifies a claim verification (WRITE-FENCING.md §9.1).
+// The route maps it to HTTP: Invalid and Expired are a 401, Fenced a 409, OK
+// a 200. These are the write-token credential and live-claim pre-check
+// outcomes; service routing and stream-slot checks are outside this result.
+type ClaimVerifyStatus int
+
+const (
+	// ClaimVerifyInvalid is a token that is not a usable credential: malformed,
+	// a foreign MAC, not a write token, minted for another subscription, or
+	// naming an unfenceable shard. The zero value: any unproven token.
+	ClaimVerifyInvalid ClaimVerifyStatus = iota
+	// ClaimVerifyExpired is ours and well-formed, but past exp.
+	ClaimVerifyExpired
+	// ClaimVerifyFenced is ours and unexpired, but its claim is not the
+	// subscription's live claim: deposed, released, completed, lapsed, or the
+	// subscription is gone.
+	ClaimVerifyFenced
+	// ClaimVerifyOK names the live claim: the token passes the credential and
+	// live-claim pre-check at this instant.
+	ClaimVerifyOK
+)
+
+// ClaimVerification is VerifyClaim's answer. Detail is the operator-facing
+// refusal text (never credential material). The claim fields, Streams (the
+// token's exact scope), LeaseUntilNs, and LeaseRemainingNs are set with OK
+// only, and the lease comes from the same atomic read as the decision.
+// LeaseRemainingNs is the lease left as judged on the server clock at the
+// instant of that read — LeaseUntilNs minus the now the predicate was
+// evaluated at, floored at zero and capped at the subscription's lease TTL
+// from the same read — so a consumer bounds its WF-30 cache on the clock that
+// fences the append rather than on its own, and never on more lease than the
+// configuration can grant.
+type ClaimVerification struct {
+	Status           ClaimVerifyStatus
+	Detail           string
+	Generation       int64
+	WakeID           string
+	Holder           string
+	Streams          []string
+	LeaseUntilNs     int64
+	LeaseRemainingNs int64
+}
+
+// VerifyClaim answers whether token is the live claim of subID using the
+// append gate's write-token credential and live-state arms (WF-29): the same
+// parser, the same shard rule, and the same live-state arm as
+// AuthorizeAppendFence — and no write of any kind. A token minted for another
+// subscription is refused as unproven, like ValidateToken's subject binding,
+// so the route reveals nothing about it. An error means the answer could not
+// be computed (no claim store, or the store failed); the route reports that
+// as a server error, never as a credential decision a client might cache.
+func (a WriteTokenAuthorizer) VerifyClaim(token, subID string, now time.Time) (ClaimVerification, error) {
+	if token == "" {
+		return ClaimVerification{Status: ClaimVerifyInvalid, Detail: "missing write credential"}, nil
+	}
+	v := ParseWriteToken(a.key, token, now)
+	if v.Status == WriteTokenInvalid || v.SubID != subID {
+		return ClaimVerification{Status: ClaimVerifyInvalid, Detail: "invalid write token"}, nil
+	}
+	if v.Shard != 0 {
+		return ClaimVerification{Status: ClaimVerifyInvalid, Detail: DetailWriteTokenShard}, nil
+	}
+	if v.Status == WriteTokenExpired {
+		return ClaimVerification{Status: ClaimVerifyExpired, Detail: "write token expired"}, nil
+	}
+	if a.store == nil {
+		return ClaimVerification{}, errors.New("claim verify: no claim store")
+	}
+	d, check, err := a.liveClaimDecision(v, now)
+	if err != nil {
+		return ClaimVerification{}, err
+	}
+	if !d.Allowed() {
+		return ClaimVerification{Status: ClaimVerifyFenced, Detail: d.Detail()}, nil
+	}
+	// The remaining lease is server-relative by construction: the predicate
+	// accepted the claim against this same now, so the difference is the time
+	// the fence itself still grants, independent of any client clock (WF-30).
+	// The deadline was written on the clock of the replica that granted or
+	// last extended the claim, and this replica's clock may lag it, so the
+	// difference is capped at the configured TTL — the most any claim can
+	// hold — which is what makes §9.1's "MUST NOT exceed lease_ttl_ms" hold
+	// across replicas. The cap is absolute, not a skew correction: within the
+	// TTL a lagging replica still over-reports by up to the inter-replica
+	// skew, which §9.1 leaves to the consumer's allowance.
+	remaining := check.LeaseUntilNs - now.UnixNano()
+	if ttl := check.LeaseTTLMs * int64(time.Millisecond); remaining > ttl {
+		remaining = ttl
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	return ClaimVerification{
+		Status:           ClaimVerifyOK,
+		Generation:       v.Generation,
+		WakeID:           v.WakeID,
+		Holder:           v.Holder,
+		Streams:          v.Streams,
+		LeaseUntilNs:     check.LeaseUntilNs,
+		LeaseRemainingNs: remaining,
+	}, nil
 }

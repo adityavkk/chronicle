@@ -71,7 +71,7 @@ const (
 	// so this reason is never emitted on the wire.
 	reasonPrincipal = "principal"
 	reasonWakeToken = "wake_token"
-	reasonPrecheck  = "precheck"
+	reasonPrecheck  = webhook.FenceReasonPrecheck
 	reasonStore     = "store"
 )
 
@@ -95,13 +95,8 @@ type fenceDisclosure struct {
 // empty Write-Token or electric-claim-token is presented-but-malformed: it is
 // reported as such and never falls through to the next carrier.
 func presentedWriteToken(r *http.Request, fam appendCredentialFamily) (token string, malformed bool) {
-	for _, name := range []string{WriteTokenHeader, ClaimTokenHeader} {
-		if values := r.Header.Values(name); len(values) > 0 {
-			if len(values) > 1 || values[0] == "" {
-				return "", true
-			}
-			return values[0], false
-		}
+	if token, present, malformed := webhook.NamedWriteTokenCarrier(r); present {
+		return token, malformed
 	}
 	if fam == familyService || fam == familyAgent {
 		return "", false

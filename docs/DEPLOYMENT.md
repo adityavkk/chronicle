@@ -130,6 +130,18 @@ Across failover:
   flag; adds replica round-trip latency to every append). This narrows but
   does not eliminate the window — see PLAN.md §4.7.
 
+## Replica clocks
+
+Claim leases are compared against the serving replica's clock: a lease
+deadline is written on the clock of the chronicle replica that grants or
+extends the claim, and a takeover or a `claim/verify` answer is judged on the
+clock of the replica that serves it. Run every replica under clock
+synchronisation (NTP or the platform's equivalent) and publish the bound within
+which their clocks agree to consumers of the write-fencing extension, whose
+`claim/verify` cache allowance must cover it
+([docs/spec/WRITE-FENCING.md §9.1](spec/WRITE-FENCING.md)). A single replica
+has no skew to publish.
+
 ## Sizing
 
 A stream's full history lives in one sorted set on one shard: plan node memory

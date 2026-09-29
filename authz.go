@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
-	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
 
@@ -21,10 +20,12 @@ import (
 // WriteTokenHeader is the write-fencing extension's own header (#183),
 // ClaimTokenHeader the compatibility alias Electric producers present, and
 // Authorization: Bearer the fallback for both (Electric's claimTokenFromRequest
-// order). See presentedWriteToken for the fail-closed presentation rule.
+// order). The names and the named-carrier rule live in the webhook package so
+// the claim/verify route reads the same carriers (#192); see
+// presentedWriteToken for the fail-closed presentation rule.
 const (
-	ClaimTokenHeader = "electric-claim-token"
-	WriteTokenHeader = protocol.HeaderWriteToken
+	ClaimTokenHeader = webhook.ClaimTokenHeader
+	WriteTokenHeader = webhook.WriteTokenHeader
 )
 
 // AppendAuthorizer authorizes a data-plane append with a claim-scoped write

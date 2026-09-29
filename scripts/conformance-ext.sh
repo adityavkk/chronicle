@@ -27,8 +27,9 @@
 #   CHRONICLE_LOG_LEVEL          server log level                 (default info)
 #   CHRONICLE_BUILD_TAGS         go build tags — the fault-injection controls
 #                                (fence_fault_nobind | fence_fault_noseal |
-#                                fence_fault_nopair) build a deliberately
-#                                broken server whose named test MUST fail
+#                                fence_fault_nopair | fence_fault_verifystale)
+#                                build a deliberately broken server whose
+#                                named test MUST fail
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

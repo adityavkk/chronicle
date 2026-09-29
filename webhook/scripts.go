@@ -76,7 +76,7 @@ var (
 	writeFenceScript = newTypedScript[writeFenceKeyVec, writeFenceReply](scriptABI{
 		Name: "check_write_fence", File: "check_write_fence.lua",
 		Keys: []scriptKeySchema{keys("shardstate", "sub_config")},
-		Args: exactArgs(arg("now_ns", argUnixNS), arg("generation", argInt), arg("wake_id", argString), arg("holder", argString)),
+		Args: exactArgs(arg("now_ns", argUnixNS), arg("generation", argInt), arg("wake_id", argString), arg("holder", argString), arg("incarnation", argString)),
 	}, writeFenceDecoder)
 	ackScript = newTypedScript[ackKeyVec, ackReply](scriptABI{
 		Name: "ack", File: "ack.lua",

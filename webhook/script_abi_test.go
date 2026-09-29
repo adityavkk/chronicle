@@ -59,6 +59,41 @@ func TestScriptReplyDecodersRejectMalformedReplies(t *testing.T) {
 			},
 			raw: []any{"ARMED", "not-an-int", "wake-1"},
 		},
+		{
+			name: "write fence OK without its lease",
+			decode: func(r scriptReply) (any, error) {
+				return decodeWriteFenceReply(r)
+			},
+			raw: []any{"OK"},
+		},
+		{
+			name: "write fence OK bad lease",
+			decode: func(r scriptReply) (any, error) {
+				return decodeWriteFenceReply(r)
+			},
+			raw: []any{"OK", "soon", "1000"},
+		},
+		{
+			name: "write fence OK without its lease TTL",
+			decode: func(r scriptReply) (any, error) {
+				return decodeWriteFenceReply(r)
+			},
+			raw: []any{"OK", "1700000000123456789"},
+		},
+		{
+			name: "write fence OK bad lease TTL",
+			decode: func(r scriptReply) (any, error) {
+				return decodeWriteFenceReply(r)
+			},
+			raw: []any{"OK", "1700000000123456789", "long"},
+		},
+		{
+			name: "write fence FENCED with a payload",
+			decode: func(r scriptReply) (any, error) {
+				return decodeWriteFenceReply(r)
+			},
+			raw: []any{"FENCED", "1"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -98,6 +133,22 @@ func TestScriptReplyDecodersKeepValidPayloads(t *testing.T) {
 	if _, ok := forbidden.(claimForbidden); !ok {
 		t.Fatalf("decode forbidden claim = %#v", forbidden)
 	}
+
+	// check_write_fence's OK is the one status that carries fields: the
+	// claim's lease_until_ns and the subscription's lease_ttl_ms, returned as
+	// the raw hash strings (#192).
+	wf, err := decodeWriteFenceReply(scriptReply{"OK", "1700000000123456789", "30000"})
+	if err != nil {
+		t.Fatalf("decode write fence OK: %v", err)
+	}
+	if ok, isOK := wf.(writeFenceOK); !isOK || ok.LeaseUntilNs != 1700000000123456789 || ok.LeaseTTLMs != 30000 {
+		t.Fatalf("decode write fence OK = %#v", wf)
+	}
+	for _, raw := range []scriptReply{{"FENCED"}, {"NOSUB"}} {
+		if r, err := decodeWriteFenceReply(raw); err != nil || r.status() != raw[0] {
+			t.Fatalf("decode write fence %v = %#v err=%v", raw, r, err)
+		}
+	}
 }
 
 func TestScriptABIRejectsWrongCallArity(t *testing.T) {
@@ -114,6 +165,19 @@ func TestScriptABIRejectsWrongCallArity(t *testing.T) {
 	ackKeys := ackKeyVec{ShardState: "shard", Links: "links", LeaseZSet: "lease", RetryZSet: "retry", DueZSet: "due", SubConfig: "sub"}
 	if err := ackScript.abi.validateCall(ackKeys, []any{"member", "1", "wake", "1", "1", "1700000000", "1000", "1", "path-only", "replica", "1"}); err == nil {
 		t.Fatal("ack with incomplete variadic ack pair accepted")
+	}
+	// check_write_fence takes the token's incarnation as its fifth argument
+	// (an empty string asserts none); the four-argument pre-#192 shape is gone.
+	fenceKeys := newWriteFenceKeys("s1", 0)
+	validFenceArgs := []any{"1700000000", "1", "w_a", "worker-A", "inc-1"}
+	if err := writeFenceScript.abi.validateCall(fenceKeys, validFenceArgs); err != nil {
+		t.Fatalf("valid check_write_fence call rejected: %v", err)
+	}
+	if err := writeFenceScript.abi.validateCall(fenceKeys, []any{"1700000000", "1", "w_a", "worker-A", ""}); err != nil {
+		t.Fatalf("check_write_fence with an empty incarnation rejected: %v", err)
+	}
+	if err := writeFenceScript.abi.validateCall(fenceKeys, validFenceArgs[:4]); err == nil {
+		t.Fatal("check_write_fence without the token incarnation accepted")
 	}
 	claimKeys := claimKeyVec{
 		SubConfig: "sub", ShardState: "shard", LeaseZSet: "lease",
@@ -489,7 +553,7 @@ func luaReplyFieldKind(expr string) replyFieldKind {
 	if strings.Contains(expr, "lease_expiry_ns") || strings.Contains(expr, "until_ns") || strings.Contains(expr, "first") {
 		return replyNS
 	}
-	if strings.Contains(expr, "gen") || strings.Contains(expr, "generation") || strings.Contains(expr, "retry_count") || strings.Contains(expr, "owner_epoch") || strings.Contains(expr, "epoch") {
+	if strings.Contains(expr, "gen") || strings.Contains(expr, "generation") || strings.Contains(expr, "retry_count") || strings.Contains(expr, "owner_epoch") || strings.Contains(expr, "epoch") || strings.Contains(expr, "ttl_ms") {
 		return replyInteger
 	}
 	return replyString

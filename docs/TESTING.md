@@ -157,13 +157,15 @@ is that it sees only the HTTP surface, not the internal state.
 
 The write-fencing extension ([docs/spec/WRITE-FENCING.md](spec/WRITE-FENCING.md))
 has a second, chronicle-owned suite in `test/conformance-ext/`: one black-box
-test per WF-01…WF-28 obligation plus negative controls, run against a live
+test per WF-01…WF-30 obligation plus negative controls, run against a live
 server in enforce mode. It is a separate directory with its own runner so the
 pinned base suite never collects it and the certified 332/332 stays a
 statement about the unmodified protocol. Fault-injection build tags
-(`fence_fault_nobind`, `fence_fault_noseal`, `fence_fault_nopair`) each remove
-one fence write and must make their designated test fail — proof the checks
-are load-bearing, in the same spirit as the TLA+ fault configs.
+(`fence_fault_nobind`, `fence_fault_noseal`, `fence_fault_nopair`,
+`fence_fault_verifystale`) each remove one fence mechanism — a fence write,
+the terminal gap pair, or the verify route's token-identity predicate — and
+must make their designated test fail — proof the checks are load-bearing, in
+the same spirit as the TLA+ fault configs.
 
 Run: `make conformance` (needs Redis and a built server); the extension suite
 is `make conformance-ext`. Its runner (`scripts/conformance-ext.sh`) starts two
@@ -290,7 +292,7 @@ method and the intended fix.
 make test-unit                 # pure cores, no infrastructure
 make redis-up && make test     # unit and integration against Redis
 make conformance               # the black-box protocol suite
-make conformance-ext           # the write-fencing extension suite (WF-01…WF-28)
+make conformance-ext           # the write-fencing extension suite (WF-01…WF-30)
 cd lean && lake build          # the Lean proofs
 cd formal/tla && make tlc      # the TLA+ model checks
 cd formal/tla && make apalache # the Apalache inductive proof

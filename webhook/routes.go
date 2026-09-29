@@ -73,6 +73,8 @@ func (rt *Routes) handleSubscription(w http.ResponseWriter, r *http.Request, res
 		rt.handleAckLike(w, r, id, "callback")
 	case action == "ack" && r.Method == http.MethodPost:
 		rt.handleAckLike(w, r, id, "ack")
+	case action == "claim/verify" && r.Method == http.MethodPost:
+		rt.handleClaimVerify(w, r, id)
 	case action == "claim" && r.Method == http.MethodPost:
 		rt.handleClaim(w, r, id)
 	case action == "release" && r.Method == http.MethodPost:
@@ -543,6 +545,94 @@ func (rt *Routes) wakeRequestLogger(ctx context.Context, event, id string, gener
 		"subscription_id", id,
 		"wake_id", wakeID,
 		"generation", generation)
+}
+
+// handleClaimVerify serves POST /__ds/subscriptions/{id}/claim/verify
+// (WRITE-FENCING.md §9.1, WF-29): does the presented write token name {id}'s
+// live claim, judged by the credential and live-claim parts of the append
+// pre-check. The token is the whole credential: it is read from the append
+// gate's carriers, no service or agent principal is consulted, there is no
+// controlDeny telemetry path, and the token check binds in every AuthMode.
+// A 200 therefore does not promise that a later append will pass a separate
+// service-policy gate or the stream-slot seal and producer checks. The route is read-only: no lease
+// renewal, no marker grant, no cursor move, and no mint or refresh — the
+// TOKEN_EXPIRED answer deliberately bypasses writeTokenRejected, which mints.
+// A request body is ignored. Answers: 200 the live claim; 401 TOKEN_INVALID
+// or TOKEN_EXPIRED; 409 FENCED reason precheck — the pre-check's own
+// envelope — including for a subscription that no longer exists, so a 404
+// from this path can only mean the route is absent (the client's fallback
+// signal). Every answer is Cache-Control: no-store; WF-30 bounds what a
+// client may cache on its own.
+func (rt *Routes) handleClaimVerify(w http.ResponseWriter, r *http.Request, id string) {
+	w.Header().Set("Cache-Control", "no-store")
+	token, malformed := presentedVerifyToken(r)
+	if malformed || token == "" {
+		rt.recordClaimVerifyRefusal(id, "invalid", "missing or malformed write token")
+		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
+		return
+	}
+	// Drained, never parsed: the body carries nothing and must not be read
+	// into state, but leaving it unread would poison a kept-alive connection.
+	_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 1<<20))
+	res, err := rt.mgr.WriteAuthorizer().VerifyClaim(token, id, time.Now())
+	if err != nil {
+		// A server-side failure, never a credential answer: a client must not
+		// cache "unavailable" as a definitive negative (WF-30).
+		rt.mgr.metrics.ClaimVerify("unavailable")
+		rt.mgr.log.Warn("claim verify unavailable", "sub", id, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	switch res.Status {
+	case ClaimVerifyOK:
+		rt.mgr.metrics.ClaimVerify("ok")
+		streams := res.Streams
+		if streams == nil {
+			streams = []string{}
+		}
+		writeJSON(w, http.StatusOK, ClaimVerifyResponse{
+			Generation:       res.Generation,
+			WakeID:           res.WakeID,
+			Holder:           res.Holder,
+			Streams:          streams,
+			LeaseUntilMs:     res.LeaseUntilNs / int64(time.Millisecond),
+			LeaseRemainingMs: res.LeaseRemainingNs / int64(time.Millisecond),
+		})
+	case ClaimVerifyExpired:
+		rt.recordClaimVerifyRefusal(id, "expired", res.Detail)
+		writeErr(w, http.StatusUnauthorized, ErrCodeTokenExpired)
+	case ClaimVerifyFenced:
+		rt.recordClaimVerifyRefusal(id, "fenced", res.Detail)
+		writeJSON(w, http.StatusConflict, ErrorBody{Error: ErrorDetail{
+			Code: ErrCodeFenced, Message: res.Detail, Reason: FenceReasonPrecheck,
+		}})
+	case ClaimVerifyInvalid:
+		rt.recordClaimVerifyRefusal(id, "invalid", res.Detail)
+		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
+	default:
+		rt.recordClaimVerifyRefusal(id, "invalid", "unknown verification outcome")
+		writeErr(w, http.StatusUnauthorized, ErrCodeTokenInvalid)
+	}
+}
+
+// recordClaimVerifyRefusal counts a refused verify under its outcome
+// (chronicle_claim_verify_total) and logs it without the credential bytes.
+func (rt *Routes) recordClaimVerifyRefusal(id, outcome, detail string) {
+	rt.mgr.metrics.ClaimVerify(outcome)
+	rt.mgr.log.Warn("claim verify denied",
+		"subscription", id, "outcome", outcome, "detail", detail)
+}
+
+// presentedVerifyToken reads the write token the way the append gate does:
+// the named carriers first (a malformed one is presented, not absent, and
+// never falls through), then Authorization: Bearer — this route has no other
+// bearer credential that could have consumed it.
+func presentedVerifyToken(r *http.Request) (token string, malformed bool) {
+	if token, present, malformed := NamedWriteTokenCarrier(r); present {
+		return token, malformed
+	}
+	token, _ = bearerToken(r)
+	return token, false
 }
 
 func (rt *Routes) handleClaim(w http.ResponseWriter, r *http.Request, id string) {

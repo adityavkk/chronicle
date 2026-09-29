@@ -48,7 +48,7 @@ import Step from "../components/Step.astro";
   the **per-authority seal**.
 
   <Callout icon="info">
-    The wire contract lives in <a href="https://github.com/adityavkk/chronicle/blob/main/docs/spec/WRITE-FENCING.md">docs/spec/WRITE-FENCING.md</a> — written as a §11.1 pure-superset extension with RFC 2119 obligations (WF-01…WF-28), so it can be proposed upstream verbatim. The decision record is <a href="https://github.com/adityavkk/chronicle/blob/main/docs/adr/0008-write-fencing-extension.md">ADR-0008</a>.
+    The wire contract lives in <a href="https://github.com/adityavkk/chronicle/blob/main/docs/spec/WRITE-FENCING.md">docs/spec/WRITE-FENCING.md</a> — written as a §11.1 pure-superset extension with RFC 2119 obligations (WF-01…WF-30), so it can be proposed upstream verbatim. The decision record is <a href="https://github.com/adityavkk/chronicle/blob/main/docs/adr/0008-write-fencing-extension.md">ADR-0008</a>.
   </Callout>
 </section>
 
@@ -235,7 +235,7 @@ import Step from "../components/Step.astro";
 <section class="block" id="ops">
   <SectionHead num="06" label="Operations" title="Watching the fence <em>work</em>" />
 
-  Three counters, closed label vocabularies:
+  Four counters, closed label vocabularies:
 
   <Table>
     | Metric | Labels | Meaning |
@@ -243,13 +243,14 @@ import Step from "../components/Step.astro";
     | `chronicle_append_fence_rejections_total` | `reason` ∈ credential · shard · producer_required · wake_token · precheck · marker · sealed · epoch · bound · store | the primary zombie-writer signal — every refused write, counted once at the response sink |
     | `chronicle_append_fence_seals_total` | `outcome` ∈ sealed · already · stale · notfound · unfenced · error | seal writes per linked stream; `already` is the idempotent redelivery |
     | `chronicle_append_fence_grant_failures_total` | `site` ∈ claim · heartbeat · webhook | a marker could not be installed; `webhook` is the fail-open-delivery signal |
+    | `chronicle_claim_verify_total` | `outcome` ∈ ok · invalid · expired · fenced · unavailable | every `claim/verify` answer (WF-29); the negative outcomes are a consumer's fallback rate, and `unavailable` is the 500 a consumer must not cache |
   </Table>
 
   The extension has its own conformance suite — `make conformance-ext` runs
-  WF-01…WF-28 plus negative controls against a live server in enforce mode,
+  WF-01…WF-30 plus negative controls against a live server in enforce mode,
   separate from the pinned base suite so the certified 332/332 count is
   untouched. Fault-injection builds (`fence_fault_nobind`,
-  `fence_fault_noseal`, `fence_fault_nopair`) must each make their designated
-  test fail, proving the checks are load-bearing. See
+  `fence_fault_noseal`, `fence_fault_nopair`, `fence_fault_verifystale`) must
+  each make their designated test fail, proving the checks are load-bearing. See
   <a href="https://github.com/adityavkk/chronicle/blob/main/docs/TESTING.md">docs/TESTING.md</a>.
 </section>

@@ -197,3 +197,10 @@ const (
 	ErrCodeUnauthenticated = "UNAUTHENTICATED"
 	ErrCodeForbidden       = "FORBIDDEN"
 )
+
+// FenceReasonPrecheck is the ErrorDetail.Reason of a FENCED refusal decided by
+// the cross-slot pre-check (check_write_fence.lua) before any stream access —
+// no generation or holder is disclosed with it. The data-plane append gate and
+// the claim/verify route (WRITE-FENCING.md §9.1) both report it, so the verify
+// 409 is byte-for-byte the append pre-check's.
+const FenceReasonPrecheck = "precheck"

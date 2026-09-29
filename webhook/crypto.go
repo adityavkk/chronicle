@@ -304,9 +304,11 @@ const (
 	WriteTokenValid
 )
 
-// WriteTokenValidation is the outcome of ValidateWriteToken. SubID and
-// Generation are set whenever the MAC proved the token ours (Expired,
-// WrongPath, Valid) so the shell can log attribution without re-parsing.
+// WriteTokenValidation is the outcome of ParseWriteToken and
+// ValidateWriteToken. SubID and Generation are set whenever the MAC proved the
+// token ours (Expired, WrongPath, Valid) so the shell can log attribution
+// without re-parsing; Streams (the token's exact scope, normalized paths) and
+// Exp (unix seconds) are set under the same condition.
 type WriteTokenValidation struct {
 	Status      WriteTokenStatus
 	SubID       string
@@ -315,13 +317,19 @@ type WriteTokenValidation struct {
 	WakeID      string
 	Holder      string
 	Shard       int
+	Streams     []string
+	Exp         int64
 }
 
-// ValidateWriteToken verifies a claim-scoped write token for an append at
-// path. The constant-time MAC check runs first, then shape, expiry, and the
-// path scope — a caller who could not have minted the token learns nothing
-// about its scope from the response.
-func ValidateWriteToken(tokenKey []byte, token string, path auth.StreamPath, now time.Time) WriteTokenValidation {
+// ParseWriteToken verifies a claim-scoped write token with no stream path in
+// hand: the constant-time MAC check runs first, then shape and expiry. It is
+// the path-less half of ValidateWriteToken, shared with the claim/verify
+// route (WRITE-FENCING.md §9.1) so a per-subscription operation applies
+// exactly the credential rules the append gate applies, from one parser.
+// Status is never WrongPath here — Valid means MAC-proven, a write token, and
+// unexpired, and says nothing about scope; a caller with a path checks
+// Streams (ValidateWriteToken does).
+func ParseWriteToken(tokenKey []byte, token string, now time.Time) WriteTokenValidation {
 	// Fail closed on an unusable key (issue #126 hardening): an empty or short
 	// HMAC key is publicly forgeable, so it must authorize nothing rather than
 	// everything. This is the enforcement chokepoint — it makes even
@@ -345,15 +353,32 @@ func ValidateWriteToken(tokenKey []byte, token string, path auth.StreamPath, now
 	if err := json.Unmarshal(raw, &p); err != nil || p.Typ != writeTokenTyp {
 		return WriteTokenValidation{}
 	}
-	if TokenExpired(p.Exp, now.Unix()) {
-		return WriteTokenValidation{Status: WriteTokenExpired, SubID: p.Sub, Incarnation: p.Incarnation, Generation: p.Generation, WakeID: p.WakeID, Holder: p.Holder, Shard: p.Shard}
+	v := WriteTokenValidation{
+		Status: WriteTokenValid, SubID: p.Sub, Incarnation: p.Incarnation, Generation: p.Generation,
+		WakeID: p.WakeID, Holder: p.Holder, Shard: p.Shard, Streams: p.Streams, Exp: p.Exp,
 	}
-	for _, s := range p.Streams {
+	if TokenExpired(p.Exp, now.Unix()) {
+		v.Status = WriteTokenExpired
+	}
+	return v
+}
+
+// ValidateWriteToken verifies a claim-scoped write token for an append at
+// path: ParseWriteToken's MAC, shape, and expiry checks, then the path scope —
+// a caller who could not have minted the token learns nothing about its
+// scope from the response.
+func ValidateWriteToken(tokenKey []byte, token string, path auth.StreamPath, now time.Time) WriteTokenValidation {
+	v := ParseWriteToken(tokenKey, token, now)
+	if v.Status != WriteTokenValid {
+		return v
+	}
+	for _, s := range v.Streams {
 		if s == path.String() {
-			return WriteTokenValidation{Status: WriteTokenValid, SubID: p.Sub, Incarnation: p.Incarnation, Generation: p.Generation, WakeID: p.WakeID, Holder: p.Holder, Shard: p.Shard}
+			return v
 		}
 	}
-	return WriteTokenValidation{Status: WriteTokenWrongPath, SubID: p.Sub, Incarnation: p.Incarnation, Generation: p.Generation, WakeID: p.WakeID, Holder: p.Holder, Shard: p.Shard}
+	v.Status = WriteTokenWrongPath
+	return v
 }
 
 // GenerateWakeID returns a unique wake id "w_<hex>" (PROTOCOL §7).

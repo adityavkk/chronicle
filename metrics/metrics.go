@@ -78,6 +78,7 @@ type Prometheus struct {
 	appendFenceRejections    *prometheus.CounterVec
 	appendFenceSeals         *prometheus.CounterVec
 	appendFenceGrantFailures *prometheus.CounterVec
+	claimVerify              *prometheus.CounterVec
 
 	sseHubs                prometheus.Gauge
 	sseClients             prometheus.Gauge
@@ -334,6 +335,10 @@ func New() *Prometheus {
 			Name: "chronicle_append_fence_grant_failures_total",
 			Help: "Claim-marker grant failures by site (claim|heartbeat|webhook); the webhook site is the fail-open-delivery signal (#183).",
 		}, []string{"site"}),
+		claimVerify: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_claim_verify_total",
+			Help: "claim/verify answers by outcome (ok|invalid|expired|fenced|unavailable) — the negative outcomes are a consumer's fallback rate (WRITE-FENCING.md §9.1, #192).",
+		}, []string{"outcome"}),
 		sseHubs: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "chronicle_sse_hubs",
 			Help: "Active per-stream SSE fanout hubs on this Chronicle replica.",
@@ -441,6 +446,7 @@ func New() *Prometheus {
 		p.slotOwnership, p.coverageGap, p.ownerFenced, p.claimContention,
 		p.durabilityShort, p.serviceAccess,
 		p.appendFenceRejections, p.appendFenceSeals, p.appendFenceGrantFailures,
+		p.claimVerify,
 		p.sseHubs, p.sseClients, p.sseHubReads, p.sseHubMessages,
 		p.sseHubRingBytes, p.sseHubRingRawBytes, p.sseHubRingWireBytes,
 		p.sseHubRingIndexBytes, p.sseHubRefreshes, p.sseHubRefreshPages,
@@ -722,6 +728,11 @@ func (p *Prometheus) AppendFenceSeal(outcome string) {
 // AppendFenceGrantFailed implements webhook.Metrics.
 func (p *Prometheus) AppendFenceGrantFailed(site string) {
 	p.appendFenceGrantFailures.WithLabelValues(site).Inc()
+}
+
+// ClaimVerify implements webhook.Metrics.
+func (p *Prometheus) ClaimVerify(outcome string) {
+	p.claimVerify.WithLabelValues(outcome).Inc()
 }
 
 // SSEHubActive implements chronicle.SSEMetrics.

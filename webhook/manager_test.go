@@ -403,6 +403,7 @@ type fakeMetrics struct {
 	durShort    map[string]int // DurabilityShort by cmd (WAITAOF|WAIT), #43
 	fenceSeals  map[string]int // AppendFenceSeal by outcome, #183
 	grantFails  map[string]int // AppendFenceGrantFailed by site, #183
+	claimVerify map[string]int // ClaimVerify by outcome, #192
 	deliveries  map[string]int // WakeDelivery attempts by outcome
 }
 
@@ -518,6 +519,26 @@ func (f *fakeMetrics) AppendFenceGrantFailed(site string) {
 		f.grantFails = map[string]int{}
 	}
 	f.grantFails[site]++
+}
+
+func (f *fakeMetrics) ClaimVerify(outcome string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.claimVerify == nil {
+		f.claimVerify = map[string]int{}
+	}
+	f.claimVerify[outcome]++
+}
+
+// claimVerifies is a copy of every ClaimVerify outcome recorded so far.
+func (f *fakeMetrics) claimVerifies() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]int, len(f.claimVerify))
+	for outcome, n := range f.claimVerify {
+		out[outcome] = n
+	}
+	return out
 }
 
 func (f *fakeMetrics) durabilityShorts(cmd string) int {

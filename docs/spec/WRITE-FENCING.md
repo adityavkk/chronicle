@@ -13,11 +13,12 @@ sections 1–11 can be proposed upstream verbatim.
 ## 1. Scope and conformance language
 
 This extension is a **pure superset** of the base protocol in the sense of
-§11.1: every rule below is conditional on a stream that was created with the
-`Write-Fence: true` header, and base protocol operations remain functional
-without extension support. On a stream that never opts in, a conforming server
-behaves byte-for-byte as the base protocol requires, and a base client never
-observes this extension.
+§11.1: every rule below either is conditional on a stream that was created
+with the `Write-Fence: true` header or adds an operation that a base client
+never invokes, and base protocol operations remain functional without
+extension support. On a stream that never opts in, a conforming server behaves
+byte-for-byte as the base protocol requires, and a base client never observes
+this extension.
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD",
 "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be
@@ -274,6 +275,113 @@ A failure to mint the token for a webhook delivery SHOULD NOT abort the
 delivery (fail-open delivery, fail-closed token): the notification goes out
 without `write_token`, and the consumer's fenced writes fail closed.
 
+### 9.1 Verifying a write token
+
+A write token is server-verifiable only: it is a MAC under a key the server
+alone holds, so a client that must act on one without writing — a
+control-plane operation that proves the holder is still current before it
+delegates, signals, or spawns — has nothing to defer to, and accepting the
+token on shape alone would be impersonation. This subsection gives such a
+client the append gate's credential and live-claim answer without the append.
+The route is available whenever the server mints write tokens (§4), for claims
+whose linked streams are fenced, unfenced, or a mixture; it is additive and a
+base client never invokes it.
+
+**Request.** `POST {stream-url}/__ds/subscriptions/:id/claim/verify` with no
+body (a body, if sent, is ignored). The write token is the sole credential,
+presented as on a fenced write — `Write-Token` or `Authorization: Bearer`, with
+the malformed-carrier rule of §4. No service or agent principal is consulted.
+When the server enforces authentication, this token check still binds exactly
+as the fenced write class's token phase does (§5).
+
+**Semantics.** For a write token minted for `{id}`, the server MUST evaluate
+the credential and live-claim predicate that a fenced write to a stream in the
+token's scope would evaluate before its commit: token validity and expiry;
+the subscription's existence; the token's subscription incarnation against
+the subscription's current one; and the claim's generation, `wake_id`,
+holder, and lease. The incarnation predicate is not implied by the others: a
+deleted and recreated subscription is a new incarnation that restarts at
+generation 0, so a predecessor's token can carry the current claim's exact
+generation, `wake_id`, and holder and MUST still be refused — the same
+identity keys the stream-slot marker a fenced append is judged against.
+It MUST answer `200` when the token names the subscription's live claim, `401`
+when the token is not a usable credential, and `409` when it is the server's
+but no longer names the current claim (deposed, released, completed, lapsed,
+or the subscription is gone). A credential that is not a write token, or a
+write token minted for another subscription, is `401` regardless of how an
+append under those bytes would be classified. The decision MUST be
+linearizable with claim transitions: once a deposition commits, no verify
+that starts afterwards answers `200` for the superseded token. Verify MUST NOT
+append, advance a cursor, mint or refresh any token, or change subscription or
+fence state. **[WF-29]**
+
+The predicate is the pre-commit claim predicate only. It does not consult a
+service identity carried beside the token or per-stream seal state. A `200`
+therefore says the token names the live claim; it does not guarantee that a
+later append will pass a service-policy gate or the stream-slot seal and
+producer checks.
+
+**Responses.**
+
+- `200` — `{"generation", "wake_id", "holder", "streams", "lease_until_ms",
+  "lease_remaining_ms"}`: the claim's generation, wake, and holder identity,
+  the token's exact stream scope (normalized paths — no stream is read), the
+  lease deadline in unix milliseconds as the fence state holds it
+  (informational), and the lease remaining at the instant the predicate was
+  evaluated, in milliseconds, as judged on the server's clock — the same
+  clock that fences the append. `lease_remaining_ms` MUST be computed from
+  the deadline the predicate accepted and the server time it accepted it at,
+  MUST NOT exceed the subscription's `lease_ttl_ms`, and is `0` when the
+  claim was live at evaluation but its lease has since been exhausted to the
+  millisecond. A server with several replicas judges the lease on the clock
+  of the replica that answers, while the deadline was written on the clock
+  of the replica that granted or last extended the claim and a takeover is
+  judged on the clock of the replica that serves it. The `lease_ttl_ms`
+  bound caps the figure absolutely but does not remove that skew: a replica
+  whose clock lags can still over-report by up to the skew. A multi-replica
+  server therefore assumes its replicas' clocks agree within a bound it
+  documents, and the client's allowance covers that bound (see Caching); the
+  client's ceiling stays the smaller of its heartbeat interval and
+  `lease_remaining_ms` less that allowance, never `lease_until_ms` against a
+  local clock.
+- `401` with the §7.2 error envelope — malformed, a foreign MAC, not a write
+  token, minted for another subscription, or expired. A server SHOULD
+  distinguish an expired write token from an otherwise unusable one via
+  `code`; an expired answer MUST NOT carry a refreshed token because verify
+  mints nothing.
+- `409` with `code: "FENCED"` and `reason: "precheck"` — the message is the
+  pre-check's refusal text, normally `write token claim is fenced`; a token
+  not bound to a claim or carrying no incarnation can instead report
+  `write token is not bound to a live claim` or
+  `write token has no subscription incarnation`. No generation or holder is
+  disclosed. A subscription that no longer exists is `409`, never `404`.
+- `5xx` — the server could not evaluate the predicate. It MUST NOT report a
+  store failure as `401` or `409`. A client MUST treat this as neither a
+  positive nor a negative answer and MUST NOT cache it. This is the one
+  deliberate status difference from a fenced append, whose fail-closed data
+  plane can report a credential refusal when its fence store is unavailable.
+
+**Caching.** Lease expiry is judged on the server's clock, so a client MUST
+NOT derive a cache bound from `lease_until_ms` and its own clock — a client
+that lags the server would keep trusting a claim the fence has already
+withdrawn. A client MAY cache a `200` answer no longer than the smaller of
+its own heartbeat interval — the cadence at which it extends the claim with
+non-`done` acks — and `lease_remaining_ms` less a conservative allowance for
+the round trip, its own clock drift, and the server's inter-replica
+clock-skew bound (see the `200` response); not caching at all is conforming.
+It MUST NOT cache a `401`, `409`, or `5xx`. The server MUST answer with
+`Cache-Control: no-store`, MUST NOT extend the lease — polling verify does not
+keep a claim alive — and, because it does not, `lease_remaining_ms` MUST NOT
+grow from one `200` to the next for the same claim, except by a lease
+extension the holder made in between or, across replicas, by at most the
+server's inter-replica skew bound. **[WF-30]**
+
+**Discovery and fallback.** A client MUST treat `404`, `405`, or `501` from
+this path as "verification unavailable" and apply its local policy; the base
+protocol does not prescribe how a server handles an unknown extension route.
+A server implementing this subsection never answers those statuses here — an
+unknown subscription is `409`.
+
 ## 10. Security considerations
 
 **Token custody.** The write token is a bearer capability for the fenced
@@ -323,12 +431,18 @@ Everything above is implementation-independent. This appendix records how
 [Chronicle](https://github.com/adityavkk/chronicle) implements the extension,
 and the limits of that implementation.
 
-- **Carrier alias.** Chronicle also accepts the write token in the
-  `electric-claim-token` header (the pre-extension spelling of its Electric
-  integration). Carrier order: `Write-Token`, `electric-claim-token`, then
-  `Authorization: Bearer` — the bearer only when it was not already consumed
-  as a service or wake credential. The malformed-carrier rule of §4 applies to
-  both named headers.
+- **Carrier alias and verification errors.** Chronicle also accepts the write
+  token in the `electric-claim-token` header (the pre-extension spelling of
+  its Electric integration). Carrier order: `Write-Token`,
+  `electric-claim-token`, then `Authorization: Bearer` — the bearer only when
+  it was not already consumed as a service or wake credential on append. The
+  malformed-carrier rule of §4 applies to both named headers. The
+  `claim/verify` route (§9.1) reads the same carriers in the same order but,
+  because it deliberately does not route service or wake principals, always
+  treats the bearer as the candidate write token. Chronicle uses
+  `TOKEN_INVALID` for unusable credentials (including a write token for
+  another subscription or an unfenceable shard) and `TOKEN_EXPIRED` for an
+  expired write token.
 - **Shard 0 only.** Chronicle's fence state lives in the stream slot of claim
   shard 0, and both token mints hardcode shard 0. A write token naming any
   other shard is refused `401 write token shard is not fenceable`
@@ -362,7 +476,38 @@ and the limits of that implementation.
   stable producer id then hits the base `403` stale-epoch response until the
   new authority's generation passes the stored epoch — a liveness (not
   safety) limitation. The planned fix is control-plane: seed a recreated
-  subscription's generation above its predecessor's.
+  subscription's generation above its predecessor's. The predecessor's write
+  tokens are fenced by incarnation regardless (§9.1, WF-29).
+- **Claim verification.** `claim/verify` (§9.1) answers from
+  `check_write_fence.lua` — the append pre-check — in one atomic Redis step
+  that also yields the claim's lease, so it cannot observe a partially
+  updated claim and its `lease_until_ms` belongs to the claim it accepted;
+  `lease_remaining_ms` is that deadline minus the `now` the script judged
+  the lease against, clamped to the subscription's `lease_ttl_ms` read in the
+  same step — the deadline was written on the granting replica's clock, and
+  no answering replica may report more lease than the configuration grants —
+  so a consumer's WF-30 ceiling rests on the server's clocks, within their
+  skew bound: the clamp is absolute and does not remove inter-replica skew,
+  which the consumer's allowance covers. The same
+  script compares the token's subscription incarnation with
+  the configuration's current one ahead of the generation, wake, and holder
+  predicates, so a deleted-and-recreated subscription fences its
+  predecessor's tokens even when the rest of the tuple coincides — the
+  identity the stream-slot marker key carries. It
+  does not consult a routed service identity or the per-stream seal. Thus a
+  rejected or unauthorized service identity beside a valid named write token
+  can receive `200` here and `401`/`403` on append. A path sealed while its
+  claim remains live also receives `200` here and `409 sealed` on append. The
+  latter happens in steady state when a linked stream is explicitly removed,
+  and in the at-least-once window between a `done` seal and the control-plane
+  idle (§10). That crash window is bounded by the lease TTL or a successful
+  `done` retry, not by a client's WF-30 cache bound. The stream-slot rung
+  remains authoritative. A store failure is `500`, never a credential answer.
+  Every answer is counted in `chronicle_claim_verify_total{outcome}` (`ok`,
+  `invalid`, `expired`, `fenced`, `unavailable`), so a consumer's fallback
+  rate is observable from the server side; invalid, expired, and fenced
+  answers also emit a structured warning that omits the credential bytes
+  ([ADR-0009](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0009-claim-verify-route.md)).
 - **Departures from its consumer contract** are recorded in
   [ADR-0008](https://github.com/adityavkk/chronicle/blob/main/docs/adr/0008-write-fencing-extension.md);
   the formal model and invariants (INV-FENCE-05/06/07) in
@@ -406,3 +551,5 @@ names the in-repo Go test that pins the same rule where one exists.
 | WF-26 | no fence disclosure on the pre-credential 401 | `TestHandleAppendFencedDisclosure` |
 | WF-27 | webhook end-to-end parity | `TestWebhookCallbackHeartbeatRefreshesWriteToken`, `TestWebhookAutoAckDoneSeals` |
 | WF-28 | pull-wake end-to-end | `TestHeartbeatRefreshesWriteTokenForLongLiveHolder` |
+| WF-29 | verify evaluates the token and live-claim pre-commit predicate — incarnation included — without a write | `TestVerifyClaimUsesOneAtomicStoreRead`, `TestClaimVerifyAgreesWithAppend`, `TestClaimVerifyHasNoSideEffects`, `TestClaimVerifyLinearizedWithDeposition`, `TestVerifyClaimFencesRecreatedIncarnation`, `TestClaimVerifyFencesRecreatedIncarnation` |
+| WF-30 | verify never renews, answers `Cache-Control: no-store`, and reports a server-relative `lease_remaining_ms` bounded by the lease TTL that does not grow across answers for an unextended claim; deriving the cache ceiling from it is a consumer obligation | `TestClaimVerifyNeverRenews`, `TestClaimVerifyReportsServerRelativeLease`, `TestVerifyClaimClampsRemainingLeaseToTTL`, `TestHandleClaimVerifyRoute`; consumer tests pin the client-side cache policy |
