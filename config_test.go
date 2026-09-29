@@ -200,60 +200,133 @@ func TestLoadEnvOIDC(t *testing.T) {
 	}
 }
 
-// TestLoadEnvXFCCFailsClosed pins the #130 re-review fix at the config
-// boundary: a SPIFFE allowlist with neither a marker nor the explicit
-// trust-without-marker opt-in refuses startup, rather than silently defaulting
-// to trusting raw client XFCC. A marker OR the opt-in resolves it.
+// TestLoadEnvXFCCFailsClosed pins the XFCC trust posture at the config
+// boundary (#130, ADR-0010). A SPIFFE allowlist needs a sidecar marker; the
+// marker-less opt-in is accepted only when CHRONICLE_ENVIRONMENT is dev.
+// Outside dev the refusal names the marker and the listener modes and never
+// recommends the dev-only opt-in, and a stale opt-in stops startup even beside
+// a marker or with no allowlist at all.
 func TestLoadEnvXFCCFailsClosed(t *testing.T) {
-	env := func(vars map[string]string) func(string) (string, bool) {
-		return func(k string) (string, bool) { v, ok := vars[k]; return v, ok }
+	const (
+		spiffe = "spiffe://cluster.local/ns/electric/sa/agents-server"
+		marker = "X-Chronicle-Sidecar: verified"
+		optIn  = EnvXFCCTrustWithoutMarker + "=true"
+	)
+	nonDevRefusal := []string{EnvXFCCRequiredHeader, "SANITIZE_SET", "APPEND_FORWARD"}
+	optInRefusal := []string{optIn, EnvEnvironment}
+	for _, tc := range []struct {
+		name      string
+		vars      map[string]string
+		wantErr   []string // substrings the refusal must carry; nil means LoadEnv succeeds
+		rejectErr string   // a substring the refusal must not carry
+		wantAllow bool
+	}{
+		{name: "nothing configured"},
+		{
+			name:    "allowlist alone, environment unset",
+			vars:    map[string]string{EnvTrustedSPIFFE: spiffe},
+			wantErr: nonDevRefusal, rejectErr: optIn,
+		},
+		{
+			name:    "allowlist alone in stage",
+			vars:    map[string]string{EnvTrustedSPIFFE: spiffe, EnvEnvironment: "stage"},
+			wantErr: nonDevRefusal, rejectErr: optIn,
+		},
+		{
+			name:    "allowlist alone in dev",
+			vars:    map[string]string{EnvTrustedSPIFFE: spiffe, EnvEnvironment: DevEnvironment},
+			wantErr: []string{optIn},
+		},
+		{
+			name: "allowlist and marker",
+			vars: map[string]string{EnvTrustedSPIFFE: spiffe, EnvXFCCRequiredHeader: marker},
+		},
+		{
+			name: "allowlist and marker in prod",
+			vars: map[string]string{EnvTrustedSPIFFE: spiffe, EnvXFCCRequiredHeader: marker, EnvEnvironment: "prod"},
+		},
+		{
+			name:      "allowlist and opt-in in dev, label trimmed and lower-cased",
+			vars:      map[string]string{EnvTrustedSPIFFE: spiffe, EnvXFCCTrustWithoutMarker: "true", EnvEnvironment: " Dev "},
+			wantAllow: true,
+		},
+		{
+			name:    "opt-in, environment unset",
+			vars:    map[string]string{EnvTrustedSPIFFE: spiffe, EnvXFCCTrustWithoutMarker: "true"},
+			wantErr: optInRefusal,
+		},
+		{
+			name:    "opt-in in stage",
+			vars:    map[string]string{EnvTrustedSPIFFE: spiffe, EnvXFCCTrustWithoutMarker: "true", EnvEnvironment: "stage"},
+			wantErr: optInRefusal,
+		},
+		{
+			name:    "opt-in in prod beside a marker",
+			vars:    map[string]string{EnvTrustedSPIFFE: spiffe, EnvXFCCTrustWithoutMarker: "true", EnvXFCCRequiredHeader: marker, EnvEnvironment: "prod"},
+			wantErr: optInRefusal,
+		},
+		{
+			name:    "opt-in in prod without an allowlist",
+			vars:    map[string]string{EnvXFCCTrustWithoutMarker: "true", EnvEnvironment: "prod"},
+			wantErr: optInRefusal,
+		},
+		{
+			// An empty marker value is a fail-open trap: the gate cannot tell
+			// it from an absent header.
+			name:    "empty marker value",
+			vars:    map[string]string{EnvTrustedSPIFFE: spiffe, EnvXFCCRequiredHeader: "X-Chronicle-Sidecar:"},
+			wantErr: []string{EnvXFCCRequiredHeader},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := DefaultConfig()
+			err := c.LoadEnv(func(k string) (string, bool) { v, ok := tc.vars[k]; return v, ok })
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Fatalf("LoadEnv: %v", err)
+				}
+				if c.AllowXFCCWithoutMarker != tc.wantAllow {
+					t.Fatalf("AllowXFCCWithoutMarker = %v, want %v", c.AllowXFCCWithoutMarker, tc.wantAllow)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("LoadEnv succeeded, want a startup refusal")
+			}
+			for _, want := range tc.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal does not name %q: %v", want, err)
+				}
+			}
+			if tc.rejectErr != "" && strings.Contains(err.Error(), tc.rejectErr) {
+				t.Errorf("refusal recommends %q: %v", tc.rejectErr, err)
+			}
+		})
 	}
-	const spiffe = "spiffe://cluster.local/ns/electric/sa/agents-server"
+}
 
-	// Allowlist alone → refuse.
-	c := DefaultConfig()
-	if err := c.LoadEnv(env(map[string]string{EnvTrustedSPIFFE: spiffe})); err == nil {
-		t.Fatal("TRUSTED_SPIFFE_IDS without a marker or opt-in must fail startup")
-	}
-
-	// Allowlist + marker → OK, opt-in stays false.
-	c = DefaultConfig()
-	if err := c.LoadEnv(env(map[string]string{
-		EnvTrustedSPIFFE:      spiffe,
-		EnvXFCCRequiredHeader: "X-Chronicle-Sidecar: verified",
-	})); err != nil {
-		t.Fatalf("allowlist + marker must load: %v", err)
-	}
-	if c.AllowXFCCWithoutMarker {
-		t.Fatal("marker path must not set AllowXFCCWithoutMarker")
-	}
-
-	// Allowlist + explicit opt-in → OK.
-	c = DefaultConfig()
-	if err := c.LoadEnv(env(map[string]string{
-		EnvTrustedSPIFFE:          spiffe,
-		EnvXFCCTrustWithoutMarker: "true",
-	})); err != nil {
-		t.Fatalf("allowlist + explicit opt-in must load: %v", err)
-	}
-	if !c.AllowXFCCWithoutMarker {
-		t.Fatal("opt-in must set AllowXFCCWithoutMarker")
-	}
-
-	// No allowlist → the invariant does not apply; unset stays clean.
-	c = DefaultConfig()
-	if err := c.LoadEnv(env(nil)); err != nil {
-		t.Fatalf("no service config must load: %v", err)
-	}
-
-	// An empty marker VALUE is a fail-open trap (a header the gate can never
-	// distinguish from absent) and must be refused, not accepted as a gate.
-	c = DefaultConfig()
-	if err := c.LoadEnv(env(map[string]string{
-		EnvTrustedSPIFFE:      spiffe,
-		EnvXFCCRequiredHeader: "X-Chronicle-Sidecar:",
-	})); err == nil {
-		t.Fatal("an empty XFCC marker value must fail startup (fail-open trap)")
+// TestLoadEnvEnvironment pins the CHRONICLE_ENVIRONMENT parse: unset stays
+// empty (non-dev to the dev-only checks), and a set value is trimmed and
+// lower-cased.
+func TestLoadEnvEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		vars map[string]string
+		want string
+	}{
+		{name: "unset", want: ""},
+		{name: "trimmed and lower-cased", vars: map[string]string{EnvEnvironment: " Dev "}, want: DevEnvironment},
+		{name: "carried through", vars: map[string]string{EnvEnvironment: "stage"}, want: "stage"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := DefaultConfig()
+			if err := c.LoadEnv(func(k string) (string, bool) { v, ok := tc.vars[k]; return v, ok }); err != nil {
+				t.Fatal(err)
+			}
+			if c.Environment != tc.want {
+				t.Fatalf("Environment = %q, want %q", c.Environment, tc.want)
+			}
+		})
 	}
 }
 

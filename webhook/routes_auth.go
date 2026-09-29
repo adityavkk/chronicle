@@ -78,11 +78,13 @@ func (rt *Routes) authenticateCaller(r *http.Request) (controlCaller, error) {
 		if values := r.Header.Values(access.SidecarMarkerName); len(values) == 1 {
 			marker = values[0]
 		}
-		principal, status := access.Authenticate(token, joinedXFCC, marker)
+		principal, status, detail := access.AuthenticateDetail(token, joinedXFCC, marker)
 		switch status {
 		case auth.ServiceRejected:
 			rt.mgr.metrics.ServiceAuthenticationFailure()
-			return controlCaller{}, errors.New("invalid service identity")
+			// detail distinguishes a header the XFCC parser refused from a
+			// gate failure or allowlist miss; it never carries header material.
+			return controlCaller{}, errors.New(detail)
 		case auth.ServiceAuthenticated:
 			if joinedXFCC != "" {
 				rt.mgr.metrics.ServiceSPIFFEAuthentication()

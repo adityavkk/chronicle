@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -35,34 +36,58 @@ const (
 	ServiceNotAttempted ServiceAuthenticationStatus = iota
 	// ServiceAuthenticated means a service credential verified.
 	ServiceAuthenticated
-	// ServiceRejected means XFCC was presented but failed its attestation gate
-	// or exact identity allowlist.
+	// ServiceRejected means XFCC was presented but failed its attestation gate,
+	// was refused by the XFCC parser as malformed, or missed the exact identity
+	// allowlist. AuthenticateDetail tells the three apart for the operator.
 	ServiceRejected
 )
+
+// serviceRejectedDetail is the operator-facing detail of a ServiceRejected
+// status caused by a failed marker gate or an allowlist miss. The two are
+// deliberately indistinguishable on the wire and in logs.
+const serviceRejectedDetail = "invalid service identity"
 
 // Authenticate resolves one service principal from request credential
 // primitives. joinedXFCC must contain every XFCC header line joined in HTTP
 // order. marker is accepted only when the caller observed exactly one marker
 // header value.
 func (s *ServiceAccess) Authenticate(bearer, joinedXFCC, marker string) (Principal, ServiceAuthenticationStatus) {
+	principal, status, _ := s.AuthenticateDetail(bearer, joinedXFCC, marker)
+	return principal, status
+}
+
+// AuthenticateDetail is Authenticate plus the operator-facing detail of a
+// ServiceRejected status, for the denial log line and the error envelope. A
+// failed marker gate and an allowlist miss both report "invalid service
+// identity". A header the XFCC parser refused reports that distinctly —
+// "invalid service identity: malformed X-Forwarded-Client-Cert: <reason>" —
+// so an operator can tell a hop that emits non-Envoy quoting, or a client
+// probing the parser, from a peer that is simply not allowlisted. The detail
+// never carries header, marker, or credential material; it is empty unless
+// the status is ServiceRejected.
+func (s *ServiceAccess) AuthenticateDetail(bearer, joinedXFCC, marker string) (Principal, ServiceAuthenticationStatus, string) {
 	if s == nil {
-		return Principal{}, ServiceNotAttempted
+		return Principal{}, ServiceNotAttempted, ""
 	}
 	// SPIFFE is first-class. If XFCC is present, a failed mesh attestation is a
 	// terminal service-authentication failure, never a downgrade to bearer.
 	if joinedXFCC != "" {
 		if !s.xfccGatePasses(marker) {
-			return Principal{}, ServiceRejected
+			return Principal{}, ServiceRejected, serviceRejectedDetail
 		}
-		if principal, ok := VerifyXFCC(joinedXFCC, s.TrustedSPIFFEIDs); ok {
-			return principal, ServiceAuthenticated
+		principal, ok, err := verifyXFCC(joinedXFCC, s.TrustedSPIFFEIDs)
+		if err != nil {
+			return Principal{}, ServiceRejected, serviceRejectedDetail + ": " + err.Error()
 		}
-		return Principal{}, ServiceRejected
+		if ok {
+			return principal, ServiceAuthenticated, ""
+		}
+		return Principal{}, ServiceRejected, serviceRejectedDetail
 	}
 	if principal, ok := VerifyServiceBearer(bearer, s.Credentials); ok {
-		return principal, ServiceAuthenticated
+		return principal, ServiceAuthenticated, ""
 	}
-	return Principal{}, ServiceNotAttempted
+	return Principal{}, ServiceNotAttempted, ""
 }
 
 func (s *ServiceAccess) xfccGatePasses(marker string) bool {
@@ -204,85 +229,186 @@ func ParseTrustedSPIFFEIDs(s string) ([]string, error) {
 // forwarded hearsay from upstream hops (or attacker input, if any hop
 // forwards without sanitizing), so it must never authenticate anyone.
 //
+// The last-element rule is only as good as the element boundaries, so the
+// header is first checked against Envoy's quoting grammar by parseXFCC and
+// refused as a whole when it violates it: a client-controlled prefix must not
+// be able to move or hide the comma in front of the sidecar's element.
+//
 // The match is an exact, case-sensitive comparison of the element's URI SAN
 // (SPIFFE IDs are case-sensitive by spec) against the allowlist. An empty
-// header or an empty allowlist never authenticates.
+// header, a malformed header, or an empty allowlist never authenticates.
 func VerifyXFCC(header string, trusted []string) (Principal, bool) {
+	principal, ok, _ := verifyXFCC(header, trusted)
+	return principal, ok
+}
+
+// verifyXFCC is VerifyXFCC plus the parse error, so AuthenticateDetail can
+// report a refused header distinctly from an allowlist miss. A non-nil error
+// never comes with ok == true.
+func verifyXFCC(header string, trusted []string) (Principal, bool, error) {
 	if header == "" || len(trusted) == 0 {
-		return Principal{}, false
+		return Principal{}, false, nil
 	}
-	elements := splitXFCC(header, ',')
+	elements, err := parseXFCC(header)
+	if err != nil {
+		return Principal{}, false, err
+	}
 	last := elements[len(elements)-1]
-	for _, uri := range xfccURIs(last) {
+	for _, uri := range last.uris() {
 		for _, t := range trusted {
 			if uri == t {
-				return Principal{kind: KindService, subject: uri}, true
+				return Principal{kind: KindService, subject: uri}, true, nil
 			}
 		}
 	}
-	return Principal{}, false
+	return Principal{}, false, nil
 }
 
-// splitXFCC splits on sep outside double-quoted values, honoring Envoy's
-// quoted-string escaping (backslash escapes inside quotes).
-func splitXFCC(s string, sep byte) []string {
-	var parts []string
-	var cur strings.Builder
-	inQuotes := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case inQuotes && c == '\\' && i+1 < len(s):
-			cur.WriteByte(c)
-			i++
-			cur.WriteByte(s[i])
-		case c == '"':
-			inQuotes = !inQuotes
-			cur.WriteByte(c)
-		case c == sep && !inQuotes:
-			parts = append(parts, cur.String())
-			cur.Reset()
-		default:
-			cur.WriteByte(c)
-		}
-	}
-	parts = append(parts, cur.String())
-	return parts
-}
+// ErrMalformedXFCC is wrapped by every X-Forwarded-Client-Cert grammar
+// violation. Chronicle refuses such a header outright instead of guessing
+// where its elements begin and end; see parseXFCC.
+var ErrMalformedXFCC = errors.New("malformed X-Forwarded-Client-Cert")
 
-// xfccURIs extracts every URI SAN from one XFCC element. Envoy emits fixed
-// key names; the comparison is case-insensitive on the key purely as
-// defensive slack, never on the value.
-func xfccURIs(element string) []string {
+// The parser's refusal reasons. They are a fixed, low-cardinality set and
+// never quote header content, so they are safe in logs and error envelopes.
+const (
+	// xfccReasonUnterminatedQuote: the input ended inside a quoted value,
+	// including after a trailing lone backslash.
+	xfccReasonUnterminatedQuote = "unterminated quoted value"
+	// xfccReasonMisplacedQuote: a double quote that does not open a whole
+	// value — inside a key, or inside or after the start of an unquoted value.
+	xfccReasonMisplacedQuote = "double quote outside a quoted value"
+	// xfccReasonTrailingAfterQuote: bytes between a closing quote and the next
+	// separator or the end of the header.
+	xfccReasonTrailingAfterQuote = "data after a quoted value"
+)
+
+func xfccErr(reason string) error { return fmt.Errorf("%w: %s", ErrMalformedXFCC, reason) }
+
+// xfccPair is one key=value of an XFCC element with Envoy's quoting removed.
+type xfccPair struct{ key, value string }
+
+// xfccElement is the key=value pairs one hop added to the header.
+type xfccElement []xfccPair
+
+// uris returns the element's URI SAN values. Envoy emits fixed key names; the
+// comparison is case-insensitive on the key purely as defensive slack, never
+// on the value.
+func (e xfccElement) uris() []string {
 	var uris []string
-	for _, pair := range splitXFCC(element, ';') {
-		k, v, ok := strings.Cut(pair, "=")
-		if !ok {
-			continue
-		}
-		if !strings.EqualFold(strings.TrimSpace(k), "URI") {
-			continue
-		}
-		if u := unquoteXFCC(strings.TrimSpace(v)); u != "" {
-			uris = append(uris, u)
+	for _, p := range e {
+		if strings.EqualFold(p.key, "URI") && p.value != "" {
+			uris = append(uris, p.value)
 		}
 	}
 	return uris
 }
 
-// unquoteXFCC strips one layer of double quotes and backslash escapes, the
-// quoting Envoy applies to values containing separators.
-func unquoteXFCC(v string) string {
-	if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
-		return v
-	}
-	inner := v[1 : len(v)-1]
-	var b strings.Builder
-	for i := 0; i < len(inner); i++ {
-		if inner[i] == '\\' && i+1 < len(inner) {
+// parseXFCC tokenizes an X-Forwarded-Client-Cert value into its elements
+// (comma-separated, one per hop) of key=value pairs (semicolon-separated),
+// applying Envoy's quoting rules and refusing anything outside them.
+//
+// Envoy wraps a value that contains ',', ';' or '=' — and always Subject —
+// in double quotes and escapes an embedded '"' as '\"'; RFC 2253 subjects
+// arrive with their own backslash escapes, which are read the same way (a
+// backslash always pairs with the byte after it, and that byte is kept). The
+// grammar therefore has exactly one place a double quote may appear: opening
+// a value, right after '=', and closing it, right before ';', ',' or the end.
+// A quote anywhere else, a quoted value the input ends inside (including a
+// trailing lone backslash), or bytes between a closing quote and the next
+// separator is malformed, and the whole header is refused with an error that
+// wraps ErrMalformedXFCC — never parsed with a guessed element boundary.
+//
+// The strictness is what makes the last-element rule hold under
+// APPEND_FORWARD, where the prefix is client-controlled: a lenient parser that
+// let an unbalanced quote run across the comma before the sidecar's appended
+// element treated the client's URI as part of the "last" element (the 2026-09
+// review finding against the former splitXFCC).
+//
+// Everything else stays lenient and unambiguous: a pair without '=' carries no
+// value and is ignored, blanks around keys and values are trimmed, and an
+// empty element (a leading, trailing, or doubled comma) is kept as an element
+// with no pairs, so "URI=x," still ends with an empty last element.
+func parseXFCC(s string) ([]xfccElement, error) {
+	var (
+		elements []xfccElement
+		element  xfccElement
+		i, n     = 0, len(s)
+	)
+	for {
+		// Key: everything up to '=' or a separator; never quoted.
+		start := i
+		for i < n && s[i] != '=' && s[i] != ';' && s[i] != ',' {
+			if s[i] == '"' {
+				return nil, xfccErr(xfccReasonMisplacedQuote)
+			}
 			i++
 		}
-		b.WriteByte(inner[i])
+		key := strings.TrimSpace(s[start:i])
+		if i < n && s[i] == '=' {
+			i++
+			i = skipXFCCBlanks(s, i)
+			var value string
+			if i < n && s[i] == '"' {
+				// Quoted value: read to the closing quote, honoring escapes.
+				i++
+				var b strings.Builder
+				closed := false
+				for i < n {
+					c := s[i]
+					if c == '\\' {
+						if i+1 >= n {
+							return nil, xfccErr(xfccReasonUnterminatedQuote)
+						}
+						b.WriteByte(s[i+1])
+						i += 2
+						continue
+					}
+					i++
+					if c == '"' {
+						closed = true
+						break
+					}
+					b.WriteByte(c)
+				}
+				if !closed {
+					return nil, xfccErr(xfccReasonUnterminatedQuote)
+				}
+				i = skipXFCCBlanks(s, i)
+				if i < n && s[i] != ';' && s[i] != ',' {
+					return nil, xfccErr(xfccReasonTrailingAfterQuote)
+				}
+				value = b.String()
+			} else {
+				// Unquoted value: up to the next separator; a quote here is
+				// not Envoy's grammar and would be the start of a boundary game.
+				vstart := i
+				for i < n && s[i] != ';' && s[i] != ',' {
+					if s[i] == '"' {
+						return nil, xfccErr(xfccReasonMisplacedQuote)
+					}
+					i++
+				}
+				value = strings.TrimSpace(s[vstart:i])
+			}
+			element = append(element, xfccPair{key: key, value: value})
+		}
+		if i >= n {
+			return append(elements, element), nil
+		}
+		if s[i] == ',' {
+			elements = append(elements, element)
+			element = nil
+		}
+		i++ // consume ';' or ','
 	}
-	return b.String()
+}
+
+// skipXFCCBlanks advances past spaces and tabs, the only blanks a hop might
+// put around a quoted value (Envoy itself emits none).
+func skipXFCCBlanks(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	return i
 }
