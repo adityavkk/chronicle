@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -30,6 +31,14 @@ import (
 // recent window matters.
 const captureBufferCap = 200
 
+// captureBucketCap bounds bucket metadata, including buckets created by SSE
+// subscribers before any delivery arrives.
+const captureBucketCap = 1024
+
+// captureBucketTTL bounds how long an idle bucket retains deliveries. Reaping is
+// lazy on bucket creation, avoiding a background goroutine for this tiny tool.
+const captureBucketTTL = time.Hour
+
 // captureSubscriberChanSize bounds a single SSE subscriber's pending queue. If a
 // subscriber falls this far behind it is dropped rather than blocking the POST
 // handler (a slow browser must never wall the chronicle server's delivery).
@@ -51,7 +60,8 @@ type Delivery struct {
 	Signature string `json:"signature"`
 	// ContentType is the delivery's Content-Type header (normally application/json).
 	ContentType string `json:"contentType"`
-	// Headers is the full set of request headers (each value joined by ", ").
+	// Headers contains only display-safe webhook protocol headers. Credentials and
+	// proxy metadata are never retained or relayed to the browser.
 	Headers map[string]string `json:"headers"`
 	// Body is the exact raw request body bytes as a string.
 	Body string `json:"body"`
@@ -62,6 +72,7 @@ type captureBucket struct {
 	seq         uint64
 	deliveries  []Delivery
 	subscribers map[chan Delivery]struct{}
+	updatedAt   time.Time
 }
 
 // captureStore is the concurrency-safe owner of all capture buckets. A single
@@ -70,32 +81,50 @@ type captureBucket struct {
 type captureStore struct {
 	mu      sync.Mutex
 	buckets map[string]*captureBucket
+	now     func() time.Time
 }
 
 func newCaptureStore() *captureStore {
-	return &captureStore{buckets: make(map[string]*captureBucket)}
+	return &captureStore{buckets: make(map[string]*captureBucket), now: time.Now}
 }
 
 // bucketLocked returns the bucket for id, creating it on first use. The caller
 // must hold s.mu.
-func (s *captureStore) bucketLocked(id string) *captureBucket {
+func (s *captureStore) bucketLocked(id string) (*captureBucket, bool) {
 	b := s.buckets[id]
 	if b == nil {
-		b = &captureBucket{subscribers: make(map[chan Delivery]struct{})}
+		now := s.now()
+		s.reapExpiredLocked(now)
+		if len(s.buckets) >= captureBucketCap {
+			return nil, false
+		}
+		b = &captureBucket{subscribers: make(map[chan Delivery]struct{}), updatedAt: now}
 		s.buckets[id] = b
 	}
-	return b
+	return b, true
+}
+
+func (s *captureStore) reapExpiredLocked(now time.Time) {
+	for id, bucket := range s.buckets {
+		if len(bucket.subscribers) == 0 && now.Sub(bucket.updatedAt) >= captureBucketTTL {
+			delete(s.buckets, id)
+		}
+	}
 }
 
 // record stamps a delivery into the bucket's ring buffer (evicting the oldest
 // past the cap) and fans it out to every live subscriber. A subscriber whose
 // queue is full is skipped for this delivery rather than blocking the POST.
-func (s *captureStore) record(id string, d Delivery) Delivery {
+func (s *captureStore) record(id string, d Delivery) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	b := s.bucketLocked(id)
+	b, ok := s.bucketLocked(id)
+	if !ok {
+		return false
+	}
 
 	b.seq++
+	b.updatedAt = s.now()
 	d.Seq = b.seq
 	b.deliveries = append(b.deliveries, d)
 	if len(b.deliveries) > captureBufferCap {
@@ -114,7 +143,7 @@ func (s *captureStore) record(id string, d Delivery) Delivery {
 			// has the buffered replay and will recover on its next read.
 		}
 	}
-	return d
+	return true
 }
 
 // list returns a snapshot copy of a bucket's buffered deliveries (oldest first).
@@ -133,15 +162,19 @@ func (s *captureStore) list(id string) []Delivery {
 // subscribe registers a new SSE subscriber and returns its channel plus the
 // current buffered backlog (to replay before streaming). The caller MUST call
 // unsubscribe with the same channel when done.
-func (s *captureStore) subscribe(id string) (chan Delivery, []Delivery) {
+func (s *captureStore) subscribe(id string) (chan Delivery, []Delivery, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	b := s.bucketLocked(id)
+	b, ok := s.bucketLocked(id)
+	if !ok {
+		return nil, nil, false
+	}
 	ch := make(chan Delivery, captureSubscriberChanSize)
 	b.subscribers[ch] = struct{}{}
+	b.updatedAt = s.now()
 	backlog := make([]Delivery, len(b.deliveries))
 	copy(backlog, b.deliveries)
-	return ch, backlog
+	return ch, backlog, true
 }
 
 // unsubscribe removes a subscriber and closes its channel. Safe to call once.
@@ -155,17 +188,18 @@ func (s *captureStore) unsubscribe(id string, ch chan Delivery) {
 	if _, ok := b.subscribers[ch]; ok {
 		delete(b.subscribers, ch)
 		close(ch)
+		b.updatedAt = s.now()
 	}
 }
 
 // registerCaptureRoutes wires the capture endpoint onto a mux. It is split out of
 // main so it can be unit-tested against a stand-alone mux + httptest server with
-// no chronicle and no embedded UI.
-func registerCaptureRoutes(mux *http.ServeMux, store *captureStore) {
+// no chronicle and no embedded UI. A nil verifier records deliveries unverified.
+func registerCaptureRoutes(mux *http.ServeMux, store *captureStore, verifier captureVerifier) {
 	// Go 1.22+ pattern routing gives us the {id} wildcard and method matching, so
 	// the stream and list/post routes split cleanly without manual path parsing.
 	mux.HandleFunc("POST /__hooks/{id}", func(w http.ResponseWriter, r *http.Request) {
-		handleCapturePost(store, w, r)
+		handleCapturePost(store, w, r, verifier)
 	})
 	mux.HandleFunc("GET /__hooks/{id}/stream", func(w http.ResponseWriter, r *http.Request) {
 		handleCaptureStream(store, w, r)
@@ -177,18 +211,47 @@ func registerCaptureRoutes(mux *http.ServeMux, store *captureStore) {
 
 // maxCaptureBody bounds a single captured body so a hostile or runaway delivery
 // cannot exhaust memory. 2 MiB is far above any realistic wake notification.
-const maxCaptureBody = 2 << 20
+const (
+	maxCaptureBody    = 2 << 20
+	maxCaptureIDBytes = 256
+)
 
-func handleCapturePost(store *captureStore, w http.ResponseWriter, r *http.Request) {
+func captureID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := r.PathValue("id")
 	if id == "" {
 		http.Error(w, "missing capture id", http.StatusBadRequest)
+		return "", false
+	}
+	if len(id) > maxCaptureIDBytes {
+		http.Error(w, "capture id too long", http.StatusBadRequest)
+		return "", false
+	}
+	return id, true
+}
+
+func handleCapturePost(store *captureStore, w http.ResponseWriter, r *http.Request, verifier captureVerifier) {
+	id, ok := captureID(w, r)
+	if !ok {
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxCaptureBody))
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxCaptureBody+1))
 	if err != nil {
 		http.Error(w, "could not read body", http.StatusBadRequest)
 		return
+	}
+	if len(body) > maxCaptureBody {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if verifier != nil {
+		if err := verifier.Verify(r.Header.Get("Webhook-Signature"), body); err != nil {
+			if errors.Is(err, errJWKSUnavailable) {
+				http.Error(w, "webhook verification unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			http.Error(w, "invalid webhook signature", http.StatusUnauthorized)
+			return
+		}
 	}
 	d := Delivery{
 		ReceivedAt:  time.Now().UnixMilli(),
@@ -198,7 +261,10 @@ func handleCapturePost(store *captureStore, w http.ResponseWriter, r *http.Reque
 		Headers:     flattenHeaders(r.Header),
 		Body:        string(body),
 	}
-	store.record(id, d)
+	if ok := store.record(id, d); !ok {
+		http.Error(w, "capture capacity reached", http.StatusServiceUnavailable)
+		return
+	}
 	// Respond fast and minimally. We deliberately do NOT echo {"done":true}: that
 	// would tell chronicle to auto-ack and release the lease, which is a decision
 	// for the operator driving the UI, not for the passive capture sink. The
@@ -209,9 +275,8 @@ func handleCapturePost(store *captureStore, w http.ResponseWriter, r *http.Reque
 }
 
 func handleCaptureList(store *captureStore, w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		http.Error(w, "missing capture id", http.StatusBadRequest)
+	id, ok := captureID(w, r)
+	if !ok {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -222,9 +287,8 @@ func handleCaptureList(store *captureStore, w http.ResponseWriter, r *http.Reque
 }
 
 func handleCaptureStream(store *captureStore, w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" {
-		http.Error(w, "missing capture id", http.StatusBadRequest)
+	id, ok := captureID(w, r)
+	if !ok {
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -238,7 +302,11 @@ func handleCaptureStream(store *captureStore, w http.ResponseWriter, r *http.Req
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	ch, backlog := store.subscribe(id)
+	ch, backlog, ok := store.subscribe(id)
+	if !ok {
+		http.Error(w, "capture capacity reached", http.StatusServiceUnavailable)
+		return
+	}
 	defer store.unsubscribe(id, ch)
 
 	// An opening comment lets the EventSource fire `open` immediately and flushes
@@ -305,13 +373,19 @@ func writeDeliveryEvent(w io.Writer, d Delivery) bool {
 	return true
 }
 
-// flattenHeaders turns http.Header (a map to a slice) into a flat string map,
-// joining multi-valued headers with ", ". The pseudo-header for the raw body is
-// not included; the body is captured separately.
+// flattenHeaders retains only protocol metadata that is safe and useful to show
+// in the browser. In particular, credentials, cookies, and forwarding headers
+// must never enter the in-memory capture store.
 func flattenHeaders(h http.Header) map[string]string {
-	out := make(map[string]string, len(h))
-	for k, v := range h {
-		out[k] = strings.Join(v, ", ")
+	const (
+		contentTypeHeader = "Content-Type"
+		signatureHeader   = "Webhook-Signature"
+	)
+	out := make(map[string]string, 2)
+	for _, name := range [...]string{contentTypeHeader, signatureHeader} {
+		if values := h.Values(name); len(values) > 0 {
+			out[name] = strings.Join(values, ", ")
+		}
 	}
 	return out
 }

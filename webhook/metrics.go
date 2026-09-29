@@ -50,6 +50,11 @@ type Metrics interface {
 	DirtyProcess(dur time.Duration, subs, wakes, duplicates int, outcome string)
 	// DirtyOverflow records the first queue overflow in a coalesced epoch.
 	DirtyOverflow()
+	// WakeCorrelationEvicted records a live wake's request id dropped because
+	// the process-local correlation memory was at capacity; that wake's later
+	// records fall back to wake-<id>. Sustained counts mean the capacity is
+	// below the replica's in-flight wake population.
+	WakeCorrelationEvicted()
 	// ReconcileRequest records whether a bounded recovery signal was enqueued or
 	// coalesced. scope and result both have closed vocabularies.
 	ReconcileRequest(scope, result string)
@@ -168,6 +173,9 @@ func (NopMetrics) DirtyProcess(time.Duration, int, int, int, string) {}
 
 // DirtyOverflow implements Metrics.
 func (NopMetrics) DirtyOverflow() {}
+
+// WakeCorrelationEvicted implements Metrics.
+func (NopMetrics) WakeCorrelationEvicted() {}
 
 // ReconcileRequest implements Metrics.
 func (NopMetrics) ReconcileRequest(string, string) {}

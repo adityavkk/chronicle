@@ -92,7 +92,7 @@ func BenchmarkSubscriptionFanout(b *testing.B) {
 					b.Fatalf("append source stream: %v", err)
 				}
 				committed := time.Now()
-				mgr.OnStreamAppend(paths[0])
+				mgr.OnStreamAppend(context.Background(), paths[0])
 				hookFinished := time.Now()
 				hookSamples = append(hookSamples, hookFinished.Sub(committed))
 				appendSamples = append(appendSamples, hookFinished.Sub(appendStarted))

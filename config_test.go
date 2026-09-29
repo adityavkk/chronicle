@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
 )
 
 func TestLoadEnvReadPageBytes(t *testing.T) {
@@ -378,5 +379,66 @@ func TestLoadEnvImmutableSegments(t *testing.T) {
 		if err := c.LoadEnv(env(map[string]string{tc.key: tc.value})); err == nil {
 			t.Fatalf("%s=%q must fail", tc.key, tc.value)
 		}
+	}
+}
+
+func TestLoadEnvRequestIDHeader(t *testing.T) {
+	env := func(vars map[string]string) func(string) (string, bool) {
+		return func(k string) (string, bool) { v, ok := vars[k]; return v, ok }
+	}
+
+	c := DefaultConfig()
+	if c.RequestIDHeader != correlation.DefaultHeader {
+		t.Fatalf("default RequestIDHeader = %q, want %q", c.RequestIDHeader, correlation.DefaultHeader)
+	}
+
+	c = DefaultConfig()
+	if err := c.LoadEnv(env(map[string]string{EnvRequestIDHeader: " My-Platform-Request-ID "})); err != nil {
+		t.Fatalf("a token header name must load: %v", err)
+	}
+	if c.RequestIDHeader != "My-Platform-Request-ID" {
+		t.Fatalf("RequestIDHeader = %q, want the trimmed configured name", c.RequestIDHeader)
+	}
+
+	for _, bad := range []string{"", "X Request ID", "X-Request-ID:", "X-Réquest"} {
+		c = DefaultConfig()
+		if err := c.LoadEnv(env(map[string]string{EnvRequestIDHeader: bad})); err == nil {
+			t.Errorf("%s=%q must refuse startup: a name that is not a header token cannot be read or echoed", EnvRequestIDHeader, bad)
+		}
+	}
+	// A header Chronicle already interprets would be overwritten with the
+	// request id on every request; naming one is a misconfiguration, not a
+	// correlation header.
+	for _, reserved := range []string{"Authorization", "cookie", "Producer-Id", "Write-Token", "electric-claim-token", "traceparent", "x-forwarded-client-cert", "Content-Type"} {
+		c = DefaultConfig()
+		if err := c.LoadEnv(env(map[string]string{EnvRequestIDHeader: reserved})); err == nil {
+			t.Errorf("%s=%q must refuse startup: the header already has a meaning", EnvRequestIDHeader, reserved)
+		}
+	}
+	// The XFCC marker is the one reserved header only the configuration knows
+	// the name of. The middleware would replace the sidecar's marker with the
+	// request id on every request, so every mesh-attested request would fail
+	// the marker gate: a fail-closed outage of mesh identity, not a spoof.
+	marker := map[string]string{EnvXFCCRequiredHeader: "X-Mesh-Marker: mesh v1"}
+	for _, name := range []string{"X-Mesh-Marker", "x-mesh-marker"} {
+		c = DefaultConfig()
+		err := c.LoadEnv(env(map[string]string{EnvRequestIDHeader: name, EnvXFCCRequiredHeader: marker[EnvXFCCRequiredHeader]}))
+		if err == nil || !strings.Contains(err.Error(), EnvRequestIDHeader) || !strings.Contains(err.Error(), EnvXFCCRequiredHeader) {
+			t.Errorf("%s=%q with the marker under that name must refuse startup naming both variables, got %v", EnvRequestIDHeader, name, err)
+		}
+	}
+	// cmd/chronicle applies -request-id-header after LoadEnv, so the same
+	// check must be callable on the finished configuration.
+	c = DefaultConfig()
+	if err := c.LoadEnv(env(marker)); err != nil {
+		t.Fatal(err)
+	}
+	c.RequestIDHeader = "X-Mesh-Marker"
+	if err := c.CheckRequestIDHeader(); err == nil {
+		t.Error("CheckRequestIDHeader must refuse the marker name set by a flag")
+	}
+	c.RequestIDHeader = "X-Request-ID"
+	if err := c.CheckRequestIDHeader(); err != nil {
+		t.Errorf("CheckRequestIDHeader(%q) = %v, want nil", c.RequestIDHeader, err)
 	}
 }

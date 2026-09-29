@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +21,7 @@ func newCaptureServer(t *testing.T) (*httptest.Server, *captureStore) {
 	t.Helper()
 	store := newCaptureStore()
 	mux := http.NewServeMux()
-	registerCaptureRoutes(mux, store)
+	registerCaptureRoutes(mux, store, nil)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, store
@@ -227,6 +229,169 @@ func TestCaptureBucketsAreIsolated(t *testing.T) {
 	}
 }
 
+func TestCapturePostRejectsOversizedBody(t *testing.T) {
+	store := newCaptureStore()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/__hooks/large",
+		strings.NewReader(strings.Repeat("x", maxCaptureBody+1)),
+	)
+	req.SetPathValue("id", "large")
+	rec := httptest.NewRecorder()
+
+	handleCapturePost(store, rec, req, nil)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized POST status = %d, want 413", rec.Code)
+	}
+	if got := store.list("large"); len(got) != 0 {
+		t.Fatalf("oversized POST recorded %d deliveries, want 0", len(got))
+	}
+}
+
+func TestCapturePostAcceptsBodyAtLimit(t *testing.T) {
+	store := newCaptureStore()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/__hooks/exact",
+		strings.NewReader(strings.Repeat("x", maxCaptureBody)),
+	)
+	req.SetPathValue("id", "exact")
+	rec := httptest.NewRecorder()
+
+	handleCapturePost(store, rec, req, nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("exact-limit POST status = %d, want 200", rec.Code)
+	}
+	if got := store.list("exact"); len(got) != 1 || len(got[0].Body) != maxCaptureBody {
+		t.Fatalf("exact-limit POST was not recorded intact")
+	}
+}
+
+func TestCapturePostRetainsOnlySafeHeaders(t *testing.T) {
+	store := newCaptureStore()
+	req := httptest.NewRequest(http.MethodPost, "/__hooks/headers", strings.NewReader("{}"))
+	req.SetPathValue("id", "headers")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Webhook-Signature", "t=1,kid=test,ed25519=sig")
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Cookie", "session=secret")
+	req.Header.Set("X-Forwarded-Client-Cert", "credential-like metadata")
+	rec := httptest.NewRecorder()
+
+	handleCapturePost(store, rec, req, nil)
+
+	got := store.list("headers")
+	if len(got) != 1 {
+		t.Fatalf("recorded deliveries = %d, want 1", len(got))
+	}
+	want := map[string]string{
+		"Content-Type":      "application/json",
+		"Webhook-Signature": "t=1,kid=test,ed25519=sig",
+	}
+	if !reflect.DeepEqual(got[0].Headers, want) {
+		t.Fatalf("captured headers = %#v, want %#v", got[0].Headers, want)
+	}
+}
+
+func TestCaptureIDLengthBounded(t *testing.T) {
+	store := newCaptureStore()
+	req := httptest.NewRequest(http.MethodPost, "/__hooks/too-long", strings.NewReader("{}"))
+	req.SetPathValue("id", strings.Repeat("x", maxCaptureIDBytes+1))
+	rec := httptest.NewRecorder()
+
+	handleCapturePost(store, rec, req, nil)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("long-id POST status = %d, want 400", rec.Code)
+	}
+	if len(store.buckets) != 0 {
+		t.Fatalf("long-id POST allocated %d buckets, want 0", len(store.buckets))
+	}
+}
+
+type captureVerifierFunc func(string, []byte) error
+
+func (f captureVerifierFunc) Verify(header string, body []byte) error {
+	return f(header, body)
+}
+
+func TestCapturePostRejectsInvalidSignature(t *testing.T) {
+	store := newCaptureStore()
+	verifier := captureVerifierFunc(func(string, []byte) error { return errors.New("nope") })
+	req := httptest.NewRequest(http.MethodPost, "/__hooks/signed", strings.NewReader("{}"))
+	req.SetPathValue("id", "signed")
+	rec := httptest.NewRecorder()
+
+	handleCapturePost(store, rec, req, verifier)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid-signature POST status = %d, want 401", rec.Code)
+	}
+	if got := store.list("signed"); len(got) != 0 {
+		t.Fatalf("invalid-signature POST recorded %d deliveries, want 0", len(got))
+	}
+}
+
+func TestCapturePostReportsVerifierOutage(t *testing.T) {
+	store := newCaptureStore()
+	verifier := captureVerifierFunc(func(string, []byte) error { return errJWKSUnavailable })
+	req := httptest.NewRequest(http.MethodPost, "/__hooks/signed", strings.NewReader("{}"))
+	req.SetPathValue("id", "signed")
+	rec := httptest.NewRecorder()
+
+	handleCapturePost(store, rec, req, verifier)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("verifier-outage POST status = %d, want 503", rec.Code)
+	}
+	if got := store.list("signed"); len(got) != 0 {
+		t.Fatalf("verifier-outage POST recorded %d deliveries, want 0", len(got))
+	}
+}
+
+func TestCaptureBucketCountBounded(t *testing.T) {
+	store := newCaptureStore()
+	for i := 0; i < captureBucketCap; i++ {
+		if ok := store.record(fmt.Sprintf("bucket-%d", i), Delivery{}); !ok {
+			t.Fatalf("bucket %d rejected before cap", i)
+		}
+	}
+	if ok := store.record("one-too-many", Delivery{}); ok {
+		t.Fatal("bucket beyond cap was accepted")
+	}
+	if got := len(store.buckets); got != captureBucketCap {
+		t.Fatalf("bucket count = %d, want %d", got, captureBucketCap)
+	}
+}
+
+func TestCaptureBucketCapacityRecoversAfterExpiry(t *testing.T) {
+	now := time.Unix(1_778_324_210, 0)
+	store := newCaptureStore()
+	store.now = func() time.Time { return now }
+	for i := 0; i < captureBucketCap; i++ {
+		if ok := store.record(fmt.Sprintf("bucket-%d", i), Delivery{}); !ok {
+			t.Fatalf("bucket %d rejected before cap", i)
+		}
+	}
+	now = now.Add(captureBucketTTL)
+	if ok := store.record("replacement", Delivery{}); !ok {
+		t.Fatal("expired buckets did not release capacity")
+	}
+	if got := len(store.buckets); got != 1 {
+		t.Fatalf("bucket count after reap = %d, want 1", got)
+	}
+}
+
+func TestHealthIsMinimalAndUnauthenticated(t *testing.T) {
+	rec := httptest.NewRecorder()
+	handleHealth(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != "ok\n" {
+		t.Fatalf("health response = (%d, %q), want (200, %q)", rec.Code, rec.Body.String(), "ok\n")
+	}
+}
+
 // TestCaptureUnsubscribeOnDisconnect asserts a client disconnect tears the
 // subscriber down so it does not leak. We cancel the request context and then
 // verify the bucket has no remaining subscribers.
@@ -285,7 +450,7 @@ func TestCaptureMissingIdRejected(t *testing.T) {
 	// Call the handler directly with no path value set.
 	req := httptest.NewRequest(http.MethodPost, "/__hooks/", strings.NewReader("{}"))
 	rec := httptest.NewRecorder()
-	handleCapturePost(store, rec, req)
+	handleCapturePost(store, rec, req, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing-id POST status = %d, want 400", rec.Code)
 	}

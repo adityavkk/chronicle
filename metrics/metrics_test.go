@@ -51,6 +51,9 @@ func TestMuxEndpoints(t *testing.T) {
 	p.DirtyQueue(1, 1024, time.Millisecond)
 	p.DirtyProcess(4*time.Millisecond, 12, 3, 2, "ok")
 	p.DirtyOverflow()
+	p.WakeCorrelationEvicted()
+	p.TracingSetupFailed("credentials_unavailable")
+	p.TrackTracingExportFailures(func() uint64 { return 2 })
 	p.ReconcileRequest("dirty-overflow", "enqueued")
 	p.DirtyProcessingError("lookup")
 	p.DirtyRecoveryDelay(5 * time.Millisecond)
@@ -132,6 +135,9 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_subscription_dirty_wakes_armed_total",
 		"chronicle_subscription_dirty_duplicate_work_total",
 		"chronicle_subscription_dirty_overflow_total",
+		"chronicle_wake_correlation_evictions_total",
+		"chronicle_tracing_setup_failures_total",
+		"chronicle_tracing_export_failures_total",
 		"chronicle_subscription_reconcile_requests_total",
 		"chronicle_subscription_dirty_processing_errors_total",
 		"chronicle_subscription_dirty_recovery_delay_seconds",
@@ -215,6 +221,27 @@ func TestFenceMetricsGolden(t *testing.T) {
 		if !strings.Contains(body, sample) {
 			t.Errorf("/metrics output missing %q", sample)
 		}
+	}
+}
+
+func TestMuxPprofIsDisabledByDefault(t *testing.T) {
+	p := New()
+	mux := p.Mux(nil)
+	for _, path := range []string{
+		"/debug/pprof/",
+		"/debug/pprof/cmdline",
+		"/debug/pprof/profile",
+		"/debug/pprof/symbol",
+		"/debug/pprof/trace",
+		"/debug/pprof/goroutine?debug=1",
+	} {
+		t.Run(path, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+			if rr.Code != http.StatusNotFound {
+				t.Fatalf("%s = %d, want 404", path, rr.Code)
+			}
+		})
 	}
 }
 

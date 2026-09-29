@@ -438,6 +438,7 @@ func (f *fakeMetrics) DirtyQueue(int, int, time.Duration)           {}
 func (f *fakeMetrics) DirtyProcess(time.Duration, int, int, int, string) {
 }
 func (f *fakeMetrics) DirtyOverflow()                   {}
+func (f *fakeMetrics) WakeCorrelationEvicted()          {}
 func (f *fakeMetrics) ReconcileRequest(string, string)  {}
 func (f *fakeMetrics) DirtyProcessingError(string)      {}
 func (f *fakeMetrics) DirtyRecoveryDelay(time.Duration) {}
@@ -875,7 +876,7 @@ func TestRecordFailureFencesAfterSuccessAck(t *testing.T) {
 			if err != nil {
 				t.Fatalf("new manager: %v", err)
 			}
-			mgr.recordFailure("s1", arm.Generation, arm.WakeID, owner)
+			mgr.recordFailure("s1", arm.Generation, arm.WakeID, owner, mgr.requestIDForWake(arm.WakeID))
 
 			sub, _, _ := base.Get("s1")
 			if sub.Phase != PhaseIdle || sub.Status != StatusActive || sub.RetryCount != 0 || sub.NextAttemptNs != 0 {
@@ -1328,5 +1329,17 @@ func TestPromoteDrivesEagerReconcile(t *testing.T) {
 	due, _ := store.DueLeases(slotOf("present"), future, dueClaimLimit, time.Second)
 	if len(due) != 1 || due[0] != "present" {
 		t.Fatalf("the restored lease entry must be visible to the lease worker, got due=%v", due)
+	}
+}
+
+func TestNewManagerRefusesAnUnusableRequestIDHeader(t *testing.T) {
+	// The check runs before anything is loaded, so a library caller learns of
+	// the misconfiguration from the constructor rather than from every
+	// delivery ending as a transport error (net/http refuses an invalid field
+	// name) or from a protocol header being overwritten.
+	for _, bad := range []string{"X Request ID", "Authorization", "Producer-Id"} {
+		if _, err := NewManager(nil, nil, ManagerOptions{RequestIDHeader: bad}); err == nil {
+			t.Errorf("NewManager with RequestIDHeader %q must fail", bad)
+		}
 	}
 }
