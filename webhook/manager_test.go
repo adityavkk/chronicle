@@ -3,7 +3,9 @@ package webhook
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"net/http"
 	"strings"
@@ -1099,6 +1101,139 @@ func TestReconcileBackfillsPreexistingStreamAtTail(t *testing.T) {
 	sub, _, _ := store.Get("s1")
 	if len(sub.Links) != 1 || sub.Links[0].AckedOffset != stream.Tail {
 		t.Fatalf("pre-existing stream should link at tail (no replay), got %+v", sub.Links)
+	}
+}
+
+// recreatingStore is a Store whose first Link call, as a side effect, deletes
+// another subscription and re-creates it with an explicit-only config: the
+// client DELETE + PUT that is the only way to change a subscription's config,
+// landing while the reconcile pass is repairing an earlier subscription.
+type recreatingStore struct {
+	Store
+	victim string
+	cfg    Config
+	links  []StreamLink
+	at     time.Time
+	fired  bool
+}
+
+func (r *recreatingStore) Link(id, path string, linkType LinkType, offset string) error {
+	err := r.Store.Link(id, path, linkType, offset)
+	if !r.fired {
+		r.fired = true
+		if err := r.Delete(r.victim); err != nil {
+			panic(err)
+		}
+		if st, err := r.CreateOrConfirm(r.victim, r.cfg, r.links, r.at); err != nil || st != CreateCreated {
+			panic(fmt.Sprintf("recreate %s: %v %v", r.victim, st, err))
+		}
+	}
+	return err
+}
+
+// TestReconcileRelinksFromAFreshRead pins that the pattern pass links each
+// subscription from a read taken immediately before its writes, not from the
+// batched read that found it a candidate: a subscription deleted and re-created
+// without a pattern while the pass repaired an earlier one carries only its own
+// explicit link afterwards (PROTOCOL 6.1: glob links only where the pattern
+// matches), is absent from the stream's fan-out and is not woken.
+func TestReconcileRelinksFromAFreshRead(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Now()
+	for _, id := range []string{"s1", "s2"} {
+		if _, err := store.CreateOrConfirm(id, pullWakeCfg(), nil, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids, err := store.List()
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("list: %v %v", ids, err)
+	}
+	victim := ids[1] // the pass reaches it after the first repair fired the re-create
+	const yTail = "0000000000000001_0000000000000005"
+	rs := &recreatingStore{
+		Store:  store,
+		victim: victim,
+		cfg:    Config{Type: DispatchPullWake, Streams: []string{"manual/y"}, WakeStream: "wake/pool", LeaseTTLMs: 1000},
+		links:  []StreamLink{{Path: "manual/y", LinkType: LinkExplicit, AckedOffset: yTail}},
+		at:     now.Add(2 * time.Second),
+	}
+	// events/x was created after both subscriptions and its OnStreamCreated was
+	// lost, so the pass owes each of them a glob link at the beginning offset.
+	stream := StreamMeta{Path: "events/x", Tail: "0000000000000001_0000000000000010", CreatedAtNs: now.Add(time.Second).UnixNano()}
+	fs := &fakeStreams{tails: map[string]string{stream.Path: stream.Tail, "manual/y": yTail}}
+	mgr, err := NewManager(rs, fs, ManagerOptions{StreamRootURL: "http://x/v1/stream/", Lister: &fakeLister{streams: []StreamMeta{stream}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.RunReconcile()
+	if !rs.fired {
+		t.Fatal("the first repair never ran, so the race was not exercised")
+	}
+
+	sub, ok, err := store.Get(victim)
+	if err != nil || !ok {
+		t.Fatalf("re-created %s must exist: ok=%v err=%v", victim, ok, err)
+	}
+	if len(sub.Links) != 1 || sub.Links[0].Path != "manual/y" || sub.Links[0].LinkType != LinkExplicit {
+		t.Fatalf("re-created %s (pattern %q) must carry only its explicit link, got %+v", victim, sub.Config.Pattern, sub.Links)
+	}
+	if subs, _, _ := store.StreamSubscribers("events/x"); len(subs) != 1 || subs[0] != ids[0] {
+		t.Fatalf("events/x fan-out should hold only the repaired %s, got %v", ids[0], subs)
+	}
+	for _, woken := range fs.eventIDs() {
+		if woken == victim {
+			t.Fatalf("the re-created %s was woken for a stream it never subscribed to", victim)
+		}
+	}
+}
+
+// TestReconcilePatternPassSurvivesAnUnreadableSubscription pins that one
+// unreadable hash costs one subscription, not the pass: when the batched read
+// fails on it, every other pattern subscription is still repaired from its own
+// read, on this pass and the next.
+func TestReconcilePatternPassSurvivesAnUnreadableSubscription(t *testing.T) {
+	store, client := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	const n = 8
+	stream := StreamMeta{Path: "events/x", Tail: "0000000000000001_0000000000000010", CreatedAtNs: now.Add(time.Second).UnixNano()}
+	for i := 0; i < n; i++ {
+		if _, err := store.CreateOrConfirm(fmt.Sprintf("s%d", i), pullWakeCfg(), nil, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// s3's sub hash is a STRING: WRONGTYPE for any HGETALL, so the chunk's Exec
+	// and GetMany fail; the index pass does not read sub hashes and is unaffected.
+	if err := client.Del(ctx, subKey("s3")).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Set(ctx, subKey("s3"), "not-a-hash", 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetMany([]string{"s0", "s3"}); err == nil {
+		t.Fatal("precondition: the batched read must fail on the unreadable hash")
+	}
+	fs := &fakeStreams{tails: map[string]string{stream.Path: stream.Tail}}
+	mgr, err := NewManager(store, fs, ManagerOptions{
+		StreamRootURL: "http://x/v1/stream/", Lister: &fakeLister{streams: []StreamMeta{stream}},
+		Logger: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for pass := 1; pass <= 2; pass++ {
+		mgr.RunReconcile()
+		for i := 0; i < n; i++ {
+			id := fmt.Sprintf("s%d", i)
+			linked, err := client.HExists(ctx, linksKey(id), stream.Path).Result()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := i != 3; linked != want {
+				t.Fatalf("pass %d: %s linked to %s = %v, want %v", pass, id, stream.Path, linked, want)
+			}
+		}
 	}
 }
 
