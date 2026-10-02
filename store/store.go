@@ -308,6 +308,15 @@ type AppendOptions struct {
 	ProducerEpoch *int64            // Producer-Epoch header
 	ProducerSeq   *int64            // Producer-Seq header
 	Fence         *auth.AppendFence // claim fence checked atomically with mutation
+
+	// TailHint is the stream tail the caller last read (handleAppend's Get),
+	// or nil. Advisory only: the Redis store frames its first attempt against
+	// it instead of reading the tail again, and append.lua still compares the
+	// tail atomically with the write (INV-LIN-02), so a stale hint costs one
+	// RETRY and never changes the result. It is not an expected-version check:
+	// a stale hint is never an error. Backends that read live state under a
+	// lock (MemoryStore) ignore it.
+	TailHint *Offset
 }
 
 // HasProducerHeaders returns true if any producer headers are set
