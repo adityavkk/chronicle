@@ -467,7 +467,7 @@ func assertIndexCoversLinks(t *testing.T, client goredis.UniversalClient) {
 }
 
 // snapshotKeyspace DUMPs every key so the same seeded pre-state can be RESTOREd
-// byte-for-byte under the second pass (and seeding runs once per fixture).
+// byte-for-byte under every pass and lister mode (seeding runs once per seed).
 func snapshotKeyspace(t *testing.T, client goredis.UniversalClient) map[string]string {
 	t.Helper()
 	ctx := context.Background()
@@ -551,9 +551,12 @@ func TestReconcileDifferentialMatchesLegacy(t *testing.T) {
 	_, client := newTestStore(t)
 	const seeds = 32
 	for seed := int64(0); seed < seeds; seed++ {
+		// Seeding through the real store is the expensive part: once per seed,
+		// then every mode and pass starts from the RESTOREd snapshot.
+		fx, snap := seedAndSnapshot(t, client, seed)
 		for _, mode := range []listerMode{listerNil, listerEmpty, listerStreams} {
 			t.Run(fmt.Sprintf("seed%02d/%s", seed, mode), func(t *testing.T) {
-				fx, snap := seedAndSnapshot(t, client, seed)
+				restoreKeyspace(t, client, snap)
 				wantDump, wantTrace, _ := reconcileWith(t, client, fx, mode, oracleReconcileOnce)
 				restoreKeyspace(t, client, snap)
 				gotDump, gotTrace, mgr := reconcileWith(t, client, fx, mode, func(m *Manager, _ *RedisStore) { m.RunReconcile() })
