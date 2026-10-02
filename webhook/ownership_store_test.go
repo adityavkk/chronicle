@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"reflect"
 	"strconv"
 	"sync"
@@ -599,42 +600,65 @@ func TestClaimSlotsRoundTripsAreConstant(t *testing.T) {
 	}
 }
 
-// TestClaimSlotsHealsNoscript: after a script-cache flush the EVALSHA pipelines
-// come back NOSCRIPT; exactly those commands are re-issued as EVAL in one more
-// pipeline per phase (+2 round trips for the whole pass, not +1 per slot), every
-// slot is still granted, and the next pass is back to three EVALSHA pipelines.
-func TestClaimSlotsHealsNoscript(t *testing.T) {
-	s, client, hook := newCountingStore(t)
-	warmScripts(t, s, client)
+// TestRunBatchHealsNoscript: a script no node has cached makes every EVALSHA in
+// the batch come back NOSCRIPT; exactly those commands are re-issued as EVAL in
+// ONE more pipeline (+1 round trip per batch, not +1 per command), every call
+// still executes exactly once, and the next batch is back to one EVALSHA
+// pipeline. The script is claim_shard plus a unique trailing comment, so its SHA
+// is cold for this run by construction and no other client of the server can
+// prime or flush it: the test needs no server-wide SCRIPT FLUSH, which would
+// also empty the cache under other packages' exact round-trip tests on a shared
+// Redis. The composition, a ClaimSlots pass after a flush costing 3 + 2
+// pipelines (reserve and claim heal; the mirror step is plain HSET), is proven
+// with a real SCRIPT FLUSH on the throwaway cluster in TestClaimSlotsOnCluster.
+func TestRunBatchHealsNoscript(t *testing.T) {
+	_, client, hook := newCountingStore(t)
 	ctx := context.Background()
 	t0 := time.Unix(1_700_000_000, 0)
-	keys := make([]string, 32)
-	for h := range keys {
-		keys[h] = slotKey(h)
-	}
-	if err := client.ScriptFlush(ctx).Err(); err != nil {
+	prelude, err := scriptFS.ReadFile("scripts/common.lua")
+	if err != nil {
 		t.Fatal(err)
 	}
+	body, err := scriptFS.ReadFile("scripts/claim_shard.lua")
+	if err != nil {
+		t.Fatal(err)
+	}
+	salt := fmt.Sprintf("\n-- uncached %d-%d", os.Getpid(), time.Now().UnixNano())
+	fresh := typedScript[claimShardKeys, slotClaimReply]{
+		abi:     claimShardScript.abi,
+		script:  goredis.NewScript(string(prelude) + "\n" + string(body) + salt),
+		decoder: claimShardScript.decoder,
+	}
+	keys := make([]claimShardKeys, 32)
+	for h := range keys {
+		keys[h] = newClaimShardKeys(slotKey(h))
+	}
+	claimArgs := func(now time.Time) []any {
+		return []any{"rA", nsArg(now), strconv.FormatInt(slotTTL.Milliseconds(), 10)}
+	}
 	hook.reset()
-	for _, r := range s.ClaimSlots(keys, "rA", t0, slotTTL) {
-		if r.Err != nil || r.Claim.Status != SlotClaimed {
-			t.Fatalf("claim after SCRIPT FLUSH: %+v/%v", r.Claim, r.Err)
+	replies, errs := fresh.runBatch(ctx, client, keys, claimArgs(t0)...)
+	for i := range keys {
+		if errs[i] != nil || replies[i].toSlotClaim().Status != SlotClaimed {
+			t.Fatalf("cold slot %d: %v/%v", i, replies[i], errs[i])
 		}
 	}
 	singles, pipes := hook.counts()
-	if singles != 0 || pipes != 5 || hook.pipelined("eval") != 64 || hook.pipelined("evalsha") != 64 {
-		t.Fatalf("healing pass: singles=%d pipes=%d eval=%d evalsha=%d, want 0/5/64/64",
-			singles, pipes, hook.pipelined("eval"), hook.pipelined("evalsha"))
+	if singles != 0 || pipes != 2 || hook.pipelined("evalsha") != 32 || hook.pipelined("eval") != 32 {
+		t.Fatalf("healing batch: singles=%d pipes=%d evalsha=%d eval=%d, want 0/2/32/32",
+			singles, pipes, hook.pipelined("evalsha"), hook.pipelined("eval"))
 	}
 	hook.reset()
-	for _, r := range s.ClaimSlots(keys, "rA", t0.Add(time.Millisecond), slotTTL) {
-		if r.Err != nil || r.Claim.Status != SlotRenewed {
-			t.Fatalf("renew after heal: %+v/%v", r.Claim, r.Err)
+	replies, errs = fresh.runBatch(ctx, client, keys, claimArgs(t0.Add(time.Millisecond))...)
+	for i := range keys {
+		if errs[i] != nil || replies[i].toSlotClaim().Status != SlotRenewed {
+			t.Fatalf("renew after heal, slot %d: %v/%v", i, replies[i], errs[i])
 		}
 	}
 	singles, pipes = hook.counts()
-	if singles != 0 || pipes != 3 || hook.pipelined("eval") != 0 {
-		t.Fatalf("healed pass: singles=%d pipes=%d eval=%d, want 0/3/0", singles, pipes, hook.pipelined("eval"))
+	if singles != 0 || pipes != 1 || hook.pipelined("evalsha") != 32 || hook.pipelined("eval") != 0 {
+		t.Fatalf("healed batch: singles=%d pipes=%d evalsha=%d eval=%d, want 0/1/32/0",
+			singles, pipes, hook.pipelined("evalsha"), hook.pipelined("eval"))
 	}
 }
 
