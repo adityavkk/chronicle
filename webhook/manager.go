@@ -276,9 +276,11 @@ type Manager struct {
 	// held is the set of ownership slots this replica currently holds a lease on,
 	// SlotID -> the epoch it holds, recomputed each slotReconcileInterval as
 	// HRW-targeted ∩ claim_shard-granted. The fast workers (lease/retry/due)
-	// iterate ownedSlots() over it; the full sweep deliberately ignores it (the
-	// unguarded backstop). Guarded by ownMu. THE CAS IS THE AUTHORITY, NOT THE HRW
-	// MATH (05:399): a slot is here only if claim_shard granted it.
+	// snapshot it through ownedScopes(); the full sweep deliberately ignores it
+	// (the unguarded backstop). A brief stale-read disagreement is SAFE (a
+	// double-wake coalesces, and a zero-owner gap is covered by the full sweep
+	// until claim_shard resolves it). Guarded by ownMu. THE CAS IS THE AUTHORITY,
+	// NOT THE HRW MATH (05:399): a slot is here only if claim_shard granted it.
 	ownMu sync.RWMutex
 	held  map[SlotID]OwnerEpoch
 
@@ -2249,7 +2251,7 @@ func (m *Manager) heartbeatLoop() {
 }
 
 // slotReconcileLoop recomputes the HRW assignment and (re)claims owned slots every
-// slotReconcileInterval. It is the loop that drives ownedSlots(); a dead member
+// slotReconcileInterval. It is the loop that maintains held; a dead member
 // ages out of the member set, so on the next tick a survivor's HRW targets its
 // slots and claim_shard takes them over (a transfer / epoch bump), firing the
 // eager reconcile.
@@ -2271,7 +2273,7 @@ func (m *Manager) slotReconcileLoop() {
 // slot, and CASes the ones this replica targets via claim_shard — one batched
 // pass (ClaimSlots: one pipeline per legacy-guard step), so the pass costs a few
 // round trips however many slots it renews. It then snapshots the held set
-// (HRW-targeted ∩ claim_shard-granted) that ownedSlots() returns —
+// (HRW-targeted ∩ claim_shard-granted) that the workers read via ownedScopes() —
 // THE CAS IS THE AUTHORITY, NOT THE HRW MATH (05:399-402): a slot is "owned" only
 // when claim_shard granted it AND HRW still targets it here. A transfer (CLAIMED —
 // a new-owner CAS / epoch bump) fires #13's reconcile(scope) so the freshly-claimed
@@ -2343,41 +2345,6 @@ func (m *Manager) slotReconcileOnce() {
 
 // RunSlotReconcile runs one slot-reconcile pass immediately (startup and tests).
 func (m *Manager) RunSlotReconcile() { m.slotReconcileOnce() }
-
-// ownedSlots is the slots this replica currently owns (HRW-targeted ∩
-// claim_shard-granted), snapshotted at the last reconcile tick. The fast workers
-// iterate it; a brief stale-read disagreement is SAFE (a double-wake coalesces,
-// and a zero-owner gap is covered by the full sweep until claim_shard resolves it).
-func (m *Manager) ownedSlots() []SlotID {
-	m.ownMu.RLock()
-	defer m.ownMu.RUnlock()
-	out := make([]SlotID, 0, len(m.held))
-	for h := range m.held {
-		out = append(out, h)
-	}
-	return out
-}
-
-// ownsAnySlot reports whether this replica holds any slot lease — the gate the
-// fast lease/retry/due workers check before doing work.
-func (m *Manager) ownsAnySlot() bool {
-	m.ownMu.RLock()
-	defer m.ownMu.RUnlock()
-	return len(m.held) > 0
-}
-
-// ownerScope builds the OwnerScope for an owned slot so a background-worker write
-// inlines the owner-epoch fence atomically. ok is false if the slot is no longer
-// held (a reconcile released it between calls).
-func (m *Manager) ownerScope(h SlotID) (OwnerScope, bool) {
-	m.ownMu.RLock()
-	defer m.ownMu.RUnlock()
-	e, ok := m.held[h]
-	if !ok {
-		return OwnerScope{}, false
-	}
-	return OwnerScope{SlotKey: slotKey(h.Index()), ReplicaID: m.replicaID.String(), Epoch: e.String()}, true
-}
 
 // sortedSlots lists a slot set in slot order, so a pass issues, logs and reports
 // its claims deterministically.
