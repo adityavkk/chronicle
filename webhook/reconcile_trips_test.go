@@ -226,8 +226,9 @@ func TestReconcileRoundTripsAreBounded(t *testing.T) {
 
 // TestReconcileRepairsMissingLinksWithOneLinkEach is the drift shape: M glob
 // links missing across R subscriptions cost exactly M Link calls (one Lua trip
-// and one index pipeline each) and one maybeWake read per relinked subscription
-// on top of the steady-state pass. Nothing else grows with the damage.
+// and one index pipeline each) plus, per relinked subscription, the fresh read
+// it is linked from and maybeWake's read, on top of the steady-state pass.
+// Nothing else grows with the damage.
 func TestReconcileRepairsMissingLinksWithOneLinkEach(t *testing.T) {
 	s, counter := newCountedStore(t)
 	const n, k = 10, 2
@@ -261,11 +262,12 @@ func TestReconcileRepairsMissingLinksWithOneLinkEach(t *testing.T) {
 	if got := counter.execsLedBy("SADD"); got != 1+m {
 		t.Fatalf("index pipelines = %d, want the pass's 1 plus one per Link (%d): %s", got, 1+m, counter)
 	}
-	// GetMany once, then maybeWake's Get once per subscription that relinked.
-	if got := counter.execsLedBy("HGETALL"); got != 1+relinkedSubs {
-		t.Fatalf("subscription reads = %d, want 1 + %d: %s", got, 1+relinkedSubs, counter)
+	// GetMany once, then per relinked subscription the fresh read its links are
+	// decided from and maybeWake's read.
+	if got := counter.execsLedBy("HGETALL"); got != 1+2*relinkedSubs {
+		t.Fatalf("subscription reads = %d, want 1 + 2*%d: %s", got, relinkedSubs, counter)
 	}
-	if got, want := counter.trips(), 5+2*m+relinkedSubs; got != want {
+	if got, want := counter.trips(), 5+2*m+2*relinkedSubs; got != want {
 		t.Fatalf("drift pass = %d trips, want %d: %s", got, want, counter)
 	}
 	for _, path := range missing {

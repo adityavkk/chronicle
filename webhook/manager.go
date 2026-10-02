@@ -2530,14 +2530,20 @@ func (m *Manager) backfill(id string, cfg Config) {
 // initial backfill was lost to a crash. A missed glob link does not self-heal: a
 // later append to an unlinked stream has no subscriber in the fan-out to wake,
 // and the sweep only re-evaluates existing links. So it lists streams once and,
-// for each pattern subscription, links any matching stream it is missing — at the
-// beginning offset when the stream was created after the subscription (a missed
-// OnStreamCreated, so its data should wake) or at the current tail when it
-// predates the subscription (a missed pre-existing backfill, no replay).
-// Matching is O(pattern subs × streams) of CPU but a bounded number of round
-// trips (List, ListStreams, one GetMany per 512 subscriptions) plus one Link per
-// genuinely missing link, which is ~0 in steady state; it runs on the slow
-// reconcile loop, not the 2s sweep.
+// for each pattern subscription, links any matching stream it is missing (see
+// relinkPatternSub for the offset rule).
+//
+// The subscriptions are read in one GetMany (a pipelined round trip per
+// pipelineChunk of them, in List order) only to find the ones that owe a link,
+// which is none in steady state. Each of those is then repaired from its own
+// fresh read, immediately before its writes, exactly as the per-subscription
+// loop did: a subscription deleted or re-created while the pass repaired earlier
+// ones is never linked from the batched snapshot. If the batch read fails (one
+// unreadable hash fails its whole chunk) every subscription is a candidate and
+// the repair's per-subscription reads carry the pass at the old cost of one
+// round trip each, so one bad key costs one subscription, not glob-link
+// recovery for all of them. Matching is O(pattern subs × streams) of CPU; it
+// runs on the slow reconcile loop, not the 2s sweep.
 func (m *Manager) reconcilePatternLinks() {
 	if m.lister == nil {
 		return
@@ -2550,47 +2556,69 @@ func (m *Manager) reconcilePatternLinks() {
 	if err != nil || len(streams) == 0 {
 		return
 	}
-	begin := m.streams.BeginningOffset()
-	// One batched read of every subscription instead of one round trip each. GetMany
-	// returns them in id order, skips ids deleted since List and migrates a legacy sub
-	// through the same lazy Get fallback, so the Link calls below are unchanged. A
-	// batch read error ends this pass (the old loop skipped one subscription); the
-	// loop is level-triggered and the next tick retries.
-	subs, err := m.store.GetMany(ids)
-	if err != nil {
+	candidates := ids
+	if subs, err := m.store.GetMany(ids); err == nil {
+		candidates = nil
+		for _, sub := range subs {
+			if len(missingGlobLinks(sub, streams)) > 0 {
+				candidates = append(candidates, sub.ID)
+			}
+		}
+	} else {
+		m.log.Warn("webhook: reconcile pattern links: batch read failed, reading each subscription", "error", err)
+	}
+	for _, id := range candidates {
+		m.relinkPatternSub(id, streams)
+	}
+}
+
+// missingGlobLinks is the listed streams that match sub's pattern and that sub
+// has no link to (of either type); nil for a subscription without a pattern.
+func missingGlobLinks(sub Subscription, streams []StreamMeta) []StreamMeta {
+	if sub.Config.Pattern == "" {
+		return nil
+	}
+	linked := make(map[string]struct{}, len(sub.Links))
+	for _, l := range sub.Links {
+		linked[l.Path] = struct{}{}
+	}
+	var missing []StreamMeta
+	for _, st := range streams {
+		if _, ok := linked[st.Path]; !ok && GlobMatch(sub.Config.Pattern, st.Path) {
+			missing = append(missing, st)
+		}
+	}
+	return missing
+}
+
+// relinkPatternSub reads one subscription and links every matching stream it is
+// missing — at the beginning offset when the stream was created after the
+// subscription (a missed OnStreamCreated, so its data should wake) or at the
+// current tail when it predates the subscription (a missed pre-existing
+// backfill, no replay) — then wakes it once if anything was relinked. The read
+// is the authority for the writes: a subscription that is gone, or that was
+// re-created without a pattern, gets nothing linked.
+func (m *Manager) relinkPatternSub(id string, streams []StreamMeta) {
+	sub, ok, err := m.store.Get(id)
+	if err != nil || !ok {
 		return
 	}
-	for _, sub := range subs {
-		if sub.Config.Pattern == "" {
+	begin := m.streams.BeginningOffset()
+	subCreatedNs := sub.CreatedAt.UnixNano()
+	relinked := false
+	for _, st := range missingGlobLinks(sub, streams) {
+		offset := st.Tail
+		if st.CreatedAtNs > subCreatedNs {
+			offset = begin // created during the outage: deliver from the start
+		}
+		if err := m.store.Link(id, st.Path, LinkGlob, offset); err != nil {
+			m.log.Warn("webhook: reconcile link", "sub", id, "path", st.Path, "error", err)
 			continue
 		}
-		id := sub.ID
-		linked := make(map[string]struct{}, len(sub.Links))
-		for _, l := range sub.Links {
-			linked[l.Path] = struct{}{}
-		}
-		subCreatedNs := sub.CreatedAt.UnixNano()
-		relinked := false
-		for _, st := range streams {
-			if _, ok := linked[st.Path]; ok {
-				continue
-			}
-			if !GlobMatch(sub.Config.Pattern, st.Path) {
-				continue
-			}
-			offset := st.Tail
-			if st.CreatedAtNs > subCreatedNs {
-				offset = begin // created during the outage: deliver from the start
-			}
-			if err := m.store.Link(id, st.Path, LinkGlob, offset); err != nil {
-				m.log.Warn("webhook: reconcile link", "sub", id, "path", st.Path, "error", err)
-				continue
-			}
-			relinked = true
-		}
-		if relinked {
-			m.maybeWake(id, "")
-		}
+		relinked = true
+	}
+	if relinked {
+		m.maybeWake(id, "")
 	}
 }
 
