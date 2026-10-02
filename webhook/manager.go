@@ -1889,29 +1889,72 @@ func (m *Manager) leaseWorker() {
 		case <-m.runCtx.Done():
 			return
 		case <-ticker.C:
-			// Work-sharded: a replica runs the lease worker only over the slots it
-			// owns (issue #14, now real S slots — #15). For each owned slot it drains
-			// that slot's per-slot lease schedule and presents the slot's owner scope,
-			// so a just-deposed owner's expiry/re-owe is FENCED atomically (TOCTOU).
-			// The full sweep stays the unguarded backstop for unowned slots.
-			now := time.Now()
-			for _, h := range m.ownedSlots() {
-				scope, ok := m.ownerScope(h)
-				if !ok {
-					continue
-				}
-				ids, err := m.store.DueLeases(h.Index(), now, dueClaimLimit, m.workerTick*2)
-				if err != nil {
-					continue
-				}
-				if len(ids) > 0 {
-					m.metrics.WorkerTick("lease", len(ids))
-				}
-				for _, id := range ids {
-					_, _ = m.expireLeaseOwned(scope, id, now) // EXPIRED re-owes the due-set; dueWorker re-fires
-				}
-			}
+			m.leasePass(time.Now())
 		}
+	}
+}
+
+// leasePass is one lease-worker tick. Work-sharded: a replica runs the lease
+// worker only over the slots it owns (issue #14, now real S slots — #15). It
+// drains every owned slot's per-slot lease schedule in one round trip and
+// presents each slot's owner scope, so a just-deposed owner's expiry/re-owe is
+// FENCED atomically (TOCTOU). The full sweep stays the unguarded backstop for
+// unowned slots.
+func (m *Manager) leasePass(now time.Time) {
+	m.drainOwnedSlots(ScheduleLease, now, func(scope OwnerScope, ids []string) {
+		m.metrics.WorkerTick("lease", len(ids))
+		for _, id := range ids {
+			_, _ = m.expireLeaseOwned(scope, id, now) // EXPIRED re-owes the due-set; dueWorker re-fires
+		}
+	})
+}
+
+// ownedSlot is one entry of the held snapshot a worker pass iterates: the slot
+// and the owner scope (epoch) it was held at when the pass began.
+type ownedSlot struct {
+	h     SlotID
+	scope OwnerScope
+}
+
+// ownedScopes snapshots every owned slot with its scope under one read lock, in
+// slot order. Every slot in a pass is handled under the epoch held when the pass
+// began; a slot transferred mid-pass is fenced by the inline owner_fenced check
+// exactly as under the old per-slot read, which was equally stale by the time
+// its Lua ran.
+func (m *Manager) ownedScopes() []ownedSlot {
+	m.ownMu.RLock()
+	defer m.ownMu.RUnlock()
+	out := make([]ownedSlot, 0, len(m.held))
+	for h, e := range m.held {
+		out = append(out, ownedSlot{h: h, scope: OwnerScope{SlotKey: slotKey(h.Index()), ReplicaID: m.replicaID.String(), Epoch: e.String()}})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].h.Index() < out[j].h.Index() })
+	return out
+}
+
+// drainOwnedSlots claims the due members of one schedule for every owned slot in
+// ONE round trip (ClaimDueSlots), then hands each non-empty slot's ids to handle
+// under the scope of the slot they were drained from, in slot order. An errored
+// slot is skipped for this tick, as before. The claim_due visibility window now
+// opens for all owned slots at once rather than one slot at a time; that is
+// harmless, because the only other drainer of an owned slot is this goroutine's
+// next tick, and a re-claimed id resolves to DueSkip, FENCED or STALE, or to a
+// legitimate at-least-once re-fire.
+func (m *Manager) drainOwnedSlots(schedule Schedule, now time.Time, handle func(scope OwnerScope, ids []string)) {
+	owned := m.ownedScopes()
+	if len(owned) == 0 {
+		return
+	}
+	slots := make([]int, len(owned))
+	for i, o := range owned {
+		slots[i] = o.h.Index()
+	}
+	drains := m.store.ClaimDueSlots(schedule, slots, now, dueClaimLimit, m.workerTick*2)
+	for i, o := range owned {
+		if drains[i].Err != nil || len(drains[i].IDs) == 0 {
+			continue
+		}
+		handle(o.scope, drains[i].IDs)
 	}
 }
 
@@ -1931,46 +1974,49 @@ func (m *Manager) dueWorker() {
 		case <-m.runCtx.Done():
 			return
 		case <-ticker.C:
-			// Work-sharded: a replica drains the due-set only for its owned slots
-			// (issue #14, real S slots — #15). The directly-invokable drainDue
-			// (RunDueWorker, tests) stays ungated, sweeping every slot.
-			for _, h := range m.ownedSlots() {
-				scope, ok := m.ownerScope(h)
-				if !ok {
-					continue
-				}
-				m.drainDueOwned(h.Index(), scope)
-			}
+			m.duePass(time.Now())
 		}
 	}
 }
 
+// duePass is one due-worker tick. Work-sharded: a replica drains the due-set only
+// for its owned slots (issue #14, real S slots — #15), all in one claim round trip,
+// then fires each slot's owed ids under that slot's scope. The directly-invokable
+// drainDue (RunDueWorker, tests) stays ungated, sweeping every slot. DueWorkerTick
+// is recorded per non-empty slot and covers that slot's firing, with the shared
+// claim trip amortised out, so the histogram reflects real work rather than idle
+// ticks.
+func (m *Manager) duePass(now time.Time) {
+	m.drainOwnedSlots(ScheduleDue, now, func(scope OwnerScope, ids []string) {
+		slotStart := time.Now()
+		fired := m.fireDrained(ids, func(id string) bool { return m.fireDueOwned(scope, id) })
+		m.metrics.DueWorkerTick(time.Since(slotStart), fired)
+	})
+}
+
 // drainDue runs one due-set drain over SLOT h: claim h's owed ids in O(owed) and
 // reconcile each. Split out so a test can drive a single pass deterministically (cf.
-// RunSweep). It records DueWorkerTick only for non-empty passes, so the duration
-// histogram reflects real work rather than idle ticks. Returns the number of wakes
-// fired.
+// RunSweep). It records DueWorkerTick only for non-empty passes. Returns the number
+// of wakes fired.
 func (m *Manager) drainDue(h int) int {
-	return m.drainDueWithFire(h, m.fireDue)
-}
-
-func (m *Manager) drainDueOwned(h int, scope OwnerScope) int {
-	return m.drainDueWithFire(h, func(id string) bool { return m.fireDueOwned(scope, id) })
-}
-
-func (m *Manager) drainDueWithFire(h int, fire func(string) bool) int {
 	start := time.Now()
 	ids, err := m.store.ClaimDue(h, start, dueClaimLimit, m.workerTick*2)
 	if err != nil || len(ids) == 0 {
 		return 0
 	}
+	fired := m.fireDrained(ids, m.fireDue)
+	m.metrics.DueWorkerTick(time.Since(start), fired)
+	return fired
+}
+
+// fireDrained reconciles each drained id and counts the wakes issued.
+func (m *Manager) fireDrained(ids []string, fire func(string) bool) int {
 	fired := 0
 	for _, id := range ids {
 		if fire(id) {
 			fired++
 		}
 	}
-	m.metrics.DueWorkerTick(time.Since(start), fired)
 	return fired
 }
 
@@ -2027,34 +2073,28 @@ func (m *Manager) retryWorker() {
 		case <-m.runCtx.Done():
 			return
 		case <-ticker.C:
-			// Work-sharded: a replica runs the retry worker only over its owned slots
-			// (issue #14, real S slots — #15), draining each slot's per-slot retry
-			// schedule under that slot's owner scope.
-			now := time.Now()
-			for _, h := range m.ownedSlots() {
-				scope, ok := m.ownerScope(h)
-				if !ok {
-					continue
-				}
-				ids, err := m.store.DueRetries(h.Index(), now, dueClaimLimit, m.workerTick*2)
-				if err != nil {
-					continue
-				}
-				if len(ids) > 0 {
-					m.metrics.WorkerTick("retry", len(ids))
-				}
-				for _, id := range ids {
-					sub, ok, err := m.store.Get(id)
-					if err != nil || !ok || sub.Phase != PhaseWaking {
-						continue
-					}
-					// deliverWebhook gates the external POST on check_owner OWNER (the one
-					// write that cannot inline the check — it crosses the network).
-					m.deliverWebhookOwned(scope, id, sub.Generation, sub.WakeID)
-				}
-			}
+			m.retryPass(time.Now())
 		}
 	}
+}
+
+// retryPass is one retry-worker tick. Work-sharded: a replica runs the retry
+// worker only over its owned slots (issue #14, real S slots — #15), draining every
+// owned slot's per-slot retry schedule in one round trip and re-delivering each
+// slot's ids under that slot's owner scope.
+func (m *Manager) retryPass(now time.Time) {
+	m.drainOwnedSlots(ScheduleRetry, now, func(scope OwnerScope, ids []string) {
+		m.metrics.WorkerTick("retry", len(ids))
+		for _, id := range ids {
+			sub, ok, err := m.store.Get(id)
+			if err != nil || !ok || sub.Phase != PhaseWaking {
+				continue
+			}
+			// deliverWebhook gates the external POST on check_owner OWNER (the one
+			// write that cannot inline the check — it crosses the network).
+			m.deliverWebhookOwned(scope, id, sub.Generation, sub.WakeID)
+		}
+	})
 }
 
 // scope is the sealed reason a recovery reconcile fired — the recovery-event
@@ -2228,8 +2268,10 @@ func (m *Manager) slotReconcileLoop() {
 }
 
 // slotReconcileOnce reads the live member set, computes the HRW target for every
-// slot, and CASes the ones this replica targets via claim_shard. It then snapshots
-// the held set (HRW-targeted ∩ claim_shard-granted) that ownedSlots() returns —
+// slot, and CASes the ones this replica targets via claim_shard — one batched
+// pass (ClaimSlots: one pipeline per legacy-guard step), so the pass costs a few
+// round trips however many slots it renews. It then snapshots the held set
+// (HRW-targeted ∩ claim_shard-granted) that ownedSlots() returns —
 // THE CAS IS THE AUTHORITY, NOT THE HRW MATH (05:399-402): a slot is "owned" only
 // when claim_shard granted it AND HRW still targets it here. A transfer (CLAIMED —
 // a new-owner CAS / epoch bump) fires #13's reconcile(scope) so the freshly-claimed
@@ -2254,10 +2296,17 @@ func (m *Manager) slotReconcileOnce() {
 	if !containsReplica(members, m.replicaID) {
 		members = append(members, m.replicaID)
 	}
-	targeted := TargetedSlots(m.replicaID, members, AllSlots())
-	newHeld := make(map[SlotID]OwnerEpoch, len(targeted))
-	for h := range targeted {
-		claim, cerr := m.store.ClaimSlot(slotKey(h.Index()), m.replicaID.String(), now, m.slotLeaseTTL)
+	slots := sortedSlots(TargetedSlots(m.replicaID, members, AllSlots()))
+	keys := make([]string, len(slots))
+	for i, h := range slots {
+		keys[i] = slotKey(h.Index())
+	}
+	// One `now` for the whole pass: every lease is anchored at the pass start,
+	// which now costs under a round trip or two of lease, not a full serial pass.
+	results := m.store.ClaimSlots(keys, m.replicaID.String(), now, m.slotLeaseTTL)
+	newHeld := make(map[SlotID]OwnerEpoch, len(slots))
+	for i, h := range slots {
+		claim, cerr := results[i].Claim, results[i].Err
 		if cerr != nil {
 			m.log.Warn("webhook: claim slot", "slot", h, "error", cerr)
 			continue
@@ -2282,6 +2331,14 @@ func (m *Manager) slotReconcileOnce() {
 	m.ownMu.Lock()
 	m.held = newHeld
 	m.ownMu.Unlock()
+	// The runtime precondition of Membership.tla's Tick slot gate (an alive, still-
+	// targeted owner renews before its lease lapses) is
+	// slotReconcileInterval + pass duration < slotLeaseTTL. The pass is now
+	// independent of the owned-slot count, so crossing the margin means Redis is
+	// slower than the timers were designed for, not a normal event.
+	if took := time.Since(now); took > m.slotLeaseTTL-m.slotReconcileInterval {
+		m.log.Warn("webhook: slot reconcile pass exceeded the lease renewal margin", "took", took, "slots", len(keys))
+	}
 }
 
 // RunSlotReconcile runs one slot-reconcile pass immediately (startup and tests).
@@ -2320,6 +2377,17 @@ func (m *Manager) ownerScope(h SlotID) (OwnerScope, bool) {
 		return OwnerScope{}, false
 	}
 	return OwnerScope{SlotKey: slotKey(h.Index()), ReplicaID: m.replicaID.String(), Epoch: e.String()}, true
+}
+
+// sortedSlots lists a slot set in slot order, so a pass issues, logs and reports
+// its claims deterministically.
+func sortedSlots(set map[SlotID]struct{}) []SlotID {
+	out := make([]SlotID, 0, len(set))
+	for h := range set {
+		out = append(out, h)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Index() < out[j].Index() })
+	return out
 }
 
 // containsReplica reports whether r is in the member set.
