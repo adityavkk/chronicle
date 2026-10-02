@@ -45,7 +45,7 @@ func (h *nodePartCounter) take() int {
 	return n
 }
 
-func newClusterStore(t *testing.T) (*RedisStore, *goredis.ClusterClient, *tripCounter, *nodePartCounter) {
+func newClusterStore(t *testing.T) (*RedisStore, *goredis.ClusterClient, *slotTripCounter, *nodePartCounter) {
 	t.Helper()
 	addrs := os.Getenv("CHRONICLE_TEST_CLUSTER_ADDRS")
 	if addrs == "" {
@@ -54,7 +54,7 @@ func newClusterStore(t *testing.T) (*RedisStore, *goredis.ClusterClient, *tripCo
 	cc := goredis.NewClusterClient(&goredis.ClusterOptions{Addrs: strings.Split(addrs, ",")})
 	parts := &nodePartCounter{}
 	cc.OnNewNode(func(node *goredis.Client) { node.AddHook(parts) })
-	hook := newTripCounter()
+	hook := newSlotTripCounter()
 	cc.AddHook(hook)
 	ctx := context.Background()
 	if err := cc.ForEachMaster(ctx, func(ctx context.Context, c *goredis.Client) error { return c.FlushDB(ctx).Err() }); err != nil {

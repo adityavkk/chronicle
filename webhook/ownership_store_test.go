@@ -220,11 +220,11 @@ func TestMembershipHeartbeatAndLiveMembers(t *testing.T) {
 // against a verbatim transcription of it), and the round-trip count is constant
 // in the number of slots (a counting redis.Hook).
 
-// tripCounter is a redis.Hook that counts single commands and pipelines, by
+// slotTripCounter is a redis.Hook that counts single commands and pipelines, by
 // command name, and can stall one pipeline (the stability test's injected
 // read-timeout). Commands inside a pipeline are counted under pipeCmds, never as
 // singles, so "pipes" is the number of round trips a batch cost.
-type tripCounter struct {
+type slotTripCounter struct {
 	mu       sync.Mutex
 	singles  map[string]int
 	pipes    int
@@ -234,17 +234,17 @@ type tripCounter struct {
 	stallPipe func(first goredis.Cmder)
 }
 
-func newTripCounter() *tripCounter {
-	return &tripCounter{singles: map[string]int{}, pipeCmds: map[string]int{}}
+func newSlotTripCounter() *slotTripCounter {
+	return &slotTripCounter{singles: map[string]int{}, pipeCmds: map[string]int{}}
 }
 
-func (h *tripCounter) reset() {
+func (h *slotTripCounter) reset() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.singles, h.pipes, h.pipeCmds = map[string]int{}, 0, map[string]int{}
 }
 
-func (h *tripCounter) counts() (singles, pipes int) {
+func (h *slotTripCounter) counts() (singles, pipes int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, n := range h.singles {
@@ -253,15 +253,15 @@ func (h *tripCounter) counts() (singles, pipes int) {
 	return singles, h.pipes
 }
 
-func (h *tripCounter) pipelined(name string) int {
+func (h *slotTripCounter) pipelined(name string) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.pipeCmds[name]
 }
 
-func (h *tripCounter) DialHook(next goredis.DialHook) goredis.DialHook { return next }
+func (h *slotTripCounter) DialHook(next goredis.DialHook) goredis.DialHook { return next }
 
-func (h *tripCounter) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook {
+func (h *slotTripCounter) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook {
 	return func(ctx context.Context, cmd goredis.Cmder) error {
 		h.mu.Lock()
 		h.singles[cmd.Name()]++
@@ -270,7 +270,7 @@ func (h *tripCounter) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook 
 	}
 }
 
-func (h *tripCounter) ProcessPipelineHook(next goredis.ProcessPipelineHook) goredis.ProcessPipelineHook {
+func (h *slotTripCounter) ProcessPipelineHook(next goredis.ProcessPipelineHook) goredis.ProcessPipelineHook {
 	return func(ctx context.Context, cmds []goredis.Cmder) error {
 		h.mu.Lock()
 		h.pipes++
@@ -286,12 +286,12 @@ func (h *tripCounter) ProcessPipelineHook(next goredis.ProcessPipelineHook) gore
 	}
 }
 
-// newCountingStore is newTestStore with a tripCounter attached (counting starts
+// newCountingStore is newTestStore with a slotTripCounter attached (counting starts
 // after the caller's warm-up, via reset).
-func newCountingStore(t *testing.T) (*RedisStore, goredis.UniversalClient, *tripCounter) {
+func newCountingStore(t *testing.T) (*RedisStore, goredis.UniversalClient, *slotTripCounter) {
 	t.Helper()
 	s, client := newTestStore(t)
-	hook := newTripCounter()
+	hook := newSlotTripCounter()
 	client.AddHook(hook)
 	return s, client, hook
 }

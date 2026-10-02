@@ -609,7 +609,7 @@ func (c *slowConn) Write(b []byte) (int, error) {
 
 // newSlowCountingStore is newCountingStore over a client whose connections sleep
 // perWrite before each flush.
-func newSlowCountingStore(t *testing.T, perWrite time.Duration) (*RedisStore, goredis.UniversalClient, *tripCounter) {
+func newSlowCountingStore(t *testing.T, perWrite time.Duration) (*RedisStore, goredis.UniversalClient, *slotTripCounter) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping Redis integration test in -short mode")
@@ -639,7 +639,7 @@ func newSlowCountingStore(t *testing.T, perWrite time.Duration) (*RedisStore, go
 		t.Fatalf("flushdb: %v", err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	hook := newTripCounter()
+	hook := newSlotTripCounter()
 	client.AddHook(hook)
 	return NewRedisStore(client), client, hook
 }
