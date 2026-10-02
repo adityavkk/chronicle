@@ -407,7 +407,11 @@ witness. The control is sharp: the target requires a *temporal* violation whose
 trace passes through `TickUngated`, and every counterexample must contain a
 `TickUngated` step that `Tick` forbids (a lapse of an alive, still-targeted
 owner's lease), because a `SpecSlowPass` behaviour without one is a `Spec`
-behaviour, and `Spec` converges.
+behaviour, and `Spec` converges. That step, not reach-versus-stay, is the
+criterion: the weaker `EventuallyConverges` (`churnStopped ~> Converged`) also
+fails on the twin, by a lasso in which the sole survivor's two slot leases lapse
+and are renewed alternately so `Converged` never holds for both at once, and
+which counterexample TLC prints first is not stable across runs.
 
 ## The L3 lease-tail-drop refinement (INV-LR-01 / INV-JEP-L3-01)
 
@@ -429,7 +433,7 @@ reconcile loop.
 | `membership-nofair` (negative control) | Temporal property violated (as required) |
 | `membership-witness` (NotTransferReachable / NotZeroOwnerGapReachable) | both violated (as required — non-vacuous) |
 | `membership-slowpass-safety` (Tick slot gate removed: Inv + Epoch action-props) | No error — 30071 distinct states (more than the gated 21038: the extra states are the lapsed-while-alive slot leases the gate forbade) |
-| `membership-slowpass-convergence` (gate removed, same fairness: `<>[]Converged`, TypeOK) | Temporal property violated (as required), 30071 distinct states: the trace reaches `Converged` (the sole survivor owning both slots with live leases), then `TickUngated` drives its `slotTTL` to 0 and `ReconcileClaim` renews it, looping — the lapse/renew lasso of an alive HRW owner |
+| `membership-slowpass-convergence` (gate removed, same fairness: `<>[]Converged`, TypeOK) | Temporal property violated (as required), 30071 distinct states: the trace reaches `Converged` (the sole survivor owning both slots with live leases), then `TickUngated` drives its `slotTTL` to 0 and `ReconcileClaim` renews it, looping — the lapse/renew lasso of an alive HRW owner (one of several such lassos; the target checks for the `TickUngated` step, not for this particular trace) |
 | `leasetail` (Inv + `LeaseRecoverable`) | No error |
 | `leasetail-witness` (NoStranded) | violated (as required — stranded state reachable) |
 
