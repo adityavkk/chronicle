@@ -697,8 +697,8 @@ func (s *RedisStore) StreamSubscribers(path string) (ids []string, slotsProbed i
 // re-adding the missing entry is the correctness-critical part.
 //
 // Cost: 1 + ceil(N/pipelineChunk) read trips + about ceil(L/pipelineChunk) write
-// trips for N subscriptions and L links (it was 1 + N + 2L serial trips, about
-// 20 s per pass from a remote region and growing with every subscription).
+// trips for N subscriptions and L links (it was 1 + N + 2L serial trips, growing
+// with every subscription).
 func (s *RedisStore) ReconcileIndexes() error {
 	ctx := s.ctx()
 	// UNION the canonical id set across the S per-slot id-sets (GAP4) — reading a

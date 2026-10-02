@@ -170,7 +170,9 @@ func ceilDiv(a, b int) int { return (a + b - 1) / b }
 // List (1) + HKEYS per chunk of subscriptions + one index pipeline per chunk of
 // (subscription, path) entries, then List (1) + GetMany per chunk — and not a
 // single unpipelined command. The three shapes are the ones the loop was
-// measured on: it used to cost 337, 1,837 and 4,018 serial trips respectively.
+// measured on: on these same fixtures, with this same hook, the serial pass
+// cost 2 + 2N + 2L = 334, 1,828 and 4,002 trips respectively (a real stream
+// listing adds its own few trips to either side alike).
 func TestReconcileRoundTripsAreBounded(t *testing.T) {
 	cases := []struct {
 		n, k      int
