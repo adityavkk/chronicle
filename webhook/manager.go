@@ -2533,8 +2533,11 @@ func (m *Manager) backfill(id string, cfg Config) {
 // for each pattern subscription, links any matching stream it is missing — at the
 // beginning offset when the stream was created after the subscription (a missed
 // OnStreamCreated, so its data should wake) or at the current tail when it
-// predates the subscription (a missed pre-existing backfill, no replay). This is
-// O(pattern subs × streams); it runs on the slow reconcile loop, not the 2s sweep.
+// predates the subscription (a missed pre-existing backfill, no replay).
+// Matching is O(pattern subs × streams) of CPU but a bounded number of round
+// trips (List, ListStreams, one GetMany per 512 subscriptions) plus one Link per
+// genuinely missing link, which is ~0 in steady state; it runs on the slow
+// reconcile loop, not the 2s sweep.
 func (m *Manager) reconcilePatternLinks() {
 	if m.lister == nil {
 		return
@@ -2548,11 +2551,20 @@ func (m *Manager) reconcilePatternLinks() {
 		return
 	}
 	begin := m.streams.BeginningOffset()
-	for _, id := range ids {
-		sub, ok, err := m.store.Get(id)
-		if err != nil || !ok || sub.Config.Pattern == "" {
+	// One batched read of every subscription instead of one round trip each. GetMany
+	// returns them in id order, skips ids deleted since List and migrates a legacy sub
+	// through the same lazy Get fallback, so the Link calls below are unchanged. A
+	// batch read error ends this pass (the old loop skipped one subscription); the
+	// loop is level-triggered and the next tick retries.
+	subs, err := m.store.GetMany(ids)
+	if err != nil {
+		return
+	}
+	for _, sub := range subs {
+		if sub.Config.Pattern == "" {
 			continue
 		}
+		id := sub.ID
 		linked := make(map[string]struct{}, len(sub.Links))
 		for _, l := range sub.Links {
 			linked[l.Path] = struct{}{}
