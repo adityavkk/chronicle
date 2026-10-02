@@ -283,6 +283,10 @@ type Manager struct {
 	// NOT THE HRW MATH (05:399): a slot is here only if claim_shard granted it.
 	ownMu sync.RWMutex
 	held  map[SlotID]OwnerEpoch
+	// lastPassAt is the start of the latest pass that claimed slots: every lease
+	// that pass wrote is anchored there (lease_expiry_ns = lastPassAt +
+	// slotLeaseTTL). Guarded by ownMu.
+	lastPassAt time.Time
 
 	// reconcileC coalesces event-triggered recovery onto the single recovery loop
 	// (issue #13). Depth 1 + non-blocking sends mean concurrent recovery events
@@ -2332,14 +2336,23 @@ func (m *Manager) slotReconcileOnce() {
 	}
 	m.ownMu.Lock()
 	m.held = newHeld
+	prev := m.lastPassAt
+	if now.After(prev) {
+		m.lastPassAt = now
+	}
 	m.ownMu.Unlock()
-	// The runtime precondition of Membership.tla's Tick slot gate (an alive, still-
-	// targeted owner renews before its lease lapses) is
-	// slotReconcileInterval + pass duration < slotLeaseTTL. The pass is now
-	// independent of the owned-slot count, so crossing the margin means Redis is
-	// slower than the timers were designed for, not a normal event.
-	if took := time.Since(now); took > m.slotLeaseTTL-m.slotReconcileInterval {
-		m.log.Warn("webhook: slot reconcile pass exceeded the lease renewal margin", "took", took, "slots", len(keys))
+	// Membership.tla's Tick slot gate (an alive, still-targeted owner renews before
+	// its lease lapses) stands for a runtime precondition the timers alone cannot
+	// enforce: every lease of a pass is anchored at that pass's start, so this
+	// pass's claims had to land within slotLeaseTTL of the previous pass's start.
+	// They landed no later than ClaimSlots returned, so an age past the TTL here
+	// means a rival could have taken a slot we still believed we held (seen as a
+	// self-RENEW, or a transfer). Batching keeps a pass to a few round trips
+	// however many slots it renews, so this fires only when Redis is far slower
+	// than the timers were designed for. Observational only.
+	if age := time.Since(prev); !prev.IsZero() && age > m.slotLeaseTTL {
+		m.log.Warn("webhook: slot reconcile pass renewed leases that may already have lapsed",
+			"since_previous_pass", age, "took", time.Since(now), "slots", len(keys))
 	}
 }
 

@@ -106,8 +106,9 @@ parse38: jar
 #                            FAIL (the leads-to is non-trivial).
 #   membership-witness     : non-vacuity -- a genuine TRANSFER and a genuine
 #                            zero-owner coverage GAP are each really reached.
-#   membership-slowpass-safety      : the Tick slot-lease gate REMOVED (a claim
-#                            pass longer than slotLeaseTTL - slotReconcileInterval):
+#   membership-slowpass-safety      : the Tick slot-lease gate REMOVED (a pass whose
+#                            claims land more than slotLeaseTTL after the previous
+#                            pass's start, where that pass's leases are anchored):
 #                            Inv + the epoch action-properties MUST still hold --
 #                            pass timing can churn, never break safety.
 #   membership-slowpass-convergence : negative control -- with the gate removed

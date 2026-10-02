@@ -391,8 +391,11 @@ interval); for passes that fit inside the interval that is
 `slotReconcileInterval + D < slotLeaseTTL`. What batching changes is `D`: a
 serial pass of N slots × 3 round trips could exceed the lease at a remote
 region's RTT, whereas `ClaimSlots` makes the pass a fixed few round trips
-independent of the owned-slot count, and `slotReconcileOnce` warns if a pass
-ever crosses `slotLeaseTTL - slotReconcileInterval`. The twin `SpecSlowPass` /
+independent of the owned-slot count, and `slotReconcileOnce` warns when a pass's
+claims land more than `slotLeaseTTL` after the previous pass's start — the exact
+condition above, checked at the pass that renewed late, rather than a per-pass
+duration proxy, which two passes under the proxy threshold can defeat once the
+first overruns the interval. The twin `SpecSlowPass` /
 `SpecSlowPassNoFair` (`TickUngated`: the slot conjunct removed, the member gate
 kept) shows what the gate buys: `membership-slowpass-safety` keeps `Inv` and
 both epoch action-properties (none reads the gate — pass timing can only churn,

@@ -771,41 +771,59 @@ func TestSlotReconcileRenewsWithinLeaseUnderStall(t *testing.T) {
 	}
 }
 
-// delayedClaimStore makes every pass take `delay` longer than Redis does.
-type delayedClaimStore struct {
+// instantClaimStore answers the two calls a slot-reconcile pass makes in memory
+// (the embedded Store serves only NewManager's key custody), so a test about pass
+// timing sees only the delays it injects, never Redis or machine load.
+type instantClaimStore struct {
 	Store
-	delay time.Duration
+	delay time.Duration // spent inside ClaimSlots, the pass's claim step
 }
 
-func (d *delayedClaimStore) ClaimSlots(slotKeys []string, replicaID string, now time.Time, ttl time.Duration) []SlotClaimResult {
-	time.Sleep(d.delay)
-	return d.Store.ClaimSlots(slotKeys, replicaID, now, ttl)
+func (f *instantClaimStore) LiveMembers(time.Time) ([]string, error) { return []string{"rA"}, nil }
+
+func (f *instantClaimStore) ClaimSlots(slotKeys []string, _ string, now time.Time, ttl time.Duration) []SlotClaimResult {
+	time.Sleep(f.delay)
+	out := make([]SlotClaimResult, len(slotKeys))
+	for i := range out {
+		out[i].Claim = SlotClaim{Status: SlotRenewed, Epoch: parseOwnerEpoch("1"), ExpiryNs: now.Add(ttl).UnixNano()}
+	}
+	return out
 }
 
-// TestSlotClaimPassWarnsPastRenewalMargin: exactly one Warn when a pass runs past
-// slotLeaseTTL - slotReconcileInterval (the precondition of the Membership.tla
-// Tick slot gate), none for a normal pass.
-func TestSlotClaimPassWarnsPastRenewalMargin(t *testing.T) {
+// TestSlotReconcileWarnsOnLapsedLeases: the Warn fires exactly when a pass's
+// claims land more than slotLeaseTTL after the previous pass's start, the moment
+// the leases that pass anchored could have lapsed (Membership.tla's Tick slot
+// gate, INV-MEMBER-01), not merely when a pass is slow. Two passes that each take
+// 0.6 TTL fit the in-interval proxy (neither exceeds slotLeaseTTL -
+// slotReconcileInterval = 0.75 TTL), yet the second lands 1.2 TTL after the
+// first's start, so it warns once; the instant pass after it does not.
+func TestSlotReconcileWarnsOnLapsedLeases(t *testing.T) {
+	const ttl = time.Second
 	s, _ := newTestStore(t)
+	store := &instantClaimStore{Store: s}
 	var logs bytes.Buffer
-	slow := &delayedClaimStore{Store: s, delay: 150 * time.Millisecond}
-	m, err := NewManager(slow, &fakeStreams{tails: map[string]string{}}, ManagerOptions{
+	m, err := NewManager(store, &fakeStreams{tails: map[string]string{}}, ManagerOptions{
 		StreamRootURL: "http://x/v1/stream/", ReplicaID: "rA",
 		Logger:         slog.New(slog.NewTextHandler(&logs, nil)),
-		MemberLeaseTTL: time.Second, HeartbeatInterval: 200 * time.Millisecond,
-		SlotLeaseTTL: 300 * time.Millisecond, SlotReconcileInterval: 200 * time.Millisecond,
+		MemberLeaseTTL: 4 * ttl, HeartbeatInterval: ttl / 4,
+		SlotLeaseTTL: ttl, SlotReconcileInterval: ttl / 4,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	heartbeatMembers(t, s, "rA")
-	warns := func() int { return strings.Count(logs.String(), "exceeded the lease renewal margin") }
-	m.RunSlotReconcile()
-	if warns() != 1 {
-		t.Fatalf("a pass past the renewal margin must warn once, got %d in:\n%s", warns(), logs.String())
+	warns := func() int { return strings.Count(logs.String(), "may already have lapsed") }
+	m.RunSlotReconcile() // pass 1: no earlier leases to outlive
+	store.delay = 6 * ttl / 10
+	m.RunSlotReconcile() // pass 2 lands 0.6 TTL after pass 1 started: inside its leases
+	if warns() != 0 {
+		t.Fatalf("a pass landing inside the previous pass's leases must not warn, got %d in:\n%s", warns(), logs.String())
 	}
-	slow.delay = 0
-	m.RunSlotReconcile()
+	m.RunSlotReconcile() // pass 3 lands 1.2 TTL after pass 2 started: pass 2's leases could have lapsed
+	if warns() != 1 {
+		t.Fatalf("a pass landing after the previous pass's leases could lapse must warn once, got %d in:\n%s", warns(), logs.String())
+	}
+	store.delay = 0
+	m.RunSlotReconcile() // pass 4 lands 0.6 TTL after pass 3 started
 	if warns() != 1 {
 		t.Fatalf("a normal pass must not warn, got %d in:\n%s", warns(), logs.String())
 	}

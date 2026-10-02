@@ -602,7 +602,7 @@ import Aside from "../components/Aside.astro";
       | `memberLeaseTTL` | 9s | a missed heartbeat past this drops the replica |
       | `heartbeatInterval` | 3s | `heartbeat < memberLeaseTTL / 2`, renew with headroom |
       | `slotLeaseTTL` | 9s | `claim_shard` lease on a slot record |
-      | `slotReconcileInterval` | 3s | `slotReconcile ≤ heartbeat`, reclaim before a peer's lease lapses; at runtime `interval + claim-pass duration < slotLeaseTTL`, which holds because a pass is a few pipelined round trips however many slots a replica owns (the manager warns if one ever crosses that margin) |
+      | `slotReconcileInterval` | 3s | `slotReconcile ≤ heartbeat`, reclaim before a peer's lease lapses; at runtime each pass's claims must land within `slotLeaseTTL` of the previous pass's start, where that pass's leases are anchored — `max(interval, pass duration) + time to the claim step < slotLeaseTTL` — which holds because a pass is a few pipelined round trips however many slots a replica owns (the manager warns when a pass lands past that point) |
     </Table>
   </Aside>
 
