@@ -28,9 +28,10 @@ type Store interface {
 	// Get returns a subscription with its Links hydrated, and whether it exists.
 	Get(id string) (Subscription, bool, error)
 
-	// GetMany hydrates many subscriptions in one pipelined batch, omitting any
-	// that no longer exist (order is not significant). It is the batched form of
-	// Get for the recovery sweep, which reads every subscription per tick.
+	// GetMany hydrates many subscriptions in one pipelined batch, in the order
+	// of ids, omitting any that no longer exist. It is the batched form of Get
+	// for the loops that read every subscription (the recovery sweep and the
+	// reconcile loop).
 	GetMany(ids []string) ([]Subscription, error)
 
 	// PatternSubscriptions reads the glob pattern of each subscription in ids
@@ -78,7 +79,8 @@ type Store interface {
 
 	// ReconcileIndexes rebuilds the per-stream fan-out index from the canonical
 	// links, re-adding any membership a crash dropped between the link write and
-	// the index update. It only mirrors links and never invents membership.
+	// the index update, in a bounded number of pipelined round trips. It only
+	// mirrors links and never invents membership.
 	ReconcileIndexes() error
 
 	// ArmWakeUnscoped issues a new wake generation if the subscription is idle;

@@ -662,6 +662,30 @@ func TestReconcileIndexDoesNotInventMembership(t *testing.T) {
 	}
 }
 
+// TestReconcileIndexesRepairsMissingBit is the other half of the index: the
+// occupied-slots bit, never cleared on deindex and only ever repaired here. With
+// the bit clear the scatter-gather never probes the slot, so the subscriber is
+// invisible to the append path until the reconcile re-asserts the bit.
+func TestReconcileIndexesRepairsMissingBit(t *testing.T) {
+	s, client := newTestStore(t)
+	ctx := context.Background()
+	_, _ = s.CreateOrConfirm("s1", webhookCfg("https://w.example/h"), nil, time.Now())
+	_ = s.Link("s1", "events/a", LinkGlob, "0000000000000000_0000000000000000")
+
+	if err := client.SetBit(ctx, streamSlotsKey("events/a"), int64(slotOf("s1")), 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if subs, _, _ := s.StreamSubscribers("events/a"); len(subs) != 0 {
+		t.Fatalf("precondition: a clear bit hides the subscriber, got %v", subs)
+	}
+	if err := s.ReconcileIndexes(); err != nil {
+		t.Fatal(err)
+	}
+	if subs, _, _ := s.StreamSubscribers("events/a"); len(subs) != 1 || subs[0] != "s1" {
+		t.Fatalf("repair should re-assert the occupied bit, got %v", subs)
+	}
+}
+
 // TestLazyMigrationServesFromNewTag is the Move-1 migration contract (05 §Migration
 // step 3): a subscription seeded under the LEGACY {__ds} keyspace (simulating
 // pre-slot-homing data) is lazily migrated to its slot-homed {__ds:h} keyspace on

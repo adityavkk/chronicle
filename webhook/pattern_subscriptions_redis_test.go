@@ -17,7 +17,7 @@ import (
 )
 
 // redisCallCounter counts single commands and pipelines so a test can pin the
-// round-trip shape of a read: one pipeline per subReadChunk ids, never one
+// round-trip shape of a read: one pipeline per pipelineChunk ids, never one
 // command per id.
 type redisCallCounter struct {
 	singles, pipelines atomic.Int64

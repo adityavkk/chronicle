@@ -12,8 +12,9 @@ Alloy "small scope hypothesis"):
 | [`SlotHoming.als`](SlotHoming.als) | **INV-JEP-T5-01** | the bitmap-gated S-slot scatter-gather subscriber set equals the reference set equals the brute-force all-slots union — no cross-subscriber leakage |
 
 Both are grounded in the real code: `webhook/keys.go` (`slotOf`, `streamSubsKey`,
-`streamSlotsKey`), `webhook/redis_store.go` (`ReconcileIndexes`, `indexStream`,
-`deindexStream`), and `jepsen/checker/check_slot.go` (`computeSlotLeakage`).
+`streamSlotsKey`), `webhook/redis_store.go` (`ReconcileIndexes`, `indexStreams`,
+`indexStream`, `deindexStream`), and `jepsen/checker/check_slot.go`
+(`computeSlotLeakage`).
 
 ## How to run (headless, scripted)
 
