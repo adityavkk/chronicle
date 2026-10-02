@@ -52,6 +52,7 @@ type Prometheus struct {
 	fanoutSlotsProbed        prometheus.Histogram
 	fanoutSubs               prometheus.Histogram
 	appendHookSeconds        prometheus.Histogram
+	createHookSeconds        prometheus.Histogram
 	dirtyEnqueues            *prometheus.CounterVec
 	dirtyDepth               prometheus.Gauge
 	dirtyCapacity            prometheus.Gauge
@@ -225,6 +226,11 @@ func New() *Prometheus {
 			Name:    "chronicle_append_subscription_hook_seconds",
 			Help:    "Wall time from a successful append commit through all synchronous subscription hook work before the HTTP response.",
 			Buckets: prometheus.ExponentialBuckets(0.000001, 2, 20),
+		}),
+		createHookSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "chronicle_create_subscription_hook_seconds",
+			Help:    "Wall time of the synchronous glob-link subscription hook run for every created stream before the HTTP response.",
+			Buckets: prometheus.ExponentialBuckets(0.000001, 2, 24),
 		}),
 		dirtyEnqueues: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_subscription_dirty_enqueues_total",
@@ -437,7 +443,7 @@ func New() *Prometheus {
 		p.readScriptInvokes, p.readResponse, p.readCanceled,
 	)
 	reg.MustRegister(
-		p.fanoutSeconds, p.fanoutSlotsProbed, p.fanoutSubs, p.appendHookSeconds,
+		p.fanoutSeconds, p.fanoutSlotsProbed, p.fanoutSubs, p.appendHookSeconds, p.createHookSeconds,
 		p.dirtyEnqueues, p.dirtyDepth, p.dirtyCapacity, p.dirtyOldestAge,
 		p.dirtyProcess, p.dirtyProcessSubs, p.dirtyProcessWakes,
 		p.dirtyDuplicates, p.dirtyOverflows, p.wakeCorrelationEvictions, p.tracingSetupFailures, p.reconcileRequests, p.dirtyErrors,
@@ -578,6 +584,11 @@ func (p *Prometheus) FanOut(dur time.Duration, slotsProbed, subs int) {
 // AppendSubscriptionHook implements chronicle.AppendMetrics.
 func (p *Prometheus) AppendSubscriptionHook(dur time.Duration) {
 	p.appendHookSeconds.Observe(dur.Seconds())
+}
+
+// CreateSubscriptionHook implements chronicle.AppendMetrics.
+func (p *Prometheus) CreateSubscriptionHook(dur time.Duration) {
+	p.createHookSeconds.Observe(dur.Seconds())
 }
 
 // DirtyEnqueue implements webhook.Metrics.

@@ -592,24 +592,81 @@ func (m *Manager) mintWakeTokenFor(sub Subscription, generation int64, wakeID st
 
 // OnStreamCreated links a newly created stream to matching glob subscriptions at
 // the beginning offset, so the stream's first append wakes them (PROTOCOL §6.2).
+// It runs on the create request before the response is written, so its work is
+// bounded: one List, one pipelined pattern read (Store.PatternSubscriptions: no
+// link hydration, no per-id fallback) and one Link per match. It is
+// best-effort: a subscription whose read or Link failed stays unlinked until
+// reconcilePatternLinks re-links it at the beginning offset. Every call emits
+// one stream_create_subscriptions_completed line with the phase durations and
+// counts, which is how create latency is attributed to this hook.
 func (m *Manager) OnStreamCreated(path string) {
+	m.OnStreamCreatedWithContext(context.Background(), path)
+}
+
+// OnStreamCreatedWithContext is OnStreamCreated carrying the create request's
+// correlation id (correlation.RequestID) onto the completion log line, so it
+// joins the request's http_request_completed line. Nothing else is read from
+// ctx and its cancellation is not honored: the hook is the request's last
+// durable side effect, as with OnStreamAppendWithContext.
+func (m *Manager) OnStreamCreatedWithContext(ctx context.Context, path string) {
+	start := m.now()
+	var listDur, readDur, linkDur time.Duration
+	var listed, matched, linked, linkFailed int
+	var read PatternRead
+	outcome := "success"
+	defer func() {
+		m.log.Info("stream create subscriptions completed",
+			"event", "stream_create_subscriptions_completed",
+			"request_id", correlation.RequestID(ctx),
+			"stream_path", path,
+			"outcome", outcome,
+			"subscriptions", listed,
+			"pattern_subscriptions", len(read.Subs),
+			"missing", read.Missing,
+			"read_failures", read.Failed,
+			"matched", matched,
+			"linked", linked,
+			"link_failures", linkFailed,
+			"list_ms", listDur.Milliseconds(),
+			"read_ms", readDur.Milliseconds(),
+			"link_ms", linkDur.Milliseconds(),
+			"duration_ms", m.now().Sub(start).Milliseconds())
+	}()
+	phase := m.now()
 	ids, err := m.store.List()
+	listDur = m.now().Sub(phase)
 	if err != nil {
-		m.log.Warn("webhook: list subscriptions on stream create", "error", err)
+		outcome = "list_failed"
+		m.log.Warn("webhook: list subscriptions on stream create", "path", path, "error", err)
 		return
 	}
+	listed = len(ids)
+	phase = m.now()
+	read, err = m.store.PatternSubscriptions(ids)
+	readDur = m.now().Sub(phase)
+	if err != nil {
+		outcome = "partial_failure"
+		if read.Failed+read.Missing == listed {
+			outcome = "read_failed"
+		}
+		m.log.Warn("webhook: read pattern subscriptions on stream create", "path", path, "failed", read.Failed, "error", err)
+	}
+	phase = m.now()
 	begin := m.streams.BeginningOffset()
-	for _, id := range ids {
-		sub, ok, err := m.store.Get(id)
-		if err != nil || !ok {
+	for _, sub := range read.Subs {
+		if !GlobMatch(sub.Pattern, path) {
 			continue
 		}
-		if sub.Config.Pattern != "" && GlobMatch(sub.Config.Pattern, path) {
-			if err := m.store.Link(id, path, LinkGlob, begin); err != nil {
-				m.log.Warn("webhook: link glob stream", "sub", id, "path", path, "error", err)
-			}
+		matched++
+		if err := m.store.Link(sub.ID, path, LinkGlob, begin); err != nil {
+			linkFailed++
+			outcome = "partial_failure"
+			m.log.Warn("webhook: link glob stream", "sub", sub.ID, "path", path, "error", err)
+			continue
 		}
+		linked++
 	}
+	linkDur = m.now().Sub(phase)
 }
 
 // OnStreamAppend records one process-local dirty hint after a durable append.
