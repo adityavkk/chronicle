@@ -96,6 +96,12 @@ type chronicleModel struct {
 	paths   []string                              // every path ever created (may be deleted/expired)
 	claims  map[string]map[int][]auth.AppendFence // path -> claimPool index -> granted fences
 	claimed []string                              // every path with a granted claim, in grant order
+
+	// hintTail is the tail the model saw on each path at its previous Append,
+	// handed to the next Append there as AppendOptions.TailHint: fresh when
+	// that append was refused, stale when it committed, and spanning whatever
+	// closes, deletes, re-creations, fences and expiry happened in between.
+	hintTail map[string]store.Offset
 }
 
 // fenceTally counts the outcomes a property run reached, by key, so a probe
@@ -326,6 +332,12 @@ func (m *chronicleModel) Append(t *rapid.T) {
 		// keep the comparison meaningful without tripping LB-2 here.
 		opts.Seq = fmt.Sprintf("%04d", rapid.IntRange(0, 50).Draw(t, "streamSeq"))
 	}
+	// Both backends receive the hint; the oracle ignores it, so the diff below
+	// is the parity a hinted Redis append must keep (INV-LIN-02).
+	before, beforeErr := m.oracle.GetCurrentOffset(path)
+	if hint, ok := m.hintTail[path]; ok {
+		opts.TailHint = &hint
+	}
 
 	oRes, oErr := m.oracle.Append(path, data, opts)
 	sRes, sErr := m.subject.Append(path, data, opts)
@@ -333,6 +345,18 @@ func (m *chronicleModel) Append(t *rapid.T) {
 		m.diffAppendResult(t, path, oRes, sRes)
 	}
 	m.tallyWrite(path, opts.Fence, oRes.FenceReason, oErr)
+
+	if beforeErr == nil {
+		m.hintTail[path] = before
+	}
+	if opts.TailHint != nil && opts.ContentType != "" {
+		// Only a request naming a content type frames against the hint.
+		if beforeErr == nil && opts.TailHint.Equal(before) {
+			m.tally.hit("hint:fresh")
+		} else {
+			m.tally.hit("hint:stale")
+		}
+	}
 }
 
 // Read draws a starting offset (zero, the current tail, or a generated earlier
@@ -939,7 +963,8 @@ func TestEquivalenceMemoryVsRedis(t *testing.T) {
 	// The fence outcomes the generators reach in every default run by a wide
 	// margin; the rarer ones are pinned deterministically by the corpus probe
 	// (TestFuzzStoreEquivalenceCorpusReachesBranches).
-	tally.reached(t, "grant:installed", "grant:fenced", "fence:marker", "seal:unfenced", "seal:sealed")
+	tally.reached(t, "grant:installed", "grant:fenced", "fence:marker", "seal:unfenced", "seal:sealed",
+		"hint:fresh", "hint:stale")
 }
 
 // runEquivalenceModel is the ONE state-machine property body driven by both the
@@ -972,11 +997,12 @@ func runEquivalenceModelWith(t *rapid.T, base *Store, tally *fenceTally) {
 	subject := New(base.client, Options{Clock: clock})
 
 	m := &chronicleModel{
-		oracle:  oracle,
-		subject: subject,
-		clock:   clock,
-		tally:   tally,
-		claims:  make(map[string]map[int][]auth.AppendFence),
+		oracle:   oracle,
+		subject:  subject,
+		clock:    clock,
+		tally:    tally,
+		claims:   make(map[string]map[int][]auth.AppendFence),
+		hintTail: make(map[string]store.Offset),
 	}
 
 	// Bootstrap one baseline stream so the model's initial state is non-degenerate
