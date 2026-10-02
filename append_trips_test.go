@@ -18,78 +18,12 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/internal/redistest"
 	"gecgithub01.walmart.com/auk000v/chronicle/protocol"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 	redisstore "gecgithub01.walmart.com/auk000v/chronicle/store/redis"
 	"gecgithub01.walmart.com/auk000v/chronicle/webhook"
 )
-
-// appendTripLog is a go-redis Hook that records one entry per Redis round
-// trip a POST spends: single commands by name, a pipeline Exec as
-// "pipe(name+name)", and a script call as "evalsha:append" (keys in a stream
-// slot) or "evalsha:control" (the write-fence pre-check in the control
-// plane). A script reload after NOSCRIPT is logged as "eval:..." so a cold
-// script cache is diagnosed as such and not mistaken for a second round trip.
-// beforeScript, when armed, runs once before the next script call.
-type appendTripLog struct {
-	mu           sync.Mutex
-	trips        []string
-	beforeScript func()
-}
-
-func (l *appendTripLog) DialHook(next goredis.DialHook) goredis.DialHook { return next }
-
-func (l *appendTripLog) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook {
-	return func(ctx context.Context, cmd goredis.Cmder) error {
-		name := cmd.Name()
-		var before func()
-		if name == "evalsha" || name == "eval" {
-			slot := "control"
-			if key, _ := cmd.Args()[3].(string); strings.HasPrefix(key, "ds:{") && strings.HasSuffix(key, ":meta") {
-				slot = "append"
-			}
-			name += ":" + slot
-			l.mu.Lock()
-			before, l.beforeScript = l.beforeScript, nil
-			l.mu.Unlock()
-		}
-		l.mu.Lock()
-		l.trips = append(l.trips, name)
-		l.mu.Unlock()
-		if before != nil {
-			before()
-		}
-		return next(ctx, cmd)
-	}
-}
-
-func (l *appendTripLog) ProcessPipelineHook(next goredis.ProcessPipelineHook) goredis.ProcessPipelineHook {
-	return func(ctx context.Context, cmds []goredis.Cmder) error {
-		names := make([]string, len(cmds))
-		for i, cmd := range cmds {
-			names[i] = cmd.Name()
-		}
-		l.mu.Lock()
-		l.trips = append(l.trips, "pipe("+strings.Join(names, "+")+")")
-		l.mu.Unlock()
-		return next(ctx, cmds)
-	}
-}
-
-func (l *appendTripLog) take() []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	trips := l.trips
-	l.trips = nil
-	return trips
-}
-
-// arm schedules fn to run once, just before the next script call.
-func (l *appendTripLog) arm(fn func()) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.beforeScript = fn
-}
 
 // warmEveryMaster calls warm with a stream name whose slot lives on each
 // cluster master in turn. A stream's keys hash by the {path} tag, so
@@ -111,6 +45,9 @@ func warmEveryMaster(t *testing.T, cc *goredis.ClusterClient, path func(string) 
 	}
 	warmed := map[string]bool{}
 	for n := 0; len(warmed) < len(masters); n++ {
+		if n == 16384 { // one name per slot would have hit every master
+			t.Fatalf("warmed %d of %d masters: a master owns no slot", len(warmed), len(masters))
+		}
 		name := "warm-" + strconv.Itoa(n)
 		master, err := cc.MasterForKey(context.Background(), "{"+path(name)+"}")
 		if err != nil {
@@ -163,7 +100,7 @@ func runHandleAppendRoundTrips(t *testing.T, newClient func() goredis.UniversalC
 		_ = client.Close()
 		t.Skipf("redis unreachable: %v", err)
 	}
-	trips := &appendTripLog{}
+	trips := &redistest.TripLog{}
 	client.AddHook(trips)
 	// side moves tails behind the measured request's back; it is not logged.
 	side := newClient()
@@ -327,10 +264,10 @@ func runHandleAppendRoundTrips(t *testing.T, newClient func() goredis.UniversalC
 	mustCreate(t, h, path("first"), "text/plain", nil)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			trips.take()
-			trips.arm(tc.beforeScript)
+			trips.Take()
+			trips.BeforeAppendScript(tc.beforeScript)
 			rec := do(tc.handler, http.MethodPost, tc.path, tc.headers, tc.body)
-			got := trips.take()
+			got := trips.Take()
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("status %d body %q, want %d", rec.Code, rec.Body.String(), tc.wantStatus)
 			}

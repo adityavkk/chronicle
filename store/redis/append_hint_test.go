@@ -16,6 +16,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/auth"
+	"gecgithub01.walmart.com/auk000v/chronicle/internal/redistest"
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
@@ -26,86 +27,19 @@ import (
 // from an unhinted one in result, error and resulting stream state, whatever
 // happened to the stream between the read and the write (INV-LIN-02).
 
-// tripRecorder is a go-redis Hook recording one entry per Redis round trip:
-// each single command by name, each pipeline Exec as "pipe(name+name)". It
-// also counts append.lua RETRY replies and can run a callback once, just
-// before the first script call it sees, to move the tail under an append.
-type tripRecorder struct {
-	mu           sync.Mutex
-	trips        []string
-	retries      int
-	beforeScript func()
-}
-
-func (r *tripRecorder) DialHook(next goredis.DialHook) goredis.DialHook { return next }
-
-func (r *tripRecorder) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook {
-	return func(ctx context.Context, cmd goredis.Cmder) error {
-		r.mu.Lock()
-		r.trips = append(r.trips, cmd.Name())
-		before := r.beforeScript
-		if cmd.Name() == "evalsha" || cmd.Name() == "eval" {
-			r.beforeScript = nil
-		} else {
-			before = nil
-		}
-		r.mu.Unlock()
-		if before != nil {
-			before()
-		}
-		err := next(ctx, cmd)
-		if c, ok := cmd.(*goredis.Cmd); ok && err == nil {
-			if reply, ok := c.Val().([]any); ok && len(reply) > 0 && reply[0] == stRetry {
-				r.mu.Lock()
-				r.retries++
-				r.mu.Unlock()
-			}
-		}
-		return err
-	}
-}
-
-func (r *tripRecorder) ProcessPipelineHook(next goredis.ProcessPipelineHook) goredis.ProcessPipelineHook {
-	return func(ctx context.Context, cmds []goredis.Cmder) error {
-		names := make([]string, len(cmds))
-		for i, cmd := range cmds {
-			names[i] = cmd.Name()
-		}
-		r.mu.Lock()
-		r.trips = append(r.trips, "pipe("+strings.Join(names, "+")+")")
-		r.mu.Unlock()
-		return next(ctx, cmds)
-	}
-}
-
-// take returns the trips recorded since the last take and clears them.
-func (r *tripRecorder) take() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	trips := r.trips
-	r.trips = nil
-	return trips
-}
-
-func (r *tripRecorder) retryCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.retries
-}
-
-// recordedStore is a Store on its own client with a tripRecorder attached and
-// the script cache warmed, so EVALSHA never falls back to EVAL mid-count.
-func recordedStore(t *testing.T) (*Store, *tripRecorder) {
+// recordedStore is a Store on its own client with a TripLog attached and the
+// script cache warmed, so EVALSHA never falls back to EVAL mid-count.
+func recordedStore(t *testing.T) (*Store, *redistest.TripLog) {
 	t.Helper()
 	client := goredis.NewClient(testClient.Options())
 	t.Cleanup(func() { _ = client.Close() })
-	rec := &tripRecorder{}
+	rec := &redistest.TripLog{}
 	client.AddHook(rec)
 	s := New(client, Options{})
 	warm := testPath("warm")
 	mustCreate(t, s, warm, store.CreateOptions{ContentType: "text/plain"})
 	mustAppend(t, s, warm, []byte("w"), store.AppendOptions{ContentType: "text/plain"})
-	rec.take()
+	rec.Take()
 	return s, rec
 }
 
@@ -117,7 +51,7 @@ func offsetPtr(o store.Offset) *store.Offset { return &o }
 // type first; a stale hint costs one RETRY, whose reply carries the live tail
 // the next attempt frames against, so a retry is one more script call.
 func TestAppendTailHintRoundTrips(t *testing.T) {
-	side := newTestStore(t) // moves tails behind the recorded store's back; not recorded
+	side := newTestStore(t) // moves tails behind the logged store's back; not logged
 	s, rec := recordedStore(t)
 	plain := store.AppendOptions{ContentType: "text/plain"}
 
@@ -129,40 +63,41 @@ func TestAppendTailHintRoundTrips(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rec.take()
+		rec.Take()
 		return path, &meta.CurrentOffset
 	}
 	assertTrips := func(label string, want ...string) {
 		t.Helper()
-		if got := rec.take(); !reflect.DeepEqual(got, want) {
+		if got := rec.Take(); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: round trips %v, want %v", label, got, want)
 		}
 	}
+	const script = "evalsha:append"
 
 	path, hint := newStream("fresh")
 	fresh := mustAppend(t, s, path, []byte("x"), store.AppendOptions{ContentType: "text/plain", TailHint: hint})
-	assertTrips("fresh hint", "evalsha")
+	assertTrips("fresh hint", script)
 
 	path, _ = newStream("nohint")
 	unhinted := mustAppend(t, s, path, []byte("x"), plain)
-	assertTrips("no hint", "hmget", "evalsha")
+	assertTrips("no hint", "hmget", script)
 
 	path, hint = newStream("noct")
 	noCT := mustAppend(t, s, path, []byte("x"), store.AppendOptions{TailHint: hint})
-	assertTrips("hint without content type", "hmget", "evalsha")
+	assertTrips("hint without content type", "hmget", script)
 
 	path, hint = newStream("stale")
 	mustAppend(t, s, path, []byte("moved"), plain)
-	rec.take()
+	rec.Take()
 	stale := mustAppend(t, s, path, []byte("x"), store.AppendOptions{ContentType: "text/plain", TailHint: hint})
-	assertTrips("stale hint", "evalsha", "evalsha")
+	assertTrips("stale hint", script, script)
 
 	// Without a content type nothing pins the framing mode, so a retry reads
 	// tail and content type together again rather than trusting the reply.
 	path, _ = newStream("noct-stale")
-	rec.beforeScript = func() { mustAppend(t, side, path, []byte("moved"), plain) }
+	rec.BeforeAppendScript(func() { mustAppend(t, side, path, []byte("moved"), plain) })
 	noCTStale := mustAppend(t, s, path, []byte("x"), store.AppendOptions{})
-	assertTrips("no content type, tail moved", "hmget", "evalsha", "hmget", "evalsha")
+	assertTrips("no content type, tail moved", "hmget", script, "hmget", script)
 
 	// Each variant appended one byte after a four-byte seed; the stale ones
 	// after a further five.
@@ -176,8 +111,8 @@ func TestAppendTailHintRoundTrips(t *testing.T) {
 			t.Errorf("%s: offset %v, want %v", label, res.Offset, want)
 		}
 	}
-	if rec.retryCount() != 2 {
-		t.Errorf("RETRY replies = %d, want 2 (one per stale snapshot)", rec.retryCount())
+	if rec.Retries() != 2 {
+		t.Errorf("RETRY replies = %d, want 2 (one per stale snapshot)", rec.Retries())
 	}
 }
 
@@ -470,15 +405,15 @@ func runConcurrentTiling(t *testing.T, newClient func() goredis.UniversalClient)
 		writers        = 8
 		appendsPerEach = 40
 	)
-	// Two stores: hinted appenders go through one recorder, unhinted through
-	// the other, so RETRY counts can be reported per half.
-	open := func() (*Store, *tripRecorder) {
+	// Two stores: hinted appenders go through one log, unhinted through the
+	// other, so RETRY counts can be reported per half.
+	open := func() (*Store, *redistest.TripLog) {
 		client := newClient()
 		if err := client.Ping(context.Background()).Err(); err != nil {
 			t.Skipf("redis unreachable: %v", err)
 		}
 		t.Cleanup(func() { _ = client.Close() })
-		rec := &tripRecorder{}
+		rec := &redistest.TripLog{}
 		client.AddHook(rec)
 		return New(client, Options{}), rec
 	}
@@ -623,7 +558,7 @@ func runConcurrentTiling(t *testing.T, newClient func() goredis.UniversalClient)
 		}
 	}
 	t.Logf("rejections: %v", rejected)
-	t.Logf("RETRY replies: hinted half %d, unhinted half %d", hintedRec.retryCount(), unhintedRec.retryCount())
+	t.Logf("RETRY replies: hinted half %d, unhinted half %d", hintedRec.Retries(), unhintedRec.Retries())
 }
 
 func prodSeqsOf(mu *sync.Mutex, m map[string][]int64, producer string) []int64 {
