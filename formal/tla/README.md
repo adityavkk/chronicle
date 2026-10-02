@@ -292,7 +292,7 @@ transitions into it — so the layering proof compares like with like.
 
 | Spec action | Source mirror | Guard transcribed |
 |---|---|---|
-| `ClaimShard(me,h)` | `webhook/scripts/claim_shard.lua` (`webhook/ownership.go SlotClaim`), issued by `RedisStore.ClaimSlots` as one EVALSHA per slot inside a per-node pipeline | BUSY iff a live foreign owner; else grant — `owner=me` RENEW (epoch kept), `owner≠me` TRANSFER (`HINCRBY owner_epoch +1`, strictly up). Each EVALSHA is still exactly one atomic action; a pipeline is not a transaction, so other replicas' steps may interleave between them — the arbitrary interleaving `ONext` already allows. A pass is a finite sequence of model steps in slot order, not a new action; two overlapping passes (`Promote` concurrent with the loop) are two interleaved sequences of same-owner RENEW steps, also already in the model. |
+| `ClaimShard(me,h)` | `webhook/scripts/claim_shard.lua` (`webhook/ownership.go SlotClaim`), issued by `RedisStore.ClaimSlots` as one EVALSHA per slot inside a per-node pipeline | BUSY iff a live foreign owner; else grant — `owner=me` RENEW (epoch kept), `owner≠me` TRANSFER (`HINCRBY owner_epoch +1`, strictly up). Each EVALSHA is still exactly one atomic action; a pipeline is not a transaction, so other replicas' steps may interleave between them — the arbitrary interleaving `ONext` already allows. A pass is a finite sequence of model steps in slot order, not a new action; two overlapping passes (`Promote` concurrent with the loop) are two interleaved sequences of same-owner RENEW steps, also already in the model for the owner/epoch algebra. One grain difference: the model's RENEW resets the full `SlotTTL`, while the Lua writes `lease_expiry_ns = pass now + slotLeaseTTL` unconditionally, anchored at that pass's start — so a step that lands late (a slow pass, or the older of two overlapping passes landing after the newer) leaves less than the TTL. That is exactly what the `Tick` slot gate's runtime precondition (below) bounds. |
 | Lease / Retry / Due drains (`claim_due`) | `webhook/scripts/claim_due.lua`, issued by `RedisStore.ClaimDueSlots` as one EVALSHA per owned slot inside one pipeline per worker tick | Re-score forward to `now + visibility`, never ZREM (INV-LEASE-02); one key per call, so the batch is single-slot per command and the per-slot semantics Liveness.tla's drain fairness abstracts are unchanged. |
 | `OwnerVerdict` / `OwnerFenced` | `webhook/scripts/check_owner.lua` / `common.lua owner_fenced` | UNOWNED / FENCED (owner≠me ∨ epoch mismatch) / OWNER; `epoch=''`(=0) short-circuits to pass (external/hot path). |
 | `Depose(h)` | membership drop | the slot lease lapses; `owner_id`/`owner_epoch` persist (fenced only by a later TRANSFER bump). |
@@ -374,25 +374,37 @@ convergence run is not vacuous.
 
 **The slot gate's runtime precondition, and the slow-pass twin.** The Tick slot
 gate assumes an alive, still-targeted owner renews a slot before its lease
-lapses. In the implementation that is `slotReconcileInterval + claim-pass
-duration < slotLeaseTTL`. A pass is a finite sequence of `ReconcileClaim(me,h)`
-steps — each `claim_shard` EVALSHA is one atomic action, and `Next` already
-interleaves such steps arbitrarily with every other replica's, so *how* a pass
-issues them (one round trip per slot, or batched per node in one pipeline by
+lapses. A pass is a finite sequence of `ReconcileClaim(me,h)` steps — each
+`claim_shard` EVALSHA is one atomic action, and `Next` already interleaves such
+steps arbitrarily with every other replica's, so *how* a pass issues them (one
+round trip per slot, or batched per node in one pipeline by
 `RedisStore.ClaimSlots`) adds no behaviour to the model; a pipeline is not a
 transaction, and an overlapping `Promote` pass is a second interleaved sequence
-of same-owner RENEW steps the model also contains. What batching changes is the
-precondition: a serial pass of N slots × 3 round trips could exceed the lease at
-a remote region's RTT, whereas `ClaimSlots` makes the pass a fixed few round
-trips independent of the owned-slot count, and `slotReconcileOnce` warns if a
-pass ever crosses the margin. The twin `SpecSlowPass` / `SpecSlowPassNoFair`
-(`TickUngated`: the slot conjunct removed, the member gate kept) shows what the
-gate buys: `membership-slowpass-safety` keeps `Inv` and both epoch
-action-properties (none reads the gate — pass timing can only churn, never break
-single-owner or epoch safety, which is why INV-OWNER-01/02 are time-free), and
-`membership-slowpass-convergence` **must fail**, its counterexample an alive HRW
-owner whose `slotTTL` reaches 0 and is renewed again forever — the lapse/renew
-oscillation, which doubles as the gate's non-vacuity witness.
+of same-owner RENEW steps the model also contains. What the model abstracts is
+the lease anchor: its RENEW resets the full TTL, whereas the code anchors every
+lease of a pass at the pass start, so the gate stands for the runtime
+precondition that pass *k+1*'s claim of a slot lands within `slotLeaseTTL` of
+pass *k*'s start — `max(slotReconcileInterval, D_k) + c_(k+1) < slotLeaseTTL`,
+with `D` the pass duration and `c ≤ D` the time from pass start to the claim
+step (a `time.Ticker` fires the next pass at once when one overruns the
+interval); for passes that fit inside the interval that is
+`slotReconcileInterval + D < slotLeaseTTL`. What batching changes is `D`: a
+serial pass of N slots × 3 round trips could exceed the lease at a remote
+region's RTT, whereas `ClaimSlots` makes the pass a fixed few round trips
+independent of the owned-slot count, and `slotReconcileOnce` warns if a pass
+ever crosses `slotLeaseTTL - slotReconcileInterval`. The twin `SpecSlowPass` /
+`SpecSlowPassNoFair` (`TickUngated`: the slot conjunct removed, the member gate
+kept) shows what the gate buys: `membership-slowpass-safety` keeps `Inv` and
+both epoch action-properties (none reads the gate — pass timing can only churn,
+never break single-owner or epoch safety, which is why INV-OWNER-01/02 are
+time-free), and `membership-slowpass-convergence` **must fail**, its
+counterexample an alive HRW owner whose `slotTTL` reaches 0 and is renewed again
+forever — the lapse/renew oscillation, which doubles as the gate's non-vacuity
+witness. The control is sharp: the target requires a *temporal* violation whose
+trace passes through `TickUngated`, and every counterexample must contain a
+`TickUngated` step that `Tick` forbids (a lapse of an alive, still-targeted
+owner's lease), because a `SpecSlowPass` behaviour without one is a `Spec`
+behaviour, and `Spec` converges.
 
 ## The L3 lease-tail-drop refinement (INV-LR-01 / INV-JEP-L3-01)
 
@@ -414,7 +426,7 @@ reconcile loop.
 | `membership-nofair` (negative control) | Temporal property violated (as required) |
 | `membership-witness` (NotTransferReachable / NotZeroOwnerGapReachable) | both violated (as required — non-vacuous) |
 | `membership-slowpass-safety` (Tick slot gate removed: Inv + Epoch action-props) | No error — 30071 distinct states (more than the gated 21038: the extra states are the lapsed-while-alive slot leases the gate forbade) |
-| `membership-slowpass-convergence` (gate removed, same fairness: `<>[]Converged`) | Temporal property violated (as required): an alive HRW owner's `slotTTL` reaches 0 under `TickUngated` and is renewed again — the lapse/renew lasso |
+| `membership-slowpass-convergence` (gate removed, same fairness: `<>[]Converged`, TypeOK) | Temporal property violated (as required), 30071 distinct states: the trace reaches `Converged` (the sole survivor owning both slots with live leases), then `TickUngated` drives its `slotTTL` to 0 and `ReconcileClaim` renews it, looping — the lapse/renew lasso of an alive HRW owner |
 | `leasetail` (Inv + `LeaseRecoverable`) | No error |
 | `leasetail-witness` (NoStranded) | violated (as required — stranded state reachable) |
 

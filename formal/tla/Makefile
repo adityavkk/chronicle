@@ -153,10 +153,23 @@ membership-slowpass-safety: jar
 	$(TLC) -config Membership_SlowPass_Safety.cfg MC_Membership.tla
 
 # Slow-pass twin, negative control: with the gate removed convergence MUST FAIL
-# (an alive HRW owner's own slot lease lapses and oscillates).
+# (an alive HRW owner's own slot lease lapses and oscillates). The fence-fault
+# idiom, not the nofair one: the run must report a TEMPORAL violation and its
+# counterexample must pass through TickUngated (the lapse of an alive, still-
+# targeted owner's slot lease -- the one step Tick forbids; a SpecSlowPass
+# behavior with no such step is a Spec behavior, which converges). A parse
+# error, a TypeOK violation or a run that never model-checked fails too.
+# SLOWPASS_CFG is overridable so the control can be shown to FAIL on the gated
+# Membership_Convergence.cfg, which violates nothing.
 membership-slowpass-convergence: jar
-	@! $(TLC) -config Membership_SlowPass_Convergence.cfg MC_Membership.tla 2>&1 | tee /dev/stderr | grep -q 'No error has been found' \
-		|| (echo "FAIL: convergence held WITHOUT the slot-lease gate — the gate is not load-bearing" && exit 1)
+	@out=$$(mktemp); $(TLC) -config $${SLOWPASS_CFG:-Membership_SlowPass_Convergence.cfg} MC_Membership.tla 2>&1 | tee $$out; \
+	if grep -q 'No error has been found' $$out; then \
+	    echo "FAIL: convergence held WITHOUT the slot-lease gate — the gate is not load-bearing"; rm -f $$out; exit 1; fi; \
+	grep -q 'Temporal properties were violated' $$out \
+	    || { echo "FAIL: slow-pass run reported no temporal violation (did TLC run?)"; rm -f $$out; exit 1; }; \
+	grep -q '<TickUngated ' $$out \
+	    || { echo "FAIL: slow-pass counterexample has no TickUngated step — not the lapse/renew lasso"; rm -f $$out; exit 1; }; \
+	rm -f $$out
 
 leasetail: jar
 	$(TLC) -config LeaseTail.cfg LeaseTail.tla
