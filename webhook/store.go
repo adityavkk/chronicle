@@ -28,9 +28,9 @@ type Store interface {
 	// Get returns a subscription with its Links hydrated, and whether it exists.
 	Get(id string) (Subscription, bool, error)
 
-	// GetMany hydrates many subscriptions in one pipelined batch, omitting any
-	// that no longer exist (order is not significant). It is the batched form of
-	// Get for the loops that read every subscription (the recovery sweep and the
+	// GetMany hydrates many subscriptions in one pipelined batch, in the order
+	// of ids, omitting any that no longer exist. It is the batched form of Get
+	// for the loops that read every subscription (the recovery sweep and the
 	// reconcile loop).
 	GetMany(ids []string) ([]Subscription, error)
 

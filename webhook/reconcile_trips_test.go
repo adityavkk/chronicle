@@ -314,7 +314,7 @@ func TestLinkIsTwoRoundTrips(t *testing.T) {
 // runs. The fault is a STRING squatting a fan-out SET key (so the index write
 // fails WRONGTYPE) — not a links hash, which the pattern pass reads too.
 func TestReconcileIndexErrorDoesNotSuppressPatternRecovery(t *testing.T) {
-	s, _ := newCountedStore(t)
+	s, _ := newTestStore(t)
 	ctx := context.Background()
 	const begin = "0000000000000000_0000000000000000"
 	// x: explicit-only, its fan-out SET replaced by a STRING.
