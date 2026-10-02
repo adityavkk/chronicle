@@ -125,40 +125,53 @@ func TestClaimSlotsOnCluster(t *testing.T) {
 		t.Fatalf("healing pass: %d singles, %d pipelines, want 0 and 5 (3 phases + 2 EVAL batches)", singles, pipes)
 	}
 
-	// Stall one master for 4 s (past the default 3 s read timeout) while a pass runs.
-	stalled, err := cc.MasterForKey(ctx, slotKey(0))
-	if err != nil {
-		t.Fatal(err)
-	}
-	onStalled := map[int]bool{}
-	for h, k := range keys {
-		m, err := cc.MasterForKey(ctx, k)
+	// Stall one master for 4 s (past the default 3 s read timeout) while a pass
+	// runs. DEBUG SLEEP needs a cluster started with --enable-debug-command yes;
+	// without it the case is skipped rather than passing with no stall at all.
+	t.Run("one-master stall", func(t *testing.T) {
+		stalled, err := cc.MasterForKey(ctx, slotKey(0))
 		if err != nil {
 			t.Fatal(err)
 		}
-		onStalled[h] = m.Options().Addr == stalled.Options().Addr
-	}
-	go func() { _ = stalled.Do(ctx, "DEBUG", "SLEEP", "4").Err() }()
-	time.Sleep(200 * time.Millisecond)
-	start := time.Now()
-	for h, r := range s.ClaimSlots(keys, "rA", start, time.Minute) {
-		switch {
-		case r.Err != nil:
-			if !onStalled[h] {
-				t.Fatalf("slot %d on a healthy master errored during the stall: %v", h, r.Err)
+		if err := stalled.Do(ctx, "DEBUG", "SLEEP", "0").Err(); err != nil {
+			t.Skipf("DEBUG SLEEP is unavailable (start the cluster with --enable-debug-command yes): %v", err)
+		}
+		onStalled := map[int]bool{}
+		for h, k := range keys {
+			m, err := cc.MasterForKey(ctx, k)
+			if err != nil {
+				t.Fatal(err)
 			}
-		case r.Claim.Status == SlotRenewed && r.Claim.Epoch == epochs[h]:
-		default:
-			t.Fatalf("slot %d during the stall: %+v, want RENEWED at epoch %v or an error on the stalled master", h, r.Claim, epochs[h])
+			onStalled[h] = m.Options().Addr == stalled.Options().Addr
 		}
-	}
-	t.Logf("pass during a 4 s stall of %s took %v", stalled.Options().Addr, time.Since(start))
-	time.Sleep(4*time.Second - time.Since(start) + 200*time.Millisecond)
-	for h, r := range s.ClaimSlots(keys, "rA", time.Now(), time.Minute) {
-		if r.Err != nil || r.Claim.Status != SlotRenewed || r.Claim.Epoch != epochs[h] {
-			t.Fatalf("after the stall slot %d: %+v/%v, want RENEWED at epoch %v (no churn)", h, r.Claim, r.Err, epochs[h])
+		go func() { _ = stalled.Do(ctx, "DEBUG", "SLEEP", "4").Err() }() // the node client's read times out at 3 s; the server sleeps on
+		time.Sleep(200 * time.Millisecond)
+		start := time.Now()
+		for h, r := range s.ClaimSlots(keys, "rA", start, time.Minute) {
+			switch {
+			case r.Err != nil:
+				if !onStalled[h] {
+					t.Fatalf("slot %d on a healthy master errored during the stall: %v", h, r.Err)
+				}
+			case r.Claim.Status == SlotRenewed && r.Claim.Epoch == epochs[h]:
+			default:
+				t.Fatalf("slot %d during the stall: %+v, want RENEWED at epoch %v or an error on the stalled master", h, r.Claim, epochs[h])
+			}
 		}
-	}
+		took := time.Since(start)
+		// Nothing on the stalled master is answered before its sleep ends, so a
+		// pass that finished inside the read timeout was never stalled.
+		if took < 3*time.Second {
+			t.Fatalf("pass during the stall of %s took %v, so the master was not stalled", stalled.Options().Addr, took)
+		}
+		t.Logf("pass during a 4 s stall of %s took %v", stalled.Options().Addr, took)
+		time.Sleep(4*time.Second - took + 200*time.Millisecond)
+		for h, r := range s.ClaimSlots(keys, "rA", time.Now(), time.Minute) {
+			if r.Err != nil || r.Claim.Status != SlotRenewed || r.Claim.Epoch != epochs[h] {
+				t.Fatalf("after the stall slot %d: %+v/%v, want RENEWED at epoch %v (no churn)", h, r.Claim, r.Err, epochs[h])
+			}
+		}
+	})
 }
 
 // TestClaimDueSlotsOnCluster: one claim_due pipeline over all 256 per-slot ZSETs
