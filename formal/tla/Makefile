@@ -25,7 +25,8 @@ SANY               = $(JAVA) -cp $(JAR) tla2sany.SANY
         composed-deposed liveness liveness-nofair liveness-safety liveness-sensitivity parse38 \
         parse-trace trace-validate trace-negative \
         tlc40 parse40 membership-safety membership-convergence membership-nofair \
-        membership-witness leasetail leasetail-witness alloy \
+        membership-witness membership-slowpass-safety membership-slowpass-convergence \
+        leasetail leasetail-witness alloy \
         tlc41 apalache \
         token-refresh parse-token-refresh token-refresh-live token-refresh-witness token-refresh-norecover \
         fence parse-fence fence-1x2 fence-2x2 fence-fault-toctou fence-fault-nobind \
@@ -105,12 +106,23 @@ parse38: jar
 #                            FAIL (the leads-to is non-trivial).
 #   membership-witness     : non-vacuity -- a genuine TRANSFER and a genuine
 #                            zero-owner coverage GAP are each really reached.
+#   membership-slowpass-safety      : the Tick slot-lease gate REMOVED (a pass whose
+#                            claims land more than slotLeaseTTL after the previous
+#                            pass's start, where that pass's leases are anchored):
+#                            Inv + the epoch action-properties MUST still hold --
+#                            pass timing can churn, never break safety.
+#   membership-slowpass-convergence : negative control -- with the gate removed
+#                            (same fairness) convergence MUST FAIL: an alive HRW
+#                            owner's own lease lapses and oscillates. Proves the
+#                            gate, which ClaimSlots makes true in the code, is
+#                            exactly what []Converged needs.
 # (B) The L3 lease-tail-drop refinement (INV-LR-01 / INV-JEP-L3-01): the lease
 # ZSET is a cache repairable from the durable record.
 #   leasetail              : NoSpuriousLease (never invent a lease) + a stranded
 #                            lease is eventually restored from the durable hash.
 tlc40: jar parse40 membership-safety membership-convergence membership-nofair \
-       membership-witness leasetail leasetail-witness
+       membership-witness membership-slowpass-safety membership-slowpass-convergence \
+       leasetail leasetail-witness
 
 parse40: jar
 	$(SANY) Membership.tla
@@ -135,6 +147,30 @@ membership-witness: jar
 		|| (echo "FAIL: no TRANSFER was reachable — convergence run is vacuous" && exit 1)
 	@! $(TLC) -config Membership_WitnessGap.cfg MC_Membership.tla 2>&1 | tee /dev/stderr | grep -q 'No error has been found' \
 		|| (echo "FAIL: no zero-owner GAP was reachable — convergence run is vacuous" && exit 1)
+
+# Slow-pass twin, safety lane: with the slot-lease headroom gate removed the
+# safety invariants and epoch action-properties MUST still hold.
+membership-slowpass-safety: jar
+	$(TLC) -config Membership_SlowPass_Safety.cfg MC_Membership.tla
+
+# Slow-pass twin, negative control: with the gate removed convergence MUST FAIL
+# (an alive HRW owner's own slot lease lapses and oscillates). The fence-fault
+# idiom, not the nofair one: the run must report a TEMPORAL violation and its
+# counterexample must pass through TickUngated (the lapse of an alive, still-
+# targeted owner's slot lease -- the one step Tick forbids; a SpecSlowPass
+# behavior with no such step is a Spec behavior, which converges). A parse
+# error, a TypeOK violation or a run that never model-checked fails too.
+# SLOWPASS_CFG is overridable so the control can be shown to FAIL on the gated
+# Membership_Convergence.cfg, which violates nothing.
+membership-slowpass-convergence: jar
+	@out=$$(mktemp); $(TLC) -config $${SLOWPASS_CFG:-Membership_SlowPass_Convergence.cfg} MC_Membership.tla 2>&1 | tee $$out; \
+	if grep -q 'No error has been found' $$out; then \
+	    echo "FAIL: convergence held WITHOUT the slot-lease gate — the gate is not load-bearing"; rm -f $$out; exit 1; fi; \
+	grep -q 'Temporal properties were violated' $$out \
+	    || { echo "FAIL: slow-pass run reported no temporal violation (did TLC run?)"; rm -f $$out; exit 1; }; \
+	grep -q '<TickUngated ' $$out \
+	    || { echo "FAIL: slow-pass counterexample has no TickUngated step — not the lapse/renew lasso"; rm -f $$out; exit 1; }; \
+	rm -f $$out
 
 leasetail: jar
 	$(TLC) -config LeaseTail.cfg LeaseTail.tla

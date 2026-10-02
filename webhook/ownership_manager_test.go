@@ -1,14 +1,47 @@
 package webhook
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
+	"maps"
+	"math/rand"
+	"net"
+	"os"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	goredis "github.com/redis/go-redis/v9"
 )
 
 // ownership_manager_test.go covers the Manager's slot-ownership shell (issue #14):
-// the membership/HRW/slot-reconcile wiring, the ownedSlots() work-sharding gate,
+// the membership/HRW/slot-reconcile wiring, the held-set work-sharding gate,
 // the new-owner-CAS firing #13's reconcile seam, and the inline OwnerFenced metric.
 // Against live Redis (skipped under -short).
+
+// ownedSlots is the test's view of the held set: the slots m currently owns.
+func ownedSlots(m *Manager) []SlotID {
+	scopes := m.ownedScopes()
+	out := make([]SlotID, len(scopes))
+	for i, o := range scopes {
+		out[i] = o.h
+	}
+	return out
+}
+
+// ownerScope is the scope m holds slot h at; ok is false when m does not hold h.
+func ownerScope(m *Manager, h SlotID) (OwnerScope, bool) {
+	for _, o := range m.ownedScopes() {
+		if o.h == h {
+			return o.scope, true
+		}
+	}
+	return OwnerScope{}, false
+}
 
 func newOwnershipManager(t *testing.T, s *RedisStore, replica string, fm *fakeMetrics) *Manager {
 	t.Helper()
@@ -76,10 +109,10 @@ func TestManagerSlotReconcileClaimsOwnsAndFires(t *testing.T) {
 	}
 	m.RunSlotReconcile()
 
-	if !m.ownsAnySlot() {
+	owned := ownedSlots(m)
+	if len(owned) == 0 {
 		t.Fatal("rA should own slots after reconcile")
 	}
-	owned := m.ownedSlots()
 	if len(owned) != subSlots {
 		t.Fatalf("a sole replica should own all %d slots, got %d", subSlots, len(owned))
 	}
@@ -128,8 +161,8 @@ func TestManagerWorkShardingPartitionsSlots(t *testing.T) {
 	mA.RunSlotReconcile()
 	mB.RunSlotReconcile()
 
-	ownedA := mA.ownedSlots()
-	ownedB := mB.ownedSlots()
+	ownedA := ownedSlots(mA)
+	ownedB := ownedSlots(mB)
 	owners := make(map[int]int, subSlots)
 	for _, h := range ownedA {
 		owners[h.Index()]++
@@ -168,7 +201,7 @@ func TestManagerDeposedOwnerExpireFencedInline(t *testing.T) {
 	m.RunSlotReconcile() // rA owns all slots at epoch 1
 	// s1's slot is the one whose owner scope its lease worker presents.
 	sh, _ := NewSlotID(slotOf("s1"))
-	scope, ok := m.ownerScope(sh)
+	scope, ok := ownerScope(m, sh)
 	if !ok {
 		t.Fatal("rA should hold s1's slot")
 	}
@@ -212,7 +245,7 @@ func TestManagerRetryPathFencedInline(t *testing.T) {
 	}
 	m.RunSlotReconcile() // rA owns all slots at epoch 1
 	sh, _ := NewSlotID(slotOf("s1"))
-	scope, ok := m.ownerScope(sh)
+	scope, ok := ownerScope(m, sh)
 	if !ok {
 		t.Fatal("rA should hold s1's slot")
 	}
@@ -303,5 +336,495 @@ func TestSlotReclaimedAfterMemberAndLeaseExpire(t *testing.T) {
 	// rA, if it resumed, is fenced at its stale epoch 1.
 	if chk, _ := s.CheckOwner(slotKey(0), "rA", "1"); chk != OwnerCheckFenced {
 		t.Fatalf("resumed rA = %v, want FENCED", chk)
+	}
+}
+
+// ---- batched passes: slotReconcileOnce / leasePass / duePass / retryPass ----
+//
+// Member ids chosen so that rA HRW-targets exactly 85 of the 256 slots with
+// {rA, rB, rC} and exactly 128 with {rA, rB}: the three-member steady state and
+// the share after one member leaves.
+const (
+	memberB = "rB-27"
+	memberC = "rC-19"
+)
+
+func heartbeatMembers(t *testing.T, s Store, ids ...string) {
+	t.Helper()
+	for _, id := range ids {
+		if err := s.Heartbeat(id, time.Now(), 10*time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// heldSnapshot copies the manager's held map (slot -> epoch) for comparison.
+func heldSnapshot(m *Manager) map[SlotID]OwnerEpoch {
+	m.ownMu.RLock()
+	defer m.ownMu.RUnlock()
+	return maps.Clone(m.held)
+}
+
+// queuedReconcile drains the depth-1 reconcileC: the scope a pass queued, or -1.
+func queuedReconcile(m *Manager) scope {
+	select {
+	case sc := <-m.reconcileC:
+		return sc
+	default:
+		return -1
+	}
+}
+
+// serialClaimStore is the sequential reference: ClaimSlots as one ClaimSlot per key,
+// in a shuffled order (the old loop iterated a Go map).
+type serialClaimStore struct {
+	Store
+	rng *rand.Rand
+}
+
+func (s *serialClaimStore) ClaimSlots(slotKeys []string, replicaID string, now time.Time, ttl time.Duration) []SlotClaimResult {
+	out := make([]SlotClaimResult, len(slotKeys))
+	for _, i := range s.rng.Perm(len(slotKeys)) {
+		c, err := s.ClaimSlot(slotKeys[i], replicaID, now, ttl)
+		out[i] = SlotClaimResult{Claim: c, Err: err}
+	}
+	return out
+}
+
+// TestSlotReconcileHeldMatchesSerialReference replays one random schedule of
+// foreign takeovers, lease lapses and member joins/leaves against a fresh DB twice
+// — once through the batched ClaimSlots, once through the shuffled per-key serial
+// store — and requires the held map (slot -> epoch) and the queued reconcile scope
+// to be identical after every pass. Given the same members and foreign state, the
+// CAS outcomes are a function of per-slot state alone.
+func TestSlotReconcileHeldMatchesSerialReference(t *testing.T) {
+	s, client := newTestStore(t)
+	ctx := context.Background()
+	const passes = 6
+	rng := rand.New(rand.NewSource(11))
+	type event struct {
+		kind   int
+		slot   int
+		member string
+	}
+	schedule := make([][]event, passes)
+	for p := range schedule {
+		for i := 0; i < 12; i++ {
+			schedule[p] = append(schedule[p], event{kind: rng.Intn(5), slot: rng.Intn(subSlots), member: []string{memberB, memberC, "rD"}[rng.Intn(3)]})
+		}
+	}
+	apply := func(evs []event) {
+		now := time.Now()
+		for _, ev := range evs {
+			key, legacy := slotKey(ev.slot), legacyOwnershipSlotKey(ev.slot)
+			switch ev.kind {
+			case 0: // a rival holds the slot live: BUSY for us until it lapses
+				exp := strconv.FormatInt(now.Add(time.Hour).UnixNano(), 10)
+				for _, k := range []string{key, legacy} {
+					if err := client.HSet(ctx, k, "owner_id", "rival", "owner_epoch", "7", "lease_expiry_ns", exp).Err(); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case 1: // a rival's lease has lapsed: a takeover (epoch bump) for us
+				exp := strconv.FormatInt(now.Add(-time.Hour).UnixNano(), 10)
+				for _, k := range []string{key, legacy} {
+					if err := client.HSet(ctx, k, "owner_id", "rival", "owner_epoch", "7", "lease_expiry_ns", exp).Err(); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case 2: // our own lease was lost (a stall): the next claim is a transfer back
+				if err := client.HSet(ctx, key, "owner_id", "rival", "lease_expiry_ns", "0").Err(); err != nil {
+					t.Fatal(err)
+				}
+			case 3:
+				heartbeatMembers(t, s, ev.member)
+			case 4:
+				if err := client.ZRem(ctx, membersKey, ev.member).Err(); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	type snapshot struct {
+		held   map[SlotID]OwnerEpoch
+		queued scope
+	}
+	run := func(st Store) []snapshot {
+		if err := client.FlushDB(ctx).Err(); err != nil {
+			t.Fatal(err)
+		}
+		m, err := NewManager(st, &fakeStreams{tails: map[string]string{}}, ManagerOptions{StreamRootURL: "http://x/v1/stream/", ReplicaID: "rA"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		heartbeatMembers(t, s, "rA", memberB, memberC)
+		out := make([]snapshot, 0, passes)
+		for p := 0; p < passes; p++ {
+			apply(schedule[p])
+			m.RunSlotReconcile()
+			out = append(out, snapshot{heldSnapshot(m), queuedReconcile(m)})
+		}
+		return out
+	}
+	want := run(&serialClaimStore{Store: s, rng: rand.New(rand.NewSource(3))})
+	got := run(s)
+	for p := range want {
+		if want[p].queued != got[p].queued {
+			t.Fatalf("pass %d: batched queued scope %v, serial %v", p, got[p].queued, want[p].queued)
+		}
+		if !reflect.DeepEqual(want[p].held, got[p].held) {
+			t.Fatalf("pass %d: held differs\nbatched: %v\nserial:  %v", p, got[p].held, want[p].held)
+		}
+		if len(want[p].held) == 0 {
+			t.Fatalf("pass %d: the schedule left rA owning nothing — not a useful run", p)
+		}
+	}
+}
+
+// TestSlotReconcilePassRoundTripsAreConstant: a pass is one ZRANGEBYSCORE plus three
+// pipelines whether it claims 85 slots cold, renews them, or takes over 43 more
+// after a member leaves — and the SlotOwnership counts equal the serial reference's.
+func TestSlotReconcilePassRoundTripsAreConstant(t *testing.T) {
+	s, client, hook := newCountingStore(t)
+	warmScripts(t, s, client)
+	ctx := context.Background()
+	assertPass := func(label string) {
+		t.Helper()
+		singles, pipes := hook.counts()
+		if singles != 1 || pipes != 3 {
+			t.Fatalf("%s: %d single commands and %d pipelines, want 1 (ZRANGEBYSCORE) and 3", label, singles, pipes)
+		}
+		hook.reset()
+	}
+	run := func(st Store) map[string]int {
+		if err := client.FlushDB(ctx).Err(); err != nil {
+			t.Fatal(err)
+		}
+		fm := &fakeMetrics{}
+		m := newOwnershipManager(t, s, "rA", fm)
+		m.store = st
+		heartbeatMembers(t, s, "rA", memberB, memberC)
+		hook.reset()
+		m.RunSlotReconcile()
+		if n := len(ownedSlots(m)); n != 85 {
+			t.Fatalf("three members: rA owns %d slots, want 85", n)
+		}
+		if _, ok := st.(*serialClaimStore); !ok {
+			assertPass("cold pass, 85 slots")
+		}
+		m.RunSlotReconcile()
+		if _, ok := st.(*serialClaimStore); !ok {
+			assertPass("steady pass, 85 slots")
+		}
+		if err := client.ZRem(ctx, membersKey, memberC).Err(); err != nil {
+			t.Fatal(err)
+		}
+		hook.reset()
+		m.RunSlotReconcile()
+		if n := len(ownedSlots(m)); n != 128 {
+			t.Fatalf("after a member left: rA owns %d slots, want 128", n)
+		}
+		if _, ok := st.(*serialClaimStore); !ok {
+			assertPass("member-leaves pass, 43 claimed + 85 renewed")
+		}
+		fm.mu.Lock()
+		defer fm.mu.Unlock()
+		return maps.Clone(fm.slotOwn)
+	}
+	got := run(s)
+	want := run(&serialClaimStore{Store: s, rng: rand.New(rand.NewSource(5))})
+	if !reflect.DeepEqual(want, got) || got["claimed"] != 85+43 || got["renewed"] != 85+85 {
+		t.Fatalf("SlotOwnership counts: batched %v, serial %v, want claimed=128 renewed=170", got, want)
+	}
+}
+
+// TestWorkerPassRoundTripsAreConstant: each worker pass over 128 owned slots is one
+// claim_due pipeline when every slot is empty, and one pipeline plus only the
+// per-id work when 22 slots hold one (nonexistent) item each: expire_lease for the
+// lease worker; the slot-homed Get (a pipeline), the legacy-tag Get miss and the
+// ClearDue ZREM for the due worker; the Get pair for the retry worker.
+func TestWorkerPassRoundTripsAreConstant(t *testing.T) {
+	s, client, hook := newCountingStore(t)
+	warmScripts(t, s, client)
+	ctx := context.Background()
+	fm := &fakeMetrics{}
+	m := newOwnershipManager(t, s, "rA", fm)
+	heartbeatMembers(t, s, "rA", memberB)
+	m.RunSlotReconcile()
+	owned := ownedSlots(m)
+	if len(owned) != 128 {
+		t.Fatalf("two members: rA owns %d slots, want 128", len(owned))
+	}
+	var nonEmpty []int
+	for i, h := range m.ownedScopes() {
+		if i%6 == 0 && len(nonEmpty) < 22 {
+			nonEmpty = append(nonEmpty, h.h.Index())
+		}
+	}
+	seed := func() {
+		past := float64(time.Now().Add(-time.Second).UnixNano())
+		for _, h := range nonEmpty {
+			for _, k := range []string{leaseZKey(h), dueZKey(h), retryZKey(h)} {
+				if err := client.ZAdd(ctx, k, goredis.Z{Score: past, Member: idInSlot(h)}).Err(); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	type pass struct {
+		name string
+		run  func(time.Time)
+	}
+	passes := []pass{{"leasePass", m.leasePass}, {"duePass", m.duePass}, {"retryPass", m.retryPass}}
+	// Warm the per-id scripts (expire_lease) so the counted runs see no NOSCRIPT.
+	seed()
+	for _, p := range passes {
+		p.run(time.Now())
+	}
+	if err := client.FlushDB(ctx).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, p := range passes {
+		hook.reset()
+		p.run(time.Now())
+		if singles, pipes := hook.counts(); singles != 0 || pipes != 1 {
+			t.Fatalf("%s over 128 empty slots: %d singles and %d pipelines, want 0 and 1", p.name, singles, pipes)
+		}
+	}
+	want := map[string][2]int{ // singles, pipelines
+		"leasePass": {22, 1},      // expire_lease per id
+		"duePass":   {44, 1 + 22}, // Get: slot-homed pipeline + legacy HGETALL miss; then ClearDue ZREM
+		"retryPass": {22, 1 + 22}, // Get: slot-homed pipeline + legacy HGETALL miss
+	}
+	dueTicksBefore := fm.dueTicks
+	for _, p := range passes {
+		if err := client.FlushDB(ctx).Err(); err != nil {
+			t.Fatal(err)
+		}
+		seed()
+		hook.reset()
+		p.run(time.Now())
+		singles, pipes := hook.counts()
+		if w := want[p.name]; singles != w[0] || pipes != w[1] {
+			t.Fatalf("%s over 128 slots with 22 items: %d singles and %d pipelines, want %d and %d", p.name, singles, pipes, w[0], w[1])
+		}
+	}
+	if n := fm.dueTicks - dueTicksBefore; n != 22 {
+		t.Fatalf("DueWorkerTick recorded %d times, want once per non-empty slot (22)", n)
+	}
+}
+
+// slowConn sleeps before every Write: one injected round trip per flush, the model
+// under which the sequential pass is N x trips x RTT and the batched one is ~trips x RTT.
+type slowConn struct {
+	net.Conn
+	perWrite time.Duration
+}
+
+func (c *slowConn) Write(b []byte) (int, error) {
+	time.Sleep(c.perWrite)
+	return c.Conn.Write(b)
+}
+
+// newSlowCountingStore is newCountingStore over a client whose connections sleep
+// perWrite before each flush.
+func newSlowCountingStore(t *testing.T, perWrite time.Duration) (*RedisStore, goredis.UniversalClient, *slotTripCounter) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping Redis integration test in -short mode")
+	}
+	url := os.Getenv("REDIS_URL")
+	if url == "" {
+		url = "redis://localhost:6379/14"
+	}
+	opts, err := goredis.ParseURL(url)
+	if err != nil {
+		t.Fatalf("parse REDIS_URL: %v", err)
+	}
+	opts.Dialer = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		c, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return &slowConn{Conn: c, perWrite: perWrite}, nil
+	}
+	client := goredis.NewClient(opts)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		t.Skipf("redis unreachable (%s): %v", url, err)
+	}
+	if err := client.FlushDB(ctx).Err(); err != nil {
+		t.Fatalf("flushdb: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	hook := newSlotTripCounter()
+	client.AddHook(hook)
+	return NewRedisStore(client), client, hook
+}
+
+// recordingClaimStore logs when each pass issued its claims and what came back.
+type recordingClaimStore struct {
+	Store
+	mu       sync.Mutex
+	issuedAt []time.Time
+	results  [][]SlotClaimResult
+}
+
+func (r *recordingClaimStore) ClaimSlots(slotKeys []string, replicaID string, now time.Time, ttl time.Duration) []SlotClaimResult {
+	issued := time.Now()
+	out := r.Store.ClaimSlots(slotKeys, replicaID, now, ttl)
+	r.mu.Lock()
+	r.issuedAt = append(r.issuedAt, issued)
+	r.results = append(r.results, out)
+	r.mu.Unlock()
+	return out
+}
+
+func (r *recordingClaimStore) passes() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.results)
+}
+
+// TestSlotReconcileRenewsWithinLeaseUnderStall is the stability proof with scaled
+// timers (slotLeaseTTL 1200 ms, slotReconcileInterval 400 ms — the production 9 s /
+// 3 s ratio), an 8 ms round trip and one 400 ms stall on a claim-phase pipeline:
+// over six passes of the real slotReconcileLoop, every slot's lease from pass k is
+// still live when pass k+1 issues its renewal, held stays at 128 and no epoch
+// changes. The sequential form cannot pass this: 128 slots x 3 trips x 8 ms = 3.07 s
+// per pass against a 1.2 s lease, so every renewal would land after its lease lapsed.
+func TestSlotReconcileRenewsWithinLeaseUnderStall(t *testing.T) {
+	const (
+		rtt      = 8 * time.Millisecond
+		leaseTTL = 1200 * time.Millisecond
+		interval = 400 * time.Millisecond
+		passes   = 6
+	)
+	s, _, hook := newSlowCountingStore(t, rtt)
+	rec := &recordingClaimStore{Store: s}
+	m, err := NewManager(rec, &fakeStreams{tails: map[string]string{}}, ManagerOptions{
+		StreamRootURL: "http://x/v1/stream/", ReplicaID: "rA",
+		MemberLeaseTTL: leaseTTL, HeartbeatInterval: interval,
+		SlotLeaseTTL: leaseTTL, SlotReconcileInterval: interval,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.slotLeaseTTL != leaseTTL || m.slotReconcileInterval != interval {
+		t.Fatalf("scaled timers rejected: lease=%v interval=%v", m.slotLeaseTTL, m.slotReconcileInterval)
+	}
+	heartbeatMembers(t, s, "rA", memberB)
+	// Stall the second claim-phase pipeline (pass 2) by 400 ms: one read-timeout
+	// class delay on one round trip.
+	var claimPipes int
+	hook.stallPipe = func(first goredis.Cmder) {
+		if first.Name() != "evalsha" || len(first.Args()) < 2 || first.Args()[1] != claimShardScript.script.Hash() {
+			return
+		}
+		claimPipes++
+		if claimPipes == 2 {
+			time.Sleep(interval)
+		}
+	}
+
+	m.wg.Add(1)
+	go m.slotReconcileLoop()
+	deadline := time.Now().Add(passes*interval + 5*time.Second)
+	for rec.passes() < passes && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	m.cancelRun()
+	m.wg.Wait()
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.results) < passes {
+		t.Fatalf("only %d passes ran in time", len(rec.results))
+	}
+	epochs := map[int]OwnerEpoch{}
+	for p := 0; p < passes; p++ {
+		if len(rec.results[p]) != 128 {
+			t.Fatalf("pass %d claimed %d slots, want 128", p, len(rec.results[p]))
+		}
+		for i, r := range rec.results[p] {
+			if r.Err != nil || !r.Claim.Granted() {
+				t.Fatalf("pass %d slot %d: %+v/%v, want a grant", p, i, r.Claim, r.Err)
+			}
+			if p == 0 {
+				epochs[i] = r.Claim.Epoch
+			} else if r.Claim.Epoch != epochs[i] || r.Claim.Status != SlotRenewed {
+				t.Fatalf("pass %d slot %d: %+v, want RENEWED at epoch %v (no churn)", p, i, r.Claim, epochs[i])
+			}
+			if p+1 < passes && r.Claim.ExpiryNs <= rec.issuedAt[p+1].UnixNano() {
+				t.Fatalf("pass %d slot %d: lease expired %v before pass %d issued its renewal at %v",
+					p, i, time.Unix(0, r.Claim.ExpiryNs), p+1, rec.issuedAt[p+1])
+			}
+		}
+	}
+	if n := len(ownedSlots(m)); n != 128 {
+		t.Fatalf("held %d slots after the run, want 128", n)
+	}
+	if claimPipes < passes {
+		t.Fatalf("the stall hook saw %d claim-phase pipelines, want >= %d", claimPipes, passes)
+	}
+}
+
+// instantClaimStore answers the two calls a slot-reconcile pass makes in memory
+// (the embedded Store serves only NewManager's key custody), so a test about pass
+// timing sees only the delays it injects, never Redis or machine load.
+type instantClaimStore struct {
+	Store
+	delay time.Duration // spent inside ClaimSlots, the pass's claim step
+}
+
+func (f *instantClaimStore) LiveMembers(time.Time) ([]string, error) { return []string{"rA"}, nil }
+
+func (f *instantClaimStore) ClaimSlots(slotKeys []string, _ string, now time.Time, ttl time.Duration) []SlotClaimResult {
+	time.Sleep(f.delay)
+	out := make([]SlotClaimResult, len(slotKeys))
+	for i := range out {
+		out[i].Claim = SlotClaim{Status: SlotRenewed, Epoch: parseOwnerEpoch("1"), ExpiryNs: now.Add(ttl).UnixNano()}
+	}
+	return out
+}
+
+// TestSlotReconcileWarnsOnLapsedLeases: the Warn fires exactly when a pass's
+// claims land more than slotLeaseTTL after the previous pass's start, the moment
+// the leases that pass anchored could have lapsed (Membership.tla's Tick slot
+// gate, INV-MEMBER-01), not merely when a pass is slow. Two passes that each take
+// 0.6 TTL fit the in-interval proxy (neither exceeds slotLeaseTTL -
+// slotReconcileInterval = 0.75 TTL), yet the second lands 1.2 TTL after the
+// first's start, so it warns once; the instant pass after it does not.
+func TestSlotReconcileWarnsOnLapsedLeases(t *testing.T) {
+	const ttl = time.Second
+	s, _ := newTestStore(t)
+	store := &instantClaimStore{Store: s}
+	var logs bytes.Buffer
+	m, err := NewManager(store, &fakeStreams{tails: map[string]string{}}, ManagerOptions{
+		StreamRootURL: "http://x/v1/stream/", ReplicaID: "rA",
+		Logger:         slog.New(slog.NewTextHandler(&logs, nil)),
+		MemberLeaseTTL: 4 * ttl, HeartbeatInterval: ttl / 4,
+		SlotLeaseTTL: ttl, SlotReconcileInterval: ttl / 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	warns := func() int { return strings.Count(logs.String(), "may already have lapsed") }
+	m.RunSlotReconcile() // pass 1: no earlier leases to outlive
+	store.delay = 6 * ttl / 10
+	m.RunSlotReconcile() // pass 2 lands 0.6 TTL after pass 1 started: inside its leases
+	if warns() != 0 {
+		t.Fatalf("a pass landing inside the previous pass's leases must not warn, got %d in:\n%s", warns(), logs.String())
+	}
+	m.RunSlotReconcile() // pass 3 lands 1.2 TTL after pass 2 started: pass 2's leases could have lapsed
+	if warns() != 1 {
+		t.Fatalf("a pass landing after the previous pass's leases could lapse must warn once, got %d in:\n%s", warns(), logs.String())
+	}
+	store.delay = 0
+	m.RunSlotReconcile() // pass 4 lands 0.6 TTL after pass 3 started
+	if warns() != 1 {
+		t.Fatalf("a normal pass must not warn, got %d in:\n%s", warns(), logs.String())
 	}
 }

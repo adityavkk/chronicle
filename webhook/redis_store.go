@@ -1265,19 +1265,15 @@ func (s *RedisStore) RestoreLease(id string, owed bool, now time.Time) (string, 
 // with the subs, so h selects the per-slot ZSET (claim_due.lua runs unchanged, 1 key,
 // once per slot — 05:152-157).
 func (s *RedisStore) DueLeases(h int, now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	return s.due(leaseZKey(h), now, limit, visibility)
+	d := s.ClaimDueSlots(ScheduleLease, []int{h}, now, limit, visibility)[0]
+	return d.IDs, d.Err
 }
 
 // DueRetries takes due retry-schedule members from SLOT h by re-scoring them forward,
 // the same re-score-never-ZREM machinery as DueLeases (docs/research/07 §6.1).
 func (s *RedisStore) DueRetries(h int, now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	return s.due(retryZKey(h), now, limit, visibility)
-}
-
-func (s *RedisStore) due(zkey string, now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	reply, err := claimDueScript.run(s.ctx(), s.client, newClaimDueKeys(zkey),
-		nsArg(now), strconv.Itoa(limit), strconv.FormatInt(int64(visibility), 10))
-	return []string(reply), err
+	d := s.ClaimDueSlots(ScheduleRetry, []int{h}, now, limit, visibility)[0]
+	return d.IDs, d.Err
 }
 
 // ClaimDue takes due members of the "needs a wake" due-set by re-scoring them
@@ -1287,7 +1283,33 @@ func (s *RedisStore) due(zkey string, now time.Time, limit int, visibility time.
 // DecideDue; a mark only leaves the set on a done-ack/release ZREM or a dueWorker
 // ClearDue, never here.
 func (s *RedisStore) ClaimDue(h int, now time.Time, limit int, visibility time.Duration) ([]string, error) {
-	return s.due(dueZKey(h), now, limit, visibility)
+	d := s.ClaimDueSlots(ScheduleDue, []int{h}, now, limit, visibility)[0]
+	return d.IDs, d.Err
+}
+
+// ClaimDueSlots drains one schedule for every slot in slots: a single pipeline of
+// per-slot claim_due calls (one key each, so a cluster fans them out per master
+// with no CROSSSLOT), the worker pass's one round trip for all its owned slots.
+// claim_due itself is unchanged — once per slot, re-score forward, never ZREM
+// (INV-LEASE-02). The only claim_due call site.
+//
+// Retry nuance: go-redis re-issues a node's pipeline part on a retryable transport
+// error (and LOADING/TRYAGAIN-class replies) exactly as it retries a single
+// command. If the first execution ran but its reply was lost, the re-run returns
+// an empty list for the ids it already re-scored; they fall due again after the
+// visibility window — the same at-least-once class as a single-command retry.
+func (s *RedisStore) ClaimDueSlots(schedule Schedule, slots []int, now time.Time, limit int, visibility time.Duration) []DueDrain {
+	keys := make([]claimDueKeys, len(slots))
+	for i, h := range slots {
+		keys[i] = newClaimDueKeys(schedule.zkey(h))
+	}
+	replies, errs := claimDueScript.runBatch(s.ctx(), s.client, keys,
+		nsArg(now), strconv.Itoa(limit), strconv.FormatInt(int64(visibility), 10))
+	out := make([]DueDrain, len(slots))
+	for i := range slots {
+		out[i] = DueDrain{IDs: []string(replies[i]), Err: errs[i]}
+	}
+	return out
 }
 
 // ClearDue removes a subscription's due-set wake mark. It is a single-key ZREM
@@ -1395,83 +1417,165 @@ func (s *RedisStore) RecordWakeEventSent(id string, generation int64, wakeID str
 // OwnerFenced metrics are recorded by the Manager's slot-reconcile loop, which
 // holds the SlotID and the held-lease context. slotLeaseTTL is the ownership
 // lease TTL, a DIFFERENT layer from the per-subscription webhook lease_ttl_ms.
+// It is ClaimSlots over one key, so the legacy rollout guard exists exactly once.
 func (s *RedisStore) ClaimSlot(slotKey, replicaID string, now time.Time, slotLeaseTTL time.Duration) (SlotClaim, error) {
-	if h, ok := ownershipSlotIndex(slotKey); ok {
-		return s.claimSlotWithLegacyGuard(h, slotKey, replicaID, now, slotLeaseTTL)
-	}
-	reply, err := claimShardScript.run(s.ctx(), s.client, newClaimShardKeys(slotKey),
-		replicaID, nsArg(now), strconv.FormatInt(slotLeaseTTL.Milliseconds(), 10))
-	if err != nil {
-		return SlotClaim{}, err
-	}
-	claim := reply.toSlotClaim()
-	if claim.Granted() {
-		if err := durableSlotOwnership().RunExternalAction(func() error { return nil }); err != nil {
-			return SlotClaim{}, err
+	r := s.ClaimSlots([]string{slotKey}, replicaID, now, slotLeaseTTL)[0]
+	return r.Claim, r.Err
+}
+
+// slotClaimPlan is one slot's progress through a ClaimSlots pass.
+type slotClaimPlan struct {
+	key string
+	// legacyKey is the pre-#146 record the rollout guard bridges; "" when key is
+	// not a real ownership slot key, which takes the unguarded one-step branch.
+	legacyKey string
+	// reserved is the reservation this pass holds on legacyKey (what
+	// reserve_legacy_slot wrote), so a release can tell its own reservation apart.
+	reserved SlotClaim
+	result   SlotClaimResult
+}
+
+// ClaimSlots is the slot-reconcile pass's claim. Every slot still goes through the
+// same steps as before — reserve the legacy record, claim_shard, then mirror the
+// grant onto the legacy record (or release the reservation) — but each step is
+// issued for all slots in one pipeline, so a pass costs three or four round trips
+// however many slots it renews, instead of three per slot.
+//
+// Slots are independent keys, so the only order that ever mattered is per slot:
+// reserve before claim, claim before mirror/release. The step boundaries keep it,
+// because step k+1 is built from step k's decoded replies. Cross-slot order was
+// already arbitrary (the pass iterated a Go map). Every pipelined command is one
+// atomic single-key Lua step, so the per-slot CAS semantics (INV-OWNER-01) and the
+// epoch each slot returns are exactly ClaimSlot's.
+//
+// Retry nuance: go-redis re-issues a node's pipeline part on a retryable transport
+// error (and LOADING/TRYAGAIN-class replies) exactly as it retries a single
+// command, so a claim_shard whose reply was lost can report RENEWED instead of
+// CLAIMED and skip the scopeNewOwnerCAS trigger for that slot; the full sweep is
+// the backstop, as it was for the single-command retry.
+func (s *RedisStore) ClaimSlots(slotKeys []string, replicaID string, now time.Time, slotLeaseTTL time.Duration) []SlotClaimResult {
+	ctx := s.ctx()
+	args := []any{replicaID, nsArg(now), strconv.FormatInt(slotLeaseTTL.Milliseconds(), 10)}
+	plans := make([]*slotClaimPlan, len(slotKeys))
+	var guarded, claimants []*slotClaimPlan
+	for i, key := range slotKeys {
+		p := &slotClaimPlan{key: key}
+		plans[i] = p
+		if h, ok := ownershipSlotIndex(key); ok {
+			p.legacyKey = legacyOwnershipSlotKey(h)
+			guarded = append(guarded, p)
+		} else {
+			claimants = append(claimants, p)
 		}
 	}
-	return claim, nil
+	claimants = append(claimants, s.reserveLegacySlots(ctx, guarded, args)...)
+	mirrors, releases := s.claimShards(ctx, claimants, args)
+	s.settleLegacySlots(ctx, replicaID, mirrors, releases)
+
+	results := make([]SlotClaimResult, len(plans))
+	for i, p := range plans {
+		if p.result.Err == nil && p.result.Claim.Granted() {
+			if err := durableSlotOwnership().RunExternalAction(func() error { return nil }); err != nil {
+				p.result = SlotClaimResult{Err: err}
+			}
+		}
+		results[i] = p.result
+	}
+	return results
 }
 
-func (s *RedisStore) claimSlotWithLegacyGuard(h int, key, replicaID string, now time.Time, slotLeaseTTL time.Duration) (SlotClaim, error) {
-	legacyKey := legacyOwnershipSlotKey(h)
-	reserved, legacy, err := s.reserveLegacySlot(legacyKey, replicaID, now, slotLeaseTTL)
-	if err != nil || !reserved {
-		return legacy, err
+// reserveLegacySlots is step 1 for the guarded slots: reserve_legacy_slot on every
+// pre-#146 record in one pipeline (all are {ownership}-tagged: one node). BUSY is
+// the slot's verdict (a live pre-rollout owner); a RESERVED slot goes on to claim.
+func (s *RedisStore) reserveLegacySlots(ctx context.Context, guarded []*slotClaimPlan, args []any) []*slotClaimPlan {
+	keys := make([]reserveLegacySlotKeys, len(guarded))
+	for i, p := range guarded {
+		keys[i] = newReserveLegacySlotKeys(p.legacyKey)
 	}
-
-	reply, err := claimShardScript.run(s.ctx(), s.client, newClaimShardKeys(key),
-		replicaID, nsArg(now), strconv.FormatInt(slotLeaseTTL.Milliseconds(), 10))
-	if err != nil {
-		s.releaseLegacySlotReservation(legacyKey, replicaID, legacy.ExpiryNs)
-		return SlotClaim{}, err
+	replies, errs := reserveLegacySlotScript.runBatch(ctx, s.client, keys, args...)
+	reserved := make([]*slotClaimPlan, 0, len(guarded))
+	for i, p := range guarded {
+		if errs[i] != nil {
+			p.result.Err = errs[i]
+			continue
+		}
+		switch r := replies[i].(type) {
+		case reserveLegacySlotReserved:
+			p.reserved = r.toSlotClaim()
+			reserved = append(reserved, p)
+		case reserveLegacySlotBusy:
+			p.result.Claim = r.toSlotClaim()
+		default:
+			p.result.Err = fmt.Errorf("webhook: unhandled reserve_legacy_slot reply %T", replies[i])
+		}
 	}
-	claim := reply.toSlotClaim()
-	if !claim.Granted() {
-		s.releaseLegacySlotReservation(legacyKey, replicaID, legacy.ExpiryNs)
-		return claim, nil
-	}
-	if err := s.syncLegacySlot(legacyKey, claim); err != nil {
-		return SlotClaim{}, err
-	}
-	if err := durableSlotOwnership().RunExternalAction(func() error { return nil }); err != nil {
-		return SlotClaim{}, err
-	}
-	return claim, nil
+	return reserved
 }
 
-func (s *RedisStore) reserveLegacySlot(key, replicaID string, now time.Time, slotLeaseTTL time.Duration) (bool, SlotClaim, error) {
-	reply, err := reserveLegacySlotScript.run(s.ctx(), s.client, newReserveLegacySlotKeys(key),
-		replicaID, nsArg(now), strconv.FormatInt(slotLeaseTTL.Milliseconds(), 10))
-	if err != nil {
-		return false, SlotClaim{}, err
+// claimShards is step 2: claim_shard on every claimant in one pipeline, which a
+// cluster client fans out over every master in parallel. It returns the guarded
+// slots whose legacy record now needs the grant mirrored, or the reservation
+// released (not granted, or errored after reserving).
+func (s *RedisStore) claimShards(ctx context.Context, claimants []*slotClaimPlan, args []any) (mirrors, releases []*slotClaimPlan) {
+	keys := make([]claimShardKeys, len(claimants))
+	for i, p := range claimants {
+		keys[i] = newClaimShardKeys(p.key)
 	}
-	switch r := reply.(type) {
-	case reserveLegacySlotReserved:
-		return true, r.toSlotClaim(), nil
-	case reserveLegacySlotBusy:
-		return false, r.toSlotClaim(), nil
-	default:
-		return false, SlotClaim{}, fmt.Errorf("webhook: unhandled reserve_legacy_slot reply %T", reply)
+	replies, errs := claimShardScript.runBatch(ctx, s.client, keys, args...)
+	for i, p := range claimants {
+		if errs[i] != nil {
+			p.result.Err = errs[i]
+		} else {
+			p.result.Claim = replies[i].toSlotClaim()
+		}
+		switch {
+		case p.legacyKey == "":
+		case p.result.Err == nil && p.result.Claim.Granted():
+			mirrors = append(mirrors, p)
+		default:
+			releases = append(releases, p)
+		}
 	}
+	return mirrors, releases
 }
 
-func (s *RedisStore) releaseLegacySlotReservation(key, replicaID string, expiryNs int64) {
-	ctx := s.ctx()
-	fields, err := s.client.HMGet(ctx, key, "owner_id", "lease_expiry_ns").Result()
-	if err != nil || len(fields) != 2 || fields[0] != replicaID || parseLeaseUntilNs(fmt.Sprint(fields[1])) != expiryNs {
+// settleLegacySlots is step 3: mirror every grant onto its legacy record, so old
+// pods see BUSY/FENCED, and probe the reservations of the slots that were not
+// granted, in one pipeline; then (step 4) DEL the probed reservations that are
+// still ours — the pre-existing best-effort probe-then-DEL release, errors
+// ignored. A mirror HSET failure is that slot's error, as in the serial form.
+func (s *RedisStore) settleLegacySlots(ctx context.Context, replicaID string, mirrors, releases []*slotClaimPlan) {
+	if len(mirrors)+len(releases) == 0 {
 		return
 	}
-	_ = s.client.Del(ctx, key).Err()
-}
-
-func (s *RedisStore) syncLegacySlot(key string, claim SlotClaim) error {
-	return s.client.HSet(
-		s.ctx(), key,
-		"owner_id", claim.Owner.String(),
-		"owner_epoch", claim.Epoch.String(),
-		"lease_expiry_ns", strconv.FormatInt(claim.ExpiryNs, 10),
-	).Err()
+	pipe := s.client.Pipeline()
+	hsets := make([]*redis.IntCmd, len(mirrors))
+	for i, p := range mirrors {
+		c := p.result.Claim
+		hsets[i] = pipe.HSet(ctx, p.legacyKey,
+			"owner_id", c.Owner.String(),
+			"owner_epoch", c.Epoch.String(),
+			"lease_expiry_ns", strconv.FormatInt(c.ExpiryNs, 10))
+	}
+	probes := make([]*redis.SliceCmd, len(releases))
+	for i, p := range releases {
+		probes[i] = pipe.HMGet(ctx, p.legacyKey, "owner_id", "lease_expiry_ns")
+	}
+	_, _ = pipe.Exec(ctx)
+	for i, p := range mirrors {
+		if err := hsets[i].Err(); err != nil {
+			p.result = SlotClaimResult{Err: err}
+		}
+	}
+	del := s.client.Pipeline() // Exec of an empty pipeline costs no round trip
+	for i, p := range releases {
+		fields, err := probes[i].Result()
+		if err != nil || len(fields) != 2 || fields[0] != replicaID || parseLeaseUntilNs(fmt.Sprint(fields[1])) != p.reserved.ExpiryNs {
+			continue // no longer our reservation: leave it alone
+		}
+		del.Del(ctx, p.legacyKey)
+	}
+	_, _ = del.Exec(ctx)
 }
 
 // CheckOwner runs check_owner.lua — the owner-epoch fence for the external

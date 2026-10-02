@@ -40,7 +40,7 @@ import (
 // {__ds:h} keyspace shard, so a replica that holds slot h runs the lease/retry/due
 // workers over ds:{__ds:h}:sched:* exactly. #14 ran the degenerate single-slot case
 // (one ownership slot gated ALL background work); #15 raises it to subSlots so
-// ownedSlots() iterates the real S slots and the per-slot schedules shard with the
+// the held set spans the real S slots and the per-slot schedules shard with the
 // subs. The HRW math below was already general over slot indices, so this is the
 // one-line lift — adding/removing a replica still reassigns only ~1/N of slots.
 const ownershipSlots = subSlots
