@@ -250,9 +250,9 @@ import Aside from "../components/Aside.astro";
 
   ### Append collapse under <em>concurrent writers</em>
 
-  `store/redis` retries a contended append optimistically, up to 64 times
+  `store/redis` retries a contended append optimistically, up to 128 times
   with no backoff. With several appends in flight against one stream the
-  retries collide, and past about 1,000/s in total every request uses all 64
+  retries collide, and past about 1,000/s in total every request uses all 128
   attempts and fails. Goodput drops to zero and stays there while load
   continues. With one in-flight append per stream, Chronicle instead sustains
   1,500/s across 50 streams with zero errors. The collapse is specific to

@@ -7,14 +7,15 @@ sequenceDiagram
     participant M as Sub Manager
     C->>H: POST /chat + body
     H->>H: authorize path · parse content type, producer headers, sequence, and close flag
-    H->>S: handleAppend → Store.Append(path, data, opts)
-    S->>R: HMGET :meta tail ct · optimistic snapshot
-    Note over S: frame JSON or binary bytes against the snapshot tail
+    H->>S: Store.Get(path) · existence, write class, content type, tail
+    S->>R: HGETALL :meta + :prod · one pipeline
+    H->>S: handleAppend → Store.Append(path, data, opts) · TailHint = the tail Get returned
+    Note over S: frame JSON or binary bytes against the hinted tail · no second read
     S->>R: EVALSHA append.lua
-    Note over S,R: atomic validate → ZADD → HSET tail → PUBLISH
-    R-->>S: reply OK, newTail — or RETRY
+    Note over S,R: atomic validate → tail == expected? → ZADD → HSET tail → PUBLISH
+    R-->>S: reply OK, newTail — or RETRY carrying the live tail
     alt tail moved before the script
-        S->>R: read the new tail · reframe · retry, at most 64 attempts
+        S->>R: reframe against the live tail · EVALSHA again, at most 128 attempts
     end
     S-->>H: typed append result and producer result
     H->>H: map duplicate, fence, conflict, close, and success headers
