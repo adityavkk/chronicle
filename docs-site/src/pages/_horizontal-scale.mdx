@@ -578,9 +578,9 @@ import Aside from "../components/Aside.astro";
   <Table wide>
     | Loop · function | Before | Current |
     | --- | --- | --- |
-    | `leaseWorker` | one global lease ZSET | for each owned slot: `DueLeases(h)` → `ExpireLease`, which inlines the owner+epoch check |
-    | `retryWorker` | one global retry ZSET | for each owned slot: `DueRetries(h)`; deliver only after `check_owner` returns `OWNER` |
-    | `dueWorker` | none | for each owned slot: `claim_due` over `{__ds:h}:due` → fenced wake evaluation |
+    | `leaseWorker` | one global lease ZSET | one `ClaimDueSlots` round trip drains every owned slot's lease schedule (one `claim_due` per slot, pipelined per node); then per slot: `ExpireLease`, which inlines the owner+epoch check |
+    | `retryWorker` | one global retry ZSET | the same one-round-trip drain over the retry schedules; deliver only after `check_owner` returns `OWNER` |
+    | `dueWorker` | none | the same one-round-trip drain over `{__ds:h}:due` → fenced wake evaluation per slot |
     | `recoverySweeper` · `sweepOnce` | `List()` over one slot | iterate **all** `h ∈ [0,S)`, owned or not, the unowned-slot backstop, no owner guard |
     | `OnStreamAppend` | synchronous fanout | one bounded local enqueue or coalesce transition |
     | `dirtyWorker` | none | batches 64 paths; scatter-gathers occupied fanout slots, hydrates subscriptions, batches linked tails, then arms wakes |
@@ -602,7 +602,7 @@ import Aside from "../components/Aside.astro";
       | `memberLeaseTTL` | 9s | a missed heartbeat past this drops the replica |
       | `heartbeatInterval` | 3s | `heartbeat < memberLeaseTTL / 2`, renew with headroom |
       | `slotLeaseTTL` | 9s | `claim_shard` lease on a slot record |
-      | `slotReconcileInterval` | 3s | `slotReconcile ≤ heartbeat`, reclaim before a peer's lease lapses |
+      | `slotReconcileInterval` | 3s | `slotReconcile ≤ heartbeat`, reclaim before a peer's lease lapses; at runtime `interval + claim-pass duration < slotLeaseTTL`, which holds because a pass is a few pipelined round trips however many slots a replica owns (the manager warns if one ever crosses that margin) |
     </Table>
   </Aside>
 
