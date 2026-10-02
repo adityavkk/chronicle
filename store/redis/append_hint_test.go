@@ -114,9 +114,10 @@ func offsetPtr(o store.Offset) *store.Offset { return &o }
 // TestAppendTailHintRoundTrips pins the round trips Append spends: a fresh
 // hint with a content type is the script alone; no hint, or a hint with no
 // content type (nothing then pins the framing mode), reads tail and content
-// type first; a stale hint costs one RETRY and then the unhinted path.
+// type first; a stale hint costs one RETRY, whose reply carries the live tail
+// the next attempt frames against, so a retry is one more script call.
 func TestAppendTailHintRoundTrips(t *testing.T) {
-	newTestStore(t)
+	side := newTestStore(t) // moves tails behind the recorded store's back; not recorded
 	s, rec := recordedStore(t)
 	plain := store.AppendOptions{ContentType: "text/plain"}
 
@@ -154,20 +155,29 @@ func TestAppendTailHintRoundTrips(t *testing.T) {
 	mustAppend(t, s, path, []byte("moved"), plain)
 	rec.take()
 	stale := mustAppend(t, s, path, []byte("x"), store.AppendOptions{ContentType: "text/plain", TailHint: hint})
-	assertTrips("stale hint", "evalsha", "hmget", "evalsha")
+	assertTrips("stale hint", "evalsha", "evalsha")
 
-	// Each variant appended one byte after a four-byte seed; the stale one
+	// Without a content type nothing pins the framing mode, so a retry reads
+	// tail and content type together again rather than trusting the reply.
+	path, _ = newStream("noct-stale")
+	rec.beforeScript = func() { mustAppend(t, side, path, []byte("moved"), plain) }
+	noCTStale := mustAppend(t, s, path, []byte("x"), store.AppendOptions{})
+	assertTrips("no content type, tail moved", "hmget", "evalsha", "hmget", "evalsha")
+
+	// Each variant appended one byte after a four-byte seed; the stale ones
 	// after a further five.
 	for label, res := range map[string]store.AppendResult{"fresh": fresh, "unhinted": unhinted, "no content type": noCT} {
 		if want := (store.Offset{ReadSeq: 0, ByteOffset: 5}); !res.Offset.Equal(want) {
 			t.Errorf("%s: offset %v, want %v", label, res.Offset, want)
 		}
 	}
-	if want := (store.Offset{ReadSeq: 0, ByteOffset: 10}); !stale.Offset.Equal(want) {
-		t.Errorf("stale: offset %v, want %v", stale.Offset, want)
+	for label, res := range map[string]store.AppendResult{"stale": stale, "no content type, tail moved": noCTStale} {
+		if want := (store.Offset{ReadSeq: 0, ByteOffset: 10}); !res.Offset.Equal(want) {
+			t.Errorf("%s: offset %v, want %v", label, res.Offset, want)
+		}
 	}
-	if rec.retryCount() != 1 {
-		t.Errorf("RETRY replies = %d, want 1 (the stale hint only)", rec.retryCount())
+	if rec.retryCount() != 2 {
+		t.Errorf("RETRY replies = %d, want 2 (one per stale snapshot)", rec.retryCount())
 	}
 }
 

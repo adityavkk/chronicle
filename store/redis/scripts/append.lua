@@ -1,7 +1,8 @@
 -- append.lua — atomic append: full validation chain in spec precedence
 -- order, then write + meta update + notify. Frames arrive pre-encoded
 -- ("<offset>|<data>") computed by Go against ARGV[10] (expected tail); if
--- the tail moved concurrently the script returns RETRY and Go re-frames.
+-- the tail moved concurrently the script returns RETRY carrying the live
+-- tail, and Go re-frames against it.
 --
 -- valOnly ('1') runs the validation chain only and replies VALONLY instead
 -- of writing: Go uses it when JSON-mode parsing fails, so closed/producer/
@@ -104,8 +105,9 @@ end
 -- 10. Validation-only mode stops here (all checks passed, nothing written).
 if val_only then return make_reply('VALONLY', m.tail) end
 
--- 11. Optimistic frame check: Go framed against expected_tail.
-if m.tail ~= expected_tail then return make_reply('RETRY') end
+-- 11. Optimistic frame check: Go framed against expected_tail. RETRY carries
+-- the live tail so the next attempt frames against it without another read.
+if m.tail ~= expected_tail then return make_reply('RETRY', m.tail) end
 
 -- 12. Write frames (chunked: unpack is C-stack bounded) and commit metadata.
 if #ARGV >= 17 then

@@ -17,9 +17,11 @@ import (
 
 // maxAppendRetries bounds the optimistic re-frame loop. Each retry means
 // another writer advanced the tail between our snapshot and the script run;
-// the script itself is atomic, so this is contention back-off, not
-// correctness.
-const maxAppendRetries = 64
+// the script itself is atomic, so this is a contention budget, not
+// correctness. A retry is one round trip when the request names a content
+// type (the RETRY reply carries the live tail), so 128 attempts keep the
+// wall-clock allowance the loop had with 64 read-then-script attempts.
+const maxAppendRetries = 128
 
 // Options configures a Store.
 type Options struct {
@@ -550,10 +552,11 @@ func (s *Store) resolveForkSubOffset(ctx context.Context, srcPath string, srcMet
 }
 
 // Append adds data to a stream. All validation and the write happen in one
-// atomic Lua script; frames are pre-encoded against a tail snapshot (the
-// caller's TailHint on the first attempt when the request names a content
-// type, else one read of tail and content type) and the script returns RETRY
-// when the tail moved.
+// atomic Lua script; frames are pre-encoded against a tail snapshot and the
+// script returns RETRY, carrying the live tail, when the tail moved. When the
+// request names a content type the snapshot is a hint (the caller's TailHint,
+// then the tail each RETRY reply carries), so an attempt is one round trip;
+// otherwise every attempt reads tail and content type together first.
 func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (store.AppendResult, error) {
 	if opts.Fence != nil && !opts.Fence.Complete() {
 		return store.AppendResult{}, store.ErrAppendFenced
@@ -593,19 +596,20 @@ func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (stor
 	// Framing inputs. frameCT selects JSON or binary framing: when the request
 	// names a content type, append.lua step 7 refuses any commit whose stream
 	// media type differs from it, so framing by the request type is framing by
-	// the stream's type at every commit (INV-CT-01) and the first attempt can
-	// frame against the caller's tail hint with no read at all. A request that
-	// names none frames by the stream's own type, read together with the tail.
+	// the stream's type at every commit (INV-CT-01), and the tail can be a
+	// hint read apart from the content type: the caller's first, then the
+	// live tail each RETRY reply carries. A request that names none frames by
+	// the stream's own type, read together with the tail on every attempt.
 	// The tail is pinned by step 11 (RETRY) whatever its source.
 	frameCT := opts.ContentType
-	hint := opts.TailHint
-	if reqCT == "" {
-		hint = nil
+	var hint *store.Offset
+	if reqCT != "" {
+		hint = opts.TailHint
 	}
 	for attempt := 0; attempt < maxAppendRetries; attempt++ {
 		var base store.Offset
 		if hint != nil {
-			base, hint = *hint, nil // a hint serves one attempt; RETRY means it was stale
+			base, hint = *hint, nil
 		} else {
 			tail, ct, err := s.readTailAndContentType(ctx, path)
 			if err != nil {
@@ -646,6 +650,13 @@ func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (stor
 			return store.AppendResult{}, err
 		}
 		if r.Status == stRetry {
+			if reqCT != "" {
+				live, err := store.ParseOffset(r.Tail)
+				if err != nil {
+					return store.AppendResult{}, err
+				}
+				hint = &live
+			}
 			continue
 		}
 		res, err := s.mapAppendReply(r)
@@ -662,7 +673,7 @@ func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (stor
 }
 
 // readTailAndContentType is the live (tail, content type) pair an attempt
-// frames against when it has no hint: one Redis round trip. Returns
+// frames against when it has no tail hint: one Redis round trip. Returns
 // ErrStreamNotFound when the presence marker is absent.
 func (s *Store) readTailAndContentType(ctx context.Context, path string) (store.Offset, string, error) {
 	snap, err := s.client.HMGet(ctx, metaKey(path), fTail, fCT).Result()

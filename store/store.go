@@ -313,9 +313,10 @@ type AppendOptions struct {
 	// or nil. Advisory only: the Redis store frames its first attempt against
 	// it instead of reading the tail again, and append.lua still compares the
 	// tail atomically with the write (INV-LIN-02), so a stale hint costs one
-	// RETRY and never changes the result. It is not an expected-version check:
-	// a stale hint is never an error. Backends that read live state under a
-	// lock (MemoryStore) ignore it.
+	// RETRY (one round trip, whose reply carries the live tail) and never
+	// changes the result. It is not an expected-version check: a stale hint is
+	// never an error. Backends that read live state under a lock (MemoryStore)
+	// ignore it.
 	TailHint *Offset
 }
 

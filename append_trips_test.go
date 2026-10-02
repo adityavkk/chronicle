@@ -301,13 +301,15 @@ func runHandleAppendRoundTrips(t *testing.T, newClient func() goredis.UniversalC
 			wantStatus: http.StatusOK, wantTrips: []string{pipe, precheck, script},
 		},
 		{
+			// RETRY carries the live tail, so the second attempt is the script
+			// again: one round trip per retry.
 			name: "tail moved before the script", handler: h, path: path("moved"), headers: plain, body: []byte("hello"),
 			beforeScript: func() {
 				if _, err := sideData.Append(path("moved"), []byte("concurrent"), store.AppendOptions{ContentType: "text/plain"}); err != nil {
 					t.Errorf("side append: %v", err)
 				}
 			},
-			wantStatus: http.StatusNoContent, wantTrips: []string{pipe, script, "hmget", script},
+			wantStatus: http.StatusNoContent, wantTrips: []string{pipe, script, script},
 		},
 		{
 			name: "first append after create", handler: h, path: path("first"), headers: plain, body: []byte("hello"),
