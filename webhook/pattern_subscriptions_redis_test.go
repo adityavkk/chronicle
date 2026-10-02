@@ -7,37 +7,14 @@ import (
 	"log/slog"
 	"net"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 
 	"gecgithub01.walmart.com/auk000v/chronicle/correlation"
+	"gecgithub01.walmart.com/auk000v/chronicle/internal/redistest"
 )
-
-// redisCallCounter counts single commands and pipelines so a test can pin the
-// round-trip shape of a read: one pipeline per subReadChunk ids, never one
-// command per id.
-type redisCallCounter struct {
-	singles, pipelines atomic.Int64
-}
-
-func (c *redisCallCounter) DialHook(next goredis.DialHook) goredis.DialHook { return next }
-
-func (c *redisCallCounter) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook {
-	return func(ctx context.Context, cmd goredis.Cmder) error {
-		c.singles.Add(1)
-		return next(ctx, cmd)
-	}
-}
-
-func (c *redisCallCounter) ProcessPipelineHook(next goredis.ProcessPipelineHook) goredis.ProcessPipelineHook {
-	return func(ctx context.Context, cmds []goredis.Cmder) error {
-		c.pipelines.Add(1)
-		return next(ctx, cmds)
-	}
-}
 
 // seedPatternHash writes a minimal pattern subscription hash and a links key of
 // the wrong type, which proves the pattern read never touches link history.
@@ -97,8 +74,8 @@ func TestPatternSubscriptionsPartialBatch(t *testing.T) {
 // read, and missing is not an error.
 func TestPatternSubscriptionsMissingIDsCostNoExtraRoundTrips(t *testing.T) {
 	s, client := newTestStore(t)
-	var calls redisCallCounter
-	client.AddHook(&calls)
+	rec := &redistest.TripLog{}
+	client.AddHook(rec)
 	ids := make([]string, 1100)
 	for i := range ids {
 		ids[i] = fmt.Sprintf("gone-%d", i)
@@ -110,8 +87,8 @@ func TestPatternSubscriptionsMissingIDsCostNoExtraRoundTrips(t *testing.T) {
 	if read.Missing != 1100 || read.Failed != 0 || len(read.Subs) != 0 {
 		t.Fatalf("read = %+v, want 1100 missing and nothing else", read)
 	}
-	if p, c := calls.pipelines.Load(), calls.singles.Load(); p != 3 || c != 0 {
-		t.Fatalf("round trips: %d pipelines, %d single commands; want 3 and 0", p, c)
+	if trips := rec.Take(); len(trips) != 3 || len(singleCommands(trips)) != 0 {
+		t.Fatalf("round trips: %s; want 3 pipelines and no single command", summarize(trips))
 	}
 }
 
@@ -128,8 +105,8 @@ func TestPatternSubscriptionsTransportFailureFailsFast(t *testing.T) {
 	_ = ln.Close() // nothing listens here any more
 	client := goredis.NewClient(&goredis.Options{Addr: addr, DialTimeout: 200 * time.Millisecond, MaxRetries: -1})
 	t.Cleanup(func() { _ = client.Close() })
-	var calls redisCallCounter
-	client.AddHook(&calls)
+	rec := &redistest.TripLog{}
+	client.AddHook(rec)
 	s := NewRedisStore(client)
 	ids := make([]string, 1100)
 	for i := range ids {
@@ -144,8 +121,8 @@ func TestPatternSubscriptionsTransportFailureFailsFast(t *testing.T) {
 	if read.Failed != 1100 || read.Missing != 0 || len(read.Subs) != 0 {
 		t.Fatalf("read: failed %d missing %d subs %d; want every id failed", read.Failed, read.Missing, len(read.Subs))
 	}
-	if p := calls.pipelines.Load(); p != 1 {
-		t.Fatalf("pipelines = %d, want 1: fail fast after the first chunk", p)
+	if trips := rec.Take(); len(trips) != 1 {
+		t.Fatalf("round trips: %s; want one pipeline: fail fast after the first chunk", summarize(trips))
 	}
 	if took := time.Since(start); took > 2*time.Second {
 		t.Fatalf("took %s; an unreachable Redis must not cost a dial timeout per chunk", took)
