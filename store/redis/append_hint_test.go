@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -477,15 +478,12 @@ func runConcurrentTiling(t *testing.T, newClient func() goredis.UniversalClient)
 	stamp := time.Now().UnixNano()
 	path := func(name string) string { return fmt.Sprintf("/tiling/%d/%s", stamp, name) }
 	plainPath, jsonPath, prodPath, seqPath, closePath := path("plain"), path("json"), path("prod"), path("seq"), path("close")
-	for p, ct := range map[string]string{
-		plainPath: "text/plain", jsonPath: "application/json", prodPath: "text/plain",
-		seqPath: "text/plain", closePath: "text/plain",
-	} {
-		mustCreate(t, hintedStore, p, store.CreateOptions{ContentType: ct})
-	}
 	contentType := map[string]string{
 		plainPath: "text/plain", jsonPath: "application/json", prodPath: "text/plain",
 		seqPath: "text/plain", closePath: "text/plain",
+	}
+	for p, ct := range contentType {
+		mustCreate(t, hintedStore, p, store.CreateOptions{ContentType: ct})
 	}
 
 	var (
@@ -580,7 +578,7 @@ func runConcurrentTiling(t *testing.T, newClient func() goredis.UniversalClient)
 			t.Fatalf("read %s: %v", p, err)
 		}
 		want := accepted[p]
-		sortByEnd(want)
+		slices.SortFunc(want, func(a, b acceptedAppend) int { return store.Compare(a.end, b.end) })
 		if len(msgs) != len(want) {
 			t.Errorf("%s: %d messages read, %d appends accepted", p, len(msgs), len(want))
 			continue
@@ -622,19 +620,4 @@ func prodSeqsOf(mu *sync.Mutex, m map[string][]int64, producer string) []int64 {
 	mu.Lock()
 	defer mu.Unlock()
 	return m[producer]
-}
-
-func sortByEnd(a []acceptedAppend) {
-	for i := 1; i < len(a); i++ {
-		for j := i; j > 0 && less(a[j].end, a[j-1].end); j-- {
-			a[j], a[j-1] = a[j-1], a[j]
-		}
-	}
-}
-
-func less(a, b store.Offset) bool {
-	if a.ReadSeq != b.ReadSeq {
-		return a.ReadSeq < b.ReadSeq
-	}
-	return a.ByteOffset < b.ByteOffset
 }

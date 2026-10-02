@@ -28,7 +28,9 @@ import (
 // trip a POST spends: single commands by name, a pipeline Exec as
 // "pipe(name+name)", and a script call as "evalsha:append" (keys in a stream
 // slot) or "evalsha:control" (the write-fence pre-check in the control
-// plane). beforeScript, when set, runs once before the first script call.
+// plane). A script reload after NOSCRIPT is logged as "eval:..." so a cold
+// script cache is diagnosed as such and not mistaken for a second round trip.
+// beforeScript, when armed, runs once before the next script call.
 type appendTripLog struct {
 	mu           sync.Mutex
 	trips        []string
@@ -42,10 +44,11 @@ func (l *appendTripLog) ProcessHook(next goredis.ProcessHook) goredis.ProcessHoo
 		name := cmd.Name()
 		var before func()
 		if name == "evalsha" || name == "eval" {
-			name = "evalsha:control"
+			slot := "control"
 			if key, _ := cmd.Args()[3].(string); strings.HasPrefix(key, "ds:{") && strings.HasSuffix(key, ":meta") {
-				name = "evalsha:append"
+				slot = "append"
 			}
+			name += ":" + slot
 			l.mu.Lock()
 			before, l.beforeScript = l.beforeScript, nil
 			l.mu.Unlock()
@@ -79,6 +82,45 @@ func (l *appendTripLog) take() []string {
 	trips := l.trips
 	l.trips = nil
 	return trips
+}
+
+// arm schedules fn to run once, just before the next script call.
+func (l *appendTripLog) arm(fn func()) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.beforeScript = fn
+}
+
+// warmEveryMaster calls warm with a stream name whose slot lives on each
+// cluster master in turn. A stream's keys hash by the {path} tag, so
+// MasterForKey on that tag names the master the stream's appends run on.
+func warmEveryMaster(t *testing.T, cc *goredis.ClusterClient, path func(string) string, warm func(string)) {
+	t.Helper()
+	var (
+		mu      sync.Mutex // ForEachMaster visits the masters concurrently
+		masters = map[string]bool{}
+	)
+	err := cc.ForEachMaster(context.Background(), func(_ context.Context, node *goredis.Client) error {
+		mu.Lock()
+		defer mu.Unlock()
+		masters[node.Options().Addr] = true
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	warmed := map[string]bool{}
+	for n := 0; len(warmed) < len(masters); n++ {
+		name := "warm-" + strconv.Itoa(n)
+		master, err := cc.MasterForKey(context.Background(), "{"+path(name)+"}")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if addr := master.Options().Addr; !warmed[addr] {
+			warmed[addr] = true
+			warm(name)
+		}
+	}
 }
 
 // TestHandleAppendRoundTrips pins the serial Redis round trips a POST spends
@@ -204,9 +246,17 @@ func runHandleAppendRoundTrips(t *testing.T, newClient func() goredis.UniversalC
 		}
 	}
 
-	// Warm the script cache so no EVALSHA falls back to EVAL mid-count.
-	mustCreate(t, h, path("warm"), "text/plain", nil)
-	mustAppend(t, h, path("warm"), "text/plain", []byte("w"))
+	// Warm the script cache so no EVALSHA falls back to EVAL mid-count. Script
+	// caches are per node, so on a cluster one append must land on every master.
+	warm := func(name string) {
+		mustCreate(t, h, path(name), "text/plain", nil)
+		mustAppend(t, h, path(name), "text/plain", []byte("w"))
+	}
+	if cc, ok := client.(*goredis.ClusterClient); ok {
+		warmEveryMaster(t, cc, path, warm)
+	} else {
+		warm("warm")
+	}
 	if rec := do(fh, http.MethodPost, fenced, fencedHeaders("0"), []byte(`{"warm":1}`)); rec.Code != http.StatusOK {
 		t.Fatalf("warm fenced append = %d %q", rec.Code, rec.Body.String())
 	}
@@ -276,7 +326,7 @@ func runHandleAppendRoundTrips(t *testing.T, newClient func() goredis.UniversalC
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			trips.take()
-			trips.beforeScript = tc.beforeScript
+			trips.arm(tc.beforeScript)
 			rec := do(tc.handler, http.MethodPost, tc.path, tc.headers, tc.body)
 			got := trips.take()
 			if rec.Code != tc.wantStatus {
