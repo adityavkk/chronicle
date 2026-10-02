@@ -37,7 +37,8 @@ linters:
       # scripts through it, never with a bare EVALSHA at a call site.
       forbid:
         - pattern: \.Eval(Sha)?(RO)?\b
-          msg: use *redis.Script.Run/RunRO, not a bare EVAL/EVALSHA; the NOSCRIPT->EVAL self-heal does not fire inside a pipeline/MULTI (go-redis #3228). To batch a script, go through webhook typedScript.runBatch, the one seam that heals NOSCRIPT inside a pipeline.
+          # Quoted: in a plain scalar ' #' starts a YAML comment, which cut the text at "#3228".
+          msg: 'use *redis.Script.Run/RunRO, not a bare EVAL/EVALSHA; the NOSCRIPT->EVAL self-heal does not fire inside a pipeline/MULTI (go-redis #3228). To batch a script, go through webhook typedScript.runBatch, the one seam that heals NOSCRIPT inside a pipeline.'
     revive:
       rules:
         - name: exported
