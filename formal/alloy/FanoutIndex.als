@@ -3,9 +3,12 @@
  *
  * The per-stream fan-out index (streamSubsKey SET) is a CACHE repairable from
  * the canonical links (linksKey HASH, the SOURCE OF TRUTH). ReconcileIndexes
- * (webhook/redis_store.go:393) rebuilds the SET from the links HASH: it re-adds
+ * (webhook/redis_store.go) rebuilds the SET from the links HASH: it re-adds
  * any membership a crash dropped, and NEVER invents membership absent from
- * links. The catalogued invariant (INVARIANTS.md INV-RECOVER-04):
+ * links. The implementation applies the transpose as pipelined, chunked
+ * SADD/SETBIT batches (indexStreams); every write is idempotent and commutes,
+ * so the relational post-state modeled here is independent of the order the
+ * batches land in. The catalogued invariant (INVARIANTS.md INV-RECOVER-04):
  *
  *     forall (sub,path): path in links(sub)  =>  sub in streamSubs(path)
  *       (after reconcile -- the index is a SUPERSET of the link projection)
@@ -14,7 +17,7 @@
  *       (reconcile never INVENTS membership) -- modeled as: every streamSubs
  *       tuple either mirrors a current link OR is a STALE bit that deindex left
  *       (bits are never cleared on deindex; a stale set bit only costs one empty
- *       SMEMBERS, redis_store.go:436). We therefore distinguish the two cleanly.
+ *       SMEMBERS, deindexStream). We therefore distinguish the two cleanly.
  *
  * We model the canonical links as a relation Sub->Path and the index as a
  * relation Path->Sub (its natural transpose). A crash DROPS index tuples
