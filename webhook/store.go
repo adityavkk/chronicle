@@ -78,7 +78,8 @@ type Store interface {
 
 	// ReconcileIndexes rebuilds the per-stream fan-out index from the canonical
 	// links, re-adding any membership a crash dropped between the link write and
-	// the index update. It only mirrors links and never invents membership.
+	// the index update, in a bounded number of pipelined round trips. It only
+	// mirrors links and never invents membership.
 	ReconcileIndexes() error
 
 	// ArmWakeUnscoped issues a new wake generation if the subscription is idle;

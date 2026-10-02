@@ -695,6 +695,10 @@ func (s *RedisStore) StreamSubscribers(path string) (ids []string, slotsProbed i
 // to sweep latency until repaired. This re-adds any missing SADD; it never
 // invents membership (it only mirrors links). Stale-entry cleanup is deferred:
 // re-adding the missing entry is the correctness-critical part.
+//
+// Cost: 1 + ceil(N/pipelineChunk) read trips + about ceil(L/pipelineChunk) write
+// trips for N subscriptions and L links (it was 1 + N + 2L serial trips, about
+// 20 s per pass from a remote region and growing with every subscription).
 func (s *RedisStore) ReconcileIndexes() error {
 	ctx := s.ctx()
 	// UNION the canonical id set across the S per-slot id-sets (GAP4) — reading a
@@ -703,18 +707,32 @@ func (s *RedisStore) ReconcileIndexes() error {
 	if err != nil {
 		return err
 	}
-	for _, id := range ids {
-		paths, err := s.client.HKeys(ctx, linksKey(id)).Result()
-		if err != nil {
+	for batch := range slices.Chunk(ids, pipelineChunk) {
+		// Read the canonical links of this chunk in one round trip. Only the
+		// slot-homed links hash is read, whether or not the sub hash exists, and
+		// nothing is migrated here: a legacy {__ds} sub contributes nothing until the
+		// pattern pass's read migrates it (unchanged from the per-sub loop).
+		pipe := s.client.Pipeline()
+		cmds := make([]*redis.StringSliceCmd, len(batch))
+		for i, id := range batch {
+			cmds[i] = pipe.HKeys(ctx, linksKey(id))
+		}
+		if _, err := pipe.Exec(ctx); err != nil {
 			return err
 		}
-		for _, path := range paths {
-			// Re-add the fan-out membership in the SUBSCRIBER's slot AND re-assert the
-			// occupied-slots bit (the bitmap is never cleared on deindex, so the
-			// reconcile loop is where a missing/torn bit is repaired — 05:496-500).
-			if err := s.indexStream(path, id); err != nil {
-				return err
+		var entries []indexEntry
+		for i, id := range batch {
+			for _, path := range cmds[i].Val() {
+				entries = append(entries, indexEntry{path: path, id: id})
 			}
+		}
+		// Re-assert each link's membership and occupied bit (the bitmap is never
+		// cleared on deindex, so this is where a missing or torn bit is repaired —
+		// 05:496-500). A failed Exec ends the pass like the old first-error return;
+		// every write is an idempotent step toward transpose(links), so partial
+		// application is safe and the next tick re-asserts the rest.
+		if err := s.indexStreams(entries); err != nil {
+			return err
 		}
 	}
 	return nil
