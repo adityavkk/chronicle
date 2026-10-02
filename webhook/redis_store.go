@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -383,22 +384,20 @@ func (s *RedisStore) getSlotHomed(id string) (Subscription, bool, error) {
 	return subscriptionFromHash(id, fields, linkCmd.Val()), true, nil
 }
 
-// subReadChunk bounds one pipelined subscription read (GetMany,
-// PatternSubscriptions) to 512 ids: about a thousand small commands per
-// pipeline, split per node on a cluster.
-const subReadChunk = 512
+// pipelineChunk bounds one pipeline Exec at 512 subscriptions (2 HGETALL or
+// 1 HKEYS each) or 512 fan-out entries (SADD + SETBIT each): at most ~1k commands
+// per round trip, which keeps the reply batch Redis queues small (its guidance is
+// ~10k) and holds one pooled connection per cluster node for about one round trip,
+// while a whole pass stays at a handful of round trips.
+const pipelineChunk = 512
 
-// GetMany hydrates many subscriptions in one pipelined batch, chunked to bound
-// the pipeline size. Missing subscriptions are skipped. It turns the recovery
-// sweep's per-subscription Get round trips into a handful of batched ones.
+// GetMany hydrates many subscriptions in pipelined batches of pipelineChunk.
+// Missing subscriptions are skipped. It is the batched form of Get for the loops
+// that read every subscription (the recovery sweep and the reconcile loop): a
+// handful of round trips instead of one per subscription.
 func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 	out := make([]Subscription, 0, len(ids))
-	for start := 0; start < len(ids); start += subReadChunk {
-		end := start + subReadChunk
-		if end > len(ids) {
-			end = len(ids)
-		}
-		batch := ids[start:end]
+	for batch := range slices.Chunk(ids, pipelineChunk) {
 		pipe := s.client.Pipeline()
 		subCmds := make([]*redis.MapStringStringCmd, len(batch))
 		linkCmds := make([]*redis.MapStringStringCmd, len(batch))
@@ -426,7 +425,7 @@ func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 }
 
 // PatternSubscriptions implements Store.PatternSubscriptions: one HGETALL of
-// the sub hash per id, pipelined in subReadChunk batches, no links hash, and no
+// the sub hash per id, pipelined in pipelineChunk batches, no links hash, and no
 // per-id fallback. A miss is counted, never chased with a serial Get: the
 // recovery sweep's GetMany migrates legacy records, and reconcilePatternLinks
 // re-links a stream whose create-time read missed. Successful commands survive
@@ -435,8 +434,8 @@ func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 func (s *RedisStore) PatternSubscriptions(ids []string) (PatternRead, error) {
 	read := PatternRead{Subs: make([]PatternSubscription, 0, len(ids))}
 	var firstErr error
-	for start := 0; start < len(ids); start += subReadChunk {
-		end := min(start+subReadChunk, len(ids))
+	for start := 0; start < len(ids); start += pipelineChunk {
+		end := min(start+pipelineChunk, len(ids))
 		batch := ids[start:end]
 		pipe := s.client.Pipeline()
 		cmds := make([]*redis.MapStringStringCmd, len(batch))
@@ -721,17 +720,41 @@ func (s *RedisStore) ReconcileIndexes() error {
 	return nil
 }
 
-// indexStream adds a subscriber to a stream's per-slot fan-out shard and SETs the
-// stream's occupied-slots bit for that slot. The bit drives OnStreamAppend's
-// scatter-gather; setting it on every link keeps the bitmap a superset of the
-// occupied slots, so the bitmap-gated fan-out never misses a subscriber.
-func (s *RedisStore) indexStream(path, id string) error {
+// indexEntry is one (stream, subscriber) membership the fan-out index must hold.
+type indexEntry struct{ path, id string }
+
+// indexStreams writes fan-out entries in pipelined chunks: for each entry an SADD
+// into the SUBSCRIBER's slot shard and a SETBIT of the stream's occupied-slots
+// bit. The bit drives OnStreamAppend's scatter-gather; setting it on every write
+// keeps the bitmap a superset of the occupied slots, so the bitmap-gated fan-out
+// never misses a subscriber. Both commands are idempotent and commute across
+// entries, so the final SETs and bitmaps do not depend on arrival order. go-redis
+// groups a pipeline per cluster node and runs the nodes in parallel, so a bit may
+// land before its member: a reader that interleaves misses the subscriber under
+// either order (bit unset, or bit set and an empty SMEMBERS), exactly as it could
+// before, and once Exec returns both are visible. Plain Pipeline, never
+// TxPipeline: the SADD keys ({__ds:h}) and the SETBIT keys ({__ds-occ}) are
+// different cluster slots, so MULTI would be CROSSSLOT (standalone Redis hides
+// that).
+func (s *RedisStore) indexStreams(entries []indexEntry) error {
 	ctx := s.ctx()
-	h := slotOf(id)
-	if err := s.client.SAdd(ctx, streamSubsKey(h, path), id).Err(); err != nil {
-		return err
+	for batch := range slices.Chunk(entries, pipelineChunk) {
+		pipe := s.client.Pipeline()
+		for _, e := range batch {
+			h := slotOf(e.id)
+			pipe.SAdd(ctx, streamSubsKey(h, e.path), e.id)
+			pipe.SetBit(ctx, streamSlotsKey(e.path), int64(h), 1)
+		}
+		if _, err := pipe.Exec(ctx); err != nil {
+			return err
+		}
 	}
-	return s.client.SetBit(ctx, streamSlotsKey(path), int64(h), 1).Err()
+	return nil
+}
+
+// indexStream is the single-entry case (create, link, migrate): one round trip.
+func (s *RedisStore) indexStream(path, id string) error {
+	return s.indexStreams([]indexEntry{{path: path, id: id}})
 }
 
 // deindexStream removes a subscriber from its slot's fan-out shard. It does NOT
