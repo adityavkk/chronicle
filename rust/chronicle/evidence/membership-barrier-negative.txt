@@ -1,0 +1,19 @@
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/repo/rust/chronicle)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.71s
+     Running unittests src/main.rs (target/debug/deps/chronicle_raft-5a3f91c34f0e1fdf)
+
+running 1 test
+
+thread 'controller::tests::matching_prefix_cannot_complete_over_cancelled_membership' panicked at src/controller.rs:700:73:
+called `Result::unwrap_err()` on an `Ok` value: LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 2 }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test controller::tests::matching_prefix_cannot_complete_over_cancelled_membership ... FAILED
+
+failures:
+
+failures:
+    controller::tests::matching_prefix_cannot_complete_over_cancelled_membership
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.21s
+
+error: test failed, to rerun pass `--bin chronicle-raft`

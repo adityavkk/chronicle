@@ -171,10 +171,18 @@ async fn tick(
             let node = &state.nodes[id];
             if !matches {
                 // Repeat even for registered learners: presence does not prove catch-up.
-                group
+                let added = group
                     .raft
-                    .add_learner(*id, BasicNode::new(node.addr.clone()), true)
+                    .change_membership_if_vote(
+                        openraft::ChangeMembers::AddNodes(BTreeMap::from([(
+                            *id,
+                            BasicNode::new(node.addr.clone()),
+                        )])),
+                        true,
+                        initial.vote,
+                    )
                     .await?;
+                let catch_up = boundary.max(Some(added.log_id));
                 loop {
                     let m = group.raft.metrics().borrow().clone();
                     anyhow::ensure!(
@@ -184,7 +192,7 @@ async fn tick(
                     if m.replication
                         .as_ref()
                         .and_then(|r| r.get(id))
-                        .is_some_and(|matched| *matched >= boundary)
+                        .is_some_and(|matched| *matched >= catch_up)
                     {
                         break;
                     }
@@ -204,21 +212,7 @@ async fn tick(
             group.raft.metrics().borrow().vote == initial.vote,
             "leadership changed"
         );
-        if !matches {
-            group.raft.change_membership(p.voters.clone(), true).await?;
-        }
-        let (_, applied_membership) = group.store.clone().applied_state().await?;
-        anyhow::ensure!(
-            applied_membership.membership().get_joint_config().len() == 1
-                && applied_membership
-                    .membership()
-                    .voter_ids()
-                    .collect::<BTreeSet<_>>()
-                    == p.voters,
-            "target membership not applied"
-        );
-        let membership = *applied_membership.log_id();
-        anyhow::ensure!(membership.is_some(), "missing applied membership boundary");
+        let membership = Some(commit_membership(group, &p.voters, initial.vote).await?);
         // Membership commitment is authoritative even if this completion record is lost.
         // The next leader can inspect/repeat the same intent safely.
         let command = Command::Placed {
@@ -337,9 +331,10 @@ async fn retire_replica(
         // evidence of local retirement. The registry preserves future discovery.
         group
             .raft
-            .change_membership(
+            .change_membership_if_vote(
                 openraft::ChangeMembers::RemoveNodes(BTreeSet::from([id])),
                 false,
+                initial.vote,
             )
             .await?;
         tracing::info!(
@@ -352,7 +347,11 @@ async fn retire_replica(
     } else {
         group
             .raft
-            .add_learner(id, BasicNode::new(address), false)
+            .change_membership_if_vote(
+                openraft::ChangeMembers::AddNodes(BTreeMap::from([(id, BasicNode::new(address))])),
+                true,
+                initial.vote,
+            )
             .await?;
         tracing::info!(
             shard,
@@ -519,6 +518,25 @@ async fn balance_leaders(
     Ok(())
 }
 
+async fn commit_membership(
+    group: &crate::Group,
+    voters: &BTreeSet<u64>,
+    vote: openraft::Vote<u64>,
+) -> anyhow::Result<openraft::LogId<u64>> {
+    // A read barrier and matching applied voters do not rule out an outstanding
+    // membership entry from a cancelled call. Always await a membership operation
+    // before completing a new intent; InProgress leaves the intent incomplete.
+    let response = group
+        .raft
+        .change_membership_if_vote(voters.clone(), true, vote)
+        .await?;
+    anyhow::ensure!(
+        membership_applied(&group.store, voters).await?,
+        "target membership not applied"
+    );
+    Ok(response.log_id)
+}
+
 async fn membership_applied(
     store: &chronicle_raft::storage::SqliteStore,
     voters: &BTreeSet<u64>,
@@ -555,6 +573,163 @@ mod tests {
     use super::*;
     use chronicle_raft::storage::SqliteStore;
     use openraft::{CommittedLeaderId, Entry, EntryPayload, LogId, Membership};
+
+    #[tokio::test]
+    async fn matching_prefix_cannot_complete_over_cancelled_membership() {
+        use axum::{Json, Router, http::StatusCode, routing::post};
+        use chronicle_raft::{Raft, TypeConfig, network::Network};
+        use openraft::raft::AppendEntriesRequest;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let dir = tempfile::tempdir().unwrap();
+            let client = reqwest::Client::new();
+            let mut groups = Vec::new();
+            for id in [1, 2] {
+                let store = SqliteStore::open(dir.path().join(format!("{id}.sqlite")))
+                    .await
+                    .unwrap();
+                let raft = Raft::new(
+                    id,
+                    Arc::new(openraft::Config::default().validate().unwrap()),
+                    Network {
+                        client: client.clone(),
+                        cluster: "membership-test".into(),
+                        group: 1,
+                    },
+                    store.clone(),
+                    store.clone(),
+                )
+                .await
+                .unwrap();
+                groups.push(crate::Group {
+                    raft,
+                    store,
+                    movement: tokio::sync::Mutex::new(()),
+                });
+            }
+            let blocked = Arc::new(AtomicBool::new(false));
+            let peer = groups[1].raft.clone();
+            let gate = blocked.clone();
+            // Real follower and SQLite, with data-bearing RPCs selectively dropped.
+            // Empty read-barrier heartbeats still reach the follower's real core.
+            let router = Router::new().route(
+                "/raft/1/append",
+                post(
+                    move |Json(request): Json<AppendEntriesRequest<TypeConfig>>| {
+                        let peer = peer.clone();
+                        let gate = gate.clone();
+                        async move {
+                            if gate.load(Ordering::SeqCst) && !request.entries.is_empty() {
+                                return Err(StatusCode::SERVICE_UNAVAILABLE);
+                            }
+                            Ok(Json(peer.append_entries(request).await))
+                        }
+                    },
+                ),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap().to_string();
+            let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+            let group = &groups[0];
+            group
+                .raft
+                .initialize(BTreeMap::from([(1, BasicNode::new("unused"))]))
+                .await
+                .unwrap();
+            group.raft.ensure_linearizable().await.unwrap();
+            let vote = group.raft.metrics().borrow().vote;
+            let added = group
+                .raft
+                .change_membership_if_vote(
+                    openraft::ChangeMembers::AddNodes(BTreeMap::from([(
+                        2,
+                        BasicNode::new(address),
+                    )])),
+                    true,
+                    vote,
+                )
+                .await
+                .unwrap();
+            group
+                .raft
+                .wait(Some(Duration::from_secs(3)))
+                .metrics(
+                    |m| {
+                        m.replication
+                            .as_ref()
+                            .and_then(|r| r.get(&2))
+                            .is_some_and(|matched| *matched >= Some(added.log_id))
+                    },
+                    "learner caught up",
+                )
+                .await
+                .unwrap();
+            blocked.store(true, Ordering::SeqCst);
+            assert!(
+                tokio::time::timeout(
+                    Duration::from_millis(100),
+                    group
+                        .raft
+                        .change_membership_if_vote(BTreeSet::from([1, 2]), true, vote),
+                )
+                .await
+                .is_err()
+            ); // Cancels waiter, not the outstanding joint entry.
+            assert_eq!(
+                group
+                    .raft
+                    .metrics()
+                    .borrow()
+                    .membership_config
+                    .membership()
+                    .get_joint_config()
+                    .len(),
+                2
+            );
+            let original = BTreeSet::from([1]);
+            assert!(membership_applied(&group.store, &original).await.unwrap());
+            group.raft.ensure_linearizable().await.unwrap();
+            let error = commit_membership(group, &original, vote).await.unwrap_err();
+            let Some(openraft::error::RaftError::APIError(
+                openraft::error::ClientWriteError::ChangeMembershipError(
+                    openraft::error::ChangeMembershipError::InProgress(_),
+                ),
+            )) =
+                error.downcast_ref::<openraft::error::RaftError<
+                    u64,
+                    openraft::error::ClientWriteError<u64, BasicNode>,
+                >>()
+            else {
+                panic!("expected outstanding-membership rejection, got {error:?}");
+            };
+            blocked.store(false, Ordering::SeqCst);
+            group
+                .raft
+                .wait(Some(Duration::from_secs(3)))
+                .metrics(
+                    |m| m.last_applied > Some(added.log_id),
+                    "joint entry applied",
+                )
+                .await
+                .unwrap();
+            let boundary = commit_membership(group, &original, vote).await.unwrap();
+            assert!(boundary > added.log_id);
+            assert!(membership_applied(&group.store, &original).await.unwrap());
+            let (_, applied) = group.store.clone().applied_state().await.unwrap();
+            assert_eq!(*applied.log_id(), Some(boundary));
+            for group in groups {
+                group.raft.shutdown().await.unwrap();
+                group.store.close().await;
+            }
+            server.abort();
+        })
+        .await
+        .unwrap();
+    }
 
     #[test]
     fn retirement_requires_applied_uniform_nonvoter_membership() {
