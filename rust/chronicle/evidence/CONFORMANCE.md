@@ -175,3 +175,19 @@ The unchanged full suite `conformance-write-reply-64011` reports **184 passed,
 with the preceding full run. Producer response metadata still prevents two
 producer-close tests from passing. Forks, TTL, sequence ordering and the other
 documented gaps remain; this is not full conformance or a new durability proof.
+
+## Browser response headers
+
+Source `794a9e9` adds the Go server's `nosniff` and cross-origin resource-policy
+headers outside stream admission and extraction. It does not consume the body,
+change status, or grant authorization. `browser-headers-check.txt` records passing
+checks, including an unfinished streaming body retaining admission and 204/413/
+429/501 responses. Independent scoped review found no blocker in this wrapper or
+the closure change; its wording correction distinguishes HTTP admission from
+Raft proposal.
+
+`browser-headers-after-*` passes the live matrix; `browser-headers-pods.json`
+records five uniform-image pods on retained PVCs. The unchanged full suite
+`conformance-browser-headers-64013` reports **190 passed, 136 failed, 6 skipped**:
+six header tests improve, with no new failures. All compatibility and durability
+limitations above still apply. The listener remains trusted-private only.
