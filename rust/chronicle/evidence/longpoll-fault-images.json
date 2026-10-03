@@ -1,0 +1,78 @@
+[
+  {
+    "pod": "chronicle-0",
+    "images": [
+      {
+        "image": "docker.io/library/chronicle-raft:longpoll-fault",
+        "imageID": "sha256:e1fcc23badb6afd7d4845caaa5a8af02190e4798af7c003afcc3343cc24b874b"
+      }
+    ],
+    "fault_env": [
+      {
+        "name": "CHRONICLE_STORAGE_FAULTS",
+        "value": "1"
+      },
+      {
+        "name": "CHRONICLE_FAULT_DIR",
+        "value": "/data/live-faults-20261003"
+      }
+    ]
+  },
+  {
+    "pod": "chronicle-1",
+    "images": [
+      {
+        "image": "docker.io/library/chronicle-raft:longpoll-fault",
+        "imageID": "sha256:e1fcc23badb6afd7d4845caaa5a8af02190e4798af7c003afcc3343cc24b874b"
+      }
+    ],
+    "fault_env": [
+      {
+        "name": "CHRONICLE_STORAGE_FAULTS",
+        "value": "1"
+      },
+      {
+        "name": "CHRONICLE_FAULT_DIR",
+        "value": "/data/live-faults-20261003"
+      }
+    ]
+  },
+  {
+    "pod": "chronicle-2",
+    "images": [
+      {
+        "image": "docker.io/library/chronicle-raft:longpoll-fault",
+        "imageID": "sha256:e1fcc23badb6afd7d4845caaa5a8af02190e4798af7c003afcc3343cc24b874b"
+      }
+    ],
+    "fault_env": [
+      {
+        "name": "CHRONICLE_STORAGE_FAULTS",
+        "value": "1"
+      },
+      {
+        "name": "CHRONICLE_FAULT_DIR",
+        "value": "/data/live-faults-20261003"
+      }
+    ]
+  },
+  {
+    "pod": "chronicle-3",
+    "images": [
+      {
+        "image": "docker.io/library/chronicle-raft:longpoll-fault",
+        "imageID": "sha256:e1fcc23badb6afd7d4845caaa5a8af02190e4798af7c003afcc3343cc24b874b"
+      }
+    ],
+    "fault_env": [
+      {
+        "name": "CHRONICLE_STORAGE_FAULTS",
+        "value": "1"
+      },
+      {
+        "name": "CHRONICLE_FAULT_DIR",
+        "value": "/data/live-faults-20261003"
+      }
+    ]
+  }
+]

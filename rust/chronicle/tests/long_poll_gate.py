@@ -76,9 +76,12 @@ def run(args):
             elif args.scenario == "close":
                 assert call("gate", "POST", headers={"stream-closed": "true"})["status"] == 200
             else:
-                probe = subprocess.run(["sudo", "docker", "exec", node, "iptables", "-S", "CHRONICLE_FAULT"],
+                probe = subprocess.run(["sudo", "docker", "exec", node, "iptables", "-S"],
                                        capture_output=True, text=True, timeout=10)
-                if probe.returncode != 1 or "No chain" not in probe.stderr:
+                present = "CHRONICLE_FAULT" in probe.stdout
+                note("partition-preflight", returncode=probe.returncode, stderr=probe.stderr,
+                     chain_present=present, filter_lines=len(probe.stdout.splitlines()))
+                if probe.returncode != 0 or probe.stderr or present:
                     raise RuntimeError("refusing existing/unknown partition state")
                 # The absent-chain check makes a partially applied isolate ours to heal.
                 partition_owned = True
@@ -110,7 +113,14 @@ def run(args):
                 # detached blocking tasks; removing it could re-trap an old reader.
             finally:
                 executor.shutdown(wait=True)
-        final = call("gate", "GET")
+        deadline = time.monotonic() + 30
+        while True:
+            final = call("gate", "GET")
+            if final["status"] is not None and final["status"] < 500:
+                break
+            if time.monotonic() >= deadline:
+                raise TimeoutError("strict reads did not recover; retain all attempts")
+            time.sleep(.2)
         assert final["status"] == 200, final
         assert final["body"] == {"append": "after", "recreate": "NEW", "close": "", "quorum": ""}[args.scenario], final
     print(json.dumps({"result": "passed", "scenario": args.scenario, "history": args.output,

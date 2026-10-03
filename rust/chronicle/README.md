@@ -83,11 +83,15 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
   partitions and membership round trips under paced traffic. The mechanism stays
   **default off**; it is neither directed transfer nor resource-informed balancing.
   Failed harness attempts and the missed stability threshold remain in the evidence.
+* [Strict long polling](evidence/LONGPOLL.md) has bounded admission and a fresh
+  barrier/view after its five-second deadline. Real k3d gates cover concurrent
+  append, recreation, close and loss of quorum at that boundary. These HTTP
+  observations are not general linearizability evidence. SSE is not implemented.
 
 ## Explicitly unfinished
 
 This is a bounded replicated vertical slice, **not the full requested deliverable**.
-Protocol conformance beyond the implemented request subset, SSE/long polling,
+Protocol conformance beyond the implemented request subset, SSE,
 zero-copy sendfile, resource-informed placement and leadership
 balancing, deeper replication/storage trace linkage, broader I/O-fault schedules, stronger
 admission/snapshot crash schedules, and equal-semantics performance baselines remain.

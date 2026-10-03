@@ -1,0 +1,37 @@
+{"f": "run", "schema": 1, "time_ns": 37711006028671, "type": "info", "value": {"append_interval": 0, "consistency": "strict except labelled stale reads", "operations_per_producer": 20, "path": "longpoll-restored-20261003", "payload": "fixed-width ASCII record", "producers": 2, "reads": 1, "record_size": 96, "retry_interval": 0.1, "seed": 2026100308, "tenant": "jepsen", "urls": ["http://127.0.0.1:18080"]}}
+{"f": "create", "id": "create", "process": "setup", "schema": 1, "time_ns": 37711006095926, "type": "invoke"}
+{"f": "create", "id": "create", "process": "setup", "schema": 1, "time_ns": 37711014475614, "type": "unknown", "value": {"error": "RemoteDisconnected('Remote end closed connection without response')", "latency_ms": 8.357, "status": null}}
+{"f": "read", "id": "r0-0", "process": "reader-0", "schema": 1, "time_ns": 37711015780972, "type": "invoke"}
+{"f": "append", "id": "p0-0", "process": "producer-0", "schema": 1, "time_ns": 37711017400547, "type": "invoke"}
+{"f": "append", "id": "p1-0", "process": "producer-1", "schema": 1, "time_ns": 37711017816512, "type": "invoke"}
+{"f": "read", "id": "r0-0", "process": "reader-0", "schema": 1, "time_ns": 37711018287553, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 2.437, "status": null}}
+{"f": "append", "id": "p0-0", "process": "producer-0", "schema": 1, "time_ns": 37711018459383, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.998, "status": null}}
+{"f": "append", "id": "p1-0", "process": "producer-1", "schema": 1, "time_ns": 37711018609095, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.745, "status": null}}
+{"f": "read", "id": "r0-1", "process": "reader-0", "schema": 1, "time_ns": 37711068539895, "type": "invoke"}
+{"f": "read", "id": "r0-1", "process": "reader-0", "schema": 1, "time_ns": 37711068966471, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.347, "status": null}}
+{"f": "append-retry", "id": "p0-0", "process": "producer-0", "schema": 1, "time_ns": 37711118693936, "type": "invoke"}
+{"f": "append-retry", "id": "p1-0", "process": "producer-1", "schema": 1, "time_ns": 37711118845500, "type": "invoke"}
+{"f": "read", "id": "r0-2", "process": "reader-0", "schema": 1, "time_ns": 37711119279693, "type": "invoke"}
+{"f": "append-retry", "id": "p1-0", "process": "producer-1", "schema": 1, "time_ns": 37711120162207, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.764, "status": null}}
+{"f": "read", "id": "r0-2", "process": "reader-0", "schema": 1, "time_ns": 37711120282639, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.566, "status": null}}
+{"f": "append-retry", "id": "p0-0", "process": "producer-0", "schema": 1, "time_ns": 37711120437432, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 1.537, "status": null}}
+{"f": "read", "id": "r0-3", "process": "reader-0", "schema": 1, "time_ns": 37711170543297, "type": "invoke"}
+{"f": "read", "id": "r0-3", "process": "reader-0", "schema": 1, "time_ns": 37711170973690, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.335, "status": null}}
+{"f": "append-retry", "id": "p1-0", "process": "producer-1", "schema": 1, "time_ns": 37711220334167, "type": "invoke"}
+{"f": "append-retry", "id": "p0-0", "process": "producer-0", "schema": 1, "time_ns": 37711220763578, "type": "invoke"}
+{"f": "append-retry", "id": "p1-0", "process": "producer-1", "schema": 1, "time_ns": 37711221203885, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.742, "status": null}}
+{"f": "read", "id": "r0-4", "process": "reader-0", "schema": 1, "time_ns": 37711221337277, "type": "invoke"}
+{"f": "append-retry", "id": "p0-0", "process": "producer-0", "schema": 1, "time_ns": 37711221476925, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.631, "status": null}}
+{"f": "read", "id": "r0-4", "process": "reader-0", "schema": 1, "time_ns": 37711221991143, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.438, "status": null}}
+{"f": "read", "id": "r0-5", "process": "reader-0", "schema": 1, "time_ns": 37711272225794, "type": "invoke"}
+{"f": "read", "id": "r0-5", "process": "reader-0", "schema": 1, "time_ns": 37711272659717, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.346, "status": null}}
+{"f": "append-retry", "id": "p1-0", "process": "producer-1", "schema": 1, "time_ns": 37711321372317, "type": "invoke"}
+{"f": "append-retry", "id": "p1-0", "process": "producer-1", "schema": 1, "time_ns": 37711321944027, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.458, "status": null}}
+{"f": "append-retry", "id": "p0-0", "process": "producer-0", "schema": 1, "time_ns": 37711322054959, "type": "invoke"}
+{"f": "record", "id": "p1-0", "schema": 1, "time_ns": 37711322135437, "type": "info", "value": {"attempts": 4, "record": "R|0000000078c3d654|0001|000000000000|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", "terminal": "unknown"}}
+{"f": "append-retry", "id": "p0-0", "process": "producer-0", "schema": 1, "time_ns": 37711322708630, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.457, "status": null}}
+{"f": "record", "id": "p0-0", "schema": 1, "time_ns": 37711322892978, "type": "info", "value": {"attempts": 4, "record": "R|0000000078c3d654|0000|000000000000|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", "terminal": "unknown"}}
+{"f": "read", "id": "r0-6", "process": "reader-0", "schema": 1, "time_ns": 37711322845687, "type": "invoke"}
+{"f": "read", "id": "r0-6", "process": "reader-0", "schema": 1, "time_ns": 37711323350407, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.162, "status": null}}
+{"f": "read", "id": "final-read", "process": "final", "schema": 1, "time_ns": 37711323798559, "type": "invoke"}
+{"f": "read", "id": "final-read", "process": "final", "schema": 1, "time_ns": 37711324232467, "type": "unknown", "value": {"error": "URLError(ConnectionRefusedError(111, 'Connection refused'))", "latency_ms": 0.383, "status": null}}
