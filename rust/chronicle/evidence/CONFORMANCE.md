@@ -150,3 +150,28 @@ property tests for concurrent-reader byte consistency, random operations and
 read-your-writes. This remains a failing conformance baseline. Successful
 close-only status does not implement its missing closure response headers or
 non-producer repeated-close semantics.
+
+## Closure metadata captured during apply
+
+Source `f4764d7` captures closure and error frontiers during replicated apply,
+including retained old-sequence success after closure. It does not reconstruct
+closure from changed retry flags or a later read. Empty producer retries reach
+dedup lookup before fresh-empty validation. Missing `empty_body` in historical
+commands preserves replay semantics. POST JSON `[]` remains rejected; the first
+draft fixture mistakenly expected acceptance and was corrected against the
+unchanged pinned encoder and upstream test, not by weakening either.
+
+`make check` and `make formal` passed (`write-reply-final-check.txt`,
+`write-reply-formal.txt`). The closure publication model precedes implementation;
+both request-echo and later-state negative controls fail as intended. This is a
+bounded boundary model, not mechanized refinement. Snapshot/reopen regressions
+check retained results and closure. `write-reply-before-*` retains the old-image
+failure; `write-reply-after-*` passes the expanded HTTP matrix on the new image.
+`write-reply-pods.json` records all five same-image pods after a stop-all/start-all
+upgrade preserving PVCs.
+
+The unchanged full suite `conformance-write-reply-64011` reports **184 passed,
+142 failed, 6 skipped**: 15 closure tests improve, with no new failures compared
+with the preceding full run. Producer response metadata still prevents two
+producer-close tests from passing. Forks, TTL, sequence ordering and the other
+documented gaps remain; this is not full conformance or a new durability proof.
