@@ -89,3 +89,34 @@ HTTP regression. Rejected creates leave no object, rejected ordered appends
 change neither bytes nor producer sequence, and unrelated headers still work.
 This removes false success for those missing features; it does not implement
 them or turn the failing conformance baseline into a pass.
+
+## Committed create response mapping
+
+Source `c9b9b4026b99ca3cf7e09fc7b385f67b50c025b4` maps idempotent PUT to 200
+and includes the validated content type for creation and retry. It does not
+change the replicated transition. `make check` passed. On actual k3d, the
+unmodified suite's three selected PUT header/idempotency/config-conflict tests
+passed (`create-response-conformance.txt`); the other 329 were not executed by
+that targeted command. This is not a new full-suite baseline.
+
+The first post-rollout regression stopped on a GET returning 503 `no leader;
+retry`, after successful create/retry/conflict cases. Its history is retained
+as `create-response-history.jsonl`, and its empty result file records that the
+runner never reached success. After further cluster observation, a new path
+passed all cases (`create-response-converged-*`). No automatic retry hides the
+original failure. The failure occurred shortly after rollout and vote timeouts
+were observed, but its precise cause is not established.
+
+`create-response-images.json` was another empty capture caused by the incorrect
+`app=chronicle` selector. `create-response-images-verified.json` uses the actual
+`app=chronicle-raft` selector and asserts four results; all four have the same
+image digest. The analogous admission-stage empty capture is also disclosed in
+`ADMISSION.md`; it must not be cited as live image-identity evidence.
+
+An additional observation remains open: drained node 4 is still running and its
+local groups retain obsolete joint membership and repeatedly become candidates,
+while strict control reports completed placements with voters 1/2/3 and node 4
+draining (`drained-node-candidate-status.json`, `create-response-control.json`).
+These are ordinary Raft elections, not the default-off balancing experiment.
+Their availability/resource impact has not been qualified; do not infer useful
+leadership convergence or completed physical node removal from placement alone.

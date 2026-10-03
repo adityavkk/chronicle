@@ -27,8 +27,12 @@ contract. Forwarding metadata jobs use a separately bounded actor queue.
   frontier 27/incarnation 1. A second case uses production read-triggered expiry:
   both general/live slots remain held, then return after the tombstone applies.
 * `make formal` passed the entire Lean/TLC suite and expected negative controls.
-* The normal release image was rolled to all four real k3d pods; exact image
-  identities are in `admission-images.json`. Header regressions passed again.
+* The normal release image rollout completed for all four real k3d pods.
+  `admission-images.json` is an empty capture: the selector mistakenly used
+  `app=chronicle` instead of `app=chronicle-raft`. It is retained as failed
+  evidence, not proof of pod identity. `admission-built-image.json` records the
+  local image/source label; it is not a retrospective live-pod capture.
+  Header regressions passed again.
   Four producers appended 40 records with concurrent reads; the retained history
   passed the independent Go Porcupine adapter (`admission-porcupine.txt`: `Ok`).
 
