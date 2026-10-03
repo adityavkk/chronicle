@@ -85,7 +85,7 @@ func completionLine(t *testing.T, logs *bytes.Buffer) map[string]any {
 // the counts and the phase durations.
 func TestOnStreamCreatedReadsPatternsOnceAndLinksMatches(t *testing.T) {
 	s := &createHookStore{}
-	var want []string
+	want := make([]string, 0, 80)
 	for i := range 80 {
 		id := strconv.Itoa(i)
 		s.ids = append(s.ids, id)
