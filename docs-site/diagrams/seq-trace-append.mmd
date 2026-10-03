@@ -8,11 +8,11 @@ sequenceDiagram
     C->>H: POST /events/x + batch
     Note over H: buffer body · authorize before existence · parse headers · handler.go:823
     H->>S: Store.Append(path, data, opts) · store/redis/store.go:533
-    Note over S: HMGET tail+ct snapshot · frame batch · build ZADD args
+    Note over S: frame batch against the handler's tail hint · build ZADD args · no read
     S->>L: EVALSHA append.lua · store.go:590
     Note over L: validate chain · ZADD frames · HSET tail · PUBLISH · append.lua:35
-    L-->>S: OK newTail — or RETRY
-    Note over S: RETRY re-snapshots the tail · up to 64 attempts
+    L-->>S: OK newTail — or RETRY with the live tail
+    Note over S: RETRY reframes against the live tail · EVALSHA again · up to 128 attempts
     S-->>H: AppendResult offset
     Note over H: map headers · duplicates return before the hook
     H->>M: OnStreamAppend for a new durable append · handler.go:1060
