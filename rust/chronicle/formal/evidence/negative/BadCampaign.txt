@@ -1,14 +1,14 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
-Running breadth-first search Model-Checking with fp 32 and seed 7507067419290678505 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 3122445] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 38 and seed -903563937757039429 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 3263716] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/Campaign.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/Sequences.tla
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module Campaign
-Starting... (2026-10-03 18:58:51)
+Starting... (2026-10-03 19:12:43)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-03 18:58:51.
+Finished computing initial states: 1 distinct state generated at 2026-10-03 19:12:43.
 Error: Invariant CampaignSpacing is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -18,42 +18,49 @@ State 1: <Initial predicate>
 /\ clock = 0
 /\ since = 0
 
-State 2: <Observe line 15, col 12 to line 16, col 49 of module Campaign>
+State 2: <Tick line 11, col 9 to line 12, col 56 of module Campaign>
 /\ view = 1
-/\ observed = 1
+/\ observed = 0
 /\ attempts = <<>>
-/\ clock = 0
+/\ clock = 1
 /\ since = 0
 
-State 3: <Tick line 11, col 9 to line 12, col 56 of module Campaign>
+State 3: <Observe line 15, col 12 to line 16, col 49 of module Campaign>
 /\ view = 1
 /\ observed = 1
 /\ attempts = <<>>
 /\ clock = 1
-/\ since = 0
+/\ since = 1
 
 State 4: <Tick line 11, col 9 to line 12, col 56 of module Campaign>
 /\ view = 1
 /\ observed = 1
 /\ attempts = <<>>
 /\ clock = 2
-/\ since = 0
+/\ since = 1
 
-State 5: <Campaign line 17, col 13 to line 20, col 50 of module Campaign>
+State 5: <Tick line 11, col 9 to line 12, col 56 of module Campaign>
 /\ view = 1
 /\ observed = 1
-/\ attempts = <<2>>
-/\ clock = 2
-/\ since = 0
+/\ attempts = <<>>
+/\ clock = 3
+/\ since = 1
 
 State 6: <Campaign line 17, col 13 to line 20, col 50 of module Campaign>
 /\ view = 1
 /\ observed = 1
-/\ attempts = <<2, 2>>
-/\ clock = 2
-/\ since = 0
+/\ attempts = <<3>>
+/\ clock = 3
+/\ since = 1
 
-494 states generated, 237 distinct states found, 84 states left on queue.
-The depth of the complete state graph search is 9.
+State 7: <Campaign line 17, col 13 to line 20, col 50 of module Campaign>
+/\ view = 1
+/\ observed = 1
+/\ attempts = <<3, 3>>
+/\ clock = 3
+/\ since = 1
+
+406 states generated, 201 distinct states found, 75 states left on queue.
+The depth of the complete state graph search is 8.
 The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 4 and the 95th percentile is 3).
-Finished in 00s at (2026-10-03 18:58:51)
+Finished in 00s at (2026-10-03 19:12:43)

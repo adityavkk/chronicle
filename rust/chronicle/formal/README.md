@@ -364,3 +364,27 @@ requests have different votes. This permits older work to settle after a newer
 intent, but not to reassert itself after the newer placement completes. It does
 not promise immediate cross-group revocation at intent commit, recovery without
 the applicable joint quorums, or safe additional concurrent membership writers.
+
+## Replacing a stalled intent must preserve authority history
+
+`PlacementIntent.tla` specifies the next control-state change before implementation.
+It explores two shards, four registered identities, three-voter configurations and
+three generations. `Place` maps to `State::apply(Command::Place)`: generation CAS,
+only one pending shard, and union of old/new possible-voter identities. A new
+default-false `repair_pending` command field will permit replacing the *same*
+pending shard without changing replay of previously committed commands. `Complete`
+maps to generation-checked `Placed`, assuming an applied uniform membership
+response obtained through the separately checked membership-admission boundary.
+
+Four negative configurations remove repair availability, single-movement gating,
+completion-generation checking or old-identity retention. Health observations,
+cooldown and failure-domain preferences choose targets; none authorizes quorum
+reduction or forgetting a possibly promoted replica. The controller will replace
+a pending target only when one of its members is unavailable/draining, a distinct
+three-node eligible target exists, and cooldown has elapsed. Other moves wait.
+
+The temporal check assumes weak fairness of membership completion and bounded
+intent changes. It does not infer eventual quorum, disk or network progress from
+health checks. In particular, loss of an applicable joint quorum can still block
+completion even after a successor intent is accepted. The models are separate
+abstractions, not a mechanized composition or end-to-end Rust refinement proof.
