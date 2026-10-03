@@ -559,6 +559,33 @@ async fn admit_stream(
     let context = telemetry::RequestContext::from_headers(request.headers());
     context.inject(request.headers_mut());
     request.extensions_mut().insert(context.clone());
+    // Reject missing semantics before any body, forwarding or storage work;
+    // ignoring these headers would acknowledge a different operation.
+    let unsupported: &[&str] = if request.method() == Method::PUT {
+        &[
+            "stream-forked-from",
+            "stream-fork-offset",
+            "stream-fork-sub-offset",
+            "stream-expires-at",
+        ]
+    } else if request.method() == Method::POST {
+        &["stream-seq"]
+    } else {
+        &[]
+    };
+    if let Some(name) = unsupported
+        .iter()
+        .copied()
+        .find(|name| request.headers().contains_key(*name))
+    {
+        let mut response = (
+            StatusCode::NOT_IMPLEMENTED,
+            format!("unsupported header: {name}"),
+        )
+            .into_response();
+        context.inject(response.headers_mut());
+        return Ok(response);
+    }
     // Acquire before the Bytes extractor reads the body, not after allocation.
     let Ok(permit) = admission.try_acquire_owned() else {
         let mut response = (StatusCode::TOO_MANY_REQUESTS, "admission full").into_response();
@@ -984,6 +1011,44 @@ async fn read_visible_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn unsupported_headers_reject_before_admission_or_body_extraction() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // Exhausted admission distinguishes this gate from entering the handler.
+        let admission = Arc::new(Semaphore::new(0));
+        let router = Router::new()
+            .route("/", any(|body: Bytes| async move { body }))
+            .layer(middleware::from_fn_with_state(admission, admit_stream));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        for (method, header, status) in [
+            ("PUT", "Stream-Forked-From", "501"),
+            ("PUT", "Stream-Fork-Offset", "501"),
+            ("PUT", "Stream-Fork-Sub-Offset", "501"),
+            ("PUT", "Stream-Expires-At", "501"),
+            ("POST", "Stream-Seq", "501"),
+            ("POST", "X-Unrelated", "429"),
+        ] {
+            let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+            client
+                .write_all(
+                    format!("{method} / HTTP/1.1\r\nHost: test\r\n{header}: value\r\nContent-Length: 1\r\n\r\n")
+                        .as_bytes(),
+                )
+                .await
+                .unwrap();
+            // Deliberately never send the body byte. Reading it would deadlock.
+            let mut prefix = [0; 12];
+            tokio::time::timeout(Duration::from_secs(2), client.read_exact(&mut prefix))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(prefix.as_slice(), format!("HTTP/1.1 {status}").as_bytes());
+        }
+        server.abort();
+    }
 
     #[tokio::test]
     async fn admission_lasts_until_streaming_response_is_dropped() {

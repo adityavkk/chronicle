@@ -101,6 +101,10 @@ Protocol conformance beyond the implemented request subset,
 zero-copy sendfile, resource-informed placement and leadership
 balancing, deeper replication/storage trace linkage, broader I/O-fault schedules, stronger
 admission/snapshot crash schedules, and equal-semantics performance baselines remain.
+The [unmodified conformance baseline](evidence/CONFORMANCE.md) is failing, not
+waived. Until implemented, PUT fork/absolute-expiry headers and POST `Stream-Seq`
+return 501 before body extraction or storage access, rather than acknowledging
+an operation with those semantics silently removed.
 Completion events track response-body completion, errors and cancellation;
 `bytes_out` counts data frames yielded to the HTTP server, not proven client receipt.
 The [real delivery fault](evidence/DELIVERY.md) distinguishes a truncated 200 response
