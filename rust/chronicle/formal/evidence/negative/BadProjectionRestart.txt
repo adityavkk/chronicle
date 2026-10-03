@@ -1,14 +1,14 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
-Running breadth-first search Model-Checking with fp 46 and seed 9012535643885579524 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 3263610] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 59 and seed 2109250615702982279 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 4154313] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/Projection.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/Sequences.tla
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module Projection
-Starting... (2026-10-03 19:12:41)
+Starting... (2026-10-03 23:11:31)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-03 19:12:42.
+Finished computing initial states: 1 distinct state generated at 2026-10-03 23:11:31.
 Error: Invariant DataFromAuthority is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -24,22 +24,9 @@ State 1: <Initial predicate>
 /\ cacheIncarnation = 1
 /\ copying = FALSE
 
-State 2: <Commit line 17, col 14 to line 20, col 84 of module Projection>
+State 2: <Crash line 52, col 10 to line 55, col 67 of module Projection>
 /\ incarnation = 1
-/\ authority = <<1>>
-/\ lastRead = [actual |-> <<>>, expected |-> <<>>, fileInc |-> 1, inc |-> 1]
-/\ live = TRUE
-/\ targetIncarnation = 1
-/\ target = <<>>
-/\ published = 0
-/\ staged = <<>>
-/\ cache = <<>>
-/\ cacheIncarnation = 1
-/\ copying = FALSE
-
-State 3: <Crash line 52, col 10 to line 55, col 67 of module Projection>
-/\ incarnation = 1
-/\ authority = <<1>>
+/\ authority = <<>>
 /\ lastRead = [actual |-> <<>>, expected |-> <<>>, fileInc |-> 1, inc |-> 1]
 /\ live = FALSE
 /\ targetIncarnation = 1
@@ -50,7 +37,20 @@ State 3: <Crash line 52, col 10 to line 55, col 67 of module Projection>
 /\ cacheIncarnation = 1
 /\ copying = FALSE
 
-State 4: <Restart line 56, col 12 to line 59, col 77 of module Projection>
+State 3: <Restart line 56, col 12 to line 59, col 77 of module Projection>
+/\ incarnation = 1
+/\ authority = <<>>
+/\ lastRead = [actual |-> <<>>, expected |-> <<>>, fileInc |-> 1, inc |-> 1]
+/\ live = TRUE
+/\ targetIncarnation = 1
+/\ target = <<>>
+/\ published = 1
+/\ staged = <<>>
+/\ cache = <<9>>
+/\ cacheIncarnation = 1
+/\ copying = FALSE
+
+State 4: <Commit line 17, col 14 to line 20, col 84 of module Projection>
 /\ incarnation = 1
 /\ authority = <<1>>
 /\ lastRead = [actual |-> <<>>, expected |-> <<>>, fileInc |-> 1, inc |-> 1]
@@ -76,7 +76,7 @@ State 5: <Read line 42, col 9 to line 48, col 70 of module Projection>
 /\ cacheIncarnation = 1
 /\ copying = FALSE
 
-277 states generated, 199 distinct states found, 84 states left on queue.
+278 states generated, 207 distinct states found, 87 states left on queue.
 The depth of the complete state graph search is 8.
 The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 5 and the 95th percentile is 4).
-Finished in 00s at (2026-10-03 19:12:42)
+Finished in 00s at (2026-10-03 23:11:31)

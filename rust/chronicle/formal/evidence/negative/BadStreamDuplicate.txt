@@ -1,0 +1,44 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 33 and seed 6881575554911044427 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 4153105] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/StreamOrder.tla
+Parsing file /tmp/Integers.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module StreamOrder
+Starting... (2026-10-03 23:11:14)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-03 23:11:14.
+Error: Invariant DuplicateNoEffect is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ prior = 0
+/\ duplicate = FALSE
+/\ supplied = 0
+/\ effects = 0
+/\ token = 0
+/\ producer = -1
+/\ accepted = FALSE
+
+State 2: <Append line 18, col 6 to line 23, col 61 of module StreamOrder>
+/\ prior = 0
+/\ duplicate = FALSE
+/\ supplied = 0
+/\ effects = 1
+/\ token = 0
+/\ producer = 0
+/\ accepted = TRUE
+
+State 3: <Append line 18, col 6 to line 23, col 61 of module StreamOrder>
+/\ prior = 0
+/\ duplicate = TRUE
+/\ supplied = 1
+/\ effects = 1
+/\ token = 1
+/\ producer = 0
+/\ accepted = FALSE
+
+74 states generated, 37 distinct states found, 21 states left on queue.
+The depth of the complete state graph search is 4.
+The average outdegree of the complete state graph is 5 (minimum is 2, the maximum 7 and the 95th percentile is 7).
+Finished in 00s at (2026-10-03 23:11:14)

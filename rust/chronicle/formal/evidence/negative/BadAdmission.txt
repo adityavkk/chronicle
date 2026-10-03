@@ -1,5 +1,5 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
-Running breadth-first search Model-Checking with fp 126 and seed -6804688659201331556 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 3263280] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 124 and seed 6108196928220480999 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 4153958] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/Admission.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/FiniteSets.tla
@@ -8,9 +8,9 @@ Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module Admission
-Starting... (2026-10-03 19:12:36)
+Starting... (2026-10-03 23:11:26)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-03 19:12:36.
+Finished computing initial states: 1 distinct state generated at 2026-10-03 23:11:26.
 Error: Invariant PendingOwned is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -33,7 +33,7 @@ State 4: <Finish line 14, col 14 to line 18, col 33 of module Admission>
 /\ active = {}
 /\ held = {}
 
-43 states generated, 26 distinct states found, 3 states left on queue.
+41 states generated, 25 distinct states found, 2 states left on queue.
 The depth of the complete state graph search is 6.
-The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 3 and the 95th percentile is 3).
-Finished in 00s at (2026-10-03 19:12:36)
+The average outdegree of the complete state graph is 2 (minimum is 1, the maximum 3 and the 95th percentile is 3).
+Finished in 00s at (2026-10-03 23:11:26)

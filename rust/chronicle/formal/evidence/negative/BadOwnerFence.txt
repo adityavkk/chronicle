@@ -1,5 +1,5 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
-Running breadth-first search Model-Checking with fp 71 and seed -6833683047560688184 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 3263355] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 82 and seed 4774898517583059875 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 4154056] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/Chronicle.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/Sequences.tla
@@ -10,9 +10,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module Chronicle
-Starting... (2026-10-03 19:12:38)
+Starting... (2026-10-03 23:11:27)
 Computing initial states...
-Finished computing initial states: 2 distinct states generated at 2026-10-03 19:12:38.
+Finished computing initial states: 2 distinct states generated at 2026-10-03 23:11:28.
 Error: Invariant AcceptedAuthorityCurrent is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -69,7 +69,7 @@ State 2: <AuthorityOp line 108, col 21 to line 112, col 167 of module Chronicle>
 /\ owner = n2
 /\ producer = (p1 :> <<0, 0>>)
 
-54 states generated, 22 distinct states found, 4 states left on queue.
+60 states generated, 22 distinct states found, 4 states left on queue.
 The depth of the complete state graph search is 5.
-The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 1 and the 95th percentile is 1).
-Finished in 00s at (2026-10-03 19:12:38)
+The average outdegree of the complete state graph is 1 (minimum is 1, the maximum 1 and the 95th percentile is 1).
+Finished in 00s at (2026-10-03 23:11:28)

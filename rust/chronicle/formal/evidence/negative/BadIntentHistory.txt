@@ -1,5 +1,5 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
-Running breadth-first search Model-Checking with fp 113 and seed -5756803385951002599 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 3260140] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 107 and seed 3791139187960439054 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 4153608] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/PlacementIntent.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/FiniteSets.tla
@@ -8,9 +8,9 @@ Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module PlacementIntent
-Starting... (2026-10-03 19:12:30)
+Starting... (2026-10-03 23:11:20)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-03 19:12:30.
+Finished computing initial states: 1 distinct state generated at 2026-10-03 23:11:21.
 Error: Invariant HistoryRetained is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -41,7 +41,7 @@ State 2: <Place line 22, col 5 to line 31, col 26 of module PlacementIntent>
         history |-> {1, 2, 3} ] )
 /\ assigned = (0 :> {1, 2, 3, 4} @@ 1 :> {1, 2, 3})
 
-22 states generated, 19 distinct states found, 2 states left on queue.
+24 states generated, 19 distinct states found, 1 states left on queue.
 The depth of the complete state graph search is 7.
-The average outdegree of the complete state graph is 1 (minimum is 1, the maximum 1 and the 95th percentile is 1).
-Finished in 00s at (2026-10-03 19:12:30)
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 1 and the 95th percentile is 1).
+Finished in 00s at (2026-10-03 23:11:21)

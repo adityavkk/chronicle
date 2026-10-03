@@ -506,3 +506,37 @@ preserve a captured outcome across a subsequent epoch change, cross snapshot /
 reopen, and fill a rejected gap before retrying it. The offline checker still
 checks the same effects and domain errors; HTTP/schema-3 tests additionally
 check metadata, since the effects checker does not certify response headers.
+
+### Stream-wide ordering token
+
+`Stream-Seq` is optional, per stream incarnation, and compared lexicographically
+by bytes: `"10" < "2"`. Present-empty differs from absent. Absence leaves the
+last token unchanged; presence must strictly advance it unless none was stored.
+Producer/incarnation fences and cached-success lookup keep existing precedence.
+A cached retry ignores a changed token and returns its original effect/frontier.
+A token conflict returns 409 with the applied frontier and consumes neither
+producer sequence nor epoch. Empty close-only acceptance updates the token;
+idempotent re-close does not. Delete/recreate clears it. Successful PUT retry
+does not change it. These follow pinned Electric's optional-string policy while
+preserving this implementation's stronger historical-result retention.
+
+Mapping, established before implementation: `Command::Append.stream_seq`
+contains the supplied token; `Stream.last_seq` contains the committed token.
+Both default to absent for legacy JSON replay. The deterministic apply guard
+runs after retry/closure checks but before any payload, producer or token update.
+Token storage counts toward the shard metadata bound, charging only growth on
+replacement. SQLite apply and serialized snapshots include it atomically with
+the rest of `Stream`; no sidecar or HTTP-local token is authoritative. HTTP must
+not silently ignore an undecodable supplied token.
+
+`StreamOrder.tla` checks bounded token/dedup composition with four token ranks,
+including empty and the asymmetric numeric spellings above. Negative mutations
+parse numeric spellings or update the token during a duplicate. Lean proves
+lexicographic transitivity over arbitrary natural-number lists (a superset of
+byte lists), strict advancement on change, and preservation for absent,
+duplicate and rejected tokens. These are application-level properties, not a
+new proof of Raft, snapshot transport, or mechanized refinement of Rust string
+comparison. Tests must cross snapshot/install/reopen, rejected epoch changes,
+old duplicates, token absence/emptiness and metadata capacity. Existing offline
+histories do not submit tokens; until extended, their checker does not certify
+token ordering. Keep live token fixtures separate and explicitly scoped.

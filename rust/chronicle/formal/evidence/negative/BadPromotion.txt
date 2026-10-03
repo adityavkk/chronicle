@@ -1,5 +1,5 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
-Running breadth-first search Model-Checking with fp 90 and seed 479444970955777103 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 3263438] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 105 and seed -8054428421410597339 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 4154137] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/Chronicle.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/Sequences.tla
@@ -10,9 +10,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module Chronicle
-Starting... (2026-10-03 19:12:38)
+Starting... (2026-10-03 23:11:28)
 Computing initial states...
-Finished computing initial states: 2 distinct states generated at 2026-10-03 19:12:39.
+Finished computing initial states: 2 distinct states generated at 2026-10-03 23:11:28.
 Error: Invariant PromotionCaughtUp is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -150,7 +150,7 @@ State 5: <Promote line 102, col 15 to line 105, col 149 of module Chronicle>
 /\ owner = n1
 /\ producer = (p1 :> <<0, 0>>)
 
-671 states generated, 297 distinct states found, 184 states left on queue.
-The depth of the complete state graph search is 6.
-The average outdegree of the complete state graph is 3 (minimum is 0, the maximum 23 and the 95th percentile is 4).
-Finished in 00s at (2026-10-03 19:12:39)
+462 states generated, 239 distinct states found, 158 states left on queue.
+The depth of the complete state graph search is 5.
+The average outdegree of the complete state graph is 3 (minimum is 1, the maximum 23 and the 95th percentile is 4).
+Finished in 00s at (2026-10-03 23:11:29)

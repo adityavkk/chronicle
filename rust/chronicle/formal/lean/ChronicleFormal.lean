@@ -1,1 +1,2 @@
 import ChronicleFormal.Machine
+import ChronicleFormal.StreamOrder

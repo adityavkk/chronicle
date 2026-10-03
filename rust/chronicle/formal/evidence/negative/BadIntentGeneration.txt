@@ -1,5 +1,5 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
-Running breadth-first search Model-Checking with fp 115 and seed 777464578622817303 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 3258075] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 0 and seed 4176815441474179212 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 4153558] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/PlacementIntent.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/FiniteSets.tla
@@ -8,9 +8,9 @@ Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module PlacementIntent
-Starting... (2026-10-03 19:12:29)
+Starting... (2026-10-03 23:11:20)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-03 19:12:29.
+Finished computing initial states: 1 distinct state generated at 2026-10-03 23:11:20.
 Error: Invariant CompletionCurrent is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -41,24 +41,10 @@ State 2: <Place line 22, col 5 to line 31, col 26 of module PlacementIntent>
         history |-> {1, 2, 3} ] )
 /\ assigned = (0 :> {1, 2, 3} @@ 1 :> {1, 2, 3})
 
-State 3: <Place line 22, col 5 to line 31, col 26 of module PlacementIntent>
+State 3: <Complete line 36, col 5 to line 40, col 25 of module PlacementIntent>
 /\ completed = (0 :> 1 @@ 1 :> 1)
 /\ placements = ( 0 :>
-      [ generation |-> 3,
-        voters |-> {1, 2, 3},
-        complete |-> FALSE,
-        history |-> {1, 2, 3} ] @@
-  1 :>
-      [ generation |-> 1,
-        voters |-> {1, 2, 3},
-        complete |-> TRUE,
-        history |-> {1, 2, 3} ] )
-/\ assigned = (0 :> {1, 2, 3} @@ 1 :> {1, 2, 3})
-
-State 4: <Complete line 36, col 5 to line 40, col 25 of module PlacementIntent>
-/\ completed = (0 :> 1 @@ 1 :> 1)
-/\ placements = ( 0 :>
-      [ generation |-> 3,
+      [ generation |-> 2,
         voters |-> {1, 2, 3},
         complete |-> TRUE,
         history |-> {1, 2, 3} ] @@
@@ -69,7 +55,7 @@ State 4: <Complete line 36, col 5 to line 40, col 25 of module PlacementIntent>
         history |-> {1, 2, 3} ] )
 /\ assigned = (0 :> {1, 2, 3} @@ 1 :> {1, 2, 3})
 
-67 states generated, 27 distinct states found, 10 states left on queue.
+63 states generated, 27 distinct states found, 10 states left on queue.
 The depth of the complete state graph search is 4.
 The average outdegree of the complete state graph is 8 (minimum is 8, the maximum 8 and the 95th percentile is 8).
-Finished in 00s at (2026-10-03 19:12:29)
+Finished in 00s at (2026-10-03 23:11:20)
