@@ -256,6 +256,7 @@ async fn snapshot_rpc(
     Json(q): Json<InstallSnapshotRequest<TypeConfig>>,
 ) -> ApiResult {
     rpc_recipient(&a.identity, &headers)?;
+    snapshot_range(q.offset, q.data.len())?;
     Ok(Json(
         a.groups
             .get(&g)
@@ -265,6 +266,17 @@ async fn snapshot_rpc(
             .await,
     )
     .into_response())
+}
+fn snapshot_range(offset: u64, len: usize) -> Result<(), (StatusCode, String)> {
+    // Bound assembly, not just the final decoded snapshot. Checked addition also
+    // rejects malformed offsets without delegating allocation decisions to Raft.
+    if offset
+        .checked_add(len as u64)
+        .is_none_or(|end| end > chronicle_raft::storage::MAX_SNAPSHOT_BYTES as u64)
+    {
+        return Err((StatusCode::PAYLOAD_TOO_LARGE, "snapshot too large".into()));
+    }
+    Ok(())
 }
 fn rpc_recipient(
     identity: &identity::Identity,
@@ -908,6 +920,19 @@ mod tests {
         .await
         .unwrap();
         server.abort();
+    }
+
+    #[test]
+    fn snapshot_chunks_are_bounded_before_assembly() {
+        let limit = chronicle_raft::storage::MAX_SNAPSHOT_BYTES as u64;
+        assert!(snapshot_range(limit - 1, 1).is_ok());
+        assert!(snapshot_range(limit, 0).is_ok());
+        for (offset, len) in [(limit - 1, 2), (limit + 1, 0), (u64::MAX, 1)] {
+            assert_eq!(
+                snapshot_range(offset, len).unwrap_err().0,
+                StatusCode::PAYLOAD_TOO_LARGE
+            );
+        }
     }
 
     #[test]

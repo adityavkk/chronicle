@@ -30,7 +30,8 @@ type Result<T> = std::result::Result<T, StorageError<u64>>;
 type Job = Box<dyn FnOnce(&mut Worker) + Send>;
 const QUEUE_DEPTH: usize = 128;
 const SNAPSHOT_CHECKSUM_BYTES: usize = 32;
-const MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
+/// Maximum encoded snapshot size, enforced during receipt and before persistence.
+pub const MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
 static QUEUE: Histogram = Histogram::new();
 static PERSIST: Histogram = Histogram::new();
 static APPLY: Histogram = Histogram::new();

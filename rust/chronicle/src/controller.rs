@@ -60,10 +60,18 @@ async fn control(a: &Shared) -> anyhow::Result<State> {
         g.raft.ensure_linearizable().await?;
         return Ok(g.store.read_state().await?);
     }
-    for n in a.nodes.values() {
+    // Seeds can all retire. Persisted registry entries are routing hints, never
+    // authority: the destination still performs a strict read barrier.
+    let mut nodes = a.nodes.clone();
+    nodes.extend(g.store.read_state().await?.nodes);
+    let hint = g.raft.metrics().borrow().current_leader;
+    let mut candidates: Vec<_> = nodes.into_iter().filter(|(id, _)| *id != a.id).collect();
+    candidates.sort_by_key(|(id, n)| (Some(*id) != hint, n.draining));
+    for (_, n) in candidates {
         if let Ok(r) = a
             .client
             .get(format!("http://{}/admin/control", n.addr))
+            .timeout(Duration::from_millis(500))
             .send()
             .await
             && r.status().is_success()
@@ -316,6 +324,100 @@ mod tests {
     use super::*;
     use chronicle_raft::storage::SqliteStore;
     use openraft::{CommittedLeaderId, Entry, EntryPayload, LogId, Membership};
+
+    #[tokio::test]
+    async fn control_discovery_survives_unavailable_original_seeds() {
+        use crate::{App, Group, Network, Raft, identity, telemetry::Telemetry};
+        use axum::{Json, Router, routing::get};
+        use chronicle_raft::model::Node;
+        use std::sync::Arc;
+        use tokio::sync::{Mutex, Semaphore};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let registered = Node {
+            addr: listener.local_addr().unwrap().to_string(),
+            zone: "new".into(),
+            draining: false,
+        };
+        // Distinct remote state proves discovery did not return the local hints.
+        let remote = State {
+            nodes: BTreeMap::from([(9, registered.clone())]),
+            ..Default::default()
+        };
+        let router = Router::new().route("/admin/control", get(move || async { Json(remote) }));
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let temp = tempfile::tempdir().unwrap();
+        let mut store = SqliteStore::open(temp.path().join("control"))
+            .await
+            .unwrap();
+        store
+            .apply(vec![Entry {
+                log_id: LogId::new(CommittedLeaderId::new(1, 1), 1),
+                payload: EntryPayload::Normal(Command::Register {
+                    id: 4,
+                    node: registered,
+                }),
+            }])
+            .await
+            .unwrap();
+        let client = reqwest::Client::new();
+        let raft = Raft::new(
+            2,
+            Arc::new(openraft::Config::default().validate().unwrap()),
+            Network {
+                client: client.clone(),
+                cluster: "test".into(),
+                group: 0,
+            },
+            store.clone(),
+            store.clone(),
+        )
+        .await
+        .unwrap();
+        let (logs, _guard) = tracing_appender::non_blocking(std::io::sink());
+        let app = Arc::new(App {
+            id: 2,
+            identity: identity::Identity {
+                node: 2,
+                cluster: "test".into(),
+                genesis: true,
+            },
+            nodes: BTreeMap::from([(
+                1,
+                Node {
+                    addr: "127.0.0.1:0".into(),
+                    zone: "old".into(),
+                    draining: true,
+                },
+            )]),
+            groups: BTreeMap::from([(
+                0,
+                Group {
+                    raft,
+                    store: store.clone(),
+                    movement: Mutex::new(()),
+                },
+            )]),
+            client,
+            admission: Arc::new(Semaphore::new(1)),
+            telemetry: Arc::new(Telemetry::new(2, logs.error_counter(), String::new())),
+        });
+        assert_eq!(
+            control(&app)
+                .await
+                .unwrap()
+                .nodes
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![9]
+        );
+        app.groups[&0].raft.shutdown().await.unwrap();
+        server.abort();
+        assert!(control(&app).await.is_err());
+        drop(app);
+        store.close().await;
+    }
 
     #[tokio::test]
     async fn every_ineligible_campaign_clears_without_touching_storage() {
