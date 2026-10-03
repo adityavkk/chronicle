@@ -1,0 +1,23 @@
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+Sending build context to Docker daemon  91.62MB
+Step 1/5 : FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
+ ---> 3783cc01769c
+Step 2/5 : COPY target/release/chronicle-raft /usr/local/bin/chronicle-raft
+ ---> dc03f129b73e
+Step 3/5 : USER 1000:1000
+ ---> Running in 46160bd5300a
+ ---> Removed intermediate container 46160bd5300a
+ ---> a02e67298d2b
+Step 4/5 : ENTRYPOINT ["/usr/local/bin/chronicle-raft"]
+ ---> Running in b8e4ef9a38c3
+ ---> Removed intermediate container b8e4ef9a38c3
+ ---> 0cad49026fde
+Step 5/5 : LABEL org.opencontainers.image.revision=5c31d0e4934d925333d3ed2ddc5fc8c880aaf63e
+ ---> Running in cd55beb3763c
+ ---> Removed intermediate container cd55beb3763c
+ ---> 6546e204e1ab
+Successfully built 6546e204e1ab
+Successfully tagged chronicle-raft:stream-order

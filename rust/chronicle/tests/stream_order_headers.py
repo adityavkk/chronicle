@@ -66,7 +66,9 @@ def run(args):
                 assert call(base, "GET", path)["body"] == "xxx"
                 # A comma is part of one opaque token, not a list delimiter.
                 assert call(base, "POST", path, [("stream-seq", "3,4")], b"y")["status"] == 204
-                assert call(base, "GET", path)["body"] == "xxxy"
+                assert call(base, "POST", path, [("stream-seq", "3!")], b"wrong")["status"] == 409
+                assert call(base, "POST", path, [("stream-seq", "3-")], b"z")["status"] == 204
+                assert call(base, "GET", path)["body"] == "xxxyz"
             after = json.loads(call(base, "GET", "/admin/status")["body"])
             for shard in paths:
                 old, new = before[str(shard)], after[str(shard)]

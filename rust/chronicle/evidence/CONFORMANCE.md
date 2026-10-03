@@ -215,3 +215,37 @@ identities are retained in `producer-reply-pods.json`. The unmodified full suite
 `conformance-producer-reply-64016` reports **200 passed, 126 failed, 6 skipped**:
 ten producer/closure tests improve, with no new failures. Full compatibility
 remains unfinished, including producer input validation outside this change.
+
+## Stream-wide ordering committed with application state
+
+Source `5c31d0e` implements optional per-incarnation `Stream-Seq`, compared by
+bytes, not numerically. Empty and absent differ; absent leaves the token intact.
+Fences/cached-success lookup retain precedence, and conflicts consume neither
+sequence nor epoch. Payload, producer state and token share the existing durable
+apply transaction and snapshot. Metadata bounds include the token. Missing
+fields in legacy commands/snapshots default absent; mixed versions and downgrade
+after token-bearing writes are unsupported.
+
+Formal-first `2532b19` includes Lean byte-order/transitivity/preservation proofs
+and a 98-state bounded TLC check. The first model accidentally excluded
+duplicates through an unparenthesized conjunction; its negative control failed
+to find a counterexample. That failed run is retained as `stream-order-formal-draft`
+and `stream-order-draft-missed-duplicate`, not counted as success. After fixing
+the model, both numeric-order and duplicate-update mutations produce actual
+counterexamples. All `make formal` checks passed before implementation.
+
+`stream-order-check-reviewed.txt` records passing fmt/clippy/tests/docs, including
+snapshot/install/reopen, legacy replay, rejected epoch changes, capacity and
+rank-model property tests. Independent review found first-value-only header
+parsing could ignore a malformed second field. The implemented fix rejects
+repeated fields; a follow-up review closed that blocker. Live raw HTTP tests use
+separate header fields, verify rejection leaves the tuple available, and exercise
+all four shards through three pinned-pod ingresses. Stable before/after status
+classifies direct/forwarded paths; it is not per-request leadership evidence.
+These schema-3 histories are contract fixtures, not Porcupine histories.
+
+All five retained-PVC pods run `chronicle-raft:stream-order`; image/source identity
+is in `stream-order-image-identity.txt` and `stream-order-pods.json`. The extended
+HTTP matrix passed. The unchanged full suite `conformance-stream-order` reports
+**213 passed, 113 failed, 6 skipped**: thirteen improvements, no new failures
+relative to `conformance-producer-reply-64016`. Full compatibility remains failing.
