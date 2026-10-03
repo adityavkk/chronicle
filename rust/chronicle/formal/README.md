@@ -255,3 +255,31 @@ a different command is not a refinement of the requested operation. This gate
 does not make those features conformant; their state transitions remain missing.
 Middleware tests must distinguish rejection from request admission and prove a
 missing request body cannot delay it. HTTP parsing itself is not formally proved.
+
+## Pending writes retain admission after HTTP cancellation
+
+`Admission.tla` separates the HTTP lifetime (`active`) from outstanding local
+Raft proposal tracking (`pending`). `Finish` includes timeout, disconnect and
+normal response completion; it cannot release the last permit while the proposal
+is pending. `Complete` means the local Raft completion waiter terminates, not
+necessarily that the operation was rejected or even that its durable log entry
+can never apply. Timeout remains an unknown outcome in the stream history model.
+The negative mutation releases admission at timeout and violates `PendingOwned`.
+
+Implementation mapping, specified before the fix: a detached completion task
+owns a clone of the request admission guard and awaits `client_write` without an
+HTTP deadline. The caller may time out or disconnect without cancelling that task.
+The same ownership is needed for expiry proposals initiated by reads. Bodies and
+commands remain size-bounded. This bounds outstanding proposals from the public
+stream endpoint, not trusted administrative RPCs, library-internal queues, total
+disk usage or a cluster's globally aggregated requests. Runtime shutdown ends local
+tracking without asserting a no-effect result. No fairness or eventual quorum is
+assumed for this safety check; without quorum all slots may remain occupied.
+This is a bounded resource model, not a mechanized refinement proof.
+
+Review identified the same cancellation boundary for `ensure_linearizable`:
+it submits a barrier to the core queue before awaiting a response. The strict
+read path now retains guards in a detached barrier waiter too. `Submit` and
+`Complete` can also represent this local waiter; no application mutation is
+asserted for a read barrier. The forwarding metadata actor queue remains separately
+bounded, and this model does not claim every internal Raft allocation is covered.
