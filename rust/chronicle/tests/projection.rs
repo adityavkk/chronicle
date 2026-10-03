@@ -219,6 +219,49 @@ async fn snapshot_fences_unopened_metadata_even_for_identical_bytes() {
     store.close().await;
 }
 
+#[tokio::test]
+async fn notifications_coalesce_applies_and_only_signal_successful_snapshot_install() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = SqliteStore::open(dir.path().join("notifications"))
+        .await
+        .unwrap();
+    let mut changes = store.applied_changes();
+    assert!(!changes.has_changed().unwrap());
+    apply(&mut store, 1, create(b"abc", None)).await;
+    apply(
+        &mut store,
+        2,
+        Command::Append {
+            key: "s".into(),
+            incarnation: 1,
+            data: b"XYZW".to_vec(),
+            producer: None,
+            close: false,
+        },
+    )
+    .await;
+    // Both applies preceded awaiting: the wake must not be lost, and the reader
+    // must fetch authority rather than interpret one notification as one append.
+    assert!(changes.has_changed().unwrap());
+    changes.changed().await.unwrap();
+    assert_eq!(store.read_info("s".into()).await.unwrap().unwrap().end, 7);
+    let snapshot = store.build_snapshot().await.unwrap();
+    assert!(!changes.has_changed().unwrap());
+    assert!(
+        store
+            .install_snapshot(&snapshot.meta, Box::new(std::io::Cursor::new(vec![0])))
+            .await
+            .is_err()
+    );
+    assert!(!changes.has_changed().unwrap());
+    store
+        .install_snapshot(&snapshot.meta, snapshot.snapshot)
+        .await
+        .unwrap();
+    assert!(changes.has_changed().unwrap());
+    store.close().await;
+}
+
 #[test]
 fn cancellation_retains_admission_until_queued_blocking_read_finishes() {
     let runtime = tokio::runtime::Builder::new_current_thread()

@@ -41,6 +41,7 @@ pub struct App {
     pub groups: BTreeMap<u64, Group>,
     pub client: reqwest::Client,
     pub admission: Arc<Semaphore>,
+    pub live_admission: Arc<Semaphore>,
     pub telemetry: Arc<telemetry::Telemetry>,
 }
 type Shared = Arc<App>;
@@ -183,6 +184,7 @@ async fn main() -> anyhow::Result<()> {
         groups,
         client,
         admission: Arc::new(Semaphore::new(128)),
+        live_admission: Arc::new(Semaphore::new(32)),
         telemetry: Arc::new(telemetry::Telemetry::new(
             id,
             log_errors,
@@ -309,6 +311,10 @@ async fn status(State(a): State<Shared>) -> Response {
 }
 async fn metrics(State(a): State<Shared>) -> String {
     let mut text = a.telemetry.metrics();
+    text.push_str(&format!(
+        "# TYPE chronicle_live_read_available_slots gauge\nchronicle_live_read_available_slots {}\n",
+        a.live_admission.available_permits()
+    ));
     for (id, g) in &a.groups {
         let m = g.raft.metrics().borrow().clone();
         text.push_str(&format!("chronicle_raft_leader{{group=\"{id}\"}} {}\nchronicle_raft_applied{{group=\"{id}\"}} {}\n", u8::from(m.current_leader == Some(a.id)), m.last_applied.map_or(0, |l| l.index)));
@@ -634,12 +640,40 @@ async fn stream_inner(
     }
     let g = &a.groups[&shard];
     let stale = query.get("consistency").is_some_and(|v| v == "stale") && method == Method::GET;
+    let poll = match query.get("live").map(String::as_str) {
+        None => false,
+        Some("long-poll") if method == Method::GET && !stale && query.contains_key("offset") => {
+            true
+        }
+        _ => {
+            return Err(bad(
+                "live reads require strict GET, offset and live=long-poll",
+            ));
+        }
+    };
+    // Reserve fewer waiters than the overall request limit, including on ingress
+    // forwarders, so quiet long polls cannot occupy every writer admission slot.
+    let _live = if poll {
+        Some(Arc::new(
+            a.live_admission.clone().try_acquire_owned().map_err(|_| {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "live read admission full".into(),
+                )
+            })?,
+        ))
+    } else {
+        None
+    };
     if !stale && g.raft.metrics().borrow().current_leader != Some(a.id) {
         let started = Instant::now();
         let result = proxy(a, shard, method, &uri.to_string(), headers, body).await;
         timings.forward_us = started.elapsed().as_micros() as u64;
         return result;
     }
+    let changes = _live
+        .as_ref()
+        .map(|permit| (g.store.applied_changes(), permit.clone()));
     let existing = read_visible_info(g, &key, stale, timings).await?;
     let h = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
     let close = h("stream-closed") == Some("true");
@@ -647,11 +681,13 @@ async fn stream_inner(
         .unwrap_or("application/octet-stream")
         .to_string();
     if method == Method::GET || method == Method::HEAD {
-        let s = existing.ok_or_else(|| (StatusCode::NOT_FOUND, "stream missing".into()))?;
+        let mut s = existing.ok_or_else(|| (StatusCode::NOT_FOUND, "stream missing".into()))?;
         let offset =
             match wire::parse_offset(query.get("offset").map(String::as_str)).map_err(bad)? {
                 ParsedOffset::Start => 0,
                 ParsedOffset::Now => s.end,
+                // Electric treats a future live cursor as caught up at this tail.
+                ParsedOffset::At(n) if poll => n.min(s.end),
                 ParsedOffset::At(n) => n,
             };
         if offset > s.end {
@@ -660,19 +696,33 @@ async fn stream_inner(
                 "offset beyond committed tail".into(),
             ));
         }
-        let started = Instant::now();
-        let file = g.store.read_file(key, &s, offset).await;
-        timings.read_us += started.elapsed().as_micros() as u64;
-        let file = file.map_err(|e| match e {
-            chronicle_raft::storage::ReadError::Offset => bad(e),
-            _ => unavailable(e),
-        })?;
+        let cursor = if let Some((changes, live_permit)) = changes {
+            let client = query
+                .get("cursor")
+                .map(|v| v.parse::<u64>().map_err(bad))
+                .transpose()?;
+            s = wait_for_data(
+                g,
+                &key,
+                offset,
+                s,
+                changes,
+                timings,
+                [admission.clone(), live_permit],
+            )
+            .await?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            Some(wire::compute_cursor(client, now).map_err(bad)?)
+        } else {
+            None
+        };
         let json = s.config.content_type.starts_with("application/json");
         let length = (s.end - offset).saturating_sub(u64::from(json));
         let mut r = Response::builder()
             .status(200)
             .header("content-type", &s.config.content_type)
-            .header("content-length", length + if json { 2 } else { 0 })
             .header("stream-next-offset", wire::format_offset(s.end))
             .header("stream-up-to-date", "true")
             .header("stream-incarnation", s.incarnation.to_string())
@@ -681,7 +731,21 @@ async fn stream_inner(
         if s.closed {
             r = r.header("stream-closed", "true");
         }
+        if let Some(cursor) = cursor {
+            r = r.header("stream-cursor", cursor.to_string());
+            if offset == s.end {
+                return r.status(204).body(Body::empty()).map_err(unavailable);
+            }
+        }
+        let started = Instant::now();
+        let file = g.store.read_file(key, &s, offset).await;
+        timings.read_us += started.elapsed().as_micros() as u64;
+        let file = file.map_err(|e| match e {
+            chronicle_raft::storage::ReadError::Offset => bad(e),
+            _ => unavailable(e),
+        })?;
         return r
+            .header("content-length", length + if json { 2 } else { 0 })
             .body(if method == Method::HEAD {
                 Body::empty()
             } else {
@@ -797,6 +861,41 @@ async fn stream_inner(
         .header("stream-duplicate", result.data.duplicate.to_string())
         .body(Body::empty())
         .map_err(unavailable)
+}
+
+async fn wait_for_data(
+    g: &Group,
+    key: &str,
+    offset: u64,
+    mut view: chronicle_raft::storage::StreamInfo,
+    mut changes: tokio::sync::watch::Receiver<()>,
+    timings: &mut telemetry::PhaseTimings,
+    _admission: [Arc<tokio::sync::OwnedSemaphorePermit>; 2],
+) -> Result<chronicle_raft::storage::StreamInfo, (StatusCode, String)> {
+    let incarnation = view.incarnation;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while view.end == offset && !view.closed && tokio::time::Instant::now() < deadline {
+        let waiting = Instant::now();
+        tokio::select! {
+            result = changes.changed() => { result.map_err(unavailable)?; }
+            _ = tokio::time::sleep_until(deadline) => {
+                #[cfg(feature = "storage-faults")]
+                chronicle_raft::faults::before_live_recheck(model::shard(key), _admission.clone())
+                    .await
+                    .map_err(unavailable)?;
+            }
+        }
+        timings.wait_us += waiting.elapsed().as_micros() as u64;
+        // Recheck after a deadline too: never return an empty response carrying
+        // the offset of bytes that arrived during the wait but were not delivered.
+        view = read_visible_info(g, key, false, timings)
+            .await?
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "stream missing".into()))?;
+        if view.incarnation != incarnation {
+            return Err((StatusCode::CONFLICT, "stream incarnation changed".into()));
+        }
+    }
+    Ok(view)
 }
 
 /// Strict visibility and expiration are shared by initial reads and subsequent

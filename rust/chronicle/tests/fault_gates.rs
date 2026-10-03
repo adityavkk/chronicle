@@ -5,8 +5,8 @@ use std::process::{Child, Command as ProcessCommand};
 use std::time::{Duration, Instant};
 
 use chronicle_raft::faults::{
-    AFTER_APPLY_COMMIT, AFTER_LOG_COMMIT, AFTER_SNAPSHOT_INSTALL, BEFORE_SNAPSHOT_INSTALL,
-    store_directory,
+    AFTER_APPLY_COMMIT, AFTER_LOG_COMMIT, AFTER_SNAPSHOT_INSTALL, BEFORE_LIVE_RECHECK,
+    BEFORE_SNAPSHOT_INSTALL, before_live_recheck, store_directory,
 };
 use chronicle_raft::model::{Command, StreamConfig};
 use chronicle_raft::{TypeConfig, storage::SqliteStore};
@@ -123,10 +123,80 @@ fn fault_gate_child() {
                     .await
                     .unwrap();
             }
+            "live-cancel" => {
+                use std::sync::Arc;
+                use tokio::sync::Semaphore;
+                let requests = Arc::new(Semaphore::new(4));
+                let live = Arc::new(Semaphore::new(1));
+                let directory = store_directory(&root.join("controls"), Path::new("http-live-1"));
+                let task = tokio::spawn(before_live_recheck(
+                    1,
+                    [
+                        Arc::new(requests.clone().try_acquire_owned().unwrap()),
+                        Arc::new(live.clone().try_acquire_owned().unwrap()),
+                    ],
+                ));
+                tokio::time::timeout(DEADLINE, async {
+                    while !directory
+                        .join(format!("{BEFORE_LIVE_RECHECK}.reached"))
+                        .is_file()
+                    {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                })
+                .await
+                .unwrap();
+                task.abort();
+                assert!(task.await.unwrap_err().is_cancelled());
+                assert_eq!(requests.available_permits(), 3);
+                assert!(live.try_acquire().is_err());
+                // All three reserved writer slots remain available while a
+                // cancelled live task is still detached and blocked in the gate.
+                drop(requests.clone().try_acquire_many_owned(3).unwrap());
+                std::fs::write(root.join("cancelled"), b"checked").unwrap();
+                tokio::time::timeout(DEADLINE, async {
+                    while requests.available_permits() != 4 || live.available_permits() != 1 {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                })
+                .await
+                .unwrap();
+            }
             _ => panic!("unknown child operation"),
         }
         store.close().await;
     });
+}
+
+#[test]
+fn cancelled_live_gate_retains_writer_reservation() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let mut child = spawn_child(root, "live-cancel");
+    wait_for(&root.join("setup"), &mut child);
+    let directory = store_directory(&root.join("controls"), Path::new("http-live-1"));
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join(format!("{BEFORE_LIVE_RECHECK}.arm")),
+        b"armed",
+    )
+    .unwrap();
+    std::fs::write(root.join("trigger"), b"go").unwrap();
+    wait_for(&root.join("cancelled"), &mut child);
+    std::fs::write(
+        directory.join(format!("{BEFORE_LIVE_RECHECK}.release")),
+        b"release",
+    )
+    .unwrap();
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert!(status.success());
+            break;
+        }
+        assert!(Instant::now() < deadline, "released child did not finish");
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]

@@ -46,6 +46,7 @@ pub fn timing_metrics(text: &mut String) {
 pub struct SqliteStore {
     tx: mpsc::Sender<Job>,
     stopped: tokio::sync::watch::Receiver<bool>,
+    applied: tokio::sync::watch::Sender<()>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -129,13 +130,26 @@ impl SqliteStore {
         ready_rx
             .await
             .map_err(|e| io_err(ErrorSubject::Store, ErrorVerb::Read, e))??;
-        Ok(Self { tx, stopped })
+        let (applied, _) = tokio::sync::watch::channel(());
+        Ok(Self {
+            tx,
+            stopped,
+            applied,
+        })
+    }
+
+    /// Subscribe before capturing a read view to avoid missed wakeups. Signals
+    /// coalesce and are only hints; consumers still require a safe read barrier.
+    pub fn applied_changes(&self) -> tokio::sync::watch::Receiver<()> {
+        self.applied.subscribe()
     }
 
     /// Release the final store handle and await durable actor shutdown.
     /// All other clones (including Raft) must already have been dropped.
     pub async fn close(self) {
-        let Self { tx, mut stopped } = self;
+        let Self {
+            tx, mut stopped, ..
+        } = self;
         drop(tx);
         let _ = stopped.wait_for(|done| *done).await;
     }
@@ -562,6 +576,7 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
         I::IntoIter: openraft::OptionalSend,
     {
         let es: Vec<_> = entries.into_iter().collect();
+        let applied = self.applied.clone();
         self.call(move |w| {
             let started = Instant::now();
             let result = w.state_transaction(|t, s| {
@@ -610,6 +625,9 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                 }
                 Ok(out)
             });
+            if result.is_ok() {
+                applied.send_replace(());
+            }
             #[cfg(feature = "storage-faults")]
             let result = result.and_then(|out| {
                 w.faults
@@ -641,6 +659,7 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
             )));
         }
         let supplied = meta.clone();
+        let applied = self.applied.clone();
         self.call(move |w| {
             let body = decode_snapshot(&bytes)?;
             if body.last_applied != supplied.last_log_id
@@ -673,6 +692,7 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
             if result.is_ok() {
                 w.projection.invalidate();
                 w.read_generation = Arc::new(());
+                applied.send_replace(());
             }
             #[cfg(feature = "storage-faults")]
             let result = result.and_then(|()| {

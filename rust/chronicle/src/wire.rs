@@ -9,6 +9,18 @@ pub fn format_offset(bytes: u64) -> String {
     format!("{:016}_{:016}", 0, bytes)
 }
 
+/// Electric store.rs cursor intervals and clock-derived jitter. Unlike upstream,
+/// take the clock explicitly and reject client-controlled integer overflow.
+pub fn compute_cursor(client: Option<u64>, now: std::time::Duration) -> Result<u64, &'static str> {
+    let interval = now.as_secs().saturating_sub(1_728_432_000) / 20;
+    match client {
+        Some(cursor) if cursor >= interval => cursor
+            .checked_add(1 + u64::from(now.subsec_nanos() % 180))
+            .ok_or("cursor overflow"),
+        _ => Ok(interval),
+    }
+}
+
 pub enum ParsedOffset {
     Start,
     Now,
@@ -119,5 +131,22 @@ pub fn file_body(
         )
     } else {
         axum::body::Body::from_stream(reader)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn cursor_crosses_interval_and_rejects_overflow() {
+        let now = Duration::new(1_728_432_000 + 39, 179);
+        assert_eq!(compute_cursor(None, now), Ok(1));
+        assert_eq!(compute_cursor(Some(0), now), Ok(1));
+        assert_eq!(compute_cursor(Some(1), now), Ok(181));
+        assert_eq!(compute_cursor(None, now + Duration::from_secs(1)), Ok(2));
+        assert_eq!(compute_cursor(Some(u64::MAX - 180), now), Ok(u64::MAX));
+        assert!(compute_cursor(Some(u64::MAX - 179), now).is_err());
     }
 }

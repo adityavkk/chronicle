@@ -133,6 +133,7 @@ pub fn commit_apply(elapsed: Duration) {
 pub struct PhaseTimings {
     pub barrier_us: u64,
     pub read_us: u64,
+    pub wait_us: u64,
     pub proposal_us: u64,
     pub forward_us: u64,
 }

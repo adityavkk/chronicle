@@ -19,6 +19,22 @@ pub const AFTER_SNAPSHOT_INSTALL: &str = "after-snapshot-install-transaction";
 /// Uses the synthetic filename `http-body`; pauses the blocking file reader,
 /// not the SQLite actor. The harness can then truncate only its disposable cache.
 pub const BEFORE_BODY_READ: &str = "before-response-file-read";
+/// Pause only after a live-read deadline, before its fresh strict read. The
+/// synthetic filename is `http-live-SHARD`; only the external harness releases it.
+pub const BEFORE_LIVE_RECHECK: &str = "before-live-timeout-recheck";
+
+pub async fn before_live_recheck(
+    shard: u64,
+    admission: [std::sync::Arc<tokio::sync::OwnedSemaphorePermit>; 2],
+) -> io::Result<()> {
+    tokio::task::spawn_blocking(move || {
+        // Retain both request and live admission if the async caller is cancelled.
+        let _admission = admission;
+        Context::new(Path::new(&format!("http-live-{shard}"))).hit(BEFORE_LIVE_RECHECK)
+    })
+    .await
+    .map_err(io::Error::other)?
+}
 
 pub struct Context {
     directory: Option<PathBuf>,

@@ -400,6 +400,7 @@ mod tests {
             )]),
             client,
             admission: Arc::new(Semaphore::new(1)),
+            live_admission: Arc::new(Semaphore::new(1)),
             telemetry: Arc::new(Telemetry::new(2, logs.error_counter(), String::new())),
         });
         assert_eq!(

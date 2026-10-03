@@ -4,7 +4,7 @@
 set -euo pipefail
 action=${1:?usage: partition.sh isolate|heal agent-number}
 ordinal=${2:?agent number}
-[[ "$ordinal" =~ ^[0-9]+$ ]] || exit 2
+[[ "$ordinal" =~ ^[0-9]+(-[0-9]+)?$ ]] || exit 2
 node="k3d-chronicle-rust-agent-$ordinal"
 sudo docker inspect "$node" >/dev/null
 rule() { sudo docker exec "$node" iptables "$@"; }

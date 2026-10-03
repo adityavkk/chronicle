@@ -46,11 +46,14 @@ class Client:
     def __init__(self, urls, tenant, path, timeout, rng):
         self.urls, self.tenant, self.path, self.timeout, self.rng = urls, tenant, path, timeout, rng
 
-    def request(self, method, body=b"", headers=None, stale=False):
+    def request(self, method, body=b"", headers=None, stale=False, query=None):
         base = self.rng.choice(self.urls).rstrip("/")
         path = "/v1/stream/{}/{}".format(urllib.parse.quote(self.tenant), urllib.parse.quote(self.path, safe="/"))
+        parameters = dict(query or {})
         if stale:
-            path += "?consistency=stale"
+            parameters["consistency"] = "stale"
+        if parameters:
+            path += "?" + urllib.parse.urlencode(parameters)
         req = urllib.request.Request(base + path, data=body if method in ("PUT", "POST") else None,
                                      headers=headers or {}, method=method)
         try:

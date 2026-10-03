@@ -22,6 +22,15 @@ def history(reads, writes=()):
     return ev
 
 class CheckerTest(unittest.TestCase):
+    def test_query_encoding_preserves_inputs_and_explicit_stale_mode(self):
+        client = H.Client(["http://unused"], "t", "p", 1, random.Random(0))
+        query = {"offset": "a b&c", "consistency": "strict"}
+        with patch.object(H.urllib.request, "urlopen") as open_url:
+            client.request("GET", stale=True, query=query)
+        actual = H.urllib.parse.parse_qs(H.urllib.parse.urlsplit(open_url.call_args.args[0].full_url).query)
+        self.assertEqual(actual, {"offset": ["a b&c"], "consistency": ["stale"]})
+        self.assertEqual(query, {"offset": "a b&c", "consistency": "strict"})
+
     def test_unknown_retry_is_paced_and_never_skips_a_sequence(self):
         for retries, expected in [(1, ["0", "0"]), (2, ["0", "0", "0", "1"])]:
             with tempfile.TemporaryDirectory() as directory:
