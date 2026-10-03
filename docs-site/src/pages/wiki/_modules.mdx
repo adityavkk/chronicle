@@ -294,7 +294,7 @@ matches, write.
   source="store/redis/scripts/append.lua"
   label="The write path, after validation passes"
   steps={[
-    { cmd: "compare tail", does: "If the live <code>tail</code> moved since the Go caller snapshotted it, return <code>RETRY</code> and write nothing. The caller re-snapshots and re-runs the script.", loc: "store/redis/scripts/append.lua:93", kind: "flow" },
+    { cmd: "compare tail", does: "If the live <code>tail</code> moved since the Go caller snapshotted it, return <code>RETRY</code> carrying the live tail and write nothing. The caller reframes against that tail and re-runs the script.", loc: "store/redis/scripts/append.lua:93", kind: "flow" },
     { cmd: "ZADD", key: "ds:{p}:msg", does: "Write each frame into the sorted set, keyed by its offset string.", loc: "store/redis/scripts/append.lua:100" },
     { cmd: "HSET", key: "ds:{p}:meta", does: "Advance the stored <code>tail</code> to the new offset.", loc: "store/redis/scripts/append.lua:108" },
     { cmd: "PUBLISH", key: "ds:notify:{p}", does: "Wake any long-poll waiter with <code>a</code> (append) or <code>c</code> (close).", loc: "store/redis/scripts/append.lua:139" },
@@ -302,9 +302,9 @@ matches, write.
   caption="The closed-stream, content-type, producer, and <code>Stream-Seq</code> checks run before this block. Every command here runs inside the same EVALSHA, so the compare-and-write is atomic."
 />
 
-<Aside label="Edge case" summary="Why the retry loop is bounded at 64">
-  The Go caller re-snapshots the tail and re-runs the script on every
-  <code>RETRY</code>, up to 64 attempts. Past that it returns an error rather
+<Aside label="Edge case" summary="Why the retry loop is bounded at 128">
+  The Go caller reframes against the tail each <code>RETRY</code> carries and
+  re-runs the script, one round trip per attempt, up to 128 attempts. Past that it returns an error rather
   than spin forever under pathological contention on one stream.
 </Aside>
 
@@ -313,7 +313,7 @@ matches, write.
   <Table>
     | Piece | Where | Does |
     | --- | --- | --- |
-    | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L533) | `store.go` | reads the tail, frames the batch, runs the script, retries on `RETRY` |
+    | [`Store.Append`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L533) | `store.go` | frames the batch against the caller's tail hint (or one read of tail and content type), runs the script, reframes against the tail a `RETRY` carries |
     | [`keysFor`](https://github.com/adityavkk/chronicle/blob/main/store/redis/keys.go#L45) | `keys.go` | builds the four `{path}`-tagged keys for one slot |
     | [`ReadPage`](https://github.com/adityavkk/chronicle/blob/main/store/redis/store.go#L670) | `store.go` | captures one typed root snapshot and returns a bounded root-owned range in the same script |
     | [`SubscribeNotifications`](https://github.com/adityavkk/chronicle/blob/main/store/redis/notify.go) | `notify.go` | registers one logical channel through the store-owned multiplexer and confirms the current physical connection generation |

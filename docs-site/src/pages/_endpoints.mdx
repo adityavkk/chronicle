@@ -267,10 +267,11 @@ import Aside from "../components/Aside.astro";
 
   `POST {stream-url}` with a body appends one batch. In JSON mode the body
   is a JSON array, flattened one level into individual messages. Otherwise
-  the whole body is one message.[^append] The store frames the bytes against a
-  tail snapshot, then runs `append.lua`, which re-validates and writes in one
-  atomic step. A concurrent append that moved the tail returns `RETRY`, and the
-  store re-frames up to 64 times before giving up.
+  the whole body is one message.[^append] The store frames the bytes against the
+  tail the handler's metadata read returned, then runs `append.lua`, which
+  re-validates and writes in one atomic step. A concurrent append that moved the
+  tail returns `RETRY` carrying the live tail, and the store re-frames against it
+  up to 128 times before giving up.
 
   ```http title="Append two JSON messages"
   POST /v1/stream/chat HTTP/1.1
@@ -289,7 +290,7 @@ import Aside from "../components/Aside.astro";
   <Diagram
     name="seq-append"
     label="POST, append"
-    caption="On RETRY the store loops back to the HMGET snapshot and re-frames against the new tail. Once a new append commits, the handler records one bounded local dirty hint and returns. Subscription fanout runs in the background."
+    caption="On RETRY the store re-frames against the live tail the reply carries and runs the script again, with no second read. Once a new append commits, the handler records one bounded local dirty hint and returns. Subscription fanout runs in the background."
   />
 
   <Callout icon="arrow" label="The subscription boundary">
@@ -312,7 +313,7 @@ import Aside from "../components/Aside.astro";
       { cmd: "HSET", key: "ds:{p}:meta accessedAtNs", does: "The sliding-TTL touch. Upstream touches before the closed check, so even an append about to be rejected slides the idle window forward.", loc: "append.lua:50" },
       { cmd: "PEXPIRE", key: "ds:{p}:*", does: "Re-arm the backstop against the new <code>accessedAtNs</code>.", loc: "append.lua:51" },
       { cmd: "validate", does: "In spec precedence: closed stream → <code>CLOSED</code> (<strong>409</strong> + <code>Stream-Closed</code>) unless the body duplicates the closing producer tuple, then content-type mismatch → <code>CTMISMATCH</code> (<strong>409</strong>), then <code>Stream-Seq ≤ lastSeq</code> → <code>SEQCONFLICT</code> (<strong>409</strong>).", loc: "append.lua:55", kind: "flow" },
-      { cmd: "tail == expected?", does: "The optimistic check. Go framed the bytes against a tail snapshot; if a concurrent append moved the tail, return <code>RETRY</code> and let Go re-frame.", loc: "append.lua:93", kind: "flow" },
+      { cmd: "tail == expected?", does: "The optimistic check. Go framed the bytes against a tail snapshot; if a concurrent append moved the tail, return <code>RETRY</code> with the live tail and let Go re-frame against it.", loc: "append.lua:93", kind: "flow" },
       { cmd: "ZADD", key: "ds:{p}:msg", does: "Write each frame <code>\"&lt;endOffset&gt;|&lt;bytes&gt;\"</code> at score <code>0</code>, chunked 1000 at a time (Lua's <code>unpack</code> is C-stack bounded).", loc: "append.lua:104" },
       { cmd: "HSET", key: "ds:{p}:meta tail", does: "Advance the tail to the new end offset, in the same script as the frame writes.", loc: "append.lua:108" },
       { cmd: "PUBLISH", key: "ds:notify:{p}", does: "Send <code>a</code> (or <code>c</code> when the append also closes), waking every long-poll and SSE waiter on the stream.", loc: "append.lua:139" },

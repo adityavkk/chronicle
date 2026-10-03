@@ -250,13 +250,17 @@ import Aside from "../components/Aside.astro";
 
   ### Append collapse under <em>concurrent writers</em>
 
-  `store/redis` retries a contended append optimistically, up to 64 times
-  with no backoff. With several appends in flight against one stream the
-  retries collide, and past about 1,000/s in total every request uses all 64
-  attempts and fails. Goodput drops to zero and stays there while load
+  `store/redis` retries a contended append optimistically with no backoff. In
+  the 2026-06-10 run every attempt was a metadata read followed by the script,
+  bounded at 64 attempts. With several appends in flight against one stream
+  the retries collide, and past about 1,000/s in total every request used all
+  64 attempts and failed. Goodput drops to zero and stays there while load
   continues. With one in-flight append per stream, Chronicle instead sustains
   1,500/s across 50 streams with zero errors. The collapse is specific to
-  concurrent appends on a single stream.
+  concurrent appends on a single stream. The loop now frames against the tail
+  the handler read and the tail each `RETRY` reply carries, so an attempt is
+  one round trip, and it allows 128 of them; the collapse threshold has not
+  been re-measured with that loop.
 
   ### The live-read bottleneck moved from <em>Redis reads to client sockets</em>
 
