@@ -60,9 +60,17 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
   600, 600 and 720 records respectively. The partition run retained 23 unknown
   append attempts and 3 unknown reads. Untouched groups stayed empty. These checks
   do not cover a failed destination during initial learner catch-up.
+* [Membership admission fencing](evidence/MEMBERSHIP-ADMISSION.md) closes delayed
+  controller work across reelection and cancelled-membership completion races.
+  The narrowly patched, checksum-pinned OpenRaft source retains its licenses.
+* [Pending-target repair](evidence/PENDING-PLACEMENT.md) now supersedes a failed
+  catch-up destination without losing possible-voter history. Gated k3d histories
+  on the repaired and an unaffected shard each retained 720 records and received
+  Porcupine `Ok`. The tested gate was log persistence, not snapshot installation.
 * OpenRaft's pinned storage contract suite passes, alongside SQLite VFS faults,
   snapshot/reopen producer and membership checks, and a slow-body admission test.
-  Placement completion now reads applied membership, not effective Raft metrics.
+  New placement completion awaits a membership operation and verifies its applied
+  state; matching applied voters or a read barrier alone are insufficient.
 * VictoriaMetrics, VictoriaLogs and VictoriaTraces receive real request telemetry
   through the OTel Collector; Grafana has populated request/index/export panels.
   Bounded lossy exporters, W3C forwarding, separated loss/failure counters, stage

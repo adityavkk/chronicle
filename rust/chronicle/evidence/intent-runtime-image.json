@@ -1,0 +1,68 @@
+{
+  "info": {
+    "chainID": "sha256:e63561fe99c113e087a7c3e93782a979a4d88233ce3adeb284c2eaebb7ab436c",
+    "imageSpec": {
+      "architecture": "amd64",
+      "config": {
+        "Entrypoint": [
+          "/usr/local/bin/chronicle-raft"
+        ],
+        "Env": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        ],
+        "Labels": {
+          "org.opencontainers.image.revision": "a2a20c5cfe93e388af0628d1b1cbbbaf0ca685a5"
+        },
+        "User": "1000:1000"
+      },
+      "created": "2026-10-03T19:41:30.830898982Z",
+      "history": [
+        {
+          "comment": "debuerreotype 0.17",
+          "created": "2026-09-18T00:00:00Z",
+          "created_by": "# debian.sh --arch 'amd64' out/ 'bookworm' '@1789689600'"
+        },
+        {
+          "created": "2026-10-03T19:41:28.674823413Z",
+          "created_by": "/bin/sh -c #(nop) COPY file:1e6e4a3efbac8b65f1710e38d25878436141e33f8cf5c38d07f34f9266fae465 in /usr/local/bin/chronicle-raft "
+        },
+        {
+          "created": "2026-10-03T19:41:30.033898129Z",
+          "created_by": "/bin/sh -c #(nop)  USER 1000:1000",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-03T19:41:30.433222552Z",
+          "created_by": "/bin/sh -c #(nop)  ENTRYPOINT [\"/usr/local/bin/chronicle-raft\"]",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-03T19:41:30.830898982Z",
+          "created_by": "/bin/sh -c #(nop)  LABEL org.opencontainers.image.revision=a2a20c5cfe93e388af0628d1b1cbbbaf0ca685a5",
+          "empty_layer": true
+        }
+      ],
+      "os": "linux",
+      "rootfs": {
+        "diff_ids": [
+          "sha256:34467cc93912af891dfee8a3902adf9b4f355a9bca4eaa46f658d1181a21de0d",
+          "sha256:d90c97a72bd4cba9c21ba1211848d438ccb7073394b1719fe9b3f6db3960dd35"
+        ],
+        "type": "layers"
+      }
+    }
+  },
+  "status": {
+    "id": "sha256:99f9f5b63b41f87d084c07de6380e2c1a4827be15dfed3dbe3db0d0e4378450a",
+    "pinned": false,
+    "repoDigests": [],
+    "repoTags": [
+      "docker.io/library/chronicle-raft:pending-repair"
+    ],
+    "size": "54482876",
+    "uid": {
+      "value": "1000"
+    },
+    "username": ""
+  }
+}

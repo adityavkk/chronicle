@@ -1,0 +1,50 @@
+{
+  "intent-catchup": {
+    "counts": {
+      "('run', 'info')": 1,
+      "('create', 'invoke')": 1,
+      "('create', 'ok')": 1,
+      "('read', 'invoke')": 113,
+      "('append', 'invoke')": 720,
+      "('read', 'ok')": 111,
+      "('append', 'ok')": 706,
+      "('record', 'info')": 720,
+      "('nemesis', 'info')": 1,
+      "('append', 'unknown')": 14,
+      "('append-retry', 'invoke')": 16,
+      "('append-retry', 'ok')": 14,
+      "('append-retry', 'unknown')": 2,
+      "('read', 'unknown')": 2,
+      "('nemesis', 'ok')": 1
+    },
+    "traffic_shard": 4,
+    "gate": "after-log-commit-before-log-flushed",
+    "old_generation": 24,
+    "repaired_generation": 25,
+    "observed_repair_seconds": 23.251539196
+  },
+  "intent-catchup-shard1": {
+    "counts": {
+      "('run', 'info')": 1,
+      "('create', 'invoke')": 1,
+      "('create', 'ok')": 1,
+      "('read', 'invoke')": 110,
+      "('append', 'invoke')": 720,
+      "('read', 'ok')": 105,
+      "('append', 'ok')": 709,
+      "('record', 'info')": 720,
+      "('nemesis', 'info')": 1,
+      "('append', 'unknown')": 11,
+      "('append-retry', 'invoke')": 16,
+      "('append-retry', 'ok')": 11,
+      "('read', 'unknown')": 5,
+      "('append-retry', 'unknown')": 5,
+      "('nemesis', 'ok')": 1
+    },
+    "traffic_shard": 1,
+    "gate": "after-log-commit-before-log-flushed",
+    "old_generation": 26,
+    "repaired_generation": 27,
+    "observed_repair_seconds": 23.345484387
+  }
+}
