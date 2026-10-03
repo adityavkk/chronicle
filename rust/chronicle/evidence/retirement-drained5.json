@@ -1,0 +1,182 @@
+{
+  "drained": 5,
+  "control": {
+    "streams": {},
+    "nodes": {
+      "1": {
+        "addr": "chronicle-0.chronicle:8080",
+        "zone": "a",
+        "draining": false
+      },
+      "2": {
+        "addr": "chronicle-1.chronicle:8080",
+        "zone": "b",
+        "draining": false
+      },
+      "3": {
+        "addr": "chronicle-2.chronicle:8080",
+        "zone": "c",
+        "draining": false
+      },
+      "4": {
+        "addr": "chronicle-3.chronicle:8080",
+        "zone": "unknown",
+        "draining": true
+      },
+      "5": {
+        "addr": "chronicle-4.chronicle:8080",
+        "zone": "unknown",
+        "draining": true
+      }
+    },
+    "placements": {
+      "0": {
+        "generation": 29,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791025522552,
+        "replicas": {
+          "1": "MayVote",
+          "2": "MayVote",
+          "3": "MayVote",
+          "4": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 4904,
+                "node_id": 1
+              },
+              "index": 368
+            }
+          }
+        }
+      },
+      "1": {
+        "generation": 19,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791049169017,
+        "replicas": {
+          "1": "MayVote",
+          "2": "MayVote",
+          "3": "MayVote",
+          "4": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 4863,
+                "node_id": 3
+              },
+              "index": 1555
+            }
+          },
+          "5": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 9892,
+                "node_id": 3
+              },
+              "index": 2821
+            }
+          }
+        }
+      },
+      "2": {
+        "generation": 13,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791049171061,
+        "replicas": {
+          "1": "MayVote",
+          "2": "MayVote",
+          "3": "MayVote",
+          "4": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 3829,
+                "node_id": 3
+              },
+              "index": 4530
+            }
+          },
+          "5": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 8694,
+                "node_id": 3
+              },
+              "index": 5764
+            }
+          }
+        }
+      },
+      "3": {
+        "generation": 9,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791049173106,
+        "replicas": {
+          "1": "MayVote",
+          "2": "MayVote",
+          "3": "MayVote",
+          "4": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 5111,
+                "node_id": 1
+              },
+              "index": 286
+            }
+          },
+          "5": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 10206,
+                "node_id": 1
+              },
+              "index": 2291
+            }
+          }
+        }
+      },
+      "4": {
+        "generation": 5,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791025545100,
+        "replicas": {
+          "1": "MayVote",
+          "2": "MayVote",
+          "3": "MayVote",
+          "4": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 190,
+                "node_id": 3
+              },
+              "index": 3783
+            }
+          }
+        }
+      }
+    }
+  }
+}

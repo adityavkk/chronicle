@@ -64,6 +64,26 @@ disposable node. Docker network disconnect is **not** an equivalent nemesis: it
 destroys the node's VXLAN interface, and reconnect alone may not heal pod routing.
 Always verify convergence after healing, not just Ready status.
 
+`retirement_partition.py` is a combined hook for the existing history driver.
+It requires the three seeds eligible and a verified drained non-seed replica.
+It resumes that replica, waits for all three data-group assignments, isolates its
+agent, requests draining once, checks voter repair with retirement still false,
+heals in `finally`, then requires verified retirement. For example, on the private
+five-replica rig, use a fresh history path/output:
+
+```sh
+python3 tests/history.py run --url "$PRIVATE_CHRONICLE_URL" --seed 530004 \
+  --path retirement-join-1 --producers 2 --readers 1 --operations 360 \
+  --append-interval .25 --read-interval 1 --timeout 5 --retries 20 \
+  --retry-interval .25 --nemesis node-join --nemesis-delay 4 --hook-timeout 400 \
+  --hook 'node-join:start=python3 tests/retirement_partition.py --node 5 --output partition-events.jsonl' \
+  --output partition-history.jsonl
+```
+
+The `node-join` hook slot runs this whole sequence; the separate events record the
+actual partition and repair phases. This is not a mid-catch-up or mid-snapshot
+failure test. The helper never retries an ambiguous administrative mutation.
+
 ## Offline Porcupine subset
 
 From the repository root:

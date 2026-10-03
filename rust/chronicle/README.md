@@ -54,6 +54,12 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
   `review-drain.jsonl` preserves the first failed attempt (admin forwarding timed
   out); `review-drain2.jsonl` records the fixed run. A 21-operation real HTTP
   lifecycle/retry history also received `Ok`.
+* [Verified replica retirement](evidence/RETIREMENT.md) now distinguishes voter
+  replacement from delivery of demotion to the old process. Fresh node-5 admission,
+  drain/restart, and partition/repair/heal histories received Porcupine `Ok` with
+  600, 600 and 720 records respectively. The partition run retained 23 unknown
+  append attempts and 3 unknown reads. Untouched groups stayed empty. These checks
+  do not cover a failed destination during initial learner catch-up.
 * OpenRaft's pinned storage contract suite passes, alongside SQLite VFS faults,
   snapshot/reopen producer and membership checks, and a slow-body admission test.
   Placement completion now reads applied membership, not effective Raft metrics.
