@@ -37,7 +37,38 @@ def quarantine(node, note):
         raise RuntimeError("quarantine unverified")
 
 
-def cleanup(pod, node, armed, reached, isolated, partition, note):
+def crash_gated(pod, node, note):
+    def status():
+        data = json.loads(command(K, "-n", "chronicle", "get", "pod", pod, "-o", "json"))
+        container = next(c for c in data["status"]["containerStatuses"] if c["name"] == "chronicle")
+        return {"pod_uid": data["metadata"]["uid"], **container}
+
+    before = status()
+    container_id = before["containerID"].removeprefix("containerd://")
+    if not re.fullmatch(r"[0-9a-f]{64}", container_id):
+        raise RuntimeError("unexpected container runtime identity")
+    try:
+        # Signal through the runtime: PID-namespace init has special signal rules.
+        result = subprocess.run(["sudo", "docker", "exec", node, "ctr", "--namespace", "k8s.io",
+                                 "tasks", "kill", "--signal", "SIGKILL", container_id],
+                                capture_output=True, text=True, timeout=30)
+        note("kill-issued", code=result.returncode, stdout=result.stdout, stderr=result.stderr)
+    except subprocess.TimeoutExpired as error:
+        note("kill-unknown", error=repr(error))
+
+    def restarted():
+        after = status()
+        return after if (after["pod_uid"] == before["pod_uid"] and after["ready"]
+            and after["containerID"] != before["containerID"]
+            and after["restartCount"] > before["restartCount"]) else None
+
+    after = wait(restarted, "replacement container on the same PVC")
+    if after["lastState"].get("terminated", {}).get("exitCode") != 137:
+        raise RuntimeError(f"previous container did not report SIGKILL: {after}")
+    note("restarted-with-gate-unreleased", before=before, after=after)
+
+
+def cleanup(pod, node, armed, reached, isolated, partition, note, restarted=False):
     errors = []
 
     def attempt(label, action):
@@ -56,7 +87,9 @@ def cleanup(pod, node, armed, reached, isolated, partition, note):
     if isolated:
         attempt("heal", lambda: partition("heal"))
     if reached is not None and all(disarmed) and all(released):
-        resumed = attempt("resume", lambda: wait(
+        # A verified replacement while still partitioned proves the gated actor
+        # no longer exists. It cannot produce a resumed marker after SIGKILL.
+        resumed = restarted or attempt("resume", lambda: wait(
             lambda: control(pod, "test", reached["resumed"], check=False).returncode == 0,
             "storage gate release"))
         if resumed:
@@ -77,10 +110,13 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--fault-root", default="/data/faults")
     parser.add_argument("--gate", choices=GATES, help="arm only this boundary; default arms both")
+    parser.add_argument("--crash-gated", action="store_true", help="SIGKILL at the selected snapshot gate")
     args = parser.parse_args()
     root = PurePosixPath(args.fault_root)
     if args.node <= 3 or not root.is_relative_to("/data") or ".." in root.parts:
         parser.error("requires a non-seed replica and fault directory within /data")
+    if args.crash_gated and args.gate != "before-snapshot-install-transaction":
+        parser.error("--crash-gated requires the snapshot installation gate")
     preflight(args)
     pod = f"chronicle-{args.node - 1}"
     node = command(K, "-n", "chronicle", "get", "pod", pod, "-o", "jsonpath={.spec.nodeName}")
@@ -123,7 +159,7 @@ def main():
             note("snapshot-required", source=source, destination=destination)
 
         command(K, "-n", "chronicle", "exec", pod, "--", "mkdir", "-p", directory)
-        armed, isolated, reached, admitted = [], False, None, False
+        armed, isolated, reached, admitted, restarted = [], False, None, False, False
         try:
             for files in paths.values():
                 # Refuse replacement rather than silently overwriting a concurrent owner.
@@ -144,6 +180,9 @@ def main():
             note("pending-gated", gate=reached, state=state)
             isolated = True  # Cleanup owns even a partially applied injection.
             partition("isolate")
+            if args.crash_gated:
+                crash_gated(pod, node, note)
+                restarted = True
 
             def repaired():
                 state = api("/admin/control")
@@ -167,7 +206,7 @@ def main():
             raise
         finally:
             errors = cleanup(pod, args.node if admitted else None, armed,
-                             paths[reached] if reached else None, isolated, partition, note)
+                             paths[reached] if reached else None, isolated, partition, note, restarted)
             if errors:
                 raise RuntimeError(f"cleanup incomplete: {errors}")
         wait(lambda: api(f"/admin/retirement/{args.node}") is True, "retirement after release")

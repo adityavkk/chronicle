@@ -10,6 +10,48 @@ import pending_placement as harness
 
 
 class CleanupTest(unittest.TestCase):
+    def test_crash_needs_runtime_replacement_not_only_ready_or_command_success(self):
+        before = {"metadata": {"uid": "same-pod"}, "status": {"containerStatuses": [{
+            "name": "chronicle", "containerID": "containerd://" + "a" * 64,
+            "restartCount": 0, "ready": True, "lastState": {},
+        }]}}
+        for changed in ({}, {"containerID": "containerd://" + "a" * 64},
+                        {"restartCount": 0}, {"ready": False},
+                        {"lastState": {"terminated": {"exitCode": 1}}}):
+            with self.subTest(changed=changed):
+                after = copy.deepcopy(before)
+                after["status"]["containerStatuses"][0].update({
+                    "containerID": "containerd://" + "b" * 64, "restartCount": 1,
+                    "lastState": {"terminated": {"exitCode": 137}}, **changed,
+                })
+
+                def wait(predicate, label):
+                    result = predicate()
+                    if result is None:
+                        raise TimeoutError(label)
+                    return result
+
+                with patch.object(harness, "command", side_effect=[json.dumps(before), json.dumps(after)]), \
+                        patch.object(harness, "wait", side_effect=wait), \
+                        patch.object(harness.subprocess, "run", return_value=SimpleNamespace(
+                            returncode=0, stdout="", stderr="")) as signal:
+                    if changed:
+                        with self.assertRaises((TimeoutError, RuntimeError)):
+                            harness.crash_gated("pod", "agent", Mock())
+                    else:
+                        harness.crash_gated("pod", "agent", Mock())
+                self.assertEqual(signal.call_args.args[0][-3:], ["--signal", "SIGKILL", "a" * 64])
+
+    def test_verified_restart_does_not_wait_for_a_dead_actor_to_resume(self):
+        files = {s: f"gate.{s}" for s in ("arm", "release", "reached", "resumed")}
+        with patch.object(harness, "control") as control, patch.object(harness, "wait") as wait, \
+                patch.object(harness, "command") as command:
+            errors = harness.cleanup("pod", None, [files], files, True, Mock(), Mock(), restarted=True)
+        self.assertEqual(errors, [])
+        wait.assert_not_called()
+        self.assertEqual([call.args[1] for call in control.call_args_list], ["rm", "touch"])
+        self.assertEqual(command.call_count, 3)
+
     def test_cleanup_failures_do_not_skip_release_or_heal(self):
         files = [{s: f"{i}.{s}" for s in ("arm", "release", "reached", "resumed")} for i in range(2)]
         calls, note, partition = [], Mock(), Mock()
