@@ -133,3 +133,31 @@ Each RPC carries the intended cluster and node ID; the receiver checks its persi
 identity before passing append/vote/snapshot to Raft. A DNS alias for another replica
 therefore cannot count as an independent voter. This is routing validation on a trusted
 network, not authentication against a malicious sender.
+
+## Leadership policy (specified before implementation)
+
+OpenRaft 0.9.25 has no directed transfer API. The controller will use its native
+`trigger().elect()` on the preferred voter, not alter terms or remove/re-add
+members. This can interrupt availability; it is not a zero-downtime handoff.
+For each completed placement, the preferred voter is the sorted voter at
+`shard % voter_count`. This derives the intent from replicated placement state
+without another mutable authority. It balances leader counts, not measured load.
+
+Campaign only while applied membership is the uniform intended voter set, this
+node is the preferred voter, and another leader is known. Require the same
+placement generation, term and leader for 30 monotonic seconds first. Reset the
+cooldown **before** calling the native trigger, including unknown outcomes.
+Restart, ineligibility or observation changes require a fresh interval. This
+does not wait for a particular log index: Raft's native voting/log-up-to-date
+rules remain authoritative, including a membership change racing the check.
+
+`Campaign.tla` checks this cooldown in 711 bounded states. Its `clock` maps to
+Rust `Instant`, `view` to `(generation, term, leader)`, `observed/since` to the
+controller's per-group observation, and `Campaign` to resetting `since` before
+awaiting the trigger. `Restart` forgets the observation; ineligibility uses the
+same reset. `BadCampaign.cfg` omits that pre-trigger reset and violates
+`CampaignSpacing`. Unit tests must cross the interval boundary, unknown/repeated
+attempts, changed views and restart. There is no mechanized refinement or claim
+that this policy proves election safety/liveness; those rely on OpenRaft and
+eventually connected healthy voters. No resource-informed balancing claim follows
+from this count-based preference.
