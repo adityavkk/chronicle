@@ -293,13 +293,25 @@ learners can receive their nonvoter configuration; unreachable learners can be
 pruned without claiming that their local process learned its demotion. Registered
 identities outside desired voters remain a durable, derivable cleanup obligation:
 on return an obsolete voter can be added only as a learner, demoted, then pruned.
-No new placement journal is needed. The negative mutation incorrectly calls an
-unreachable replica retired merely because its replication stream was removed.
+The existing placement record retains per-identity history: possible voter, or
+the committed demotion boundary after its last possible promotion. New intents
+mark their target identities as possible voters before consensus membership work.
+Completion records fill demotion boundaries without advancing already-retired
+identities unnecessarily. Legacy records conservatively include every registered
+identity; the registry never deletes identities. Missing identities in known
+history are genuinely untouched, unlike identities missing from legacy history.
+This metadata change requires an offline upgrade; mixed revisions are unsupported.
 
 Implementation mapping: `change_membership(target, true)` implements Repair;
 replication/snapshot install supplies Deliver; a peer's atomic Raft metrics with
-uniform nonvoter membership and last-applied covering its membership log entry
-supplies Observe under this store's durable-apply contract. `RemoveNodes` prunes
+uniform nonvoter membership at or beyond the recorded demotion boundary, and
+last-applied covering that membership log entry, supplies Observe under this
+store's durable-apply contract. Version 0 in the model is an older learner state,
+1 a delayed promotion, and 2 the required demotion. Separate negative mutations
+incorrectly accept an unreachable peer or stale learner metadata. An untouched
+group additionally requires recovery-confirmed empty state; that implementation
+case is not modeled by this single previously-assigned-replica episode.
+`RemoveNodes` prunes
 nonvoters, never active voters. Probe/catch-up failures do not undo completed voter
 replacement. Completion of placement alone still does not certify graceful node
 retirement. Reconciliation must serialize membership work, check current intent
@@ -314,3 +326,12 @@ an old volume under an already-live identity remain unsupported.
 The positive configuration separately checks eventual voter repair under weak
 fairness of Repair and the stated available-quorum assumption. It does not claim
 eventual retirement while the old replica remains unreachable.
+
+`Drain.tla` separately models a controller's cached eligible-node observation
+racing a committed draining registration. New `Place` commands check eligibility
+at deterministic apply, before changing placement/history. Thus an earlier intent
+blocks retirement, while a later stale intent is rejected. The negative mutation
+omits that guard and reassigns a node after retirement. The model excludes an
+explicit operator undrain, which deliberately permits future assignment.
+The command's default-false `eligible_only` field preserves old committed-log
+replay; new controllers always set it. This is not a configurable placement policy.

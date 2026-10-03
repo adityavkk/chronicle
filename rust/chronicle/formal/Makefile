@@ -7,6 +7,7 @@ TLC := java -XX:+UseParallelGC -cp $(JAR) tlc2.TLC -workers auto
 check: jar lean positive negative
 
 positive:
+	cd tla && $(TLC) -metadir /tmp/chronicle-drain-$$$$ -config Drain.cfg Drain.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-retirement-$$$$ -config Retirement.cfg Retirement.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-admission-$$$$ -config Admission.cfg Admission.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-sse-read-$$$$ -config SseRead.cfg SseRead.tla
@@ -28,6 +29,8 @@ negative:
 	  module=$${3:-Chronicle}; set +e; (cd tla && $(TLC) -metadir /tmp/chronicle-$$name-$$$$ -config $$name.cfg $$module.tla) >$$out 2>&1; rc=$$?; set -e; \
 	  test $$rc -eq 12; grep -F "Invariant $$inv is violated." $$out >/dev/null; }; \
 	check_bad BadRetirement RetirementVerified Retirement; \
+	check_bad BadRetirementFreshness RetirementVerified Retirement; \
+	check_bad BadDrain DrainFenced Drain; \
 	check_bad BadAdmission PendingOwned Admission; \
 	check_bad BadAck AckDurable; \
 	check_bad BadOwnerFence AcceptedAuthorityCurrent; \
