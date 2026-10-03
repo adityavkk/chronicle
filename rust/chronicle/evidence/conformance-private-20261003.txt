@@ -1,0 +1,2249 @@
+
+> test
+> vitest run --reporter=default --reporter=json --outputFile=../../evidence/conformance-private-20261003.json
+
+
+ RUN  v4.1.8 /home/user/workspace/repo/rust/chronicle/tests/conformance
+
+stderr | conformance.test.ts > Long-Poll Operations > should wait for new data with long-poll
+conformance transport failure http://172.18.0.3:30644/v1/stream/conformance-private-20261003/v1/stream/longpoll-test-1791039399022?offset=0000000000000000_0000000000000008&live=long-poll&cursor=3130369 [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on long-poll responses
+conformance transport failure http://172.18.0.3:30644/v1/stream/conformance-private-20261003/v1/stream/security-longpoll-nosniff-1791039400165?offset=0000000000000000_0000000000000012&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Long-Poll Edge Cases > should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout
+conformance transport failure http://172.18.0.3:30644/v1/stream/conformance-private-20261003/v1/stream/longpoll-204-headers-test-1791039411652?offset=0000000000000000_0000000000000000&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Fork - Live Modes > should return inherited data immediately on long-poll
+conformance transport failure http://172.18.0.3:30644/v1/stream/conformance-private-20261003/v1/stream/fork-live-inherited-fork-1791039446801-1q18q2?offset=-1&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+ ❯ conformance.test.ts (332 tests | 146 failed | 6 skipped) 64407ms
+     ✓ should create a stream 28ms
+     ✓ should allow idempotent create with same config 14ms
+     ✓ should reject create with different config (409) 57ms
+     ✓ should delete a stream 58ms
+     × should properly isolate recreated stream after delete 89ms
+     ✓ should append string data 118ms
+     ✓ should append multiple chunks 73ms
+     × should enforce sequence ordering with seq 27ms
+     ✓ should read empty stream 10ms
+     ✓ should read stream with data 56ms
+     ✓ should read from offset 128ms
+     ✓ should wait for new data with long-poll  524ms
+     ✓ should return immediately if data already exists 68ms
+     × should return correct headers on PUT 10ms
+     × should return 200 on idempotent PUT with same config 17ms
+     ✓ should return 409 on PUT with different config 13ms
+     × should return correct headers on POST 13ms
+     ✓ should return 404 on POST to non-existent stream 3ms
+     × should return 409 on content-type mismatch 10ms
+     ✓ should return correct headers on GET 49ms
+     ✓ should return empty body with up-to-date for empty stream 13ms
+     ✓ should read from offset 143ms
+     ✓ should return 404 on DELETE non-existent stream 9ms
+     ✓ should return 204 on successful DELETE 21ms
+     × should enforce sequence ordering 51ms
+     × should enforce lexicographic seq ordering ("2" then "10" rejects) 44ms
+     × should allow lexicographic seq ordering ("09" then "10" succeeds) 34ms
+     × should reject duplicate seq values 29ms
+     × should include X-Content-Type-Options: nosniff on GET responses 13ms
+     × should include X-Content-Type-Options: nosniff on PUT responses 14ms
+     × should include X-Content-Type-Options: nosniff on POST responses 16ms
+     × should include X-Content-Type-Options: nosniff on HEAD responses 11ms
+     × should include Cross-Origin-Resource-Policy header on GET responses 10ms
+     ✓ should include Cache-Control: no-store on HEAD responses 14ms
+     ✓ should include X-Content-Type-Options: nosniff on SSE responses 13ms
+     ✓ should include X-Content-Type-Options: nosniff on long-poll responses  511ms
+     × should include security headers on error responses 3ms
+     × should reject both TTL and Expires-At (400) 7ms
+     ✓ should reject invalid TTL (non-integer) 2ms
+     ✓ should reject negative TTL 2ms
+     ✓ should accept valid TTL 6ms
+     ✓ should accept valid Expires-At 7ms
+     × should treat content-type case-insensitively 10ms
+     × should allow idempotent create with different case content-type 11ms
+     × should accept headers with different casing 10ms
+     × should enforce content-type match on append 10ms
+     × should allow append with matching content-type 10ms
+     ✓ should return stream content-type on GET 9ms
+     ✓ should return metadata without body 9ms
+     ✓ should return 404 for non-existent stream 4ms
+     ✓ should return tail offset 19ms
+     ✓ should accept -1 as sentinel for stream beginning 53ms
+     ✓ should return same data for offset=-1 and no offset 58ms
+     ✓ should accept offset=now as sentinel for current tail position 10ms
+     ✓ should return correct tail offset for offset=now 9ms
+     ✓ should be able to resume from offset=now result 59ms
+     ✓ should work with offset=now on empty stream 15ms
+     ✓ should return empty JSON array for offset=now on JSON streams 15ms
+     ✓ should return empty body for offset=now on non-JSON streams 9ms
+     × should support offset=now with long-poll mode (waits for data) 5001ms
+     ✓ should receive data with offset=now long-poll when appended 107ms
+     ✓ should support offset=now with SSE mode 11ms
+     ✓ should return 404 for offset=now on non-existent stream 1ms
+     ✓ should return 404 for offset=now with long-poll on non-existent stream 3ms
+     ✓ should return 404 for offset=now with SSE on non-existent stream 1ms
+     × should support offset=now with long-poll on empty stream 5001ms
+     ✓ should support offset=now with SSE on empty stream 11ms
+     ✓ should reject malformed offset (contains comma) 6ms
+     ✓ should reject offset with spaces 6ms
+     ✓ should support resumable reads (no duplicate data) 100ms
+     ✓ should return empty response when reading from tail offset 10ms
+     ✓ should reject empty POST body with 400 7ms
+     ✓ should handle PUT with initial body correctly 51ms
+     ✓ should preserve data immutability by position 108ms
+     ✓ should generate unique, monotonically increasing offsets 28ms
+     ✓ should reject empty offset parameter 9ms
+     ✓ should reject multiple offset parameters 7ms
+     × should enforce case-sensitive seq ordering 11ms
+     ✓ should handle binary data with integrity 48ms
+     × should return Location header on 201 6ms
+     × should reject missing Content-Type on POST 7ms
+     ✓ should accept PUT without Content-Type (use default) 4ms
+     ✓ should ignore unknown query parameters 50ms
+     ✓ should require offset parameter for long-poll 8ms
+     ✓ should generate Stream-Cursor header on long-poll responses 6ms
+     ✓ should return immediately with Stream-Up-To-Date when data exists at offset 8ms
+     ✓ should echo cursor and handle collision with jitter 8ms
+     ✓ should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout  5010ms
+     × should reject TTL with leading zeros 6ms
+     × should reject TTL with plus sign 8ms
+     ✓ should reject TTL with float value 1ms
+     ✓ should reject TTL with scientific notation 2ms
+     × should reject invalid Expires-At timestamp 6ms
+     ✓ should accept Expires-At with Z timezone 6ms
+     ✓ should accept Expires-At with timezone offset 4ms
+     × should handle idempotent PUT with same TTL 9ms
+     ✓ should reject idempotent PUT with different TTL 8ms
+     × should return TTL metadata if configured 7ms
+     ✓ should return Expires-At metadata if configured 8ms
+     ✓ should return 404 on HEAD after TTL expires  1028ms
+     ✓ should return 404 on GET after TTL expires (idle)  1025ms
+     ✓ should return 404 on POST append after TTL expires (idle)  1019ms
+     × should return 404 on HEAD after Expires-At passes 5001ms
+     × should return 404 on GET after Expires-At passes 5002ms
+     × should return 404 on POST append after Expires-At passes 17ms
+     × should allow recreating stream after TTL expires 1021ms
+     × should extend TTL on write (sliding window) 1517ms
+     × should extend TTL on read (sliding window) 3019ms
+     ✓ should NOT extend TTL on HEAD  2022ms
+     × should NOT extend Expires-At on read or write 5001ms
+     × should generate ETag on GET responses 11ms
+     × should return 304 Not Modified for matching If-None-Match 8ms
+     ✓ should return 200 for non-matching If-None-Match 9ms
+     × should return new ETag after data changes 15ms
+     ✓ should handle chunk-size pagination correctly  948ms
+     ✓ should handle large payload appropriately 34ms
+     ✓ should immediately read message after append 51ms
+     ✓ should immediately read multiple appends 68ms
+     ✓ should serve offset-based reads immediately after append 68ms
+     ✓ should return text/event-stream content-type for SSE requests 10ms
+     ✓ should accept live=sse query parameter for application/json 10ms
+     ✓ should require offset parameter for SSE mode 8ms
+     ✓ should stream data events via SSE 56ms
+     ✓ should send control events with offset 52ms
+     ✓ should generate streamCursor in SSE control events 52ms
+     ✓ should handle cursor collision with jitter in SSE mode 100ms
+     ✓ should wrap JSON data in arrays for SSE and produce valid JSON 52ms
+     ✓ should handle SSE for empty stream with correct offset 12ms
+     ✓ should send upToDate flag in SSE control events when caught up 51ms
+     × should have correct SSE headers (no Content-Length, proper Cache-Control) 53ms
+     × should handle newlines in text/plain payloads 52ms
+     × should prevent CRLF injection in payloads - embedded event boundaries become literal data 55ms
+     ✓ should prevent CRLF injection - LF-only attack vectors 52ms
+     × should prevent CRLF injection - carriage return only attack vectors 56ms
+     × should handle JSON payloads with embedded newlines safely 52ms
+     ✓ should generate unique, monotonically increasing offsets in SSE mode 96ms
+     ✓ should support reconnection with last known offset 116ms
+     ✓ should auto-detect binary streams and return base64 encoded data in SSE mode 55ms
+     ✓ should include Stream-SSE-Data-Encoding header for binary streams 12ms
+     ✓ should NOT include Stream-SSE-Data-Encoding header for text/plain streams 7ms
+     ✓ should NOT include Stream-SSE-Data-Encoding header for application/json streams 49ms
+     ✓ should base64 encode data events only, control events remain JSON 52ms
+     ✓ should handle empty binary payload with auto-detected base64 encoding 12ms
+     ✓ should handle large binary payload with auto-detected base64 encoding 18ms
+     ✓ should handle binary data with special bytes using auto-detected base64 encoding 50ms
+     ✓ should auto-detect base64 encoding for application/x-protobuf streams 56ms
+     ✓ should auto-detect base64 encoding for image/png streams 52ms
+     ✓ should handle offset=now with auto-detected base64 encoding for binary streams 8ms
+     ✓ should allow PUT with empty array body (creates empty stream) 7ms
+     ✓ should reject POST with empty array body 12ms
+     ✓ should handle content-type with charset parameter 59ms
+     ✓ should wrap single JSON value in array 64ms
+     ✓ should store arrays as single messages 64ms
+     ✓ should concatenate multiple appends into single array 80ms
+     ✓ should handle mixed single values and arrays 76ms
+     ✓ should reject invalid JSON with 400 11ms
+     ✓ should handle various JSON value types 97ms
+     ✓ should preserve JSON structure and nesting 63ms
+     ✓ should work with client json() iterator 76ms
+     ✓ should reject empty JSON arrays with 400 10ms
+     ✓ should store nested arrays as single messages 58ms
+     ✓ should store arrays as values when double-wrapped 64ms
+     ✓ should store primitive arrays as single messages 68ms
+     ✓ should handle mixed batching - single values, arrays, and nested arrays 88ms
+       × concurrent readers see consistent data during writes 119ms
+       ✓ single byte values cover full range (0-255) with concurrent readers during write  5037ms
+       × random operation sequences maintain stream invariants 132ms
+       ✓ offsets are always monotonically increasing  1362ms
+       × read-your-writes: data is immediately visible after append 31ms
+       ✓ data at offset never changes after additional appends  2454ms
+       ✓ should reject offsets with invalid characters 232ms
+       × lexicographically ordered seq values are accepted 80ms
+       × out-of-order seq values are rejected 65ms
+       ✓ concurrent writers with sequence numbers - server handles gracefully 71ms
+       ✓ concurrent writers racing with incrementing seq values  884ms
+       ✓ concurrent appends without seq - all data is persisted 96ms
+       ✓ mixed readers and writers - readers see consistent state 140ms
+       ✓ replay produces identical content hash  2416ms
+       ✓ content hash changes with each append 276ms
+       ✓ empty stream has consistent hash 17ms
+       ✓ deterministic ordering - same data in same order produces same hash  1411ms
+     × should accept first append with producer headers (epoch=0, seq=0) 12ms
+     ✓ should accept sequential producer sequences 19ms
+     ✓ should return 204 for duplicate sequence (idempotent success) 16ms
+     × should accept epoch upgrade (new epoch starts at seq=0) 17ms
+     × should reject stale epoch with 403 (zombie fencing) 15ms
+     × should reject sequence gap with 409 15ms
+     × should reject epoch increase with seq != 0 18ms
+     ✓ should require all producer headers together 9ms
+     ✓ should reject invalid integer formats in producer headers 19ms
+     ✓ multiple producers should have independent state 27ms
+     ✓ duplicate of seq=0 should not corrupt state 20ms
+     × duplicate response should return highest accepted seq, not request seq 11ms
+     × split-brain fencing scenario 21ms
+     × epoch rollback should be rejected 14ms
+     ✓ producer headers work with Stream-Seq header 10ms
+     ✓ producer duplicate should return 204 even with Stream-Seq header 16ms
+     ✓ should store and read back data correctly 48ms
+     ✓ should preserve order of sequential producer writes 89ms
+     ✓ duplicate should not corrupt or duplicate data 76ms
+     ✓ multiple producers should interleave correctly 76ms
+     ✓ should store and read back JSON object correctly 60ms
+     ✓ should preserve order of JSON appends with producer 92ms
+     ✓ JSON duplicate should not corrupt data 81ms
+     ✓ should reject invalid JSON with producer headers 12ms
+     ✓ should reject empty JSON array with producer headers 9ms
+     ✓ should return 404 for non-existent stream 2ms
+     × should return 409 for content-type mismatch 12ms
+     ✓ should return 400 for empty body 11ms
+     × should reject empty Producer-Id 18ms
+       × create-closed-stream: PUT with Stream-Closed: true creates closed stream 8ms
+       × create-closed-stream-with-body: PUT with body + Stream-Closed: true 6ms
+       × create-closed-returns-header: Response includes Stream-Closed: true 7ms
+       × close-stream-empty-post: POST with Stream-Closed: true, empty body closes stream 14ms
+       × close-with-final-append: POST with body + Stream-Closed: true 28ms
+       × close-returns-offset-and-header: Response includes Stream-Next-Offset and Stream-Closed: true 19ms
+       × close-idempotent: Closing already-closed stream (empty body) returns 204 13ms
+       × close-only-ignores-content-type: Close-only with mismatched Content-Type still succeeds 16ms
+       × append-to-closed-stream-409: Append to closed stream returns 409 with Stream-Closed: true header 21ms
+       × append-and-close-to-closed-stream-409: POST with body + Stream-Closed: true to already-closed stream returns 409 19ms
+       ✓ head-closed-stream: HEAD returns Stream-Closed: true header 18ms
+       ✓ head-open-stream-no-closed-header: HEAD on open stream does NOT have Stream-Closed header 10ms
+       ✓ read-closed-stream-at-tail: Returns Stream-Closed: true at tail of closed stream 60ms
+       ✓ read-closed-stream-partial-no-closed: Partial read of closed stream does NOT include Stream-Closed 64ms
+       ✓ read-closed-stream-empty-body-eof: At tail of closed stream: 200 OK, empty body, Stream-Closed: true 16ms
+       ✓ longpoll-closed-stream-immediate: No wait when closed stream at tail, returns immediately 11ms
+       ✓ longpoll-closed-returns-204-with-header: Returns 204 with Stream-Closed: true 9ms
+       ✓ sse-closed-stream-control-event: Final control event has streamClosed: true 20ms
+       ✓ sse-closed-stream-no-cursor: streamCursor omitted when streamClosed is true 38ms
+       ✓ sse-closed-stream-connection-closes: Connection closes after final event 75ms
+       ✓ sse-live-reader-receives-final-append-on-close: live reader at tail receives data appended atomically with the close  1168ms
+       × idempotent-close-with-append: Close with final append using producer headers 13ms
+       × idempotent-close-only-with-producer-headers: Close-only with producer headers updates state 23ms
+       × idempotent-close-duplicate-returns-204: Duplicate close (same tuple) returns 204 16ms
+       × idempotent-close-different-tuple-returns-409: Different producer/seq gets 409 16ms
+       × idempotent-close-different-seq-returns-409: Same producer, different seq gets 409 17ms
+       × idempotent-close-only-duplicate-returns-204: Duplicate close-only (no body) returns 204 10ms
+       × 409-includes-stream-offset: 409 for closed stream includes Stream-Next-Offset header 15ms
+       ✓ close-nonexistent-stream-404: POST with Stream-Closed to nonexistent stream returns 404 1ms
+       ✓ offset-now-on-closed-stream: offset=now on closed stream returns Stream-Closed: true 22ms
+       ✓ producer-state-survives-close: Stale-epoch producer gets 403, not 409 STREAM_CLOSED 25ms
+       ✓ close-with-different-body-dedup: Retry close with different body deduplicates to original 57ms
+       ✓ empty-post-without-stream-closed-400: POST with empty body but no Stream-Closed returns 400 9ms
+       ✓ delete-closed-stream: Deleting a closed stream removes it (returns 404 after) 26ms
+     ✓ should fork at current head (default) 16ms
+     × should fork at a specific offset 19ms
+     ✓ should fork at zero offset (empty inherited data) 23ms
+     × should fork at head offset (all source data inherited) 28ms
+     × should return 404 when forking a nonexistent stream 22ms
+     × should return 400 when forking at offset beyond stream length 21ms
+     ✓ should return 409 when forking to path already in use with different config 19ms
+     × should fork a closed stream — fork starts open 27ms
+     ✓ should fork an empty stream 14ms
+     × should fork preserving content-type when specified 19ms
+     × should fork inheriting content-type when header omitted 11ms
+     × should fork at a binary sub-offset within an append 15ms
+     × should fork at a JSON sub-offset within a flattened batch 18ms
+     × should treat sub-offset 0 as equivalent to absent header 22ms
+     × should return 400 when binary sub-offset overshoots message length 13ms
+     × should return 400 when JSON sub-offset overshoots message count 14ms
+     × should return 400 for malformed sub-offset values 11ms
+     × should be idempotent when re-creating with matching sub-offset 18ms
+     × should return 409 when re-creating with mismatched sub-offset 17ms
+     × should be idempotent when re-creating a JSON fork with matching sub-offset 16ms
+     × should return 409 when re-creating a JSON fork with mismatched sub-offset 21ms
+     × should support appending to fork after sub-offset boundary 31ms
+     × should inherit content-type when sub-offset is supplied without explicit Content-Type 16ms
+     × should not inherit producer state across sub-offset fork boundary 24ms
+     × should not inherit producer state across binary sub-offset fork boundary 17ms
+     × should fork at a binary sub-offset anchored mid-stream 29ms
+     × should return 400 when sub-offset > 0 is supplied without Stream-Fork-Offset 11ms
+     × should return 400 when Stream-Fork-Sub-Offset is supplied without Stream-Forked-From (even when value is 0) 4ms
+     ✓ should return a Stream-Next-Offset on sub-offset fork creation that is consumable by reads 17ms
+     × should return 400 when sub-offset is supplied on an empty source stream 10ms
+     × should accept binary sub-offset equal to message length 11ms
+     × should accept JSON sub-offset equal to flattened message count 13ms
+     × should append initial body after the materialized sub-offset prefix 60ms
+     × should allow sub-offset fork creation from a closed source stream 14ms
+     × should read entire fork (source + fork data) 61ms
+     × should read only inherited portion 24ms
+     × should read only fork's own data (starting past fork offset) 84ms
+     × should read across fork boundary 84ms
+     × should not show source appends after fork 29ms
+     ✓ should NOT include fork headers on HEAD/GET/PUT responses (forks are transparent) 36ms
+     × should append to a fork 50ms
+     × should support idempotent producer on fork 81ms
+     × should close forked stream independently 29ms
+     × should not affect fork when source is closed 22ms
+     × should append to source after fork — source independent 21ms
+     ✓ should create a three-level fork chain 22ms
+     × should fork at mid-point of inherited data 51ms
+     × should read correctly across three levels 133ms
+     × should append at each level independently 156ms
+     × should compose sub-offsets across chained forks 20ms
+     × should return inherited data immediately on long-poll 3020ms
+     ✓ should wait for fork appends, not source appends, on long-poll at tail 128ms
+     × should stream fork data via SSE 57ms
+     × should handle long-poll handover at fork offset 5001ms
+     ✓ should delete fork without affecting source 75ms
+     × should soft-delete source while fork exists — fork still reads 22ms
+     ✓ should block re-creation of soft-deleted source (PUT returns 409) 40ms
+     × should return 410 for GET on soft-deleted source 19ms
+     × should return 410 for POST on soft-deleted source 18ms
+     × should return 410 for DELETE on soft-deleted source 17ms
+     × should return 409 for fork from soft-deleted source 21ms
+     × should return 409 for fork with content-type mismatch 16ms
+     × rejected fork (content-type mismatch) does not leak a source reference 11ms
+     × should cascade GC when last fork is deleted 16ms
+     × should cascade GC through three levels 29ms
+     × should preserve data when deleting middle of chain 38ms
+     ✓ should keep source alive when all forks are deleted 77ms
+     ✓ should inherit source expiry when none specified 19ms
+     ✓ should allow fork with shorter TTL 18ms
+     ✓ should expire fork based on TTL (releases refcount)  1026ms
+     × should expire source with living forks (source goes 410) 5000ms
+     × should inherit source TTL value when none specified 17ms
+     × should use fork's own TTL when specified 15ms
+     × should allow fork to outlive source via TTL renewal 2033ms
+     ✓ should allow fork Expires-At beyond source TTL expiry 21ms
+     × should allow fork TTL longer than source TTL (no capping) 15ms
+     × should fork a JSON stream 10ms
+     × should read forked JSON across boundary 66ms
+     × should handle fork then immediately delete source 26ms
+     × should handle many forks of same stream (10 forks) 68ms
+     × should fork at every offset position 40ms
+     × should handle idempotent fork creation (PUT twice) 17ms
+     ↓ creates and idempotently re-confirms a webhook subscription
+     ↓ rejects unsafe webhook URLs
+     ↓ webhook synchronous done auto-acks the wake snapshot
+     ↓ webhook callback acks and fences stale wake generations
+     ↓ adds and removes explicit subscription streams
+     ↓ pull-wake claim, ack, and release use subscription-scoped leases
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 146 ⎯⎯⎯⎯⎯⎯
+
+ FAIL  conformance.test.ts > Basic Stream Operations > should properly isolate recreated stream after delete
+AssertionError: expected 409 to be 201 // Object.is equality
+
+- Expected
++ Received
+
+- 201
++ 409
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:225:36
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/146]⎯
+
+ FAIL  conformance.test.ts > Append Operations > should enforce sequence ordering with seq
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:274:58
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/146]⎯
+
+ FAIL  conformance.test.ts > HTTP Protocol > should return correct headers on PUT
+AssertionError: expected null to be 'text/plain' // Object.is equality
+
+- Expected:
+"text/plain"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:367:49
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/146]⎯
+
+ FAIL  conformance.test.ts > HTTP Protocol > should return 200 on idempotent PUT with same config
+AssertionError: expected 204 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 204
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:381:34
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/146]⎯
+
+ FAIL  conformance.test.ts > HTTP Protocol > should return correct headers on POST
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:406:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/146]⎯
+
+ FAIL  conformance.test.ts > HTTP Protocol > should return 409 on content-type mismatch
+AssertionError: expected 415 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 415
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:429:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/146]⎯
+
+ FAIL  conformance.test.ts > HTTP Protocol > should enforce sequence ordering
+AssertionError: expected 200 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:541:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/146]⎯
+
+ FAIL  conformance.test.ts > HTTP Protocol > should enforce lexicographic seq ordering ("2" then "10" rejects)
+AssertionError: expected 200 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:565:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/146]⎯
+
+ FAIL  conformance.test.ts > HTTP Protocol > should allow lexicographic seq ordering ("09" then "10" succeeds)
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:589:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/146]⎯
+
+ FAIL  conformance.test.ts > HTTP Protocol > should reject duplicate seq values
+AssertionError: expected 200 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:613:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/146]⎯
+
+ FAIL  conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on GET responses
+AssertionError: expected null to be 'nosniff' // Object.is equality
+
+- Expected:
+"nosniff"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:626:59
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/146]⎯
+
+ FAIL  conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on PUT responses
+AssertionError: expected null to be 'nosniff' // Object.is equality
+
+- Expected:
+"nosniff"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:635:59
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/146]⎯
+
+ FAIL  conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on POST responses
+AssertionError: expected null to be 'nosniff' // Object.is equality
+
+- Expected:
+"nosniff"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:649:59
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/146]⎯
+
+ FAIL  conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on HEAD responses
+AssertionError: expected null to be 'nosniff' // Object.is equality
+
+- Expected:
+"nosniff"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:659:59
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/146]⎯
+
+ FAIL  conformance.test.ts > Browser Security Headers > should include Cross-Origin-Resource-Policy header on GET responses
+AssertionError: expected [ 'cross-origin', 'same-origin', …(1) ] to include null
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:681:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/146]⎯
+
+ FAIL  conformance.test.ts > Browser Security Headers > should include security headers on error responses
+AssertionError: expected null to be 'nosniff' // Object.is equality
+
+- Expected:
+"nosniff"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:747:59
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/146]⎯
+
+ FAIL  conformance.test.ts > TTL and Expiry Validation > should reject both TTL and Expires-At (400)
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:761:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/146]⎯
+
+ FAIL  conformance.test.ts > Case-Insensitivity > should treat content-type case-insensitively
+AssertionError: expected 415 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 415
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:820:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/146]⎯
+
+ FAIL  conformance.test.ts > Case-Insensitivity > should allow idempotent create with different case content-type
+AssertionError: expected 409 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 409
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:833:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/146]⎯
+
+ FAIL  conformance.test.ts > Case-Insensitivity > should accept headers with different casing
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:849:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/146]⎯
+
+ FAIL  conformance.test.ts > Content-Type Validation > should enforce content-type match on append
+AssertionError: expected 415 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 415
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:864:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/146]⎯
+
+ FAIL  conformance.test.ts > Content-Type Validation > should allow append with matching content-type
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:877:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/146]⎯
+
+ FAIL  conformance.test.ts > Offset Validation and Resumability > should support offset=now with long-poll mode (waits for data)
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1049:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/146]⎯
+
+ FAIL  conformance.test.ts > Offset Validation and Resumability > should support offset=now with long-poll on empty stream
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1123:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/146]⎯
+
+ FAIL  conformance.test.ts > Protocol Edge Cases > should enforce case-sensitive seq ordering
+AssertionError: expected 200 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1337:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/146]⎯
+
+ FAIL  conformance.test.ts > Protocol Edge Cases > should return Location header on 201
+TypeError: Cannot read properties of null (reading 'endsWith')
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1370:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/146]⎯
+
+ FAIL  conformance.test.ts > Protocol Edge Cases > should reject missing Content-Type on POST
+AssertionError: expected 415 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 415
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1383:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/146]⎯
+
+ FAIL  conformance.test.ts > TTL and Expiry Edge Cases > should reject TTL with leading zeros
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1501:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/146]⎯
+
+ FAIL  conformance.test.ts > TTL and Expiry Edge Cases > should reject TTL with plus sign
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1512:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/146]⎯
+
+ FAIL  conformance.test.ts > TTL and Expiry Edge Cases > should reject invalid Expires-At timestamp
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1545:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/146]⎯
+
+ FAIL  conformance.test.ts > TTL and Expiry Edge Cases > should handle idempotent PUT with same TTL
+AssertionError: expected 409 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 409
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1589:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/146]⎯
+
+ FAIL  conformance.test.ts > HEAD Metadata Edge Cases > should return TTL metadata if configured
+AssertionError: expected null to be '3600' // Object.is equality
+
+- Expected:
+"3600"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1622:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/146]⎯
+
+ FAIL  conformance.test.ts > TTL Expiration Behavior > should return 404 on HEAD after Expires-At passes
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1701:8
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/146]⎯
+
+ FAIL  conformance.test.ts > TTL Expiration Behavior > should return 404 on GET after Expires-At passes
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1718:8
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/146]⎯
+
+ FAIL  conformance.test.ts > TTL Expiration Behavior > should return 404 on POST append after Expires-At passes
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1752:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/146]⎯
+
+ FAIL  conformance.test.ts > TTL Expiration Behavior > should allow recreating stream after TTL expires
+AssertionError: expected 409 to be 201 // Object.is equality
+
+- Expected
++ Received
+
+- 201
++ 409
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1781:36
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/146]⎯
+
+ FAIL  conformance.test.ts > TTL Expiration Behavior > should extend TTL on write (sliding window)
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1803:34
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/146]⎯
+
+ FAIL  conformance.test.ts > TTL Expiration Behavior > should extend TTL on read (sliding window)
+AssertionError: expected 404 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 404
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1824:32
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/146]⎯
+
+ FAIL  conformance.test.ts > TTL Expiration Behavior > should NOT extend Expires-At on read or write
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1843:8
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/146]⎯
+
+ FAIL  conformance.test.ts > Caching and ETag > should generate ETag on GET responses
+TypeError: Cannot read properties of null (reading 'length')
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1875:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/146]⎯
+
+ FAIL  conformance.test.ts > Caching and ETag > should return 304 Not Modified for matching If-None-Match
+AssertionError: expected 200 to be 304 // Object.is equality
+
+- Expected
++ Received
+
+- 304
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1891:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/146]⎯
+
+ FAIL  conformance.test.ts > Caching and ETag > should return new ETag after data changes
+AssertionError: expected null not to be null // Object.is equality
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:1926:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/146]⎯
+
+ FAIL  conformance.test.ts > SSE Mode > should have correct SSE headers (no Content-Length, proper Cache-Control)
+AssertionError: expected 'no-store' to contain 'no-cache'
+
+Expected: "no-cache"
+Received: "no-store"
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:2221:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/146]⎯
+
+ FAIL  conformance.test.ts > SSE Mode > should handle newlines in text/plain payloads
+AssertionError: expected 'event: data\ndata: line1\ndata: line2…' to contain 'data:line1'
+
+- Expected
++ Received
+
+- data:line1
++ event: data
++ data: line1
++ data: line2
++ data: line3
++
++ event: control
++ data:{"streamNextOffset":"0000000000000000_0000000000000017","streamCursor":"3130371","upToDate":true}
++
++
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:2233:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/146]⎯
+
+ FAIL  conformance.test.ts > SSE Mode > should prevent CRLF injection in payloads - embedded event boundaries become literal data
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:2251:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[45/146]⎯
+
+ FAIL  conformance.test.ts > SSE Mode > should prevent CRLF injection - carriage return only attack vectors
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:2288:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[46/146]⎯
+
+ FAIL  conformance.test.ts > SSE Mode > should handle JSON payloads with embedded newlines safely
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:2310:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[47/146]⎯
+
+ FAIL  conformance.test.ts > Property-Based Tests (fast-check) > Byte-Exactness Property > concurrent readers see consistent data during writes
+Error: Property failed after 1 tests
+{ seed: -1814728619, path: "0:0:0:0", endOnFailure: true }
+Counterexample: [[Uint8Array.from([0])]]
+Shrunk 3 time(s)
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ buildError node_modules/fast-check/lib/fast-check.js:2469:16
+ ❯ asyncThrowIfFailed node_modules/fast-check/lib/fast-check.js:2481:8
+
+Caused by: AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:2972:33
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:2976:31
+ ❯ AsyncProperty.run node_modules/fast-check/lib/fast-check.js:1217:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[48/146]⎯
+
+ FAIL  conformance.test.ts > Property-Based Tests (fast-check) > Operation Sequence Properties > random operation sequences maintain stream invariants
+Error: Property failed after 1 tests
+{ seed: 1129793973, path: "0:0:0:0:0:0:0", endOnFailure: true }
+Counterexample: [[{"type":"readFromOffset","offsetIndex":0},{"type":"read"},{"type":"append","data":Uint8Array.from([0])},{"type":"append","data":Uint8Array.from([0])},{"type":"read"}]]
+Shrunk 6 time(s)
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ buildError node_modules/fast-check/lib/fast-check.js:2469:16
+ ❯ asyncThrowIfFailed node_modules/fast-check/lib/fast-check.js:2481:8
+
+Caused by: AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3068:32
+ ❯ AsyncProperty.run node_modules/fast-check/lib/fast-check.js:1217:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[49/146]⎯
+
+ FAIL  conformance.test.ts > Property-Based Tests (fast-check) > Operation Sequence Properties > read-your-writes: data is immediately visible after append
+Error: Property failed after 1 tests
+{ seed: 107190822, path: "0:0:0", endOnFailure: true }
+Counterexample: [Uint8Array.from([0])]
+Shrunk 2 time(s)
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ buildError node_modules/fast-check/lib/fast-check.js:2469:16
+ ❯ asyncThrowIfFailed node_modules/fast-check/lib/fast-check.js:2481:8
+
+Caused by: AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3154:36
+ ❯ AsyncProperty.run node_modules/fast-check/lib/fast-check.js:1217:19
+ ❯ asyncPropertyExecution node_modules/fast-check/lib/fast-check.js:2564:14
+ ❯ asyncRunIt node_modules/fast-check/lib/fast-check.js:2557:15
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3140:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[50/146]⎯
+
+ FAIL  conformance.test.ts > Property-Based Tests (fast-check) > Sequence Ordering Properties > lexicographically ordered seq values are accepted
+Error: Property failed after 1 tests
+{ seed: -1941421176, path: "0:0:0:0:0:0:0", endOnFailure: true }
+Counterexample: [["a","b"]]
+Shrunk 6 time(s)
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ buildError node_modules/fast-check/lib/fast-check.js:2469:16
+ ❯ asyncThrowIfFailed node_modules/fast-check/lib/fast-check.js:2481:8
+
+Caused by: AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3266:32
+ ❯ AsyncProperty.run node_modules/fast-check/lib/fast-check.js:1217:19
+ ❯ asyncPropertyExecution node_modules/fast-check/lib/fast-check.js:2564:14
+ ❯ asyncRunIt node_modules/fast-check/lib/fast-check.js:2557:15
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3245:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[51/146]⎯
+
+ FAIL  conformance.test.ts > Property-Based Tests (fast-check) > Sequence Ordering Properties > out-of-order seq values are rejected
+Error: Property failed after 1 tests
+{ seed: -1819887815, path: "0:0:0:0:0:0", endOnFailure: true }
+Counterexample: [["A","0A"]]
+Shrunk 5 time(s)
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ buildError node_modules/fast-check/lib/fast-check.js:2469:16
+ ❯ asyncThrowIfFailed node_modules/fast-check/lib/fast-check.js:2481:8
+
+Caused by: AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3290:32
+ ❯ AsyncProperty.run node_modules/fast-check/lib/fast-check.js:1217:19
+ ❯ asyncPropertyExecution node_modules/fast-check/lib/fast-check.js:2564:14
+ ❯ asyncRunIt node_modules/fast-check/lib/fast-check.js:2557:15
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3273:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[52/146]⎯
+
+ FAIL  conformance.test.ts > Idempotent Producer Operations > should accept first append with producer headers (epoch=0, seq=0)
+AssertionError: expected null to be '0' // Object.is equality
+
+- Expected:
+"0"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3576:56
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[53/146]⎯
+
+ FAIL  conformance.test.ts > Idempotent Producer Operations > should accept epoch upgrade (new epoch starts at seq=0)
+AssertionError: expected null to be '1' // Object.is equality
+
+- Expected:
+"1"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3684:49
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[54/146]⎯
+
+ FAIL  conformance.test.ts > Idempotent Producer Operations > should reject stale epoch with 403 (zombie fencing)
+AssertionError: expected 409 to be 403 // Object.is equality
+
+- Expected
++ Received
+
+- 403
++ 409
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3712:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[55/146]⎯
+
+ FAIL  conformance.test.ts > Idempotent Producer Operations > should reject sequence gap with 409
+AssertionError: expected null to be '1' // Object.is equality
+
+- Expected:
+"1"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3742:56
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[56/146]⎯
+
+ FAIL  conformance.test.ts > Idempotent Producer Operations > should reject epoch increase with seq != 0
+AssertionError: expected 409 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 409
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3771:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[57/146]⎯
+
+ FAIL  conformance.test.ts > Idempotent Producer Operations > duplicate response should return highest accepted seq, not request seq
+AssertionError: expected null to be '0' // Object.is equality
+
+- Expected:
+"0"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:3979:48
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[58/146]⎯
+
+ FAIL  conformance.test.ts > Idempotent Producer Operations > split-brain fencing scenario
+AssertionError: expected 409 to be 403 // Object.is equality
+
+- Expected
++ Received
+
+- 403
++ 409
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4032:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[59/146]⎯
+
+ FAIL  conformance.test.ts > Idempotent Producer Operations > epoch rollback should be rejected
+AssertionError: expected 409 to be 403 // Object.is equality
+
+- Expected
++ Received
+
+- 403
++ 409
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4061:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[60/146]⎯
+
+ FAIL  conformance.test.ts > Idempotent Producer Operations > should return 409 for content-type mismatch
+AssertionError: expected 415 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 415
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4432:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[61/146]⎯
+
+ FAIL  conformance.test.ts > Idempotent Producer Operations > should reject empty Producer-Id
+AssertionError: expected 200 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4468:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[62/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Create with Stream-Closed > create-closed-stream: PUT with Stream-Closed: true creates closed stream
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4484:56
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[63/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Create with Stream-Closed > create-closed-stream-with-body: PUT with body + Stream-Closed: true
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4498:56
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[64/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Create with Stream-Closed > create-closed-returns-header: Response includes Stream-Closed: true
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4514:56
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[65/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Close Operations > close-stream-empty-post: POST with Stream-Closed: true, empty body closes stream
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4528:34
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[66/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Close Operations > close-with-final-append: POST with body + Stream-Closed: true
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4550:34
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[67/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Close Operations > close-returns-offset-and-header: Response includes Stream-Next-Offset and Stream-Closed: true
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4567:34
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[68/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Close Operations > close-idempotent: Closing already-closed stream (empty body) returns 204
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4581:31
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[69/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Close Operations > close-only-ignores-content-type: Close-only with mismatched Content-Type still succeeds
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4602:34
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[70/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Close Operations > append-to-closed-stream-409: Append to closed stream returns 409 with Stream-Closed: true header
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4621:62
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[71/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Close Operations > append-and-close-to-closed-stream-409: POST with body + Stream-Closed: true to already-closed stream returns 409
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4642:56
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[72/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-with-append: Close with final append using producer headers
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4922:61
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[73/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-only-with-producer-headers: Close-only with producer headers updates state
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4953:34
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[74/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-duplicate-returns-204: Duplicate close (same tuple) returns 204
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:4988:62
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[75/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-different-tuple-returns-409: Different producer/seq gets 409
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5019:65
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[76/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-different-seq-returns-409: Same producer, different seq gets 409
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5050:60
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[77/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-only-duplicate-returns-204: Duplicate close-only (no body) returns 204
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5067:31
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[78/146]⎯
+
+ FAIL  conformance.test.ts > Stream Closure > Edge Cases > 409-includes-stream-offset: 409 for closed stream includes Stream-Next-Offset header
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5104:62
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[79/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should fork at a specific offset
+AssertionError: expected '' to be 'first' // Object.is equality
+
+- Expected
++ Received
+
+- first
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5292:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[80/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should fork at head offset (all source data inherited)
+AssertionError: expected '' to be 'chunk1chunk2' // Object.is equality
+
+- Expected
++ Received
+
+- chunk1chunk2
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5347:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[81/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should return 404 when forking a nonexistent stream
+AssertionError: expected 201 to be 404 // Object.is equality
+
+- Expected
++ Received
+
+- 404
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5359:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[82/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should return 400 when forking at offset beyond stream length
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5378:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[83/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should fork a closed stream — fork starts open
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5429:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[84/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should fork preserving content-type when specified
+AssertionError: expected null to be 'application/json' // Object.is equality
+
+- Expected:
+"application/json"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5470:48
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[85/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should fork inheriting content-type when header omitted
+AssertionError: expected null to be 'application/json' // Object.is equality
+
+- Expected:
+"application/json"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5488:48
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[86/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should fork at a binary sub-offset within an append
+AssertionError: expected '' to be 'hel' // Object.is equality
+
+- Expected
++ Received
+
+- hel
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5522:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[87/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should fork at a JSON sub-offset within a flattened batch
+AssertionError: expected [] to deeply equal [ { a: 1 }, { b: 2 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "a": 1,
+-   },
+-   {
+-     "b": 2,
+-   },
+- ]
++ []
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5547:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[88/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should treat sub-offset 0 as equivalent to absent header
+AssertionError: expected 204 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 204
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5576:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[89/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should return 400 when binary sub-offset overshoots message length
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5596:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[90/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should return 400 when JSON sub-offset overshoots message count
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5616:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[91/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should return 400 for malformed sub-offset values
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5643:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[92/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should be idempotent when re-creating with matching sub-offset
+AssertionError: expected 204 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 204
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5670:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[93/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should return 409 when re-creating with mismatched sub-offset
+AssertionError: expected 204 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 204
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5701:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[94/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should be idempotent when re-creating a JSON fork with matching sub-offset
+AssertionError: expected 204 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 204
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5727:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[95/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should return 409 when re-creating a JSON fork with mismatched sub-offset
+AssertionError: expected 204 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 204
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5758:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[96/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should support appending to fork after sub-offset boundary
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5783:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[97/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should inherit content-type when sub-offset is supplied without explicit Content-Type
+AssertionError: expected null to be 'application/json' // Object.is equality
+
+- Expected:
+"application/json"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5807:44
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[98/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should not inherit producer state across sub-offset fork boundary
+AssertionError: expected 415 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 415
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5849:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[99/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should not inherit producer state across binary sub-offset fork boundary
+AssertionError: expected 415 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 415
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5894:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[100/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should fork at a binary sub-offset anchored mid-stream
+AssertionError: expected '' to be 'firstsec' // Object.is equality
+
+- Expected
++ Received
+
+- firstsec
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5925:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[101/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should return 400 when sub-offset > 0 is supplied without Stream-Fork-Offset
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5944:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[102/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should return 400 when Stream-Fork-Sub-Offset is supplied without Stream-Forked-From (even when value is 0)
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:5956:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[103/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should return 400 when sub-offset is supplied on an empty source stream
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6001:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[104/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should accept binary sub-offset equal to message length
+AssertionError: expected '' to be 'hello' // Object.is equality
+
+- Expected
++ Received
+
+- hello
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6023:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[105/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should accept JSON sub-offset equal to flattened message count
+AssertionError: expected [] to deeply equal [ { a: 1 }, { b: 2 }, { c: 3 } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "a": 1,
+-   },
+-   {
+-     "b": 2,
+-   },
+-   {
+-     "c": 3,
+-   },
+- ]
++ []
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6045:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[106/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should append initial body after the materialized sub-offset prefix
+AssertionError: expected 'XY' to be 'helXY' // Object.is equality
+
+Expected: "helXY"
+Received: "XY"
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6072:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[107/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Creation > should allow sub-offset fork creation from a closed source stream
+AssertionError: expected '' to be 'hel' // Object.is equality
+
+- Expected
++ Received
+
+- hel
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6098:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[108/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Reading > should read entire fork (source + fork data)
+AssertionError: expected ' fork' to be 'source fork' // Object.is equality
+
+Expected: "source fork"
+Received: " fork"
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6129:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[109/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Reading > should read only inherited portion
+AssertionError: expected '' to be 'inherited data' // Object.is equality
+
+- Expected
++ Received
+
+- inherited data
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6150:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[110/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Reading > should read only fork's own data (starting past fork offset)
+AssertionError: expected 'nly' to be 'fork only' // Object.is equality
+
+Expected: "fork only"
+Received: "nly"
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6179:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[111/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Reading > should read across fork boundary
+AssertionError: expected 'C' to be 'ABC' // Object.is equality
+
+Expected: "ABC"
+Received: "C"
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6210:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[112/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Reading > should not show source appends after fork
+AssertionError: expected '' to be 'before' // Object.is equality
+
+- Expected
++ Received
+
+- before
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6236:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[113/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Appending > should append to a fork
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6290:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[114/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Appending > should support idempotent producer on fork
+AssertionError: expected 'msg1' to be 'sourcemsg1' // Object.is equality
+
+Expected: "sourcemsg1"
+Received: "msg1"
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6336:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[115/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Appending > should close forked stream independently
+AssertionError: expected null to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6364:60
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[116/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Appending > should not affect fork when source is closed
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6393:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[117/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Appending > should append to source after fork — source independent
+AssertionError: expected 200 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 200
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6418:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[118/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Recursive > should fork at mid-point of inherited data
+AssertionError: expected '' to be 'ABC' // Object.is equality
+
+- Expected
++ Received
+
+- ABC
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6496:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[119/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Recursive > should read correctly across three levels
+AssertionError: expected 'B' to be 'AB' // Object.is equality
+
+Expected: "AB"
+Received: "B"
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6535:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[120/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Recursive > should append at each level independently
+AssertionError: expected 'Y1' to be 'XY1' // Object.is equality
+
+Expected: "XY1"
+Received: "Y1"
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6586:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[121/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Recursive > should compose sub-offsets across chained forks
+AssertionError: expected '' to be 'abcd' // Object.is equality
+
+- Expected
++ Received
+
+- abcd
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6612:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[122/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Live Modes > should return inherited data immediately on long-poll
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6667:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[123/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Live Modes > should stream fork data via SSE
+AssertionError: expected 'event: data\ndata:  forked\n\n' to contain 'inherited'
+
+- Expected
++ Received
+
+- inherited
++ event: data
++ data:  forked
++
++
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6733:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[124/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Live Modes > should handle long-poll handover at fork offset
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6736:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[125/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Deletion and Lifecycle > should soft-delete source while fork exists — fork still reads
+AssertionError: expected 404 to be 410 // Object.is equality
+
+- Expected
++ Received
+
+- 410
++ 404
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6824:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[126/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Deletion and Lifecycle > should return 410 for GET on soft-deleted source
+AssertionError: expected 404 to be 410 // Object.is equality
+
+- Expected
++ Received
+
+- 410
++ 404
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6871:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[127/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Deletion and Lifecycle > should return 410 for POST on soft-deleted source
+AssertionError: expected 404 to be 410 // Object.is equality
+
+- Expected
++ Received
+
+- 410
++ 404
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6895:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[128/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Deletion and Lifecycle > should return 410 for DELETE on soft-deleted source
+AssertionError: expected 404 to be 410 // Object.is equality
+
+- Expected
++ Received
+
+- 410
++ 404
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6915:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[129/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Deletion and Lifecycle > should return 409 for fork from soft-deleted source
+AssertionError: expected 201 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6942:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[130/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Deletion and Lifecycle > should return 409 for fork with content-type mismatch
+AssertionError: expected 201 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6960:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[131/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Deletion and Lifecycle > rejected fork (content-type mismatch) does not leak a source reference
+AssertionError: expected 201 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 201
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:6978:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[132/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Deletion and Lifecycle > should cascade GC when last fork is deleted
+AssertionError: expected 404 to be 410 // Object.is equality
+
+- Expected
++ Received
+
+- 410
++ 404
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7001:31
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[133/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Deletion and Lifecycle > should cascade GC through three levels
+AssertionError: expected 404 to be 410 // Object.is equality
+
+- Expected
++ Received
+
+- 410
++ 404
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7032:81
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[134/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Deletion and Lifecycle > should preserve data when deleting middle of chain
+AssertionError: expected 404 to be 410 // Object.is equality
+
+- Expected
++ Received
+
+- 410
++ 404
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7075:81
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[135/146]⎯
+
+ FAIL  conformance.test.ts > Fork - TTL and Expiry > should expire source with living forks (source goes 410)
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7204:8
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[136/146]⎯
+
+ FAIL  conformance.test.ts > Fork - TTL and Expiry > should inherit source TTL value when none specified
+AssertionError: expected null to be '3600' // Object.is equality
+
+- Expected:
+"3600"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7253:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[137/146]⎯
+
+ FAIL  conformance.test.ts > Fork - TTL and Expiry > should use fork's own TTL when specified
+AssertionError: expected null to be '7200' // Object.is equality
+
+- Expected:
+"7200"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7279:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[138/146]⎯
+
+ FAIL  conformance.test.ts > Fork - TTL and Expiry > should allow fork to outlive source via TTL renewal
+AssertionError: expected 404 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 404
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7309:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[139/146]⎯
+
+ FAIL  conformance.test.ts > Fork - TTL and Expiry > should allow fork TTL longer than source TTL (no capping)
+AssertionError: expected null to be '99999' // Object.is equality
+
+- Expected:
+"99999"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7362:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[140/146]⎯
+
+ FAIL  conformance.test.ts > Fork - JSON Mode > should fork a JSON stream
+AssertionError: expected null to be 'application/json' // Object.is equality
+
+- Expected:
+"application/json"
+
++ Received:
+null
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7385:48
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[141/146]⎯
+
+ FAIL  conformance.test.ts > Fork - JSON Mode > should read forked JSON across boundary
+AssertionError: expected [ { from: 'fork' } ] to deeply equal [ Array(2) ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "from": "source",
+-   },
+-   {
+      "from": "fork",
+    },
+  ]
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7418:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[142/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Edge Cases > should handle fork then immediately delete source
+AssertionError: expected '' to be 'ephemeral' // Object.is equality
+
+- Expected
++ Received
+
+- ephemeral
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7445:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[143/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Edge Cases > should handle many forks of same stream (10 forks)
+AssertionError: expected '' to be 'shared data' // Object.is equality
+
+- Expected
++ Received
+
+- shared data
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7472:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[144/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Edge Cases > should fork at every offset position
+AssertionError: expected '' to be 'A' // Object.is equality
+
+- Expected
++ Received
+
+- A
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7520:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[145/146]⎯
+
+ FAIL  conformance.test.ts > Fork - Edge Cases > should handle idempotent fork creation (PUT twice)
+AssertionError: expected 204 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 204
+
+ ❯ node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7568:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[146/146]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  146 failed | 180 passed | 6 skipped (332)
+   Start at  14:56:38
+   Duration  64.68s (transform 23ms, setup 0ms, import 121ms, tests 64.41s, environment 0ms)
+
+JSON report written to /home/user/workspace/repo/rust/chronicle/evidence/conformance-private-20261003.json

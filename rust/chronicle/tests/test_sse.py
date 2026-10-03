@@ -65,6 +65,12 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(wire, b'"a,b",true,')
         self.assertEqual(len(wire), 11)
 
+    def test_wire_offsets_preserve_json_spelling_and_internal_whitespace(self):
+        body = br' [ { "n": 1.00, "s": "\u0061" }, [ true , false ], "x,y" ] '
+        expected = br'{ "n": 1.00, "s": "\u0061" },[ true , false ],"x,y",'
+        self.assertEqual(sse.encode_wire(body, True), expected)
+        self.assertEqual(sse.encode_wire(b" \n1e2\t", True), b"1e2,")
+
     def test_output_refuses_overwrite_before_network(self):
         class Args:
             output = ""; url = "http://127.0.0.1:1"; path = "unused"

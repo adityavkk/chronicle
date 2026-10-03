@@ -1,0 +1,345 @@
+
+> test
+> vitest run -t should return text/event-stream content-type for SSE requests --reporter=verbose
+
+
+ RUN  v4.1.8 /home/user/workspace/repo/rust/chronicle/tests/conformance
+
+ ↓ conformance.test.ts > Basic Stream Operations > should create a stream
+ ↓ conformance.test.ts > Basic Stream Operations > should allow idempotent create with same config
+ ↓ conformance.test.ts > Basic Stream Operations > should reject create with different config (409)
+ ↓ conformance.test.ts > Basic Stream Operations > should delete a stream
+ ↓ conformance.test.ts > Basic Stream Operations > should properly isolate recreated stream after delete
+ ↓ conformance.test.ts > Append Operations > should append string data
+ ↓ conformance.test.ts > Append Operations > should append multiple chunks
+ ↓ conformance.test.ts > Append Operations > should enforce sequence ordering with seq
+ ↓ conformance.test.ts > Read Operations > should read empty stream
+ ↓ conformance.test.ts > Read Operations > should read stream with data
+ ↓ conformance.test.ts > Read Operations > should read from offset
+ ↓ conformance.test.ts > Long-Poll Operations > should wait for new data with long-poll
+ ↓ conformance.test.ts > Long-Poll Operations > should return immediately if data already exists
+ ↓ conformance.test.ts > HTTP Protocol > should return correct headers on PUT
+ ↓ conformance.test.ts > HTTP Protocol > should return 200 on idempotent PUT with same config
+ ↓ conformance.test.ts > HTTP Protocol > should return 409 on PUT with different config
+ ↓ conformance.test.ts > HTTP Protocol > should return correct headers on POST
+ ↓ conformance.test.ts > HTTP Protocol > should return 404 on POST to non-existent stream
+ ↓ conformance.test.ts > HTTP Protocol > should return 409 on content-type mismatch
+ ↓ conformance.test.ts > HTTP Protocol > should return correct headers on GET
+ ↓ conformance.test.ts > HTTP Protocol > should return empty body with up-to-date for empty stream
+ ↓ conformance.test.ts > HTTP Protocol > should read from offset
+ ↓ conformance.test.ts > HTTP Protocol > should return 404 on DELETE non-existent stream
+ ↓ conformance.test.ts > HTTP Protocol > should return 204 on successful DELETE
+ ↓ conformance.test.ts > HTTP Protocol > should enforce sequence ordering
+ ↓ conformance.test.ts > HTTP Protocol > should enforce lexicographic seq ordering ("2" then "10" rejects)
+ ↓ conformance.test.ts > HTTP Protocol > should allow lexicographic seq ordering ("09" then "10" succeeds)
+ ↓ conformance.test.ts > HTTP Protocol > should reject duplicate seq values
+ ↓ conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on GET responses
+ ↓ conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on PUT responses
+ ↓ conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on POST responses
+ ↓ conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on HEAD responses
+ ↓ conformance.test.ts > Browser Security Headers > should include Cross-Origin-Resource-Policy header on GET responses
+ ↓ conformance.test.ts > Browser Security Headers > should include Cache-Control: no-store on HEAD responses
+ ↓ conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on SSE responses
+ ↓ conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on long-poll responses
+ ↓ conformance.test.ts > Browser Security Headers > should include security headers on error responses
+ ↓ conformance.test.ts > TTL and Expiry Validation > should reject both TTL and Expires-At (400)
+ ↓ conformance.test.ts > TTL and Expiry Validation > should reject invalid TTL (non-integer)
+ ↓ conformance.test.ts > TTL and Expiry Validation > should reject negative TTL
+ ↓ conformance.test.ts > TTL and Expiry Validation > should accept valid TTL
+ ↓ conformance.test.ts > TTL and Expiry Validation > should accept valid Expires-At
+ ↓ conformance.test.ts > Case-Insensitivity > should treat content-type case-insensitively
+ ↓ conformance.test.ts > Case-Insensitivity > should allow idempotent create with different case content-type
+ ↓ conformance.test.ts > Case-Insensitivity > should accept headers with different casing
+ ↓ conformance.test.ts > Content-Type Validation > should enforce content-type match on append
+ ↓ conformance.test.ts > Content-Type Validation > should allow append with matching content-type
+ ↓ conformance.test.ts > Content-Type Validation > should return stream content-type on GET
+ ↓ conformance.test.ts > HEAD Metadata > should return metadata without body
+ ↓ conformance.test.ts > HEAD Metadata > should return 404 for non-existent stream
+ ↓ conformance.test.ts > HEAD Metadata > should return tail offset
+ ↓ conformance.test.ts > Offset Validation and Resumability > should accept -1 as sentinel for stream beginning
+ ↓ conformance.test.ts > Offset Validation and Resumability > should return same data for offset=-1 and no offset
+ ↓ conformance.test.ts > Offset Validation and Resumability > should accept offset=now as sentinel for current tail position
+ ↓ conformance.test.ts > Offset Validation and Resumability > should return correct tail offset for offset=now
+ ↓ conformance.test.ts > Offset Validation and Resumability > should be able to resume from offset=now result
+ ↓ conformance.test.ts > Offset Validation and Resumability > should work with offset=now on empty stream
+ ↓ conformance.test.ts > Offset Validation and Resumability > should return empty JSON array for offset=now on JSON streams
+ ↓ conformance.test.ts > Offset Validation and Resumability > should return empty body for offset=now on non-JSON streams
+ ↓ conformance.test.ts > Offset Validation and Resumability > should support offset=now with long-poll mode (waits for data)
+ ↓ conformance.test.ts > Offset Validation and Resumability > should receive data with offset=now long-poll when appended
+ ↓ conformance.test.ts > Offset Validation and Resumability > should support offset=now with SSE mode
+ ↓ conformance.test.ts > Offset Validation and Resumability > should return 404 for offset=now on non-existent stream
+ ↓ conformance.test.ts > Offset Validation and Resumability > should return 404 for offset=now with long-poll on non-existent stream
+ ↓ conformance.test.ts > Offset Validation and Resumability > should return 404 for offset=now with SSE on non-existent stream
+ ↓ conformance.test.ts > Offset Validation and Resumability > should support offset=now with long-poll on empty stream
+ ↓ conformance.test.ts > Offset Validation and Resumability > should support offset=now with SSE on empty stream
+ ↓ conformance.test.ts > Offset Validation and Resumability > should reject malformed offset (contains comma)
+ ↓ conformance.test.ts > Offset Validation and Resumability > should reject offset with spaces
+ ↓ conformance.test.ts > Offset Validation and Resumability > should support resumable reads (no duplicate data)
+ ↓ conformance.test.ts > Offset Validation and Resumability > should return empty response when reading from tail offset
+ ↓ conformance.test.ts > Protocol Edge Cases > should reject empty POST body with 400
+ ↓ conformance.test.ts > Protocol Edge Cases > should handle PUT with initial body correctly
+ ↓ conformance.test.ts > Protocol Edge Cases > should preserve data immutability by position
+ ↓ conformance.test.ts > Protocol Edge Cases > should generate unique, monotonically increasing offsets
+ ↓ conformance.test.ts > Protocol Edge Cases > should reject empty offset parameter
+ ↓ conformance.test.ts > Protocol Edge Cases > should reject multiple offset parameters
+ ↓ conformance.test.ts > Protocol Edge Cases > should enforce case-sensitive seq ordering
+ ↓ conformance.test.ts > Protocol Edge Cases > should handle binary data with integrity
+ ↓ conformance.test.ts > Protocol Edge Cases > should return Location header on 201
+ ↓ conformance.test.ts > Protocol Edge Cases > should reject missing Content-Type on POST
+ ↓ conformance.test.ts > Protocol Edge Cases > should accept PUT without Content-Type (use default)
+ ↓ conformance.test.ts > Protocol Edge Cases > should ignore unknown query parameters
+ ↓ conformance.test.ts > Long-Poll Edge Cases > should require offset parameter for long-poll
+ ↓ conformance.test.ts > Long-Poll Edge Cases > should generate Stream-Cursor header on long-poll responses
+ ↓ conformance.test.ts > Long-Poll Edge Cases > should return immediately with Stream-Up-To-Date when data exists at offset
+ ↓ conformance.test.ts > Long-Poll Edge Cases > should echo cursor and handle collision with jitter
+ ↓ conformance.test.ts > Long-Poll Edge Cases > should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout
+ ↓ conformance.test.ts > TTL and Expiry Edge Cases > should reject TTL with leading zeros
+ ↓ conformance.test.ts > TTL and Expiry Edge Cases > should reject TTL with plus sign
+ ↓ conformance.test.ts > TTL and Expiry Edge Cases > should reject TTL with float value
+ ↓ conformance.test.ts > TTL and Expiry Edge Cases > should reject TTL with scientific notation
+ ↓ conformance.test.ts > TTL and Expiry Edge Cases > should reject invalid Expires-At timestamp
+ ↓ conformance.test.ts > TTL and Expiry Edge Cases > should accept Expires-At with Z timezone
+ ↓ conformance.test.ts > TTL and Expiry Edge Cases > should accept Expires-At with timezone offset
+ ↓ conformance.test.ts > TTL and Expiry Edge Cases > should handle idempotent PUT with same TTL
+ ↓ conformance.test.ts > TTL and Expiry Edge Cases > should reject idempotent PUT with different TTL
+ ↓ conformance.test.ts > HEAD Metadata Edge Cases > should return TTL metadata if configured
+ ↓ conformance.test.ts > HEAD Metadata Edge Cases > should return Expires-At metadata if configured
+ ↓ conformance.test.ts > TTL Expiration Behavior > should return 404 on HEAD after TTL expires
+ ↓ conformance.test.ts > TTL Expiration Behavior > should return 404 on GET after TTL expires (idle)
+ ↓ conformance.test.ts > TTL Expiration Behavior > should return 404 on POST append after TTL expires (idle)
+ ↓ conformance.test.ts > TTL Expiration Behavior > should return 404 on HEAD after Expires-At passes
+ ↓ conformance.test.ts > TTL Expiration Behavior > should return 404 on GET after Expires-At passes
+ ↓ conformance.test.ts > TTL Expiration Behavior > should return 404 on POST append after Expires-At passes
+ ↓ conformance.test.ts > TTL Expiration Behavior > should allow recreating stream after TTL expires
+ ↓ conformance.test.ts > TTL Expiration Behavior > should extend TTL on write (sliding window)
+ ↓ conformance.test.ts > TTL Expiration Behavior > should extend TTL on read (sliding window)
+ ↓ conformance.test.ts > TTL Expiration Behavior > should NOT extend TTL on HEAD
+ ↓ conformance.test.ts > TTL Expiration Behavior > should NOT extend Expires-At on read or write
+ ↓ conformance.test.ts > Caching and ETag > should generate ETag on GET responses
+ ↓ conformance.test.ts > Caching and ETag > should return 304 Not Modified for matching If-None-Match
+ ↓ conformance.test.ts > Caching and ETag > should return 200 for non-matching If-None-Match
+ ↓ conformance.test.ts > Caching and ETag > should return new ETag after data changes
+ ↓ conformance.test.ts > Chunking and Large Payloads > should handle chunk-size pagination correctly
+ ↓ conformance.test.ts > Chunking and Large Payloads > should handle large payload appropriately
+ ↓ conformance.test.ts > Read-Your-Writes Consistency > should immediately read message after append
+ ↓ conformance.test.ts > Read-Your-Writes Consistency > should immediately read multiple appends
+ ↓ conformance.test.ts > Read-Your-Writes Consistency > should serve offset-based reads immediately after append
+ ✓ conformance.test.ts > SSE Mode > should return text/event-stream content-type for SSE requests 43ms
+ ↓ conformance.test.ts > SSE Mode > should accept live=sse query parameter for application/json
+ ↓ conformance.test.ts > SSE Mode > should require offset parameter for SSE mode
+ ↓ conformance.test.ts > SSE Mode > should stream data events via SSE
+ ↓ conformance.test.ts > SSE Mode > should send control events with offset
+ ↓ conformance.test.ts > SSE Mode > should generate streamCursor in SSE control events
+ ↓ conformance.test.ts > SSE Mode > should handle cursor collision with jitter in SSE mode
+ ↓ conformance.test.ts > SSE Mode > should wrap JSON data in arrays for SSE and produce valid JSON
+ ↓ conformance.test.ts > SSE Mode > should handle SSE for empty stream with correct offset
+ ↓ conformance.test.ts > SSE Mode > should send upToDate flag in SSE control events when caught up
+ ↓ conformance.test.ts > SSE Mode > should have correct SSE headers (no Content-Length, proper Cache-Control)
+ ↓ conformance.test.ts > SSE Mode > should handle newlines in text/plain payloads
+ ↓ conformance.test.ts > SSE Mode > should prevent CRLF injection in payloads - embedded event boundaries become literal data
+ ↓ conformance.test.ts > SSE Mode > should prevent CRLF injection - LF-only attack vectors
+ ↓ conformance.test.ts > SSE Mode > should prevent CRLF injection - carriage return only attack vectors
+ ↓ conformance.test.ts > SSE Mode > should handle JSON payloads with embedded newlines safely
+ ↓ conformance.test.ts > SSE Mode > should generate unique, monotonically increasing offsets in SSE mode
+ ↓ conformance.test.ts > SSE Mode > should support reconnection with last known offset
+ ↓ conformance.test.ts > SSE Mode > should auto-detect binary streams and return base64 encoded data in SSE mode
+ ↓ conformance.test.ts > SSE Mode > should include Stream-SSE-Data-Encoding header for binary streams
+ ↓ conformance.test.ts > SSE Mode > should NOT include Stream-SSE-Data-Encoding header for text/plain streams
+ ↓ conformance.test.ts > SSE Mode > should NOT include Stream-SSE-Data-Encoding header for application/json streams
+ ↓ conformance.test.ts > SSE Mode > should base64 encode data events only, control events remain JSON
+ ↓ conformance.test.ts > SSE Mode > should handle empty binary payload with auto-detected base64 encoding
+ ↓ conformance.test.ts > SSE Mode > should handle large binary payload with auto-detected base64 encoding
+ ↓ conformance.test.ts > SSE Mode > should handle binary data with special bytes using auto-detected base64 encoding
+ ↓ conformance.test.ts > SSE Mode > should auto-detect base64 encoding for application/x-protobuf streams
+ ↓ conformance.test.ts > SSE Mode > should auto-detect base64 encoding for image/png streams
+ ↓ conformance.test.ts > SSE Mode > should handle offset=now with auto-detected base64 encoding for binary streams
+ ↓ conformance.test.ts > JSON Mode > should allow PUT with empty array body (creates empty stream)
+ ↓ conformance.test.ts > JSON Mode > should reject POST with empty array body
+ ↓ conformance.test.ts > JSON Mode > should handle content-type with charset parameter
+ ↓ conformance.test.ts > JSON Mode > should wrap single JSON value in array
+ ↓ conformance.test.ts > JSON Mode > should store arrays as single messages
+ ↓ conformance.test.ts > JSON Mode > should concatenate multiple appends into single array
+ ↓ conformance.test.ts > JSON Mode > should handle mixed single values and arrays
+ ↓ conformance.test.ts > JSON Mode > should reject invalid JSON with 400
+ ↓ conformance.test.ts > JSON Mode > should handle various JSON value types
+ ↓ conformance.test.ts > JSON Mode > should preserve JSON structure and nesting
+ ↓ conformance.test.ts > JSON Mode > should work with client json() iterator
+ ↓ conformance.test.ts > JSON Mode > should reject empty JSON arrays with 400
+ ↓ conformance.test.ts > JSON Mode > should store nested arrays as single messages
+ ↓ conformance.test.ts > JSON Mode > should store arrays as values when double-wrapped
+ ↓ conformance.test.ts > JSON Mode > should store primitive arrays as single messages
+ ↓ conformance.test.ts > JSON Mode > should handle mixed batching - single values, arrays, and nested arrays
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Byte-Exactness Property > concurrent readers see consistent data during writes
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Byte-Exactness Property > single byte values cover full range (0-255) with concurrent readers during write
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Operation Sequence Properties > random operation sequences maintain stream invariants
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Operation Sequence Properties > offsets are always monotonically increasing
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Operation Sequence Properties > read-your-writes: data is immediately visible after append
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Immutability Properties > data at offset never changes after additional appends
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Offset Validation Properties > should reject offsets with invalid characters
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Sequence Ordering Properties > lexicographically ordered seq values are accepted
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Sequence Ordering Properties > out-of-order seq values are rejected
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Concurrent Writer Stress Tests > concurrent writers with sequence numbers - server handles gracefully
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Concurrent Writer Stress Tests > concurrent writers racing with incrementing seq values
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Concurrent Writer Stress Tests > concurrent appends without seq - all data is persisted
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > Concurrent Writer Stress Tests > mixed readers and writers - readers see consistent state
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > State Hash Verification > replay produces identical content hash
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > State Hash Verification > content hash changes with each append
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > State Hash Verification > empty stream has consistent hash
+ ↓ conformance.test.ts > Property-Based Tests (fast-check) > State Hash Verification > deterministic ordering - same data in same order produces same hash
+ ↓ conformance.test.ts > Idempotent Producer Operations > should accept first append with producer headers (epoch=0, seq=0)
+ ↓ conformance.test.ts > Idempotent Producer Operations > should accept sequential producer sequences
+ ↓ conformance.test.ts > Idempotent Producer Operations > should return 204 for duplicate sequence (idempotent success)
+ ↓ conformance.test.ts > Idempotent Producer Operations > should accept epoch upgrade (new epoch starts at seq=0)
+ ↓ conformance.test.ts > Idempotent Producer Operations > should reject stale epoch with 403 (zombie fencing)
+ ↓ conformance.test.ts > Idempotent Producer Operations > should reject sequence gap with 409
+ ↓ conformance.test.ts > Idempotent Producer Operations > should reject epoch increase with seq != 0
+ ↓ conformance.test.ts > Idempotent Producer Operations > should require all producer headers together
+ ↓ conformance.test.ts > Idempotent Producer Operations > should reject invalid integer formats in producer headers
+ ↓ conformance.test.ts > Idempotent Producer Operations > multiple producers should have independent state
+ ↓ conformance.test.ts > Idempotent Producer Operations > duplicate of seq=0 should not corrupt state
+ ↓ conformance.test.ts > Idempotent Producer Operations > duplicate response should return highest accepted seq, not request seq
+ ↓ conformance.test.ts > Idempotent Producer Operations > split-brain fencing scenario
+ ↓ conformance.test.ts > Idempotent Producer Operations > epoch rollback should be rejected
+ ↓ conformance.test.ts > Idempotent Producer Operations > producer headers work with Stream-Seq header
+ ↓ conformance.test.ts > Idempotent Producer Operations > producer duplicate should return 204 even with Stream-Seq header
+ ↓ conformance.test.ts > Idempotent Producer Operations > should store and read back data correctly
+ ↓ conformance.test.ts > Idempotent Producer Operations > should preserve order of sequential producer writes
+ ↓ conformance.test.ts > Idempotent Producer Operations > duplicate should not corrupt or duplicate data
+ ↓ conformance.test.ts > Idempotent Producer Operations > multiple producers should interleave correctly
+ ↓ conformance.test.ts > Idempotent Producer Operations > should store and read back JSON object correctly
+ ↓ conformance.test.ts > Idempotent Producer Operations > should preserve order of JSON appends with producer
+ ↓ conformance.test.ts > Idempotent Producer Operations > JSON duplicate should not corrupt data
+ ↓ conformance.test.ts > Idempotent Producer Operations > should reject invalid JSON with producer headers
+ ↓ conformance.test.ts > Idempotent Producer Operations > should reject empty JSON array with producer headers
+ ↓ conformance.test.ts > Idempotent Producer Operations > should return 404 for non-existent stream
+ ↓ conformance.test.ts > Idempotent Producer Operations > should return 409 for content-type mismatch
+ ↓ conformance.test.ts > Idempotent Producer Operations > should return 400 for empty body
+ ↓ conformance.test.ts > Idempotent Producer Operations > should reject empty Producer-Id
+ ↓ conformance.test.ts > Stream Closure > Create with Stream-Closed > create-closed-stream: PUT with Stream-Closed: true creates closed stream
+ ↓ conformance.test.ts > Stream Closure > Create with Stream-Closed > create-closed-stream-with-body: PUT with body + Stream-Closed: true
+ ↓ conformance.test.ts > Stream Closure > Create with Stream-Closed > create-closed-returns-header: Response includes Stream-Closed: true
+ ↓ conformance.test.ts > Stream Closure > Close Operations > close-stream-empty-post: POST with Stream-Closed: true, empty body closes stream
+ ↓ conformance.test.ts > Stream Closure > Close Operations > close-with-final-append: POST with body + Stream-Closed: true
+ ↓ conformance.test.ts > Stream Closure > Close Operations > close-returns-offset-and-header: Response includes Stream-Next-Offset and Stream-Closed: true
+ ↓ conformance.test.ts > Stream Closure > Close Operations > close-idempotent: Closing already-closed stream (empty body) returns 204
+ ↓ conformance.test.ts > Stream Closure > Close Operations > close-only-ignores-content-type: Close-only with mismatched Content-Type still succeeds
+ ↓ conformance.test.ts > Stream Closure > Close Operations > append-to-closed-stream-409: Append to closed stream returns 409 with Stream-Closed: true header
+ ↓ conformance.test.ts > Stream Closure > Close Operations > append-and-close-to-closed-stream-409: POST with body + Stream-Closed: true to already-closed stream returns 409
+ ↓ conformance.test.ts > Stream Closure > HEAD with Stream Closure > head-closed-stream: HEAD returns Stream-Closed: true header
+ ↓ conformance.test.ts > Stream Closure > HEAD with Stream Closure > head-open-stream-no-closed-header: HEAD on open stream does NOT have Stream-Closed header
+ ↓ conformance.test.ts > Stream Closure > Read Closed Streams (Catch-up) > read-closed-stream-at-tail: Returns Stream-Closed: true at tail of closed stream
+ ↓ conformance.test.ts > Stream Closure > Read Closed Streams (Catch-up) > read-closed-stream-partial-no-closed: Partial read of closed stream does NOT include Stream-Closed
+ ↓ conformance.test.ts > Stream Closure > Read Closed Streams (Catch-up) > read-closed-stream-empty-body-eof: At tail of closed stream: 200 OK, empty body, Stream-Closed: true
+ ↓ conformance.test.ts > Stream Closure > Long-poll with Stream Closure > longpoll-closed-stream-immediate: No wait when closed stream at tail, returns immediately
+ ↓ conformance.test.ts > Stream Closure > Long-poll with Stream Closure > longpoll-closed-returns-204-with-header: Returns 204 with Stream-Closed: true
+ ↓ conformance.test.ts > Stream Closure > SSE with Stream Closure > sse-closed-stream-control-event: Final control event has streamClosed: true
+ ↓ conformance.test.ts > Stream Closure > SSE with Stream Closure > sse-closed-stream-no-cursor: streamCursor omitted when streamClosed is true
+ ↓ conformance.test.ts > Stream Closure > SSE with Stream Closure > sse-closed-stream-connection-closes: Connection closes after final event
+ ↓ conformance.test.ts > Stream Closure > SSE with Stream Closure > sse-live-reader-receives-final-append-on-close: live reader at tail receives data appended atomically with the close
+ ↓ conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-with-append: Close with final append using producer headers
+ ↓ conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-only-with-producer-headers: Close-only with producer headers updates state
+ ↓ conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-duplicate-returns-204: Duplicate close (same tuple) returns 204
+ ↓ conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-different-tuple-returns-409: Different producer/seq gets 409
+ ↓ conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-different-seq-returns-409: Same producer, different seq gets 409
+ ↓ conformance.test.ts > Stream Closure > Idempotent Producers with Stream Closure > idempotent-close-only-duplicate-returns-204: Duplicate close-only (no body) returns 204
+ ↓ conformance.test.ts > Stream Closure > Edge Cases > 409-includes-stream-offset: 409 for closed stream includes Stream-Next-Offset header
+ ↓ conformance.test.ts > Stream Closure > Edge Cases > close-nonexistent-stream-404: POST with Stream-Closed to nonexistent stream returns 404
+ ↓ conformance.test.ts > Stream Closure > Edge Cases > offset-now-on-closed-stream: offset=now on closed stream returns Stream-Closed: true
+ ↓ conformance.test.ts > Stream Closure > Edge Cases > producer-state-survives-close: Stale-epoch producer gets 403, not 409 STREAM_CLOSED
+ ↓ conformance.test.ts > Stream Closure > Edge Cases > close-with-different-body-dedup: Retry close with different body deduplicates to original
+ ↓ conformance.test.ts > Stream Closure > Edge Cases > empty-post-without-stream-closed-400: POST with empty body but no Stream-Closed returns 400
+ ↓ conformance.test.ts > Stream Closure > Edge Cases > delete-closed-stream: Deleting a closed stream removes it (returns 404 after)
+ ↓ conformance.test.ts > Fork - Creation > should fork at current head (default)
+ ↓ conformance.test.ts > Fork - Creation > should fork at a specific offset
+ ↓ conformance.test.ts > Fork - Creation > should fork at zero offset (empty inherited data)
+ ↓ conformance.test.ts > Fork - Creation > should fork at head offset (all source data inherited)
+ ↓ conformance.test.ts > Fork - Creation > should return 404 when forking a nonexistent stream
+ ↓ conformance.test.ts > Fork - Creation > should return 400 when forking at offset beyond stream length
+ ↓ conformance.test.ts > Fork - Creation > should return 409 when forking to path already in use with different config
+ ↓ conformance.test.ts > Fork - Creation > should fork a closed stream — fork starts open
+ ↓ conformance.test.ts > Fork - Creation > should fork an empty stream
+ ↓ conformance.test.ts > Fork - Creation > should fork preserving content-type when specified
+ ↓ conformance.test.ts > Fork - Creation > should fork inheriting content-type when header omitted
+ ↓ conformance.test.ts > Fork - Creation > should fork at a binary sub-offset within an append
+ ↓ conformance.test.ts > Fork - Creation > should fork at a JSON sub-offset within a flattened batch
+ ↓ conformance.test.ts > Fork - Creation > should treat sub-offset 0 as equivalent to absent header
+ ↓ conformance.test.ts > Fork - Creation > should return 400 when binary sub-offset overshoots message length
+ ↓ conformance.test.ts > Fork - Creation > should return 400 when JSON sub-offset overshoots message count
+ ↓ conformance.test.ts > Fork - Creation > should return 400 for malformed sub-offset values
+ ↓ conformance.test.ts > Fork - Creation > should be idempotent when re-creating with matching sub-offset
+ ↓ conformance.test.ts > Fork - Creation > should return 409 when re-creating with mismatched sub-offset
+ ↓ conformance.test.ts > Fork - Creation > should be idempotent when re-creating a JSON fork with matching sub-offset
+ ↓ conformance.test.ts > Fork - Creation > should return 409 when re-creating a JSON fork with mismatched sub-offset
+ ↓ conformance.test.ts > Fork - Creation > should support appending to fork after sub-offset boundary
+ ↓ conformance.test.ts > Fork - Creation > should inherit content-type when sub-offset is supplied without explicit Content-Type
+ ↓ conformance.test.ts > Fork - Creation > should not inherit producer state across sub-offset fork boundary
+ ↓ conformance.test.ts > Fork - Creation > should not inherit producer state across binary sub-offset fork boundary
+ ↓ conformance.test.ts > Fork - Creation > should fork at a binary sub-offset anchored mid-stream
+ ↓ conformance.test.ts > Fork - Creation > should return 400 when sub-offset > 0 is supplied without Stream-Fork-Offset
+ ↓ conformance.test.ts > Fork - Creation > should return 400 when Stream-Fork-Sub-Offset is supplied without Stream-Forked-From (even when value is 0)
+ ↓ conformance.test.ts > Fork - Creation > should return a Stream-Next-Offset on sub-offset fork creation that is consumable by reads
+ ↓ conformance.test.ts > Fork - Creation > should return 400 when sub-offset is supplied on an empty source stream
+ ↓ conformance.test.ts > Fork - Creation > should accept binary sub-offset equal to message length
+ ↓ conformance.test.ts > Fork - Creation > should accept JSON sub-offset equal to flattened message count
+ ↓ conformance.test.ts > Fork - Creation > should append initial body after the materialized sub-offset prefix
+ ↓ conformance.test.ts > Fork - Creation > should allow sub-offset fork creation from a closed source stream
+ ↓ conformance.test.ts > Fork - Reading > should read entire fork (source + fork data)
+ ↓ conformance.test.ts > Fork - Reading > should read only inherited portion
+ ↓ conformance.test.ts > Fork - Reading > should read only fork's own data (starting past fork offset)
+ ↓ conformance.test.ts > Fork - Reading > should read across fork boundary
+ ↓ conformance.test.ts > Fork - Reading > should not show source appends after fork
+ ↓ conformance.test.ts > Fork - Reading > should NOT include fork headers on HEAD/GET/PUT responses (forks are transparent)
+ ↓ conformance.test.ts > Fork - Appending > should append to a fork
+ ↓ conformance.test.ts > Fork - Appending > should support idempotent producer on fork
+ ↓ conformance.test.ts > Fork - Appending > should close forked stream independently
+ ↓ conformance.test.ts > Fork - Appending > should not affect fork when source is closed
+ ↓ conformance.test.ts > Fork - Appending > should append to source after fork — source independent
+ ↓ conformance.test.ts > Fork - Recursive > should create a three-level fork chain
+ ↓ conformance.test.ts > Fork - Recursive > should fork at mid-point of inherited data
+ ↓ conformance.test.ts > Fork - Recursive > should read correctly across three levels
+ ↓ conformance.test.ts > Fork - Recursive > should append at each level independently
+ ↓ conformance.test.ts > Fork - Recursive > should compose sub-offsets across chained forks
+ ↓ conformance.test.ts > Fork - Live Modes > should return inherited data immediately on long-poll
+ ↓ conformance.test.ts > Fork - Live Modes > should wait for fork appends, not source appends, on long-poll at tail
+ ↓ conformance.test.ts > Fork - Live Modes > should stream fork data via SSE
+ ↓ conformance.test.ts > Fork - Live Modes > should handle long-poll handover at fork offset
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should delete fork without affecting source
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should soft-delete source while fork exists — fork still reads
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should block re-creation of soft-deleted source (PUT returns 409)
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should return 410 for GET on soft-deleted source
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should return 410 for POST on soft-deleted source
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should return 410 for DELETE on soft-deleted source
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should return 409 for fork from soft-deleted source
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should return 409 for fork with content-type mismatch
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > rejected fork (content-type mismatch) does not leak a source reference
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should cascade GC when last fork is deleted
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should cascade GC through three levels
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should preserve data when deleting middle of chain
+ ↓ conformance.test.ts > Fork - Deletion and Lifecycle > should keep source alive when all forks are deleted
+ ↓ conformance.test.ts > Fork - TTL and Expiry > should inherit source expiry when none specified
+ ↓ conformance.test.ts > Fork - TTL and Expiry > should allow fork with shorter TTL
+ ↓ conformance.test.ts > Fork - TTL and Expiry > should expire fork based on TTL (releases refcount)
+ ↓ conformance.test.ts > Fork - TTL and Expiry > should expire source with living forks (source goes 410)
+ ↓ conformance.test.ts > Fork - TTL and Expiry > should inherit source TTL value when none specified
+ ↓ conformance.test.ts > Fork - TTL and Expiry > should use fork's own TTL when specified
+ ↓ conformance.test.ts > Fork - TTL and Expiry > should allow fork to outlive source via TTL renewal
+ ↓ conformance.test.ts > Fork - TTL and Expiry > should allow fork Expires-At beyond source TTL expiry
+ ↓ conformance.test.ts > Fork - TTL and Expiry > should allow fork TTL longer than source TTL (no capping)
+ ↓ conformance.test.ts > Fork - JSON Mode > should fork a JSON stream
+ ↓ conformance.test.ts > Fork - JSON Mode > should read forked JSON across boundary
+ ↓ conformance.test.ts > Fork - Edge Cases > should handle fork then immediately delete source
+ ↓ conformance.test.ts > Fork - Edge Cases > should handle many forks of same stream (10 forks)
+ ↓ conformance.test.ts > Fork - Edge Cases > should fork at every offset position
+ ↓ conformance.test.ts > Fork - Edge Cases > should handle idempotent fork creation (PUT twice)
+ ↓ conformance.test.ts > Reserved subscription APIs > creates and idempotently re-confirms a webhook subscription
+ ↓ conformance.test.ts > Reserved subscription APIs > rejects unsafe webhook URLs
+ ↓ conformance.test.ts > Reserved subscription APIs > webhook synchronous done auto-acks the wake snapshot
+ ↓ conformance.test.ts > Reserved subscription APIs > webhook callback acks and fences stale wake generations
+ ↓ conformance.test.ts > Reserved subscription APIs > adds and removes explicit subscription streams
+ ↓ conformance.test.ts > Reserved subscription APIs > pull-wake claim, ack, and release use subscription-scoped leases
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 331 skipped (332)
+   Start at  14:52:24
+   Duration  401ms (transform 20ms, setup 0ms, import 120ms, tests 45ms, environment 0ms)
+

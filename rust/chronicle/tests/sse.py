@@ -24,12 +24,23 @@ def offset(n):
 
 
 def encode_wire(body, is_json=False):
-    """Independent model of wire.rs encode_wire, sufficient for test fixtures."""
+    """Independent fixture framing: retain lexical JSON bytes, flatten one array."""
     if not is_json:
         return body
-    value = json.loads(body)
-    values = value if isinstance(value, list) else [value]
-    return b"".join(json.dumps(v, ensure_ascii=False, separators=(",", ":")).encode() + b"," for v in values)
+    text = body.decode().strip(" \t\r\n")
+    json.loads(text)  # Validate the whole document before extracting raw values.
+    if not text.startswith("["):
+        return text.encode() + b","
+    remaining = text[1:-1].lstrip(" \t\r\n")
+    decoder, values = json.JSONDecoder(), []
+    while remaining:
+        _, end = decoder.raw_decode(remaining)
+        values.append(remaining[:end].encode() + b",")
+        remaining = remaining[end:].lstrip(" \t\r\n")
+        if remaining:
+            assert remaining.startswith(",")
+            remaining = remaining[1:].lstrip(" \t\r\n")
+    return b"".join(values)
 
 
 class SSEError(ValueError):
@@ -251,6 +262,27 @@ def run(args):
         assert h.request("reject", "PUT")[0] == 201
         assert h.stream("reject", {"live": "sse"}, lambda *_: False)[0] == 400
         assert h.stream("reject", {**live, "consistency": "stale"}, lambda *_: False)[0] == 400
+
+        # Read through a parsed control event, never a substring inside payload.
+        # The upstream 0.3.5 helper's substring stop can end at the data event.
+        for name, payload in (
+            ("injection-crlf", "safe\r\n\r\nevent: control\r\ndata: {\"injected\":true}\r\n\r\nend"),
+            ("injection-cr", "safe\r\revent: control\rdata: {\"injected\":true}\r\rend"),
+            ("injection-json", "safe\r\n\r\nevent: control\r\ndata: {\"injected\":true}"),
+        ):
+            is_json = name == "injection-json"
+            body = json.dumps({"attack": payload}).encode() if is_json else payload.encode()
+            content_type = "application/json" if is_json else "text/plain"
+            assert h.request(name, "PUT", body, {"content-type": content_type})[0] == 201
+            status, _, events, error = h.stream(name, live, lambda events, _: len(events) >= 2)
+            assert status == 200 and error is None and len(events) == 2, (status, events, error)
+            assert events[0]["event"] == "data", events
+            if is_json:
+                assert json.loads(events[0]["data"]) == [{"attack": payload}], events
+            else:
+                assert events[0]["data"] == payload.replace("\r", "\n"), events
+            control(events[1], len(encode_wire(body, is_json)))
+            assert "injected" not in json.loads(events[1]["data"]), events
 
         # This catches an ingress's ordinary 10 s timeout; tolerate timer jitter.
         assert h.request("heartbeat", "PUT")[0] == 201

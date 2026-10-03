@@ -1,6 +1,6 @@
 CARGO := $(HOME)/.cargo/bin/cargo
 
-.PHONY: check fault-check formal image local
+.PHONY: check fault-check formal conformance image local
 check: fault-check
 	$(CARGO) fmt --all -- --check
 	$(CARGO) clippy --locked --all-targets -- -D warnings
@@ -17,6 +17,10 @@ fault-check:
 
 formal:
 	PATH="$(HOME)/.elan/bin:$$PATH" $(MAKE) -C formal check
+
+conformance:
+	npm --prefix tests/conformance ci --ignore-scripts --legacy-peer-deps --no-audit --no-fund
+	CONFORMANCE_TEST_URL="$(CONFORMANCE_TEST_URL)" npm --prefix tests/conformance test
 
 image:
 	$(CARGO) build --release --locked

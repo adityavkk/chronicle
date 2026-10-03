@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/rust/chronicle/tests/sse.py", line 328, in <module>
+    main()
+  File "/home/user/workspace/repo/rust/chronicle/tests/sse.py", line 324, in main
+    run(p.parse_args())
+  File "/home/user/workspace/repo/rust/chronicle/tests/sse.py", line 273, in run
+    control(events[1], len(encode_wire(body, is_json)))
+  File "/home/user/workspace/repo/rust/chronicle/tests/sse.py", line 198, in control
+    assert value["streamNextOffset"] == offset(at), value
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'streamNextOffset': '0000000000000000_0000000000000070', 'streamCursor': '3130399', 'upToDate': True}
