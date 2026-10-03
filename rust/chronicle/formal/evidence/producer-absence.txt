@@ -1,0 +1,13 @@
+make: Entering directory '/home/user/workspace/repo/rust/chronicle/formal'
+cd lean && lake build -- -DwarningAsError=true
+Build completed successfully (4 jobs).
+! grep -R -nE '\b(sorry|admit|axiom)\b' lean/ChronicleFormal*.lean lean/ChronicleFormal
+make: Leaving directory '/home/user/workspace/repo/rust/chronicle/formal'
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running tests/formal_retry.rs (target/debug/deps/formal_retry-d9b5dd619658aa57)
+
+running 1 test
+test replays_formal_retention_scenario ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

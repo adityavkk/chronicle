@@ -45,8 +45,20 @@ writes, exact/lower-sequence retries and epoch regressions as no-ops, Close-afte
 delayed expiry, and an exact retry after another producer's interleaved write. The proofs
 contain no `sorry`, `admit`, or custom axioms.
 
+The producer map now distinguishes absence from a committed epoch-zero/sequence-zero
+entry. The original total-map default conflated them: it rejected the first sequence
+zero and admitted sequence one. This retrospective model correction adds proofs for
+fresh sequence-zero acceptance at any epoch, fresh gap rejection, initial epoch-zero
+acceptance, and absence after recreation. `initial` represents a successfully created
+empty, open incarnation-one stream, not Rust's pre-create state. The existing Rust
+retention fixture crosses the initial gap/zero boundary and recreation. No-op means
+no effect on state, not a rejected HTTP result: a duplicate may succeed without an
+effect. Write-offset monotonicity is non-strict and does not cover recreation, which
+resets the offset. The effect and retained-result models remain separately proved;
+their composition and Rust's capacity/finite-integer limits are not proved here.
+
 This does not prove Raft, storage fsync correctness, serialization, integer overflow, or
-refinement to future Rust. Implementations must atomically persist applied state, producer
+refinement to Rust. Implementations must atomically persist applied state, producer
 and outcome dedup records, lifecycle/expiry metadata, and `last_applied`; snapshots must
 capture exactly that committed boundary before log truncation.
 
