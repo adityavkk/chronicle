@@ -9,7 +9,7 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{DefaultBodyLimit, Extension, Path, Query, Request, State},
-    http::{HeaderMap, Method, StatusCode, Uri},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, Uri},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{any, get, post},
@@ -212,9 +212,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/raft/{group}/snapshot", post(snapshot_rpc))
         .route(
             "/v1/stream/{tenant}/{*path}",
-            any(stream).layer(DefaultBodyLimit::max(1024 * 1024)).layer(
-                middleware::from_fn_with_state(app.admission.clone(), admit_stream),
-            ),
+            any(stream)
+                .layer(DefaultBodyLimit::max(1024 * 1024))
+                .layer(middleware::from_fn_with_state(
+                    app.admission.clone(),
+                    admit_stream,
+                ))
+                .layer(middleware::from_fn(browser_headers)),
         )
         .layer(DefaultBodyLimit::max(8 * 1024 * 1024))
         .with_state(app);
@@ -583,6 +587,19 @@ async fn placed(
         return Err(unavailable("placement generation changed"));
     }
     Ok(Json(result).into_response())
+}
+
+async fn browser_headers(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    response.headers_mut().insert(
+        "cross-origin-resource-policy",
+        HeaderValue::from_static("cross-origin"),
+    );
+    response
 }
 
 async fn admit_stream(
@@ -1272,7 +1289,8 @@ mod tests {
             .layer(middleware::from_fn_with_state(
                 admission.clone(),
                 admit_stream,
-            ));
+            ))
+            .layer(middleware::from_fn(browser_headers));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -1283,6 +1301,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(
+            response.headers()["cross-origin-resource-policy"],
+            "cross-origin"
+        );
         assert_eq!(admission.available_permits(), 0);
         let rejected = client
             .get(format!("http://{address}/"))
@@ -1290,6 +1313,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(rejected.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(
+            rejected.headers()["cross-origin-resource-policy"],
+            "cross-origin"
+        );
         drop(response);
         tokio::time::timeout(Duration::from_secs(2), async {
             while admission.available_permits() != 1 {
@@ -1298,6 +1326,40 @@ mod tests {
         })
         .await
         .unwrap();
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn browser_headers_cover_early_rejection_and_extraction_failure() {
+        let router = Router::new()
+            .route("/", post(|_: Bytes| async { StatusCode::NO_CONTENT }))
+            .layer(DefaultBodyLimit::max(1))
+            .layer(middleware::from_fn_with_state(
+                Arc::new(Semaphore::new(1)),
+                admit_stream,
+            ))
+            .layer(middleware::from_fn(browser_headers));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let client = reqwest::Client::new();
+        for (body, unsupported, status) in [
+            ("x", false, StatusCode::NO_CONTENT),
+            ("xx", false, StatusCode::PAYLOAD_TOO_LARGE),
+            ("xx", true, StatusCode::NOT_IMPLEMENTED),
+        ] {
+            let mut request = client.post(format!("http://{address}/")).body(body);
+            if unsupported {
+                request = request.header("stream-seq", "1");
+            }
+            let response = request.send().await.unwrap();
+            assert_eq!(response.status(), status);
+            assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+            assert_eq!(
+                response.headers()["cross-origin-resource-policy"],
+                "cross-origin"
+            );
+        }
         server.abort();
     }
 

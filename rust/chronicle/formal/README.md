@@ -458,7 +458,8 @@ retried with false/omitted closure must still reach result lookup. Before fixing
 that path, the command contract adds default-false `empty_body`, meaning original
 HTTP-body emptiness before JSON framing. Missing fields in old logs must preserve
 replay of zero-byte commands. POST JSON `[]` remains rejected by the HTTP encoder
-before admission; PUT JSON `[]` is allowed. Neither policy changes here.
+before Raft proposal (after HTTP admission); PUT JSON `[]` is allowed. Neither
+policy changes here.
 New commands reject empty/non-closing bodies only after existing fences and
 retained-success lookup, before any state/producer mutation. Fresh rejection
 does not consume a tuple; cached retries still succeed. Malformed-body errors

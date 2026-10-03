@@ -8,7 +8,14 @@ from long_poll import Requests
 
 def run(args):
     with open(args.output, "x", encoding="utf-8") as output:
-        call = Requests(args, output).call
+        requests = Requests(args, output)
+
+        def call(*positional, **named):
+            result = requests.call(*positional, **named)
+            assert result["headers"].get("x-content-type-options") == "nosniff", result
+            assert result["headers"].get("cross-origin-resource-policy") == "cross-origin", result
+            return result
+
         for name, value in (
             ("stream-forked-from", "/v1/stream/source"),
             ("stream-fork-offset", "0000000000000000_0000000000000000"),
@@ -93,10 +100,12 @@ def run(args):
         assert call("empty", "GET")["body"] == "accepted"
         json_producer = {**producer, "content-type": "application/json"}
         assert call("empty-json", "PUT", headers=json_producer)["status"] == 201
-        # The pinned protocol rejects empty JSON appends before admission.
+        # The pinned protocol rejects empty JSON appends before Raft proposal.
         assert call("empty-json", "POST", b"[]", json_producer)["status"] == 400
         assert call("empty-json", "POST", b"[1]", json_producer)["status"] == 200
         assert call("empty-json", "GET")["body"] == "[1]"
+        assert call("empty-json", "HEAD")["status"] == 200
+        assert call("empty-json", "DELETE")["status"] == 204
     print(json.dumps({"result": "passed", "history": args.output,
                       "scope": "unsupported-header and committed write status contract, not full conformance"}))
 
