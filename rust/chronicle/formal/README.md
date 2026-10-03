@@ -50,6 +50,34 @@ refinement to future Rust. Implementations must atomically persist applied state
 and outcome dedup records, lifecycle/expiry metadata, and `last_applied`; snapshots must
 capture exactly that committed boundary before log truncation.
 
+## Committed file projection — checked before adding the read path
+
+`Projection.tla` explores two incarnations, up to two committed bytes chosen from
+two values, partial copying, publication, reads, crashes and restart: 3,168 states.
+`authority` maps to the durable applied SQLite stream, never a local file length.
+`BeginCopy`/`CopyByte`/`Publish` map to blocking-actor materialization followed by
+publishing a usable file range. The actor serializes this with state changes.
+`Read` captures bytes and authoritative frontier together; an already opened range
+must remain bounded even if later appends extend the file. Lifecycle/snapshot
+replacement must use a new inode, never truncate a file held by an existing reader.
+
+Restart discards projection metadata and reconstructs from SQLite; a file is not
+proof of committed content. `BadProjectionRestart` trusts a corrupt file's size;
+`BadProjectionIncarnation` reuses a published generation after recreation. Both
+produce retained `DataFromAuthority` counterexamples. These are bounded publication
+checks, not a proof of OS inode semantics, power-loss behavior, or Rust refinement.
+The required implementation tests cover partial files, restart corruption,
+incarnation/snapshot replacement, concurrent range lifetimes, JSON boundaries,
+and truncation during response delivery. Liveness still depends on responsive
+local storage and eventual quorum; this cache model asserts safety only.
+
+The planned cache is bounded and rebuildable. Range opening checks the captured
+incarnation/frontier against current authority; an intervening lifecycle change
+may return a retryable read error instead of serving another incarnation. Raw
+binary and comma-delimited JSON bytes follow pinned Electric 0.1.5. Axum will use
+bounded file reads with explicit unexpected-EOF errors; its body API does not
+expose Electric's raw plaintext socket for `sendfile`, so this is not zero-copy.
+
 ## Implementation mapping and remaining gaps
 
 `src/model.rs::State::apply` is the deterministic state machine. `storage.rs` commits

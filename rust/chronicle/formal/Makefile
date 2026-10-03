@@ -7,6 +7,7 @@ TLC := java -XX:+UseParallelGC -cp $(JAR) tlc2.TLC -workers auto
 check: jar lean positive negative
 
 positive:
+	cd tla && $(TLC) -metadir /tmp/chronicle-projection-$$$$ -config Projection.cfg Projection.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-retention-$$$$ -config Retention.cfg RetentionScenario.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-ownership-$$$$ -config Ownership.cfg Ownership.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-safety-$$$$ -config Safety.cfg Chronicle.tla
@@ -25,7 +26,9 @@ negative:
 	check_bad BadOwnerFence AcceptedAuthorityCurrent; \
 	check_bad BadPromotion PromotionCaughtUp; \
 	check_bad BadOwnership AcknowledgedRetained Ownership; \
-	check_bad BadRetention OriginalFrontierReplies RetentionScenario
+	check_bad BadRetention OriginalFrontierReplies RetentionScenario; \
+	check_bad BadProjectionRestart DataFromAuthority Projection; \
+	check_bad BadProjectionIncarnation DataFromAuthority Projection
 
 jar:
 	@test -f $(JAR) || curl -fL -o $(JAR) https://github.com/tlaplus/tlaplus/releases/download/$(TLA_VERSION)/tla2tools.jar
