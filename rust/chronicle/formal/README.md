@@ -62,6 +62,19 @@ refinement to Rust. Implementations must atomically persist applied state, produ
 and outcome dedup records, lifecycle/expiry metadata, and `last_applied`; snapshots must
 capture exactly that committed boundary before log truncation.
 
+Permanent-volume-loss qualification treats the lost identity as stopped, not as
+a Raft voter permitted to forget its durable state. The planned local schedule
+stops one k3d agent, withholds its Chronicle PVC contents, and starts it with an
+empty directory. Startup must refuse to serve or recreate databases. Two original
+voters retain quorum; an existing, previously verified drained spare is made
+eligible, and automatic learner catch-up/membership replacement must complete.
+The withheld contents remain inaccessible to every Chronicle process through the
+final strict read/history check. This exercises a volume-unavailability simulation
+and the no-empty-store-restart boundary, not physical disk/power loss. Any later
+restoration is a separately reported cleanup step, never evidence for retention.
+No new consensus theorem is claimed: this relies on the existing crash-stop,
+surviving quorum and safe membership assumptions, plus tested startup fencing.
+
 ## Committed file projection — checked before adding the read path
 
 `Projection.tla` explores two incarnations, up to two committed bytes chosen from
