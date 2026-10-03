@@ -60,3 +60,27 @@ Do not add detached membership jobs or another writer without revisiting them.
 These local regressions are not k3d fault histories or physical durability tests.
 Pending-intent supersession and resource-informed balancing remain outstanding;
 experimental native leadership campaigns remain default-off.
+
+## Real k3d upgrade and repair history
+
+The `membership-fence` release image, with test-only storage gates compiled in,
+ran on all five pods. `membership-built-image.json` records its source revision;
+`membership-runtime-image.json` links that revision to the containerd digest in
+`membership-running-pods.json`. All old pods stopped before the upgrade and all
+five PVC UIDs remained unchanged; before/after inventories are retained.
+
+`membership-partition.jsonl` contains node-5 reassignment, packet isolation,
+replacement by the three seeds, reconnection and verified demotion under paced
+traffic. The helper's phases and actual DROP counters are retained separately in
+`membership-partition-events.jsonl`. Retirement was false during isolation and
+true after healing. Both the smoke/prefix checker and the independent Porcupine
+adapter passed (`membership-partition-check.json`, `membership-partition-porcupine.txt`).
+There were 720 acknowledged logical records, 38 unknown append attempts including
+retries, 103 successful strict reads and four unknown reads. Unknown mutations
+remain pending through the history's end in the independent check.
+
+This run validates integration of the fenced controller, not the exact delayed
+API race; the deterministic dependency/controller regressions target that race.
+The workload used two producers, 96-byte records and 250-ms pacing, not a throughput
+benchmark. A single-host k3d network partition does not emulate independent AZs,
+power loss or arbitrary disk faults. Pending catch-up failure is a separate test.

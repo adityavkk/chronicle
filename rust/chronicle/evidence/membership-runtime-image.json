@@ -1,0 +1,68 @@
+{
+  "info": {
+    "chainID": "sha256:9231724057135aa34534bb8549f55d14bd8624ed80c8dad04c76472726083d58",
+    "imageSpec": {
+      "architecture": "amd64",
+      "config": {
+        "Entrypoint": [
+          "/usr/local/bin/chronicle-raft"
+        ],
+        "Env": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        ],
+        "Labels": {
+          "org.opencontainers.image.revision": "efd545f4f933786814f1e17cbaca8cd6d087f807"
+        },
+        "User": "1000:1000"
+      },
+      "created": "2026-10-03T19:05:34.830684557Z",
+      "history": [
+        {
+          "comment": "debuerreotype 0.17",
+          "created": "2026-09-18T00:00:00Z",
+          "created_by": "# debian.sh --arch 'amd64' out/ 'bookworm' '@1789689600'"
+        },
+        {
+          "created": "2026-10-03T19:05:32.656745177Z",
+          "created_by": "/bin/sh -c #(nop) COPY file:41392502a41e291d52ce48e9f327f093fac11639ffb228d9944d1c1767b21612 in /usr/local/bin/chronicle-raft "
+        },
+        {
+          "created": "2026-10-03T19:05:33.941465419Z",
+          "created_by": "/bin/sh -c #(nop)  USER 1000:1000",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-03T19:05:34.402950968Z",
+          "created_by": "/bin/sh -c #(nop)  ENTRYPOINT [\"/usr/local/bin/chronicle-raft\"]",
+          "empty_layer": true
+        },
+        {
+          "created": "2026-10-03T19:05:34.830684557Z",
+          "created_by": "/bin/sh -c #(nop)  LABEL org.opencontainers.image.revision=efd545f4f933786814f1e17cbaca8cd6d087f807",
+          "empty_layer": true
+        }
+      ],
+      "os": "linux",
+      "rootfs": {
+        "diff_ids": [
+          "sha256:34467cc93912af891dfee8a3902adf9b4f355a9bca4eaa46f658d1181a21de0d",
+          "sha256:1152fd5bbf0392cea6df0bdbb837abc3849599a072803a7879b7fa4fd9d26693"
+        ],
+        "type": "layers"
+      }
+    }
+  },
+  "status": {
+    "id": "sha256:9844074bbca85f400219cf0a1b9e5a85936e1e30cf29983f6c3cd72b5b91d6bd",
+    "pinned": false,
+    "repoDigests": [],
+    "repoTags": [
+      "docker.io/library/chronicle-raft:membership-fence"
+    ],
+    "size": "54450399",
+    "uid": {
+      "value": "1000"
+    },
+    "username": ""
+  }
+}
