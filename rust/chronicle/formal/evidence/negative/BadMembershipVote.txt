@@ -1,0 +1,60 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 59 and seed 5542539205695688442 with 2 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 2867452] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/MembershipAdmission.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module MembershipAdmission
+Starting... (2026-10-03 18:25:07)
+Computing initial states...
+Finished computing initial states: 2 distinct states generated at 2026-10-03 18:25:07.
+Error: Invariant CompletedAuthority is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ pending = FALSE
+/\ term = 0
+/\ applied = "A"
+/\ complete = FALSE
+/\ mode = "delayed"
+/\ superseded = FALSE
+/\ ready = TRUE
+
+State 2: <AdvanceTerm line 14, col 16 to line 15, col 83 of module MembershipAdmission>
+/\ pending = FALSE
+/\ term = 1
+/\ applied = "A"
+/\ complete = FALSE
+/\ mode = "delayed"
+/\ superseded = FALSE
+/\ ready = TRUE
+
+State 3: <OtherCompletes line 24, col 19 to line 26, col 61 of module MembershipAdmission>
+/\ pending = FALSE
+/\ term = 1
+/\ applied = "A"
+/\ complete = TRUE
+/\ mode = "delayed"
+/\ superseded = TRUE
+/\ ready = TRUE
+
+State 4: <AdvanceTerm line 14, col 16 to line 15, col 83 of module MembershipAdmission>
+/\ pending = FALSE
+/\ term = 2
+/\ applied = "A"
+/\ complete = TRUE
+/\ mode = "delayed"
+/\ superseded = TRUE
+/\ ready = TRUE
+
+State 5: <AdmitOld line 16, col 13 to line 19, col 70 of module MembershipAdmission>
+/\ pending = TRUE
+/\ term = 2
+/\ applied = "A"
+/\ complete = TRUE
+/\ mode = "delayed"
+/\ superseded = TRUE
+/\ ready = FALSE
+
+46 states generated, 29 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 2).
+Finished in 00s at (2026-10-03 18:25:07)

@@ -1,0 +1,42 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 3 and seed 8250378145823028760 with 2 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 2867496] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/MembershipAdmission.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module MembershipAdmission
+Starting... (2026-10-03 18:25:08)
+Computing initial states...
+Finished computing initial states: 2 distinct states generated at 2026-10-03 18:25:08.
+Error: Invariant CompletedAuthority is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ pending = TRUE
+/\ term = 0
+/\ applied = "A"
+/\ complete = FALSE
+/\ mode = "cancelled"
+/\ superseded = FALSE
+/\ ready = FALSE
+
+State 2: <Supersede line 27, col 14 to line 28, col 75 of module MembershipAdmission>
+/\ pending = TRUE
+/\ term = 0
+/\ applied = "A"
+/\ complete = FALSE
+/\ mode = "cancelled"
+/\ superseded = TRUE
+/\ ready = FALSE
+
+State 3: <CompleteNew line 31, col 16 to line 34, col 70 of module MembershipAdmission>
+/\ pending = TRUE
+/\ term = 0
+/\ applied = "A"
+/\ complete = TRUE
+/\ mode = "cancelled"
+/\ superseded = TRUE
+/\ ready = FALSE
+
+33 states generated, 24 distinct states found, 7 states left on queue.
+The depth of the complete state graph search is 4.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 3 and the 95th percentile is 3).
+Finished in 00s at (2026-10-03 18:25:08)

@@ -335,3 +335,32 @@ omits that guard and reassigns a node after retirement. The model excludes an
 explicit operator undrain, which deliberately permits future assignment.
 The command's default-false `eligible_only` field preserves old committed-log
 replay; new controllers always set it. This is not a configurable placement policy.
+
+## Membership admission must fence the originating vote
+
+`MembershipAdmission.tla` precedes the next implementation change. It separates
+two races not covered by the earlier fixed-episode retirement model:
+
+* A paused controller may resume after its process loses and regains leadership.
+  A separate metrics check cannot prevent its old target being admitted in the
+  new term, even after another leader completed a successor placement. An atomic
+  expected-**Vote** check at RaftCore admission must cover both membership phases,
+  AddNodes and pruning, without altering upstream quorum/commit rules.
+* Cancellation drops the operation future, not an already-enqueued membership
+  entry. Applied voters may still equal a replacement target while an older joint
+  entry is outstanding. OpenRaft's strict-read barrier covers committed/noop state,
+  not that outstanding tail. A completed target-membership operation is required
+  even when applied voters already match; InProgress prevents premature completion.
+
+The bounded positive check has 28 states. Separate negative mutations remove each
+boundary and violate `CompletedAuthority`. The delayed-admission action represents
+either phase's common core gate; it is not a full model of the consensus engine.
+The completion action assumes upstream serialized membership admission and durable
+commit, and must be bridged by deterministic library/controller regression tests.
+
+With a single timeout-owned controller per process, dropping a future prevents
+unsent phases; queued phases precede the next membership barrier. Other-leader
+requests have different votes. This permits older work to settle after a newer
+intent, but not to reassert itself after the newer placement completes. It does
+not promise immediate cross-group revocation at intent commit, recovery without
+the applicable joint quorums, or safe additional concurrent membership writers.
