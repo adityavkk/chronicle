@@ -1,5 +1,6 @@
 //! One process hosts a control group and fixed virtual data shards.
 mod controller;
+mod failure;
 mod identity;
 mod sse;
 mod telemetry;
@@ -169,6 +170,7 @@ async fn main() -> anyhow::Result<()> {
             store.clone(),
         )
         .await?;
+        tokio::spawn(failure::monitor(id, group, raft.metrics()));
         groups.insert(
             group,
             Group {
@@ -194,7 +196,7 @@ async fn main() -> anyhow::Result<()> {
     });
     tokio::spawn(controller::run(app.clone()));
     let router = Router::new()
-        .route("/healthz", get(|| async { "ok" }))
+        .route("/healthz", get(health))
         .route("/metrics", get(metrics))
         .route("/admin/status", get(status))
         .route("/admin/bootstrap", post(bootstrap))
@@ -218,6 +220,17 @@ async fn main() -> anyhow::Result<()> {
         .with_state(app);
     axum::serve(tokio::net::TcpListener::bind(listen).await?, router).await?;
     Ok(())
+}
+
+async fn health(State(a): State<Shared>) -> impl IntoResponse {
+    if a.groups
+        .values()
+        .any(|g| failure::storage_error(&g.raft.metrics().borrow()).is_some())
+    {
+        (StatusCode::SERVICE_UNAVAILABLE, "fatal storage error")
+    } else {
+        (StatusCode::OK, "ok")
+    }
 }
 
 async fn append_rpc(

@@ -12,6 +12,7 @@ check: fault-check
 fault-check:
 	$(CARGO) clippy --locked --all-targets --features storage-faults -- -D warnings
 	$(CARGO) test --locked --features storage-faults --test fault_gates
+	$(CARGO) test --locked --features storage-faults --bin chronicle-raft failure::
 	$(CARGO) fmt --manifest-path tests/vfs/Cargo.toml -- --check
 	CARGO_TARGET_DIR=$(CURDIR)/target $(CARGO) clippy --manifest-path tests/vfs/Cargo.toml --locked --all-targets -- -D warnings
 	CARGO_TARGET_DIR=$(CURDIR)/target $(CARGO) test --manifest-path tests/vfs/Cargo.toml --locked

@@ -6,6 +6,9 @@
 //! actor durably creates `<NAME>.reached` and waits until `<NAME>.release` exists.
 //! It then creates `<NAME>.resumed`; wait for that marker before deleting release.
 //! The actor never removes control files (in particular, it cannot unlink locks).
+//! Alternatively, `<NAME>.error` returns an injected I/O error after writing the
+//! reached marker, without waiting. It remains effective across process restart
+//! until the external harness removes it. This is not a simulated power failure.
 
 use std::ffi::OsStr;
 use std::io;
@@ -59,13 +62,19 @@ impl Context {
         let Some(directory) = &self.directory else {
             return Ok(());
         };
-        if !directory.join(format!("{name}.arm")).is_file() {
+        let fail = directory.join(format!("{name}.error")).is_file();
+        if !fail && !directory.join(format!("{name}.arm")).is_file() {
             return Ok(());
         }
         std::fs::create_dir_all(directory)?;
         let reached = std::fs::File::create(directory.join(format!("{name}.reached")))?;
         reached.sync_all()?;
         std::fs::File::open(directory)?.sync_all()?;
+        if fail {
+            return Err(io::Error::other(format!(
+                "injected storage fault at {name}"
+            )));
+        }
         while !directory.join(format!("{name}.release")).is_file() {
             std::thread::sleep(Duration::from_millis(5));
         }
