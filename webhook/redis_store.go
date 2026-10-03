@@ -444,7 +444,7 @@ func (s *RedisStore) PatternSubscriptions(ids []string) (PatternRead, error) {
 		}
 		_, execErr := pipe.Exec(s.ctx())
 		batchFailed := 0
-		if execErr != nil && !anyCmdErr(cmds) {
+		if failed, _ := failedCmds(cmds); execErr != nil && failed == 0 {
 			// go-redis stamps every command's error once a connection is writing
 			// (cluster and in-flight failures are visible per command below), but
 			// a standalone client that could not acquire a connection at all
@@ -485,14 +485,25 @@ func (s *RedisStore) PatternSubscriptions(ids []string) (PatternRead, error) {
 	return read, nil
 }
 
-// anyCmdErr reports whether any pipelined command carries an error.
-func anyCmdErr(cmds []*redis.MapStringStringCmd) bool {
+// failedCmds reports how many pipelined commands carry an error and the first
+// of them. Exec returns only the first command error, so after a failed Exec the
+// per-command errors are the authority: some failed means those keys did (a
+// Redis reply error stamps only its own command); none failed means go-redis
+// never reached Redis (it leaves the commands clean when it could not acquire a
+// connection); all failed means the connection did (it stamps every command
+// when the write fails). A connection lost part way through the replies is the
+// one case that looks like keys failing: the caller keeps the replies it has,
+// reports the error and, if the fault persists, its next pipeline stops it.
+func failedCmds[C redis.Cmder](cmds []C) (n int, first error) {
 	for _, c := range cmds {
-		if c.Err() != nil {
-			return true
+		if err := c.Err(); err != nil {
+			if first == nil {
+				first = err
+			}
+			n++
 		}
 	}
-	return false
+	return n, first
 }
 
 // Delete removes the subscription and de-indexes its streams.
@@ -707,6 +718,7 @@ func (s *RedisStore) ReconcileIndexes() error {
 	if err != nil {
 		return err
 	}
+	var firstErr error
 	for batch := range slices.Chunk(ids, pipelineChunk) {
 		// Read the canonical links of this chunk in one round trip. Only the
 		// slot-homed links hash is read, whether or not the sub hash exists, and
@@ -717,25 +729,39 @@ func (s *RedisStore) ReconcileIndexes() error {
 		for i, id := range batch {
 			cmds[i] = pipe.HKeys(ctx, linksKey(id))
 		}
-		if _, err := pipe.Exec(ctx); err != nil {
-			return err
+		// The per-command replies are the authority, not Exec's error, which is
+		// only the first of them: a links hash of the wrong type fails its own
+		// HKEYS and costs that subscription this tick (the per-subscription loop
+		// returned at its first bad HKEYS and repaired only the ids before it).
+		// When no command or every command carries an error the connection
+		// failed, and the pass ends as it did on the first error before.
+		_, execErr := pipe.Exec(ctx)
+		if n, first := failedCmds(cmds); execErr != nil && (n == 0 || n == len(batch)) {
+			return execErr
+		} else if firstErr == nil {
+			firstErr = first
 		}
 		var entries []indexEntry
 		for i, id := range batch {
-			for _, path := range cmds[i].Val() {
+			paths, err := cmds[i].Result()
+			if err != nil {
+				continue
+			}
+			for _, path := range paths {
 				entries = append(entries, indexEntry{path: path, id: id})
 			}
 		}
 		// Re-assert each link's membership and occupied bit (the bitmap is never
 		// cleared on deindex, so this is where a missing or torn bit is repaired —
-		// 05:496-500). A failed Exec ends the pass like the old first-error return;
-		// every write is an idempotent step toward transpose(links), so partial
-		// application is safe and the next tick re-asserts the rest.
-		if err := s.indexStreams(entries); err != nil {
-			return err
+		// 05:496-500). Every write is an idempotent step toward transpose(links),
+		// so a failed write costs its entry and the next tick re-asserts it; a
+		// connection failure here is reported and the next chunk's read ends
+		// the pass.
+		if err := s.indexStreams(entries); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // indexEntry is one (stream, subscriber) membership the fan-out index must hold.
@@ -756,18 +782,29 @@ type indexEntry struct{ path, id string }
 // that).
 func (s *RedisStore) indexStreams(entries []indexEntry) error {
 	ctx := s.ctx()
+	var firstErr error
 	for batch := range slices.Chunk(entries, pipelineChunk) {
 		pipe := s.client.Pipeline()
+		cmds := make([]redis.Cmder, 0, 2*len(batch))
 		for _, e := range batch {
 			h := slotOf(e.id)
-			pipe.SAdd(ctx, streamSubsKey(h, e.path), e.id)
-			pipe.SetBit(ctx, streamSlotsKey(e.path), int64(h), 1)
+			cmds = append(cmds,
+				pipe.SAdd(ctx, streamSubsKey(h, e.path), e.id),
+				pipe.SetBit(ctx, streamSlotsKey(e.path), int64(h), 1))
 		}
+		// A pipeline is not a transaction: every command runs and Exec's error
+		// is the first of them. A key of the wrong type fails its own write and
+		// costs that entry; when no command or every command failed the
+		// connection did, and the write stops.
 		if _, err := pipe.Exec(ctx); err != nil {
-			return err
+			if n, first := failedCmds(cmds); n == 0 || n == len(cmds) {
+				return err
+			} else if firstErr == nil {
+				firstErr = first
+			}
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // indexStream is the single-entry case (create, link, migrate): one round trip.

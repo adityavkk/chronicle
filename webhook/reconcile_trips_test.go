@@ -318,3 +318,55 @@ func TestReconcileIndexErrorDoesNotSuppressPatternRecovery(t *testing.T) {
 		t.Fatalf("pattern recovery must still run after an index error, links %+v", sub.Links)
 	}
 }
+
+// TestReconcileIndexPassSurvivesAnUnreadableLinksHash pins the index pass's
+// fault isolation: one links hash of the wrong type fails its own HKEYS and is
+// reported, and every other subscription in the same chunk still gets its
+// dropped fan-out member back. The per-subscription loop repaired only the
+// subscriptions it reached before the bad one; a pipelined pass must not do
+// worse by failing the whole chunk.
+func TestReconcileIndexPassSurvivesAnUnreadableLinksHash(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	const begin = "0000000000000000_0000000000000000"
+	ids := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+	for _, id := range ids {
+		cfg := Config{Type: DispatchWebhook, WebhookURL: "https://w.example/h", LeaseTTLMs: 1000, Streams: []string{"events/" + id}}
+		links := []StreamLink{{Path: "events/" + id, LinkType: LinkExplicit, AckedOffset: begin}}
+		if _, err := s.CreateOrConfirm(id, cfg, links, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		// Drop the fan-out member the pass exists to repair.
+		if err := s.client.SRem(ctx, streamSubsKey(slotOf(id), "events/"+id), id).Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const broken = "d"
+	if err := s.client.Del(ctx, linksKey(broken)).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.client.Set(ctx, linksKey(broken), "not-a-hash", 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	err := s.ReconcileIndexes()
+	if err == nil || !strings.Contains(err.Error(), "WRONGTYPE") {
+		t.Fatalf("ReconcileIndexes should report the unreadable links hash, got %v", err)
+	}
+	for _, id := range ids {
+		member, merr := s.client.SIsMember(ctx, streamSubsKey(slotOf(id), "events/"+id), id).Result()
+		if merr != nil {
+			t.Fatal(merr)
+		}
+		if id == broken && member {
+			t.Fatalf("subscription %s has no readable links; nothing should have been indexed for it", id)
+		}
+		if id != broken && !member {
+			t.Fatalf("subscription %s lost its repair to another subscription's bad key", id)
+		}
+	}
+	// The next tick reports the same key again and keeps the repairs.
+	if err := s.ReconcileIndexes(); err == nil {
+		t.Fatal("the unreadable links hash must stay reported until it is fixed")
+	}
+}

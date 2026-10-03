@@ -79,7 +79,7 @@ type Store interface {
 
 	// ReconcileIndexes rebuilds the per-stream fan-out index from the canonical
 	// links, re-adding any membership a crash dropped between the link write and
-	// the index update, in a bounded number of pipelined round trips. It only
+	// the index update, in about one pipelined round trip per 512 subscriptions plus one per 512 links. It only
 	// mirrors links and never invents membership.
 	ReconcileIndexes() error
 
