@@ -622,6 +622,7 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                                 end: 0,
                                 incarnation: 0,
                                 duplicate: false,
+                                closed: false,
                                 error: None,
                             });
                         }
@@ -629,6 +630,7 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                             end: 0,
                             incarnation: 0,
                             duplicate: false,
+                            closed: false,
                             error: None,
                         }),
                     }

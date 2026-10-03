@@ -89,6 +89,7 @@ fn fatal_child() {
                 data: b"?".to_vec(),
                 producer: None,
                 close: false,
+                empty_body: false,
             })
             .await;
         std::future::pending::<()>().await;

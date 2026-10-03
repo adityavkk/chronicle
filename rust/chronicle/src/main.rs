@@ -765,7 +765,7 @@ async fn stream_inner(
     )
     .await?;
     let h = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
-    let close = h("stream-closed") == Some("true");
+    let close = h("stream-closed").is_some_and(|v| v.eq_ignore_ascii_case("true"));
     let content_type = h("content-type")
         .unwrap_or("application/octet-stream")
         .to_string();
@@ -893,7 +893,7 @@ async fn stream_inner(
                 expired_at: None,
             }
         } else {
-            if body.is_empty() && !close {
+            if body.is_empty() && !close && h("producer-id").is_none() {
                 return Err(bad("empty append"));
             }
             if content_type != s.config.content_type && !body.is_empty() {
@@ -927,6 +927,7 @@ async fn stream_inner(
                 data: wire.to_vec(),
                 producer,
                 close,
+                empty_body: body.is_empty(),
             }
         }
     } else {
@@ -947,9 +948,19 @@ async fn stream_inner(
     if let Some(error) = result.data.error {
         let status = match error {
             model::Error::Missing => StatusCode::NOT_FOUND,
+            model::Error::EmptyBody => StatusCode::BAD_REQUEST,
             model::Error::Capacity => StatusCode::TOO_MANY_REQUESTS,
             _ => StatusCode::CONFLICT,
         };
+        if error == model::Error::Closed {
+            return Response::builder()
+                .status(status)
+                .header("stream-closed", "true")
+                .header("stream-next-offset", wire::format_offset(result.data.end))
+                .header("stream-incarnation", result.data.incarnation.to_string())
+                .body(Body::empty())
+                .map_err(unavailable);
+        }
         return Err((status, format!("{error:?}")));
     }
     let status = if method == Method::PUT {
@@ -969,6 +980,9 @@ async fn stream_inner(
         .header("stream-incarnation", result.data.incarnation.to_string())
         .header("stream-commit-index", result.log_id.index.to_string())
         .header("stream-duplicate", result.data.duplicate.to_string());
+    if result.data.closed {
+        response = response.header("stream-closed", "true");
+    }
     if method == Method::PUT {
         // A successful create outcome has atomically validated this config,
         // including on a retry. Do not sample mutable stream metadata afterward.

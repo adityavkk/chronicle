@@ -35,6 +35,7 @@ fn replays_formal_retention_scenario() {
                     seq: fields[3].parse().unwrap(),
                 }),
                 close: false,
+                empty_body: false,
             }),
             "snapshot" => {
                 snapshot = Some(serde_json::to_vec(&state).unwrap());

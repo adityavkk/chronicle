@@ -74,6 +74,7 @@ async fn bounded_ranges_have_independent_cursors_and_survive_recreation() {
             data: b"efg".to_vec(),
             producer: None,
             close: false,
+            empty_body: false,
         },
     )
     .await;
@@ -117,6 +118,7 @@ async fn restart_rebuilds_untrusted_cache_and_snapshot_replaces_inode() {
             data: b"def".to_vec(),
             producer: None,
             close: false,
+            empty_body: false,
         },
     )
     .await;
@@ -240,6 +242,7 @@ async fn notifications_coalesce_applies_and_only_signal_successful_snapshot_inst
             data: b"XYZW".to_vec(),
             producer: None,
             close: false,
+            empty_body: false,
         },
     )
     .await;

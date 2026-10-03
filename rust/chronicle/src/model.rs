@@ -91,6 +91,9 @@ pub enum Command {
         data: Vec<u8>,
         producer: Option<Producer>,
         close: bool,
+        /// Original HTTP-body emptiness; default false preserves legacy log replay.
+        #[serde(default)]
+        empty_body: bool,
     },
     Delete {
         key: String,
@@ -133,6 +136,7 @@ pub enum Error {
     ConfigConflict,
     EpochFenced,
     SequenceGap,
+    EmptyBody,
     Capacity,
     InvalidPlacement,
 }
@@ -142,6 +146,9 @@ pub struct Outcome {
     pub end: u64,
     pub incarnation: u64,
     pub duplicate: bool,
+    /// Captured during apply, never reconstructed from request intent or a later read.
+    #[serde(default)]
+    pub closed: bool,
     pub error: Option<Error>,
 }
 
@@ -151,7 +158,14 @@ impl Outcome {
             end,
             incarnation,
             duplicate,
+            closed: false,
             error: None,
+        }
+    }
+    fn stream(stream: &Stream, duplicate: bool) -> Self {
+        Self {
+            closed: stream.closed,
+            ..Self::ok(stream.data.len() as u64, stream.incarnation, duplicate)
         }
     }
     fn err(error: Error) -> Self {
@@ -159,6 +173,7 @@ impl Outcome {
             end: 0,
             incarnation: 0,
             duplicate: false,
+            closed: false,
             error: Some(error),
         }
     }
@@ -187,8 +202,8 @@ impl State {
                     if s.incarnation != requested {
                         return Outcome::err(Error::StaleIncarnation);
                     }
-                    return if s.config == *config {
-                        Outcome::ok(s.data.len() as u64, s.incarnation, true)
+                    return if s.config == *config && s.closed == *closed {
+                        Outcome::stream(s, true)
                     } else {
                         Outcome::err(Error::ConfigConflict)
                     };
@@ -222,7 +237,10 @@ impl State {
                         producers: BTreeMap::new(),
                     },
                 );
-                Outcome::ok(data.len() as u64, incarnation, false)
+                Outcome {
+                    closed: *closed,
+                    ..Outcome::ok(data.len() as u64, incarnation, false)
+                }
             }
             Command::Append {
                 key,
@@ -230,6 +248,7 @@ impl State {
                 data,
                 producer,
                 close,
+                empty_body,
             } => {
                 let producer_metadata = producer.as_ref().map_or(0, |p| {
                     self.streams
@@ -251,7 +270,10 @@ impl State {
                         }
                         if p.epoch == old.epoch && p.seq <= old.seq {
                             return match old.results.get(&p.seq) {
-                                Some(end) => Outcome::ok(*end, s.incarnation, true),
+                                Some(end) => Outcome {
+                                    end: *end,
+                                    ..Outcome::stream(s, true)
+                                },
                                 None => Outcome::err(Error::SequenceGap),
                             };
                         }
@@ -270,8 +292,17 @@ impl State {
                         return Outcome::err(Error::Capacity);
                     }
                 }
+                if *empty_body && !close {
+                    return Outcome::err(Error::EmptyBody);
+                }
                 if s.closed {
-                    return Outcome::err(Error::Closed);
+                    if producer.is_none() && *close && data.is_empty() {
+                        return Outcome::stream(s, true);
+                    }
+                    return Outcome {
+                        error: Some(Error::Closed),
+                        ..Outcome::stream(s, false)
+                    };
                 }
                 if !fits || s.data.len().saturating_add(data.len()) > MAX_STREAM_BYTES {
                     return Outcome::err(Error::Capacity);
@@ -296,7 +327,7 @@ impl State {
                         },
                     );
                 }
-                Outcome::ok(end, s.incarnation, false)
+                Outcome::stream(s, false)
             }
             Command::Delete {
                 key,

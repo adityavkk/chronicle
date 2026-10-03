@@ -51,14 +51,52 @@ def run(args):
             assert appended["status"] == expected and appended["body"] == "", appended
             end = len(b"A" + body)
             assert appended["headers"]["stream-next-offset"] == f"{0:016d}_{end:016d}", appended
+            assert appended["headers"].get("stream-closed") == headers.get("stream-closed"), appended
             if "producer-id" in headers:
-                duplicate = call(name, "POST", body, headers)
+                # Changed close intent cannot change the cached tuple's effect.
+                duplicate = call(name, "POST", body, {**headers, "stream-closed": "TRUE"})
                 assert duplicate["status"] == 204 and duplicate["headers"]["stream-duplicate"] == "true", duplicate
                 assert duplicate["headers"]["stream-next-offset"] == appended["headers"]["stream-next-offset"], duplicate
+                assert duplicate["headers"].get("stream-closed") == headers.get("stream-closed"), duplicate
+                for retry_headers in (producer, {**producer, "stream-closed": "false"}):
+                    empty_retry = call(name, "POST", headers=retry_headers)
+                    assert empty_retry["status"] == 204 and empty_retry["headers"]["stream-duplicate"] == "true", empty_retry
+                    assert empty_retry["headers"].get("stream-closed") == headers.get("stream-closed"), empty_retry
+                    assert empty_retry["headers"]["stream-next-offset"] == appended["headers"]["stream-next-offset"], empty_retry
             read = call(name, "GET")
             assert read["status"] == 200 and read["body"] == (b"A" + body).decode(), read
             if "stream-closed" in headers:
                 assert read["headers"]["stream-closed"] == "true", read
+                repeated = call(name, "POST", headers={"stream-closed": "TrUe", "content-type": "text/plain"})
+                assert repeated["status"] == 204 and repeated["headers"]["stream-closed"] == "true", repeated
+                rejected = call(name, "POST", b"not applied")
+                assert rejected["status"] == 409 and rejected["headers"]["stream-closed"] == "true", rejected
+                assert rejected["headers"]["stream-next-offset"] == f"{0:016d}_{end:016d}", rejected
+            elif name == "producer":
+                closing = call(name, "POST", b"D", {**producer, "producer-seq": "1", "stream-closed": "TRUE"})
+                assert closing["status"] == 200 and closing["headers"]["stream-closed"] == "true", closing
+                old = call(name, "POST", b"ignored", producer)
+                assert old["status"] == 204 and old["headers"]["stream-closed"] == "true", old
+                assert old["headers"]["stream-next-offset"] == f"{0:016d}_{3:016d}", old
+                assert call(name, "GET")["body"] == "ABCD"
+        for closed in (False, True):
+            name = f"create-closed-{closed}"
+            headers = {"stream-closed": "TrUe" if closed else "yes"}
+            created = call(name, "PUT", b"created", headers)
+            assert created["status"] == 201 and created["headers"].get("stream-closed") == ("true" if closed else None), created
+            assert call(name, "PUT", headers=headers)["status"] == 200
+            opposite = {"stream-closed": "false" if closed else "true"}
+            assert call(name, "PUT", headers=opposite)["status"] == 409
+        assert call("empty", "PUT")["status"] == 201
+        assert call("empty", "POST", headers=producer)["status"] == 400
+        assert call("empty", "POST", b"accepted", producer)["status"] == 200
+        assert call("empty", "GET")["body"] == "accepted"
+        json_producer = {**producer, "content-type": "application/json"}
+        assert call("empty-json", "PUT", headers=json_producer)["status"] == 201
+        # The pinned protocol rejects empty JSON appends before admission.
+        assert call("empty-json", "POST", b"[]", json_producer)["status"] == 400
+        assert call("empty-json", "POST", b"[1]", json_producer)["status"] == 200
+        assert call("empty-json", "GET")["body"] == "[1]"
     print(json.dumps({"result": "passed", "history": args.output,
                       "scope": "unsupported-header and committed write status contract, not full conformance"}))
 

@@ -390,6 +390,7 @@ fn append(id: &str, seq: u64, data: &[u8]) -> Command {
             seq,
         }),
         close: false,
+        empty_body: data.is_empty(),
     }
 }
 fn entry(index: u64, command: Command) -> Entry<TypeConfig> {
@@ -501,6 +502,127 @@ fn gaps_are_rejected_without_consuming_producer_identity() {
     );
     s.apply(&append("p", 0, b"first"));
     assert_eq!(s.apply(&append("p", 1, b"later")).end, 10);
+}
+
+#[tokio::test]
+async fn closure_replies_follow_apply_and_survive_snapshot_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = SqliteStore::open(directory.path().join("source"))
+        .await
+        .unwrap();
+    let first = store
+        .apply([entry(1, create()), entry(2, append("p", 0, b"abc"))])
+        .await
+        .unwrap();
+    assert!(!first[1].closed);
+    let mut changed_retry = append("p", 0, b"not applied");
+    if let Command::Append { close, .. } = &mut changed_retry {
+        *close = true;
+    }
+    let duplicate = store.apply([entry(3, changed_retry)]).await.unwrap();
+    assert!(duplicate[0].duplicate && !duplicate[0].closed);
+    assert_eq!(duplicate[0].end, 3);
+    let mut closing = append("p", 1, b"12");
+    if let Command::Append { close, .. } = &mut closing {
+        *close = true;
+    }
+    let closed = store.apply([entry(4, closing)]).await.unwrap();
+    assert!(closed[0].closed && closed[0].error.is_none());
+    assert!(!first[1].closed); // A later close cannot rewrite an earlier reply.
+    let snapshot = store.build_snapshot().await.unwrap();
+    let path = directory.path().join("installed");
+    let mut installed = SqliteStore::open(&path).await.unwrap();
+    installed
+        .install_snapshot(&snapshot.meta, snapshot.snapshot)
+        .await
+        .unwrap();
+    installed.close().await;
+    let mut installed = SqliteStore::open_existing(&path).await.unwrap();
+    let replay = installed
+        .apply([entry(5, append("p", 0, b"ignored"))])
+        .await
+        .unwrap();
+    assert!(replay[0].closed && replay[0].duplicate);
+    assert_eq!(replay[0].end, 3); // Original reply frontier, not closed tail 5.
+    let rejected = installed
+        .apply([entry(6, append("p", 2, b"rejected"))])
+        .await
+        .unwrap();
+    assert_eq!(rejected[0].error, Some(Error::Closed));
+    assert!(rejected[0].closed);
+    assert_eq!(rejected[0].end, 5);
+    let repeated = Command::Append {
+        key: "s".into(),
+        incarnation: 1,
+        data: Vec::new(),
+        producer: None,
+        close: true,
+        empty_body: true,
+    };
+    let repeated = installed.apply([entry(7, repeated)]).await.unwrap();
+    assert!(repeated[0].closed && repeated[0].duplicate && repeated[0].error.is_none());
+    assert_eq!(repeated[0].end, 5);
+    assert_eq!(
+        installed
+            .read_stream("s".into())
+            .await
+            .unwrap()
+            .unwrap()
+            .data,
+        b"abc12"
+    );
+    let empty_retry = installed
+        .apply([entry(8, append("p", 1, b""))])
+        .await
+        .unwrap();
+    assert!(empty_retry[0].closed && empty_retry[0].duplicate && empty_retry[0].error.is_none());
+    assert_eq!(empty_retry[0].end, 5);
+    installed.close().await;
+    store.close().await;
+}
+
+#[test]
+fn empty_body_validation_preserves_retention_and_legacy_zero_byte_commands() {
+    let mut state = State::default();
+    state.apply(&create());
+    let empty = append("p", 0, b"");
+    assert_eq!(state.apply(&empty).error, Some(Error::EmptyBody));
+    assert!(state.streams["s"].producers.is_empty());
+    assert!(state.apply(&append("p", 0, b"abc")).error.is_none());
+    let retry = state.apply(&empty);
+    assert!(retry.duplicate && retry.error.is_none() && !retry.closed);
+    assert_eq!(retry.end, 3);
+    let mut legacy = serde_json::to_value(append("p", 1, b"")).unwrap();
+    legacy["Append"]
+        .as_object_mut()
+        .unwrap()
+        .remove("empty_body");
+    let legacy = serde_json::from_value(legacy).unwrap();
+    assert!(state.apply(&legacy).error.is_none());
+    assert_eq!(state.streams["s"].producers["p"].seq, 1);
+    assert_eq!(state.streams["s"].data, b"abc");
+}
+
+#[test]
+fn create_matches_current_closure_without_mutating_it() {
+    for closed in [false, true] {
+        let mut state = State::default();
+        let mut command = create();
+        if let Command::Create { closed: flag, .. } = &mut command {
+            *flag = closed;
+        }
+        let created = state.apply(&command);
+        assert_eq!(created.closed, closed);
+        let duplicate = state.apply(&command);
+        assert!(duplicate.duplicate && duplicate.error.is_none());
+        assert_eq!(duplicate.closed, closed);
+        if let Command::Create { closed: flag, .. } = &mut command {
+            *flag = !closed;
+        }
+        let before = serde_json::to_value(&state).unwrap();
+        assert_eq!(state.apply(&command).error, Some(Error::ConfigConflict));
+        assert_eq!(serde_json::to_value(&state).unwrap(), before);
+    }
 }
 
 #[tokio::test]

@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/rust/chronicle/tests/protocol_headers.py", line 94, in <module>
+    run(parser.parse_args())
+  File "/home/user/workspace/repo/rust/chronicle/tests/protocol_headers.py", line 72, in run
+    assert closing["status"] == 200 and closing["headers"]["stream-closed"] == "true", closing
+                                        ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+KeyError: 'stream-closed'
