@@ -125,10 +125,14 @@ def run(args):
             return False
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         finished, partition_owned = False, False
+        def stream_once():
+            started = time.monotonic()
+            result = h.stream("gate", {"live": "sse", "offset": "-1"}, seen, 75)
+            return result, time.monotonic() - started
         try:
             if gate:
                 gate_control(pod, "touch", arm)
-            future = executor.submit(h.stream, "gate", {"live": "sse", "offset": "-1"}, seen, 75)
+            future = executor.submit(stream_once)
             if not baseline:
                 assert initial.wait(10), "initial SSE control not observed"
             if args.scenario == "later-open-timeout":
@@ -151,7 +155,7 @@ def run(args):
                 partition("isolate")
             if gate and "open-timeout" not in args.scenario:
                 gate_control(pod, "touch", release)
-            status, _, events, error = future.result(timeout=75)
+            (status, _, events, error), elapsed = future.result(timeout=75)
             if args.scenario == "append":
                 assert status == 200 and error is None and len(events) == 4, (status, events, error)
                 assert events[0] == {"event": "data", "data": baseline.decode()}
@@ -159,13 +163,14 @@ def run(args):
                 assert events[2] == {"event": "data", "data": "XYZ"}
                 control(events[3], len(baseline) + 3, True)
             elif args.scenario == "open-timeout":
-                assert status == 503 and not events, (status, events, error)
+                assert status == 503 and not events and error is None, (status, events, error)
             else:
                 assert status == 200 and error and "IncompleteRead" in error, (status, events, error)
                 assert len(events) == (0 if args.scenario == "truncate" else 1), events
             if "open-timeout" in args.scenario:
+                assert 58 <= elapsed <= 70, f"application deadline outside jitter window: {elapsed}"
                 current = slots(pod)
-                note("deadline-ended-with-actor-held", slots=current)
+                note("deadline-ended-with-actor-held", slots=current, elapsed_s=elapsed)
                 assert current == {"chronicle_live_read_available_slots": 31, "chronicle_request_available_slots": 127}, current
             finished = True
         finally:

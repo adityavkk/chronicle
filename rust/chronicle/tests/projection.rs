@@ -14,7 +14,7 @@ async fn range(
     start: u64,
     end: u64,
 ) -> Result<std::fs::File, ReadError> {
-    let mut view = store.read_info("s".into()).await.unwrap().unwrap();
+    let mut view = store.read_info("s".into(), ()).await.unwrap().unwrap();
     view.incarnation = incarnation;
     view.end = end;
     store.read_file("s".into(), &view, start, ()).await
@@ -155,7 +155,10 @@ async fn cache_failure_does_not_undo_committed_appends_and_truncation_is_an_erro
         range(&store, 1, 0, 7).await,
         Err(ReadError::Io(_))
     ));
-    assert_eq!(store.read_info("s".into()).await.unwrap().unwrap().end, 7);
+    assert_eq!(
+        store.read_info("s".into(), ()).await.unwrap().unwrap().end,
+        7
+    );
     std::fs::remove_file(&cache).unwrap();
     let reader = range(&store, 1, 0, 7).await.unwrap();
     let cached = std::fs::read_dir(&cache)
@@ -206,7 +209,7 @@ async fn snapshot_fences_unopened_metadata_even_for_identical_bytes() {
         .await
         .unwrap();
     apply(&mut store, 1, create(b"abc", None)).await;
-    let view = store.read_info("s".into()).await.unwrap().unwrap();
+    let view = store.read_info("s".into(), ()).await.unwrap().unwrap();
     let snapshot = store.build_snapshot().await.unwrap();
     store
         .install_snapshot(&snapshot.meta, snapshot.snapshot)
@@ -244,7 +247,10 @@ async fn notifications_coalesce_applies_and_only_signal_successful_snapshot_inst
     // must fetch authority rather than interpret one notification as one append.
     assert!(changes.has_changed().unwrap());
     changes.changed().await.unwrap();
-    assert_eq!(store.read_info("s".into()).await.unwrap().unwrap().end, 7);
+    assert_eq!(
+        store.read_info("s".into(), ()).await.unwrap().unwrap().end,
+        7
+    );
     let snapshot = store.build_snapshot().await.unwrap();
     assert!(!changes.has_changed().unwrap());
     assert!(

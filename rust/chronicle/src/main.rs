@@ -695,7 +695,14 @@ async fn stream_inner(
     let changes = live_permit
         .as_ref()
         .map(|permit| (g.store.applied_changes(), permit.clone()));
-    let existing = read_visible_info(g, &key, stale, timings).await?;
+    let existing = read_visible_info(
+        g,
+        &key,
+        stale,
+        timings,
+        (admission.clone(), live_permit.clone()),
+    )
+    .await?;
     let h = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
     let close = h("stream-closed") == Some("true");
     let content_type = h("content-type")
@@ -906,7 +913,7 @@ async fn wait_for_data(
     mut view: chronicle_raft::storage::StreamInfo,
     mut changes: tokio::sync::watch::Receiver<()>,
     timings: &mut telemetry::PhaseTimings,
-    _admission: [Arc<tokio::sync::OwnedSemaphorePermit>; 2],
+    admission: [Arc<tokio::sync::OwnedSemaphorePermit>; 2],
 ) -> Result<chronicle_raft::storage::StreamInfo, (StatusCode, String)> {
     let incarnation = view.incarnation;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
@@ -916,7 +923,7 @@ async fn wait_for_data(
             result = changes.changed() => { result.map_err(unavailable)?; }
             _ = tokio::time::sleep_until(deadline) => {
                 #[cfg(feature = "storage-faults")]
-                chronicle_raft::faults::before_live_recheck(model::shard(key), _admission.clone())
+                chronicle_raft::faults::before_live_recheck(model::shard(key), admission.clone())
                     .await
                     .map_err(unavailable)?;
             }
@@ -924,7 +931,7 @@ async fn wait_for_data(
         timings.wait_us += waiting.elapsed().as_micros() as u64;
         // Recheck after a deadline too: never return an empty response carrying
         // the offset of bytes that arrived during the wait but were not delivered.
-        view = read_visible_info(g, key, false, timings)
+        view = read_visible_info(g, key, false, timings, admission.clone())
             .await?
             .ok_or_else(|| (StatusCode::NOT_FOUND, "stream missing".into()))?;
         if view.incarnation != incarnation {
@@ -941,6 +948,7 @@ async fn read_visible_info(
     key: &str,
     stale: bool,
     timings: &mut telemetry::PhaseTimings,
+    admission: impl Send + 'static,
 ) -> Result<Option<chronicle_raft::storage::StreamInfo>, (StatusCode, String)> {
     if !stale {
         let started = Instant::now();
@@ -949,7 +957,7 @@ async fn read_visible_info(
         result.map_err(unavailable)?;
     }
     let started = Instant::now();
-    let existing = g.store.read_info(key.to_owned()).await;
+    let existing = g.store.read_info(key.to_owned(), admission).await;
     timings.read_us += started.elapsed().as_micros() as u64;
     let mut existing = existing.map_err(unavailable)?.filter(|s| !s.deleted);
     if !stale

@@ -131,7 +131,7 @@ fn fault_gate_child() {
                 use tokio::sync::Semaphore;
                 let requests = Arc::new(Semaphore::new(4));
                 let live = Arc::new(Semaphore::new(1));
-                let view = store.read_info("s".into()).await.unwrap().unwrap();
+                let view = store.read_info("s".into(), ()).await.unwrap().unwrap();
                 let guards = [
                     Arc::new(requests.clone().try_acquire_owned().unwrap()),
                     Arc::new(live.clone().try_acquire_owned().unwrap()),

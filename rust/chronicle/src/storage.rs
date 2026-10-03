@@ -180,8 +180,14 @@ impl SqliteStore {
             .await
     }
 
-    pub async fn read_info(&self, key: String) -> Result<Option<StreamInfo>> {
+    /// Retain request admission even if its caller abandons this queued read.
+    pub async fn read_info(
+        &self,
+        key: String,
+        admission: impl Send + 'static,
+    ) -> Result<Option<StreamInfo>> {
         self.call(move |w| {
+            let _admission = admission;
             Ok(w.state.streams.get(&key).map(|s| StreamInfo {
                 generation: w.read_generation.clone(),
                 incarnation: s.incarnation,
@@ -1028,6 +1034,45 @@ mod tests {
             reopened.read_state().await.unwrap().nodes[&9].addr,
             "persisted"
         );
+    }
+
+    #[tokio::test]
+    async fn cancelled_metadata_read_retains_admission_until_actor_finishes() {
+        let d = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open(d.path().join("metadata.db"))
+            .await
+            .unwrap();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let (entered, ready) = oneshot::channel();
+        let copy = store.clone();
+        let blocker = tokio::spawn(async move {
+            copy.call(move |_| {
+                let _ = entered.send(());
+                let _ = blocked.recv();
+                Ok(())
+            })
+            .await
+        });
+        ready.await.unwrap();
+        let requests = Arc::new(tokio::sync::Semaphore::new(1));
+        let live = Arc::new(tokio::sync::Semaphore::new(1));
+        let guards = [
+            requests.clone().try_acquire_owned().unwrap(),
+            live.clone().try_acquire_owned().unwrap(),
+        ];
+        let mut read = Box::pin(store.read_info("missing".into(), guards));
+        // The actor is blocked and its empty queue accepts the metadata job.
+        assert!(futures_util::poll!(&mut read).is_pending());
+        drop(read);
+        assert_eq!(requests.available_permits(), 0);
+        assert_eq!(live.available_permits(), 0);
+        release.send(()).unwrap();
+        blocker.await.unwrap().unwrap();
+        // FIFO completion fences the abandoned job without timing assumptions.
+        store.read_state().await.unwrap();
+        assert_eq!(requests.available_permits(), 1);
+        assert_eq!(live.available_permits(), 1);
+        store.close().await;
     }
 
     #[tokio::test]
