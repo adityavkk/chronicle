@@ -131,3 +131,22 @@ instead of silently succeeding, so these counts are not directly comparable to
 the earlier silently-ignored-header baseline. Ordinary POST/close-only success
 status mapping is a concrete next fix; TTL, forks, sequence ordering, metadata,
 incarnation compatibility and the documented SSE-helper issues remain separate.
+
+## Committed ordinary append and close-only status
+
+Source `f96a9b37d37c590117b64ba8f76c2f414c3e3333` changes only successful HTTP
+status mapping: ordinary append/empty close-only are 204; fresh producer data is
+200; duplicates remain 204. The committed transition and retained outcomes are
+unchanged. The mapping was recorded in `formal/README.md` first. `make check`
+passed (`post-status-check.txt`). The new HTTP matrix failed on the old server's
+200 (`post-status-before-*`) and passed on the new image (`post-status-after-*`),
+checking exact bytes/frontiers, both producer modes and producer duplicates.
+Five uniform-image pods are recorded in `post-status-pods.json`.
+
+The full unmodified rerun `conformance-post-status-64007` reports **169 passed,
+157 failed, 6 skipped**. Five tests changed from failure to pass and none from
+pass to failure: POST response headers, matching content type, and three
+property tests for concurrent-reader byte consistency, random operations and
+read-your-writes. This remains a failing conformance baseline. Successful
+close-only status does not implement its missing closure response headers or
+non-producer repeated-close semantics.
