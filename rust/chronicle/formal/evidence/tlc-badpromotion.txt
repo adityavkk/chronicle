@@ -1,0 +1,156 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 121 and seed 376289789242582640 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 126450] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/Chronicle.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Chronicle
+Starting... (2026-10-03 02:54:04)
+Computing initial states...
+Finished computing initial states: 2 distinct states generated at 2026-10-03 02:54:04.
+Error: Invariant PromotionCaughtUp is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ learners = {}
+/\ completed = {}
+/\ events = <<>>
+/\ caughtIndex = (n1 :> 0 @@ n2 :> 0)
+/\ byteEnd = 0
+/\ log = <<>>
+/\ results = <<>>
+/\ applied = 0
+/\ pending = {}
+/\ life = "open"
+/\ incarnation = 0
+/\ expiryInc = 0
+/\ authority = <<>>
+/\ term = 0
+/\ snapshot = [ inc |-> 0,
+  events |-> <<>>,
+  byteEnd |-> 0,
+  producer |-> (p1 :> <<0, 0>>),
+  life |-> "open",
+  expiryInc |-> 0,
+  idx |-> 0 ]
+/\ members = {n2}
+/\ promotions = <<>>
+/\ owner = n2
+/\ producer = (p1 :> <<0, 0>>)
+
+State 2: <Submit line 66, col 14 to line 72, col 99 of module Chronicle>
+/\ learners = {}
+/\ completed = {}
+/\ events = <<>>
+/\ caughtIndex = (n1 :> 0 @@ n2 :> 0)
+/\ byteEnd = 0
+/\ log = <<>>
+/\ results = <<>>
+/\ applied = 0
+/\ pending = {[kind |-> "close", p |-> p1, epoch |-> 0, seq |-> 0, inc |-> 0, bytes |-> 0]}
+/\ life = "open"
+/\ incarnation = 0
+/\ expiryInc = 0
+/\ authority = <<>>
+/\ term = 0
+/\ snapshot = [ inc |-> 0,
+  events |-> <<>>,
+  byteEnd |-> 0,
+  producer |-> (p1 :> <<0, 0>>),
+  life |-> "open",
+  expiryInc |-> 0,
+  idx |-> 0 ]
+/\ members = {n2}
+/\ promotions = <<>>
+/\ owner = n2
+/\ producer = (p1 :> <<0, 0>>)
+
+State 3: <Commit line 74, col 14 to line 77, col 104 of module Chronicle>
+/\ learners = {}
+/\ completed = {}
+/\ events = <<>>
+/\ caughtIndex = (n1 :> 0 @@ n2 :> 0)
+/\ byteEnd = 0
+/\ log = <<[kind |-> "close", p |-> p1, epoch |-> 0, seq |-> 0, inc |-> 0, bytes |-> 0]>>
+/\ results = <<>>
+/\ applied = 0
+/\ pending = {}
+/\ life = "open"
+/\ incarnation = 0
+/\ expiryInc = 0
+/\ authority = <<>>
+/\ term = 0
+/\ snapshot = [ inc |-> 0,
+  events |-> <<>>,
+  byteEnd |-> 0,
+  producer |-> (p1 :> <<0, 0>>),
+  life |-> "open",
+  expiryInc |-> 0,
+  idx |-> 0 ]
+/\ members = {n2}
+/\ promotions = <<>>
+/\ owner = n2
+/\ producer = (p1 :> <<0, 0>>)
+
+State 4: <AddLearner line 98, col 18 to line 99, col 168 of module Chronicle>
+/\ learners = {n1}
+/\ completed = {}
+/\ events = <<>>
+/\ caughtIndex = (n1 :> 0 @@ n2 :> 0)
+/\ byteEnd = 0
+/\ log = <<[kind |-> "close", p |-> p1, epoch |-> 0, seq |-> 0, inc |-> 0, bytes |-> 0]>>
+/\ results = <<>>
+/\ applied = 0
+/\ pending = {}
+/\ life = "open"
+/\ incarnation = 0
+/\ expiryInc = 0
+/\ authority = <<>>
+/\ term = 0
+/\ snapshot = [ inc |-> 0,
+  events |-> <<>>,
+  byteEnd |-> 0,
+  producer |-> (p1 :> <<0, 0>>),
+  life |-> "open",
+  expiryInc |-> 0,
+  idx |-> 0 ]
+/\ members = {n2}
+/\ promotions = <<>>
+/\ owner = n2
+/\ producer = (p1 :> <<0, 0>>)
+
+State 5: <Promote line 102, col 15 to line 105, col 149 of module Chronicle>
+/\ learners = {}
+/\ completed = {}
+/\ events = <<>>
+/\ caughtIndex = (n1 :> 0 @@ n2 :> 0)
+/\ byteEnd = 0
+/\ log = <<[kind |-> "close", p |-> p1, epoch |-> 0, seq |-> 0, inc |-> 0, bytes |-> 0]>>
+/\ results = <<>>
+/\ applied = 0
+/\ pending = {}
+/\ life = "open"
+/\ incarnation = 0
+/\ expiryInc = 0
+/\ authority = <<>>
+/\ term = 0
+/\ snapshot = [ inc |-> 0,
+  events |-> <<>>,
+  byteEnd |-> 0,
+  producer |-> (p1 :> <<0, 0>>),
+  life |-> "open",
+  expiryInc |-> 0,
+  idx |-> 0 ]
+/\ members = {n1, n2}
+/\ promotions = <<[node |-> n1, caught |-> 0, commit |-> 1]>>
+/\ owner = n2
+/\ producer = (p1 :> <<0, 0>>)
+
+539 states generated, 255 distinct states found, 167 states left on queue.
+The depth of the complete state graph search is 5.
+The average outdegree of the complete state graph is 3 (minimum is 1, the maximum 23 and the 95th percentile is 4).
+Finished in 00s at (2026-10-03 02:54:04)
