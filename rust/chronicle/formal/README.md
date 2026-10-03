@@ -452,3 +452,15 @@ the applied closure and relevant byte frontier. Case-insensitive `true` controls
 the request flag; other values are ignored. Snapshot/reopen and HTTP tests must
 cross changed-flag duplicate retries, old-frontier retries after closure,
 ordinary repeated close, and create closure mismatch, without weakening fences.
+
+Review exposed an early HTTP-validation gap: a retained empty producer close
+retried with false/omitted closure must still reach result lookup. Before fixing
+that path, the command contract adds default-false `empty_body`, meaning original
+HTTP-body emptiness before JSON framing. Missing fields in old logs must preserve
+replay; JSON `[]` also has zero stored bytes but is not an empty HTTP body.
+New commands reject empty/non-closing bodies only after existing fences and
+retained-success lookup, before any state/producer mutation. Fresh rejection
+does not consume a tuple; cached retries still succeed. Malformed-body errors
+emit no closure metadata and are outside this publication model. Tests must
+separate old zero-byte commands, valid empty JSON batches, invalid fresh empty
+requests and retained empty retries, including false/omitted close flags.
