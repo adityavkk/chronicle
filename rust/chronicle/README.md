@@ -87,9 +87,11 @@ Protocol conformance beyond the implemented request subset, SSE/long polling,
 zero-copy sendfile, resource-informed placement and leadership
 balancing, deeper replication/storage trace linkage, broader I/O-fault schedules, stronger
 admission/snapshot crash schedules, and equal-semantics performance baselines remain.
-Completion events currently measure handler completion through header construction,
-not full streaming delivery; `bytes_out` is the constructed representation length,
-not proof that a client received it. Body completion/error telemetry remains work.
+Completion events track response-body completion, errors and cancellation;
+`bytes_out` counts data frames yielded to the HTTP server, not proven client receipt.
+The [real delivery fault](evidence/DELIVERY.md) distinguishes a truncated 200 response
+from a completed response and a valid forwarded empty 204. Extractor/admission
+rejections before the stream handler remain outside this completion observer.
 Payload state is buffered and bounded (8 MiB per stream, 16 MiB per shard), with
 backpressure rather than cold offload. Do not infer many-stream production capacity
 from these local tests or treat illustrative Fermi targets as measured SLOs.

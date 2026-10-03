@@ -7,7 +7,6 @@ serving/telemetry fault, not a Raft durability or power-loss experiment.
 import argparse
 import concurrent.futures
 import hashlib
-import json
 import pathlib
 import random
 import threading
@@ -104,7 +103,6 @@ def run(args):
         if typ != "ok" or value.get("records") != [payload.decode()]:
             raise RuntimeError(f"committed payload not recovered: {value}")
     result = check_file(args.output)
-    print(json.dumps(result, indent=2, sort_keys=True))
     if not result["valid"]:
         raise RuntimeError("history check failed; preserve the history")
 
