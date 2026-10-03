@@ -1106,6 +1106,11 @@ func (h *Handler) handleAppend(w http.ResponseWriter, r *http.Request, path stri
 		Seq:         r.Header.Get(protocol.HeaderStreamSeq),
 		ContentType: contentType,
 		Close:       closeStream,
+		// The tail came back with the metadata above; handing it on lets the
+		// store's first attempt be the atomic script itself rather than a second
+		// read of the same hash (one Redis round trip fewer per append).
+		// append.lua re-checks it and answers RETRY if it moved.
+		TailHint: &meta.CurrentOffset,
 	}
 
 	if hasAllProducerHeaders {
