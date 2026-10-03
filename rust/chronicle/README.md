@@ -65,6 +65,11 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
 * Feature-gated storage pause points exercise log-flush, apply and snapshot-install
   boundaries. Subprocess crash/release checks pass on the actual local PVC; these
   are narrower than a live distributed membership fault or power-loss test.
+  Two live Raft histories additionally pause after log persistence or committed
+  apply, issue concurrent identical retries, terminate the leader pod, and recover.
+  Both received Porcupine `Ok`; the log-only retry appended, while the committed
+  apply retry returned its retained duplicate result. The histories preserve the
+  unknown responses and the bounded pause observation rather than hiding them.
 
 ## Explicitly unfinished
 

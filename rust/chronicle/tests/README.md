@@ -136,3 +136,43 @@ reopen exclusively, and check exact log/data and old-or-new snapshot state.
 inside the real k3d pod. This exercises the supported PVC filesystem, not a live
 Raft membership change or a mid-transaction disk/power failure. The separate VFS
 suite tests selected actual write/sync errors within SQLite transactions.
+
+`tests/gated_history.py` is the bounded external counterpart for the disposable
+`k3d-chronicle-rust` cluster and `chronicle` namespace. Deploy a binary built with
+`storage-faults`, set `CHRONICLE_STORAGE_FAULTS=1` and `CHRONICLE_FAULT_DIR` to
+the same path within `/data` on every Chronicle container, and supply a private URL
+and a genuinely unused path:
+
+```bash
+python3 tests/gated_history.py \
+  --url "$PRIVATE_CHRONICLE_URL" --tenant gated-history \
+  --path "gate-$USER-$(date +%s)" --seed 42 \
+  --gate after-log-commit-before-log-flushed \
+  --fault-root /data/fault-controls --output gated-log.jsonl
+```
+
+The other supported gate is `after-apply-commit-before-return`. The harness
+refuses any other Kubernetes context, validates both marker environment
+variables before touching a pod, discovers the data-group leader through the
+Kubernetes pod proxy, and uses only `ops/kubectl.sh`. It creates/removes only its
+known `.arm`, `.reached`, and `.release` controls. The environment marker is an
+operator assertion; actually reaching the gate checks the instrumented behavior.
+Never run two drivers against the same gate directory. It pauses identical seq-1
+requests, deletes exactly the gated pod with a one-second grace period, waits for
+replacement readiness and a strict read, retries seq 1, and checks the retained
+schema-1 history with `tests/history.py`. A failure history is retained at
+`--output`; it fails if the gate is not reached or either paused request reports
+success during the one-second observation before pod deletion (a changed schedule
+or legitimate failover must be investigated before calling that a safety defect).
+After the committed-apply gate, retry must return the retained duplicate result;
+the log-only gate permits either outcome. Existing output files are never overwritten.
+Cleanup leaves `.release` present so a blocked
+actor can observe it. This is pod termination at a known persistence boundary,
+not SIGKILL, power-loss, torn-write, or a namespace/PVC lifecycle test.
+
+`evidence/gated-{log,apply}-k3d.jsonl` retain actual executions on the four-pod
+cluster (three voters, one drained ingress). Both received Porcupine `Ok`.
+Both requests were still pending during the pause and returned unknown after
+pod termination. The log-gated retry returned 200; the apply-gated retry returned
+204 with the original frontier. Each final strict read contained exactly two
+records. This distinguishes unknown outcomes; it does not enumerate every schedule.
