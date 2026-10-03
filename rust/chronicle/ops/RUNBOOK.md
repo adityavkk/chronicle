@@ -42,6 +42,20 @@ replication latency**. Completion events carry barrier/read/proposal/forward tim
 request and response byte counts, duplicate result, and response frontier/commit
 index when present. Sampled term/applied metrics are diagnostic, not read authority.
 Batch persistence timings are not falsely attributed to individual requests.
-Duration begins in admission middleware and ends when the response is constructed,
-not when the last byte reaches the client. Early extractor/admission rejections do
-not yet produce completion events. No payload, raw path, or producer ID is logged.
+Duration begins in admission middleware; the event is emitted when the observed
+handler/response body is dropped, with complete, body-error or cancelled delivery.
+Yielded bytes are not proof of client receipt. Early extractor/admission rejections
+do not yet produce completion events. No payload, raw path, or producer ID is logged.
+
+## Grafana panels suddenly show no data
+
+Check datasource query errors, Grafana pod termination reason and the supervised
+port-forward before concluding that Victoria lost data. A local dashboard refresh
+exposed `OOMKilled` at the former 384 MiB Grafana limit; the restarted instance was
+already near 365 MiB. The local manifest now requests 256 MiB and limits 768 MiB.
+The replacement rendered all six panels and sustained repeated queries without
+restart during a four-minute check, reaching 498 MiB reported memory. This
+is measured headroom, not a long-duration memory-leak diagnosis or production
+sizing guarantee. The forwarding service reconnects after pod replacement;
+wait for Grafana provisioning and successful datasource queries as well as Pod
+Ready. API health alone can precede provisioned dashboard/datasource readiness.

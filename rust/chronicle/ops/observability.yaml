@@ -205,7 +205,7 @@ spec:
             - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "true"}
             - {name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: Viewer}
             - {name: GF_INSTALL_PLUGINS, value: "victoriametrics-logs-datasource 0.32.0"}
-          resources: {requests: {cpu: 25m, memory: 96Mi}, limits: {cpu: 500m, memory: 384Mi}}
+          resources: {requests: {cpu: 25m, memory: 256Mi}, limits: {cpu: 500m, memory: 768Mi}}
           volumeMounts:
             - {name: provisioning, mountPath: /etc/grafana/provisioning/datasources/datasources.yaml, subPath: datasources.yaml}
             - {name: provisioning, mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml, subPath: dashboards.yaml}

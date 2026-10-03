@@ -1,0 +1,507 @@
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "annotations": {
+                    "kubectl.kubernetes.io/restartedAt": "2026-10-03T07:29:14Z"
+                },
+                "creationTimestamp": "2026-10-03T07:29:14Z",
+                "deletionGracePeriodSeconds": 30,
+                "deletionTimestamp": "2026-10-03T22:51:29Z",
+                "generateName": "grafana-78f7f99d48-",
+                "labels": {
+                    "app": "grafana",
+                    "pod-template-hash": "78f7f99d48"
+                },
+                "name": "grafana-78f7f99d48-rvgsp",
+                "namespace": "observability",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "ReplicaSet",
+                        "name": "grafana-78f7f99d48",
+                        "uid": "0d57b330-3d9c-4b87-ad7f-3006ff8a7fd8"
+                    }
+                ],
+                "resourceVersion": "64088",
+                "uid": "10ddaf4a-2ef2-4fe8-9f48-cc96791c90b4"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "env": [
+                            {
+                                "name": "GF_AUTH_ANONYMOUS_ENABLED",
+                                "value": "true"
+                            },
+                            {
+                                "name": "GF_AUTH_ANONYMOUS_ORG_ROLE",
+                                "value": "Viewer"
+                            },
+                            {
+                                "name": "GF_INSTALL_PLUGINS",
+                                "value": "victoriametrics-logs-datasource 0.32.0"
+                            }
+                        ],
+                        "image": "grafana/grafana@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572",
+                        "imagePullPolicy": "IfNotPresent",
+                        "name": "grafana",
+                        "resources": {
+                            "limits": {
+                                "cpu": "500m",
+                                "memory": "384Mi"
+                            },
+                            "requests": {
+                                "cpu": "25m",
+                                "memory": "96Mi"
+                            }
+                        },
+                        "terminationMessagePath": "/dev/termination-log",
+                        "terminationMessagePolicy": "File",
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/etc/grafana/provisioning/datasources/datasources.yaml",
+                                "name": "provisioning",
+                                "subPath": "datasources.yaml"
+                            },
+                            {
+                                "mountPath": "/etc/grafana/provisioning/dashboards/dashboards.yaml",
+                                "name": "provisioning",
+                                "subPath": "dashboards.yaml"
+                            },
+                            {
+                                "mountPath": "/var/lib/grafana/dashboards/chronicle.json",
+                                "name": "provisioning",
+                                "subPath": "chronicle.json"
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-kj9jl",
+                                "readOnly": true
+                            }
+                        ]
+                    }
+                ],
+                "dnsPolicy": "ClusterFirst",
+                "enableServiceLinks": true,
+                "nodeName": "k3d-chronicle-rust-agent-0",
+                "preemptionPolicy": "PreemptLowerPriority",
+                "priority": 0,
+                "restartPolicy": "Always",
+                "schedulerName": "default-scheduler",
+                "securityContext": {},
+                "serviceAccount": "default",
+                "serviceAccountName": "default",
+                "terminationGracePeriodSeconds": 30,
+                "tolerations": [
+                    {
+                        "effect": "NoExecute",
+                        "key": "node.kubernetes.io/not-ready",
+                        "operator": "Exists",
+                        "tolerationSeconds": 300
+                    },
+                    {
+                        "effect": "NoExecute",
+                        "key": "node.kubernetes.io/unreachable",
+                        "operator": "Exists",
+                        "tolerationSeconds": 300
+                    }
+                ],
+                "volumes": [
+                    {
+                        "configMap": {
+                            "defaultMode": 420,
+                            "name": "grafana-provisioning"
+                        },
+                        "name": "provisioning"
+                    },
+                    {
+                        "name": "kube-api-access-kj9jl",
+                        "projected": {
+                            "defaultMode": 420,
+                            "sources": [
+                                {
+                                    "serviceAccountToken": {
+                                        "expirationSeconds": 3607,
+                                        "path": "token"
+                                    }
+                                },
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "ca.crt",
+                                                "path": "ca.crt"
+                                            }
+                                        ],
+                                        "name": "kube-root-ca.crt"
+                                    }
+                                },
+                                {
+                                    "downwardAPI": {
+                                        "items": [
+                                            {
+                                                "fieldRef": {
+                                                    "apiVersion": "v1",
+                                                    "fieldPath": "metadata.namespace"
+                                                },
+                                                "path": "namespace"
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "conditions": [
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-10-03T07:29:15Z",
+                        "status": "True",
+                        "type": "PodReadyToStartContainers"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-10-03T07:29:14Z",
+                        "status": "True",
+                        "type": "Initialized"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-10-03T22:50:48Z",
+                        "status": "True",
+                        "type": "Ready"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-10-03T22:50:48Z",
+                        "status": "True",
+                        "type": "ContainersReady"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-10-03T07:29:14Z",
+                        "status": "True",
+                        "type": "PodScheduled"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "containerID": "containerd://431c7de548c4d25f9adbbb26bb536741bd00b1bc51f63d35b5b6497adcc9273e",
+                        "image": "sha256:fe28f8795cacedcab7a315750dc2ad6bb6f7b63ac720525cb76b15b6647a28c4",
+                        "imageID": "docker.io/grafana/grafana@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572",
+                        "lastState": {
+                            "terminated": {
+                                "containerID": "containerd://5242680764304759b062cbb639c23eabe575478bf6f1a63832d8086217521783",
+                                "exitCode": 137,
+                                "finishedAt": "2026-10-03T22:50:35Z",
+                                "reason": "OOMKilled",
+                                "startedAt": "2026-10-03T22:47:47Z"
+                            }
+                        },
+                        "name": "grafana",
+                        "ready": true,
+                        "restartCount": 4,
+                        "started": true,
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-10-03T22:50:47Z"
+                            }
+                        },
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/etc/grafana/provisioning/datasources/datasources.yaml",
+                                "name": "provisioning"
+                            },
+                            {
+                                "mountPath": "/etc/grafana/provisioning/dashboards/dashboards.yaml",
+                                "name": "provisioning"
+                            },
+                            {
+                                "mountPath": "/var/lib/grafana/dashboards/chronicle.json",
+                                "name": "provisioning"
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-kj9jl",
+                                "readOnly": true,
+                                "recursiveReadOnly": "Disabled"
+                            }
+                        ]
+                    }
+                ],
+                "hostIP": "172.18.0.3",
+                "hostIPs": [
+                    {
+                        "ip": "172.18.0.3"
+                    }
+                ],
+                "phase": "Running",
+                "podIP": "10.42.3.38",
+                "podIPs": [
+                    {
+                        "ip": "10.42.3.38"
+                    }
+                ],
+                "qosClass": "Burstable",
+                "startTime": "2026-10-03T07:29:14Z"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "annotations": {
+                    "kubectl.kubernetes.io/restartedAt": "2026-10-03T07:29:14Z"
+                },
+                "creationTimestamp": "2026-10-03T22:50:47Z",
+                "generateName": "grafana-796fc6766d-",
+                "labels": {
+                    "app": "grafana",
+                    "pod-template-hash": "796fc6766d"
+                },
+                "name": "grafana-796fc6766d-w5plj",
+                "namespace": "observability",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "ReplicaSet",
+                        "name": "grafana-796fc6766d",
+                        "uid": "9744c1b7-0468-461f-aa96-6ec7b324d3eb"
+                    }
+                ],
+                "resourceVersion": "64082",
+                "uid": "e14a702d-c564-4730-bc3a-b547106176b3"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "env": [
+                            {
+                                "name": "GF_AUTH_ANONYMOUS_ENABLED",
+                                "value": "true"
+                            },
+                            {
+                                "name": "GF_AUTH_ANONYMOUS_ORG_ROLE",
+                                "value": "Viewer"
+                            },
+                            {
+                                "name": "GF_INSTALL_PLUGINS",
+                                "value": "victoriametrics-logs-datasource 0.32.0"
+                            }
+                        ],
+                        "image": "grafana/grafana@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572",
+                        "imagePullPolicy": "IfNotPresent",
+                        "name": "grafana",
+                        "resources": {
+                            "limits": {
+                                "cpu": "500m",
+                                "memory": "768Mi"
+                            },
+                            "requests": {
+                                "cpu": "25m",
+                                "memory": "256Mi"
+                            }
+                        },
+                        "terminationMessagePath": "/dev/termination-log",
+                        "terminationMessagePolicy": "File",
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/etc/grafana/provisioning/datasources/datasources.yaml",
+                                "name": "provisioning",
+                                "subPath": "datasources.yaml"
+                            },
+                            {
+                                "mountPath": "/etc/grafana/provisioning/dashboards/dashboards.yaml",
+                                "name": "provisioning",
+                                "subPath": "dashboards.yaml"
+                            },
+                            {
+                                "mountPath": "/var/lib/grafana/dashboards/chronicle.json",
+                                "name": "provisioning",
+                                "subPath": "chronicle.json"
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-5hsjc",
+                                "readOnly": true
+                            }
+                        ]
+                    }
+                ],
+                "dnsPolicy": "ClusterFirst",
+                "enableServiceLinks": true,
+                "nodeName": "k3d-chronicle-rust-agent-3-0",
+                "preemptionPolicy": "PreemptLowerPriority",
+                "priority": 0,
+                "restartPolicy": "Always",
+                "schedulerName": "default-scheduler",
+                "securityContext": {},
+                "serviceAccount": "default",
+                "serviceAccountName": "default",
+                "terminationGracePeriodSeconds": 30,
+                "tolerations": [
+                    {
+                        "effect": "NoExecute",
+                        "key": "node.kubernetes.io/not-ready",
+                        "operator": "Exists",
+                        "tolerationSeconds": 300
+                    },
+                    {
+                        "effect": "NoExecute",
+                        "key": "node.kubernetes.io/unreachable",
+                        "operator": "Exists",
+                        "tolerationSeconds": 300
+                    }
+                ],
+                "volumes": [
+                    {
+                        "configMap": {
+                            "defaultMode": 420,
+                            "name": "grafana-provisioning"
+                        },
+                        "name": "provisioning"
+                    },
+                    {
+                        "name": "kube-api-access-5hsjc",
+                        "projected": {
+                            "defaultMode": 420,
+                            "sources": [
+                                {
+                                    "serviceAccountToken": {
+                                        "expirationSeconds": 3607,
+                                        "path": "token"
+                                    }
+                                },
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "ca.crt",
+                                                "path": "ca.crt"
+                                            }
+                                        ],
+                                        "name": "kube-root-ca.crt"
+                                    }
+                                },
+                                {
+                                    "downwardAPI": {
+                                        "items": [
+                                            {
+                                                "fieldRef": {
+                                                    "apiVersion": "v1",
+                                                    "fieldPath": "metadata.namespace"
+                                                },
+                                                "path": "namespace"
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "conditions": [
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-10-03T22:50:59Z",
+                        "status": "True",
+                        "type": "PodReadyToStartContainers"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-10-03T22:50:47Z",
+                        "status": "True",
+                        "type": "Initialized"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-10-03T22:50:59Z",
+                        "status": "True",
+                        "type": "Ready"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-10-03T22:50:59Z",
+                        "status": "True",
+                        "type": "ContainersReady"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-10-03T22:50:47Z",
+                        "status": "True",
+                        "type": "PodScheduled"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "containerID": "containerd://ad312f79011ba317d43594ff4a4373e12736f7d4a38942f82cc4831d0b3a05b5",
+                        "image": "sha256:fe28f8795cacedcab7a315750dc2ad6bb6f7b63ac720525cb76b15b6647a28c4",
+                        "imageID": "docker.io/grafana/grafana@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572",
+                        "lastState": {},
+                        "name": "grafana",
+                        "ready": true,
+                        "restartCount": 0,
+                        "started": true,
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-10-03T22:50:59Z"
+                            }
+                        },
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/etc/grafana/provisioning/datasources/datasources.yaml",
+                                "name": "provisioning"
+                            },
+                            {
+                                "mountPath": "/etc/grafana/provisioning/dashboards/dashboards.yaml",
+                                "name": "provisioning"
+                            },
+                            {
+                                "mountPath": "/var/lib/grafana/dashboards/chronicle.json",
+                                "name": "provisioning"
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-5hsjc",
+                                "readOnly": true,
+                                "recursiveReadOnly": "Disabled"
+                            }
+                        ]
+                    }
+                ],
+                "hostIP": "172.18.0.7",
+                "hostIPs": [
+                    {
+                        "ip": "172.18.0.7"
+                    }
+                ],
+                "phase": "Running",
+                "podIP": "10.42.4.55",
+                "podIPs": [
+                    {
+                        "ip": "10.42.4.55"
+                    }
+                ],
+                "qosClass": "Burstable",
+                "startTime": "2026-10-03T22:50:47Z"
+            }
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}

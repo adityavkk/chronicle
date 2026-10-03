@@ -1,0 +1,57 @@
+{
+  "status": [
+    {
+      "containerID": "containerd://5242680764304759b062cbb639c23eabe575478bf6f1a63832d8086217521783",
+      "image": "sha256:fe28f8795cacedcab7a315750dc2ad6bb6f7b63ac720525cb76b15b6647a28c4",
+      "imageID": "docker.io/grafana/grafana@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572",
+      "lastState": {
+        "terminated": {
+          "containerID": "containerd://41c8ad25d7e9b5ebc26e03dc7a98bf48c595a21f51cce0c19e47bfc8513f5f8c",
+          "exitCode": 137,
+          "finishedAt": "2026-10-03T22:47:46Z",
+          "reason": "OOMKilled",
+          "startedAt": "2026-10-03T07:48:43Z"
+        }
+      },
+      "name": "grafana",
+      "ready": true,
+      "restartCount": 3,
+      "started": true,
+      "state": {
+        "running": {
+          "startedAt": "2026-10-03T22:47:47Z"
+        }
+      },
+      "volumeMounts": [
+        {
+          "mountPath": "/etc/grafana/provisioning/datasources/datasources.yaml",
+          "name": "provisioning"
+        },
+        {
+          "mountPath": "/etc/grafana/provisioning/dashboards/dashboards.yaml",
+          "name": "provisioning"
+        },
+        {
+          "mountPath": "/var/lib/grafana/dashboards/chronicle.json",
+          "name": "provisioning"
+        },
+        {
+          "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+          "name": "kube-api-access-kj9jl",
+          "readOnly": true,
+          "recursiveReadOnly": "Disabled"
+        }
+      ]
+    }
+  ],
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "384Mi"
+    },
+    "requests": {
+      "cpu": "25m",
+      "memory": "96Mi"
+    }
+  }
+}
