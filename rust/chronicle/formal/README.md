@@ -226,7 +226,7 @@ sample. `BadSseCoverage` samples a later tail for control; `BadSseIncarnation`
 substitutes a recreated stream. Checks are bounded and do not prove client receipt,
 HTTP encoding, notification delivery, executor fairness or Rust refinement.
 
-The planned HTTP implementation follows the pinned Electric SSE event format:
+The HTTP implementation in `src/sse.rs` follows the pinned Electric SSE event format:
 data then control, JSON arrays/text/base64, initial caught-up control, closed
 control without cursor, and a 60-second connection lifetime. It retains the initial
 incarnation and resolves `now`/future offsets once. A post-header read error or
@@ -234,9 +234,13 @@ lost quorum aborts the body without a new control offset. `upToDate` describes t
 captured strict view, not freshness after another concurrent write. Idle lifetime
 expiry needs no new barrier because it emits no new data or cursor.
 
-Encoding must stream bounded chunks, preserving UTF-8/base64 boundaries and
-escaping CR/LF SSE field injection. A slow consumer must not buffer an entire
-backlog or spawn a producer queue. General and live admission remain held through
-delivery and any detached blocking work, on the leader and forwarding ingress.
-Tests must cover chunk boundaries, truncation before control, recreation, closure,
-quorum loss, forwarded lifetime beyond the ordinary proxy timeout and disconnect.
+`src/sse_wire.rs` streams bounded chunks, preserving UTF-8/base64 boundaries and
+escaping CR/LF SSE field injection. It deliberately emits `data: ` rather than
+upstream's `data:` so an SSE parser does not strip a payload's leading space.
+A slow consumer does not buffer an entire backlog or spawn a producer queue.
+General and live admission remain held through delivery and any detached blocking
+work, on the leader and forwarding ingress. Unit tests cover encoding boundaries;
+`tests/sse.py` and `tests/sse_faults.py` exercise real HTTP and storage boundaries.
+The lifetime is an application deadline, not a transport shutdown guarantee for a
+consumer whose socket stops polling the body. These tests do not close the formal
+model-to-Rust refinement gap.

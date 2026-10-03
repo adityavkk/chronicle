@@ -86,12 +86,18 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
 * [Strict long polling](evidence/LONGPOLL.md) has bounded admission and a fresh
   barrier/view after its five-second deadline. Real k3d gates cover concurrent
   append, recreation, close and loss of quorum at that boundary. These HTTP
-  observations are not general linearizability evidence. SSE is not implemented.
+  observations are not general linearizability evidence.
+* [Strict SSE](evidence/SSE.md) streams bounded text/JSON/base64 chunks and publishes
+  a control offset only after its captured range. Each new observation requires a barrier;
+  recreation or post-header failure aborts without advancing the cursor. The
+  60-second application lifetime assumes HTTP consumer progress, not forced
+  socket teardown when the transport stops polling. Forwarded streams retain
+  admission on both nodes. This is not full protocol conformance.
 
 ## Explicitly unfinished
 
 This is a bounded replicated vertical slice, **not the full requested deliverable**.
-Protocol conformance beyond the implemented request subset, SSE,
+Protocol conformance beyond the implemented request subset,
 zero-copy sendfile, resource-informed placement and leadership
 balancing, deeper replication/storage trace linkage, broader I/O-fault schedules, stronger
 admission/snapshot crash schedules, and equal-semantics performance baselines remain.
