@@ -388,3 +388,31 @@ intent changes. It does not infer eventual quorum, disk or network progress from
 health checks. In particular, loss of an applicable joint quorum can still block
 completion even after a successor intent is accepted. The models are separate
 abstractions, not a mechanized composition or end-to-end Rust refinement proof.
+
+## A terminal storage failure stops the whole node
+
+Specified before implementation: any group's OpenRaft `Fatal::StorageError`
+causes process exit, including learners and control group 0. All five groups
+share a node/PVC failure domain. Keeping the other groups alive can strand their
+controller behind the failed local control group and advertise a permanently
+broken learner as healthy. Loss of quorum, normal elections, uninitialized
+learners, application rejections and `Fatal::Stopped` do not meet this predicate.
+
+This maps to the existing crash transition, not a new consensus operation:
+unacknowledged operations remain unknown, persistent state is unchanged by the
+monitor, and restart uses the existing identity/stores without bootstrap, deletion
+or reset. SQLite transactions and quorum persistence, not destructors, supply
+recovery. Other groups may have in-flight operations when the process exits.
+The refinement assumption is that the executor eventually observes a published
+storage-fatal metric; a storage call that hangs forever need not publish one.
+No bounded failure-detection or eventual repair theorem follows from this policy.
+
+Each group watcher inspects its initial and changed metrics, without a storage
+read or quorum barrier. The fatal path logs best effort and exits without waiting
+for blocking file readers, store shutdown or telemetry flush. A normal async-main
+return is insufficient: Tokio runtime teardown can wait forever for a blocked
+file-read task. Health checks use the same predicate during the interval before
+exit. Tests must distinguish typed storage failure from other terminal states,
+cross the actual core-to-metrics boundary, and verify subprocess exit while an
+unrelated blocking task remains gated. This is a reviewed model-to-code mapping,
+not mechanized refinement or evidence of power-loss durability.
