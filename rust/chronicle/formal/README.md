@@ -1,7 +1,7 @@
 # Chronicle formal-first contract
 
-This directory is executable design input for the future Rust implementation; no Rust
-code depends on it yet. `tla/` model-checks bounded distributed traces and `lean/` proves
+This directory began as executable design input before the Rust implementation.
+`tla/` model-checks bounded distributed traces and `lean/` proves
 unbounded facts about the deterministic apply function. Run `make check` (Java, curl,
 and Lean 4.31.0 via elan are required).
 
@@ -49,3 +49,42 @@ This does not prove Raft, storage fsync correctness, serialization, integer over
 refinement to future Rust. Implementations must atomically persist applied state, producer
 and outcome dedup records, lifecycle/expiry metadata, and `last_applied`; snapshots must
 capture exactly that committed boundary before log truncation.
+
+## Implementation mapping and remaining gaps
+
+`src/model.rs::State::apply` is the deterministic state machine. `storage.rs` commits
+SQLite WAL/FULL transactions before publishing cached state or calling `LogFlushed`;
+`main.rs` awaits OpenRaft `client_write` before success and `ensure_linearizable`
+before strict reads. Snapshot install atomically replaces streams, producer results,
+membership and applied index. These are reviewed correspondences, **not mechanized
+refinement**. The formal model is smaller than the implementation:
+
+* The implementation retains successful sequence-to-original-frontier results for the
+  current epoch/incarnation, at most 100,000 total per stream; capacity rejects without
+  eviction. Incarnation and epoch fences precede cache lookup. Same-tuple payload
+  changes are ignored. A gap rejection consumes no producer identity and may succeed
+  after its predecessor. The TLA outcome cache includes rejections, so that policy is
+  **not an exact implementation model**; Lean no-effect lemmas do not prove response
+  retention across all sequences. Fixed tests cover the chosen implementation policy.
+* Learners catch up to an observed committed read-barrier boundary before OpenRaft
+  performs safe membership change. The abstract model's instantaneous current-commit
+  promotion condition is stronger. OpenRaft, not that simplified predicate, supplies
+  membership safety while writes continue.
+* `Ownership.tla` was added **after** the live overlap failure. It explicitly models
+  two processes loading and later publishing cached state through one durable node
+  identity. Twenty reachable states preserve acknowledged retention with exclusive
+  ownership; `BadOwnership.cfg` reproduces lost acknowledgement without it. It is a
+  retrospective ownership-assumption check, not a consensus proof.
+
+The deployment assumption is one running process per node identity, one unmodified
+local volume, and no cloned identity/volume. `Worker` locks the same persistent inode
+before opening SQLite; the binary additionally locks the data directory and validates
+a local identity file and all five stores before starting any Raft group. Locks are
+never unlinked. They **cannot fence independent volume copies or hostile filesystem
+mutation**. Normal restart fails closed on missing stores; explicit genesis and
+fresh learner admission are separate operations. Admission durably rejects reused IDs
+and addresses. The identity record is local and never installed from a Raft snapshot.
+Each RPC carries the intended cluster and node ID; the receiver checks its persisted
+identity before passing append/vote/snapshot to Raft. A DNS alias for another replica
+therefore cannot count as an independent voter. This is routing validation on a trusted
+network, not authentication against a malicious sender.
