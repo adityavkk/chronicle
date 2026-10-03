@@ -73,9 +73,9 @@ def run(args):
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(call, "binary", "GET", query={**live, "offset": offset(3)})
             time.sleep(.2)
-            assert call("binary", "POST", b"WXYZ")["status"] == 200
+            assert call("binary", "POST", b"WXYZ")["status"] == 204
             expect_read(future.result(), 200, "WXYZ", 7)
-        assert call("binary", "POST", headers={"stream-closed": "true"})["status"] == 200
+        assert call("binary", "POST", headers={"stream-closed": "true"})["status"] == 204
         for cursor in ["now", offset(99)]:
             eof = call("binary", "GET", query={**live, "offset": cursor})
             expect_read(eof, 204, "", 7, closed=True)
@@ -103,7 +103,7 @@ def run(args):
                 time.sleep(.025)
             emit(output, requests.lock, {"schema": 3, "type": "info", "f": "admission", "value": {"available_slots": 0}})
             assert call("admission", "GET", query=live)["status"] == 429
-            assert call("admission", "POST", b"wake")["status"] == 200
+            assert call("admission", "POST", b"wake")["status"] == 204
             for future in futures:
                 expect_read(future.result(), 200, "wake", 4)
     print(json.dumps({"result": "passed", "history": args.output,

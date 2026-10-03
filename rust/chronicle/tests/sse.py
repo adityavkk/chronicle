@@ -226,7 +226,7 @@ def run(args):
         for name, ctype, body, expected, encoding in fixtures:
             wire = encode_wire(body, ctype == "application/json")
             assert h.request(name, "PUT", body, {"content-type": ctype})[0] == 201
-            assert h.request(name, "POST", headers={"stream-closed": "true"})[0] == 200
+            assert h.request(name, "POST", headers={"stream-closed": "true"})[0] == 204
             status, headers, events, error = h.stream(name, live, lambda *_: False)
             assert status == 200 and error is None and headers.get("content-type", "").startswith("text/event-stream")
             assert headers.get("stream-incarnation") == "1" and headers.get("stream-consistency") == "strict", headers
@@ -240,10 +240,10 @@ def run(args):
         def writer(events, _elapsed):
             if len(events) == 1:
                 control(events[0], 0)
-                assert h.request("open", "POST", b"next", {"content-type": "text/plain"})[0] == 200
+                assert h.request("open", "POST", b"next", {"content-type": "text/plain"})[0] == 204
             elif len(events) == 3:
                 control(events[2], 4)
-                assert h.request("open", "POST", headers={"stream-closed": "true"})[0] == 200
+                assert h.request("open", "POST", headers={"stream-closed": "true"})[0] == 204
             return False
         _, _, events, error = h.stream("open", {"live": "sse", "offset": "now"}, writer)
         assert error is None and len(events) == 4, (events, error)

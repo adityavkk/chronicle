@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Schema-3 checks that unsupported semantics cannot receive false success."""
+"""Schema-3 checks for fail-closed headers and committed write status mapping."""
 import argparse
 import json
 
@@ -40,8 +40,27 @@ def run(args):
         assert accepted["status"] == 200 and accepted["headers"]["stream-duplicate"] == "false", accepted
         read = call("seq", "GET")
         assert read["status"] == 200 and read["body"] == "beforeafter", read
+        for name, body, headers, expected in (
+            ("ordinary", b"BC", {}, 204),
+            ("producer", b"BC", producer, 200),
+            ("close", b"", {"stream-closed": "true"}, 204),
+            ("producer-close", b"", {**producer, "stream-closed": "true"}, 204),
+        ):
+            assert call(name, "PUT", b"A")["status"] == 201
+            appended = call(name, "POST", body, headers)
+            assert appended["status"] == expected and appended["body"] == "", appended
+            end = len(b"A" + body)
+            assert appended["headers"]["stream-next-offset"] == f"{0:016d}_{end:016d}", appended
+            if "producer-id" in headers:
+                duplicate = call(name, "POST", body, headers)
+                assert duplicate["status"] == 204 and duplicate["headers"]["stream-duplicate"] == "true", duplicate
+                assert duplicate["headers"]["stream-next-offset"] == appended["headers"]["stream-next-offset"], duplicate
+            read = call(name, "GET")
+            assert read["status"] == 200 and read["body"] == (b"A" + body).decode(), read
+            if "stream-closed" in headers:
+                assert read["headers"]["stream-closed"] == "true", read
     print(json.dumps({"result": "passed", "history": args.output,
-                      "scope": "unsupported-header fail-closed contract, not protocol conformance"}))
+                      "scope": "unsupported-header and committed write status contract, not full conformance"}))
 
 
 if __name__ == "__main__":

@@ -79,7 +79,7 @@ def run(args):
                     note("saturated", pod=target, slots=current)
                     assert current == {"chronicle_live_read_available_slots": 0, "chronicle_request_available_slots": 96}, current
                 assert h.stream("gate", {"live": "sse", "offset": "now"}, lambda *_: False)[0] == 429
-                assert h.request("gate", "POST", b"wake", {"content-type": "text/plain", "stream-closed": "true"})[0] == 200
+                assert h.request("gate", "POST", b"wake", {"content-type": "text/plain", "stream-closed": "true"})[0] == 204
                 for future in futures:
                     status, _, events, error = future.result(timeout=20)
                     assert status == 200 and error is None and len(events) == 3, (status, events, error)
@@ -136,7 +136,7 @@ def run(args):
             if not baseline:
                 assert initial.wait(10), "initial SSE control not observed"
             if args.scenario == "later-open-timeout":
-                assert h.request("gate", "POST", b"later", {"content-type": "text/plain"})[0] == 200
+                assert h.request("gate", "POST", b"later", {"content-type": "text/plain"})[0] == 204
             if gate:
                 wait_until(lambda: gate_control(pod, "test", reached, check=False).returncode == 0,
                            time.monotonic() + 15, "SSE gate")
@@ -146,7 +146,7 @@ def run(args):
                 note("truncate", target=target)
                 kubectl("-n", NAMESPACE, "exec", pod, "--", "truncate", "--no-create", "-s", "0", target)
             elif args.scenario == "append":
-                assert h.request("gate", "POST", b"XYZ", {"content-type": "text/plain", "stream-closed": "true"})[0] == 200
+                assert h.request("gate", "POST", b"XYZ", {"content-type": "text/plain", "stream-closed": "true"})[0] == 204
             elif args.scenario == "quorum":
                 probe = subprocess.run(["sudo", "docker", "exec", node, "iptables", "-S"],
                                        capture_output=True, text=True, timeout=10)

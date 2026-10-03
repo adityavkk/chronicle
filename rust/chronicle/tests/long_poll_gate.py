@@ -69,12 +69,12 @@ def run(args):
             # inferred from elapsed time observed by this slower external process.
             note("deadline-gated", elapsed_s=time.monotonic() - start)
             if args.scenario == "append":
-                assert call("gate", "POST", b"after")["status"] == 200
+                assert call("gate", "POST", b"after")["status"] == 204
             elif args.scenario == "recreate":
                 assert call("gate", "DELETE")["status"] == 204
                 assert call("gate", "PUT", b"NEW", {"stream-incarnation": "2"})["status"] == 201
             elif args.scenario == "close":
-                assert call("gate", "POST", headers={"stream-closed": "true"})["status"] == 200
+                assert call("gate", "POST", headers={"stream-closed": "true"})["status"] == 204
             else:
                 probe = subprocess.run(["sudo", "docker", "exec", node, "iptables", "-S"],
                                        capture_output=True, text=True, timeout=10)

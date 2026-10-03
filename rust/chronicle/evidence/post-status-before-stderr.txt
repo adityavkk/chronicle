@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/rust/chronicle/tests/protocol_headers.py", line 71, in <module>
+    run(parser.parse_args())
+  File "/home/user/workspace/repo/rust/chronicle/tests/protocol_headers.py", line 51, in run
+    assert appended["status"] == expected and appended["body"] == "", appended
+                                              ^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'status': 200, 'headers': {'stream-next-offset': '0000000000000000_0000000000000003', 'stream-incarnation': '1', 'stream-commit-index': '4359', 'stream-duplicate': 'false', 'traceparent': '00-894f7f2a7f7a5ab39761bf8bb375d44d-7c0122c47ccc5f8a-01', 'x-request-id': 'live-post-status-before-64005-30', 'connection': 'close', 'transfer-encoding': 'chunked', 'date': 'Sat, 03 Oct 2026 21:15:53 GMT'}, 'body': '', 'error': None, 'elapsed_s': 0.007486663002055138}

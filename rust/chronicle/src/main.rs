@@ -954,7 +954,11 @@ async fn stream_inner(
     }
     let status = if method == Method::PUT {
         if result.data.duplicate { 200 } else { 201 }
-    } else if method == Method::DELETE || result.data.duplicate {
+    } else if method == Method::DELETE
+        || result.data.duplicate
+        || h("producer-id").is_none()
+        || body.is_empty()
+    {
         204
     } else {
         200
