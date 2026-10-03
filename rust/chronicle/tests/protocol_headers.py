@@ -20,7 +20,13 @@ def run(args):
             assert rejected["headers"].get("x-request-id") and rejected["headers"].get("traceparent"), rejected
             assert call(name, "GET")["status"] == 404
             # Unknown application headers remain allowed, rather than a blanket ban.
-            assert call(name, "PUT", b"accepted", {"x-application-tag": "fixture"})["status"] == 201
+            created = call(name, "PUT", b"accepted", {"x-application-tag": "fixture"})
+            assert created["status"] == 201 and created["headers"]["content-type"] == "application/octet-stream", created
+            retried = call(name, "PUT", b"different initial bytes")
+            assert retried["status"] == 200 and retried["headers"]["content-type"] == "application/octet-stream", retried
+            assert retried["headers"]["stream-duplicate"] == "true", retried
+            conflict = call(name, "PUT", b"different type", {"content-type": "text/plain"})
+            assert conflict["status"] == 409, conflict
             read = call(name, "GET")
             assert read["status"] == 200 and read["body"] == "accepted", read
 

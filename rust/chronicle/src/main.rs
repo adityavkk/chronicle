@@ -840,7 +840,7 @@ async fn stream_inner(
                 .map(|v| v.parse::<u64>().map_err(bad))
                 .transpose()?,
             config: StreamConfig {
-                content_type,
+                content_type: content_type.clone(),
                 expires_ms,
             },
             data: wire.to_vec(),
@@ -918,21 +918,25 @@ async fn stream_inner(
         };
         return Err((status, format!("{error:?}")));
     }
-    let status = if method == Method::PUT && !result.data.duplicate {
-        201
+    let status = if method == Method::PUT {
+        if result.data.duplicate { 200 } else { 201 }
     } else if method == Method::DELETE || result.data.duplicate {
         204
     } else {
         200
     };
-    Response::builder()
+    let mut response = Response::builder()
         .status(status)
         .header("stream-next-offset", wire::format_offset(result.data.end))
         .header("stream-incarnation", result.data.incarnation.to_string())
         .header("stream-commit-index", result.log_id.index.to_string())
-        .header("stream-duplicate", result.data.duplicate.to_string())
-        .body(Body::empty())
-        .map_err(unavailable)
+        .header("stream-duplicate", result.data.duplicate.to_string());
+    if method == Method::PUT {
+        // A successful create outcome has atomically validated this config,
+        // including on a retry. Do not sample mutable stream metadata afterward.
+        response = response.header("content-type", content_type);
+    }
+    response.body(Body::empty()).map_err(unavailable)
 }
 
 async fn admitted_write(
