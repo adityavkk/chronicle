@@ -4,6 +4,7 @@
 //! explicit test directory. For store `group.sqlite`, gate `NAME` is armed by
 //! creating `<dir>/<hex filename>/<NAME>.arm`. Once reached, the blocking storage
 //! actor durably creates `<NAME>.reached` and waits until `<NAME>.release` exists.
+//! It then creates `<NAME>.resumed`; wait for that marker before deleting release.
 //! The actor never removes control files (in particular, it cannot unlink locks).
 
 use std::ffi::OsStr;
@@ -15,6 +16,9 @@ pub const AFTER_LOG_COMMIT: &str = "after-log-commit-before-log-flushed";
 pub const AFTER_APPLY_COMMIT: &str = "after-apply-commit-before-return";
 pub const BEFORE_SNAPSHOT_INSTALL: &str = "before-snapshot-install-transaction";
 pub const AFTER_SNAPSHOT_INSTALL: &str = "after-snapshot-install-transaction";
+/// Uses the synthetic filename `http-body`; pauses the blocking file reader,
+/// not the SQLite actor. The harness can then truncate only its disposable cache.
+pub const BEFORE_BODY_READ: &str = "before-response-file-read";
 
 pub struct Context {
     directory: Option<PathBuf>,
@@ -47,6 +51,7 @@ impl Context {
         while !directory.join(format!("{name}.release")).is_file() {
             std::thread::sleep(Duration::from_millis(5));
         }
+        std::fs::File::create(directory.join(format!("{name}.resumed")))?;
         Ok(())
     }
 }

@@ -1,5 +1,9 @@
 //! Bounded completion telemetry. Export and stdout backpressure never await Raft.
-use axum::http::{HeaderMap, HeaderValue};
+use axum::{
+    body::{Body, HttpBody},
+    http::{HeaderMap, HeaderValue, StatusCode},
+    response::Response,
+};
 use chronicle_raft::metrics::Histogram;
 use opentelemetry::{propagation::TextMapPropagator, trace::TraceContextExt};
 use opentelemetry_sdk::{
@@ -10,10 +14,12 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
+    pin::Pin,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
+    task::{Context, Poll},
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
@@ -131,18 +137,130 @@ pub struct PhaseTimings {
     pub forward_us: u64,
 }
 
-pub struct Completion<'a> {
-    pub method: &'a str,
+#[derive(Default)]
+pub struct Completion {
+    pub method: String,
     pub shard: u64,
     pub term: u64,
     pub applied: u64,
     pub commit_index: Option<u64>,
-    pub frontier: Option<&'a str>,
+    pub frontier: Option<String>,
     pub duplicate: Option<bool>,
-    pub status: u16,
+    pub status: Option<u16>,
     pub bytes_in: usize,
     pub bytes_out: u64,
+    pub expected_bytes: Option<u64>,
+    pub delivery: Delivery,
     pub timings: PhaseTimings,
+}
+
+impl Completion {
+    fn body_end(&mut self) {
+        if self.delivery != Delivery::BodyError {
+            self.delivery = if self.expected_bytes.is_none_or(|n| n == self.bytes_out) {
+                Delivery::Complete
+            } else {
+                Delivery::BodyError
+            };
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Delivery {
+    Complete,
+    BodyError,
+    #[default]
+    Cancelled,
+}
+
+/// One event even when the handler or response body is cancelled. Publication is
+/// bounded and nonblocking; this records server observation, not client receipt.
+pub struct Observation {
+    telemetry: Arc<Telemetry>,
+    context: RequestContext,
+    pub completion: Completion,
+}
+
+impl Observation {
+    pub fn response(mut self, response: Response) -> Response {
+        let header = |name: &str| response.headers().get(name)?.to_str().ok();
+        self.completion.status = Some(response.status().as_u16());
+        self.completion.commit_index = header("stream-commit-index").and_then(|v| v.parse().ok());
+        self.completion.frontier = header("stream-next-offset").map(str::to_owned);
+        self.completion.duplicate = header("stream-duplicate").and_then(|v| v.parse().ok());
+        self.completion.expected_bytes = if self.completion.method == "HEAD"
+            || matches!(
+                response.status(),
+                StatusCode::NO_CONTENT | StatusCode::NOT_MODIFIED
+            ) {
+            Some(0)
+        } else {
+            header("content-length")
+                .and_then(|v| v.parse().ok())
+                .or_else(|| response.body().size_hint().exact())
+        };
+        if response.body().is_end_stream() || self.completion.expected_bytes == Some(0) {
+            self.completion.body_end();
+        }
+        response.map(|inner| {
+            Body::new(ObservedBody {
+                inner,
+                observation: self,
+            })
+        })
+    }
+}
+
+impl Drop for Observation {
+    fn drop(&mut self) {
+        self.telemetry.complete(&self.context, &self.completion);
+    }
+}
+
+struct ObservedBody {
+    inner: Body,
+    observation: Observation,
+}
+
+impl HttpBody for ObservedBody {
+    type Data = bytes::Bytes;
+    type Error = axum::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        let this = self.get_mut();
+        let frame = Pin::new(&mut this.inner).poll_frame(cx);
+        let completion = &mut this.observation.completion;
+        match &frame {
+            Poll::Ready(Some(Ok(frame))) => {
+                if let Some(data) = frame.data_ref() {
+                    completion.bytes_out += data.len() as u64;
+                }
+                if this.inner.is_end_stream()
+                    || completion
+                        .expected_bytes
+                        .is_some_and(|n| completion.bytes_out >= n)
+                {
+                    completion.body_end();
+                }
+            }
+            Poll::Ready(Some(Err(_))) => completion.delivery = Delivery::BodyError,
+            Poll::Ready(None) => completion.body_end(),
+            _ => {}
+        }
+        frame
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
 }
 
 pub struct Telemetry {
@@ -152,6 +270,8 @@ pub struct Telemetry {
     log_errors: tracing_appender::non_blocking::ErrorCounter,
     requests: Histogram,
     errors: AtomicU64,
+    body_errors: AtomicU64,
+    cancellations: AtomicU64,
 }
 
 impl Telemetry {
@@ -210,10 +330,24 @@ impl Telemetry {
             log_errors,
             requests: Histogram::new(),
             errors: AtomicU64::new(0),
+            body_errors: AtomicU64::new(0),
+            cancellations: AtomicU64::new(0),
         }
     }
 
-    pub fn complete(&self, context: &RequestContext, completion: Completion<'_>) {
+    pub fn observe(
+        self: &Arc<Self>,
+        context: RequestContext,
+        completion: Completion,
+    ) -> Observation {
+        Observation {
+            telemetry: self.clone(),
+            context,
+            completion,
+        }
+    }
+
+    fn complete(&self, context: &RequestContext, completion: &Completion) {
         let Completion {
             method,
             shard,
@@ -225,12 +359,25 @@ impl Telemetry {
             status,
             bytes_in,
             bytes_out,
+            expected_bytes,
+            delivery,
             timings,
         } = completion;
         let elapsed = context.started.elapsed();
         self.requests.observe(elapsed);
         let us = elapsed.as_micros().min(u64::MAX as u128) as u64;
-        if status >= 400 {
+        let error_type = match delivery {
+            Delivery::BodyError => {
+                self.body_errors.fetch_add(1, Ordering::Relaxed);
+                Some("response_body".to_owned())
+            }
+            Delivery::Cancelled => {
+                self.cancellations.fetch_add(1, Ordering::Relaxed);
+                Some("cancelled".to_owned())
+            }
+            Delivery::Complete => status.filter(|s| *s >= 400).map(|s| s.to_string()),
+        };
+        if error_type.is_some() {
             self.errors.fetch_add(1, Ordering::Relaxed);
         }
         let end = std::time::SystemTime::now()
@@ -241,7 +388,7 @@ impl Telemetry {
             "event": "request.complete",
             "http.request.method": method,
             "http.response.status_code": status,
-            "error.type": (status >= 400).then(|| status.to_string()),
+            "error.type": error_type,
             "shard": shard,
             "raft.term": term,
             "raft.applied_index": applied,
@@ -252,7 +399,9 @@ impl Telemetry {
             "phase_us": timings,
             "bytes_in": bytes_in,
             "bytes_out": bytes_out,
-            "outcome": if status >= 500 { "unknown" } else if status >= 400 { "rejected" } else { "ok" },
+            "expected_bytes": expected_bytes,
+            "delivery": delivery,
+            "outcome": if *delivery != Delivery::Complete || status.is_none_or(|s| s >= 500) { "unknown" } else if status.is_some_and(|s| s >= 400) { "rejected" } else { "ok" },
             "trace_id": context.trace_id,
             "span_id": context.span_id,
             "request_id": context.request_id
@@ -260,7 +409,17 @@ impl Telemetry {
         tracing::info!(event=%event, "request.complete");
         let log = json!({"timeUnixNano":end.to_string(),"severityNumber":9,"severityText":"INFO","body":{"stringValue":event.to_string()},"traceId":context.trace_id,"spanId":context.span_id});
         let span = if context.sampled {
-            json!({"traceId":context.trace_id,"spanId":context.span_id,"parentSpanId":context.parent_span_id,"name":"durable_stream.request","kind":2,"startTimeUnixNano":end.saturating_sub(elapsed.as_nanos()).to_string(),"endTimeUnixNano":end.to_string(),"attributes":[{"key":"http.request.method","value":{"stringValue":method}},{"key":"http.response.status_code","value":{"intValue":status.to_string()}},{"key":"chronicle.shard","value":{"intValue":shard.to_string()}}],"status":{"code":if status>=500{2}else{0}}})
+            let mut attributes = vec![
+                json!({"key":"http.request.method","value":{"stringValue":method}}),
+                json!({"key":"chronicle.shard","value":{"intValue":shard.to_string()}}),
+            ];
+            if let Some(status) = status {
+                attributes.push(json!({"key":"http.response.status_code","value":{"intValue":status.to_string()}}));
+            }
+            if let Some(error) = error_type {
+                attributes.push(json!({"key":"error.type","value":{"stringValue":error}}));
+            }
+            json!({"traceId":context.trace_id,"spanId":context.span_id,"parentSpanId":context.parent_span_id,"name":"durable_stream.request","kind":2,"startTimeUnixNano":end.saturating_sub(elapsed.as_nanos()).to_string(),"endTimeUnixNano":end.to_string(),"attributes":attributes,"status":{"code":if *delivery != Delivery::Complete || status.is_some_and(|s| s>=500){2}else{0}}})
         } else {
             Value::Null
         };
@@ -271,9 +430,11 @@ impl Telemetry {
 
     pub fn metrics(&self) -> String {
         let mut text = format!(
-            "chronicle_requests_total {}\nchronicle_errors_total {}\nchronicle_telemetry_dropped_total {}\nchronicle_telemetry_export_errors_total {}\nchronicle_log_dropped_total {}\n",
+            "chronicle_requests_total {}\nchronicle_errors_total {}\nchronicle_response_body_errors_total {}\nchronicle_request_cancellations_total {}\nchronicle_telemetry_dropped_total {}\nchronicle_telemetry_export_errors_total {}\nchronicle_log_dropped_total {}\n",
             self.requests.count(),
             self.errors.load(Ordering::Relaxed),
+            self.body_errors.load(Ordering::Relaxed),
+            self.cancellations.load(Ordering::Relaxed),
             self.dropped.load(Ordering::Relaxed),
             self.export_errors.load(Ordering::Relaxed),
             self.log_errors.dropped_lines()
@@ -290,6 +451,181 @@ impl Telemetry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn captured() -> (
+        Arc<Telemetry>,
+        mpsc::Receiver<(Value, Value)>,
+        tracing_appender::non_blocking::WorkerGuard,
+    ) {
+        let (writer, guard) = tracing_appender::non_blocking(std::io::sink());
+        let mut telemetry = Telemetry::new(1, writer.error_counter(), String::new());
+        let (tx, rx) = mpsc::channel(16);
+        telemetry.tx = tx;
+        (Arc::new(telemetry), rx, guard)
+    }
+
+    fn observation(telemetry: &Arc<Telemetry>, method: &str) -> Observation {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "traceparent",
+            "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
+                .parse()
+                .unwrap(),
+        );
+        headers.insert("x-request-id", "body-test".parse().unwrap());
+        telemetry.observe(
+            RequestContext::from_headers(&headers),
+            Completion {
+                method: method.into(),
+                shard: 2,
+                ..Default::default()
+            },
+        )
+    }
+
+    fn event(rx: &mut mpsc::Receiver<(Value, Value)>) -> (Value, Value) {
+        let (log, span) = rx.try_recv().unwrap();
+        let event: Value =
+            serde_json::from_str(log["body"]["stringValue"].as_str().unwrap()).unwrap();
+        assert_eq!(event["trace_id"], "0123456789abcdef0123456789abcdef");
+        assert_eq!(span["parentSpanId"], "0123456789abcdef");
+        assert_eq!(event["span_id"], span["spanId"]);
+        assert_eq!(event["request_id"], "body-test");
+        assert!(
+            rx.try_recv().is_err(),
+            "completion must be emitted exactly once"
+        );
+        (event, span)
+    }
+
+    #[tokio::test]
+    async fn body_error_keeps_http_status_but_records_unknown_partial_delivery() {
+        let (telemetry, mut rx, _logging) = captured();
+        let body = Body::from_stream(futures_util::stream::iter([
+            Ok(bytes::Bytes::from_static(b"NEVER_LOG_THIS")),
+            Err(std::io::Error::other("private fault detail")),
+        ]));
+        let response = observation(&telemetry, "GET").response(
+            Response::builder()
+                .header("content-length", 20)
+                .body(body)
+                .unwrap(),
+        );
+        assert!(rx.try_recv().is_err());
+        assert!(
+            axum::body::to_bytes(response.into_body(), 100)
+                .await
+                .is_err()
+        );
+        let (event, span) = event(&mut rx);
+        assert_eq!(event["http.response.status_code"], 200);
+        assert_eq!(event["bytes_out"], 14);
+        assert_eq!(event["expected_bytes"], 20);
+        assert_eq!(event["delivery"], "body_error");
+        assert_eq!(event["outcome"], "unknown");
+        assert_eq!(span["status"]["code"], 2);
+        assert!(!event.to_string().contains("NEVER_LOG_THIS"));
+        assert!(!event.to_string().contains("private fault detail"));
+        assert_eq!(telemetry.body_errors.load(Ordering::Relaxed), 1);
+        assert_eq!(telemetry.cancellations.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn completion_waits_for_body_and_includes_delivery_time() {
+        let (telemetry, mut rx, _logging) = captured();
+        let body = Body::from_stream(futures_util::stream::once(async {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"done"))
+        }));
+        let response = observation(&telemetry, "GET").response(
+            Response::builder()
+                .header("content-length", 4)
+                .body(body)
+                .unwrap(),
+        );
+        assert!(rx.try_recv().is_err());
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), 100)
+                .await
+                .unwrap(),
+            "done"
+        );
+        let (event, span) = event(&mut rx);
+        assert_eq!(event["delivery"], "complete");
+        assert_eq!(event["bytes_out"], 4);
+        assert!(event["duration_us"].as_u64().unwrap() >= 40_000);
+        assert_eq!(span["status"]["code"], 0);
+    }
+
+    #[tokio::test]
+    async fn cancellation_before_headers_and_after_partial_body_are_unknown() {
+        use futures_util::{StreamExt, stream};
+        let (telemetry, mut rx, _logging) = captured();
+        drop(observation(&telemetry, "POST"));
+        let (before, _) = event(&mut rx);
+        assert!(before["http.response.status_code"].is_null());
+        assert_eq!(before["outcome"], "unknown");
+        assert_eq!(before["delivery"], "cancelled");
+        let body = Body::from_stream(
+            stream::once(async { Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"abc")) })
+                .chain(stream::pending()),
+        );
+        let response = observation(&telemetry, "GET").response(Response::new(body));
+        let mut chunks = response.into_body().into_data_stream();
+        assert_eq!(chunks.next().await.unwrap().unwrap(), "abc");
+        drop(chunks);
+        let (after, _) = event(&mut rx);
+        assert_eq!(after["bytes_out"], 3);
+        assert_eq!(after["delivery"], "cancelled");
+        assert_eq!(after["outcome"], "unknown");
+        assert_eq!(telemetry.cancellations.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
+    async fn forwarded_bodyless_status_is_complete_without_length_or_polling() {
+        let (telemetry, mut rx, _logging) = captured();
+        for status in [204, 304] {
+            let body = Body::from_stream(futures_util::stream::pending::<
+                Result<bytes::Bytes, std::io::Error>,
+            >());
+            let response = Response::builder().status(status).body(body).unwrap();
+            drop(observation(&telemetry, "GET").response(response));
+            let (event, _) = event(&mut rx);
+            assert_eq!(event["delivery"], "complete");
+            assert_eq!(event["outcome"], "ok");
+            assert_eq!(event["bytes_out"], 0);
+        }
+        assert_eq!(telemetry.cancellations.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn head_and_no_content_need_no_poll_but_length_mismatches_are_errors() {
+        let (telemetry, mut rx, _logging) = captured();
+        for (method, status) in [("HEAD", 200), ("POST", 204)] {
+            let response = Response::builder()
+                .status(status)
+                .header("content-length", if method == "HEAD" { 37 } else { 0 })
+                .body(Body::empty())
+                .unwrap();
+            drop(observation(&telemetry, method).response(response));
+            let (event, _) = event(&mut rx);
+            assert_eq!(event["delivery"], "complete");
+            assert_eq!(event["bytes_out"], 0);
+        }
+        for data in ["", "short", "too long"] {
+            let response = Response::builder()
+                .header("content-length", 6)
+                .body(Body::from(data))
+                .unwrap();
+            let response = observation(&telemetry, "GET").response(response);
+            let _ = axum::body::to_bytes(response.into_body(), 100)
+                .await
+                .unwrap();
+            let (event, _) = event(&mut rx);
+            assert_eq!(event["delivery"], "body_error");
+        }
+    }
+
     #[test]
     fn invalid_context_is_replaced_and_valid_context_continues() {
         let mut h = HeaderMap::new();
@@ -384,17 +720,19 @@ mod tests {
         for _ in 0..QUEUE_DEPTH + 7 {
             telemetry.complete(
                 &context,
-                Completion {
-                    method: "POST",
+                &Completion {
+                    method: "POST".into(),
                     shard: 1,
                     term: 2,
                     applied: 3,
                     commit_index: Some(3),
-                    frontier: Some("000000000000000b"),
+                    frontier: Some("000000000000000b".into()),
                     duplicate: Some(false),
-                    status: 200,
+                    status: Some(200),
                     bytes_in: 11,
                     bytes_out: 0,
+                    expected_bytes: Some(0),
+                    delivery: Delivery::Complete,
                     timings: PhaseTimings::default(),
                 },
             );

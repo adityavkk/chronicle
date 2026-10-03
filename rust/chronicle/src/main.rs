@@ -5,7 +5,7 @@ mod telemetry;
 
 use axum::{
     Json, Router,
-    body::{Body, HttpBody},
+    body::Body,
     extract::{DefaultBodyLimit, Extension, Path, Query, Request, State},
     http::{HeaderMap, Method, StatusCode, Uri},
     middleware::{self, Next},
@@ -41,7 +41,7 @@ pub struct App {
     pub groups: BTreeMap<u64, Group>,
     pub client: reqwest::Client,
     pub admission: Arc<Semaphore>,
-    pub telemetry: telemetry::Telemetry,
+    pub telemetry: Arc<telemetry::Telemetry>,
 }
 type Shared = Arc<App>;
 type ApiResult = Result<Response, (StatusCode, String)>;
@@ -183,11 +183,11 @@ async fn main() -> anyhow::Result<()> {
         groups,
         client,
         admission: Arc::new(Semaphore::new(128)),
-        telemetry: telemetry::Telemetry::new(
+        telemetry: Arc::new(telemetry::Telemetry::new(
             id,
             log_errors,
             std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or_default(),
-        ),
+        )),
     });
     tokio::spawn(controller::run(app.clone()));
     let router = Router::new()
@@ -573,8 +573,18 @@ async fn stream(
 ) -> ApiResult {
     let key = format!("{}:{tenant}{path}", tenant.len());
     let shard = model::shard(&key);
-    let bytes_in = body.len();
-    let mut timings = telemetry::PhaseTimings::default();
+    let m = a.groups[&shard].raft.metrics().borrow().clone();
+    let mut observation = a.telemetry.observe(
+        context,
+        telemetry::Completion {
+            method: method.to_string(),
+            shard,
+            term: m.current_term,
+            applied: m.last_applied.map_or(0, |l| l.index),
+            bytes_in: body.len(),
+            ..Default::default()
+        },
+    );
     let result = stream_inner(
         &a,
         shard,
@@ -584,48 +594,14 @@ async fn stream(
         uri,
         headers,
         body,
-        &mut timings,
+        &mut observation.completion.timings,
         admission,
     )
     .await;
-    let status = result
-        .as_ref()
-        .map_or_else(|(s, _)| s.as_u16(), |r| r.status().as_u16());
     let m = a.groups[&shard].raft.metrics().borrow().clone();
-    let response_header = |name: &str| result.as_ref().ok()?.headers().get(name)?.to_str().ok();
-    a.telemetry.complete(
-        &context,
-        telemetry::Completion {
-            method: method.as_str(),
-            shard,
-            term: m.current_term,
-            applied: m.last_applied.map_or(0, |l| l.index),
-            commit_index: response_header("stream-commit-index").and_then(|v| v.parse().ok()),
-            frontier: response_header("stream-next-offset"),
-            duplicate: response_header("stream-duplicate").and_then(|v| v.parse().ok()),
-            status,
-            bytes_in,
-            bytes_out: result.as_ref().map_or_else(
-                |(_, message)| message.len() as u64,
-                |r| {
-                    r.body()
-                        .size_hint()
-                        .exact()
-                        .or_else(|| {
-                            r.headers()
-                                .get("content-length")?
-                                .to_str()
-                                .ok()?
-                                .parse()
-                                .ok()
-                        })
-                        .unwrap_or_default()
-                },
-            ),
-            timings,
-        },
-    );
-    result
+    observation.completion.term = m.current_term;
+    observation.completion.applied = m.last_applied.map_or(0, |l| l.index);
+    Ok(observation.response(result.unwrap_or_else(IntoResponse::into_response)))
 }
 
 #[allow(clippy::too_many_arguments)]

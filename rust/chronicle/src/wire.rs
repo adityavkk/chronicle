@@ -98,6 +98,9 @@ pub fn file_body(
             let retained = admission.clone();
             let (file, bytes) = tokio::task::spawn_blocking(move || {
                 let _admission = retained;
+                #[cfg(feature = "storage-faults")]
+                crate::faults::Context::new(std::path::Path::new("http-body"))
+                    .hit(crate::faults::BEFORE_BODY_READ)?;
                 let mut bytes = vec![0; remaining.min(256 * 1024) as usize];
                 file.read_exact(&mut bytes)?;
                 Ok::<_, std::io::Error>((file, bytes))
