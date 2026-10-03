@@ -1,15 +1,15 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
-Running breadth-first search Model-Checking with fp 9 and seed -1981479976670945518 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 4051676] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 49 and seed -1170580753436421448 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 4051818] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/WriteReply.tla
 Parsing file /tmp/Naturals.tla
 Semantic processing of module Naturals
 Semantic processing of module WriteReply
-Starting... (2026-10-03 22:17:55)
+Starting... (2026-10-03 22:17:57)
 Computing initial states...
 Computed 2 initial states...
 Computed 4 initial states...
-Finished computing initial states: 8 distinct states generated at 2026-10-03 22:17:56.
-Error: Invariant ClosureFromApply is violated.
+Finished computing initial states: 8 distinct states generated at 2026-10-03 22:17:57.
+Error: Invariant ProducerFromApply is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
 /\ requestSeq = 4
@@ -37,33 +37,33 @@ State 2: <Apply line 19, col 3 to line 26, col 40 of module WriteReply>
 /\ appliedSeq = 1
 /\ requested = FALSE
 
-State 3: <OtherClose line 29, col 15 to line 31, col 66 of module WriteReply>
+State 3: <Recreate line 36, col 13 to line 38, col 60 of module WriteReply>
 /\ requestSeq = 1
 /\ replySeq = 4
 /\ boundary = FALSE
 /\ cached = FALSE
 /\ reply = FALSE
-/\ closed = TRUE
-/\ seq = 1
-/\ tail = 2
+/\ closed = FALSE
+/\ seq = 0
+/\ tail = 0
 /\ phase = "applied"
 /\ appliedSeq = 1
 /\ requested = FALSE
 
 State 4: <Respond line 39, col 12 to line 46, col 54 of module WriteReply>
 /\ requestSeq = 1
-/\ replySeq = 1
+/\ replySeq = 0
 /\ boundary = FALSE
 /\ cached = FALSE
-/\ reply = TRUE
-/\ closed = TRUE
-/\ seq = 1
-/\ tail = 2
+/\ reply = FALSE
+/\ closed = FALSE
+/\ seq = 0
+/\ tail = 0
 /\ phase = "done"
 /\ appliedSeq = 1
 /\ requested = FALSE
 
-264 states generated, 170 distinct states found, 94 states left on queue.
+316 states generated, 204 distinct states found, 104 states left on queue.
 The depth of the complete state graph search is 4.
-The average outdegree of the complete state graph is 3 (minimum is 0, the maximum 8 and the 95th percentile is 6).
-Finished in 00s at (2026-10-03 22:17:56)
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 7 and the 95th percentile is 4).
+Finished in 00s at (2026-10-03 22:17:57)

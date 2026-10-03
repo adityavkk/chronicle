@@ -478,3 +478,31 @@ These are response decorations, not replicated state transitions; the state
 models and durability assumptions are unchanged. HTTP tests, not TLC, verify
 this boundary. The headers neither authenticate requests nor make the private
 admin/Raft listener safe for public access; no CORS authorization is added.
+
+### Producer response position
+
+`WriteReply` now also checks `ProducerFromApply`: the highest accepted sequence
+in a producer response is captured at apply. A retained sequence-zero retry
+after sequence one therefore reports sequence one while retaining sequence
+zero's original byte frontier. Concurrent appends or recreation before HTTP
+encoding cannot rewrite that position. The bounded model abstracts epoch and
+validation; two dedicated negative controls echo the request or sample later
+state. Existing deterministic safety proofs are unchanged, and this is not a
+mechanized refinement of the HTTP implementation.
+
+The code mapping adds an optional epoch/sequence position to `Outcome`, populated
+from committed producer state on duplicate success and fencing/gap errors, and
+from the newly applied position on fresh success. No producer ID or payload is
+copied into reply metadata. HTTP uses this captured position for producer headers
+and sequence-gap diagnostics. Fenced epochs map to 403; a higher epoch starting
+at nonzero sequence maps to 400; ordinary gaps remain 409. Expected sequence is
+zero for a new epoch/producer or the current successor otherwise; received
+sequence comes from the immutable submitted command. Rejections still change no
+producer state and consume no tuple. Incarnation/epoch precedence, original
+frontier retention, snapshot format and command replay remain unchanged.
+
+Tests must distinguish an old retry from the current tail and highest sequence,
+preserve a captured outcome across a subsequent epoch change, cross snapshot /
+reopen, and fill a rejected gap before retrying it. The offline checker still
+checks the same effects and domain errors; HTTP/schema-3 tests additionally
+check metadata, since the effects checker does not certify response headers.

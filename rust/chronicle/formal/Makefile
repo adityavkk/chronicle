@@ -33,6 +33,8 @@ negative:
 	  test $$rc -eq 12; grep -F "Invariant $$inv is violated." $$out >/dev/null; }; \
 	check_bad BadWriteRequest ClosureFromApply WriteReply; \
 	check_bad BadWriteSample ClosureFromApply WriteReply; \
+	check_bad BadProducerRequest ProducerFromApply WriteReply; \
+	check_bad BadProducerSample ProducerFromApply WriteReply; \
 	check_bad BadIntentRepair RepairEnabled PlacementIntent; \
 	check_bad BadIntentConcurrent OneMovement PlacementIntent; \
 	check_bad BadIntentGeneration CompletionCurrent PlacementIntent; \
