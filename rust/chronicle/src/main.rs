@@ -313,8 +313,10 @@ async fn status(State(a): State<Shared>) -> Response {
 async fn metrics(State(a): State<Shared>) -> String {
     let mut text = a.telemetry.metrics();
     text.push_str(&format!(
-        "# TYPE chronicle_live_read_available_slots gauge\nchronicle_live_read_available_slots {}\n",
-        a.live_admission.available_permits()
+        "# TYPE chronicle_live_read_available_slots gauge\nchronicle_live_read_available_slots {}\n\
+         # TYPE chronicle_request_available_slots gauge\nchronicle_request_available_slots {}\n",
+        a.live_admission.available_permits(),
+        a.admission.available_permits()
     ));
     for (id, g) in &a.groups {
         let m = g.raft.metrics().borrow().clone();
