@@ -244,3 +244,14 @@ work, on the leader and forwarding ingress. Unit tests cover encoding boundaries
 The lifetime is an application deadline, not a transport shutdown guarantee for a
 consumer whose socket stops polling the body. These tests do not close the formal
 model-to-Rust refinement gap.
+
+## Unsupported HTTP semantics are pre-admission rejection
+
+Until implemented, PUT fork/absolute-expiry headers and POST `Stream-Seq` must
+return 501 before body extraction, forwarding, a read barrier or any store call.
+The model mapping is a stuttering step: no command is submitted and no lifecycle,
+payload or producer state changes. Silently dropping such headers and submitting
+a different command is not a refinement of the requested operation. This gate
+does not make those features conformant; their state transitions remain missing.
+Middleware tests must distinguish rejection from request admission and prove a
+missing request body cannot delay it. HTTP parsing itself is not formally proved.
