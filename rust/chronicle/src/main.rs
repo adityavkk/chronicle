@@ -634,40 +634,13 @@ async fn stream_inner(
     }
     let g = &a.groups[&shard];
     let stale = query.get("consistency").is_some_and(|v| v == "stale") && method == Method::GET;
-    if !stale {
-        if g.raft.metrics().borrow().current_leader != Some(a.id) {
-            let started = Instant::now();
-            let result = proxy(a, shard, method, &uri.to_string(), headers, body).await;
-            timings.forward_us = started.elapsed().as_micros() as u64;
-            return result;
-        }
+    if !stale && g.raft.metrics().borrow().current_leader != Some(a.id) {
         let started = Instant::now();
-        let result = g.raft.ensure_linearizable().await;
-        timings.barrier_us = started.elapsed().as_micros() as u64;
-        result.map_err(unavailable)?;
+        let result = proxy(a, shard, method, &uri.to_string(), headers, body).await;
+        timings.forward_us = started.elapsed().as_micros() as u64;
+        return result;
     }
-    let started = Instant::now();
-    let existing = g.store.read_info(key.clone()).await;
-    timings.read_us = started.elapsed().as_micros() as u64;
-    let mut existing = existing.map_err(unavailable)?.filter(|s| !s.deleted);
-    if !stale
-        && let Some(s) = &existing
-        && s.config.expires_ms.is_some_and(|t| t <= now_ms())
-    {
-        let started = Instant::now();
-        let result = g
-            .raft
-            .client_write(Command::Delete {
-                key: key.clone(),
-                incarnation: s.incarnation,
-                expired_at: s.config.expires_ms,
-            })
-            .await;
-        telemetry::commit_apply(started.elapsed());
-        timings.proposal_us += started.elapsed().as_micros() as u64;
-        result.map_err(unavailable)?;
-        existing = None;
-    }
+    let existing = read_visible_info(g, &key, stale, timings).await?;
     let h = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
     let close = h("stream-closed") == Some("true");
     let content_type = h("content-type")
@@ -824,6 +797,45 @@ async fn stream_inner(
         .header("stream-duplicate", result.data.duplicate.to_string())
         .body(Body::empty())
         .map_err(unavailable)
+}
+
+/// Strict visibility and expiration are shared by initial reads and subsequent
+/// live-read wakeups. Local notifications cannot authorize a successful read.
+async fn read_visible_info(
+    g: &Group,
+    key: &str,
+    stale: bool,
+    timings: &mut telemetry::PhaseTimings,
+) -> Result<Option<chronicle_raft::storage::StreamInfo>, (StatusCode, String)> {
+    if !stale {
+        let started = Instant::now();
+        let result = g.raft.ensure_linearizable().await;
+        timings.barrier_us += started.elapsed().as_micros() as u64;
+        result.map_err(unavailable)?;
+    }
+    let started = Instant::now();
+    let existing = g.store.read_info(key.to_owned()).await;
+    timings.read_us += started.elapsed().as_micros() as u64;
+    let mut existing = existing.map_err(unavailable)?.filter(|s| !s.deleted);
+    if !stale
+        && let Some(s) = &existing
+        && s.config.expires_ms.is_some_and(|t| t <= now_ms())
+    {
+        let started = Instant::now();
+        let result = g
+            .raft
+            .client_write(Command::Delete {
+                key: key.to_owned(),
+                incarnation: s.incarnation,
+                expired_at: s.config.expires_ms,
+            })
+            .await;
+        telemetry::commit_apply(started.elapsed());
+        timings.proposal_us += started.elapsed().as_micros() as u64;
+        result.map_err(unavailable)?;
+        existing = None;
+    }
+    Ok(existing)
 }
 
 #[cfg(test)]
