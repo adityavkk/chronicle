@@ -213,3 +213,30 @@ storage actor and executor fairness. There is no mechanized model-to-Rust
 refinement. Unit tests and the [retained k3d HTTP observations](../evidence/LONGPOLL.md)
 cross timeout/append races, incarnation replacement, EOF and loss of quorum before
 a response. These observations are not input to the general Porcupine adapter.
+
+## SSE publication (specified before implementation)
+
+`SseRead.tla` specifies repeated strict observations, data delivery and control
+publication, including appends, close, recreation, connectivity and cancellation.
+Raft and the projection model supply committed range authority. `Observe` maps
+to a strict barrier and captured incarnation/frontier. `Data` finishes encoding
+that captured range; only then may `Control` expose its next stored-byte offset.
+Wakes and 15-second heartbeats request another observation, not an unguarded tail
+sample. `BadSseCoverage` samples a later tail for control; `BadSseIncarnation`
+substitutes a recreated stream. Checks are bounded and do not prove client receipt,
+HTTP encoding, notification delivery, executor fairness or Rust refinement.
+
+The planned HTTP implementation follows the pinned Electric SSE event format:
+data then control, JSON arrays/text/base64, initial caught-up control, closed
+control without cursor, and a 60-second connection lifetime. It retains the initial
+incarnation and resolves `now`/future offsets once. A post-header read error or
+lost quorum aborts the body without a new control offset. `upToDate` describes the
+captured strict view, not freshness after another concurrent write. Idle lifetime
+expiry needs no new barrier because it emits no new data or cursor.
+
+Encoding must stream bounded chunks, preserving UTF-8/base64 boundaries and
+escaping CR/LF SSE field injection. A slow consumer must not buffer an entire
+backlog or spawn a producer queue. General and live admission remain held through
+delivery and any detached blocking work, on the leader and forwarding ingress.
+Tests must cover chunk boundaries, truncation before control, recreation, closure,
+quorum loss, forwarded lifetime beyond the ordinary proxy timeout and disconnect.
