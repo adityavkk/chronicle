@@ -501,7 +501,12 @@ fn gaps_are_rejected_without_consuming_producer_identity() {
         Some(Error::SequenceGap)
     );
     s.apply(&append("p", 0, b"first"));
+    let gap = s.apply(&append("p", 2, b"third"));
+    assert_eq!(gap.error, Some(Error::SequenceGap));
+    assert_eq!(gap.producer, Some(ProducerPosition { epoch: 0, seq: 0 }));
     assert_eq!(s.apply(&append("p", 1, b"later")).end, 10);
+    assert_eq!(s.apply(&append("p", 2, b"third")).end, 15);
+    assert_eq!(gap.producer, Some(ProducerPosition { epoch: 0, seq: 0 }));
 }
 
 #[tokio::test]
@@ -515,6 +520,10 @@ async fn closure_replies_follow_apply_and_survive_snapshot_reopen() {
         .await
         .unwrap();
     assert!(!first[1].closed);
+    assert_eq!(
+        first[1].producer,
+        Some(ProducerPosition { epoch: 0, seq: 0 })
+    );
     let mut changed_retry = append("p", 0, b"not applied");
     if let Command::Append { close, .. } = &mut changed_retry {
         *close = true;
@@ -544,6 +553,10 @@ async fn closure_replies_follow_apply_and_survive_snapshot_reopen() {
         .unwrap();
     assert!(replay[0].closed && replay[0].duplicate);
     assert_eq!(replay[0].end, 3); // Original reply frontier, not closed tail 5.
+    assert_eq!(
+        replay[0].producer,
+        Some(ProducerPosition { epoch: 0, seq: 1 })
+    );
     let rejected = installed
         .apply([entry(6, append("p", 2, b"rejected"))])
         .await
@@ -667,6 +680,10 @@ async fn snapshot_reopen_preserves_successful_retry_and_membership_boundary() {
     assert_eq!(results[0].end, 3);
     assert!(results[0].duplicate);
     assert_eq!(
+        results[0].producer,
+        Some(ProducerPosition { epoch: 0, seq: 1 })
+    );
+    assert_eq!(
         b.read_stream("s".into()).await.unwrap().unwrap().data,
         b"abc12"
     );
@@ -675,30 +692,53 @@ async fn snapshot_reopen_preserves_successful_retry_and_membership_boundary() {
         unreachable!()
     };
     producer.as_mut().unwrap().epoch = u64::MAX;
-    assert!(
-        b.apply(vec![entry(6, fenced)]).await.unwrap()[0]
-            .error
-            .is_none()
-    );
+    let upgraded = b.apply(vec![entry(6, fenced)]).await.unwrap();
+    let position = Some(ProducerPosition {
+        epoch: u64::MAX,
+        seq: 0,
+    });
+    assert!(upgraded[0].error.is_none());
+    assert_eq!(upgraded[0].producer, position);
+    let rejected = b
+        .apply(vec![entry(7, append("p", 1, b"fenced"))])
+        .await
+        .unwrap();
+    assert_eq!(rejected[0].error, Some(Error::EpochFenced));
+    assert_eq!(rejected[0].producer, position);
+    // An epoch change cannot rewrite the position captured for the old retry.
     assert_eq!(
-        b.apply(vec![entry(7, append("p", 1, b"fenced"))])
-            .await
-            .unwrap()[0]
-            .error,
-        Some(Error::EpochFenced)
+        results[0].producer,
+        Some(ProducerPosition { epoch: 0, seq: 1 })
     );
 }
 
 proptest::proptest! {
     #[test]
-    fn committed_duplicate_schedules_preserve_exact_bytes(lengths in proptest::collection::vec(1usize..50,1..30), retries in proptest::collection::vec(0usize..100,0..80)) {
-        let mut s=State::default();s.apply(&create());
-        let mut expected=Vec::new();let mut offsets=Vec::new();
-        for (seq,len) in lengths.iter().enumerate() {
-            let bytes=vec![(seq+1) as u8;*len];expected.extend_from_slice(&bytes);offsets.push(expected.len() as u64);
-            proptest::prop_assert_eq!(s.apply(&append("p",seq as u64,&bytes)).end,expected.len() as u64);
+    fn committed_duplicate_schedules_preserve_exact_bytes(
+        lengths in proptest::collection::vec(1usize..50, 1..30),
+        retries in proptest::collection::vec(0usize..100, 0..80),
+    ) {
+        let mut state = State::default();
+        state.apply(&create());
+        let mut expected = Vec::new();
+        let mut offsets = Vec::new();
+        for (seq, len) in lengths.iter().enumerate() {
+            let bytes = vec![(seq + 1) as u8; *len];
+            expected.extend_from_slice(&bytes);
+            offsets.push(expected.len() as u64);
+            let result = state.apply(&append("p", seq as u64, &bytes));
+            proptest::prop_assert_eq!(result.end, expected.len() as u64);
         }
-        for index in retries {let seq=index%lengths.len();let result=s.apply(&append("p",seq as u64,b"retry"));proptest::prop_assert!(result.duplicate);proptest::prop_assert_eq!(result.end,offsets[seq]);}
-        proptest::prop_assert_eq!(&s.streams["s"].data,&expected);
+        for index in retries {
+            let seq = index % lengths.len();
+            let result = state.apply(&append("p", seq as u64, b"retry"));
+            proptest::prop_assert!(result.duplicate);
+            proptest::prop_assert_eq!(result.end, offsets[seq]);
+            proptest::prop_assert_eq!(result.producer, Some(ProducerPosition {
+                epoch: 0,
+                seq: lengths.len() as u64 - 1,
+            }));
+        }
+        proptest::prop_assert_eq!(&state.streams["s"].data, &expected);
     }
 }

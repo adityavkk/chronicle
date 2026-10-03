@@ -141,6 +141,13 @@ pub enum Error {
     InvalidPlacement,
 }
 
+/// Highest accepted producer position at this command's apply boundary.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProducerPosition {
+    pub epoch: u64,
+    pub seq: u64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Outcome {
     pub end: u64,
@@ -149,6 +156,8 @@ pub struct Outcome {
     /// Captured during apply, never reconstructed from request intent or a later read.
     #[serde(default)]
     pub closed: bool,
+    #[serde(default)]
+    pub producer: Option<ProducerPosition>,
     pub error: Option<Error>,
 }
 
@@ -159,6 +168,7 @@ impl Outcome {
             incarnation,
             duplicate,
             closed: false,
+            producer: None,
             error: None,
         }
     }
@@ -168,12 +178,17 @@ impl Outcome {
             ..Self::ok(stream.data.len() as u64, stream.incarnation, duplicate)
         }
     }
+    fn with_producer(mut self, epoch: u64, seq: u64) -> Self {
+        self.producer = Some(ProducerPosition { epoch, seq });
+        self
+    }
     fn err(error: Error) -> Self {
         Self {
             end: 0,
             incarnation: 0,
             duplicate: false,
             closed: false,
+            producer: None,
             error: Some(error),
         }
     }
@@ -266,21 +281,24 @@ impl State {
                 if let Some(p) = producer {
                     if let Some(old) = s.producers.get(&p.id) {
                         if p.epoch < old.epoch {
-                            return Outcome::err(Error::EpochFenced);
+                            return Outcome::err(Error::EpochFenced)
+                                .with_producer(old.epoch, old.seq);
                         }
                         if p.epoch == old.epoch && p.seq <= old.seq {
                             return match old.results.get(&p.seq) {
                                 Some(end) => Outcome {
                                     end: *end,
-                                    ..Outcome::stream(s, true)
+                                    ..Outcome::stream(s, true).with_producer(old.epoch, old.seq)
                                 },
-                                None => Outcome::err(Error::SequenceGap),
+                                None => Outcome::err(Error::SequenceGap)
+                                    .with_producer(old.epoch, old.seq),
                             };
                         }
                         if (p.epoch == old.epoch && old.seq.checked_add(1) != Some(p.seq))
                             || (p.epoch > old.epoch && p.seq != 0)
                         {
-                            return Outcome::err(Error::SequenceGap);
+                            return Outcome::err(Error::SequenceGap)
+                                .with_producer(old.epoch, old.seq);
                         }
                     } else if p.seq != 0 {
                         return Outcome::err(Error::SequenceGap);
@@ -327,7 +345,11 @@ impl State {
                         },
                     );
                 }
-                Outcome::stream(s, false)
+                let outcome = Outcome::stream(s, false);
+                match producer {
+                    Some(p) => outcome.with_producer(p.epoch, p.seq),
+                    None => outcome,
+                }
             }
             Command::Delete {
                 key,

@@ -1,0 +1,22 @@
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/repo/rust/chronicle)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.10s
+     Running tests/state_machine.rs (target/debug/deps/state_machine-81699b50da15b947)
+
+running 14 tests
+test admission_never_reuses_an_identity_or_address ... ok
+test create_matches_current_closure_without_mutating_it ... ok
+test draining_fences_cached_placement_without_changing_legacy_replay ... ok
+test empty_body_validation_preserves_retention_and_legacy_zero_byte_commands ... ok
+test old_sequence_returns_its_original_frontier_after_interleaving ... ok
+test gaps_are_rejected_without_consuming_producer_identity ... ok
+test legacy_placement_never_claims_unknown_identities_are_untouched ... ok
+test stale_lifecycle_operations_cannot_mutate_recreated_stream ... ok
+test committed_duplicate_schedules_preserve_exact_bytes ... ok
+test snapshot_reopen_preserves_successful_retry_and_membership_boundary ... ok
+test pending_replacement_preserves_history_and_fences_stale_completion_after_snapshot ... ok
+test closure_replies_follow_apply_and_survive_snapshot_reopen ... ok
+test retirement_history_survives_snapshot_and_distinguishes_repromotion_from_untouched ... ok
+test content_type_and_metadata_are_bounded_by_capacity ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.83s
+

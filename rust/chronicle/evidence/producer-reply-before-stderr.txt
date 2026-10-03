@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/rust/chronicle/tests/protocol_headers.py", line 143, in <module>
+    run(parser.parse_args())
+  File "/home/user/workspace/repo/rust/chronicle/tests/protocol_headers.py", line 63, in run
+    assert appended["headers"]["producer-epoch"] == "0" and appended["headers"]["producer-seq"] == "0", appended
+           ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+KeyError: 'producer-epoch'

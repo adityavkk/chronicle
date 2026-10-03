@@ -60,6 +60,7 @@ def run(args):
             assert appended["headers"]["stream-next-offset"] == f"{0:016d}_{end:016d}", appended
             assert appended["headers"].get("stream-closed") == headers.get("stream-closed"), appended
             if "producer-id" in headers:
+                assert appended["headers"]["producer-epoch"] == "0" and appended["headers"]["producer-seq"] == "0", appended
                 # Changed close intent cannot change the cached tuple's effect.
                 duplicate = call(name, "POST", body, {**headers, "stream-closed": "TRUE"})
                 assert duplicate["status"] == 204 and duplicate["headers"]["stream-duplicate"] == "true", duplicate
@@ -85,6 +86,7 @@ def run(args):
                 old = call(name, "POST", b"ignored", producer)
                 assert old["status"] == 204 and old["headers"]["stream-closed"] == "true", old
                 assert old["headers"]["stream-next-offset"] == f"{0:016d}_{3:016d}", old
+                assert old["headers"]["producer-epoch"] == "0" and old["headers"]["producer-seq"] == "1", old
                 assert call(name, "GET")["body"] == "ABCD"
         for closed in (False, True):
             name = f"create-closed-{closed}"
@@ -106,6 +108,29 @@ def run(args):
         assert call("empty-json", "GET")["body"] == "[1]"
         assert call("empty-json", "HEAD")["status"] == 200
         assert call("empty-json", "DELETE")["status"] == 204
+        assert call("producer-position", "PUT")["status"] == 201
+        gap = call("producer-position", "POST", b"wrong", {**producer, "producer-seq": "3"})
+        assert gap["status"] == 409 and gap["headers"]["producer-expected-seq"] == "0", gap
+        assert gap["headers"]["producer-received-seq"] == "3" and "producer-epoch" not in gap["headers"], gap
+        assert call("producer-position", "POST", b"A", producer)["status"] == 200
+        gap = call("producer-position", "POST", b"C", {**producer, "producer-seq": "2"})
+        assert gap["status"] == 409 and gap["headers"]["producer-expected-seq"] == "1", gap
+        assert gap["headers"]["producer-received-seq"] == "2" and gap["headers"]["producer-seq"] == "0", gap
+        assert call("producer-position", "POST", b"BB", {**producer, "producer-seq": "1"})["status"] == 200
+        assert call("producer-position", "POST", b"C", {**producer, "producer-seq": "2"})["status"] == 200
+        old = call("producer-position", "POST", b"ignored", producer)
+        assert old["status"] == 204 and old["headers"]["producer-seq"] == "2", old
+        assert old["headers"]["stream-next-offset"] == f"{0:016d}_{1:016d}", old
+        invalid_epoch = call("producer-position", "POST", b"wrong", {**producer, "producer-epoch": "7", "producer-seq": "3"})
+        assert invalid_epoch["status"] == 400 and invalid_epoch["headers"]["producer-expected-seq"] == "0", invalid_epoch
+        assert invalid_epoch["headers"]["producer-epoch"] == "0" and invalid_epoch["headers"]["producer-seq"] == "2", invalid_epoch
+        upgraded = call("producer-position", "POST", b"D", {**producer, "producer-epoch": "7"})
+        assert upgraded["status"] == 200 and upgraded["headers"]["producer-epoch"] == "7", upgraded
+        assert upgraded["headers"]["producer-seq"] == "0", upgraded
+        fenced = call("producer-position", "POST", b"ignored", producer)
+        assert fenced["status"] == 403 and fenced["headers"]["producer-epoch"] == "7", fenced
+        assert fenced["headers"]["producer-seq"] == "0", fenced
+        assert call("producer-position", "GET")["body"] == "ABBCD"
     print(json.dumps({"result": "passed", "history": args.output,
                       "scope": "unsupported-header and committed write status contract, not full conformance"}))
 

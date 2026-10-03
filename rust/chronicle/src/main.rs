@@ -950,6 +950,13 @@ async fn stream_inner(
     } else {
         return Err((StatusCode::METHOD_NOT_ALLOWED, "unsupported method".into()));
     };
+    let requested_producer = match &command {
+        Command::Append { producer, .. } => producer.as_ref().map(|p| model::ProducerPosition {
+            epoch: p.epoch,
+            seq: p.seq,
+        }),
+        _ => None,
+    };
     // No duplicate shortcut: every response follows durable-majority apply, even retries.
     // This measures the caller-visible proposal-through-apply path. It deliberately is not
     // labelled as replication latency: queueing, persistence and state-machine apply are included.
@@ -962,15 +969,38 @@ async fn stream_inner(
     telemetry::commit_apply(commit_apply_started.elapsed());
     timings.proposal_us += commit_apply_started.elapsed().as_micros() as u64;
     let result = result.map_err(|_| unavailable("timeout: outcome unknown"))??;
+    let mut response = Response::builder();
+    if let Some(position) = result.data.producer {
+        response = response
+            .header("producer-epoch", position.epoch.to_string())
+            .header("producer-seq", position.seq.to_string());
+    }
     if let Some(error) = result.data.error {
-        let status = match error {
+        let mut status = match error {
             model::Error::Missing => StatusCode::NOT_FOUND,
             model::Error::EmptyBody => StatusCode::BAD_REQUEST,
+            model::Error::EpochFenced => StatusCode::FORBIDDEN,
             model::Error::Capacity => StatusCode::TOO_MANY_REQUESTS,
             _ => StatusCode::CONFLICT,
         };
+        if error == model::Error::SequenceGap
+            && let Some(requested) = requested_producer
+        {
+            let expected = match result.data.producer {
+                Some(current) if current.epoch == requested.epoch => current.seq.checked_add(1),
+                Some(_) => {
+                    status = StatusCode::BAD_REQUEST;
+                    Some(0)
+                }
+                None => Some(0),
+            };
+            if let Some(expected) = expected {
+                response = response.header("producer-expected-seq", expected.to_string());
+            }
+            response = response.header("producer-received-seq", requested.seq.to_string());
+        }
         if error == model::Error::Closed {
-            return Response::builder()
+            return response
                 .status(status)
                 .header("stream-closed", "true")
                 .header("stream-next-offset", wire::format_offset(result.data.end))
@@ -978,7 +1008,11 @@ async fn stream_inner(
                 .body(Body::empty())
                 .map_err(unavailable);
         }
-        return Err((status, format!("{error:?}")));
+        return response
+            .status(status)
+            .header("content-type", "text/plain; charset=utf-8")
+            .body(Body::from(format!("{error:?}")))
+            .map_err(unavailable);
     }
     let status = if method == Method::PUT {
         if result.data.duplicate { 200 } else { 201 }
@@ -991,7 +1025,7 @@ async fn stream_inner(
     } else {
         200
     };
-    let mut response = Response::builder()
+    response = response
         .status(status)
         .header("stream-next-offset", wire::format_offset(result.data.end))
         .header("stream-incarnation", result.data.incarnation.to_string())
