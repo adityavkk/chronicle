@@ -113,6 +113,9 @@ pub enum Command {
         /// New controllers set this; false preserves legacy committed-log replay.
         #[serde(default)]
         eligible_only: bool,
+        /// Replace this shard's pending intent, never another concurrent move.
+        #[serde(default)]
+        repair_pending: bool,
     },
     Placed {
         shard: u64,
@@ -342,8 +345,14 @@ impl State {
                 voters,
                 now_ms,
                 eligible_only,
+                repair_pending,
             } => {
-                if *shard > SHARDS || self.placements.values().any(|p| !p.complete) {
+                if *shard > SHARDS
+                    || self
+                        .placements
+                        .iter()
+                        .any(|(other, p)| !p.complete && (!repair_pending || other != shard))
+                {
                     return Outcome::err(Error::InvalidPlacement);
                 }
                 if *eligible_only

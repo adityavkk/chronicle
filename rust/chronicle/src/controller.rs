@@ -1,6 +1,7 @@
 //! Reconcile replicated whole-shard intents. One move at a time; retries are idempotent.
 use crate::{Shared, now_ms};
 use chronicle_raft::model::{Command, Placement, ReplicaHistory, SHARDS, State};
+use futures_util::{StreamExt, stream};
 use openraft::BasicNode;
 use openraft::storage::RaftStateMachine;
 use std::{
@@ -111,41 +112,11 @@ async fn tick(
             }
         }
         state = control_group.store.read_state().await?;
-        if state.placements.values().all(|p| p.complete) {
-            // Health is only a placement preference; it never authorizes lowering quorum.
-            let mut healthy = BTreeMap::new();
-            for (id, node) in state.nodes.iter().filter(|(_, n)| !n.draining) {
-                if a.client
-                    .get(format!("http://{}/healthz", node.addr))
-                    .timeout(Duration::from_millis(500))
-                    .send()
-                    .await
-                    .is_ok_and(|r| r.status().is_success())
-                {
-                    healthy.insert(*id, node.clone());
-                }
-            }
-            if healthy.len() >= 3 {
-                for shard in 0..=SHARDS {
-                    let voters = target(shard, &healthy);
-                    let old = state.placements.get(&shard);
-                    if old.is_none_or(|p| {
-                        p.voters != voters && now_ms().saturating_sub(p.changed_ms) >= 15_000
-                    }) {
-                        control_group
-                            .raft
-                            .client_write(Command::Place {
-                                shard,
-                                expected_generation: old.map_or(0, |p| p.generation),
-                                voters,
-                                now_ms: now_ms(),
-                                eligible_only: true,
-                            })
-                            .await?;
-                        break;
-                    }
-                }
-            }
+        // Health is only a placement preference; it never authorizes lowering quorum.
+        let healthy = healthy_nodes(&a.client, &state.nodes).await;
+        if let Some(command) = next_placement(&state, &healthy, now_ms()) {
+            let response = control_group.raft.client_write(command).await?;
+            anyhow::ensure!(response.data.error.is_none(), "placement intent rejected");
         }
     }
     state = control(a).await?;
@@ -548,6 +519,68 @@ async fn membership_applied(
         && membership.membership().voter_ids().collect::<BTreeSet<_>>() == *voters)
 }
 
+async fn healthy_nodes(
+    client: &reqwest::Client,
+    nodes: &BTreeMap<u64, chronicle_raft::model::Node>,
+) -> BTreeMap<u64, chronicle_raft::model::Node> {
+    // At the 128-identity registry bound, serial 500ms probes can exhaust every
+    // 20s controller tick. Eight concurrent probes leave time for reconciliation.
+    let eligible: Vec<_> = nodes
+        .iter()
+        .filter(|(_, node)| !node.draining)
+        .map(|(id, node)| (*id, node.clone()))
+        .collect();
+    stream::iter(eligible)
+        .map(|(id, node)| async move {
+            client
+                .get(format!("http://{}/healthz", node.addr))
+                .timeout(Duration::from_millis(500))
+                .send()
+                .await
+                .is_ok_and(|response| response.status().is_success())
+                .then_some((id, node))
+        })
+        .buffer_unordered(8)
+        .filter_map(std::future::ready)
+        .collect()
+        .await
+}
+
+fn next_placement(
+    state: &State,
+    healthy: &BTreeMap<u64, chronicle_raft::model::Node>,
+    now: u64,
+) -> Option<Command> {
+    if healthy.len() < 3 {
+        return None;
+    }
+    let pending = state.placements.iter().find(|(_, p)| !p.complete);
+    for shard in 0..=SHARDS {
+        if pending.is_some_and(|(id, _)| *id != shard) {
+            continue;
+        }
+        let old = state.placements.get(&shard);
+        // A slow but eligible target retains its intent. New-node arrivals are
+        // not a reason to supersede catch-up and repeatedly restart movement.
+        if old.is_some_and(|p| !p.complete && p.voters.iter().all(|id| healthy.contains_key(id))) {
+            continue;
+        }
+        let voters = target(shard, healthy);
+        if old.is_some_and(|p| p.voters == voters || now.saturating_sub(p.changed_ms) < 15_000) {
+            continue;
+        }
+        return Some(Command::Place {
+            shard,
+            expected_generation: old.map_or(0, |p| p.generation),
+            voters,
+            now_ms: now,
+            eligible_only: true,
+            repair_pending: old.is_some_and(|p| !p.complete),
+        });
+    }
+    None
+}
+
 fn target(shard: u64, nodes: &BTreeMap<u64, chronicle_raft::model::Node>) -> BTreeSet<u64> {
     let ids: Vec<_> = nodes.keys().copied().collect();
     let mut selected = BTreeSet::new();
@@ -573,6 +606,93 @@ mod tests {
     use super::*;
     use chronicle_raft::storage::SqliteStore;
     use openraft::{CommittedLeaderId, Entry, EntryPayload, LogId, Membership};
+
+    #[tokio::test]
+    async fn failed_health_probes_leave_budget_for_reconciliation() {
+        let mut nodes = BTreeMap::new();
+        let mut silent = Vec::new();
+        let mut servers = tokio::task::JoinSet::new();
+        for id in 1..=128 {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            nodes.insert(
+                id,
+                chronicle_raft::model::Node {
+                    addr: listener.local_addr().unwrap().to_string(),
+                    zone: "a".into(),
+                    draining: id == 128,
+                },
+            );
+            if id <= 124 {
+                // TCP connects but no HTTP response arrives: each probe really
+                // consumes its timeout rather than failing at connection setup.
+                silent.push(listener);
+            } else {
+                let router = axum::Router::new().route(
+                    "/healthz",
+                    axum::routing::get(|| async { axum::http::StatusCode::OK }),
+                );
+                servers.spawn(async move { axum::serve(listener, router).await.unwrap() });
+            }
+        }
+        let healthy = tokio::time::timeout(
+            Duration::from_secs(12),
+            healthy_nodes(&reqwest::Client::new(), &nodes),
+        )
+        .await
+        .unwrap();
+        assert_eq!(healthy.keys().copied().collect::<Vec<_>>(), [125, 126, 127]);
+        servers.abort_all();
+        while servers.join_next().await.is_some() {}
+    }
+
+    #[test]
+    fn pending_repair_waits_for_cooldown_and_does_not_start_other_moves() {
+        let mut state = State::default();
+        for id in 1..=4 {
+            state.nodes.insert(
+                id,
+                chronicle_raft::model::Node {
+                    addr: format!("node-{id}"),
+                    zone: "a".into(),
+                    draining: false,
+                },
+            );
+        }
+        state.placements.insert(
+            2,
+            Placement {
+                generation: 7,
+                voters: [1, 2, 4].into(),
+                complete: false,
+                changed_ms: 100,
+                ..Default::default()
+            },
+        );
+        // Healthy pending work is not superseded just to rebalance. Missing
+        // earlier shards must not bypass it either.
+        assert!(next_placement(&state, &state.nodes, 15_100).is_none());
+        let mut healthy = state.nodes.clone();
+        healthy.remove(&4);
+        for now in [0, 15_099] {
+            assert!(next_placement(&state, &healthy, now).is_none());
+        }
+        let Some(Command::Place {
+            shard,
+            expected_generation,
+            voters,
+            repair_pending,
+            eligible_only,
+            ..
+        }) = next_placement(&state, &healthy, 15_100)
+        else {
+            panic!("pending repair should be eligible at the cooldown boundary");
+        };
+        assert_eq!((shard, expected_generation), (2, 7));
+        assert_eq!(voters, [1, 2, 3].into());
+        assert!(repair_pending && eligible_only);
+        healthy.remove(&3);
+        assert!(next_placement(&state, &healthy, 15_100).is_none());
+    }
 
     #[tokio::test]
     async fn matching_prefix_cannot_complete_over_cancelled_membership() {

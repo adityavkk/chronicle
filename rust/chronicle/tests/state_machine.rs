@@ -91,6 +91,7 @@ async fn retirement_history_survives_snapshot_and_distinguishes_repromotion_from
                     voters: voters.into_iter().collect(),
                     now_ms: generation,
                     eligible_only: true,
+                    repair_pending: false,
                 },
             )])
             .await
@@ -229,6 +230,7 @@ fn draining_fences_cached_placement_without_changing_legacy_replay() {
         voters: [1, 2, 4].into_iter().collect(),
         now_ms: 0,
         eligible_only: true,
+        repair_pending: false,
     };
     let mut drained = state.nodes[&4].clone();
     drained.draining = true;
@@ -246,6 +248,123 @@ fn draining_fences_cached_placement_without_changing_legacy_replay() {
         .remove("eligible_only");
     let legacy = serde_json::from_value(legacy).unwrap();
     assert!(state.apply(&legacy).error.is_none()); // Previously committed legacy command.
+}
+
+#[tokio::test]
+async fn pending_replacement_preserves_history_and_fences_stale_completion_after_snapshot() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = SqliteStore::open(directory.path().join("control"))
+        .await
+        .unwrap();
+    for id in 1..=4 {
+        store
+            .apply(vec![entry(
+                id,
+                Command::Register {
+                    id,
+                    node: Node {
+                        addr: format!("node-{id}"),
+                        zone: "a".into(),
+                        draining: false,
+                    },
+                },
+            )])
+            .await
+            .unwrap();
+    }
+    let original = Command::Place {
+        shard: 1,
+        expected_generation: 0,
+        voters: [1, 2, 4].into(),
+        now_ms: 0,
+        eligible_only: true,
+        repair_pending: false,
+    };
+    assert!(
+        store.apply(vec![entry(5, original)]).await.unwrap()[0]
+            .error
+            .is_none()
+    );
+    let replacement = Command::Place {
+        shard: 1,
+        expected_generation: 1,
+        voters: [1, 2, 3].into(),
+        now_ms: 15_000,
+        eligible_only: true,
+        repair_pending: true,
+    };
+    let state = store.read_state().await.unwrap();
+    let before = serde_json::to_value(&state).unwrap();
+    // Legacy replay must still reject pending replacement. A second shard and
+    // an obsolete generation must also reject without changing placement state.
+    for (shard, generation, legacy) in [(1, 1, true), (2, 0, false), (1, 0, false)] {
+        let mut value = serde_json::to_value(&replacement).unwrap();
+        value["Place"]["shard"] = shard.into();
+        value["Place"]["expected_generation"] = generation.into();
+        if legacy {
+            value["Place"]
+                .as_object_mut()
+                .unwrap()
+                .remove("repair_pending");
+        }
+        let mut candidate = state.clone();
+        assert_eq!(
+            candidate
+                .apply(&serde_json::from_value(value).unwrap())
+                .error,
+            Some(Error::InvalidPlacement)
+        );
+        assert_eq!(serde_json::to_value(candidate).unwrap(), before);
+    }
+    assert!(
+        store.apply(vec![entry(6, replacement)]).await.unwrap()[0]
+            .error
+            .is_none()
+    );
+    let snapshot = store.build_snapshot().await.unwrap();
+    let path = directory.path().join("restored");
+    let mut restored = SqliteStore::open(&path).await.unwrap();
+    restored
+        .install_snapshot(&snapshot.meta, snapshot.snapshot)
+        .await
+        .unwrap();
+    restored.close().await;
+    let mut restored = SqliteStore::open_existing(&path).await.unwrap();
+    let state = restored.read_state().await.unwrap();
+    let p = &state.placements[&1];
+    assert_eq!(p.generation, 2);
+    assert_eq!(p.voters, [1, 2, 3].into());
+    assert!(!p.complete);
+    assert_eq!(p.replicas.as_ref().unwrap()[&4], ReplicaHistory::MayVote);
+    let boundary = LogId::new(CommittedLeaderId::new(3, 2), 99);
+    for (index, generation, expected) in [(7, 1, Some(Error::InvalidPlacement)), (8, 2, None)] {
+        assert_eq!(
+            restored
+                .apply(vec![entry(
+                    index,
+                    Command::Placed {
+                        shard: 1,
+                        generation,
+                        membership: Some(boundary),
+                    }
+                )])
+                .await
+                .unwrap()[0]
+                .error,
+            expected
+        );
+        assert_eq!(
+            restored.read_state().await.unwrap().placements[&1].complete,
+            generation == 2
+        );
+    }
+    let state = restored.read_state().await.unwrap();
+    assert_eq!(
+        state.placements[&1].replicas.as_ref().unwrap()[&4],
+        ReplicaHistory::NonvoterAfter(boundary)
+    );
+    store.close().await;
+    restored.close().await;
 }
 
 fn create() -> Command {
