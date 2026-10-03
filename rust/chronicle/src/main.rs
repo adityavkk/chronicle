@@ -619,8 +619,6 @@ async fn admit_stream(
             "stream-fork-sub-offset",
             "stream-expires-at",
         ]
-    } else if request.method() == Method::POST {
-        &["stream-seq"]
     } else {
         &[]
     };
@@ -928,6 +926,15 @@ async fn stream_inner(
                 }),
                 _ => return Err(bad("all producer headers are required")),
             };
+            let mut tokens = headers.get_all("stream-seq").iter();
+            let stream_seq = tokens
+                .next()
+                .map(|value| value.to_str().map(str::to_owned))
+                .transpose()
+                .map_err(bad)?;
+            if tokens.next().is_some() {
+                return Err(bad("at most one Stream-Seq field is allowed"));
+            }
             let wire = if body.is_empty() {
                 Bytes::new()
             } else {
@@ -945,6 +952,7 @@ async fn stream_inner(
                 producer,
                 close,
                 empty_body: body.is_empty(),
+                stream_seq,
             }
         }
     } else {
@@ -998,6 +1006,11 @@ async fn stream_inner(
                 response = response.header("producer-expected-seq", expected.to_string());
             }
             response = response.header("producer-received-seq", requested.seq.to_string());
+        }
+        if error == model::Error::StreamSequenceConflict {
+            response = response
+                .header("stream-next-offset", wire::format_offset(result.data.end))
+                .header("stream-incarnation", result.data.incarnation.to_string());
         }
         if error == model::Error::Closed {
             return response
@@ -1282,7 +1295,7 @@ mod tests {
             ("PUT", "Stream-Fork-Offset", "501"),
             ("PUT", "Stream-Fork-Sub-Offset", "501"),
             ("PUT", "Stream-Expires-At", "501"),
-            ("POST", "Stream-Seq", "501"),
+            ("POST", "Stream-Seq", "429"),
             ("POST", "X-Unrelated", "429"),
         ] {
             let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
@@ -1366,7 +1379,7 @@ mod tests {
     #[tokio::test]
     async fn browser_headers_cover_early_rejection_and_extraction_failure() {
         let router = Router::new()
-            .route("/", post(|_: Bytes| async { StatusCode::NO_CONTENT }))
+            .route("/", any(|_: Bytes| async { StatusCode::NO_CONTENT }))
             .layer(DefaultBodyLimit::max(1))
             .layer(middleware::from_fn_with_state(
                 Arc::new(Semaphore::new(1)),
@@ -1384,7 +1397,10 @@ mod tests {
         ] {
             let mut request = client.post(format!("http://{address}/")).body(body);
             if unsupported {
-                request = request.header("stream-seq", "1");
+                request = client
+                    .put(format!("http://{address}/"))
+                    .header("stream-forked-from", "source")
+                    .body(body);
             }
             let response = request.send().await.unwrap();
             assert_eq!(response.status(), status);

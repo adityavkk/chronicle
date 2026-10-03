@@ -39,14 +39,26 @@ def run(args):
 
         assert call("seq", "PUT", b"before")["status"] == 201
         producer = {"producer-id": "header-test", "producer-epoch": "0", "producer-seq": "0"}
-        rejected = call("seq", "POST", b"wrong", {**producer, "stream-seq": "A"})
-        assert rejected["status"] == 501 and rejected["body"] == "unsupported header: stream-seq", rejected
-        assert call("seq", "GET")["body"] == "before"
+        assert call("seq", "POST", b"wrong", {"stream-seq": "\u0080"})["status"] == 400
+        assert call("seq", "POST", b"x", {"stream-seq": ""})["status"] == 204
+        rejected = call("seq", "POST", b"wrong", {**producer, "stream-seq": ""})
+        assert rejected["status"] == 409 and rejected["body"] == "StreamSequenceConflict", rejected
+        assert rejected["headers"]["stream-next-offset"] == f"{0:016d}_{7:016d}", rejected
+        assert call("seq", "GET")["body"] == "beforex"
         # Rejection must not consume the producer tuple or produce a cached success.
-        accepted = call("seq", "POST", b"after", producer)
+        accepted = call("seq", "POST", b"after", {**producer, "stream-seq": "10"})
         assert accepted["status"] == 200 and accepted["headers"]["stream-duplicate"] == "false", accepted
+        assert call("seq", "POST", b"!", {**producer, "producer-seq": "1", "stream-seq": "2"})["status"] == 200
+        retry = call("seq", "POST", b"ignored", {**producer, "stream-seq": "zz"})
+        assert retry["status"] == 204 and retry["headers"]["stream-next-offset"] == f"{0:016d}_{12:016d}", retry
+        assert call("seq", "POST", b"wrong", {**producer, "producer-epoch": "1", "stream-seq": "10"})["status"] == 409
+        assert call("seq", "POST", b"?", {**producer, "producer-seq": "2"})["status"] == 200
+        assert call("seq", "POST", b"wrong", {**producer, "producer-seq": "3", "stream-seq": "2"})["status"] == 409
+        assert call("seq", "POST", b"!", {**producer, "producer-seq": "3", "stream-seq": "3"})["status"] == 200
+        assert call("seq", "POST", headers={**producer, "producer-seq": "4", "stream-seq": "4", "stream-closed": "true"})["status"] == 204
+        assert call("seq", "POST", headers={"stream-seq": "1", "stream-closed": "true"})["status"] == 204
         read = call("seq", "GET")
-        assert read["status"] == 200 and read["body"] == "beforeafter", read
+        assert read["status"] == 200 and read["body"] == "beforexafter!?!", read
         for name, body, headers, expected in (
             ("ordinary", b"BC", {}, 204),
             ("producer", b"BC", producer, 200),

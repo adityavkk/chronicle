@@ -90,6 +90,7 @@ fn fatal_child() {
                 producer: None,
                 close: false,
                 empty_body: false,
+                stream_seq: None,
             })
             .await;
         std::future::pending::<()>().await;

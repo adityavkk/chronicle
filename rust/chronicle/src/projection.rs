@@ -97,6 +97,7 @@ mod tests {
             closed: false,
             deleted: false,
             producers: BTreeMap::new(),
+            last_seq: None,
         };
         let mut reader = cache.open("000", &stream).unwrap();
         for index in 1..=MAX_FILES {

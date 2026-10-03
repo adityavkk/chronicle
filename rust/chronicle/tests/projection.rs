@@ -75,6 +75,7 @@ async fn bounded_ranges_have_independent_cursors_and_survive_recreation() {
             producer: None,
             close: false,
             empty_body: false,
+            stream_seq: None,
         },
     )
     .await;
@@ -119,6 +120,7 @@ async fn restart_rebuilds_untrusted_cache_and_snapshot_replaces_inode() {
             producer: None,
             close: false,
             empty_body: false,
+            stream_seq: None,
         },
     )
     .await;
@@ -243,6 +245,7 @@ async fn notifications_coalesce_applies_and_only_signal_successful_snapshot_inst
             producer: None,
             close: false,
             empty_body: false,
+            stream_seq: None,
         },
     )
     .await;

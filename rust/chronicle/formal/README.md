@@ -527,7 +527,8 @@ runs after retry/closure checks but before any payload, producer or token update
 Token storage counts toward the shard metadata bound, charging only growth on
 replacement. SQLite apply and serialized snapshots include it atomically with
 the rest of `Stream`; no sidecar or HTTP-local token is authoritative. HTTP must
-not silently ignore an undecodable supplied token.
+not silently ignore an undecodable supplied token. Repeated `Stream-Seq` fields
+are rejected, including equal values; a comma inside one value remains opaque.
 
 `StreamOrder.tla` checks bounded token/dedup composition with four token ranks,
 including empty and the asymmetric numeric spellings above. Negative mutations

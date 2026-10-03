@@ -391,6 +391,7 @@ fn append(id: &str, seq: u64, data: &[u8]) -> Command {
         }),
         close: false,
         empty_body: data.is_empty(),
+        stream_seq: None,
     }
 }
 fn entry(index: u64, command: Command) -> Entry<TypeConfig> {
@@ -398,6 +399,168 @@ fn entry(index: u64, command: Command) -> Entry<TypeConfig> {
         log_id: LogId::new(CommittedLeaderId::new(1, 1), index),
         payload: EntryPayload::Normal(command),
     }
+}
+
+fn ordered(mut command: Command, token: &str) -> Command {
+    let Command::Append { stream_seq, .. } = &mut command else {
+        panic!("expected append fixture");
+    };
+    *stream_seq = Some(token.into());
+    command
+}
+
+#[tokio::test]
+async fn stream_order_survives_snapshot_reopen_without_changing_retry_or_epoch_fences() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = SqliteStore::open(directory.path().join("source"))
+        .await
+        .unwrap();
+    let results = store
+        .apply([
+            entry(1, create()),
+            entry(2, ordered(append("p", 0, b"ab"), "10")),
+            entry(3, ordered(append("p", 1, b"c"), "2")),
+        ])
+        .await
+        .unwrap();
+    assert!(results.iter().all(|r| r.error.is_none()));
+    let snapshot = store.build_snapshot().await.unwrap();
+    let path = directory.path().join("restored");
+    let mut restored = SqliteStore::open(&path).await.unwrap();
+    restored
+        .install_snapshot(&snapshot.meta, snapshot.snapshot)
+        .await
+        .unwrap();
+    restored.close().await;
+    let mut restored = SqliteStore::open_existing(&path).await.unwrap();
+    let retry = restored
+        .apply([entry(4, ordered(append("p", 0, b"ignored"), "zz"))])
+        .await
+        .unwrap();
+    assert!(retry[0].duplicate && retry[0].error.is_none());
+    assert_eq!(retry[0].end, 2);
+    let mut new_epoch = ordered(append("p", 0, b"rejected"), "10");
+    let Command::Append { producer, .. } = &mut new_epoch else {
+        unreachable!()
+    };
+    producer.as_mut().unwrap().epoch = 1;
+    let rejected = restored.apply([entry(5, new_epoch)]).await.unwrap();
+    assert_eq!(rejected[0].error, Some(Error::StreamSequenceConflict));
+    assert_eq!(rejected[0].end, 3);
+    let next = restored
+        .apply([entry(6, ordered(append("p", 2, b"d"), "3"))])
+        .await
+        .unwrap();
+    assert!(next[0].error.is_none()); // Rejection neither fenced epoch zero nor consumed sequence two.
+    let mut close = ordered(append("p", 3, b""), "4");
+    let Command::Append { close: flag, .. } = &mut close else {
+        unreachable!()
+    };
+    *flag = true;
+    assert!(restored.apply([entry(7, close)]).await.unwrap()[0].closed);
+    let s = restored.read_state().await.unwrap();
+    assert_eq!(s.streams["s"].last_seq.as_deref(), Some("4"));
+    assert_eq!(s.streams["s"].data, b"abcd");
+    store.close().await;
+    restored.close().await;
+}
+
+#[test]
+fn stream_order_empty_absent_recreation_and_legacy_replay_are_distinct() {
+    let mut state = State::default();
+    state.apply(&create());
+    assert!(
+        state
+            .apply(&ordered(append("p", 0, b"a"), ""))
+            .error
+            .is_none()
+    );
+    assert!(state.apply(&append("p", 1, b"b")).error.is_none());
+    assert_eq!(state.streams["s"].last_seq.as_deref(), Some(""));
+    assert_eq!(
+        state.apply(&ordered(append("p", 2, b"wrong"), "")).error,
+        Some(Error::StreamSequenceConflict)
+    );
+    assert!(
+        state
+            .apply(&ordered(append("p", 2, b"c"), "10"))
+            .error
+            .is_none()
+    );
+    assert!(state.apply(&create()).duplicate);
+    assert_eq!(state.streams["s"].last_seq.as_deref(), Some("10"));
+    let mut legacy = serde_json::to_value(append("p", 3, b"d")).unwrap();
+    legacy["Append"]
+        .as_object_mut()
+        .unwrap()
+        .remove("stream_seq");
+    assert!(
+        state
+            .apply(&serde_json::from_value(legacy).unwrap())
+            .error
+            .is_none()
+    );
+    assert_eq!(state.streams["s"].last_seq.as_deref(), Some("10"));
+    let mut legacy_state = serde_json::to_value(&state).unwrap();
+    legacy_state["streams"]["s"]
+        .as_object_mut()
+        .unwrap()
+        .remove("last_seq");
+    let legacy_state: State = serde_json::from_value(legacy_state).unwrap();
+    assert!(legacy_state.streams["s"].last_seq.is_none());
+    state.apply(&Command::Delete {
+        key: "s".into(),
+        incarnation: 1,
+        expired_at: None,
+    });
+    assert!(state.streams["s"].last_seq.is_none());
+    let mut recreate = create();
+    let Command::Create {
+        expected_incarnation,
+        ..
+    } = &mut recreate
+    else {
+        unreachable!()
+    };
+    *expected_incarnation = Some(2);
+    assert!(state.apply(&recreate).error.is_none());
+    let mut fresh = ordered(append("p", 0, b"new"), "");
+    assert_eq!(state.apply(&fresh).error, Some(Error::StaleIncarnation));
+    let Command::Append { incarnation, .. } = &mut fresh else {
+        unreachable!()
+    };
+    *incarnation = 2;
+    assert!(state.apply(&fresh).error.is_none());
+}
+
+#[test]
+fn stream_order_metadata_is_bounded_and_replacement_charges_only_growth() {
+    let mut state = State::default();
+    state.apply(&create());
+    // Independent accounting: key(1), content type(24), stream metadata(256), byte(1).
+    let length = MAX_SHARD_BYTES - 282;
+    let mut command = ordered(append("p", 0, b"x"), &"a".repeat(length));
+    let Command::Append { producer, .. } = &mut command else {
+        unreachable!()
+    };
+    *producer = None;
+    assert!(state.apply(&command).error.is_none());
+    let Command::Append {
+        data, empty_body, ..
+    } = &mut command
+    else {
+        unreachable!()
+    };
+    data.clear();
+    *empty_body = false; // Legacy zero-byte command remains replayable.
+    let command = ordered(command, &"b".repeat(length));
+    assert!(state.apply(&command).error.is_none());
+    let command = ordered(command, &"c".repeat(length + 1));
+    assert_eq!(state.apply(&command).error, Some(Error::Capacity));
+    assert_eq!(
+        state.streams["s"].last_seq.as_deref(),
+        Some("b".repeat(length).as_str())
+    );
 }
 
 #[test]
@@ -571,6 +734,7 @@ async fn closure_replies_follow_apply_and_survive_snapshot_reopen() {
         producer: None,
         close: true,
         empty_body: true,
+        stream_seq: None,
     };
     let repeated = installed.apply([entry(7, repeated)]).await.unwrap();
     assert!(repeated[0].closed && repeated[0].duplicate && repeated[0].error.is_none());
@@ -713,6 +877,36 @@ async fn snapshot_reopen_preserves_successful_retry_and_membership_boundary() {
 }
 
 proptest::proptest! {
+    #[test]
+    fn stream_order_matches_rank_model(
+        schedule in proptest::collection::vec(0usize..8, 1..100),
+    ) {
+        let tokens = ["", "09", "1", "10", "2", "A", "a"];
+        let mut state = State::default();
+        state.apply(&create());
+        let mut rank = None;
+        let mut seq = 0;
+        for candidate in schedule {
+            let token = tokens.get(candidate);
+            let command = append("p", seq, b"x");
+            let command = match token {
+                Some(t) => ordered(command, t),
+                None => command,
+            };
+            let accepted = token.is_none() || rank.is_none_or(|previous| candidate > previous);
+            let outcome = state.apply(&command);
+            if accepted {
+                seq += 1;
+                if token.is_some() { rank = Some(candidate); }
+                proptest::prop_assert!(outcome.error.is_none());
+            } else {
+                proptest::prop_assert_eq!(outcome.error, Some(Error::StreamSequenceConflict));
+            }
+            proptest::prop_assert_eq!(state.streams["s"].data.len(), seq as usize);
+            proptest::prop_assert_eq!(state.streams["s"].last_seq.as_deref(), rank.map(|r| tokens[r]));
+        }
+    }
+
     #[test]
     fn committed_duplicate_schedules_preserve_exact_bytes(
         lengths in proptest::collection::vec(1usize..50, 1..30),

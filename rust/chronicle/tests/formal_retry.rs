@@ -36,6 +36,7 @@ fn replays_formal_retention_scenario() {
                 }),
                 close: false,
                 empty_body: false,
+                stream_seq: None,
             }),
             "snapshot" => {
                 snapshot = Some(serde_json::to_vec(&state).unwrap());

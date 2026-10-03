@@ -38,6 +38,8 @@ pub struct Stream {
     pub closed: bool,
     pub deleted: bool,
     pub producers: BTreeMap<String, ProducerState>,
+    #[serde(default)]
+    pub last_seq: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,6 +96,8 @@ pub enum Command {
         /// Original HTTP-body emptiness; default false preserves legacy log replay.
         #[serde(default)]
         empty_body: bool,
+        #[serde(default)]
+        stream_seq: Option<String>,
     },
     Delete {
         key: String,
@@ -136,6 +140,7 @@ pub enum Error {
     ConfigConflict,
     EpochFenced,
     SequenceGap,
+    StreamSequenceConflict,
     EmptyBody,
     Capacity,
     InvalidPlacement,
@@ -250,6 +255,7 @@ impl State {
                         closed: *closed,
                         deleted: false,
                         producers: BTreeMap::new(),
+                        last_seq: None,
                     },
                 );
                 Outcome {
@@ -264,6 +270,7 @@ impl State {
                 producer,
                 close,
                 empty_body,
+                stream_seq,
             } => {
                 let producer_metadata = producer.as_ref().map_or(0, |p| {
                     self.streams
@@ -271,7 +278,11 @@ impl State {
                         .and_then(|s| s.producers.get(&p.id))
                         .map_or_else(|| p.id.len().saturating_add(128 + 64), |_| 64)
                 });
-                let fits = self.fits(data.len(), producer_metadata);
+                let token_growth = stream_seq.as_ref().map_or(0, |seq| {
+                    let previous = self.streams.get(key).and_then(|s| s.last_seq.as_ref());
+                    seq.len().saturating_sub(previous.map_or(0, String::len))
+                });
+                let fits = self.fits(data.len(), producer_metadata.saturating_add(token_growth));
                 let Some(s) = self.streams.get_mut(key).filter(|s| !s.deleted) else {
                     return Outcome::err(Error::Missing);
                 };
@@ -322,11 +333,22 @@ impl State {
                         ..Outcome::stream(s, false)
                     };
                 }
+                if let (Some(seq), Some(previous)) = (stream_seq, &s.last_seq)
+                    && seq <= previous
+                {
+                    return Outcome {
+                        error: Some(Error::StreamSequenceConflict),
+                        ..Outcome::stream(s, false)
+                    };
+                }
                 if !fits || s.data.len().saturating_add(data.len()) > MAX_STREAM_BYTES {
                     return Outcome::err(Error::Capacity);
                 }
                 s.data.extend_from_slice(data);
                 s.closed = *close;
+                if let Some(seq) = stream_seq {
+                    s.last_seq = Some(seq.clone());
+                }
                 let end = s.data.len() as u64;
                 if let Some(p) = producer {
                     let mut results = s
@@ -368,6 +390,7 @@ impl State {
                 s.deleted = true;
                 s.data.clear();
                 s.producers.clear();
+                s.last_seq = None;
                 Outcome::ok(0, s.incarnation, false)
             }
             Command::Admit { id, node } => {
@@ -483,6 +506,7 @@ impl State {
                 s.data.len()
                     + key.len()
                     + s.config.content_type.len()
+                    + s.last_seq.as_ref().map_or(0, String::len)
                     + 256
                     + s.producers
                         .iter()
