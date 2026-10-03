@@ -1,0 +1,24 @@
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/repo/rust/chronicle)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.86s
+     Running unittests src/main.rs (target/debug/deps/chronicle_raft-0b345c309913899e)
+
+running 1 test
+
+running 1 test
+test failure::subprocess::storage_fatal_exits_with_blocked_body_and_retains_acknowledged_state ... FAILED
+
+failures:
+
+---- failure::subprocess::storage_fatal_exits_with_blocked_body_and_retains_acknowledged_state stdout ----
+
+thread 'failure::subprocess::storage_fatal_exits_with_blocked_body_and_retains_acknowledged_state' panicked at src/failure_tests.rs:122:13:
+fatal did not terminate process
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    failure::subprocess::storage_fatal_exits_with_blocked_body_and_retains_acknowledged_state
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 30 filtered out; finished in 15.01s
+
+error: test failed, to rerun pass `--bin chronicle-raft`

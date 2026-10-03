@@ -147,6 +147,13 @@ or snapshot/membership persistence boundary.
 harness creates `<gate>.arm`, waits for `<gate>.reached`, then creates
 `<gate>.release` or kills the process. The blocking storage actor never removes
 these files or ownership locks. Use a fresh control directory for each run.
+Alternatively `<gate>.error` writes the reached marker and returns an injected
+I/O error without waiting. This persistent control remains active across restart
+until the external harness removes it. It is an application storage boundary,
+not an SQLite VFS or power-loss simulation. `failure_tests.rs` checks that actual
+Raft storage errors terminate the process despite a gated blocking body reader.
+The [live k3d fail-stop history](../evidence/FAIL-STOP.md) uses
+`tests/fatal_storage.py` and retains same-PVC recovery plus Porcupine evidence.
 
 The four gates are `after-log-commit-before-log-flushed`,
 `after-apply-commit-before-return`, `before-snapshot-install-transaction`, and

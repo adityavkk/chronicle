@@ -69,6 +69,10 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
   Porcupine `Ok`. Two further 720-record histories reached the snapshot receiver
   before its SQLite install transaction; one SIGKILLed and restarted that
   container on its existing PVC. Both received Porcupine `Ok`.
+* [Terminal storage failure](evidence/FAIL-STOP.md) now stops the shared node
+  instead of advertising a partly broken process as healthy. A blocked-body
+  k3d run verified self-exit 1, same-PVC restart, 480 retained records and
+  Porcupine `Ok`. Permanent disk failure/spare replacement remains unqualified.
 * OpenRaft's pinned storage contract suite passes, alongside SQLite VFS faults,
   snapshot/reopen producer and membership checks, and a slow-body admission test.
   New placement completion awaits a membership operation and verifies its applied

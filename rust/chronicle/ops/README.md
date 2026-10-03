@@ -82,7 +82,7 @@ Drained replicas may retain older applied indices; those gauges are not read fro
 
 ## Binary contract
 
-The image contains `/bin/sh` and `/usr/local/bin/chronicle-raft`. The StatefulSet derives `NODE_ID` (ordinal + 1) and `ADVERTISE`; it supplies `CLUSTER_ID`, `LISTEN`, `DATA_DIR`, the three-node `CLUSTER_NODES` JSON map, and the collector endpoint. The binary exports OTLP/HTTP logs and traces to port 4318 (legacy 4317 configuration is translated); the collector scrapes metrics. `POST /admin/bootstrap` is restricted to the first persisted genesis seed and initializes all five groups. `/healthz` means the process responds, **not that quorum is available**. Quorum, migration and admission depth have separate metrics.
+The image contains `/bin/sh` and `/usr/local/bin/chronicle-raft`. The StatefulSet derives `NODE_ID` (ordinal + 1) and `ADVERTISE`; it supplies `CLUSTER_ID`, `LISTEN`, `DATA_DIR`, the three-node `CLUSTER_NODES` JSON map, and the collector endpoint. The binary exports OTLP/HTTP logs and traces to port 4318 (legacy 4317 configuration is translated); the collector scrapes metrics. `POST /admin/bootstrap` is restricted to the first persisted genesis seed and initializes all five groups. `/healthz` means the process responds without a published Raft storage-fatal error, **not that quorum is available**. A storage-fatal error in any group terminates the shared process with exit 1. Quorum, migration and admission depth have separate metrics.
 
 `alerts.yaml` is a portable Prometheus/vmalert rule file; no notification receiver is fabricated for local use. See [RUNBOOK.md](RUNBOOK.md).
 

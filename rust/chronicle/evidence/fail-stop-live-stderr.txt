@@ -1,0 +1,23 @@
+history: evidence/fail-stop-live.jsonl
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/rust/chronicle/tests/history.py", line 256, in <module>
+    if __name__ == "__main__": raise SystemExit(main())
+                                                ^^^^^^
+  File "/home/user/workspace/repo/rust/chronicle/tests/history.py", line 253, in main
+    return 0 if run_workload(a)["valid"] else 1
+                ^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/rust/chronicle/tests/history.py", line 143, in run_workload
+    if nemesis: nemesis.result()
+                ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/rust/chronicle/tests/history.py", line 167, in run_nemesis
+    if p.returncode: raise RuntimeError(f"nemesis hook failed: {key}")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: nemesis hook failed: node-join:start

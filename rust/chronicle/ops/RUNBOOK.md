@@ -4,6 +4,17 @@
 
 Check `kubectl -n chronicle get pods -o wide` and `/admin/status`. Preserve PVCs. Restore failed agents/pods before changing membership; never bootstrap an existing data set. A three-node group requires two healthy members.
 
+## Storage-fatal exit
+
+Any Raft group's typed storage-fatal error terminates all groups in the process
+with exit 1. Inspect the previous container log and termination status; the final
+log event is best effort and may be dropped. The supervisor restarts the same
+identity/PVC. Restore storage access/capacity before repeated restarts; never
+delete SQLite/WAL, identity or lock files to make startup succeed. A lost or
+corrupt disk requires the explicit fresh-identity replacement procedure, not
+genesis initialization or a copied live identity. Quorum loss alone is not this
+trigger. Hung I/O that never returns an error is not detected by the watcher.
+
 ## Migration stalled
 
 Inspect the group map and source/destination pod logs. Confirm both nodes are healthy, neither is marked draining unexpectedly, and disk is available. Do not start another migration for the group until its current transition is resolved.
