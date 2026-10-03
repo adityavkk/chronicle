@@ -64,7 +64,6 @@ def run(args):
         expect_read(call("binary", "GET", query=live), 200, "abc", 3)
         for method, query in [("HEAD", live), ("GET", {"live": "long-poll"}),
                               ("GET", {**live, "consistency": "stale"}),
-                              ("GET", {**live, "live": "sse"}),
                               ("GET", {**live, "live": "invalid"})]:
             assert call("binary", method, query=query)["status"] == 400
         quiet = call("binary", "GET", query={**live, "offset": offset(3), "cursor": "1000000000"})

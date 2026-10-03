@@ -95,7 +95,7 @@ pub fn file_body(
     file: std::fs::File,
     length: u64,
     json: bool,
-    admission: std::sync::Arc<tokio::sync::OwnedSemaphorePermit>,
+    admission: impl Clone + Send + 'static,
 ) -> axum::body::Body {
     use futures_util::{StreamExt, stream};
     use std::io::Read;

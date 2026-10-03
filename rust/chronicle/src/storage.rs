@@ -196,16 +196,21 @@ impl SqliteStore {
 
     /// Open the exact captured committed prefix; a later lifecycle change cannot
     /// substitute another incarnation. Callers must bound delivery at `end`.
+    /// The owned guard stays with queued or executing work after caller cancellation.
     pub async fn read_file(
         &self,
         key: String,
         view: &StreamInfo,
         start: u64,
+        admission: impl Send + 'static,
     ) -> std::result::Result<std::fs::File, ReadError> {
         let (incarnation, end) = (view.incarnation, view.end);
         let generation = view.generation.clone();
         self.call(move |w| {
+            let _admission = admission;
             Ok((|| {
+                #[cfg(feature = "storage-faults")]
+                w.faults.hit(crate::faults::BEFORE_PROJECTION_OPEN)?;
                 let s = w.state.streams.get(&key).ok_or(ReadError::Changed)?;
                 if s.deleted
                     || s.incarnation != incarnation

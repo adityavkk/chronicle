@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use chronicle_raft::faults::{
     AFTER_APPLY_COMMIT, AFTER_LOG_COMMIT, AFTER_SNAPSHOT_INSTALL, BEFORE_LIVE_RECHECK,
-    BEFORE_SNAPSHOT_INSTALL, before_live_recheck, store_directory,
+    BEFORE_PROJECTION_OPEN, BEFORE_SNAPSHOT_INSTALL, before_live_recheck, store_directory,
 };
 use chronicle_raft::model::{Command, StreamConfig};
 use chronicle_raft::{TypeConfig, storage::SqliteStore};
@@ -88,6 +88,9 @@ fn fault_gate_child() {
     runtime.block_on(async {
         let path = root.join("store.sqlite");
         let mut store = SqliteStore::open(&path).await.unwrap();
+        if operation == "open-cancel" {
+            store.apply([create_entry(1, "s", b"abc")]).await.unwrap();
+        }
         let snapshot = if operation.starts_with("snapshot-") {
             store.apply([create_entry(1, "old", b"old")]).await.unwrap();
             let mut source = SqliteStore::open(root.join("source.sqlite")).await.unwrap();
@@ -122,6 +125,50 @@ fn fault_gate_child() {
                     .install_snapshot(&snapshot.meta, snapshot.snapshot)
                     .await
                     .unwrap();
+            }
+            "open-cancel" => {
+                use std::sync::Arc;
+                use tokio::sync::Semaphore;
+                let requests = Arc::new(Semaphore::new(4));
+                let live = Arc::new(Semaphore::new(1));
+                let view = store.read_info("s".into()).await.unwrap().unwrap();
+                let guards = [
+                    Arc::new(requests.clone().try_acquire_owned().unwrap()),
+                    Arc::new(live.clone().try_acquire_owned().unwrap()),
+                ];
+                let copy = store.clone();
+                let task = tokio::spawn(async move {
+                    tokio::time::timeout(
+                        Duration::from_millis(100),
+                        copy.read_file("s".into(), &view, 0, guards),
+                    )
+                    .await
+                });
+                let directory = store_directory(&root.join("controls"), &path);
+                tokio::time::timeout(DEADLINE, async {
+                    while !directory
+                        .join(format!("{BEFORE_PROJECTION_OPEN}.reached"))
+                        .is_file()
+                    {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                })
+                .await
+                .unwrap();
+                assert!(
+                    task.await.unwrap().is_err(),
+                    "gated open must hit the async deadline"
+                );
+                assert_eq!(requests.available_permits(), 3);
+                assert_eq!(live.available_permits(), 0);
+                std::fs::write(root.join("cancelled"), b"checked").unwrap();
+                tokio::time::timeout(DEADLINE, async {
+                    while requests.available_permits() != 4 || live.available_permits() != 1 {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                })
+                .await
+                .unwrap();
             }
             "live-cancel" => {
                 use std::sync::Arc;
@@ -170,32 +217,29 @@ fn fault_gate_child() {
 
 #[test]
 fn cancelled_live_gate_retains_writer_reservation() {
-    let temp = tempfile::tempdir().unwrap();
-    let root = temp.path();
-    let mut child = spawn_child(root, "live-cancel");
-    wait_for(&root.join("setup"), &mut child);
-    let directory = store_directory(&root.join("controls"), Path::new("http-live-1"));
-    std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(
-        directory.join(format!("{BEFORE_LIVE_RECHECK}.arm")),
-        b"armed",
-    )
-    .unwrap();
-    std::fs::write(root.join("trigger"), b"go").unwrap();
-    wait_for(&root.join("cancelled"), &mut child);
-    std::fs::write(
-        directory.join(format!("{BEFORE_LIVE_RECHECK}.release")),
-        b"release",
-    )
-    .unwrap();
-    let deadline = Instant::now() + DEADLINE;
-    loop {
-        if let Some(status) = child.0.try_wait().unwrap() {
-            assert!(status.success());
-            break;
+    for (operation, filename, gate) in [
+        ("live-cancel", "http-live-1", BEFORE_LIVE_RECHECK),
+        ("open-cancel", "store.sqlite", BEFORE_PROJECTION_OPEN),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let mut child = spawn_child(root, operation);
+        wait_for(&root.join("setup"), &mut child);
+        let directory = store_directory(&root.join("controls"), Path::new(filename));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join(format!("{gate}.arm")), b"armed").unwrap();
+        std::fs::write(root.join("trigger"), b"go").unwrap();
+        wait_for(&root.join("cancelled"), &mut child);
+        std::fs::write(directory.join(format!("{gate}.release")), b"release").unwrap();
+        let deadline = Instant::now() + DEADLINE;
+        loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            assert!(Instant::now() < deadline, "released child did not finish");
+            std::thread::sleep(Duration::from_millis(10));
         }
-        assert!(Instant::now() < deadline, "released child did not finish");
-        std::thread::sleep(Duration::from_millis(10));
     }
 }
 

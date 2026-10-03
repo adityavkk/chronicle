@@ -17,7 +17,7 @@ async fn range(
     let mut view = store.read_info("s".into()).await.unwrap().unwrap();
     view.incarnation = incarnation;
     view.end = end;
-    store.read_file("s".into(), &view, start).await
+    store.read_file("s".into(), &view, start, ()).await
 }
 
 fn body(file: std::fs::File, length: u64, json: bool) -> axum::body::Body {
@@ -213,7 +213,7 @@ async fn snapshot_fences_unopened_metadata_even_for_identical_bytes() {
         .await
         .unwrap();
     assert!(matches!(
-        store.read_file("s".into(), &view, 0).await,
+        store.read_file("s".into(), &view, 0, ()).await,
         Err(ReadError::Changed)
     ));
     store.close().await;
@@ -276,15 +276,21 @@ fn cancellation_retains_admission_until_queued_blocking_read_finishes() {
         });
         let permits = Arc::new(Semaphore::new(1));
         let permit = Arc::new(permits.clone().try_acquire_owned().unwrap());
+        let live_permits = Arc::new(Semaphore::new(1));
+        let live_permit = Arc::new(live_permits.clone().try_acquire_owned().unwrap());
         let file = tempfile::tempfile().unwrap();
-        let mut read = Box::pin(to_bytes(wire::file_body(file, 1, false, permit), 100));
+        let mut read = Box::pin(to_bytes(
+            wire::file_body(file, 1, false, [permit, live_permit]),
+            100,
+        ));
         assert!(futures_util::poll!(&mut read).is_pending());
         drop(read);
         assert_eq!(permits.available_permits(), 0);
+        assert_eq!(live_permits.available_permits(), 0);
         release.send(()).unwrap();
         blocker.await.unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            while permits.available_permits() == 0 {
+            while permits.available_permits() == 0 || live_permits.available_permits() == 0 {
                 tokio::task::yield_now().await;
             }
         })

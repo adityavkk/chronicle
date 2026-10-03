@@ -6,6 +6,7 @@ pub mod metrics;
 pub mod model;
 pub mod network;
 mod projection;
+pub mod sse_wire;
 pub mod storage;
 pub mod wire;
 

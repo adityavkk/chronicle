@@ -16,6 +16,8 @@ pub const AFTER_LOG_COMMIT: &str = "after-log-commit-before-log-flushed";
 pub const AFTER_APPLY_COMMIT: &str = "after-apply-commit-before-return";
 pub const BEFORE_SNAPSHOT_INSTALL: &str = "before-snapshot-install-transaction";
 pub const AFTER_SNAPSHOT_INSTALL: &str = "after-snapshot-install-transaction";
+/// Pauses the storage actor before validating/materializing a captured read range.
+pub const BEFORE_PROJECTION_OPEN: &str = "before-projection-open";
 /// Uses the synthetic filename `http-body`; pauses the blocking file reader,
 /// not the SQLite actor. The harness can then truncate only its disposable cache.
 pub const BEFORE_BODY_READ: &str = "before-response-file-read";

@@ -1,6 +1,7 @@
 //! One process hosts a control group and fixed virtual data shards.
 mod controller;
 mod identity;
+mod sse;
 mod telemetry;
 
 use axum::{
@@ -426,14 +427,18 @@ pub async fn proxy(
     // may describe different bytes; let reqwest frame the supplied body.
     headers.remove("content-length");
     headers.remove("transfer-encoding");
-    let r = a
-        .client
-        .request(method, format!("http://{address}{uri}"))
-        .headers(headers)
-        .body(body)
-        .send()
-        .await
-        .map_err(unavailable)?;
+    let url = reqwest::Url::parse(&format!("http://{address}{uri}")).map_err(bad)?;
+    let sse = method == Method::GET
+        && url
+            .query_pairs()
+            .any(|(key, value)| key == "live" && value == "sse");
+    let mut request = a.client.request(method, url).headers(headers).body(body);
+    if sse {
+        // Override the pool's 10s total deadline, including body delivery. The
+        // destination caps subscriptions at 60s; leave time for setup and EOF.
+        request = request.timeout(Duration::from_secs(65));
+    }
+    let r = request.send().await.map_err(unavailable)?;
     let status = r.status();
     let headers = r.headers().clone();
     let chunks = futures_util::stream::try_unfold(r, |mut response| async move {
@@ -624,7 +629,7 @@ async fn stream(
 
 #[allow(clippy::too_many_arguments)]
 async fn stream_inner(
-    a: &App,
+    a: &Shared,
     shard: u64,
     key: String,
     query: BTreeMap<String, String>,
@@ -640,20 +645,22 @@ async fn stream_inner(
     }
     let g = &a.groups[&shard];
     let stale = query.get("consistency").is_some_and(|v| v == "stale") && method == Method::GET;
-    let poll = match query.get("live").map(String::as_str) {
-        None => false,
-        Some("long-poll") if method == Method::GET && !stale && query.contains_key("offset") => {
-            true
+    let live = match query.get("live").map(String::as_str) {
+        None => None,
+        Some(mode @ ("long-poll" | "sse"))
+            if method == Method::GET && !stale && query.contains_key("offset") =>
+        {
+            Some(mode)
         }
         _ => {
             return Err(bad(
-                "live reads require strict GET, offset and live=long-poll",
+                "live reads require strict GET, offset and live=long-poll or sse",
             ));
         }
     };
     // Reserve fewer waiters than the overall request limit, including on ingress
     // forwarders, so quiet long polls cannot occupy every writer admission slot.
-    let _live = if poll {
+    let live_permit = if live.is_some() {
         Some(Arc::new(
             a.live_admission.clone().try_acquire_owned().map_err(|_| {
                 (
@@ -669,9 +676,21 @@ async fn stream_inner(
         let started = Instant::now();
         let result = proxy(a, shard, method, &uri.to_string(), headers, body).await;
         timings.forward_us = started.elapsed().as_micros() as u64;
-        return result;
+        // Forwarded SSE headers arrive before the stream ends. Keep its live
+        // reservation with the body, not just with the header-producing future.
+        return result.map(|response| {
+            response.map(|body| {
+                use futures_util::{StreamExt, stream};
+                Body::from_stream(stream::unfold(
+                    (body.into_data_stream(), live_permit),
+                    |(mut body, permit)| async move {
+                        body.next().await.map(|chunk| (chunk, (body, permit)))
+                    },
+                ))
+            })
+        });
     }
-    let changes = _live
+    let changes = live_permit
         .as_ref()
         .map(|permit| (g.store.applied_changes(), permit.clone()));
     let existing = read_visible_info(g, &key, stale, timings).await?;
@@ -687,7 +706,7 @@ async fn stream_inner(
                 ParsedOffset::Start => 0,
                 ParsedOffset::Now => s.end,
                 // Electric treats a future live cursor as caught up at this tail.
-                ParsedOffset::At(n) if poll => n.min(s.end),
+                ParsedOffset::At(n) if live.is_some() => n.min(s.end),
                 ParsedOffset::At(n) => n,
             };
         if offset > s.end {
@@ -701,6 +720,18 @@ async fn stream_inner(
                 .get("cursor")
                 .map(|v| v.parse::<u64>().map_err(bad))
                 .transpose()?;
+            if live == Some("sse") {
+                return sse::response(
+                    a.clone(),
+                    key,
+                    offset,
+                    s,
+                    changes,
+                    client,
+                    [admission, live_permit],
+                )
+                .await;
+            }
             s = wait_for_data(
                 g,
                 &key,
@@ -738,7 +769,10 @@ async fn stream_inner(
             }
         }
         let started = Instant::now();
-        let file = g.store.read_file(key, &s, offset).await;
+        let file = g
+            .store
+            .read_file(key, &s, offset, (admission.clone(), live_permit))
+            .await;
         timings.read_us += started.elapsed().as_micros() as u64;
         let file = file.map_err(|e| match e {
             chronicle_raft::storage::ReadError::Offset => bad(e),
