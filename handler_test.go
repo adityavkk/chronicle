@@ -439,9 +439,59 @@ func (c *countingHooks) OnStreamCreated(string)                 { c.created++ }
 func (c *countingHooks) OnStreamAppend(context.Context, string) { c.appended++ }
 func (c *countingHooks) OnStreamDeleted(string)                 { c.deleted++ }
 
-type countingAppendMetrics struct{ calls int }
+type countingAppendMetrics struct{ calls, creates int }
 
 func (m *countingAppendMetrics) AppendSubscriptionHook(time.Duration) { m.calls++ }
+func (m *countingAppendMetrics) CreateSubscriptionHook(time.Duration) { m.creates++ }
+
+// contextHooks is a SubscriptionHooks that also accepts the request context on
+// create, recording the correlation id the handler hands it.
+type contextHooks struct {
+	countingHooks
+	createRequestIDs []string
+}
+
+func (c *contextHooks) OnStreamCreatedWithContext(ctx context.Context, _ string) {
+	c.created++
+	c.createRequestIDs = append(c.createRequestIDs, correlation.RequestID(ctx))
+}
+
+// TestCreateHookCarriesRequestContextAndIsMetered pins the create-side hook
+// contract: a data-less PUT (the session-init shape) still runs the hook, the
+// hook sees the request's correlation id when it can take a context, and the
+// create hook histogram is observed for every created stream, while a
+// re-create of an existing stream (no wasCreated) runs nothing.
+func TestCreateHookCarriesRequestContextAndIsMetered(t *testing.T) {
+	h := testHandler(time.Second, time.Second)
+	hooks := &contextHooks{}
+	appendMetrics := &countingAppendMetrics{}
+	h.SubHooks = hooks
+	h.AppendMetrics = appendMetrics
+
+	req := httptest.NewRequest(http.MethodPut, "/ctx-hook", nil)
+	req.Header.Set("Content-Type", "text/plain")
+	req = req.WithContext(correlation.WithRequestID(req.Context(), "req-create-hook-1"))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d, want 201", rec.Code)
+	}
+	if hooks.created != 1 || len(hooks.createRequestIDs) != 1 || hooks.createRequestIDs[0] != "req-create-hook-1" {
+		t.Fatalf("create hook: fired %d times with request ids %v, want once with the request's id", hooks.created, hooks.createRequestIDs)
+	}
+	if appendMetrics.creates != 1 || appendMetrics.calls != 0 {
+		t.Fatalf("hook metrics: create=%d append=%d, want 1 and 0 for a data-less create", appendMetrics.creates, appendMetrics.calls)
+	}
+
+	// Idempotent re-create: not wasCreated, so no hook and no observation.
+	rec = do(h, http.MethodPut, "/ctx-hook", map[string]string{"Content-Type": "text/plain"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("re-create: status = %d, want 200", rec.Code)
+	}
+	if hooks.created != 1 || appendMetrics.creates != 1 {
+		t.Fatalf("re-create must not run the hook: created=%d metered=%d", hooks.created, appendMetrics.creates)
+	}
+}
 
 // TestAppendDuplicateDoesNotWake pins the fix for #76: a deduplicated producer
 // retry wrote no new data, so it must not wake subscribers; only a genuinely new

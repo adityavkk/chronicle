@@ -34,6 +34,10 @@ import (
 // both boundaries exactly.
 type AppendMetrics interface {
 	AppendSubscriptionHook(dur time.Duration)
+	// CreateSubscriptionHook records the synchronous subscription hook work
+	// between a stream's durable creation and its HTTP response (the glob-link
+	// scan) for every created stream, with or without initial data.
+	CreateSubscriptionHook(dur time.Duration)
 }
 
 // FenceMetrics records data-plane write-fence rejections by reason (#183):
@@ -159,9 +163,23 @@ type Handler struct {
 // PROTOCOL §6 paths have no leading slash.
 func subStreamPath(path string) string { return strings.TrimPrefix(path, "/") }
 
-func (h *Handler) onStreamCreated(path string) {
-	if h.SubHooks != nil {
-		h.SubHooks.OnStreamCreated(subStreamPath(path))
+// onStreamCreated runs the subscription layer's create hook synchronously and
+// times it. The hook receives the request context when it can carry one
+// (OnStreamCreatedWithContext) so its completion log line shares the request
+// id of the http_request_completed line; it never reads cancellation from it.
+func (h *Handler) onStreamCreated(ctx context.Context, path string) {
+	if h.SubHooks == nil {
+		return
+	}
+	start := time.Now()
+	streamPath := subStreamPath(path)
+	if traced, ok := h.SubHooks.(interface{ OnStreamCreatedWithContext(context.Context, string) }); ok {
+		traced.OnStreamCreatedWithContext(ctx, streamPath)
+	} else {
+		h.SubHooks.OnStreamCreated(streamPath)
+	}
+	if h.AppendMetrics != nil {
+		h.AppendMetrics.CreateSubscriptionHook(time.Since(start))
 	}
 }
 
@@ -434,7 +452,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, path stri
 			// fenced write fails closed (design K.16), which is worth saying once.
 			h.logger().Warn("write-fenced stream created with no append authorizer configured", "path", path)
 		}
-		h.onStreamCreated(path)
+		h.onStreamCreated(r.Context(), path)
 		if len(initialData) > 0 {
 			h.onStreamAppend(r.Context(), path)
 			h.observeAppendSubscriptionHook(createReturnedAt)

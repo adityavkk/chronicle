@@ -33,6 +33,19 @@ type Store interface {
 	// Get for the recovery sweep, which reads every subscription per tick.
 	GetMany(ids []string) ([]Subscription, error)
 
+	// PatternSubscriptions reads the glob pattern of each subscription in ids
+	// in pipelined batches, hydrating neither links nor wake state. It is the
+	// stream-creation hook's read, where only "which patterns match this path"
+	// matters and the response is waiting. Unlike GetMany it keeps what it did
+	// read: Subs holds every pattern subscription whose hash was read, Missing
+	// counts ids with no hash (deleted between List and this read, or a legacy
+	// record the recovery sweep has not migrated yet), and Failed counts
+	// commands that returned an error. The error is non-nil iff Failed > 0 and
+	// wraps the first failure; the returned PatternRead is valid either way, so
+	// the caller links what it did read and leaves the rest to the pattern
+	// reconcile (INV-RECOVER-03).
+	PatternSubscriptions(ids []string) (PatternRead, error)
+
 	// Delete tombstones a subscription and removes its fan-out index entries.
 	Delete(id string) error
 	// DeleteAuthorized performs Delete only if the current subscription still
@@ -270,6 +283,22 @@ type WriteFenceCheck struct {
 	Status       string
 	LeaseUntilNs int64
 	LeaseTTLMs   int64
+}
+
+// PatternSubscription is the projection PatternSubscriptions returns: a
+// subscription id and its glob pattern, never empty.
+type PatternSubscription struct {
+	ID      string
+	Pattern string
+}
+
+// PatternRead is the outcome of PatternSubscriptions: the pattern subscriptions
+// read, plus how many ids had no hash (Missing) and how many reads errored
+// (Failed). It is valid even when PatternSubscriptions also returns an error.
+type PatternRead struct {
+	Subs    []PatternSubscription
+	Missing int
+	Failed  int
 }
 
 // ClaimResult is the outcome of a claim attempt.

@@ -383,14 +383,18 @@ func (s *RedisStore) getSlotHomed(id string) (Subscription, bool, error) {
 	return subscriptionFromHash(id, fields, linkCmd.Val()), true, nil
 }
 
+// subReadChunk bounds one pipelined subscription read (GetMany,
+// PatternSubscriptions) to 512 ids: about a thousand small commands per
+// pipeline, split per node on a cluster.
+const subReadChunk = 512
+
 // GetMany hydrates many subscriptions in one pipelined batch, chunked to bound
 // the pipeline size. Missing subscriptions are skipped. It turns the recovery
 // sweep's per-subscription Get round trips into a handful of batched ones.
 func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
-	const chunk = 512
 	out := make([]Subscription, 0, len(ids))
-	for start := 0; start < len(ids); start += chunk {
-		end := start + chunk
+	for start := 0; start < len(ids); start += subReadChunk {
+		end := start + subReadChunk
 		if end > len(ids) {
 			end = len(ids)
 		}
@@ -419,6 +423,77 @@ func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 		}
 	}
 	return out, nil
+}
+
+// PatternSubscriptions implements Store.PatternSubscriptions: one HGETALL of
+// the sub hash per id, pipelined in subReadChunk batches, no links hash, and no
+// per-id fallback. A miss is counted, never chased with a serial Get: the
+// recovery sweep's GetMany migrates legacy records, and reconcilePatternLinks
+// re-links a stream whose create-time read missed. Successful commands survive
+// another command's failure, so a mistyped or stalled key costs one
+// subscription, not the whole create.
+func (s *RedisStore) PatternSubscriptions(ids []string) (PatternRead, error) {
+	read := PatternRead{Subs: make([]PatternSubscription, 0, len(ids))}
+	var firstErr error
+	for start := 0; start < len(ids); start += subReadChunk {
+		end := min(start+subReadChunk, len(ids))
+		batch := ids[start:end]
+		pipe := s.client.Pipeline()
+		cmds := make([]*redis.MapStringStringCmd, len(batch))
+		for i, id := range batch {
+			cmds[i] = pipe.HGetAll(s.ctx(), subKey(id))
+		}
+		_, execErr := pipe.Exec(s.ctx())
+		batchFailed := 0
+		if execErr != nil && !anyCmdErr(cmds) {
+			// go-redis stamps every command's error once a connection is writing
+			// (cluster and in-flight failures are visible per command below), but
+			// a standalone client that could not acquire a connection at all
+			// leaves the commands clean. Those are failed reads, not a batch of
+			// missing hashes.
+			batchFailed = len(batch)
+			if firstErr == nil {
+				firstErr = execErr
+			}
+		} else {
+			for i, id := range batch {
+				fields, err := cmds[i].Result()
+				switch {
+				case err != nil:
+					batchFailed++
+					if firstErr == nil {
+						firstErr = err
+					}
+				case len(fields) == 0:
+					read.Missing++
+				case fields["pattern"] != "":
+					read.Subs = append(read.Subs, PatternSubscription{ID: id, Pattern: fields["pattern"]})
+				}
+			}
+		}
+		read.Failed += batchFailed
+		if batchFailed == len(batch) {
+			// The whole chunk failed: Redis is unreachable or the connection is
+			// gone, and the hook runs inside the create request. Count the rest
+			// as failed rather than pay a dial or pool timeout per chunk.
+			read.Failed += len(ids) - end
+			break
+		}
+	}
+	if firstErr != nil {
+		return read, fmt.Errorf("pattern subscriptions: %d of %d reads failed: %w", read.Failed, len(ids), firstErr)
+	}
+	return read, nil
+}
+
+// anyCmdErr reports whether any pipelined command carries an error.
+func anyCmdErr(cmds []*redis.MapStringStringCmd) bool {
+	for _, c := range cmds {
+		if c.Err() != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Delete removes the subscription and de-indexes its streams.
