@@ -8,7 +8,7 @@ Alloy "small scope hypothesis"):
 
 | Model | Invariant | What it checks |
 |---|---|---|
-| [`FanoutIndex.als`](FanoutIndex.als) | **INV-RECOVER-04** | the per-stream fan-out index SET is exactly the projection of the canonical links HASH; reconcile rebuilds it, repairs drops, and never invents membership |
+| [`FanoutIndex.als`](FanoutIndex.als) | **INV-RECOVER-04** | the per-stream fan-out index SET is exactly the projection of the canonical links HASH; reconcile rebuilds it, repairs drops, and never invents membership; the batched form (one additive SADD/SETBIT chunk per pipeline Exec) is monotone, justified by current links, commutes across chunks and covers every link once every chunk has landed, so a pass that stops after any chunk is safe |
 | [`SlotHoming.als`](SlotHoming.als) | **INV-JEP-T5-01** | the bitmap-gated S-slot scatter-gather subscriber set equals the reference set equals the brute-force all-slots union — no cross-subscriber leakage |
 
 Both are grounded in the real code: `webhook/keys.go` (`slotOf`, `streamSubsKey`,
@@ -62,7 +62,25 @@ check ReconcileCoversAllLinks      UNSAT   every link has its index tuple (super
 check NeverInventsMembership       UNSAT   no index tuple unjustified by a link
 check DropThenReconcileSelfHeals   UNSAT   drop-any-subset then reconcile fully repairs
 run   RepairWitness                SAT     a real drop→reconcile repair is reachable
+check ChunkIsMonotoneAndJustified  UNSAT   one pipelined chunk only adds, and only tuples a current link justifies
+check ChunksCommute                UNSAT   chunk order (and the chunk cut) does not change the index
+check FullPassCoversAndIsIdempotent UNSAT  once every chunk landed, every link is covered; a second pass is a no-op
+run   InterruptedPassWitness       SAT     a pass stopped after a chunk, then a full pass that covers the rest, is reachable
 ```
+
+The last four model the shipped transport (`ReconcileIndexes` / `indexStreams`):
+a `Chunk` is the links one pipeline Exec carries, applied additively, and a pass
+may end after any chunk (a failed Exec); a pipeline that fails part-way lands a
+subset of its entries, which is itself a `Chunk`. The model's atomicity boundary
+is one entry: an entry's SADD and SETBIT are a single tuple, so a pair torn
+between them (member without bit, or bit without member) is outside the model —
+`StreamSubscribers` treats either as "not yet visible" and the next pass
+re-asserts both, which the Go tests cover. Negative controls: making a chunk
+*replace* the index (`post.streamSubs = ~(c.done)`) turns all three checks SAT;
+dropping `c.done in pre.links` turns `ChunkIsMonotoneAndJustified` SAT; making a
+chunk write the whole transpose (`pre.streamSubs + ~(pre.links)`) keeps the
+checks UNSAT but turns `InterruptedPassWitness` UNSAT, so the witness is what
+shows the partial pass is really modelled.
 
 `SlotHoming.als` (INV-JEP-T5-01), scope 6:
 
