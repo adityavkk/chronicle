@@ -465,3 +465,15 @@ does not consume a tuple; cached retries still succeed. Malformed-body errors
 emit no closure metadata and are outside this publication model. Tests must
 separate old zero-byte commands, rejected empty JSON appends, invalid fresh empty
 requests and retained empty retries, including false/omitted close flags.
+
+### Browser response boundary
+
+All stream-route responses must include `X-Content-Type-Options: nosniff` and
+`Cross-Origin-Resource-Policy: cross-origin`, matching Chronicle's existing Go
+HTTP contract. The wrapper runs outside admission and body extraction so errors,
+empty responses and streaming responses receive the same headers. It must not
+poll or buffer a response body, release its admission guard or change status.
+These are response decorations, not replicated state transitions; the state
+models and durability assumptions are unchanged. HTTP tests, not TLC, verify
+this boundary. The headers neither authenticate requests nor make the private
+admin/Raft listener safe for public access; no CORS authorization is added.
