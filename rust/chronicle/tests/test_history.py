@@ -1,6 +1,9 @@
 import importlib.util
+import http.client
 import pathlib
+import random
 import unittest
+from unittest.mock import MagicMock, patch
 
 P = pathlib.Path(__file__).with_name("history.py")
 S = importlib.util.spec_from_file_location("history", P); H = importlib.util.module_from_spec(S); S.loader.exec_module(H)
@@ -17,6 +20,20 @@ def history(reads, writes=()):
     return ev
 
 class CheckerTest(unittest.TestCase):
+    def test_truncated_success_or_error_body_is_unknown(self):
+        client = H.Client(["http://unused"], "tenant", "path", 1, random.Random(0))
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.closed = False
+        response.status, response.headers = 200, {}
+        response.read.side_effect = http.client.IncompleteRead(b"partial", 20)
+        for failure in [None, H.urllib.error.HTTPError("http://unused", 409, "rejected", {}, response)]:
+            with patch.object(H.urllib.request, "urlopen", return_value=response, side_effect=failure):
+                status, _, data, error = client.request("POST", b"mutation")
+            self.assertIsNone(status)
+            self.assertEqual(data, b"")
+            self.assertIn("IncompleteRead", error)
+
     def test_falsified_retention(self):
         self.assertFalse(H.check_events(history([(3,4,[])], [("w","a","ok",1,2)]))["checks"]["acked-retention"]["valid"])
     def test_duplicates(self):

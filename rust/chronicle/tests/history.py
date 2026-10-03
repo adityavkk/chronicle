@@ -4,6 +4,7 @@
 import argparse
 import concurrent.futures
 import datetime
+import http.client
 import json
 import os
 import random
@@ -53,11 +54,14 @@ class Client:
         req = urllib.request.Request(base + path, data=body if method in ("PUT", "POST") else None,
                                      headers=headers or {}, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                return r.status, dict(r.headers.items()), r.read(), None
-        except urllib.error.HTTPError as e:
-            return e.code, dict(e.headers.items()), e.read(), str(e)
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            detail = None
+            try:
+                response = urllib.request.urlopen(req, timeout=self.timeout)
+            except urllib.error.HTTPError as error:
+                response, detail = error, str(error)
+            with response as r:
+                return r.status, dict(r.headers.items()), r.read(), detail
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as e:
             return None, {}, b"", repr(e)
 
 
