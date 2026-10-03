@@ -19,6 +19,12 @@ not run genesis again. `CLUSTER_ID` and `NODE_ID` must match `identity.json`.
 The binary validates all databases before starting any Raft group. Missing or
 truncated storage fails closed. Initialization Jobs never overwrite existing data.
 
+Schema-changing binary upgrades require stopping **all** Chronicle processes,
+preserving PVCs, selecting the new pinned image, and then starting them together.
+In particular the retirement-history metadata cannot be rolled out with mixed
+revisions. Do not confuse an ordinary same-image restart with a binary upgrade;
+mixed-version snapshot/log compatibility is not established.
+
 For a fourth **fresh** ordinal after provisioning another k3d agent:
 
 ```sh
@@ -37,12 +43,18 @@ authorization for a brand-new cluster, never a recovery or disk-replacement mode
 
 Drain through `/admin/register`, preserving the registered address and setting
 `draining:true`; wait until `/admin/control` shows complete placements excluding
-that ID and confirm each group's actual membership before stopping it. Kubernetes
+that ID and `/admin/retirement/{id}` returns true before stopping it. Kubernetes
 `drain` alone does not remove Raft membership. Keep three healthy destinations.
 `python3 ops/drain.py --url "$PRIVATE_CHRONICLE_URL" --node 4` performs the
-request once and polls placement completion. It never deletes storage or retries
-an ambiguous mutation. Completion is based on durable applied uniform membership,
-not the possibly uncommitted effective membership in Raft metrics.
+request once and polls verified retirement. It never deletes storage or retries
+an ambiguous mutation. Voter replacement completes without the departing node;
+graceful retirement additionally requires that process to report durable applied
+nonvoter membership covering its last demotion, or recovery-confirmed empty state
+for a never-assigned group. Unreachable learners may be pruned to release resources,
+but that is not graceful retirement. Preserve their volume and keep them fenced.
+Returning obsolete voters are temporarily re-added as learners, demoted and pruned.
+Do not undrain a node concurrently with stopping it: that explicitly permits a
+new assignment. Cleanup is rate-limited and fair, not resource-informed balancing.
 
 Every Raft RPC checks intended cluster/node against local persisted identity, so
 DNS aliases cannot be counted as additional replicas. This is not authentication.

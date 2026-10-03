@@ -53,6 +53,27 @@ pub struct Placement {
     pub voters: BTreeSet<u64>,
     pub complete: bool,
     pub changed_ms: u64,
+    /// None means legacy/unknown history. A missing identity in known history
+    /// has never been assigned; it must not receive a full shard just to retire.
+    #[serde(default)]
+    pub replicas: Option<BTreeMap<u64, ReplicaHistory>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ReplicaHistory {
+    MayVote,
+    NonvoterAfter(openraft::LogId<u64>),
+}
+
+impl Placement {
+    pub fn retirement_known(&self) -> bool {
+        self.complete
+            && self.replicas.as_ref().is_some_and(|replicas| {
+                replicas.iter().all(|(id, history)| {
+                    self.voters.contains(id) || matches!(history, ReplicaHistory::NonvoterAfter(_))
+                })
+            })
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -89,10 +110,15 @@ pub enum Command {
         expected_generation: u64,
         voters: BTreeSet<u64>,
         now_ms: u64,
+        /// New controllers set this; false preserves legacy committed-log replay.
+        #[serde(default)]
+        eligible_only: bool,
     },
     Placed {
         shard: u64,
         generation: u64,
+        #[serde(default)]
+        membership: Option<openraft::LogId<u64>>,
     },
 }
 
@@ -315,8 +341,16 @@ impl State {
                 expected_generation,
                 voters,
                 now_ms,
+                eligible_only,
             } => {
                 if *shard > SHARDS || self.placements.values().any(|p| !p.complete) {
+                    return Outcome::err(Error::InvalidPlacement);
+                }
+                if *eligible_only
+                    && voters
+                        .iter()
+                        .any(|id| self.nodes.get(id).is_none_or(|n| n.draining))
+                {
                     return Outcome::err(Error::InvalidPlacement);
                 }
                 let p = self.placements.entry(*shard).or_default();
@@ -329,15 +363,31 @@ impl State {
                 let Some(generation) = p.generation.checked_add(1) else {
                     return Outcome::err(Error::Capacity);
                 };
+                // Bootstrap may have used any registered seed. For legacy
+                // placements the registry conservatively bounds lost history.
+                let mut replicas = p.replicas.clone().unwrap_or_else(|| {
+                    self.nodes
+                        .keys()
+                        .map(|id| (*id, ReplicaHistory::MayVote))
+                        .collect()
+                });
+                for id in voters {
+                    replicas.insert(*id, ReplicaHistory::MayVote);
+                }
                 *p = Placement {
                     generation,
                     voters: voters.clone(),
                     complete: false,
                     changed_ms: *now_ms,
+                    replicas: Some(replicas),
                 };
                 Outcome::ok(0, 0, false)
             }
-            Command::Placed { shard, generation } => {
+            Command::Placed {
+                shard,
+                generation,
+                membership,
+            } => {
                 let Some(p) = self
                     .placements
                     .get_mut(shard)
@@ -346,6 +396,19 @@ impl State {
                     return Outcome::err(Error::InvalidPlacement);
                 };
                 p.complete = true;
+                if let Some(boundary) = membership {
+                    let replicas = p.replicas.get_or_insert_with(|| {
+                        self.nodes
+                            .keys()
+                            .map(|id| (*id, ReplicaHistory::MayVote))
+                            .collect()
+                    });
+                    for (id, history) in replicas {
+                        if !p.voters.contains(id) && *history == ReplicaHistory::MayVote {
+                            *history = ReplicaHistory::NonvoterAfter(*boundary);
+                        }
+                    }
+                }
                 Outcome::ok(0, 0, false)
             }
         }

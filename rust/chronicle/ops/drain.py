@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Request Raft removal and await applied placement completion; never deletes a PVC."""
+"""Request voter removal and verify the old process learned its demotion; preserves PVCs."""
 import argparse
 import json
 import time
@@ -36,13 +36,13 @@ def main():
             placements = state["placements"]
             if len(placements) == 5 and all(
                 p["complete"] and args.node not in p["voters"] for p in placements.values()
-            ):
+            ) and request(args.url.rstrip("/") + f"/admin/retirement/{args.node}") is True:
                 print(json.dumps({"drained": args.node, "control": state}, indent=2))
                 return
         except (urllib.error.URLError, TimeoutError):
             pass  # Safe to retry only this read, including during control-group transfer.
         time.sleep(1)
-    raise TimeoutError("drain incomplete; keep the node and its volume running")
+    raise TimeoutError("graceful retirement unverified; voter repair may be complete, but keep the old node fenced and preserve its volume")
 
 
 if __name__ == "__main__":

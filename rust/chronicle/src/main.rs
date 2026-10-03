@@ -202,6 +202,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/admit", post(admit))
         .route("/admin/placed", post(placed))
         .route("/admin/control", get(control))
+        .route("/admin/retirement/{id}", get(retirement))
+        .route("/admin/retirement-state", get(retirement_state))
         .route("/admin/snapshot/{group}", post(snapshot))
         .route("/raft/{group}/append", post(append_rpc))
         .route("/raft/{group}/vote", post(vote_rpc))
@@ -309,6 +311,15 @@ async fn status(State(a): State<Shared>) -> Response {
             .collect::<BTreeMap<_, _>>(),
     )
     .into_response()
+}
+async fn retirement_state(State(a): State<Shared>, headers: HeaderMap) -> ApiResult {
+    rpc_recipient(&a.identity, &headers)?;
+    // This core request is processed only after storage recovery. Ordinary
+    // routing status stays nonblocking; retirement must not trust startup defaults.
+    for group in a.groups.values() {
+        group.raft.is_initialized().await.map_err(unavailable)?;
+    }
+    Ok(status(State(a)).await)
 }
 async fn metrics(State(a): State<Shared>) -> String {
     let mut text = a.telemetry.metrics();
@@ -456,6 +467,9 @@ async fn control(State(a): State<Shared>, headers: HeaderMap) -> ApiResult {
     g.raft.ensure_linearizable().await.map_err(unavailable)?;
     Ok(Json(g.store.read_state().await.map_err(unavailable)?).into_response())
 }
+async fn retirement(State(a): State<Shared>, Path(id): Path<u64>) -> ApiResult {
+    Ok(Json(controller::retired(&a, id).await.map_err(unavailable)?).into_response())
+}
 async fn register(
     State(a): State<Shared>,
     headers: HeaderMap,
@@ -539,10 +553,17 @@ async fn snapshot(State(a): State<Shared>, Path(id): Path<u64>) -> ApiResult {
     Ok("snapshot requested".into_response())
 }
 
-async fn placed(State(a): State<Shared>, Json((shard, generation)): Json<(u64, u64)>) -> ApiResult {
+async fn placed(
+    State(a): State<Shared>,
+    Json((shard, generation, membership)): Json<(u64, u64, Option<openraft::LogId<u64>>)>,
+) -> ApiResult {
     let result = a.groups[&0]
         .raft
-        .client_write(Command::Placed { shard, generation })
+        .client_write(Command::Placed {
+            shard,
+            generation,
+            membership,
+        })
         .await
         .map_err(unavailable)?;
     if result.data.error.is_some() {

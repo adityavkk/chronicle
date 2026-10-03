@@ -53,6 +53,201 @@ fn admission_never_reuses_an_identity_or_address() {
     assert!(state.nodes[&4].draining);
 }
 
+#[tokio::test]
+async fn retirement_history_survives_snapshot_and_distinguishes_repromotion_from_untouched() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("control");
+    let mut store = SqliteStore::open(&path).await.unwrap();
+    for id in 1..=4 {
+        store
+            .apply(vec![entry(
+                id,
+                Command::Register {
+                    id,
+                    node: Node {
+                        addr: format!("node-{id}"),
+                        zone: "a".into(),
+                        draining: false,
+                    },
+                },
+            )])
+            .await
+            .unwrap();
+    }
+    // Retire 4, promote it again, then demote it. An unrelated completed
+    // placement must preserve its last demotion boundary rather than recopy it.
+    for (generation, voters, boundary) in [
+        (1, [1, 2, 3], 17),
+        (2, [1, 2, 4], 23),
+        (3, [1, 2, 3], 31),
+        (4, [1, 2, 3], 39),
+    ] {
+        let result = store
+            .apply(vec![entry(
+                3 + generation * 2,
+                Command::Place {
+                    shard: 0,
+                    expected_generation: generation - 1,
+                    voters: voters.into_iter().collect(),
+                    now_ms: generation,
+                    eligible_only: true,
+                },
+            )])
+            .await
+            .unwrap();
+        assert!(result[0].error.is_none());
+        let mut pending = store.read_state().await.unwrap();
+        if generation == 2 || generation == 3 {
+            assert_eq!(
+                pending
+                    .apply(&Command::Placed {
+                        shard: 0,
+                        generation: generation - 1,
+                        membership: Some(LogId::new(CommittedLeaderId::new(3, 1), 999)),
+                    })
+                    .error,
+                Some(Error::InvalidPlacement)
+            );
+            assert_eq!(
+                pending.placements[&0].replicas.as_ref().unwrap()[&4],
+                ReplicaHistory::MayVote
+            );
+        }
+        store
+            .apply(vec![entry(
+                4 + generation * 2,
+                Command::Placed {
+                    shard: 0,
+                    generation,
+                    membership: Some(LogId::new(CommittedLeaderId::new(3, 1), boundary)),
+                },
+            )])
+            .await
+            .unwrap();
+    }
+    let snapshot = store.build_snapshot().await.unwrap();
+    let other_path = directory.path().join("restored");
+    let mut restored = SqliteStore::open(&other_path).await.unwrap();
+    restored
+        .install_snapshot(&snapshot.meta, snapshot.snapshot)
+        .await
+        .unwrap();
+    restored.close().await;
+    let mut restored = SqliteStore::open_existing(&other_path).await.unwrap();
+    let state = restored.read_state().await.unwrap();
+    let placement = &state.placements[&0];
+    assert!(placement.retirement_known());
+    let replicas = placement.replicas.as_ref().unwrap();
+    assert_eq!(
+        replicas[&4],
+        ReplicaHistory::NonvoterAfter(LogId::new(CommittedLeaderId::new(3, 1), 31))
+    );
+    assert!(!replicas.contains_key(&5));
+    assert_eq!(
+        restored
+            .apply(vec![entry(
+                13,
+                Command::Placed {
+                    shard: 0,
+                    generation: 3,
+                    membership: Some(LogId::new(CommittedLeaderId::new(3, 1), 999)),
+                }
+            )])
+            .await
+            .unwrap()[0]
+            .error,
+        Some(Error::InvalidPlacement)
+    );
+    let retry = restored
+        .apply(vec![entry(
+            14,
+            Command::Placed {
+                shard: 0,
+                generation: 4,
+                membership: Some(LogId::new(CommittedLeaderId::new(3, 1), 999)),
+            },
+        )])
+        .await
+        .unwrap();
+    assert!(retry[0].error.is_none());
+    assert_eq!(
+        restored.read_state().await.unwrap().placements[&0].replicas,
+        placement.replicas
+    );
+    store.close().await;
+    restored.close().await;
+}
+
+#[test]
+fn legacy_placement_never_claims_unknown_identities_are_untouched() {
+    let mut state = State::default();
+    for id in 1..=4 {
+        state.apply(&Command::Register {
+            id,
+            node: Node {
+                addr: format!("node-{id}"),
+                zone: "a".into(),
+                draining: false,
+            },
+        });
+    }
+    state.placements.insert(
+        0,
+        serde_json::from_str(r#"{"generation":1,"voters":[1,2,3],"complete":true,"changed_ms":0}"#)
+            .unwrap(),
+    );
+    assert!(!state.placements[&0].retirement_known());
+    let boundary = LogId::new(CommittedLeaderId::new(3, 1), 17);
+    state.apply(&Command::Placed {
+        shard: 0,
+        generation: 1,
+        membership: Some(boundary),
+    });
+    assert!(state.placements[&0].retirement_known());
+    assert_eq!(
+        state.placements[&0].replicas.as_ref().unwrap()[&4],
+        ReplicaHistory::NonvoterAfter(boundary)
+    );
+}
+
+#[test]
+fn draining_fences_cached_placement_without_changing_legacy_replay() {
+    let mut state = State::default();
+    for id in 1..=4 {
+        state.apply(&Command::Register {
+            id,
+            node: Node {
+                addr: format!("node-{id}"),
+                zone: "a".into(),
+                draining: false,
+            },
+        });
+    }
+    let cached = Command::Place {
+        shard: 0,
+        expected_generation: 0,
+        voters: [1, 2, 4].into_iter().collect(),
+        now_ms: 0,
+        eligible_only: true,
+    };
+    let mut drained = state.nodes[&4].clone();
+    drained.draining = true;
+    state.apply(&Command::Register {
+        id: 4,
+        node: drained,
+    });
+    let before = serde_json::to_value(&state).unwrap();
+    assert_eq!(state.apply(&cached).error, Some(Error::InvalidPlacement));
+    assert_eq!(serde_json::to_value(&state).unwrap(), before);
+    let mut legacy = serde_json::to_value(&cached).unwrap();
+    legacy["Place"]
+        .as_object_mut()
+        .unwrap()
+        .remove("eligible_only");
+    let legacy = serde_json::from_value(legacy).unwrap();
+    assert!(state.apply(&legacy).error.is_none()); // Previously committed legacy command.
+}
+
 fn create() -> Command {
     Command::Create {
         key: "s".into(),
