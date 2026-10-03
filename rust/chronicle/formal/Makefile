@@ -7,6 +7,7 @@ TLC := java -XX:+UseParallelGC -cp $(JAR) tlc2.TLC -workers auto
 check: jar lean positive negative
 
 positive:
+	cd tla && $(TLC) -metadir /tmp/chronicle-write-reply-$$$$ -config WriteReply.cfg WriteReply.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-placement-intent-$$$$ -config PlacementIntent.cfg PlacementIntent.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-membership-admission-$$$$ -config MembershipAdmission.cfg MembershipAdmission.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-drain-$$$$ -config Drain.cfg Drain.tla
@@ -30,6 +31,8 @@ negative:
 	@set -eu; check_bad() { name=$$1; inv=$$2; out=evidence/negative/$$name.txt; \
 	  module=$${3:-Chronicle}; set +e; (cd tla && $(TLC) -metadir /tmp/chronicle-$$name-$$$$ -config $$name.cfg $$module.tla) >$$out 2>&1; rc=$$?; set -e; \
 	  test $$rc -eq 12; grep -F "Invariant $$inv is violated." $$out >/dev/null; }; \
+	check_bad BadWriteRequest ClosureFromApply WriteReply; \
+	check_bad BadWriteSample ClosureFromApply WriteReply; \
 	check_bad BadIntentRepair RepairEnabled PlacementIntent; \
 	check_bad BadIntentConcurrent OneMovement PlacementIntent; \
 	check_bad BadIntentGeneration CompletionCurrent PlacementIntent; \

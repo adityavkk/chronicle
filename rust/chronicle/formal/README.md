@@ -427,3 +427,28 @@ transition, read of later mutable state or pre-commit success is permitted.
 Tests distinguish non-producer data, new producer data, duplicate producer data,
 and empty close-only with and without a producer. Body bytes, frontiers and
 retained producer effects must remain unchanged.
+
+## Closure response metadata belongs to the apply boundary
+
+`WriteReply.tla` precedes adding closure response metadata. `Apply` abstracts
+Raft's committed deterministic application; `boundary` maps to a closure field
+captured in `Outcome`, not a later store read. A duplicate producer tuple retains
+its old effect even when a retry changes the requested close flag. Its offset
+remains the original cached frontier, while its closure metadata describes the
+state at duplicate application. Existing incarnation/epoch fences still precede
+lookup. Historical success retention is not narrowed to the closing tuple.
+
+The two negative controls echo request intent or sample mutable state after
+application; both must violate `ClosureFromApply`. Concurrent closure/recreation
+can change current state before HTTP encoding. The bounded model covers this
+publication boundary, not the full producer/lifecycle composition or Rust
+refinement. Existing Lean no-effect/lifecycle proofs remain scoped as before.
+
+The accompanying closure-policy corrections are deterministic: idempotent PUT
+must compare current closure as part of config matching; an empty non-producer
+close on an already closed stream succeeds without effect; other new appends to
+closed streams still fail. Successful stream outcomes and closed errors capture
+the applied closure and relevant byte frontier. Case-insensitive `true` controls
+the request flag; other values are ignored. Snapshot/reopen and HTTP tests must
+cross changed-flag duplicate retries, old-frontier retries after closure,
+ordinary repeated close, and create closure mismatch, without weakening fences.
