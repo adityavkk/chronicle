@@ -63,8 +63,10 @@ configuration. Those observations do not exclude every intermediate state.
 |---|---:|---:|---:|---:|---|---:|---|
 | `intent-catchup.jsonl` | 4 (unaffected) | 720 | 16 | 111 / 2 | 24 → 25 | 23.25 s | Ok |
 | `intent-catchup-shard1.jsonl` | 1 (repaired) | 720 | 16 | 105 / 5 | 26 → 27 | 23.35 s | Ok |
+| `intent-snapshot.jsonl` | 1 (repaired) | 720 | 15 | 105 / 4 | 28 → 29 | 22.12 s | Ok |
+| `intent-snapshot-crash.jsonl` | 1 (repaired) | 720 | 13 | 105 / 4 | 30 → 31 | 23.43 s | Ok |
 
-Both hit `after-log-commit-before-log-flushed`, **not** the separately armed
+The first two hit `after-log-commit-before-log-flushed`, **not** the separately armed
 snapshot-install gate. Their `*-events.jsonl` files retain gated/pending state,
 automatic repair before quarantine/release, DROP counters, cleanup results and
 post-release observations. Matching smoke/prefix and independent Porcupine
@@ -72,6 +74,19 @@ outputs are retained; unknown mutations stay pending through history end.
 `intent-counts.json` derives counts and elapsed observation times from the raw
 records. The workload used two producers, 96-byte records and 250-ms pacing:
 these are fault schedules, not throughput benchmarks or recovery SLOs.
+
+The last two force snapshot catch-up: the leader's purge boundary must first
+exceed the drained learner's log. They reach `before-snapshot-install-transaction`
+in the snapshot receiver, before the atomic SQLite replacement transaction.
+The crash run then uses the host container runtime to SIGKILL that container,
+not an in-container PID-1 signal. Its event history verifies exit 137, the same
+Pod UID, a different container ID and restart count 0 → 1. This tests interrupted
+installation before its transaction and recovery, not a torn SQLite transaction
+or power loss. `intent-snapshot-counts.json` retains the counts; final pod and
+gate-file captures confirm recovery and cleanup. The harness now has 27 unit tests.
+Use `--gate before-snapshot-install-transaction` on the hook for this schedule,
+and add `--crash-gated` for the runtime kill. Replica repair must still complete
+before either fault is released.
 
 Reproduce after the private k3d deployment has a verified drained non-seed replica
 and only seeds 1/2/3 eligible; enable the test-only gate environment as described
@@ -93,6 +108,6 @@ gate controls and iptables explicitly before reuse: SIGKILL cannot promise Pytho
 cleanup. Successful runs removed all owned gate files and partition rules.
 
 This does not demonstrate recovery without an applicable joint quorum, failure
-during actual snapshot installation, power-loss durability, independent disks or
+inside the SQLite snapshot transaction, power-loss durability, independent disks or
 AZs, full protocol conformance, or resource-informed balancing. Experimental
 leadership campaigns remain off.

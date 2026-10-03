@@ -1,0 +1,53 @@
+{
+  "intent-snapshot": {
+    "counts": {
+      "('run', 'info')": 1,
+      "('create', 'invoke')": 1,
+      "('create', 'ok')": 1,
+      "('read', 'invoke')": 109,
+      "('append', 'invoke')": 720,
+      "('read', 'ok')": 105,
+      "('append', 'ok')": 707,
+      "('record', 'info')": 720,
+      "('nemesis', 'info')": 1,
+      "('append', 'unknown')": 13,
+      "('append-retry', 'invoke')": 15,
+      "('append-retry', 'ok')": 13,
+      "('read', 'unknown')": 4,
+      "('append-retry', 'unknown')": 2,
+      "('nemesis', 'ok')": 1
+    },
+    "gate": "before-snapshot-install-transaction",
+    "generation_before": 28,
+    "generation_after": 29,
+    "observed_repair_seconds": 22.120954467
+  },
+  "intent-snapshot-crash": {
+    "counts": {
+      "('run', 'info')": 1,
+      "('create', 'invoke')": 1,
+      "('create', 'ok')": 1,
+      "('read', 'invoke')": 109,
+      "('append', 'invoke')": 720,
+      "('read', 'ok')": 105,
+      "('append', 'ok')": 707,
+      "('record', 'info')": 720,
+      "('nemesis', 'info')": 1,
+      "('append', 'unknown')": 13,
+      "('append-retry', 'invoke')": 13,
+      "('append-retry', 'ok')": 13,
+      "('read', 'unknown')": 4,
+      "('nemesis', 'ok')": 1
+    },
+    "gate": "before-snapshot-install-transaction",
+    "generation_before": 30,
+    "generation_after": 31,
+    "observed_repair_seconds": 23.434437171,
+    "restart": {
+      "before": 0,
+      "after": 1,
+      "exit": 137,
+      "same_pod": true
+    }
+  }
+}

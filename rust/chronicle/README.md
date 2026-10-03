@@ -66,7 +66,9 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
 * [Pending-target repair](evidence/PENDING-PLACEMENT.md) now supersedes a failed
   catch-up destination without losing possible-voter history. Gated k3d histories
   on the repaired and an unaffected shard each retained 720 records and received
-  Porcupine `Ok`. The tested gate was log persistence, not snapshot installation.
+  Porcupine `Ok`. Two further 720-record histories reached the snapshot receiver
+  before its SQLite install transaction; one SIGKILLed and restarted that
+  container on its existing PVC. Both received Porcupine `Ok`.
 * OpenRaft's pinned storage contract suite passes, alongside SQLite VFS faults,
   snapshot/reopen producer and membership checks, and a slow-body admission test.
   New placement completion awaits a membership operation and verifies its applied
