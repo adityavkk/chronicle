@@ -70,14 +70,26 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
   Both received Porcupine `Ok`; the log-only retry appended, while the committed
   apply retry returned its retained duplicate result. The histories preserve the
   unknown responses and the bounded pause observation rather than hiding them.
+* Committed SQLite bytes are lazily projected into rebuildable Electric-format
+  files. Metadata capture is fenced across snapshot/lifecycle replacement; opened
+  ranges keep their original inode and frontier. Cache retention is capped at 64
+  files and 16 MiB per group; evicted inodes held by active readers remain until
+  those reads finish. Admission covers responses and cancelled blocking reads.
+  Delivery uses 256 KiB file reads, with unexpected EOF treated as an error.
+  This is portable range delivery, **not zero-copy sendfile**. Ordinary filesystem
+  reliability is assumed; hostile mutation/silent corruption of a published inode
+  is not detected by a cryptographic cache checksum. Restart never trusts caches.
 
 ## Explicitly unfinished
 
 This is a bounded replicated vertical slice, **not the full requested deliverable**.
 Protocol conformance beyond the implemented request subset, SSE/long polling,
-Electric file/sendfile materialization, resource-informed placement and leadership
+zero-copy sendfile, resource-informed placement and leadership
 balancing, deeper replication/storage trace linkage, broader I/O-fault schedules, stronger
 admission/snapshot crash schedules, and equal-semantics performance baselines remain.
+Completion events currently measure handler completion through header construction,
+not full streaming delivery; `bytes_out` is the constructed representation length,
+not proof that a client received it. Body completion/error telemetry remains work.
 Payload state is buffered and bounded (8 MiB per stream, 16 MiB per shard), with
 backpressure rather than cold offload. Do not infer many-stream production capacity
 from these local tests or treat illustrative Fermi targets as measured SLOs.

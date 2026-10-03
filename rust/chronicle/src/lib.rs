@@ -5,6 +5,7 @@ pub mod faults;
 pub mod metrics;
 pub mod model;
 pub mod network;
+mod projection;
 pub mod storage;
 pub mod wire;
 

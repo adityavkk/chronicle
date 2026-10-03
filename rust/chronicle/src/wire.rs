@@ -62,3 +62,59 @@ pub fn encode_wire(
         Ok(out.freeze())
     }
 }
+
+/// A comma inside a string or nested array is not a cursor boundary.
+pub fn json_boundary(data: &[u8], offset: usize) -> bool {
+    use std::io::Read;
+    if offset == 0 {
+        return true;
+    }
+    let Some(prefix) = data.get(..offset).and_then(|p| p.strip_suffix(b",")) else {
+        return false;
+    };
+    // Parse without allocating another payload or a Vec of individual values.
+    let framed = b"[".as_slice().chain(prefix).chain(b"]".as_slice());
+    serde_json::from_reader::<_, serde::de::IgnoredAny>(framed).is_ok()
+}
+
+/// Portable bounded range delivery, following Electric engine_raw.rs's fallback.
+/// Unexpected EOF is an error, not successful completion of a short response.
+pub fn file_body(
+    file: std::fs::File,
+    length: u64,
+    json: bool,
+    admission: std::sync::Arc<tokio::sync::OwnedSemaphorePermit>,
+) -> axum::body::Body {
+    use futures_util::{StreamExt, stream};
+    use std::io::Read;
+    let reader = stream::try_unfold(
+        (file, length, admission),
+        |(mut file, remaining, admission)| async move {
+            if remaining == 0 {
+                return Ok::<_, std::io::Error>(None);
+            }
+            // Cancellation cannot release admission while this blocking read still
+            // owns an FD/buffer. Tokio File's internal task does not retain our guard.
+            let retained = admission.clone();
+            let (file, bytes) = tokio::task::spawn_blocking(move || {
+                let _admission = retained;
+                let mut bytes = vec![0; remaining.min(256 * 1024) as usize];
+                file.read_exact(&mut bytes)?;
+                Ok::<_, std::io::Error>((file, bytes))
+            })
+            .await
+            .map_err(std::io::Error::other)??;
+            let left = remaining - bytes.len() as u64;
+            Ok(Some((Bytes::from(bytes), (file, left, admission))))
+        },
+    );
+    if json {
+        axum::body::Body::from_stream(
+            stream::once(async { Ok(Bytes::from_static(b"[")) })
+                .chain(reader)
+                .chain(stream::once(async { Ok(Bytes::from_static(b"]")) })),
+        )
+    } else {
+        axum::body::Body::from_stream(reader)
+    }
+}

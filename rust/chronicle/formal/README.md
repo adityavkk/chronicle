@@ -71,10 +71,13 @@ incarnation/snapshot replacement, concurrent range lifetimes, JSON boundaries,
 and truncation during response delivery. Liveness still depends on responsive
 local storage and eventual quorum; this cache model asserts safety only.
 
-The planned cache is bounded and rebuildable. Range opening checks the captured
-incarnation/frontier against current authority; an intervening lifecycle change
-may return a retryable read error instead of serving another incarnation. Raw
-binary and comma-delimited JSON bytes follow pinned Electric 0.1.5. Axum will use
+The implemented cache in `src/projection.rs` is bounded and rebuildable. Range
+opening checks captured incarnation/frontier and a process-local snapshot token
+against current authority; intervening lifecycle/snapshot changes return a
+retryable read error instead of substituting another view. `tests/projection.rs`
+checks that fence, old-reader lifetimes, independent seeks, restart reconstruction,
+JSON boundaries, truncation errors and cancellation with a queued blocking read.
+Raw binary and comma-delimited JSON bytes follow pinned Electric 0.1.5. Axum uses
 bounded file reads with explicit unexpected-EOF errors; its body API does not
 expose Electric's raw plaintext socket for `sendfile`, so this is not zero-copy.
 

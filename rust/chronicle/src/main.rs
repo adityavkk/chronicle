@@ -418,8 +418,10 @@ pub async fn proxy(
         .map_err(unavailable)?;
     let status = r.status();
     let headers = r.headers().clone();
-    let bytes = r.bytes().await.map_err(unavailable)?;
-    Ok((status, headers, bytes).into_response())
+    let chunks = futures_util::stream::try_unfold(r, |mut response| async move {
+        Ok::<_, reqwest::Error>(response.chunk().await?.map(|bytes| (bytes, response)))
+    });
+    Ok((status, headers, Body::from_stream(chunks)).into_response())
 }
 async fn control(State(a): State<Shared>, headers: HeaderMap) -> ApiResult {
     let g = &a.groups[&0];
@@ -533,20 +535,35 @@ async fn admit_stream(
     context.inject(request.headers_mut());
     request.extensions_mut().insert(context.clone());
     // Acquire before the Bytes extractor reads the body, not after allocation.
-    let Ok(_permit) = admission.try_acquire() else {
+    let Ok(permit) = admission.try_acquire_owned() else {
         let mut response = (StatusCode::TOO_MANY_REQUESTS, "admission full").into_response();
         context.inject(response.headers_mut());
         return Ok(response);
     };
+    let permit = Arc::new(permit);
+    request.extensions_mut().insert(permit.clone());
     let mut response = next.run(request).await;
     context.inject(response.headers_mut());
-    Ok(response)
+    // Keep admission through delivery: slow readers must not accumulate unbounded
+    // file handles and detached cache generations after the handler returns.
+    Ok(
+        response.map(|body| {
+            use futures_util::{StreamExt, stream};
+            Body::from_stream(stream::unfold(
+                (body.into_data_stream(), permit),
+                |(mut body, permit)| async move {
+                    body.next().await.map(|chunk| (chunk, (body, permit)))
+                },
+            ))
+        }),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn stream(
     State(a): State<Shared>,
     Extension(context): Extension<telemetry::RequestContext>,
+    Extension(admission): Extension<Arc<tokio::sync::OwnedSemaphorePermit>>,
     Path((tenant, path)): Path<(String, String)>,
     Query(query): Query<BTreeMap<String, String>>,
     method: Method,
@@ -568,6 +585,7 @@ async fn stream(
         headers,
         body,
         &mut timings,
+        admission,
     )
     .await;
     let status = result
@@ -589,7 +607,20 @@ async fn stream(
             bytes_in,
             bytes_out: result.as_ref().map_or_else(
                 |(_, message)| message.len() as u64,
-                |r| r.body().size_hint().exact().unwrap_or_default(),
+                |r| {
+                    r.body()
+                        .size_hint()
+                        .exact()
+                        .or_else(|| {
+                            r.headers()
+                                .get("content-length")?
+                                .to_str()
+                                .ok()?
+                                .parse()
+                                .ok()
+                        })
+                        .unwrap_or_default()
+                },
             ),
             timings,
         },
@@ -608,6 +639,7 @@ async fn stream_inner(
     headers: HeaderMap,
     body: Bytes,
     timings: &mut telemetry::PhaseTimings,
+    admission: Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> ApiResult {
     if key.len() > 2048 || key.contains('\0') {
         return Err(bad("invalid stream identity"));
@@ -627,7 +659,7 @@ async fn stream_inner(
         result.map_err(unavailable)?;
     }
     let started = Instant::now();
-    let existing = g.store.read_stream(key.clone()).await;
+    let existing = g.store.read_info(key.clone()).await;
     timings.read_us = started.elapsed().as_micros() as u64;
     let mut existing = existing.map_err(unavailable)?.filter(|s| !s.deleted);
     if !stale
@@ -658,33 +690,29 @@ async fn stream_inner(
         let offset =
             match wire::parse_offset(query.get("offset").map(String::as_str)).map_err(bad)? {
                 ParsedOffset::Start => 0,
-                ParsedOffset::Now => s.data.len() as u64,
+                ParsedOffset::Now => s.end,
                 ParsedOffset::At(n) => n,
             };
-        if offset > s.data.len() as u64 {
+        if offset > s.end {
             return Err((
                 StatusCode::RANGE_NOT_SATISFIABLE,
                 "offset beyond committed tail".into(),
             ));
         }
-        let mut data = s.data[offset as usize..].to_vec();
-        if s.config.content_type.starts_with("application/json") {
-            if offset > 0 && s.data[offset as usize - 1] != b',' {
-                return Err(bad("offset is not a JSON boundary"));
-            }
-            if data.last() == Some(&b',') {
-                data.pop();
-            }
-            data.insert(0, b'[');
-            data.push(b']');
-        }
+        let started = Instant::now();
+        let file = g.store.read_file(key, &s, offset).await;
+        timings.read_us += started.elapsed().as_micros() as u64;
+        let file = file.map_err(|e| match e {
+            chronicle_raft::storage::ReadError::Offset => bad(e),
+            _ => unavailable(e),
+        })?;
+        let json = s.config.content_type.starts_with("application/json");
+        let length = (s.end - offset).saturating_sub(u64::from(json));
         let mut r = Response::builder()
             .status(200)
             .header("content-type", &s.config.content_type)
-            .header(
-                "stream-next-offset",
-                wire::format_offset(s.data.len() as u64),
-            )
+            .header("content-length", length + if json { 2 } else { 0 })
+            .header("stream-next-offset", wire::format_offset(s.end))
             .header("stream-up-to-date", "true")
             .header("stream-incarnation", s.incarnation.to_string())
             .header("cache-control", "no-store")
@@ -693,11 +721,11 @@ async fn stream_inner(
             r = r.header("stream-closed", "true");
         }
         return r
-            .body(Body::from(if method == Method::HEAD {
-                Vec::new()
+            .body(if method == Method::HEAD {
+                Body::empty()
             } else {
-                data
-            }))
+                wire::file_body(file, length, json, admission)
+            })
             .map_err(unavailable);
     }
     let command = if method == Method::PUT {
@@ -813,6 +841,54 @@ async fn stream_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn admission_lasts_until_streaming_response_is_dropped() {
+        use futures_util::{StreamExt, stream};
+        let admission = Arc::new(Semaphore::new(1));
+        let router = Router::new()
+            .route(
+                "/",
+                get(|| async {
+                    Body::from_stream(
+                        stream::once(async {
+                            Ok::<_, std::io::Error>(Bytes::from_static(b"first"))
+                        })
+                        .chain(stream::pending()),
+                    )
+                }),
+            )
+            .layer(middleware::from_fn_with_state(
+                admission.clone(),
+                admit_stream,
+            ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(admission.available_permits(), 0);
+        let rejected = client
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+        drop(response);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while admission.available_permits() != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        server.abort();
+    }
 
     #[tokio::test]
     async fn admission_is_reserved_before_reading_a_slow_body() {

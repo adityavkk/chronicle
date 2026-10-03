@@ -7,9 +7,10 @@
 #![allow(clippy::result_large_err)]
 
 use std::fmt::Debug;
-use std::io::Cursor;
+use std::io::{Cursor, Seek, SeekFrom};
 use std::ops::{Bound, RangeBounds};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
 use openraft::storage::{LogFlushed, RaftLogStorage, RaftStateMachine};
@@ -56,11 +57,35 @@ struct SnapshotBody {
 struct Worker {
     db: Connection,
     state: model::State,
+    projection: crate::projection::Cache,
+    read_generation: Arc<()>,
     #[cfg(feature = "storage-faults")]
     faults: crate::faults::Context,
     // SQLite transaction locks do not fence two independent cached Raft state machines.
     // Keep this OS lock for the entire actor lifetime, including shutdown.
     _process_lock: std::fs::File,
+}
+
+/// A committed metadata view, without cloning payload or producer results.
+pub struct StreamInfo {
+    generation: Arc<()>,
+    pub incarnation: u64,
+    pub config: model::StreamConfig,
+    pub end: u64,
+    pub closed: bool,
+    pub deleted: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ReadError {
+    #[error("stream changed while opening range; retry read")]
+    Changed,
+    #[error("offset is not a JSON boundary")]
+    Offset,
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Storage(Box<StorageError<u64>>),
 }
 
 impl SqliteStore {
@@ -139,6 +164,55 @@ impl SqliteStore {
         self.call(move |w| Ok(w.state.streams.get(&key).cloned()))
             .await
     }
+
+    pub async fn read_info(&self, key: String) -> Result<Option<StreamInfo>> {
+        self.call(move |w| {
+            Ok(w.state.streams.get(&key).map(|s| StreamInfo {
+                generation: w.read_generation.clone(),
+                incarnation: s.incarnation,
+                config: s.config.clone(),
+                end: s.data.len() as u64,
+                closed: s.closed,
+                deleted: s.deleted,
+            }))
+        })
+        .await
+    }
+
+    /// Open the exact captured committed prefix; a later lifecycle change cannot
+    /// substitute another incarnation. Callers must bound delivery at `end`.
+    pub async fn read_file(
+        &self,
+        key: String,
+        view: &StreamInfo,
+        start: u64,
+    ) -> std::result::Result<std::fs::File, ReadError> {
+        let (incarnation, end) = (view.incarnation, view.end);
+        let generation = view.generation.clone();
+        self.call(move |w| {
+            Ok((|| {
+                let s = w.state.streams.get(&key).ok_or(ReadError::Changed)?;
+                if s.deleted
+                    || s.incarnation != incarnation
+                    || end > s.data.len() as u64
+                    || start > end
+                    || !Arc::ptr_eq(&generation, &w.read_generation)
+                {
+                    return Err(ReadError::Changed);
+                }
+                if s.config.content_type.starts_with("application/json")
+                    && !crate::wire::json_boundary(&s.data[..end as usize], start as usize)
+                {
+                    return Err(ReadError::Offset);
+                }
+                let mut file = w.projection.open(&key, s)?;
+                file.seek(SeekFrom::Start(start))?;
+                Ok(file)
+            })())
+        })
+        .await
+        .map_err(|e| ReadError::Storage(Box::new(e)))?
+    }
 }
 
 impl Worker {
@@ -202,6 +276,8 @@ impl Worker {
         Ok(Self {
             db,
             state,
+            projection: crate::projection::Cache::new(path.with_extension("projection")),
+            read_generation: Arc::new(()),
             #[cfg(feature = "storage-faults")]
             faults: crate::faults::Context::new(path),
             _process_lock: process_lock,
@@ -593,6 +669,10 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                 *s = body.state;
                 Ok(())
             });
+            if result.is_ok() {
+                w.projection.invalidate();
+                w.read_generation = Arc::new(());
+            }
             #[cfg(feature = "storage-faults")]
             let result = result.and_then(|()| {
                 w.faults
