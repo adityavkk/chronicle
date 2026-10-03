@@ -6,11 +6,16 @@ rust-version = "1.90"
 license = "Apache-2.0"
 publish = false
 
+[features]
+storage-faults = []
+
 [dependencies]
 anyhow = "1"
 axum = "0.8"
 bytes = "1"
 openraft = { version = "=0.9.25", features = ["serde", "storage-v2"] }
+opentelemetry = { version = "=0.31.0", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "=0.31.0", default-features = false, features = ["trace"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
@@ -19,6 +24,7 @@ sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
+tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [dev-dependencies]

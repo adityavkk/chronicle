@@ -5,8 +5,8 @@ mod telemetry;
 
 use axum::{
     Json, Router,
-    body::Body,
-    extract::{DefaultBodyLimit, Path, Query, Request, State},
+    body::{Body, HttpBody},
+    extract::{DefaultBodyLimit, Extension, Path, Query, Request, State},
     http::{HeaderMap, Method, StatusCode, Uri},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -60,8 +60,14 @@ pub fn now_ms() -> u64 {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let (stdout, _log_guard) = tracing_appender::non_blocking::NonBlockingBuilder::default()
+        .buffered_lines_limit(4096)
+        .lossy(true)
+        .finish(std::io::stdout());
+    let log_errors = stdout.error_counter();
     tracing_subscriber::fmt()
         .json()
+        .with_writer(stdout)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "chronicle_raft=info,warn".into()),
@@ -177,7 +183,11 @@ async fn main() -> anyhow::Result<()> {
         groups,
         client,
         admission: Arc::new(Semaphore::new(128)),
-        telemetry: telemetry::Telemetry::new(id),
+        telemetry: telemetry::Telemetry::new(
+            id,
+            log_errors,
+            std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or_default(),
+        ),
     });
     tokio::spawn(controller::run(app.clone()));
     let router = Router::new()
@@ -516,18 +526,27 @@ async fn placed(State(a): State<Shared>, Json((shard, generation)): Json<(u64, u
 
 async fn admit_stream(
     State(admission): State<Arc<Semaphore>>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> ApiResult {
+    let context = telemetry::RequestContext::from_headers(request.headers());
+    context.inject(request.headers_mut());
+    request.extensions_mut().insert(context.clone());
     // Acquire before the Bytes extractor reads the body, not after allocation.
-    let _permit = admission
-        .try_acquire()
-        .map_err(|_| (StatusCode::TOO_MANY_REQUESTS, "admission full".into()))?;
-    Ok(next.run(request).await)
+    let Ok(_permit) = admission.try_acquire() else {
+        let mut response = (StatusCode::TOO_MANY_REQUESTS, "admission full").into_response();
+        context.inject(response.headers_mut());
+        return Ok(response);
+    };
+    let mut response = next.run(request).await;
+    context.inject(response.headers_mut());
+    Ok(response)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn stream(
     State(a): State<Shared>,
+    Extension(context): Extension<telemetry::RequestContext>,
     Path((tenant, path)): Path<(String, String)>,
     Query(query): Query<BTreeMap<String, String>>,
     method: Method,
@@ -535,23 +554,45 @@ async fn stream(
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult {
-    let started = Instant::now();
     let key = format!("{}:{tenant}{path}", tenant.len());
     let shard = model::shard(&key);
     let bytes_in = body.len();
-    let result = stream_inner(&a, shard, key, query, method.clone(), uri, headers, body).await;
+    let mut timings = telemetry::PhaseTimings::default();
+    let result = stream_inner(
+        &a,
+        shard,
+        key,
+        query,
+        method.clone(),
+        uri,
+        headers,
+        body,
+        &mut timings,
+    )
+    .await;
     let status = result
         .as_ref()
         .map_or_else(|(s, _)| s.as_u16(), |r| r.status().as_u16());
     let m = a.groups[&shard].raft.metrics().borrow().clone();
+    let response_header = |name: &str| result.as_ref().ok()?.headers().get(name)?.to_str().ok();
     a.telemetry.complete(
-        method.as_str(),
-        shard,
-        m.current_term,
-        m.last_applied.map_or(0, |l| l.index),
-        status,
-        bytes_in,
-        started.elapsed(),
+        &context,
+        telemetry::Completion {
+            method: method.as_str(),
+            shard,
+            term: m.current_term,
+            applied: m.last_applied.map_or(0, |l| l.index),
+            commit_index: response_header("stream-commit-index").and_then(|v| v.parse().ok()),
+            frontier: response_header("stream-next-offset"),
+            duplicate: response_header("stream-duplicate").and_then(|v| v.parse().ok()),
+            status,
+            bytes_in,
+            bytes_out: result.as_ref().map_or_else(
+                |(_, message)| message.len() as u64,
+                |r| r.body().size_hint().exact().unwrap_or_default(),
+            ),
+            timings,
+        },
     );
     result
 }
@@ -566,6 +607,7 @@ async fn stream_inner(
     uri: Uri,
     headers: HeaderMap,
     body: Bytes,
+    timings: &mut telemetry::PhaseTimings,
 ) -> ApiResult {
     if key.len() > 2048 || key.contains('\0') {
         return Err(bad("invalid stream identity"));
@@ -574,28 +616,36 @@ async fn stream_inner(
     let stale = query.get("consistency").is_some_and(|v| v == "stale") && method == Method::GET;
     if !stale {
         if g.raft.metrics().borrow().current_leader != Some(a.id) {
-            return proxy(a, shard, method, &uri.to_string(), headers, body).await;
+            let started = Instant::now();
+            let result = proxy(a, shard, method, &uri.to_string(), headers, body).await;
+            timings.forward_us = started.elapsed().as_micros() as u64;
+            return result;
         }
-        g.raft.ensure_linearizable().await.map_err(unavailable)?;
+        let started = Instant::now();
+        let result = g.raft.ensure_linearizable().await;
+        timings.barrier_us = started.elapsed().as_micros() as u64;
+        result.map_err(unavailable)?;
     }
-    let mut existing = g
-        .store
-        .read_stream(key.clone())
-        .await
-        .map_err(unavailable)?
-        .filter(|s| !s.deleted);
+    let started = Instant::now();
+    let existing = g.store.read_stream(key.clone()).await;
+    timings.read_us = started.elapsed().as_micros() as u64;
+    let mut existing = existing.map_err(unavailable)?.filter(|s| !s.deleted);
     if !stale
         && let Some(s) = &existing
         && s.config.expires_ms.is_some_and(|t| t <= now_ms())
     {
-        g.raft
+        let started = Instant::now();
+        let result = g
+            .raft
             .client_write(Command::Delete {
                 key: key.clone(),
                 incarnation: s.incarnation,
                 expired_at: s.config.expires_ms,
             })
-            .await
-            .map_err(unavailable)?;
+            .await;
+        telemetry::commit_apply(started.elapsed());
+        timings.proposal_us += started.elapsed().as_micros() as u64;
+        result.map_err(unavailable)?;
         existing = None;
     }
     let h = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
@@ -726,8 +776,13 @@ async fn stream_inner(
         return Err((StatusCode::METHOD_NOT_ALLOWED, "unsupported method".into()));
     };
     // No duplicate shortcut: every response follows durable-majority apply, even retries.
-    let result = tokio::time::timeout(Duration::from_secs(8), g.raft.client_write(command))
-        .await
+    // This measures the caller-visible proposal-through-apply path. It deliberately is not
+    // labelled as replication latency: queueing, persistence and state-machine apply are included.
+    let commit_apply_started = Instant::now();
+    let result = tokio::time::timeout(Duration::from_secs(8), g.raft.client_write(command)).await;
+    telemetry::commit_apply(commit_apply_started.elapsed());
+    timings.proposal_us += commit_apply_started.elapsed().as_micros() as u64;
+    let result = result
         .map_err(|_| unavailable("timeout: outcome unknown"))?
         .map_err(unavailable)?;
     if let Some(error) = result.data.error {
@@ -750,6 +805,7 @@ async fn stream_inner(
         .header("stream-next-offset", wire::format_offset(result.data.end))
         .header("stream-incarnation", result.data.incarnation.to_string())
         .header("stream-commit-index", result.log_id.index.to_string())
+        .header("stream-duplicate", result.data.duplicate.to_string())
         .body(Body::empty())
         .map_err(unavailable)
 }
@@ -789,6 +845,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(response.headers().contains_key("x-request-id"));
+        assert!(response.headers().contains_key("traceparent"));
         slow.write_all(b"x").await.unwrap();
         tokio::time::timeout(Duration::from_secs(2), async {
             while admission.available_permits() != 1 {

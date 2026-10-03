@@ -1,10 +1,17 @@
 //! Reused HTTP pool; RPC timeouts and bounded message bodies belong to the caller.
-use crate::TypeConfig;
+use crate::{TypeConfig, metrics::Histogram};
 use openraft::error::{InstallSnapshotError, NetworkError, RPCError, RaftError, RemoteError};
 use openraft::network::RPCOption;
 use openraft::raft::*;
 use openraft::{BasicNode, RaftNetwork, RaftNetworkFactory};
 use serde::{Serialize, de::DeserializeOwned};
+use std::time::Instant;
+
+static RPC: Histogram = Histogram::new();
+
+pub fn timing_metrics(text: &mut String) {
+    RPC.render("chronicle_rpc_duration_seconds", text);
+}
 
 pub type RpcError<E = openraft::error::Infallible> = RPCError<u64, BasicNode, RaftError<u64, E>>;
 
@@ -41,24 +48,30 @@ impl Connection {
             "http://{}/raft/{}/{}",
             self.node.addr, self.network.group, method
         );
-        let response = self
-            .network
-            .client
-            .post(url)
-            .header("x-chronicle-cluster", &self.network.cluster)
-            .header("x-chronicle-recipient", self.id)
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| RPCError::Network(NetworkError::new(&e)))?;
-        let response = response
-            .error_for_status()
-            .map_err(|e| RPCError::Network(NetworkError::new(&e)))?;
-        let result: Result<R, E> = response
-            .json()
-            .await
-            .map_err(|e| RPCError::Network(NetworkError::new(&e)))?;
-        result.map_err(|e| RPCError::RemoteError(RemoteError::new(self.id, e)))
+        let started = Instant::now();
+        let result = async {
+            let response = self
+                .network
+                .client
+                .post(url)
+                .header("x-chronicle-cluster", &self.network.cluster)
+                .header("x-chronicle-recipient", self.id)
+                .json(&req)
+                .send()
+                .await;
+            let response = response.map_err(|e| RPCError::Network(NetworkError::new(&e)))?;
+            let response = response
+                .error_for_status()
+                .map_err(|e| RPCError::Network(NetworkError::new(&e)))?;
+            let result: Result<R, E> = response
+                .json()
+                .await
+                .map_err(|e| RPCError::Network(NetworkError::new(&e)))?;
+            result.map_err(|e| RPCError::RemoteError(RemoteError::new(self.id, e)))
+        }
+        .await;
+        RPC.observe(started.elapsed());
+        result
     }
 }
 

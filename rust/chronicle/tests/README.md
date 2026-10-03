@@ -120,3 +120,19 @@ advance. Reopen must retain earlier acknowledged state; the failed operation may
 be absent or fully present because its durable outcome is unknown. This is not
 power-loss/torn-write simulation, and it does not yet check every log-flush callback
 or snapshot/membership persistence boundary.
+
+`make fault-check` also builds the optional `storage-faults` feature and runs
+`tests/fault_gates.rs`. Normal builds contain no gates. A test binary reads
+`CHRONICLE_FAULT_DIR`; within the hex-encoded store-filename directory, the
+harness creates `<gate>.arm`, waits for `<gate>.reached`, then creates
+`<gate>.release` or kills the process. The blocking storage actor never removes
+these files or ownership locks. Use a fresh control directory for each run.
+
+The four gates are `after-log-commit-before-log-flushed`,
+`after-apply-commit-before-return`, `before-snapshot-install-transaction`, and
+`after-snapshot-install-transaction`. Subprocess tests kill at each boundary,
+reopen exclusively, and check exact log/data and old-or-new snapshot state.
+`evidence/fault-gates-pvc.txt` retains the same suite executed with `TMPDIR=/data`
+inside the real k3d pod. This exercises the supported PVC filesystem, not a live
+Raft membership change or a mid-transaction disk/power failure. The separate VFS
+suite tests selected actual write/sync errors within SQLite transactions.

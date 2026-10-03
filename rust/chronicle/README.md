@@ -59,13 +59,19 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
   Placement completion now reads applied membership, not effective Raft metrics.
 * VictoriaMetrics, VictoriaLogs and VictoriaTraces receive real request telemetry
   through the OTel Collector; Grafana has populated request/index/export panels.
+  Bounded lossy exporters, W3C forwarding, separated loss/failure counters, stage
+  histograms and completion phase timings have targeted tests. Retained Victoria
+  queries show a real forwarded request's parent/child spans and two correlated logs.
+* Feature-gated storage pause points exercise log-flush, apply and snapshot-install
+  boundaries. Subprocess crash/release checks pass on the actual local PVC; these
+  are narrower than a live distributed membership fault or power-loss test.
 
 ## Explicitly unfinished
 
 This is a bounded replicated vertical slice, **not the full requested deliverable**.
 Protocol conformance beyond the implemented request subset, SSE/long polling,
 Electric file/sendfile materialization, resource-informed placement and leadership
-balancing, detailed phase timing/trace propagation, broader I/O-fault schedules, stronger
+balancing, deeper replication/storage trace linkage, broader I/O-fault schedules, stronger
 admission/snapshot crash schedules, and equal-semantics performance baselines remain.
 Payload state is buffered and bounded (8 MiB per stream, 16 MiB per shard), with
 backpressure rather than cold offload. Do not infer many-stream production capacity

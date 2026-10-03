@@ -10,6 +10,7 @@ use std::fmt::Debug;
 use std::io::Cursor;
 use std::ops::{Bound, RangeBounds};
 use std::path::Path;
+use std::time::Instant;
 
 use openraft::storage::{LogFlushed, RaftLogStorage, RaftStateMachine};
 use openraft::{
@@ -22,13 +23,22 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{TypeConfig, model};
+use crate::{TypeConfig, metrics::Histogram, model};
 
 type Result<T> = std::result::Result<T, StorageError<u64>>;
 type Job = Box<dyn FnOnce(&mut Worker) + Send>;
 const QUEUE_DEPTH: usize = 128;
 const SNAPSHOT_CHECKSUM_BYTES: usize = 32;
 const MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
+static QUEUE: Histogram = Histogram::new();
+static PERSIST: Histogram = Histogram::new();
+static APPLY: Histogram = Histogram::new();
+
+pub fn timing_metrics(text: &mut String) {
+    QUEUE.render("chronicle_storage_queue_duration_seconds", text);
+    PERSIST.render("chronicle_storage_persist_duration_seconds", text);
+    APPLY.render("chronicle_storage_apply_duration_seconds", text);
+}
 
 #[derive(Clone)]
 pub struct SqliteStore {
@@ -46,6 +56,8 @@ struct SnapshotBody {
 struct Worker {
     db: Connection,
     state: model::State,
+    #[cfg(feature = "storage-faults")]
+    faults: crate::faults::Context,
     // SQLite transaction locks do not fence two independent cached Raft state machines.
     // Keep this OS lock for the entire actor lifetime, including shutdown.
     _process_lock: std::fs::File,
@@ -107,8 +119,10 @@ impl SqliteStore {
         f: impl FnOnce(&mut Worker) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         let (tx, rx) = oneshot::channel();
+        let queued = Instant::now();
         self.tx
             .send(Box::new(move |w| {
+                QUEUE.observe(queued.elapsed());
                 let _ = tx.send(f(w));
             }))
             .await
@@ -188,6 +202,8 @@ impl Worker {
         Ok(Self {
             db,
             state,
+            #[cfg(feature = "storage-faults")]
+            faults: crate::faults::Context::new(path),
             _process_lock: process_lock,
         })
     }
@@ -389,8 +405,11 @@ impl RaftLogStorage<TypeConfig> for SqliteStore {
     {
         let es: Vec<_> = entries.into_iter().collect();
         let (result_tx, result_rx) = oneshot::channel();
+        let queued = Instant::now();
         self.tx
             .send(Box::new(move |w| {
+                QUEUE.observe(queued.elapsed());
+                let persisted = Instant::now();
                 let result = w.db_transaction(|t| {
                     for e in es {
                         t.execute(
@@ -401,6 +420,13 @@ impl RaftLogStorage<TypeConfig> for SqliteStore {
                     }
                     Ok(())
                 });
+                #[cfg(feature = "storage-faults")]
+                let result = result.and_then(|()| {
+                    w.faults
+                        .hit(crate::faults::AFTER_LOG_COMMIT)
+                        .map_err(store_write)
+                });
+                PERSIST.observe(persisted.elapsed());
                 callback.log_io_completed(
                     result
                         .as_ref()
@@ -460,7 +486,8 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
     {
         let es: Vec<_> = entries.into_iter().collect();
         self.call(move |w| {
-            w.state_transaction(|t, s| {
+            let started = Instant::now();
+            let result = w.state_transaction(|t, s| {
                 let mut out = Vec::with_capacity(es.len());
                 for e in es {
                     match e.payload {
@@ -505,7 +532,16 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                     put_meta(t, "applied", &Some(e.log_id))?;
                 }
                 Ok(out)
-            })
+            });
+            #[cfg(feature = "storage-faults")]
+            let result = result.and_then(|out| {
+                w.faults
+                    .hit(crate::faults::AFTER_APPLY_COMMIT)
+                    .map_err(store_write)?;
+                Ok(out)
+            });
+            APPLY.observe(started.elapsed());
+            result
         })
         .await
     }
@@ -538,7 +574,11 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                     "snapshot metadata mismatch",
                 )));
             }
-            w.state_transaction(|t, s| {
+            #[cfg(feature = "storage-faults")]
+            w.faults
+                .hit(crate::faults::BEFORE_SNAPSHOT_INSTALL)
+                .map_err(store_write)?;
+            let result = w.state_transaction(|t, s| {
                 t.execute("DELETE FROM streams", []).map_err(store_write)?;
                 for (k, v) in &body.state.streams {
                     t.execute("INSERT INTO streams(k,v) VALUES(?,?)", (k, encode(v)?))
@@ -552,7 +592,14 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                 put_meta(t, "snapshot_meta", &supplied)?;
                 *s = body.state;
                 Ok(())
-            })
+            });
+            #[cfg(feature = "storage-faults")]
+            let result = result.and_then(|()| {
+                w.faults
+                    .hit(crate::faults::AFTER_SNAPSHOT_INSTALL)
+                    .map_err(store_write)
+            });
+            result
         })
         .await
     }

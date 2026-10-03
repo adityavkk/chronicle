@@ -1,5 +1,8 @@
 //! Durable-majority stream state and OpenRaft integration.
 use std::io::Cursor;
+#[cfg(feature = "storage-faults")]
+pub mod faults;
+pub mod metrics;
 pub mod model;
 pub mod network;
 pub mod storage;

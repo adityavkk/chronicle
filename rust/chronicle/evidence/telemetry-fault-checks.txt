@@ -1,0 +1,149 @@
+/home/user/.cargo/bin/cargo clippy --locked --all-targets --features storage-faults -- -D warnings
+    Checking chronicle-raft v0.1.0 (/home/user/workspace/repo/rust/chronicle)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.18s
+/home/user/.cargo/bin/cargo test --locked --features storage-faults --test fault_gates
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/repo/rust/chronicle)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.32s
+     Running tests/fault_gates.rs (target/debug/deps/fault_gates-dbfbbfdfc530bee3)
+
+running 4 tests
+test fault_gate_child ... ok
+
+running 1 test
+
+running 1 test
+
+running 1 test
+test fault_gate_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.04s
+
+test unwinding_test_reaps_paused_child_and_releases_store ... ok
+
+running 1 test
+test release_file_allows_the_paused_operation_to_finish ... ok
+
+running 1 test
+
+running 1 test
+test crashes_at_durable_boundaries_reopen_with_exact_state ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+/home/user/.cargo/bin/cargo fmt --manifest-path tests/vfs/Cargo.toml -- --check
+CARGO_TARGET_DIR=/home/user/workspace/repo/rust/chronicle/target /home/user/.cargo/bin/cargo clippy --manifest-path tests/vfs/Cargo.toml --locked --all-targets -- -D warnings
+    Checking chronicle-vfs-tests v0.0.0 (/home/user/workspace/repo/rust/chronicle/tests/vfs)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+CARGO_TARGET_DIR=/home/user/workspace/repo/rust/chronicle/target /home/user/.cargo/bin/cargo test --manifest-path tests/vfs/Cargo.toml --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running unittests src/lib.rs (target/debug/deps/chronicle_vfs_tests-701701b934ec5e32)
+
+running 1 test
+test tests::sqlite_vfs_write_and_sync_failures_preserve_acknowledged_state ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+   Doc-tests chronicle_vfs_tests
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+/home/user/.cargo/bin/cargo fmt --all -- --check
+/home/user/.cargo/bin/cargo clippy --locked --all-targets -- -D warnings
+    Checking chronicle-raft v0.1.0 (/home/user/workspace/repo/rust/chronicle)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.79s
+/home/user/.cargo/bin/cargo test --locked
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/repo/rust/chronicle)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.07s
+     Running unittests src/lib.rs (target/debug/deps/chronicle_raft-a18eef1620ecd1fa)
+
+running 14 tests
+test storage::tests::child_process_lock_holder ... ok
+test metrics::tests::inclusive_buckets_and_sum_have_independent_expectations ... ok
+test storage::tests::corrupt_and_truncated_snapshots_are_rejected ... ok
+
+running 1 test
+test storage::tests::rejects_corrupt_database ... ok
+test storage::tests::overlapping_process_cannot_open_same_raft_identity ... ok
+test storage::tests::failed_state_transaction_rolls_back_database_and_publication ... ok
+test storage::tests::snapshot_format_is_raw_body_with_fixed_checksum_overhead ... ok
+test storage::tests::reopen_empty_store ... ok
+test metrics::tests::concurrent_scrapes_keep_cumulative_buckets_consistent ... ok
+test storage::tests::nonempty_vote_and_state_survive_reopen ... ok
+test storage::tests::cancelled_caller_does_not_release_actor_lock_or_cancel_durable_work ... ok
+test storage::tests::install_rejects_metadata_that_does_not_match_body ... ok
+test storage::tests::restart_rejects_missing_or_truncated_store_without_initializing_it ... ok
+test storage::tests::process_lock_survives_overlap_and_releases_on_sigkill ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/main.rs (target/debug/deps/chronicle_raft-c3fcd433c50fc0ef)
+
+running 9 tests
+test telemetry::tests::duplicate_and_coalesced_future_traceparents_are_rejected ... ok
+test identity::tests::duplicate_seed_addresses_are_not_three_replicas ... ok
+test telemetry::tests::invalid_context_is_replaced_and_valid_context_continues ... ok
+test tests::rpc_rejects_missing_wrong_node_and_wrong_cluster_identity ... ok
+test telemetry::tests::forwarding_preserves_unsampled_context ... ok
+test identity::tests::restart_is_bound_to_identity_and_requires_every_store ... ok
+test tests::admission_is_reserved_before_reading_a_slow_body ... ok
+test controller::tests::placement_completion_requires_applied_uniform_membership ... ok
+test telemetry::tests::unavailable_exporter_cannot_block_completion_and_overflow_is_counted ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/fault_gates.rs (target/debug/deps/fault_gates-2ca9530e8ae36972)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/formal_retry.rs (target/debug/deps/formal_retry-aaf581be0c593459)
+
+running 1 test
+test replays_formal_retention_scenario ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/openraft_storage.rs (target/debug/deps/openraft_storage-e736cea6ea842765)
+
+running 1 test
+test upstream_storage_contracts ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.60s
+
+     Running tests/state_machine.rs (target/debug/deps/state_machine-2288e3534a296361)
+
+running 7 tests
+test admission_never_reuses_an_identity_or_address ... ok
+test gaps_are_rejected_without_consuming_producer_identity ... ok
+test old_sequence_returns_its_original_frontier_after_interleaving ... ok
+test stale_lifecycle_operations_cannot_mutate_recreated_stream ... ok
+test snapshot_reopen_preserves_successful_retry_and_membership_boundary ... ok
+test committed_duplicate_schedules_preserve_exact_bytes ... ok
+test content_type_and_metadata_are_bounded_by_capacity ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.70s
+
+   Doc-tests chronicle_raft
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+RUSTDOCFLAGS='-D warnings' /home/user/.cargo/bin/cargo doc --locked --no-deps
+ Documenting chronicle-raft v0.1.0 (/home/user/workspace/repo/rust/chronicle)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.52s
+   Generated /home/user/workspace/repo/rust/chronicle/target/doc/chronicle_raft/index.html
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+test_duplicates (test_history.CheckerTest.test_duplicates) ... ok
+test_falsified_retention (test_history.CheckerTest.test_falsified_retention) ... ok
+test_non_prefix (test_history.CheckerTest.test_non_prefix) ... ok
+test_real_time_violation (test_history.CheckerTest.test_real_time_violation) ... ok
+test_unknown_accepted_write (test_history.CheckerTest.test_unknown_accepted_write) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.001s
+
+OK

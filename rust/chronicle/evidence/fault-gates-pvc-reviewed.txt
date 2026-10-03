@@ -1,0 +1,29 @@
+
+running 4 tests
+test crashes_at_durable_boundaries_reopen_with_exact_state ... 
+running 1 test
+test fault_gate_child ... 
+running 1 test
+test fault_gate_child ... 
+running 1 test
+test fault_gate_child ... 
+running 1 test
+test fault_gate_child ... ok
+test fault_gate_child ... ok
+test release_file_allows_the_paused_operation_to_finish ... 
+running 1 test
+test fault_gate_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.02s
+
+ok
+test unwinding_test_reaps_paused_child_and_releases_store ... 
+running 1 test
+test fault_gate_child ... 
+thread 'unwinding_test_reaps_paused_child_and_releases_store' panicked at tests/fault_gates.rs:254:9:
+intentional harness failure
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+

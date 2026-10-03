@@ -78,11 +78,25 @@ data:
          "options":{"legend":{"displayMode":"table","placement":"right","showLegend":true,"width":260,"calcs":["lastNotNull"]}},
          "gridPos":{"h":16,"w":18,"x":0,"y":8}},
         {"id":4,"type":"timeseries","title":"Dropped / failed telemetry export",
-         "datasource":{"uid":"vm"},"targets":[{"expr":"sum(rate(chronicle_telemetry_dropped_total[1m]))","legendFormat":"Drops / failures per second"}],
-         "gridPos":{"h":16,"w":6,"x":18,"y":8}}
+         "datasource":{"uid":"vm"},"targets":[
+           {"expr":"sum(rate(chronicle_telemetry_dropped_total[1m]))","legendFormat":"OTLP queue drops/s"},
+           {"expr":"sum(rate(chronicle_telemetry_export_errors_total[1m]))","legendFormat":"Export failures/s"},
+           {"expr":"sum(rate(chronicle_log_dropped_total[1m]))","legendFormat":"Stdout drops/s"}],
+         "gridPos":{"h":16,"w":6,"x":18,"y":8}},
+        {"id":5,"type":"timeseries","title":"Storage phase p99 seconds (completed batches)",
+         "datasource":{"uid":"vm"},"targets":[
+           {"expr":"histogram_quantile(0.99,sum by(le)(rate(chronicle_storage_queue_duration_seconds_bucket[1m])))","legendFormat":"Actor queue"},
+           {"expr":"histogram_quantile(0.99,sum by(le)(rate(chronicle_storage_persist_duration_seconds_bucket[1m])))","legendFormat":"Log transaction"},
+           {"expr":"histogram_quantile(0.99,sum by(le)(rate(chronicle_storage_apply_duration_seconds_bucket[1m])))","legendFormat":"Apply transaction"}],
+         "gridPos":{"h":8,"w":12,"x":0,"y":24}},
+        {"id":6,"type":"timeseries","title":"Proposal / RPC p99 seconds (not pure replication)",
+         "datasource":{"uid":"vm"},"targets":[
+           {"expr":"histogram_quantile(0.99,sum by(le)(rate(chronicle_commit_apply_duration_seconds_bucket[1m])))","legendFormat":"Proposal through apply / timeout"},
+           {"expr":"histogram_quantile(0.99,sum by(le)(rate(chronicle_rpc_duration_seconds_bucket[1m])))","legendFormat":"RPC including decode"}],
+         "gridPos":{"h":8,"w":12,"x":12,"y":24}}
       ],
       "schemaVersion":42,"tags":["chronicle"],"title":"Chronicle Raft","uid":"chronicle-raft",
-      "version":5,"time":{"from":"now-30m","to":"now"},"refresh":"10s"
+      "version":6,"time":{"from":"now-30m","to":"now"},"refresh":"10s"
     }
 ---
 apiVersion: apps/v1
