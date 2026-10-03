@@ -78,3 +78,14 @@ bytes, never from response metadata.
 See `tests/conformance/README.md` for reproducible installation and private-cluster
 execution. The default manifests remain ClusterIP-only; the temporary local test
 NodePort must not be exposed publicly and should be removed after testing.
+
+## Fail-closed header boundary after the baseline
+
+Source `30a541ec75f35b49f58e7d08b9dd3a8f5c8312c5` rejects PUT fork and
+absolute-expiry headers and POST `Stream-Seq` with 501 before admission or body
+extraction. `header-guard-images.json` identifies all four updated k3d pods;
+`header-guard-history.jsonl` and `header-guard-result.json` retain the passing
+HTTP regression. Rejected creates leave no object, rejected ordered appends
+change neither bytes nor producer sequence, and unrelated headers still work.
+This removes false success for those missing features; it does not implement
+them or turn the failing conformance baseline into a pass.

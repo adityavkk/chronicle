@@ -1,0 +1,154 @@
+[
+  {
+    "pod": "chronicle-0",
+    "node": "k3d-chronicle-rust-agent-2",
+    "containers": [
+      {
+        "image": "chronicle-raft:header-guard",
+        "env": [
+          {
+            "name": "LISTEN",
+            "value": "0.0.0.0:8080"
+          },
+          {
+            "name": "DATA_DIR",
+            "value": "/data"
+          },
+          {
+            "name": "CLUSTER_ID",
+            "value": "chronicle-k3d-disposable-v1"
+          },
+          {
+            "name": "CLUSTER_NODES",
+            "value": "{\"1\":{\"addr\":\"chronicle-0.chronicle:8080\",\"zone\":\"a\",\"draining\":false},\"2\":{\"addr\":\"chronicle-1.chronicle:8080\",\"zone\":\"b\",\"draining\":false},\"3\":{\"addr\":\"chronicle-2.chronicle:8080\",\"zone\":\"c\",\"draining\":false}}"
+          },
+          {
+            "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "value": "http://otel-collector.observability:4317"
+          }
+        ]
+      }
+    ],
+    "status": [
+      {
+        "imageID": "sha256:aa11dfac7422ac33864d9b64bfbbe8cedc6e097ca9978d6a669c866ab262d71b",
+        "ready": true,
+        "restartCount": 0
+      }
+    ]
+  },
+  {
+    "pod": "chronicle-1",
+    "node": "k3d-chronicle-rust-agent-1",
+    "containers": [
+      {
+        "image": "chronicle-raft:header-guard",
+        "env": [
+          {
+            "name": "LISTEN",
+            "value": "0.0.0.0:8080"
+          },
+          {
+            "name": "DATA_DIR",
+            "value": "/data"
+          },
+          {
+            "name": "CLUSTER_ID",
+            "value": "chronicle-k3d-disposable-v1"
+          },
+          {
+            "name": "CLUSTER_NODES",
+            "value": "{\"1\":{\"addr\":\"chronicle-0.chronicle:8080\",\"zone\":\"a\",\"draining\":false},\"2\":{\"addr\":\"chronicle-1.chronicle:8080\",\"zone\":\"b\",\"draining\":false},\"3\":{\"addr\":\"chronicle-2.chronicle:8080\",\"zone\":\"c\",\"draining\":false}}"
+          },
+          {
+            "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "value": "http://otel-collector.observability:4317"
+          }
+        ]
+      }
+    ],
+    "status": [
+      {
+        "imageID": "sha256:aa11dfac7422ac33864d9b64bfbbe8cedc6e097ca9978d6a669c866ab262d71b",
+        "ready": true,
+        "restartCount": 0
+      }
+    ]
+  },
+  {
+    "pod": "chronicle-2",
+    "node": "k3d-chronicle-rust-agent-3-0",
+    "containers": [
+      {
+        "image": "chronicle-raft:header-guard",
+        "env": [
+          {
+            "name": "LISTEN",
+            "value": "0.0.0.0:8080"
+          },
+          {
+            "name": "DATA_DIR",
+            "value": "/data"
+          },
+          {
+            "name": "CLUSTER_ID",
+            "value": "chronicle-k3d-disposable-v1"
+          },
+          {
+            "name": "CLUSTER_NODES",
+            "value": "{\"1\":{\"addr\":\"chronicle-0.chronicle:8080\",\"zone\":\"a\",\"draining\":false},\"2\":{\"addr\":\"chronicle-1.chronicle:8080\",\"zone\":\"b\",\"draining\":false},\"3\":{\"addr\":\"chronicle-2.chronicle:8080\",\"zone\":\"c\",\"draining\":false}}"
+          },
+          {
+            "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "value": "http://otel-collector.observability:4317"
+          }
+        ]
+      }
+    ],
+    "status": [
+      {
+        "imageID": "sha256:aa11dfac7422ac33864d9b64bfbbe8cedc6e097ca9978d6a669c866ab262d71b",
+        "ready": true,
+        "restartCount": 0
+      }
+    ]
+  },
+  {
+    "pod": "chronicle-3",
+    "node": "k3d-chronicle-rust-agent-0",
+    "containers": [
+      {
+        "image": "chronicle-raft:header-guard",
+        "env": [
+          {
+            "name": "LISTEN",
+            "value": "0.0.0.0:8080"
+          },
+          {
+            "name": "DATA_DIR",
+            "value": "/data"
+          },
+          {
+            "name": "CLUSTER_ID",
+            "value": "chronicle-k3d-disposable-v1"
+          },
+          {
+            "name": "CLUSTER_NODES",
+            "value": "{\"1\":{\"addr\":\"chronicle-0.chronicle:8080\",\"zone\":\"a\",\"draining\":false},\"2\":{\"addr\":\"chronicle-1.chronicle:8080\",\"zone\":\"b\",\"draining\":false},\"3\":{\"addr\":\"chronicle-2.chronicle:8080\",\"zone\":\"c\",\"draining\":false}}"
+          },
+          {
+            "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "value": "http://otel-collector.observability:4317"
+          }
+        ]
+      }
+    ],
+    "status": [
+      {
+        "imageID": "sha256:aa11dfac7422ac33864d9b64bfbbe8cedc6e097ca9978d6a669c866ab262d71b",
+        "ready": true,
+        "restartCount": 0
+      }
+    ]
+  }
+]

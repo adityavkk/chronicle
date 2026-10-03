@@ -902,12 +902,14 @@ async fn stream_inner(
     // This measures the caller-visible proposal-through-apply path. It deliberately is not
     // labelled as replication latency: queueing, persistence and state-machine apply are included.
     let commit_apply_started = Instant::now();
-    let result = tokio::time::timeout(Duration::from_secs(8), g.raft.client_write(command)).await;
+    let result = tokio::time::timeout(
+        Duration::from_secs(8),
+        admitted_write(g.raft.clone(), command, admission),
+    )
+    .await;
     telemetry::commit_apply(commit_apply_started.elapsed());
     timings.proposal_us += commit_apply_started.elapsed().as_micros() as u64;
-    let result = result
-        .map_err(|_| unavailable("timeout: outcome unknown"))?
-        .map_err(unavailable)?;
+    let result = result.map_err(|_| unavailable("timeout: outcome unknown"))??;
     if let Some(error) = result.data.error {
         let status = match error {
             model::Error::Missing => StatusCode::NOT_FOUND,
@@ -931,6 +933,23 @@ async fn stream_inner(
         .header("stream-duplicate", result.data.duplicate.to_string())
         .body(Body::empty())
         .map_err(unavailable)
+}
+
+async fn admitted_write(
+    raft: Raft,
+    command: Command,
+    admission: impl Send + 'static,
+) -> Result<openraft::raft::ClientWriteResponse<TypeConfig>, (StatusCode, String)> {
+    // Dropping a JoinHandle detaches rather than aborts. HTTP cancellation must
+    // not free capacity while the local client_write waiter remains pending.
+    tokio::spawn(async move {
+        let result = raft.client_write(command).await;
+        drop(admission);
+        result
+    })
+    .await
+    .map_err(unavailable)?
+    .map_err(unavailable)
 }
 
 async fn wait_for_data(
@@ -975,16 +994,26 @@ async fn read_visible_info(
     key: &str,
     stale: bool,
     timings: &mut telemetry::PhaseTimings,
-    admission: impl Send + 'static,
+    admission: impl Clone + Send + 'static,
 ) -> Result<Option<chronicle_raft::storage::StreamInfo>, (StatusCode, String)> {
     if !stale {
         let started = Instant::now();
-        let result = g.raft.ensure_linearizable().await;
+        let raft = g.raft.clone();
+        let guard = admission.clone();
+        // The barrier also submits to OpenRaft's unbounded API queue. Keep its
+        // waiter admitted if the HTTP caller disconnects while the core stalls.
+        let result = tokio::spawn(async move {
+            let result = raft.ensure_linearizable().await;
+            drop(guard);
+            result
+        })
+        .await
+        .map_err(unavailable)?;
         timings.barrier_us += started.elapsed().as_micros() as u64;
         result.map_err(unavailable)?;
     }
     let started = Instant::now();
-    let existing = g.store.read_info(key.to_owned(), admission).await;
+    let existing = g.store.read_info(key.to_owned(), admission.clone()).await;
     timings.read_us += started.elapsed().as_micros() as u64;
     let mut existing = existing.map_err(unavailable)?.filter(|s| !s.deleted);
     if !stale
@@ -992,17 +1021,19 @@ async fn read_visible_info(
         && s.config.expires_ms.is_some_and(|t| t <= now_ms())
     {
         let started = Instant::now();
-        let result = g
-            .raft
-            .client_write(Command::Delete {
+        let result = admitted_write(
+            g.raft.clone(),
+            Command::Delete {
                 key: key.to_owned(),
                 incarnation: s.incarnation,
                 expired_at: s.config.expires_ms,
-            })
-            .await;
+            },
+            admission,
+        )
+        .await;
         telemetry::commit_apply(started.elapsed());
         timings.proposal_us += started.elapsed().as_micros() as u64;
-        result.map_err(unavailable)?;
+        result?;
         existing = None;
     }
     Ok(existing)
@@ -1011,6 +1042,122 @@ async fn read_visible_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancelled_write_and_expiry_retain_admission_until_raft_completes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("raft.sqlite");
+        let store = SqliteStore::open(&path).await.unwrap();
+        let raft = Raft::new(
+            1,
+            Arc::new(Config::default().validate().unwrap()),
+            Network {
+                client: reqwest::Client::new(),
+                cluster: "admission-test".into(),
+                group: 1,
+            },
+            store.clone(),
+            store.clone(),
+        )
+        .await
+        .unwrap();
+        raft.initialize(BTreeMap::from([(1, BasicNode::new("unused"))]))
+            .await
+            .unwrap();
+        raft.ensure_linearizable().await.unwrap();
+        // Hold SQLite's writer lock, not an artificial completion future. The
+        // actual Raft write cannot persist until this transaction rolls back.
+        let blocker = rusqlite::Connection::open(&path).unwrap();
+        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let admission = Arc::new(Semaphore::new(1));
+        let permit = admission.clone().try_acquire_owned().unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            admitted_write(
+                raft.clone(),
+                Command::Create {
+                    key: "cancelled".into(),
+                    expected_incarnation: None,
+                    config: StreamConfig {
+                        content_type: "application/octet-stream".into(),
+                        expires_ms: None,
+                    },
+                    data: b"accepted after cancellation".to_vec(),
+                    closed: false,
+                },
+                permit,
+            ),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(admission.available_permits(), 0);
+        assert!(admission.clone().try_acquire_owned().is_err());
+        blocker.execute_batch("ROLLBACK").unwrap();
+        let released = tokio::time::timeout(Duration::from_secs(3), admission.acquire())
+            .await
+            .unwrap()
+            .unwrap();
+        let stream = store
+            .read_info("cancelled".into(), ())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stream.end, 27);
+        assert_eq!(stream.incarnation, 1);
+        drop(released);
+
+        raft.client_write(Command::Create {
+            key: "expired".into(),
+            expected_incarnation: None,
+            config: StreamConfig {
+                content_type: "application/octet-stream".into(),
+                expires_ms: Some(0),
+            },
+            data: vec![7],
+            closed: false,
+        })
+        .await
+        .unwrap();
+        let live = Arc::new(Semaphore::new(1));
+        let guards = (
+            Arc::new(admission.clone().try_acquire_owned().unwrap()),
+            Arc::new(live.clone().try_acquire_owned().unwrap()),
+        );
+        let group = Group {
+            raft: raft.clone(),
+            store: store.clone(),
+            movement: Mutex::new(()),
+        };
+        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let mut timings = telemetry::PhaseTimings::default();
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            read_visible_info(&group, "expired", false, &mut timings, guards),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(admission.available_permits(), 0);
+        assert_eq!(live.available_permits(), 0);
+        blocker.execute_batch("ROLLBACK").unwrap();
+        let released = tokio::time::timeout(Duration::from_secs(3), admission.acquire())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(live.available_permits(), 1);
+        assert!(
+            store
+                .read_info("expired".into(), ())
+                .await
+                .unwrap()
+                .unwrap()
+                .deleted
+        );
+        drop(released);
+        drop(group);
+        raft.shutdown().await.unwrap();
+        drop(raft);
+        store.close().await;
+    }
 
     #[tokio::test]
     async fn unsupported_headers_reject_before_admission_or_body_extraction() {
