@@ -191,3 +191,27 @@ records five uniform-image pods on retained PVCs. The unchanged full suite
 `conformance-browser-headers-64013` reports **190 passed, 136 failed, 6 skipped**:
 six header tests improve, with no new failures. All compatibility and durability
 limitations above still apply. The listener remains trusted-private only.
+
+## Producer position captured during apply
+
+Source `60d0bae` adds captured epoch/highest-sequence response metadata without
+changing commands or snapshots. A retained retry still returns its original
+frontier; its sequence header instead reports the highest accepted sequence at
+retry apply. Fenced epochs return 403; an existing producer's invalid epoch
+upgrade returns 400; ordinary gaps remain 409 with expected/received metadata.
+No rejected tuple is consumed. Snapshot/reopen and property tests distinguish
+these positions, including after closure and after a subsequent epoch change.
+
+Formal-first source `64ddd1a` extends `WriteReply` to 504 bounded states, with
+two producer-publication negative controls. Its first draft mixed a string
+sentinel and integers, causing TLC evaluation error 75; the retained draft
+error is not a successful check or intended counterexample. The corrected
+`make formal` passed. `producer-reply-check.txt` and the state-machine rerun
+record passing Rust checks. Independent scoped review found no blocker.
+
+`producer-reply-before-*` retains the missing-header failure on the prior image;
+`producer-reply-after-*` passes the extended live HTTP matrix. All five image
+identities are retained in `producer-reply-pods.json`. The unmodified full suite
+`conformance-producer-reply-64016` reports **200 passed, 126 failed, 6 skipped**:
+ten producer/closure tests improve, with no new failures. Full compatibility
+remains unfinished, including producer input validation outside this change.
