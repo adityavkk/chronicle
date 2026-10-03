@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chronicle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chronicle
+  namespace: chronicle
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {app: chronicle-raft}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chronicle-http
+  namespace: chronicle
+spec:
+  type: ClusterIP
+  selector: {app: chronicle-raft}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chronicle
+  namespace: chronicle
+spec:
+  serviceName: chronicle
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: {app: chronicle-raft}
+  template:
+    metadata:
+      labels: {app: chronicle-raft}
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 1000
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - {key: node-role.kubernetes.io/control-plane, operator: DoesNotExist}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: {app: chronicle-raft}
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: chronicle
+          image: chronicle-raft:dev
+          imagePullPolicy: Never
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              ordinal="${HOSTNAME##*-}"
+              export NODE_ID="$((ordinal + 1))"
+              export ADVERTISE="${HOSTNAME}.chronicle:8080"
+              exec /usr/local/bin/chronicle-raft
+          env:
+            - {name: LISTEN, value: "0.0.0.0:8080"}
+            - {name: DATA_DIR, value: /data}
+            - {name: CLUSTER_ID, value: chronicle-k3d-disposable-v1}
+            - name: CLUSTER_NODES
+              value: '{"1":{"addr":"chronicle-0.chronicle:8080","zone":"a","draining":false},"2":{"addr":"chronicle-1.chronicle:8080","zone":"b","draining":false},"3":{"addr":"chronicle-2.chronicle:8080","zone":"c","draining":false}}'
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector.observability:4317"}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests: {storage: 1Gi}

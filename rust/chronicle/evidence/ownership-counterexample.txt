@@ -1,0 +1,51 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 29 and seed 7627876166444879447 with 1 worker on 8 cores with 4002MB heap and 64MB offheap memory [pid: 321951] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/Ownership.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module Ownership
+Starting... (2026-10-03 04:16:29)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-03 04:16:29.
+Error: Invariant AcknowledgedRetained is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ active = {}
+/\ cache = <<{}, {}>>
+/\ acknowledged = {}
+/\ disk = {}
+
+State 2: <Open line 11, col 12 to line 15, col 46 of module Ownership>
+/\ active = {1}
+/\ cache = <<{}, {}>>
+/\ acknowledged = {}
+/\ disk = {}
+
+State 3: <Open line 11, col 12 to line 15, col 46 of module Ownership>
+/\ active = {1, 2}
+/\ cache = <<{}, {}>>
+/\ acknowledged = {}
+/\ disk = {}
+
+State 4: <Apply line 19, col 13 to line 24, col 31 of module Ownership>
+/\ active = {1, 2}
+/\ cache = <<{1}, {}>>
+/\ acknowledged = {1}
+/\ disk = {1}
+
+State 5: <Apply line 19, col 13 to line 24, col 31 of module Ownership>
+/\ active = {1, 2}
+/\ cache = <<{1}, {2}>>
+/\ acknowledged = {1, 2}
+/\ disk = {2}
+
+28 states generated, 17 distinct states found, 7 states left on queue.
+The depth of the complete state graph search is 5.
+The average outdegree of the complete state graph is 2 (minimum is 1, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-03 04:16:29)

@@ -1,0 +1,80 @@
+{
+  "drained": 4,
+  "control": {
+    "streams": {},
+    "nodes": {
+      "1": {
+        "addr": "chronicle-0.chronicle:8080",
+        "zone": "a",
+        "draining": false
+      },
+      "2": {
+        "addr": "chronicle-1.chronicle:8080",
+        "zone": "b",
+        "draining": false
+      },
+      "3": {
+        "addr": "chronicle-2.chronicle:8080",
+        "zone": "c",
+        "draining": false
+      },
+      "4": {
+        "addr": "chronicle-3.chronicle:8080",
+        "zone": "unknown",
+        "draining": true
+      }
+    },
+    "placements": {
+      "0": {
+        "generation": 25,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791008855361
+      },
+      "1": {
+        "generation": 13,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791008915506
+      },
+      "2": {
+        "generation": 7,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791008923519
+      },
+      "3": {
+        "generation": 3,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791008929529
+      },
+      "4": {
+        "generation": 1,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791002364696
+      }
+    }
+  }
+}

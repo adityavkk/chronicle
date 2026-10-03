@@ -1,0 +1,23 @@
+groups:
+  - name: chronicle-raft
+    rules:
+      - alert: ChronicleLossOfQuorum
+        expr: min by (group) (chronicle_raft_quorum_available) < 1
+        for: 30s
+        labels: {severity: critical}
+        annotations: {runbook: "RUNBOOK.md#loss-of-quorum"}
+      - alert: ChronicleMigrationStalled
+        expr: max by (group) (chronicle_migration_age_seconds) > 300
+        for: 5m
+        labels: {severity: warning}
+        annotations: {runbook: "RUNBOOK.md#migration-stalled"}
+      - alert: ChronicleBackpressure
+        expr: max by (instance) (chronicle_backpressure_queue_depth) > 1000
+        for: 2m
+        labels: {severity: warning}
+        annotations: {runbook: "RUNBOOK.md#backpressure"}
+      - alert: ChronicleTelemetryDrops
+        expr: sum(rate(otelcol_exporter_send_failed_spans_total[5m])) + sum(rate(otelcol_exporter_send_failed_log_records_total[5m])) + sum(rate(otelcol_exporter_send_failed_metric_points_total[5m])) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations: {runbook: "RUNBOOK.md#telemetry-drops"}

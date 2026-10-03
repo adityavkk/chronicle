@@ -1,0 +1,204 @@
+apiVersion: v1
+kind: Namespace
+metadata: {name: observability}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: otel-config, namespace: observability}
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: {endpoint: 0.0.0.0:4317}
+          http: {endpoint: 0.0.0.0:4318}
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: chronicle-raft
+              scrape_interval: 10s
+              dns_sd_configs:
+                - names: [_http._tcp.chronicle.chronicle.svc.cluster.local]
+                  type: SRV
+                  refresh_interval: 10s
+              relabel_configs:
+                - source_labels: [__meta_dns_srv_record_target]
+                  regex: '(chronicle-[0-9]+)\..*'
+                  target_label: node
+                  replacement: '$1'
+            - job_name: otel-collector
+              scrape_interval: 10s
+              static_configs:
+                - targets: [127.0.0.1:8888]
+    processors:
+      batch: {}
+      memory_limiter: {check_interval: 1s, limit_mib: 192}
+    exporters:
+      otlphttp/metrics:
+        metrics_endpoint: http://victoria-metrics:8428/opentelemetry/v1/metrics
+      otlphttp/logs:
+        logs_endpoint: http://victoria-logs:9428/insert/opentelemetry/v1/logs
+      otlphttp/traces:
+        traces_endpoint: http://victoria-traces:10428/insert/opentelemetry/v1/traces
+    service:
+      pipelines:
+        metrics: {receivers: [otlp, prometheus], processors: [memory_limiter, batch], exporters: [otlphttp/metrics]}
+        logs: {receivers: [otlp], processors: [memory_limiter, batch], exporters: [otlphttp/logs]}
+        traces: {receivers: [otlp], processors: [memory_limiter, batch], exporters: [otlphttp/traces]}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: grafana-provisioning, namespace: observability}
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - {name: VictoriaMetrics, uid: vm, type: prometheus, access: proxy, url: http://victoria-metrics:8428, isDefault: true}
+      - {name: VictoriaTraces, uid: vt, type: jaeger, access: proxy, url: http://victoria-traces:10428/select/jaeger}
+      - {name: VictoriaLogs, uid: vl, type: victoriametrics-logs-datasource, access: proxy, url: http://victoria-logs:9428}
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: local
+        folder: Chronicle
+        type: file
+        options: {path: /var/lib/grafana/dashboards}
+  chronicle.json: |
+    {
+      "annotations":{"list":[]},"editable":false,
+      "panels":[
+        {"id":1,"type":"timeseries","title":"Request rate (includes forwarding hops)",
+         "datasource":{"uid":"vm"},"targets":[{"expr":"sum(rate(chronicle_requests_total[1m]))","legendFormat":"Requests/s"}],
+         "gridPos":{"h":8,"w":12,"x":0,"y":0}},
+        {"id":2,"type":"timeseries","title":"Request p99 seconds",
+         "datasource":{"uid":"vm"},"targets":[{"expr":"histogram_quantile(0.99,sum by(le)(rate(chronicle_request_duration_seconds_bucket[1m])))","legendFormat":"p99"}],
+         "gridPos":{"h":8,"w":12,"x":12,"y":0}},
+        {"id":3,"type":"timeseries","title":"Applied Raft index by node / group",
+         "datasource":{"uid":"vm"},"targets":[{"expr":"chronicle_raft_applied{node!=\"\"}","legendFormat":"{{node}} group {{group}}"}],
+         "options":{"legend":{"displayMode":"table","placement":"right","showLegend":true,"width":260,"calcs":["lastNotNull"]}},
+         "gridPos":{"h":16,"w":18,"x":0,"y":8}},
+        {"id":4,"type":"timeseries","title":"Dropped / failed telemetry export",
+         "datasource":{"uid":"vm"},"targets":[{"expr":"sum(rate(chronicle_telemetry_dropped_total[1m]))","legendFormat":"Drops / failures per second"}],
+         "gridPos":{"h":16,"w":6,"x":18,"y":8}}
+      ],
+      "schemaVersion":42,"tags":["chronicle"],"title":"Chronicle Raft","uid":"chronicle-raft",
+      "version":5,"time":{"from":"now-30m","to":"now"},"refresh":"10s"
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: otel-collector, namespace: observability}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: otel-collector}}
+  template:
+    metadata: {labels: {app: otel-collector}}
+    spec:
+      containers:
+        - name: collector
+          image: otel/opentelemetry-collector-contrib@sha256:886722fe0f37af9d1fe24d29529253ec59fbf263b3b1df4facaf221373e19d23
+          args: [--config=/etc/otel/config.yaml]
+          resources: {requests: {cpu: 25m, memory: 64Mi}, limits: {cpu: 300m, memory: 256Mi}}
+          volumeMounts: [{name: config, mountPath: /etc/otel}]
+      volumes: [{name: config, configMap: {name: otel-config}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: otel-collector, namespace: observability}
+spec:
+  selector: {app: otel-collector}
+  ports: [{name: grpc, port: 4317}, {name: http, port: 4318}, {name: metrics, port: 8888}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: victoria-metrics, namespace: observability}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: victoria-metrics}}
+  template:
+    metadata: {labels: {app: victoria-metrics}}
+    spec:
+      containers:
+        - name: server
+          image: victoriametrics/victoria-metrics@sha256:5eff7af5341e401471002f58d106d399e614a62f3d240f2dbc21901e49eed5dd
+          args: [-storageDataPath=/data, -retentionPeriod=7d]
+          resources: {requests: {cpu: 25m, memory: 64Mi}, limits: {cpu: 500m, memory: 384Mi}}
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes: [{name: data, emptyDir: {sizeLimit: 1Gi}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: victoria-metrics, namespace: observability}
+spec: {selector: {app: victoria-metrics}, ports: [{port: 8428}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: victoria-logs, namespace: observability}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: victoria-logs}}
+  template:
+    metadata: {labels: {app: victoria-logs}}
+    spec:
+      containers:
+        - name: server
+          image: victoriametrics/victoria-logs@sha256:251121fa882af99b95ba0c230a4a2f412ea602d2698c64a96c58dc9842bb755d
+          args: [-storageDataPath=/data, -retentionPeriod=7d]
+          resources: {requests: {cpu: 25m, memory: 64Mi}, limits: {cpu: 500m, memory: 384Mi}}
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes: [{name: data, emptyDir: {sizeLimit: 1Gi}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: victoria-logs, namespace: observability}
+spec: {selector: {app: victoria-logs}, ports: [{port: 9428}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: victoria-traces, namespace: observability}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: victoria-traces}}
+  template:
+    metadata: {labels: {app: victoria-traces}}
+    spec:
+      containers:
+        - name: server
+          image: victoriametrics/victoria-traces@sha256:80919fcc85cc6dd87f598d20ccf42d0ab1120de8f25d4dcf08c5ea2515a496ba
+          args: [-storageDataPath=/data, -retentionPeriod=7d]
+          resources: {requests: {cpu: 25m, memory: 64Mi}, limits: {cpu: 500m, memory: 384Mi}}
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes: [{name: data, emptyDir: {sizeLimit: 1Gi}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: victoria-traces, namespace: observability}
+spec: {selector: {app: victoria-traces}, ports: [{port: 10428}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: grafana, namespace: observability}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: grafana}}
+  template:
+    metadata: {labels: {app: grafana}}
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572
+          env:
+            - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "true"}
+            - {name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: Viewer}
+            - {name: GF_INSTALL_PLUGINS, value: "victoriametrics-logs-datasource 0.32.0"}
+          resources: {requests: {cpu: 25m, memory: 96Mi}, limits: {cpu: 500m, memory: 384Mi}}
+          volumeMounts:
+            - {name: provisioning, mountPath: /etc/grafana/provisioning/datasources/datasources.yaml, subPath: datasources.yaml}
+            - {name: provisioning, mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml, subPath: dashboards.yaml}
+            - {name: provisioning, mountPath: /var/lib/grafana/dashboards/chronicle.json, subPath: chronicle.json}
+      volumes: [{name: provisioning, configMap: {name: grafana-provisioning}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: grafana, namespace: observability}
+spec: {selector: {app: grafana}, ports: [{port: 3000}]}

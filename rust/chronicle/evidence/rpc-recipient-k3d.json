@@ -1,0 +1,164 @@
+{
+  "valid": true,
+  "results": [
+    {
+      "route": "append",
+      "case": "missing",
+      "status": 421
+    },
+    {
+      "route": "append",
+      "case": "wrong-node",
+      "status": 421
+    },
+    {
+      "route": "append",
+      "case": "wrong-cluster",
+      "status": 421
+    },
+    {
+      "route": "vote",
+      "case": "missing",
+      "status": 421
+    },
+    {
+      "route": "vote",
+      "case": "wrong-node",
+      "status": 421
+    },
+    {
+      "route": "vote",
+      "case": "wrong-cluster",
+      "status": 421
+    },
+    {
+      "route": "snapshot",
+      "case": "missing",
+      "status": 421
+    },
+    {
+      "route": "snapshot",
+      "case": "wrong-node",
+      "status": 421
+    },
+    {
+      "route": "snapshot",
+      "case": "wrong-cluster",
+      "status": 421
+    }
+  ],
+  "before": {
+    "running_state": {
+      "Ok": null
+    },
+    "id": 1,
+    "current_term": 25,
+    "vote": {
+      "leader_id": {
+        "term": 25,
+        "node_id": 3
+      },
+      "committed": true
+    },
+    "last_log_index": 70,
+    "last_applied": {
+      "leader_id": {
+        "term": 25,
+        "node_id": 3
+      },
+      "index": 70
+    },
+    "snapshot": null,
+    "purged": null,
+    "state": "Follower",
+    "current_leader": 3,
+    "millis_since_quorum_ack": null,
+    "membership_config": {
+      "log_id": {
+        "leader_id": {
+          "term": 22,
+          "node_id": 2
+        },
+        "index": 68
+      },
+      "membership": {
+        "configs": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "nodes": {
+          "1": {
+            "addr": "chronicle-0.chronicle:8080"
+          },
+          "2": {
+            "addr": "chronicle-1.chronicle:8080"
+          },
+          "3": {
+            "addr": "chronicle-2.chronicle:8080"
+          }
+        }
+      }
+    },
+    "replication": null
+  },
+  "after": {
+    "running_state": {
+      "Ok": null
+    },
+    "id": 1,
+    "current_term": 25,
+    "vote": {
+      "leader_id": {
+        "term": 25,
+        "node_id": 3
+      },
+      "committed": true
+    },
+    "last_log_index": 70,
+    "last_applied": {
+      "leader_id": {
+        "term": 25,
+        "node_id": 3
+      },
+      "index": 70
+    },
+    "snapshot": null,
+    "purged": null,
+    "state": "Follower",
+    "current_leader": 3,
+    "millis_since_quorum_ack": null,
+    "membership_config": {
+      "log_id": {
+        "leader_id": {
+          "term": 22,
+          "node_id": 2
+        },
+        "index": 68
+      },
+      "membership": {
+        "configs": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "nodes": {
+          "1": {
+            "addr": "chronicle-0.chronicle:8080"
+          },
+          "2": {
+            "addr": "chronicle-1.chronicle:8080"
+          },
+          "3": {
+            "addr": "chronicle-2.chronicle:8080"
+          }
+        }
+      }
+    },
+    "replication": null
+  }
+}

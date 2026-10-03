@@ -1,0 +1,26 @@
+time="2026-10-03T03:38:40.518954851Z" level=info msg="Container 943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d: CDI devices from CRI Config.CDIDevices: []"
+time="2026-10-03T03:38:40.525124648Z" level=info msg="CreateContainer within sandbox \"854656e9af22859f4021f54d22e639db226f40c24ac28acb4da18fcd2d7953f3\" for &ContainerMetadata{Name:chronicle,Attempt:0,} returns container id \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\""
+time="2026-10-03T03:38:40.525648977Z" level=info msg="StartContainer for \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\""
+time="2026-10-03T03:38:40.526326718Z" level=info msg="connecting to shim 943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d" address="unix:///run/containerd/s/faa2c5678012bd5fc3d1d235878dea2650c8716026813ba6c8bb95216c1f1078" protocol=ttrpc version=3
+time="2026-10-03T03:38:40.589018327Z" level=info msg="StartContainer for \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\" returns successfully"
+time="2026-10-03T03:41:27.730310127Z" level=info msg="StopContainer for \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\" with timeout 2 (s)"
+time="2026-10-03T03:41:27.730799713Z" level=info msg="Stop container \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\" with signal terminated"
+time="2026-10-03T03:41:28.276348485Z" level=info msg="Container 3ae9cca21c6affd19e987612f25e1563ac81b52cbd684b3ae3d6c2dc719febb8: CDI devices from CRI Config.CDIDevices: []"
+time="2026-10-03T03:41:28.285615291Z" level=info msg="CreateContainer within sandbox \"380fb0a00a387348ded148e1888824948928014f150a694c4f301da638926732\" for &ContainerMetadata{Name:chronicle,Attempt:0,} returns container id \"3ae9cca21c6affd19e987612f25e1563ac81b52cbd684b3ae3d6c2dc719febb8\""
+time="2026-10-03T03:41:28.286355297Z" level=info msg="StartContainer for \"3ae9cca21c6affd19e987612f25e1563ac81b52cbd684b3ae3d6c2dc719febb8\""
+time="2026-10-03T03:41:28.287230619Z" level=info msg="connecting to shim 3ae9cca21c6affd19e987612f25e1563ac81b52cbd684b3ae3d6c2dc719febb8" address="unix:///run/containerd/s/33956ca5a9202a60513a07e7e447657f939595cb663b4d50343d6654bed9f1c3" protocol=ttrpc version=3
+time="2026-10-03T03:41:28.353872131Z" level=info msg="StartContainer for \"3ae9cca21c6affd19e987612f25e1563ac81b52cbd684b3ae3d6c2dc719febb8\" returns successfully"
+time="2026-10-03T03:41:29.743616503Z" level=info msg="Kill container \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\""
+time="2026-10-03T03:41:29.754979848Z" level=info msg="received exit event container_id:\"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\"  id:\"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\"  pid:27005  exit_status:137  exited_at:{seconds:1790998889  nanos:754620909}"
+time="2026-10-03T03:41:29.755116051Z" level=info msg="TaskExit event in podsandbox handler container_id:\"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\"  id:\"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\"  pid:27005  exit_status:137  exited_at:{seconds:1790998889  nanos:754620909}"
+time="2026-10-03T03:41:29.787524040Z" level=info msg="StopContainer for \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\" returns successfully"
+time="2026-10-03T03:41:29.788059399Z" level=info msg="Container to stop \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\" must be in running or unknown state, current state \"CONTAINER_EXITED\""
+time="2026-10-03T03:41:30.335525875Z" level=info msg="RemoveContainer for \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\""
+time="2026-10-03T03:41:30.337843533Z" level=info msg="RemoveContainer for \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\" returns successfully"
+time="2026-10-03T03:41:30.338337980Z" level=error msg="ContainerStatus for \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\" failed" error="rpc error: code = NotFound desc = an error occurred when try to find container \"943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d\": not found"
+time="2026-10-03T03:43:40.534419217Z" level=warning msg="container event discarded" container=943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d type=CONTAINER_CREATED_EVENT
+time="2026-10-03T03:43:40.598161932Z" level=warning msg="container event discarded" container=943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d type=CONTAINER_STARTED_EVENT
+time="2026-10-03T03:46:28.295006074Z" level=warning msg="container event discarded" container=3ae9cca21c6affd19e987612f25e1563ac81b52cbd684b3ae3d6c2dc719febb8 type=CONTAINER_CREATED_EVENT
+time="2026-10-03T03:46:28.362459693Z" level=warning msg="container event discarded" container=3ae9cca21c6affd19e987612f25e1563ac81b52cbd684b3ae3d6c2dc719febb8 type=CONTAINER_STARTED_EVENT
+time="2026-10-03T03:46:29.797680052Z" level=warning msg="container event discarded" container=943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d type=CONTAINER_STOPPED_EVENT
+time="2026-10-03T03:46:30.349006138Z" level=warning msg="container event discarded" container=943ffde52d821e97bc3091dfc320ff549c9911fdc4288511ea8eed4ffb13366d type=CONTAINER_DELETED_EVENT
