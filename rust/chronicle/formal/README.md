@@ -136,6 +136,10 @@ network, not authentication against a malicious sender.
 
 ## Leadership policy (specified before implementation)
 
+This is an opt-in experiment (`CHRONICLE_EXPERIMENTAL_CAMPAIGNS=1`), default off.
+It does not qualify as the requested resource-informed leadership balancing.
+Automatic replica placement and repair operate independently of this switch.
+
 OpenRaft 0.9.25 has no directed transfer API. The controller will use its native
 `trigger().elect()` on the preferred voter, not alter terms or remove/re-add
 members. This can interrupt availability; it is not a zero-downtime handoff.
@@ -144,12 +148,15 @@ For each completed placement, the preferred voter is the sorted voter at
 without another mutable authority. It balances leader counts, not measured load.
 
 Campaign only while applied membership is the uniform intended voter set, this
-node is the preferred voter, and another leader is known. Require the same
+node is the preferred voter and not draining, and another leader is known. Require the same
 placement generation, term and leader for 30 monotonic seconds first. Reset the
 cooldown **before** calling the native trigger, including unknown outcomes.
 Restart, ineligibility or observation changes require a fresh interval. This
 does not wait for a particular log index: Raft's native voting/log-up-to-date
 rules remain authoritative, including a membership change racing the check.
+The interval bounds trigger submissions, not election starts: `elect()` enqueues
+a command and does not report election success. Cancellation cannot retract a
+queued command. A delayed command may execute after eligibility changes.
 
 `Campaign.tla` checks this cooldown in 711 bounded states. Its `clock` maps to
 Rust `Instant`, `view` to `(generation, term, leader)`, `observed/since` to the

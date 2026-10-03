@@ -91,6 +91,7 @@ def run_workload(a):
         emit(fp, lock, {"type": "info", "f": "run", "value": {"seed": a.seed, "urls": a.url,
              "tenant": a.tenant, "path": a.path, "record_size": RECORD_SIZE,
              "producers": a.producers, "reads": a.readers, "operations_per_producer": a.operations,
+             "append_interval": a.append_interval,
              "payload": "fixed-width ASCII record", "consistency": "strict except labelled stale reads"}})
         c = Client(a.url, a.tenant, a.path, a.timeout, rng)
         operation(fp, lock, "setup", "create", "create", lambda: c.request("PUT", b"", {"Content-Type": "application/octet-stream"}))
@@ -111,6 +112,8 @@ def run_workload(a):
                 value["record"] = data.decode("ascii")  # completion was already emitted; add authoritative metadata.
                 emit(fp, lock, {"type": "info", "f": "record", "id": oid,
                                 "value": {"record": data.decode("ascii"), "terminal": typ, "attempts": attempts}})
+                if a.append_interval > 0:
+                    stop.wait(a.append_interval)
 
         def reader(rid):
             local = Client(a.url, a.tenant, a.path, a.timeout, random.Random(a.seed + 10000 + rid))
@@ -229,6 +232,7 @@ def main():
     r.add_argument("--producers", type=int, default=4); r.add_argument("--readers", type=int, default=2)
     r.add_argument("--operations", type=int, default=100); r.add_argument("--retries", type=int, default=3)
     r.add_argument("--timeout", type=float, default=10); r.add_argument("--read-interval", type=float, default=.05)
+    r.add_argument("--append-interval", type=float, default=0, help="per-producer pause after each logical append, including retries")
     r.add_argument("--stale-fraction", type=float, default=0)
     r.add_argument("--nemesis", choices=["none", "leader-kill", "minority-partition", "majority-partition", "drop-delay", "snapshot-crash", "node-join", "node-drain"], default="none")
     r.add_argument("--nemesis-delay", type=float, default=2); r.add_argument("--nemesis-duration", type=float, default=5)

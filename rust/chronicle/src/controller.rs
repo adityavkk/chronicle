@@ -5,14 +5,50 @@ use openraft::BasicNode;
 use openraft::storage::RaftStateMachine;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
+const CAMPAIGN_DELAY: Duration = Duration::from_secs(30);
+
+struct Campaign {
+    // Placement generation, term, current leader. Any change restarts observation.
+    view: (u64, u64, u64),
+    since: Instant,
+}
+
+impl Campaign {
+    fn due(&mut self, view: (u64, u64, u64), now: Instant) -> bool {
+        if self.view != view {
+            self.view = view;
+            self.since = now;
+            return false;
+        }
+        if now.duration_since(self.since) < CAMPAIGN_DELAY {
+            return false;
+        }
+        // Before the await: cancellation or an unknown result must not undo this.
+        self.since = now;
+        true
+    }
+}
+
 pub async fn run(a: Shared) {
+    // Native campaigns are disruptive experiments, never default balancing.
+    let campaigns_enabled =
+        std::env::var("CHRONICLE_EXPERIMENTAL_CAMPAIGNS").is_ok_and(|value| value == "1");
+    let mut campaigns = BTreeMap::new();
     loop {
-        match tokio::time::timeout(Duration::from_secs(20), tick(&a)).await {
+        match tokio::time::timeout(
+            Duration::from_secs(20),
+            tick(&a, &mut campaigns, campaigns_enabled),
+        )
+        .await
+        {
             Ok(Ok(())) => (),
-            result => tracing::warn!(error = ?result, "controller retry; outcome may be unknown"),
+            result => {
+                campaigns.clear();
+                tracing::warn!(error = ?result, "controller retry; outcome may be unknown");
+            }
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
@@ -38,7 +74,11 @@ async fn control(a: &Shared) -> anyhow::Result<State> {
     anyhow::bail!("control quorum unavailable")
 }
 
-async fn tick(a: &Shared) -> anyhow::Result<()> {
+async fn tick(
+    a: &Shared,
+    campaigns: &mut BTreeMap<u64, Campaign>,
+    campaigns_enabled: bool,
+) -> anyhow::Result<()> {
     let mut state = control(a).await?;
     let control_group = &a.groups[&0];
     if control_group.raft.metrics().borrow().current_leader == Some(a.id) {
@@ -92,6 +132,9 @@ async fn tick(a: &Shared) -> anyhow::Result<()> {
         }
     }
     state = control(a).await?;
+    if campaigns_enabled {
+        balance_leaders(a.id, &a.groups, &state, campaigns).await?;
+    }
     for (shard, p) in &state.placements {
         let group = &a.groups[shard];
         let initial = group.raft.metrics().borrow().clone();
@@ -191,6 +234,52 @@ async fn tick(a: &Shared) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn balance_leaders(
+    id: u64,
+    groups: &BTreeMap<u64, crate::Group>,
+    state: &State,
+    campaigns: &mut BTreeMap<u64, Campaign>,
+) -> anyhow::Result<()> {
+    // Scan every campaign before reconciliation's one-movement break. A skipped
+    // shard must not retain an observation made before draining/ineligibility.
+    for (shard, p) in &state.placements {
+        // Place validates exactly three voters. Derive preference from replicated
+        // intent; reject irrelevant groups before awaiting their storage actors.
+        let preferred = p.voters.iter().nth((*shard % 3) as usize).copied();
+        if !p.complete
+            || preferred != Some(id)
+            || state.nodes.get(&id).is_none_or(|node| node.draining)
+        {
+            campaigns.remove(shard);
+            continue;
+        }
+        let group = &groups[shard];
+        let matches = membership_applied(&group.store, &p.voters).await?;
+        // Membership I/O can wait behind other storage jobs. Do not credit that
+        // elapsed time to a term/leader sampled before the await.
+        let current = group.raft.metrics().borrow().clone();
+        if matches && let Some(leader) = current.current_leader.filter(|leader| *leader != id) {
+            let now = Instant::now();
+            let view = (p.generation, current.current_term, leader);
+            let campaign = campaigns
+                .entry(*shard)
+                .or_insert(Campaign { view, since: now });
+            if campaign.due(view, now) {
+                tracing::info!(
+                    shard,
+                    leader,
+                    term = current.current_term,
+                    "preferred voter requesting native election; availability may pause"
+                );
+                group.raft.trigger().elect().await?;
+            }
+        } else {
+            campaigns.remove(shard);
+        }
+    }
+    Ok(())
+}
+
 async fn membership_applied(
     store: &chronicle_raft::storage::SqliteStore,
     voters: &BTreeSet<u64>,
@@ -227,6 +316,72 @@ mod tests {
     use super::*;
     use chronicle_raft::storage::SqliteStore;
     use openraft::{CommittedLeaderId, Entry, EntryPayload, LogId, Membership};
+
+    #[tokio::test]
+    async fn every_ineligible_campaign_clears_without_touching_storage() {
+        use chronicle_raft::model::{Node, Placement};
+        for (complete, draining, id) in [(false, false, 1), (true, true, 1), (true, false, 4)] {
+            let mut state = State::default();
+            state.nodes.insert(
+                id,
+                Node {
+                    addr: "node".into(),
+                    zone: "a".into(),
+                    draining,
+                },
+            );
+            let mut campaigns = BTreeMap::new();
+            // Two shards preferring node1: both must reset, not only the first.
+            for shard in [0, 3] {
+                state.placements.insert(
+                    shard,
+                    Placement {
+                        voters: BTreeSet::from([1, 2, 3]),
+                        complete,
+                        ..Default::default()
+                    },
+                );
+                campaigns.insert(
+                    shard,
+                    Campaign {
+                        view: (1, 2, 3),
+                        since: Instant::now() - CAMPAIGN_DELAY,
+                    },
+                );
+            }
+            // No groups exist: indexing one would expose an irrelevant storage read.
+            balance_leaders(id, &BTreeMap::new(), &state, &mut campaigns)
+                .await
+                .unwrap();
+            assert!(campaigns.is_empty());
+        }
+    }
+
+    #[test]
+    fn campaign_waits_again_after_attempt_view_change_and_restart() {
+        let start = Instant::now();
+        let view = (7, 11, 3);
+        let mut campaign = Campaign { view, since: start };
+        assert!(!campaign.due(view, start + CAMPAIGN_DELAY - Duration::from_nanos(1)));
+        assert!(campaign.due(view, start + CAMPAIGN_DELAY));
+        // No result is supplied: successful, rejected and unknown attempts all
+        // consume the interval before the native election call can be awaited.
+        assert!(!campaign.due(view, start + CAMPAIGN_DELAY));
+        assert!(campaign.due(view, start + CAMPAIGN_DELAY * 2));
+        for changed in [(8, 11, 3), (8, 12, 3), (8, 12, 2)] {
+            let now = campaign.since + CAMPAIGN_DELAY;
+            assert!(!campaign.due(changed, now));
+            assert!(!campaign.due(changed, now + CAMPAIGN_DELAY - Duration::from_nanos(1)));
+            assert!(campaign.due(changed, now + CAMPAIGN_DELAY));
+        }
+        let restart = campaign.since + CAMPAIGN_DELAY;
+        let mut campaign = Campaign {
+            view,
+            since: restart,
+        };
+        assert!(!campaign.due(view, restart));
+        assert!(campaign.due(view, restart + CAMPAIGN_DELAY));
+    }
 
     #[tokio::test]
     async fn placement_completion_requires_applied_uniform_membership() {
