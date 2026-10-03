@@ -113,6 +113,12 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
   60-second application lifetime assumes HTTP consumer progress, not forced
   socket teardown when the transport stops polling. Forwarded streams retain
   admission on both nodes. This is not full protocol conformance.
+* A [release-mode workload comparison](evidence/PERFORMANCE.md) measured 156 ack/s
+  with 172 ms p99 on one hot stream, versus 262 ack/s with 74 ms p99 across four
+  shards, using the same CP/strict semantics and eight producers. Each case
+  retained 2,048 records with no failed/unknown append and Porcupine `Ok` for
+  every stream history. This short shared-host run is not a capacity estimate;
+  coarse resource samples cannot compare per-case peaks.
 
 ## Explicitly unfinished
 
@@ -120,7 +126,8 @@ This is a bounded replicated vertical slice, **not the full requested deliverabl
 Protocol conformance beyond the implemented request subset,
 zero-copy sendfile, resource-informed placement and leadership
 balancing, deeper replication/storage trace linkage, broader I/O-fault schedules, stronger
-admission/snapshot crash schedules, and equal-semantics performance baselines remain.
+admission/snapshot crash schedules, repeated steady-state measurements and external
+equal-semantics performance baselines remain.
 The [unmodified conformance baseline](evidence/CONFORMANCE.md) is failing, not
 waived. Until implemented, PUT fork/absolute-expiry headers and POST `Stream-Seq`
 return 501 before body extraction or storage access, rather than acknowledging
