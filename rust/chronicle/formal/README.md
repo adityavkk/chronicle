@@ -59,13 +59,27 @@ before strict reads. Snapshot install atomically replaces streams, producer resu
 membership and applied index. These are reviewed correspondences, **not mechanized
 refinement**. The formal model is smaller than the implementation:
 
-* The implementation retains successful sequence-to-original-frontier results for the
-  current epoch/incarnation, at most 100,000 total per stream; capacity rejects without
-  eviction. Incarnation and epoch fences precede cache lookup. Same-tuple payload
-  changes are ignored. A gap rejection consumes no producer identity and may succeed
-  after its predecessor. The TLA outcome cache includes rejections, so that policy is
-  **not an exact implementation model**; Lean no-effect lemmas do not prove response
-  retention across all sequences. Fixed tests cover the chosen implementation policy.
+* The original `Chronicle.tla` outcome cache includes rejections. The retrospective
+  `Retention.tla` refinement instead models the implemented policy: incarnation and
+  epoch fences precede lookup; only successes are retained; each old sequence returns
+  its original byte frontier despite later writes and payload changes; a gap consumes
+  nothing; a new epoch and delete/recreate clear old results; and snapshot/recovery
+  carries the success table. `RetentionScenario.tla` runs a deterministic trace of 14
+  transitions (15 states), including a retry immediately after recovery that must
+  return the original frontier. `BadRetention.cfg` changes duplicate
+  replies to the latest frontier and reaches a six-state
+  `OriginalFrontierReplies` counterexample. This is a retrospective policy refinement,
+  not evidence that the refinement preceded the implementation.
+* `bridge/retention_trace.tsv` is the tabular projection of those scenario phases and
+  `tests/formal_retry.rs` replays it through the real `State::apply`, including a serde
+  state round trip for snapshot/recovery. The fixture and TLA scenario are reviewed
+  side-by-side rather than generated from one common executable AST, so this catches
+  Rust behavior drift but not transcription drift between those two files. Lean proves
+  original-frontier insertion, preservation across later successes, and incarnation/
+  epoch-before-cache ordering without `sorry`, `admit`, or custom axioms.
+* Production permits 100,000 retained successes per stream and rejects the next one
+  without eviction. The bounded model's `CacheBound` checks its three-sequence domain;
+  it does not enumerate 100,001 writes or prove Rust allocation/overflow behavior.
 * Learners catch up to an observed committed read-barrier boundary before OpenRaft
   performs safe membership change. The abstract model's instantaneous current-commit
   promotion condition is stronger. OpenRaft, not that simplified predicate, supplies

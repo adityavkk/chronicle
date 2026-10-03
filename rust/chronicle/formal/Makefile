@@ -7,6 +7,7 @@ TLC := java -XX:+UseParallelGC -cp $(JAR) tlc2.TLC -workers auto
 check: jar lean positive negative
 
 positive:
+	cd tla && $(TLC) -metadir /tmp/chronicle-retention-$$$$ -config Retention.cfg RetentionScenario.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-ownership-$$$$ -config Ownership.cfg Ownership.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-safety-$$$$ -config Safety.cfg Chronicle.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-placement-$$$$ -config Placement.cfg Chronicle.tla
@@ -16,13 +17,15 @@ positive:
 # TLC exit 12 plus the exact invariant name proves a model counterexample;
 # parser/configuration failures cannot accidentally satisfy these controls.
 negative:
-	@set -eu; check_bad() { name=$$1; inv=$$2; out=$$(mktemp); trap 'rm -f "$$out"' EXIT; \
+	@mkdir -p evidence/negative
+	@set -eu; check_bad() { name=$$1; inv=$$2; out=evidence/negative/$$name.txt; \
 	  module=$${3:-Chronicle}; set +e; (cd tla && $(TLC) -metadir /tmp/chronicle-$$name-$$$$ -config $$name.cfg $$module.tla) >$$out 2>&1; rc=$$?; set -e; \
-	  test $$rc -eq 12; grep -F "Invariant $$inv is violated." $$out >/dev/null; rm -f $$out; trap - EXIT; }; \
+	  test $$rc -eq 12; grep -F "Invariant $$inv is violated." $$out >/dev/null; }; \
 	check_bad BadAck AckDurable; \
 	check_bad BadOwnerFence AcceptedAuthorityCurrent; \
 	check_bad BadPromotion PromotionCaughtUp; \
-	check_bad BadOwnership AcknowledgedRetained Ownership
+	check_bad BadOwnership AcknowledgedRetained Ownership; \
+	check_bad BadRetention OriginalFrontierReplies RetentionScenario
 
 jar:
 	@test -f $(JAR) || curl -fL -o $(JAR) https://github.com/tlaplus/tlaplus/releases/download/$(TLA_VERSION)/tla2tools.jar
@@ -33,4 +36,4 @@ lean:
 	! grep -R -nE '\b(sorry|admit|axiom)\b' lean/ChronicleFormal*.lean lean/ChronicleFormal
 
 clean:
-	rm -rf lean/.lake tla/states /tmp/chronicle-*
+	rm -rf lean/.lake tla/states

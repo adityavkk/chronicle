@@ -104,4 +104,56 @@ theorem retry_after_other_producer_interleaving (s : State) (p other e q oe oq :
 theorem prefix_recovery (s : State) (committed suffix : List Command) :
     replay s (committed ++ suffix) = replay (replay s committed) suffix := replay_append s committed suffix
 
+/- The implementation's success-only result table, modeled independently of effects. -/
+structure Retention where
+  incarnation : Nat
+  epoch : Nat
+  seq : Nat
+  frontier : Nat
+  results : List (Nat × Nat)
+deriving DecidableEq
+
+def retained (q : Nat) : List (Nat × Nat) → Option Nat
+  | [] => none
+  | (q', end') :: rest => if q = q' then some end' else retained q rest
+
+def retainSuccess (r : Retention) (q bytes : Nat) : Retention :=
+  ⟨r.incarnation, r.epoch, q, r.frontier + bytes,
+    (q, r.frontier + bytes) :: r.results⟩
+
+inductive RetainedReply where
+  | staleIncarnation | epochFenced | newEpoch | sequenceGap | duplicate (end' : Nat)
+deriving DecidableEq
+
+def retryReply (r : Retention) (inc epoch q : Nat) : RetainedReply :=
+  if inc ≠ r.incarnation then .staleIncarnation
+  else if epoch < r.epoch then .epochFenced
+  else if r.epoch < epoch then if q = 0 then .newEpoch else .sequenceGap
+  else match retained q r.results with
+    | some end' => .duplicate end'
+    | none => .sequenceGap
+
+theorem newest_success_retains_original_frontier (r : Retention) (q bytes : Nat) :
+    retained q (retainSuccess r q bytes).results = some (r.frontier + bytes) := by
+  simp [retainSuccess, retained]
+
+theorem later_success_preserves_old_frontier (r : Retention) (oldQ oldEnd q bytes : Nat)
+    (hne : oldQ ≠ q) (h : retained oldQ r.results = some oldEnd) :
+    retained oldQ (retainSuccess r q bytes).results = some oldEnd := by
+  simp [retainSuccess, retained, hne, h]
+
+theorem stale_incarnation_fences_before_cache (r : Retention) (inc epoch q : Nat)
+    (h : inc ≠ r.incarnation) :
+    retryReply r inc epoch q = .staleIncarnation := by simp [retryReply, h]
+
+theorem old_epoch_fences_before_cache (r : Retention) (epoch q : Nat)
+    (h : epoch < r.epoch) :
+    retryReply r r.incarnation epoch q = .epochFenced := by simp [retryReply, h]
+
+theorem new_epoch_never_uses_old_cache (r : Retention) (epoch : Nat)
+    (h : r.epoch < epoch) :
+    retryReply r r.incarnation epoch 0 = .newEpoch := by
+  have hn : ¬ epoch < r.epoch := by omega
+  simp [retryReply, h, hn]
+
 end ChronicleFormal

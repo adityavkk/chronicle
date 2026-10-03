@@ -1,0 +1,16 @@
+# Manually synchronized RetentionScenario phases, not a generated TLC export.
+# op	inc	epoch	seq	payload	error	end	duplicate
+append	1	0	1	bb	SequenceGap	0	false
+append	1	0	0	a	-	1	false
+append	1	0	1	bb	-	3	false
+append	1	0	2	ccc	-	6	false
+append	1	0	0	XXX	-	1	true
+snapshot	-	-	-	-	-	-	-
+recover	-	-	-	-	-	-	-
+append	1	0	0	XXX	-	1	true
+append	1	1	0	dd	-	8	false
+append	1	0	2	ccc	EpochFenced	0	false
+delete	1	-	-	-	-	0	false
+recreate	2	-	-	-	-	0	false
+append	1	1	0	dd	StaleIncarnation	0	false
+append	2	0	0	e	-	1	false
