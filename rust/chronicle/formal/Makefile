@@ -7,6 +7,7 @@ TLC := java -XX:+UseParallelGC -cp $(JAR) tlc2.TLC -workers auto
 check: jar lean positive negative
 
 positive:
+	cd tla && $(TLC) -metadir /tmp/chronicle-live-read-$$$$ -config LiveRead.cfg LiveRead.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-campaign-$$$$ -config Campaign.cfg Campaign.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-projection-$$$$ -config Projection.cfg Projection.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-retention-$$$$ -config Retention.cfg RetentionScenario.tla
@@ -30,7 +31,9 @@ negative:
 	check_bad BadRetention OriginalFrontierReplies RetentionScenario; \
 	check_bad BadProjectionRestart DataFromAuthority Projection; \
 	check_bad BadProjectionIncarnation DataFromAuthority Projection; \
-	check_bad BadCampaign CampaignSpacing Campaign
+	check_bad BadCampaign CampaignSpacing Campaign; \
+	check_bad BadLiveTimeout NoSkippedBytes LiveRead; \
+	check_bad BadLiveIncarnation IncarnationBound LiveRead
 
 jar:
 	@test -f $(JAR) || curl -fL -o $(JAR) https://github.com/tlaplus/tlaplus/releases/download/$(TLA_VERSION)/tla2tools.jar

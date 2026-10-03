@@ -168,3 +168,34 @@ attempts, changed views and restart. There is no mechanized refinement or claim
 that this policy proves election safety/liveness; those rely on OpenRaft and
 eventually connected healthy voters. No resource-informed balancing claim follows
 from this count-based preference.
+
+## Long-poll response boundary (specified before implementation)
+
+`LiveRead.tla` specifies the next live-read stage, not an already implemented API.
+It assumes OpenRaft supplies committed application state and a safe strict read
+barrier. `Observe` maps to a barrier followed by `read_info`; `from` is the fixed
+requested byte offset, including the initial resolution of `offset=now`.
+`requestInc` binds the request to that initial incarnation. A later incarnation
+must fail the pending request, never silently substitute a recreated stream.
+
+`Reply` uses one captured frontier for both payload coverage and next offset.
+An empty timeout must not advertise a newer frontier sampled after that capture:
+the client could otherwise skip committed bytes. The timeout mutation deliberately
+makes this mistake. The incarnation mutation permits a response from a replacement
+stream. Positive checks cover close, recreate, append and connectivity changes
+interleaved between capture and response. The existing projection model separately
+checks that captured ranges come from the committed incarnation.
+
+The implementation will use bounded admission and a five-second long-poll wait,
+with apply notifications used only to wake readers. Every successful response,
+including timeout/EOF, requires a strict barrier and a captured view; notifications
+are not authority. A deadline wake must recheck data before returning an empty
+response. Follow Electric's cursor/framing conventions from the pinned vendor
+source. Do not infer new stored-byte offsets from JSON response wrapper lengths.
+Explicit stale-prefix mode remains a finite read, not a freshness promise.
+
+This safety model does not prove notification delivery, wall-clock expiration or
+bounded HTTP completion. Progress requires eventual connectivity, a responsive
+storage actor and executor fairness. There is no mechanized model-to-Rust
+refinement. Implementation tests must cross timeout/append races, incarnation
+replacement, EOF and loss of quorum before a response.
