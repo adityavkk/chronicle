@@ -21,11 +21,21 @@ case "$action" in
     done
     ;;
   heal)
-    rule -nvL CHRONICLE_FAULT
-    rule -D INPUT -j CHRONICLE_FAULT
-    rule -D OUTPUT -j CHRONICLE_FAULT
-    rule -F CHRONICLE_FAULT
-    rule -X CHRONICLE_FAULT
+    # Injection may fail between chain creation and either jump. Inspect once,
+    # attempt every remaining removal, and report failures rather than hiding them.
+    rules=$(rule -S)
+    failed=0
+    if grep -q '^-N CHRONICLE_FAULT$' <<<"$rules"; then
+      rule -nvL CHRONICLE_FAULT || failed=1
+      for hook in INPUT OUTPUT; do
+        if grep -q "^-A $hook -j CHRONICLE_FAULT$" <<<"$rules"; then
+          rule -D "$hook" -j CHRONICLE_FAULT || failed=1
+        fi
+      done
+      rule -F CHRONICLE_FAULT || failed=1
+      rule -X CHRONICLE_FAULT || failed=1
+    fi
+    exit "$failed"
     ;;
   *) exit 2;;
 esac

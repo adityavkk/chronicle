@@ -24,6 +24,53 @@ def applied_uniform(metrics, voters):
             and metrics["last_applied"]["index"] >= membership["log_id"]["index"])
 
 
+def quarantine(node, note):
+    registered = api("/admin/control")["nodes"][str(node)]
+    if not registered["draining"]:
+        registered["draining"] = True
+        try:
+            api("/admin/register", [node, registered])
+        except Exception as error:
+            note("quarantine-unknown", error=repr(error))
+    # Read after an ambiguous mutation; never assume it did not execute or retry blindly.
+    if not api("/admin/control")["nodes"][str(node)]["draining"]:
+        raise RuntimeError("quarantine unverified")
+
+
+def cleanup(pod, node, armed, reached, isolated, partition, note):
+    errors = []
+
+    def attempt(label, action):
+        try:
+            action()
+            return True
+        except Exception as error:
+            errors.append(f"{label}: {error!r}")
+            return False
+
+    if node is not None:
+        attempt("restore draining", lambda: quarantine(node, note))
+    # Disarm every gate before releasing any; failures must not skip the others.
+    disarmed = [attempt("disarm", lambda f=f: control(pod, "rm", f["arm"])) for f in armed]
+    released = [attempt("release", lambda f=f: control(pod, "touch", f["release"])) for f in armed]
+    if isolated:
+        attempt("heal", lambda: partition("heal"))
+    if reached is not None and all(disarmed) and all(released):
+        resumed = attempt("resume", lambda: wait(
+            lambda: control(pod, "test", reached["resumed"], check=False).returncode == 0,
+            "storage gate release"))
+        if resumed:
+            for files in armed:
+                for suffix in ("reached", "resumed", "release"):
+                    # Unused gate markers need not exist; these exact paths are owned.
+                    attempt("remove marker", lambda p=files[suffix]: command(
+                        K, "-n", "chronicle", "exec", pod, "--", "rm", "-f", p))
+    elif armed:
+        note("gate-controls-retained", controls=armed)
+    note("cleanup", errors=errors)
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--node", type=int, required=True)
@@ -66,14 +113,16 @@ def main():
             result.check_returncode()
 
         command(K, "-n", "chronicle", "exec", pod, "--", "mkdir", "-p", directory)
-        armed, isolated, reached = [], False, None
+        armed, isolated, reached, admitted = [], False, None, False
         try:
             for files in paths.values():
                 # Refuse replacement rather than silently overwriting a concurrent owner.
+                # One harness owns these preflight-absent paths; creation can be ambiguous.
+                armed.append(files)
                 command(K, "-n", "chronicle", "exec", pod, "--", "sh", "-c",
                         'set -C; : > "$1"', "sh", files["arm"])
-                armed.append(files)
             registered["draining"] = False
+            admitted = True
             api("/admin/register", [args.node, registered])
             reached = wait(lambda: next((gate for gate, files in paths.items()
                 if control(pod, "test", files["reached"], check=False).returncode == 0), None),
@@ -96,32 +145,21 @@ def main():
             leader, _ = leader_for(1)
             metrics = pod_status(leader)["1"]
             assert applied_uniform(metrics, [1, 2, 3]), metrics
-            assert api(f"/admin/retirement/{args.node}") is False
             assert control(pod, "test", paths[reached]["release"], check=False).returncode != 0
             note("repaired-before-release", state=state, leader=metrics)
             # Repair above must be automatic, before this operator quarantine.
             # Otherwise reconnection legitimately schedules a fresh placement.
-            registered["draining"] = True
-            api("/admin/register", [args.node, registered])
+            quarantine(args.node, note)
+            assert api(f"/admin/retirement/{args.node}") is False
+            note("quarantined-before-release", retired=False)
+        except BaseException as error:
+            note("failed", error=repr(error))
+            raise
         finally:
-            try:
-                # Both gates belong to one serial storage actor. Disarm both
-                # before waking it, so no later hit can reuse an old resumed marker.
-                for files in armed:
-                    control(pod, "rm", files["arm"])
-                for files in armed:
-                    control(pod, "touch", files["release"])
-            finally:
-                if isolated:
-                    partition("heal")
-            if reached is not None:
-                wait(lambda: control(pod, "test", paths[reached]["resumed"], check=False).returncode == 0,
-                     "storage gate release")
-                for files in armed:
-                    for suffix in ("reached", "resumed", "release"):
-                        control(pod, "rm", files[suffix], check=False)
-            elif armed:
-                note("unobserved-gate-release-retained", controls=armed)
+            errors = cleanup(pod, args.node if admitted else None, armed,
+                             paths[reached] if reached else None, isolated, partition, note)
+            if errors:
+                raise RuntimeError(f"cleanup incomplete: {errors}")
         wait(lambda: api(f"/admin/retirement/{args.node}") is True, "retirement after release")
         for _ in range(3):
             state = api("/admin/control")
