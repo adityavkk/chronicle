@@ -79,6 +79,10 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
   This is portable range delivery, **not zero-copy sendfile**. Ordinary filesystem
   reliability is assumed; hostile mutation/silent corruption of a published inode
   is not detected by a cryptographic cache checksum. Restart never trusts caches.
+* [Native-election experiments](evidence/CAMPAIGNS.md) exercised preferred-voter
+  partitions and membership round trips under paced traffic. The mechanism stays
+  **default off**; it is neither directed transfer nor resource-informed balancing.
+  Failed harness attempts and the missed stability threshold remain in the evidence.
 
 ## Explicitly unfinished
 

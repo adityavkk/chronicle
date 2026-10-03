@@ -1,0 +1,22 @@
+{
+  "note": "Paced 2 producers, 0.5s after each logical append; read interval0.2s. Success gaps include pacing and requests, not continuous outage duration or a capacity benchmark.",
+  "read": {
+    "responses": {
+      "ok": 572,
+      "unknown": 19
+    },
+    "successful_p99_ms": 17.920468,
+    "successful_max_ms": 44.051397,
+    "largest_gap_between_successes_s": 3.459795916
+  },
+  "append": {
+    "responses": {
+      "ok": 480,
+      "unknown": 36
+    },
+    "successful_p99_ms": 28.173321,
+    "successful_max_ms": 62.061716,
+    "largest_gap_between_successes_s": 3.170840113
+  },
+  "preferred_leader_observed_after_heal_s": 31.363740365
+}

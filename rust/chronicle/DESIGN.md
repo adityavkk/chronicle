@@ -36,8 +36,13 @@ authority. Many streams scale across groups; one hot stream remains leader order
 Placement reconciliation records intent in group zero, adds learners with blocking
 catch-up, changes membership through OpenRaft, then records completion. A stale
 controller cannot bypass the data group's term or committed membership. Movement
-is whole-shard, one at a time, with cooldown and capacity checks. Failure domains
-are inputs, not inferred from Kubernetes node names in production.
+is whole-shard, one at a time, with a cooldown. Target rotation uses node health
+and supplied failure domains, not measured disk/CPU/memory capacity. State-machine
+byte limits backpressure writes; they are not resource-informed placement.
+Resource-informed placement and leadership balancing remain unfinished. A native
+election preference is available only as the default-off experimental policy
+documented in `formal/README.md`; it is not directed transfer. Failure domains are
+inputs, not inferred from Kubernetes node names in production.
 
 Durability target: acknowledged writes survive loss of one of three independent
 replica disks/nodes, assuming honest fsync/storage and no Byzantine faults. Production

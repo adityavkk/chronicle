@@ -1,0 +1,21 @@
+{
+  "note": "Two producers paced0.5s, retries paced0.5s (40 limit), one reader paced0.5s; success gaps include pacing and routing to a drained ingress, not continuous outage duration or capacity.",
+  "read": {
+    "responses": {
+      "ok": 597,
+      "unknown": 159
+    },
+    "successful_p99_ms": 19.670854,
+    "successful_max_ms": 62.361368,
+    "largest_gap_between_successes_s": 4.05758422
+  },
+  "append": {
+    "responses": {
+      "ok": 1200,
+      "unknown": 287
+    },
+    "successful_p99_ms": 30.247076,
+    "successful_max_ms": 101.959001,
+    "largest_gap_between_successes_s": 4.046420066
+  }
+}

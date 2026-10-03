@@ -2,6 +2,8 @@ import importlib.util
 import http.client
 import pathlib
 import random
+import tempfile
+import types
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +22,36 @@ def history(reads, writes=()):
     return ev
 
 class CheckerTest(unittest.TestCase):
+    def test_unknown_retry_is_paced_and_never_skips_a_sequence(self):
+        for retries, expected in [(1, ["0", "0"]), (2, ["0", "0", "0", "1"])]:
+            with tempfile.TemporaryDirectory() as directory:
+                args = types.SimpleNamespace(seed=1, output=str(pathlib.Path(directory) / "history"),
+                    url=["http://unused"], tenant="t", path="p", timeout=1, producers=1,
+                    readers=0, operations=2, append_interval=0, retry_interval=.25,
+                    retries=retries, nemesis="none")
+                seen = []
+                def request(method, data=None, headers=None):
+                    if method == "POST":
+                        seen.append(headers["producer-seq"])
+                        if len(seen) <= 2:
+                            return None, {}, b"", "timeout"
+                    return 200, {}, b"", None
+                with patch.object(H.Client, "request", side_effect=request), \
+                     patch.object(H.time, "sleep") as pause, \
+                     patch.object(H, "check_file", return_value={"valid": True}):
+                    H.run_workload(args)
+                self.assertEqual(seen, expected)
+                self.assertEqual(pause.call_count, retries)
+                pause.assert_called_with(.25)
+
+    def test_workload_never_overwrites_retained_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "failed.jsonl"
+            path.write_text("retained counterexample\n")
+            with self.assertRaises(FileExistsError):
+                H.run_workload(types.SimpleNamespace(seed=1, output=str(path)))
+            self.assertEqual(path.read_text(), "retained counterexample\n")
+
     def test_truncated_success_or_error_body_is_unknown(self):
         client = H.Client(["http://unused"], "tenant", "path", 1, random.Random(0))
         response = MagicMock()

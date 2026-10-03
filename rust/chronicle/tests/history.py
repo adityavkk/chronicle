@@ -87,11 +87,11 @@ def run_workload(a):
     rng = random.Random(a.seed)
     lock, stop = threading.Lock(), threading.Event()
     os.makedirs(os.path.dirname(os.path.abspath(a.output)), exist_ok=True)
-    with open(a.output, "w", encoding="utf-8") as fp:
+    with open(a.output, "x", encoding="utf-8") as fp:
         emit(fp, lock, {"type": "info", "f": "run", "value": {"seed": a.seed, "urls": a.url,
              "tenant": a.tenant, "path": a.path, "record_size": RECORD_SIZE,
              "producers": a.producers, "reads": a.readers, "operations_per_producer": a.operations,
-             "append_interval": a.append_interval,
+             "append_interval": a.append_interval, "retry_interval": a.retry_interval,
              "payload": "fixed-width ASCII record", "consistency": "strict except labelled stale reads"}})
         c = Client(a.url, a.tenant, a.path, a.timeout, rng)
         operation(fp, lock, "setup", "create", "create", lambda: c.request("PUT", b"", {"Content-Type": "application/octet-stream"}))
@@ -108,10 +108,15 @@ def run_workload(a):
                         "producer-id": f"history-{a.seed}-{pid}", "producer-epoch": "0", "producer-seq": str(seq)})
                 typ, value = operation(fp, lock, f"producer-{pid}", oid, "append", attempt)
                 while typ == "unknown" and attempts <= a.retries:
+                    time.sleep(a.retry_interval)
                     typ, value = operation(fp, lock, f"producer-{pid}", oid, "append-retry", attempt)
                 value["record"] = data.decode("ascii")  # completion was already emitted; add authoritative metadata.
                 emit(fp, lock, {"type": "info", "f": "record", "id": oid,
                                 "value": {"record": data.decode("ascii"), "terminal": typ, "attempts": attempts}})
+                if typ != "ok":
+                    # Do not advance an unresolved sequence and turn a transient
+                    # outage into permanent client-generated gap rejections.
+                    return
                 if a.append_interval > 0:
                     stop.wait(a.append_interval)
 
@@ -233,6 +238,7 @@ def main():
     r.add_argument("--operations", type=int, default=100); r.add_argument("--retries", type=int, default=3)
     r.add_argument("--timeout", type=float, default=10); r.add_argument("--read-interval", type=float, default=.05)
     r.add_argument("--append-interval", type=float, default=0, help="per-producer pause after each logical append, including retries")
+    r.add_argument("--retry-interval", type=float, default=.1, help="pause before retrying an unknown append; exhaustion stops that producer")
     r.add_argument("--stale-fraction", type=float, default=0)
     r.add_argument("--nemesis", choices=["none", "leader-kill", "minority-partition", "majority-partition", "drop-delay", "snapshot-crash", "node-join", "node-drain"], default="none")
     r.add_argument("--nemesis-delay", type=float, default=2); r.add_argument("--nemesis-duration", type=float, default=5)
