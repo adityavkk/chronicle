@@ -120,3 +120,14 @@ draining (`drained-node-candidate-status.json`, `create-response-control.json`).
 These are ordinary Raft elections, not the default-off balancing experiment.
 Their availability/resource impact has not been qualified; do not infer useful
 leadership convergence or completed physical node removal from placement alone.
+
+## Refreshed full baseline after fail-stop deployment
+
+`conformance-fail-stop-64004.json` and `.txt` retain an unmodified full-suite run
+against all five `chronicle-raft:fail-stop` pods (source
+`6393655db6d9f1c164e696dcd25c006b74f3b261`). It reports **164 passed, 162 failed,
+6 skipped**. This is not a compatibility pass. Unsupported headers now reject
+instead of silently succeeding, so these counts are not directly comparable to
+the earlier silently-ignored-header baseline. Ordinary POST/close-only success
+status mapping is a concrete next fix; TTL, forks, sequence ordering, metadata,
+incarnation compatibility and the documented SSE-helper issues remain separate.

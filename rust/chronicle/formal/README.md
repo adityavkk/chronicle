@@ -416,3 +416,14 @@ exit. Tests must distinguish typed storage failure from other terminal states,
 cross the actual core-to-metrics boundary, and verify subprocess exit while an
 unrelated blocking task remains gated. This is a reviewed model-to-code mapping,
 not mechanized refinement or evidence of power-loss durability.
+
+## Successful POST status is a projection of a committed result
+
+Specified before the status correction: ordinary POST and empty close-only POST
+return 204, while a new producer POST with a body returns 200; duplicates return
+204. PUT's 201/200 and DELETE's 204 are unchanged. This is only HTTP encoding of
+the already committed outcome, per protocol sections 5.2 and 5.2.1: no new
+transition, read of later mutable state or pre-commit success is permitted.
+Tests distinguish non-producer data, new producer data, duplicate producer data,
+and empty close-only with and without a producer. Body bytes, frontiers and
+retained producer effects must remain unchanged.
