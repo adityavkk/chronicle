@@ -1,0 +1,39 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 39 and seed -2355813622325684736 with 2 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 2462622] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/Retirement.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Retirement
+Starting... (2026-10-03 16:21:18)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-03 16:21:19.
+Error: Invariant RetirementVerified is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ retired = FALSE
+/\ nonvoter = FALSE
+/\ repaired = FALSE
+/\ observed = FALSE
+/\ reachable = FALSE
+/\ retained = FALSE
+
+State 2: <Repair line 12, col 11 to line 13, col 65 of module Retirement>
+/\ retired = FALSE
+/\ nonvoter = FALSE
+/\ repaired = TRUE
+/\ observed = FALSE
+/\ reachable = FALSE
+/\ retained = TRUE
+
+State 3: <Prune line 21, col 10 to line 24, col 65 of module Retirement>
+/\ retired = TRUE
+/\ nonvoter = FALSE
+/\ repaired = TRUE
+/\ observed = FALSE
+/\ reachable = FALSE
+/\ retained = FALSE
+
+34 states generated, 11 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-03 16:21:19)

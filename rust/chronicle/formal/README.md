@@ -283,3 +283,34 @@ read path now retains guards in a detached barrier waiter too. `Submit` and
 `Complete` can also represent this local waiter; no application mutation is
 asserted for a read barrier. The forwarding metadata actor queue remains separately
 bounded, and this model does not claim every internal Raft allocation is covered.
+
+## Replica retirement is distinct from quorum repair
+
+`Retirement.tla` specifies the cleanup boundary before implementation. Raft is
+assumed to supply committed uniform replacement and durable membership delivery.
+Repair must not require the removed node to be reachable. Temporarily retained
+learners can receive their nonvoter configuration; unreachable learners can be
+pruned without claiming that their local process learned its demotion. Registered
+identities outside desired voters remain a durable, derivable cleanup obligation:
+on return an obsolete voter can be added only as a learner, demoted, then pruned.
+No new placement journal is needed. The negative mutation incorrectly calls an
+unreachable replica retired merely because its replication stream was removed.
+
+Implementation mapping: `change_membership(target, true)` implements Repair;
+replication/snapshot install supplies Deliver; a peer's atomic Raft metrics with
+uniform nonvoter membership and last-applied covering its membership log entry
+supplies Observe under this store's durable-apply contract. `RemoveNodes` prunes
+nonvoters, never active voters. Probe/catch-up failures do not undo completed voter
+replacement. Completion of placement alone still does not certify graceful node
+retirement. Reconciliation must serialize membership work, check current intent
+and leadership, and limit returning-replica probes/additions rather than starting
+full-data learners for every historical node at once.
+
+The model fixes the desired voter set for one cleanup episode. A changed placement
+supersedes that episode; OpenRaft rejects removal of a current voter. No formal
+claim is made about concurrent controller refinement, transport honesty, or
+retirement without eventual connectivity and durable storage progress. Copies of
+an old volume under an already-live identity remain unsupported.
+The positive configuration separately checks eventual voter repair under weak
+fairness of Repair and the stated available-quorum assumption. It does not claim
+eventual retirement while the old replica remains unreachable.
