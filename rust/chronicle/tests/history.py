@@ -243,7 +243,7 @@ def main():
     r.add_argument("--append-interval", type=float, default=0, help="per-producer pause after each logical append, including retries")
     r.add_argument("--retry-interval", type=float, default=.1, help="pause before retrying an unknown append; exhaustion stops that producer")
     r.add_argument("--stale-fraction", type=float, default=0)
-    r.add_argument("--nemesis", choices=["none", "leader-kill", "minority-partition", "majority-partition", "drop-delay", "snapshot-crash", "node-join", "node-drain"], default="none")
+    r.add_argument("--nemesis", choices=["none", "leader-kill", "minority-partition", "majority-partition", "drop-delay", "snapshot-crash", "node-join", "node-drain", "volume-loss"], default="none")
     r.add_argument("--nemesis-delay", type=float, default=2); r.add_argument("--nemesis-duration", type=float, default=5)
     r.add_argument("--hook", action="append", default=[]); r.add_argument("--hook-timeout", type=float, default=120)
     a = p.parse_args()
