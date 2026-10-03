@@ -76,6 +76,7 @@ def main():
     parser.add_argument("--node", type=int, required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--fault-root", default="/data/faults")
+    parser.add_argument("--gate", choices=GATES, help="arm only this boundary; default arms both")
     args = parser.parse_args()
     root = PurePosixPath(args.fault_root)
     if args.node <= 3 or not root.is_relative_to("/data") or ".." in root.parts:
@@ -96,7 +97,8 @@ def main():
         raise RuntimeError("requires only the three seeds eligible before admission")
     directory = str(root / "group-1.sqlite".encode().hex())
     paths = {gate: {suffix: f"{directory}/{gate}.{suffix}"
-                   for suffix in ("arm", "reached", "release", "resumed")} for gate in GATES}
+                   for suffix in ("arm", "reached", "release", "resumed")}
+             for gate in ((args.gate,) if args.gate else GATES)}
     for files in paths.values():
         for path in files.values():
             if control(pod, "test", path, check=False).returncode == 0:
@@ -111,6 +113,14 @@ def main():
                                     capture_output=True, text=True, timeout=30)
             note(action, code=result.returncode, stdout=result.stdout, stderr=result.stderr)
             result.check_returncode()
+
+        if args.gate == "before-snapshot-install-transaction":
+            leader, _ = leader_for(1)
+            source, destination = pod_status(leader)["1"], pod_status(pod)["1"]
+            purged = source["purged"]
+            if purged is None or purged["index"] <= (destination["last_log_index"] or 0):
+                raise RuntimeError("snapshot test needs source compaction beyond the drained learner's log")
+            note("snapshot-required", source=source, destination=destination)
 
         command(K, "-n", "chronicle", "exec", pod, "--", "mkdir", "-p", directory)
         armed, isolated, reached, admitted = [], False, None, False
