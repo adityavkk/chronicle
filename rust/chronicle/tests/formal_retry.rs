@@ -6,6 +6,7 @@ fn create(expected_incarnation: Option<u64>) -> Command {
         expected_incarnation,
         config: StreamConfig {
             content_type: "application/octet-stream".into(),
+            track_boundaries: false,
             json_framing: None,
             expiry: None,
         },

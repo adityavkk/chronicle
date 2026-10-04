@@ -9,6 +9,7 @@ fn create(policy: Expiry, now: u64) -> Command {
         expected_incarnation: None,
         config: StreamConfig {
             content_type: "text/plain".into(),
+            track_boundaries: false,
             json_framing: None,
             expiry: Some(policy),
         },

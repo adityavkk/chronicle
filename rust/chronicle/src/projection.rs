@@ -91,10 +91,12 @@ mod tests {
             incarnation: 1,
             config: crate::model::StreamConfig {
                 content_type: "application/octet-stream".into(),
+                track_boundaries: false,
                 json_framing: None,
                 expiry: None,
             },
             data: b"x".to_vec(),
+            append_ends: Vec::new(),
             closed: false,
             deleted: false,
             producers: BTreeMap::new(),

@@ -40,6 +40,9 @@ pub struct ProducerState {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StreamConfig {
     pub content_type: String,
+    /// Explicit opt-in keeps legacy log replay's metadata accounting unchanged.
+    #[serde(default)]
+    pub track_boundaries: bool,
     /// Absent preserves the old persisted-byte interpretation on replay.
     #[serde(default)]
     pub json_framing: Option<bool>,
@@ -63,6 +66,9 @@ pub struct Stream {
     pub incarnation: u64,
     pub config: StreamConfig,
     pub data: Vec<u8>,
+    /// Missing legacy history cannot be reconstructed from concatenated bytes.
+    #[serde(default)]
+    pub append_ends: Vec<u64>,
     pub closed: bool,
     pub deleted: bool,
     pub producers: BTreeMap<String, ProducerState>,
@@ -296,7 +302,8 @@ impl State {
                 let metadata = key
                     .len()
                     .saturating_add(config.content_type.len())
-                    .saturating_add(256);
+                    .saturating_add(256)
+                    .saturating_add(usize::from(config.track_boundaries && !data.is_empty()) * 8);
                 if config.content_type.len() > MAX_CONTENT_TYPE_BYTES
                     || !self.fits(data.len(), metadata)
                     || data.len() > MAX_STREAM_BYTES
@@ -310,6 +317,11 @@ impl State {
                         incarnation,
                         config: config.clone(),
                         data: data.clone(),
+                        append_ends: if config.track_boundaries && !data.is_empty() {
+                            vec![data.len() as u64]
+                        } else {
+                            Vec::new()
+                        },
                         closed: *closed,
                         deleted: false,
                         producers: BTreeMap::new(),
@@ -343,7 +355,19 @@ impl State {
                     let previous = self.streams.get(key).and_then(|s| s.last_seq.as_ref());
                     seq.len().saturating_sub(previous.map_or(0, String::len))
                 });
-                let fits = self.fits(data.len(), producer_metadata.saturating_add(token_growth));
+                let boundary_growth = usize::from(
+                    !data.is_empty()
+                        && self
+                            .streams
+                            .get(key)
+                            .is_some_and(|s| s.config.track_boundaries),
+                ) * 8;
+                let fits = self.fits(
+                    data.len(),
+                    producer_metadata
+                        .saturating_add(token_growth)
+                        .saturating_add(boundary_growth),
+                );
                 let Some(s) = self.streams.get_mut(key).filter(|s| !s.deleted) else {
                     return Outcome::err(Error::Missing);
                 };
@@ -417,6 +441,9 @@ impl State {
                     return Outcome::err(Error::Capacity);
                 }
                 s.data.extend_from_slice(data);
+                if s.config.track_boundaries && !data.is_empty() {
+                    s.append_ends.push(s.data.len() as u64);
+                }
                 s.closed = *close;
                 if let Some(seq) = stream_seq {
                     s.last_seq = Some(seq.clone());
@@ -511,6 +538,7 @@ impl State {
                 }
                 s.deleted = true;
                 s.data.clear();
+                s.append_ends.clear();
                 s.producers.clear();
                 s.last_seq = None;
                 Outcome::ok(0, s.incarnation, false)
@@ -626,6 +654,7 @@ impl State {
             .iter()
             .map(|(key, s)| {
                 s.data.len()
+                    + s.append_ends.len() * 8
                     + key.len()
                     + s.config.content_type.len()
                     + s.last_seq.as_ref().map_or(0, String::len)

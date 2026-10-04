@@ -373,6 +373,7 @@ fn create() -> Command {
         expected_incarnation: None,
         config: StreamConfig {
             content_type: "application/octet-stream".into(),
+            track_boundaries: false,
             json_framing: None,
             expiry: None,
         },
@@ -601,6 +602,7 @@ fn content_type_and_metadata_are_bounded_by_capacity() {
             expected_incarnation: None,
             config: StreamConfig {
                 content_type: content_type.clone(),
+                track_boundaries: false,
                 json_framing: None,
                 expiry: None,
             },

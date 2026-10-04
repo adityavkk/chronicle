@@ -22,6 +22,7 @@ fn entry(index: u64, data: &[u8]) -> Entry<TypeConfig> {
             expected_incarnation: None,
             config: model::StreamConfig {
                 content_type: "application/octet-stream".into(),
+                track_boundaries: false,
                 json_framing: None,
                 expiry: None,
             },

@@ -42,6 +42,7 @@ fn create(data: &[u8], expected: Option<u64>) -> Command {
         expected_incarnation: expected,
         config: StreamConfig {
             content_type: "application/octet-stream".into(),
+            track_boundaries: false,
             json_framing: None,
             expiry: None,
         },

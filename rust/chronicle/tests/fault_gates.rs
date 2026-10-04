@@ -33,6 +33,7 @@ fn create_entry(index: u64, key: &str, data: &[u8]) -> Entry<TypeConfig> {
             expected_incarnation: None,
             config: StreamConfig {
                 content_type: "application/octet-stream".into(),
+                track_boundaries: false,
                 json_framing: None,
                 expiry: None,
             },

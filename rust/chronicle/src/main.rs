@@ -1026,6 +1026,7 @@ async fn stream_inner(
             expected_incarnation: Some(incarnation),
             config: StreamConfig {
                 content_type: content_type.clone(),
+                track_boundaries: true,
                 json_framing: Some(model::content_type_matches(
                     &content_type,
                     "application/json",
@@ -1362,6 +1363,7 @@ mod tests {
                     expected_incarnation: None,
                     config: StreamConfig {
                         content_type: "application/octet-stream".into(),
+                        track_boundaries: false,
                         json_framing: None,
                         expiry: None,
                     },
@@ -1395,6 +1397,7 @@ mod tests {
             expected_incarnation: None,
             config: StreamConfig {
                 content_type: "application/octet-stream".into(),
+                track_boundaries: false,
                 json_framing: None,
                 expiry: Some(chronicle_raft::expiry::Expiry::At {
                     seconds: 0,
