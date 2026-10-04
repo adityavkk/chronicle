@@ -108,6 +108,16 @@ expose Electric's raw plaintext socket for `sendfile`, so this is not zero-copy.
 
 ## Implementation mapping and remaining gaps
 
+`RetryBackoff.tla` records the replication retry policy before its adapter fix.
+Unavailable transport/HTTP/decoding endpoints map to OpenRaft `Unreachable`,
+whose default replication-worker backoff is 500 ms, rather than `Network`, which
+may immediately reschedule pending replication. The negative mutation permits
+two failures without elapsed backoff. This is a two-state policy check, not a
+proof of the library scheduler: a real-Raft HTTP failure-count regression must
+bridge it to the adapter. Read-quorum probes and elections have separate caller
+timeouts and are not rate-limited by this replication-worker policy. Snapshot
+chunk retries use the pinned library's separate bounded-attempt policy.
+
 `LeaderRetirement.tla` specifies the retained-leader cleanup fix before code changes.
 OpenRaft 0.9.25 deliberately keeps a demoted leader leading while its node record
 remains. `DeliverDemotion` maps to observing locally applied uniform membership
