@@ -7,6 +7,7 @@ TLC := java -XX:+UseParallelGC -cp $(JAR) tlc2.TLC -workers auto
 check: jar lean positive negative
 
 positive:
+	cd tla && $(TLC) -metadir /tmp/chronicle-leader-retirement-$$$$ -config LeaderRetirement.cfg LeaderRetirement.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-stream-order-$$$$ -config StreamOrder.cfg StreamOrder.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-write-reply-$$$$ -config WriteReply.cfg WriteReply.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-placement-intent-$$$$ -config PlacementIntent.cfg PlacementIntent.tla
@@ -29,6 +30,8 @@ positive:
 # parser/configuration failures cannot accidentally satisfy these controls.
 negative:
 	@mkdir -p evidence/negative
+	@set +e; (cd tla && $(TLC) -metadir /tmp/chronicle-bad-leader-retirement-$$$$ -config BadLeaderRetirement.cfg LeaderRetirement.tla) >evidence/negative/BadLeaderRetirement.txt 2>&1; rc=$$?; \
+	  test $$rc -eq 13 && grep -F 'Temporal properties were violated.' evidence/negative/BadLeaderRetirement.txt
 	@set -eu; check_bad() { name=$$1; inv=$$2; out=evidence/negative/$$name.txt; \
 	  module=$${3:-Chronicle}; set +e; (cd tla && $(TLC) -metadir /tmp/chronicle-$$name-$$$$ -config $$name.cfg $$module.tla) >$$out 2>&1; rc=$$?; set -e; \
 	  test $$rc -eq 12; grep -F "Invariant $$inv is violated." $$out >/dev/null; }; \

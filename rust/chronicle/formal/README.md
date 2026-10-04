@@ -108,6 +108,20 @@ expose Electric's raw plaintext socket for `sendfile`, so this is not zero-copy.
 
 ## Implementation mapping and remaining gaps
 
+`LeaderRetirement.tla` specifies the retained-leader cleanup fix before code changes.
+OpenRaft 0.9.25 deliberately keeps a demoted leader leading while its node record
+remains. `DeliverDemotion` maps to observing locally applied uniform membership
+at or beyond the replicated placement's demotion boundary. `RemoveSelf` maps to
+the controller's vote-fenced `RemoveNodes(self)`, serialized with movement and
+revalidated against the completed placement generation. `ApplyRemoval` and `Tick`
+are the library's committed removal application and subsequent step-down. Final
+verified retirement still requires runtime Learner; eligibility to remove self
+does not. The negative mutation waits for Learner before removing its node record
+and violates eventual step-down. Liveness assumes a stable completed intent,
+surviving voter quorum, responsive storage and fair reconciliation/Raft ticks;
+it does not assert progress during sustained membership churn or quorum loss.
+This focused five-state model neither proves Raft nor mechanizes Rust refinement.
+
 `src/model.rs::State::apply` is the deterministic state machine. `storage.rs` commits
 SQLite WAL/FULL transactions before publishing cached state or calling `LogFlushed`;
 `main.rs` awaits OpenRaft `client_write` before success and `ensure_linearizable`
