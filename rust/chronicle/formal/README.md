@@ -108,6 +108,23 @@ expose Electric's raw plaintext socket for `sendfile`, so this is not zero-copy.
 
 ## Implementation mapping and remaining gaps
 
+`Expiry.tla` and `ChronicleFormal/Expiry.lean` precede sliding-TTL implementation.
+Immutable policy (duration or absolute instant) is distinct from last access.
+Only committed initial strict GET touches and append attempts renew sliding TTL;
+HEAD, live-read continuations, idempotent PUT and explicitly stale reads do not.
+Pre-admission rejections do not renew; append rejections after incarnation and
+expiry checks may renew, so they are not no-effect operations for TTL histories.
+Absolute instants never slide. Expiry commands recheck incarnation, observed
+access and expiry at their supplied time; a delayed command cannot delete a
+renewed/recreated stream. Clock samples are replicated inputs, not apply-time I/O.
+Access uses max(previous, sample), and expired touch cannot revive a stream.
+Snapshot/replay must preserve policy/access together; the TLA recovery stutter
+assumes that contract, rather than proving serialization or Raft recovery.
+Lean proves monotonic sliding deadlines, absolute stability and rejection of
+stale expiry/access. Real wall-clock accuracy, drift bounds and Rust refinement
+are not proved. Legacy `expires_ms` decodes as its original fixed absolute
+deadline; its lost original TTL duration cannot be reconstructed or invented.
+
 `RetryBackoff.tla` records the replication retry policy before its adapter fix.
 Unavailable transport/HTTP/decoding endpoints map to OpenRaft `Unreachable`,
 whose default replication-worker backoff is 500 ms, rather than `Network`, which

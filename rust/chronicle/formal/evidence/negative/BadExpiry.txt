@@ -1,0 +1,47 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 42 and seed 5931052384390281297 with 2 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 294179] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/Expiry.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Expiry
+Starting... (2026-10-04 19:40:30)
+Computing initial states...
+Finished computing initial states: 2 distinct states generated at 2026-10-04 19:40:31.
+Error: Invariant ExpiryFenced is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ pending = [access |-> 0, inc |-> 0, now |-> 0]
+/\ incarnation = 1
+/\ safeDeletion = TRUE
+/\ deleted = FALSE
+/\ access = 0
+/\ sliding = TRUE
+
+State 2: <Prepare line 15, col 17 to line 17, col 84 of module Expiry>
+/\ pending = [access |-> 0, inc |-> 1, now |-> 3]
+/\ incarnation = 1
+/\ safeDeletion = TRUE
+/\ deleted = FALSE
+/\ access = 0
+/\ sliding = TRUE
+
+State 3: <Touch line 12, col 15 to line 14, col 83 of module Expiry>
+/\ pending = [access |-> 0, inc |-> 1, now |-> 3]
+/\ incarnation = 1
+/\ safeDeletion = TRUE
+/\ deleted = FALSE
+/\ access = 1
+/\ sliding = TRUE
+
+State 4: <Expire line 20, col 11 to line 22, col 64 of module Expiry>
+/\ pending = [access |-> 0, inc |-> 1, now |-> 3]
+/\ incarnation = 1
+/\ safeDeletion = FALSE
+/\ deleted = TRUE
+/\ access = 1
+/\ sliding = TRUE
+
+166 states generated, 51 distinct states found, 26 states left on queue.
+The depth of the complete state graph search is 4.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 6 and the 95th percentile is 4).
+Finished in 00s at (2026-10-04 19:40:31)

@@ -1,0 +1,7 @@
+make: Entering directory '/home/user/workspace/repo/rust/chronicle/formal'
+cd lean && lake build -- -DwarningAsError=true
+✔ [4/6] Built ChronicleFormal.Expiry (17s)
+✔ [5/6] Built ChronicleFormal (962ms)
+Build completed successfully (6 jobs).
+! grep -R -nE '\b(sorry|admit|axiom)\b' lean/ChronicleFormal*.lean lean/ChronicleFormal
+make: Leaving directory '/home/user/workspace/repo/rust/chronicle/formal'

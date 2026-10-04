@@ -1,0 +1,30 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 107 and seed 5765797654155451637 with 2 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 268348] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/Expiry.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Expiry
+Starting... (2026-10-04 19:38:36)
+Computing initial states...
+Error: Attempted to enumerate a set of the form [l1 : v1, ..., ln : vn],
+but can't enumerate the value of the `access' field:
+0
+While working on the initial state:
+/\ pending = [access: 0, inc: 0, now: 0]
+/\ incarnation = 1
+/\ safeDeletion = TRUE
+/\ deleted = FALSE
+/\ access = 0
+/\ sliding = FALSE
+
+Error: TLC was unable to fingerprint.
+
+Fingerprint Stack Trace:
+0) line 8, col 41 to line 8, col 67 of module Expiry
+
+Reason:
+Attempted to enumerate a set of the form [l1 : v1, ..., ln : vn],
+but can't enumerate the value of the `access' field:
+0
+2 states generated, 0 distinct states found, 0 states left on queue.
+Finished in 00s at (2026-10-04 19:38:36)
