@@ -49,16 +49,24 @@ pub async fn run(a: Shared) {
         std::env::var("CHRONICLE_EXPERIMENTAL_CAMPAIGNS").is_ok_and(|value| value == "1");
     let mut campaigns = BTreeMap::new();
     let mut retirement = Retirement::default();
+    let mut balance = chronicle_raft::balance::Window::default();
     loop {
         match tokio::time::timeout(
             Duration::from_secs(20),
-            tick(&a, &mut campaigns, campaigns_enabled, &mut retirement),
+            tick(
+                &a,
+                &mut campaigns,
+                campaigns_enabled,
+                &mut retirement,
+                &mut balance,
+            ),
         )
         .await
         {
             Ok(Ok(())) => (),
             result => {
                 campaigns.clear();
+                balance.reset();
                 tracing::warn!(error = ?result, "controller retry; outcome may be unknown");
             }
         }
@@ -100,10 +108,12 @@ async fn tick(
     campaigns: &mut BTreeMap<u64, Campaign>,
     campaigns_enabled: bool,
     retirement: &mut Retirement,
+    balance: &mut chronicle_raft::balance::Window,
 ) -> anyhow::Result<()> {
     let mut state = control(a).await?;
     let control_group = &a.groups[&0];
-    if control_group.raft.metrics().borrow().state == openraft::ServerState::Leader {
+    let authority = control_group.raft.metrics().borrow().clone();
+    if authority.state == openraft::ServerState::Leader {
         for (id, n) in &a.nodes {
             if !state.nodes.contains_key(id) {
                 let result = control_group
@@ -120,9 +130,22 @@ async fn tick(
         // Health is only a placement preference; it never authorizes lowering quorum.
         let healthy = healthy_nodes(&a.client, &state.nodes).await;
         if let Some(command) = next_placement(&state, &healthy, now_ms()) {
+            balance.reset();
             let response = control_group.raft.client_write(command).await?;
             anyhow::ensure!(response.data.error.is_none(), "placement intent rejected");
+        } else if let Some(command) =
+            resource_balance(a, &state, &healthy, authority.current_term, balance).await
+        {
+            tracing::info!(intent = ?command, "resource placement proposed");
+            let response = control_group.raft.client_write(command).await?;
+            anyhow::ensure!(
+                response.data.error.is_none(),
+                "resource placement intent rejected"
+            );
+            tracing::info!(control_log = %response.log_id, "resource placement intent committed");
         }
+    } else {
+        balance.reset();
     }
     state = control(a).await?;
     if campaigns_enabled {
@@ -568,6 +591,62 @@ async fn healthy_nodes(
         .await
 }
 
+fn can_sample(state: &State, healthy: &BTreeMap<u64, chronicle_raft::model::Node>) -> bool {
+    state.placements.len() == (SHARDS + 1) as usize
+        && state.placements.values().all(|p| p.complete)
+        && state
+            .nodes
+            .iter()
+            .all(|(id, n)| n.draining || healthy.contains_key(id))
+}
+
+async fn resource_balance(
+    a: &Shared,
+    state: &State,
+    healthy: &BTreeMap<u64, chronicle_raft::model::Node>,
+    term: u64,
+    window: &mut chronicle_raft::balance::Window,
+) -> Option<Command> {
+    if !can_sample(state, healthy) {
+        window.reset();
+        return None;
+    }
+    let loads = resource_loads(a, healthy).await;
+    let current = a.groups[&0].raft.metrics().borrow().clone();
+    if current.state != openraft::ServerState::Leader || current.current_term != term {
+        window.reset();
+        return None;
+    }
+    window.observe(state, loads, term, Instant::now(), now_ms())
+}
+
+async fn resource_loads(
+    a: &Shared,
+    nodes: &BTreeMap<u64, chronicle_raft::model::Node>,
+) -> chronicle_raft::balance::Loads {
+    let addresses: Vec<_> = nodes
+        .iter()
+        .map(|(id, node)| (*id, node.addr.clone()))
+        .collect();
+    stream::iter(addresses)
+        .map(|(id, addr)| async move {
+            let response = a
+                .client
+                .get(format!("http://{addr}/admin/resources"))
+                .header("x-chronicle-cluster", &a.identity.cluster)
+                .header("x-chronicle-recipient", id)
+                .timeout(Duration::from_millis(500))
+                .send()
+                .await
+                .ok()?;
+            Some((id, response.error_for_status().ok()?.json().await.ok()?))
+        })
+        .buffer_unordered(8)
+        .filter_map(std::future::ready)
+        .collect()
+        .await
+}
+
 fn next_placement(
     state: &State,
     healthy: &BTreeMap<u64, chronicle_raft::model::Node>,
@@ -584,7 +663,7 @@ fn next_placement(
         let old = state.placements.get(&shard);
         // A slow but eligible target retains its intent. New-node arrivals are
         // not a reason to supersede catch-up and repeatedly restart movement.
-        if old.is_some_and(|p| !p.complete && p.voters.iter().all(|id| healthy.contains_key(id))) {
+        if old.is_some_and(|p| p.voters.iter().all(|id| healthy.contains_key(id))) {
             continue;
         }
         let voters = target(shard, healthy);
@@ -628,6 +707,51 @@ mod tests {
     use super::*;
     use chronicle_raft::storage::SqliteStore;
     use openraft::{CommittedLeaderId, Entry, EntryPayload, LogId, Membership};
+
+    #[test]
+    fn resource_moves_are_not_rotated_back_and_pending_repair_skips_sampling() {
+        let mut state = State::default();
+        for id in 1..=4 {
+            state.nodes.insert(
+                id,
+                chronicle_raft::model::Node {
+                    addr: id.to_string(),
+                    zone: id.to_string(),
+                    draining: false,
+                },
+            );
+        }
+        for shard in 0..=SHARDS {
+            state.placements.insert(
+                shard,
+                Placement {
+                    generation: 2,
+                    voters: [1, 3, 4].into(),
+                    complete: true,
+                    ..Default::default()
+                },
+            );
+        }
+        assert!(can_sample(&state, &state.nodes));
+        assert!(next_placement(&state, &state.nodes, 100_000).is_none());
+        let mut healthy = state.nodes.clone();
+        healthy.remove(&4);
+        assert!(!can_sample(&state, &healthy));
+        assert!(matches!(
+            next_placement(&state, &healthy, 100_000),
+            Some(Command::Place { shard: 0, .. })
+        ));
+        state.placements.get_mut(&2).unwrap().complete = false;
+        assert!(!can_sample(&state, &state.nodes));
+        assert!(matches!(
+            next_placement(&state, &healthy, 100_000),
+            Some(Command::Place {
+                shard: 2,
+                repair_pending: true,
+                ..
+            })
+        ));
+    }
 
     #[tokio::test]
     async fn failed_health_probes_leave_budget_for_reconciliation() {

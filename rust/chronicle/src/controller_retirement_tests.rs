@@ -221,9 +221,15 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
         let mut retirement = Retirement::default();
         for shard in 1..=SHARDS {
             place(leader, shard, 1, BTreeSet::from([2, 3, 4])).await;
-            tick(old, &mut campaigns, false, &mut retirement)
-                .await
-                .unwrap();
+            tick(
+                old,
+                &mut campaigns,
+                false,
+                &mut retirement,
+                &mut chronicle_raft::balance::Window::default(),
+            )
+            .await
+            .unwrap();
             let remote = leader.groups[&0].store.read_state().await.unwrap();
             assert!(remote.placements[&shard].retirement_known());
             assert_eq!(remote.placements[&shard].generation, 2);

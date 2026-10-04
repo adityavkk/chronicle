@@ -175,6 +175,12 @@ pub enum Command {
         id: u64,
         node: Node,
     },
+    Balance {
+        shard: u64,
+        expected_generation: u64,
+        voters: BTreeSet<u64>,
+        now_ms: u64,
+    },
     Place {
         shard: u64,
         expected_generation: u64,
@@ -618,6 +624,24 @@ impl State {
                 self.nodes.insert(*id, node.clone());
                 Outcome::ok(0, 0, false)
             }
+            Command::Balance {
+                shard,
+                expected_generation,
+                voters,
+                now_ms,
+            } => {
+                if !crate::balance::admissible(self, *shard, voters, *now_ms) {
+                    return Outcome::err(Error::InvalidPlacement);
+                }
+                self.apply(&Command::Place {
+                    shard: *shard,
+                    expected_generation: *expected_generation,
+                    voters: voters.clone(),
+                    now_ms: *now_ms,
+                    eligible_only: true,
+                    repair_pending: false,
+                })
+            }
             Command::Place {
                 shard,
                 expected_generation,
@@ -703,6 +727,14 @@ impl State {
     }
 
     pub(crate) fn fits(&self, extra_data: usize, extra_metadata: usize) -> bool {
+        self.charged_bytes()
+            .saturating_add(extra_data)
+            .saturating_add(extra_metadata)
+            <= MAX_SHARD_BYTES
+    }
+
+    /// Admission-accounted application bytes, not physical SQLite/RSS usage.
+    pub fn charged_bytes(&self) -> usize {
         self.streams
             .iter()
             .map(|(key, s)| {
@@ -733,9 +765,6 @@ impl State {
                     .map(|p| p.offer.reservation_charge() + p.offer.total as usize)
                     .sum::<usize>(),
             )
-            .saturating_add(extra_data)
-            .saturating_add(extra_metadata)
-            <= MAX_SHARD_BYTES
     }
 }
 

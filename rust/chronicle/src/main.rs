@@ -229,6 +229,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/metrics", get(metrics))
         .route("/admin/status", get(status))
         .route(
+            "/admin/resources",
+            get(resources).layer(middleware::from_fn_with_state(
+                Arc::new(Semaphore::new(8)),
+                admit_stream,
+            )),
+        )
+        .route(
             "/admin/fork",
             post(forks::rpc).layer(middleware::from_fn_with_state(
                 Arc::new(Semaphore::new(16)),
@@ -369,6 +376,15 @@ async fn status(State(a): State<Shared>) -> Response {
     )
     .into_response()
 }
+async fn resources(State(a): State<Shared>, headers: HeaderMap) -> ApiResult {
+    rpc_recipient(&a.identity, &headers)?;
+    let mut loads = BTreeMap::new();
+    for (id, group) in &a.groups {
+        loads.insert(*id, group.store.load().await.map_err(unavailable)?);
+    }
+    Ok(Json(loads).into_response())
+}
+
 async fn retirement_state(State(a): State<Shared>, headers: HeaderMap) -> ApiResult {
     rpc_recipient(&a.identity, &headers)?;
     // This core request is processed only after storage recovery. Ordinary

@@ -11,6 +11,7 @@ use std::io::{Cursor, Seek, SeekFrom};
 use std::ops::{Bound, RangeBounds};
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use openraft::storage::{LogFlushed, RaftLogStorage, RaftStateMachine};
@@ -47,6 +48,8 @@ pub struct SqliteStore {
     tx: mpsc::Sender<Job>,
     stopped: tokio::sync::watch::Receiver<bool>,
     applied: tokio::sync::watch::Sender<()>,
+    busy_us: Arc<AtomicU64>,
+    instance: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -107,6 +110,9 @@ impl SqliteStore {
 
     async fn open_mode(path: &Path, initialize: bool) -> Result<Self> {
         let path = path.to_path_buf();
+        let instance = getrandom::u64().map_err(store_write)?;
+        let busy_us = Arc::new(AtomicU64::new(0));
+        let actor_busy = busy_us.clone();
         let (ready_tx, ready_rx) = oneshot::channel();
         let (tx, mut rx) = mpsc::channel::<Job>(QUEUE_DEPTH);
         let (stopped_tx, stopped) = tokio::sync::watch::channel(false);
@@ -125,7 +131,9 @@ impl SqliteStore {
                     }
                 };
                 while let Some(job) = rx.blocking_recv() {
+                    let start = Instant::now();
                     job(&mut worker);
+                    actor_busy.fetch_add(start.elapsed().as_micros() as u64, Ordering::Relaxed);
                 }
                 drop(worker);
                 let _ = stopped_tx.send(true);
@@ -139,6 +147,20 @@ impl SqliteStore {
             tx,
             stopped,
             applied,
+            busy_us,
+            instance,
+        })
+    }
+
+    /// Bounded private placement sample; no payload copy or telemetry dependency.
+    pub async fn load(&self) -> Result<crate::balance::Load> {
+        let queued = QUEUE_DEPTH - self.tx.capacity();
+        let charged_bytes = self.call(|w| Ok(w.state.charged_bytes())).await?;
+        Ok(crate::balance::Load {
+            instance: self.instance,
+            busy_us: self.busy_us.load(Ordering::Relaxed),
+            queued,
+            charged_bytes,
         })
     }
 
@@ -876,6 +898,53 @@ impl RaftSnapshotBuilder<TypeConfig> for SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn resource_samples_charge_state_measure_work_and_reset_on_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("resources.sqlite");
+        let mut store = SqliteStore::open(&path).await.unwrap();
+        let initial = store.load().await.unwrap();
+        assert_eq!(initial.charged_bytes, 0);
+        let command = model::Command::Create {
+            key: "resource".into(),
+            expected_incarnation: Some(1),
+            config: model::StreamConfig {
+                content_type: "text/plain".into(),
+                track_boundaries: false,
+                json_framing: Some(false),
+                expiry: None,
+            },
+            data: vec![42; 1234],
+            closed: false,
+            now_ms: Some(0),
+        };
+        let result = store
+            .apply([Entry {
+                log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), 1),
+                payload: EntryPayload::Normal(command),
+            }])
+            .await
+            .unwrap();
+        assert!(result[0].error.is_none());
+        store
+            .call(|_| {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let measured = store.load().await.unwrap();
+        assert_eq!(measured.charged_bytes, 1234 + 8 + 10 + 256);
+        assert!(measured.busy_us >= initial.busy_us + 5000);
+        assert_eq!(measured.instance, initial.instance);
+        store.close().await;
+        let reopened = SqliteStore::open_existing(&path).await.unwrap();
+        let restored = reopened.load().await.unwrap();
+        assert_eq!(restored.charged_bytes, measured.charged_bytes);
+        assert_ne!(restored.instance, measured.instance);
+        reopened.close().await;
+    }
 
     fn sample_snapshot() -> (SnapshotBody, Vec<u8>) {
         let mut state = model::State::default();
