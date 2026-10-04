@@ -1,7 +1,7 @@
 # Pinned protocol failure-family ledger
 
 Acceptance suite: unchanged `@durable-streams/server-conformance-tests@0.3.5`.
-The latest full run is `conformance-cache.json`: **242 passed, 84 failed,
+The latest full run is `conformance-sse-compat.json`: **247 passed, 79 failed,
 6 skipped of 332**. The six skips are upstream-default reserved subscription
 tests; no new skips, filtering, weakened assertions or replacement suite count
 as a full pass. Focused development runs will be labelled separately.
@@ -12,11 +12,11 @@ as a full pass. Focused development runs will be labelled separately.
 | HTTP/content-type/empty producer ID | 0 | Eight resolved; nonleader supplemental test also passed |
 | Offset-now long polling | 0 | Passed with runner timeout above intentional server wait; see RECREATION.md |
 | Caching/ETag | 0 | Passed; explicit revalidation only, Cache-Control remains no-store |
-| SSE | 5 | Pending; preserve parser-boundary evidence and unchanged upstream results |
+| SSE | 0 | Passed; bounded batching is not a transport-atomicity guarantee |
 | Ordinary same-URL recreation | 0 | Passed; explicit incarnation required for cross-lifetime retry fencing |
 | Concurrent-read byte property | 0 | Passed this run; earlier 222-byte 503 barrier-timeout failure remains an open availability issue |
 | Fork creation/read/write/lifecycle/expiry/live/JSON | 79 | Pending; one additional failure versus metadata run retained |
-| **Total** | **84** | **Not conformant** |
+| **Total** | **79** | **Not conformant** |
 
 The raw JSON report, not this grouping, is authoritative for individual failures.
 `CONFORMANCE.md` retains prior full-run counts and diagnoses. Every subsequent
