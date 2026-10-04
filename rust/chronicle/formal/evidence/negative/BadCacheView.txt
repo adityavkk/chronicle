@@ -1,0 +1,44 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 99 and seed -3755337652108074831 with 2 workers on 8 cores with 4002MB heap and 64MB offheap memory [pid: 470622] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/CacheView.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module CacheView
+Starting... (2026-10-04 20:41:58)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-04 20:41:58.
+Error: Invariant ValidatorBound is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ incarnation = 1
+/\ cached = [inc |-> 1, end |-> 0]
+/\ reply = [tag |-> [inc |-> 1, end |-> 0], body |-> [inc |-> 1, end |-> 0]]
+/\ tail = 0
+/\ captured = [inc |-> 1, end |-> 0]
+
+State 2: <Recreate line 12, col 13 to line 13, col 50 of module CacheView>
+/\ incarnation = 2
+/\ cached = [inc |-> 1, end |-> 0]
+/\ reply = [tag |-> [inc |-> 1, end |-> 0], body |-> [inc |-> 1, end |-> 0]]
+/\ tail = 0
+/\ captured = [inc |-> 1, end |-> 0]
+
+State 3: <Respond line 16, col 12 to line 19, col 53 of module CacheView>
+/\ incarnation = 2
+/\ cached = [inc |-> 1, end |-> 0]
+/\ reply = [tag |-> [inc |-> 2, end |-> 0], body |-> [inc |-> 1, end |-> 0]]
+/\ tail = 0
+/\ captured = [inc |-> 1, end |-> 0]
+
+12 states generated, 9 distinct states found, 4 states left on queue.
+The depth of the complete state graph search is 3.
+The average outdegree of the complete state graph is 2 (minimum is 2, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-04 20:41:58)

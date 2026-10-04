@@ -634,3 +634,19 @@ comparison. Tests must cross snapshot/install/reopen, rejected epoch changes,
 old duplicates, token absence/emptiness and metadata capacity. Existing offline
 histories do not submit tokens; until extended, their checker does not certify
 token ordering. Keep live token fixtures separate and explicitly scoped.
+
+### Conditional read validators
+
+Before implementation: ordinary GET validators bind the same committed view
+used by `Store::read_file`, never a later metadata sample. The descriptor binds
+resource identity, incarnation, start/end byte offsets, closure and framing;
+append-only bytes within an incarnation make that descriptor immutable. A
+SHA-256 digest is an opaque HTTP validator, not an integrity proof. Strict reads
+still cross the leadership barrier, TTL renewal and range validation before
+returning 304. Live reads do not use conditional replies. Cache-Control remains
+no-store; validators support explicit client revalidation, not shared caching.
+`CacheView.tla` checks capture/respond interleavings with append and recreation;
+the negative mutation samples the tag after capture and must fail. Its scope is
+descriptor/body correspondence, assuming committed-prefix and incarnation
+safety already established separately. Hash correctness and Rust refinement
+are tested/reviewed, not mechanized here.
