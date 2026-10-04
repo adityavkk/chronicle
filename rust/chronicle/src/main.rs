@@ -618,7 +618,6 @@ async fn admit_stream(
             "stream-forked-from",
             "stream-fork-offset",
             "stream-fork-sub-offset",
-            "stream-expires-at",
         ]
     } else {
         &[]
@@ -787,6 +786,30 @@ async fn stream_inner(
         .to_string();
     if method == Method::GET || method == Method::HEAD {
         let mut s = existing.ok_or_else(|| (StatusCode::NOT_FOUND, "stream missing".into()))?;
+        if method == Method::GET
+            && !stale
+            && matches!(
+                s.config.expiry,
+                Some(chronicle_raft::expiry::Expiry::Ttl(_))
+            )
+        {
+            let started = Instant::now();
+            let result = admitted_write(
+                g.raft.clone(),
+                Command::Touch {
+                    key: key.clone(),
+                    incarnation: s.incarnation,
+                    now_ms: now_ms(),
+                },
+                (admission.clone(), live_permit.clone()),
+            )
+            .await?;
+            telemetry::commit_apply(started.elapsed());
+            timings.proposal_us += started.elapsed().as_micros() as u64;
+            if result.data.error.is_some() {
+                return Err((StatusCode::NOT_FOUND, "stream expired or replaced".into()));
+            }
+        }
         let offset =
             match wire::parse_offset(query.get("offset").map(String::as_str)).map_err(bad)? {
                 ParsedOffset::Start => 0,
@@ -848,6 +871,17 @@ async fn stream_inner(
         if s.closed {
             r = r.header("stream-closed", "true");
         }
+        match s.config.expiry {
+            Some(chronicle_raft::expiry::Expiry::Ttl(seconds)) => {
+                r = r.header("stream-ttl", seconds.to_string());
+            }
+            Some(policy) => {
+                if let Some(value) = policy.absolute_header() {
+                    r = r.header("stream-expires-at", value);
+                }
+            }
+            None => {}
+        }
         if let Some(cursor) = cursor {
             r = r.header("stream-cursor", cursor.to_string());
             if offset == s.end {
@@ -874,10 +908,17 @@ async fn stream_inner(
             .map_err(unavailable);
     }
     let command = if method == Method::PUT {
-        let expires_ms = h("stream-ttl")
-            .map(|v| v.parse::<u64>().map_err(bad))
-            .transpose()?
-            .map(|s| now_ms().saturating_add(s.saturating_mul(1000)));
+        for name in ["stream-ttl", "stream-expires-at"] {
+            let mut values = headers.get_all(name).iter();
+            if let Some(value) = values.next() {
+                value.to_str().map_err(bad)?;
+            }
+            if values.next().is_some() {
+                return Err(bad("repeated expiry header"));
+            }
+        }
+        let expiry = chronicle_raft::expiry::Expiry::parse(h("stream-ttl"), h("stream-expires-at"))
+            .map_err(bad)?;
         let wire = if body.is_empty() {
             Bytes::new()
         } else {
@@ -891,10 +932,11 @@ async fn stream_inner(
                 .transpose()?,
             config: StreamConfig {
                 content_type: content_type.clone(),
-                expires_ms,
+                expiry,
             },
             data: wire.to_vec(),
             closed: close,
+            now_ms: Some(now_ms()),
         }
     } else if method == Method::POST || method == Method::DELETE {
         let s = existing.ok_or_else(|| (StatusCode::NOT_FOUND, "stream missing".into()))?;
@@ -954,6 +996,7 @@ async fn stream_inner(
                 close,
                 empty_body: body.is_empty(),
                 stream_seq,
+                now_ms: Some(now_ms()),
             }
         }
     } else {
@@ -1133,31 +1176,39 @@ async fn read_visible_info(
         timings.barrier_us += started.elapsed().as_micros() as u64;
         result.map_err(unavailable)?;
     }
-    let started = Instant::now();
-    let existing = g.store.read_info(key.to_owned(), admission.clone()).await;
-    timings.read_us += started.elapsed().as_micros() as u64;
-    let mut existing = existing.map_err(unavailable)?.filter(|s| !s.deleted);
-    if !stale
-        && let Some(s) = &existing
-        && s.config.expires_ms.is_some_and(|t| t <= now_ms())
-    {
+    for _ in 0..8 {
+        let started = Instant::now();
+        let existing = g.store.read_info(key.to_owned(), admission.clone()).await;
+        timings.read_us += started.elapsed().as_micros() as u64;
+        let existing = existing.map_err(unavailable)?.filter(|s| !s.deleted);
+        let now = now_ms();
+        let Some(s) = existing
+            .as_ref()
+            .filter(|s| !stale && s.config.expiry.is_some_and(|p| p.expired(s.access_ms, now)))
+        else {
+            return Ok(existing);
+        };
         let started = Instant::now();
         let result = admitted_write(
             g.raft.clone(),
-            Command::Delete {
+            Command::Expire {
                 key: key.to_owned(),
                 incarnation: s.incarnation,
-                expired_at: s.config.expires_ms,
+                access_ms: s.access_ms,
+                now_ms: now,
             },
-            admission,
+            admission.clone(),
         )
         .await;
         telemetry::commit_apply(started.elapsed());
         timings.proposal_us += started.elapsed().as_micros() as u64;
-        result?;
-        existing = None;
+        if result?.data.error.is_none() {
+            return Ok(None);
+        }
+        // A concurrent renewal or recreation invalidates the observed expiry.
+        // Re-read instead of reporting that a still-live stream was deleted.
     }
-    Ok(existing)
+    Err(unavailable("expiry changed repeatedly; retry"))
 }
 
 #[cfg(test)]
@@ -1201,10 +1252,11 @@ mod tests {
                     expected_incarnation: None,
                     config: StreamConfig {
                         content_type: "application/octet-stream".into(),
-                        expires_ms: None,
+                        expiry: None,
                     },
                     data: b"accepted after cancellation".to_vec(),
                     closed: false,
+                    now_ms: None,
                 },
                 permit,
             ),
@@ -1232,10 +1284,14 @@ mod tests {
             expected_incarnation: None,
             config: StreamConfig {
                 content_type: "application/octet-stream".into(),
-                expires_ms: Some(0),
+                expiry: Some(chronicle_raft::expiry::Expiry::At {
+                    seconds: 0,
+                    nanos: 0,
+                }),
             },
             data: vec![7],
             closed: false,
+            now_ms: None,
         })
         .await
         .unwrap();
@@ -1275,6 +1331,34 @@ mod tests {
         );
         drop(released);
         drop(group);
+        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let guards = (
+            Arc::new(admission.clone().try_acquire_owned().unwrap()),
+            Arc::new(live.clone().try_acquire_owned().unwrap()),
+        );
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            admitted_write(
+                raft.clone(),
+                Command::Touch {
+                    key: "cancelled".into(),
+                    incarnation: 1,
+                    now_ms: 1,
+                },
+                guards,
+            ),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(admission.available_permits(), 0);
+        assert_eq!(live.available_permits(), 0);
+        blocker.execute_batch("ROLLBACK").unwrap();
+        let released = tokio::time::timeout(Duration::from_secs(3), admission.acquire())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(live.available_permits(), 1);
+        drop(released);
         raft.shutdown().await.unwrap();
         drop(raft);
         store.close().await;
@@ -1295,7 +1379,7 @@ mod tests {
             ("PUT", "Stream-Forked-From", "501"),
             ("PUT", "Stream-Fork-Offset", "501"),
             ("PUT", "Stream-Fork-Sub-Offset", "501"),
-            ("PUT", "Stream-Expires-At", "501"),
+            ("PUT", "Stream-Expires-At", "429"),
             ("POST", "Stream-Seq", "429"),
             ("POST", "X-Unrelated", "429"),
         ] {

@@ -373,10 +373,11 @@ fn create() -> Command {
         expected_incarnation: None,
         config: StreamConfig {
             content_type: "application/octet-stream".into(),
-            expires_ms: None,
+            expiry: None,
         },
         data: vec![],
         closed: false,
+        now_ms: None,
     }
 }
 fn append(id: &str, seq: u64, data: &[u8]) -> Command {
@@ -392,6 +393,7 @@ fn append(id: &str, seq: u64, data: &[u8]) -> Command {
         close: false,
         empty_body: data.is_empty(),
         stream_seq: None,
+        now_ms: None,
     }
 }
 fn entry(index: u64, command: Command) -> Entry<TypeConfig> {
@@ -598,10 +600,11 @@ fn content_type_and_metadata_are_bounded_by_capacity() {
             expected_incarnation: None,
             config: StreamConfig {
                 content_type: content_type.clone(),
-                expires_ms: None,
+                expiry: None,
             },
             data: Vec::new(),
             closed: false,
+            now_ms: None,
         });
         if result.error == Some(Error::Capacity) {
             rejected = true;
@@ -640,6 +643,7 @@ fn stale_lifecycle_operations_cannot_mutate_recreated_stream() {
         data,
         closed,
         expected_incarnation: Some(2),
+        now_ms: None,
     });
     assert_eq!(s.apply(&old).error, Some(Error::StaleIncarnation));
     assert_eq!(
@@ -735,6 +739,7 @@ async fn closure_replies_follow_apply_and_survive_snapshot_reopen() {
         close: true,
         empty_body: true,
         stream_seq: None,
+        now_ms: None,
     };
     let repeated = installed.apply([entry(7, repeated)]).await.unwrap();
     assert!(repeated[0].closed && repeated[0].duplicate && repeated[0].error.is_none());

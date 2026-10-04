@@ -6,10 +6,11 @@ fn create(expected_incarnation: Option<u64>) -> Command {
         expected_incarnation,
         config: StreamConfig {
             content_type: "application/octet-stream".into(),
-            expires_ms: None,
+            expiry: None,
         },
         data: Vec::new(),
         closed: false,
+        now_ms: None,
     }
 }
 
@@ -37,6 +38,7 @@ fn replays_formal_retention_scenario() {
                 close: false,
                 empty_body: false,
                 stream_seq: None,
+                now_ms: None,
             }),
             "snapshot" => {
                 snapshot = Some(serde_json::to_vec(&state).unwrap());

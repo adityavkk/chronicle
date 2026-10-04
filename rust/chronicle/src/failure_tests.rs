@@ -55,10 +55,11 @@ fn fatal_child() {
                 expected_incarnation: None,
                 config: StreamConfig {
                     content_type: "application/octet-stream".into(),
-                    expires_ms: None,
+                    expiry: None,
                 },
                 data: b"acknowledged".to_vec(),
                 closed: false,
+                now_ms: None,
             })
             .await
             .unwrap();
@@ -91,6 +92,7 @@ fn fatal_child() {
                 close: false,
                 empty_body: false,
                 stream_seq: None,
+                now_ms: None,
             })
             .await;
         std::future::pending::<()>().await;

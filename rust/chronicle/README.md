@@ -137,9 +137,15 @@ balancing, deeper replication/storage trace linkage, broader I/O-fault schedules
 admission/snapshot crash schedules, repeated steady-state measurements and external
 equal-semantics performance baselines remain.
 The [unmodified conformance baseline](evidence/CONFORMANCE.md) is failing, not
-waived. Until implemented, PUT fork/absolute-expiry headers return 501 before
+waived. Until implemented, PUT fork headers return 501 before
 body extraction or storage access, rather than acknowledging an operation with
-those semantics silently removed. POST `Stream-Seq` is a per-incarnation,
+those semantics silently removed. Sliding TTL renews through committed initial
+strict GET and append attempts, not HEAD, stale reads, live continuations or
+idempotent PUT. Rejected appends after the incarnation/expiry checks may renew.
+Absolute RFC3339 deadlines never slide. Legacy persisted deadlines stay fixed;
+their original TTL duration was not recorded. Mixed-version operation and
+downgrade after expiry-policy writes are unsupported.
+POST `Stream-Seq` is a per-incarnation,
 byte-lexicographic token (`"10" < "2"`), committed with payload/producer state.
 Absent leaves it unchanged; present-empty is a token. Producer retries ignore
 changed tokens after fencing; token conflicts do not consume producer tuples.

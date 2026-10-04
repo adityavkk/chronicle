@@ -1,6 +1,7 @@
 //! Deterministic apply: no clock, network, filesystem, or speculative producer state.
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::expiry::Expiry;
 use serde::{Deserialize, Serialize};
 
 /// Fixed at cluster creation; changing this remaps existing identities and is forbidden.
@@ -27,7 +28,12 @@ pub struct ProducerState {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StreamConfig {
     pub content_type: String,
-    pub expires_ms: Option<u64>,
+    #[serde(
+        default,
+        alias = "expires_ms",
+        deserialize_with = "crate::expiry::deserialize"
+    )]
+    pub expiry: Option<Expiry>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -40,6 +46,8 @@ pub struct Stream {
     pub producers: BTreeMap<String, ProducerState>,
     #[serde(default)]
     pub last_seq: Option<String>,
+    #[serde(default)]
+    pub access_ms: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -86,6 +94,8 @@ pub enum Command {
         config: StreamConfig,
         data: Vec<u8>,
         closed: bool,
+        #[serde(default)]
+        now_ms: Option<u64>,
     },
     Append {
         key: String,
@@ -98,6 +108,19 @@ pub enum Command {
         empty_body: bool,
         #[serde(default)]
         stream_seq: Option<String>,
+        #[serde(default)]
+        now_ms: Option<u64>,
+    },
+    Touch {
+        key: String,
+        incarnation: u64,
+        now_ms: u64,
+    },
+    Expire {
+        key: String,
+        incarnation: u64,
+        access_ms: u64,
+        now_ms: u64,
     },
     Delete {
         key: String,
@@ -215,6 +238,7 @@ impl State {
                 config,
                 data,
                 closed,
+                now_ms,
             } => {
                 let previous = self.streams.get(key);
                 let requested = expected_incarnation.unwrap_or(1);
@@ -256,6 +280,7 @@ impl State {
                         deleted: false,
                         producers: BTreeMap::new(),
                         last_seq: None,
+                        access_ms: now_ms.unwrap_or(0),
                     },
                 );
                 Outcome {
@@ -271,6 +296,7 @@ impl State {
                 close,
                 empty_body,
                 stream_seq,
+                now_ms,
             } => {
                 let producer_metadata = producer.as_ref().map_or(0, |p| {
                     self.streams
@@ -288,6 +314,17 @@ impl State {
                 };
                 if s.incarnation != *incarnation {
                     return Outcome::err(Error::StaleIncarnation);
+                }
+                if let Some(now) = now_ms {
+                    if s.config
+                        .expiry
+                        .is_some_and(|p| p.expired(s.access_ms, *now))
+                    {
+                        return Outcome::err(Error::Missing);
+                    }
+                    if matches!(s.config.expiry, Some(Expiry::Ttl(_))) {
+                        s.access_ms = s.access_ms.max(*now);
+                    }
                 }
                 if let Some(p) = producer {
                     if let Some(old) = s.producers.get(&p.id) {
@@ -373,6 +410,54 @@ impl State {
                     None => outcome,
                 }
             }
+            Command::Touch {
+                key,
+                incarnation,
+                now_ms,
+            } => {
+                let Some(s) = self.streams.get_mut(key).filter(|s| !s.deleted) else {
+                    return Outcome::err(Error::Missing);
+                };
+                if s.incarnation != *incarnation {
+                    return Outcome::err(Error::StaleIncarnation);
+                }
+                if s.config
+                    .expiry
+                    .is_some_and(|p| p.expired(s.access_ms, *now_ms))
+                {
+                    return Outcome::err(Error::Missing);
+                }
+                if matches!(s.config.expiry, Some(Expiry::Ttl(_))) {
+                    s.access_ms = s.access_ms.max(*now_ms);
+                }
+                Outcome::stream(s, true)
+            }
+            Command::Expire {
+                key,
+                incarnation,
+                access_ms,
+                now_ms,
+            } => {
+                let Some(s) = self.streams.get(key).filter(|s| !s.deleted) else {
+                    return Outcome::err(Error::Missing);
+                };
+                if s.incarnation != *incarnation {
+                    return Outcome::err(Error::StaleIncarnation);
+                }
+                if s.access_ms != *access_ms
+                    || !s
+                        .config
+                        .expiry
+                        .is_some_and(|p| p.expired(s.access_ms, *now_ms))
+                {
+                    return Outcome::err(Error::ConfigConflict);
+                }
+                self.apply(&Command::Delete {
+                    key: key.clone(),
+                    incarnation: *incarnation,
+                    expired_at: None,
+                })
+            }
             Command::Delete {
                 key,
                 incarnation,
@@ -384,7 +469,9 @@ impl State {
                 if s.incarnation != *incarnation {
                     return Outcome::err(Error::StaleIncarnation);
                 }
-                if expired_at.is_some() && s.config.expires_ms != *expired_at {
+                if expired_at.is_some()
+                    && s.config.expiry.and_then(Expiry::fixed_millis) != *expired_at
+                {
                     return Outcome::err(Error::ConfigConflict);
                 }
                 s.deleted = true;

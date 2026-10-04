@@ -91,13 +91,14 @@ mod tests {
             incarnation: 1,
             config: crate::model::StreamConfig {
                 content_type: "application/octet-stream".into(),
-                expires_ms: None,
+                expiry: None,
             },
             data: b"x".to_vec(),
             closed: false,
             deleted: false,
             producers: BTreeMap::new(),
             last_seq: None,
+            access_ms: 0,
         };
         let mut reader = cache.open("000", &stream).unwrap();
         for index in 1..=MAX_FILES {

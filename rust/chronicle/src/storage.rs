@@ -76,6 +76,7 @@ pub struct StreamInfo {
     pub end: u64,
     pub closed: bool,
     pub deleted: bool,
+    pub access_ms: u64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -195,6 +196,7 @@ impl SqliteStore {
                 end: s.data.len() as u64,
                 closed: s.closed,
                 deleted: s.deleted,
+                access_ms: s.access_ms,
             }))
         })
         .await
@@ -598,7 +600,9 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                             let key = match &c {
                                 model::Command::Create { key, .. }
                                 | model::Command::Append { key, .. }
-                                | model::Command::Delete { key, .. } => Some(key.clone()),
+                                | model::Command::Delete { key, .. }
+                                | model::Command::Touch { key, .. }
+                                | model::Command::Expire { key, .. } => Some(key.clone()),
                                 _ => None,
                             };
                             let r = s.apply(&c);

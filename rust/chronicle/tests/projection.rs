@@ -42,10 +42,11 @@ fn create(data: &[u8], expected: Option<u64>) -> Command {
         expected_incarnation: expected,
         config: StreamConfig {
             content_type: "application/octet-stream".into(),
-            expires_ms: None,
+            expiry: None,
         },
         data: data.to_vec(),
         closed: false,
+        now_ms: None,
     }
 }
 
@@ -76,6 +77,7 @@ async fn bounded_ranges_have_independent_cursors_and_survive_recreation() {
             close: false,
             empty_body: false,
             stream_seq: None,
+            now_ms: None,
         },
     )
     .await;
@@ -121,6 +123,7 @@ async fn restart_rebuilds_untrusted_cache_and_snapshot_replaces_inode() {
             close: false,
             empty_body: false,
             stream_seq: None,
+            now_ms: None,
         },
     )
     .await;
@@ -246,6 +249,7 @@ async fn notifications_coalesce_applies_and_only_signal_successful_snapshot_inst
             close: false,
             empty_body: false,
             stream_seq: None,
+            now_ms: None,
         },
     )
     .await;
