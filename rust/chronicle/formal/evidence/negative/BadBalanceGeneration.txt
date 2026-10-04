@@ -1,0 +1,100 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 22 and seed 8203581878749225240 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 801647] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/ResourceBalance.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module ResourceBalance
+Starting... (2026-10-04 23:20:09)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-04 23:20:09.
+Error: Invariant Current is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ lastMove = 0
+/\ pending = FALSE
+/\ now = 0
+/\ generation = 1
+/\ accepted = <<>>
+/\ proposals = {}
+
+State 2: <Tick line 15, col 9 to line 16, col 75 of module ResourceBalance>
+/\ lastMove = 0
+/\ pending = FALSE
+/\ now = 1
+/\ generation = 1
+/\ accepted = <<>>
+/\ proposals = {}
+
+State 3: <Tick line 15, col 9 to line 16, col 75 of module ResourceBalance>
+/\ lastMove = 0
+/\ pending = FALSE
+/\ now = 2
+/\ generation = 1
+/\ accepted = <<>>
+/\ proposals = {}
+
+State 4: <Tick line 15, col 9 to line 16, col 75 of module ResourceBalance>
+/\ lastMove = 0
+/\ pending = FALSE
+/\ now = 3
+/\ generation = 1
+/\ accepted = <<>>
+/\ proposals = {}
+
+State 5: <Observe line 13, col 12 to line 14, col 72 of module ResourceBalance>
+/\ lastMove = 0
+/\ pending = FALSE
+/\ now = 3
+/\ generation = 1
+/\ accepted = <<>>
+/\ proposals = {1}
+
+State 6: <Next line 27, col 39 to line 27, col 66 of module ResourceBalance>
+/\ lastMove = 3
+/\ pending = TRUE
+/\ now = 3
+/\ generation = 2
+/\ accepted = <<[at |-> 3, previous |-> 0, expected |-> 1, actual |-> 1]>>
+/\ proposals = {1}
+
+State 7: <Finish line 25, col 11 to line 26, col 73 of module ResourceBalance>
+/\ lastMove = 3
+/\ pending = FALSE
+/\ now = 3
+/\ generation = 2
+/\ accepted = <<[at |-> 3, previous |-> 0, expected |-> 1, actual |-> 1]>>
+/\ proposals = {1}
+
+State 8: <Tick line 15, col 9 to line 16, col 75 of module ResourceBalance>
+/\ lastMove = 3
+/\ pending = FALSE
+/\ now = 4
+/\ generation = 2
+/\ accepted = <<[at |-> 3, previous |-> 0, expected |-> 1, actual |-> 1]>>
+/\ proposals = {1}
+
+State 9: <Tick line 15, col 9 to line 16, col 75 of module ResourceBalance>
+/\ lastMove = 3
+/\ pending = FALSE
+/\ now = 5
+/\ generation = 2
+/\ accepted = <<[at |-> 3, previous |-> 0, expected |-> 1, actual |-> 1]>>
+/\ proposals = {1}
+
+State 10: <Next line 27, col 39 to line 27, col 66 of module ResourceBalance>
+/\ lastMove = 5
+/\ pending = TRUE
+/\ now = 5
+/\ generation = 3
+/\ accepted = << [at |-> 3, previous |-> 0, expected |-> 1, actual |-> 1],
+   [at |-> 5, previous |-> 3, expected |-> 1, actual |-> 2] >>
+/\ proposals = {1}
+
+168 states generated, 81 distinct states found, 4 states left on queue.
+The depth of the complete state graph search is 12.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 3).
+Finished in 00s at (2026-10-04 23:20:09)
