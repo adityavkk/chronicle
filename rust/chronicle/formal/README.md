@@ -108,6 +108,25 @@ expose Electric's raw plaintext socket for `sendfile`, so this is not zero-copy.
 
 ## Implementation mapping and remaining gaps
 
+`IncarnationAdmission.tla` precedes implicit HTTP recreation compatibility.
+Requests with no `Stream-Incarnation` target the current lifetime at admission;
+Create after a tombstone chooses its checked next incarnation. HTTP resolves
+this once and submits an explicit incarnation in every command. Apply never
+refreshes that binding. Explicit stale caller headers stay stale, even across
+delete/recreate; the negative model refreshes at apply and violates the binding.
+The existing Lean `stale_incarnation_write_noop` theorem proves the corresponding
+unbounded deterministic write fence. Rust legacy commands with absent Create
+incarnation still mean one on replay, rather than acquiring new semantics.
+
+An implicit retry arriving after recreation is indistinguishable from a new
+operation on that URL. Clients needing unknown-outcome retry safety across
+lifetimes must retain and resend the original explicit incarnation (and producer
+tuple for append). This is a necessary API distinction, not cross-lifetime dedup
+or a claim that the server can infer intent from an identical headerless request.
+Tests must cover normal implicit recreation, fixed queued-command fencing,
+explicit stale retries, producer reset and legacy replay. TTL expiration is
+the same tombstone transition, not a bypass of the incarnation guard.
+
 HTTP metadata compatibility preserves the existing committed-command model:
 config equality compares the ASCII-case-insensitive media type before `;`,
 expiry policy and closure, while preserving the original content-type header.
