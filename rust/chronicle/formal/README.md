@@ -650,3 +650,17 @@ the negative mutation samples the tag after capture and must fail. Its scope is
 descriptor/body correspondence, assuming committed-prefix and incarnation
 safety already established separately. Hash correctness and Rust refinement
 are tested/reviewed, not mechanized here.
+
+### SSE wire compatibility refinement
+
+Before changing encoding: `SseRead.tla` continues to require complete successful
+data encoding before a control can advance the frontier. Coalescing bounded
+data chunks with that following control does not change the transition order;
+source errors must never emit the control. Flush once buffered output reaches
+16 KiB (plus one bounded source chunk), rather than buffering a whole stream.
+No transport-level atomic delivery guarantee follows from this coalescing.
+Text fields omit the optional separator except when the payload itself starts
+with a space, which needs an extra space to survive SSE parsing. The line-start
+state crosses arbitrary UTF-8/source chunk boundaries. Existing split-boundary
+and property tests check parser-equivalent output; the TLA model does not prove
+byte encoding. SSE Cache-Control becomes no-cache; strict barriers are unchanged.
