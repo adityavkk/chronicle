@@ -132,6 +132,11 @@ committed commands keep their original incarnation on replay.
   pinned conformance suite now passes **326 tests, with zero failures and six
   upstream-default subscription skips**, on real k3d. This is protocol evidence,
   not comprehensive fork crash/partition qualification.
+* [Resource-informed replica placement](evidence/RESOURCE-BALANCE.md) uses bounded
+  actor-work/charged-byte observations, known-domain preservation and replicated
+  movement cooldown. A loaded k3d join–balance–drain cycle retained 9,600 appends
+  across four Porcupine-checked histories. It included 249 unknown append attempts;
+  observed stable placement is not uninterrupted availability or a convergence proof.
 * A [release-mode workload comparison](evidence/PERFORMANCE.md) measured 156 ack/s
   with 172 ms p99 on one hot stream, versus 262 ack/s with 74 ms p99 across four
   shards, using the same CP/strict semantics and eight producers. Each case
@@ -142,7 +147,7 @@ committed commands keep their original incarnation on replay.
 ## Explicitly unfinished
 
 This is a bounded replicated vertical slice, **not the full requested deliverable**.
-Reserved subscription APIs, zero-copy sendfile, resource-informed placement and leadership
+Reserved subscription APIs, zero-copy sendfile, independent resource-informed leadership
 balancing, deeper replication/storage trace linkage, broader I/O-fault schedules, stronger
 admission/snapshot crash schedules, repeated steady-state measurements and external
 equal-semantics performance baselines remain.

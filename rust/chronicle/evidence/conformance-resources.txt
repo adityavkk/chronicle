@@ -1,0 +1,60 @@
+
+> test
+> vitest run --testTimeout=30000 --reporter=default --reporter=json --outputFile=../../evidence/conformance-resources.json
+
+
+ RUN  v4.1.8 /home/user/workspace/repo/rust/chronicle/tests/conformance
+
+stderr | conformance.test.ts > Long-Poll Operations > should wait for new data with long-poll
+conformance transport failure http://172.18.0.3:30644/v1/stream/longpoll-test-1791157743238?offset=0000000000000000_0000000000000008&live=long-poll&cursor=3136287 [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on long-poll responses
+conformance transport failure http://172.18.0.3:30644/v1/stream/security-longpoll-nosniff-1791157744403?offset=0000000000000000_0000000000000012&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Long-Poll Edge Cases > should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout
+conformance transport failure http://172.18.0.3:30644/v1/stream/longpoll-204-headers-test-1791157756174?offset=0000000000000000_0000000000000000&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+ ✓ conformance.test.ts (332 tests | 6 skipped) 69837ms
+     ✓ should wait for new data with long-poll  568ms
+     ✓ should include X-Content-Type-Options: nosniff on long-poll responses  514ms
+     ✓ should support offset=now with long-poll mode (waits for data)  5015ms
+     ✓ should support offset=now with long-poll on empty stream  5026ms
+     ✓ should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout  5013ms
+     ✓ should return 404 on HEAD after TTL expires  1066ms
+     ✓ should return 404 on GET after TTL expires (idle)  1060ms
+     ✓ should return 404 on POST append after TTL expires (idle)  1054ms
+     ✓ should return 404 on HEAD after Expires-At passes  3046ms
+     ✓ should return 404 on GET after Expires-At passes  3048ms
+     ✓ should return 404 on POST append after Expires-At passes  3035ms
+     ✓ should allow recreating stream after TTL expires  1082ms
+     ✓ should extend TTL on write (sliding window)  3023ms
+     ✓ should extend TTL on read (sliding window)  3026ms
+     ✓ should NOT extend TTL on HEAD  2032ms
+     ✓ should NOT extend Expires-At on read or write  4028ms
+     ✓ should handle chunk-size pagination correctly  952ms
+       ✓ concurrent readers see consistent data during writes  3118ms
+       ✓ single byte values cover full range (0-255) with concurrent readers during write  4671ms
+       ✓ random operation sequences maintain stream invariants  2393ms
+       ✓ offsets are always monotonically increasing  2059ms
+       ✓ read-your-writes: data is immediately visible after append  1962ms
+       ✓ data at offset never changes after additional appends  2632ms
+       ✓ should reject offsets with invalid characters  357ms
+       ✓ lexicographically ordered seq values are accepted  1057ms
+       ✓ out-of-order seq values are rejected  717ms
+       ✓ concurrent writers racing with incrementing seq values  842ms
+       ✓ replay produces identical content hash  3256ms
+       ✓ deterministic ordering - same data in same order produces same hash  1512ms
+       ✓ sse-live-reader-receives-final-append-on-close: live reader at tail receives data appended atomically with the close  1223ms
+     ✓ should cascade GC through three levels  729ms
+     ✓ should expire fork based on TTL (releases refcount)  1081ms
+     ✓ should expire source with living forks (source goes 410)  1087ms
+     ✓ should allow fork to outlive source via TTL renewal  2090ms
+     ✓ should handle many forks of same stream (10 forks)  1207ms
+     ✓ should fork at every offset position  377ms
+
+ Test Files  1 passed (1)
+      Tests  326 passed | 6 skipped (332)
+   Start at  23:49:02
+   Duration  70.13s (transform 39ms, setup 0ms, import 135ms, tests 69.84s, environment 0ms)
+
+JSON report written to /home/user/workspace/repo/rust/chronicle/evidence/conformance-resources.json

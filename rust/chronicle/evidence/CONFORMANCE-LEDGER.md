@@ -1,13 +1,15 @@
 # Pinned protocol failure-family ledger
 
 Acceptance suite: unchanged `@durable-streams/server-conformance-tests@0.3.5`.
-The latest full run is `conformance-forks.json`: **326 passed, 0 failed,
+The latest full run is `conformance-resources.json`: **326 passed, 0 failed,
 6 skipped of 332**. The six skips are upstream-default reserved subscription
 tests; no new skips, filtering, weakened assertions or replacement suite count
 as a full pass. Focused development runs will be labelled separately.
 
 This run uses the explicit fixed-tenant mount (`STREAM_TENANT=conformance-mounted`)
-with the origin as suite base URL. Earlier runs used a nested tenant URL; those
+on source `5781042`, image `chronicle-raft:resources2` (exact identities in
+`resource-84171/`), after resource-informed placement qualification.
+It uses the origin as suite base URL. Earlier runs used a nested tenant URL; those
 runs did not establish correct fork-reference namespace resolution. See MOUNT.md.
 
 | Family | Failed in latest full run | Work status |
