@@ -1,10 +1,14 @@
 # Pinned protocol failure-family ledger
 
 Acceptance suite: unchanged `@durable-streams/server-conformance-tests@0.3.5`.
-The latest full run is `conformance-sse-compat.json`: **247 passed, 79 failed,
+The latest full run is `conformance-mount.json`: **247 passed, 79 failed,
 6 skipped of 332**. The six skips are upstream-default reserved subscription
 tests; no new skips, filtering, weakened assertions or replacement suite count
 as a full pass. Focused development runs will be labelled separately.
+
+This run uses the explicit fixed-tenant mount (`STREAM_TENANT=conformance-mounted`)
+with the origin as suite base URL. Earlier runs used a nested tenant URL; those
+runs did not establish correct fork-reference namespace resolution. See MOUNT.md.
 
 | Family | Failed in latest full run | Work status |
 |---|---:|---|
