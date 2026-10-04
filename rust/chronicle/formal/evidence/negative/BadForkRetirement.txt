@@ -1,0 +1,75 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 41 and seed 8255623248653311384 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 646248] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/rust/chronicle/formal/tla/ForkRetirement.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ForkRetirement
+Starting... (2026-10-04 22:00:37)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-04 22:00:37.
+Error: Invariant CommittedPinned is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ incarnation = 1
+/\ deleted = FALSE
+/\ target = "absent"
+/\ retained = FALSE
+/\ delayed = TRUE
+/\ decision = "preparing"
+/\ erased = FALSE
+
+State 2: <Prepare line 12, col 12 to line 14, col 72 of module ForkRetirement>
+/\ incarnation = 1
+/\ deleted = FALSE
+/\ target = "prepared"
+/\ retained = FALSE
+/\ delayed = FALSE
+/\ decision = "preparing"
+/\ erased = FALSE
+
+State 3: <Commit line 15, col 11 to line 17, col 68 of module ForkRetirement>
+/\ incarnation = 1
+/\ deleted = FALSE
+/\ target = "prepared"
+/\ retained = TRUE
+/\ delayed = FALSE
+/\ decision = "commit"
+/\ erased = FALSE
+
+State 4: <Delete line 27, col 11 to line 28, col 78 of module ForkRetirement>
+/\ incarnation = 1
+/\ deleted = TRUE
+/\ target = "prepared"
+/\ retained = TRUE
+/\ delayed = FALSE
+/\ decision = "commit"
+/\ erased = FALSE
+
+State 5: <Finish line 20, col 11 to line 22, col 79 of module ForkRetirement>
+/\ incarnation = 1
+/\ deleted = TRUE
+/\ target = "live"
+/\ retained = TRUE
+/\ delayed = FALSE
+/\ decision = "commit"
+/\ erased = FALSE
+
+State 6: <Recreate line 29, col 13 to line 31, col 67 of module ForkRetirement>
+/\ incarnation = 2
+/\ deleted = TRUE
+/\ target = "live"
+/\ retained = TRUE
+/\ delayed = FALSE
+/\ decision = "forgotten"
+/\ erased = FALSE
+
+28 states generated, 18 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-04 22:00:37)

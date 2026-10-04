@@ -732,3 +732,16 @@ Recreation cannot pass unresolved prepares or retained child references. Old
 messages cannot recreate an old target incarnation. These retirement/counter
 rules need direct implementation tests; the initial single-transaction model
 does not establish their multi-transaction composition.
+
+Retirement refinement before coordinator implementation: abort cleanup may be
+followed by a delayed Prepare, even after source recreation erased the explicit
+abort. Reconcile target reservations independently of source finalization. A
+strict observation of a **newer source incarnation** permits cleanup of the old
+reservation: a committed unresolved child would still pin the source incarnation.
+Missing state, stale reads and transport errors do not establish retirement.
+`ForkRetirement` checks this pin and cleanup implication across delayed/repeated
+preparation and abort/recreation. Removing the pin yields a retained negative
+trace. This is a bounded single-transaction safety check, not a liveness proof;
+eventual cleanup additionally requires finite delayed messages and fair target
+reconciliation. The coordinator must verify the exact target/source transaction,
+and use the persisted decision, not a successful Decide proposal acknowledgment.
