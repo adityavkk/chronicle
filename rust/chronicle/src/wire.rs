@@ -5,6 +5,27 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use serde_json::value::RawValue;
 
+/// Validator for an immutable range of an incarnation, captured with its bytes.
+pub fn etag(key: &str, incarnation: u64, start: u64, end: u64, closed: bool, json: bool) -> String {
+    use sha2::{Digest as _, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(incarnation.to_be_bytes());
+    hash.update(start.to_be_bytes());
+    hash.update(end.to_be_bytes());
+    hash.update([u8::from(closed), u8::from(json)]);
+    hash.update(key.as_bytes());
+    format!("\"{:x}\"", hash.finalize())
+}
+
+/// GET uses weak comparison; `*` is only valid as the entire field value.
+pub fn matches_etag(value: &str, tag: &str) -> bool {
+    value.trim() == "*"
+        || value.split(',').any(|candidate| {
+            let candidate = candidate.trim();
+            candidate.strip_prefix("W/").unwrap_or(candidate) == tag
+        })
+}
+
 pub fn format_offset(bytes: u64) -> String {
     format!("{:016}_{:016}", 0, bytes)
 }
@@ -138,6 +159,26 @@ pub fn file_body(
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn validators_bind_every_representation_dimension() {
+        let tag = etag("tenant/path", 2, 3, 9, false, true);
+        assert_eq!(tag, etag("tenant/path", 2, 3, 9, false, true));
+        for changed in [
+            etag("tenant/other", 2, 3, 9, false, true),
+            etag("tenant/path", 3, 3, 9, false, true),
+            etag("tenant/path", 2, 4, 9, false, true),
+            etag("tenant/path", 2, 3, 10, false, true),
+            etag("tenant/path", 2, 3, 9, true, true),
+            etag("tenant/path", 2, 3, 9, false, false),
+        ] {
+            assert_ne!(tag, changed);
+        }
+        assert!(matches_etag(&format!("\"other\", W/{tag}"), &tag));
+        assert!(matches_etag(" * ", &tag));
+        assert!(!matches_etag("\"other\", *", &tag));
+        assert!(!matches_etag("\"other,tag\"", &tag));
+    }
 
     #[test]
     fn cursor_crosses_interval_and_rejects_overflow() {

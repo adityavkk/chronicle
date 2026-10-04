@@ -1,25 +1,26 @@
-# Implicit lifecycle admission
+# Implicit lifecycle admission verification
 
-Formal checks preceded implementation in a separate commit: TLC explored 16
-states, while refreshing an admitted incarnation at apply produced the retained
-`AdmittedIncarnationBound` counterexample. Lean's existing unbounded stale-write
-fence theorem rebuilt without proof holes. These are not a proof of the HTTP
-adapter or Raft/storage implementation.
+Source `308f18b`; image `chronicle-raft:recreation`, ID
+`sha256:6dae3e4446335737bbd3221843d75f79b8fd1606e924db04041af71a36562272`;
+release binary SHA256
+`8bc1781bdedd7643a703a581f314bdf3fd16ca88d412afb6950c291b4afa1dd0`.
+All five pods stopped before upgrade; PVCs preserved.
 
-The HTTP adapter now binds an omitted incarnation to the observed lifetime (or
-checked next lifetime for a tombstone). Every submitted command contains a fixed
-incarnation. Explicit caller headers are never refreshed; legacy persisted
-commands retain their old replay behavior. `make check` passed, including the
-existing deterministic stale-lifecycle/legacy guards. A new schema-3 live test
-checks implicit deletion/TTL recreation, producer reset and explicit stale
-create/append/delete rejection. It is not input to the older schema-2 checker.
+Initial live check after Kubernetes Ready returned 503 `no leader; retry`.
+`recreation-http.jsonl` retains it: pod readiness is not leader readiness.
+The later independent run `recreation-http-ready.jsonl` passed deletion/TTL
+recreation, producer reset and explicit stale create/append/delete checks.
+These schema-3 HTTP observations are not Porcupine-certified histories.
 
-Clients retrying across lifetimes must send the original explicit incarnation.
-Headerless retries after recreation cannot be distinguished from new operations;
-cross-lifetime deduplication is not promised. A concurrent lifecycle change can
-reject an already bound request instead of silently retargeting it.
+Full pinned suite: **239 passed, 87 failed, 6 upstream-default skips** in
+`conformance-recreation.{json,txt}`. Recreation and offset-now now pass;
+fork failures increased from 78 to 79 and remain unresolved. Upstream source and
+assertions are unchanged. The runner's default test timeout changed from 5s to
+30s, above the intentional 5s server long-poll wait and suite's 20s long-poll
+configuration; this is a harness deadline correction, not a server latency fix.
 
-The conformance runner deadline is now 30 seconds, above the already configured
-20-second long-poll allowance. Earlier reports retain the two 5-second runner
-timeouts. No upstream test/assertion/explicit deadline or server wait was changed.
-Live results and the new full-suite report will be recorded after execution.
+Formal admission mapping/checks preceded implementation. `make check` passed
+before deployment. Independent Oracle review found no admission/conditional-read
+correctness blockers; sequential live checks do not establish all concurrent
+admission interleavings. Explicit original incarnation remains necessary to
+distinguish cross-lifetime retries from new implicit operations.

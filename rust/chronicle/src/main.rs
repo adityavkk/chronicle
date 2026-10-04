@@ -894,6 +894,8 @@ async fn stream_inner(
             }
         }
         let started = Instant::now();
+        let tag = (live.is_none() && method == Method::GET)
+            .then(|| wire::etag(&key, s.incarnation, offset, s.end, s.closed, json));
         let file = g
             .store
             .read_file(key, &s, offset, (admission.clone(), live_permit))
@@ -903,6 +905,16 @@ async fn stream_inner(
             chronicle_raft::storage::ReadError::Offset => bad(e),
             _ => unavailable(e),
         })?;
+        if let Some(tag) = tag {
+            r = r.header("etag", &tag);
+            if headers.get_all("if-none-match").iter().any(|value| {
+                value
+                    .to_str()
+                    .is_ok_and(|value| wire::matches_etag(value, &tag))
+            }) {
+                return r.status(304).body(Body::empty()).map_err(unavailable);
+            }
+        }
         return r
             .header("content-length", length + if json { 2 } else { 0 })
             .body(if method == Method::HEAD {
