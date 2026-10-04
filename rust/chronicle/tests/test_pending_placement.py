@@ -10,6 +10,66 @@ import pending_placement as harness
 
 
 class CleanupTest(unittest.TestCase):
+    def test_forced_repair_restores_seed_before_isolation_and_on_failures(self):
+        for failure in ("drain", "gate", "isolate", "restore-response", "restore-rejected"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                state = {"nodes": {str(i): {"draining": i == 5} for i in (1, 2, 3, 5)},
+                         "placements": {"1": {"complete": False, "voters": [1, 2, 5], "generation": 2}}}
+                mutations, partitions = [], []
+
+                def api(path, value=None):
+                    if path == "/admin/control":
+                        return copy.deepcopy(state)
+                    if path == "/admin/retirement/5":
+                        return True
+                    self.assertEqual(path, "/admin/register")
+                    node, registration = value
+                    mutations.append((node, registration["draining"]))
+                    if node == 3 and not registration["draining"] and failure == "restore-rejected":
+                        raise TimeoutError("restore not executed")
+                    state["nodes"][str(node)] = copy.deepcopy(registration)
+                    if node == 3 and ((registration["draining"] and failure == "drain") or
+                                      (not registration["draining"] and failure == "restore-response")):
+                        raise TimeoutError("response lost after execution")
+
+                def command(*args):
+                    return "k3d-chronicle-rust-agent-4-0" if "jsonpath={.spec.nodeName}" in args else ""
+
+                def control(pod, action, path, check=True):
+                    reached = (3, True) in mutations and path.endswith((".reached", ".resumed"))
+                    return SimpleNamespace(returncode=0 if action != "test" or reached else 1)
+
+                def wait(predicate, label):
+                    if failure == "gate" and label == "learner persistence gate":
+                        raise TimeoutError(label)
+                    result = predicate()
+                    self.assertTrue(result, label)
+                    return result
+
+                def partition(args, **kwargs):
+                    action = args[-2]
+                    partitions.append(action)
+                    if action == "isolate":
+                        self.assertFalse(state["nodes"]["3"]["draining"])
+                        raise TimeoutError("isolation response lost")
+                    return SimpleNamespace(returncode=0, stdout="", stderr="", check_returncode=lambda: None)
+
+                output = str(Path(directory) / "events.jsonl")
+                with patch("sys.argv", ["pending_placement.py", "--node", "5", "--output", output]), \
+                        patch.object(harness, "preflight"), patch.object(harness, "api", side_effect=api), \
+                        patch.object(harness, "command", side_effect=command), \
+                        patch.object(harness, "control", side_effect=control), \
+                        patch.object(harness, "wait", side_effect=wait), \
+                        patch.object(harness.subprocess, "run", side_effect=partition):
+                    with self.assertRaises((TimeoutError, RuntimeError)):
+                        harness.main()
+                self.assertEqual(mutations, [(5, False), (3, True), (3, False), (5, True)])
+                self.assertEqual(state["nodes"]["3"]["draining"], failure == "restore-rejected")
+                self.assertEqual(partitions, ["isolate", "heal"] if failure in ("isolate", "restore-response") else [])
+                events = [json.loads(line) for line in Path(output).read_text().splitlines()]
+                errors = next(e for e in events if e["phase"] == "cleanup")["errors"]
+                self.assertEqual(bool(errors), failure == "restore-rejected")
+
     def test_crash_needs_runtime_replacement_not_only_ready_or_command_success(self):
         before = {"metadata": {"uid": "same-pod"}, "status": {"containerStatuses": [{
             "name": "chronicle", "containerID": "containerd://" + "a" * 64,

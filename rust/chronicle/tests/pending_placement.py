@@ -68,7 +68,8 @@ def crash_gated(pod, node, note):
     note("restarted-with-gate-unreleased", before=before, after=after)
 
 
-def cleanup(pod, node, armed, reached, isolated, partition, note, restarted=False):
+def cleanup(pod, node, armed, reached, isolated, partition, note, restarted=False,
+            restore_seed=None):
     errors = []
 
     def attempt(label, action):
@@ -79,6 +80,8 @@ def cleanup(pod, node, armed, reached, isolated, partition, note, restarted=Fals
             errors.append(f"{label}: {error!r}")
             return False
 
+    if restore_seed is not None:
+        attempt("restore seed eligibility", restore_seed)
     if node is not None:
         attempt("restore draining", lambda: quarantine(node, note))
     # Disarm every gate before releasing any; failures must not skip the others.
@@ -160,6 +163,27 @@ def main():
 
         command(K, "-n", "chronicle", "exec", pod, "--", "mkdir", "-p", directory)
         armed, isolated, reached, admitted, restarted = [], False, None, False, False
+        # Force RF3 repair rather than waiting for a healthy balancing choice.
+        # Keep seed 1 (the admin proxy) eligible; group 0 can finish before group 1.
+        seed, seed_owned, restore_attempted = 3, False, False
+
+        def restore_seed():
+            nonlocal restore_attempted
+            if not seed_owned:
+                return
+            registered_seed = api("/admin/control")["nodes"][str(seed)]
+            if registered_seed["draining"] and not restore_attempted:
+                restore_attempted = True  # Own even a lost response; never retry the POST.
+                registered_seed["draining"] = False
+                note("seed-restore-invoke", node=seed)
+                try:
+                    api("/admin/register", [seed, registered_seed])
+                except Exception as error:
+                    note("seed-restore-unknown", node=seed, error=repr(error))
+            if api("/admin/control")["nodes"][str(seed)]["draining"]:
+                raise RuntimeError("seed eligibility restoration unverified; inspect before retrying")
+            note("seed-restored", node=seed)
+
         try:
             for files in paths.values():
                 # Refuse replacement rather than silently overwriting a concurrent owner.
@@ -170,6 +194,11 @@ def main():
             registered["draining"] = False
             admitted = True
             api("/admin/register", [args.node, registered])
+            registered_seed = api("/admin/control")["nodes"][str(seed)]
+            registered_seed["draining"] = True
+            seed_owned = True  # Cleanup owns an ambiguous drain as well.
+            note("seed-drain-invoke", node=seed)
+            api("/admin/register", [seed, registered_seed])
             reached = wait(lambda: next((gate for gate, files in paths.items()
                 if control(pod, "test", files["reached"], check=False).returncode == 0), None),
                 "learner persistence gate")
@@ -178,6 +207,8 @@ def main():
             if old["complete"] or args.node not in old["voters"]:
                 raise RuntimeError("gate did not intercept the pending prospective learner")
             note("pending-gated", gate=reached, state=state)
+            # Automatic pending-target repair must be able to choose all seeds.
+            restore_seed()
             isolated = True  # Cleanup owns even a partially applied injection.
             partition("isolate")
             if args.crash_gated:
@@ -206,7 +237,8 @@ def main():
             raise
         finally:
             errors = cleanup(pod, args.node if admitted else None, armed,
-                             paths[reached] if reached else None, isolated, partition, note, restarted)
+                             paths[reached] if reached else None, isolated, partition, note, restarted,
+                             restore_seed=restore_seed)
             if errors:
                 raise RuntimeError(f"cleanup incomplete: {errors}")
         wait(lambda: api(f"/admin/retirement/{args.node}") is True, "retirement after release")

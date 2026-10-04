@@ -36,11 +36,17 @@ def main():
             output.write(json.dumps({"phase": phase, "time_ns": time.monotonic_ns(), **data}) + "\n")
             output.flush()
 
-        def draining(node, value):
+        def draining(node, value, verify=None):
             registered = api("/admin/control")["nodes"][str(node)]
             registered["draining"] = value
+            if verify is not None:
+                verify()
             note("register-invoke", node=node, draining=value)
-            api("/admin/register", [node, registered])
+            try:
+                api("/admin/register", [node, registered])
+            except BaseException as error:
+                note("register-unknown", node=node, draining=value, error=repr(error))
+                raise
             note("register-ok", node=node, draining=value)
 
         state = api("/admin/control")
@@ -50,15 +56,6 @@ def main():
             raise RuntimeError("requires verified spare 4")
         before = processes()
         note("before", processes=before, control=state)
-        draining(4, False)
-
-        def joined():
-            state = api("/admin/control")
-            placements = state["placements"]
-            return state if all(p["complete"] for p in placements.values()) and all(
-                4 in placements[str(g)]["voters"] for g in (1, 2, 3)) else None
-
-        note("joined", control=wait(joined, "spare placement"))
         statuses = {pod: pod_status(pod) for pod in before}
         leaders = [pod for pod, status in statuses.items() if status["0"]["state"] == "Leader"]
         if len(leaders) != 1:
@@ -67,18 +64,38 @@ def main():
         node = statuses[pod]["0"]["id"]
         if node not in (1, 2, 3) or not any(statuses[pod][str(g)]["state"] == "Leader" for g in range(1, 5)):
             raise RuntimeError("control leader must also lead a data group")
-        note("leader-before-drain", node=node, status=statuses)
-        draining(node, True)
-        wait(lambda: api(f"/admin/retirement/{node}") is True, "leader retirement")
-        after = pod_status(pod)
-        if any(m["state"] != "Learner" for m in after.values()):
-            raise RuntimeError("retired process still leads or votes")
-        note("leader-retired", node=node, status=after, control=api("/admin/control"))
-        if processes() != before:
-            raise RuntimeError("process restart masked retirement")
+        note("leader-selected", node=node, status=statuses)
+
+        def verify_leader():
+            current = pod_status(pod)
+            groups = [g for g in range(1, 5) if current[str(g)]["state"] == "Leader"]
+            valid = current["0"]["id"] == node and current["0"]["state"] == "Leader" and bool(groups)
+            note("leader-before-drain", node=node, status=current, data_groups=groups, valid=valid)
+            if not valid:
+                raise RuntimeError("selected seed no longer leads both control and data; fault not injected")
+
+        # Admission need not move any particular group (and can move group 0).
+        # Fail rather than claiming leader-drain coverage after a role change.
+        try:
+            draining(4, False)
+            draining(node, True, verify=verify_leader)
+            wait(lambda: api(f"/admin/retirement/{node}") is True, "leader retirement")
+            after = pod_status(pod)
+            if any(m["state"] != "Learner" for m in after.values()):
+                raise RuntimeError("retired process still leads or votes")
+            note("leader-retired", node=node, status=after, control=api("/admin/control"))
+            if processes() != before:
+                raise RuntimeError("process restart masked retirement")
+        except BaseException as error:
+            note("failed", node=node, error=repr(error))
+            raise
+        finally:
+            # Reconcile even an ambiguous drain, without retrying either POST.
+            if api("/admin/control")["nodes"][str(node)]["draining"]:
+                draining(node, False)
+            if not api("/admin/control")["nodes"]["4"]["draining"]:
+                draining(4, True)
         # A second membership transition qualifies restoration, not just removal.
-        draining(node, False)
-        draining(4, True)
 
         def restored():
             state = api("/admin/control")

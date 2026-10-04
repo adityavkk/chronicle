@@ -75,12 +75,13 @@ def main():
         def assigned():
             state = api("/admin/control")
             placements = state["placements"].values()
-            # With three seeds and one later identity, stable rotation assigns
-            # that identity to groups 1..3. Wait for all three, not a transient
-            # completed placement between successive joins.
-            return state if all(p["complete"] for p in placements) and all(
-                args.node in state["placements"][str(g)]["voters"] for g in (1, 2, 3)) else None
-        note("assigned", state=wait(assigned, "node assignment"))
+            # Healthy balancing observes load and has a global cooldown; any
+            # group, including control group 0, can be the first assignment.
+            return state if all(p["complete"] for p in placements) and any(
+                args.node in p["voters"] for p in state["placements"].values()) else None
+        state = wait(assigned, "node assignment")
+        groups = sorted(int(g) for g, p in state["placements"].items() if args.node in p["voters"])
+        note("assigned", state=state, groups=groups)
         probe = command("sudo", "docker", "exec", node, "iptables", "-S")
         if "CHRONICLE_FAULT" in probe:
             raise RuntimeError("refusing existing partition")
@@ -95,12 +96,12 @@ def main():
                                     for p in state["placements"].values()) else None
             state = wait(repaired, "voter repair without old replica")
             retired = api(f"/admin/retirement/{args.node}")
-            note("repaired-but-unverified", state=state, retired=retired)
+            note("repaired-but-unverified", state=state, retired=retired, groups=groups)
             assert retired is False, "unreachable replica reported gracefully retired"
         finally:
             partition("heal")
         wait(lambda: api(f"/admin/retirement/{args.node}") is True, "retirement after healing")
-        note("verified-after-heal", state=api("/admin/control"))
+        note("verified-after-heal", state=api("/admin/control"), groups=groups)
 
 
 if __name__ == "__main__":
