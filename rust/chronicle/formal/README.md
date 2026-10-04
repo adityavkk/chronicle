@@ -108,6 +108,21 @@ expose Electric's raw plaintext socket for `sendfile`, so this is not zero-copy.
 
 ## Implementation mapping and remaining gaps
 
+HTTP metadata compatibility preserves the existing committed-command model:
+config equality compares the ASCII-case-insensitive media type before `;`,
+expiry policy and closure, while preserving the original content-type header.
+This follows Chronicle's Go `ContentTypeMatches`, not a Unicode case fold.
+JSON framing is selected by exact base media type, not a string prefix;
+`application/jsonp` is not JSON. Header decoding, required nonempty producer IDs
+and POST content type are validation before the append proposal, not replicated
+append attempts. Existing expiry maintenance remains a separate committed action.
+Successful creation supplies Location from the request authority and path; it
+does not read newer stream state to construct the response. Existing safety
+proofs abstract payload/config classification: parser correctness and this
+classification-to-code refinement require explicit Rust/live tests, not a claim
+that TLA/Lean prove HTTP parsing. No consensus/lifecycle transition changes are
+needed for this compatibility family.
+
 `Expiry.tla` and `ChronicleFormal/Expiry.lean` precede sliding-TTL implementation.
 Immutable policy (duration or absolute instant) is distinct from last access.
 Only committed initial strict GET touches and append attempts renew sliding TTL;
