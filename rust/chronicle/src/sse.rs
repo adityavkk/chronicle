@@ -52,9 +52,14 @@ pub async fn response(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
     wire::compute_cursor(client_cursor, now).map_err(bad)?;
-    let encoding = if view.config.content_type.starts_with("application/json") {
+    let encoding = if view.config.is_json() {
         Encoding::Json
-    } else if view.config.content_type.starts_with("text/") {
+    } else if view
+        .config
+        .content_type
+        .get(..5)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("text/"))
+    {
         Encoding::Text
     } else {
         Encoding::Base64

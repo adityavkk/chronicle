@@ -10,6 +10,18 @@ pub const MAX_STREAM_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_SHARD_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_CONTENT_TYPE_BYTES: usize = 4096;
 
+/// Match Chronicle's protocol media-type identity without altering response headers.
+pub fn content_type_matches(a: &str, b: &str) -> bool {
+    fn base(value: &str) -> &str {
+        if value.is_empty() {
+            "application/octet-stream"
+        } else {
+            value.split_once(';').map_or(value, |(base, _)| base)
+        }
+    }
+    base(a).eq_ignore_ascii_case(base(b))
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Producer {
     pub id: String,
@@ -28,12 +40,22 @@ pub struct ProducerState {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StreamConfig {
     pub content_type: String,
+    /// Absent preserves the old persisted-byte interpretation on replay.
+    #[serde(default)]
+    pub json_framing: Option<bool>,
     #[serde(
         default,
         alias = "expires_ms",
         deserialize_with = "crate::expiry::deserialize"
     )]
     pub expiry: Option<Expiry>,
+}
+
+impl StreamConfig {
+    pub fn is_json(&self) -> bool {
+        self.json_framing
+            .unwrap_or_else(|| self.content_type.starts_with("application/json"))
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -186,6 +208,9 @@ pub struct Outcome {
     pub closed: bool,
     #[serde(default)]
     pub producer: Option<ProducerPosition>,
+    /// Stored header captured by successful Create, including idempotent replies.
+    #[serde(default)]
+    pub content_type: Option<String>,
     pub error: Option<Error>,
 }
 
@@ -197,6 +222,7 @@ impl Outcome {
             duplicate,
             closed: false,
             producer: None,
+            content_type: None,
             error: None,
         }
     }
@@ -217,6 +243,7 @@ impl Outcome {
             duplicate: false,
             closed: false,
             producer: None,
+            content_type: None,
             error: Some(error),
         }
     }
@@ -246,8 +273,15 @@ impl State {
                     if s.incarnation != requested {
                         return Outcome::err(Error::StaleIncarnation);
                     }
-                    return if s.config == *config && s.closed == *closed {
-                        Outcome::stream(s, true)
+                    return if content_type_matches(&s.config.content_type, &config.content_type)
+                        && s.config.is_json() == config.is_json()
+                        && s.config.expiry == config.expiry
+                        && s.closed == *closed
+                    {
+                        Outcome {
+                            content_type: Some(s.config.content_type.clone()),
+                            ..Outcome::stream(s, true)
+                        }
                     } else {
                         Outcome::err(Error::ConfigConflict)
                     };
@@ -285,6 +319,7 @@ impl State {
                 );
                 Outcome {
                     closed: *closed,
+                    content_type: Some(config.content_type.clone()),
                     ..Outcome::ok(data.len() as u64, incarnation, false)
                 }
             }

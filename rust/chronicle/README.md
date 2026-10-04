@@ -145,6 +145,13 @@ idempotent PUT. Rejected appends after the incarnation/expiry checks may renew.
 Absolute RFC3339 deadlines never slide. Legacy persisted deadlines stay fixed;
 their original TTL duration was not recorded. Mixed-version operation and
 downgrade after expiry-policy writes are unsupported.
+New streams persist an explicit JSON framing choice using case-insensitive exact
+media-type matching. Legacy records keep their old byte interpretation; an old
+misclassified stream is not silently converted by replay or idempotent PUT.
+Content-type comparison ignores parameters, but successful PUT replies carry
+the stored header captured during apply. Location preserves the incoming Host
+for ordinary HTTP origin-form requests; TLS/public-origin discovery is not
+implemented. Mixed-version operation/downgrade after framing writes is unsupported.
 POST `Stream-Seq` is a per-incarnation,
 byte-lexicographic token (`"10" < "2"`), committed with payload/producer state.
 Absent leaves it unchanged; present-empty is a token. Producer retries ignore

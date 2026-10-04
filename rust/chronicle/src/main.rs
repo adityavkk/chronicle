@@ -453,7 +453,7 @@ pub async fn proxy(
     .map_err(unavailable)?
     .ok_or_else(|| unavailable("no leader; retry"))?;
     headers.insert("x-chronicle-forwarded", "1".parse().map_err(bad)?);
-    headers.remove("host");
+    // Keep the caller's authority for Location; routing uses the explicit URL.
     // Admin handlers reserialize JSON before forwarding. The original framing
     // may describe different bytes; let reqwest frame the supplied body.
     headers.remove("content-length");
@@ -779,6 +779,11 @@ async fn stream_inner(
         (admission.clone(), live_permit.clone()),
     )
     .await?;
+    if (method == Method::PUT || (method == Method::POST && !body.is_empty()))
+        && let Some(value) = headers.get("content-type")
+    {
+        value.to_str().map_err(bad)?;
+    }
     let h = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
     let close = h("stream-closed").is_some_and(|v| v.eq_ignore_ascii_case("true"));
     let content_type = h("content-type")
@@ -858,7 +863,7 @@ async fn stream_inner(
         } else {
             None
         };
-        let json = s.config.content_type.starts_with("application/json");
+        let json = s.config.is_json();
         let length = (s.end - offset).saturating_sub(u64::from(json));
         let mut r = Response::builder()
             .status(200)
@@ -907,6 +912,28 @@ async fn stream_inner(
             })
             .map_err(unavailable);
     }
+    // Validate response metadata before accepting a durable create.
+    let location = if method == Method::PUT {
+        let authority = uri
+            .authority()
+            .map(|v| v.as_str())
+            .or_else(|| h("host"))
+            .ok_or_else(|| bad("request authority required"))?
+            .parse::<axum::http::uri::Authority>()
+            .map_err(bad)?;
+        Some(
+            format!(
+                "{}://{}{}",
+                uri.scheme_str().unwrap_or("http"),
+                authority,
+                uri.path()
+            )
+            .parse::<HeaderValue>()
+            .map_err(bad)?,
+        )
+    } else {
+        None
+    };
     let command = if method == Method::PUT {
         for name in ["stream-ttl", "stream-expires-at"] {
             let mut values = headers.get_all(name).iter();
@@ -922,8 +949,12 @@ async fn stream_inner(
         let wire = if body.is_empty() {
             Bytes::new()
         } else {
-            wire::encode_wire(&body, content_type.starts_with("application/json"), true)
-                .map_err(bad)?
+            wire::encode_wire(
+                &body,
+                model::content_type_matches(&content_type, "application/json"),
+                true,
+            )
+            .map_err(bad)?
         };
         Command::Create {
             key,
@@ -932,6 +963,10 @@ async fn stream_inner(
                 .transpose()?,
             config: StreamConfig {
                 content_type: content_type.clone(),
+                json_framing: Some(model::content_type_matches(
+                    &content_type,
+                    "application/json",
+                )),
                 expiry,
             },
             data: wire.to_vec(),
@@ -954,19 +989,28 @@ async fn stream_inner(
             if body.is_empty() && !close && h("producer-id").is_none() {
                 return Err(bad("empty append"));
             }
-            if content_type != s.config.content_type && !body.is_empty() {
-                return Err((
-                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                    "content-type mismatch".into(),
-                ));
+            if !body.is_empty() {
+                if h("content-type").is_none_or(str::is_empty) {
+                    return Err(bad("Content-Type required for append body"));
+                }
+                if !model::content_type_matches(&content_type, &s.config.content_type) {
+                    return Err((StatusCode::CONFLICT, "content-type mismatch".into()));
+                }
+            }
+            for name in ["producer-id", "producer-epoch", "producer-seq"] {
+                if let Some(value) = headers.get(name) {
+                    value.to_str().map_err(bad)?;
+                }
             }
             let producer = match (h("producer-id"), h("producer-epoch"), h("producer-seq")) {
                 (None, None, None) => None,
-                (Some(id), Some(epoch), Some(seq)) if id.len() <= 256 => Some(Producer {
-                    id: id.into(),
-                    epoch: epoch.parse().map_err(bad)?,
-                    seq: seq.parse().map_err(bad)?,
-                }),
+                (Some(id), Some(epoch), Some(seq)) if !id.is_empty() && id.len() <= 256 => {
+                    Some(Producer {
+                        id: id.into(),
+                        epoch: epoch.parse().map_err(bad)?,
+                        seq: seq.parse().map_err(bad)?,
+                    })
+                }
                 _ => return Err(bad("all producer headers are required")),
             };
             let mut tokens = headers.get_all("stream-seq").iter();
@@ -981,12 +1025,7 @@ async fn stream_inner(
             let wire = if body.is_empty() {
                 Bytes::new()
             } else {
-                wire::encode_wire(
-                    &body,
-                    s.config.content_type.starts_with("application/json"),
-                    false,
-                )
-                .map_err(bad)?
+                wire::encode_wire(&body, s.config.is_json(), false).map_err(bad)?
             };
             Command::Append {
                 key,
@@ -1094,7 +1133,18 @@ async fn stream_inner(
     if method == Method::PUT {
         // A successful create outcome has atomically validated this config,
         // including on a retry. Do not sample mutable stream metadata afterward.
-        response = response.header("content-type", content_type);
+        response = response.header(
+            "content-type",
+            result
+                .data
+                .content_type
+                .ok_or_else(|| unavailable("create outcome missing stored content type"))?,
+        );
+        if status == 201
+            && let Some(location) = location
+        {
+            response = response.header("location", location);
+        }
     }
     response.body(Body::empty()).map_err(unavailable)
 }
@@ -1252,6 +1302,7 @@ mod tests {
                     expected_incarnation: None,
                     config: StreamConfig {
                         content_type: "application/octet-stream".into(),
+                        json_framing: None,
                         expiry: None,
                     },
                     data: b"accepted after cancellation".to_vec(),
@@ -1284,6 +1335,7 @@ mod tests {
             expected_incarnation: None,
             config: StreamConfig {
                 content_type: "application/octet-stream".into(),
+                json_framing: None,
                 expiry: Some(chronicle_raft::expiry::Expiry::At {
                     seconds: 0,
                     nanos: 0,

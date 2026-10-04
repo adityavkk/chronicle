@@ -373,6 +373,7 @@ fn create() -> Command {
         expected_incarnation: None,
         config: StreamConfig {
             content_type: "application/octet-stream".into(),
+            json_framing: None,
             expiry: None,
         },
         data: vec![],
@@ -600,6 +601,7 @@ fn content_type_and_metadata_are_bounded_by_capacity() {
             expected_incarnation: None,
             config: StreamConfig {
                 content_type: content_type.clone(),
+                json_framing: None,
                 expiry: None,
             },
             data: Vec::new(),
@@ -613,6 +615,54 @@ fn content_type_and_metadata_are_bounded_by_capacity() {
     }
     assert!(rejected);
     assert!(state.streams.len() < 10_000);
+}
+
+#[test]
+fn media_identity_preserves_config_and_distinguishes_json_prefixes() {
+    for (a, b, expected) in [
+        ("APPLICATION/JSON; charset=utf-8", "application/json", true),
+        ("text/plain;charset=ascii", "TEXT/PLAIN;charset=utf-8", true),
+        ("application/jsonp", "application/json", false),
+        ("text/K", "text/k", false),
+        ("", "APPLICATION/OCTET-STREAM", true),
+        ("text/plain ", "text/plain", false),
+    ] {
+        assert_eq!(content_type_matches(a, b), expected, "{a} vs {b}");
+        assert_eq!(content_type_matches(b, a), expected);
+    }
+    let mut state = State::default();
+    let mut command = create();
+    let Command::Create { config, .. } = &mut command else {
+        unreachable!()
+    };
+    config.content_type = "APPLICATION/JSON; charset=utf-8".into();
+    config.json_framing = Some(true);
+    assert!(state.apply(&command).error.is_none());
+    let Command::Create { config, .. } = &mut command else {
+        unreachable!()
+    };
+    config.content_type = "application/json".into();
+    let reply = state.apply(&command);
+    assert!(reply.duplicate);
+    assert_eq!(
+        reply.content_type.as_deref(),
+        Some("APPLICATION/JSON; charset=utf-8")
+    );
+    assert_eq!(
+        state.streams["s"].config.content_type,
+        "APPLICATION/JSON; charset=utf-8"
+    );
+    let Command::Create { config, .. } = &mut command else {
+        unreachable!()
+    };
+    config.content_type = "application/jsonp".into();
+    assert_eq!(state.apply(&command).error, Some(Error::ConfigConflict));
+    let Command::Create { config, .. } = &mut command else {
+        unreachable!()
+    };
+    config.content_type = "APPLICATION/JSON; charset=utf-8".into();
+    config.json_framing = None; // Same media type, different legacy wire interpretation.
+    assert_eq!(state.apply(&command).error, Some(Error::ConfigConflict));
 }
 
 #[test]

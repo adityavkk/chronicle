@@ -55,6 +55,7 @@ fn fatal_child() {
                 expected_incarnation: None,
                 config: StreamConfig {
                     content_type: "application/octet-stream".into(),
+                    json_framing: None,
                     expiry: None,
                 },
                 data: b"acknowledged".to_vec(),

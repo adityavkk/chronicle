@@ -42,11 +42,65 @@ fn create(data: &[u8], expected: Option<u64>) -> Command {
         expected_incarnation: expected,
         config: StreamConfig {
             content_type: "application/octet-stream".into(),
+            json_framing: None,
             expiry: None,
         },
         data: data.to_vec(),
         closed: false,
         now_ms: None,
+    }
+}
+
+#[tokio::test]
+async fn persisted_framing_does_not_reinterpret_legacy_bytes() {
+    let directory = tempfile::tempdir().unwrap();
+    for (index, (content_type, framing, data, expected)) in [
+        (
+            "APPLICATION/JSON",
+            None,
+            b"raw".as_slice(),
+            b"raw".as_slice(),
+        ),
+        ("application/jsonp", None, b"7,", b"[7]"),
+        ("APPLICATION/JSON", Some(true), b"7,", b"[7]"),
+        ("application/jsonp", Some(false), b"raw", b"raw"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut source = SqliteStore::open(directory.path().join(format!("source-{index}")))
+            .await
+            .unwrap();
+        let mut command = create(data, None);
+        let Command::Create { config, .. } = &mut command else {
+            unreachable!()
+        };
+        // Actual legacy shape omits json_framing, rather than merely setting false.
+        *config =
+            serde_json::from_value(serde_json::json!({"content_type":content_type,"expiry":null}))
+                .unwrap();
+        config.json_framing = framing;
+        apply(&mut source, 1, command).await;
+        let snapshot = source.build_snapshot().await.unwrap();
+        let path = directory.path().join(format!("restored-{index}"));
+        let mut restored = SqliteStore::open(&path).await.unwrap();
+        restored
+            .install_snapshot(&snapshot.meta, snapshot.snapshot)
+            .await
+            .unwrap();
+        restored.close().await;
+        let restored = SqliteStore::open_existing(&path).await.unwrap();
+        let view = restored.read_info("s".into(), ()).await.unwrap().unwrap();
+        let json = view.config.is_json();
+        let file = restored.read_file("s".into(), &view, 0, ()).await.unwrap();
+        let delivered = to_bytes(body(file, view.end - u64::from(json), json), 100)
+            .await
+            .unwrap();
+        assert_eq!(delivered.as_ref(), expected);
+        let interior = restored.read_file("s".into(), &view, 1, ()).await;
+        assert_eq!(matches!(interior, Err(ReadError::Offset)), json);
+        restored.close().await;
+        source.close().await;
     }
 }
 

@@ -91,6 +91,7 @@ mod tests {
             incarnation: 1,
             config: crate::model::StreamConfig {
                 content_type: "application/octet-stream".into(),
+                json_framing: None,
                 expiry: None,
             },
             data: b"x".to_vec(),

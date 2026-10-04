@@ -228,7 +228,7 @@ impl SqliteStore {
                 {
                     return Err(ReadError::Changed);
                 }
-                if s.config.content_type.starts_with("application/json")
+                if s.config.is_json()
                     && !crate::wire::json_boundary(&s.data[..end as usize], start as usize)
                 {
                     return Err(ReadError::Offset);
@@ -628,6 +628,7 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                                 duplicate: false,
                                 closed: false,
                                 producer: None,
+                                content_type: None,
                                 error: None,
                             });
                         }
@@ -637,6 +638,7 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                             duplicate: false,
                             closed: false,
                             producer: None,
+                            content_type: None,
                             error: None,
                         }),
                     }
