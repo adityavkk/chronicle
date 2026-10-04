@@ -709,3 +709,26 @@ merely within the overall tail. JSON sub-offsets count parsed flattened values,
 including nested arrays/strings as single values, and may span append batches.
 The copied range ends at an actual wire boundary. `Fork.boundary_offset` applies
 after that resolution; malformed headers and overshoots submit no transaction.
+
+Fork staging refinement: a full prefix may exceed the existing JSON RPC body
+limit even though each original append fitted. Reserve target capacity first,
+then durably stage at most 256 KiB of bytes per command, with corresponding
+append ends. Exact duplicate chunks are no-ops; conflicting duplicates and gaps
+are rejected. Only the complete byte and boundary counts acknowledge target
+preparation. Nothing staged is publicly readable. `ForkStaging` checks ordered
+duplicate chunks, readiness and publication over two asymmetric chunks; mutations
+allowing gaps or premature readiness violate named invariants. Raft supplies
+durable actions; crash/recovery does not discard staged state. This is a bounded
+refinement model, not a proof of RPC serialization or the storage implementation.
+
+Transaction IDs bind source key, source incarnation and a durable increasing
+per-incarnation counter. Preparation checks the expected next counter; retries
+must match the existing intent. Source records distinguish preparing, committed
+and aborted decisions, with finalization acknowledgment. Committed records also
+retain child lifecycle references until a durably reclaimed target releases them.
+Aborted terminal records remain bounded and retained until source recreation;
+capacity exhaustion backpressures new transactions rather than evicting fences.
+Recreation cannot pass unresolved prepares or retained child references. Old
+messages cannot recreate an old target incarnation. These retirement/counter
+rules need direct implementation tests; the initial single-transaction model
+does not establish their multi-transaction composition.
