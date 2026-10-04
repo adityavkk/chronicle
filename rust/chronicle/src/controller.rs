@@ -11,6 +11,10 @@ use std::{
 
 const CAMPAIGN_DELAY: Duration = Duration::from_secs(30);
 
+#[cfg(test)]
+#[path = "controller_retirement_tests.rs"]
+mod retirement_tests;
+
 #[derive(Default)]
 struct Retirement {
     cursors: BTreeMap<u64, usize>,
@@ -64,7 +68,8 @@ pub async fn run(a: Shared) {
 
 async fn control(a: &Shared) -> anyhow::Result<State> {
     let g = &a.groups[&0];
-    if g.raft.metrics().borrow().current_leader == Some(a.id) {
+    // A removed leader can retain a self leader hint after becoming Learner.
+    if g.raft.metrics().borrow().state == openraft::ServerState::Leader {
         g.raft.ensure_linearizable().await?;
         return Ok(g.store.read_state().await?);
     }
@@ -98,7 +103,7 @@ async fn tick(
 ) -> anyhow::Result<()> {
     let mut state = control(a).await?;
     let control_group = &a.groups[&0];
-    if control_group.raft.metrics().borrow().current_leader == Some(a.id) {
+    if control_group.raft.metrics().borrow().state == openraft::ServerState::Leader {
         for (id, n) in &a.nodes {
             if !state.nodes.contains_key(id) {
                 let result = control_group
@@ -126,7 +131,7 @@ async fn tick(
     for (shard, p) in &state.placements {
         let group = &a.groups[shard];
         let initial = group.raft.metrics().borrow().clone();
-        if initial.current_leader != Some(a.id) {
+        if initial.state != openraft::ServerState::Leader {
             continue;
         }
         let matches = membership_applied(&group.store, &p.voters).await?;
@@ -191,7 +196,7 @@ async fn tick(
             generation: p.generation,
             membership,
         };
-        if control_group.raft.metrics().borrow().current_leader == Some(a.id) {
+        if control_group.raft.metrics().borrow().state == openraft::ServerState::Leader {
             let result = control_group.raft.client_write(command).await?;
             anyhow::ensure!(result.data.error.is_none(), "placement completion rejected");
         } else {
@@ -227,7 +232,7 @@ async fn tick(
         for _ in 0..=SHARDS {
             let shard = retirement.next_shard;
             retirement.next_shard = (shard + 1) % (SHARDS + 1);
-            if a.groups[&shard].raft.metrics().borrow().current_leader == Some(a.id) {
+            if a.groups[&shard].raft.metrics().borrow().state == openraft::ServerState::Leader {
                 retire_replica(
                     a,
                     shard,
@@ -261,7 +266,7 @@ async fn retire_replica(
     // another identity, and cancellation cannot undo the cursor advancement.
     let mut candidates: BTreeMap<_, _> = membership
         .nodes()
-        .filter(|(id, _)| !p.voters.contains(id) && **id != a.id)
+        .filter(|(id, _)| !p.voters.contains(id))
         .map(|(id, node)| (*id, node.addr.clone()))
         .collect();
     candidates.extend(
@@ -275,12 +280,23 @@ async fn retire_replica(
         return Ok(false);
     };
     let retained = membership.get_node(&id).is_some();
-    let peer = peer_metrics(a, &address, id)
-        .await
-        .and_then(|mut metrics| metrics.remove(&shard));
+    let peer = if id == a.id {
+        Some(initial.clone())
+    } else {
+        peer_metrics(a, &address, id)
+            .await
+            .and_then(|mut metrics| metrics.remove(&shard))
+    };
     let verified = peer.as_ref().is_some_and(|m| replica_retired(p, m));
+    // OpenRaft retains a demoted leader until its node record is removed. It
+    // must apply demotion first, but requiring Learner here would deadlock.
+    let self_demoted = id == a.id
+        && p.replicas.as_ref().is_some_and(|replicas| {
+            matches!(replicas.get(&id), Some(ReplicaHistory::NonvoterAfter(boundary))
+                if demotion_applied(&initial, *boundary))
+        });
     if retained {
-        if peer.as_ref().is_some_and(|m| m.running_state.is_ok()) && !verified {
+        if peer.as_ref().is_some_and(|m| m.running_state.is_ok()) && !verified && !self_demoted {
             return Ok(false); // Replication continues; never wait here for catch-up.
         }
     } else if verified || peer.as_ref().is_none_or(|m| m.running_state.is_err()) {
@@ -376,9 +392,15 @@ fn nonvoter_applied(
     metrics: &openraft::RaftMetrics<u64, BasicNode>,
     boundary: openraft::LogId<u64>,
 ) -> bool {
+    metrics.state == openraft::ServerState::Learner && demotion_applied(metrics, boundary)
+}
+
+fn demotion_applied(
+    metrics: &openraft::RaftMetrics<u64, BasicNode>,
+    boundary: openraft::LogId<u64>,
+) -> bool {
     let membership = &metrics.membership_config;
     metrics.running_state.is_ok()
-        && metrics.state == openraft::ServerState::Learner
         && membership.membership().get_joint_config().len() == 1
         && !membership
             .membership()
@@ -863,10 +885,19 @@ mod tests {
         ));
         metrics.last_applied = Some(LogId::new(CommittedLeaderId::new(3, 1), 16));
         assert!(!nonvoter_applied(&metrics, log));
+        assert!(!demotion_applied(&metrics, log));
         metrics.last_applied = Some(log);
+        assert!(nonvoter_applied(&metrics, log));
+        metrics.state = openraft::ServerState::Leader;
+        metrics.current_leader = Some(4);
+        assert!(demotion_applied(&metrics, log));
+        assert!(!nonvoter_applied(&metrics, log));
+        // Removal eligibility must not become proof that leadership has ended.
+        metrics.state = openraft::ServerState::Learner;
         assert!(nonvoter_applied(&metrics, log));
         let later = LogId::new(CommittedLeaderId::new(3, 1), 19);
         assert!(!nonvoter_applied(&metrics, later));
+        assert!(!demotion_applied(&metrics, later));
         metrics.state = openraft::ServerState::Candidate;
         assert!(!nonvoter_applied(&metrics, log));
         metrics.state = openraft::ServerState::Learner;
@@ -878,11 +909,13 @@ mod tests {
             ),
         ));
         assert!(!nonvoter_applied(&metrics, log));
+        assert!(!demotion_applied(&metrics, log));
         metrics.membership_config = std::sync::Arc::new(openraft::StoredMembership::new(
             Some(log),
             Membership::new(vec![BTreeSet::from([1, 3, 4])], nodes),
         ));
         assert!(!nonvoter_applied(&metrics, log));
+        assert!(!demotion_applied(&metrics, log));
     }
 
     #[test]

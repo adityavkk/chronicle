@@ -348,8 +348,8 @@ async fn metrics(State(a): State<Shared>) -> String {
     ));
     for (id, g) in &a.groups {
         let m = g.raft.metrics().borrow().clone();
-        text.push_str(&format!("chronicle_raft_leader{{group=\"{id}\"}} {}\nchronicle_raft_applied{{group=\"{id}\"}} {}\n", u8::from(m.current_leader == Some(a.id)), m.last_applied.map_or(0, |l| l.index)));
-        text.push_str(&format!("chronicle_raft_quorum_available{{group=\"{id}\"}} {}\nchronicle_snapshot_index{{group=\"{id}\"}} {}\n",u8::from(m.current_leader==Some(a.id) && m.millis_since_quorum_ack.is_some_and(|n|n<800)),m.snapshot.map_or(0,|l|l.index)));
+        text.push_str(&format!("chronicle_raft_leader{{group=\"{id}\"}} {}\nchronicle_raft_applied{{group=\"{id}\"}} {}\n", u8::from(m.state == openraft::ServerState::Leader), m.last_applied.map_or(0, |l| l.index)));
+        text.push_str(&format!("chronicle_raft_quorum_available{{group=\"{id}\"}} {}\nchronicle_snapshot_index{{group=\"{id}\"}} {}\n",u8::from(m.state == openraft::ServerState::Leader && m.millis_since_quorum_ack.is_some_and(|n|n<800)),m.snapshot.map_or(0,|l|l.index)));
         if let Some(replication) = m.replication {
             for (node, matched) in replication {
                 text.push_str(&format!(
@@ -442,6 +442,7 @@ pub async fn proxy(
                 && let Ok(status) = response.json::<serde_json::Value>().await
                 && status[group.to_string()]["id"].as_u64() == Some(id)
                 && status[group.to_string()]["current_leader"].as_u64() == Some(id)
+                && status[group.to_string()]["state"].as_str() == Some("Leader")
             {
                 return Some(node.addr);
             }
@@ -478,7 +479,7 @@ pub async fn proxy(
 }
 async fn control(State(a): State<Shared>, headers: HeaderMap) -> ApiResult {
     let g = &a.groups[&0];
-    if g.raft.metrics().borrow().current_leader != Some(a.id) {
+    if g.raft.metrics().borrow().state != openraft::ServerState::Leader {
         return proxy(&a, 0, Method::GET, "/admin/control", headers, Bytes::new()).await;
     }
     g.raft.ensure_linearizable().await.map_err(unavailable)?;
@@ -493,7 +494,7 @@ async fn register(
     Json((id, node)): Json<(u64, Node)>,
 ) -> ApiResult {
     let g = &a.groups[&0];
-    if g.raft.metrics().borrow().current_leader != Some(a.id) {
+    if g.raft.metrics().borrow().state != openraft::ServerState::Leader {
         return proxy(
             &a,
             0,
@@ -532,7 +533,7 @@ async fn admit(
         return Err(bad("invalid learner admission"));
     }
     let g = &a.groups[&0];
-    if g.raft.metrics().borrow().current_leader != Some(a.id) {
+    if g.raft.metrics().borrow().state != openraft::ServerState::Leader {
         return proxy(
             &a,
             0,
@@ -750,7 +751,7 @@ async fn stream_inner(
     } else {
         None
     };
-    if !stale && g.raft.metrics().borrow().current_leader != Some(a.id) {
+    if !stale && g.raft.metrics().borrow().state != openraft::ServerState::Leader {
         let started = Instant::now();
         let result = proxy(a, shard, method, &uri.to_string(), headers, body).await;
         timings.forward_us = started.elapsed().as_micros() as u64;
