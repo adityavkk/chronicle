@@ -5,7 +5,7 @@ use axum::{
     body::{Body, BodyDataStream},
     response::Response,
 };
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use chronicle_raft::{
     model,
     sse_wire::{self, Encoding},
@@ -66,7 +66,7 @@ pub async fn response(
     };
     let mut response = Response::builder()
         .header("content-type", "text/event-stream")
-        .header("cache-control", "no-store")
+        .header("cache-control", "no-cache")
         .header("x-content-type-options", "nosniff")
         .header("stream-consistency", "strict")
         .header("stream-incarnation", view.incarnation.to_string());
@@ -132,6 +132,7 @@ impl Reader {
     }
 
     async fn next(&mut self) -> io::Result<Option<Bytes>> {
+        let mut output = BytesMut::new();
         loop {
             if Instant::now() >= self.deadline {
                 return if self.data.is_some() || !self.reported {
@@ -148,7 +149,15 @@ impl Reader {
                     .await
                     .map_err(io::Error::other)?
                 {
-                    Some(bytes) => return bytes.map(Some).map_err(io::Error::other),
+                    Some(bytes) => {
+                        output.extend_from_slice(&bytes.map_err(io::Error::other)?);
+                        // Bound batching; small events and their control share a
+                        // frame, without buffering a complete large payload.
+                        if output.len() >= 16 * 1024 {
+                            return Ok(Some(output.freeze()));
+                        }
+                        continue;
+                    }
                     None => self.data = None,
                 }
             }
@@ -162,11 +171,8 @@ impl Reader {
                     .unwrap_or_default();
                 let cursor =
                     wire::compute_cursor(self.client_cursor, now).map_err(io::Error::other)?;
-                return Ok(Some(sse_wire::control(
-                    self.offset,
-                    cursor,
-                    self.view.closed,
-                )));
+                output.extend_from_slice(&sse_wire::control(self.offset, cursor, self.view.closed));
+                return Ok(Some(output.freeze()));
             }
             if self.view.closed || Instant::now() >= self.deadline {
                 return Ok(None);

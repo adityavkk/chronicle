@@ -230,7 +230,7 @@ def run(args):
             status, headers, events, error = h.stream(name, live, lambda *_: False)
             assert status == 200 and error is None and headers.get("content-type", "").startswith("text/event-stream")
             assert headers.get("stream-incarnation") == "1" and headers.get("stream-consistency") == "strict", headers
-            assert headers.get("cache-control") == "no-store", headers
+            assert headers.get("cache-control") == "no-cache", headers
             assert headers.get("stream-sse-data-encoding") == encoding
             assert len(events) == 2, events
             assert events[0] == {"event": "data", "data": expected}; control(events[1], len(wire), True)

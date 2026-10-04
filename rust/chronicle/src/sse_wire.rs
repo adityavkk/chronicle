@@ -27,6 +27,7 @@ struct State {
     encoding: Encoding,
     pending: Vec<u8>,
     started: bool,
+    line_start: bool,
     completed: bool,
 }
 
@@ -41,6 +42,7 @@ pub fn data_body(body: Body, encoding: Encoding) -> Body {
         encoding,
         pending: Vec::with_capacity(3),
         started: false,
+        line_start: true,
         completed: false,
     };
 
@@ -51,7 +53,7 @@ pub fn data_body(body: Body, encoding: Encoding) -> Body {
         if !state.started {
             state.started = true;
             return Some((
-                Ok::<_, axum::Error>(Bytes::from_static(b"event: data\ndata: ")),
+                Ok::<_, axum::Error>(Bytes::from_static(b"event: data\ndata:")),
                 state,
             ));
         }
@@ -60,7 +62,7 @@ pub fn data_body(body: Body, encoding: Encoding) -> Body {
             Some(Ok(chunk)) => {
                 let framed = match state.encoding {
                     Encoding::Json | Encoding::Text => {
-                        encode_text(&mut state.pending, &chunk, false)
+                        encode_text(&mut state.pending, &mut state.line_start, &chunk, false)
                     }
                     Encoding::Base64 => encode_base64(&mut state.pending, &chunk, false),
                 };
@@ -72,7 +74,9 @@ pub fn data_body(body: Body, encoding: Encoding) -> Body {
             }
             None => {
                 let tail = match state.encoding {
-                    Encoding::Json | Encoding::Text => encode_text(&mut state.pending, &[], true),
+                    Encoding::Json | Encoding::Text => {
+                        encode_text(&mut state.pending, &mut state.line_start, &[], true)
+                    }
                     Encoding::Base64 => encode_base64(&mut state.pending, &[], true),
                 };
                 let mut framed = BytesMut::with_capacity(tail.len() + 2);
@@ -85,7 +89,7 @@ pub fn data_body(body: Body, encoding: Encoding) -> Body {
     }))
 }
 
-fn encode_text(pending: &mut Vec<u8>, chunk: &[u8], finish: bool) -> Bytes {
+fn encode_text(pending: &mut Vec<u8>, line_start: &mut bool, chunk: &[u8], finish: bool) -> Bytes {
     let mut input = Vec::with_capacity(pending.len() + chunk.len());
     input.append(pending);
     input.extend_from_slice(chunk);
@@ -100,8 +104,17 @@ fn encode_text(pending: &mut Vec<u8>, chunk: &[u8], finish: bool) -> Bytes {
     let mut output = BytesMut::with_capacity(text.len());
     for byte in text.bytes() {
         match byte {
-            b'\r' | b'\n' => output.extend_from_slice(b"\ndata: "),
-            _ => output.extend_from_slice(&[byte]),
+            b'\r' | b'\n' => {
+                output.extend_from_slice(b"\ndata:");
+                *line_start = true;
+            }
+            _ => {
+                if *line_start && byte == b' ' {
+                    output.extend_from_slice(b" ");
+                }
+                output.extend_from_slice(&[byte]);
+                *line_start = false;
+            }
         }
     }
     output.freeze()

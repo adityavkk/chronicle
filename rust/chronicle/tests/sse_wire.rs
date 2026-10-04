@@ -40,8 +40,17 @@ fn eager(input: &[u8], encoding: Encoding) -> Vec<u8> {
         Encoding::Json | Encoding::Text => String::from_utf8_lossy(input).into_owned(),
         Encoding::Base64 => base64::engine::general_purpose::STANDARD.encode(input),
     };
-    let escaped = payload.replace(['\r', '\n'], "\ndata: ");
-    format!("event: data\ndata: {escaped}\n\n").into_bytes()
+    let fields = payload
+        .split(['\r', '\n'])
+        .map(|line| {
+            format!(
+                "data:{}{line}",
+                if line.starts_with(' ') { " " } else { "" }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("event: data\n{fields}\n\n").into_bytes()
 }
 
 #[tokio::test]
@@ -133,7 +142,7 @@ async fn source_error_does_not_emit_event_terminator() {
     }
     assert_eq!(
         (received, saw_error),
-        (b"event: data\ndata: accepted".to_vec(), true)
+        (b"event: data\ndata:accepted".to_vec(), true)
     );
 }
 
