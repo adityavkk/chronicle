@@ -1,0 +1,20 @@
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/repo/rust/chronicle)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.51s
+     Running unittests src/lib.rs (target/debug/deps/chronicle_raft-a565019445f6e7e0)
+
+running 1 test
+12 failed attempts; minimum spacing 867.306µs
+
+thread 'network::tests::unavailable_replica_backs_off_and_recovers' panicked at src/network.rs:210:13:
+retry burst: 12 attempts, minimum spacing 867.306µs
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test network::tests::unavailable_replica_backs_off_and_recovers ... FAILED
+
+failures:
+
+failures:
+    network::tests::unavailable_replica_backs_off_and_recovers
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.06s
+
+error: test failed, to rerun pass `--lib`
