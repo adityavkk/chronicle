@@ -104,6 +104,78 @@ impl Prepared {
     }
 }
 
+/// Bounded metadata receipt; callers obtain it behind the owning group's barrier.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct View {
+    pub stream: Option<StreamView>,
+    pub prepared: Option<PreparationView>,
+    pub transaction: Option<TransactionView>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PreparationView {
+    pub offer: Offer,
+    pub offset: u64,
+    pub ready: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TransactionView {
+    pub offer: Offer,
+    pub decision: Decision,
+    pub finalized: bool,
+}
+
+pub enum Work {
+    Reconcile(Offer),
+    Release(String),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StreamView {
+    pub incarnation: u64,
+    pub config: StreamConfig,
+    pub deleted: bool,
+    pub closed: bool,
+    pub end: u64,
+    pub access_ms: u64,
+    pub retained: bool,
+    pub sequence: u64,
+    pub origin: Option<Offer>,
+}
+
+pub fn view(state: &crate::model::State, key: &str, sequence: Option<u64>) -> View {
+    let stream = state.streams.get(key);
+    View {
+        stream: stream.map(|s| StreamView {
+            incarnation: s.incarnation,
+            config: s.config.clone(),
+            deleted: s.deleted,
+            closed: s.closed,
+            end: s.data.len() as u64,
+            access_ms: s.access_ms,
+            retained: s.forks.retained(),
+            sequence: s.forks.sequence,
+            origin: s.forks.origin.clone(),
+        }),
+        prepared: state.fork_targets.get(key).map(|p| PreparationView {
+            offer: p.offer.clone(),
+            offset: p.data.len() as u64,
+            ready: p.ready(),
+        }),
+        transaction: stream.and_then(|s| {
+            s.forks
+                .transactions
+                .get(&sequence?)
+                .map(|t| TransactionView {
+                    offer: t.offer.clone(),
+                    decision: t.decision.clone(),
+                    finalized: t.finalized,
+                })
+        }),
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Operation {
     Begin {

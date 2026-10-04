@@ -1,6 +1,8 @@
 //! One process hosts a control group and fixed virtual data shards.
 mod controller;
 mod failure;
+mod fork_http;
+mod forks;
 mod identity;
 mod sse;
 mod telemetry;
@@ -221,10 +223,18 @@ async fn main() -> anyhow::Result<()> {
         )),
     });
     tokio::spawn(controller::run(app.clone()));
+    tokio::spawn(forks::run(app.clone()));
     let router = Router::new()
         .route("/healthz", get(health))
         .route("/metrics", get(metrics))
         .route("/admin/status", get(status))
+        .route(
+            "/admin/fork",
+            post(forks::rpc).layer(middleware::from_fn_with_state(
+                Arc::new(Semaphore::new(16)),
+                admit_stream,
+            )),
+        )
         .route("/admin/bootstrap", post(bootstrap))
         .route("/admin/register", post(register))
         .route("/admin/admit", post(admit))
@@ -641,25 +651,15 @@ async fn admit_stream(
     let context = telemetry::RequestContext::from_headers(request.headers());
     context.inject(request.headers_mut());
     request.extensions_mut().insert(context.clone());
-    // Reject missing semantics before any body, forwarding or storage work;
-    // ignoring these headers would acknowledge a different operation.
-    let unsupported: &[&str] = if request.method() == Method::PUT {
-        &[
-            "stream-forked-from",
-            "stream-fork-offset",
-            "stream-fork-sub-offset",
-        ]
-    } else {
-        &[]
-    };
-    if let Some(name) = unsupported
-        .iter()
-        .copied()
-        .find(|name| request.headers().contains_key(*name))
+    if request.method() == Method::PUT
+        && !request.headers().contains_key("stream-forked-from")
+        && ["stream-fork-offset", "stream-fork-sub-offset"]
+            .iter()
+            .any(|name| request.headers().contains_key(*name))
     {
         let mut response = (
-            StatusCode::NOT_IMPLEMENTED,
-            format!("unsupported header: {name}"),
+            StatusCode::BAD_REQUEST,
+            "fork offset requires Stream-Forked-From",
         )
             .into_response();
         context.inject(response.headers_mut());
@@ -805,6 +805,14 @@ async fn stream_inner(
                 ))
             })
         });
+    }
+    if method == Method::PUT && headers.contains_key("stream-forked-from") {
+        return tokio::time::timeout(
+            Duration::from_secs(8),
+            fork_http::create(a, key, headers, body, uri),
+        )
+        .await
+        .map_err(|_| unavailable("fork timeout: outcome unknown"))?;
     }
     let changes = live_permit
         .as_ref()
@@ -1508,7 +1516,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsupported_headers_reject_before_admission_or_body_extraction() {
+    async fn orphan_fork_headers_reject_before_admission_or_body_extraction() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         // Exhausted admission distinguishes this gate from entering the handler.
         let admission = Arc::new(Semaphore::new(0));
@@ -1519,9 +1527,9 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         for (method, header, status) in [
-            ("PUT", "Stream-Forked-From", "501"),
-            ("PUT", "Stream-Fork-Offset", "501"),
-            ("PUT", "Stream-Fork-Sub-Offset", "501"),
+            ("PUT", "Stream-Forked-From", "429"),
+            ("PUT", "Stream-Fork-Offset", "400"),
+            ("PUT", "Stream-Fork-Sub-Offset", "400"),
             ("PUT", "Stream-Expires-At", "429"),
             ("POST", "Stream-Seq", "429"),
             ("POST", "X-Unrelated", "429"),
@@ -1618,16 +1626,16 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         let client = reqwest::Client::new();
-        for (body, unsupported, status) in [
+        for (body, orphan_offset, status) in [
             ("x", false, StatusCode::NO_CONTENT),
             ("xx", false, StatusCode::PAYLOAD_TOO_LARGE),
-            ("xx", true, StatusCode::NOT_IMPLEMENTED),
+            ("xx", true, StatusCode::BAD_REQUEST),
         ] {
             let mut request = client.post(format!("http://{address}/")).body(body);
-            if unsupported {
+            if orphan_offset {
                 request = client
                     .put(format!("http://{address}/"))
-                    .header("stream-forked-from", "source")
+                    .header("stream-fork-offset", "-1")
                     .body(body);
             }
             let response = request.send().await.unwrap();

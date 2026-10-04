@@ -1,0 +1,21 @@
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/repo/rust/chronicle)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.37s
+     Running unittests src/main.rs (target/debug/deps/chronicle_raft-9fbd4cdd4ee4c088)
+
+running 1 test
+
+thread 'forks::tests::cross_leader_chunked_fork_and_cascade_use_real_raft_quorums' panicked at src/forks_tests.rs:159:9:
+assertion `left == right` failed: has to forward request to: Some(3), Some(BasicNode { addr: "127.0.0.1:41121" })
+  left: 503
+ right: 201
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test forks::tests::cross_leader_chunked_fork_and_cascade_use_real_raft_quorums ... FAILED
+
+failures:
+
+failures:
+    forks::tests::cross_leader_chunked_fork_and_cascade_use_real_raft_quorums
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 31 filtered out; finished in 0.92s
+
+error: test failed, to rerun pass `--bin chronicle-raft`

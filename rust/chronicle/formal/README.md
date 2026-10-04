@@ -745,3 +745,24 @@ trace. This is a bounded single-transaction safety check, not a liveness proof;
 eventual cleanup additionally requires finite delayed messages and fair target
 reconciliation. The coordinator must verify the exact target/source transaction,
 and use the persisted decision, not a successful Decide proposal acknowledgment.
+
+Implemented mapping: `src/fork.rs` owns durable transitions, `src/storage.rs`
+atomically persists their stream/reservation changes and includes them in snapshots.
+`src/forks.rs` obtains bounded metadata/chunk receipts behind strict Raft barriers,
+stages the reserved target, re-reads the actual decision, then publishes and
+finalizes. Source and target work scans are independent local hints; they never
+authorize a decision. RPC execution slots stay owned after caller cancellation.
+The private `/admin/fork` endpoint has bounded body admission; its cluster header
+detects misrouting and is **not authentication**. Production still requires the
+documented trusted consensus network boundary.
+
+`tests/fork_transactions.rs` checks deterministic transitions and both direct DB
+reopen and snapshot/install/reopen. `src/forks_tests.rs` uses three real Raft/SQLite
+replicas per group and HTTP between distinct source/target leaders. Named test-only
+gates exercise sequence reuse after source recreation and concurrent identical
+PUTs; target-only reconciliation cleans up a late Prepare after the old decision
+was erased. These tests bridge selected model transitions, not a mechanized
+refinement proof or complete fault schedule exploration. The fixture initially
+failed ordinary large PUT under OpenRaft's 150–300 ms defaults; it now uses the
+binary's 800–1600 ms election timing. Both failures remain in evidence and do not
+establish an application-level fork safety violation or a general latency bound.

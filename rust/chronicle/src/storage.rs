@@ -184,6 +184,61 @@ impl SqliteStore {
             .await
     }
 
+    pub async fn fork_view(&self, key: String, sequence: Option<u64>) -> Result<crate::fork::View> {
+        self.call(move |w| Ok(crate::fork::view(&w.state, &key, sequence)))
+            .await
+    }
+
+    pub async fn fork_chunk(
+        &self,
+        id: crate::fork::Id,
+        offset: u64,
+    ) -> Result<std::result::Result<crate::fork::Operation, model::Error>> {
+        self.call(move |w| Ok(crate::fork::chunk(&w.state, &id, offset)))
+            .await
+    }
+
+    /// Local hints only; reconciliation obtains strict receipts before acting.
+    pub async fn fork_work(&self, after: String) -> Result<Vec<(String, crate::fork::Work)>> {
+        self.call(move |w| {
+            use crate::fork::Work;
+            let mut work = std::collections::BTreeMap::new();
+            for (key, prepared) in w
+                .state
+                .fork_targets
+                .range((Bound::Excluded(after.clone()), Bound::Unbounded))
+                .take(16)
+            {
+                work.insert(key.clone(), Work::Reconcile(prepared.offer.clone()));
+            }
+            let streams = w
+                .state
+                .streams
+                .range((Bound::Excluded(after), Bound::Unbounded));
+            for (key, item) in streams
+                .filter_map(|(key, stream)| {
+                    if let Some(transaction) =
+                        stream.forks.transactions.values().find(|t| !t.finalized)
+                    {
+                        Some((key, Work::Reconcile(transaction.offer.clone())))
+                    } else if stream.deleted
+                        && !stream.forks.retained()
+                        && stream.forks.origin.is_some()
+                    {
+                        Some((key, Work::Release(key.clone())))
+                    } else {
+                        None
+                    }
+                })
+                .take(16)
+            {
+                work.entry(key.clone()).or_insert(item);
+            }
+            Ok(work.into_iter().take(16).collect())
+        })
+        .await
+    }
+
     /// Retain request admission even if its caller abandons this queued read.
     pub async fn read_info(
         &self,
