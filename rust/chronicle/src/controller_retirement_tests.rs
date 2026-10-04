@@ -80,6 +80,7 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
             }
             let app = Arc::new(App {
                 id,
+                stream_tenant: None,
                 identity: identity::Identity {
                     node: id,
                     cluster: "retirement-test".into(),

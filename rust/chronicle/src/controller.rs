@@ -1010,6 +1010,7 @@ mod tests {
         let (logs, _guard) = tracing_appender::non_blocking(std::io::sink());
         let app = Arc::new(App {
             id: 2,
+            stream_tenant: None,
             identity: identity::Identity {
                 node: 2,
                 cluster: "test".into(),

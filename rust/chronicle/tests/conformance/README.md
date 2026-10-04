@@ -18,6 +18,17 @@ production tenant. Fork references and same-URL recreation need explicit review
 against this service's tenant/incarnation contract; a nested base URL alone is
 not proof that every suite assumption is compatible.
 
+For fork qualification, configure the disposable cluster uniformly with
+`STREAM_TENANT=unused-tenant` and give the suite the server origin as `baseUrl`.
+This fixed-tenant mount serves `/v1/stream/<path>`; the ordinary default serves
+`/v1/stream/<tenant>/<path>`. Both map to the same tenant/path storage identity.
+All API-forwarding nodes must use the same mount configuration; change it only
+with the stop-all upgrade procedure. It is a trusted deployment configuration,
+not a client header or authorization mechanism. This permits unchanged upstream
+request URLs and fork-header paths to refer to the same namespace. It does not
+make the currently unimplemented fork operations conformant. Keep canonical
+multi-tenant routing checks separate from mounted conformance results.
+
 `npm ci --ignore-scripts --legacy-peer-deps` reproduces installation; npm 10.9.9
 otherwise failed its peer-dependency graph construction with `edgesOut` on this
 orb. No dependency lifecycle scripts are required. `longPollTimeoutMs` controls

@@ -38,6 +38,8 @@ pub struct Group {
 }
 pub struct App {
     pub id: u64,
+    /// Fixed-tenant mount for a dedicated API origin; None keeps canonical URLs.
+    pub stream_tenant: Option<String>,
     pub identity: identity::Identity,
     pub nodes: BTreeMap<u64, Node>,
     pub groups: BTreeMap<u64, Group>,
@@ -82,6 +84,17 @@ async fn main() -> anyhow::Result<()> {
     let cluster = std::env::var("CLUSTER_ID")?;
     let dir = std::env::var("DATA_DIR").unwrap_or_else(|_| ".data".into());
     let listen = std::env::var("LISTEN").unwrap_or_else(|_| "0.0.0.0:8080".into());
+    let stream_tenant = match std::env::var("STREAM_TENANT") {
+        Ok(tenant) => {
+            anyhow::ensure!(
+                !tenant.is_empty() && tenant.len() <= 1024 && !tenant.contains(['/', '\0']),
+                "invalid fixed stream tenant"
+            );
+            Some(tenant)
+        }
+        Err(std::env::VarError::NotPresent) => None,
+        Err(error) => return Err(error.into()),
+    };
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()?;
@@ -182,6 +195,7 @@ async fn main() -> anyhow::Result<()> {
     }
     let app = Arc::new(App {
         id,
+        stream_tenant,
         identity: local_identity,
         nodes,
         groups,
@@ -211,7 +225,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/raft/{group}/vote", post(vote_rpc))
         .route("/raft/{group}/snapshot", post(snapshot_rpc))
         .route(
-            "/v1/stream/{tenant}/{*path}",
+            if app.stream_tenant.is_some() {
+                "/v1/stream/{*path}"
+            } else {
+                "/v1/stream/{tenant}/{*path}"
+            },
             any(stream)
                 .layer(DefaultBodyLimit::max(1024 * 1024))
                 .layer(middleware::from_fn_with_state(
@@ -665,13 +683,21 @@ async fn stream(
     State(a): State<Shared>,
     Extension(context): Extension<telemetry::RequestContext>,
     Extension(admission): Extension<Arc<tokio::sync::OwnedSemaphorePermit>>,
-    Path((tenant, path)): Path<(String, String)>,
+    Path(mut params): Path<BTreeMap<String, String>>,
     Query(query): Query<BTreeMap<String, String>>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult {
+    let tenant = a
+        .stream_tenant
+        .clone()
+        .or_else(|| params.remove("tenant"))
+        .ok_or_else(|| bad("stream tenant required"))?;
+    let path = params
+        .remove("path")
+        .ok_or_else(|| bad("stream path required"))?;
     let key = format!("{}:{tenant}{path}", tenant.len());
     let shard = model::shard(&key);
     let m = a.groups[&shard].raft.metrics().borrow().clone();
