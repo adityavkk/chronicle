@@ -77,6 +77,9 @@ pub struct StreamInfo {
     pub closed: bool,
     pub deleted: bool,
     pub access_ms: u64,
+    pub fork_pending: bool,
+    pub soft_deleted: bool,
+    pub fork_sequence: u64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -189,6 +192,20 @@ impl SqliteStore {
     ) -> Result<Option<StreamInfo>> {
         self.call(move |w| {
             let _admission = admission;
+            if let Some(prepared) = w.state.fork_targets.get(&key) {
+                return Ok(Some(StreamInfo {
+                    generation: w.read_generation.clone(),
+                    incarnation: prepared.offer.request.incarnation,
+                    config: prepared.offer.config.clone(),
+                    end: 0,
+                    closed: false,
+                    deleted: false,
+                    access_ms: 0,
+                    fork_pending: true,
+                    soft_deleted: false,
+                    fork_sequence: 0,
+                }));
+            }
             Ok(w.state.streams.get(&key).map(|s| StreamInfo {
                 generation: w.read_generation.clone(),
                 incarnation: s.incarnation,
@@ -197,6 +214,9 @@ impl SqliteStore {
                 closed: s.closed,
                 deleted: s.deleted,
                 access_ms: s.access_ms,
+                fork_pending: s.forks.locked(),
+                soft_deleted: s.deleted && s.forks.retained(),
+                fork_sequence: s.forks.sequence,
             }))
         })
         .await
@@ -221,6 +241,7 @@ impl SqliteStore {
                 w.faults.hit(crate::faults::BEFORE_PROJECTION_OPEN)?;
                 let s = w.state.streams.get(&key).ok_or(ReadError::Changed)?;
                 if s.deleted
+                    || w.state.fork_targets.contains_key(&key)
                     || s.incarnation != incarnation
                     || end > s.data.len() as u64
                     || start > end
@@ -301,6 +322,7 @@ impl Worker {
         }
         state.nodes = read_meta(&db, "nodes")?.unwrap_or_default();
         state.placements = read_meta(&db, "placements")?.unwrap_or_default();
+        state.fork_targets = read_meta(&db, "fork_targets")?.unwrap_or_default();
         Ok(Self {
             db,
             state,
@@ -603,10 +625,14 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                                 | model::Command::Delete { key, .. }
                                 | model::Command::Touch { key, .. }
                                 | model::Command::Expire { key, .. } => Some(key.clone()),
+                                model::Command::Fork(operation) => Some(operation.key().to_owned()),
                                 _ => None,
                             };
                             let r = s.apply(&c);
                             out.push(r);
+                            if matches!(c, model::Command::Fork(_)) {
+                                put_meta(t, "fork_targets", &s.fork_targets)?;
+                            }
                             if let Some(k) = key {
                                 if let Some(v) = s.streams.get(&k) {
                                     t.execute(
@@ -703,6 +729,7 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                 }
                 put_meta(t, "nodes", &body.state.nodes)?;
                 put_meta(t, "placements", &body.state.placements)?;
+                put_meta(t, "fork_targets", &body.state.fork_targets)?;
                 put_meta(t, "applied", &body.last_applied)?;
                 put_meta(t, "membership", &body.membership)?;
                 put_meta_raw(t, "snapshot_bytes", &bytes)?;

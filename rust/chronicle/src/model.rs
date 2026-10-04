@@ -76,6 +76,17 @@ pub struct Stream {
     pub last_seq: Option<String>,
     #[serde(default)]
     pub access_ms: u64,
+    #[serde(default)]
+    pub forks: crate::fork::Lifecycle,
+}
+
+impl Stream {
+    pub(crate) fn reclaim(&mut self) {
+        if self.deleted && !self.forks.retained() {
+            self.data = Vec::new();
+            self.append_ends = Vec::new();
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,6 +127,7 @@ impl Placement {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Command {
+    Fork(Box<crate::fork::Operation>),
     Create {
         key: String,
         expected_incarnation: Option<u64>,
@@ -195,6 +207,10 @@ pub enum Error {
     EmptyBody,
     Capacity,
     InvalidPlacement,
+    PendingFork,
+    InvalidFork,
+    LegacyFork,
+    Gone,
 }
 
 /// Highest accepted producer position at this command's apply boundary.
@@ -221,7 +237,7 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    fn ok(end: u64, incarnation: u64, duplicate: bool) -> Self {
+    pub(crate) fn ok(end: u64, incarnation: u64, duplicate: bool) -> Self {
         Self {
             end,
             incarnation,
@@ -232,7 +248,7 @@ impl Outcome {
             error: None,
         }
     }
-    fn stream(stream: &Stream, duplicate: bool) -> Self {
+    pub(crate) fn stream(stream: &Stream, duplicate: bool) -> Self {
         Self {
             closed: stream.closed,
             ..Self::ok(stream.data.len() as u64, stream.incarnation, duplicate)
@@ -242,7 +258,7 @@ impl Outcome {
         self.producer = Some(ProducerPosition { epoch, seq });
         self
     }
-    fn err(error: Error) -> Self {
+    pub(crate) fn err(error: Error) -> Self {
         Self {
             end: 0,
             incarnation: 0,
@@ -260,11 +276,47 @@ pub struct State {
     pub streams: BTreeMap<String, Stream>,
     pub nodes: BTreeMap<u64, Node>,
     pub placements: BTreeMap<u64, Placement>,
+    #[serde(default)]
+    pub fork_targets: BTreeMap<String, crate::fork::Prepared>,
 }
 
 impl State {
     pub fn apply(&mut self, command: &Command) -> Outcome {
+        let key = match command {
+            Command::Create { key, .. }
+            | Command::Append { key, .. }
+            | Command::Delete { key, .. }
+            | Command::Touch { key, .. }
+            | Command::Expire { key, .. } => Some(key),
+            _ => None,
+        };
+        if let Some(key) = key {
+            if self.fork_targets.contains_key(key) {
+                return Outcome::err(Error::PendingFork);
+            }
+            if let Some(stream) = self.streams.get(key) {
+                if stream.forks.locked() {
+                    return Outcome::err(Error::PendingFork);
+                }
+                if stream.deleted && stream.forks.retained() {
+                    return Outcome::err(if matches!(command, Command::Create { .. }) {
+                        Error::ConfigConflict
+                    } else {
+                        Error::Gone
+                    });
+                }
+                if matches!(command, Command::Create { .. })
+                    && stream.deleted
+                    && stream.forks.origin.is_some()
+                {
+                    return Outcome::err(Error::PendingFork);
+                }
+            }
+        }
         match command {
+            Command::Fork(operation) => {
+                crate::fork::apply(self, operation).unwrap_or_else(Outcome::err)
+            }
             Command::Create {
                 key,
                 expected_incarnation,
@@ -279,7 +331,8 @@ impl State {
                     if s.incarnation != requested {
                         return Outcome::err(Error::StaleIncarnation);
                     }
-                    return if content_type_matches(&s.config.content_type, &config.content_type)
+                    return if s.forks.origin.is_none()
+                        && content_type_matches(&s.config.content_type, &config.content_type)
                         && s.config.is_json() == config.is_json()
                         && s.config.expiry == config.expiry
                         && s.closed == *closed
@@ -327,6 +380,7 @@ impl State {
                         producers: BTreeMap::new(),
                         last_seq: None,
                         access_ms: now_ms.unwrap_or(0),
+                        forks: crate::fork::Lifecycle::default(),
                     },
                 );
                 Outcome {
@@ -537,8 +591,7 @@ impl State {
                     return Outcome::err(Error::ConfigConflict);
                 }
                 s.deleted = true;
-                s.data.clear();
-                s.append_ends.clear();
+                s.reclaim();
                 s.producers.clear();
                 s.last_seq = None;
                 Outcome::ok(0, s.incarnation, false)
@@ -649,7 +702,7 @@ impl State {
         }
     }
 
-    fn fits(&self, extra_data: usize, extra_metadata: usize) -> bool {
+    pub(crate) fn fits(&self, extra_data: usize, extra_metadata: usize) -> bool {
         self.streams
             .iter()
             .map(|(key, s)| {
@@ -658,6 +711,15 @@ impl State {
                     + key.len()
                     + s.config.content_type.len()
                     + s.last_seq.as_ref().map_or(0, String::len)
+                    + s.forks
+                        .origin
+                        .as_ref()
+                        .map_or(0, crate::fork::Offer::charge)
+                    + s.forks
+                        .transactions
+                        .values()
+                        .map(|t| t.offer.charge() + t.initial.len())
+                        .sum::<usize>()
                     + 256
                     + s.producers
                         .iter()
@@ -665,6 +727,12 @@ impl State {
                         .sum::<usize>()
             })
             .sum::<usize>()
+            .saturating_add(
+                self.fork_targets
+                    .values()
+                    .map(|p| p.offer.reservation_charge() + p.offer.total as usize)
+                    .sum::<usize>(),
+            )
             .saturating_add(extra_data)
             .saturating_add(extra_metadata)
             <= MAX_SHARD_BYTES

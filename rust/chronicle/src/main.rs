@@ -56,6 +56,18 @@ fn unavailable(e: impl std::fmt::Display) -> (StatusCode, String) {
 fn bad(e: impl std::fmt::Display) -> (StatusCode, String) {
     (StatusCode::BAD_REQUEST, e.to_string())
 }
+fn error_status(error: &model::Error) -> StatusCode {
+    match error {
+        model::Error::Missing => StatusCode::NOT_FOUND,
+        model::Error::EmptyBody | model::Error::InvalidFork => StatusCode::BAD_REQUEST,
+        model::Error::EpochFenced => StatusCode::FORBIDDEN,
+        model::Error::Capacity => StatusCode::TOO_MANY_REQUESTS,
+        model::Error::PendingFork => StatusCode::SERVICE_UNAVAILABLE,
+        model::Error::LegacyFork => StatusCode::NOT_IMPLEMENTED,
+        model::Error::Gone => StatusCode::GONE,
+        _ => StatusCode::CONFLICT,
+    }
+}
 pub fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -804,7 +816,17 @@ async fn stream_inner(
         timings,
         (admission.clone(), live_permit.clone()),
     )
-    .await?;
+    .await
+    .map_err(|(status, message)| {
+        (
+            if method == Method::PUT && status == StatusCode::GONE {
+                StatusCode::CONFLICT
+            } else {
+                status
+            },
+            message,
+        )
+    })?;
     if (method == Method::PUT || (method == Method::POST && !body.is_empty()))
         && let Some(value) = headers.get("content-type")
     {
@@ -837,6 +859,11 @@ async fn stream_inner(
             .await?;
             telemetry::commit_apply(started.elapsed());
             timings.proposal_us += started.elapsed().as_micros() as u64;
+            if let Some(error @ (model::Error::PendingFork | model::Error::Gone)) =
+                &result.data.error
+            {
+                return Err((error_status(error), format!("{error:?}")));
+            }
             if result.data.error.is_some() {
                 return Err((StatusCode::NOT_FOUND, "stream expired or replaced".into()));
             }
@@ -1128,13 +1155,7 @@ async fn stream_inner(
             .header("producer-seq", position.seq.to_string());
     }
     if let Some(error) = result.data.error {
-        let mut status = match error {
-            model::Error::Missing => StatusCode::NOT_FOUND,
-            model::Error::EmptyBody => StatusCode::BAD_REQUEST,
-            model::Error::EpochFenced => StatusCode::FORBIDDEN,
-            model::Error::Capacity => StatusCode::TOO_MANY_REQUESTS,
-            _ => StatusCode::CONFLICT,
-        };
+        let mut status = error_status(&error);
         if error == model::Error::SequenceGap
             && let Some(requested) = requested_producer
         {
@@ -1291,7 +1312,14 @@ async fn read_visible_info(
         let started = Instant::now();
         let existing = g.store.read_info(key.to_owned(), admission.clone()).await;
         timings.read_us += started.elapsed().as_micros() as u64;
-        let existing = existing.map_err(unavailable)?.filter(|s| !s.deleted);
+        let existing = existing.map_err(unavailable)?;
+        if existing.as_ref().is_some_and(|s| s.fork_pending) {
+            return Err(unavailable("fork preparation pending; retry"));
+        }
+        if existing.as_ref().is_some_and(|s| s.soft_deleted) {
+            return Err((StatusCode::GONE, "source retained by forks".into()));
+        }
+        let existing = existing.filter(|s| !s.deleted);
         let now = now_ms();
         let Some(s) = existing
             .as_ref()
@@ -1314,7 +1342,7 @@ async fn read_visible_info(
         telemetry::commit_apply(started.elapsed());
         timings.proposal_us += started.elapsed().as_micros() as u64;
         if result?.data.error.is_none() {
-            return Ok(None);
+            continue; // Re-read: expiration can soft-delete a retained source.
         }
         // A concurrent renewal or recreation invalidates the observed expiry.
         // Re-read instead of reporting that a still-live stream was deleted.

@@ -102,6 +102,7 @@ mod tests {
             producers: BTreeMap::new(),
             last_seq: None,
             access_ms: 0,
+            forks: crate::fork::Lifecycle::default(),
         };
         let mut reader = cache.open("000", &stream).unwrap();
         for index in 1..=MAX_FILES {
