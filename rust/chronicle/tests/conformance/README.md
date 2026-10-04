@@ -22,7 +22,13 @@ not proof that every suite assumption is compatible.
 otherwise failed its peer-dependency graph construction with `edgesOut` on this
 orb. No dependency lifecycle scripts are required. `longPollTimeoutMs` controls
 some upstream test timeouts, not the server's configured waiting period or every
-test's independently hard-coded timeout.
+test's independently hard-coded timeout. The runner's default deadline is now
+30 seconds, above the configured 20-second long-poll allowance. Previously the
+implicit Vitest 5-second default aborted two offset-now tests at the server's
+intentional 5-second wait boundary. Reports before `conformance-recreation`
+retain those failures. No upstream assertion, explicit per-test deadline or
+server waiting behavior was changed; this is not evidence of sub-5-second
+long-poll completion.
 
 For live k3d tests, prefer an in-cluster client or a temporary private NodePort
 over `kubectl port-forward`. During this run, a broken-pipe connection terminated

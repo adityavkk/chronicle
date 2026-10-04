@@ -27,8 +27,14 @@ recovery procedure; it never overwrites existing identity/storage.
 
 HTTP example: PUT `/v1/stream/tenant/path` creates an octet stream; POST appends;
 GET reads; DELETE tombstones. Producer headers are `producer-id`, `producer-epoch`,
-and `producer-seq`. Recreate requires explicit next `stream-incarnation`; omitted
-incarnation defaults to 1 rather than rebinding an old request to a new stream.
+and `producer-seq`. Without `stream-incarnation`, a request targets the current
+lifetime when admitted, including ordinary recreation after deletion/expiry.
+Its Raft command is bound to that lifetime and cannot retarget during apply.
+**For retries across deletion/recreation, retain and send the original explicit
+`stream-incarnation`** from the successful create/read, plus the producer tuple
+for append. An implicit retry after recreation is indistinguishable from a new
+operation on that URL; cross-lifetime deduplication is not promised. Existing
+committed commands keep their original incarnation on replay.
 
 ## What is verified at this checkpoint
 

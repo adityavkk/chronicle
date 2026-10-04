@@ -934,6 +934,14 @@ async fn stream_inner(
     } else {
         None
     };
+    let mut incarnations = headers.get_all("stream-incarnation").iter();
+    let requested_incarnation = incarnations
+        .next()
+        .map(|value| value.to_str().map_err(bad)?.parse::<u64>().map_err(bad))
+        .transpose()?;
+    if incarnations.next().is_some() {
+        return Err(bad("repeated incarnation header"));
+    }
     let command = if method == Method::PUT {
         for name in ["stream-ttl", "stream-expires-at"] {
             let mut values = headers.get_all(name).iter();
@@ -956,11 +964,28 @@ async fn stream_inner(
             )
             .map_err(bad)?
         };
+        let incarnation = if let Some(incarnation) = requested_incarnation {
+            incarnation
+        } else {
+            // Preserve tombstones when binding a fresh request. Never retarget
+            // this incarnation during apply if a concurrent lifecycle change wins.
+            let started = Instant::now();
+            let previous = g.store.read_info(key.clone(), admission.clone()).await;
+            timings.read_us += started.elapsed().as_micros() as u64;
+            previous
+                .map_err(unavailable)?
+                .map_or(Some(1), |s| {
+                    if s.deleted {
+                        s.incarnation.checked_add(1)
+                    } else {
+                        Some(s.incarnation)
+                    }
+                })
+                .ok_or_else(|| (StatusCode::CONFLICT, "incarnation exhausted".into()))?
+        };
         Command::Create {
             key,
-            expected_incarnation: h("stream-incarnation")
-                .map(|v| v.parse::<u64>().map_err(bad))
-                .transpose()?,
+            expected_incarnation: Some(incarnation),
             config: StreamConfig {
                 content_type: content_type.clone(),
                 json_framing: Some(model::content_type_matches(
@@ -975,10 +1000,7 @@ async fn stream_inner(
         }
     } else if method == Method::POST || method == Method::DELETE {
         let s = existing.ok_or_else(|| (StatusCode::NOT_FOUND, "stream missing".into()))?;
-        let incarnation = h("stream-incarnation")
-            .map(|v| v.parse::<u64>().map_err(bad))
-            .transpose()?
-            .unwrap_or(1);
+        let incarnation = requested_incarnation.unwrap_or(s.incarnation);
         if method == Method::DELETE {
             Command::Delete {
                 key,
