@@ -245,3 +245,10 @@ blindly. Wait for verified retirement before any subsequent operator eligibility
 change. The [retained evidence](../evidence/FAIL-STOP.md#withheld-volume-replacement-under-concurrent-load)
 distinguishes simulated volume loss, post-restart equality and cleanup from
 physical disk/power-loss guarantees.
+
+`leader_drain.py` exercises autonomous spare placement, live control/data leader
+drain and baseline restoration without any process restart. See
+[the complete schedule and interrupted-client results](../evidence/LEADER-DRAIN.md).
+`kill_leader.py` uses containerd SIGKILL and verifies exit 137 plus same-PVC
+container replacement. Use its explicit history hook rather than assuming
+`kubectl delete pod` kills immediately; see [the retained comparison](../evidence/RETRY-BACKOFF.md).

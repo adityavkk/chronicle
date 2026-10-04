@@ -103,6 +103,14 @@ incarnation defaults to 1 rather than rebinding an old request to a new stream.
   partitions and membership round trips under paced traffic. The mechanism stays
   **default off**; it is neither directed transfer nor resource-informed balancing.
   Failed harness attempts and the missed stability threshold remain in the evidence.
+* [Leader draining](evidence/LEADER-DRAIN.md) now removes a retained nonvoter
+  leader through committed membership, without campaigns or restarting it.
+  The k3d join/drain/restoration cycle retained 3,402 acknowledged appends across
+  four Porcupine-checked histories, but two producers exhausted retry budgets;
+  later retries succeeded. This is not zero-disruption transfer.
+* [Unavailable-peer backoff](evidence/RETRY-BACKOFF.md) prevents immediate
+  replication retry floods. A real-Raft negative mutation catches the burst;
+  an explicit k3d SIGKILL run retained 800 appends with Porcupine `Ok`.
 * [Strict long polling](evidence/LONGPOLL.md) has bounded admission and a fresh
   barrier/view after its five-second deadline. Real k3d gates cover concurrent
   append, recreation, close and loss of quorum at that boundary. These HTTP
