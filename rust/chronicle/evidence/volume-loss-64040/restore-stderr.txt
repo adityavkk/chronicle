@@ -1,0 +1,17 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/rust/chronicle/tests/lost_volume.py", line 175, in <module>
+    main()
+  File "/home/user/workspace/repo/rust/chronicle/tests/lost_volume.py", line 126, in main
+    wait(lambda: pod_status(POD), "original-volume process restart")
+  File "/home/user/workspace/repo/rust/chronicle/tests/retirement_partition.py", line 35, in wait
+    value = predicate()
+            ^^^^^^^^^^^
+  File "/home/user/workspace/repo/rust/chronicle/tests/lost_volume.py", line 126, in <lambda>
+    wait(lambda: pod_status(POD), "original-volume process restart")
+                 ^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/rust/chronicle/tests/gated_history.py", line 53, in pod_status
+    return json.loads(kubectl("get", "--raw", path).stdout)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/rust/chronicle/tests/gated_history.py", line 34, in kubectl
+    raise RuntimeError(
+RuntimeError: kubectl get --raw /api/v1/namespaces/chronicle/pods/chronicle-2:8080/proxy/admin/status failed (1): Error from server (ServiceUnavailable): error trying to reach service: proxy error from 127.0.0.1:6443 while dialing 10.42.4.57:8080, code 502: 502 Bad Gateway

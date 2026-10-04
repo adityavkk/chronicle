@@ -203,3 +203,45 @@ Both requests were still pending during the pause and returned unknown after
 pod termination. The log-gated retry returned 200; the apply-gated retry returned
 204 with the original frontier. Each final strict read contained exactly two
 records. This distinguishes unknown outcomes; it does not enumerate every schedule.
+
+## Withheld-volume qualification
+
+`lost_volume.py` is a destructive **disposable-cluster-only** history hook. It
+requires stable voters `[1,2,3]` in all five groups, a verified drained spare 4,
+one Chronicle pod per agent, and the exact guarded local PVC layout. It stops
+replica 3's agent before changing its volume. The original data is moved aside,
+not copied into a concurrently running identity. A normal (non-fault-feature)
+release is sufficient. Run only one fault driver at a time.
+
+Use a fresh history/path/seed and run `history.py` with:
+
+```sh
+--nemesis volume-loss --nemesis-delay 5 --hook-timeout 300 \
+--hook 'volume-loss:start=exec python3 tests/lost_volume.py inject --run NEW_RUN --output NEW_EVENTS.jsonl --confirm-disposable-data-loss chronicle-rust'
+```
+
+The recorded four-shard run used two producers and one strict reader per shard,
+384 appends per producer, `--append-interval .2 --read-interval .3 --timeout 10
+--retries 10 --retry-interval .3`. Only one history owns the injection hook; the
+other three run concurrently without a second nemesis. Choose paths mapping to
+all four shards with the existing `gated_history.group_for` function. See
+`evidence/volume-loss-64040/paths.tsv` and each history's initial run record.
+
+Check every history with the existing Go Porcupine adapter **before restoration**.
+The hook intentionally leaves replica 3 unready and data withheld. It enables an
+existing spare, waits for automatic replacement, and marks the lost identity
+draining; it does not provision or reuse an identity. After validation, restore
+the original volume as a separate cleanup step:
+
+```sh
+python3 tests/lost_volume.py restore --run SAME_RUN --output NEW_RESTORE_EVENTS.jsonl \
+  --confirm-disposable-data-loss chronicle-rust
+```
+
+Restore refuses a non-quarantined identity or unexpected new files, and does not
+restore eligibility. If interrupted, inspect events, Docker state and both
+directories before acting; never repeat a possibly completed filesystem mutation
+blindly. Wait for verified retirement before any subsequent operator eligibility
+change. The [retained evidence](../evidence/FAIL-STOP.md#withheld-volume-replacement-under-concurrent-load)
+distinguishes simulated volume loss, post-restart equality and cleanup from
+physical disk/power-loss guarantees.

@@ -87,3 +87,61 @@ requires a control leader also leading a data group, test gates enabled under
 `/data/faults`, and the guarded disposable cluster. On harness interruption,
 inspect retained controls and pod state before reuse; Python cleanup cannot run
 after SIGKILL. Do not expose the unauthenticated admin/Raft endpoints publicly.
+
+## Withheld-volume replacement under concurrent load
+
+`volume-loss-64040/` adds a narrower storage-unavailability qualification on normal
+release source `5c31d0e`. The formal assumptions precede the harness (`5daffef`,
+then `4f87d69`). The driver stopped the k3d agent hosting only replica 3, moved its
+Chronicle PVC contents to a sibling quarantine directory, created an empty mount,
+and restarted the agent. The Chronicle process exited 1 and created only
+`process.lock`: it did not recreate databases or bootstrap a forgotten identity.
+All original data remained inaccessible to Chronicle through the history checks.
+
+The operator enabled previously verified drained spare 4. The controller, without
+further placement commands, caught it up and completed all five groups on voters
+`[1,2,4]`, about 21.9 seconds after withholding. Eight producers and four strict
+readers ran across the four data shards. Each history contains 768 acknowledged
+appends: **3,072 total, all retained**, with seven unknown append attempts retried
+and four unknown read attempts. All four Go Porcupine checks return **Ok**.
+Unknown mutations remain potentially effective through history end, not merely
+until the HTTP timeout. This was not uninterrupted availability; the slowest
+logical append, including retries, took about 10.37 seconds. The 200ms deliberate
+per-producer pause makes this a fault schedule, not a throughput benchmark.
+
+Before restoring any original storage, spare 4 restarted on its own PVC. Explicit
+local stale reads matched each checked final strict read: 768 records / 73,728
+bytes per shard. `spare-local-shard-*.txt.gz` retain a subsequent equivalent raw
+capture while the original volume was still withheld; `local-read-capture.json`
+contains hashes and observation time. Peers were connected, so this establishes
+post-restart equality, **not disk-only recovery without possible catch-up**.
+The complete operation histories are gzip-compressed after checking; decompress
+them before passing them to the Go checker again. No failed run was discarded.
+
+Independent review accepted this scope and found a cleanup guard omission:
+restore checked completed replacement but not the old identity's draining flag.
+The red/green unit evidence proves that restore now rejects missing/undrained
+identity 3 before any Docker mutation, and checks quarantine again after recovery.
+Actual restore moved the original contents back successfully; its first status
+poll received 503 and exposed mismatched exception handling in the read wait.
+`restore-stderr.txt` retains that failure. Inspection confirmed the mutation had
+already completed; it was not repeated. The polling fix retries only reads, with
+a regression asserting exactly one volume mutation. All 33 Python tests pass.
+
+`cleanup-reconciled.json` records subsequent process recovery and verified
+nonvoter retirement with identity 3 still draining. This cleanup happens after
+retention validation and is not counted as durability evidence. Returning to
+the three-seed baseline is recorded separately in `baseline-cleanup.jsonl`.
+
+That baseline cleanup timed out: `retirement-timeout-state.json` preserves all
+five applied uniform voter sets `[1,2,3]` with retained nonvoter 4 still Leader.
+OpenRaft 0.9.25 intentionally retains that runtime role until its node record is
+removed. The controller excluded itself from cleanup. This is a separate drain
+liveness failure, not a passing restoration result; it does not invalidate the
+earlier histories checked while the original volume was still withheld.
+
+This tests withheld local storage plus an eligible existing spare, not physical
+disk/power loss, corrupted surviving replicas, true AZ failure, fresh-identity
+provisioning, or arbitrary failure schedules. The old contents are preserved for
+safe disposable-cluster cleanup rather than physically destroyed. Bounded model
+checks and the local trace tests still do not mechanize refinement to Rust/Raft.

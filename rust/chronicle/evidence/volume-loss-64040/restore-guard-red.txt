@@ -1,0 +1,79 @@
+test_only_exact_disposable_pvc_and_named_volume_are_accepted (test_lost_volume.LocationTest.test_only_exact_disposable_pvc_and_named_volume_are_accepted) ... ok
+test_restore_requires_quarantine_before_any_docker_mutation (test_lost_volume.LocationTest.test_restore_requires_quarantine_before_any_docker_mutation) ... 
+  test_restore_requires_quarantine_before_any_docker_mutation (test_lost_volume.LocationTest.test_restore_requires_quarantine_before_any_docker_mutation) (nodes={}) ... ERROR
+  test_restore_requires_quarantine_before_any_docker_mutation (test_lost_volume.LocationTest.test_restore_requires_quarantine_before_any_docker_mutation) (nodes={'3': {'draining': False}}) ... ERROR
+
+======================================================================
+ERROR: test_restore_requires_quarantine_before_any_docker_mutation (test_lost_volume.LocationTest.test_restore_requires_quarantine_before_any_docker_mutation) (nodes={})
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/rust/chronicle/tests/lost_volume.py", line 102, in main
+    command("sudo", "docker", "stop", "--time", "0", agent)
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1185, in _execute_mock_call
+    result = next(effect)
+             ^^^^^^^^^^^^
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/rust/chronicle/tests/test_lost_volume.py", line 64, in test_restore_requires_quarantine_before_any_docker_mutation
+    lost_volume.main()
+  File "/home/user/workspace/repo/rust/chronicle/tests/lost_volume.py", line 120, in main
+    command("sudo", "docker", "start", agent)
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1185, in _execute_mock_call
+    result = next(effect)
+             ^^^^^^^^^^^^
+StopIteration
+
+======================================================================
+ERROR: test_restore_requires_quarantine_before_any_docker_mutation (test_lost_volume.LocationTest.test_restore_requires_quarantine_before_any_docker_mutation) (nodes={'3': {'draining': False}})
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/rust/chronicle/tests/lost_volume.py", line 102, in main
+    command("sudo", "docker", "stop", "--time", "0", agent)
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1185, in _execute_mock_call
+    result = next(effect)
+             ^^^^^^^^^^^^
+StopIteration
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/rust/chronicle/tests/test_lost_volume.py", line 64, in test_restore_requires_quarantine_before_any_docker_mutation
+    lost_volume.main()
+  File "/home/user/workspace/repo/rust/chronicle/tests/lost_volume.py", line 120, in main
+    command("sudo", "docker", "start", agent)
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/unittest/mock.py", line 1185, in _execute_mock_call
+    result = next(effect)
+             ^^^^^^^^^^^^
+StopIteration
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.015s
+
+FAILED (errors=2)

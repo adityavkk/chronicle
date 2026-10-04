@@ -1,0 +1,2053 @@
+{
+  "control": {
+    "streams": {},
+    "nodes": {
+      "1": {
+        "addr": "chronicle-0.chronicle:8080",
+        "zone": "a",
+        "draining": false
+      },
+      "2": {
+        "addr": "chronicle-1.chronicle:8080",
+        "zone": "b",
+        "draining": false
+      },
+      "3": {
+        "addr": "chronicle-2.chronicle:8080",
+        "zone": "c",
+        "draining": false
+      },
+      "4": {
+        "addr": "chronicle-3.chronicle:8080",
+        "zone": "unknown",
+        "draining": true
+      },
+      "5": {
+        "addr": "chronicle-4.chronicle:8080",
+        "zone": "unknown",
+        "draining": true
+      }
+    },
+    "placements": {
+      "0": {
+        "generation": 31,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791072517565,
+        "replicas": {
+          "1": "MayVote",
+          "2": "MayVote",
+          "3": "MayVote",
+          "4": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 9751,
+                "node_id": 4
+              },
+              "index": 523
+            }
+          }
+        }
+      },
+      "1": {
+        "generation": 33,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791072519623,
+        "replicas": {
+          "1": "MayVote",
+          "2": "MayVote",
+          "3": "MayVote",
+          "4": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 9935,
+                "node_id": 4
+              },
+              "index": 11204
+            }
+          },
+          "5": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 9919,
+                "node_id": 3
+              },
+              "index": 4434
+            }
+          }
+        }
+      },
+      "2": {
+        "generation": 19,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791072521699,
+        "replicas": {
+          "1": "MayVote",
+          "2": "MayVote",
+          "3": "MayVote",
+          "4": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 8733,
+                "node_id": 4
+              },
+              "index": 11422
+            }
+          },
+          "5": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 8707,
+                "node_id": 1
+              },
+              "index": 7228
+            }
+          }
+        }
+      },
+      "3": {
+        "generation": 15,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791072523755,
+        "replicas": {
+          "1": "MayVote",
+          "2": "MayVote",
+          "3": "MayVote",
+          "4": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 10249,
+                "node_id": 4
+              },
+              "index": 7718
+            }
+          },
+          "5": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 10221,
+                "node_id": 2
+              },
+              "index": 2958
+            }
+          }
+        }
+      },
+      "4": {
+        "generation": 7,
+        "voters": [
+          1,
+          2,
+          3
+        ],
+        "complete": true,
+        "changed_ms": 1791072525806,
+        "replicas": {
+          "1": "MayVote",
+          "2": "MayVote",
+          "3": "MayVote",
+          "4": {
+            "NonvoterAfter": {
+              "leader_id": {
+                "term": 5289,
+                "node_id": 4
+              },
+              "index": 10117
+            }
+          }
+        }
+      }
+    }
+  },
+  "retirement4": false,
+  "pods": {
+    "1": {
+      "0": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 1,
+        "current_term": 9751,
+        "vote": {
+          "leader_id": {
+            "term": 9751,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 533,
+        "last_applied": {
+          "leader_id": {
+            "term": 9751,
+            "node_id": 4
+          },
+          "index": 533
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 9745,
+            "node_id": 1
+          },
+          "index": 511
+        },
+        "purged": {
+          "leader_id": {
+            "term": 9729,
+            "node_id": 3
+          },
+          "index": 447
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 9751,
+              "node_id": 4
+            },
+            "index": 523
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "1": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 1,
+        "current_term": 9935,
+        "vote": {
+          "leader_id": {
+            "term": 9935,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 11204,
+        "last_applied": {
+          "leader_id": {
+            "term": 9935,
+            "node_id": 4
+          },
+          "index": 11204
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 9929,
+            "node_id": 1
+          },
+          "index": 11007
+        },
+        "purged": {
+          "leader_id": {
+            "term": 9929,
+            "node_id": 1
+          },
+          "index": 10943
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 9935,
+              "node_id": 4
+            },
+            "index": 11204
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "2": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 1,
+        "current_term": 8733,
+        "vote": {
+          "leader_id": {
+            "term": 8733,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 11422,
+        "last_applied": {
+          "leader_id": {
+            "term": 8733,
+            "node_id": 4
+          },
+          "index": 11422
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 8732,
+            "node_id": 1
+          },
+          "index": 11263
+        },
+        "purged": {
+          "leader_id": {
+            "term": 8732,
+            "node_id": 1
+          },
+          "index": 11199
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 8733,
+              "node_id": 4
+            },
+            "index": 11422
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "3": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 1,
+        "current_term": 10249,
+        "vote": {
+          "leader_id": {
+            "term": 10249,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 7718,
+        "last_applied": {
+          "leader_id": {
+            "term": 10249,
+            "node_id": 4
+          },
+          "index": 7718
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 10248,
+            "node_id": 1
+          },
+          "index": 7679
+        },
+        "purged": {
+          "leader_id": {
+            "term": 10248,
+            "node_id": 1
+          },
+          "index": 7615
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 10249,
+              "node_id": 4
+            },
+            "index": 7718
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "4": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 1,
+        "current_term": 5289,
+        "vote": {
+          "leader_id": {
+            "term": 5289,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 10117,
+        "last_applied": {
+          "leader_id": {
+            "term": 5289,
+            "node_id": 4
+          },
+          "index": 10117
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 5288,
+            "node_id": 1
+          },
+          "index": 9983
+        },
+        "purged": {
+          "leader_id": {
+            "term": 5288,
+            "node_id": 1
+          },
+          "index": 9919
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 5289,
+              "node_id": 4
+            },
+            "index": 10117
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      }
+    },
+    "2": {
+      "0": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 2,
+        "current_term": 9751,
+        "vote": {
+          "leader_id": {
+            "term": 9751,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 533,
+        "last_applied": {
+          "leader_id": {
+            "term": 9751,
+            "node_id": 4
+          },
+          "index": 533
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 9745,
+            "node_id": 1
+          },
+          "index": 511
+        },
+        "purged": {
+          "leader_id": {
+            "term": 9729,
+            "node_id": 3
+          },
+          "index": 447
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 9751,
+              "node_id": 4
+            },
+            "index": 523
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "1": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 2,
+        "current_term": 9935,
+        "vote": {
+          "leader_id": {
+            "term": 9935,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 11204,
+        "last_applied": {
+          "leader_id": {
+            "term": 9935,
+            "node_id": 4
+          },
+          "index": 11204
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 9929,
+            "node_id": 1
+          },
+          "index": 11007
+        },
+        "purged": {
+          "leader_id": {
+            "term": 9929,
+            "node_id": 1
+          },
+          "index": 10943
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 9935,
+              "node_id": 4
+            },
+            "index": 11204
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "2": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 2,
+        "current_term": 8733,
+        "vote": {
+          "leader_id": {
+            "term": 8733,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 11422,
+        "last_applied": {
+          "leader_id": {
+            "term": 8733,
+            "node_id": 4
+          },
+          "index": 11422
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 8732,
+            "node_id": 1
+          },
+          "index": 11263
+        },
+        "purged": {
+          "leader_id": {
+            "term": 8732,
+            "node_id": 1
+          },
+          "index": 11199
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 8733,
+              "node_id": 4
+            },
+            "index": 11422
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "3": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 2,
+        "current_term": 10249,
+        "vote": {
+          "leader_id": {
+            "term": 10249,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 7718,
+        "last_applied": {
+          "leader_id": {
+            "term": 10249,
+            "node_id": 4
+          },
+          "index": 7718
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 10248,
+            "node_id": 1
+          },
+          "index": 7679
+        },
+        "purged": {
+          "leader_id": {
+            "term": 10248,
+            "node_id": 1
+          },
+          "index": 7615
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 10249,
+              "node_id": 4
+            },
+            "index": 7718
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "4": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 2,
+        "current_term": 5289,
+        "vote": {
+          "leader_id": {
+            "term": 5289,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 10117,
+        "last_applied": {
+          "leader_id": {
+            "term": 5289,
+            "node_id": 4
+          },
+          "index": 10117
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 5288,
+            "node_id": 1
+          },
+          "index": 9983
+        },
+        "purged": {
+          "leader_id": {
+            "term": 5288,
+            "node_id": 1
+          },
+          "index": 9919
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 5289,
+              "node_id": 4
+            },
+            "index": 10117
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      }
+    },
+    "3": {
+      "0": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 3,
+        "current_term": 9751,
+        "vote": {
+          "leader_id": {
+            "term": 9751,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 533,
+        "last_applied": {
+          "leader_id": {
+            "term": 9751,
+            "node_id": 4
+          },
+          "index": 533
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 9745,
+            "node_id": 1
+          },
+          "index": 511
+        },
+        "purged": {
+          "leader_id": {
+            "term": 9729,
+            "node_id": 3
+          },
+          "index": 447
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 9751,
+              "node_id": 4
+            },
+            "index": 523
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "1": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 3,
+        "current_term": 9935,
+        "vote": {
+          "leader_id": {
+            "term": 9935,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 11204,
+        "last_applied": {
+          "leader_id": {
+            "term": 9935,
+            "node_id": 4
+          },
+          "index": 11204
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 9929,
+            "node_id": 1
+          },
+          "index": 11007
+        },
+        "purged": {
+          "leader_id": {
+            "term": 9929,
+            "node_id": 1
+          },
+          "index": 11007
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 9935,
+              "node_id": 4
+            },
+            "index": 11204
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "2": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 3,
+        "current_term": 8733,
+        "vote": {
+          "leader_id": {
+            "term": 8733,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 11422,
+        "last_applied": {
+          "leader_id": {
+            "term": 8733,
+            "node_id": 4
+          },
+          "index": 11422
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 8732,
+            "node_id": 1
+          },
+          "index": 11263
+        },
+        "purged": {
+          "leader_id": {
+            "term": 8732,
+            "node_id": 1
+          },
+          "index": 11263
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 8733,
+              "node_id": 4
+            },
+            "index": 11422
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "3": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 3,
+        "current_term": 10249,
+        "vote": {
+          "leader_id": {
+            "term": 10249,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 7718,
+        "last_applied": {
+          "leader_id": {
+            "term": 10249,
+            "node_id": 4
+          },
+          "index": 7718
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 10248,
+            "node_id": 1
+          },
+          "index": 7679
+        },
+        "purged": {
+          "leader_id": {
+            "term": 10248,
+            "node_id": 1
+          },
+          "index": 7679
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 10249,
+              "node_id": 4
+            },
+            "index": 7718
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "4": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 3,
+        "current_term": 5289,
+        "vote": {
+          "leader_id": {
+            "term": 5289,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 10117,
+        "last_applied": {
+          "leader_id": {
+            "term": 5289,
+            "node_id": 4
+          },
+          "index": 10117
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 5288,
+            "node_id": 1
+          },
+          "index": 9983
+        },
+        "purged": {
+          "leader_id": {
+            "term": 5288,
+            "node_id": 1
+          },
+          "index": 9983
+        },
+        "state": "Follower",
+        "current_leader": 4,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 5289,
+              "node_id": 4
+            },
+            "index": 10117
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      }
+    },
+    "4": {
+      "0": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 4,
+        "current_term": 9751,
+        "vote": {
+          "leader_id": {
+            "term": 9751,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 533,
+        "last_applied": {
+          "leader_id": {
+            "term": 9751,
+            "node_id": 4
+          },
+          "index": 533
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 9745,
+            "node_id": 1
+          },
+          "index": 511
+        },
+        "purged": {
+          "leader_id": {
+            "term": 9729,
+            "node_id": 3
+          },
+          "index": 447
+        },
+        "state": "Leader",
+        "current_leader": 4,
+        "millis_since_quorum_ack": 127,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 9751,
+              "node_id": 4
+            },
+            "index": 523
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": {
+          "1": {
+            "leader_id": {
+              "term": 9751,
+              "node_id": 4
+            },
+            "index": 533
+          },
+          "2": {
+            "leader_id": {
+              "term": 9751,
+              "node_id": 4
+            },
+            "index": 533
+          },
+          "3": {
+            "leader_id": {
+              "term": 9751,
+              "node_id": 4
+            },
+            "index": 533
+          },
+          "4": {
+            "leader_id": {
+              "term": 9751,
+              "node_id": 4
+            },
+            "index": 533
+          }
+        }
+      },
+      "1": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 4,
+        "current_term": 9935,
+        "vote": {
+          "leader_id": {
+            "term": 9935,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 11204,
+        "last_applied": {
+          "leader_id": {
+            "term": 9935,
+            "node_id": 4
+          },
+          "index": 11204
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 9929,
+            "node_id": 1
+          },
+          "index": 11007
+        },
+        "purged": {
+          "leader_id": {
+            "term": 9929,
+            "node_id": 1
+          },
+          "index": 10943
+        },
+        "state": "Leader",
+        "current_leader": 4,
+        "millis_since_quorum_ack": 0,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 9935,
+              "node_id": 4
+            },
+            "index": 11204
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": {
+          "1": {
+            "leader_id": {
+              "term": 9935,
+              "node_id": 4
+            },
+            "index": 11204
+          },
+          "2": {
+            "leader_id": {
+              "term": 9935,
+              "node_id": 4
+            },
+            "index": 11204
+          },
+          "3": {
+            "leader_id": {
+              "term": 9935,
+              "node_id": 4
+            },
+            "index": 11204
+          },
+          "4": {
+            "leader_id": {
+              "term": 9935,
+              "node_id": 4
+            },
+            "index": 11204
+          }
+        }
+      },
+      "2": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 4,
+        "current_term": 8733,
+        "vote": {
+          "leader_id": {
+            "term": 8733,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 11422,
+        "last_applied": {
+          "leader_id": {
+            "term": 8733,
+            "node_id": 4
+          },
+          "index": 11422
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 8732,
+            "node_id": 1
+          },
+          "index": 11263
+        },
+        "purged": {
+          "leader_id": {
+            "term": 8732,
+            "node_id": 1
+          },
+          "index": 11199
+        },
+        "state": "Leader",
+        "current_leader": 4,
+        "millis_since_quorum_ack": 0,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 8733,
+              "node_id": 4
+            },
+            "index": 11422
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": {
+          "1": {
+            "leader_id": {
+              "term": 8733,
+              "node_id": 4
+            },
+            "index": 11422
+          },
+          "2": {
+            "leader_id": {
+              "term": 8733,
+              "node_id": 4
+            },
+            "index": 11422
+          },
+          "3": {
+            "leader_id": {
+              "term": 8733,
+              "node_id": 4
+            },
+            "index": 11422
+          },
+          "4": {
+            "leader_id": {
+              "term": 8733,
+              "node_id": 4
+            },
+            "index": 11422
+          }
+        }
+      },
+      "3": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 4,
+        "current_term": 10249,
+        "vote": {
+          "leader_id": {
+            "term": 10249,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 7718,
+        "last_applied": {
+          "leader_id": {
+            "term": 10249,
+            "node_id": 4
+          },
+          "index": 7718
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 10248,
+            "node_id": 1
+          },
+          "index": 7679
+        },
+        "purged": {
+          "leader_id": {
+            "term": 10248,
+            "node_id": 1
+          },
+          "index": 7615
+        },
+        "state": "Leader",
+        "current_leader": 4,
+        "millis_since_quorum_ack": 0,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 10249,
+              "node_id": 4
+            },
+            "index": 7718
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": {
+          "1": {
+            "leader_id": {
+              "term": 10249,
+              "node_id": 4
+            },
+            "index": 7718
+          },
+          "2": {
+            "leader_id": {
+              "term": 10249,
+              "node_id": 4
+            },
+            "index": 7718
+          },
+          "3": {
+            "leader_id": {
+              "term": 10249,
+              "node_id": 4
+            },
+            "index": 7718
+          },
+          "4": {
+            "leader_id": {
+              "term": 10249,
+              "node_id": 4
+            },
+            "index": 7718
+          }
+        }
+      },
+      "4": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 4,
+        "current_term": 5289,
+        "vote": {
+          "leader_id": {
+            "term": 5289,
+            "node_id": 4
+          },
+          "committed": true
+        },
+        "last_log_index": 10117,
+        "last_applied": {
+          "leader_id": {
+            "term": 5289,
+            "node_id": 4
+          },
+          "index": 10117
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 5288,
+            "node_id": 1
+          },
+          "index": 9983
+        },
+        "purged": {
+          "leader_id": {
+            "term": 5288,
+            "node_id": 1
+          },
+          "index": 9919
+        },
+        "state": "Leader",
+        "current_leader": 4,
+        "millis_since_quorum_ack": 0,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 5289,
+              "node_id": 4
+            },
+            "index": 10117
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "4": {
+                "addr": "chronicle-3.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": {
+          "1": {
+            "leader_id": {
+              "term": 5289,
+              "node_id": 4
+            },
+            "index": 10117
+          },
+          "2": {
+            "leader_id": {
+              "term": 5289,
+              "node_id": 4
+            },
+            "index": 10117
+          },
+          "3": {
+            "leader_id": {
+              "term": 5289,
+              "node_id": 4
+            },
+            "index": 10117
+          },
+          "4": {
+            "leader_id": {
+              "term": 5289,
+              "node_id": 4
+            },
+            "index": 10117
+          }
+        }
+      }
+    },
+    "5": {
+      "0": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 5,
+        "current_term": 0,
+        "vote": {
+          "leader_id": {
+            "term": 0,
+            "node_id": 0
+          },
+          "committed": false
+        },
+        "last_log_index": null,
+        "last_applied": null,
+        "snapshot": null,
+        "purged": null,
+        "state": "Learner",
+        "current_leader": null,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": null,
+          "membership": {
+            "configs": [],
+            "nodes": {}
+          }
+        },
+        "replication": null
+      },
+      "1": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 5,
+        "current_term": 9919,
+        "vote": {
+          "leader_id": {
+            "term": 9919,
+            "node_id": 3
+          },
+          "committed": true
+        },
+        "last_log_index": 4510,
+        "last_applied": {
+          "leader_id": {
+            "term": 9919,
+            "node_id": 3
+          },
+          "index": 4510
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 9919,
+            "node_id": 3
+          },
+          "index": 4351
+        },
+        "purged": {
+          "leader_id": {
+            "term": 9919,
+            "node_id": 3
+          },
+          "index": 4351
+        },
+        "state": "Learner",
+        "current_leader": 3,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 9919,
+              "node_id": 3
+            },
+            "index": 4434
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "5": {
+                "addr": "chronicle-4.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "2": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 5,
+        "current_term": 8721,
+        "vote": {
+          "leader_id": {
+            "term": 8721,
+            "node_id": 1
+          },
+          "committed": true
+        },
+        "last_log_index": 7229,
+        "last_applied": {
+          "leader_id": {
+            "term": 8721,
+            "node_id": 1
+          },
+          "index": 7229
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 8705,
+            "node_id": 3
+          },
+          "index": 7167
+        },
+        "purged": {
+          "leader_id": {
+            "term": 8705,
+            "node_id": 3
+          },
+          "index": 7167
+        },
+        "state": "Learner",
+        "current_leader": 1,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 8707,
+              "node_id": 1
+            },
+            "index": 7228
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "5": {
+                "addr": "chronicle-4.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "3": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 5,
+        "current_term": 10235,
+        "vote": {
+          "leader_id": {
+            "term": 10235,
+            "node_id": 2
+          },
+          "committed": true
+        },
+        "last_log_index": 2978,
+        "last_applied": {
+          "leader_id": {
+            "term": 10235,
+            "node_id": 2
+          },
+          "index": 2978
+        },
+        "snapshot": {
+          "leader_id": {
+            "term": 10206,
+            "node_id": 1
+          },
+          "index": 2815
+        },
+        "purged": {
+          "leader_id": {
+            "term": 10206,
+            "node_id": 1
+          },
+          "index": 2751
+        },
+        "state": "Learner",
+        "current_leader": 2,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": {
+            "leader_id": {
+              "term": 10221,
+              "node_id": 2
+            },
+            "index": 2958
+          },
+          "membership": {
+            "configs": [
+              [
+                1,
+                2,
+                3
+              ]
+            ],
+            "nodes": {
+              "1": {
+                "addr": "chronicle-0.chronicle:8080"
+              },
+              "2": {
+                "addr": "chronicle-1.chronicle:8080"
+              },
+              "3": {
+                "addr": "chronicle-2.chronicle:8080"
+              },
+              "5": {
+                "addr": "chronicle-4.chronicle:8080"
+              }
+            }
+          }
+        },
+        "replication": null
+      },
+      "4": {
+        "running_state": {
+          "Ok": null
+        },
+        "id": 5,
+        "current_term": 0,
+        "vote": {
+          "leader_id": {
+            "term": 0,
+            "node_id": 0
+          },
+          "committed": false
+        },
+        "last_log_index": null,
+        "last_applied": null,
+        "snapshot": null,
+        "purged": null,
+        "state": "Learner",
+        "current_leader": null,
+        "millis_since_quorum_ack": null,
+        "membership_config": {
+          "log_id": null,
+          "membership": {
+            "configs": [],
+            "nodes": {}
+          }
+        },
+        "replication": null
+      }
+    }
+  }
+}

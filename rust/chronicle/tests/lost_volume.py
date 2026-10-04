@@ -81,6 +81,8 @@ def main():
     else:
         if any(not p["complete"] or p["voters"] != [1, 2, 4] for p in state["placements"].values()):
             raise RuntimeError("restore requires completed replacement")
+        if not state["nodes"].get("3", {}).get("draining", False):
+            raise RuntimeError("restore requires the lost identity to remain quarantined")
 
     def cold(script):
         running = command("sudo", "docker", "inspect", agent, "--format", "{{.State.Running}}").strip()
@@ -121,8 +123,15 @@ def main():
             note("agent-started")
 
         if args.mode == "restore":
-            wait(lambda: pod_status(POD), "original-volume process restart")
-            note("original-process-recovered", metrics=pod_status(POD))
+            # Use the command helper whose transient subprocess errors wait()
+            # handles; gated_history.pod_status instead wraps them in RuntimeError.
+            metrics = wait(lambda: json.loads(command(K, "get", "--raw",
+                f"/api/v1/namespaces/chronicle/pods/{POD}:8080/proxy/admin/status")),
+                "original-volume process restart")
+            state = api("/admin/control")
+            if not state["nodes"]["3"]["draining"]:
+                raise RuntimeError("restored identity is no longer quarantined")
+            note("original-process-recovered", metrics=metrics, state=state)
             return
 
         def refused():
