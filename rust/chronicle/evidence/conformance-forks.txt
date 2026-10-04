@@ -1,0 +1,58 @@
+
+> test
+> vitest run --testTimeout=30000 --reporter=default --reporter=json --outputFile=../../evidence/conformance-forks.json
+
+
+ RUN  v4.1.8 /home/user/workspace/repo/rust/chronicle/tests/conformance
+
+stderr | conformance.test.ts > Long-Poll Operations > should wait for new data with long-poll
+conformance transport failure http://172.18.0.3:30644/v1/stream/longpoll-test-1791153673258?offset=0000000000000000_0000000000000008&live=long-poll&cursor=3136083 [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on long-poll responses
+conformance transport failure http://172.18.0.3:30644/v1/stream/security-longpoll-nosniff-1791153674404?offset=0000000000000000_0000000000000012&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Long-Poll Edge Cases > should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout
+conformance transport failure http://172.18.0.3:30644/v1/stream/longpoll-204-headers-test-1791153686269?offset=0000000000000000_0000000000000000&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+ ✓ conformance.test.ts (332 tests | 6 skipped) 65356ms
+     ✓ should wait for new data with long-poll  572ms
+     ✓ should include X-Content-Type-Options: nosniff on long-poll responses  702ms
+     ✓ should support offset=now with long-poll mode (waits for data)  5013ms
+     ✓ should support offset=now with long-poll on empty stream  5062ms
+     ✓ should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout  5012ms
+     ✓ should return 404 on HEAD after TTL expires  1030ms
+     ✓ should return 404 on GET after TTL expires (idle)  1026ms
+     ✓ should return 404 on POST append after TTL expires (idle)  1029ms
+     ✓ should return 404 on HEAD after Expires-At passes  3033ms
+     ✓ should return 404 on GET after Expires-At passes  3035ms
+     ✓ should return 404 on POST append after Expires-At passes  3035ms
+     ✓ should allow recreating stream after TTL expires  1087ms
+     ✓ should extend TTL on write (sliding window)  3022ms
+     ✓ should extend TTL on read (sliding window)  3021ms
+     ✓ should NOT extend TTL on HEAD  2026ms
+     ✓ should NOT extend Expires-At on read or write  4026ms
+     ✓ should handle chunk-size pagination correctly  925ms
+       ✓ concurrent readers see consistent data during writes  2522ms
+       ✓ single byte values cover full range (0-255) with concurrent readers during write  4505ms
+       ✓ random operation sequences maintain stream invariants  2043ms
+       ✓ offsets are always monotonically increasing  1435ms
+       ✓ read-your-writes: data is immediately visible after append  1948ms
+       ✓ data at offset never changes after additional appends  2432ms
+       ✓ lexicographically ordered seq values are accepted  867ms
+       ✓ out-of-order seq values are rejected  556ms
+       ✓ concurrent writers racing with incrementing seq values  760ms
+       ✓ replay produces identical content hash  2790ms
+       ✓ deterministic ordering - same data in same order produces same hash  1426ms
+       ✓ sse-live-reader-receives-final-append-on-close: live reader at tail receives data appended atomically with the close  1209ms
+     ✓ should cascade GC through three levels  720ms
+     ✓ should expire fork based on TTL (releases refcount)  1064ms
+     ✓ should expire source with living forks (source goes 410)  1074ms
+     ✓ should allow fork to outlive source via TTL renewal  2056ms
+     ✓ should handle many forks of same stream (10 forks)  912ms
+
+ Test Files  1 passed (1)
+      Tests  326 passed | 6 skipped (332)
+   Start at  22:41:12
+   Duration  65.63s (transform 23ms, setup 0ms, import 113ms, tests 65.36s, environment 0ms)
+
+JSON report written to /home/user/workspace/repo/rust/chronicle/evidence/conformance-forks.json

@@ -1,7 +1,7 @@
 # Pinned protocol failure-family ledger
 
 Acceptance suite: unchanged `@durable-streams/server-conformance-tests@0.3.5`.
-The latest full run is `conformance-mount.json`: **247 passed, 79 failed,
+The latest full run is `conformance-forks.json`: **326 passed, 0 failed,
 6 skipped of 332**. The six skips are upstream-default reserved subscription
 tests; no new skips, filtering, weakened assertions or replacement suite count
 as a full pass. Focused development runs will be labelled separately.
@@ -19,8 +19,8 @@ runs did not establish correct fork-reference namespace resolution. See MOUNT.md
 | SSE | 0 | Passed; bounded batching is not a transport-atomicity guarantee |
 | Ordinary same-URL recreation | 0 | Passed; explicit incarnation required for cross-lifetime retry fencing |
 | Concurrent-read byte property | 0 | Passed this run; earlier 222-byte 503 barrier-timeout failure remains an open availability issue |
-| Fork creation/read/write/lifecycle/expiry/live/JSON | 79 | Pending; one additional failure versus metadata run retained |
-| **Total** | **79** | **Not conformant** |
+| Fork creation/read/write/lifecycle/expiry/live/JSON | 0 | Passed on the real k3d deployment; see FORKS.md for source/image and proof scope |
+| **Total** | **0** | **Pinned enabled suite passed; six upstream-default subscription skips** |
 
 The raw JSON report, not this grouping, is authoritative for individual failures.
 `CONFORMANCE.md` retains prior full-run counts and diagnoses. Every subsequent

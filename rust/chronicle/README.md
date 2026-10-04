@@ -126,7 +126,12 @@ committed commands keep their original incarnation on replay.
   recreation or post-header failure aborts without advancing the cursor. The
   60-second application lifetime assumes HTTP consumer progress, not forced
   socket teardown when the transport stops polling. Forwarded streams retain
-  admission on both nodes. This is not full protocol conformance.
+  admission on both nodes.
+* [Cross-shard forks](evidence/FORKS.md) use source-coordinated durable decisions,
+  bounded unpublished target staging and restartable cleanup. The unchanged
+  pinned conformance suite now passes **326 tests, with zero failures and six
+  upstream-default subscription skips**, on real k3d. This is protocol evidence,
+  not comprehensive fork crash/partition qualification.
 * A [release-mode workload comparison](evidence/PERFORMANCE.md) measured 156 ack/s
   with 172 ms p99 on one hot stream, versus 262 ack/s with 74 ms p99 across four
   shards, using the same CP/strict semantics and eight producers. Each case
@@ -137,15 +142,16 @@ committed commands keep their original incarnation on replay.
 ## Explicitly unfinished
 
 This is a bounded replicated vertical slice, **not the full requested deliverable**.
-Protocol conformance beyond the implemented request subset,
-zero-copy sendfile, resource-informed placement and leadership
+Reserved subscription APIs, zero-copy sendfile, resource-informed placement and leadership
 balancing, deeper replication/storage trace linkage, broader I/O-fault schedules, stronger
 admission/snapshot crash schedules, repeated steady-state measurements and external
 equal-semantics performance baselines remain.
-The [unmodified conformance baseline](evidence/CONFORMANCE.md) is failing, not
-waived. Until implemented, PUT fork headers return 501 before
-body extraction or storage access, rather than acknowledging an operation with
-those semantics silently removed. Sliding TTL renews through committed initial
+The [failure-family ledger](evidence/CONFORMANCE-LEDGER.md) retains the earlier
+failing full runs and current passing pinned result. Forks copy committed prefixes;
+they do not share unsafe local tier manifests. Legacy binary sources without
+recorded append boundaries reject nontrivial sub-offsets rather than inventing
+history. Mixed-version operation and downgrade after fork writes are unsupported.
+Sliding TTL renews through committed initial
 strict GET and append attempts, not HEAD, stale reads, live continuations or
 idempotent PUT. Rejected appends after the incarnation/expiry checks may renew.
 Absolute RFC3339 deadlines never slide. Legacy persisted deadlines stay fixed;
