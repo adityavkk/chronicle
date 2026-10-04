@@ -113,7 +113,12 @@ config equality compares the ASCII-case-insensitive media type before `;`,
 expiry policy and closure, while preserving the original content-type header.
 This follows Chronicle's Go `ContentTypeMatches`, not a Unicode case fold.
 JSON framing is selected by exact base media type, not a string prefix;
-`application/jsonp` is not JSON. Header decoding, required nonempty producer IDs
+`application/jsonp` is not JSON. New configs persist the framing choice explicitly.
+Legacy configs without it retain the original case-sensitive prefix rule: changing
+classification on replay would reinterpret already acknowledged bytes. Config
+equivalence also requires matching effective framing; a legacy misclassified
+stream must not silently acquire a different framing through idempotent creation.
+This is an upgrade boundary, not a payload migration or repair. Header decoding, required nonempty producer IDs
 and POST content type are validation before the append proposal, not replicated
 append attempts. Existing expiry maintenance remains a separate committed action.
 Successful creation supplies Location from the request authority and path; it
