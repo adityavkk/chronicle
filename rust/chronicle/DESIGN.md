@@ -53,3 +53,50 @@ Formal evidence is in formal/. Raft is assumed, not re-proved. TLC is bounded;
 Lean proves selected pure properties. Rust refinement is not mechanized. Tests,
 fault histories, storage hooks and independent review must bridge that gap; none
 constitutes an end-to-end proof of hardware durability.
+
+## Fork atomic commit (decision before implementation)
+
+The pinned protocol permits copied prefixes but requires source soft-deletion
+(410), blocked recreation (409), and cascading cleanup while descendants live.
+Source and target may hash to different groups. Copying bytes alone cannot
+provide that lifecycle contract. Do not relocate identities or put fork payloads
+through the placement group. Use a specialized two-participant transaction,
+coordinated by the source data group, with copied target bytes.
+
+1. Check an existing target's fork configuration before resampling its source.
+2. Durably prepare the source: bind source/target incarnations, request identity,
+   boundary, inherited policy and bytes. Freeze conflicting source mutations,
+   including append and TTL renewal, until the decision. Default-tail capture
+   must still be current when the decision commits.
+3. Durably reserve target identity/capacity and persist its unpublished copy.
+4. Commit or abort in the source group. Commit requires durable target prepare
+   and revalidates source expiry using a replicated time sample. It establishes
+   the retained source relationship atomically with the irrevocable decision.
+   This is the lifecycle linearization point; no timeout reverses it.
+5. Finalize the target from the decision. Only then reply success. A prepared
+   target resolves the decision or returns unavailable, never a speculative 404.
+
+Replicated logical locks do not hold SQLite transactions across network calls.
+Bounded reconciliation resumes accepted work after cancellation, failover and
+snapshot installation. Charge staged bytes, relationships, decisions and release
+obligations to capacity; reserve recovery capacity. Never evict unresolved records
+or delete settled decisions by age. Delayed RPCs must be fenced by transaction
+identity and incarnation even after cleanup. An indefinite partition can block
+affected streams and fill the bounded transaction budget; this is CP behavior.
+
+Deletion cleanup is asynchronous, as the protocol permits: a fork retains its
+parent relationship while it has descendants. Final reclamation durably enqueues
+an idempotent parent release, cascading across groups. Target writer state starts
+empty and source closure is not inherited. Sliding TTL uses the commit-time
+creation sample; fixed expiry follows the protocol inheritance table.
+
+The initial `ForkCommit` model covers one transaction, durable prepares, decision,
+visibility and release. Additional refinement/tests must cover multiple competing
+transactions, expiry, incarnation reuse, chain cleanup, capacity and snapshot
+installation before claiming implementation acceptance. Optional stale reads are
+committed-prefix observations, not participants in strict atomic visibility.
+
+Conformance must use a disposable fixed-tenant API mount where both request URLs
+and absolute fork-header paths resolve through the same namespace. The old nested
+base URL is unsuitable for fork certification. No test-name special cases,
+cross-tenant fallback, or rewriting upstream assertions is permitted.

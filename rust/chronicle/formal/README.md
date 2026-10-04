@@ -664,3 +664,28 @@ with a space, which needs an extra space to survive SSE parsing. The line-start
 state crosses arbitrary UTF-8/source chunk boundaries. Existing split-boundary
 and property tests check parser-equivalent output; the TLA model does not prove
 byte encoding. SSE Cache-Control becomes no-cache; strict barriers are unchanged.
+
+### Cross-shard fork commit: initial model and mapping
+
+`ForkCommit.tla` assumes each action is a durable application of the owning Raft
+group. Source/target availability can toggle independently. `Begin` maps to a
+persisted source preparation that locks conflicting mutations and captures its
+prefix; `Prepare` maps to unpublished target bytes and a capacity/identity
+reservation. `Commit` records the irreversible source decision and retained
+relationship atomically. `Finalize` publishes only from that decision. Timeout
+is not abort. Deletion and idempotent parent release are separate transitions.
+Both prepared records and decisions belong in SQLite state and snapshots, not
+HTTP task memory. Apply persistence must include every modified record and its
+applied index in one transaction. This is a pre-implementation mapping.
+
+Positive safety checks cover 1,212 reachable states for one transaction and
+three tail lengths. Negative controls remove the mutation lock, publish a target
+before decision, or lose prepared state during recovery. Each must violate its
+named invariant, not merely fail parsing. `ForkLiveness` separately assumes
+eventual sustained availability of both groups and weakly fair reconciliation;
+it checks settlement/publication, not availability during a partition. Lean
+proves irreversible/idempotent decisions, copied prefix, exact boundary offset
+and fresh writer state for arbitrary lists/natural offsets. It does not verify
+the cross-shard protocol or byte framing. The initial model excludes competing
+transactions, expiry, incarnation reuse and chained releases; those remain
+required refinement/test work. No fork implementation is certified by this model.
