@@ -699,6 +699,11 @@ must not invent historical append boundaries: binary sub-offsets and nontrivial
 anchors requiring missing history are unsupported until recreation. JSON value
 boundaries remain recoverable from the committed framing itself.
 
+Enable boundary tracking through an explicit default-false field in the persisted
+Create configuration. Replaying old commands must not silently add new metadata
+or change capacity decisions relative to an old installed snapshot. New HTTP
+creation opts in; legacy replay retains its previous accounting and byte state.
+
 Binary sub-offsets must stop within the first append following the anchor, not
 merely within the overall tail. JSON sub-offsets count parsed flattened values,
 including nested arrays/strings as single values, and may span append batches.
