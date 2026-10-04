@@ -693,9 +693,12 @@ fn target(shard: u64, nodes: &BTreeMap<u64, chronicle_raft::model::Node>) -> BTr
             if selected.len() == 3 {
                 break;
             }
-            if !distinct || !zones.contains(&nodes[&id].zone) {
+            let zone = nodes[&id].failure_domain();
+            if !distinct || zone.is_some_and(|z| !zones.contains(z)) {
                 selected.insert(id);
-                zones.insert(nodes[&id].zone.clone());
+                if let Some(zone) = zone {
+                    zones.insert(zone);
+                }
             }
         }
     }
@@ -707,6 +710,24 @@ mod tests {
     use super::*;
     use chronicle_raft::storage::SqliteStore;
     use openraft::{CommittedLeaderId, Entry, EntryPayload, LogId, Membership};
+
+    #[test]
+    fn unspecified_domain_does_not_displace_available_distinct_domains() {
+        let mut nodes = BTreeMap::new();
+        for (id, zone) in [(1, "a"), (2, "unknown"), (3, "b"), (4, "c")] {
+            nodes.insert(
+                id,
+                chronicle_raft::model::Node {
+                    addr: id.to_string(),
+                    zone: zone.into(),
+                    draining: false,
+                },
+            );
+        }
+        assert_eq!(target(1, &nodes), [1, 3, 4].into());
+        nodes.remove(&4);
+        assert_eq!(target(1, &nodes), [1, 2, 3].into());
+    }
 
     #[test]
     fn resource_moves_are_not_rotated_back_and_pending_repair_skips_sampling() {

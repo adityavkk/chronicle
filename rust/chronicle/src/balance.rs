@@ -29,7 +29,7 @@ fn zones(state: &State, voters: &BTreeSet<u64>) -> usize {
     voters
         .iter()
         .filter_map(|id| state.nodes.get(id))
-        .map(|n| &n.zone)
+        .filter_map(Node::failure_domain)
         .collect::<BTreeSet<_>>()
         .len()
 }

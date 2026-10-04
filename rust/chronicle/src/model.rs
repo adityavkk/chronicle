@@ -96,6 +96,13 @@ pub struct Node {
     pub draining: bool,
 }
 
+impl Node {
+    /// An unspecified label cannot establish independence from another replica.
+    pub fn failure_domain(&self) -> Option<&str> {
+        (!self.zone.is_empty() && self.zone != "unknown").then_some(self.zone.as_str())
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Placement {
     pub generation: u64,

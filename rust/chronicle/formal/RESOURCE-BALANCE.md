@@ -19,7 +19,9 @@ Weight each shard by a base replica cost plus its maximum replica byte charge an
 service utilization. Compare the sum of squared source/destination weights before
 and after one replica replacement. Require a 10% pair improvement (which strictly
 decreases the whole-cluster potential because other nodes are unchanged).
-Preserve at least the old distinct-zone count; reject a destination with a
+Preserve at least the old **known** distinct-zone count: empty/`unknown` labels
+are not evidence of a separate failure domain. Initial/repair selection prefers
+supplied distinct domains before falling back to maintain RF3. Reject a destination with a
 quarter-full actor queue. The weight is 16 base units, one per charged 256 KiB
 (at most 64), and up to 64 units for the busy fraction of the observation window.
 Use non-overlapping windows rather than lifetime-average demand.

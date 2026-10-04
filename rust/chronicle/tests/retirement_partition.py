@@ -71,6 +71,7 @@ def main():
         if {int(id_) for id_, value in state["nodes"].items() if not value["draining"]} != {1, 2, 3}:
             raise RuntimeError("requires the three healthy seeds as the only eligible replicas")
         registered["draining"] = False
+        registered["zone"] = "a"  # Supplied simulated domain; unknown is not independent.
         api("/admin/register", [args.node, registered])
         def assigned():
             state = api("/admin/control")

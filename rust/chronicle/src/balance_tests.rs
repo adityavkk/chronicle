@@ -35,6 +35,19 @@ fn weights() -> BTreeMap<u64, u64> {
 }
 
 #[test]
+fn unknown_domains_are_not_evidence_of_diversity() {
+    let (mut state, loads) = fixture();
+    state.nodes.get_mut(&4).unwrap().zone = "unknown".into();
+    state.nodes.get_mut(&5).unwrap().zone.clear();
+    assert!(choose(&state, &loads, &weights(), 60_000).is_none());
+    state.nodes.get_mut(&4).unwrap().zone = "1".into();
+    let Some(Command::Balance { voters, .. }) = choose(&state, &loads, &weights(), 60_000) else {
+        panic!()
+    };
+    assert_eq!(voters, [2, 3, 4].into());
+}
+
+#[test]
 fn measured_weight_changes_selection_and_queue_pressure_blocks_destination() {
     let (state, mut loads) = fixture();
     assert!(matches!(
