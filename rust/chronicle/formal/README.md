@@ -689,3 +689,18 @@ and fresh writer state for arbitrary lists/natural offsets. It does not verify
 the cross-shard protocol or byte framing. The initial model excludes competing
 transactions, expiry, incarnation reuse and chained releases; those remain
 required refinement/test work. No fork implementation is certified by this model.
+
+Fork boundary refinement, before implementation: new stream state persists
+strictly increasing ends of nonempty accepted appends (including PUT data).
+Producer retries, rejected writes and close-only commands add no boundary.
+Deletion clears them. Charge each boundary against the existing metadata budget;
+snapshots/install/reopen must preserve them. A legacy snapshot without boundaries
+must not invent historical append boundaries: binary sub-offsets and nontrivial
+anchors requiring missing history are unsupported until recreation. JSON value
+boundaries remain recoverable from the committed framing itself.
+
+Binary sub-offsets must stop within the first append following the anchor, not
+merely within the overall tail. JSON sub-offsets count parsed flattened values,
+including nested arrays/strings as single values, and may span append batches.
+The copied range ends at an actual wire boundary. `Fork.boundary_offset` applies
+after that resolution; malformed headers and overshoots submit no transaction.
