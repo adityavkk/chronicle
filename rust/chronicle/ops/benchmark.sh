@@ -6,21 +6,26 @@ OUT=${2:?new output directory required}
 SEED=${3:?fresh numeric seed required}
 OPERATIONS=${OPERATIONS:-256}
 GO=${GO:-go}
+CLUSTER=${CLUSTER:-chronicle-rust}
+MOUNTED_TENANT=${MOUNTED_TENANT:-}
+[[ "$CLUSTER" == chronicle-rust || "$CLUSTER" == chronicle-upgrade ]] || { echo "unsupported local cluster" >&2; exit 2; }
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 mkdir "$OUT"
 OUT=$(realpath "$OUT")
-export URL OUT ROOT OPERATIONS
+export URL OUT ROOT OPERATIONS MOUNTED_TENANT
 
 # Use the documented stable mapping; both cases have eight producers and four
 # strict readers. The spread case has one stream per virtual data shard.
 python3 - "$SEED" "$OUT" <<'PY'
-import hashlib, pathlib, sys
+import hashlib, os, pathlib, sys
 seed, out = int(sys.argv[1]), pathlib.Path(sys.argv[2])
+tenant = os.environ['MOUNTED_TENANT']
+prefix = f'{len(tenant.encode())}:{tenant}bench/' if tenant else '5:bench'
 for mode in ("hot", "many"):
     paths = {}
     for n in range(10000):
         path = f"bench-{seed}-{mode}-{n}"
-        group = int.from_bytes(hashlib.sha256(("5:bench" + path).encode()).digest()[:8], "big") % 4 + 1
+        group = int.from_bytes(hashlib.sha256((prefix + path).encode()).digest()[:8], "big") % 4 + 1
         paths.setdefault(group, path)
         if len(paths) == 4:
             break
@@ -38,7 +43,11 @@ run_history() {
 }
 export -f run_history
 resources() {
-  "$ROOT/ops/kubectl.sh" get --raw /apis/metrics.k8s.io/v1beta1/namespaces/chronicle/pods > "$OUT/$1-resources.json"
+  if [[ "$CLUSTER" == chronicle-upgrade ]]; then
+    sudo docker exec k3d-chronicle-upgrade-server-0 kubectl get --raw /apis/metrics.k8s.io/v1beta1/namespaces/chronicle/pods > "$OUT/$1-resources.json"
+  else
+    "$ROOT/ops/kubectl.sh" get --raw /apis/metrics.k8s.io/v1beta1/namespaces/chronicle/pods > "$OUT/$1-resources.json"
+  fi
 }
 failed=0
 resources before
