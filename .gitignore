@@ -42,3 +42,12 @@ docs-site/.astro/
 /chronicle_entrypoint_test.go
 /.dockerignore
 /CONTEXT.md
+# Deploy-contract tests that read kitt.yml, the KITT Dockerfiles and deploy/
+# manifests, or exercise the internal webhook adapter: GEC-internal only,
+# reserved here for the same reason as the files above.
+/cmd/chronicle/wcnp_kitt_integration_test.go
+/dockerfile_test.go
+/langfuse_manifest_test.go
+/metrics/kitt_contract_test.go
+/metrics/prod_metrics_policy_test.go
+/webhook/wcnp_internal_callback_integration_test.go
