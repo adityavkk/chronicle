@@ -40,7 +40,7 @@ import (
 // {__ds:h} keyspace shard, so a replica that holds slot h runs the lease/retry/due
 // workers over ds:{__ds:h}:sched:* exactly. #14 ran the degenerate single-slot case
 // (one ownership slot gated ALL background work); #15 raises it to subSlots so
-// ownedSlots() iterates the real S slots and the per-slot schedules shard with the
+// the held set spans the real S slots and the per-slot schedules shard with the
 // subs. The HRW math below was already general over slot indices, so this is the
 // one-line lift — adding/removing a replica still reassigns only ~1/N of slots.
 const ownershipSlots = subSlots
@@ -361,11 +361,16 @@ func scopedOwnerArgs(scope OwnerScope) (ownerScriptArgs, error) {
 	return ownerScriptArgs{slotKey: scope.SlotKey, replicaID: scope.ReplicaID, epoch: scope.Epoch}, nil
 }
 
-// CheckOwnershipConfig enforces the two membership invariants (05:507-508):
-// heartbeatInterval < memberLeaseTTL/2 (renew with headroom so a single late beat
-// does not drop the replica) and slotReconcileInterval <= heartbeatInterval
-// (re-claim owned slots at least as often as we prove liveness). Pure, so it is
-// unit-tested without a Manager and reused to validate operator-supplied config.
+// CheckOwnershipConfig enforces the membership timer relations, stated here once:
+// the two from 05:507-508, heartbeatInterval < memberLeaseTTL/2 (renew with
+// headroom so a single late beat does not drop the replica) and
+// slotReconcileInterval <= heartbeatInterval (re-claim owned slots at least as
+// often as we prove liveness), plus slotReconcileInterval < slotLeaseTTL (a slot
+// lease must outlive the interval between the passes that renew it). The last is
+// necessary for, not sufficient for, the runtime precondition on pass timing
+// behind Membership.tla's Tick slot gate: the pass duration enters too, which
+// only slotReconcileOnce can observe. Pure, so it is unit-tested without a
+// Manager and reused to validate operator-supplied config.
 func CheckOwnershipConfig(memberLeaseTTL, heartbeatInterval, slotLeaseTTL, slotReconcileInterval time.Duration) error {
 	if memberLeaseTTL <= 0 || heartbeatInterval <= 0 || slotLeaseTTL <= 0 || slotReconcileInterval <= 0 {
 		return fmt.Errorf("webhook: ownership TTLs must be positive (member=%s heartbeat=%s slot=%s reconcile=%s)",
@@ -376,6 +381,10 @@ func CheckOwnershipConfig(memberLeaseTTL, heartbeatInterval, slotLeaseTTL, slotR
 	}
 	if slotReconcileInterval > heartbeatInterval {
 		return fmt.Errorf("webhook: slotReconcileInterval (%s) must be <= heartbeatInterval (%s)", slotReconcileInterval, heartbeatInterval)
+	}
+	if slotReconcileInterval >= slotLeaseTTL {
+		return fmt.Errorf("webhook: slotReconcileInterval (%s) must be < slotLeaseTTL (%s): a slot lease must outlive the interval between the passes that renew it; raise slotLeaseTTL or lower slotReconcileInterval",
+			slotReconcileInterval, slotLeaseTTL)
 	}
 	return nil
 }

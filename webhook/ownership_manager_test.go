@@ -6,9 +6,29 @@ import (
 )
 
 // ownership_manager_test.go covers the Manager's slot-ownership shell (issue #14):
-// the membership/HRW/slot-reconcile wiring, the ownedSlots() work-sharding gate,
+// the membership/HRW/slot-reconcile wiring, the held-set work-sharding gate,
 // the new-owner-CAS firing #13's reconcile seam, and the inline OwnerFenced metric.
 // Against live Redis (skipped under -short).
+
+// ownedSlots is the test's view of the held set: the slots m currently owns.
+func ownedSlots(m *Manager) []SlotID {
+	scopes := m.ownedScopes()
+	out := make([]SlotID, len(scopes))
+	for i, o := range scopes {
+		out[i] = o.h
+	}
+	return out
+}
+
+// ownerScope is the scope m holds slot h at; ok is false when m does not hold h.
+func ownerScope(m *Manager, h SlotID) (OwnerScope, bool) {
+	for _, o := range m.ownedScopes() {
+		if o.h == h {
+			return o.scope, true
+		}
+	}
+	return OwnerScope{}, false
+}
 
 func newOwnershipManager(t *testing.T, s *RedisStore, replica string, fm *fakeMetrics) *Manager {
 	t.Helper()
@@ -76,10 +96,10 @@ func TestManagerSlotReconcileClaimsOwnsAndFires(t *testing.T) {
 	}
 	m.RunSlotReconcile()
 
-	if !m.ownsAnySlot() {
+	if len(ownedSlots(m)) == 0 {
 		t.Fatal("rA should own slots after reconcile")
 	}
-	owned := m.ownedSlots()
+	owned := ownedSlots(m)
 	if len(owned) != subSlots {
 		t.Fatalf("a sole replica should own all %d slots, got %d", subSlots, len(owned))
 	}
@@ -128,8 +148,8 @@ func TestManagerWorkShardingPartitionsSlots(t *testing.T) {
 	mA.RunSlotReconcile()
 	mB.RunSlotReconcile()
 
-	ownedA := mA.ownedSlots()
-	ownedB := mB.ownedSlots()
+	ownedA := ownedSlots(mA)
+	ownedB := ownedSlots(mB)
 	owners := make(map[int]int, subSlots)
 	for _, h := range ownedA {
 		owners[h.Index()]++
@@ -168,7 +188,7 @@ func TestManagerDeposedOwnerExpireFencedInline(t *testing.T) {
 	m.RunSlotReconcile() // rA owns all slots at epoch 1
 	// s1's slot is the one whose owner scope its lease worker presents.
 	sh, _ := NewSlotID(slotOf("s1"))
-	scope, ok := m.ownerScope(sh)
+	scope, ok := ownerScope(m, sh)
 	if !ok {
 		t.Fatal("rA should hold s1's slot")
 	}
@@ -212,7 +232,7 @@ func TestManagerRetryPathFencedInline(t *testing.T) {
 	}
 	m.RunSlotReconcile() // rA owns all slots at epoch 1
 	sh, _ := NewSlotID(slotOf("s1"))
-	scope, ok := m.ownerScope(sh)
+	scope, ok := ownerScope(m, sh)
 	if !ok {
 		t.Fatal("rA should hold s1's slot")
 	}

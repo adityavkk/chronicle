@@ -61,8 +61,8 @@ type SubscriptionTuning struct {
 	// HeartbeatInterval / SlotLeaseTTL / SlotReconcileInterval are the membership +
 	// slot-ownership timers (a DIFFERENT lease layer from the per-subscription
 	// webhook lease_ttl_ms). Zero values default to 9s/3s/9s/3s; the Manager
-	// enforces heartbeatInterval < memberLeaseTTL/2 and slotReconcileInterval <=
-	// heartbeatInterval, falling back to defaults if violated.
+	// enforces the relations webhook.CheckOwnershipConfig states, falling back to
+	// defaults if violated.
 	ReplicaID             string
 	MemberLeaseTTL        time.Duration
 	HeartbeatInterval     time.Duration
