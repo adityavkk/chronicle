@@ -1,0 +1,676 @@
+
+ RUN  v3.2.4 /home/user/workspace/electric-snapshot-upstream/packages/agents-runtime
+
+ ✓ test/runtime-checkpoint.test.ts (5 tests) 41ms
+ ✓ test/entity-stream-db-snapshot.test.ts (4 tests) 48ms
+{"level":40,"time":1791051303485,"msg":"[http://localhost:3000/test-agent/agent-1] unknown entity type, ignoring wake"}
+{"level":40,"time":1791051303486,"msg":"[http://localhost:3000/test-agent/agent-1] missing entity type, ignoring wake"}
+{"level":30,"time":1791051303487,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051303492,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051303498,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051303498,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051303499,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051303600,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051303601,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=2.31 preloadMs=1.96 handlerMs=0.01 httpMs=0 httpCount=0 totalMs=113.18"}
+{"level":40,"time":1791051303601,"msg":"[http://localhost:3000/test-agent/agent-1] wake metrics observer failed: observer failure must be isolated"}
+{"level":30,"time":1791051303604,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":40,"time":1791051303605,"msg":"[http://localhost:3000/test-agent/agent-1] claim callback returned status=409 ok=false claimMs=0.27 hasWriteToken=false errorCode=(none) errorMessage=(none) callback=http://localhost:3000/_electric/wakes/wake-abc responseBody={\"ok\":false}"}
+{"level":40,"time":1791051303605,"msg":"[http://localhost:3000/test-agent/agent-1] claim callback rejected wake status=409 errorCode=(none) errorMessage=(none) callback=http://localhost:3000/_electric/wakes/wake-abc responseBody={\"ok\":false}"}
+{"level":30,"time":1791051303607,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051303609,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":40,"time":1791051303610,"msg":"[http://localhost:3000/test-agent/agent-1] discarding unusable projection snapshot: projection snapshot image offset does not match response metadata"}
+{"level":30,"time":1791051303610,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051303611,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051303611,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051303611,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051303712,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051303712,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.25 preloadMs=0.2 handlerMs=0.03 httpMs=0 httpCount=0 totalMs=102.69"}
+{"level":30,"time":1791051303715,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051303716,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051303717,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=8_0 ackOffset=8_0 events=2 payloadType=string firstWake=false"}
+{"level":30,"time":1791051303717,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051303717,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051303818,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 8_0"}
+{"level":30,"time":1791051303818,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.56 preloadMs=0.54 handlerMs=0.05 httpMs=0 httpCount=0 totalMs=103.24"}
+{"level":30,"time":1791051303820,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051303821,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051303821,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=8_0 ackOffset=8_0 events=2 payloadType=string firstWake=false"}
+{"level":30,"time":1791051303822,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051303822,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051303922,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 8_0"}
+{"level":30,"time":1791051303923,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.46 preloadMs=0.43 handlerMs=0.06 httpMs=0 httpCount=0 totalMs=103.09"}
+{"level":30,"time":1791051303924,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":40,"time":1791051303925,"msg":"[http://localhost:3000/test-agent/agent-1] snapshot hydration rejected; falling back to full state replay"}
+{"level":30,"time":1791051303925,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051303926,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=8_0 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051303926,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051303926,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051304027,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 8_0"}
+{"level":30,"time":1791051304027,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=1.02 preloadMs=1 handlerMs=0.06 httpMs=0 httpCount=0 totalMs=103.01"}
+{"level":30,"time":1791051304029,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304033,"msg":"[http://localhost:3000/test-agent/agent-1] done without ack (no consumed offset)"}
+{"level":30,"time":1791051304033,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.46 preloadMs=0 handlerMs=0 httpMs=0 httpCount=0 totalMs=4.54"}
+{"level":30,"time":1791051304036,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304088,"msg":"[http://localhost:3000/test-agent/agent-1] done without ack (no consumed offset)"}
+{"level":30,"time":1791051304088,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=51.79 preloadMs=0.16 handlerMs=0 httpMs=0 httpCount=0 totalMs=52.84"}
+{"level":30,"time":1791051304090,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304141,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051304142,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=6_0 ackOffset=6_0 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051304142,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051304142,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051304242,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 6_0"}
+{"level":30,"time":1791051304243,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=50.7 preloadMs=0.1 handlerMs=0.05 httpMs=0 httpCount=0 totalMs=152.68"}
+{"level":30,"time":1791051304244,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":40,"time":1791051304245,"msg":"[http://localhost:3000/test-agent/agent-1] claim callback returned status=200 ok=false claimMs=0.3 hasWriteToken=false errorCode=(none) errorMessage=(none) callback=http://localhost:3000/_electric/wakes/wake-abc responseBody={\"ok\":false}"}
+{"level":40,"time":1791051304245,"msg":"[http://localhost:3000/test-agent/agent-1] claim callback rejected wake status=200 errorCode=(none) errorMessage=(none) callback=http://localhost:3000/_electric/wakes/wake-abc responseBody={\"ok\":false}"}
+{"level":30,"time":1791051304246,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304246,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051304247,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051304247,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051304247,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051304348,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051304349,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.19 preloadMs=0.16 handlerMs=0.07 httpMs=0 httpCount=0 totalMs=103.35"}
+{"level":30,"time":1791051304351,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304352,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051304352,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051304352,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051304352,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051304453,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051304454,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.21 preloadMs=0.18 handlerMs=0.03 httpMs=0 httpCount=0 totalMs=102.72"}
+{"level":30,"time":1791051304455,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304457,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051304459,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051304459,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051304460,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051304561,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 12_000"}
+{"level":30,"time":1791051304562,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.46 preloadMs=0.42 handlerMs=0.04 httpMs=0 httpCount=0 totalMs=106.38"}
+{"level":30,"time":1791051304563,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304563,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051304564,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":50,"time":1791051304564,"msg":"[http://localhost:3000/test-agent/agent-1] handler failed for http://localhost:3000/test-agent/agent-1: handler exploded"}
+{"level":30,"time":1791051304565,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051304565,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.19 preloadMs=0.16 handlerMs=0 httpMs=0 httpCount=0 totalMs=2.81"}
+{"level":30,"time":1791051304566,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304567,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051304567,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051304567,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051304567,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, closing wake"}
+{"level":30,"time":1791051304568,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051304568,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, sending done callback at checkpoint"}
+{"level":30,"time":1791051304568,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.12 preloadMs=0.1 handlerMs=0.12 httpMs=0 httpCount=0 totalMs=1.3"}
+{"level":30,"time":1791051304568,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304570,"msg":"[http://localhost:3000/test-agent/agent-1] SIGSTOP received, pausing after current checkpoint"}
+{"level":30,"time":1791051304570,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051304570,"msg":"[http://localhost:3000/test-agent/agent-1] pause requested, closing wake"}
+{"level":30,"time":1791051304570,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_500"}
+{"level":30,"time":1791051304570,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.78 preloadMs=0.76 handlerMs=0 httpMs=0 httpCount=0 totalMs=1.97"}
+{"level":30,"time":1791051304571,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304572,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051304572,"msg":"[http://localhost:3000/test-agent/agent-1] skipping initial handler pass: no fresh wake input in catch-up; entering idle (0.1s timeout)"}
+{"level":30,"time":1791051304672,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_600"}
+{"level":30,"time":1791051304673,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.26 preloadMs=0.24 handlerMs=0 httpMs=0 httpCount=0 totalMs=101.5"}
+{"level":30,"time":1791051304674,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304675,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051304676,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051304676,"msg":"[http://localhost:3000/test-agent/agent-1] SIGSTOP received, pausing after current checkpoint"}
+{"level":30,"time":1791051304681,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051304681,"msg":"[http://localhost:3000/test-agent/agent-1] pause requested, closing wake"}
+{"level":30,"time":1791051304681,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_500"}
+{"level":30,"time":1791051304682,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.19 preloadMs=0.15 handlerMs=5.76 httpMs=0 httpCount=0 totalMs=7.61"}
+{"level":30,"time":1791051304683,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304683,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":40,"time":1791051304784,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051304784,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051304785,"msg":"[http://localhost:3000/test-agent/agent-1] SIGSTOP received, pausing after current checkpoint"}
+{"level":30,"time":1791051304785,"msg":"[http://localhost:3000/test-agent/agent-1] SIGINT received, aborting active handler invocation"}
+{"level":30,"time":1791051304785,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051304785,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, closing wake"}
+{"level":30,"time":1791051304785,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_600"}
+{"level":30,"time":1791051304785,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, sending done callback at checkpoint"}
+{"level":30,"time":1791051304785,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.16 preloadMs=0.13 handlerMs=0.64 httpMs=0 httpCount=0 totalMs=102.68"}
+{"level":30,"time":1791051304786,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304787,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":40,"time":1791051304888,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051304889,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051304889,"msg":"[http://localhost:3000/test-agent/agent-1] SIGINT received, aborting active handler invocation"}
+{"level":30,"time":1791051304889,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051304889,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, closing wake"}
+{"level":30,"time":1791051304889,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_500"}
+{"level":30,"time":1791051304889,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, sending done callback at checkpoint"}
+{"level":30,"time":1791051304890,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.2 preloadMs=0.16 handlerMs=0.47 httpMs=0 httpCount=0 totalMs=103.13"}
+{"level":30,"time":1791051304891,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304891,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":40,"time":1791051304992,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051304992,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051304992,"msg":"[http://localhost:3000/test-agent/agent-1] SIGINT received, aborting active handler invocation"}
+{"level":30,"time":1791051304993,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051304993,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, closing wake"}
+{"level":30,"time":1791051304993,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_500"}
+{"level":30,"time":1791051304993,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, sending done callback at checkpoint"}
+{"level":30,"time":1791051304993,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.18 preloadMs=0.15 handlerMs=0.74 httpMs=0 httpCount=0 totalMs=101.95"}
+{"level":30,"time":1791051304994,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051304995,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":40,"time":1791051305095,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051305095,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":50,"time":1791051305098,"msg":"[http://localhost:3000/test-agent/agent-1] handler failed for http://localhost:3000/test-agent/agent-1: handler failed after signal"}
+{"level":30,"time":1791051305098,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_500"}
+{"level":30,"time":1791051305099,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.18 preloadMs=0.15 handlerMs=0 httpMs=0 httpCount=0 totalMs=104.22"}
+{"level":30,"time":1791051305101,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051305102,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051305103,"msg":"[http://localhost:3000/test-agent/agent-1] SIGINT received before active run controller, queuing abort"}
+{"level":40,"time":1791051305203,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051305204,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=1 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051305212,"msg":"[http://localhost:3000/test-agent/agent-1] agent.run starting provider=anthropic model=claude-sonnet-4-5-20250929 messages=0 latestRole=none wakeType=inbox wakeOffset=0_0 triggerMessageLen=111 runInputLen=111 tools=0"}
+{"level":30,"time":1791051305212,"msg":"[http://localhost:3000/test-agent/agent-1] agent.run input: {\"type\":\"inbox\",\"source\":\"http://localhost:3000/test-agent/agent-1\",\"fromOffset\":0,\"toOffset\":0,\"eventCount\":0}"}
+{"level":30,"time":1791051305216,"msg":"[http://localhost:3000/test-agent/agent-1] agent.run completed"}
+{"level":30,"time":1791051305216,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051305216,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, closing wake"}
+{"level":30,"time":1791051305216,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_500"}
+{"level":30,"time":1791051305216,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, sending done callback at checkpoint"}
+{"level":30,"time":1791051305216,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.46 preloadMs=0.4 handlerMs=11.41 httpMs=0 httpCount=0 totalMs=115.19"}
+{"level":30,"time":1791051305217,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051305218,"msg":"[http://localhost:3000/test-agent/agent-1] SIGINT received with no active run, ignoring"}
+{"level":30,"time":1791051305218,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051305219,"msg":"[http://localhost:3000/test-agent/agent-1] skipping initial handler pass: no fresh wake input in catch-up; entering idle (0.1s timeout)"}
+{"level":30,"time":1791051305319,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_500"}
+{"level":30,"time":1791051305319,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.4 preloadMs=0.36 handlerMs=0 httpMs=0 httpCount=0 totalMs=101.69"}
+{"level":30,"time":1791051305322,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051305323,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":40,"time":1791051305424,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051305424,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051305425,"msg":"[http://localhost:3000/test-agent/agent-1] agent.run starting provider=anthropic model=claude-sonnet-4-5-20250929 messages=0 latestRole=none wakeType=inbox wakeOffset=0_0 triggerMessageLen=111 runInputLen=111 tools=0"}
+{"level":30,"time":1791051305425,"msg":"[http://localhost:3000/test-agent/agent-1] agent.run input: {\"type\":\"inbox\",\"source\":\"http://localhost:3000/test-agent/agent-1\",\"fromOffset\":0,\"toOffset\":0,\"eventCount\":0}"}
+{"level":30,"time":1791051305425,"msg":"[http://localhost:3000/test-agent/agent-1] SIGKILL received, aborting active run and closing wake"}
+{"level":30,"time":1791051305426,"msg":"[http://localhost:3000/test-agent/agent-1] agent.run completed"}
+{"level":30,"time":1791051305426,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051305426,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, closing wake"}
+{"level":30,"time":1791051305426,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_500"}
+{"level":30,"time":1791051305426,"msg":"[http://localhost:3000/test-agent/agent-1] shutdown requested, sending done callback at checkpoint"}
+{"level":30,"time":1791051305426,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.24 preloadMs=0.19 handlerMs=1.53 httpMs=0 httpCount=0 totalMs=104.1"}
+{"level":30,"time":1791051305427,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051305428,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051305428,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":50,"time":1791051305429,"msg":"[http://localhost:3000/test-agent/agent-1] handler failed for http://localhost:3000/test-agent/agent-1: handler exploded"}
+{"level":30,"time":1791051305429,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051305429,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.27 preloadMs=0.22 handlerMs=0 httpMs=0 httpCount=0 totalMs=2.03"}
+{"level":30,"time":1791051305431,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051305431,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051305431,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051305431,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051305432,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051305532,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051305533,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.15 preloadMs=0.13 handlerMs=0.03 httpMs=0 httpCount=0 totalMs=101.96"}
+{"level":30,"time":1791051305533,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051305534,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051305534,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051305538,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051305540,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051305640,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051305641,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.16 preloadMs=0.13 handlerMs=4.07 httpMs=0.04 httpCount=1 totalMs=107.08"}
+{"level":30,"time":1791051305642,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051305642,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051305643,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051305643,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051305643,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051305744,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051305745,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.15 preloadMs=0.11 handlerMs=0.61 httpMs=0.04 httpCount=1 totalMs=103.03"}
+{"level":30,"time":1791051305746,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051305747,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051305747,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":50,"time":1791051305748,"msg":"[http://localhost:3000/test-agent/agent-1] handler failed for http://localhost:3000/test-agent/agent-1: afterMs must be a non-negative finite number"}
+{"level":30,"time":1791051305749,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051305749,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.23 preloadMs=0.19 handlerMs=0 httpMs=0 httpCount=0 totalMs=3.13"}
+{"level":30,"time":1791051305750,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051305752,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051305752,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051305752,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051305752,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051305853,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051305854,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.17 preloadMs=0.14 handlerMs=0.21 httpMs=0.03 httpCount=1 totalMs=102.99"}
+{"level":30,"time":1791051305858,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051305860,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051305861,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051305883,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051305885,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051305985,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051305986,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.63 preloadMs=0.24 handlerMs=21.66 httpMs=0.02 httpCount=2 totalMs=127.12"}
+{"level":30,"time":1791051305988,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051305989,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051305990,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051305991,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051305991,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051306093,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051306093,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.42 preloadMs=0.37 handlerMs=1.55 httpMs=0.02 httpCount=2 totalMs=104.91"}
+{"level":30,"time":1791051306094,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306095,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051306096,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":50,"time":1791051306096,"msg":"[http://localhost:3000/test-agent/agent-1] handler failed for http://localhost:3000/test-agent/agent-1: spawn child-worker/worker-fail failed (500): internal server error"}
+{"level":30,"time":1791051306097,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051306097,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.3 preloadMs=0.26 handlerMs=0 httpMs=0.01 httpCount=1 totalMs=3.1"}
+{"level":30,"time":1791051306099,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306099,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051306100,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":50,"time":1791051306102,"msg":"[http://localhost:3000/test-agent/agent-1] handler failed for http://localhost:3000/test-agent/agent-1: parent failed after spawn"}
+{"level":40,"time":1791051306102,"msg":"[http://localhost:3000/test-agent/agent-1] handler failed — detaching 1 child wake registration(s) created before the failure"}
+{"level":30,"time":1791051306102,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051306103,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.28 preloadMs=0.2 handlerMs=0 httpMs=0.02 httpCount=2 totalMs=3.85"}
+{"level":30,"time":1791051306104,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306105,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051306105,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051306106,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051306106,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051306206,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051306207,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.24 preloadMs=0.21 handlerMs=0.2 httpMs=0.04 httpCount=1 totalMs=102.55"}
+{"level":30,"time":1791051306208,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306209,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051306209,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051306210,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051306211,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051306311,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051306312,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.21 preloadMs=0.18 handlerMs=1.22 httpMs=0.02 httpCount=2 totalMs=103.96"}
+{"level":30,"time":1791051306314,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306315,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051306315,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051306315,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051306316,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051306416,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051306417,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.21 preloadMs=0.14 handlerMs=0.02 httpMs=0 httpCount=0 totalMs=102.37"}
+{"level":30,"time":1791051306418,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306419,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051306419,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051306419,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051306419,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051306519,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051306520,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.17 preloadMs=0.14 handlerMs=0.09 httpMs=0 httpCount=0 totalMs=101.84"}
+{"level":30,"time":1791051306521,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306522,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051306522,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051306522,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051306522,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051306623,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051306623,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.19 preloadMs=0.15 handlerMs=0.03 httpMs=0 httpCount=0 totalMs=101.86"}
+{"level":30,"time":1791051306624,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306625,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051306625,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051306627,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051306629,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051306729,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051306730,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.27 preloadMs=0.18 handlerMs=1.93 httpMs=0.01 httpCount=1 totalMs=105.59"}
+{"level":30,"time":1791051306731,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306732,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051306732,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051306734,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051306735,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051306835,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051306836,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.2 preloadMs=0.16 handlerMs=1.57 httpMs=0.01 httpCount=1 totalMs=104.55"}
+{"level":30,"time":1791051306874,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306878,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051306880,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=wake wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=object firstWake=false"}
+{"level":30,"time":1791051306881,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051306881,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051306982,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051306982,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.38 preloadMs=0.33 handlerMs=0.47 httpMs=0 httpCount=0 totalMs=107.4"}
+{"level":30,"time":1791051306984,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306987,"msg":"[http://localhost:3000/test-agent/agent-1] done without ack (no consumed offset)"}
+{"level":30,"time":1791051306987,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.28 preloadMs=0 handlerMs=0 httpMs=0 httpCount=0 totalMs=2.61"}
+{"level":30,"time":1791051306991,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051306992,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":40,"time":1791051307093,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051307093,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051307093,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051307093,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.05s timeout)"}
+{"level":30,"time":1791051307100,"msg":"[http://localhost:3000/test-agent/agent-1] fresh work arrived during idle, continuing in-process"}
+{"level":30,"time":1791051307100,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=11_000 ackOffset=11_000 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051307100,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051307100,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.05s timeout)"}
+{"level":30,"time":1791051307152,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 11_000"}
+{"level":30,"time":1791051307153,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.19 preloadMs=0.16 handlerMs=0.09 httpMs=0 httpCount=0 totalMs=161.71"}
+{"level":30,"time":1791051307154,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051307155,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051307155,"msg":"[http://localhost:3000/test-agent/agent-1] skipping initial handler pass: no fresh wake input in catch-up; entering idle (0.1s timeout)"}
+{"level":30,"time":1791051307156,"msg":"[http://localhost:3000/test-agent/agent-1] fresh work arrived during idle, continuing in-process"}
+{"level":30,"time":1791051307156,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=1_0 ackOffset=1_0 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051307156,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051307156,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051307256,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 1_0"}
+{"level":30,"time":1791051307256,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.29 preloadMs=0.24 handlerMs=0.03 httpMs=0 httpCount=0 totalMs=102.03"}
+{"level":30,"time":1791051307257,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051307258,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051307308,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=wake wakeOffset=1_0 ackOffset=1_0 events=1 payloadType=object firstWake=false"}
+{"level":30,"time":1791051307308,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051307308,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.3s timeout)"}
+{"level":30,"time":1791051307608,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 1_0"}
+{"level":30,"time":1791051307608,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.18 preloadMs=0.15 handlerMs=0.02 httpMs=0 httpCount=0 totalMs=350.81"}
+{"level":30,"time":1791051307610,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051307610,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051307662,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=wake wakeOffset=2_0 ackOffset=2_0 events=2 payloadType=object firstWake=false"}
+{"level":30,"time":1791051307662,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051307662,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.3s timeout)"}
+{"level":30,"time":1791051307962,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 2_0"}
+{"level":30,"time":1791051307962,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.23 preloadMs=0.14 handlerMs=0.02 httpMs=0 httpCount=0 totalMs=352.27"}
+{"level":30,"time":1791051307964,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051307966,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051307966,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=wake wakeOffset=2_0 ackOffset=2_0 events=3 payloadType=object firstWake=false"}
+{"level":30,"time":1791051307966,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051307966,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051308067,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 2_0"}
+{"level":30,"time":1791051308067,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.61 preloadMs=0.57 handlerMs=0.05 httpMs=0 httpCount=0 totalMs=102.93"}
+{"level":30,"time":1791051308070,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051308070,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051308071,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=1_0 ackOffset=1_0 events=2 payloadType=string firstWake=false"}
+{"level":30,"time":1791051308071,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051308071,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051308172,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 1_0"}
+{"level":30,"time":1791051308172,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.52 preloadMs=0.49 handlerMs=0.07 httpMs=0 httpCount=0 totalMs=102.52"}
+{"level":30,"time":1791051308175,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051308176,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051308177,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=11_0 ackOffset=11_0 events=2 payloadType=string firstWake=false"}
+{"level":30,"time":1791051308177,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051308177,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051308277,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 11_0"}
+{"level":30,"time":1791051308277,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.41 preloadMs=0.38 handlerMs=0.04 httpMs=0 httpCount=0 totalMs=102.13"}
+{"level":30,"time":1791051308279,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051308280,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051308284,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=11_0 ackOffset=11_0 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051308284,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051308284,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051308386,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 11_0"}
+{"level":30,"time":1791051308386,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.43 preloadMs=0.39 handlerMs=0.04 httpMs=0 httpCount=0 totalMs=107.07"}
+{"level":30,"time":1791051308387,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051308388,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051308389,"msg":"[http://localhost:3000/test-agent/agent-1] skipping initial handler pass: no fresh wake input in catch-up; entering idle (0.1s timeout)"}
+{"level":30,"time":1791051308489,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 0_0"}
+{"level":30,"time":1791051308490,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.39 preloadMs=0.32 handlerMs=0 httpMs=0 httpCount=0 totalMs=102.48"}
+{"level":30,"time":1791051308493,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051308495,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051308496,"msg":"[http://localhost:3000/test-agent/agent-1] skipping initial handler pass: no fresh wake input in catch-up; entering idle (0.001s timeout)"}
+{"level":30,"time":1791051308498,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 20_0"}
+{"level":30,"time":1791051308498,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.65 preloadMs=0.6 handlerMs=0 httpMs=0 httpCount=0 totalMs=4.7"}
+{"level":30,"time":1791051308499,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051308500,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":40,"time":1791051308600,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051308600,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051308601,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051308601,"msg":"[http://localhost:3000/test-agent/agent-1] fresh work already pending, continuing in-process"}
+{"level":30,"time":1791051308601,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=wake wakeOffset=12_000 ackOffset=12_000 events=2 payloadType=object firstWake=false"}
+{"level":30,"time":1791051308601,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051308601,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051308701,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 12_000"}
+{"level":30,"time":1791051308702,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.17 preloadMs=0.14 handlerMs=0.26 httpMs=0 httpCount=0 totalMs=202.64"}
+{"level":30,"time":1791051308703,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051308704,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":40,"time":1791051308805,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051308806,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051308806,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051308806,"msg":"[http://localhost:3000/test-agent/agent-1] fresh work already pending, continuing in-process"}
+{"level":30,"time":1791051308806,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=wake wakeOffset=12_000 ackOffset=12_000 events=3 payloadType=object firstWake=false"}
+{"level":30,"time":1791051308807,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051308807,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051308907,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 12_000"}
+{"level":30,"time":1791051308907,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.18 preloadMs=0.15 handlerMs=0.52 httpMs=0 httpCount=0 totalMs=203.74"}
+{"level":30,"time":1791051308909,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051308909,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":40,"time":1791051309009,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051309010,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051309010,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051309010,"msg":"[http://localhost:3000/test-agent/agent-1] fresh work already pending, continuing in-process"}
+{"level":30,"time":1791051309010,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=13_000 ackOffset=13_000 events=4 payloadType=string firstWake=false"}
+{"level":30,"time":1791051309010,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051309011,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051309111,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 13_000"}
+{"level":30,"time":1791051309112,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.21 preloadMs=0.15 handlerMs=0.53 httpMs=0 httpCount=0 totalMs=202.89"}
+{"level":30,"time":1791051309113,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051309114,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":40,"time":1791051309215,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051309216,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051309216,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051309216,"msg":"[http://localhost:3000/test-agent/agent-1] fresh work already pending, continuing in-process"}
+{"level":30,"time":1791051309216,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=12_000 ackOffset=12_000 events=2 payloadType=string firstWake=false"}
+{"level":30,"time":1791051309216,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051309217,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051309318,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 12_000"}
+{"level":30,"time":1791051309318,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.2 preloadMs=0.16 handlerMs=0.32 httpMs=0 httpCount=0 totalMs=204.62"}
+{"level":30,"time":1791051309320,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051309320,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":40,"time":1791051309421,"msg":"[http://localhost:3000/test-agent/agent-1] timed out waiting 100ms for concrete wake input; continuing with current wake payload"}
+{"level":30,"time":1791051309422,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051309422,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051309422,"msg":"[http://localhost:3000/test-agent/agent-1] fresh work already pending, continuing in-process"}
+{"level":30,"time":1791051309422,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=12_000 ackOffset=12_000 events=3 payloadType=string firstWake=false"}
+{"level":30,"time":1791051309422,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051309423,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051309524,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 12_000"}
+{"level":30,"time":1791051309524,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.16 preloadMs=0.13 handlerMs=0.34 httpMs=0 httpCount=0 totalMs=204.2"}
+{"level":30,"time":1791051309525,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051309526,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051309527,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=inbox wakeOffset=0_0 ackOffset=10_100 events=2 payloadType=string firstWake=false"}
+{"level":30,"time":1791051309527,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051309527,"msg":"[http://localhost:3000/test-agent/agent-1] done acking /streams/entity:agent-1 at 10_100"}
+{"level":30,"time":1791051309527,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.38 preloadMs=0.3 handlerMs=0.04 httpMs=0 httpCount=0 totalMs=1.46"}
+{"level":30,"time":1791051309528,"msg":"[http://localhost:3000/test-agent/agent-1] wake received (epoch=1)"}
+{"level":30,"time":1791051309528,"msg":"[http://localhost:3000/test-agent/agent-1] [sandbox] entity=http://localhost:3000/test-agent/agent-1 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051309529,"msg":"[http://localhost:3000/test-agent/agent-1] invoking handler wakeType=message wakeOffset=-1 ackOffset=-1 events=0 payloadType=undefined firstWake=false"}
+{"level":30,"time":1791051309529,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned"}
+{"level":30,"time":1791051309529,"msg":"[http://localhost:3000/test-agent/agent-1] handler returned, entering idle (0.1s timeout)"}
+{"level":30,"time":1791051309629,"msg":"[http://localhost:3000/test-agent/agent-1] done without ack (no consumed offset)"}
+{"level":30,"time":1791051309629,"msg":"[http://localhost:3000/test-agent/agent-1] wake done claimMs=0.13 preloadMs=0.11 handlerMs=0.03 httpMs=0 httpCount=0 totalMs=101.25"}
+ ✓ test/process-wake.test.ts (64 tests) 6154ms
+   ✓ processWake > adopts a wake event that arrives during the initial wait window  352ms
+   ✓ processWake > combines multiple pending wake events into one handler wake  354ms
+ ✓ test/entity-timeline.test.ts (71 tests) 1597ms
+{"level":30,"time":1791051312353,"msg":"[/review2/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051312366,"msg":"[/review2/entity] [sandbox] entity=/review2/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051312380,"msg":"[/review2/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000177 ackOffset=0000000000000000_0000000000000177 events=1 payloadType=string firstWake=false"}
+{"level":50,"time":1791051312380,"msg":"[/review2/entity] handler failed for /review2/entity: handler failed"}
+{"level":30,"time":1791051312386,"msg":"[/review2/entity] done without ack (no consumed offset)"}
+{"level":30,"time":1791051312386,"msg":"[/review2/entity] wake done claimMs=2.07 preloadMs=9.9 handlerMs=0 httpMs=0 httpCount=0 totalMs=33.42"}
+{"level":30,"time":1791051312401,"msg":"[/review2/entity] wake received (epoch=2)"}
+{"level":30,"time":1791051312404,"msg":"[/review2/entity] [sandbox] entity=/review2/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051312405,"msg":"[/review2/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000177 ackOffset=0000000000000000_0000000000000515 events=3 payloadType=string firstWake=false"}
+{"level":30,"time":1791051312405,"msg":"[/review2/entity] handler returned"}
+{"level":30,"time":1791051312406,"msg":"[/review2/entity] handler returned with sleep(), closing immediately"}
+{"level":30,"time":1791051312411,"msg":"[/review2/entity] done acking /streams/review2 at 0000000000000000_0000000000000730"}
+{"level":30,"time":1791051312411,"msg":"[/review2/entity] wake done claimMs=0.45 preloadMs=2.75 handlerMs=0.06 httpMs=0 httpCount=0 totalMs=10.43"}
+{"level":30,"time":1791051312426,"msg":"[/review2/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051312429,"msg":"[/review2/entity] [sandbox] entity=/review2/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051312430,"msg":"[/review2/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000142 ackOffset=0000000000000000_0000000000000142 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051312430,"msg":"[/review2/entity] handler returned"}
+{"level":30,"time":1791051312430,"msg":"[/review2/entity] handler returned with sleep(), closing immediately"}
+{"level":30,"time":1791051312436,"msg":"[/review2/entity] done without ack (no consumed offset)"}
+{"level":30,"time":1791051312436,"msg":"[/review2/entity] wake done claimMs=0.57 preloadMs=2.29 handlerMs=0.17 httpMs=0 httpCount=0 totalMs=9.51"}
+{"level":30,"time":1791051312441,"msg":"[/review2/entity] wake received (epoch=2)"}
+{"level":30,"time":1791051312444,"msg":"[/review2/entity] [sandbox] entity=/review2/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+stdout | test/review-bounded-additional.test.ts > retains certified handler completion despite later sandbox cleanup failure
+DISPOSE_AFTER_MARKER {"doneBodies":[{"epoch":1,"acks":[],"done":true},{"epoch":2,"acks":[{"path":"/streams/review2","offset":"0000000000000000_0000000000000357"}],"done":true}],"calls":1,"checkpoint":{"contract":"bounded-checkpoint-v1","processedThrough":"0000000000000000_0000000000000142","processedSeq":1,"_timeline_order":"stream:000000000000000000000000:0000000000000002","key":"bounded-checkpoint-v1","_seq":1}}
+
+{"level":30,"time":1791051312445,"msg":"[/review2/entity] done acking /streams/review2 at 0000000000000000_0000000000000357"}
+{"level":30,"time":1791051312445,"msg":"[/review2/entity] wake done claimMs=0.32 preloadMs=2.08 handlerMs=0 httpMs=0 httpCount=0 totalMs=3.84"}
+stdout | test/review-bounded-additional.test.ts > encodes identical canonical rows for same-key writes across HTTP batches
+ROW_GROUPING {"single":[{"x":4,"y":2,"_timeline_order":"stream:000000000000000000000000:0000000000000001","key":"a","_seq":5,"q":5,"nested":{"yes":true}},{"r":6,"_timeline_order":"stream:000000000000000000000000:0000000000000002","key":"b","_seq":4}],"split":[{"x":4,"y":2,"_timeline_order":"stream:000000000000000000000000:0000000000000001","key":"a","_seq":5,"q":5,"nested":{"yes":true}},{"r":6,"_timeline_order":"stream:000000000000000000000000:0000000000000002","key":"b","_seq":4}]}
+
+{"level":30,"time":1791051312459,"msg":"[/review2/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051312462,"msg":"[/review2/entity] [sandbox] entity=/review2/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051312462,"msg":"[/review2/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000142 ackOffset=0000000000000000_0000000000000142 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051312462,"msg":"[/review2/entity] handler returned"}
+{"level":30,"time":1791051312462,"msg":"[/review2/entity] handler returned with sleep(), closing immediately"}
+{"level":30,"time":1791051312469,"msg":"[/review2/entity] done without ack (no consumed offset)"}
+{"level":30,"time":1791051312470,"msg":"[/review2/entity] wake done claimMs=0.36 preloadMs=1.99 handlerMs=0.11 httpMs=0 httpCount=0 totalMs=10.46"}
+{"level":30,"time":1791051312472,"msg":"[/review2/entity] wake received (epoch=2)"}
+{"level":30,"time":1791051312474,"msg":"[/review2/entity] [sandbox] entity=/review2/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051312475,"msg":"[/review2/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000284 ackOffset=0000000000000000_0000000000000499 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051312475,"msg":"[/review2/entity] handler returned"}
+{"level":30,"time":1791051312475,"msg":"[/review2/entity] handler returned with sleep(), closing immediately"}
+{"level":30,"time":1791051312480,"msg":"[/review2/entity] done acking /streams/review2 at 0000000000000000_0000000000000714"}
+{"level":30,"time":1791051312480,"msg":"[/review2/entity] wake done claimMs=0.47 preloadMs=2.07 handlerMs=0 httpMs=0 httpCount=0 totalMs=8.79"}
+{"level":30,"time":1791051312487,"msg":"[/review2/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051312542,"msg":"[/review2/entity] [sandbox] entity=/review2/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051312542,"msg":"[/review2/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000284 ackOffset=0000000000000000_0000000000000284 events=2 payloadType=string firstWake=false"}
+{"level":30,"time":1791051312543,"msg":"[/review2/entity] handler returned"}
+{"level":30,"time":1791051312543,"msg":"[/review2/entity] handler returned with sleep(), closing immediately"}
+{"level":30,"time":1791051312548,"msg":"[/review2/entity] done acking /streams/review2 at 0000000000000000_0000000000000499"}
+{"level":30,"time":1791051312548,"msg":"[/review2/entity] wake done claimMs=54.07 preloadMs=2.74 handlerMs=0.09 httpMs=0 httpCount=0 totalMs=60.92"}
+{"level":30,"time":1791051312568,"msg":"[/review2/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051312571,"msg":"[/review2/entity] [sandbox] entity=/review2/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051312571,"msg":"[/review2/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000150 ackOffset=0000000000000000_0000000000000150 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051312580,"msg":"[/review2/entity] handler returned"}
+{"level":30,"time":1791051312581,"msg":"[/review2/entity] handler returned with sleep(), closing immediately"}
+{"level":30,"time":1791051312585,"msg":"[/review2/entity] done acking /streams/review2 at 0000000000000000_0000000000000800"}
+{"level":30,"time":1791051312585,"msg":"[/review2/entity] wake done claimMs=0.45 preloadMs=1.84 handlerMs=9.14 httpMs=0 httpCount=0 totalMs=17.2"}
+stdout | test/review-bounded-additional.test.ts > exports canonical image bytes after tracked applyEvent insertion/update echoes
+APPLY_EVENT_CANONICAL_IMAGE {"live":[{"text":"updated canonical row","key":"a","_timeline_order":"stream:000000000000000000000000:0000000000000002","_seq":2}],"replay":[{"text":"updated canonical row","key":"a","_timeline_order":"stream:000000000000000000000000:0000000000000002","_seq":2}],"liveOrder":[["a","stream:000000000000000000000000:0000000000000002"]],"replayOrder":[["a","stream:000000000000000000000000:0000000000000002"]]}
+
+ ✓ test/review-bounded-additional.test.ts (8 tests) 359ms
+(node:545389) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"level":30,"time":1791051314013,"msg":"[/review/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051314029,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051314037,"msg":"[/review/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000142 ackOffset=0000000000000000_0000000000000142 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051314037,"msg":"[/review/entity] handler returned"}
+{"level":30,"time":1791051314037,"msg":"[/review/entity] handler returned with sleep(), closing immediately"}
+{"level":50,"time":1791051314062,"err":{"type":"Error","message":"bounded-checkpoint-v1 requires schema-owned events: unknown-type","stack":"Error: bounded-checkpoint-v1 requires schema-owned events: unknown-type\n    at collectRawEvents (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/process-wake.ts:665:17)\n    at Object.handleLiveBatch [as onBatch] (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/process-wake.ts:1391:7)\n    at onBatch (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/entity-stream-db.ts:572:13)\n    at /home/user/workspace/durable-streams-snapshot-upstream/packages/state/dist/db.js:348:14\n    at consumeJsonSubscription (/home/user/workspace/durable-streams-snapshot-upstream/packages/client/dist/index.js:1428:12)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)"},"msg":"[/review/entity] wake background task failed for /review/entity:"}
+stderr | test/review-bounded-faults.test.ts > releases the claim without ack after a batch failure during cleanup
+[StreamDB] Error processing batch: Error: bounded-checkpoint-v1 requires schema-owned events: unknown-type
+    at collectRawEvents (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/process-wake.ts:665:17)
+    at Object.handleLiveBatch [as onBatch] (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/process-wake.ts:1391:7)
+    at onBatch (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/entity-stream-db.ts:572:13)
+    at /home/user/workspace/durable-streams-snapshot-upstream/packages/state/dist/db.js:348:14
+    at consumeJsonSubscription (/home/user/workspace/durable-streams-snapshot-upstream/packages/client/dist/index.js:1428:12)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+{"level":30,"time":1791051314094,"msg":"[/review/entity] done without ack (no consumed offset)"}
+stdout | test/review-bounded-faults.test.ts > releases the claim without ack after a batch failure during cleanup
+CLEANUP_REPRO {"doneBodies":[{"epoch":1,"acks":[],"done":true}],"sandboxDisposals":1}
+
+{"level":30,"time":1791051314094,"msg":"[/review/entity] wake done claimMs=4.39 preloadMs=12.51 handlerMs=0.13 httpMs=0 httpCount=0 totalMs=81.31"}
+{"level":30,"time":1791051314110,"msg":"[/review/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051314114,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051314115,"msg":"[/review/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000142 ackOffset=0000000000000000_0000000000000142 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051314117,"msg":"[/review/entity] handler returned"}
+{"level":30,"time":1791051314130,"msg":"[/review/entity] done without ack (no consumed offset)"}
+{"level":30,"time":1791051314131,"msg":"[/review/entity] wake done claimMs=0.71 preloadMs=3.65 handlerMs=1.73 httpMs=0 httpCount=0 totalMs=21.04"}
+{"level":30,"time":1791051314138,"msg":"[/review/entity] wake received (epoch=2)"}
+{"level":30,"time":1791051314142,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051314144,"msg":"[/review/entity] done acking /streams/review-faults at 0000000000000000_0000000000000945"}
+{"level":30,"time":1791051314144,"msg":"[/review/entity] wake done claimMs=0.49 preloadMs=3.61 handlerMs=0 httpMs=0 httpCount=0 totalMs=5.72"}
+{"level":30,"time":1791051314154,"msg":"[/review/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051314157,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051314159,"msg":"[/review/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000177 ackOffset=0000000000000000_0000000000000177 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051314159,"msg":"[/review/entity] handler returned"}
+{"level":30,"time":1791051314159,"msg":"[/review/entity] handler returned with sleep(), closing immediately"}
+{"level":30,"time":1791051314160,"msg":"[/review/entity] done acking /streams/review-faults at 0000000000000000_0000000000000339"}
+{"level":30,"time":1791051314160,"msg":"[/review/entity] wake done claimMs=0.38 preloadMs=1.84 handlerMs=0.04 httpMs=0 httpCount=0 totalMs=5.52"}
+stdout | test/review-bounded-faults.test.ts > preserves Electric partial update fields even in legacy full replay
+PARTIAL_UPDATE_REPRO {"inbox":{"from":"user","timestamp":"2026-03-20T00:00:00.000Z","payload":"A","status":"processed","mode":"queued","_timeline_order":"stream:000000000000000000000000:0000000000000001","key":"a","_seq":1,"processed_at":"2026-10-03T18:15:14.157Z","$synced":true,"$origin":"remote","$key":"a","$collectionId":"stream-db:http://127.0.0.1:43441/streams/review-faults:inbox"}}
+
+stdout | test/review-bounded-faults.test.ts > does not convert runtime progress into a runnable self-observation wake
+SELF_WAKE_REPRO []
+
+stdout | test/review-bounded-faults.test.ts > exports identical prefix bytes independent of HTTP grouping for unstamped events
+GROUPING_REPRO {"single":[["a",{"offset":null,"subOffset":1}],["b",{"offset":null,"subOffset":2}]],"split":[["a",{"offset":null,"subOffset":1}],["b",{"offset":null,"subOffset":2}]]}
+
+ ✓ test/review-bounded-faults.test.ts (5 tests) 209ms
+{"level":30,"time":1791051314976,"msg":"[/review/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051314993,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051314999,"msg":"[/review/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000142 ackOffset=0000000000000000_0000000000000142 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051315010,"msg":"[/review/entity] handler returned"}
+{"level":30,"time":1791051315017,"msg":"[/review/entity] handler returned with sleep(), closing immediately"}
+{"level":30,"time":1791051315018,"msg":"[/review/entity] done without ack (no consumed offset)"}
+{"level":30,"time":1791051315018,"msg":"[/review/entity] wake done claimMs=5.94 preloadMs=12.98 handlerMs=10.04 httpMs=0 httpCount=0 totalMs=41.61"}
+stdout | test/review-bounded-repro.test.ts > does not acknowledge B arriving after the delivered A delta
+LIVE_ACK_REPRO {"aOffset":"0000000000000000_0000000000000142","bOffset":"0000000000000000_0000000000000284","delivered":[["a"]],"doneBodies":[{"epoch":1,"acks":[],"done":true}],"types":["inbox","inbox","run","text","text_delta","text","run"]}
+
+{"level":30,"time":1791051315050,"msg":"[/review/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051315053,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051315054,"msg":"[/review/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000142 ackOffset=0000000000000000_0000000000000142 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051315054,"msg":"[/review/entity] handler returned"}
+{"level":30,"time":1791051315060,"msg":"[/review/entity] done acking /streams/review at 0000000000000000_0000000000000357"}
+{"level":30,"time":1791051315060,"msg":"[/review/entity] wake done claimMs=0.44 preloadMs=2.31 handlerMs=0.06 httpMs=0 httpCount=0 totalMs=9.99"}
+{"level":30,"time":1791051315064,"msg":"[/review/entity] wake received (epoch=2)"}
+{"level":30,"time":1791051315067,"msg":"[/review/entity] done without ack (no consumed offset)"}
+{"level":30,"time":1791051315067,"msg":"[/review/entity] wake done claimMs=0.56 preloadMs=2.28 handlerMs=0 httpMs=0 httpCount=0 totalMs=3.13"}
+{"level":30,"time":1791051315068,"msg":"[/review/entity] wake received (epoch=3)"}
+{"level":30,"time":1791051315071,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+stdout | test/review-bounded-repro.test.ts > does not rerun completed raw input on an explicit wakeEvent redelivery
+EXPLICIT_WAKE_REPRO {"delivered":["A"],"doneBodies":[{"epoch":1,"acks":[{"path":"/streams/review","offset":"0000000000000000_0000000000000357"}],"done":true},{"epoch":2,"acks":[],"done":true},{"epoch":3,"acks":[{"path":"/streams/review","offset":"0000000000000000_0000000000000357"}],"done":true}]}
+
+{"level":30,"time":1791051315072,"msg":"[/review/entity] done acking /streams/review at 0000000000000000_0000000000000357"}
+{"level":30,"time":1791051315072,"msg":"[/review/entity] wake done claimMs=0.37 preloadMs=2.81 handlerMs=0 httpMs=0 httpCount=0 totalMs=4.37"}
+{"level":30,"time":1791051315079,"msg":"[/review/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051315082,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051315082,"msg":"[/review/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000142 ackOffset=0000000000000000_0000000000000142 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051315083,"msg":"[/review/entity] handler returned"}
+{"level":30,"time":1791051315088,"msg":"[/review/entity] done acking /streams/review at 0000000000000000_0000000000000357"}
+{"level":30,"time":1791051315088,"msg":"[/review/entity] wake done claimMs=0.4 preloadMs=2.17 handlerMs=0.05 httpMs=0 httpCount=0 totalMs=8.63"}
+{"level":30,"time":1791051315092,"msg":"[/review/entity] wake received (epoch=2)"}
+{"level":30,"time":1791051315094,"msg":"[/review/entity] done without ack (no consumed offset)"}
+{"level":30,"time":1791051315095,"msg":"[/review/entity] wake done claimMs=0.37 preloadMs=2 handlerMs=0 httpMs=0 httpCount=0 totalMs=2.82"}
+{"level":30,"time":1791051315096,"msg":"[/review/entity] wake received (epoch=3)"}
+{"level":30,"time":1791051315099,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051315100,"msg":"[/review/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000499 ackOffset=0000000000000000_0000000000000499 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051315100,"msg":"[/review/entity] handler returned"}
+{"level":30,"time":1791051315106,"msg":"[/review/entity] done acking /streams/review at 0000000000000000_0000000000000714"}
+{"level":30,"time":1791051315106,"msg":"[/review/entity] wake done claimMs=0.52 preloadMs=2.24 handlerMs=0 httpMs=0 httpCount=0 totalMs=9.42"}
+{"level":30,"time":1791051315112,"msg":"[/review/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051315115,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051315115,"msg":"[/review/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000142 ackOffset=0000000000000000_0000000000000142 events=1 payloadType=string firstWake=false"}
+{"level":30,"time":1791051315116,"msg":"[/review/entity] handler returned"}
+{"level":30,"time":1791051315121,"msg":"[/review/entity] done acking /streams/review at 0000000000000000_0000000000000357"}
+{"level":30,"time":1791051315122,"msg":"[/review/entity] wake done claimMs=0.32 preloadMs=2.02 handlerMs=0.06 httpMs=0 httpCount=0 totalMs=9.22"}
+{"level":30,"time":1791051315122,"msg":"[/review/entity] wake received (epoch=2)"}
+{"level":30,"time":1791051315125,"msg":"[/review/entity] done without ack (no consumed offset)"}
+{"level":30,"time":1791051315125,"msg":"[/review/entity] wake done claimMs=0.37 preloadMs=2.46 handlerMs=0 httpMs=0 httpCount=0 totalMs=3.58"}
+ ✓ test/review-bounded-repro.test.ts (4 tests) 202ms
+{"level":30,"time":1791051315861,"msg":"[/review/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051315875,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051315883,"msg":"[/review/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000284 ackOffset=0000000000000000_0000000000000284 events=2 payloadType=string firstWake=false"}
+{"level":30,"time":1791051315883,"msg":"[/review/entity] handler returned"}
+{"level":30,"time":1791051315883,"msg":"[/review/entity] handler returned with sleep(), closing immediately"}
+{"level":30,"time":1791051315893,"msg":"[/review/entity] done acking /streams/two-inputs at 0000000000000000_0000000000000499"}
+{"level":30,"time":1791051315893,"msg":"[/review/entity] wake done claimMs=2.63 preloadMs=10.57 handlerMs=0.03 httpMs=0 httpCount=0 totalMs=32.01"}
+stdout | test/review-bounded-tail-cut.test.ts > does not skip an unseen input below the notification tail (stamped=true)
+TAIL_CUT_REPRO {"aOffset":"0000000000000000_0000000000000142","bOffset":"0000000000000000_0000000000000284","delivered":[["a","b"]],"checkpoint":{"contract":"bounded-checkpoint-v1","processedThrough":"0000000000000000_0000000000000284","processedSeq":2,"_timeline_order":"stream:000000000000000000000000:0000000000000003","key":"bounded-checkpoint-v1","_seq":2},"done":[{"epoch":1,"acks":[{"path":"/streams/two-inputs","offset":"0000000000000000_0000000000000499"}],"done":true}]}
+
+{"level":30,"time":1791051315923,"msg":"[/review/entity] wake received (epoch=1)"}
+{"level":30,"time":1791051315926,"msg":"[/review/entity] [sandbox] entity=/review/entity requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791051315927,"msg":"[/review/entity] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000284 ackOffset=0000000000000000_0000000000000284 events=2 payloadType=string firstWake=false"}
+{"level":30,"time":1791051315927,"msg":"[/review/entity] handler returned"}
+{"level":30,"time":1791051315927,"msg":"[/review/entity] handler returned with sleep(), closing immediately"}
+{"level":30,"time":1791051315933,"msg":"[/review/entity] done acking /streams/two-inputs at 0000000000000000_0000000000000499"}
+{"level":30,"time":1791051315933,"msg":"[/review/entity] wake done claimMs=0.5 preloadMs=2.84 handlerMs=0 httpMs=0 httpCount=0 totalMs=10.71"}
+stdout | test/review-bounded-tail-cut.test.ts > does not skip an unseen input below the notification tail (stamped=false)
+TAIL_CUT_REPRO {"aOffset":"0000000000000000_0000000000000142","bOffset":"0000000000000000_0000000000000284","delivered":[["a","b"]],"checkpoint":{"contract":"bounded-checkpoint-v1","processedThrough":"0000000000000000_0000000000000284","processedSeq":2,"_timeline_order":"stream:000000000000000000000000:0000000000000003","key":"bounded-checkpoint-v1","_seq":2},"done":[{"epoch":1,"acks":[{"path":"/streams/two-inputs","offset":"0000000000000000_0000000000000499"}],"done":true}]}
+
+ ✓ test/review-bounded-tail-cut.test.ts (2 tests) 134ms
+ ✓ test/wake-session.test.ts (7 tests) 20ms
+stderr | test/entity-stream-db-principal.test.ts > entity-stream-db principal virtual column > projects headers.principal onto the configured column for externally writable collections
+[agent-runtime] Write transaction persistence failed (apply-event:state:comments:insert): Error: [agent-runtime] Cannot write state events: no writeEvent provided to createEntityStreamDB
+    at persistMutationsNow (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/entity-stream-db.ts:386:13)
+    at /home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/entity-stream-db.ts:459:7
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+stderr | test/entity-stream-db-principal.test.ts > entity-stream-db principal virtual column > projects headers.principal onto _principal when externallyWritable: true
+[agent-runtime] Write transaction persistence failed (apply-event:state:notes:insert): Error: [agent-runtime] Cannot write state events: no writeEvent provided to createEntityStreamDB
+    at persistMutationsNow (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/entity-stream-db.ts:386:13)
+    at /home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/entity-stream-db.ts:459:7
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+stderr | test/entity-stream-db-principal.test.ts > entity-stream-db principal virtual column > does not add a principal column when the collection is not writable
+[agent-runtime] Write transaction persistence failed (apply-event:state:notes:insert): Error: [agent-runtime] Cannot write state events: no writeEvent provided to createEntityStreamDB
+    at persistMutationsNow (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/entity-stream-db.ts:386:13)
+    at /home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/entity-stream-db.ts:459:7
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+ ✓ test/entity-stream-db-principal.test.ts (4 tests) 21ms
+ ✓ test/event-pointer.test.ts (14 tests) 5ms
+ ✓ test/timeline-context.test.ts (10 tests) 15ms
+stdout | test/review-atomic-export.test.ts > exports a whole committed image or rejects inside the next synchronous onBatch callback
+SYNCHRONOUS_ONBATCH_EXPORT {"beforeB":{"offset":"0000000000000000_0000000000000092","nextSeq":1,"nextEventPosition":1,"rows":[{"text":"A","_timeline_order":"stream:000000000000000000000000:0000000000000001","key":"a","_seq":0}],"rowPointers":[["a",{"offset":null,"subOffset":1}]],"timelineOrders":[["a","stream:000000000000000000000000:0000000000000001"]],"previousBatchOffset":"0000000000000000_0000000000000092"},"afterB":{"offset":"0000000000000000_0000000000000200","nextSeq":2,"nextEventPosition":2,"rows":[{"text":"A","_timeline_order":"stream:000000000000000000000000:0000000000000001","key":"a","_seq":0},{"text":"B","_timeline_order":"stream:000000000000000000000000:0000000000000002","key":"b","_seq":1}],"rowPointers":[["a",{"offset":null,"subOffset":1}],["b",{"offset":null,"subOffset":2}]],"timelineOrders":[["a","stream:000000000000000000000000:0000000000000001"],["b","stream:000000000000000000000000:0000000000000002"]],"previousBatchOffset":"0000000000000000_0000000000000200"},"exportError":"Cannot export state during an uncommitted stream batch","committedImageCount":2}
+
+ ✓ test/review-atomic-export.test.ts (1 test) 90ms
+
+ Test Files  13 passed (13)
+      Tests  199 passed (199)
+   Start at  18:15:01
+   Duration  16.62s (transform 1.05s, setup 0ms, collect 5.11s, tests 8.89s, environment 2ms, prepare 762ms)
+
+JUNIT report written to /home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/junit/test-report.junit.xml

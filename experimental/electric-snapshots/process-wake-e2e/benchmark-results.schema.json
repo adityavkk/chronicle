@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://electric-sql.com/schemas/chronicle-process-wake-benchmark-v1.json",
+  "title": "Chronicle processWake benchmark campaign",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "kind",
+    "pins",
+    "hashes",
+    "campaign",
+    "commands",
+    "samples",
+    "failures"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "const": "chronicle-process-wake-benchmark-campaign" },
+    "pins": { "type": "object" },
+    "hashes": {
+      "type": "object",
+      "required": [
+        "electricPatchSha256",
+        "durablePatchSha256",
+        "harnessSha256",
+        "chronicleBinarySha256",
+        "electricImageRepoDigest"
+      ],
+      "properties": {
+        "electricPatchSha256": { "$ref": "#/$defs/sha256" },
+        "durablePatchSha256": { "$ref": "#/$defs/sha256" },
+        "harnessSha256": { "$ref": "#/$defs/sha256" },
+        "chronicleBinarySha256": { "$ref": "#/$defs/sha256" },
+        "electricImageRepoDigest": {
+          "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }]
+        }
+      }
+    },
+    "campaign": { "type": "object" },
+    "commands": { "type": "array", "items": { "type": "string" } },
+    "samples": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sample" }
+    },
+    "failures": { "type": "array", "items": { "type": "object" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nullableNumber": { "type": ["number", "null"] },
+    "nullableBoolean": { "type": ["boolean", "null"] },
+    "trafficCategory": {
+      "type": "object",
+      "required": ["requests", "requestBytes", "responseBytes"],
+      "properties": {
+        "requests": { "type": "integer", "minimum": 0 },
+        "requestBytes": { "type": "integer", "minimum": 0 },
+        "responseBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "required": [
+        "scenario",
+        "mode",
+        "phase",
+        "phaseOrder",
+        "sampleIndex",
+        "warmup",
+        "status",
+        "sourceHash",
+        "sourceHashScope",
+        "activation",
+        "snapshot",
+        "traffic",
+        "resources",
+        "leaseState",
+        "assertions"
+      ],
+      "properties": {
+        "scenario": {
+          "enum": ["update-heavy", "append-only", "large-inbox"]
+        },
+        "mode": { "enum": ["replay", "snapshot-full-raw-replay"] },
+        "phase": { "type": "string" },
+        "phaseOrder": { "type": "string" },
+        "sampleIndex": { "type": "integer" },
+        "warmup": { "type": "boolean" },
+        "status": { "enum": ["passed", "failed", "incomplete"] },
+        "sourceHash": { "$ref": "#/$defs/sha256" },
+        "sourceHashScope": { "type": "string" },
+        "activation": {
+          "type": "object",
+          "required": ["scope", "totalMs", "preloadMs"],
+          "properties": {
+            "scope": { "type": "string" },
+            "totalMs": { "$ref": "#/$defs/nullableNumber" },
+            "preloadMs": { "$ref": "#/$defs/nullableNumber" },
+            "runtimeWakeTotalMs": { "$ref": "#/$defs/nullableNumber" },
+            "claimMs": { "$ref": "#/$defs/nullableNumber" },
+            "handlerMs": { "$ref": "#/$defs/nullableNumber" }
+          }
+        },
+        "snapshot": { "type": ["object", "null"] },
+        "traffic": {
+          "type": ["object", "null"],
+          "properties": {
+            "total": { "$ref": "#/$defs/trafficCategory" },
+            "snapshotLookup": { "$ref": "#/$defs/trafficCategory" },
+            "snapshotPublication": { "$ref": "#/$defs/trafficCategory" },
+            "fullReplay": { "$ref": "#/$defs/trafficCategory" },
+            "suffix": { "$ref": "#/$defs/trafficCategory" },
+            "other": { "$ref": "#/$defs/trafficCategory" }
+          }
+        },
+        "resources": { "type": ["object", "null"] },
+        "leaseState": {
+          "type": "object",
+          "required": ["phase", "holder", "leaseUntilNs"],
+          "properties": {
+            "phase": { "type": ["string", "null"] },
+            "holder": { "type": ["string", "null"] },
+            "leaseUntilNs": { "type": ["string", "null"] }
+          }
+        },
+        "assertions": {
+          "type": "object",
+          "required": [
+            "state",
+            "hydratedState",
+            "rawInputs",
+            "persistedOutput",
+            "exactPersistedOutputs",
+            "activationCount",
+            "ack",
+            "release",
+            "signal",
+            "cancellation"
+          ],
+          "properties": {
+            "state": { "$ref": "#/$defs/nullableBoolean" },
+            "hydratedState": { "$ref": "#/$defs/nullableBoolean" },
+            "rawInputs": { "$ref": "#/$defs/nullableBoolean" },
+            "persistedOutput": { "$ref": "#/$defs/nullableBoolean" },
+            "exactPersistedOutputs": { "$ref": "#/$defs/nullableBoolean" },
+            "activationCount": { "$ref": "#/$defs/nullableBoolean" },
+            "ack": { "$ref": "#/$defs/nullableBoolean" },
+            "release": { "$ref": "#/$defs/nullableBoolean" },
+            "signal": { "$ref": "#/$defs/nullableBoolean" },
+            "cancellation": { "$ref": "#/$defs/nullableBoolean" }
+          }
+        }
+      }
+    }
+  }
+}

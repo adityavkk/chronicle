@@ -1,0 +1,3993 @@
+diff --git a/.changeset/calm-agents-snapshot.md b/.changeset/calm-agents-snapshot.md
+new file mode 100644
+index 000000000..c285bbe26
+--- /dev/null
++++ b/.changeset/calm-agents-snapshot.md
+@@ -0,0 +1,6 @@
++---
++'@electric-ax/agents-runtime': patch
++'@electric-ax/agents-server': patch
++---
++
++Add opt-in entity projection snapshot recovery and preserve dedicated snapshot mutation credentials through the agents-server proxy.
+diff --git a/packages/agents-runtime/src/create-handler.ts b/packages/agents-runtime/src/create-handler.ts
+index 7bc8069ec..fa520b12f 100644
+--- a/packages/agents-runtime/src/create-handler.ts
++++ b/packages/agents-runtime/src/create-handler.ts
+@@ -60,6 +60,10 @@ export interface RuntimeRouterConfig {
+   ) => DispatchPolicy | undefined
+   /** Additional headers sent to agents-server control-plane requests. */
+   serverHeaders?: HeadersProvider
++  /** Selective projection recovery; pending raw wake input remains full replay. */
++  projectionSnapshots?: ProcessWakeConfig[`projectionSnapshots`]
++  /** Optional per-wake observability hook. */
++  onWakeMetrics?: ProcessWakeConfig[`onWakeMetrics`]
+   /**
+    * Webhook signature verification. Enabled by default against
+    * `${baseUrl}/__ds/jwks.json`; set to false only for trusted in-process tests.
+@@ -340,6 +344,8 @@ export function createRuntimeRouter(
+     registrationConcurrency,
+     defaultDispatchPolicyForType,
+     serverHeaders,
++    projectionSnapshots,
++    onWakeMetrics,
+     webhookSignature,
+   } = normalized
+ 
+@@ -367,6 +373,8 @@ export function createRuntimeRouter(
+     idleTimeout,
+     heartbeatInterval,
+     sandboxProfiles,
++    projectionSnapshots,
++    onWakeMetrics,
+   }
+   const debugRegistrationTiming =
+     process.env.ELECTRIC_AGENTS_DEBUG_REGISTRATION_TIMING === `1`
+@@ -709,6 +717,8 @@ function normalizeConfig(config: RuntimeRouterConfig): {
+   subscriptionPathForType?: (typeName: string) => string
+   defaultDispatchPolicyForType?: RuntimeRouterConfig[`defaultDispatchPolicyForType`]
+   serverHeaders?: RuntimeRouterConfig[`serverHeaders`]
++  projectionSnapshots?: RuntimeRouterConfig[`projectionSnapshots`]
++  onWakeMetrics?: RuntimeRouterConfig[`onWakeMetrics`]
+   idleTimeout?: number
+   heartbeatInterval?: number
+   createElectricTools?: RuntimeRouterConfig[`createElectricTools`]
+@@ -740,6 +750,8 @@ function normalizeConfig(config: RuntimeRouterConfig): {
+     subscriptionPathForType: config.subscriptionPathForType,
+     defaultDispatchPolicyForType: config.defaultDispatchPolicyForType,
+     serverHeaders: config.serverHeaders,
++    projectionSnapshots: config.projectionSnapshots,
++    onWakeMetrics: config.onWakeMetrics,
+     idleTimeout: config.idleTimeout,
+     heartbeatInterval: config.heartbeatInterval,
+     createElectricTools: config.createElectricTools,
+diff --git a/packages/agents-runtime/src/entity-stream-db.ts b/packages/agents-runtime/src/entity-stream-db.ts
+index 37a87b11d..8313705e8 100644
+--- a/packages/agents-runtime/src/entity-stream-db.ts
++++ b/packages/agents-runtime/src/entity-stream-db.ts
+@@ -5,6 +5,7 @@ import {
+ } from '@durable-streams/state'
+ import {
+   type CreateStreamDBOptions,
++  type StreamDBBootstrap,
+   createStreamDB,
+   createTransaction,
+   getStreamDBCollectionId,
+@@ -46,6 +47,74 @@ interface EntityWriteUtils {
+   applyEvent: (event: ChangeEvent) => EntityWriteTransaction
+   awaitWritesSettled: () => Promise<void>
+   drainPendingWrites: () => Promise<void>
++  exportSnapshot: (projectionVersion: string) => EntityProjectionImageV1
++}
++
++export const ENTITY_PROJECTION_IMAGE_CODEC = `electric-entity-image/v1` as const
++
++export interface EntityProjectionImageV1 {
++  codec: typeof ENTITY_PROJECTION_IMAGE_CODEC
++  projectionVersion: string
++  offset: string
++  nextSeq: number
++  rowsByCollection: Record<string, Array<Record<string, unknown>>>
++  rowPointers: Record<string, Array<[string | number, EventPointer]>>
++  timelineOrders: Record<string, Array<[string | number, string]>>
++  previousBatchOffset: string | null
++}
++
++export function encodeEntityProjectionImage(
++  image: EntityProjectionImageV1
++): Uint8Array {
++  return new TextEncoder().encode(JSON.stringify(image))
++}
++
++export function decodeEntityProjectionImage(
++  bytes: Uint8Array,
++  projectionVersion: string
++): EntityProjectionImageV1 {
++  let value: unknown
++  try {
++    value = JSON.parse(new TextDecoder(`utf-8`, { fatal: true }).decode(bytes))
++  } catch {
++    throw new Error(`[agent-runtime] Invalid entity projection image JSON`)
++  }
++  if (typeof value !== `object` || value === null) {
++    throw new Error(`[agent-runtime] Invalid entity projection image`)
++  }
++  const image = value as Partial<EntityProjectionImageV1>
++  if (
++    image.codec !== ENTITY_PROJECTION_IMAGE_CODEC ||
++    image.projectionVersion !== projectionVersion ||
++    typeof image.offset !== `string` ||
++    !Number.isSafeInteger(image.nextSeq) ||
++    image.nextSeq! < 0 ||
++    typeof image.rowsByCollection !== `object` ||
++    image.rowsByCollection === null ||
++    typeof image.rowPointers !== `object` ||
++    image.rowPointers === null ||
++    typeof image.timelineOrders !== `object` ||
++    image.timelineOrders === null ||
++    !(`previousBatchOffset` in image) ||
++    (image.previousBatchOffset !== null &&
++      typeof image.previousBatchOffset !== `string`)
++  ) {
++    throw new Error(`[agent-runtime] Incompatible entity projection image`)
++  }
++  for (const rows of Object.values(image.rowsByCollection)) {
++    if (!Array.isArray(rows)) {
++      throw new Error(`[agent-runtime] Invalid projection collection rows`)
++    }
++  }
++  for (const entries of [
++    ...Object.values(image.rowPointers),
++    ...Object.values(image.timelineOrders),
++  ]) {
++    if (!Array.isArray(entries)) {
++      throw new Error(`[agent-runtime] Invalid projection index`)
++    }
++  }
++  return image as EntityProjectionImageV1
+ }
+ 
+ type EntityCollectionMeta = {
+@@ -89,8 +158,22 @@ type EntityStreamDBOptions = {
+   onBeforeBatch?: (batch: JsonBatch<StateEvent>) => void
+   onEvent?: (event: ChangeEvent) => void
+   onBatch?: (batch: JsonBatch<StateEvent>) => void
++  onError?: (error: Error) => void
+   /** Actor identity stamped onto entity-authored state/shared writes. */
+   actorFrom?: string
++  /** Opt-in validated image and source identity used before suffix replay. */
++  snapshot?: {
++    image: EntityProjectionImageV1
++    incarnation: string
++  }
++  /** Guard source reads even when a rejected image falls back to full replay. */
++  sourceIncarnation?: string
++  projectionVersion?: string
++  /** Receives immutable committed cuts; it must not block stream consumption. */
++  onCommittedSnapshot?: (
++    image: EntityProjectionImageV1,
++    sourceIncarnation: string | undefined
++  ) => void
+ } & (
+   | {
+       /** Write a state event through the entity's shared producer (fire-and-forget). */
+@@ -223,7 +306,27 @@ export function createEntityStreamDB(
+   // offset of the next batch's items, which is the anchor we pair
+   // with each item's sub-offset to form an `EventPointer`. `null`
+   // before any batch has arrived (anchor at stream start).
+-  let previousBatchOffset: string | null = null
++  let previousBatchOffset: string | null =
++    opts?.snapshot?.image.previousBatchOffset ?? null
++
++  if (opts?.snapshot) {
++    for (const [name, entries] of Object.entries(
++      opts.snapshot.image.rowPointers
++    )) {
++      const target = rowOffsetsByCollection.get(name)
++      if (!target)
++        throw new Error(`[agent-runtime] Unknown snapshot collection`)
++      for (const [key, pointer] of entries) target.set(key, pointer)
++    }
++    for (const [name, entries] of Object.entries(
++      opts.snapshot.image.timelineOrders
++    )) {
++      const target = timelineOrdersByCollection.get(name)
++      if (!target)
++        throw new Error(`[agent-runtime] Unknown snapshot collection`)
++      for (const [key, order] of entries) target.set(key, order)
++    }
++  }
+   // Build a reverse map from TanStack DB collection id to schema key
+   const collIdToSchemaKey: Record<string, string> = {}
+   for (const name of Object.keys(mergedCollections)) {
+@@ -341,6 +444,41 @@ export function createEntityStreamDB(
+     await next
+   }
+ 
++  const streamBootstrap: StreamDBBootstrap | undefined = opts?.snapshot
++    ? {
++        offset: opts.snapshot.image.offset,
++        incarnation: opts.snapshot.incarnation,
++        nextSeq: opts.snapshot.image.nextSeq,
++        rowsByCollection: opts.snapshot.image.rowsByCollection,
++      }
++    : undefined
++
++  const snapshotFromState = (
++    projectionVersion: string,
++    stateImage: StreamDBBootstrap
++  ): EntityProjectionImageV1 =>
++    structuredClone({
++      codec: ENTITY_PROJECTION_IMAGE_CODEC,
++      projectionVersion,
++      offset: stateImage.offset,
++      nextSeq: stateImage.nextSeq,
++      rowsByCollection: stateImage.rowsByCollection,
++      rowPointers: Object.fromEntries(
++        [...rowOffsetsByCollection].map(([name, pointers]) => [
++          name,
++          [...pointers].map(([key, pointer]) => [key, { ...pointer }]),
++        ])
++      ),
++      timelineOrders: Object.fromEntries(
++        [...timelineOrdersByCollection].map(([name, orders]) => [
++          name,
++          [...orders],
++        ])
++      ),
++      previousBatchOffset,
++    })
++  const onCommittedSnapshot = opts?.onCommittedSnapshot
++
+   const db = createStreamDB({
+     ...(opts?.stream
+       ? { stream: opts.stream }
+@@ -352,6 +490,11 @@ export function createEntityStreamDB(
+           },
+         }),
+     ...(opts?.onEvent && { onEvent: opts.onEvent }),
++    ...(opts?.onError && { onError: opts.onError }),
++    ...(streamBootstrap && { bootstrap: streamBootstrap }),
++    ...(opts?.sourceIncarnation && {
++      incarnation: opts.sourceIncarnation,
++    }),
+     onBeforeBatch: (batch) => {
+       opts?.onBeforeBatch?.(batch)
+       replayBatchOffset.current = batch.offset
+@@ -435,6 +578,19 @@ export function createEntityStreamDB(
+     onBatch: (batch) => {
+       opts?.onBatch?.(batch)
+     },
++    ...(onCommittedSnapshot && {
++      onCommittedBatch: ({ image }: { image: StreamDBBootstrap }) => {
++        onCommittedSnapshot(
++          snapshotFromState(
++            opts.projectionVersion ??
++              opts.snapshot?.image.projectionVersion ??
++              `unversioned`,
++            image
++          ),
++          image.incarnation
++        )
++      },
++    }),
+     state: mergedCollections,
+     ...(hasCustomActions && {
+       actions: ({ db: actionDb }) => {
+@@ -732,6 +888,8 @@ export function createEntityStreamDB(
+   }
+ 
+   Object.assign(replayDb.utils, {
++    exportSnapshot: (projectionVersion: string) =>
++      snapshotFromState(projectionVersion, replayDb.exportState()),
+     createWriteTransaction,
+     awaitWritesSettled: async () => {
+       await Promise.resolve()
+diff --git a/packages/agents-runtime/src/index.ts b/packages/agents-runtime/src/index.ts
+index 8222347ab..d3bb2ab46 100644
+--- a/packages/agents-runtime/src/index.ts
++++ b/packages/agents-runtime/src/index.ts
+@@ -46,10 +46,12 @@ export type {
+   Wake,
+   WakeMessage,
+   WakeEvent,
++  WakeMetrics,
+   WakeNotification,
+   WebhookNotification,
+   ClaimTokenHeader,
+   HeadersProvider,
++  ProjectionSnapshotRecoveryPolicy,
+   HandlerContext,
+   HandlerWake,
+   InboxHandlerWake,
+@@ -121,7 +123,13 @@ export type {
+   WakeConfigValue,
+ } from './entity-schema'
+ 
+-export { createEntityStreamDB } from './entity-stream-db'
++export {
++  createEntityStreamDB,
++  decodeEntityProjectionImage,
++  encodeEntityProjectionImage,
++  ENTITY_PROJECTION_IMAGE_CODEC,
++} from './entity-stream-db'
++export type { EntityProjectionImageV1 } from './entity-stream-db'
+ export {
+   getEntityAttachmentStreamPath,
+   manifestAttachmentKey,
+diff --git a/packages/agents-runtime/src/process-wake.ts b/packages/agents-runtime/src/process-wake.ts
+index 472cba39b..b5b0ba21f 100644
+--- a/packages/agents-runtime/src/process-wake.ts
++++ b/packages/agents-runtime/src/process-wake.ts
+@@ -1,7 +1,16 @@
+-import { DurableStream, IdempotentProducer } from '@durable-streams/client'
++import {
++  DurableStream,
++  DurableStreamError,
++  IdempotentProducer,
++} from '@durable-streams/client'
+ import { createStreamDB, queryOnce } from '@durable-streams/state/db'
+ import { getEntityType } from './define-entity'
+-import { createEntityStreamDB } from './entity-stream-db'
++import {
++  createEntityStreamDB,
++  decodeEntityProjectionImage,
++  encodeEntityProjectionImage,
++} from './entity-stream-db'
++import type { EntityProjectionImageV1 } from './entity-stream-db'
+ import { entityStateSchema, isManagementEvent } from './entity-schema'
+ import { normalizeObservationSchema } from './observation-schema'
+ import { createWakeSession } from './wake-session'
+@@ -53,6 +62,7 @@ import type {
+ } from './types'
+ import type { Signal } from './entity-schema'
+ import type { JsonBatch } from '@durable-streams/client'
++import { isChangeEvent } from '@durable-streams/state'
+ import type { ChangeEvent, StateEvent } from '@durable-streams/state'
+ 
+ interface WakeResult {
+@@ -84,6 +94,10 @@ interface RawClaimCallbackResponse extends Omit<ClaimCallbackResponse, `ok`> {
+ 
+ const DEFAULT_IDLE_TIMEOUT = 20_000
+ const DEFAULT_HEARTBEAT_INTERVAL = 10_000
++const snapshotRecoveryState = new Map<
++  string,
++  { missUntil: number; lastPublishedAt: number }
++>()
+ type EntityStreamOptions = NonNullable<
+   Parameters<typeof createEntityStreamDB>[3]
+ >
+@@ -507,10 +521,105 @@ export async function processWake(
+   })
+   log.info(`wake received (epoch=${epoch})`)
+   const wakeStartMs = performance.now()
++  const wakeCpuStart = process.cpuUsage()
++  const wakeMemoryBefore = process.memoryUsage()
++  const samplingIntervalMs = 2
++  let peakHeapBytes = wakeMemoryBefore.heapUsed
++  let peakRssBytes = wakeMemoryBefore.rss
++  let memorySampler = config.onWakeMetrics
++    ? setInterval(() => {
++        const memory = process.memoryUsage()
++        peakHeapBytes = Math.max(peakHeapBytes, memory.heapUsed)
++        peakRssBytes = Math.max(peakRssBytes, memory.rss)
++      }, samplingIntervalMs)
++    : null
++  const stopMemorySampler = (): void => {
++    if (memorySampler) {
++      clearInterval(memorySampler)
++      memorySampler = null
++    }
++  }
+   let claimMs = 0
+   let preloadMs = 0
+   let handlerMs = 0
++  let doneAckCompleted = false
+ 
++  // prettier-ignore
++  try {
++  const snapshotPolicy = config.projectionSnapshots
++  const snapshotKey = snapshotPolicy
++    ? `${streamUrl}\0${snapshotPolicy.projectionVersion}`
++    : null
++  const snapshotState = snapshotKey
++    ? (snapshotRecoveryState.get(snapshotKey) ?? {
++        missUntil: 0,
++        lastPublishedAt: 0,
++      })
++    : null
++  if (snapshotKey && snapshotState) {
++    snapshotRecoveryState.set(snapshotKey, snapshotState)
++  }
++  let loadedSnapshot:
++    | {
++        image: EntityProjectionImageV1
++        incarnation: string
++        etag: string
++      }
++    | undefined
++  let snapshotMaxBytes = snapshotPolicy?.maxImageBytes ?? 1024 * 1024
++  let snapshotETag: string | null = null
++
++  const snapshotStream = snapshotPolicy
++    ? new DurableStream({
++        url: streamUrl,
++        headers: await resolveHeadersProvider(snapshotPolicy.readerHeaders),
++        contentType: `application/json`,
++      })
++    : null
++  if (
++    snapshotPolicy &&
++    snapshotStream &&
++    snapshotState &&
++    Date.now() >= snapshotState.missUntil
++  ) {
++    try {
++      const image = await snapshotStream.loadSnapshot(
++        snapshotPolicy.projectionVersion,
++        {
++          expectedContentType: `application/vnd.electric.entity-image+json`,
++        }
++      )
++      if (image) {
++        const decodedImage = decodeEntityProjectionImage(
++          image.body,
++          snapshotPolicy.projectionVersion
++        )
++        if (decodedImage.offset !== image.offset) {
++          throw new Error(
++            `projection snapshot image offset does not match response metadata`
++          )
++        }
++        loadedSnapshot = {
++          image: decodedImage,
++          incarnation: image.incarnation,
++          etag: image.etag,
++        }
++        snapshotETag = image.etag
++      } else {
++        snapshotState.missUntil =
++          Date.now() + (snapshotPolicy.missBackoffMs ?? 5 * 60_000)
++      }
++    } catch (error) {
++      if (error instanceof DurableStreamError && error.status !== undefined) {
++        throw error
++      }
++      log.warn(
++        `discarding unusable projection snapshot: ${toError(error).message}`
++      )
++      snapshotState.missUntil =
++        Date.now() + (snapshotPolicy.missBackoffMs ?? 5 * 60_000)
++    }
++  }
+   // 1. Single DurableStream shared by StreamDB, IdempotentProducer, and SSE tail.
+   // StreamDB opens one SSE connection on preload(); all consumers share it.
+   const catchUpEvents: Array<ChangeEvent> = []
+@@ -524,6 +633,11 @@ export async function processWake(
+   let currentWakeEvents: Array<ChangeEvent> = []
+   let resolveCurrentWakeReady: (() => void) | null = null
+   let queuedNextWake: WakeDeltaWindow | null = null
++  let rawRecoveryJoined = false
++  let latestStateOffset = loadedSnapshot?.image.offset ?? `-1`
++  let resolveStateAdvanced: (() => void) | null = null
++  let rejectStateAdvanced: ((error: Error) => void) | null = null
++  let stateRecoveryError: Error | null = null
+ 
+   let writeToken = ``
+   const stream = new DurableStream({
+@@ -531,6 +645,10 @@ export async function processWake(
+     headers: serverHeaders,
+     contentType: `application/json`,
+   })
++  let latestSnapshotCandidate: {
++    image: EntityProjectionImageV1
++    sourceIncarnation: string
++  } | null = null
+ 
+   // Create producer BEFORE the StreamDB so state actions can write through it.
+   const producer = new IdempotentProducer(stream, `entity-${entityUrl}`, {
+@@ -555,23 +673,55 @@ export async function processWake(
+     producer.append(JSON.stringify(event))
+   }
+ 
+-  const db = createEntityStreamDB(
+-    streamUrl,
+-    entry.definition.state,
+-    entry.definition.actions,
+-    {
+-      stream: stream as unknown as EntityStreamHandle,
+-      actorFrom: entityUrl,
+-      onEvent: (event) => {
+-        if (preloaded) {
+-          handleRuntimeSideEffectEvent(event)
+-        }
+-      },
+-      onBatch: handleLiveBatch,
+-      writeEvent,
+-      flushWrites: () => producer.flush(),
+-    }
+-  )
++  const recoveringRawSeparately = loadedSnapshot !== undefined
++  let useSnapshot = recoveringRawSeparately
++  const createPrimaryDb = (): EntityStreamDBWithActions =>
++    createEntityStreamDB(
++      streamUrl,
++      entry.definition.state,
++      entry.definition.actions,
++      {
++        stream: stream as unknown as EntityStreamHandle,
++        actorFrom: entityUrl,
++        ...(useSnapshot && loadedSnapshot && { snapshot: loadedSnapshot }),
++        ...(loadedSnapshot && {
++          sourceIncarnation: loadedSnapshot.incarnation,
++        }),
++        ...(snapshotPolicy && {
++          projectionVersion: snapshotPolicy.projectionVersion,
++          onCommittedSnapshot: (
++            image: EntityProjectionImageV1,
++            sourceIncarnation: string | undefined
++          ) => {
++            latestStateOffset = image.offset
++            resolveStateAdvanced?.()
++            resolveStateAdvanced = null
++            rejectStateAdvanced = null
++            if (sourceIncarnation) {
++              latestSnapshotCandidate = { image, sourceIncarnation }
++            }
++          },
++        }),
++        onEvent: (event) => {
++          if (preloaded) {
++            handleRuntimeSideEffectEvent(event)
++          }
++        },
++        onBatch: handleLiveBatch,
++        onError: (error) => {
++          stateRecoveryError = error
++          rejectStateAdvanced?.(error)
++          rejectStateAdvanced = null
++          resolveStateAdvanced = null
++          if (preloaded) {
++            failBackgroundWake(error, `READ_FAILED`)
++          }
++        },
++        writeEvent,
++        flushWrites: () => producer.flush(),
++      }
++    )
++  let db = createPrimaryDb()
+ 
+   let activeClaimToken = claimToken
+   let claimData: ClaimCallbackResponse | null = null
+@@ -1127,10 +1277,30 @@ export async function processWake(
+   }
+ 
+   function handleLiveBatch(batch: JsonBatch<StateEvent>): void {
+-    if (!preloaded) {
+-      const changeEvents = toChangeEvents(batch)
++    if (!preloaded && rawRecoveryJoined) {
++      const changeEvents = filterAcceptedLiveEvents(batch)
++      lastCatchUpOffset = batch.offset
+       if (changeEvents.length > 0) {
++        // Preserve the normal live path's raw handler/effect input while the
++        // concurrently-started claim is still pending. Execution remains
++        // gated on successful claim acquisition below.
+         catchUpEvents.push(...changeEvents)
++        pendingLiveBatches.push({
++          ...batch,
++          items: changeEvents as Array<StateEvent>,
++        })
++      } else {
++        setSafeAckOffset(batch.offset)
++      }
++      return
++    }
++
++    if (!preloaded) {
++      if (!recoveringRawSeparately) {
++        const changeEvents = toChangeEvents(batch)
++        if (changeEvents.length > 0) {
++          catchUpEvents.push(...changeEvents)
++        }
+       }
+       lastCatchUpOffset = batch.offset
+       return
+@@ -1204,10 +1374,102 @@ export async function processWake(
+       })
+ 
+     const preloadT0 = performance.now()
+-    const preloadPromise = db.preload().then(() => {
+-      preloadMs = +(performance.now() - preloadT0).toFixed(2)
++    let rawReplayOffset = `-1`
++    const replayRawSegment = async (): Promise<void> => {
++      if (!loadedSnapshot) return
++      const response = await new DurableStream({
++        url: streamUrl,
++        headers: serverHeaders,
++        contentType: `application/json`,
++      }).stream<StateEvent>({
++        live: false,
++        json: true,
++        ...(rawReplayOffset !== `-1` ? { offset: rawReplayOffset } : {}),
++        incarnation: loadedSnapshot.incarnation,
++      })
++      const events = await response.json<StateEvent>()
++      const nextOffset = response.offset
++      if (nextOffset === rawReplayOffset && nextOffset !== latestStateOffset) {
++        throw new Error(`raw input replay made no progress before state cut`)
++      }
++      rawReplayOffset = nextOffset
++      catchUpEvents.push(
++        ...events.filter((event): event is ChangeEvent => isChangeEvent(event))
++      )
++    }
++    const rawReplayPromise = recoveringRawSeparately
++      ? replayRawSegment()
++      : Promise.resolve()
++    const statePreloadPromise = db.preload().catch(async (error: unknown) => {
++      const status = (error as { status?: unknown } | null)?.status
++      if (
++        !useSnapshot ||
++        status === 410 ||
++        status === 412 ||
++        !toError(error).message.includes(`bootstrap`)
++      ) {
++        throw error
++      }
++      log.warn(`snapshot hydration rejected; falling back to full state replay`)
++      db.close()
++      useSnapshot = false
++      db = createPrimaryDb()
++      await db.preload()
+     })
+-    const [claimed] = await Promise.all([claimPromise, preloadPromise])
++    const preloadPromise = Promise.all([statePreloadPromise, rawReplayPromise])
++      .then(async () => {
++        if (recoveringRawSeparately) {
++          while (rawReplayOffset !== latestStateOffset) {
++            if (stateRecoveryError) throw stateRecoveryError
++            if (compareOffsets(rawReplayOffset, latestStateOffset) < 0) {
++              await replayRawSegment()
++            } else {
++              await new Promise<void>((resolve, reject) => {
++                resolveStateAdvanced = resolve
++                rejectStateAdvanced = reject
++                // Avoid losing an advancement between the comparison and
++                // installing the waiter.
++                if (compareOffsets(latestStateOffset, rawReplayOffset) >= 0) {
++                  resolveStateAdvanced = null
++                  rejectStateAdvanced = null
++                  resolve()
++                }
++              })
++            }
++          }
++          // From this exact common next-read cut onward, state batches are
++          // queued as live input rather than suppressed as historical replay.
++          rawRecoveryJoined = true
++        }
++      })
++      .then(() => {
++        preloadMs = +(performance.now() - preloadT0).toFixed(2)
++      })
++    const [claimOutcome, preloadOutcome] = await Promise.allSettled([
++      claimPromise,
++      preloadPromise,
++    ])
++    if (claimOutcome.status === `fulfilled` && claimOutcome.value.ok) {
++      // If preload failed (including a guarded 410/412), the finally block now
++      // releases this claim without acknowledging an offset. No handler or
++      // historical side effect runs against the invalid activation.
++      claimedWake = true
++      writeToken = claimOutcome.value.writeToken ?? ``
++    }
++    if (preloadOutcome.status === `rejected`) {
++      // A failed/recreated guarded read invalidates the entire activation.
++      // Release any acquired claim without acknowledging the notification.
++      safeAckOffset = `-1`
++      throw preloadOutcome.reason
++    }
++    if (claimOutcome.status === `rejected`) {
++      throw claimOutcome.reason
++    }
++    if (stateRecoveryError) {
++      safeAckOffset = `-1`
++      throw stateRecoveryError
++    }
++    const claimed = claimOutcome.value
+     preloaded = true
+     if (compareOffsets(db.offset, lastCatchUpOffset) > 0) {
+       lastCatchUpOffset = db.offset
+@@ -1221,9 +1483,6 @@ export async function processWake(
+       )
+       return null
+     }
+-    claimedWake = true
+-    writeToken = claimed.writeToken ?? ``
+-
+     handleRuntimeSideEffectEvents(catchUpEvents)
+ 
+     // 3b. Start heartbeat once this worker owns the wake
+@@ -2544,6 +2803,74 @@ export async function processWake(
+     } catch (err) {
+       cleanupErrors.push(toError(err))
+     }
++    const settledSnapshotCandidate = latestSnapshotCandidate as {
++      image: EntityProjectionImageV1
++      sourceIncarnation: string
++    } | null
++    if (
++      snapshotPolicy &&
++      settledSnapshotCandidate &&
++      cleanupErrors.length === 0
++    ) {
++      try {
++        // Optimistic transactions reconcile with their authoritative stream
++        // echoes after the committed-batch callback. Refresh from the retained
++        // fully committed cut once all writes have settled, while preserving
++        // the incarnation captured by that same guarded reader.
++        latestSnapshotCandidate = {
++          image: db.utils.exportSnapshot(snapshotPolicy.projectionVersion),
++          sourceIncarnation: settledSnapshotCandidate.sourceIncarnation,
++        }
++      } catch (err) {
++        cleanupErrors.push(toError(err))
++      }
++    }
++    if (
++      snapshotPolicy &&
++      snapshotStream &&
++      snapshotState &&
++      latestSnapshotCandidate &&
++      claimedWake &&
++      primaryError == null &&
++      catchUpEvents.length >= (snapshotPolicy.minReplayEvents ?? 100) &&
++      preloadMs >= (snapshotPolicy.minReplayMs ?? 25) &&
++      Date.now() - snapshotState.lastPublishedAt >=
++        (snapshotPolicy.minPublishIntervalMs ?? 60_000)
++    ) {
++      const snapshotCandidate = latestSnapshotCandidate
++      const candidate = snapshotCandidate.image
++      const bytes = encodeEntityProjectionImage(candidate)
++      if (bytes.byteLength <= snapshotMaxBytes) {
++        snapshotState.lastPublishedAt = Date.now()
++        void resolveHeadersProvider(snapshotPolicy.publisherHeaders)
++          .then((publisherHeaders) =>
++            snapshotStream.publishSnapshot(snapshotPolicy.projectionVersion, {
++              body: bytes,
++              contentType: `application/vnd.electric.entity-image+json`,
++              offset: candidate.offset,
++              incarnation: snapshotCandidate.sourceIncarnation,
++              etag: snapshotETag,
++              headers: publisherHeaders,
++            })
++          )
++          .then((published) => {
++            snapshotETag = published.etag
++            snapshotState.missUntil = 0
++          })
++          .catch((error) => {
++            if (error instanceof DurableStreamError && error.status === 412) {
++              snapshotETag = null
++              snapshotState.missUntil = 0
++            } else {
++              snapshotState.missUntil =
++                Date.now() + (snapshotPolicy.missBackoffMs ?? 5 * 60_000)
++            }
++            log.warn(
++              `projection snapshot publication failed: ${toError(error).message}`
++            )
++          })
++      }
++    }
+     // Updated by the handler-error path before control reaches this async cleanup.
+ 
+     if (ackCurrentWakeOnFailure && cleanupErrors.length === 0) {
+@@ -2612,6 +2939,7 @@ export async function processWake(
+           streamPath,
+           doneOffset === `-1` ? null : doneOffset
+         )
++        doneAckCompleted = true
+       } catch (err) {
+         cleanupErrors.push(toError(err))
+       }
+@@ -2633,17 +2961,49 @@ export async function processWake(
+ 
+   const totalMs = +(performance.now() - wakeStartMs).toFixed(2)
+   const httpMs = +serverHttpMs.toFixed(2)
++  stopMemorySampler()
++  const wakeCpu = process.cpuUsage(wakeCpuStart)
++  const wakeMemoryAfter = process.memoryUsage()
++  peakHeapBytes = Math.max(peakHeapBytes, wakeMemoryAfter.heapUsed)
++  peakRssBytes = Math.max(peakRssBytes, wakeMemoryAfter.rss)
+   log.info(
+     `wake done claimMs=${claimMs} preloadMs=${preloadMs} ` +
+       `handlerMs=${handlerMs} httpMs=${httpMs} httpCount=${serverHttpCount} ` +
+       `totalMs=${totalMs}`
+   )
++  try {
++    config.onWakeMetrics?.({
++      entityUrl,
++      claimMs,
++      preloadMs,
++      handlerMs,
++      httpMs,
++      httpCount: serverHttpCount,
++      totalMs,
++      doneAckCompleted,
++      succeeded: finalError == null,
++      cpuUserMicros: wakeCpu.user,
++      cpuSystemMicros: wakeCpu.system,
++      heapBeforeBytes: wakeMemoryBefore.heapUsed,
++      heapAfterBytes: wakeMemoryAfter.heapUsed,
++      peakHeapBytes,
++      rssBeforeBytes: wakeMemoryBefore.rss,
++      rssAfterBytes: wakeMemoryAfter.rss,
++      peakRssBytes,
++      samplingIntervalMs,
++    })
++  } catch (err) {
++    log.warn(`wake metrics observer failed: ${toError(err).message}`)
++  }
+ 
+   if (finalError) {
+     throw finalError
+   }
+ 
+   return result
++  } finally {
++    stopMemorySampler()
++  }
+ }
+ 
+ async function sendDone(
+diff --git a/packages/agents-runtime/src/types.ts b/packages/agents-runtime/src/types.ts
+index 8cee5d472..4d0989e70 100644
+--- a/packages/agents-runtime/src/types.ts
++++ b/packages/agents-runtime/src/types.ts
+@@ -741,6 +741,42 @@ export type HeadersProvider =
+   | HeadersInit
+   | (() => HeadersInit | Promise<HeadersInit>)
+ 
++export interface ProjectionSnapshotRecoveryPolicy {
++  /** Changes whenever schemas, reducers, ordering, or serialization change. */
++  projectionVersion: string
++  /** Explicit safe contract: raw wake inputs are still replayed independently. */
++  rawInputRecovery: `full-replay`
++  /** Dedicated service grant; never reuse browser or ordinary append authority. */
++  publisherHeaders: HeadersProvider
++  readerHeaders?: HeadersProvider
++  maxImageBytes?: number
++  minReplayEvents?: number
++  minReplayMs?: number
++  minPublishIntervalMs?: number
++  missBackoffMs?: number
++}
++
++export interface WakeMetrics {
++  entityUrl: string
++  claimMs: number
++  preloadMs: number
++  handlerMs: number
++  httpMs: number
++  httpCount: number
++  totalMs: number
++  doneAckCompleted: boolean
++  succeeded: boolean
++  cpuUserMicros: number
++  cpuSystemMicros: number
++  heapBeforeBytes: number
++  heapAfterBytes: number
++  peakHeapBytes: number
++  rssBeforeBytes: number
++  rssAfterBytes: number
++  peakRssBytes: number
++  samplingIntervalMs: number
++}
++
+ export interface ProcessWakeConfig {
+   /** Base URL of the durable streams server */
+   baseUrl: string
+@@ -755,6 +791,9 @@ export interface ProcessWakeConfig {
+    * Authorization for webhook compatibility.
+    */
+   claimTokenHeader?: ClaimTokenHeader
++  projectionSnapshots?: ProjectionSnapshotRecoveryPolicy
++  /** Optional per-wake observability hook. Sampling runs only when configured. */
++  onWakeMetrics?: (metrics: WakeMetrics) => void
+   /** Optional tool factory invoked per wake context. */
+   createElectricTools?: (context: {
+     entityUrl: string
+diff --git a/packages/agents-runtime/test/entity-stream-db-snapshot.test.ts b/packages/agents-runtime/test/entity-stream-db-snapshot.test.ts
+new file mode 100644
+index 000000000..f20e2f1bd
+--- /dev/null
++++ b/packages/agents-runtime/test/entity-stream-db-snapshot.test.ts
+@@ -0,0 +1,161 @@
++import { describe, expect, it, vi } from 'vitest'
++import {
++  createEntityStreamDB,
++  decodeEntityProjectionImage,
++  encodeEntityProjectionImage,
++} from '../src/entity-stream-db'
++import type { EntityProjectionImageV1 } from '../src/entity-stream-db'
++
++function response(items: Array<unknown>, offset: string, guarded = false) {
++  return new Response(JSON.stringify(items), {
++    headers: {
++      'content-type': `application/json`,
++      'Stream-Next-Offset': offset,
++      'Stream-Up-To-Date': `true`,
++      ...(guarded
++        ? {
++            'Stream-Snapshot': `v1`,
++            'Stream-Incarnation': `inc-1`,
++          }
++        : {}),
++    },
++  })
++}
++
++describe(`EntityStreamDB projection snapshots`, () => {
++  it(`round-trips rows, deletion sequence, pointers, order indexes and batch anchor`, async () => {
++    let committed: EntityProjectionImageV1 | undefined
++    const replay = createEntityStreamDB(
++      `https://example.com/entity`,
++      { notes: {} } as any,
++      undefined,
++      {
++        streamOptions: {
++          fetch: vi.fn<typeof fetch>().mockResolvedValue(
++            response(
++              [
++                {
++                  type: `state:notes`,
++                  key: `a`,
++                  value: {
++                    body: `first`,
++                    removedLater: true,
++                    nested: { stable: true },
++                  },
++                  headers: { operation: `insert`, offset: `entry-1` },
++                },
++                {
++                  type: `state:notes`,
++                  key: `b`,
++                  value: { body: `delete me` },
++                  headers: { operation: `insert`, offset: `entry-1` },
++                },
++                {
++                  type: `state:notes`,
++                  key: `a`,
++                  value: { body: `replacement`, nested: { stable: true } },
++                  headers: { operation: `update`, offset: `entry-2` },
++                },
++                {
++                  type: `state:notes`,
++                  key: `b`,
++                  headers: { operation: `delete`, offset: `entry-3` },
++                },
++              ],
++              `cut-4`
++            )
++          ),
++        },
++        projectionVersion: `entity-v7`,
++        onCommittedSnapshot: (image) => {
++          committed = image
++        },
++      }
++    )
++    await replay.preload()
++    expect(committed).toBeDefined()
++    expect(committed?.nextSeq).toBe(4)
++    expect(committed?.previousBatchOffset).toBe(`cut-4`)
++    expect(committed?.rowsByCollection.notes).toEqual([
++      expect.objectContaining({
++        key: `a`,
++        body: `replacement`,
++        _seq: 2,
++      }),
++    ])
++    expect(committed?.rowsByCollection.notes[0]).not.toHaveProperty(
++      `removedLater`
++    )
++    const retainedImage = committed!
++    ;(
++      replay.collections.notes.get(`a`) as unknown as {
++        nested: { stable: boolean }
++      }
++    ).nested.stable = false
++    expect(
++      (
++        retainedImage.rowsByCollection.notes[0]!.nested as {
++          stable: boolean
++        }
++      ).stable
++    ).toBe(true)
++    const pointerA = committed?.rowPointers.notes.find(([key]) => key === `a`)
++    expect(pointerA?.[1]).toEqual({ offset: `entry-1`, subOffset: 1 })
++    const orderA = committed?.timelineOrders.notes.find(([key]) => key === `a`)
++    replay.close()
++
++    const bytes = encodeEntityProjectionImage(committed!)
++    const decoded = decodeEntityProjectionImage(bytes, `entity-v7`)
++    const suffixFetch = vi.fn<typeof fetch>().mockResolvedValue(
++      response(
++        [
++          {
++            type: `state:notes`,
++            key: `c`,
++            value: { body: `suffix` },
++            headers: { operation: `insert`, offset: `entry-4` },
++          },
++        ],
++        `cut-5`,
++        true
++      )
++    )
++    const hydrated = createEntityStreamDB(
++      `https://example.com/entity`,
++      { notes: {} } as any,
++      undefined,
++      {
++        streamOptions: { fetch: suffixFetch },
++        snapshot: { image: decoded, incarnation: `inc-1` },
++        projectionVersion: `entity-v7`,
++      }
++    )
++    await hydrated.preload()
++    expect(hydrated.collections.notes.get(`a`)).toEqual(
++      expect.objectContaining({ body: `replacement`, _seq: 2 })
++    )
++    expect(hydrated.collections.notes.get(`c`)).toEqual(
++      expect.objectContaining({ body: `suffix`, _seq: 4 })
++    )
++    expect(hydrated.collections.notes.__electricTimelineOrders?.get(`a`)).toBe(
++      orderA?.[1]
++    )
++    expect(hydrated.collections.notes.__electricRowOffsets?.get(`c`)).toEqual({
++      offset: `cut-4`,
++      subOffset: 1,
++    })
++    hydrated.close()
++  })
++
++  it(`rejects malformed and incompatible images before hydration`, () => {
++    expect(() =>
++      decodeEntityProjectionImage(new TextEncoder().encode(`{`), `entity-v1`)
++    ).toThrow(`Invalid entity projection image JSON`)
++    const wrongVersion = new TextEncoder().encode(
++      JSON.stringify({ codec: `electric-entity-image/v1` })
++    )
++    expect(() =>
++      decodeEntityProjectionImage(wrongVersion, `entity-v2`)
++    ).toThrow(`Incompatible entity projection image`)
++  })
++})
+diff --git a/packages/agents-runtime/test/process-wake.test.ts b/packages/agents-runtime/test/process-wake.test.ts
+index 49c3a5460..7023c48d4 100644
+--- a/packages/agents-runtime/test/process-wake.test.ts
++++ b/packages/agents-runtime/test/process-wake.test.ts
+@@ -46,6 +46,11 @@ const {
+   mockInitialManifests,
+   mockEntityOnEvent,
+   mockEntityOnBatch,
++  mockEntityOnCommittedSnapshot,
++  mockEntityOnError,
++  mockEntityOptions,
++  mockLoadSnapshot,
++  mockPublishSnapshot,
+ } = vi.hoisted(() => ({
+   mockProducerAppend: vi.fn(),
+   mockProducerFlush: vi.fn().mockResolvedValue(undefined),
+@@ -80,6 +85,15 @@ const {
+       | ((batch: { items: Array<unknown>; offset: string }) => void)
+       | null,
+   },
++  mockEntityOnCommittedSnapshot: {
++    current: null as
++      | ((image: Record<string, unknown>, incarnation?: string) => void)
++      | null,
++  },
++  mockEntityOnError: { current: null as ((error: Error) => void) | null },
++  mockEntityOptions: [] as Array<Record<string, unknown>>,
++  mockLoadSnapshot: vi.fn().mockResolvedValue(null),
++  mockPublishSnapshot: vi.fn(),
+ }))
+ 
+ const mockStreamResponse = {
+@@ -118,6 +132,8 @@ vi.mock(`@durable-streams/client`, async (importOriginal) => {
+   class MockDurableStream {
+     stream = mockDurableStreamStream
+     head = mockStreamHead
++    loadSnapshot = mockLoadSnapshot
++    publishSnapshot = mockPublishSnapshot
+   }
+   class MockIdempotentProducer {
+     constructor(
+@@ -149,7 +165,9 @@ vi.mock(`@durable-streams/state`, async (importOriginal) => {
+ })
+ 
+ // Mock createEntityStreamDB so it doesn't try to create a real TanStack DB
+-vi.mock(`../src/entity-stream-db`, () => ({
++vi.mock(`../src/entity-stream-db`, async (importOriginal) => ({
++  // eslint-disable-next-line quotes
++  ...(await importOriginal<typeof import('../src/entity-stream-db')>()),
+   createEntityStreamDB: vi.fn().mockImplementation(
+     (
+       _streamUrl: string,
+@@ -160,8 +178,16 @@ vi.mock(`../src/entity-stream-db`, () => ({
+         onBatch?: (batch: { items: Array<unknown>; offset: string }) => void
+         writeEvent?: (event: ChangeEvent) => void
+         actorFrom?: string
++        onCommittedSnapshot?: (
++          image: Record<string, unknown>,
++          incarnation?: string
++        ) => void
++        snapshot?: { image: Record<string, unknown>; incarnation: string }
++        projectionVersion?: string
++        onError?: (error: Error) => void
+       }
+     ) => {
++      mockEntityOptions.push((opts ?? {}) as Record<string, unknown>)
+       const manifests = createLocalOnlyTestCollection<Record<string, unknown>>(
+         mockInitialManifests.current
+       )
+@@ -193,8 +219,25 @@ vi.mock(`../src/entity-stream-db`, () => ({
+       const contextRemoved = createLocalOnlyTestCollection<
+         Record<string, unknown>
+       >([])
++      let committedImage = opts?.snapshot?.image ?? {
++        codec: `electric-entity-image/v1`,
++        projectionVersion: opts?.projectionVersion ?? `test-v1`,
++        offset: mockDbOffset.value,
++        nextSeq: 0,
++        rowsByCollection: {},
++        rowPointers: {},
++        timelineOrders: {},
++        previousBatchOffset: null,
++      }
+       mockEntityOnEvent.current = opts?.onEvent ?? null
+       mockEntityOnBatch.current = opts?.onBatch ?? null
++      mockEntityOnCommittedSnapshot.current = opts?.onCommittedSnapshot
++        ? (image, incarnation) => {
++            committedImage = { ...committedImage, ...image }
++            opts.onCommittedSnapshot?.(committedImage, incarnation)
++          }
++        : null
++      mockEntityOnError.current = opts?.onError ?? null
+       const applyEventToCollection = (event: {
+         type: string
+         key: string
+@@ -340,6 +383,11 @@ vi.mock(`../src/entity-stream-db`, () => ({
+           awaitTxId: vi.fn().mockResolvedValue(undefined),
+           awaitWritesSettled: vi.fn().mockResolvedValue(undefined),
+           drainPendingWrites: vi.fn().mockResolvedValue(undefined),
++          exportSnapshot: vi.fn().mockImplementation((projectionVersion) => ({
++            ...committedImage,
++            projectionVersion,
++            offset: mockDbOffset.value,
++          })),
+           createWriteTransaction,
+           applyEvent: vi
+             .fn()
+@@ -397,6 +445,49 @@ const BASE_CONFIG: ProcessWakeConfig = {
+   idleTimeout: 100,
+ }
+ 
++function snapshotConfig(): ProcessWakeConfig {
++  return {
++    ...BASE_CONFIG,
++    projectionSnapshots: {
++      projectionVersion: `test-v1`,
++      rawInputRecovery: `full-replay`,
++      publisherHeaders: { authorization: `Bearer publisher` },
++      missBackoffMs: 0,
++    },
++  }
++}
++
++function mockProjectionSnapshot(
++  imageOffset: string,
++  metadataOffset = imageOffset
++) {
++  const body = new TextEncoder().encode(
++    JSON.stringify({
++      codec: `electric-entity-image/v1`,
++      projectionVersion: `test-v1`,
++      offset: imageOffset,
++      nextSeq: 0,
++      rowsByCollection: {},
++      rowPointers: {},
++      timelineOrders: {},
++      previousBatchOffset: null,
++    })
++  )
++  mockLoadSnapshot.mockResolvedValue({
++    body,
++    contentType: `application/vnd.electric.entity-image+json`,
++    offset: metadataOffset,
++    incarnation: `inc-old`,
++    etag: `"snapshot"`,
++    digest: `sha-256=:test:`,
++  })
++}
++
++function commitMockProjection(offset: string): void {
++  mockDbOffset.value = offset
++  mockEntityOnCommittedSnapshot.current?.({ offset }, `inc-old`)
++}
++
+ const sharedFindingsSchema = {
+   findings: {
+     schema: passthrough<Record<string, unknown>>(),
+@@ -459,6 +550,11 @@ describe(`processWake`, () => {
+     mockDbOffset.value = `10_100`
+     mockEntityOnEvent.current = null
+     mockEntityOnBatch.current = null
++    mockEntityOnCommittedSnapshot.current = null
++    mockEntityOnError.current = null
++    mockEntityOptions.length = 0
++    mockLoadSnapshot.mockResolvedValue(null)
++    mockPublishSnapshot.mockResolvedValue({ created: true, etag: `"next"` })
+     mockStreamHead.mockResolvedValue({
+       exists: true,
+       offset: `10_100`,
+@@ -520,6 +616,333 @@ describe(`processWake`, () => {
+     expect(fetchMock).not.toHaveBeenCalled()
+   })
+ 
++  it(`reports successful wake metrics after the done callback without letting the observer alter processing`, async () => {
++    defineEntity(`test-agent`, { handler: () => {} })
++    const observer = vi.fn(() => {
++      throw new Error(`observer failure must be isolated`)
++    })
++
++    const result = await processWake(makeNotification(), {
++      ...BASE_CONFIG,
++      onWakeMetrics: observer,
++    })
++
++    expect(result).not.toBeNull()
++    expect(observer).toHaveBeenCalledOnce()
++    expect(observer).toHaveBeenCalledWith(
++      expect.objectContaining({
++        entityUrl: `http://localhost:3000/test-agent/agent-1`,
++        doneAckCompleted: true,
++        succeeded: true,
++        totalMs: expect.any(Number),
++        handlerMs: expect.any(Number),
++        peakHeapBytes: expect.any(Number),
++        peakRssBytes: expect.any(Number),
++      })
++    )
++  })
++
++  it(`stops wake memory sampling when the claim is denied`, async () => {
++    defineEntity(`test-agent`, { handler: () => {} })
++    const setIntervalSpy = vi.spyOn(globalThis, `setInterval`)
++    const clearIntervalSpy = vi.spyOn(globalThis, `clearInterval`)
++    fetchMock.mockResolvedValueOnce(
++      new Response(JSON.stringify({ ok: false }), { status: 409 })
++    )
++
++    try {
++      await expect(
++        processWake(makeNotification(), {
++          ...BASE_CONFIG,
++          onWakeMetrics: vi.fn(),
++        })
++      ).resolves.toBeNull()
++
++      const memorySampler = setIntervalSpy.mock.results[0]?.value
++      expect(setIntervalSpy).toHaveBeenCalledOnce()
++      expect(clearIntervalSpy).toHaveBeenCalledOnce()
++      expect(clearIntervalSpy).toHaveBeenCalledWith(memorySampler)
++    } finally {
++      setIntervalSpy.mockRestore()
++      clearIntervalSpy.mockRestore()
++    }
++  })
++
++  it(`stops wake memory sampling when snapshot headers fail before recovery`, async () => {
++    defineEntity(`test-agent`, { handler: () => {} })
++    const setIntervalSpy = vi.spyOn(globalThis, `setInterval`)
++    const clearIntervalSpy = vi.spyOn(globalThis, `clearInterval`)
++
++    try {
++      await expect(
++        processWake(makeNotification(), {
++          ...snapshotConfig(),
++          onWakeMetrics: vi.fn(),
++          projectionSnapshots: {
++            ...snapshotConfig().projectionSnapshots!,
++            readerHeaders: async () => {
++              throw new Error(`snapshot headers unavailable`)
++            },
++          },
++        })
++      ).rejects.toThrow(`snapshot headers unavailable`)
++
++      const memorySampler = setIntervalSpy.mock.results[0]?.value
++      expect(setIntervalSpy).toHaveBeenCalledOnce()
++      expect(clearIntervalSpy).toHaveBeenCalledOnce()
++      expect(clearIntervalSpy).toHaveBeenCalledWith(memorySampler)
++    } finally {
++      setIntervalSpy.mockRestore()
++      clearIntervalSpy.mockRestore()
++    }
++  })
++
++  it(`rejects a snapshot whose body and metadata name different cuts before hydration`, async () => {
++    defineEntity(`test-agent`, { handler: () => {} })
++    mockProjectionSnapshot(`5_0`, `6_0`)
++
++    await processWake(makeNotification(), snapshotConfig())
++
++    expect(mockLoadSnapshot).toHaveBeenCalledWith(`test-v1`, {
++      expectedContentType: `application/vnd.electric.entity-image+json`,
++    })
++    expect(mockEntityOptions[0]).not.toHaveProperty(`snapshot`)
++    expect(mockDurableStreamStream).not.toHaveBeenCalled()
++  })
++
++  it(`joins raw replay forward to a state cut without missing or duplicating inputs`, async () => {
++    const seen: Array<string> = []
++    defineEntity(`test-agent`, {
++      handler: (ctx) => {
++        seen.push(...ctx.events.map((event) => String(event.key)))
++      },
++    })
++    mockProjectionSnapshot(`5_0`)
++    const first = {
++      type: `history`,
++      key: `history`,
++      value: {},
++      headers: { operation: `insert`, offset: `6_0` },
++    } as ChangeEvent
++    const second = ev(
++      `inbox`,
++      `current`,
++      `insert`,
++      { payload: `now` },
++      { offset: `8_0` }
++    )
++    mockDurableStreamStream
++      .mockResolvedValueOnce({ offset: `6_0`, json: async () => [first] })
++      .mockResolvedValueOnce({ offset: `8_0`, json: async () => [second] })
++    mockDbPreload.mockImplementationOnce(async () => {
++      commitMockProjection(`8_0`)
++    })
++
++    await processWake(
++      makeNotification({
++        triggerEvent: `inbox`,
++        streams: [{ path: `/streams/entity:agent-1`, offset: `6_0` }],
++      }),
++      snapshotConfig()
++    )
++
++    expect(seen).toEqual([`history`, `current`])
++    expect(mockDurableStreamStream).toHaveBeenNthCalledWith(
++      2,
++      expect.objectContaining({ offset: `6_0`, incarnation: `inc-old` })
++    )
++  })
++
++  it(`waits for committed state to reach a raw replay cut before activation`, async () => {
++    const seen: Array<string> = []
++    defineEntity(`test-agent`, {
++      handler: (ctx) => {
++        seen.push(...ctx.events.map((event) => String(event.key)))
++      },
++    })
++    mockProjectionSnapshot(`5_0`)
++    const events = [
++      {
++        type: `history`,
++        key: `history`,
++        value: {},
++        headers: { operation: `insert`, offset: `6_0` },
++      } as ChangeEvent,
++      ev(`inbox`, `current`, `insert`, { payload: `now` }, { offset: `8_0` }),
++    ]
++    mockDurableStreamStream.mockResolvedValueOnce({
++      offset: `8_0`,
++      json: async () => events,
++    })
++    mockDbPreload.mockImplementationOnce(async () => {
++      commitMockProjection(`6_0`)
++      queueMicrotask(() => commitMockProjection(`8_0`))
++    })
++
++    await processWake(
++      makeNotification({
++        triggerEvent: `inbox`,
++        streams: [{ path: `/streams/entity:agent-1`, offset: `6_0` }],
++      }),
++      snapshotConfig()
++    )
++
++    expect(seen).toEqual([`history`, `current`])
++    expect(mockDurableStreamStream).toHaveBeenCalledOnce()
++  })
++
++  it(`retains the loaded incarnation when hydration falls back to full state replay`, async () => {
++    defineEntity(`test-agent`, { handler: () => {} })
++    mockProjectionSnapshot(`5_0`)
++    mockDurableStreamStream.mockResolvedValueOnce({
++      offset: `8_0`,
++      json: async () => [],
++    })
++    mockDbPreload
++      .mockRejectedValueOnce(new Error(`bootstrap validation failed`))
++      .mockImplementationOnce(async () => {
++        commitMockProjection(`8_0`)
++      })
++
++    await processWake(makeNotification(), snapshotConfig())
++
++    expect(mockEntityOptions).toHaveLength(2)
++    expect(mockEntityOptions[1]).not.toHaveProperty(`snapshot`)
++    expect(mockEntityOptions[1]).toHaveProperty(`sourceIncarnation`, `inc-old`)
++  })
++
++  it(`abandons the claimed activation when guarded recovery loses its incarnation`, async () => {
++    const handler = vi.fn()
++    defineEntity(`test-agent`, { handler })
++    mockProjectionSnapshot(`5_0`)
++    const stale = Object.assign(new Error(`source incarnation changed`), {
++      status: 412,
++    })
++    mockDurableStreamStream
++      .mockResolvedValueOnce({ offset: `6_0`, json: async () => [] })
++      .mockRejectedValueOnce(stale)
++    mockDbPreload.mockImplementationOnce(async () => {
++      commitMockProjection(`8_0`)
++    })
++
++    await expect(
++      processWake(makeNotification(), snapshotConfig())
++    ).rejects.toThrow(`source incarnation changed`)
++
++    expect(handler).not.toHaveBeenCalled()
++    expect(mockProducerAppend).not.toHaveBeenCalled()
++    const doneCalls = fetchMock.mock.calls.filter(([, init]) => {
++      if (typeof init?.body !== `string`) return false
++      return JSON.parse(init.body).done === true
++    })
++    expect(doneCalls).toHaveLength(1)
++    expect(JSON.parse(doneCalls[0]![1]!.body as string).acks).toEqual([])
++  })
++
++  it(`aborts when the guarded state reader fails after joining but before claim`, async () => {
++    const handler = vi.fn()
++    defineEntity(`test-agent`, { handler })
++    mockProjectionSnapshot(`5_0`)
++    mockDurableStreamStream.mockResolvedValueOnce({
++      offset: `5_0`,
++      json: async () => [],
++    })
++    mockDbPreload.mockImplementationOnce(async () => {
++      commitMockProjection(`5_0`)
++    })
++    let resolveClaim!: (response: Response) => void
++    fetchMock.mockImplementationOnce(
++      () =>
++        new Promise<Response>((resolve) => {
++          resolveClaim = resolve
++        })
++    )
++
++    const activation = processWake(makeNotification(), snapshotConfig())
++    await vi.waitFor(() => expect(mockDbPreload).toHaveBeenCalled())
++    await new Promise((resolve) => setTimeout(resolve, 0))
++    const stale = Object.assign(new Error(`joined source was recreated`), {
++      status: 412,
++    })
++    mockEntityOnError.current?.(stale)
++    resolveClaim(
++      new Response(JSON.stringify({ ok: true }), {
++        status: 200,
++        headers: { 'content-type': `application/json` },
++      })
++    )
++
++    await expect(activation).rejects.toThrow(`joined source was recreated`)
++    expect(handler).not.toHaveBeenCalled()
++    const doneCalls = fetchMock.mock.calls.filter(([, init]) => {
++      if (typeof init?.body !== `string`) return false
++      return JSON.parse(init.body).done === true
++    })
++    expect(JSON.parse(doneCalls[0]![1]!.body as string).acks).toEqual([])
++  })
++
++  it(`retains joined live inputs while claim acquisition is delayed`, async () => {
++    const handlerEvents: Array<Array<string>> = []
++    defineEntity(`test-agent`, {
++      handler: (ctx) => {
++        handlerEvents.push(ctx.events.map((event) => String(event.key)))
++      },
++    })
++    mockProjectionSnapshot(`5_0`)
++    mockDurableStreamStream.mockResolvedValueOnce({
++      offset: `5_0`,
++      json: async () => [],
++    })
++    mockDbPreload.mockImplementationOnce(async () => {
++      commitMockProjection(`5_0`)
++    })
++    let resolveClaim!: (response: Response) => void
++    fetchMock.mockImplementationOnce(
++      () =>
++        new Promise<Response>((resolve) => {
++          resolveClaim = resolve
++        })
++    )
++
++    const activation = processWake(
++      makeNotification({
++        triggerEvent: `inbox`,
++        streams: [{ path: `/streams/entity:agent-1`, offset: `5_0` }],
++      }),
++      snapshotConfig()
++    )
++    await vi.waitFor(() => expect(mockDbPreload).toHaveBeenCalled())
++    await new Promise((resolve) => setTimeout(resolve, 0))
++    mockEntityOnBatch.current?.({
++      items: [
++        ev(
++          `inbox`,
++          `joined-input`,
++          `insert`,
++          { payload: `after join` },
++          { offset: `6_0` }
++        ),
++      ],
++      offset: `6_0`,
++    })
++    resolveClaim(
++      new Response(JSON.stringify({ ok: true }), {
++        status: 200,
++        headers: { 'content-type': `application/json` },
++      })
++    )
++
++    await activation
++    expect(handlerEvents).toContainEqual([`joined-input`])
++    const doneCalls = fetchMock.mock.calls.filter(([, init]) => {
++      if (typeof init?.body !== `string`) return false
++      return JSON.parse(init.body).done === true
++    })
++    expect(JSON.parse(doneCalls[0]![1]!.body as string).acks).toEqual([
++      { path: `/streams/entity:agent-1`, offset: `6_0` },
++    ])
++  })
++
+   it(`closes the StreamDB when the wake claim is rejected`, async () => {
+     defineEntity(`test-agent`, {
+       handler: () => {},
+diff --git a/packages/agents-runtime/test/runtime-dsl.ts b/packages/agents-runtime/test/runtime-dsl.ts
+index bb9c6bf84..d10144106 100644
+--- a/packages/agents-runtime/test/runtime-dsl.ts
++++ b/packages/agents-runtime/test/runtime-dsl.ts
+@@ -6,8 +6,14 @@ import {
+   createRuntimeServerClient,
+   getSharedStateStreamPath,
+ } from '../src/index'
+-import type { EntityDefinition, RuntimeHandler } from '../src/index'
++import type {
++  EntityDefinition,
++  EntitySignal,
++  RuntimeHandler,
++  WakeMetrics,
++} from '../src/index'
+ import type { EntityRegistry } from '../src/define-entity'
++import type { ProjectionSnapshotRecoveryPolicy } from '../src/types'
+ 
+ export interface RuntimeStreamEvent extends Record<string, unknown> {
+   type: string
+@@ -28,6 +34,8 @@ type ElectricAgentsServerInstance = {
+ 
+ type ElectricAgentsServerConstructor = new (opts: {
+   durableStreamsUrl: string
++  durableStreamsBearer?: string
++  durableStreamsWebhookSignature?: false
+   port: number
+   postgresUrl: string
+   electricUrl: string
+@@ -203,6 +211,11 @@ export interface RuntimeTestBuilder {
+     payload: unknown,
+     opts?: { type?: string }
+   ) => Promise<void>
++  signal: (
++    entityUrl: string,
++    signal: EntitySignal,
++    opts?: { reason?: string; payload?: unknown }
++  ) => Promise<void>
+   waitForRun: (entityUrl: string, timeoutMs?: number) => Promise<void>
+   waitForSettled: (timeoutMs?: number) => Promise<void>
+   waitForEvent: (
+@@ -222,7 +235,7 @@ export interface RuntimeTestBuilder {
+ }
+ 
+ interface ServerState {
+-  dsServer: DurableStreamTestServer
++  dsServer?: DurableStreamTestServer
+   electricAgentsServer: ElectricAgentsServerInstance
+   handlerServer: http.Server
+   runtime: RuntimeHandler
+@@ -230,6 +243,19 @@ interface ServerState {
+   handlerUrl: string
+ }
+ 
++export interface RuntimeTestOptions {
++  /** Use an externally managed backend instead of DurableStreamTestServer. */
++  durableStreamsUrl?: string
++  durableStreamsBearer?: string
++  /** Chronicle signs webhooks; retain verification unless explicitly disabled. */
++  durableStreamsWebhookSignature?: false
++  projectionSnapshots?: ProjectionSnapshotRecoveryPolicy
++  onWakeMetrics?: (metrics: WakeMetrics) => void
++  beforeWebhook?: (request: http.IncomingMessage) => Promise<void>
++  /** Preserve an externally isolated schema; ElectricAgentsServer still migrates it. */
++  resetBackend?: boolean
++}
++
+ const debugStartupTiming = process.env.ELECTRIC_AGENTS_DEBUG_TEST_TIMING === `1`
+ 
+ async function timeStep<T>(label: string, fn: () => Promise<T>): Promise<T> {
+@@ -245,24 +271,36 @@ async function timeStep<T>(label: string, fn: () => Promise<T>): Promise<T> {
+   }
+ }
+ 
+-async function startServers(registry: EntityRegistry): Promise<ServerState> {
++async function startServers(
++  registry: EntityRegistry,
++  options: RuntimeTestOptions
++): Promise<ServerState> {
+   const overallStart = performance.now()
+   const [
+     { TEST_ELECTRIC_URL, TEST_POSTGRES_URL, resetElectricAgentsTestBackend },
+     ElectricAgentsServer,
+   ] = await Promise.all([loadTestBackend(), loadElectricAgentsServer()])
+-  await timeStep(`resetElectricAgentsTestBackend`, () =>
+-    resetElectricAgentsTestBackend()
+-  )
++  if (options.resetBackend !== false) {
++    await timeStep(`resetElectricAgentsTestBackend`, () =>
++      resetElectricAgentsTestBackend()
++    )
++  }
+ 
+-  const dsServer = new DurableStreamTestServer({
+-    port: 0,
+-    webhooks: true,
+-  })
+-  await timeStep(`DurableStreamTestServer.start`, () => dsServer.start())
++  const dsServer = options.durableStreamsUrl
++    ? undefined
++    : new DurableStreamTestServer({
++        port: 0,
++        webhooks: true,
++      })
++  if (dsServer) {
++    await timeStep(`DurableStreamTestServer.start`, () => dsServer.start())
++  }
+ 
+   const electricAgentsServer = new ElectricAgentsServer({
+-    durableStreamsUrl: `${dsServer.url}/v1/stream`,
++    durableStreamsUrl:
++      options.durableStreamsUrl ?? `${dsServer!.url}/v1/stream`,
++    durableStreamsBearer: options.durableStreamsBearer,
++    durableStreamsWebhookSignature: options.durableStreamsWebhookSignature,
+     port: 0,
+     postgresUrl: TEST_POSTGRES_URL,
+     electricUrl: TEST_ELECTRIC_URL,
+@@ -275,6 +313,7 @@ async function startServers(registry: EntityRegistry): Promise<ServerState> {
+ 
+   const handlerServer = http.createServer(async (req, res) => {
+     if (req.url === `/webhook` && req.method === `POST` && runtimeRef.current) {
++      await options.beforeWebhook?.(req)
+       await runtimeRef.current.onEnter(req, res)
+       return
+     }
+@@ -303,6 +342,8 @@ async function startServers(registry: EntityRegistry): Promise<ServerState> {
+     serveEndpoint: `${handlerUrl}/webhook`,
+     registry,
+     idleTimeout: 0,
++    projectionSnapshots: options.projectionSnapshots,
++    onWakeMetrics: options.onWakeMetrics,
+     ...(process.env.ELECTRIC_AGENTS_TEST_REGISTRATION_CONCURRENCY
+       ? {
+           registrationConcurrency: Number.parseInt(
+@@ -529,7 +570,9 @@ function summarizeEvent(event: RuntimeStreamEvent): RuntimeHistorySummaryEntry {
+   }
+ }
+ 
+-export function runtimeTest(): RuntimeTestBuilder {
++export function runtimeTest(
++  options: RuntimeTestOptions = {}
++): RuntimeTestBuilder {
+   const registry = createEntityRegistry()
+   let serverState: ServerState | null = null
+   let serverClient: ReturnType<typeof createRuntimeServerClient> | null = null
+@@ -537,7 +580,7 @@ export function runtimeTest(): RuntimeTestBuilder {
+ 
+   async function ensureServer(): Promise<ServerState> {
+     if (!serverState) {
+-      serverState = await startServers(registry)
++      serverState = await startServers(registry, options)
+     }
+     return serverState
+   }
+@@ -933,6 +976,22 @@ export function runtimeTest(): RuntimeTestBuilder {
+       )
+     },
+ 
++    async signal(
++      entityUrl: string,
++      signal: EntitySignal,
++      opts?: { reason?: string; payload?: unknown }
++    ) {
++      const client = await ensureClient()
++      await timeStep(`signal ${entityUrl} ${signal}`, () =>
++        client.signalEntity({
++          entityUrl,
++          signal,
++          reason: opts?.reason,
++          payload: opts?.payload,
++        })
++      )
++    },
++
+     async waitForRun(entityUrl: string, timeoutMs = 30_000) {
+       await builder.entity(entityUrl).waitForRun(timeoutMs)
+     },
+@@ -1016,7 +1075,7 @@ export function runtimeTest(): RuntimeTestBuilder {
+       if (debugCleanup) {
+         console.error(`[agent-runtime][cleanup] electric-agents server stopped`)
+       }
+-      await serverState.dsServer.stop()
++      await serverState.dsServer?.stop()
+       if (debugStartupTiming) {
+         process.stderr.write(
+           `[agent-runtime][timing] cleanup total: ${(performance.now() - cleanupStart).toFixed(1)}ms\n`
+diff --git a/packages/agents-server/src/routing/durable-streams-router.ts b/packages/agents-server/src/routing/durable-streams-router.ts
+index db283021c..7cc947579 100644
+--- a/packages/agents-server/src/routing/durable-streams-router.ts
++++ b/packages/agents-server/src/routing/durable-streams-router.ts
+@@ -133,7 +133,7 @@ async function forwardToDurableStreams(
+   body?: Uint8Array,
+   route: `stream` | `control` = `stream`,
+   urlOverride?: string,
+-  durableStreamsBearerMode: `overwrite` | `if-missing` = `overwrite`
++  durableStreamsBearerMode: `overwrite` | `if-missing` | `none` = `overwrite`
+ ): Promise<Response> {
+   const headers = new Headers(request.headers)
+   headers.delete(`host`)
+@@ -623,9 +623,24 @@ async function proxyPassThrough(
+ ): Promise<Response> {
+   const auth = await authorizeDurableStreamAccess(request, ctx)
+   if (auth) return auth
+-  const streamPath = new URL(request.url).pathname
+-  const upstream = await forwardToDurableStreams(ctx, request)
++  const requestUrl = new URL(request.url)
++  const streamPath = requestUrl.pathname
+   const method = request.method.toUpperCase()
++  const isSnapshotMutation =
++    (method === `PUT` || method === `DELETE`) &&
++    requestUrl.searchParams.getAll(`snapshot`).length === 1
++  // Snapshot publication and retirement authority belongs to the caller's
++  // dedicated service credential. Never replace it with agents-server's broadly
++  // privileged backend bearer (and never turn browser/append authority into
++  // snapshot mutation authority).
++  const upstream = await forwardToDurableStreams(
++    ctx,
++    request,
++    undefined,
++    `stream`,
++    undefined,
++    isSnapshotMutation ? `none` : `overwrite`
++  )
+   const endTrackedRead =
+     method === `GET`
+       ? await ctx.entityBridgeManager.beginClientRead(streamPath)
+diff --git a/packages/agents-server/src/routing/internal-router.ts b/packages/agents-server/src/routing/internal-router.ts
+index 87b78ee00..c27b27d37 100644
+--- a/packages/agents-server/src/routing/internal-router.ts
++++ b/packages/agents-server/src/routing/internal-router.ts
+@@ -36,6 +36,7 @@ import { observationsRouter } from './observations-router.js'
+ import { runnersRouter } from './runners-router.js'
+ import { routeBody, validateOptionalJsonBody, withSchema } from './schema.js'
+ import { withLeadingSlash } from './tenant-stream-paths.js'
++import { fetch as undiciFetch } from 'undici'
+ import type { IRequest, RouterType } from 'itty-router'
+ import type {
+   WebhookSourceContract,
+@@ -251,8 +252,14 @@ function durableStreamsJwksFetchClient(ctx: TenantContext): typeof fetch {
+     }
+     if (ctx.durableStreamsDispatcher) {
+       nextInit.dispatcher = ctx.durableStreamsDispatcher
++      const upstreamInput =
++        typeof input === `string` || input instanceof URL ? input : input.url
++      return (await undiciFetch(
++        upstreamInput,
++        nextInit as Parameters<typeof undiciFetch>[1]
++      )) as unknown as Response
+     }
+-    return await fetch(input, nextInit as RequestInit)
++    return await fetch(input, nextInit)
+   }
+ }
+ 
+diff --git a/packages/agents-server/src/utils/server-utils.ts b/packages/agents-server/src/utils/server-utils.ts
+index b2e5a15ec..846c9695d 100644
+--- a/packages/agents-server/src/utils/server-utils.ts
++++ b/packages/agents-server/src/utils/server-utils.ts
+@@ -4,6 +4,7 @@ import {
+   applyElectricUrlQueryParams,
+   electricUrlWithPath,
+ } from './electric-url.js'
++import { fetch as undiciFetch } from 'undici'
+ import { resolveDurableStreamsRoutingAdapter } from '../routing/durable-streams-routing-adapter.js'
+ import { applyDurableStreamsBearer } from '../stream-client.js'
+ import type { Agent } from 'undici'
+@@ -478,9 +479,13 @@ export async function forwardFetchRequest(options: {
+   }
+   if (options.dispatcher) {
+     init.dispatcher = options.dispatcher
++    return (await undiciFetch(
++      upstreamUrl,
++      init as Parameters<typeof undiciFetch>[1]
++    )) as unknown as Response
+   }
+ 
+-  return await fetch(upstreamUrl, init as RequestInit)
++  return await fetch(upstreamUrl, init)
+ }
+ 
+ function bodyFromBytes(body: Uint8Array): ArrayBuffer {
+diff --git a/packages/agents-server/test/electric-agents-routes.test.ts b/packages/agents-server/test/electric-agents-routes.test.ts
+index 020de60f8..f7243084e 100644
+--- a/packages/agents-server/test/electric-agents-routes.test.ts
++++ b/packages/agents-server/test/electric-agents-routes.test.ts
+@@ -464,6 +464,72 @@ describe(`ElectricAgentsRoutes shared-state streams`, () => {
+     }
+   })
+ 
++  it(`never elevates caller credentials for snapshot publication or retirement`, async () => {
++    const fetchSpy = vi.spyOn(globalThis, `fetch`).mockImplementation(
++      async (_input, init) =>
++        new Response(null, {
++          status:
++            new Headers(init?.headers).get(`authorization`) ===
++            `Bearer snapshot-publisher`
++              ? 204
++              : 403,
++        })
++    )
++
++    try {
++      for (const method of [`PUT`, `DELETE`]) {
++        for (const credential of [`browser-token`, `ordinary-append-token`]) {
++          const result = await globalRouter.fetch(
++            new Request(
++              `http://localhost/entities/demo/main?snapshot=entity-v1`,
++              {
++                method,
++                headers: { authorization: `Bearer ${credential}` },
++                ...(method === `PUT` ? { body: `{}` } : {}),
++              }
++            ),
++            {
++              service: `test`,
++              durableStreamsUrl: `http://durable.local/v1/stream/test`,
++              durableStreamsBearer: `broad-backend-token`,
++              entityBridgeManager: {
++                beginClientRead: vi.fn(),
++                touchByStreamPath: vi.fn(),
++              },
++              isShuttingDown: () => false,
++            } as unknown as TenantContext
++          )
++
++          expect(result.status).toBe(403)
++          const [, init] = fetchSpy.mock.calls.at(-1)!
++          expect(new Headers(init?.headers).get(`authorization`)).toBe(
++            `Bearer ${credential}`
++          )
++        }
++      }
++
++      const publisherResult = await globalRouter.fetch(
++        new Request(`http://localhost/entities/demo/main?snapshot=entity-v1`, {
++          method: `DELETE`,
++          headers: { authorization: `Bearer snapshot-publisher` },
++        }),
++        {
++          service: `test`,
++          durableStreamsUrl: `http://durable.local/v1/stream/test`,
++          durableStreamsBearer: `broad-backend-token`,
++          entityBridgeManager: {
++            beginClientRead: vi.fn(),
++            touchByStreamPath: vi.fn(),
++          },
++          isShuttingDown: () => false,
++        } as unknown as TenantContext
++      )
++      expect(publisherResult.status).toBe(204)
++    } finally {
++      fetchSpy.mockRestore()
++    }
++  })
++
+   it(`preserves subscription-scoped bearer auth for ack proxy traffic`, async () => {
+     const fetchSpy = vi
+       .spyOn(globalThis, `fetch`)
+diff --git a/packages/agents-server/test/server-utils.test.ts b/packages/agents-server/test/server-utils.test.ts
+index d96a3b7c2..4dbeb5ea4 100644
+--- a/packages/agents-server/test/server-utils.test.ts
++++ b/packages/agents-server/test/server-utils.test.ts
+@@ -1,7 +1,10 @@
++import { createServer } from 'node:http'
++import { Agent } from 'undici'
+ import { describe, expect, it } from 'vitest'
+ import {
+   ElectricProxyError,
+   buildElectricProxyTarget,
++  forwardFetchRequest,
+ } from '../src/utils/server-utils'
+ 
+ function shapeTarget(query: string): URL {
+@@ -15,6 +18,49 @@ function shapeTarget(query: string): URL {
+ }
+ 
+ describe(`server utils`, () => {
++  it(`preserves upstream response headers with the configured dispatcher`, async () => {
++    const server = createServer((_request, response) => {
++      response.writeHead(200, {
++        'content-type': `application/json`,
++        'stream-next-offset': `0000000000000001`,
++        'stream-up-to-date': `true`,
++      })
++      response.end(`[]`)
++    })
++    await new Promise<void>((resolve) => server.listen(0, `127.0.0.1`, resolve))
++    const address = server.address()
++    if (!address || typeof address === `string`) {
++      throw new Error(`Expected an HTTP server address`)
++    }
++    const dispatcher = new Agent({ bodyTimeout: 0, headersTimeout: 0 })
++
++    try {
++      const response = await forwardFetchRequest({
++        request: {
++          method: `GET`,
++          url: `http://agents.local/entity/test`,
++          headers: new Headers(),
++        },
++        durableStreamsUrl: `http://127.0.0.1:${address.port}`,
++        serviceId: `test`,
++        dispatcher,
++      })
++
++      expect(response.status).toBe(200)
++      expect(response.headers.get(`content-type`)).toBe(`application/json`)
++      expect(response.headers.get(`stream-next-offset`)).toBe(
++        `0000000000000001`
++      )
++      expect(response.headers.get(`stream-up-to-date`)).toBe(`true`)
++      expect(await response.json()).toEqual([])
++    } finally {
++      await dispatcher.close()
++      await new Promise<void>((resolve, reject) =>
++        server.close((error) => (error ? reject(error) : resolve()))
++      )
++    }
++  })
++
+   it(`owner-scopes runner shapes to the authenticated principal`, () => {
+     const target = shapeTarget(`table=runners`)
+ 
+diff --git a/packages/agents-runtime/test/chronicle-callback-gate.mjs b/packages/agents-runtime/test/chronicle-callback-gate.mjs
+new file mode 100644
+index 000000000..e69b6634e
+--- /dev/null
++++ b/packages/agents-runtime/test/chronicle-callback-gate.mjs
+@@ -0,0 +1,116 @@
++#!/usr/bin/env node
++import { createServer, request as httpRequest } from 'node:http'
++
++const listen = new URL(
++  process.env.CHRONICLE_CALLBACK_GATE_LISTEN ?? `http://127.0.0.1:18439`
++)
++const upstream = new URL(
++  process.env.CHRONICLE_CALLBACK_GATE_UPSTREAM ?? `http://127.0.0.1:18438`
++)
++for (const url of [listen, upstream]) {
++  if (![`127.0.0.1`, `localhost`, `::1`].includes(url.hostname)) {
++    throw new Error(`Chronicle callback gate refuses non-loopback URLs`)
++  }
++}
++
++let failNextDone = false
++const records = []
++
++const server = createServer(async (request, response) => {
++  const incoming = new URL(request.url ?? `/`, listen)
++  if (incoming.pathname === `/__fixture/fail-next-done`) {
++    if (request.method !== `POST`)
++      return send(response, 405, `method not allowed`)
++    failNextDone = true
++    return send(response, 204, ``)
++  }
++  if (incoming.pathname === `/__fixture/records`) {
++    if (request.method === `DELETE`) {
++      records.length = 0
++      return send(response, 204, ``)
++    }
++    if (request.method === `GET`) {
++      response.writeHead(200, { 'content-type': `application/json` })
++      return response.end(JSON.stringify(records))
++    }
++    return send(response, 405, `method not allowed`)
++  }
++
++  const chunks = []
++  let bytes = 0
++  for await (const chunk of request) {
++    bytes += chunk.byteLength
++    if (bytes > 1024 * 1024)
++      return send(response, 413, `fixture body too large`)
++    chunks.push(chunk)
++  }
++  const body = Buffer.concat(chunks)
++  const done = parseDone(body)
++  const record = {
++    method: request.method ?? `GET`,
++    pathname: incoming.pathname,
++    done,
++    status: null,
++    outcome: `pending`,
++  }
++  records.push(record)
++
++  if (
++    failNextDone &&
++    done === true &&
++    incoming.pathname.endsWith(`/callback`)
++  ) {
++    failNextDone = false
++    record.status = 503
++    record.outcome = `injected-failure`
++    return send(response, 503, `injected callback failure`)
++  }
++
++  const target = new URL(`${incoming.pathname}${incoming.search}`, upstream)
++  const forwarded = httpRequest(
++    target,
++    {
++      method: request.method,
++      headers: { ...request.headers, host: target.host },
++    },
++    (upstreamResponse) => {
++      record.status = upstreamResponse.statusCode ?? 502
++      response.writeHead(record.status, upstreamResponse.headers)
++      upstreamResponse.pipe(response)
++      upstreamResponse.on(`end`, () => {
++        record.outcome = `completed`
++      })
++    }
++  )
++  forwarded.on(`error`, (error) => {
++    record.status = 502
++    record.outcome = `error`
++    if (!response.headersSent) response.writeHead(502)
++    response.end(error.message)
++  })
++  response.on(`close`, () => {
++    if (!response.writableEnded) forwarded.destroy()
++  })
++  forwarded.end(body)
++})
++
++server.listen(Number(listen.port), listen.hostname, () => {
++  process.stdout.write(
++    `Chronicle callback gate listening on ${listen.origin}\n`
++  )
++})
++
++function parseDone(body) {
++  if (body.byteLength === 0) return null
++  try {
++    const value = JSON.parse(body.toString(`utf8`))
++    return typeof value.done === `boolean` ? value.done : null
++  } catch {
++    return null
++  }
++}
++
++function send(response, status, body) {
++  response.writeHead(status, { 'content-type': `text/plain` })
++  response.end(body)
++}
+diff --git a/packages/agents-runtime/test/chronicle-e2e-gate.ts b/packages/agents-runtime/test/chronicle-e2e-gate.ts
+new file mode 100644
+index 000000000..4d83dd825
+--- /dev/null
++++ b/packages/agents-runtime/test/chronicle-e2e-gate.ts
+@@ -0,0 +1,293 @@
++import { createServer, request as requestHttp } from 'node:http'
++import type { AddressInfo } from 'node:net'
++import type { ClientRequest, Server } from 'node:http'
++
++export interface ChronicleGateRequest {
++  id: number
++  method: string
++  pathname: string
++  search: string
++  snapshot: string | null
++  status: number | null
++  requestBytes: number
++  responseBytes: number
++  startedAtUnixMs: number
++  durationMs: number | null
++  streamNextOffset: string | null
++  streamUpToDate: string | null
++  streamSnapshotOffset: string | null
++  done: boolean | null
++  outcome: `pending` | `completed` | `aborted` | `error`
++}
++
++export interface ChronicleGateCapture {
++  stop(): Array<ChronicleGateRequest>
++}
++
++export interface ChronicleGate {
++  streamRoot: string
++  requests: Array<ChronicleGateRequest>
++  startCapture(): ChronicleGateCapture
++  failNext(
++    predicate: (request: {
++      method: string
++      pathname: string
++      search: string
++    }) => boolean,
++    status: number
++  ): void
++  waitFor(
++    predicate: (request: ChronicleGateRequest) => boolean,
++    timeoutMs: number
++  ): Promise<ChronicleGateRequest>
++  reset(): void
++  stop(): Promise<void>
++}
++
++export async function startChronicleGate(
++  chronicleStreamRoot: URL
++): Promise<ChronicleGate> {
++  if (
++    ![`127.0.0.1`, `localhost`, `::1`].includes(chronicleStreamRoot.hostname)
++  ) {
++    throw new Error(`Refusing non-loopback Chronicle root`)
++  }
++  if (!chronicleStreamRoot.pathname.endsWith(`/`)) {
++    throw new Error(`CHRONICLE_STREAM_ROOT must end with /`)
++  }
++
++  const requests: Array<ChronicleGateRequest> = []
++  const failures: Array<{
++    predicate: (request: {
++      method: string
++      pathname: string
++      search: string
++    }) => boolean
++    status: number
++  }> = []
++  const waiters = new Set<{
++    predicate: (request: ChronicleGateRequest) => boolean
++    resolve: (request: ChronicleGateRequest) => void
++  }>()
++  let nextRequestId = 1
++
++  const server = createServer((request, response) => {
++    const startedAt = performance.now()
++    const target = new URL(request.url ?? `/`, chronicleStreamRoot.origin)
++    const recorded: ChronicleGateRequest = {
++      id: nextRequestId++,
++      method: request.method ?? `GET`,
++      pathname: target.pathname,
++      search: target.search,
++      snapshot: target.searchParams.get(`snapshot`),
++      status: null,
++      requestBytes: 0,
++      responseBytes: 0,
++      startedAtUnixMs: Date.now(),
++      durationMs: null,
++      streamNextOffset: null,
++      streamUpToDate: null,
++      streamSnapshotOffset: null,
++      done: null,
++      outcome: `pending`,
++    }
++    requests.push(recorded)
++
++    const requestChunks: Array<Buffer> = []
++    request.on(`data`, (chunk: Buffer) => {
++      recorded.requestBytes += chunk.byteLength
++      if (recorded.requestBytes <= 64 * 1024) requestChunks.push(chunk)
++    })
++    request.on(`end`, () => {
++      recorded.done = parseDone(requestChunks)
++    })
++
++    const summary = {
++      method: recorded.method,
++      pathname: recorded.pathname,
++      search: recorded.search,
++    }
++    const failureIndex = failures.findIndex(({ predicate }) =>
++      predicate(summary)
++    )
++    if (failureIndex >= 0) {
++      const failure = failures.splice(failureIndex, 1)[0]!
++      request.resume()
++      request.on(`end`, () => {
++        recorded.status = failure.status
++        recorded.outcome = `completed`
++        recorded.durationMs = +(performance.now() - startedAt).toFixed(2)
++        response.writeHead(failure.status)
++        response.end(`injected Chronicle gate failure`)
++        notify(recorded)
++      })
++      return
++    }
++
++    let upstream: ClientRequest | null = requestHttp(
++      target,
++      {
++        method: request.method,
++        headers: { ...request.headers, host: target.host },
++      },
++      (upstreamResponse) => {
++        recorded.status = upstreamResponse.statusCode ?? 502
++        recorded.streamNextOffset = stringHeader(
++          upstreamResponse.headers[`stream-next-offset`]
++        )
++        recorded.streamUpToDate = stringHeader(
++          upstreamResponse.headers[`stream-up-to-date`]
++        )
++        recorded.streamSnapshotOffset = stringHeader(
++          upstreamResponse.headers[`stream-snapshot-offset`]
++        )
++        response.writeHead(recorded.status, upstreamResponse.headers)
++        upstreamResponse.on(`data`, (chunk: Buffer) => {
++          recorded.responseBytes += chunk.byteLength
++        })
++        upstreamResponse.on(`end`, () => {
++          if (recorded.outcome !== `pending`) return
++          recorded.outcome = `completed`
++          recorded.durationMs = +(performance.now() - startedAt).toFixed(2)
++          notify(recorded)
++        })
++        upstreamResponse.on(`aborted`, () => finish(`aborted`))
++        upstreamResponse.on(`error`, () => finish(`error`))
++        upstreamResponse.pipe(response)
++      }
++    )
++
++    const finish = (outcome: `aborted` | `error`) => {
++      if (recorded.outcome !== `pending`) return
++      recorded.outcome = outcome
++      recorded.durationMs = +(performance.now() - startedAt).toFixed(2)
++      notify(recorded)
++    }
++    request.on(`aborted`, () => {
++      finish(`aborted`)
++      upstream?.destroy()
++      upstream = null
++    })
++    response.on(`close`, () => {
++      if (response.writableEnded) return
++      finish(`aborted`)
++      upstream?.destroy()
++      upstream = null
++    })
++    upstream.on(`error`, (error) => {
++      finish(`error`)
++      if (!response.headersSent) response.writeHead(502)
++      response.end(error.message)
++    })
++    request.pipe(upstream)
++  })
++
++  await listen(server)
++  const { port } = server.address() as AddressInfo
++  const streamRoot = new URL(
++    chronicleStreamRoot.pathname,
++    `http://127.0.0.1:${port}`
++  ).toString()
++
++  return {
++    streamRoot,
++    requests,
++    startCapture() {
++      const firstId = nextRequestId
++      let stopped = false
++      return {
++        stop() {
++          if (stopped) throw new Error(`Chronicle gate capture already stopped`)
++          stopped = true
++          const lastId = nextRequestId - 1
++          return requests
++            .filter((request) => request.id >= firstId && request.id <= lastId)
++            .map((request) => ({ ...request }))
++        },
++      }
++    },
++    failNext(predicate, status) {
++      failures.push({ predicate, status })
++    },
++    waitFor(predicate, timeoutMs) {
++      const existing = requests.find(
++        (request) => request.outcome !== `pending` && predicate(request)
++      )
++      if (existing) return Promise.resolve({ ...existing })
++      return new Promise<ChronicleGateRequest>((resolve, reject) => {
++        const waiter = { predicate, resolve }
++        waiters.add(waiter)
++        setTimeout(() => {
++          if (waiters.delete(waiter)) {
++            reject(
++              new Error(
++                `Timed out waiting for Chronicle gate request; observed ${JSON.stringify(
++                  requests.map(
++                    ({ method, pathname, status, done, outcome }) => ({
++                      method,
++                      pathname,
++                      status,
++                      done,
++                      outcome,
++                    })
++                  )
++                )}`
++              )
++            )
++          }
++        }, timeoutMs)
++      })
++    },
++    reset() {
++      requests.length = 0
++    },
++    async stop() {
++      await close(server)
++    },
++  }
++
++  function notify(recorded: ChronicleGateRequest): void {
++    for (const waiter of waiters) {
++      if (waiter.predicate(recorded)) {
++        waiters.delete(waiter)
++        waiter.resolve({ ...recorded })
++      }
++    }
++  }
++}
++
++function parseDone(chunks: Array<Buffer>): boolean | null {
++  if (chunks.length === 0) return null
++  try {
++    const body = JSON.parse(Buffer.concat(chunks).toString(`utf8`)) as {
++      done?: unknown
++    }
++    return typeof body.done === `boolean` ? body.done : null
++  } catch {
++    return null
++  }
++}
++
++function stringHeader(
++  value: string | Array<string> | undefined
++): string | null {
++  return Array.isArray(value) ? (value[0] ?? null) : (value ?? null)
++}
++
++async function listen(server: Server): Promise<void> {
++  await new Promise<void>((resolve, reject) => {
++    server.once(`error`, reject)
++    server.listen(0, `127.0.0.1`, () => {
++      server.off(`error`, reject)
++      resolve()
++    })
++  })
++}
++
++async function close(server: Server): Promise<void> {
++  await new Promise<void>((resolve, reject) => {
++    server.close((error) => (error ? reject(error) : resolve()))
++    server.closeIdleConnections()
++    server.closeAllConnections()
++  })
++}
+diff --git a/packages/agents-runtime/test/chronicle-process-wake-benchmark.test.ts b/packages/agents-runtime/test/chronicle-process-wake-benchmark.test.ts
+new file mode 100644
+index 000000000..e6408d0ed
+--- /dev/null
++++ b/packages/agents-runtime/test/chronicle-process-wake-benchmark.test.ts
+@@ -0,0 +1,814 @@
++import { createHash, randomUUID } from 'node:crypto'
++import { readFile } from 'node:fs/promises'
++import { createConnection } from 'node:net'
++import { afterAll, describe, expect, it } from 'vitest'
++import { DurableStream } from '@durable-streams/client'
++import { z } from 'zod'
++import { startChronicleGate } from './chronicle-e2e-gate'
++import { runtimeTest } from './runtime-dsl'
++import type {
++  EntityDefinition,
++  StateCollectionProxy,
++  WakeMetrics,
++} from '../src/index'
++
++const chronicleRoot = process.env.CHRONICLE_STREAM_ROOT
++const chronicleRedisUrl = process.env.CHRONICLE_REDIS_URL
++const tokenDir = process.env.CHRONICLE_TOKEN_DIR
++const scenario = process.env.CHRONICLE_BENCH_SCENARIO as
++  | `update-heavy`
++  | `append-only`
++  | `large-inbox`
++  | undefined
++const mode = process.env.CHRONICLE_BENCH_MODE as
++  | `replay`
++  | `snapshot-full-raw-replay`
++  | undefined
++const measuredSamples = Number(process.env.CHRONICLE_BENCH_SAMPLES ?? `1`)
++const warmupSamples = Number(process.env.CHRONICLE_BENCH_WARMUPS ?? `1`)
++const sampleIndexBase = Number(process.env.CHRONICLE_BENCH_INDEX_BASE ?? `0`)
++const phase = process.env.CHRONICLE_BENCH_PHASE ?? `standalone`
++const phaseOrder = process.env.CHRONICLE_BENCH_PHASE_ORDER ?? mode ?? `unknown`
++const configured = Boolean(
++  chronicleRoot && chronicleRedisUrl && tokenDir && scenario && mode
++)
++const suite = configured ? describe : describe.skip
++
++const readToken = async (name: string): Promise<string> =>
++  configured
++    ? (await readFile(`${tokenDir}/.${name}-token`, `utf8`)).trim()
++    : ``
++const runtimeToken = await readToken(`writer`)
++const publisherToken = await readToken(`publisher`)
++const root = configured ? new URL(chronicleRoot!) : null
++const gate = root ? await startChronicleGate(root) : null
++const redisUrl = configured ? new URL(chronicleRedisUrl!) : null
++if (
++  redisUrl &&
++  ![`127.0.0.1`, `localhost`, `::1`].includes(redisUrl.hostname)
++) {
++  throw new Error(`Refusing non-loopback Chronicle Redis URL`)
++}
++
++type Scenario = NonNullable<typeof scenario>
++
++interface InputPayload {
++  seq: number
++  measure?: boolean
++  data?: string
++}
++
++const counterSchema = z.object({
++  key: z.string(),
++  count: z.number().int(),
++  lastRawCount: z.number().int(),
++  lastRawSum: z.number().int(),
++  lastRawIds: z.array(z.number().int()),
++})
++const itemSchema = z.object({ key: z.string(), seq: z.number().int() })
++type Counter = z.infer<typeof counterSchema>
++type Item = z.infer<typeof itemSchema>
++interface HydratedObservation {
++  main: Counter | null
++  counters: Array<{ key: string; count: number }>
++  items: Array<{ key: string; seq: number }>
++}
++
++const metricWaiters = new Map<string, Array<(metrics: WakeMetrics) => void>>()
++const wakeCounts = new Map<string, number>()
++const hydratedObservations = new Map<string, HydratedObservation>()
++let nextWebhookHold:
++  | {
++      arrived: Promise<void>
++      markArrived: () => void
++      released: Promise<void>
++      release: () => void
++    }
++  | undefined
++
++function waitForWakeMetrics(
++  entityUrl: string,
++  timeoutMs: number
++): Promise<WakeMetrics> {
++  return new Promise((resolve, reject) => {
++    const waiters = metricWaiters.get(entityUrl) ?? []
++    const timer = setTimeout(() => {
++      const index = waiters.indexOf(onMetrics)
++      if (index >= 0) waiters.splice(index, 1)
++      reject(new Error(`Timed out waiting for wake metrics for ${entityUrl}`))
++    }, timeoutMs)
++    const onMetrics = (metrics: WakeMetrics) => {
++      clearTimeout(timer)
++      resolve(metrics)
++    }
++    waiters.push(onMetrics)
++    metricWaiters.set(entityUrl, waiters)
++  })
++}
++
++function fnv1a32(value: string): number {
++  let hash = 0x811c9dc5
++  for (const byte of Buffer.from(value)) {
++    hash ^= byte
++    hash = Math.imul(hash, 0x01000193) >>> 0
++  }
++  return hash
++}
++
++async function readLeaseState(subscriptionId: string): Promise<{
++  phase: string | null
++  holder: string | null
++  leaseUntilNs: string | null
++}> {
++  if (!redisUrl) throw new Error(`CHRONICLE_REDIS_URL is required`)
++  if (redisUrl.username || redisUrl.password) {
++    throw new Error(`Fixture Redis URL must not contain credentials`)
++  }
++  const slot = fnv1a32(subscriptionId) % 256
++  const key = `ds:{__ds:${slot}}:sub:${subscriptionId}`
++  const parts = [`HMGET`, key, `phase`, `holder`, `lease_until_ns`]
++  const command = parts
++    .map((part) => `$${Buffer.byteLength(part)}\r\n${part}\r\n`)
++    .join(``)
++  const payload = `*${parts.length}\r\n${command}`
++  return new Promise((resolve, reject) => {
++    const socket = createConnection({
++      host: redisUrl.hostname,
++      port: Number(redisUrl.port || `6379`),
++    })
++    let response = ``
++    socket.setTimeout(5_000)
++    socket.on(`connect`, () => socket.write(payload))
++    socket.on(`data`, (chunk) => {
++      response += chunk.toString(`utf8`)
++      const values = parseRedisBulkArray(response)
++      if (!values) return
++      socket.end()
++      resolve({
++        phase: values[0] ?? null,
++        holder: values[1] ?? null,
++        leaseUntilNs: values[2] ?? null,
++      })
++    })
++    socket.on(`timeout`, () =>
++      socket.destroy(new Error(`Redis read timed out`))
++    )
++    socket.on(`error`, reject)
++  })
++}
++
++function parseRedisBulkArray(response: string): Array<string | null> | null {
++  const lines = response.split(`\r\n`)
++  if (!lines[0]?.startsWith(`*`)) return null
++  const count = Number(lines[0].slice(1))
++  const values: Array<string | null> = []
++  let index = 1
++  for (let item = 0; item < count; item++) {
++    const lengthLine = lines[index++]
++    if (lengthLine === undefined) return null
++    const length = Number(lengthLine.slice(1))
++    if (length === -1) {
++      values.push(null)
++      continue
++    }
++    const value = lines[index++]
++    if (value === undefined || Buffer.byteLength(value) !== length) return null
++    values.push(value)
++  }
++  return values
++}
++
++function holdNextWebhook() {
++  let markArrived!: () => void
++  let release!: () => void
++  const hold = {
++    arrived: new Promise<void>((resolve) => {
++      markArrived = resolve
++    }),
++    released: new Promise<void>((resolve) => {
++      release = resolve
++    }),
++    markArrived,
++    release,
++  }
++  nextWebhookHold = hold
++  return hold
++}
++
++function inboxPayloads(events: Array<{ type: string; value?: unknown }>) {
++  return events
++    .filter((event) => event.type === `inbox`)
++    .map((event) => (event.value as { payload?: unknown })?.payload)
++    .filter(
++      (payload): payload is InputPayload =>
++        Boolean(payload) &&
++        typeof payload === `object` &&
++        Number.isInteger((payload as InputPayload).seq)
++    )
++}
++
++function latestCounter(
++  events: Array<{ type: string; key?: string; value?: unknown }>
++): Counter | undefined {
++  return events
++    .filter((event) => event.type === `state:counters` && event.key === `main`)
++    .at(-1)?.value as Counter | undefined
++}
++
++function sampleSize(selected: Scenario): number {
++  switch (selected) {
++    case `update-heavy`:
++      return Number(process.env.CHRONICLE_BENCH_UPDATE_EVENTS ?? `500`)
++    case `append-only`:
++      return Number(process.env.CHRONICLE_BENCH_APPEND_EVENTS ?? `300`)
++    case `large-inbox`:
++      return Number(process.env.CHRONICLE_BENCH_INBOX_EVENTS ?? `100`)
++  }
++}
++
++async function appendWorkloadHistory(
++  stream: DurableStream,
++  selected: Exclude<Scenario, `large-inbox`>,
++  count: number
++): Promise<void> {
++  const events: Array<Record<string, unknown>> = []
++  if (selected === `update-heavy`) {
++    const keyCount = Math.min(16, count)
++    for (let seq = 0; seq < count; seq++) {
++      const key = `work-${seq % keyCount}`
++      events.push({
++        type: `state:counters`,
++        key,
++        value: {
++          key,
++          count: seq,
++          lastRawCount: 0,
++          lastRawSum: 0,
++          lastRawIds: [],
++        },
++        headers: { operation: seq < keyCount ? `insert` : `update` },
++      })
++    }
++  } else {
++    for (let seq = 0; seq < count; seq++) {
++      events.push({
++        type: `state:items`,
++        key: `history-item-${seq}`,
++        value: { key: `history-item-${seq}`, seq },
++        headers: { operation: `insert` },
++      })
++    }
++  }
++  await stream.append(events.map((event) => JSON.stringify(event)).join(`,`))
++}
++
++function normalizedWorkload(selected: Scenario, count: number) {
++  const inputs =
++    selected === `large-inbox`
++      ? Array.from({ length: count + 1 }, (_, seq) => ({
++          seq,
++          measure: seq === count,
++          dataBytes: 8192,
++        }))
++      : [
++          { seq: 0, measure: false, dataBytes: 0 },
++          { seq: count, measure: true, dataBytes: 0 },
++        ]
++  const stateEvents =
++    selected === `update-heavy`
++      ? Array.from({ length: count }, (_, seq) => ({
++          operation: seq < Math.min(16, count) ? `insert` : `update`,
++          key: `work-${seq % Math.min(16, count)}`,
++          seq,
++        }))
++      : selected === `append-only`
++        ? Array.from({ length: count }, (_, seq) => ({
++            operation: `insert`,
++            key: `history-item-${seq}`,
++            seq,
++          }))
++        : []
++  return { selected, inputs, stateEvents }
++}
++
++function sourceHash(selected: Scenario, count: number): string {
++  const normalized = normalizedWorkload(selected, count)
++  return createHash(`sha256`).update(JSON.stringify(normalized)).digest(`hex`)
++}
++
++function hasExpectedHydratedState(
++  selected: Scenario,
++  count: number,
++  observation: HydratedObservation | undefined
++): boolean {
++  if (!observation) return false
++  if (
++    observation.main?.count !== 1 ||
++    observation.main.lastRawCount !== 1 ||
++    observation.main.lastRawSum !== 0 ||
++    JSON.stringify(observation.main.lastRawIds) !== JSON.stringify([0])
++  ) {
++    return false
++  }
++  if (selected === `large-inbox`) {
++    return observation.counters.length === 0 && observation.items.length === 0
++  }
++  const items = new Map(observation.items.map((item) => [item.key, item.seq]))
++  const counters = new Map(
++    observation.counters.map((counter) => [counter.key, counter.count])
++  )
++  if (selected === `append-only`) {
++    const expected = new Map([
++      ...Array.from(
++        { length: count },
++        (_, seq) => [`history-item-${seq}`, seq] as const
++      ),
++      [`item-0`, 0] as const,
++    ])
++    return (
++      items.size === expected.size &&
++      [...expected].every(([key, seq]) => items.get(key) === seq) &&
++      counters.size === 0
++    )
++  }
++  const keyCount = Math.min(16, count)
++  return (
++    counters.size === keyCount &&
++    items.size === 0 &&
++    Array.from({ length: keyCount }, (_, index) => index).every((index) => {
++      const expectedSeq = count - 1 - ((count - 1 - index) % keyCount)
++      return counters.get(`work-${index}`) === expectedSeq
++    })
++  )
++}
++
++suite(`real processWake cold activation benchmark`, () => {
++  const snapshots = mode === `snapshot-full-raw-replay`
++  const runtime = runtimeTest({
++    durableStreamsUrl: (
++      gate?.streamRoot ?? `http://127.0.0.1:1/v1/stream/`
++    ).replace(/\/$/, ``),
++    durableStreamsBearer: runtimeToken,
++    resetBackend: false,
++    onWakeMetrics(metrics) {
++      wakeCounts.set(
++        metrics.entityUrl,
++        (wakeCounts.get(metrics.entityUrl) ?? 0) + 1
++      )
++      metricWaiters.get(metrics.entityUrl)?.shift()?.(metrics)
++    },
++    async beforeWebhook() {
++      const hold = nextWebhookHold
++      if (!hold) return
++      nextWebhookHold = undefined
++      hold.markArrived()
++      await hold.released
++    },
++    ...(snapshots
++      ? {
++          projectionSnapshots: {
++            projectionVersion: `process-wake-benchmark-v1`,
++            rawInputRecovery: `full-replay` as const,
++            publisherHeaders: () => ({
++              authorization: `Bearer ${publisherToken}`,
++            }),
++            minReplayEvents: 0,
++            minReplayMs: 0,
++            minPublishIntervalMs: 0,
++            missBackoffMs: 0,
++          },
++        }
++      : {}),
++  })
++
++  const definition: EntityDefinition = {
++    state: {
++      counters: { schema: counterSchema, primaryKey: `key` },
++      items: { schema: itemSchema, primaryKey: `key` },
++    },
++    async handler(ctx) {
++      const payloads = inboxPayloads(ctx.events)
++      const counters = (
++        ctx.state as { counters: StateCollectionProxy<Counter> }
++      ).counters
++      const items = (ctx.state as { items: StateCollectionProxy<Item> }).items
++      const current = counters.get(`main`)
++      if (payloads.some((payload) => payload.measure)) {
++        hydratedObservations.set(ctx.entityUrl, {
++          main: current
++            ? {
++                key: current.key,
++                count: current.count,
++                lastRawCount: current.lastRawCount,
++                lastRawSum: current.lastRawSum,
++                lastRawIds: [...current.lastRawIds],
++              }
++            : null,
++          counters: counters.toArray
++            .filter((row) => row.key !== `main`)
++            .map((row) => ({ key: row.key, count: row.count })),
++          items: items.toArray.map((row) => ({ key: row.key, seq: row.seq })),
++        })
++      }
++      const maxSeq = payloads.reduce(
++        (maximum, payload) => Math.max(maximum, payload.seq),
++        current ? current.count - 1 : -1
++      )
++      const rawSum = payloads.reduce((sum, payload) => sum + payload.seq, 0)
++      const rawIds = payloads.map((payload) => payload.seq)
++
++      if (current) {
++        counters.update(`main`, (draft) => {
++          draft.count = Math.max(draft.count, maxSeq + 1)
++          draft.lastRawCount = payloads.length
++          draft.lastRawSum = rawSum
++          draft.lastRawIds = rawIds
++        })
++      } else {
++        counters.insert({
++          key: `main`,
++          count: maxSeq + 1,
++          lastRawCount: payloads.length,
++          lastRawSum: rawSum,
++          lastRawIds: rawIds,
++        })
++      }
++
++      if ((ctx.args as { scenario?: Scenario }).scenario === `append-only`) {
++        for (const payload of payloads) {
++          const key = `item-${payload.seq}`
++          if (!items.get(key)) items.insert({ key, seq: payload.seq })
++        }
++      }
++
++      if (payloads.some((payload) => payload.measure)) {
++        ctx.replyText(`measured:${maxSeq + 1}`)
++      }
++    },
++  }
++  runtime.define(`e2e`, definition)
++
++  const disposables: Array<{ streamPath: string; subscriptionId: string }> = []
++
++  afterAll(async () => {
++    try {
++      await runtime.cleanup()
++      const headers = { authorization: `Bearer ${runtimeToken}` }
++      for (const disposable of disposables) {
++        await fetch(
++          new URL(
++            `__ds/subscriptions/${encodeURIComponent(disposable.subscriptionId)}`,
++            root!
++          ),
++          { method: `DELETE`, headers }
++        )
++        await fetch(new URL(disposable.streamPath, root!), {
++          method: `DELETE`,
++          headers,
++        })
++      }
++    } finally {
++      await gate?.stop()
++    }
++  }, 60_000)
++
++  it(
++    `records fixed-history paired-mode samples`,
++    async () => {
++      const count = sampleSize(scenario!)
++      const expectedRawIds =
++        scenario === `large-inbox`
++          ? Array.from({ length: count + 1 }, (_, seq) => seq)
++          : [0, count]
++      const expectedRawSum = expectedRawIds.reduce((sum, seq) => sum + seq, 0)
++      const totalSamples = warmupSamples + measuredSamples
++
++      for (let sampleIndex = 0; sampleIndex < totalSamples; sampleIndex++) {
++        const warmup = sampleIndex < warmupSamples
++        const logicalSampleIndex = warmup
++          ? sampleIndex - warmupSamples
++          : sampleIndexBase + sampleIndex - warmupSamples
++        const id = `bench-${scenario}-${randomUUID()}`
++        const entityUrl = `/e2e/${id}`
++        const firstPayload: InputPayload = {
++          seq: 0,
++          ...(scenario === `large-inbox` ? { data: `x`.repeat(8192) } : {}),
++        }
++        const initialWake = waitForWakeMetrics(entityUrl, 120_000)
++        const entity = await runtime.spawn(
++          `e2e`,
++          id,
++          { scenario },
++          { initialMessage: firstPayload }
++        )
++        const initialMetrics = await initialWake
++        expect(initialMetrics.succeeded).toBe(true)
++        expect(initialMetrics.doneAckCompleted).toBe(true)
++        await entity.waitForSettled(120_000)
++
++        const streamPath = `e2e/${id}/main`
++        const stream = new DurableStream({
++          url: new URL(streamPath, root!).toString(),
++          headers: { authorization: `Bearer ${runtimeToken}` },
++          contentType: `application/json`,
++        })
++        if (scenario !== `large-inbox`) {
++          const historyWake = waitForWakeMetrics(entityUrl, 120_000)
++          await appendWorkloadHistory(stream, scenario!, count)
++          const historyMetrics = await historyWake
++          expect(historyMetrics.succeeded).toBe(true)
++          expect(historyMetrics.doneAckCompleted).toBe(true)
++          await entity.waitForSettled(120_000)
++        }
++        const subscriptionId = `webhook:e2e:${createHash(`sha256`)
++          .update(entity.entityUrl)
++          .digest(`hex`)
++          .slice(0, 16)}`
++        disposables.push({ streamPath, subscriptionId })
++
++        let image = null
++        if (snapshots) {
++          const expectedImageHead = await stream.head()
++          for (
++            let attempt = 0;
++            image?.offset !==
++              (expectedImageHead.exists ? expectedImageHead.offset : null) &&
++            attempt < 500;
++            attempt++
++          ) {
++            image = await stream.loadSnapshot(`process-wake-benchmark-v1`, {
++              expectedContentType: `application/vnd.electric.entity-image+json`,
++            })
++            if (
++              image?.offset !==
++              (expectedImageHead.exists ? expectedImageHead.offset : null)
++            ) {
++              await new Promise((resolve) => setTimeout(resolve, 10))
++            }
++          }
++          expect(image).not.toBeNull()
++          expect(image?.offset).toBe(
++            expectedImageHead.exists ? expectedImageHead.offset : null
++          )
++        }
++
++        let pendingDelivery: ReturnType<typeof holdNextWebhook> | undefined
++        if (scenario === `large-inbox`) {
++          pendingDelivery = holdNextWebhook()
++          await entity.send({ seq: 1, data: `x`.repeat(8192) })
++          await pendingDelivery.arrived
++          for (let seq = 2; seq <= count; seq++) {
++            await entity.send({
++              seq,
++              measure: seq === count,
++              data: `x`.repeat(8192),
++            })
++          }
++        }
++
++        gate!.reset()
++        const capture = gate!.startCapture()
++        const wakeCountBefore = wakeCounts.get(entityUrl) ?? 0
++        const measuredWake = waitForWakeMetrics(
++          entityUrl,
++          Number(process.env.CHRONICLE_BENCH_ACK_TIMEOUT_MS ?? `120000`)
++        )
++        const activationStartedAtUnixMs = Date.now()
++        if (pendingDelivery) {
++          pendingDelivery.release()
++        } else {
++          await entity.send({ seq: count, measure: true })
++        }
++        const measured = await measuredWake
++        const timedRequests = capture.stop()
++        const leaseState = await readLeaseState(subscriptionId)
++
++        let publication = null
++        if (snapshots) {
++          try {
++            publication = await gate!.waitFor(
++              (request) =>
++                request.method === `PUT` &&
++                request.snapshot === `process-wake-benchmark-v1`,
++              2_000
++            )
++          } catch {
++            publication = null
++          }
++        }
++
++        // Everything below this point is semantic validation, excluded from
++        // activation timing and the frozen request capture above.
++        const inputHead = await stream.head()
++        expect(inputHead.exists).toBe(true)
++        if (!inputHead.exists || !inputHead.offset) {
++          throw new Error(`Measured input stream has no head offset`)
++        }
++        const inputOffset = inputHead.offset
++        const finalHead = await stream.head()
++
++        const history = await entity.history()
++        const finalCounter = latestCounter(history.events)
++        const outputDeltas = history.events
++          .filter((event) => event.type === `text_delta`)
++          .map((event) => (event.value as { delta?: unknown })?.delta)
++        const finalAck = await readAck(
++          root!,
++          runtimeToken,
++          subscriptionId,
++          streamPath
++        )
++        const assertions = {
++          state:
++            finalCounter?.count === count + 1 &&
++            JSON.stringify(finalCounter.lastRawIds) ===
++              JSON.stringify(expectedRawIds),
++          hydratedState: hasExpectedHydratedState(
++            scenario!,
++            count,
++            hydratedObservations.get(entityUrl)
++          ),
++          rawInputs:
++            finalCounter?.lastRawCount === expectedRawIds.length &&
++            finalCounter.lastRawSum === expectedRawSum &&
++            JSON.stringify(finalCounter.lastRawIds) ===
++              JSON.stringify(expectedRawIds),
++          persistedOutput: outputDeltas.includes(`measured:${count + 1}`),
++          exactPersistedOutputs:
++            JSON.stringify(outputDeltas) ===
++            JSON.stringify([`measured:${count + 1}`]),
++          activationCount:
++            (wakeCounts.get(entityUrl) ?? 0) - wakeCountBefore === 1,
++          ack: finalAck === (finalHead.exists ? finalHead.offset : null),
++          release:
++            measured.doneAckCompleted === true &&
++            measured.succeeded === true &&
++            leaseState.phase === `idle` &&
++            leaseState.holder === `0` &&
++            leaseState.leaseUntilNs === `0`,
++          signal: null,
++          cancellation: null,
++        }
++        expect(assertions.state, JSON.stringify(finalCounter)).toBe(true)
++        expect(assertions.rawInputs, JSON.stringify(finalCounter)).toBe(true)
++        expect(assertions.hydratedState).toBe(true)
++        expect(assertions.persistedOutput).toBe(true)
++        expect(assertions.exactPersistedOutputs).toBe(true)
++        expect(assertions.activationCount).toBe(true)
++        expect(assertions.ack).toBe(true)
++        expect(assertions.release).toBe(true)
++
++        const traffic = summarizeTraffic(timedRequests, image?.offset ?? null)
++        const measuredLookup = timedRequests.find(
++          (request) =>
++            request.method === `GET` &&
++            request.snapshot === `process-wake-benchmark-v1`
++        )
++        process.stdout.write(
++          `${JSON.stringify({
++            kind: `chronicle-process-wake-benchmark-sample`,
++            schemaVersion: 1,
++            scenario,
++            mode,
++            phase,
++            phaseOrder,
++            sampleIndex: logicalSampleIndex,
++            warmup,
++            status: `passed`,
++            entityUrl,
++            sourceHash: sourceHash(scenario!, count),
++            sourceHashScope: `normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash`,
++            sourceEventCount:
++              normalizedWorkload(scenario!, count).inputs.length +
++              normalizedWorkload(scenario!, count).stateEvents.length,
++            activation: {
++              scope: `after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation`,
++              startedAtUnixMs: activationStartedAtUnixMs,
++              totalMs: measured.totalMs,
++              claimMs: measured.claimMs,
++              preloadMs: measured.preloadMs,
++              handlerMs: measured.handlerMs,
++            },
++            snapshot: {
++              lookup: measuredLookup
++                ? measuredLookup.status === 200
++                  ? `hit`
++                  : `miss-or-error`
++                : `not-requested`,
++              imageBytes: measuredLookup?.responseBytes ?? null,
++              cut: measuredLookup?.streamSnapshotOffset ?? null,
++              publication: publication
++                ? {
++                    status: publication.status,
++                    durationMs: publication.durationMs,
++                    requestBytes: publication.requestBytes,
++                  }
++                : null,
++            },
++            traffic,
++            resources: {
++              scope: `combined runtime handler and embedded agents-server Node process`,
++              cpuUserMicros: measured.cpuUserMicros,
++              cpuSystemMicros: measured.cpuSystemMicros,
++              heapBeforeBytes: measured.heapBeforeBytes,
++              heapAfterBytes: measured.heapAfterBytes,
++              peakHeapBytes: measured.peakHeapBytes,
++              rssBeforeBytes: measured.rssBeforeBytes,
++              rssAfterBytes: measured.rssAfterBytes,
++              peakRssBytes: measured.peakRssBytes,
++              samplingIntervalMs: measured.samplingIntervalMs,
++            },
++            offsets: {
++              inputHead: inputOffset,
++              finalHead: finalHead.exists ? finalHead.offset : null,
++              acked: finalAck,
++            },
++            leaseState,
++            assertions,
++            validationTimed: false,
++          })}\n`
++        )
++      }
++    },
++    30 * 60_000
++  )
++})
++
++async function readAck(
++  streamRoot: URL,
++  token: string,
++  subscriptionId: string,
++  streamPath: string
++): Promise<string | null> {
++  const response = await fetch(
++    new URL(
++      `__ds/subscriptions/${encodeURIComponent(subscriptionId)}`,
++      streamRoot
++    ),
++    { headers: { authorization: `Bearer ${token}` } }
++  )
++  if (!response.ok) return null
++  const subscription = (await response.json()) as {
++    streams?: Array<{ path?: string; acked_offset?: string }>
++  }
++  return (
++    subscription.streams?.find((entry) => entry.path === streamPath)
++      ?.acked_offset ?? null
++  )
++}
++
++function summarizeTraffic(
++  requests: Array<{
++    method: string
++    search: string
++    snapshot: string | null
++    requestBytes: number
++    responseBytes: number
++  }>,
++  imageCut: string | null
++) {
++  const categories = {
++    snapshotLookup: { requests: 0, requestBytes: 0, responseBytes: 0 },
++    snapshotPublication: {
++      requests: 0,
++      requestBytes: 0,
++      responseBytes: 0,
++    },
++    fullReplay: { requests: 0, requestBytes: 0, responseBytes: 0 },
++    suffix: { requests: 0, requestBytes: 0, responseBytes: 0 },
++    other: { requests: 0, requestBytes: 0, responseBytes: 0 },
++  }
++  for (const request of requests) {
++    const query = new URLSearchParams(request.search)
++    const category =
++      request.snapshot && request.method === `GET`
++        ? categories.snapshotLookup
++        : request.snapshot
++          ? categories.snapshotPublication
++          : request.method === `GET` && query.get(`offset`) === `-1`
++            ? categories.fullReplay
++            : request.method === `GET` &&
++                imageCut &&
++                query.get(`offset`) === imageCut
++              ? categories.suffix
++              : categories.other
++    category.requests += 1
++    category.requestBytes += request.requestBytes
++    category.responseBytes += request.responseBytes
++  }
++  return {
++    scope: `single-counted requests crossing the runtime/agents-server Chronicle gate during the timed interval; direct validation reads are excluded`,
++    total: {
++      requests: requests.length,
++      requestBytes: requests.reduce(
++        (sum, request) => sum + request.requestBytes,
++        0
++      ),
++      responseBytes: requests.reduce(
++        (sum, request) => sum + request.responseBytes,
++        0
++      ),
++    },
++    ...categories,
++  }
++}
+diff --git a/packages/agents-runtime/test/chronicle-process-wake-e2e.test.ts b/packages/agents-runtime/test/chronicle-process-wake-e2e.test.ts
+new file mode 100644
+index 000000000..fb7858ab0
+--- /dev/null
++++ b/packages/agents-runtime/test/chronicle-process-wake-e2e.test.ts
+@@ -0,0 +1,508 @@
++import { readFile } from 'node:fs/promises'
++import { createHash, randomUUID } from 'node:crypto'
++import { afterAll, describe, expect, it } from 'vitest'
++import { DurableStream } from '@durable-streams/client'
++import { z } from 'zod'
++import { startChronicleGate } from './chronicle-e2e-gate'
++import { runtimeTest } from './runtime-dsl'
++import type { EntityDefinition, StateCollectionProxy } from '../src/index'
++
++const chronicleRoot = process.env.CHRONICLE_STREAM_ROOT
++const callbackGateRoot = process.env.CHRONICLE_CALLBACK_GATE_URL
++const tokenDir = process.env.CHRONICLE_TOKEN_DIR
++const enabled = Boolean(chronicleRoot && callbackGateRoot && tokenDir)
++const snapshotEnabled = process.env.CHRONICLE_E2E_SNAPSHOTS !== `off`
++const readToken = async (name: string): Promise<string> =>
++  enabled ? (await readFile(`${tokenDir}/.${name}-token`, `utf8`)).trim() : ``
++const runtimeToken = await readToken(`writer`)
++const publisherToken = await readToken(`publisher`)
++const root = enabled ? new URL(chronicleRoot!) : null
++const callbackGate = enabled ? new URL(callbackGateRoot!) : null
++if (
++  callbackGate &&
++  ![`127.0.0.1`, `localhost`, `::1`].includes(callbackGate.hostname)
++) {
++  throw new Error(`Refusing non-loopback Chronicle callback gate`)
++}
++const gate = root ? await startChronicleGate(root) : null
++const cancellationGates = new Map<
++  string,
++  {
++    started: Promise<void>
++    markStarted: () => void
++    observed: Promise<void>
++    markObserved: () => void
++  }
++>()
++const cancellationHandled = new Set<string>()
++const redeliveryAttempts = new Map<string, number>()
++const externalEffectAttempts = new Map<string, number>()
++
++const suite = enabled ? describe : describe.skip
++
++suite(`processWake against Chronicle`, () => {
++  const runtimeOptions = {
++    durableStreamsUrl: (
++      gate?.streamRoot ?? `http://127.0.0.1:1/v1/stream/`
++    ).replace(/\/$/, ``),
++    durableStreamsBearer: runtimeToken,
++    resetBackend: false,
++  }
++  const runtime = runtimeTest({
++    ...runtimeOptions,
++    ...(snapshotEnabled
++      ? {
++          projectionSnapshots: {
++            projectionVersion: `process-wake-e2e-v1`,
++            rawInputRecovery: `full-replay` as const,
++            publisherHeaders: () => ({
++              authorization: `Bearer ${publisherToken}`,
++            }),
++            minReplayEvents: 0,
++            minReplayMs: 0,
++            minPublishIntervalMs: 0,
++            missBackoffMs: 0,
++          },
++        }
++      : {}),
++  })
++
++  const stateSchema = z.object({
++    key: z.string(),
++    count: z.number().int(),
++    eventTypes: z.array(z.string()),
++    payloads: z.array(z.unknown()),
++  })
++  type ActivationState = z.infer<typeof stateSchema>
++
++  const definition: EntityDefinition = {
++    state: {
++      activation: { schema: stateSchema, primaryKey: `key` },
++    },
++    async handler(ctx, wake) {
++      const shouldCrash = ctx.events.some(
++        (event) =>
++          event.type === `inbox` &&
++          (event.value as { payload?: { control?: unknown } })?.payload
++            ?.control === `crash`
++      )
++      if (shouldCrash) {
++        const attempt = (redeliveryAttempts.get(ctx.entityUrl) ?? 0) + 1
++        redeliveryAttempts.set(ctx.entityUrl, attempt)
++        externalEffectAttempts.set(
++          ctx.entityUrl,
++          (externalEffectAttempts.get(ctx.entityUrl) ?? 0) + 1
++        )
++        if (attempt === 2) ctx.replyText(`redelivered`)
++        return
++      }
++
++      const shouldBlock = ctx.events.some(
++        (event) =>
++          event.type === `inbox` &&
++          (event.value as { payload?: { control?: unknown } })?.payload
++            ?.control === `block`
++      )
++      const cancellationGate = cancellationGates.get(ctx.entityUrl)
++      if (shouldBlock && cancellationHandled.has(ctx.entityUrl)) return
++      if (shouldBlock && cancellationGate) {
++        cancellationGate.markStarted()
++        if (!ctx.signal.aborted) {
++          await new Promise<void>((resolve) =>
++            ctx.signal.addEventListener(`abort`, () => resolve(), {
++              once: true,
++            })
++          )
++        }
++        cancellationHandled.add(ctx.entityUrl)
++        cancellationGate.markObserved()
++        return
++      }
++
++      const activation = (
++        ctx.state as { activation: StateCollectionProxy<ActivationState> }
++      ).activation
++      const existing = activation.get(`result`)
++      const eventTypes = ctx.events.map((event) => event.type)
++      const payloads = ctx.events
++        .filter((event) => event.type === `inbox`)
++        .map((event) => (event.value as { payload?: unknown })?.payload)
++      if (existing) {
++        activation.update(`result`, (draft) => {
++          draft.count += 1
++          draft.eventTypes.push(...eventTypes)
++          draft.payloads.push(...payloads)
++        })
++      } else {
++        activation.insert({
++          key: `result`,
++          count: 1,
++          eventTypes,
++          payloads,
++        })
++      }
++      ctx.replyText(`handled:${wake.type}`)
++    },
++  }
++  runtime.define(`e2e`, definition)
++
++  const disposables: Array<{
++    entityUrl: string
++    streamPath: string
++    subscriptionId: string
++  }> = []
++
++  afterAll(async () => {
++    try {
++      if (root) {
++        const headers = { authorization: `Bearer ${runtimeToken}` }
++        for (const disposable of disposables) {
++          const subscriptionDelete = await fetch(
++            new URL(
++              `__ds/subscriptions/${encodeURIComponent(disposable.subscriptionId)}`,
++              root
++            ),
++            { method: `DELETE`, headers }
++          )
++          expect([200, 204, 404]).toContain(subscriptionDelete.status)
++        }
++        await runtime.cleanup()
++        for (const disposable of disposables) {
++          const streamDelete = await fetch(
++            new URL(disposable.streamPath, root),
++            {
++              method: `DELETE`,
++              headers,
++            }
++          )
++          expect([200, 204, 404]).toContain(streamDelete.status)
++        }
++      }
++    } finally {
++      await runtime.cleanup()
++      await gate?.stop()
++    }
++  }, 30_000)
++
++  it(`recovers a second real webhook activation from an image and acks it`, async () => {
++    const id = `activation-${randomUUID()}`
++    const entity = await runtime.spawn(`e2e`, id, {}, { initialMessage: `one` })
++    await entity.waitForOperation(`state:activation`, `insert`, {
++      timeoutMs: 30_000,
++    })
++    const firstHistory = await entity.waitForSettled(30_000)
++
++    const resultEvent = firstHistory.find(
++      `state:activation`,
++      (event) => event.key === `result`
++    )
++    expect(resultEvent?.value).toMatchObject({
++      count: 1,
++      payloads: [`one`],
++    })
++    expect(
++      firstHistory.find(`text_delta`, (event) =>
++        Object.is((event.value as { delta?: unknown })?.delta, `handled:inbox`)
++      )
++    ).toBeDefined()
++
++    const streamPath = `e2e/${id}/main`
++    const stream = new DurableStream({
++      url: new URL(streamPath, root!).toString(),
++      headers: { authorization: `Bearer ${runtimeToken}` },
++      contentType: `application/json`,
++    })
++    const head = await stream.head()
++    expect(head.exists).toBe(true)
++
++    const subscriptionId = `webhook:e2e:${createHash(`sha256`)
++      .update(entity.entityUrl)
++      .digest(`hex`)
++      .slice(0, 16)}`
++    disposables.push({
++      entityUrl: entity.entityUrl,
++      streamPath,
++      subscriptionId,
++    })
++    const subscriptionResponse = await fetch(
++      new URL(
++        `__ds/subscriptions/${encodeURIComponent(subscriptionId)}`,
++        root!
++      ),
++      { headers: { authorization: `Bearer ${runtimeToken}` } }
++    )
++    expect(subscriptionResponse.status).toBe(200)
++    const subscription = (await subscriptionResponse.json()) as {
++      streams?: Array<{ path?: string; acked_offset?: string }>
++    }
++    const subscribed = subscription.streams?.find(
++      (entry) => entry.path === streamPath
++    )
++    expect(subscribed?.acked_offset).toBe(head.exists ? head.offset : undefined)
++
++    let snapshot = null
++    if (snapshotEnabled) {
++      snapshot = await stream.loadSnapshot(`process-wake-e2e-v1`, {
++        expectedContentType: `application/vnd.electric.entity-image+json`,
++      })
++      for (let attempt = 0; !snapshot && attempt < 100; attempt++) {
++        await new Promise((resolve) => setTimeout(resolve, 10))
++        snapshot = await stream.loadSnapshot(`process-wake-e2e-v1`, {
++          expectedContentType: `application/vnd.electric.entity-image+json`,
++        })
++      }
++      expect(snapshot).not.toBeNull()
++      expect(snapshot?.offset).toBe(head.exists ? head.offset : undefined)
++    }
++
++    gate!.reset()
++    await entity.send(`two`)
++    await entity.waitForOperation(`state:activation`, `update`, {
++      timeoutMs: 30_000,
++    })
++    const finalHistory = await entity.waitForSettled(30_000)
++    const finalState = finalHistory.find(
++      `state:activation`,
++      (event) =>
++        event.key === `result` &&
++        (event.headers as { operation?: unknown })?.operation === `update`
++    )
++    expect(finalState?.value).toMatchObject({
++      count: 2,
++      eventTypes: [
++        `entity_created`,
++        `inbox`,
++        `entity_created`,
++        `inbox`,
++        `run`,
++        `text`,
++        `text_delta`,
++        `text`,
++        `run`,
++        `state:activation`,
++        `inbox`,
++      ],
++      // The currently approved conservative policy deliberately replays the
++      // complete raw history. The prior inbox therefore appears again in
++      // ctx.events; this is explicit and can erase recovery speedups.
++      payloads: [`one`, `one`, `two`],
++    })
++    expect(
++      finalHistory.events
++        .filter((event) => event.type === `text_delta`)
++        .map((event) => (event.value as { delta?: unknown }).delta)
++    ).toEqual([`handled:inbox`, `handled:inbox`])
++    const snapshotReads = gate!.requests.filter(
++      (request) =>
++        request.method === `GET` && request.snapshot === `process-wake-e2e-v1`
++    )
++    if (snapshotEnabled) {
++      expect(snapshotReads).toContainEqual(
++        expect.objectContaining({
++          status: 200,
++          snapshot: `process-wake-e2e-v1`,
++        })
++      )
++    } else {
++      expect(snapshotReads).toEqual([])
++    }
++
++    const recoveryHead = await stream.head()
++    const finalSubscriptionResponse = await fetch(
++      new URL(
++        `__ds/subscriptions/${encodeURIComponent(subscriptionId)}`,
++        root!
++      ),
++      { headers: { authorization: `Bearer ${runtimeToken}` } }
++    )
++    expect(finalSubscriptionResponse.status).toBe(200)
++    const finalSubscription = (await finalSubscriptionResponse.json()) as {
++      streams?: Array<{ path?: string; acked_offset?: string }>
++    }
++    const finalSubscribed = finalSubscription.streams?.find(
++      (entry) => entry.path === streamPath
++    )
++    expect(finalSubscribed?.acked_offset).toBe(
++      recoveryHead.exists ? recoveryHead.offset : undefined
++    )
++
++    const cancellationGate = makeCancellationGate(entity.entityUrl)
++    await entity.send({ control: `block` })
++    await cancellationGate.started
++    await runtime.signal(entity.entityUrl, `SIGINT`, {
++      reason: `real processWake E2E cancellation`,
++    })
++    await cancellationGate.observed
++    const cancellationHistory = await entity.waitForSettled(30_000)
++    expect(
++      cancellationHistory.events.some(
++        (event) =>
++          event.type === `signal` &&
++          (event.value as { signal?: unknown })?.signal === `SIGINT`
++      )
++    ).toBe(true)
++    expect(
++      cancellationHistory.events
++        .filter((event) => event.type === `text_delta`)
++        .map((event) => (event.value as { delta?: unknown }).delta)
++    ).toEqual([`handled:inbox`, `handled:inbox`])
++    const finalHead = await stream.head()
++    const cancellationAck = await waitForSubscriptionAck(
++      root!,
++      runtimeToken,
++      subscriptionId,
++      streamPath,
++      finalHead.exists ? finalHead.offset : null,
++      30_000
++    )
++    expect(cancellationAck).toBe(finalHead.exists ? finalHead.offset : null)
++
++    await fetch(new URL(`/__fixture/records`, callbackGate!), {
++      method: `DELETE`,
++    })
++    const armFailure = await fetch(
++      new URL(`/__fixture/fail-next-done`, callbackGate!),
++      { method: `POST` }
++    )
++    expect(armFailure.status).toBe(204)
++    runtime.expectWakeError(/Done callback failed \(503\)/)
++    await entity.send({ control: `crash` })
++    const redeliveryHistory = await entity.waitForTypeCount(`text_delta`, 1, {
++      timeoutMs: 90_000,
++      predicate: (event) =>
++        (event.value as { delta?: unknown })?.delta === `redelivered`,
++    })
++    expect(externalEffectAttempts.get(entity.entityUrl)).toBeGreaterThanOrEqual(
++      2
++    )
++    expect(
++      redeliveryHistory.events.filter(
++        (event) =>
++          event.type === `text_delta` &&
++          (event.value as { delta?: unknown })?.delta === `redelivered`
++      )
++    ).toHaveLength(1)
++    const callbackRecords = (await (
++      await fetch(new URL(`/__fixture/records`, callbackGate!))
++    ).json()) as Array<{
++      method?: string
++      pathname?: string
++      done?: boolean | null
++      status?: number | null
++      outcome?: string
++    }>
++    expect(
++      callbackRecords.some(
++        (request) =>
++          request.method === `POST` &&
++          request.pathname?.endsWith(`/callback`) === true &&
++          request.done === true &&
++          request.status === 503 &&
++          request.outcome === `injected-failure`
++      )
++    ).toBe(true)
++    const redeliveryHead = await stream.head()
++    const redeliveryAck = await waitForSubscriptionAck(
++      root!,
++      runtimeToken,
++      subscriptionId,
++      streamPath,
++      redeliveryHead.exists ? redeliveryHead.offset : null,
++      30_000
++    )
++    process.stdout.write(
++      `${JSON.stringify({
++        kind: `chronicle-process-wake-smoke`,
++        mode: snapshotEnabled ? `snapshot-full-raw-replay` : `replay`,
++        entityUrl: entity.entityUrl,
++        streamPath,
++        subscriptionId,
++        headOffset: redeliveryHead.exists ? redeliveryHead.offset : null,
++        ackedOffset: redeliveryAck,
++        snapshot: snapshot
++          ? {
++              hit: true,
++              bytes: snapshot.body.byteLength,
++              cut: snapshot.offset,
++            }
++          : { hit: false },
++        assertions: {
++          state: true,
++          rawInputs: true,
++          persistedOutput: true,
++          ack: true,
++          signal: true,
++          cancellation: true,
++          ackFailureRedelivery: true,
++          exactlyOnceExternalEffectsClaimed: false,
++          recoverySnapshotGet200: snapshotEnabled ? true : null,
++        },
++      })}\n`
++    )
++  }, 120_000)
++})
++
++function makeCancellationGate(entityUrl: string) {
++  let markStarted!: () => void
++  let markObserved!: () => void
++  const gate = {
++    started: new Promise<void>((resolve) => {
++      markStarted = resolve
++    }),
++    markStarted,
++    observed: new Promise<void>((resolve) => {
++      markObserved = resolve
++    }),
++    markObserved,
++  }
++  cancellationGates.set(entityUrl, gate)
++  return gate
++}
++
++async function readSubscriptionAck(
++  streamRoot: URL,
++  token: string,
++  subscriptionId: string,
++  streamPath: string
++): Promise<string | null> {
++  const response = await fetch(
++    new URL(
++      `__ds/subscriptions/${encodeURIComponent(subscriptionId)}`,
++      streamRoot
++    ),
++    { headers: { authorization: `Bearer ${token}` } }
++  )
++  expect(response.status).toBe(200)
++  const subscription = (await response.json()) as {
++    streams?: Array<{ path?: string; acked_offset?: string }>
++  }
++  return (
++    subscription.streams?.find((entry) => entry.path === streamPath)
++      ?.acked_offset ?? null
++  )
++}
++
++async function waitForSubscriptionAck(
++  streamRoot: URL,
++  token: string,
++  subscriptionId: string,
++  streamPath: string,
++  expected: string | null | undefined,
++  timeoutMs: number
++): Promise<string | null> {
++  const started = Date.now()
++  let actual: string | null = null
++  while (Date.now() - started < timeoutMs) {
++    actual = await readSubscriptionAck(
++      streamRoot,
++      token,
++      subscriptionId,
++      streamPath
++    )
++    if (actual === (expected ?? null)) return actual
++    await new Promise((resolve) => setTimeout(resolve, 10))
++  }
++  throw new Error(
++    `Timed out waiting for subscription ack ${expected ?? `(none)`}; received ${actual ?? `(none)`}`
++  )
++}
+diff --git a/packages/agents-runtime/test/run-chronicle-process-wake-benchmark.mjs b/packages/agents-runtime/test/run-chronicle-process-wake-benchmark.mjs
+new file mode 100644
+index 000000000..b3b864073
+--- /dev/null
++++ b/packages/agents-runtime/test/run-chronicle-process-wake-benchmark.mjs
+@@ -0,0 +1,239 @@
++#!/usr/bin/env node
++import { createHash } from 'node:crypto'
++import { readFile, writeFile } from 'node:fs/promises'
++import { spawnSync } from 'node:child_process'
++import { resolve } from 'node:path'
++
++const required = (name) => {
++  const value = process.env[name]
++  if (!value) throw new Error(`${name} is required`)
++  return value
++}
++
++const electricCheckout = resolve(required(`ELECTRIC_CHECKOUT`))
++const durableCheckout = resolve(required(`DURABLE_STREAMS_CHECKOUT`))
++const chronicleBinary = resolve(required(`CHRONICLE_BINARY`))
++const outputPath = resolve(required(`CHRONICLE_BENCH_OUTPUT`))
++const samplesPerPhase = Number(
++  process.env.CHRONICLE_BENCH_SAMPLES_PER_PHASE ?? `15`
++)
++const warmupsPerRun = Number(process.env.CHRONICLE_BENCH_WARMUPS ?? `1`)
++const runtimeDirectory = resolve(electricCheckout, `packages/agents-runtime`)
++const testFile = `test/chronicle-process-wake-benchmark.test.ts`
++const harnessFiles = [
++  testFile,
++  `test/chronicle-e2e-gate.ts`,
++  `test/runtime-dsl.ts`,
++  `test/run-chronicle-process-wake-benchmark.mjs`,
++]
++
++for (const [name, value] of [
++  [`CHRONICLE_BENCH_SAMPLES_PER_PHASE`, samplesPerPhase],
++  [`CHRONICLE_BENCH_WARMUPS`, warmupsPerRun],
++]) {
++  if (!Number.isInteger(value) || value < 0) {
++    throw new Error(`${name} must be a non-negative integer`)
++  }
++}
++if (warmupsPerRun < 1) {
++  throw new Error(`CHRONICLE_BENCH_WARMUPS must be at least 1`)
++}
++
++const scenarios = [`update-heavy`, `append-only`, `large-inbox`]
++const phases = [
++  {
++    name: `replay-first`,
++    indexBase: 0,
++    modes: [`replay`, `snapshot-full-raw-replay`],
++  },
++  {
++    name: `snapshot-first`,
++    indexBase: samplesPerPhase,
++    modes: [`snapshot-full-raw-replay`, `replay`],
++  },
++]
++const samples = []
++const failures = []
++const commands = []
++const frozenBefore = await frozenHashes()
++
++for (const scenario of scenarios) {
++  for (const phase of phases) {
++    for (const mode of phase.modes) {
++      const args = [`test`, `--run`, testFile]
++      const env = {
++        ...process.env,
++        CHRONICLE_BENCH_SCENARIO: scenario,
++        CHRONICLE_BENCH_MODE: mode,
++        CHRONICLE_BENCH_PHASE: phase.name,
++        CHRONICLE_BENCH_PHASE_ORDER: phase.modes.join(`,`),
++        CHRONICLE_BENCH_INDEX_BASE: String(phase.indexBase),
++        CHRONICLE_BENCH_SAMPLES: String(samplesPerPhase),
++        CHRONICLE_BENCH_WARMUPS: String(warmupsPerRun),
++      }
++      const displayCommand = [
++        `CHRONICLE_BENCH_SCENARIO=${scenario}`,
++        `CHRONICLE_BENCH_MODE=${mode}`,
++        `CHRONICLE_BENCH_PHASE=${phase.name}`,
++        `CHRONICLE_BENCH_INDEX_BASE=${phase.indexBase}`,
++        `CHRONICLE_BENCH_SAMPLES=${samplesPerPhase}`,
++        `CHRONICLE_BENCH_WARMUPS=${warmupsPerRun}`,
++        `pnpm ${args.join(` `)}`,
++      ].join(` `)
++      commands.push(displayCommand)
++      process.stderr.write(`${displayCommand}\n`)
++
++      const run = spawnSync(`pnpm`, args, {
++        cwd: runtimeDirectory,
++        env,
++        encoding: `utf8`,
++        maxBuffer: 128 * 1024 * 1024,
++      })
++      const parsed = parseOutput(run.stdout ?? ``)
++      samples.push(...parsed.samples)
++      if (run.status !== 0) {
++        failures.push({
++          scenario,
++          mode,
++          phase: phase.name,
++          exitCode: run.status,
++          signal: run.signal,
++          parsedSamples: parsed.samples.length,
++          stderrTail: (run.stderr ?? ``).split(`\n`).slice(-40).join(`\n`),
++        })
++      }
++    }
++  }
++}
++
++const frozenAfter = await frozenHashes()
++const drift = Object.keys(frozenBefore).filter(
++  (key) => frozenBefore[key] !== frozenAfter[key]
++)
++if (drift.length > 0) {
++  failures.push({ kind: `frozen-input-drift`, changed: drift })
++}
++
++const result = {
++  schemaVersion: 1,
++  kind: `chronicle-process-wake-benchmark-campaign`,
++  generatedAt: new Date().toISOString(),
++  labels: {
++    processStartup: `one fresh Node/Vitest/runtime/agents-server process per scenario/mode/phase run`,
++    activationRecovery: `fresh in-process EntityStreamDB per webhook activation`,
++    memoryScope: `combined runtime handler and embedded agents-server Node process`,
++  },
++  pins: {
++    electric: `bb397424db0e1c153dc356713fd3dfd40315470c`,
++    durableStreams: `461b40267aabd644558f9b19dbb9507dd5f691cf`,
++  },
++  hashes: {
++    electricPatchSha256: frozenBefore.electricPatchSha256,
++    durablePatchSha256: frozenBefore.durablePatchSha256,
++    harnessSha256: frozenBefore.harnessSha256,
++    chronicleBinarySha256: frozenBefore.chronicleBinarySha256,
++    electricImageRepoDigest: process.env.ELECTRIC_IMAGE_REPO_DIGEST || null,
++    electricImageManifest: process.env.ELECTRIC_IMAGE_MANIFEST || null,
++    electricImageConfig: process.env.ELECTRIC_IMAGE_CONFIG || null,
++    before: frozenBefore,
++    after: frozenAfter,
++    drift,
++  },
++  campaign: {
++    scenarios,
++    modes: [`replay`, `snapshot-full-raw-replay`],
++    measuredSamplesPerModeScenario: samplesPerPhase * phases.length,
++    warmupsPerRun,
++    phaseOrders: phases.map((phase) => phase.modes),
++    validationTimed: false,
++  },
++  commands,
++  samples,
++  failures,
++}
++await writeFile(outputPath, `${JSON.stringify(result, null, 2)}\n`)
++process.stderr.write(
++  `wrote ${samples.length} samples and ${failures.length} run failures to ${outputPath}\n`
++)
++if (failures.length > 0) process.exitCode = 1
++
++function parseOutput(stdout) {
++  const samples = []
++  for (const line of stdout.split(`\n`)) {
++    if (!line.startsWith(`{`)) continue
++    let value
++    try {
++      value = JSON.parse(line)
++    } catch {
++      continue
++    }
++    if (value.kind === `chronicle-process-wake-benchmark-sample`) {
++      samples.push(value)
++    }
++  }
++  return { samples }
++}
++
++function trackedDiff(checkout) {
++  const diff = spawnSync(`git`, [`diff`, `--binary`, `HEAD`], {
++    cwd: checkout,
++    encoding: null,
++    maxBuffer: 128 * 1024 * 1024,
++  })
++  if (diff.status !== 0) throw new Error(`git diff failed in ${checkout}`)
++  return diff.stdout
++}
++
++async function patchHash(checkout) {
++  const hash = createHash(`sha256`).update(trackedDiff(checkout))
++  const untracked = spawnSync(
++    `git`,
++    [`ls-files`, `--others`, `--exclude-standard`, `-z`],
++    { cwd: checkout, encoding: `utf8` }
++  )
++  if (untracked.status !== 0) {
++    throw new Error(`git ls-files failed in ${checkout}`)
++  }
++  for (const path of untracked.stdout.split(`\0`).filter(Boolean).sort()) {
++    hash.update(`untracked\0${path}\0`)
++    hash.update(await readFile(resolve(checkout, path)))
++    hash.update(`\0`)
++  }
++  return hash.digest(`hex`)
++}
++
++async function frozenHashes() {
++  const [
++    electricPatchSha256,
++    durablePatchSha256,
++    harnessSha256,
++    chronicleBinarySha256,
++  ] = await Promise.all([
++    patchHash(electricCheckout),
++    patchHash(durableCheckout),
++    filesHash(runtimeDirectory, harnessFiles),
++    fileHash(chronicleBinary),
++  ])
++  return {
++    electricPatchSha256,
++    durablePatchSha256,
++    harnessSha256,
++    chronicleBinarySha256,
++  }
++}
++
++async function filesHash(rootDirectory, paths) {
++  const hash = createHash(`sha256`)
++  for (const path of [...paths].sort()) {
++    hash.update(`${path}\0`)
++    hash.update(await readFile(resolve(rootDirectory, path)))
++    hash.update(`\0`)
++  }
++  return hash.digest(`hex`)
++}
++
++async function fileHash(path) {
++  return createHash(`sha256`)
++    .update(await readFile(path))
++    .digest(`hex`)
++}

@@ -54,6 +54,25 @@ exactly where you left off. See the [protocol spec](docs/spec/PROTOCOL.md) for
 the full surface, or use any of the official client libraries (TypeScript,
 Python, Go, Rust, …) against chronicle's base URL.
 
+### Optional projection snapshots
+
+Enable `--enable-snapshots` to save application-produced state images with
+`PUT <stream>?snapshot=<projection-version>`, then restore with `GET` and read
+the stream suffix from the saved offset. Images are separate KV state, not
+events; the original history remains intact. Each source allows eight versions
+and 4 MiB of image bodies, with 1 MiB per image. Retire obsolete versions with
+conditional `DELETE <stream>?snapshot=<projection-version>`. Publication and
+retirement require an explicit `snapshot-publish` service-policy grant even in
+insecure auth mode. See the
+[wire contract, limits and rollout requirements](docs/spec/SNAPSHOTS.md).
+Existing Electric runtimes need the separate
+[SDK/runtime patches and opt-in policy](docs/ELECTRIC-AGENTS.md#projection-snapshots-opt-in-upstream-patches).
+Their explicit bounded-input mode restores completed progress and state, then
+reads only the entity-source suffix on a compatible image hit. Legacy full replay
+remains the default. See the [runtime measurements](benchmarks/snapshots/README.md)
+for workload-dependent results; projection-only speedups do not establish
+Electric activation performance. The upstream patches are not released packages.
+
 ## Configuration
 
 Flags take precedence over environment variables; both over defaults.
@@ -63,6 +82,7 @@ Flags take precedence over environment variables; both over defaults.
 | `--listen` | `CHRONICLE_LISTEN` | `:4437` | HTTP listen address (4437 is the protocol's IANA-selected port) |
 | `--redis-url` | `CHRONICLE_REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
 | `--store` | `CHRONICLE_STORE` | `redis` | Storage backend: `redis` or `memory` (dev/testing) |
+| `--enable-snapshots` | `CHRONICLE_ENABLE_SNAPSHOTS` | `false` | Enable the proposed projection-snapshot extension (Redis/MemoryStore; 1 MiB images; explicit publication grant required) |
 | `--stream-root` | `CHRONICLE_STREAM_ROOT` | `/v1/stream/` | URL prefix streams live under |
 | `--long-poll-timeout` | `CHRONICLE_LONG_POLL_TIMEOUT` | `30s` | How long `live=long-poll` waits before `204` |
 | `--sse-reconnect-interval` | `CHRONICLE_SSE_RECONNECT_INTERVAL` | `60s` | SSE connection cycling (enables CDN collapsing) |

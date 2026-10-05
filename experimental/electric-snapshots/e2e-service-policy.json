@@ -1,0 +1,26 @@
+{
+  "services": [
+    {
+      "identity": "writer",
+      "actions": [
+        "read",
+        "append",
+        "create",
+        "delete",
+        "subscribe",
+        "link"
+      ],
+      "namespaces": ["e2e", "principal"]
+    },
+    {
+      "identity": "publisher",
+      "actions": ["read", "snapshot-publish"],
+      "namespaces": ["e2e"]
+    },
+    {
+      "identity": "browser",
+      "actions": ["read", "append"],
+      "namespaces": ["e2e"]
+    }
+  ]
+}

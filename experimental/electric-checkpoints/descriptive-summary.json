@@ -1,0 +1,172 @@
+{
+  "percentileMethod": "nearest-rank: sorted values at ceil(q*n)-1; no interpolation",
+  "timedValidation": false,
+  "campaigns": [
+    {
+      "name": "default",
+      "samples": 192,
+      "measuredSamples": 180,
+      "checkpointHits": 90,
+      "completePairs": 90,
+      "failures": 0,
+      "sourceDrift": [],
+      "rows": [
+        {
+          "scenario": "update-heavy",
+          "mode": "replay",
+          "measuredSamples": 30,
+          "activationP50Ms": 60.08,
+          "activationP95Ms": 70.09,
+          "preloadP50Ms": 9.45,
+          "cpuP50Ms": 52.23,
+          "capturedBodyP50KiB": 82.12,
+          "peakHeapP50MiB": 153.56,
+          "peakRssP50MiB": 409.02
+        },
+        {
+          "scenario": "update-heavy",
+          "mode": "snapshot-checkpointed-inputs",
+          "measuredSamples": 30,
+          "activationP50Ms": 63.55,
+          "activationP95Ms": 86.42,
+          "preloadP50Ms": 6.88,
+          "cpuP50Ms": 52.95,
+          "capturedBodyP50KiB": 17.86,
+          "peakHeapP50MiB": 146.72,
+          "peakRssP50MiB": 414.03
+        },
+        {
+          "scenario": "append-only",
+          "mode": "replay",
+          "measuredSamples": 30,
+          "activationP50Ms": 67.7,
+          "activationP95Ms": 77.53,
+          "preloadP50Ms": 8.56,
+          "cpuP50Ms": 58.24,
+          "capturedBodyP50KiB": 41.47,
+          "peakHeapP50MiB": 167.02,
+          "peakRssP50MiB": 406.61
+        },
+        {
+          "scenario": "append-only",
+          "mode": "snapshot-checkpointed-inputs",
+          "measuredSamples": 30,
+          "activationP50Ms": 78.97,
+          "activationP95Ms": 102.6,
+          "preloadP50Ms": 8.43,
+          "cpuP50Ms": 70.21,
+          "capturedBodyP50KiB": 151.23,
+          "peakHeapP50MiB": 170.55,
+          "peakRssP50MiB": 414.42
+        },
+        {
+          "scenario": "large-inbox",
+          "mode": "replay",
+          "measuredSamples": 30,
+          "activationP50Ms": 75.59,
+          "activationP95Ms": 99.49,
+          "preloadP50Ms": 19.09,
+          "cpuP50Ms": 66.79,
+          "capturedBodyP50KiB": 852.02,
+          "peakHeapP50MiB": 239.69,
+          "peakRssP50MiB": 472.18
+        },
+        {
+          "scenario": "large-inbox",
+          "mode": "snapshot-checkpointed-inputs",
+          "measuredSamples": 30,
+          "activationP50Ms": 91.36,
+          "activationP95Ms": 106.09,
+          "preloadP50Ms": 17.07,
+          "cpuP50Ms": 77.61,
+          "capturedBodyP50KiB": 1717.43,
+          "peakHeapP50MiB": 234.4,
+          "peakRssP50MiB": 497.45
+        }
+      ]
+    },
+    {
+      "name": "scaled",
+      "samples": 192,
+      "measuredSamples": 180,
+      "checkpointHits": 90,
+      "completePairs": 90,
+      "failures": 0,
+      "sourceDrift": [],
+      "rows": [
+        {
+          "scenario": "update-heavy",
+          "mode": "replay",
+          "measuredSamples": 30,
+          "activationP50Ms": 107.25,
+          "activationP95Ms": 136.66,
+          "preloadP50Ms": 50.16,
+          "cpuP50Ms": 89.06,
+          "capturedBodyP50KiB": 1573.0,
+          "peakHeapP50MiB": 169.44,
+          "peakRssP50MiB": 460.98
+        },
+        {
+          "scenario": "update-heavy",
+          "mode": "snapshot-checkpointed-inputs",
+          "measuredSamples": 30,
+          "activationP50Ms": 60.18,
+          "activationP95Ms": 72.42,
+          "preloadP50Ms": 6.35,
+          "cpuP50Ms": 48.39,
+          "capturedBodyP50KiB": 18.04,
+          "peakHeapP50MiB": 167.09,
+          "peakRssP50MiB": 456.87
+        },
+        {
+          "scenario": "append-only",
+          "mode": "replay",
+          "measuredSamples": 30,
+          "activationP50Ms": 155.12,
+          "activationP95Ms": 179.13,
+          "preloadP50Ms": 36.85,
+          "cpuP50Ms": 155.37,
+          "capturedBodyP50KiB": 379.58,
+          "peakHeapP50MiB": 264.48,
+          "peakRssP50MiB": 446.36
+        },
+        {
+          "scenario": "append-only",
+          "mode": "snapshot-checkpointed-inputs",
+          "measuredSamples": 30,
+          "activationP50Ms": 184.13,
+          "activationP95Ms": 236.33,
+          "preloadP50Ms": 33.04,
+          "cpuP50Ms": 182.99,
+          "capturedBodyP50KiB": 1450.91,
+          "peakHeapP50MiB": 233.84,
+          "peakRssP50MiB": 486.21
+        },
+        {
+          "scenario": "large-inbox",
+          "mode": "replay",
+          "measuredSamples": 30,
+          "activationP50Ms": 77.08,
+          "activationP95Ms": 95.5,
+          "preloadP50Ms": 18.93,
+          "cpuP50Ms": 70.64,
+          "capturedBodyP50KiB": 852.02,
+          "peakHeapP50MiB": 248.08,
+          "peakRssP50MiB": 481.39
+        },
+        {
+          "scenario": "large-inbox",
+          "mode": "snapshot-checkpointed-inputs",
+          "measuredSamples": 30,
+          "activationP50Ms": 93.21,
+          "activationP95Ms": 106.17,
+          "preloadP50Ms": 16.85,
+          "cpuP50Ms": 79.41,
+          "capturedBodyP50KiB": 1717.43,
+          "peakHeapP50MiB": 233.2,
+          "peakRssP50MiB": 491.82
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+
+ RUN  v4.0.16 /home/user/workspace/durable-streams-snapshot-upstream
+
+stdout | packages/server/test/conformance.test.ts > File-Backed Server Implementation
+[info] [FileBackedStreamStore] Starting recovery...
+[info] [FileBackedStreamStore] Recovery complete: 0 streams, 0 reconciled, 0 errors
+
+ ✓ |server| packages/server/test/conformance.test.ts (678 tests | 562 skipped) 7118ms
+       ✓ should expire fork based on TTL (releases refcount)  1011ms
+       ✓ should expire source with living forks (source goes 410)  1013ms
+       ✓ should allow fork to outlive source via TTL renewal  2008ms
+       ✓ should expire fork based on TTL (releases refcount)  1018ms
+       ✓ should expire source with living forks (source goes 410)  1022ms
+       ✓ should allow fork to outlive source via TTL renewal  2015ms
+
+ Test Files  1 passed (1)
+      Tests  116 passed | 562 skipped (678)
+   Start at  18:17:08
+   Duration  8.18s (transform 647ms, setup 0ms, import 929ms, tests 7.12s, environment 0ms)
+
