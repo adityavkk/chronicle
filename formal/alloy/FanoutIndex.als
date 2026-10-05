@@ -3,9 +3,15 @@
  *
  * The per-stream fan-out index (streamSubsKey SET) is a CACHE repairable from
  * the canonical links (linksKey HASH, the SOURCE OF TRUTH). ReconcileIndexes
- * (webhook/redis_store.go:393) rebuilds the SET from the links HASH: it re-adds
+ * (webhook/redis_store.go) rebuilds the SET from the links HASH: it re-adds
  * any membership a crash dropped, and NEVER invents membership absent from
- * links. The catalogued invariant (INVARIANTS.md INV-RECOVER-04):
+ * links. The implementation applies the transpose as pipelined, chunked
+ * SADD/SETBIT batches (indexStreams), and a pass may stop after any chunk (a
+ * failed Exec ends it); the second half of this file models one chunk as an
+ * additive step and checks that the cut and the order of the chunks do not
+ * matter (ChunkIsMonotoneAndJustified, ChunksCommute,
+ * FullPassCoversAndIsIdempotent). The catalogued invariant (INVARIANTS.md
+ * INV-RECOVER-04):
  *
  *     forall (sub,path): path in links(sub)  =>  sub in streamSubs(path)
  *       (after reconcile -- the index is a SUPERSET of the link projection)
@@ -14,7 +20,7 @@
  *       (reconcile never INVENTS membership) -- modeled as: every streamSubs
  *       tuple either mirrors a current link OR is a STALE bit that deindex left
  *       (bits are never cleared on deindex; a stale set bit only costs one empty
- *       SMEMBERS, redis_store.go:436). We therefore distinguish the two cleanly.
+ *       SMEMBERS, deindexStream). We therefore distinguish the two cleanly.
  *
  * We model the canonical links as a relation Sub->Path and the index as a
  * relation Path->Sub (its natural transpose). A crash DROPS index tuples
@@ -126,3 +132,76 @@ pred RepairWitness {
      and s2.streamSubs = ~(s2.links)      // and fully repairs the index
 }
 run RepairWitness for 5
+
+/*
+ * ---- the batched form (webhook/redis_store.go ReconcileIndexes/indexStreams) --
+ *
+ * The code never clears the index. ReconcileIndexes reads the links of a chunk
+ * of subscriptions and ADDs their transpose in one pipeline (SADD + SETBIT per
+ * link, idempotent), chunk after chunk, and a failed Exec ends the pass after
+ * the chunks already landed. A Chunk is one such pipeline: `done` is the set of
+ * links it carries (any subset of the links -- the cut is arbitrary, and on a
+ * cluster the commands of one pipeline land per node in parallel, so within a
+ * chunk no order exists either). indexChunk[pre, post, c] is its effect. A
+ * pipeline that fails part-way lands a subset of its entries, which is itself a
+ * Chunk. One entry's SADD and SETBIT are a single tuple here: a pair torn
+ * between them (member without bit, or bit without member) is below this
+ * model's atomicity -- the reader treats either as "not yet visible"
+ * (StreamSubscribers) and the next chunk that carries the link re-asserts both
+ * (indexStreams), so the tear is a transient the Go tests cover, not a state
+ * these assertions speak to.
+ */
+sig Chunk { done: Sub -> Path }
+
+pred indexChunk[pre, post: State, c: Chunk] {
+  c.done in pre.links                          // a chunk carries current links only
+  post.links = pre.links                       // links are read, never written
+  post.streamSubs = pre.streamSubs + ~(c.done) // SADD/SETBIT: additive, idempotent
+}
+
+// (5) A chunk only adds, and every tuple it adds mirrors a current link: a pass
+// that stops after any chunk leaves the index between the pre-state and the
+// transpose, never with invented membership (the partial-failure safety).
+assert ChunkIsMonotoneAndJustified {
+  all pre, post: State, c: Chunk | indexChunk[pre, post, c] =>
+     (pre.streamSubs in post.streamSubs
+      and all p: Path, s: Sub | p -> s in post.streamSubs - pre.streamSubs => mirrors[post, p, s])
+}
+
+// (6) Chunks commute: landing c1 then c2 reaches the same index as c2 then c1,
+// so neither the cut nor the arrival order of the pipelines is load-bearing.
+assert ChunksCommute {
+  all s0, s1, s2, t1, t2: State, c1, c2: Chunk |
+     (indexChunk[s0, s1, c1] and indexChunk[s1, s2, c2]
+      and indexChunk[s0, t1, c2] and indexChunk[t1, t2, c1]) =>
+        s2.streamSubs = t2.streamSubs
+}
+
+// (7) A full pass -- chunks that together carry every link -- lands exactly on
+// the pre-index plus the transpose (reconcile's post-state, plus whatever stale
+// tuples the pre-index held: the deferred cleanup the header describes), so it
+// covers every link; and a second full pass is a no-op.
+assert FullPassCoversAndIsIdempotent {
+  all s0, s1, s2, s3: State, c1, c2, c3: Chunk |
+     (indexChunk[s0, s1, c1] and indexChunk[s1, s2, c2] and c1.done + c2.done = s0.links
+      and c3.done = s2.links and indexChunk[s2, s3, c3]) =>
+        (s2.streamSubs = s0.streamSubs + ~(s0.links)
+         and (all s: Sub, p: Path | s -> p in s2.links => p -> s in s2.streamSubs)
+         and s3.streamSubs = s2.streamSubs)
+}
+
+check ChunkIsMonotoneAndJustified   for 5
+check ChunksCommute                 for 5
+check FullPassCoversAndIsIdempotent for 5
+
+// Non-vacuity witness: a pass really can stop after a chunk with a link still
+// uncovered, and the next pass really covers it. (run => SAT.)
+pred InterruptedPassWitness {
+  some s0, s1, s2: State, c1, c2: Chunk |
+     some c1.done and c1.done != s0.links      // a pass stopped after a partial chunk
+     and indexChunk[s0, s1, c1]
+     and some (~(s1.links) - s1.streamSubs)     // some link is still uncovered
+     and c2.done = s1.links and indexChunk[s1, s2, c2]
+     and ~(s2.links) in s2.streamSubs           // the next pass covers every link
+}
+run InterruptedPassWitness for 5
