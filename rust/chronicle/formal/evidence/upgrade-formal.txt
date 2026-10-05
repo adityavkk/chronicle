@@ -1,0 +1,627 @@
+PATH="/home/user/.elan/bin:$PATH" make -C formal check
+make[1]: Entering directory '/home/user/workspace/chronicle-transfer/rust/chronicle/formal'
+/tmp/tla2tools-v1.7.4.jar: OK
+cd lean && lake build -- -DwarningAsError=true
+✔ [2/9] Built ChronicleFormal.Upgrade (2.9s)
+✔ [3/9] Built ChronicleFormal.StreamOrder (2.0s)
+✔ [4/9] Built ChronicleFormal.Expiry (2.9s)
+✔ [5/9] Built ChronicleFormal.Fork (2.9s)
+✔ [6/9] Built ChronicleFormal.Balance (2.9s)
+✔ [7/9] Built ChronicleFormal.Machine (3.4s)
+✔ [8/9] Built ChronicleFormal (338ms)
+Build completed successfully (9 jobs).
+! grep -R -nE '\b(sorry|admit|axiom)\b' lean/ChronicleFormal*.lean lean/ChronicleFormal
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-upgrade-storage-$$ -config UpgradeStorage.cfg UpgradeStorage.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 66 and seed -5154553777273720867 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 936711] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/UpgradeStorage.tla
+Parsing file /tmp/Integers.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module UpgradeStorage
+Starting... (2026-10-05 00:22:40)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:40.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.0E-13
+4490 states generated, 460 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 16.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 4).
+Finished in 00s at (2026-10-05 00:22:40)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-resource-balance-$$ -config ResourceBalance.cfg ResourceBalance.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 22 and seed -2192283849692790151 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 936754] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/ResourceBalance.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module ResourceBalance
+Starting... (2026-10-05 00:22:41)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:41.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 8.5E-16
+251 states generated, 118 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 17.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 3).
+Finished in 00s at (2026-10-05 00:22:41)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-fork-retirement-$$ -config ForkRetirement.cfg ForkRetirement.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 56 and seed -6384577043525610295 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 936790] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/ForkRetirement.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ForkRetirement
+Starting... (2026-10-05 00:22:42)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:42.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 6.1E-18
+23 states generated, 16 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-05 00:22:42)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-fork-staging-$$ -config ForkStaging.cfg ForkStaging.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 82 and seed -7931965450452548546 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 936891] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/ForkStaging.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module ForkStaging
+Starting... (2026-10-05 00:22:42)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:42.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.2E-17
+30 states generated, 12 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-05 00:22:42)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-fork-commit-$$ -config ForkCommit.cfg ForkCommit.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 9 and seed 3948694946692644905 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 936927] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/ForkCommit.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ForkCommit
+Starting... (2026-10-05 00:22:43)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:43.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.7E-13
+3801 states generated, 1212 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 13.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 4).
+Finished in 00s at (2026-10-05 00:22:43)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-fork-liveness-$$ -config ForkLiveness.cfg ForkCommit.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 123 and seed -8783517476453121001 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 936963] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/ForkCommit.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ForkCommit
+Starting... (2026-10-05 00:22:44)
+Implied-temporal checking--satisfiability problem has 2 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:44.
+Progress(13) at 2026-10-05 00:22:44: 3,801 states generated, 1,212 distinct states found, 0 states left on queue.
+Checking 2 branches of temporal properties for the complete state space with 2424 total distinct states at (2026-10-05 00:22:44)
+Finished checking temporal properties in 00s at 2026-10-05 00:22:44
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.7E-13
+3801 states generated, 1212 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 13.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 4).
+Finished in 00s at (2026-10-05 00:22:44)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-cache-view-$$ -config CacheView.cfg CacheView.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 30 and seed -6531740937005298979 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937119] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/CacheView.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module CacheView
+Starting... (2026-10-05 00:22:45)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:45.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 2.9E-16
+152 states generated, 56 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 10.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 2).
+Finished in 00s at (2026-10-05 00:22:45)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-incarnation-admission-$$ -config IncarnationAdmission.cfg IncarnationAdmission.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 56 and seed 7380871776786578966 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937157] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/IncarnationAdmission.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module IncarnationAdmission
+Starting... (2026-10-05 00:22:46)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:46.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.8E-17
+37 states generated, 16 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-05 00:22:46)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-expiry-$$ -config Expiry.cfg Expiry.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 123 and seed 4057843340184219044 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937193] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Expiry.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Expiry
+Starting... (2026-10-05 00:22:47)
+Computing initial states...
+Finished computing initial states: 2 distinct states generated at 2026-10-05 00:22:47.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.2E-14
+1169 states generated, 246 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 9.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 3).
+Finished in 00s at (2026-10-05 00:22:47)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-retry-backoff-$$ -config RetryBackoff.cfg RetryBackoff.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 128 and seed 1333097149762335155 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937230] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/RetryBackoff.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module RetryBackoff
+Starting... (2026-10-05 00:22:47)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:47.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 2.2E-19
+4 states generated, 2 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 2.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 1 and the 95th percentile is 1).
+Finished in 00s at (2026-10-05 00:22:47)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-leader-retirement-$$ -config LeaderRetirement.cfg LeaderRetirement.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 102 and seed 4626215533796969175 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937336] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/LeaderRetirement.tla
+Semantic processing of module LeaderRetirement
+Starting... (2026-10-05 00:22:48)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:48.
+Progress(5) at 2026-10-05 00:22:48: 5 states generated, 5 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 5 total distinct states at (2026-10-05 00:22:48)
+Finished checking temporal properties in 00s at 2026-10-05 00:22:48
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 0.0
+5 states generated, 5 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 5.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 1 and the 95th percentile is 1).
+Finished in 00s at (2026-10-05 00:22:48)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-stream-order-$$ -config StreamOrder.cfg StreamOrder.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 79 and seed -1128223575350509698 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937401] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/StreamOrder.tla
+Parsing file /tmp/Integers.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module StreamOrder
+Starting... (2026-10-05 00:22:49)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:49.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 5.7E-15
+1177 states generated, 98 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 10 and the 95th percentile is 8).
+Finished in 00s at (2026-10-05 00:22:49)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-write-reply-$$ -config WriteReply.cfg WriteReply.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 103 and seed 3094999443310924024 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937437] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/WriteReply.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module WriteReply
+Starting... (2026-10-05 00:22:50)
+Computing initial states...
+Computed 2 initial states...
+Computed 4 initial states...
+Finished computing initial states: 8 distinct states generated at 2026-10-05 00:22:50.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.1E-14
+903 states generated, 504 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 8.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 7 and the 95th percentile is 3).
+Finished in 00s at (2026-10-05 00:22:50)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-placement-intent-$$ -config PlacementIntent.cfg PlacementIntent.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 89 and seed -3536100972031539805 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937473] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/PlacementIntent.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module PlacementIntent
+Starting... (2026-10-05 00:22:51)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:51.
+Progress(7) at 2026-10-05 00:22:51: 2,281 states generated, 380 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 380 total distinct states at (2026-10-05 00:22:51)
+Finished checking temporal properties in 00s at 2026-10-05 00:22:51
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 3.9E-14
+2281 states generated, 380 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 8 and the 95th percentile is 4).
+Finished in 00s at (2026-10-05 00:22:51)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-membership-admission-$$ -config MembershipAdmission.cfg MembershipAdmission.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 6 and seed -7292580603600565111 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937580] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/MembershipAdmission.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module MembershipAdmission
+Starting... (2026-10-05 00:22:52)
+Computing initial states...
+Finished computing initial states: 2 distinct states generated at 2026-10-05 00:22:52.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 2.3E-17
+43 states generated, 28 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 2).
+Finished in 00s at (2026-10-05 00:22:52)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-drain-$$ -config Drain.cfg Drain.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 51 and seed 1502504432339708224 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937618] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Drain.tla
+Semantic processing of module Drain
+Starting... (2026-10-05 00:22:52)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:52.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.2E-17
+30 states generated, 12 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-05 00:22:52)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-retirement-$$ -config Retirement.cfg Retirement.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 12 and seed -8122447601636028214 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937654] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Retirement.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Retirement
+Starting... (2026-10-05 00:22:53)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:53.
+Progress(8) at 2026-10-05 00:22:53: 119 states generated, 32 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 32 total distinct states at (2026-10-05 00:22:53)
+Finished checking temporal properties in 00s at 2026-10-05 00:22:53
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.5E-16
+119 states generated, 32 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 8.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 2).
+Finished in 00s at (2026-10-05 00:22:53)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-admission-$$ -config Admission.cfg Admission.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 19 and seed -2479184122220441498 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937705] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Admission.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module Admission
+Starting... (2026-10-05 00:22:54)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:54.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.8E-16
+127 states generated, 37 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 3).
+Finished in 00s at (2026-10-05 00:22:54)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-sse-read-$$ -config SseRead.cfg SseRead.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 67 and seed -1220712648025128325 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937825] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/SseRead.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module SseRead
+Starting... (2026-10-05 00:22:55)
+Computing initial states...
+Finished computing initial states: 2 distinct states generated at 2026-10-05 00:22:55.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 9.0E-13
+9196 states generated, 2462 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 20.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 3).
+Finished in 00s at (2026-10-05 00:22:55)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-live-read-$$ -config LiveRead.cfg LiveRead.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 79 and seed 262862620183463923 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937875] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/LiveRead.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module LiveRead
+Starting... (2026-10-05 00:22:56)
+Computing initial states...
+Finished computing initial states: 2 distinct states generated at 2026-10-05 00:22:56.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 5.7E-14
+2241 states generated, 678 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 11.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 4).
+Finished in 00s at (2026-10-05 00:22:56)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-campaign-$$ -config Campaign.cfg Campaign.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 94 and seed -5111852291293138357 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937911] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Campaign.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module Campaign
+Starting... (2026-10-05 00:22:56)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:57.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 5.2E-14
+2073 states generated, 711 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 14.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 4 and the 95th percentile is 3).
+Finished in 00s at (2026-10-05 00:22:57)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-projection-$$ -config Projection.cfg Projection.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 45 and seed -1190402837928876072 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 937961] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Projection.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module Projection
+Starting... (2026-10-05 00:22:57)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:57.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 5.5E-13
+6354 states generated, 3168 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 18.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 5 and the 95th percentile is 3).
+Finished in 00s at (2026-10-05 00:22:58)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-retention-$$ -config Retention.cfg RetentionScenario.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 57 and seed -6083943111522201474 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 938051] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/RetentionScenario.tla
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Retention.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module Retention
+Semantic processing of module RetentionScenario
+Starting... (2026-10-05 00:22:58)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:58.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 0.0
+15 states generated, 15 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 15.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 1 and the 95th percentile is 1).
+Finished in 00s at (2026-10-05 00:22:58)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-ownership-$$ -config Ownership.cfg Ownership.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 100 and seed 8138205506028925324 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 938089] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Ownership.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module Ownership
+Starting... (2026-10-05 00:22:59)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:22:59.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.4E-17
+33 states generated, 20 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 9.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-05 00:22:59)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-safety-$$ -config Safety.cfg Chronicle.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 3 and seed 4757718887017842871 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 938129] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Chronicle.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Chronicle
+Starting... (2026-10-05 00:23:00)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:23:00.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 7.0E-14
+2505 states generated, 723 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 31 and the 95th percentile is 3).
+Finished in 00s at (2026-10-05 00:23:00)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-placement-$$ -config Placement.cfg Chronicle.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 61 and seed 3248163339733428958 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 938249] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Chronicle.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Chronicle
+Starting... (2026-10-05 00:23:01)
+Computing initial states...
+Finished computing initial states: 2 distinct states generated at 2026-10-05 00:23:01.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 3.3E-16
+170 states generated, 50 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-05 00:23:01)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-scenario-$$ -config Scenario.cfg Scenario.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 38 and seed -4375630928799908632 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 938285] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Scenario.tla
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Chronicle.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Chronicle
+Semantic processing of module Scenario
+Starting... (2026-10-05 00:23:02)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:23:02.
+Progress(9) at 2026-10-05 00:23:02: 21 states generated, 15 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 15 total distinct states at (2026-10-05 00:23:02)
+Finished checking temporal properties in 00s at 2026-10-05 00:23:02
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 4.9E-18
+21 states generated, 15 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 9.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-10-05 00:23:02)
+cd tla && java -XX:+UseParallelGC -cp /tmp/tla2tools-v1.7.4.jar tlc2.TLC -workers auto -metadir /tmp/chronicle-live-$$ -config Liveness.cfg Chronicle.tla
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 90 and seed -8903719312412492692 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 938334] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Chronicle.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Chronicle
+Starting... (2026-10-05 00:23:03)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:23:03.
+Progress(7) at 2026-10-05 00:23:03: 2,505 states generated, 723 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 723 total distinct states at (2026-10-05 00:23:03)
+Finished checking temporal properties in 00s at 2026-10-05 00:23:03
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 7.0E-14
+2505 states generated, 723 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 31 and the 95th percentile is 3).
+Finished in 00s at (2026-10-05 00:23:03)
+Error: Temporal properties were violated.
+make[1]: Leaving directory '/home/user/workspace/chronicle-transfer/rust/chronicle/formal'

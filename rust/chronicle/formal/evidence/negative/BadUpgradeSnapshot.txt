@@ -1,0 +1,109 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 24 and seed -5623740993235250461 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 938653] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/UpgradeStorage.tla
+Parsing file /tmp/Integers.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module UpgradeStorage
+Starting... (2026-10-05 00:23:07)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 00:23:07.
+Error: Invariant SnapshotAtomic is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ pending = -1
+/\ replies = {}
+/\ snapshotMeta = -1
+/\ snapshotData = -1
+/\ applied = {}
+/\ last = -1
+/\ committed = {}
+/\ notified = {}
+/\ disk = {}
+
+State 2: <Append line 13, col 11 to line 16, col 53 of module UpgradeStorage>
+/\ pending = 0
+/\ replies = {}
+/\ snapshotMeta = -1
+/\ snapshotData = -1
+/\ applied = {}
+/\ last = 0
+/\ committed = {}
+/\ notified = {}
+/\ disk = {}
+
+State 3: <Persist line 17, col 12 to line 19, col 54 of module UpgradeStorage>
+/\ pending = 0
+/\ replies = {}
+/\ snapshotMeta = -1
+/\ snapshotData = -1
+/\ applied = {}
+/\ last = 0
+/\ committed = {}
+/\ notified = {}
+/\ disk = {0}
+
+State 4: <Notify line 20, col 11 to line 23, col 53 of module UpgradeStorage>
+/\ pending = -1
+/\ replies = {}
+/\ snapshotMeta = -1
+/\ snapshotData = -1
+/\ applied = {}
+/\ last = 0
+/\ committed = {}
+/\ notified = {0}
+/\ disk = {0}
+
+State 5: <Append line 13, col 11 to line 16, col 53 of module UpgradeStorage>
+/\ pending = 1
+/\ replies = {}
+/\ snapshotMeta = -1
+/\ snapshotData = -1
+/\ applied = {}
+/\ last = 1
+/\ committed = {}
+/\ notified = {0}
+/\ disk = {0}
+
+State 6: <Commit line 24, col 14 to line 27, col 56 of module UpgradeStorage>
+/\ pending = 1
+/\ replies = {}
+/\ snapshotMeta = -1
+/\ snapshotData = -1
+/\ applied = {}
+/\ last = 1
+/\ committed = 0..0
+/\ notified = {0}
+/\ disk = {0}
+
+State 7: <Apply line 28, col 13 to line 30, col 55 of module UpgradeStorage>
+/\ pending = 1
+/\ replies = {}
+/\ snapshotMeta = -1
+/\ snapshotData = -1
+/\ applied = 0..0
+/\ last = 1
+/\ committed = 0..0
+/\ notified = {0}
+/\ disk = {0}
+
+State 8: <Install line 41, col 15 to line 44, col 89 of module UpgradeStorage>
+/\ pending = 1
+/\ replies = {}
+/\ snapshotMeta = 0
+/\ snapshotData = -1
+/\ applied = 0..0
+/\ last = 1
+/\ committed = 0..0
+/\ notified = {0}
+/\ disk = {0}
+
+195 states generated, 74 distinct states found, 28 states left on queue.
+The depth of the complete state graph search is 11.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 4 and the 95th percentile is 3).
+Finished in 00s at (2026-10-05 00:23:07)
