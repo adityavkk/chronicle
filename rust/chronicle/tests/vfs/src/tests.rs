@@ -1,9 +1,9 @@
 use std::ffi::CString;
 
 use chronicle_raft::{Entry, LogId, model, storage::SqliteStore};
-use openraft::EntryPayload;
 use openraft::storage::RaftStateMachine;
 use openraft::vote::{RaftLeaderId, leader_id_adv::CommittedLeaderId};
+use openraft::{EntryPayload, RaftSnapshotBuilder};
 
 unsafe extern "C" {
     fn chronicle_fault_vfs_register() -> i32;
@@ -106,4 +106,54 @@ async fn exercise(kind: i32) {
 async fn sqlite_vfs_write_and_sync_failures_preserve_acknowledged_state() {
     exercise(WRITE).await;
     exercise(SYNC).await;
+    snapshot_failure(WRITE).await;
+    snapshot_failure(SYNC).await;
+}
+
+async fn snapshot_failure(kind: i32) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("snapshot.sqlite");
+    register_and_target(&path);
+    let mut store = SqliteStore::open(&path).await.unwrap();
+    store.apply_entries([entry(1, b"old")]).await.unwrap();
+    let old = store.build_snapshot().await.unwrap();
+    store.apply_entries([entry(2, b"new")]).await.unwrap();
+    // Generate the new pair before arming the filename-scoped failure, in a separate store.
+    let mut source = SqliteStore::open(dir.path().join("source.sqlite"))
+        .await
+        .unwrap();
+    source
+        .apply_entries([entry(1, b"old"), entry(2, b"new")])
+        .await
+        .unwrap();
+    let new = source.build_snapshot().await.unwrap();
+    source.close().await;
+    // SAFETY: process-global controls are exercised sequentially in the single test above.
+    unsafe { chronicle_fault_vfs_arm(kind) };
+    assert!(store.build_snapshot().await.is_err());
+    assert_eq!(unsafe { chronicle_fault_vfs_fired(kind) }, 1);
+    store.close().await;
+    let mut reopened = SqliteStore::open_existing(&path).await.unwrap();
+    assert_eq!(reopened.applied_state().await.unwrap().0.unwrap().index, 2);
+    assert_eq!(
+        reopened
+            .read_stream("stream-2".into())
+            .await
+            .unwrap()
+            .unwrap()
+            .data,
+        b"new"
+    );
+    let actual = reopened.get_current_snapshot().await.unwrap().unwrap();
+    let expected = match actual.meta.last_log_id.unwrap().index {
+        1 => old,
+        2 => new,
+        other => panic!("unexpected snapshot index {other}"),
+    };
+    assert_eq!(actual.meta, expected.meta);
+    assert_eq!(actual.snapshot.into_inner(), expected.snapshot.into_inner());
+    reopened.close().await;
+    println!(
+        "snapshot fault kind {kind}: I/O error, complete old-or-new pair, applied state retained"
+    );
 }

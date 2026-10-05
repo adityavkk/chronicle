@@ -103,7 +103,19 @@ fn fault_gate_child() {
                 .await
                 .unwrap();
         }
-        let snapshot = if operation.starts_with("snapshot-") {
+        if operation == "snapshot-build" {
+            store
+                .apply_entries([create_entry(1, "old", b"old")])
+                .await
+                .unwrap();
+            let old = store.build_snapshot().await.unwrap();
+            std::fs::write(root.join("old-snapshot"), old.snapshot.into_inner()).unwrap();
+            store
+                .apply_entries([create_entry(2, "new", b"new")])
+                .await
+                .unwrap();
+        }
+        let snapshot = if matches!(operation.as_str(), "snapshot-before" | "snapshot-after") {
             store
                 .apply_entries([create_entry(1, "old", b"old")])
                 .await
@@ -140,6 +152,10 @@ fn fault_gate_child() {
                     .install_snapshot(&snapshot.meta, snapshot.snapshot)
                     .await
                     .unwrap();
+            }
+            "snapshot-build" => {
+                let built = store.build_snapshot().await.unwrap();
+                std::fs::write(root.join("new-snapshot"), built.snapshot.into_inner()).unwrap();
             }
             "open-cancel" => {
                 use std::sync::Arc;
@@ -228,6 +244,53 @@ fn fault_gate_child() {
         }
         store.close().await;
     });
+}
+
+#[test]
+fn snapshot_build_precommit_crash_preserves_previous_snapshot_and_applied_state() {
+    for crash in [true, false] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let mut child = spawn_child(root, "snapshot-build");
+        let directory = arrange_gate(root, &mut child, BEFORE_STATE_COMMIT);
+        if crash {
+            child.0.kill().unwrap();
+            assert!(!child.0.wait().unwrap().success());
+        } else {
+            std::fs::write(
+                directory.join(format!("{BEFORE_STATE_COMMIT}.release")),
+                b"release",
+            )
+            .unwrap();
+            wait_for(&root.join("new-snapshot"), &mut child);
+            assert!(child.0.wait().unwrap().success());
+        }
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let mut store = SqliteStore::open_existing(root.join("store.sqlite"))
+                .await
+                .unwrap();
+            assert_eq!(store.applied_state().await.unwrap().0.unwrap().index, 2);
+            assert_eq!(
+                store.read_stream("new".into()).await.unwrap().unwrap().data,
+                b"new"
+            );
+            let snapshot = store.get_current_snapshot().await.unwrap().unwrap();
+            assert_eq!(
+                snapshot.meta.last_log_id.unwrap().index,
+                if crash { 1 } else { 2 }
+            );
+            assert_eq!(
+                snapshot.snapshot.into_inner(),
+                std::fs::read(root.join(if crash {
+                    "old-snapshot"
+                } else {
+                    "new-snapshot"
+                }))
+                .unwrap()
+            );
+            store.close().await;
+        });
+    }
 }
 
 #[test]

@@ -50,8 +50,8 @@ pub struct SqliteStore {
 }
 
 #[derive(Serialize, Deserialize)]
-struct SnapshotBody {
-    state: model::State,
+struct SnapshotBody<S = model::State> {
+    state: S,
     last_applied: Option<LogId>,
     membership: StoredMembership,
 }
@@ -497,11 +497,12 @@ fn read_meta_raw(db: &Connection, key: &str) -> Result<Option<Vec<u8>>> {
         .optional()
         .map_err(store_read)
 }
-fn snapshot_bytes(body: &[u8]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(SNAPSHOT_CHECKSUM_BYTES + body.len());
-    bytes.extend_from_slice(&Sha256::digest(body));
-    bytes.extend_from_slice(body);
-    bytes
+fn snapshot_bytes(body: &impl Serialize) -> Result<Vec<u8>> {
+    let mut bytes = vec![0; SNAPSHOT_CHECKSUM_BYTES];
+    serde_json::to_writer(&mut bytes, body).map_err(store_write)?;
+    let checksum = Sha256::digest(&bytes[SNAPSHOT_CHECKSUM_BYTES..]);
+    bytes[..SNAPSHOT_CHECKSUM_BYTES].copy_from_slice(&checksum);
+    Ok(bytes)
 }
 fn decode_snapshot(bytes: &[u8]) -> Result<SnapshotBody> {
     if bytes.len() < SNAPSHOT_CHECKSUM_BYTES || bytes.len() > MAX_SNAPSHOT_BYTES {
@@ -913,31 +914,36 @@ impl RaftSnapshotBuilder<TypeConfig> for SqliteStore {
     type SnapshotData = Cursor<Vec<u8>>;
     async fn build_snapshot(&mut self) -> Result<Snapshot> {
         self.call(|w| {
-            w.state_transaction(|t, s| {
-                let last: Option<LogId> = read_meta(t, "applied")?;
-                let membership: StoredMembership = read_meta(t, "membership")?.unwrap_or_default();
-                let body = encode(&SnapshotBody {
-                    state: s.clone(),
-                    last_applied: last,
-                    membership: membership.clone(),
-                })?;
-                let bytes = snapshot_bytes(&body);
-                if bytes.len() > MAX_SNAPSHOT_BYTES {
-                    return Err(store_write(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "snapshot exceeds 256 MiB",
-                    )));
-                }
-                let meta = SnapshotMeta {
-                    last_log_id: last,
-                    last_membership: membership,
-                };
-                put_meta_raw(t, "snapshot_bytes", &bytes)?;
-                put_meta(t, "snapshot_meta", &meta)?;
-                Ok(Snapshot {
-                    meta,
-                    snapshot: Cursor::new(bytes),
-                })
+            // This actor exclusively owns state and SQLite. Serialization cannot
+            // interleave with apply, and building a snapshot does not mutate state.
+            let last: Option<LogId> = read_meta(&w.db, "applied")?;
+            let membership: StoredMembership = read_meta(&w.db, "membership")?.unwrap_or_default();
+            let bytes = snapshot_bytes(&SnapshotBody {
+                state: &w.state,
+                last_applied: last,
+                membership: membership.clone(),
+            })?;
+            if bytes.len() > MAX_SNAPSHOT_BYTES {
+                return Err(store_write(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "snapshot exceeds 256 MiB",
+                )));
+            }
+            let meta = SnapshotMeta {
+                last_log_id: last,
+                last_membership: membership,
+            };
+            let tx = w.db.transaction().map_err(store_write)?;
+            put_meta_raw(&tx, "snapshot_bytes", &bytes)?;
+            put_meta(&tx, "snapshot_meta", &meta)?;
+            #[cfg(feature = "storage-faults")]
+            w.faults
+                .hit(crate::faults::BEFORE_STATE_COMMIT)
+                .map_err(store_write)?;
+            tx.commit().map_err(store_write)?;
+            Ok(Snapshot {
+                meta,
+                snapshot: Cursor::new(bytes),
             })
         })
         .await
@@ -1233,6 +1239,24 @@ mod tests {
 
     fn sample_snapshot() -> (SnapshotBody, Vec<u8>) {
         let mut state = model::State::default();
+        assert!(
+            state
+                .apply(&model::Command::Create {
+                    key: "binary".into(),
+                    expected_incarnation: None,
+                    config: model::StreamConfig {
+                        content_type: "application/octet-stream".into(),
+                        track_boundaries: false,
+                        json_framing: None,
+                        expiry: None,
+                    },
+                    data: vec![0, 7, 255],
+                    closed: false,
+                    now_ms: None,
+                })
+                .error
+                .is_none()
+        );
         state.nodes.insert(
             7,
             model::Node {
@@ -1246,7 +1270,7 @@ mod tests {
             last_applied: None,
             membership: StoredMembership::default(),
         };
-        let bytes = snapshot_bytes(&encode(&body).unwrap());
+        let bytes = snapshot_bytes(&body).unwrap();
         (body, bytes)
     }
 
@@ -1414,7 +1438,22 @@ mod tests {
         let (body, bytes) = sample_snapshot();
         let encoded = encode(&body).unwrap();
         assert_eq!(bytes.len(), encoded.len() + SNAPSHOT_CHECKSUM_BYTES);
+        assert_eq!(&bytes[SNAPSHOT_CHECKSUM_BYTES..], encoded);
+        assert_eq!(
+            &bytes[..SNAPSHOT_CHECKSUM_BYTES],
+            Sha256::digest(&encoded).as_slice()
+        );
+        let borrowed = SnapshotBody {
+            state: &body.state,
+            last_applied: body.last_applied,
+            membership: body.membership.clone(),
+        };
+        assert_eq!(snapshot_bytes(&borrowed).unwrap(), bytes);
         assert_eq!(decode_snapshot(&bytes).unwrap().state.nodes.len(), 1);
+        assert_eq!(
+            decode_snapshot(&bytes).unwrap().state.streams["binary"].data,
+            [0, 7, 255]
+        );
     }
 
     #[test]

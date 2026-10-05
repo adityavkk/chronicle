@@ -34,10 +34,23 @@ time is supplied in commands, never consulted by deterministic apply.
 
 Snapshots contain payloads, per-stream incarnation, config, producer epoch/sequence
 and original response frontier, lifecycle, expiry, applied index and membership.
-Initially snapshot size is bounded; oversized shards backpressure rather than
-silently exhausting memory. Cold offload, AP inbox, arbitrary splitting and
+Encoded snapshot size and logical shard capacity are bounded. These are not RSS
+bounds: JSON, concurrent snapshots, Raft queues and allocator retention amplify
+the admitted byte count. The former 512 MiB local pod limit OOM-looped on a valid
+captured store; a larger deployment budget and explicit recovery qualification
+are required. Cold offload, AP inbox, arbitrary splitting and
 individual-stream movement are deferred. No local tier manifest is distributed
 authority. Many streams scale across groups; one hot stream remains leader ordered.
+
+Snapshot allocation refinement, specified before the change: building a snapshot
+does not mutate application state. The single owning actor may serialize a
+borrowed state plus its applied/membership metadata, then atomically persist the
+same checksum-prefixed JSON bytes and metadata. No other actor job interleaves
+with that synchronous operation, and the lifetime process lock excludes another
+owner. Removing state clones and the second encoded buffer must not alter bytes,
+metadata ordering, durability or install validation. Existing TLA snapshot
+transitions remain unchanged; they prove no allocation/RSS bound. Resource
+liveness additionally assumes enough memory for recovery, not merely connectivity.
 
 Placement reconciliation records intent in group zero, adds learners with blocking
 catch-up, changes membership through OpenRaft, then records completion. A stale
