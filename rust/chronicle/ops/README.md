@@ -74,6 +74,16 @@ kubectl -n observability port-forward svc/victoria-traces 10428:10428
 
 Grafana is anonymous read-only because it remains ClusterIP/local port-forward only. Its provisioned dashboard and Prometheus, VictoriaLogs, and Jaeger-compatible VictoriaTraces data sources are useful starting points, not production security configuration. Observability uses ephemeral bounded storage (7-day retention, 1 GiB emptyDir); Chronicle uses 1 GiB local-path PVCs and required hostname anti-affinity.
 
+Chronicle requests 512 MiB and limits each pod to 1,536 MiB. The old 512 MiB
+limit failed cold recovery of a valid pressure-test store, not just live traffic.
+Logical payload quotas do not cover JSON buffers, snapshot copies, Raft queues
+or allocator retention. The larger local budget is a tested deployment setting,
+not a proof of a worst-case heap bound. Monitor cgroup memory/OOM events and leave
+host headroom: all k3d nodes share the same physical memory. Never recreate an
+OOM-looping volume or bootstrap over it; preserve it and recover with sufficient
+resources. `tests/recovery_memory.py` profiles a copied, stopped PVC with Docker
+networking disabled and records both kernel OOM status and a recovery barrier.
+
 The collector discovers replicas through the headless service's HTTP SRV record,
 not a static seed list. Joined replicas therefore receive metrics coverage without
 Kubernetes API credentials. `evidence/victoria-dns-nodes.json` records all four

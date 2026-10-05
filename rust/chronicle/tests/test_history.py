@@ -77,6 +77,12 @@ class CheckerTest(unittest.TestCase):
 
     def test_falsified_retention(self):
         self.assertFalse(H.check_events(history([(3,4,[])], [("w","a","ok",1,2)]))["checks"]["acked-retention"]["valid"])
+    def test_old_reads_cannot_certify_unobserved_acknowledgements(self):
+        result = H.check_events(history([(1,2,[])], [("w","a","ok",3,4)]))
+        self.assertFalse(result["checks"]["acked-retention"]["valid"])
+        self.assertIn("retention is unverified", result["checks"]["acked-retention"]["errors"][0])
+        self.assertTrue(result["checks"]["linearizability"]["valid"])
+        self.assertTrue(H.check_events(history([(1,2,[]),(5,6,["a"])], [("w","a","ok",3,4)]))["valid"])
     def test_duplicates(self):
         self.assertFalse(H.check_events(history([(1,2,["a","a"])]))["checks"]["duplicate"]["valid"])
     def test_non_prefix(self):

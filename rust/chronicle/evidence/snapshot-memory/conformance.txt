@@ -1,0 +1,69 @@
+
+> test
+> vitest run --testTimeout=30000 --reporter=default --reporter=json --outputFile=/tmp/conformance-leadership3.json
+
+
+ RUN  v4.1.8 /home/user/workspace/chronicle-transfer/rust/chronicle/tests/conformance
+
+stderr | conformance.test.ts > Long-Poll Operations > should wait for new data with long-poll
+conformance transport failure http://172.19.0.5:30644/v1/stream/longpoll-test-1791173445625?offset=0000000000000000_0000000000000008&live=long-poll&cursor=3137072 [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on long-poll responses
+conformance transport failure http://172.19.0.5:30644/v1/stream/security-longpoll-nosniff-1791173447027?offset=0000000000000000_0000000000000012&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Long-Poll Edge Cases > should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout
+conformance transport failure http://172.19.0.5:30644/v1/stream/longpoll-204-headers-test-1791173459287?offset=0000000000000000_0000000000000000&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+ ✓ conformance.test.ts (332 tests | 6 skipped) 96310ms
+     ✓ should allow idempotent create with same config  572ms
+     ✓ should wait for new data with long-poll  576ms
+     ✓ should include X-Content-Type-Options: nosniff on long-poll responses  520ms
+     ✓ should support offset=now with long-poll mode (waits for data)  5023ms
+     ✓ should support offset=now with long-poll on empty stream  5078ms
+     ✓ should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout  5059ms
+     ✓ should return 404 on HEAD after TTL expires  1055ms
+     ✓ should return 404 on GET after TTL expires (idle)  1054ms
+     ✓ should return 404 on POST append after TTL expires (idle)  1046ms
+     ✓ should return 404 on HEAD after Expires-At passes  3054ms
+     ✓ should return 404 on GET after Expires-At passes  3057ms
+     ✓ should return 404 on POST append after Expires-At passes  3054ms
+     ✓ should allow recreating stream after TTL expires  1076ms
+     ✓ should extend TTL on write (sliding window)  3052ms
+     ✓ should extend TTL on read (sliding window)  3052ms
+     ✓ should NOT extend TTL on HEAD  2035ms
+     ✓ should NOT extend Expires-At on read or write  4033ms
+     ✓ should handle chunk-size pagination correctly  932ms
+     ✓ should immediately read message after append  924ms
+       ✓ concurrent readers see consistent data during writes  3979ms
+       ✓ single byte values cover full range (0-255) with concurrent readers during write  5732ms
+       ✓ random operation sequences maintain stream invariants  4590ms
+       ✓ offsets are always monotonically increasing  4291ms
+       ✓ read-your-writes: data is immediately visible after append  3011ms
+       ✓ data at offset never changes after additional appends  3796ms
+       ✓ should reject offsets with invalid characters  1178ms
+       ✓ lexicographically ordered seq values are accepted  1983ms
+       ✓ out-of-order seq values are rejected  1915ms
+       ✓ concurrent writers racing with incrementing seq values  1750ms
+       ✓ replay produces identical content hash  4908ms
+       ✓ content hash changes with each append  328ms
+       ✓ deterministic ordering - same data in same order produces same hash  3097ms
+     ✓ multiple producers should interleave correctly  736ms
+       ✓ sse-live-reader-receives-final-append-on-close: live reader at tail receives data appended atomically with the close  1993ms
+     ✓ should inherit content-type when sub-offset is supplied without explicit Content-Type  672ms
+     ✓ should read only fork's own data (starting past fork offset)  735ms
+     ✓ should append at each level independently  304ms
+     ✓ should cascade GC when last fork is deleted  306ms
+     ✓ should cascade GC through three levels  612ms
+     ✓ should preserve data when deleting middle of chain  341ms
+     ✓ should expire fork based on TTL (releases refcount)  1141ms
+     ✓ should expire source with living forks (source goes 410)  1142ms
+     ✓ should allow fork to outlive source via TTL renewal  2122ms
+     ✓ should handle many forks of same stream (10 forks)  1216ms
+     ✓ should fork at every offset position  567ms
+
+ Test Files  1 passed (1)
+      Tests  326 passed | 6 skipped (332)
+   Start at  04:10:43
+   Duration  96.59s (transform 30ms, setup 0ms, import 122ms, tests 96.31s, environment 0ms)
+
+JSON report written to /tmp/conformance-leadership3.json

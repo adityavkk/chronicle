@@ -204,6 +204,8 @@ def check_events(events):
             appends.append((oid, rec, terminal, start, end))
     for oid, rec, terminal, start, end in appends:
         if terminal == "ok":
+            if rec not in positions:
+                errors["acked-retention"].append(f"{oid}: no successful read observed this acknowledged record; retention is unverified")
             for inv, done, rs in reads:
                 if end < inv["time_ns"] and rec not in rs:
                     errors["acked-retention"].append(f"{oid} absent from later read line {done['_line']}")
