@@ -7,6 +7,7 @@ TLC := java -XX:+UseParallelGC -cp $(JAR) tlc2.TLC -workers auto
 check: jar lean positive negative
 
 positive:
+	cd tla && $(TLC) -metadir /tmp/chronicle-leadership-$$$$ -config Leadership.cfg Leadership.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-upgrade-storage-$$$$ -config UpgradeStorage.cfg UpgradeStorage.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-resource-balance-$$$$ -config ResourceBalance.cfg ResourceBalance.tla
 	cd tla && $(TLC) -metadir /tmp/chronicle-fork-retirement-$$$$ -config ForkRetirement.cfg ForkRetirement.tla
@@ -45,6 +46,11 @@ negative:
 	@set -eu; check_bad() { name=$$1; inv=$$2; out=evidence/negative/$$name.txt; \
 	  module=$${3:-Chronicle}; set +e; (cd tla && $(TLC) -metadir /tmp/chronicle-$$name-$$$$ -config $$name.cfg $$module.tla) >$$out 2>&1; rc=$$?; set -e; \
 	  test $$rc -eq 12; grep -F "Invariant $$inv is violated." $$out >/dev/null; }; \
+	check_bad BadLeadershipDuplicate OneGrant Leadership; \
+	check_bad BadLeadershipRecovery OneGrant Leadership; \
+	check_bad BadLeadershipBudget VoteBudget Leadership; \
+	check_bad BadLeadershipCooldown Cooldown Leadership; \
+	check_bad LeadershipStaleExecution NoStaleExecution Leadership; \
 	check_bad BadUpgradeFlush FlushDurable UpgradeStorage; \
 	check_bad BadUpgradeReply ReplyDurable UpgradeStorage; \
 	check_bad BadUpgradeTruncate CommittedRetained UpgradeStorage; \

@@ -1,0 +1,192 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 90 and seed -1530884375906859104 with 8 workers on 8 cores with 3557MB heap and 64MB offheap memory [pid: 1225772] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/chronicle-transfer/rust/chronicle/formal/tla/Leadership.tla
+Parsing file /tmp/Integers.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module Leadership
+Starting... (2026-10-05 01:57:23)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-05 01:57:23.
+Error: Invariant VoteBudget is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ now = 0
+/\ plannedVote = 0
+/\ replies = {}
+/\ generation = 0
+/\ effects = <<>>
+/\ queued = <<>>
+/\ plannedGeneration = 0
+/\ id = 0
+/\ permits = {}
+/\ sent = <<>>
+/\ phase = "closed"
+/\ vote = 0
+/\ grants = <<>>
+/\ highWater = -1
+/\ lastClaim = -2
+
+State 2: <Tick line 75, col 9 to line 78, col 38 of module Leadership>
+/\ now = 1
+/\ plannedVote = 0
+/\ replies = {}
+/\ generation = 0
+/\ effects = <<>>
+/\ queued = <<>>
+/\ plannedGeneration = 0
+/\ id = 0
+/\ permits = {}
+/\ sent = <<>>
+/\ phase = "closed"
+/\ vote = 0
+/\ grants = <<>>
+/\ highWater = -1
+/\ lastClaim = -2
+
+State 3: <AdvanceVote line 67, col 16 to line 70, col 61 of module Leadership>
+/\ now = 1
+/\ plannedVote = 0
+/\ replies = {}
+/\ generation = 0
+/\ effects = <<>>
+/\ queued = <<>>
+/\ plannedGeneration = 0
+/\ id = 0
+/\ permits = {}
+/\ sent = <<>>
+/\ phase = "closed"
+/\ vote = 1
+/\ grants = <<>>
+/\ highWater = -1
+/\ lastClaim = -2
+
+State 4: <Plan line 19, col 9 to line 24, col 72 of module Leadership>
+/\ now = 1
+/\ plannedVote = 1
+/\ replies = {}
+/\ generation = 0
+/\ effects = <<>>
+/\ queued = <<>>
+/\ plannedGeneration = 0
+/\ id = 1
+/\ permits = {}
+/\ sent = <<>>
+/\ phase = "planned"
+/\ vote = 1
+/\ grants = <<>>
+/\ highWater = -1
+/\ lastClaim = -2
+
+State 5: <Claim line 25, col 10 to line 35, col 61 of module Leadership>
+/\ now = 1
+/\ plannedVote = 1
+/\ replies = {1}
+/\ generation = 0
+/\ effects = <<>>
+/\ queued = <<>>
+/\ plannedGeneration = 0
+/\ id = 1
+/\ permits = {}
+/\ sent = <<>>
+/\ phase = "claimed"
+/\ vote = 1
+/\ grants = <<[attempt |-> 1, source |-> 1, at |-> 1, previous |-> -2]>>
+/\ highWater = 1
+/\ lastClaim = 1
+
+State 6: <Close line 58, col 10 to line 61, col 55 of module Leadership>
+/\ now = 1
+/\ plannedVote = 1
+/\ replies = {1}
+/\ generation = 0
+/\ effects = <<>>
+/\ queued = <<>>
+/\ plannedGeneration = 0
+/\ id = 1
+/\ permits = {}
+/\ sent = <<>>
+/\ phase = "closed"
+/\ vote = 1
+/\ grants = <<[attempt |-> 1, source |-> 1, at |-> 1, previous |-> -2]>>
+/\ highWater = 1
+/\ lastClaim = 1
+
+State 7: <Plan line 19, col 9 to line 24, col 72 of module Leadership>
+/\ now = 1
+/\ plannedVote = 1
+/\ replies = {1}
+/\ generation = 0
+/\ effects = <<>>
+/\ queued = <<>>
+/\ plannedGeneration = 0
+/\ id = 2
+/\ permits = {}
+/\ sent = <<>>
+/\ phase = "planned"
+/\ vote = 1
+/\ grants = <<[attempt |-> 1, source |-> 1, at |-> 1, previous |-> -2]>>
+/\ highWater = 1
+/\ lastClaim = 1
+
+State 8: <Tick line 75, col 9 to line 78, col 38 of module Leadership>
+/\ now = 2
+/\ plannedVote = 1
+/\ replies = {1}
+/\ generation = 0
+/\ effects = <<>>
+/\ queued = <<>>
+/\ plannedGeneration = 0
+/\ id = 2
+/\ permits = {}
+/\ sent = <<>>
+/\ phase = "planned"
+/\ vote = 1
+/\ grants = <<[attempt |-> 1, source |-> 1, at |-> 1, previous |-> -2]>>
+/\ highWater = 1
+/\ lastClaim = 1
+
+State 9: <Tick line 75, col 9 to line 78, col 38 of module Leadership>
+/\ now = 3
+/\ plannedVote = 1
+/\ replies = {1}
+/\ generation = 0
+/\ effects = <<>>
+/\ queued = <<>>
+/\ plannedGeneration = 0
+/\ id = 2
+/\ permits = {}
+/\ sent = <<>>
+/\ phase = "planned"
+/\ vote = 1
+/\ grants = <<[attempt |-> 1, source |-> 1, at |-> 1, previous |-> -2]>>
+/\ highWater = 1
+/\ lastClaim = 1
+
+State 10: <Claim line 25, col 10 to line 35, col 61 of module Leadership>
+/\ now = 3
+/\ plannedVote = 1
+/\ replies = {1, 2}
+/\ generation = 0
+/\ effects = <<>>
+/\ queued = <<>>
+/\ plannedGeneration = 0
+/\ id = 2
+/\ permits = {}
+/\ sent = <<>>
+/\ phase = "claimed"
+/\ vote = 1
+/\ grants = << [attempt |-> 1, source |-> 1, at |-> 1, previous |-> -2],
+   [attempt |-> 2, source |-> 1, at |-> 3, previous |-> 1] >>
+/\ highWater = 1
+/\ lastClaim = 3
+
+3442 states generated, 1383 distinct states found, 605 states left on queue.
+The depth of the complete state graph search is 10.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 6 and the 95th percentile is 5).
+Finished in 00s at (2026-10-05 01:57:23)
