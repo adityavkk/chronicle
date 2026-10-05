@@ -20,6 +20,32 @@ upstream. Where the Caddy plugin persists to memory or files, chronicle
 persists to Redis — making it a fit for teams who already operate managed Redis
 and want durable streams without new infrastructure.
 
+## Stable server and separate experiment
+
+The repository root is the established **Go/Redis implementation**. Its module,
+`cmd/chronicle`, `store`, `webhook`, Dockerfile, Makefile and CI remain the default.
+The quickstart and configuration below describe that server.
+
+[`rust/chronicle/`](rust/chronicle/README.md) is an **experimental Rust/Raft server**,
+not a replacement Redis backend or a production release. Its source, pinned vendor
+code and licenses, formal models/proofs, deployment manifests, benchmarks, history
+checker and evidence are scoped under that directory. The checker has its own Go
+module, so root Go builds/tests do not pick up experimental packages.
+
+| Implementation | Local commands | Status |
+| --- | --- | --- |
+| Go/Redis (default) | `make redis-up && make run`; `make test` | Established protocol server with Redis-backed subscriptions |
+| Rust/Raft (opt-in) | `make -C rust/chronicle check`; `make -C rust/chronicle formal`; see its README before first-genesis `make -C rust/chronicle local` | Real k3d qualification, pinned prerelease consensus; not production-ready |
+
+The experiment uses durable-majority writes and strict reads, with automatic
+replica placement/repair and opt-in elective leadership balancing. Its pinned
+conformance run has 326 passes and six upstream-default skips. It does not implement
+reserved subscription APIs, mixed-version upgrades or cold offload. Local fault
+tests and scoped formal checks are not an end-to-end proof, power-loss guarantee,
+or independent-AZ qualification. Its unauthenticated admin/Raft API must remain
+on a trusted private network; only the read-only observability UI is suitable
+for the local review portal. See its [limits and evidence](rust/chronicle/README.md#limits-beyond-local-qualification).
+
 ## Quickstart
 
 Requirements: Go ≥ 1.26, Docker (for Redis).

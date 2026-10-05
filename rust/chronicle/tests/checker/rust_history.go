@@ -1,7 +1,7 @@
 package main
 
 // This file adapts the Rust history generator's JSONL directly to the
-// checker package's Porcupine seam.  It intentionally models only stream
+// offline checker's Porcupine seam. It intentionally models only stream
 // create/append/read/delete; cluster placement and the HTTP transport are not
 // part of this offline check.
 

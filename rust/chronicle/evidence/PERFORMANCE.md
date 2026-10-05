@@ -61,7 +61,8 @@ The script reuses `tests/history.py`, runs the existing Go Porcupine adapter,
 retains every outcome, and fails if any workload/check fails. It adds no alternate
 safety checker. Kubernetes resource queries use the guarded local k3d context.
 To independently recheck an archive, decompress it into a temporary file and
-pass that file to `go run ../../jepsen/checker -rust-history FILE`.
+pass its absolute path to `go -C tests/checker run . -rust-history FILE`
+from `rust/chronicle`.
 
 ## Qualified alpha36 candidate, seed 85401
 

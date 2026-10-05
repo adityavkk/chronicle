@@ -28,7 +28,7 @@ make formal      # pinned TLC + Lean; positive and negative checks
 make local       # FIRST genesis only: build, k3d, PVCs, explicit initialization, bootstrap
 ```
 
-Prerequisites: Rust 1.90, Docker with privileged networking, k3d 5.8.3,
+Prerequisites: Rust 1.90, Go 1.26 (isolated offline checker), Docker with privileged networking, k3d 5.8.3,
 kubectl, Python 3, Java, Lean 4.31.0. See [deployment](ops/README.md) for restart,
 learner admission, draining, and teardown. `make local` is intentionally not a
 recovery procedure; it never overwrites existing identity/storage.
@@ -52,13 +52,14 @@ committed commands keep their original incarnation on replay.
 * Real three-replica bootstrap, fourth-node learner admission, three shard moves,
   explicit Raft drain, process restart, and fault histories have retained evidence.
 * A forced pod replacement exposed an overlapping-owner failure: 310 acknowledgements
-  disappeared from a strict read. The failed history and database archive remain.
+  disappeared from a strict read. The failed history remains public; the raw database
+  capture is preserved privately, with its checksum and diagnosis retained here.
   [Diagnosis and actual-PVC regressions](evidence/OWNERSHIP.md) distinguish the lock,
   restart/admission, and recipient-routing fixes from broader durability claims.
 * An isolated test package injects actual SQLite VFS `xWrite` and `xSync` errors,
   checking error propagation, no speculative cache publication and prior-state
   retention on reopen. Its small test-only C/FFI boundary is not in the server binary.
-* The existing Go Porcupine checker accepts an offline Rust history flag. The
+* The isolated `tests/checker` Go module checks Rust histories with pinned Porcupine. The
   original failure is Illegal; larger ambiguous histories can time out as Unknown.
   Python's prefix/retention smoke checker is not a substitute for linearizability.
   The post-review real-cluster drain history has 2,262 successful append responses,
@@ -209,3 +210,14 @@ from these local tests or treat illustrative Fermi targets as measured SLOs.
 `vendor/electric/` preserves the exact upstream Apache-2.0 source and provenance.
 `src/wire.rs` adapts its offset and JSON framing rules. Its independent WAL and local
 tier manifests are not authorities for the replicated service.
+
+## Published evidence and local provenance
+
+Source, licenses, formal checks and synthetic failure histories are retained.
+Raw PVC/database/WAL captures are private local forensic artifacts, not published
+fixtures; their checksums and causal reports remain in `evidence/`. Before first
+publication, unpublished history was rewritten to exclude the database archive.
+Commit IDs embedded in historical command output identify pre-publication local
+checkpoints, not necessarily fetchable GitHub commits. Exact vendor revisions and
+image/binary checksums retain their original meaning. Historical checker commands
+predate its move from `jepsen/checker`; use `tests/README.md` for current invocations.

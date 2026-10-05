@@ -37,8 +37,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"github.com/anishathalye/porcupine"
 )
 
 type config struct {
@@ -93,10 +91,6 @@ type config struct {
 
 func main() {
 	var c config
-	var rustHistory string
-	var rustHistoryTimeout time.Duration
-	flag.StringVar(&rustHistory, "rust-history", "", "offline: check a Rust JSONL history and exit")
-	flag.DurationVar(&rustHistoryTimeout, "rust-history-timeout", 30*time.Second, "Porcupine timeout for -rust-history")
 	flag.StringVar(&c.base, "base", "http://localhost:4438", "chronicle base URL (via k3d loadbalancer)")
 	flag.StringVar(&c.recvHost, "recv-host", "host.k3d.internal", "hostname the cluster uses to reach this receiver")
 	flag.IntVar(&c.recvPort, "recv-port", 8099, "local webhook receiver port")
@@ -128,25 +122,6 @@ func main() {
 	flag.StringVar(&c.segmentDir, "segment-dir", "", "store-linz root for local-files/object-cache")
 	flag.Int64Var(&c.segmentCacheBytes, "segment-cache-bytes", 256<<20, "store-linz object-cache byte bound")
 	flag.Parse()
-	if rustHistory != "" {
-		f, err := os.Open(rustHistory)
-		if err == nil {
-			defer f.Close()
-			var result porcupine.CheckResult
-			result, err = checkRustHistory(f, rustHistoryTimeout)
-			if err == nil {
-				fmt.Println(result)
-				if result != porcupine.Ok {
-					err = fmt.Errorf("rust history verdict: %s", result)
-				}
-			}
-		}
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "FAIL:", err)
-			os.Exit(1)
-		}
-		return
-	}
 
 	r := newReceiver()
 	srv := r.serve(c.recvPort)

@@ -16,9 +16,11 @@ replacement start 03:41:28.353872 and old exit 03:41:29.754620, a 1.40s overlap.
 This substantiates overlapping identity/stale cache overwrite; it does not
 reconstruct every intermediate Raft transition.
 
-The preserved archive is `failed-restart/databases.tar.gz`, also available as
-`.amp/in/artifacts/chronicle-failed-restart-databases.tar.gz` at the repository
-root. `failed-restart/archive.sha256` records the identical artifact's checksum.
+The raw database/WAL archive is preserved privately by the maintainer, outside
+the published repository and its branch history. `failed-restart/archive.sha256`
+records its checksum. The synthetic histories, runtime logs, diagnosis and
+regression outputs remain public; reproducing the archived-WAL analysis requires
+the private capture, not just this checkout.
 
 ## Regression executed on the actual PVC
 

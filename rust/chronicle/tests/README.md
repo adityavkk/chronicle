@@ -89,10 +89,15 @@ failure test. The helper never retries an ambiguous administrative mutation.
 From the repository root:
 
 ```sh
-go run ./jepsen/checker -rust-history rust/chronicle/evidence/baseline.jsonl \
+go -C rust/chronicle/tests/checker run . -rust-history ../../evidence/baseline.jsonl \
   -rust-history-timeout 30s
-go test ./jepsen/checker
+go -C rust/chronicle/tests/checker test -race ./...
 ```
+
+This standalone module reuses the repository's pinned Porcupine version, not the
+Go/Redis checker's models or CLI. Root Go commands do not traverse this module.
+Historical evidence records the old `jepsen/checker` invocation before relocation;
+use the commands above to recheck it with the unchanged experimental model.
 
 Only `Ok` exits successfully. `Illegal`, malformed/unsupported input, and `Unknown`
 (search timeout) fail closed. The retained original leader-kill history is Illegal;
@@ -119,7 +124,7 @@ contract coverage, not a concurrent fault history. Schema/API coverage remains p
 python3 tests/lifecycle.py --url "$PRIVATE_CHRONICLE_URL" \
   --path a-new-unused-path --output lifecycle.jsonl
 # From the repository root:
-go run ./jepsen/checker -rust-history rust/chronicle/lifecycle.jsonl
+go -C rust/chronicle/tests/checker run . -rust-history ../../lifecycle.jsonl
 ```
 
 `tests/openraft_storage.rs` runs the pinned upstream `Suite::test_all` with a

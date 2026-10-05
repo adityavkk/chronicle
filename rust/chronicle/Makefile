@@ -1,12 +1,17 @@
 CARGO := $(HOME)/.cargo/bin/cargo
+GO ?= go
 
-.PHONY: check fault-check formal conformance image local
-check: fault-check
+.PHONY: check checker-check fault-check formal conformance image local
+check: fault-check checker-check
 	$(CARGO) fmt --all -- --check
 	$(CARGO) clippy --locked --all-targets -- -D warnings
 	$(CARGO) test --locked
 	RUSTDOCFLAGS='-D warnings' $(CARGO) doc --locked --no-deps
 	python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+checker-check:
+	$(GO) -C tests/checker test -race ./...
+	$(GO) -C tests/checker vet ./...
 
 fault-check:
 	$(CARGO) clippy --locked --all-targets --features storage-faults -- -D warnings

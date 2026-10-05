@@ -59,7 +59,7 @@ resources after-many
 python3 "$ROOT/tests/history_stats.py" "$OUT/hot.jsonl" > "$OUT/hot-stats.json"
 python3 "$ROOT/tests/history_stats.py" "$OUT"/many-[1-4].jsonl > "$OUT/many-stats.json"
 for history in "$OUT/hot.jsonl" "$OUT"/many-[1-4].jsonl; do
-  "$GO" run "$ROOT/../../jepsen/checker" -rust-history "$history" -rust-history-timeout 30s \
+  "$GO" -C "$ROOT/tests/checker" run . -rust-history "$history" -rust-history-timeout 30s \
     > "${history%.jsonl}-porcupine.txt" 2>&1 || failed=1
 done
 gzip "$OUT/hot.jsonl" "$OUT"/many-[1-4].jsonl
