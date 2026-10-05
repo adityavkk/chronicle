@@ -176,9 +176,19 @@ type Store interface {
 	// slot's outbox in O(owed) instead of re-evaluating every subscription.
 	ClaimDue(h int, now time.Time, limit int, visibility time.Duration) ([]string, error)
 
+	// ClaimDueSlots is the worker pass's form of DueLeases/DueRetries/ClaimDue: it
+	// drains one schedule for every owned slot in ONE round trip (a pipeline of
+	// per-slot claim_due calls, split per master on a cluster). claim_due still runs
+	// once per slot on that slot's one key and still re-scores forward, never ZREM
+	// (INV-LEASE-02); drain i belongs to slots[i], and one slot's error leaves the
+	// others drained.
+	ClaimDueSlots(schedule Schedule, slots []int, now time.Time, limit int, visibility time.Duration) []DueDrain
+
 	// ClearDue removes a subscription's due-set mark when it is no longer owed (the
-	// dueWorker's reconcile). claim_due never removes, so this is how a caught-up or
-	// deleted subscription leaves the due-set and its cardinality returns to ~0.
+	// dueWorker's reconcile). claim_due never removes, and ack (done), release and
+	// delete_sub remove only the sub's own mark with its state change, so this is
+	// how a caught-up subscription's mark (or one a gone subscription left behind)
+	// leaves the due-set and its cardinality returns to ~0.
 	ClearDue(id string) error
 
 	// ScheduleRetryUnscoped records a webhook failure and persists next_attempt if
@@ -216,8 +226,16 @@ type Store interface {
 	// HASH at slotKey: it grants the lease only when the current owner is expired,
 	// missing, or the caller, bumping owner_epoch on transfer only. The returned
 	// SlotClaim is a sealed sum (CLAIMED|RENEWED|BUSY), never a bool, so a
-	// silently-dropping LWW is unrepresentable (T3's contract).
+	// silently-dropping LWW is unrepresentable (T3's contract). It is the one-key
+	// form of ClaimSlots (a batch of one).
 	ClaimSlot(slotKey, replicaID string, now time.Time, slotLeaseTTL time.Duration) (SlotClaim, error)
+
+	// ClaimSlots is the slot-reconcile pass's form of ClaimSlot: one CAS per key,
+	// issued as one pipeline per step (reserve, claim, mirror), so a pass costs a
+	// few round trips however many slots it renews. Result i belongs to
+	// slotKeys[i] and each slot's outcome is exactly ClaimSlot's; a per-slot error
+	// keeps only that slot out of the pass.
+	ClaimSlots(slotKeys []string, replicaID string, now time.Time, slotLeaseTTL time.Duration) []SlotClaimResult
 
 	// CheckOwner runs check_owner.lua: the owner-epoch fence for the EXTERNAL
 	// webhook POST, where an atomic inline check is impossible. Returns the sealed
@@ -314,6 +332,20 @@ type PatternRead struct {
 	Subs    []PatternSubscription
 	Missing int
 	Failed  int
+}
+
+// SlotClaimResult is one slot's outcome in a ClaimSlots batch: the claim, or the
+// error that kept this slot (and only this slot) out of the pass.
+type SlotClaimResult struct {
+	Claim SlotClaim
+	Err   error
+}
+
+// DueDrain is one slot's outcome in a ClaimDueSlots batch: the ids claim_due took
+// from that slot's schedule, or the error that left it undrained this tick.
+type DueDrain struct {
+	IDs []string
+	Err error
 }
 
 // ClaimResult is the outcome of a claim attempt.

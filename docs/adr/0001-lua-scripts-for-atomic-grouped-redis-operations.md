@@ -1,6 +1,6 @@
 # ADR-0001: Use Lua `EVAL`/`EVALSHA` (not Redis Functions) for atomic grouped Redis operations
 
-- **Status:** Accepted
+- **Status:** Accepted, amended 2026-10-05 (batching seam: `typedScript.runBatch`)
 - **Date:** 2026-06-15
 - **Deciders:** @adityavkk
 - **Tracking issue:** [#4](https://github.com/adityavkk/chronicle/issues/4)
@@ -99,8 +99,11 @@ Full reasoning, decision matrix, and conditions-to-reconsider:
 - Forgoes Functions' AOF-persistence/replication of the logic and
   `FUNCTION LIST/STATS/DUMP` introspection. Acceptable today; a gap only if
   script-level audit/backup or server-side durability becomes a hard requirement.
-- The team must **never wrap these scripts in a pipeline/`MULTI`** — `Script.Run`'s
-  `NOSCRIPT` fallback does not fire there (go-redis #3228).
+- `Script.Run`'s `NOSCRIPT` fallback does not fire inside a pipeline/`MULTI`
+  (go-redis #3228), so a script is **never queued into one at a call site**; the
+  one sanctioned batching seam is `webhook`'s `typedScript.runBatch`, which
+  re-issues the `NOSCRIPT`-rejected commands as `EVAL` in a second pipeline (a
+  `forbidigo` rule forbids bare `EVAL`/`EVALSHA` everywhere else).
 
 ### Follow-up actions
 
@@ -127,8 +130,10 @@ statements in the repo docs. Tracked in [#4](https://github.com/adityavkk/chroni
 5. Adopt `redis.NewScriptServerSHA` (go-redis v9.19.0+; chronicle is on v9.20.0)
    so scripts are `SCRIPT LOAD`-class and exempt from Redis 7.4's `EVAL`
    LRU-eviction cap (~500).
-6. Add a guard/comment that these scripts must not be wrapped in a
-   pipeline/`MULTI` (go-redis #3228).
+6. Never queue these scripts into a pipeline/`MULTI` at a call site (go-redis
+   #3228): shipped as the `forbidigo` rule; batching goes only through
+   `webhook`'s `typedScript.runBatch`, which carries the `NOSCRIPT` heal (the
+   amendment recorded in the status line).
 
 > **No correctness or behavior change to the code is required by this decision.**
 > Items 4–6 are quality improvements, not fixes.

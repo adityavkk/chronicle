@@ -169,6 +169,30 @@ func retryZKey(h int) string { return "ds:" + slotTagAt(h) + ":sched:retry" }
 // due-key helper (#12) so its re-tag to a per-slot key was this one-line change.
 func dueZKey(h int) string { return "ds:" + slotTagAt(h) + ":due" }
 
+// Schedule selects one of the three per-slot schedule ZSETs above: the sealed
+// argument of Store.ClaimDueSlots, so a worker pass names which schedule it drains
+// without the store exposing key strings.
+type Schedule int
+
+// The three per-slot schedules a worker drains with claim_due.lua.
+const (
+	ScheduleLease Schedule = iota // leaseZKey: the lease worker's expiry schedule
+	ScheduleRetry                 // retryZKey: the retry worker's backoff schedule
+	ScheduleDue                   // dueZKey: the due worker's "needs a wake" outbox
+)
+
+// zkey is schedule s's ZSET for slot h.
+func (s Schedule) zkey(h int) string {
+	switch s {
+	case ScheduleLease:
+		return leaseZKey(h)
+	case ScheduleRetry:
+		return retryZKey(h)
+	default:
+		return dueZKey(h)
+	}
+}
+
 // streamSubsKey is the per-stream fan-out SET of subscriber ids homed in slot h —
 // one shard of a stream's fan-out per keyspace slot (05:194). A subscriber linked to
 // <path> is SADDed into streamSubsKey(slotOf(id), path), co-located with its own

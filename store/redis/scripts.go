@@ -20,8 +20,11 @@ var scriptFS embed.FS
 // Always invoke these via Script.Run/RunRO. That NOSCRIPT->EVAL self-heal does
 // NOT fire when a script is queued inside a pipeline/MULTI (go-redis #3228), so
 // a bare EVALSHA in a pipeline can fail NOSCRIPT after a cache flush/failover.
-// A forbidigo rule (.golangci.yml) forbids bare EVAL/EVALSHA to enforce this; if
-// batching is ever truly needed, SCRIPT LOAD first and add a justified //nolint.
+// A forbidigo rule (.golangci.yml) forbids bare EVAL/EVALSHA to enforce this.
+// The one sanctioned batching seam is package webhook's typedScript.runBatch
+// (unexported there), which re-issues NOSCRIPT-rejected commands as EVAL in a
+// second pipeline; a batch in this package would need that same heal under a
+// justified //nolint:forbidigo, not a SCRIPT LOAD first.
 func loadScript(name string) *redis.Script {
 	prelude, err := scriptFS.ReadFile("scripts/common.lua")
 	if err != nil {

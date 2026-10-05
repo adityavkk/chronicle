@@ -29,13 +29,18 @@ linters:
     forbidigo:
       # Always run Lua via *redis.Script (Run/RunRO). A bare EVAL/EVALSHA inside a
       # pipeline/MULTI loses the NOSCRIPT->EVAL self-heal (go-redis #3228), so it
-      # can fail NOSCRIPT after a managed-Redis cache flush/failover. chronicle has
-      # zero such calls today; this keeps it that way. If batching a script is ever
-      # genuinely needed, SCRIPT LOAD it first and take an explicit, justified
-      # //nolint:forbidigo at the call site.
+      # can fail NOSCRIPT after a managed-Redis cache flush/failover. Note that
+      # Script.Run(ctx, pipe, ...) passes this rule but loses the heal just the
+      # same. The one sanctioned batching seam is typedScript.runBatch in package
+      # webhook (unexported, so only webhook code can call it), which re-issues
+      # the NOSCRIPT-rejected commands as EVAL in a second pipeline (not SCRIPT
+      # LOAD) under a justified //nolint:forbidigo. Another package that must
+      # batch a script needs that same heal under its own justified nolint,
+      # never a bare EVALSHA at a call site.
       forbid:
         - pattern: \.Eval(Sha)?(RO)?\b
-          msg: use *redis.Script.Run/RunRO, not a bare EVAL/EVALSHA; the NOSCRIPT->EVAL self-heal does not fire inside a pipeline/MULTI (go-redis #3228). If batching is truly needed, SCRIPT LOAD first and add a justified //nolint:forbidigo.
+          # Quoted: in a plain scalar ' #' starts a YAML comment, which cut the text at "#3228".
+          msg: 'use *redis.Script.Run/RunRO, not a bare EVAL/EVALSHA; the NOSCRIPT->EVAL self-heal does not fire inside a pipeline/MULTI (go-redis #3228). To batch a script, go through typedScript.runBatch in package webhook (unexported: webhook code only), the one seam that re-issues NOSCRIPT-rejected commands as EVAL; elsewhere, add that heal under a justified //nolint:forbidigo.'
     revive:
       rules:
         - name: exported

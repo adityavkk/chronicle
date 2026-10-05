@@ -14,10 +14,13 @@ var scriptFS embed.FS
 // named script body, mirroring store/redis/scripts.go. Script.Run handles
 // NOSCRIPT reloads transparently so EVALSHA survives a flushed script cache.
 //
-// Always invoke these via Script.Run/RunRO: the NOSCRIPT->EVAL self-heal does
-// NOT fire inside a pipeline/MULTI (go-redis #3228), so a bare EVALSHA there can
-// fail NOSCRIPT after a cache flush/failover. A forbidigo rule (.golangci.yml)
-// forbids bare EVAL/EVALSHA; SCRIPT LOAD + a justified //nolint if ever batching.
+// Always invoke these via Script.Run/RunRO (typedScript.run): the NOSCRIPT->EVAL
+// self-heal does NOT fire inside a pipeline/MULTI (go-redis #3228) — note that
+// Script.Run(ctx, pipe, ...) compiles and passes the lint rule but silently loses
+// the heal, since the queued command's error is read before Exec. The one
+// batching seam is typedScript.runBatch, which re-issues NOSCRIPT-rejected
+// commands as EVAL in a second pipeline; a forbidigo rule (.golangci.yml)
+// forbids bare EVAL/EVALSHA everywhere else.
 func loadScript(name string) *redis.Script {
 	prelude, err := scriptFS.ReadFile("scripts/common.lua")
 	if err != nil {
