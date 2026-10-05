@@ -67,14 +67,14 @@ async fn regression(scenario: Scenario) {
         let client = reqwest::Client::new();
         let mut listeners = Vec::new();
         let mut nodes = BTreeMap::new();
-        for id in 1..=4 {
+        for id in 1..=5 {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             nodes.insert(
                 id,
                 Node {
                     addr: listener.local_addr().unwrap().to_string(),
                     zone: id.to_string(),
-                    draining: false,
+                    draining: id == 5,
                 },
             );
             listeners.push((id, listener));
@@ -82,7 +82,8 @@ async fn regression(scenario: Scenario) {
         let (logs, _guard) = tracing_appender::non_blocking(std::io::sink());
         let mut apps = BTreeMap::new();
         let mut servers = tokio::task::JoinSet::new();
-        let transfers: Arc<[AtomicUsize; 4]> = Arc::new(std::array::from_fn(|_| AtomicUsize::new(0)));
+        let transfers: Arc<[AtomicUsize; 5]> = Arc::new(std::array::from_fn(|_| AtomicUsize::new(0)));
+        let posts = Arc::new(AtomicUsize::new(0));
         for (id, listener) in listeners {
             let mut groups = BTreeMap::new();
             for shard in 0..=SHARDS {
@@ -119,7 +120,8 @@ async fn regression(scenario: Scenario) {
                     cluster: "retirement-test".into(),
                     genesis: true,
                 },
-                nodes: nodes.clone(),
+                nodes: nodes.iter().filter(|(node, _)| id != 5 || **node <= 3)
+                    .map(|(id, node)| (*id, node.clone())).collect(),
                 groups,
                 client: client.clone(),
                 admission: Arc::new(Semaphore::new(16)),
@@ -127,7 +129,22 @@ async fn regression(scenario: Scenario) {
                 telemetry: Arc::new(Telemetry::new(id, logs.error_counter(), String::new())),
             });
             let count = transfers.clone();
+            let post_count = posts.clone();
             let router = Router::new()
+                .route("/v1/stream/{tenant}/{*path}", axum::routing::any(crate::stream)
+                    .layer(axum::middleware::from_fn_with_state(app.admission.clone(), crate::admit_stream))
+                    .layer(axum::middleware::from_fn(move |request: axum::extract::Request, next: axum::middleware::Next| {
+                        let posts = post_count.clone();
+                        async move {
+                            let lose = id == 4 && request.headers().contains_key("x-test-lose-reply");
+                            if id == 4 && request.method() == axum::http::Method::POST {
+                                posts.fetch_add(1, Ordering::SeqCst);
+                            }
+                            let response = next.run(request).await;
+                            if lose { axum::response::IntoResponse::into_response(axum::http::StatusCode::SERVICE_UNAVAILABLE) }
+                            else { response }
+                        }
+                    })))
                 .route("/raft/{group}/append", post(crate::append_rpc))
                 .route("/raft/{group}/vote", post(crate::vote_rpc))
                 .route("/raft/{group}/snapshot", post(crate::snapshot_rpc))
@@ -184,6 +201,7 @@ async fn regression(scenario: Scenario) {
                 .state(openraft::ServerState::Leader, "bootstrap")
                 .await
                 .unwrap();
+            group.raft.ensure_linearizable(openraft::ReadPolicy::ReadIndex).await.unwrap();
             for id in 2..=4 {
                 group
                     .raft
@@ -323,11 +341,11 @@ async fn regression(scenario: Scenario) {
                 let state = control(leader).await.unwrap();
                 assert_eq!(state.leadership.attempt.unwrap().phase, Phase::ObservedTarget);
                 assert_eq!(old.telemetry.leadership_submissions[1].load(Ordering::Relaxed), 1);
-                assert_eq!(transfers.each_ref().map(|n| n.load(Ordering::SeqCst)), [0, 1, 1, 0]);
+                assert_eq!(transfers.each_ref().map(|n| n.load(Ordering::SeqCst)), [0, 1, 1, 0, 0]);
             } else {
                 tokio::time::sleep(Duration::from_millis(400)).await;
                 assert_eq!(old.telemetry.leadership_submissions[1].load(Ordering::Relaxed), 0);
-                assert_eq!(transfers.each_ref().map(|n| n.load(Ordering::SeqCst)), [0; 4]);
+                assert_eq!(transfers.each_ref().map(|n| n.load(Ordering::SeqCst)), [0; 5]);
                 assert_eq!(old.groups[&1].raft.metrics().borrow_watched().state, openraft::ServerState::Leader);
             }
         } else {
@@ -369,6 +387,50 @@ async fn regression(scenario: Scenario) {
                 .unwrap();
         }
         assert!(retired(leader, 1).await.unwrap());
+        // The retired ingress may not know a subsequently admitted leader at all.
+        // Supply only a surviving follower, not the current leader's address.
+        let successor = loop {
+            if let Some((&id, _)) = apps.iter().find(|(id, app)| **id != 1 &&
+                app.groups[&1].raft.metrics().borrow_watched().state == openraft::ServerState::Leader) {
+                break id;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        let peer = (2..=4).find(|id| *id != successor).unwrap();
+        apps[&peer].groups[&1].raft.wait(Some(Duration::from_secs(5))).metrics(
+            |m| m.current_leader == Some(successor), "surviving follower learns successor",
+        ).await.unwrap();
+        let found = crate::discover_leader(old, 1, vec![(peer, nodes[&peer].clone())]).await.unwrap();
+        assert_eq!(found, (successor, nodes[&successor].addr.clone()));
+        apps[&successor].groups[&1].raft.ensure_linearizable(openraft::ReadPolicy::ReadIndex).await.unwrap();
+        // Node 5 has neither node 4 in its seeds nor a replicated control registry.
+        // Pin the actual destination to that missing identity, using the upstream API.
+        if successor != 4 {
+            apps[&successor].groups[&1].raft.trigger().transfer_leader(4).await.unwrap();
+        }
+        apps[&4].groups[&1].raft.wait(Some(Duration::from_secs(5))).state(
+            openraft::ServerState::Leader, "new identity is the HTTP authority",
+        ).await.unwrap();
+        apps[&4].groups[&1].raft.ensure_linearizable(openraft::ReadPolicy::ReadIndex).await.unwrap();
+        apps[&2].groups[&1].raft.wait(Some(Duration::from_secs(5))).metrics(
+            |m| m.current_leader == Some(4), "known follower advertises new identity",
+        ).await.unwrap();
+        assert!(!apps[&5].nodes.contains_key(&4));
+        assert!(apps[&5].groups[&0].store.read_state().await.unwrap().nodes.is_empty());
+        let path = (0..100).map(|n| format!("probe-{n}")).find(|p| chronicle_raft::model::shard(&format!("1:t{p}")) == 1).unwrap();
+        let url = format!("http://{}/v1/stream/t/{path}", nodes[&5].addr);
+        assert_eq!(client.put(&url).header("content-type", "application/octet-stream").body("start").send().await.unwrap().status(), 201);
+        for (seq, data, lose, expected) in [(0, "-a", false, 200), (1, "-b", true, 503)] {
+            let mut request = client.post(&url).header("content-type", "application/octet-stream")
+                .header("producer-id", "probe").header("producer-epoch", "0").header("producer-seq", seq.to_string()).body(data);
+            if lose { request = request.header("x-test-lose-reply", "1"); }
+            assert_eq!(request.send().await.unwrap().status(), expected);
+        }
+        assert_eq!(posts.load(Ordering::SeqCst), 2, "proxy must not retry an ambiguous committed append");
+        let response = client.get(&url).send().await.unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["stream-consistency"], "strict");
+        assert_eq!(response.bytes().await.unwrap(), "start-a-b");
         }
         let mut stores = Vec::new();
         for app in apps.values() {

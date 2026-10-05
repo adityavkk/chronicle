@@ -1,0 +1,394 @@
+/home/user/.cargo/bin/cargo clippy --locked --all-targets --features storage-faults -- -D warnings
+    Checking chronicle-raft v0.1.0 (/home/user/workspace/chronicle-transfer/rust/chronicle)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.94s
+/home/user/.cargo/bin/cargo test --locked --features storage-faults --test fault_gates
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running tests/fault_gates.rs (target/debug/deps/fault_gates-43a0bf475c9ee461)
+
+running 7 tests
+test fault_gate_child ... ok
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+test fault_gate_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.03s
+
+test unwinding_test_reaps_paused_child_and_releases_store ... ok
+
+running 1 test
+test fault_gate_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.04s
+
+test release_file_allows_the_paused_operation_to_finish ... ok
+
+running 1 test
+
+running 1 test
+
+running 1 test
+test fault_gate_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.03s
+
+test snapshot_build_precommit_crash_preserves_previous_snapshot_and_applied_state ... ok
+
+running 1 test
+test crashes_at_durable_boundaries_reopen_with_exact_state ... ok
+test fault_gate_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.13s
+
+test cancelled_live_gate_retains_writer_reservation ... ok
+test fault_gate_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.33s
+
+
+running 1 test
+
+running 1 test
+test fault_gate_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.32s
+
+
+running 1 test
+test real_raft_responder_waits_for_commit_and_post_commit_gate ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.32s
+
+/home/user/.cargo/bin/cargo test --locked --features storage-faults --bin chronicle-raft failure::
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/chronicle-transfer/rust/chronicle)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.45s
+     Running unittests src/main.rs (target/debug/deps/chronicle_raft-653728f061b9e475)
+
+running 4 tests
+test failure::subprocess::fatal_child ... ok
+test failure::tests::non_storage_states_are_not_storage_failure ... ok
+test failure::tests::initial_and_final_storage_errors_are_observed ... ok
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+
+running 1 test
+test failure::subprocess::storage_fatal_exits_with_blocked_body_and_retains_acknowledged_state ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.90s
+
+/home/user/.cargo/bin/cargo fmt --manifest-path tests/vfs/Cargo.toml -- --check
+CARGO_TARGET_DIR=/home/user/workspace/chronicle-transfer/rust/chronicle/target /home/user/.cargo/bin/cargo clippy --manifest-path tests/vfs/Cargo.toml --locked --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+CARGO_TARGET_DIR=/home/user/workspace/chronicle-transfer/rust/chronicle/target /home/user/.cargo/bin/cargo test --manifest-path tests/vfs/Cargo.toml --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running unittests src/lib.rs (target/debug/deps/chronicle_vfs_tests-4aed8f1ff40b28e4)
+
+running 1 test
+test tests::sqlite_vfs_write_and_sync_failures_preserve_acknowledged_state ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+   Doc-tests chronicle_vfs_tests
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+/home/user/.cargo/bin/cargo fmt --all -- --check
+/home/user/.cargo/bin/cargo clippy --locked --all-targets -- -D warnings
+    Checking chronicle-raft v0.1.0 (/home/user/workspace/chronicle-transfer/rust/chronicle)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.96s
+/home/user/.cargo/bin/cargo test --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running unittests src/lib.rs (target/debug/deps/chronicle_raft-d443863c265e7af4)
+
+running 40 tests
+test balance::tests::leader_weighted_choice_reaches_a_stable_local_target_without_campaigns ... ok
+test balance::tests::competing_commands_cannot_bypass_global_budget_or_generation ... ok
+test balance::tests::measured_weight_changes_selection_and_queue_pressure_blocks_destination ... ok
+test balance::tests::apply_enforces_global_cooldown_generation_zones_and_single_swap ... ok
+test balance::tests::fixed_weights_descend_to_a_stable_local_minimum ... ok
+test metrics::tests::inclusive_buckets_and_sum_have_independent_expectations ... ok
+test balance::tests::actual_service_and_byte_samples_inform_selection ... ok
+test balance::tests::unknown_domains_are_not_evidence_of_diversity ... ok
+test balance::tests::observations_require_continuity_and_detect_actor_restart ... ok
+test balance::tests::leader_window_tracks_every_vote_and_membership_but_not_advancing_apply_indices ... ok
+test network::tests::adapter_forwards_directed_transfer_and_preserves_rejection ... ok
+test metrics::tests::concurrent_scrapes_keep_cumulative_buckets_consistent ... ok
+test storage::tests::cancelled_append_keeps_flush_callback_until_durable_commit ... ok
+test storage::tests::cancelled_caller_does_not_release_actor_lock_or_cancel_durable_work ... ok
+test storage::tests::cancelled_metadata_read_retains_admission_until_actor_finishes ... ok
+test storage::tests::cancelled_stream_apply_finishes_admitted_bounded_batch_without_responders ... ok
+test storage::tests::child_process_lock_holder ... ok
+test storage::tests::corrupt_and_truncated_snapshots_are_rejected ... ok
+test storage::tests::failed_state_transaction_rolls_back_database_and_publication ... ok
+test storage::tests::install_rejects_metadata_that_does_not_match_body ... ok
+test storage::tests::nonempty_vote_and_state_survive_reopen ... ok
+test storage::tests::overlapping_process_cannot_open_same_raft_identity ... ok
+
+running 1 test
+test projection::tests::eviction_bounds_entries_and_bytes_without_truncating_readers ... ok
+test storage::tests::rejects_corrupt_database ... ok
+test storage::tests::reopen_empty_store ... ok
+test storage::tests::process_lock_survives_overlap_and_releases_on_sigkill ... ok
+test storage::tests::restart_rejects_missing_or_truncated_store_without_initializing_it ... ok
+test storage::tests::snapshot_format_is_raw_body_with_fixed_checksum_overhead ... ok
+test storage::tests::resource_samples_charge_state_measure_work_and_reset_on_reopen ... ok
+test storage::tests::stream_error_commits_preceding_batches_and_partial_batch_but_not_following_entry ... ok
+test storage::tests::truncation_retains_committed_applied_purged_and_snapshot_metadata ... ok
+test wire::tests::cursor_crosses_interval_and_rejects_overflow ... ok
+test wire::tests::validators_bind_every_representation_dimension ... ok
+test storage::tests::truncate_after_none_zero_and_middle_survive_reopen ... ok
+test network::tests::real_transfer_elects_successor_and_serves_strict_reads_and_new_writes ... ok
+test network::tests::unavailable_transfer_recipient_is_not_success_or_an_automatic_retry ... ok
+test network::tests::real_transfer_rejects_stale_vote_and_unflushed_boundary ... ok
+test network::tests::unavailable_replica_backs_off_and_recovers ... ok
+test network::tests::heartbeat_enabled_unavailable_replica_has_bounded_aggregate_traffic_and_recovers ... ok
+test network::tests::dead_transfer_target_recovers_only_through_surviving_voter_election ... ok
+
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.56s
+
+     Running unittests src/main.rs (target/debug/deps/chronicle_raft-c19ba631153f28d0)
+
+running 39 tests
+test controller::tests::campaign_waits_again_after_attempt_view_change_and_restart ... ok
+test controller::tests::every_ineligible_campaign_clears_without_touching_storage ... ok
+test controller::tests::pending_repair_waits_for_cooldown_and_does_not_start_other_moves ... ok
+test controller::tests::persisted_advanced_leader_ids_keep_term_and_node ... ok
+test controller::tests::placement_completion_requires_applied_uniform_membership ... ok
+test controller::tests::resource_moves_are_not_rotated_back_and_pending_repair_skips_sampling ... ok
+test controller::tests::retirement_candidates_rotate_even_without_a_success_result ... ok
+test controller::tests::retirement_requires_applied_uniform_nonvoter_membership ... ok
+test controller::tests::unspecified_domain_does_not_displace_available_distinct_domains ... ok
+test controller::tests::untouched_retirement_needs_known_history_and_empty_recovered_state ... ok
+test failure::tests::initial_and_final_storage_errors_are_observed ... ok
+test failure::tests::non_storage_states_are_not_storage_failure ... ok
+test fork_http::tests::source_path_matches_axum_capture_decoding_not_whole_path_splitting ... ok
+test controller::tests::control_discovery_survives_unavailable_original_seeds ... ok
+test identity::tests::duplicate_seed_addresses_are_not_three_replicas ... ok
+test identity::tests::restart_is_bound_to_identity_and_requires_every_store ... ok
+test telemetry::tests::body_error_keeps_http_status_but_records_unknown_partial_delivery ... ok
+test telemetry::tests::cancellation_before_headers_and_after_partial_body_are_unknown ... ok
+test telemetry::tests::completion_waits_for_body_and_includes_delivery_time ... ok
+test telemetry::tests::duplicate_and_coalesced_future_traceparents_are_rejected ... ok
+test telemetry::tests::forwarded_bodyless_status_is_complete_without_length_or_polling ... ok
+test telemetry::tests::forwarding_preserves_unsampled_context ... ok
+test telemetry::tests::head_and_no_content_need_no_poll_but_length_mismatches_are_errors ... ok
+test telemetry::tests::invalid_context_is_replaced_and_valid_context_continues ... ok
+test telemetry::tests::unavailable_exporter_cannot_block_completion_and_overflow_is_counted ... ok
+test tests::admission_is_reserved_before_reading_a_slow_body ... ok
+test tests::admission_lasts_until_streaming_response_is_dropped ... ok
+test tests::browser_headers_cover_early_rejection_and_extraction_failure ... ok
+test controller::tests::matching_prefix_cannot_complete_over_cancelled_membership ... ok
+test tests::cancelled_write_and_expiry_retain_admission_until_raft_completes ... ok
+test tests::rpc_rejects_missing_wrong_node_and_wrong_cluster_identity ... ok
+test tests::snapshot_chunks_are_bounded_before_assembly ... ok
+test tests::orphan_fork_headers_reject_before_admission_or_body_extraction ... ok
+test controller::retirement_tests::removed_control_replica_discovers_claim_owner_and_transfers_once ... ok
+test controller::retirement_tests::lost_claim_reply_never_reconstructs_permission ... ok
+test controller::retirement_tests::changed_admission_after_claim_spends_permission_without_submission ... ok
+test controller::retirement_tests::removed_control_leader_completes_data_placement_and_retires ... ok
+test forks::tests::cross_leader_chunked_fork_and_cascade_use_real_raft_quorums ... ok
+test controller::tests::failed_health_probes_leave_budget_for_reconciliation ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.08s
+
+     Running tests/expiry.rs (target/debug/deps/expiry-cbe3c1f0e3a1e1dc)
+
+running 6 tests
+test canonical_policy_parsing_and_overflow_boundaries ... ok
+test legacy_deadline_and_commands_preserve_replay_semantics ... ok
+test expiry_fences_renewal_and_recreation_without_sliding_absolute_deadline ... ok
+test legacy_snapshot_installs_without_inventing_sliding_policy ... ok
+test append_renewal_precedes_validation_but_not_incarnation_or_expiry_fences ... ok
+test renewal_and_expiry_survive_snapshot_install_and_reopen ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/fault_gates.rs (target/debug/deps/fault_gates-a81b573426b3956b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/fork_boundaries.rs (target/debug/deps/fork_boundaries-bbe63b369f5bacaa)
+
+running 4 tests
+test json_counts_values_not_commas_or_bytes_and_crosses_batches ... ok
+test legacy_replay_does_not_invent_boundaries_and_delete_clears_them ... ok
+test boundaries_survive_duplicate_gap_close_snapshot_install_and_reopen ... ok
+test boundary_metadata_can_exhaust_capacity_before_payload_does ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/fork_transactions.rs (target/debug/deps/fork_transactions-7caa1a4a4b5d8050)
+
+running 6 tests
+test expiry_abort_is_irreversible_and_releases_target_without_visibility ... ok
+test preparation_fences_both_identities_and_rejects_incomplete_or_mismatched_chunks ... ok
+test soft_delete_retains_prefix_until_child_release_and_fences_recreation ... ok
+test delayed_prepare_after_abort_cleanup_has_a_retained_or_retired_decision ... ok
+test legacy_header_case_override_preserves_effective_framing ... ok
+test every_phase_survives_sqlite_snapshot_install_and_reopen ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/formal_retry.rs (target/debug/deps/formal_retry-aedc7e1ecdd5854c)
+
+running 1 test
+test replays_formal_retention_scenario ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/leadership.rs (target/debug/deps/leadership-1dbbc7fbdaf30774)
+
+running 5 tests
+test repair_preempts_claim_while_elective_replica_balance_waits ... ok
+test completion_requires_claim_successor_target_and_matching_membership ... ok
+test cooldown_is_global_and_expiry_does_not_erase_it ... ok
+test claim_response_is_one_shot_and_new_ids_cannot_rearm_consumed_vote ... ok
+test committed_claim_survives_restart_and_snapshot_install_without_a_new_permit ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/openraft_storage.rs (target/debug/deps/openraft_storage-07e1f36c3179e7dc)
+
+running 1 test
+test upstream_storage_contracts ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.68s
+
+     Running tests/projection.rs (target/debug/deps/projection-38090bbbd130ae7d)
+
+running 9 tests
+test json_cursor_is_a_complete_value_boundary ... ok
+test cancellation_retains_admission_until_queued_blocking_read_finishes ... ok
+test json_delivery_frames_values_and_empty_ranges ... ok
+test snapshot_fences_unopened_metadata_even_for_identical_bytes ... ok
+test cache_failure_does_not_undo_committed_appends_and_truncation_is_an_error ... ok
+test notifications_coalesce_applies_and_only_signal_successful_snapshot_install ... ok
+test bounded_ranges_have_independent_cursors_and_survive_recreation ... ok
+test restart_rebuilds_untrusted_cache_and_snapshot_replaces_inode ... ok
+test persisted_framing_does_not_reinterpret_legacy_bytes ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/sse_wire.rs (target/debug/deps/sse_wire-38a6f12b78310d52)
+
+running 8 tests
+test control_formats_open_and_closed_streams ... ok
+test json_is_not_rewrapped_or_trimmed ... ok
+test base64_has_padding_only_at_the_end_for_every_split_point ... ok
+test source_error_does_not_emit_event_terminator ... ok
+test sse_parsing_preserves_payload_spaces ... ok
+test text_preserves_lossy_utf8_at_every_split_point ... ok
+test text_splits_cr_and_lf_to_prevent_field_injection ... ok
+test streaming_matches_independent_eager_framing ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/state_machine.rs (target/debug/deps/state_machine-1b6f3a620bf66b50)
+
+running 19 tests
+test admission_never_reuses_an_identity_or_address ... ok
+test create_matches_current_closure_without_mutating_it ... ok
+test draining_fences_cached_placement_without_changing_legacy_replay ... ok
+test gaps_are_rejected_without_consuming_producer_identity ... ok
+test empty_body_validation_preserves_retention_and_legacy_zero_byte_commands ... ok
+test legacy_placement_never_claims_unknown_identities_are_untouched ... ok
+test media_identity_preserves_config_and_distinguishes_json_prefixes ... ok
+test old_sequence_returns_its_original_frontier_after_interleaving ... ok
+test stale_lifecycle_operations_cannot_mutate_recreated_stream ... ok
+test stream_order_empty_absent_recreation_and_legacy_replay_are_distinct ... ok
+test snapshot_reopen_preserves_successful_retry_and_membership_boundary ... ok
+test closure_replies_follow_apply_and_survive_snapshot_reopen ... ok
+test pending_replacement_preserves_history_and_fences_stale_completion_after_snapshot ... ok
+test retirement_history_survives_snapshot_and_distinguishes_repromotion_from_untouched ... ok
+test stream_order_survives_snapshot_reopen_without_changing_retry_or_epoch_fences ... ok
+test stream_order_matches_rank_model ... ok
+test committed_duplicate_schedules_preserve_exact_bytes ... ok
+test stream_order_metadata_is_bounded_and_replacement_charges_only_growth ... ok
+test content_type_and_metadata_are_bounded_by_capacity ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s
+
+     Running tests/upgrade_fixture.rs (target/debug/deps/upgrade_fixture-2643c2adfe621f88)
+
+running 2 tests
+test absent_vote_is_distinct_from_persisted_uncommitted_zero_vote ... ok
+test old_committed_prefix_replays_without_committing_suffix_or_fabricating_quorum ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+   Doc-tests chronicle_raft
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+RUSTDOCFLAGS='-D warnings' /home/user/.cargo/bin/cargo doc --locked --no-deps
+ Documenting chronicle-raft v0.1.0 (/home/user/workspace/chronicle-transfer/rust/chronicle)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.60s
+   Generated /home/user/workspace/chronicle-transfer/rust/chronicle/target/doc/chronicle_raft/index.html
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+test_leader_selected_before_admission_and_rechecked_before_drain (test_drain.DrainTest.test_leader_selected_before_admission_and_rechecked_before_drain) ... ok
+test_partition_accepts_any_single_group_but_requires_unverified_retirement (test_drain.DrainTest.test_partition_accepts_any_single_group_but_requires_unverified_retirement) ... ok
+test_unverified_old_process_is_not_reported_as_gracefully_drained (test_drain.DrainTest.test_unverified_old_process_is_not_reported_as_gracefully_drained) ... ok
+test_voter_repair_does_not_skip_old_process_verification (test_drain.DrainTest.test_voter_repair_does_not_skip_old_process_verification) ... ok
+test_control_path_is_one_argument_without_shell_interpolation (test_gated_history.GateControlTest.test_control_path_is_one_argument_without_shell_interpolation) ... ok
+test_file_probe_tests_existence_not_nonempty_path_string (test_gated_history.GateControlTest.test_file_probe_tests_existence_not_nonempty_path_string) ... ok
+test_unicode_tenant_uses_rust_utf8_byte_length (test_gated_history.GateControlTest.test_unicode_tenant_uses_rust_utf8_byte_length) ... ok
+test_duplicates (test_history.CheckerTest.test_duplicates) ... ok
+test_falsified_retention (test_history.CheckerTest.test_falsified_retention) ... ok
+test_non_prefix (test_history.CheckerTest.test_non_prefix) ... ok
+test_old_reads_cannot_certify_unobserved_acknowledgements (test_history.CheckerTest.test_old_reads_cannot_certify_unobserved_acknowledgements) ... ok
+test_query_encoding_preserves_inputs_and_explicit_stale_mode (test_history.CheckerTest.test_query_encoding_preserves_inputs_and_explicit_stale_mode) ... ok
+test_real_time_violation (test_history.CheckerTest.test_real_time_violation) ... ok
+test_truncated_success_or_error_body_is_unknown (test_history.CheckerTest.test_truncated_success_or_error_body_is_unknown) ... ok
+test_unknown_accepted_write (test_history.CheckerTest.test_unknown_accepted_write) ... ok
+test_unknown_retry_is_paced_and_never_skips_a_sequence (test_history.CheckerTest.test_unknown_retry_is_paced_and_never_skips_a_sequence) ... ok
+test_workload_never_overwrites_retained_history (test_history.CheckerTest.test_workload_never_overwrites_retained_history) ... ok
+test_rank_is_not_mean_and_empty_sample_is_not_zero (test_history_stats.StatsTest.test_rank_is_not_mean_and_empty_sample_is_not_zero) ... ok
+test_retries_keep_logical_wait_and_separate_histories_can_reuse_ids (test_history_stats.StatsTest.test_retries_keep_logical_wait_and_separate_histories_can_reuse_ids) ... ok
+test_success_gaps_do_not_cross_streams_or_end_at_errors (test_history_stats.StatsTest.test_success_gaps_do_not_cross_streams_or_end_at_errors) ... ok
+test_unknown_only_does_not_report_successful_latency (test_history_stats.StatsTest.test_unknown_only_does_not_report_successful_latency) ... ok
+test_only_exact_disposable_pvc_and_named_volume_are_accepted (test_lost_volume.LocationTest.test_only_exact_disposable_pvc_and_named_volume_are_accepted) ... ok
+test_restore_requires_quarantine_before_any_docker_mutation (test_lost_volume.LocationTest.test_restore_requires_quarantine_before_any_docker_mutation) ... ok
+test_restore_retries_status_reads_without_repeating_volume_mutation (test_lost_volume.LocationTest.test_restore_retries_status_reads_without_repeating_volume_mutation) ... ok
+test_cleanup_failures_do_not_skip_release_or_heal (test_pending_placement.CleanupTest.test_cleanup_failures_do_not_skip_release_or_heal) ... ok
+test_crash_needs_runtime_replacement_not_only_ready_or_command_success (test_pending_placement.CleanupTest.test_crash_needs_runtime_replacement_not_only_ready_or_command_success) ... ok
+test_forced_repair_restores_seed_before_isolation_and_on_failures (test_pending_placement.CleanupTest.test_forced_repair_restores_seed_before_isolation_and_on_failures) ... ok
+test_uncertain_creation_and_admission_are_owned_before_remote_mutation (test_pending_placement.CleanupTest.test_uncertain_creation_and_admission_are_owned_before_remote_mutation) ... ok
+test_verified_restart_does_not_wait_for_a_dead_actor_to_resume (test_pending_placement.CleanupTest.test_verified_restart_does_not_wait_for_a_dead_actor_to_resume) ... ok
+test_observes_stability_and_restores_after_invalid_domains_or_unknown_admission (test_resource_balance.ResourceBalanceTest.test_observes_stability_and_restores_after_invalid_domains_or_unknown_admission) ... ok
+test_mutation_failure_cannot_count_as_sse_abort (test_sse.ModelTest.test_mutation_failure_cannot_count_as_sse_abort) ... ok
+test_output_refuses_overwrite_before_network (test_sse.ModelTest.test_output_refuses_overwrite_before_network) ... ok
+test_wire_offsets_exclude_json_brackets (test_sse.ModelTest.test_wire_offsets_exclude_json_brackets) ... ok
+test_wire_offsets_preserve_json_spelling_and_internal_whitespace (test_sse.ModelTest.test_wire_offsets_preserve_json_spelling_and_internal_whitespace) ... ok
+test_comments_unknown_fields_and_default_event (test_sse.ParserTest.test_comments_unknown_fields_and_default_event) ... ok
+test_data_lines_join_exactly (test_sse.ParserTest.test_data_lines_join_exactly) ... ok
+test_empty_lines_and_complete_comments_are_not_truncated (test_sse.ParserTest.test_empty_lines_and_complete_comments_are_not_truncated) ... ok
+test_every_byte_boundary_and_all_line_endings (test_sse.ParserTest.test_every_byte_boundary_and_all_line_endings) ... ok
+test_rejects_malformed_and_truncated_events (test_sse.ParserTest.test_rejects_malformed_and_truncated_events) ... ok
+
+----------------------------------------------------------------------
+Ran 39 tests in 0.059s
+
+OK

@@ -1,0 +1,37 @@
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/chronicle-transfer/rust/chronicle)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.05s
+     Running unittests src/main.rs (target/debug/deps/chronicle_raft-c19ba631153f28d0)
+
+running 1 test
+test controller::retirement_tests::removed_control_leader_completes_data_placement_and_retires ... FAILED
+
+failures:
+
+---- controller::retirement_tests::removed_control_leader_completes_data_placement_and_retires stdout ----
+transfer delivery: group=0, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=1, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=1, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=1, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=2, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=2, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=2, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=3, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=3, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=3, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=4, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=4, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=4, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+
+thread 'controller::retirement_tests::removed_control_leader_completes_data_placement_and_retires' panicked at src/controller_retirement_tests.rs:385:94:
+called `Result::unwrap()` on an `Err` value: (503, "no leader; retry")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    controller::retirement_tests::removed_control_leader_completes_data_placement_and_retires
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 38 filtered out; finished in 2.02s
+
+error: test failed, to rerun pass `--bin chronicle-raft`

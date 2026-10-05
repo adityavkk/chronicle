@@ -20,6 +20,18 @@ Each fixed shard is one Raft group; group zero holds placement intents. Stream
 identity hashes tenant plus canonical path, independent of node count. All groups
 share one binary, not one consensus group per stream.
 
+Routing refinement before implementation: a retired replica's registry may
+predate a new shard leader. Discovery may follow a known peer's reported leader
+address from its Raft membership, within the existing three-second deadline and
+32 queue iterations (at most 32 probes), visiting each node identity once. These responses are hints,
+not permission to serve data: the selected recipient still performs the strict
+barrier or client write. Never retry a mutation during discovery, use a stale
+prefix as fallback, or require control quorum to route a healthy data group.
+The safety model's authority/barrier assumptions are unchanged. A request succeeds
+only if discovery reaches a usable leader within its budget and the destination
+barrier/write succeeds. A stale self-reported leader can still cause a retry;
+this does not promise discovery completeness for all registered-node counts.
+
 Strict reads use ensure_linearizable before taking the applied view. Optional
 stale reads expose only a committed prefix, not freshness. Timeouts mean unknown
 outcome. Every append (including a retry) crosses consensus; deterministic apply

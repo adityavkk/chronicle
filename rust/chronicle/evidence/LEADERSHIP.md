@@ -1,4 +1,4 @@
-# Directed leadership policy — implementation checkpoint, live gate outstanding
+# Directed leadership policy — opt-in local qualification
 
 The candidate remains isolated from the stable OpenRaft 0.9 deployment. Directed
 balancing is explicit opt-in (`CHRONICLE_LEADERSHIP_BALANCE=1`) and defaults off.
@@ -63,8 +63,9 @@ from 83² + 0² = 6,889 to 54² + 29² = 3,757. This is the implemented advisory
 weight score, not measured CPU redistribution.
 
 The same full votes/memberships remained stable for **127.7 seconds while all
-four workloads were running**. There was exactly one application transfer
-submission through workload completion; no pod replacement/restart hid churn.
+four workloads were running**. The retained 02:58:38 UTC counter snapshot contains
+exactly one application transfer submission; it precedes workload completion and
+does not by itself establish the end-of-run count. No pod replacement/restart hid churn.
 This is finite observed convergence, not a convergence theorem for changing load.
 The delivered driver additionally rejects a pre-existing completed attempt and
 checks the final vote/attempt after workers finish; those two guards were added
@@ -110,7 +111,11 @@ Its early empty time range reflects the later collector deployment, not missing
 server traffic fabricated with probes. This is local disposable observability;
 the manifest's emptyDir volumes are not production telemetry retention.
 
-Remaining: live membership/leadership overlap qualification and independent
-follow-up review before promotion. Policy remains **default-off**. Claim timeouts
+The subsequent [membership-overlap run](RETIRED-ROUTING.md) reached committed
+drain while an attempt remained Planned. It exposed and fixed stale-ingress
+routing; failed originals and extended recovery histories are retained. A separate
+post-fix restoration run retained all 4,000 acknowledgements with four Porcupine
+`Ok` results and unchanged process owners. Oracle's integration review found no
+code blocker. Policy remains **default-off**. Claim timeouts
 remain unknown; expiry cannot cancel queued commands, and a lost claim response
 can spend the optimization until a newer source vote.

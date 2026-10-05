@@ -30,7 +30,7 @@ use openraft::type_config::async_runtime::WatchReceiver;
 use openraft::{BasicNode, Config, Instant as _, SnapshotPolicy};
 use openraft_legacy::network_v1::{ChunkedSnapshotReceiver, InstallSnapshotRequest};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -549,10 +549,17 @@ pub async fn discover_leader(
     candidates.sort_by_key(|(id, _)| Some(*id) != hint);
     // Removed replicas can retain an absent/stale local hint indefinitely.
     tokio::time::timeout(Duration::from_secs(3), async {
-        for (id, node) in candidates {
+        let mut candidates: VecDeque<_> =
+            candidates.into_iter().map(|(id, n)| (id, n.addr)).collect();
+        let mut seen = BTreeSet::new();
+        for _ in 0..32 {
+            let (id, address) = candidates.pop_front()?;
+            if !seen.insert(id) {
+                continue;
+            }
             let response = a
                 .client
-                .get(format!("http://{}/admin/status", node.addr))
+                .get(format!("http://{address}/admin/status"))
                 .timeout(Duration::from_millis(500))
                 .send()
                 .await;
@@ -560,10 +567,22 @@ pub async fn discover_leader(
                 && response.status().is_success()
                 && let Ok(status) = response.json::<serde_json::Value>().await
                 && status[group.to_string()]["id"].as_u64() == Some(id)
-                && status[group.to_string()]["current_leader"].as_u64() == Some(id)
-                && status[group.to_string()]["state"].as_str() == Some("Leader")
             {
-                return Some((id, node.addr));
+                let status = &status[group.to_string()];
+                let leader = status["current_leader"].as_u64();
+                if leader == Some(id) && status["state"].as_str() == Some("Leader") {
+                    return Some((id, address));
+                }
+                // A surviving peer may know a leader absent from our retired
+                // registry. Probe that hint; never treat membership as a read barrier.
+                if let Some(leader) = leader
+                    && !seen.contains(&leader)
+                    && let Some(address) = status["membership_config"]["membership"]["nodes"]
+                        [leader.to_string()]["addr"]
+                        .as_str()
+                {
+                    candidates.push_front((leader, address.to_owned()));
+                }
             }
         }
         None
