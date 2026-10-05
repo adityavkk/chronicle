@@ -6,11 +6,13 @@ durable-majority consensus. Stream offsets count wire bytes, not log entries.
 Strict reads use a leadership barrier; `?consistency=stale` deliberately allows
 an older committed prefix. One stream remains leader ordered.
 
-**This checkout is an isolated upgrade qualification candidate.** The working
-baseline remains on 0.9.25. See [qualification evidence](evidence/UPGRADE.md)
+**This is a locally qualified upgrade candidate, not a production release.** The
+separate baseline deployment remains on 0.9.25. See [qualification evidence](evidence/UPGRADE.md)
 and the [pre-implementation contract](formal/UPGRADE.md). The prerelease is pinned;
 mixed-version operation and downgrade are unsupported. Directed transfer's RPC
-is implemented, but automatic leadership policy is not yet qualified or enabled.
+and resource-weighted automatic policy have [local qualification](evidence/LEADERSHIP.md),
+but elective leadership remains explicit opt-in. Safe replica placement/repair
+is automatic by default. Native campaign balancing stays off.
 
 The implementation runs on a real local k3d cluster, not an in-memory simulation.
 The tested host is one orb with nested Docker: it does not represent independent
@@ -149,14 +151,29 @@ committed commands keep their original incarnation on replay.
   retained 2,048 records with no failed/unknown append and Porcupine `Ok` for
   every stream history. This short shared-host run is not a capacity estimate;
   coarse resource samples cannot compare per-case peaks.
+* The reviewed alpha36 image passes the unchanged pinned protocol suite:
+  **326 passed, zero failed, six upstream-default skips**. A live membership-overlap
+  experiment exposed [stale-ingress routing](evidence/RETIRED-ROUTING.md); the failed
+  original and four checked extended histories retain all 7,200 acknowledgements.
+  After the fix, a restoration run retained 4,000 acknowledgements with four
+  Porcupine `Ok` results and unchanged process owners. A five-process HTTP regression
+  covers unknown leader discovery and an ambiguous committed append without proxy replay.
+* [Snapshot memory qualification](evidence/SNAPSHOT-MEMORY.md) preserves the real
+  512 MiB OOM failure, original PVC captures and subsequent recovery histories.
+  Snapshot building removes redundant state/buffer copies while retaining atomic
+  publication and SQLite I/O/crash regressions. The local pod limit is now 1536 MiB;
+  logical quotas are not a memory bound. The candidate workload measured 99.51 ack/s
+  on one hot stream and 113.09 across four shards, with p99 348.45/115.12 ms.
+  These short populated-cluster runs are not controlled version comparisons or SLOs.
 
-## Explicitly unfinished
+## Limits beyond local qualification
 
-This is a bounded replicated vertical slice, **not the full requested deliverable**.
-Reserved subscription APIs, zero-copy sendfile, independent resource-informed leadership
-balancing, deeper replication/storage trace linkage, broader I/O-fault schedules, stronger
-admission/snapshot crash schedules, repeated steady-state measurements and external
-equal-semantics performance baselines remain.
+Reserved subscription APIs and zero-copy sendfile are not implemented. Deeper
+replication/storage trace linkage, broader I/O-fault and admission/snapshot schedules,
+repeated steady-state measurements and external equal-semantics performance baselines
+remain production-qualification work. Before default-enabling elective leadership,
+qualify executor restart after claim and before submission as one integrated scenario;
+the current tests separately cover lost replies and durable ledger recovery.
 The [failure-family ledger](evidence/CONFORMANCE-LEDGER.md) retains the earlier
 failing full runs and current passing pinned result. Forks copy committed prefixes;
 they do not share unsafe local tier manifests. Legacy binary sources without

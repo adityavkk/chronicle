@@ -91,8 +91,11 @@ voter must elect a successor. A 700 ms elections-disabled observation is not
 evidence of eventual recovery. The upstream trigger also does not reject a
 nonvoter target and has no expected-vote admission fence.
 
-Automatic leadership policy, live transfer/membership-overlap fault histories,
-measured outage/recovery and independent follow-up review remain before enabling
-the policy or promoting the candidate. Native campaigns remain default-off.
+Subsequent [leadership qualification](LEADERSHIP.md), [membership overlap and
+restoration](RETIRED-ROUTING.md), [memory recovery](SNAPSHOT-MEMORY.md) and independent
+integration review qualify the local source candidate. The earlier 0.9 deployment
+and immutable captures remain separate and unchanged. Elective leadership and
+native campaigns remain default-off; integrated executor restart after a consumed
+claim is still required before considering default-on elective policy.
 Neither these tests nor the bounded model prove end-to-end durability under
 power loss, arbitrary scheduling, filesystem dishonesty or independent AZ loss.
