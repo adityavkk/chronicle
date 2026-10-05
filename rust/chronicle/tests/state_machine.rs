@@ -1,8 +1,7 @@
-use chronicle_raft::{TypeConfig, model::*, storage::SqliteStore};
+use chronicle_raft::{Entry, LogId, model::*, storage::SqliteStore};
 use openraft::storage::RaftStateMachine;
-use openraft::{
-    BasicNode, CommittedLeaderId, Entry, EntryPayload, LogId, Membership, RaftSnapshotBuilder,
-};
+use openraft::vote::{RaftLeaderId, leader_id_adv::CommittedLeaderId};
+use openraft::{BasicNode, EntryPayload, Membership, RaftSnapshotBuilder};
 
 #[test]
 fn admission_never_reuses_an_identity_or_address() {
@@ -60,7 +59,7 @@ async fn retirement_history_survives_snapshot_and_distinguishes_repromotion_from
     let mut store = SqliteStore::open(&path).await.unwrap();
     for id in 1..=4 {
         store
-            .apply(vec![entry(
+            .apply_entries(vec![entry(
                 id,
                 Command::Register {
                     id,
@@ -83,7 +82,7 @@ async fn retirement_history_survives_snapshot_and_distinguishes_repromotion_from
         (4, [1, 2, 3], 39),
     ] {
         let result = store
-            .apply(vec![entry(
+            .apply_entries(vec![entry(
                 3 + generation * 2,
                 Command::Place {
                     shard: 0,
@@ -115,7 +114,7 @@ async fn retirement_history_survives_snapshot_and_distinguishes_repromotion_from
             );
         }
         store
-            .apply(vec![entry(
+            .apply_entries(vec![entry(
                 4 + generation * 2,
                 Command::Placed {
                     shard: 0,
@@ -146,7 +145,7 @@ async fn retirement_history_survives_snapshot_and_distinguishes_repromotion_from
     assert!(!replicas.contains_key(&5));
     assert_eq!(
         restored
-            .apply(vec![entry(
+            .apply_entries(vec![entry(
                 13,
                 Command::Placed {
                     shard: 0,
@@ -160,7 +159,7 @@ async fn retirement_history_survives_snapshot_and_distinguishes_repromotion_from
         Some(Error::InvalidPlacement)
     );
     let retry = restored
-        .apply(vec![entry(
+        .apply_entries(vec![entry(
             14,
             Command::Placed {
                 shard: 0,
@@ -258,7 +257,7 @@ async fn pending_replacement_preserves_history_and_fences_stale_completion_after
         .unwrap();
     for id in 1..=4 {
         store
-            .apply(vec![entry(
+            .apply_entries(vec![entry(
                 id,
                 Command::Register {
                     id,
@@ -281,7 +280,7 @@ async fn pending_replacement_preserves_history_and_fences_stale_completion_after
         repair_pending: false,
     };
     assert!(
-        store.apply(vec![entry(5, original)]).await.unwrap()[0]
+        store.apply_entries(vec![entry(5, original)]).await.unwrap()[0]
             .error
             .is_none()
     );
@@ -317,7 +316,10 @@ async fn pending_replacement_preserves_history_and_fences_stale_completion_after
         assert_eq!(serde_json::to_value(candidate).unwrap(), before);
     }
     assert!(
-        store.apply(vec![entry(6, replacement)]).await.unwrap()[0]
+        store
+            .apply_entries(vec![entry(6, replacement)])
+            .await
+            .unwrap()[0]
             .error
             .is_none()
     );
@@ -340,7 +342,7 @@ async fn pending_replacement_preserves_history_and_fences_stale_completion_after
     for (index, generation, expected) in [(7, 1, Some(Error::InvalidPlacement)), (8, 2, None)] {
         assert_eq!(
             restored
-                .apply(vec![entry(
+                .apply_entries(vec![entry(
                     index,
                     Command::Placed {
                         shard: 1,
@@ -398,7 +400,7 @@ fn append(id: &str, seq: u64, data: &[u8]) -> Command {
         now_ms: None,
     }
 }
-fn entry(index: u64, command: Command) -> Entry<TypeConfig> {
+fn entry(index: u64, command: Command) -> Entry {
     Entry {
         log_id: LogId::new(CommittedLeaderId::new(1, 1), index),
         payload: EntryPayload::Normal(command),
@@ -420,7 +422,7 @@ async fn stream_order_survives_snapshot_reopen_without_changing_retry_or_epoch_f
         .await
         .unwrap();
     let results = store
-        .apply([
+        .apply_entries([
             entry(1, create()),
             entry(2, ordered(append("p", 0, b"ab"), "10")),
             entry(3, ordered(append("p", 1, b"c"), "2")),
@@ -438,7 +440,7 @@ async fn stream_order_survives_snapshot_reopen_without_changing_retry_or_epoch_f
     restored.close().await;
     let mut restored = SqliteStore::open_existing(&path).await.unwrap();
     let retry = restored
-        .apply([entry(4, ordered(append("p", 0, b"ignored"), "zz"))])
+        .apply_entries([entry(4, ordered(append("p", 0, b"ignored"), "zz"))])
         .await
         .unwrap();
     assert!(retry[0].duplicate && retry[0].error.is_none());
@@ -448,11 +450,11 @@ async fn stream_order_survives_snapshot_reopen_without_changing_retry_or_epoch_f
         unreachable!()
     };
     producer.as_mut().unwrap().epoch = 1;
-    let rejected = restored.apply([entry(5, new_epoch)]).await.unwrap();
+    let rejected = restored.apply_entries([entry(5, new_epoch)]).await.unwrap();
     assert_eq!(rejected[0].error, Some(Error::StreamSequenceConflict));
     assert_eq!(rejected[0].end, 3);
     let next = restored
-        .apply([entry(6, ordered(append("p", 2, b"d"), "3"))])
+        .apply_entries([entry(6, ordered(append("p", 2, b"d"), "3"))])
         .await
         .unwrap();
     assert!(next[0].error.is_none()); // Rejection neither fenced epoch zero nor consumed sequence two.
@@ -461,7 +463,7 @@ async fn stream_order_survives_snapshot_reopen_without_changing_retry_or_epoch_f
         unreachable!()
     };
     *flag = true;
-    assert!(restored.apply([entry(7, close)]).await.unwrap()[0].closed);
+    assert!(restored.apply_entries([entry(7, close)]).await.unwrap()[0].closed);
     let s = restored.read_state().await.unwrap();
     assert_eq!(s.streams["s"].last_seq.as_deref(), Some("4"));
     assert_eq!(s.streams["s"].data, b"abcd");
@@ -735,7 +737,7 @@ async fn closure_replies_follow_apply_and_survive_snapshot_reopen() {
         .await
         .unwrap();
     let first = store
-        .apply([entry(1, create()), entry(2, append("p", 0, b"abc"))])
+        .apply_entries([entry(1, create()), entry(2, append("p", 0, b"abc"))])
         .await
         .unwrap();
     assert!(!first[1].closed);
@@ -747,14 +749,17 @@ async fn closure_replies_follow_apply_and_survive_snapshot_reopen() {
     if let Command::Append { close, .. } = &mut changed_retry {
         *close = true;
     }
-    let duplicate = store.apply([entry(3, changed_retry)]).await.unwrap();
+    let duplicate = store
+        .apply_entries([entry(3, changed_retry)])
+        .await
+        .unwrap();
     assert!(duplicate[0].duplicate && !duplicate[0].closed);
     assert_eq!(duplicate[0].end, 3);
     let mut closing = append("p", 1, b"12");
     if let Command::Append { close, .. } = &mut closing {
         *close = true;
     }
-    let closed = store.apply([entry(4, closing)]).await.unwrap();
+    let closed = store.apply_entries([entry(4, closing)]).await.unwrap();
     assert!(closed[0].closed && closed[0].error.is_none());
     assert!(!first[1].closed); // A later close cannot rewrite an earlier reply.
     let snapshot = store.build_snapshot().await.unwrap();
@@ -767,7 +772,7 @@ async fn closure_replies_follow_apply_and_survive_snapshot_reopen() {
     installed.close().await;
     let mut installed = SqliteStore::open_existing(&path).await.unwrap();
     let replay = installed
-        .apply([entry(5, append("p", 0, b"ignored"))])
+        .apply_entries([entry(5, append("p", 0, b"ignored"))])
         .await
         .unwrap();
     assert!(replay[0].closed && replay[0].duplicate);
@@ -777,7 +782,7 @@ async fn closure_replies_follow_apply_and_survive_snapshot_reopen() {
         Some(ProducerPosition { epoch: 0, seq: 1 })
     );
     let rejected = installed
-        .apply([entry(6, append("p", 2, b"rejected"))])
+        .apply_entries([entry(6, append("p", 2, b"rejected"))])
         .await
         .unwrap();
     assert_eq!(rejected[0].error, Some(Error::Closed));
@@ -793,7 +798,7 @@ async fn closure_replies_follow_apply_and_survive_snapshot_reopen() {
         stream_seq: None,
         now_ms: None,
     };
-    let repeated = installed.apply([entry(7, repeated)]).await.unwrap();
+    let repeated = installed.apply_entries([entry(7, repeated)]).await.unwrap();
     assert!(repeated[0].closed && repeated[0].duplicate && repeated[0].error.is_none());
     assert_eq!(repeated[0].end, 5);
     assert_eq!(
@@ -806,7 +811,7 @@ async fn closure_replies_follow_apply_and_survive_snapshot_reopen() {
         b"abc12"
     );
     let empty_retry = installed
-        .apply([entry(8, append("p", 1, b""))])
+        .apply_entries([entry(8, append("p", 1, b""))])
         .await
         .unwrap();
     assert!(empty_retry[0].closed && empty_retry[0].duplicate && empty_retry[0].error.is_none());
@@ -872,8 +877,9 @@ async fn snapshot_reopen_preserves_successful_retry_and_membership_boundary() {
         ]
         .into_iter()
         .collect::<std::collections::BTreeMap<_, _>>(),
-    );
-    a.apply(vec![
+    )
+    .unwrap();
+    a.apply_entries(vec![
         entry(1, create()),
         entry(2, append("p", 0, b"abc")),
         entry(3, append("p", 1, b"12")),
@@ -895,7 +901,7 @@ async fn snapshot_reopen_preserves_successful_retry_and_membership_boundary() {
     assert_eq!(applied.unwrap().index, 4);
     assert_eq!(installed_membership.membership(), &membership);
     let results = b
-        .apply(vec![entry(5, append("p", 0, b"not applied"))])
+        .apply_entries(vec![entry(5, append("p", 0, b"not applied"))])
         .await
         .unwrap();
     assert_eq!(results[0].end, 3);
@@ -913,7 +919,7 @@ async fn snapshot_reopen_preserves_successful_retry_and_membership_boundary() {
         unreachable!()
     };
     producer.as_mut().unwrap().epoch = u64::MAX;
-    let upgraded = b.apply(vec![entry(6, fenced)]).await.unwrap();
+    let upgraded = b.apply_entries(vec![entry(6, fenced)]).await.unwrap();
     let position = Some(ProducerPosition {
         epoch: u64::MAX,
         seq: 0,
@@ -921,7 +927,7 @@ async fn snapshot_reopen_preserves_successful_retry_and_membership_boundary() {
     assert!(upgraded[0].error.is_none());
     assert_eq!(upgraded[0].producer, position);
     let rejected = b
-        .apply(vec![entry(7, append("p", 1, b"fenced"))])
+        .apply_entries(vec![entry(7, append("p", 1, b"fenced"))])
         .await
         .unwrap();
     assert_eq!(rejected[0].error, Some(Error::EpochFenced));

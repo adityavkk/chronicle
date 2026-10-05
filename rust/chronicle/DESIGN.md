@@ -1,11 +1,17 @@
 # Durable Streams, replicated
 
-Decision before implementation: use OpenRaft 0.9.25 (MIT OR Apache-2.0), stable
+Initial decision before implementation: use OpenRaft 0.9.25 (MIT OR Apache-2.0), stable
 revision 8815cdba2826f74e848acef361ad03f93bb1c3f8. It owns elections, durable-log
 replication, learner catch-up, joint consensus and read barriers. raft-rs 0.7.0
 plus raft-engine 0.4.2 is credible but requires more correctness-sensitive Ready,
 HardState, read-index and membership orchestration. Do not copy OpenRaft's
 RocksDB example's premature log-flush callback.
+
+The isolated transfer candidate now pins upstream 0.10.0-alpha.36 and its legacy
+chunked-snapshot adapter. Stable 0.9 has no directed transfer API; a private
+backport would duplicate consensus maintenance. This prerelease has explicit
+[qualification gates](formal/UPGRADE.md) and [retained evidence](evidence/UPGRADE.md),
+not blanket maturity or migration approval. The stable cluster remains on 0.9.
 
 SQLite WAL with synchronous=FULL owns log/vote/commit and applied state. Blocking
 transactions run on blocking workers, serialized per database. Completion means
@@ -36,10 +42,12 @@ authority. Many streams scale across groups; one hot stream remains leader order
 Placement reconciliation records intent in group zero, adds learners with blocking
 catch-up, changes membership through OpenRaft, then records completion. A stale
 controller cannot bypass the data group's term or committed membership. Movement
-is whole-shard, one at a time, with a cooldown. Target rotation uses node health
-and supplied failure domains, not measured disk/CPU/memory capacity. State-machine
-byte limits backpressure writes; they are not resource-informed placement.
-Resource-informed placement and leadership balancing remain unfinished. A native
+is whole-shard, one at a time, with a cooldown. Healthy replica placement uses
+measured charged bytes and SQLite actor service time with hysteresis, stable
+observation windows and a replicated global cooldown. Service time includes I/O
+waits and is not CPU utilization; charged bytes are not physical disk or RSS.
+See [the policy contract](formal/RESOURCE-BALANCE.md). Leadership balancing remains
+unfinished. A native
 election preference is available only as the default-off experimental policy
 documented in `formal/README.md`; it is not directed transfer. Failure domains are
 inputs, not inferred from Kubernetes node names in production.

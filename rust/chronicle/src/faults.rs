@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const AFTER_LOG_COMMIT: &str = "after-log-commit-before-log-flushed";
+pub const BEFORE_STATE_COMMIT: &str = "before-state-transaction-commit";
 pub const AFTER_APPLY_COMMIT: &str = "after-apply-commit-before-return";
 pub const BEFORE_SNAPSHOT_INSTALL: &str = "before-snapshot-install-transaction";
 pub const AFTER_SNAPSHOT_INSTALL: &str = "after-snapshot-install-transaction";

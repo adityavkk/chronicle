@@ -1,11 +1,11 @@
 use chronicle_raft::{
-    TypeConfig,
+    Entry, LogId,
     expiry::Expiry,
     fork::{self, Decision, Id, Operation, Request},
     model::{Command, Error, State, StreamConfig},
     storage::SqliteStore,
 };
-use openraft::{Entry, EntryPayload, LogId, RaftSnapshotBuilder, storage::RaftStateMachine};
+use openraft::{EntryPayload, RaftSnapshotBuilder, storage::RaftStateMachine, vote::RaftLeaderId};
 
 fn create(key: &str, incarnation: u64) -> Command {
     Command::Create {
@@ -218,11 +218,18 @@ async fn every_phase_survives_sqlite_snapshot_install_and_reopen() {
         .map(|op| Command::Fork(Box::new(op))),
     );
     for (index, command) in commands.into_iter().enumerate() {
-        let entry: Entry<TypeConfig> = Entry {
-            log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), index as u64 + 1),
+        let entry: Entry = Entry {
+            log_id: LogId::new(
+                openraft::vote::leader_id_adv::CommittedLeaderId::new(1, 1),
+                index as u64 + 1,
+            ),
             payload: EntryPayload::Normal(command),
         };
-        assert!(store.apply([entry]).await.unwrap()[0].error.is_none());
+        assert!(
+            store.apply_entries([entry]).await.unwrap()[0]
+                .error
+                .is_none()
+        );
         let snapshot = store.build_snapshot().await.unwrap();
         let bytes = snapshot.snapshot.get_ref().clone();
         // Reopen the applying DB separately: installing a cached-state snapshot

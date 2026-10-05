@@ -5,7 +5,6 @@ check: fault-check
 	$(CARGO) fmt --all -- --check
 	$(CARGO) clippy --locked --all-targets -- -D warnings
 	$(CARGO) test --locked
-	$(CARGO) test --manifest-path vendor/openraft/Cargo.toml --locked --features serde,storage-v2 --lib membership_admission
 	RUSTDOCFLAGS='-D warnings' $(CARGO) doc --locked --no-deps
 	python3 -m unittest discover -s tests -p 'test_*.py' -v
 

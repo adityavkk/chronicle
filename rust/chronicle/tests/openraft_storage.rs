@@ -2,7 +2,7 @@
 use chronicle_raft::{TypeConfig, storage::SqliteStore};
 use openraft::{
     StorageError,
-    testing::{StoreBuilder, Suite},
+    testing::log::{StoreBuilder, Suite},
 };
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
@@ -11,9 +11,17 @@ use tempfile::TempDir;
 struct Builder(Arc<Mutex<Vec<(TempDir, SqliteStore)>>>);
 
 impl StoreBuilder<TypeConfig, SqliteStore, SqliteStore> for Builder {
-    async fn build(&self) -> Result<((), SqliteStore, SqliteStore), StorageError<u64>> {
+    async fn build(&self) -> Result<((), SqliteStore, SqliteStore), StorageError<TypeConfig>> {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open(dir.path().join("raft.sqlite")).await?;
+        let store = SqliteStore::open(dir.path().join("raft.sqlite"))
+            .await
+            .map_err(|e| {
+                StorageError::from_io_error(
+                    openraft::ErrorSubject::Store,
+                    openraft::ErrorVerb::Write,
+                    e,
+                )
+            })?;
         // Suite has no async teardown. Retain the directories and final handles
         // until its cases finish, then await the actors before unlinking files.
         self.0.lock().unwrap().push((dir, store.clone()));
@@ -21,17 +29,15 @@ impl StoreBuilder<TypeConfig, SqliteStore, SqliteStore> for Builder {
     }
 }
 
-#[test]
-fn upstream_storage_contracts() {
+#[tokio::test]
+async fn upstream_storage_contracts() {
     let builder = Builder::default();
     let result =
-        Suite::<TypeConfig, SqliteStore, SqliteStore, Builder, ()>::test_all(builder.clone());
+        Suite::<TypeConfig, SqliteStore, SqliteStore, Builder, ()>::test_all(builder.clone()).await;
     let stores = std::mem::take(&mut *builder.0.lock().unwrap());
-    tokio::runtime::Runtime::new().unwrap().block_on(async {
-        for (dir, store) in stores {
-            store.close().await;
-            drop(dir);
-        }
-    });
+    for (dir, store) in stores {
+        store.close().await;
+        drop(dir);
+    }
     result.unwrap();
 }

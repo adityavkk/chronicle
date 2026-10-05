@@ -1,15 +1,44 @@
 //! Reconcile replicated whole-shard intents. One move at a time; retries are idempotent.
 use crate::{Shared, now_ms};
 use chronicle_raft::model::{Command, Placement, ReplicaHistory, SHARDS, State};
+use chronicle_raft::{LogId, TypeConfig, Vote};
 use futures_util::{StreamExt, stream};
 use openraft::BasicNode;
 use openraft::storage::RaftStateMachine;
+use openraft::type_config::async_runtime::WatchReceiver;
 use std::{
     collections::{BTreeMap, BTreeSet},
     time::{Duration, Instant},
 };
 
 const CAMPAIGN_DELAY: Duration = Duration::from_secs(30);
+
+async fn fenced_membership(
+    raft: &chronicle_raft::Raft,
+    members: impl Into<openraft::ChangeMembers<u64, BasicNode>>,
+    retain: bool,
+    vote: Vote,
+) -> anyhow::Result<openraft::raft::ClientWriteResponse<TypeConfig>> {
+    anyhow::ensure!(vote.committed, "membership requires an established leader");
+    let membership = *raft.metrics().borrow_watched().membership_config.log_id();
+    // Upstream preserves the leader fence across both phases and replaces
+    // this effective-membership fence with the applied joint entry at flattening.
+    // Even unchanged voters must go through admission and its InProgress check.
+    Ok(raft
+        .change_membership_if(
+            members,
+            retain,
+            [
+                openraft::raft::Precondition::CommittedLeaderId {
+                    committed_leader_id: vote.leader_id,
+                },
+                openraft::raft::Precondition::LastMembershipLogId {
+                    last_membership_log_id: membership,
+                },
+            ],
+        )
+        .await?)
+}
 
 #[cfg(test)]
 #[path = "controller_retirement_tests.rs"]
@@ -77,15 +106,17 @@ pub async fn run(a: Shared) {
 async fn control(a: &Shared) -> anyhow::Result<State> {
     let g = &a.groups[&0];
     // A removed leader can retain a self leader hint after becoming Learner.
-    if g.raft.metrics().borrow().state == openraft::ServerState::Leader {
-        g.raft.ensure_linearizable().await?;
+    if g.raft.metrics().borrow_watched().state == openraft::ServerState::Leader {
+        g.raft
+            .ensure_linearizable(openraft::ReadPolicy::ReadIndex)
+            .await?;
         return Ok(g.store.read_state().await?);
     }
     // Seeds can all retire. Persisted registry entries are routing hints, never
     // authority: the destination still performs a strict read barrier.
     let mut nodes = a.nodes.clone();
     nodes.extend(g.store.read_state().await?.nodes);
-    let hint = g.raft.metrics().borrow().current_leader;
+    let hint = g.raft.metrics().borrow_watched().current_leader;
     let mut candidates: Vec<_> = nodes.into_iter().filter(|(id, _)| *id != a.id).collect();
     candidates.sort_by_key(|(id, n)| (Some(*id) != hint, n.draining));
     for (_, n) in candidates {
@@ -112,7 +143,7 @@ async fn tick(
 ) -> anyhow::Result<()> {
     let mut state = control(a).await?;
     let control_group = &a.groups[&0];
-    let authority = control_group.raft.metrics().borrow().clone();
+    let authority = control_group.raft.metrics().borrow_watched().clone();
     if authority.state == openraft::ServerState::Leader {
         for (id, n) in &a.nodes {
             if !state.nodes.contains_key(id) {
@@ -153,7 +184,7 @@ async fn tick(
     }
     for (shard, p) in &state.placements {
         let group = &a.groups[shard];
-        let initial = group.raft.metrics().borrow().clone();
+        let initial = group.raft.metrics().borrow_watched().clone();
         if initial.state != openraft::ServerState::Leader {
             continue;
         }
@@ -162,7 +193,10 @@ async fn tick(
             continue;
         }
         let _guard = group.movement.lock().await;
-        let boundary = group.raft.ensure_linearizable().await?;
+        let boundary = group
+            .raft
+            .ensure_linearizable(openraft::ReadPolicy::ReadIndex)
+            .await?;
         for id in &p.voters {
             if *id == a.id {
                 continue;
@@ -170,20 +204,19 @@ async fn tick(
             let node = &state.nodes[id];
             if !matches {
                 // Repeat even for registered learners: presence does not prove catch-up.
-                let added = group
-                    .raft
-                    .change_membership_if_vote(
-                        openraft::ChangeMembers::AddNodes(BTreeMap::from([(
-                            *id,
-                            BasicNode::new(node.addr.clone()),
-                        )])),
-                        true,
-                        initial.vote,
-                    )
-                    .await?;
-                let catch_up = boundary.max(Some(added.log_id));
+                let added = fenced_membership(
+                    &group.raft,
+                    openraft::ChangeMembers::AddNodes(BTreeMap::from([(
+                        *id,
+                        BasicNode::new(node.addr.clone()),
+                    )])),
+                    true,
+                    initial.vote,
+                )
+                .await?;
+                let catch_up = Some(*boundary.log_id()).max(Some(added.log_id));
                 loop {
-                    let m = group.raft.metrics().borrow().clone();
+                    let m = group.raft.metrics().borrow_watched().clone();
                     anyhow::ensure!(
                         m.vote == initial.vote && m.current_leader == Some(a.id),
                         "leadership changed during catch-up"
@@ -208,7 +241,7 @@ async fn tick(
             "placement changed"
         );
         anyhow::ensure!(
-            group.raft.metrics().borrow().vote == initial.vote,
+            group.raft.metrics().borrow_watched().vote == initial.vote,
             "leadership changed"
         );
         let membership = Some(commit_membership(group, &p.voters, initial.vote).await?);
@@ -219,7 +252,7 @@ async fn tick(
             generation: p.generation,
             membership,
         };
-        if control_group.raft.metrics().borrow().state == openraft::ServerState::Leader {
+        if control_group.raft.metrics().borrow_watched().state == openraft::ServerState::Leader {
             let result = control_group.raft.client_write(command).await?;
             anyhow::ensure!(result.data.error.is_none(), "placement completion rejected");
         } else {
@@ -255,7 +288,9 @@ async fn tick(
         for _ in 0..=SHARDS {
             let shard = retirement.next_shard;
             retirement.next_shard = (shard + 1) % (SHARDS + 1);
-            if a.groups[&shard].raft.metrics().borrow().state == openraft::ServerState::Leader {
+            if a.groups[&shard].raft.metrics().borrow_watched().state
+                == openraft::ServerState::Leader
+            {
                 retire_replica(
                     a,
                     shard,
@@ -278,7 +313,7 @@ async fn retire_replica(
 ) -> anyhow::Result<bool> {
     let p = &state.placements[&shard];
     let group = &a.groups[&shard];
-    let initial = group.raft.metrics().borrow().clone();
+    let initial = group.raft.metrics().borrow_watched().clone();
     let membership = initial.membership_config.membership();
     if membership.get_joint_config().len() != 1
         || membership.voter_ids().collect::<BTreeSet<_>>() != p.voters
@@ -332,21 +367,20 @@ async fn retire_replica(
             .placements
             .get(&shard)
             .is_some_and(|x| x.complete && x.generation == p.generation)
-            && group.raft.metrics().borrow().vote == initial.vote
-            && group.raft.metrics().borrow().current_leader == Some(a.id),
+            && group.raft.metrics().borrow_watched().vote == initial.vote
+            && group.raft.metrics().borrow_watched().current_leader == Some(a.id),
         "retirement intent or leadership changed"
     );
     if retained {
         // Removing an unreachable learner frees replication resources but is NOT
         // evidence of local retirement. The registry preserves future discovery.
-        group
-            .raft
-            .change_membership_if_vote(
-                openraft::ChangeMembers::RemoveNodes(BTreeSet::from([id])),
-                false,
-                initial.vote,
-            )
-            .await?;
+        fenced_membership(
+            &group.raft,
+            openraft::ChangeMembers::RemoveNodes(BTreeSet::from([id])),
+            false,
+            initial.vote,
+        )
+        .await?;
         tracing::info!(
             shard,
             id,
@@ -355,14 +389,13 @@ async fn retire_replica(
             "replica.retirement"
         );
     } else {
-        group
-            .raft
-            .change_membership_if_vote(
-                openraft::ChangeMembers::AddNodes(BTreeMap::from([(id, BasicNode::new(address))])),
-                true,
-                initial.vote,
-            )
-            .await?;
+        fenced_membership(
+            &group.raft,
+            openraft::ChangeMembers::AddNodes(BTreeMap::from([(id, BasicNode::new(address))])),
+            true,
+            initial.vote,
+        )
+        .await?;
         tracing::info!(
             shard,
             id,
@@ -382,7 +415,7 @@ fn next_candidate(candidates: &BTreeMap<u64, String>, cursor: &mut usize) -> Opt
     candidate.map(|(id, address)| (*id, address.clone()))
 }
 
-fn replica_retired(p: &Placement, metrics: &openraft::RaftMetrics<u64, BasicNode>) -> bool {
+fn replica_retired(p: &Placement, metrics: &openraft::RaftMetrics<TypeConfig>) -> bool {
     let Some(replicas) = &p.replicas else {
         return false;
     };
@@ -395,7 +428,7 @@ fn replica_retired(p: &Placement, metrics: &openraft::RaftMetrics<u64, BasicNode
         // These metrics come only from the recovery-fenced endpoint below.
         None => {
             metrics.running_state.is_ok()
-                && metrics.vote == openraft::Vote::default()
+                && metrics.vote == Vote::new(0, metrics.id)
                 && metrics.last_log_index.is_none()
                 && metrics.last_applied.is_none()
                 && metrics.membership_config.log_id().is_none()
@@ -411,17 +444,11 @@ fn replica_retired(p: &Placement, metrics: &openraft::RaftMetrics<u64, BasicNode
     }
 }
 
-fn nonvoter_applied(
-    metrics: &openraft::RaftMetrics<u64, BasicNode>,
-    boundary: openraft::LogId<u64>,
-) -> bool {
+fn nonvoter_applied(metrics: &openraft::RaftMetrics<TypeConfig>, boundary: LogId) -> bool {
     metrics.state == openraft::ServerState::Learner && demotion_applied(metrics, boundary)
 }
 
-fn demotion_applied(
-    metrics: &openraft::RaftMetrics<u64, BasicNode>,
-    boundary: openraft::LogId<u64>,
-) -> bool {
+fn demotion_applied(metrics: &openraft::RaftMetrics<TypeConfig>, boundary: LogId) -> bool {
     let membership = &metrics.membership_config;
     metrics.running_state.is_ok()
         && membership.membership().get_joint_config().len() == 1
@@ -437,7 +464,7 @@ async fn peer_metrics(
     a: &Shared,
     address: &str,
     id: u64,
-) -> Option<BTreeMap<u64, openraft::RaftMetrics<u64, BasicNode>>> {
+) -> Option<BTreeMap<u64, openraft::RaftMetrics<TypeConfig>>> {
     let response = a
         .client
         .get(format!("http://{address}/admin/retirement-state"))
@@ -449,8 +476,7 @@ async fn peer_metrics(
         .ok()?
         .error_for_status()
         .ok()?;
-    let metrics: BTreeMap<u64, openraft::RaftMetrics<u64, BasicNode>> =
-        response.json().await.ok()?;
+    let metrics: BTreeMap<u64, openraft::RaftMetrics<TypeConfig>> = response.json().await.ok()?;
     metrics.values().all(|m| m.id == id).then_some(metrics)
 }
 
@@ -511,7 +537,7 @@ async fn balance_leaders(
         let matches = membership_applied(&group.store, &p.voters).await?;
         // Membership I/O can wait behind other storage jobs. Do not credit that
         // elapsed time to a term/leader sampled before the await.
-        let current = group.raft.metrics().borrow().clone();
+        let current = group.raft.metrics().borrow_watched().clone();
         if matches && let Some(leader) = current.current_leader.filter(|leader| *leader != id) {
             let now = Instant::now();
             let view = (p.generation, current.current_term, leader);
@@ -525,7 +551,7 @@ async fn balance_leaders(
                     term = current.current_term,
                     "preferred voter requesting native election; availability may pause"
                 );
-                group.raft.trigger().elect().await?;
+                group.raft.trigger().elect(false).await?;
             }
         } else {
             campaigns.remove(shard);
@@ -537,15 +563,12 @@ async fn balance_leaders(
 async fn commit_membership(
     group: &crate::Group,
     voters: &BTreeSet<u64>,
-    vote: openraft::Vote<u64>,
-) -> anyhow::Result<openraft::LogId<u64>> {
+    vote: Vote,
+) -> anyhow::Result<LogId> {
     // A read barrier and matching applied voters do not rule out an outstanding
     // membership entry from a cancelled call. Always await a membership operation
     // before completing a new intent; InProgress leaves the intent incomplete.
-    let response = group
-        .raft
-        .change_membership_if_vote(voters.clone(), true, vote)
-        .await?;
+    let response = fenced_membership(&group.raft, voters.clone(), true, vote).await?;
     anyhow::ensure!(
         membership_applied(&group.store, voters).await?,
         "target membership not applied"
@@ -612,7 +635,7 @@ async fn resource_balance(
         return None;
     }
     let loads = resource_loads(a, healthy).await;
-    let current = a.groups[&0].raft.metrics().borrow().clone();
+    let current = a.groups[&0].raft.metrics().borrow_watched().clone();
     if current.state != openraft::ServerState::Leader || current.current_term != term {
         window.reset();
         return None;
@@ -708,8 +731,24 @@ fn target(shard: u64, nodes: &BTreeMap<u64, chronicle_raft::model::Node>) -> BTr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chronicle_raft::Entry;
     use chronicle_raft::storage::SqliteStore;
-    use openraft::{CommittedLeaderId, Entry, EntryPayload, LogId, Membership};
+    use openraft::vote::{RaftLeaderId, leader_id_adv::CommittedLeaderId};
+    use openraft::{EntryPayload, Membership};
+
+    #[test]
+    fn persisted_advanced_leader_ids_keep_term_and_node() {
+        let log_json = serde_json::json!({"leader_id": {"term": 7, "node_id": 3}, "index": 42});
+        let vote_json =
+            serde_json::json!({"leader_id": {"term": 7, "node_id": 3}, "committed": true});
+        let log: LogId = serde_json::from_value(log_json.clone()).unwrap();
+        let vote: Vote = serde_json::from_value(vote_json.clone()).unwrap();
+        assert_eq!(log, LogId::new(CommittedLeaderId::new(7, 3), 42));
+        assert_eq!(vote, Vote::new_committed(7, 3));
+        assert_ne!(vote, Vote::new_committed(7, 2));
+        assert_eq!(serde_json::to_value(log).unwrap(), log_json);
+        assert_eq!(serde_json::to_value(vote).unwrap(), vote_json);
+    }
 
     #[test]
     fn unspecified_domain_does_not_displace_available_distinct_domains() {
@@ -927,20 +966,43 @@ mod tests {
                 .initialize(BTreeMap::from([(1, BasicNode::new("unused"))]))
                 .await
                 .unwrap();
-            group.raft.ensure_linearizable().await.unwrap();
-            let vote = group.raft.metrics().borrow().vote;
-            let added = group
+            group
                 .raft
-                .change_membership_if_vote(
-                    openraft::ChangeMembers::AddNodes(BTreeMap::from([(
-                        2,
-                        BasicNode::new(address),
-                    )])),
-                    true,
-                    vote,
-                )
+                .wait(Some(Duration::from_secs(3)))
+                .state(openraft::ServerState::Leader, "bootstrap")
                 .await
                 .unwrap();
+            group
+                .raft
+                .ensure_linearizable(openraft::ReadPolicy::ReadIndex)
+                .await
+                .unwrap();
+            let vote = group.raft.metrics().borrow_watched().vote;
+            // A no-op voter set must not bypass admission, and leader identity
+            // includes the node ID, not just its term.
+            let before = group.raft.metrics().borrow_watched().last_log_index;
+            let wrong_leader = Vote::new_committed(vote.leader_id.term, 2);
+            let error = commit_membership(group, &BTreeSet::from([1]), wrong_leader)
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<openraft::error::RaftError<
+                    TypeConfig,
+                    openraft::error::ClientWriteError<TypeConfig>,
+                >>(),
+                Some(openraft::error::RaftError::APIError(
+                    openraft::error::ClientWriteError::PreconditionFailed(_)
+                ))
+            ));
+            assert_eq!(group.raft.metrics().borrow_watched().last_log_index, before);
+            let added = fenced_membership(
+                &group.raft,
+                openraft::ChangeMembers::AddNodes(BTreeMap::from([(2, BasicNode::new(address))])),
+                true,
+                vote,
+            )
+            .await
+            .unwrap();
             group
                 .raft
                 .wait(Some(Duration::from_secs(3)))
@@ -959,9 +1021,7 @@ mod tests {
             assert!(
                 tokio::time::timeout(
                     Duration::from_millis(100),
-                    group
-                        .raft
-                        .change_membership_if_vote(BTreeSet::from([1, 2]), true, vote),
+                    fenced_membership(&group.raft, BTreeSet::from([1, 2]), true, vote),
                 )
                 .await
                 .is_err()
@@ -970,7 +1030,7 @@ mod tests {
                 group
                     .raft
                     .metrics()
-                    .borrow()
+                    .borrow_watched()
                     .membership_config
                     .membership()
                     .get_joint_config()
@@ -979,17 +1039,20 @@ mod tests {
             );
             let original = BTreeSet::from([1]);
             assert!(membership_applied(&group.store, &original).await.unwrap());
-            group.raft.ensure_linearizable().await.unwrap();
+            group
+                .raft
+                .ensure_linearizable(openraft::ReadPolicy::ReadIndex)
+                .await
+                .unwrap();
             let error = commit_membership(group, &original, vote).await.unwrap_err();
             let Some(openraft::error::RaftError::APIError(
                 openraft::error::ClientWriteError::ChangeMembershipError(
                     openraft::error::ChangeMembershipError::InProgress(_),
                 ),
-            )) =
-                error.downcast_ref::<openraft::error::RaftError<
-                    u64,
-                    openraft::error::ClientWriteError<u64, BasicNode>,
-                >>()
+            )) = error.downcast_ref::<openraft::error::RaftError<
+                TypeConfig,
+                openraft::error::ClientWriteError<TypeConfig>,
+            >>()
             else {
                 panic!("expected outstanding-membership rejection, got {error:?}");
             };
@@ -1021,12 +1084,12 @@ mod tests {
     #[test]
     fn retirement_requires_applied_uniform_nonvoter_membership() {
         let log = LogId::new(CommittedLeaderId::new(3, 1), 17);
-        let mut metrics = openraft::RaftMetrics::<u64, BasicNode>::new_initial(4);
+        let mut metrics = openraft::RaftMetrics::<TypeConfig>::new_initial(4);
         metrics.state = openraft::ServerState::Learner;
         let nodes = BTreeMap::from_iter((1..=4).map(|id| (id, BasicNode::new("unused"))));
         metrics.membership_config = std::sync::Arc::new(openraft::StoredMembership::new(
             Some(log),
-            Membership::new(vec![BTreeSet::from([1, 2, 3])], nodes.clone()),
+            Membership::new(vec![BTreeSet::from([1, 2, 3])], nodes.clone()).unwrap(),
         ));
         metrics.last_applied = Some(LogId::new(CommittedLeaderId::new(3, 1), 16));
         assert!(!nonvoter_applied(&metrics, log));
@@ -1051,13 +1114,14 @@ mod tests {
             Membership::new(
                 vec![BTreeSet::from([1, 3, 4]), BTreeSet::from([1, 2, 3])],
                 nodes.clone(),
-            ),
+            )
+            .unwrap(),
         ));
         assert!(!nonvoter_applied(&metrics, log));
         assert!(!demotion_applied(&metrics, log));
         metrics.membership_config = std::sync::Arc::new(openraft::StoredMembership::new(
             Some(log),
-            Membership::new(vec![BTreeSet::from([1, 3, 4])], nodes),
+            Membership::new(vec![BTreeSet::from([1, 3, 4])], nodes).unwrap(),
         ));
         assert!(!nonvoter_applied(&metrics, log));
         assert!(!demotion_applied(&metrics, log));
@@ -1070,7 +1134,7 @@ mod tests {
             voters: BTreeSet::from([1, 2, 3]),
             ..Default::default()
         };
-        let mut metrics = openraft::RaftMetrics::<u64, BasicNode>::new_initial(4);
+        let mut metrics = openraft::RaftMetrics::<TypeConfig>::new_initial(4);
         assert!(!replica_retired(&p, &metrics));
         p.replicas = Some(BTreeMap::from_iter(
             (1..=3).map(|id| (id, ReplicaHistory::MayVote)),
@@ -1129,7 +1193,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .apply(vec![Entry {
+            .apply_entries(vec![Entry {
                 log_id: LogId::new(CommittedLeaderId::new(1, 1), 1),
                 payload: EntryPayload::Normal(Command::Register {
                     id: 4,
@@ -1284,9 +1348,11 @@ mod tests {
             (3, vec![target.clone()], true),
         ] {
             store
-                .apply(vec![Entry {
+                .apply_entries(vec![Entry {
                     log_id: LogId::new(CommittedLeaderId::new(1, 1), index),
-                    payload: EntryPayload::Membership(Membership::new(configs, nodes.clone())),
+                    payload: EntryPayload::Membership(
+                        Membership::new(configs, nodes.clone()).unwrap(),
+                    ),
                 }])
                 .await
                 .unwrap();

@@ -1,0 +1,86 @@
+Verified data-chronicle-0.tar.gz: 6107cc5cebfb505a30f32bc336377d9a7cebb0eee50daab91c6a8489590a45ae
+Verified data-chronicle-1.tar.gz: 42165e1243ccc61e1aeb9e56aee4e0bb94ee09d1dcd45e8d1149d17d4fcce9fe
+Verified data-chronicle-2.tar.gz: 8dbab89c7a9b9267a21a5575bdc29fafb80fac019b400c5ba518000b465e79fd
+Verified data-chronicle-3.tar.gz: 628cdabbcec44778ee74393af093ecd8473cad180a0feee764effdefe20ea9c1
+Verified data-chronicle-4.tar.gz: 884ea9a03b0eddcc8903e7f74c34297fa0a8b79f62af6071dcb19bc0eef18586
+Verified chronicle-raft-0.9: dcfc870077729d8e6b460feac16f797fb8bb8fa2ad9e0040a0b8c1e1072f4873
+Verified Cargo.lock: 7b93c20f92cc5d5bc0cc392dce488c22462de0e23b91aea0862e3871fda9bbad
+sha256:29b335d9c198bcfb2766f5af787bbecfa661a55660325ad2ba8743b54519d505
+[36mINFO[0m[0000] Prep: Network                                
+[36mINFO[0m[0000] Created network 'k3d-chronicle-upgrade'      
+[36mINFO[0m[0000] Created image volume k3d-chronicle-upgrade-images 
+[36mINFO[0m[0000] Starting new tools node...                   
+[36mINFO[0m[0000] Starting node 'k3d-chronicle-upgrade-tools'  
+[36mINFO[0m[0001] Creating node 'k3d-chronicle-upgrade-server-0' 
+[36mINFO[0m[0001] Creating node 'k3d-chronicle-upgrade-agent-0' 
+[36mINFO[0m[0001] Creating node 'k3d-chronicle-upgrade-agent-1' 
+[36mINFO[0m[0001] Creating node 'k3d-chronicle-upgrade-agent-2' 
+[36mINFO[0m[0001] Creating node 'k3d-chronicle-upgrade-agent-3' 
+[36mINFO[0m[0001] Creating node 'k3d-chronicle-upgrade-agent-4' 
+[36mINFO[0m[0001] Creating LoadBalancer 'k3d-chronicle-upgrade-serverlb' 
+[36mINFO[0m[0001] Using the k3d-tools node to gather environment information 
+[36mINFO[0m[0002] HostIP: using network gateway 172.19.0.1 address 
+[36mINFO[0m[0002] Starting cluster 'chronicle-upgrade'         
+[36mINFO[0m[0002] Starting servers...                          
+[36mINFO[0m[0002] Starting node 'k3d-chronicle-upgrade-server-0' 
+[36mINFO[0m[0012] Starting agents...                           
+[36mINFO[0m[0012] Starting node 'k3d-chronicle-upgrade-agent-1' 
+[36mINFO[0m[0012] Starting node 'k3d-chronicle-upgrade-agent-0' 
+[36mINFO[0m[0012] Starting node 'k3d-chronicle-upgrade-agent-4' 
+[36mINFO[0m[0012] Starting node 'k3d-chronicle-upgrade-agent-2' 
+[36mINFO[0m[0012] Starting node 'k3d-chronicle-upgrade-agent-3' 
+[36mINFO[0m[0025] Starting helpers...                          
+[36mINFO[0m[0025] Starting node 'k3d-chronicle-upgrade-serverlb' 
+[36mINFO[0m[0033] Injecting records for hostAliases (incl. host.k3d.internal) and for 7 network members into CoreDNS configmap... 
+[36mINFO[0m[0035] Cluster 'chronicle-upgrade' created successfully! 
+[36mINFO[0m[0035] --kubeconfig-update-default=false --> sets --kubeconfig-switch-context=false 
+[36mINFO[0m[0035] You can now use it like this:                
+export KUBECONFIG=$(k3d kubeconfig write chronicle-upgrade)
+kubectl cluster-info
+[36mINFO[0m[0000] Importing image(s) into cluster 'chronicle-upgrade' 
+[36mINFO[0m[0000] Starting new tools node...                   
+[36mINFO[0m[0000] Starting node 'k3d-chronicle-upgrade-tools'  
+[36mINFO[0m[0001] Saving 1 image(s) from runtime...            
+[36mINFO[0m[0003] Importing images into nodes...               
+[36mINFO[0m[0003] Importing images from tarball '/k3d/images/k3d-chronicle-upgrade-images-20261005010826.tar' into node 'k3d-chronicle-upgrade-server-0'... 
+[36mINFO[0m[0003] Importing images from tarball '/k3d/images/k3d-chronicle-upgrade-images-20261005010826.tar' into node 'k3d-chronicle-upgrade-agent-3'... 
+[36mINFO[0m[0003] Importing images from tarball '/k3d/images/k3d-chronicle-upgrade-images-20261005010826.tar' into node 'k3d-chronicle-upgrade-agent-0'... 
+[36mINFO[0m[0003] Importing images from tarball '/k3d/images/k3d-chronicle-upgrade-images-20261005010826.tar' into node 'k3d-chronicle-upgrade-agent-1'... 
+[36mINFO[0m[0003] Importing images from tarball '/k3d/images/k3d-chronicle-upgrade-images-20261005010826.tar' into node 'k3d-chronicle-upgrade-agent-2'... 
+[36mINFO[0m[0003] Importing images from tarball '/k3d/images/k3d-chronicle-upgrade-images-20261005010826.tar' into node 'k3d-chronicle-upgrade-agent-4'... 
+[36mINFO[0m[0010] Removing the tarball(s) from image volume... 
+[36mINFO[0m[0011] Removing k3d-tools node...                   
+[36mINFO[0m[0011] Successfully imported image(s)               
+[36mINFO[0m[0011] Successfully imported 1 image(s) into 1 cluster(s) 
+namespace/chronicle created
+service/chronicle created
+service/chronicle-http created
+statefulset.apps/chronicle created
+persistentvolumeclaim/data-chronicle-0 created
+pod/restore-0 created
+pod/restore-0 condition met
+pod "restore-0" deleted
+persistentvolumeclaim/data-chronicle-1 created
+pod/restore-1 created
+pod/restore-1 condition met
+pod "restore-1" deleted
+persistentvolumeclaim/data-chronicle-2 created
+pod/restore-2 created
+pod/restore-2 condition met
+pod "restore-2" deleted
+persistentvolumeclaim/data-chronicle-3 created
+pod/restore-3 created
+pod/restore-3 condition met
+pod "restore-3" deleted
+persistentvolumeclaim/data-chronicle-4 created
+pod/restore-4 created
+pod/restore-4 condition met
+pod "restore-4" deleted
+statefulset.apps/chronicle scaled
+Waiting for 5 pods to be ready...
+Waiting for 4 pods to be ready...
+Waiting for 3 pods to be ready...
+Waiting for 2 pods to be ready...
+Waiting for 1 pods to be ready...
+partitioned roll out complete: 5 new pods have been updated...
+Candidate recovered in isolated chronicle-upgrade; readiness alone is not qualification.

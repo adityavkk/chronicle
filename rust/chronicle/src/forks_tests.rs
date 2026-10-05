@@ -142,7 +142,11 @@ async fn cross_leader_chunked_fork_and_cascade_use_real_raft_quorums() {
             let raft = &apps[&(group % 3 + 1)].groups[&group].raft;
             tokio::time::timeout(Duration::from_secs(5), async {
                 loop {
-                    if raft.ensure_linearizable().await.is_ok() {
+                    if raft
+                        .ensure_linearizable(openraft::ReadPolicy::ReadIndex)
+                        .await
+                        .is_ok()
+                    {
                         break;
                     }
                     tokio::time::sleep(Duration::from_millis(20)).await;

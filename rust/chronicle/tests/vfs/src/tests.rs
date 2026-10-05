@@ -1,8 +1,9 @@
 use std::ffi::CString;
 
-use chronicle_raft::{TypeConfig, model, storage::SqliteStore};
+use chronicle_raft::{Entry, LogId, model, storage::SqliteStore};
+use openraft::EntryPayload;
 use openraft::storage::RaftStateMachine;
-use openraft::{CommittedLeaderId, Entry, EntryPayload, LogId};
+use openraft::vote::{RaftLeaderId, leader_id_adv::CommittedLeaderId};
 
 unsafe extern "C" {
     fn chronicle_fault_vfs_register() -> i32;
@@ -14,7 +15,7 @@ unsafe extern "C" {
 const WRITE: i32 = 1;
 const SYNC: i32 = 2;
 
-fn entry(index: u64, data: &[u8]) -> Entry<TypeConfig> {
+fn entry(index: u64, data: &[u8]) -> Entry {
     Entry {
         log_id: LogId::new(CommittedLeaderId::new(1, 1), index),
         payload: EntryPayload::Normal(model::Command::Create {
@@ -51,12 +52,15 @@ async fn exercise(kind: i32) {
     let path = dir.path().join(format!("fault-{kind}.sqlite"));
     register_and_target(&path);
     let mut store = SqliteStore::open(&path).await.unwrap();
-    store.apply([entry(1, b"acknowledged")]).await.unwrap();
+    store
+        .apply_entries([entry(1, b"acknowledged")])
+        .await
+        .unwrap();
 
     // SAFETY: these functions only atomically arm/read the filename-scoped one-shot.
     unsafe { chronicle_fault_vfs_arm(kind) };
     let result = store
-        .apply([entry(2, b"must not be published speculatively")])
+        .apply_entries([entry(2, b"must not be published speculatively")])
         .await;
     assert!(
         result.is_err(),

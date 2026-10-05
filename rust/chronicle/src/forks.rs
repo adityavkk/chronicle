@@ -15,6 +15,7 @@ use chronicle_raft::{
     fork::{Decision, Id, Offer, Operation, View},
     model::{self, Command, Error, Outcome},
 };
+use openraft::type_config::async_runtime::WatchReceiver;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 
@@ -77,7 +78,7 @@ pub async fn rpc(
         ));
     }
     let group = model::shard(request.key());
-    if a.groups[&group].raft.metrics().borrow().state != openraft::ServerState::Leader {
+    if a.groups[&group].raft.metrics().borrow_watched().state != openraft::ServerState::Leader {
         let body = serde_json::to_vec(&request).map_err(bad)?;
         return proxy(&a, group, Method::POST, RPC_PATH, headers, body.into()).await;
     }
@@ -122,7 +123,7 @@ async fn dispatch(a: Shared, request: Request) -> Result<Reply> {
             Request::Read { key, sequence } => {
                 group
                     .raft
-                    .ensure_linearizable()
+                    .ensure_linearizable(openraft::ReadPolicy::ReadIndex)
                     .await
                     .map_err(unavailable)?;
                 Ok(Reply::View(Box::new(
@@ -136,7 +137,7 @@ async fn dispatch(a: Shared, request: Request) -> Result<Reply> {
             Request::Chunk { id, offset } => {
                 group
                     .raft
-                    .ensure_linearizable()
+                    .ensure_linearizable(openraft::ReadPolicy::ReadIndex)
                     .await
                     .map_err(unavailable)?;
                 Ok(Reply::Chunk(
@@ -156,7 +157,7 @@ async fn dispatch(a: Shared, request: Request) -> Result<Reply> {
 
 async fn call(a: &Shared, request: Request) -> Result<Reply> {
     let group = model::shard(request.key());
-    if a.groups[&group].raft.metrics().borrow().state == openraft::ServerState::Leader {
+    if a.groups[&group].raft.metrics().borrow_watched().state == openraft::ServerState::Leader {
         return dispatch(a.clone(), request).await;
     }
     let mut headers = HeaderMap::new();
@@ -409,7 +410,7 @@ pub async fn run(a: Shared) {
     loop {
         let mut work = Vec::new();
         for (&id, group) in a.groups.iter().filter(|(id, _)| **id != 0) {
-            if group.raft.metrics().borrow().state != openraft::ServerState::Leader {
+            if group.raft.metrics().borrow_watched().state != openraft::ServerState::Leader {
                 continue;
             }
             let cursor = cursors.entry(id).or_default();

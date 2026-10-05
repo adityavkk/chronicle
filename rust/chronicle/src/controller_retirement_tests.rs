@@ -97,6 +97,7 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
                 .route("/raft/{group}/append", post(crate::append_rpc))
                 .route("/raft/{group}/vote", post(crate::vote_rpc))
                 .route("/raft/{group}/snapshot", post(crate::snapshot_rpc))
+                .route("/raft/{group}/transfer", post(crate::transfer_rpc))
                 .route("/admin/status", get(crate::status))
                 .route("/admin/control", get(crate::control))
                 .route("/admin/placed", post(crate::placed))
@@ -130,7 +131,7 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
                     .await
                     .unwrap();
             }
-            let vote = group.raft.metrics().borrow().vote;
+            let vote = group.raft.metrics().borrow_watched().vote;
             commit_membership(group, &BTreeSet::from([1, 2, 3]), vote)
                 .await
                 .unwrap();
@@ -148,7 +149,7 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
         for shard in 0..=SHARDS {
             place(old, shard, 0, BTreeSet::from([1, 2, 3])).await;
             let group = &old.groups[&shard];
-            let vote = group.raft.metrics().borrow().vote;
+            let vote = group.raft.metrics().borrow_watched().vote;
             let boundary = commit_membership(group, &BTreeSet::from([1, 2, 3]), vote)
                 .await
                 .unwrap();
@@ -174,7 +175,7 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
         .await;
         place(old, 0, 1, BTreeSet::from([2, 3, 4])).await;
         let group = &old.groups[&0];
-        let vote = group.raft.metrics().borrow().vote;
+        let vote = group.raft.metrics().borrow_watched().vote;
         let boundary = commit_membership(group, &BTreeSet::from([2, 3, 4]), vote)
             .await
             .unwrap();
@@ -188,7 +189,7 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
         )
         .await;
         let state = control(old).await.unwrap();
-        let metrics = group.raft.metrics().borrow().clone();
+        let metrics = group.raft.metrics().borrow_watched().clone();
         assert_eq!(metrics.state, openraft::ServerState::Leader);
         assert!(demotion_applied(&metrics, boundary));
         assert!(!replica_retired(&state.placements[&0], &metrics));
@@ -199,9 +200,12 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
             .state(openraft::ServerState::Learner, "self removal")
             .await
             .unwrap();
-        assert_eq!(group.raft.metrics().borrow().current_leader, Some(1));
         assert_eq!(
-            old.groups[&1].raft.metrics().borrow().state,
+            group.raft.metrics().borrow_watched().current_leader,
+            Some(1)
+        );
+        assert_eq!(
+            old.groups[&1].raft.metrics().borrow_watched().state,
             openraft::ServerState::Leader
         );
 
@@ -210,13 +214,18 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
         let leader = loop {
             if let Some(app) = apps.values().find(|a| {
                 a.id != 1
-                    && a.groups[&0].raft.metrics().borrow().state == openraft::ServerState::Leader
+                    && a.groups[&0].raft.metrics().borrow_watched().state
+                        == openraft::ServerState::Leader
             }) {
                 break app;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         };
-        leader.groups[&0].raft.ensure_linearizable().await.unwrap();
+        leader.groups[&0]
+            .raft
+            .ensure_linearizable(openraft::ReadPolicy::ReadIndex)
+            .await
+            .unwrap();
         let mut campaigns = BTreeMap::new();
         let mut retirement = Retirement::default();
         for shard in 1..=SHARDS {
@@ -238,7 +247,7 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
                 group.store.read_state().await.unwrap().placements[&shard].generation,
                 1
             );
-            let metrics = old.groups[&shard].raft.metrics().borrow().clone();
+            let metrics = old.groups[&shard].raft.metrics().borrow_watched().clone();
             assert_eq!(metrics.state, openraft::ServerState::Leader);
             assert!(!replica_retired(&remote.placements[&shard], &metrics));
         }

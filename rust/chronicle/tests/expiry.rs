@@ -1,7 +1,6 @@
-use chronicle_raft::{TypeConfig, expiry::Expiry, model::*, storage::SqliteStore};
-use openraft::{
-    CommittedLeaderId, Entry, EntryPayload, LogId, RaftSnapshotBuilder, storage::RaftStateMachine,
-};
+use chronicle_raft::{Entry, LogId, expiry::Expiry, model::*, storage::SqliteStore};
+use openraft::vote::{RaftLeaderId, leader_id_adv::CommittedLeaderId};
+use openraft::{EntryPayload, RaftSnapshotBuilder, storage::RaftStateMachine};
 
 fn create(policy: Expiry, now: u64) -> Command {
     Command::Create {
@@ -36,7 +35,7 @@ fn expire(incarnation: u64, access_ms: u64, now_ms: u64) -> Command {
     }
 }
 
-fn entry(index: u64, command: Command) -> Entry<TypeConfig> {
+fn entry(index: u64, command: Command) -> Entry {
     Entry {
         log_id: LogId::new(CommittedLeaderId::new(1, 1), index),
         payload: EntryPayload::Normal(command),
@@ -145,7 +144,7 @@ async fn renewal_and_expiry_survive_snapshot_install_and_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let mut source = SqliteStore::open(dir.path().join("source")).await.unwrap();
     source
-        .apply([
+        .apply_entries([
             entry(1, create(Expiry::Ttl(2), 100)),
             entry(2, touch(1, 1500)),
         ])
@@ -170,7 +169,7 @@ async fn renewal_and_expiry_survive_snapshot_install_and_reopen() {
         1500
     );
     let outcomes = target
-        .apply([entry(3, expire(1, 100, 2101)), entry(4, touch(1, 3000))])
+        .apply_entries([entry(3, expire(1, 100, 2101)), entry(4, touch(1, 3000))])
         .await
         .unwrap();
     assert_eq!(outcomes[0].error, Some(Error::ConfigConflict));
@@ -188,7 +187,7 @@ async fn renewal_and_expiry_survive_snapshot_install_and_reopen() {
     );
     assert!(
         target
-            .apply([entry(5, expire(1, 3000, 5001))])
+            .apply_entries([entry(5, expire(1, 3000, 5001))])
             .await
             .unwrap()[0]
             .error
@@ -239,7 +238,7 @@ async fn append_renewal_precedes_validation_but_not_incarnation_or_expiry_fences
     let path = dir.path().join("append");
     let mut store = SqliteStore::open(&path).await.unwrap();
     store
-        .apply([entry(1, create(Expiry::Ttl(2), 100))])
+        .apply_entries([entry(1, create(Expiry::Ttl(2), 100))])
         .await
         .unwrap();
     let append = |incarnation, now_ms, seq| Command::Append {
@@ -257,7 +256,7 @@ async fn append_renewal_precedes_validation_but_not_incarnation_or_expiry_fences
         stream_seq: None,
     };
     let out = store
-        .apply([
+        .apply_entries([
             entry(2, append(1, 1000, 0)),
             entry(3, append(1, 1500, 0)),
             entry(4, append(1, 2000, 2)), // Gap rejection renews, but does not consume seq2.
@@ -279,7 +278,7 @@ async fn append_renewal_precedes_validation_but_not_incarnation_or_expiry_fences
         2000
     );
     let out = store
-        .apply([
+        .apply_entries([
             entry(5, append(2, 3500, 1)),
             entry(6, append(1, 1500, 1)),
             entry(7, append(1, 4001, 2)),
@@ -312,16 +311,16 @@ async fn legacy_snapshot_installs_without_inventing_sliding_policy() {
     bytes.extend_from_slice(body);
     let mut store = SqliteStore::open(&path).await.unwrap();
     store
-        .install_snapshot(
-            &openraft::SnapshotMeta::default(),
-            Box::new(Cursor::new(bytes)),
-        )
+        .install_snapshot(&chronicle_raft::SnapshotMeta::default(), Cursor::new(bytes))
         .await
         .unwrap();
     store.close().await;
     let mut store = SqliteStore::open_existing(&path).await.unwrap();
     assert!(
-        store.apply([entry(1, touch(1, 1200))]).await.unwrap()[0]
+        store
+            .apply_entries([entry(1, touch(1, 1200))])
+            .await
+            .unwrap()[0]
             .error
             .is_none()
     );
@@ -335,7 +334,11 @@ async fn legacy_snapshot_installs_without_inventing_sliding_policy() {
         0
     );
     assert_eq!(
-        store.apply([entry(2, touch(1, 1235))]).await.unwrap()[0].error,
+        store
+            .apply_entries([entry(2, touch(1, 1235))])
+            .await
+            .unwrap()[0]
+            .error,
         Some(Error::Missing)
     );
     store.close().await;

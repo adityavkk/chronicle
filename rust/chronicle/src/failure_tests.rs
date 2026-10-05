@@ -1,7 +1,10 @@
 use super::monitor;
 use chronicle_raft::{
     Raft,
-    faults::{AFTER_LOG_COMMIT, BEFORE_BODY_READ, store_directory},
+    faults::{
+        AFTER_APPLY_COMMIT, AFTER_LOG_COMMIT, BEFORE_BODY_READ, BEFORE_STATE_COMMIT,
+        store_directory,
+    },
     model::{Command, StreamConfig},
     network::Network,
     storage::SqliteStore,
@@ -27,6 +30,7 @@ fn fatal_child() {
         .unwrap()
         .parse()
         .unwrap();
+    let gate = std::env::var("CHRONICLE_FATAL_GATE").unwrap();
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let mut groups = Vec::new();
         for group in 0..2 {
@@ -48,6 +52,10 @@ fn fatal_child() {
             .unwrap();
             tokio::spawn(monitor(1, group, raft.metrics()));
             raft.initialize(BTreeMap::from([(1, openraft::BasicNode::new("unused"))]))
+                .await
+                .unwrap();
+            raft.wait(Some(Duration::from_secs(3)))
+                .state(openraft::ServerState::Leader, "bootstrap")
                 .await
                 .unwrap();
             raft.client_write(Command::Create {
@@ -82,10 +90,10 @@ fn fatal_child() {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         let fault = file_gate(&root, &format!("group-{failed}.sqlite"));
-        std::fs::write(fault.join(format!("{AFTER_LOG_COMMIT}.error")), b"1").unwrap();
-        // The injected I/O error passes through SQLite's log callback and the
-        // real core. This write's outcome is unknown, so recovery must allow it.
-        let _ = groups[failed]
+        std::fs::write(fault.join(format!("{gate}.error")), b"1").unwrap();
+        // Exercise log and application failures through the real core. The
+        // outcome is unknown even when a transaction committed before the error.
+        let result = groups[failed]
             .client_write(Command::Append {
                 key: "retained".into(),
                 incarnation: 1,
@@ -97,6 +105,7 @@ fn fatal_child() {
                 now_ms: None,
             })
             .await;
+        assert!(result.is_err(), "failed persistence returned success");
         std::future::pending::<()>().await;
     });
 }
@@ -109,13 +118,21 @@ fn file_gate(root: &std::path::Path, name: &str) -> PathBuf {
 
 #[test]
 fn storage_fatal_exits_with_blocked_body_and_retains_acknowledged_state() {
-    for failed in [0, 1] {
+    for (failed, gate) in [
+        (0, AFTER_LOG_COMMIT),
+        (1, AFTER_LOG_COMMIT),
+        (0, BEFORE_STATE_COMMIT),
+        (1, BEFORE_STATE_COMMIT),
+        (0, AFTER_APPLY_COMMIT),
+        (1, AFTER_APPLY_COMMIT),
+    ] {
         let root = tempfile::tempdir().unwrap();
         let mut child = Child(
             std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "failure::subprocess::fatal_child", "--nocapture"])
                 .env("CHRONICLE_FATAL_TEST", root.path())
                 .env("CHRONICLE_FATAL_GROUP", failed.to_string())
+                .env("CHRONICLE_FATAL_GATE", gate)
                 .env("CHRONICLE_FAULT_DIR", root.path().join("faults"))
                 .spawn()
                 .unwrap(),
@@ -136,7 +153,7 @@ fn storage_fatal_exits_with_blocked_body_and_retains_acknowledged_state() {
         assert!(body.join(format!("{BEFORE_BODY_READ}.reached")).exists());
         assert!(!body.join(format!("{BEFORE_BODY_READ}.release")).exists());
         let fault = file_gate(root.path(), &format!("group-{failed}.sqlite"));
-        assert!(fault.join(format!("{AFTER_LOG_COMMIT}.reached")).exists());
+        assert!(fault.join(format!("{gate}.reached")).exists());
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             for group in 0..2 {
                 let store =

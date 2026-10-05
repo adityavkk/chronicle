@@ -1,0 +1,19 @@
+    Finished `test` profile [unoptimized] target(s) in 0.13s
+     Running unittests src/lib.rs (target/debug/deps/chronicle_raft-2023e570993a1d11)
+
+running 6 tests
+test network::tests::adapter_forwards_directed_transfer_and_preserves_rejection ... ok
+real transfer: leader=2, term=1 -> 2, one transfer, strict read + replicated write passed
+test network::tests::real_transfer_elects_successor_and_serves_strict_reads_and_new_writes ... ok
+unavailable transfer: submission Ok, one HTTP 503, no successor/no retry after recovery (700ms), write rejected: has to forward request to: Some(2), Some(BasicNode { addr: "127.0.0.1:35737" })
+test network::tests::unavailable_transfer_recipient_is_not_success_or_an_automatic_retry ... ok
+heartbeat=200ms mode=1: attempts=9, peak=1, shortest=63.505025ms
+real rejection: VoteChanged and LogNotFlushed preserved; original leader still writes/strict-reads
+test network::tests::real_transfer_rejects_stale_vote_and_unflushed_boundary ... ok
+6 failed attempts; minimum spacing 502.001213ms
+test network::tests::unavailable_replica_backs_off_and_recovers ... ok
+heartbeat=200ms mode=2: attempts=10, peak=2, shortest=68.885673ms
+test network::tests::heartbeat_enabled_unavailable_replica_has_bounded_aggregate_traffic_and_recovers ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 3.88s
+

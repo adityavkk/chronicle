@@ -43,9 +43,11 @@ must still be reconciled. Conditions are admission fences, not retroactive
 commit-time predicates. Existing strict completion/retirement barriers remain.
 
 Directed transfer must implement the upstream network RPC. Trigger success is
-submission, not election completion. Source vote, voter eligibility and the
-target's flushed log boundary are checked by upstream; the controller must
-observe a successor under a strict barrier before declaring success. Keep native
+submission, not election completion. Source vote and the target's flushed log
+boundary are checked by upstream. The trigger does **not** reject a nonvoter
+target; it broadcasts only to effective voters. The controller must validate a
+current eligible voter and observe a successor under a strict barrier before
+declaring success. Keep native
 campaign balancing default-off. Do not enable a replacement policy until its
 staleness, membership overlap, unavailable-target, repeated-attempt and outage
 tests pass. The initiating trigger itself has no expected-vote CAS.

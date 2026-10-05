@@ -118,7 +118,7 @@ pub struct Placement {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ReplicaHistory {
     MayVote,
-    NonvoterAfter(openraft::LogId<u64>),
+    NonvoterAfter(crate::LogId),
 }
 
 impl Placement {
@@ -204,8 +204,28 @@ pub enum Command {
         shard: u64,
         generation: u64,
         #[serde(default)]
-        membership: Option<openraft::LogId<u64>>,
+        membership: Option<crate::LogId>,
     },
+}
+
+// OpenRaft displays application entries in diagnostics. Never include stream
+// keys, payload bytes, or node addresses in that diagnostic representation.
+impl std::fmt::Display for Command {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Fork(_) => "Fork",
+            Self::Create { .. } => "Create",
+            Self::Append { .. } => "Append",
+            Self::Touch { .. } => "Touch",
+            Self::Expire { .. } => "Expire",
+            Self::Delete { .. } => "Delete",
+            Self::Register { .. } => "Register",
+            Self::Admit { .. } => "Admit",
+            Self::Balance { .. } => "Balance",
+            Self::Place { .. } => "Place",
+            Self::Placed { .. } => "Placed",
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

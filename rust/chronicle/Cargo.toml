@@ -17,7 +17,8 @@ bytes = "1"
 futures-util = "0.3"
 getrandom = "=0.3.4"
 http-body = "1"
-openraft = { version = "=0.9.25", features = ["serde", "storage-v2"] }
+openraft = { version = "=0.10.0-alpha.36", features = ["serde"] }
+openraft-legacy = { version = "=0.10.0-alpha.36", features = ["serde"] }
 opentelemetry = { version = "=0.31.0", default-features = false, features = ["trace"] }
 opentelemetry_sdk = { version = "=0.31.0", default-features = false, features = ["trace"] }
 percent-encoding = "=2.3.2"
@@ -42,6 +43,3 @@ unsafe_code = "forbid"
 
 [profile.release]
 debug = 1
-
-[patch.crates-io]
-openraft = { path = "vendor/openraft" }

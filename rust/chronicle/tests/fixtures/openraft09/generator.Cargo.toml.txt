@@ -1,0 +1,11 @@
+[package]
+name = "chronicle-upgrade-fixture-generator"
+version = "0.0.0"
+edition = "2024"
+[dependencies]
+chronicle-raft = { path = "/home/user/workspace/repo/rust/chronicle" }
+openraft = { version = "=0.9.25", features = ["serde", "storage-v2"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+[patch.crates-io]
+openraft = { path = "/home/user/workspace/repo/rust/chronicle/vendor/openraft" }

@@ -6,12 +6,14 @@ use std::time::{Duration, Instant};
 
 use chronicle_raft::faults::{
     AFTER_APPLY_COMMIT, AFTER_LOG_COMMIT, AFTER_SNAPSHOT_INSTALL, BEFORE_LIVE_RECHECK,
-    BEFORE_PROJECTION_OPEN, BEFORE_SNAPSHOT_INSTALL, before_live_recheck, store_directory,
+    BEFORE_PROJECTION_OPEN, BEFORE_SNAPSHOT_INSTALL, BEFORE_STATE_COMMIT, before_live_recheck,
+    store_directory,
 };
 use chronicle_raft::model::{Command, StreamConfig};
-use chronicle_raft::{TypeConfig, storage::SqliteStore};
+use chronicle_raft::{Entry, LogId, storage::SqliteStore};
 use openraft::storage::{RaftLogStorageExt, RaftStateMachine};
-use openraft::{CommittedLeaderId, Entry, EntryPayload, LogId, RaftLogReader, RaftSnapshotBuilder};
+use openraft::vote::{RaftLeaderId, leader_id_adv::CommittedLeaderId};
+use openraft::{EntryPayload, RaftLogReader, RaftSnapshotBuilder};
 
 const DEADLINE: Duration = Duration::from_secs(10);
 
@@ -25,7 +27,7 @@ impl Drop for FaultChild {
     }
 }
 
-fn create_entry(index: u64, key: &str, data: &[u8]) -> Entry<TypeConfig> {
+fn create_entry(index: u64, key: &str, data: &[u8]) -> Entry {
     Entry {
         log_id: LogId::new(CommittedLeaderId::new(1, 1), index),
         payload: EntryPayload::Normal(Command::Create {
@@ -89,16 +91,26 @@ fn fault_gate_child() {
     let root = PathBuf::from(std::env::var_os("CHRONICLE_FAULT_CASE_DIR").unwrap());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
+        if operation == "raft-apply" {
+            real_apply_responder(&root).await;
+            return;
+        }
         let path = root.join("store.sqlite");
         let mut store = SqliteStore::open(&path).await.unwrap();
         if operation == "open-cancel" {
-            store.apply([create_entry(1, "s", b"abc")]).await.unwrap();
+            store
+                .apply_entries([create_entry(1, "s", b"abc")])
+                .await
+                .unwrap();
         }
         let snapshot = if operation.starts_with("snapshot-") {
-            store.apply([create_entry(1, "old", b"old")]).await.unwrap();
+            store
+                .apply_entries([create_entry(1, "old", b"old")])
+                .await
+                .unwrap();
             let mut source = SqliteStore::open(root.join("source.sqlite")).await.unwrap();
             source
-                .apply([create_entry(2, "new", b"new")])
+                .apply_entries([create_entry(2, "new", b"new")])
                 .await
                 .unwrap();
             let snapshot = source.build_snapshot().await.unwrap();
@@ -118,7 +130,7 @@ fn fault_gate_child() {
                 .unwrap(),
             "apply" | "release" => {
                 store
-                    .apply([create_entry(1, "applied", b"durable")])
+                    .apply_entries([create_entry(1, "applied", b"durable")])
                     .await
                     .unwrap();
             }
@@ -242,6 +254,123 @@ fn cancelled_live_gate_retains_writer_reservation() {
             }
             assert!(Instant::now() < deadline, "released child did not finish");
             std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+async fn real_apply_responder(root: &Path) {
+    use chronicle_raft::{Raft, network::Network};
+    use std::{collections::BTreeMap, sync::Arc};
+    let store = SqliteStore::open(root.join("store.sqlite")).await.unwrap();
+    let raft = Raft::new(
+        1,
+        Arc::new(openraft::Config::default().validate().unwrap()),
+        Network {
+            client: reqwest::Client::new(),
+            cluster: "responder-test".into(),
+            group: 1,
+        },
+        store.clone(),
+        store.clone(),
+    )
+    .await
+    .unwrap();
+    raft.initialize(BTreeMap::from([(1, openraft::BasicNode::new("unused"))]))
+        .await
+        .unwrap();
+    raft.wait(Some(DEADLINE))
+        .state(openraft::ServerState::Leader, "bootstrap")
+        .await
+        .unwrap();
+    let EntryPayload::Normal(command) = create_entry(0, "retained", b"acknowledged").payload else {
+        unreachable!()
+    };
+    assert!(
+        raft.client_write(command)
+            .await
+            .unwrap()
+            .data
+            .error
+            .is_none()
+    );
+    std::fs::write(root.join("setup"), b"ready").unwrap();
+    while !root.join("trigger").is_file() {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let EntryPayload::Normal(command) = create_entry(0, "new", b"candidate").payload else {
+        unreachable!()
+    };
+    let copy = raft.clone();
+    let mut write = tokio::spawn(async move { copy.client_write(command).await });
+    while !root.join("probe").is_file() {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut write)
+            .await
+            .is_err(),
+        "real responder completed while storage gate remained blocked"
+    );
+    std::fs::write(root.join("no-response"), b"checked").unwrap();
+    let result = write.await.unwrap().unwrap();
+    assert!(result.data.error.is_none());
+    assert_eq!(result.data.end, 9);
+    raft.shutdown().await.unwrap();
+    drop(raft);
+    store.close().await;
+}
+
+#[test]
+fn real_raft_responder_waits_for_commit_and_post_commit_gate() {
+    for gate in [BEFORE_STATE_COMMIT, AFTER_APPLY_COMMIT] {
+        for crash in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path();
+            let mut child = spawn_child(root, "raft-apply");
+            let directory = arrange_gate(root, &mut child, gate);
+            std::fs::write(root.join("probe"), b"check responder").unwrap();
+            wait_for(&root.join("no-response"), &mut child);
+            if crash {
+                child.0.kill().unwrap();
+                assert!(!child.0.wait().unwrap().success());
+            } else {
+                std::fs::write(directory.join(format!("{gate}.release")), b"release").unwrap();
+                let deadline = Instant::now() + DEADLINE;
+                loop {
+                    if let Some(status) = child.0.try_wait().unwrap() {
+                        assert!(status.success());
+                        break;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "released responder child did not finish"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let store = SqliteStore::open_existing(root.join("store.sqlite"))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    store
+                        .read_stream("retained".into())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .data,
+                    b"acknowledged"
+                );
+                let new = store.read_stream("new".into()).await.unwrap();
+                if !crash || gate == AFTER_APPLY_COMMIT {
+                    assert_eq!(new.unwrap().data, b"candidate");
+                } else {
+                    // This tests transaction recovery, not Raft replay: its durable log
+                    // may subsequently cause the unknown operation to apply at restart.
+                    assert!(new.is_none());
+                }
+                store.close().await;
+            });
         }
     }
 }

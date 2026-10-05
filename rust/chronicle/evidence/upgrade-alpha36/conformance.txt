@@ -1,0 +1,60 @@
+
+> test
+> vitest run --testTimeout=30000 --reporter=default --reporter=json --outputFile=../../evidence/upgrade-alpha36/conformance.json
+
+
+ RUN  v4.1.8 /home/user/workspace/chronicle-transfer/rust/chronicle/tests/conformance
+
+stderr | conformance.test.ts > Long-Poll Operations > should wait for new data with long-poll
+conformance transport failure http://172.19.0.5:30644/v1/stream/longpoll-test-1791162780054?offset=0000000000000000_0000000000000008&live=long-poll&cursor=3136539 [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on long-poll responses
+conformance transport failure http://172.19.0.5:30644/v1/stream/security-longpoll-nosniff-1791162781193?offset=0000000000000000_0000000000000012&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Long-Poll Edge Cases > should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout
+conformance transport failure http://172.19.0.5:30644/v1/stream/longpoll-204-headers-test-1791162793105?offset=0000000000000000_0000000000000000&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+ ✓ conformance.test.ts (332 tests | 6 skipped) 67979ms
+     ✓ should wait for new data with long-poll  572ms
+     ✓ should include X-Content-Type-Options: nosniff on long-poll responses  516ms
+     ✓ should support offset=now with long-poll mode (waits for data)  5016ms
+     ✓ should support offset=now with long-poll on empty stream  5068ms
+     ✓ should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout  5016ms
+     ✓ should return 404 on HEAD after TTL expires  1033ms
+     ✓ should return 404 on GET after TTL expires (idle)  1034ms
+     ✓ should return 404 on POST append after TTL expires (idle)  1026ms
+     ✓ should return 404 on HEAD after Expires-At passes  3033ms
+     ✓ should return 404 on GET after Expires-At passes  3034ms
+     ✓ should return 404 on POST append after Expires-At passes  3032ms
+     ✓ should allow recreating stream after TTL expires  1079ms
+     ✓ should extend TTL on write (sliding window)  3024ms
+     ✓ should extend TTL on read (sliding window)  3027ms
+     ✓ should NOT extend TTL on HEAD  2026ms
+     ✓ should NOT extend Expires-At on read or write  4023ms
+     ✓ should handle chunk-size pagination correctly  916ms
+       ✓ concurrent readers see consistent data during writes  2882ms
+       ✓ single byte values cover full range (0-255) with concurrent readers during write  4634ms
+       ✓ random operation sequences maintain stream invariants  2532ms
+       ✓ offsets are always monotonically increasing  1770ms
+       ✓ read-your-writes: data is immediately visible after append  1758ms
+       ✓ data at offset never changes after additional appends  2608ms
+       ✓ lexicographically ordered seq values are accepted  971ms
+       ✓ out-of-order seq values are rejected  627ms
+       ✓ concurrent writers racing with incrementing seq values  756ms
+       ✓ replay produces identical content hash  2316ms
+       ✓ deterministic ordering - same data in same order produces same hash  1549ms
+       ✓ sse-live-reader-receives-final-append-on-close: live reader at tail receives data appended atomically with the close  1219ms
+     ✓ should cascade GC when last fork is deleted  680ms
+     ✓ should cascade GC through three levels  724ms
+     ✓ should expire fork based on TTL (releases refcount)  1083ms
+     ✓ should expire source with living forks (source goes 410)  1090ms
+     ✓ should allow fork to outlive source via TTL renewal  2074ms
+     ✓ should handle many forks of same stream (10 forks)  895ms
+     ✓ should fork at every offset position  346ms
+
+ Test Files  1 passed (1)
+      Tests  326 passed | 6 skipped (332)
+   Start at  01:12:59
+   Duration  68.24s (transform 23ms, setup 0ms, import 117ms, tests 67.98s, environment 0ms)
+
+JSON report written to /home/user/workspace/chronicle-transfer/rust/chronicle/evidence/upgrade-alpha36/conformance.json

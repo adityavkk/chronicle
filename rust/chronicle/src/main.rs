@@ -24,8 +24,10 @@ use chronicle_raft::{
     storage::SqliteStore,
     wire::{self, ParsedOffset},
 };
-use openraft::raft::{AppendEntriesRequest, InstallSnapshotRequest, VoteRequest};
-use openraft::{BasicNode, Config, SnapshotPolicy};
+use openraft::raft::{AppendEntriesRequest, TransferLeaderRequest, VoteRequest};
+use openraft::type_config::async_runtime::WatchReceiver;
+use openraft::{BasicNode, Config, Instant as _, SnapshotPolicy};
+use openraft_legacy::network_v1::{ChunkedSnapshotReceiver, InstallSnapshotRequest};
 use std::{
     collections::BTreeMap,
     sync::Arc,
@@ -253,6 +255,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/raft/{group}/append", post(append_rpc))
         .route("/raft/{group}/vote", post(vote_rpc))
         .route("/raft/{group}/snapshot", post(snapshot_rpc))
+        .route("/raft/{group}/transfer", post(transfer_rpc))
         .route(
             if app.stream_tenant.is_some() {
                 "/v1/stream/{*path}"
@@ -276,7 +279,7 @@ async fn main() -> anyhow::Result<()> {
 async fn health(State(a): State<Shared>) -> impl IntoResponse {
     if a.groups
         .values()
-        .any(|g| failure::storage_error(&g.raft.metrics().borrow()).is_some())
+        .any(|g| failure::storage_error(&g.raft.metrics().borrow_watched()).is_some())
     {
         (StatusCode::SERVICE_UNAVAILABLE, "fatal storage error")
     } else {
@@ -305,7 +308,7 @@ async fn vote_rpc(
     State(a): State<Shared>,
     Path(g): Path<u64>,
     headers: HeaderMap,
-    Json(q): Json<VoteRequest<u64>>,
+    Json(q): Json<VoteRequest<TypeConfig>>,
 ) -> ApiResult {
     rpc_recipient(&a.identity, &headers)?;
     Ok(Json(
@@ -318,6 +321,26 @@ async fn vote_rpc(
     )
     .into_response())
 }
+// Private recipient-bound protocol RPC, never an administrative transfer API.
+async fn transfer_rpc(
+    State(a): State<Shared>,
+    Path(g): Path<u64>,
+    headers: HeaderMap,
+    Json(q): Json<TransferLeaderRequest<TypeConfig>>,
+) -> ApiResult {
+    rpc_recipient(&a.identity, &headers)?;
+    Ok(Json(
+        a.groups
+            .get(&g)
+            .ok_or_else(|| bad("group"))?
+            .raft
+            .handle_transfer_leader(q)
+            .await
+            .map_err(openraft::error::RaftError::<TypeConfig>::Fatal),
+    )
+    .into_response())
+}
+
 async fn snapshot_rpc(
     State(a): State<Shared>,
     Path(g): Path<u64>,
@@ -371,7 +394,7 @@ async fn status(State(a): State<Shared>) -> Response {
     Json(
         a.groups
             .iter()
-            .map(|(id, g)| (*id, g.raft.metrics().borrow().clone()))
+            .map(|(id, g)| (*id, g.raft.metrics().borrow_watched().clone()))
             .collect::<BTreeMap<_, _>>(),
     )
     .into_response()
@@ -403,16 +426,16 @@ async fn metrics(State(a): State<Shared>) -> String {
         a.admission.available_permits()
     ));
     for (id, g) in &a.groups {
-        let m = g.raft.metrics().borrow().clone();
-        text.push_str(&format!("chronicle_raft_leader{{group=\"{id}\"}} {}\nchronicle_raft_applied{{group=\"{id}\"}} {}\n", u8::from(m.state == openraft::ServerState::Leader), m.last_applied.map_or(0, |l| l.index)));
-        text.push_str(&format!("chronicle_raft_quorum_available{{group=\"{id}\"}} {}\nchronicle_snapshot_index{{group=\"{id}\"}} {}\n",u8::from(m.state == openraft::ServerState::Leader && m.millis_since_quorum_ack.is_some_and(|n|n<800)),m.snapshot.map_or(0,|l|l.index)));
+        let m = g.raft.metrics().borrow_watched().clone();
+        text.push_str(&format!("chronicle_raft_leader{{group=\"{id}\"}} {}\nchronicle_raft_applied{{group=\"{id}\"}} {}\n", u8::from(m.state == openraft::ServerState::Leader), m.last_applied.map_or(0, |l| l.index())));
+        text.push_str(&format!("chronicle_raft_quorum_available{{group=\"{id}\"}} {}\nchronicle_snapshot_index{{group=\"{id}\"}} {}\n",u8::from(m.state == openraft::ServerState::Leader && m.last_quorum_acked.is_some_and(|acked| acked.into_inner().elapsed() < Duration::from_millis(800))),m.snapshot.map_or(0,|l|l.index())));
         if let Some(replication) = m.replication {
             for (node, matched) in replication {
                 text.push_str(&format!(
                     "chronicle_replica_lag{{group=\"{id}\",replica=\"{node}\"}} {}\n",
                     m.last_log_index
                         .unwrap_or(0)
-                        .saturating_sub(matched.map_or(0, |l| l.index))
+                        .saturating_sub(matched.map_or(0, |l| l.index()))
                 ));
             }
         }
@@ -470,7 +493,11 @@ pub async fn proxy(
     if headers.contains_key("x-chronicle-forwarded") {
         return Err(unavailable("leadership changed; retry"));
     }
-    let hint = a.groups[&group].raft.metrics().borrow().current_leader;
+    let hint = a.groups[&group]
+        .raft
+        .metrics()
+        .borrow_watched()
+        .current_leader;
     let mut nodes = a.groups[&0]
         .store
         .read_state()
@@ -535,10 +562,13 @@ pub async fn proxy(
 }
 async fn control(State(a): State<Shared>, headers: HeaderMap) -> ApiResult {
     let g = &a.groups[&0];
-    if g.raft.metrics().borrow().state != openraft::ServerState::Leader {
+    if g.raft.metrics().borrow_watched().state != openraft::ServerState::Leader {
         return proxy(&a, 0, Method::GET, "/admin/control", headers, Bytes::new()).await;
     }
-    g.raft.ensure_linearizable().await.map_err(unavailable)?;
+    g.raft
+        .ensure_linearizable(openraft::ReadPolicy::ReadIndex)
+        .await
+        .map_err(unavailable)?;
     Ok(Json(g.store.read_state().await.map_err(unavailable)?).into_response())
 }
 async fn retirement(State(a): State<Shared>, Path(id): Path<u64>) -> ApiResult {
@@ -550,7 +580,7 @@ async fn register(
     Json((id, node)): Json<(u64, Node)>,
 ) -> ApiResult {
     let g = &a.groups[&0];
-    if g.raft.metrics().borrow().state != openraft::ServerState::Leader {
+    if g.raft.metrics().borrow_watched().state != openraft::ServerState::Leader {
         return proxy(
             &a,
             0,
@@ -589,7 +619,7 @@ async fn admit(
         return Err(bad("invalid learner admission"));
     }
     let g = &a.groups[&0];
-    if g.raft.metrics().borrow().state != openraft::ServerState::Leader {
+    if g.raft.metrics().borrow_watched().state != openraft::ServerState::Leader {
         return proxy(
             &a,
             0,
@@ -629,7 +659,7 @@ async fn snapshot(State(a): State<Shared>, Path(id): Path<u64>) -> ApiResult {
 
 async fn placed(
     State(a): State<Shared>,
-    Json((shard, generation, membership)): Json<(u64, u64, Option<openraft::LogId<u64>>)>,
+    Json((shard, generation, membership)): Json<(u64, u64, Option<chronicle_raft::LogId>)>,
 ) -> ApiResult {
     let result = a.groups[&0]
         .raft
@@ -728,14 +758,14 @@ async fn stream(
         .ok_or_else(|| bad("stream path required"))?;
     let key = format!("{}:{tenant}{path}", tenant.len());
     let shard = model::shard(&key);
-    let m = a.groups[&shard].raft.metrics().borrow().clone();
+    let m = a.groups[&shard].raft.metrics().borrow_watched().clone();
     let mut observation = a.telemetry.observe(
         context,
         telemetry::Completion {
             method: method.to_string(),
             shard,
             term: m.current_term,
-            applied: m.last_applied.map_or(0, |l| l.index),
+            applied: m.last_applied.map_or(0, |l| l.index()),
             bytes_in: body.len(),
             ..Default::default()
         },
@@ -753,9 +783,9 @@ async fn stream(
         admission,
     )
     .await;
-    let m = a.groups[&shard].raft.metrics().borrow().clone();
+    let m = a.groups[&shard].raft.metrics().borrow_watched().clone();
     observation.completion.term = m.current_term;
-    observation.completion.applied = m.last_applied.map_or(0, |l| l.index);
+    observation.completion.applied = m.last_applied.map_or(0, |l| l.index());
     Ok(observation.response(result.unwrap_or_else(IntoResponse::into_response)))
 }
 
@@ -804,7 +834,7 @@ async fn stream_inner(
     } else {
         None
     };
-    if !stale && g.raft.metrics().borrow().state != openraft::ServerState::Leader {
+    if !stale && g.raft.metrics().borrow_watched().state != openraft::ServerState::Leader {
         let started = Instant::now();
         let result = proxy(a, shard, method, &uri.to_string(), headers, body).await;
         timings.forward_us = started.elapsed().as_micros() as u64;
@@ -1231,7 +1261,7 @@ async fn stream_inner(
         .status(status)
         .header("stream-next-offset", wire::format_offset(result.data.end))
         .header("stream-incarnation", result.data.incarnation.to_string())
-        .header("stream-commit-index", result.log_id.index.to_string())
+        .header("stream-commit-index", result.log_id.index().to_string())
         .header("stream-duplicate", result.data.duplicate.to_string());
     if result.data.closed {
         response = response.header("stream-closed", "true");
@@ -1323,7 +1353,9 @@ async fn read_visible_info(
         // The barrier also submits to OpenRaft's unbounded API queue. Keep its
         // waiter admitted if the HTTP caller disconnects while the core stalls.
         let result = tokio::spawn(async move {
-            let result = raft.ensure_linearizable().await;
+            let result = raft
+                .ensure_linearizable(openraft::ReadPolicy::ReadIndex)
+                .await;
             drop(guard);
             result
         })
@@ -1399,7 +1431,13 @@ mod tests {
         raft.initialize(BTreeMap::from([(1, BasicNode::new("unused"))]))
             .await
             .unwrap();
-        raft.ensure_linearizable().await.unwrap();
+        raft.wait(Some(Duration::from_secs(3)))
+            .state(openraft::ServerState::Leader, "bootstrap")
+            .await
+            .unwrap();
+        raft.ensure_linearizable(openraft::ReadPolicy::ReadIndex)
+            .await
+            .unwrap();
         // Hold SQLite's writer lock, not an artificial completion future. The
         // actual Raft write cannot persist until this transaction rolls back.
         let blocker = rusqlite::Connection::open(&path).unwrap();

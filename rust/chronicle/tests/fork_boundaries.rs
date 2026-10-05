@@ -1,10 +1,10 @@
 use chronicle_raft::{
-    TypeConfig,
+    Entry, LogId,
     fork::{BoundaryError, boundary},
     model::{Command, Error, Producer, State, StreamConfig},
     storage::SqliteStore,
 };
-use openraft::{Entry, EntryPayload, LogId, RaftSnapshotBuilder, storage::RaftStateMachine};
+use openraft::{EntryPayload, RaftSnapshotBuilder, storage::RaftStateMachine, vote::RaftLeaderId};
 
 fn create(json: bool) -> Command {
     Command::Create {
@@ -48,9 +48,12 @@ fn append(seq: u64, data: &[u8], close: bool) -> Command {
     }
 }
 
-fn entry(index: u64, command: Command) -> Entry<TypeConfig> {
+fn entry(index: u64, command: Command) -> Entry {
     Entry {
-        log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), index),
+        log_id: LogId::new(
+            openraft::vote::leader_id_adv::CommittedLeaderId::new(1, 1),
+            index,
+        ),
         payload: EntryPayload::Normal(command),
     }
 }
@@ -62,7 +65,7 @@ async fn boundaries_survive_duplicate_gap_close_snapshot_install_and_reopen() {
         .await
         .unwrap();
     let results = source
-        .apply([
+        .apply_entries([
             entry(1, create(false)),
             entry(2, append(0, b"defgh", false)),
             entry(3, append(0, b"different retry bytes", false)),

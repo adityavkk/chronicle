@@ -3,8 +3,6 @@
 //! Every operation is submitted to one bounded blocking actor.  This is intentional: rusqlite is
 //! synchronous, and Raft requires vote and log writes to be ordered even when their futures are
 //! cancelled.  A request already admitted to the actor is therefore always completed.
-// OpenRaft's public storage trait fixes this error representation.
-#![allow(clippy::result_large_err)]
 
 use std::fmt::Debug;
 use std::io::{Cursor, Seek, SeekFrom};
@@ -14,12 +12,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use openraft::storage::{LogFlushed, RaftLogStorage, RaftStateMachine};
-use openraft::{
-    AnyError, Entry, EntryPayload, ErrorSubject, ErrorVerb, LogId, LogState, RaftLogReader,
-    RaftSnapshotBuilder, Snapshot, SnapshotMeta, StorageError, StorageIOError, StoredMembership,
-    Vote,
-};
+use crate::{Entry, LogId, Membership as StoredMembership, Snapshot, SnapshotMeta, Vote};
+use futures_util::{Stream, StreamExt};
+use openraft::storage::{EntryResponder, IOFlushed, RaftLogStorage, RaftStateMachine};
+use openraft::{EntryPayload, LogState, RaftLogReader, RaftSnapshotBuilder};
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -27,9 +23,10 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{TypeConfig, metrics::Histogram, model};
 
-type Result<T> = std::result::Result<T, StorageError<u64>>;
+type Result<T> = std::io::Result<T>;
 type Job = Box<dyn FnOnce(&mut Worker) + Send>;
 const QUEUE_DEPTH: usize = 128;
+const APPLY_BATCH_SIZE: usize = 128;
 const SNAPSHOT_CHECKSUM_BYTES: usize = 32;
 /// Maximum encoded snapshot size, enforced during receipt and before persistence.
 pub const MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
@@ -55,8 +52,8 @@ pub struct SqliteStore {
 #[derive(Serialize, Deserialize)]
 struct SnapshotBody {
     state: model::State,
-    last_applied: Option<LogId<u64>>,
-    membership: StoredMembership<u64, openraft::BasicNode>,
+    last_applied: Option<LogId>,
+    membership: StoredMembership,
 }
 
 struct Worker {
@@ -94,7 +91,7 @@ pub enum ReadError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
-    Storage(Box<StorageError<u64>>),
+    Storage(Box<std::io::Error>),
 }
 
 impl SqliteStore {
@@ -138,10 +135,8 @@ impl SqliteStore {
                 drop(worker);
                 let _ = stopped_tx.send(true);
             })
-            .map_err(|e| io_err(ErrorSubject::Store, ErrorVerb::Write, e))?;
-        ready_rx
-            .await
-            .map_err(|e| io_err(ErrorSubject::Store, ErrorVerb::Read, e))??;
+            .map_err(store_write)?;
+        ready_rx.await.map_err(store_read)??;
         let (applied, _) = tokio::sync::watch::channel(());
         Ok(Self {
             tx,
@@ -192,9 +187,8 @@ impl SqliteStore {
                 let _ = tx.send(f(w));
             }))
             .await
-            .map_err(|e| io_err(ErrorSubject::Store, ErrorVerb::Write, e))?;
-        rx.await
-            .map_err(|e| io_err(ErrorSubject::Store, ErrorVerb::Read, e))?
+            .map_err(store_write)?;
+        rx.await.map_err(store_read)?
     }
 
     pub async fn read_state(&self) -> Result<model::State> {
@@ -418,6 +412,10 @@ impl Worker {
         let tx = self.db.transaction().map_err(store_write)?;
         let mut next = self.state.clone();
         let out = f(&tx, &mut next)?;
+        #[cfg(feature = "storage-faults")]
+        self.faults
+            .hit(crate::faults::BEFORE_STATE_COMMIT)
+            .map_err(store_write)?;
         tx.commit().map_err(store_write)?;
         self.state = next;
         Ok(out)
@@ -437,18 +435,11 @@ fn encode<T: Serialize>(v: &T) -> Result<Vec<u8>> {
 fn decode<T: serde::de::DeserializeOwned>(v: &[u8]) -> Result<T> {
     serde_json::from_slice(v).map_err(store_read)
 }
-fn io_err(
-    subject: ErrorSubject<u64>,
-    verb: ErrorVerb,
-    e: impl std::error::Error + 'static,
-) -> StorageError<u64> {
-    StorageIOError::new(subject, verb, AnyError::new(&e)).into()
+fn store_read(e: impl std::error::Error + 'static) -> std::io::Error {
+    std::io::Error::other(format!("storage read: {e}"))
 }
-fn store_read(e: impl std::error::Error + 'static) -> StorageError<u64> {
-    io_err(ErrorSubject::Store, ErrorVerb::Read, e)
-}
-fn store_write(e: impl std::error::Error + 'static) -> StorageError<u64> {
-    io_err(ErrorSubject::Store, ErrorVerb::Write, e)
+fn store_write(e: impl std::error::Error + 'static) -> std::io::Error {
+    std::io::Error::other(format!("storage write: {e}"))
 }
 fn sync_dir(path: &Path) -> Result<()> {
     std::fs::File::open(path)
@@ -541,10 +532,14 @@ fn range_sql<R: RangeBounds<u64>>(r: &R) -> (u64, u64) {
 }
 
 impl RaftLogReader<TypeConfig> for SqliteStore {
+    async fn read_vote(&mut self) -> Result<Option<Vote>> {
+        self.call(|w| read_meta(&w.db, "vote")).await
+    }
+
     async fn try_get_log_entries<R: RangeBounds<u64> + Clone + Debug + openraft::OptionalSend>(
         &mut self,
         range: R,
-    ) -> Result<Vec<Entry<TypeConfig>>> {
+    ) -> Result<Vec<Entry>> {
         let (lo, hi) = range_sql(&range);
         self.call(move |w| {
             let mut q =
@@ -573,7 +568,7 @@ impl RaftLogStorage<TypeConfig> for SqliteStore {
                 .optional()
                 .map_err(store_read)?;
             let last_log_id = last
-                .map(|b| decode::<Entry<TypeConfig>>(&b).map(|e| e.log_id))
+                .map(|b| decode::<Entry>(&b).map(|e| e.log_id))
                 .transpose()?
                 .or(purged);
             Ok(LogState {
@@ -586,24 +581,21 @@ impl RaftLogStorage<TypeConfig> for SqliteStore {
     async fn get_log_reader(&mut self) -> Self::LogReader {
         self.clone()
     }
-    async fn save_vote(&mut self, vote: &Vote<u64>) -> Result<()> {
+    async fn save_vote(&mut self, vote: &Vote) -> Result<()> {
         let v = *vote;
         self.call(move |w| w.db_transaction(|t| put_meta(t, "vote", &v)))
             .await
     }
-    async fn read_vote(&mut self) -> Result<Option<Vote<u64>>> {
-        self.call(|w| read_meta(&w.db, "vote")).await
-    }
-    async fn save_committed(&mut self, v: Option<LogId<u64>>) -> Result<()> {
+    async fn save_committed(&mut self, v: Option<LogId>) -> Result<()> {
         self.call(move |w| w.db_transaction(|t| put_meta(t, "committed", &v)))
             .await
     }
-    async fn read_committed(&mut self) -> Result<Option<LogId<u64>>> {
+    async fn read_committed(&mut self) -> Result<Option<LogId>> {
         self.call(|w| read_meta(&w.db, "committed")).await
     }
-    async fn append<I>(&mut self, entries: I, callback: LogFlushed<TypeConfig>) -> Result<()>
+    async fn append<I>(&mut self, entries: I, callback: IOFlushed<TypeConfig>) -> Result<()>
     where
-        I: IntoIterator<Item = Entry<TypeConfig>> + openraft::OptionalSend,
+        I: IntoIterator<Item = Entry> + openraft::OptionalSend,
         I::IntoIter: openraft::OptionalSend,
     {
         let es: Vec<_> = entries.into_iter().collect();
@@ -630,7 +622,7 @@ impl RaftLogStorage<TypeConfig> for SqliteStore {
                         .map_err(store_write)
                 });
                 PERSIST.observe(persisted.elapsed());
-                callback.log_io_completed(
+                callback.io_completed(
                     result
                         .as_ref()
                         .map(|_| ())
@@ -639,22 +631,24 @@ impl RaftLogStorage<TypeConfig> for SqliteStore {
                 let _ = result_tx.send(result);
             }))
             .await
-            .map_err(|e| io_err(ErrorSubject::Store, ErrorVerb::Write, e))?;
-        result_rx
-            .await
-            .map_err(|e| io_err(ErrorSubject::Store, ErrorVerb::Read, e))?
+            .map_err(store_write)?;
+        result_rx.await.map_err(store_read)?
     }
-    async fn truncate(&mut self, id: LogId<u64>) -> Result<()> {
+    async fn truncate_after(&mut self, id: Option<LogId>) -> Result<()> {
         self.call(move |w| {
             w.db_transaction(|t| {
-                t.execute("DELETE FROM logs WHERE idx>=?", [id.index])
-                    .map_err(store_write)?;
+                if let Some(id) = id {
+                    t.execute("DELETE FROM logs WHERE idx>?", [id.index])
+                        .map_err(store_write)?;
+                } else {
+                    t.execute("DELETE FROM logs", []).map_err(store_write)?;
+                }
                 Ok(())
             })
         })
         .await
     }
-    async fn purge(&mut self, id: LogId<u64>) -> Result<()> {
+    async fn purge(&mut self, id: LogId) -> Result<()> {
         self.call(move |w| {
             w.db_transaction(|t| {
                 t.execute("DELETE FROM logs WHERE idx<=?", [id.index])
@@ -667,13 +661,9 @@ impl RaftLogStorage<TypeConfig> for SqliteStore {
 }
 
 impl RaftStateMachine<TypeConfig> for SqliteStore {
+    type SnapshotData = Cursor<Vec<u8>>;
     type SnapshotBuilder = Self;
-    async fn applied_state(
-        &mut self,
-    ) -> Result<(
-        Option<LogId<u64>>,
-        StoredMembership<u64, openraft::BasicNode>,
-    )> {
+    async fn applied_state(&mut self) -> Result<(Option<LogId>, StoredMembership)> {
         self.call(|w| {
             Ok((
                 read_meta(&w.db, "applied")?,
@@ -682,14 +672,70 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
         })
         .await
     }
-    async fn apply<I>(&mut self, entries: I) -> Result<Vec<model::Outcome>>
+    async fn apply<S>(&mut self, mut entries: S) -> Result<()>
     where
-        I: IntoIterator<Item = Entry<TypeConfig>> + openraft::OptionalSend,
-        I::IntoIter: openraft::OptionalSend,
+        S: Stream<Item = Result<EntryResponder<TypeConfig>>> + Unpin + openraft::OptionalSend,
     {
-        let es: Vec<_> = entries.into_iter().collect();
+        loop {
+            // A stream can be arbitrarily long; at most one bounded batch is admitted
+            // at a time. On a stream error, finish its preceding entries before failing.
+            let mut batch = Vec::with_capacity(APPLY_BATCH_SIZE);
+            let mut error = None;
+            while batch.len() < APPLY_BATCH_SIZE {
+                match entries.next().await {
+                    Some(Ok(entry)) => batch.push(entry),
+                    Some(Err(e)) => {
+                        error = Some(e);
+                        break;
+                    }
+                    None => break,
+                }
+            }
+            let done = batch.len() < APPLY_BATCH_SIZE;
+            if !batch.is_empty() {
+                self.apply_batch(batch).await?;
+            }
+            if let Some(e) = error {
+                return Err(e);
+            }
+            if done {
+                return Ok(());
+            }
+        }
+    }
+    async fn get_snapshot_builder(&mut self) -> Self::SnapshotBuilder {
+        self.clone()
+    }
+    async fn install_snapshot(
+        &mut self,
+        meta: &SnapshotMeta,
+        snapshot: Cursor<Vec<u8>>,
+    ) -> Result<()> {
+        self.install_snapshot_data(meta, snapshot).await
+    }
+    async fn get_current_snapshot(&mut self) -> Result<Option<Snapshot>> {
+        self.current_snapshot().await
+    }
+}
+
+impl SqliteStore {
+    /// Apply a finite batch directly and retain application outcomes for tools and tests.
+    pub async fn apply_entries(
+        &mut self,
+        entries: impl IntoIterator<Item = Entry>,
+    ) -> Result<Vec<model::Outcome>> {
+        self.apply_batch(entries.into_iter().map(|e| (e, None)).collect())
+            .await
+    }
+
+    async fn apply_batch(
+        &self,
+        entries: Vec<EntryResponder<TypeConfig>>,
+    ) -> Result<Vec<model::Outcome>> {
         let applied = self.applied.clone();
         self.call(move |w| {
+            // The actor owns responders after admission, even if the waiting future is cancelled.
+            let (es, responders): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
             let started = Instant::now();
             let result = w.state_transaction(|t, s| {
                 let mut out = Vec::with_capacity(es.len());
@@ -760,20 +806,21 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                 Ok(out)
             });
             APPLY.observe(started.elapsed());
+            if let Ok(outcomes) = &result {
+                for (responder, outcome) in responders.into_iter().zip(outcomes) {
+                    if let Some(responder) = responder {
+                        responder.send(outcome.clone());
+                    }
+                }
+            }
             result
         })
         .await
     }
-    async fn get_snapshot_builder(&mut self) -> Self::SnapshotBuilder {
-        self.clone()
-    }
-    async fn begin_receiving_snapshot(&mut self) -> Result<Box<Cursor<Vec<u8>>>> {
-        Ok(Box::new(Cursor::new(Vec::new())))
-    }
-    async fn install_snapshot(
+    async fn install_snapshot_data(
         &mut self,
-        meta: &SnapshotMeta<u64, openraft::BasicNode>,
-        snapshot: Box<Cursor<Vec<u8>>>,
+        meta: &SnapshotMeta,
+        snapshot: Cursor<Vec<u8>>,
     ) -> Result<()> {
         let bytes = snapshot.into_inner();
         if bytes.len() > MAX_SNAPSHOT_BYTES {
@@ -829,11 +876,10 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
         })
         .await
     }
-    async fn get_current_snapshot(&mut self) -> Result<Option<Snapshot<TypeConfig>>> {
+    async fn current_snapshot(&mut self) -> Result<Option<Snapshot>> {
         self.call(|w| {
             let bytes = read_meta_raw(&w.db, "snapshot_bytes")?;
-            let meta: Option<SnapshotMeta<u64, openraft::BasicNode>> =
-                read_meta(&w.db, "snapshot_meta")?;
+            let meta: Option<SnapshotMeta> = read_meta(&w.db, "snapshot_meta")?;
             match (bytes, meta) {
                 (Some(b), Some(m)) => {
                     let body = decode_snapshot(&b)?;
@@ -845,7 +891,7 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
                     }
                     Ok(Some(Snapshot {
                         meta: m,
-                        snapshot: Box::new(Cursor::new(b)),
+                        snapshot: Cursor::new(b),
                     }))
                 }
                 (None, None) => Ok(None),
@@ -860,12 +906,12 @@ impl RaftStateMachine<TypeConfig> for SqliteStore {
 }
 
 impl RaftSnapshotBuilder<TypeConfig> for SqliteStore {
-    async fn build_snapshot(&mut self) -> Result<Snapshot<TypeConfig>> {
+    type SnapshotData = Cursor<Vec<u8>>;
+    async fn build_snapshot(&mut self) -> Result<Snapshot> {
         self.call(|w| {
             w.state_transaction(|t, s| {
-                let last: Option<LogId<u64>> = read_meta(t, "applied")?;
-                let membership: StoredMembership<u64, openraft::BasicNode> =
-                    read_meta(t, "membership")?.unwrap_or_default();
+                let last: Option<LogId> = read_meta(t, "applied")?;
+                let membership: StoredMembership = read_meta(t, "membership")?.unwrap_or_default();
                 let body = encode(&SnapshotBody {
                     state: s.clone(),
                     last_applied: last,
@@ -881,13 +927,12 @@ impl RaftSnapshotBuilder<TypeConfig> for SqliteStore {
                 let meta = SnapshotMeta {
                     last_log_id: last,
                     last_membership: membership,
-                    snapshot_id: format!("sqlite-{}", last.map_or(0, |x| x.index)),
                 };
                 put_meta_raw(t, "snapshot_bytes", &bytes)?;
                 put_meta(t, "snapshot_meta", &meta)?;
                 Ok(Snapshot {
                     meta,
-                    snapshot: Box::new(Cursor::new(bytes)),
+                    snapshot: Cursor::new(bytes),
                 })
             })
         })
@@ -895,9 +940,242 @@ impl RaftSnapshotBuilder<TypeConfig> for SqliteStore {
     }
 }
 
+impl openraft_legacy::network_v1::SnapshotReceiverFactory<TypeConfig> for SqliteStore {
+    type SnapshotReceiver = Cursor<Vec<u8>>;
+
+    async fn begin_receiving_snapshot(&mut self) -> Result<Self::SnapshotReceiver> {
+        Ok(Cursor::new(Vec::new()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openraft::type_config::TypeConfigExt;
+    use openraft::vote::RaftLeaderId;
+
+    fn blank(index: u64) -> Entry {
+        Entry {
+            log_id: LogId::new(
+                openraft::vote::leader_id_adv::CommittedLeaderId::new(7, 3),
+                index,
+            ),
+            payload: EntryPayload::Blank,
+        }
+    }
+
+    #[tokio::test]
+    async fn truncate_after_none_zero_and_middle_survive_reopen() {
+        for boundary in [None, Some(0), Some(2)] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("truncate.sqlite");
+            let mut store = SqliteStore::open(&path).await.unwrap();
+            let vote = Vote::new_committed(7, 3);
+            store.save_vote(&vote).await.unwrap();
+            store
+                .append((0..5).map(blank), IOFlushed::noop())
+                .await
+                .unwrap();
+            store
+                .truncate_after(boundary.map(|i| blank(i).log_id))
+                .await
+                .unwrap();
+            store.close().await;
+            let mut store = SqliteStore::open_existing(&path).await.unwrap();
+            let remaining = store.try_get_log_entries(..).await.unwrap();
+            let expected: Vec<_> = boundary.map_or_else(Vec::new, |i| (0..=i).collect());
+            assert_eq!(
+                remaining.iter().map(|e| e.log_id.index).collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(
+                store.get_log_state().await.unwrap().last_log_id,
+                boundary.map(|i| blank(i).log_id)
+            );
+            assert_eq!(store.read_vote().await.unwrap(), Some(vote));
+            store.close().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn truncation_retains_committed_applied_purged_and_snapshot_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("retained.sqlite");
+        let mut store = SqliteStore::open(&path).await.unwrap();
+        store
+            .append((0..5).map(blank), IOFlushed::noop())
+            .await
+            .unwrap();
+        let committed = blank(2).log_id;
+        store.save_committed(Some(committed)).await.unwrap();
+        store.apply_entries((0..=2).map(blank)).await.unwrap();
+        let snapshot = store.build_snapshot().await.unwrap();
+        store.purge(blank(1).log_id).await.unwrap();
+        store.truncate_after(Some(committed)).await.unwrap();
+        store.close().await;
+
+        let mut store = SqliteStore::open_existing(&path).await.unwrap();
+        assert_eq!(store.read_committed().await.unwrap(), Some(committed));
+        assert_eq!(store.applied_state().await.unwrap().0, Some(committed));
+        let state = store.get_log_state().await.unwrap();
+        assert_eq!(state.last_purged_log_id, Some(blank(1).log_id));
+        assert_eq!(state.last_log_id, Some(committed));
+        let entries = store.try_get_log_entries(..).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].log_id, committed);
+        let current = store.get_current_snapshot().await.unwrap().unwrap();
+        assert_eq!(current.meta, snapshot.meta);
+        assert_eq!(
+            current.snapshot.into_inner(),
+            snapshot.snapshot.into_inner()
+        );
+        store.close().await;
+    }
+
+    // Hold the actor before admission to make cancellation deterministic, without sleeps.
+    async fn block_actor(
+        store: &SqliteStore,
+    ) -> (
+        std::sync::mpsc::Sender<()>,
+        tokio::task::JoinHandle<Result<()>>,
+    ) {
+        let (release, blocked) = std::sync::mpsc::channel();
+        let (entered, ready) = oneshot::channel();
+        let copy = store.clone();
+        let blocker = tokio::spawn(async move {
+            copy.call(move |_| {
+                let _ = entered.send(());
+                blocked.recv().map_err(store_read)?;
+                Ok(())
+            })
+            .await
+        });
+        ready.await.unwrap();
+        (release, blocker)
+    }
+
+    #[tokio::test]
+    async fn cancelled_append_keeps_flush_callback_until_durable_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("append.sqlite");
+        let mut store = SqliteStore::open(&path).await.unwrap();
+        let (release, blocker) = block_actor(&store).await;
+        let (tx, rx) = TypeConfig::oneshot();
+        let mut completed = Box::pin(rx);
+        let mut append = Box::pin(store.append([blank(0)], IOFlushed::signal(tx)));
+        assert!(futures_util::poll!(&mut append).is_pending());
+        drop(append);
+        assert!(futures_util::poll!(&mut completed).is_pending());
+        release.send(()).unwrap();
+        blocker.await.unwrap().unwrap();
+        completed.await.unwrap().unwrap();
+        store.close().await;
+        let mut store = SqliteStore::open_existing(&path).await.unwrap();
+        let entries = store.try_get_log_entries(..).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].log_id, blank(0).log_id);
+        assert!(matches!(entries[0].payload, EntryPayload::Blank));
+        store.close().await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_stream_apply_finishes_admitted_bounded_batch_without_responders() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("apply.sqlite");
+        let mut store = SqliteStore::open(&path).await.unwrap();
+        let (release, blocker) = block_actor(&store).await;
+        let polled = Arc::new(AtomicU64::new(0));
+        let count = polled.clone();
+        let stream = futures_util::stream::iter((0..1000).map(move |i| {
+            count.fetch_add(1, Ordering::Relaxed);
+            Ok((blank(i), None))
+        }));
+        let mut apply = Box::pin(store.apply(stream));
+        assert!(futures_util::poll!(&mut apply).is_pending());
+        assert_eq!(polled.load(Ordering::Relaxed), APPLY_BATCH_SIZE as u64);
+        drop(apply);
+        release.send(()).unwrap();
+        blocker.await.unwrap().unwrap();
+        assert_eq!(
+            store.applied_state().await.unwrap().0,
+            Some(blank(APPLY_BATCH_SIZE as u64 - 1).log_id)
+        );
+        store.close().await;
+        let mut store = SqliteStore::open_existing(&path).await.unwrap();
+        assert_eq!(
+            store.applied_state().await.unwrap().0,
+            Some(blank(APPLY_BATCH_SIZE as u64 - 1).log_id)
+        );
+        store.close().await;
+    }
+
+    #[tokio::test]
+    async fn stream_error_commits_preceding_batches_and_partial_batch_but_not_following_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stream-error.sqlite");
+        let mut store = SqliteStore::open(&path).await.unwrap();
+        store.apply(futures_util::stream::empty()).await.unwrap();
+        assert_eq!(store.applied_state().await.unwrap().0, None);
+        let first_error = std::io::Error::new(std::io::ErrorKind::InvalidData, "first entry");
+        assert_eq!(
+            store
+                .apply(futures_util::stream::iter([Err(first_error)]))
+                .await
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert_eq!(store.applied_state().await.unwrap().0, None);
+        let last = APPLY_BATCH_SIZE as u64 + 1;
+        let membership = openraft::Membership::new(
+            vec![[3].into_iter().collect()],
+            std::collections::BTreeMap::from([(3, openraft::BasicNode::default())]),
+        )
+        .unwrap();
+        let mut items: Vec<_> = (0..last).map(|i| Ok((blank(i), None))).collect();
+        items[last as usize - 1] = Ok((
+            Entry {
+                log_id: blank(last - 1).log_id,
+                payload: EntryPayload::Normal(model::Command::Register {
+                    id: 3,
+                    node: model::Node {
+                        addr: "persisted".into(),
+                        zone: "zone".into(),
+                        draining: false,
+                    },
+                }),
+            },
+            None,
+        ));
+        items.push(Ok((
+            Entry {
+                log_id: blank(last).log_id,
+                payload: EntryPayload::Membership(membership.clone()),
+            },
+            None,
+        )));
+        items.push(Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "stream interrupted",
+        )));
+        items.push(Ok((blank(last + 1), None)));
+        let error = store
+            .apply(futures_util::stream::iter(items))
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
+        store.close().await;
+        let mut store = SqliteStore::open_existing(&path).await.unwrap();
+        let (applied, stored) = store.applied_state().await.unwrap();
+        assert_eq!(applied, Some(blank(last).log_id));
+        assert_eq!(stored.log_id(), &applied);
+        assert_eq!(stored.membership(), &membership);
+        assert_eq!(
+            store.read_state().await.unwrap().nodes[&3].addr,
+            "persisted"
+        );
+        store.close().await;
+    }
 
     #[tokio::test]
     async fn resource_samples_charge_state_measure_work_and_reset_on_reopen() {
@@ -920,8 +1198,11 @@ mod tests {
             now_ms: Some(0),
         };
         let result = store
-            .apply([Entry {
-                log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), 1),
+            .apply_entries([Entry {
+                log_id: LogId::new(
+                    openraft::vote::leader_id_adv::CommittedLeaderId::new(1, 1),
+                    1,
+                ),
                 payload: EntryPayload::Normal(command),
             }])
             .await
@@ -1242,7 +1523,10 @@ mod tests {
         let mut source = SqliteStore::open(d.path().join("source.db")).await.unwrap();
         let built = source.build_snapshot().await.unwrap();
         let mut mismatched = built.meta;
-        mismatched.last_log_id = Some(LogId::new(openraft::CommittedLeaderId::new(1, 1), 1));
+        mismatched.last_log_id = Some(LogId::new(
+            openraft::vote::leader_id_adv::CommittedLeaderId::new(1, 1),
+            1,
+        ));
 
         let mut destination = SqliteStore::open(d.path().join("destination.db"))
             .await

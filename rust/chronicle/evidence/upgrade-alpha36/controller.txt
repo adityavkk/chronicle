@@ -1,0 +1,22 @@
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/chronicle-transfer/rust/chronicle)
+    Finished `test` profile [unoptimized] target(s) in 7.50s
+     Running unittests src/main.rs (target/debug/deps/chronicle_raft-875b5c54ece29af4)
+
+running 14 tests
+test controller::tests::campaign_waits_again_after_attempt_view_change_and_restart ... ok
+test controller::tests::pending_repair_waits_for_cooldown_and_does_not_start_other_moves ... ok
+test controller::tests::every_ineligible_campaign_clears_without_touching_storage ... ok
+test controller::tests::persisted_advanced_leader_ids_keep_term_and_node ... ok
+test controller::tests::resource_moves_are_not_rotated_back_and_pending_repair_skips_sampling ... ok
+test controller::tests::retirement_candidates_rotate_even_without_a_success_result ... ok
+test controller::tests::unspecified_domain_does_not_displace_available_distinct_domains ... ok
+test controller::tests::untouched_retirement_needs_known_history_and_empty_recovered_state ... ok
+test controller::tests::retirement_requires_applied_uniform_nonvoter_membership ... ok
+test controller::tests::placement_completion_requires_applied_uniform_membership ... ok
+test controller::tests::control_discovery_survives_unavailable_original_seeds ... ok
+test controller::tests::matching_prefix_cannot_complete_over_cancelled_membership ... ok
+test controller::retirement_tests::removed_control_leader_completes_data_placement_and_retires ... ok
+test controller::tests::failed_health_probes_leave_budget_for_reconciliation ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 22 filtered out; finished in 8.09s
+

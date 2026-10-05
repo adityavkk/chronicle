@@ -1,10 +1,16 @@
 # Chronicle Raft — implementation checkpoint, not a production release
 
 One Rust binary hosts four fixed data shards and a replicated placement group,
-using OpenRaft 0.9.25 and SQLite WAL/FULL. Three replicas acknowledge only after
+using OpenRaft 0.10.0-alpha.36 and SQLite WAL/FULL. Three replicas acknowledge only after
 durable-majority consensus. Stream offsets count wire bytes, not log entries.
 Strict reads use a leadership barrier; `?consistency=stale` deliberately allows
 an older committed prefix. One stream remains leader ordered.
+
+**This checkout is an isolated upgrade qualification candidate.** The working
+baseline remains on 0.9.25. See [qualification evidence](evidence/UPGRADE.md)
+and the [pre-implementation contract](formal/UPGRADE.md). The prerelease is pinned;
+mixed-version operation and downgrade are unsupported. Directed transfer's RPC
+is implemented, but automatic leadership policy is not yet qualified or enabled.
 
 The implementation runs on a real local k3d cluster, not an in-memory simulation.
 The tested host is one orb with nested Docker: it does not represent independent

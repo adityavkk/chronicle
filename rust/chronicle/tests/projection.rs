@@ -1,10 +1,11 @@
 use axum::body::to_bytes;
 use chronicle_raft::{
+    Entry, LogId,
     model::{Command, StreamConfig},
     storage::{ReadError, SqliteStore},
     wire,
 };
-use openraft::{Entry, EntryPayload, LogId, RaftSnapshotBuilder, storage::RaftStateMachine};
+use openraft::{EntryPayload, RaftSnapshotBuilder, storage::RaftStateMachine, vote::RaftLeaderId};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
@@ -27,8 +28,11 @@ fn body(file: std::fs::File, length: u64, json: bool) -> axum::body::Body {
 
 async fn apply(store: &mut SqliteStore, index: u64, command: Command) {
     let out = store
-        .apply([Entry {
-            log_id: LogId::new(openraft::CommittedLeaderId::new(1, 1), index),
+        .apply_entries([Entry {
+            log_id: LogId::new(
+                openraft::vote::leader_id_adv::CommittedLeaderId::new(1, 1),
+                index,
+            ),
             payload: EntryPayload::Normal(command),
         }])
         .await
@@ -320,7 +324,7 @@ async fn notifications_coalesce_applies_and_only_signal_successful_snapshot_inst
     assert!(!changes.has_changed().unwrap());
     assert!(
         store
-            .install_snapshot(&snapshot.meta, Box::new(std::io::Cursor::new(vec![0])))
+            .install_snapshot(&snapshot.meta, std::io::Cursor::new(vec![0]))
             .await
             .is_err()
     );

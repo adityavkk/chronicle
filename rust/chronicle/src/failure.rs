@@ -1,8 +1,9 @@
 //! A terminal Raft storage error fails the shared node/PVC, not just one group.
-use openraft::{BasicNode, RaftMetrics, StorageError, error::Fatal};
-use tokio::sync::watch;
+use chronicle_raft::TypeConfig;
+use openraft::type_config::{alias::WatchReceiverOf, async_runtime::WatchReceiver};
+use openraft::{RaftMetrics, StorageError, error::Fatal};
 
-pub fn storage_error(metrics: &RaftMetrics<u64, BasicNode>) -> Option<&StorageError<u64>> {
+pub fn storage_error(metrics: &RaftMetrics<TypeConfig>) -> Option<&StorageError<TypeConfig>> {
     match &metrics.running_state {
         Err(Fatal::StorageError(error)) => Some(error),
         _ => None,
@@ -10,8 +11,8 @@ pub fn storage_error(metrics: &RaftMetrics<u64, BasicNode>) -> Option<&StorageEr
 }
 
 async fn wait(
-    mut metrics: watch::Receiver<RaftMetrics<u64, BasicNode>>,
-) -> Option<StorageError<u64>> {
+    mut metrics: WatchReceiverOf<TypeConfig, RaftMetrics<TypeConfig>>,
+) -> Option<StorageError<TypeConfig>> {
     loop {
         if let Some(error) = storage_error(&metrics.borrow_and_update()) {
             return Some(error.clone());
@@ -22,7 +23,11 @@ async fn wait(
     }
 }
 
-pub async fn monitor(node: u64, group: u64, metrics: watch::Receiver<RaftMetrics<u64, BasicNode>>) {
+pub async fn monitor(
+    node: u64,
+    group: u64,
+    metrics: WatchReceiverOf<TypeConfig, RaftMetrics<TypeConfig>>,
+) {
     if let Some(error) = wait(metrics).await {
         tracing::error!(node, group, %error, "fatal Raft storage failure; terminating node; preserving storage");
         // Runtime teardown can wait forever for an unrelated blocking file read.
@@ -34,8 +39,9 @@ pub async fn monitor(node: u64, group: u64, metrics: watch::Receiver<RaftMetrics
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openraft::{WatchSender, type_config::TypeConfigExt};
 
-    fn fatal() -> RaftMetrics<u64, BasicNode> {
+    fn fatal() -> RaftMetrics<TypeConfig> {
         let mut metrics = RaftMetrics::new_initial(1);
         metrics.running_state = Err(Fatal::StorageError(StorageError::from_io_error(
             openraft::ErrorSubject::Store,
@@ -47,10 +53,10 @@ mod tests {
 
     #[tokio::test]
     async fn initial_and_final_storage_errors_are_observed() {
-        let (tx, rx) = watch::channel(fatal());
+        let (tx, rx) = TypeConfig::watch_channel(fatal());
         assert!(wait(rx).await.is_some());
         drop(tx);
-        let (tx, rx) = watch::channel(RaftMetrics::new_initial(1));
+        let (tx, rx) = TypeConfig::watch_channel(RaftMetrics::new_initial(1));
         let waiting = tokio::spawn(wait(rx));
         tokio::task::yield_now().await;
         assert!(!waiting.is_finished());
@@ -68,7 +74,7 @@ mod tests {
         assert!(storage_error(&metrics).is_none());
         for error in [Fatal::Stopped, Fatal::Panicked] {
             metrics.running_state = Err(error);
-            let (tx, rx) = watch::channel(metrics.clone());
+            let (tx, rx) = TypeConfig::watch_channel(metrics.clone());
             drop(tx);
             assert!(wait(rx).await.is_none());
         }
