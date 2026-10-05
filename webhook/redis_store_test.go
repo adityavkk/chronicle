@@ -19,6 +19,13 @@ import (
 
 func newTestStore(t *testing.T) (*RedisStore, goredis.UniversalClient) {
 	t.Helper()
+	return newTestStoreWith(t, nil)
+}
+
+// newTestStoreWith is newTestStore with the client options adjusted by configure
+// before the client is built (a dialer that injects latency, for instance).
+func newTestStoreWith(t *testing.T, configure func(*goredis.Options)) (*RedisStore, goredis.UniversalClient) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping Redis integration test in -short mode")
 	}
@@ -29,6 +36,9 @@ func newTestStore(t *testing.T) (*RedisStore, goredis.UniversalClient) {
 	opts, err := goredis.ParseURL(url)
 	if err != nil {
 		t.Fatalf("parse REDIS_URL: %v", err)
+	}
+	if configure != nil {
+		configure(opts)
 	}
 	client := goredis.NewClient(opts)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
