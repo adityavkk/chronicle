@@ -10,6 +10,13 @@ out=${1:?new private output directory required}
 }
 mkdir "$out"
 out=$(realpath "$out")
+# Kubelet image GC can evict the stopped application's Never-pull image. Leave
+# headroom for archives, and retain a verified local image for restoration.
+df -P "$out" | awk 'NR == 2 { gsub(/%/, "", $5); if ($5 >= 80) exit 1 }' || {
+  echo 'free generated build artifacts before capture; filesystem usage must be below 80%' >&2; exit 2;
+}
+image=$("$k" -n chronicle get statefulset chronicle -o jsonpath='{.spec.template.spec.containers[?(@.name=="chronicle")].image}')
+sudo docker image inspect "$image" --format '{{.Id}}' > "$out/docker-image.txt"
 "$k" -n chronicle get pods -l app=chronicle-raft -o json |
   jq '[.items[]|{name:.metadata.name,uid:.metadata.uid,node:.spec.nodeName,
       containers:[.status.containerStatuses[]|{name,image,imageID,containerID,restartCount}]}]' > "$out/processes.json"
@@ -22,8 +29,11 @@ cp "$root/Cargo.lock" "$out/Cargo.lock"
 cp "$root/target/release/chronicle-raft" "$out/chronicle-raft-0.9"
 
 restore() {
-  "$k" -n chronicle scale statefulset/chronicle --replicas=5
-  "$k" -n chronicle rollout status statefulset/chronicle --timeout=180s
+  local failed=0
+  sudo k3d image import -c chronicle-rust "$image" || failed=1
+  "$k" -n chronicle scale statefulset/chronicle --replicas=5 || failed=1
+  "$k" -n chronicle rollout status statefulset/chronicle --timeout=180s || failed=1
+  return "$failed"
 }
 trap restore EXIT
 "$k" -n chronicle scale statefulset/chronicle --replicas=0
