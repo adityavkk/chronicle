@@ -13,5 +13,9 @@ Copied from https://github.com/durable-streams/durable-streams at commit 82f9963
   write token, server-derived write classes, and the per-authority seal. Not
   vendored — this one is Chronicle's own, drafted so it can be proposed
   upstream verbatim
+- SNAPSHOTS.md — proposed projection-snapshot extension: complete versioned
+  images, atomic publication, incarnation-guarded snapshot-plus-tail recovery.
+  Chronicle-owned draft implemented behind `--enable-snapshots` on MemoryStore
+  and Redis. Electric SDK/runtime integration remains separate upstream work.
 
 See [`/SPEC_VERSION.md`](../../SPEC_VERSION.md) for the pinned upstream commit, conformance suite version, and certified pass count.

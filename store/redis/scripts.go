@@ -45,6 +45,9 @@ var (
 	grantAppendFenceScript  = loadScript("grant_append_fence.lua")
 	revokeAppendFenceScript = loadScript("revoke_append_fence.lua")
 	sealAppendFenceScript   = loadScript("seal_append_fence.lua")
+	snapshotGetScript       = loadScript("snapshot_get.lua")
+	snapshotPutScript       = loadScript("snapshot_put.lua")
+	snapshotDeleteScript    = loadScript("snapshot_delete.lua")
 )
 
 // Status sentinels returned in reply[0] by the scripts.

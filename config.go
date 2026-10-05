@@ -43,6 +43,7 @@ const (
 	EnvSSEClientWriteTimeout             = "CHRONICLE_SSE_CLIENT_WRITE_TIMEOUT"
 	EnvPublicURL                         = "CHRONICLE_PUBLIC_URL"
 	EnvSubscriptions                     = "CHRONICLE_SUBSCRIPTIONS"
+	EnvEnableSnapshots                   = "CHRONICLE_ENABLE_SNAPSHOTS"
 	EnvUI                                = "CHRONICLE_UI"
 	EnvUIServer                          = "CHRONICLE_UI_SERVER"
 	EnvWebhookAllowPrivate               = "CHRONICLE_WEBHOOK_ALLOW_PRIVATE"
@@ -194,6 +195,11 @@ type Config struct {
 	// Subscriptions enables the reserved __ds subscription APIs. Requires the
 	// redis backend (the subscription layer is Redis-backed).
 	Subscriptions bool
+
+	// EnableSnapshots opts this process into the proposed snapshot extension.
+	// It defaults off so mixed-version deployments cannot route snapshot PUTs
+	// to a server that might interpret them as ordinary stream creation.
+	EnableSnapshots bool
 
 	// UI serves the embedded dsui console (and its /dsui-config.json) alongside
 	// the API. Default true, but only takes effect if the UI was built into the
@@ -366,6 +372,7 @@ func DefaultConfig() Config {
 		SSEClientWriteTimeout: defaultSSEWriteTimeout,
 		PublicBaseURL:         "http://localhost:4437",
 		Subscriptions:         true,
+		EnableSnapshots:       false,
 		UI:                    true,
 		SweepInterval:         30 * time.Second, // coarse recovery floor (issue #13); recovery is event-triggered, not a 2s sweep
 		ReconcileInterval:     30 * time.Second,
@@ -502,6 +509,13 @@ func (c *Config) LoadEnv(lookup func(key string) (value string, ok bool)) error 
 	}
 	if v, ok := lookup(EnvSubscriptions); ok {
 		c.Subscriptions = v == "1" || v == "true"
+	}
+	if v, ok := lookup(EnvEnableSnapshots); ok {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", EnvEnableSnapshots, err)
+		}
+		c.EnableSnapshots = enabled
 	}
 	if v, ok := lookup(EnvUI); ok {
 		c.UI = v == "1" || v == "true"

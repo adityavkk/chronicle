@@ -57,7 +57,7 @@ if m ~= nil then
 end
 
 -- Fresh create. DEL is defensive (expired leftovers are already gone).
-redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
+redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5])
 
 local n = tonumber(ARGV[11])
 local hset = { 'HSET', KEYS[1] }

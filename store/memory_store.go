@@ -44,10 +44,11 @@ type MemoryStore struct {
 }
 
 var (
-	_ PageWaiter             = (*MemoryStore)(nil)
-	_ NotificationSubscriber = (*MemoryStore)(nil)
-	_ FencedCloser           = (*MemoryStore)(nil)
-	_ WriteFenceStore        = (*MemoryStore)(nil)
+	_ PageWaiter              = (*MemoryStore)(nil)
+	_ NotificationSubscriber  = (*MemoryStore)(nil)
+	_ FencedCloser            = (*MemoryStore)(nil)
+	_ WriteFenceStore         = (*MemoryStore)(nil)
+	_ ProjectionSnapshotStore = (*MemoryStore)(nil)
 )
 
 // MemoryStoreOption configures a MemoryStore at construction.
@@ -65,9 +66,10 @@ func WithClock(c Clock) MemoryStoreOption {
 }
 
 type memoryStream struct {
-	metadata StreamMetadata
-	messages []Message
-	data     []byte // Raw accumulated data for non-JSON streams
+	metadata  StreamMetadata
+	messages  []Message
+	data      []byte // Raw accumulated data for non-JSON streams
+	snapshots map[string]ProjectionSnapshot
 
 	// Write-fence state of a fenced stream (#183): the counterpart of the
 	// wfseal:<auth>, wfbind:<producer_id> and wfLastOff meta fields on Redis.
@@ -400,6 +402,7 @@ func (s *MemoryStore) Delete(path string) error {
 	// If there are forks referencing this stream, soft-delete instead
 	if stream.metadata.RefCount > 0 {
 		stream.metadata.SoftDeleted = true
+		stream.snapshots = nil
 		return nil
 	}
 
@@ -921,6 +924,7 @@ func (s *MemoryStore) ReadPage(ctx context.Context, path string, offset Offset, 
 		if stream.metadata.RefCount > 0 {
 			// Expiry with active forks: treat as soft-delete
 			stream.metadata.SoftDeleted = true
+			stream.snapshots = nil
 		}
 		return ReadPage{}, ErrStreamNotFound
 	}

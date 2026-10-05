@@ -70,6 +70,9 @@ func (h *Handler) handleSSE(
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	if r.Header.Get(protocol.HeaderIfStreamIncarnation) != "" {
+		w.Header().Set("Cache-Control", "private, no-store")
+	}
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	if useBase64 {

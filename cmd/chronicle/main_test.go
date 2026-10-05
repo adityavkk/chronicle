@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"flag"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,6 +19,18 @@ import (
 
 	chronicle "gecgithub01.walmart.com/auk000v/chronicle"
 )
+
+func TestBindSnapshotFlag(t *testing.T) {
+	cfg := chronicle.DefaultConfig()
+	fs := flag.NewFlagSet("snapshot", flag.ContinueOnError)
+	bindSnapshotFlag(fs, &cfg)
+	if err := fs.Parse([]string{"-enable-snapshots"}); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.EnableSnapshots {
+		t.Fatal("-enable-snapshots did not enable snapshots")
+	}
+}
 
 type recordingSubscriptionService struct {
 	reconnects  atomic.Int64

@@ -2,7 +2,7 @@
 -- including closedBy producer-tuple dedup. Mirrors MemoryStore: close does
 -- NOT refresh the sliding TTL and does NOT check softDeleted.
 --
--- KEYS: 1=meta 2=msg 3=prod 4=forks 5=append-fence marker (when enabled)
+-- KEYS: 1=meta 2=msg 3=prod 4=forks 5=snapshots 6=append-fence marker (when enabled)
 -- ARGV: 1=nowNs 2=notifyChannel 3=hasProducer('1'/'0')
 -- 4=producerId 5=producerEpoch 6=producerSeq 7=hasFence('1'/'0')
 -- 8=fenceGeneration 9=fenceWakeId 10=fenceHolder

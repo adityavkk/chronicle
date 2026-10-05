@@ -153,13 +153,15 @@ func parseServiceAction(raw string) (Action, bool) {
 		return ActionLink, true
 	case "claim":
 		return ActionClaim, true
+	case "snapshot-publish":
+		return ActionSnapshotPublish, true
 	default:
 		return 0, false
 	}
 }
 
 func validServiceAction(action Action) bool {
-	return action >= ActionRead && action <= ActionClaim
+	return action >= ActionRead && action <= ActionSnapshotPublish
 }
 
 // HasIdentity reports whether identity has an explicit policy.

@@ -60,11 +60,12 @@ type Store struct {
 }
 
 var (
-	_ store.Store           = (*Store)(nil)
-	_ store.PageReader      = (*Store)(nil)
-	_ store.PageWaiter      = (*Store)(nil)
-	_ store.FencedCloser    = (*Store)(nil)
-	_ store.WriteFenceStore = (*Store)(nil)
+	_ store.Store                   = (*Store)(nil)
+	_ store.PageReader              = (*Store)(nil)
+	_ store.PageWaiter              = (*Store)(nil)
+	_ store.FencedCloser            = (*Store)(nil)
+	_ store.WriteFenceStore         = (*Store)(nil)
+	_ store.ProjectionSnapshotStore = (*Store)(nil)
 )
 
 // New wraps a go-redis client as a store.Store. The store takes ownership
@@ -110,6 +111,7 @@ func keysFor(path string) []string {
 		keyPrefix + tagged + msgSuffix,
 		keyPrefix + tagged + prodSuffix,
 		keyPrefix + tagged + forksSuffix,
+		keyPrefix + tagged + snapshotSuffix,
 	}
 }
 

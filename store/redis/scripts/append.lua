@@ -9,7 +9,7 @@
 -- seq errors keep spec precedence over ErrInvalidJSON (upstream parses JSON
 -- after validation).
 --
--- KEYS: 1=meta 2=msg 3=prod 4=forks 5=append-fence marker (when enabled)
+-- KEYS: 1=meta 2=msg 3=prod 4=forks 5=snapshots 6=append-fence marker (when enabled)
 -- ARGV: 1=nowNs 2=notifyChannel 3=reqCT(normalized media type, ''=skip)
 --       4=streamSeq(''=none) 5=close('1'/'0') 6=hasProducer('1'/'0')
 --       7=producerId 8=producerEpoch 9=producerSeq
@@ -53,7 +53,7 @@ if is_expired(m, now) then
 end
 
 -- 4. Write fence: seal, claim marker, epoch binding, bound producer — one
--- transaction with the write (#183). fence_rung reads the marker at KEYS[5]
+-- transaction with the write (#183). fence_rung reads the marker at KEYS[6]
 -- (the stream's Redis Cluster slot) and everything else from the meta hash,
 -- so KEYS and ARGV are unchanged; the Go oracle is store.EvaluateWriteFence.
 local reason, d_gen, d_holder = fence_rung(m, has_fence, ARGV[14], ARGV[15], ARGV[16],
