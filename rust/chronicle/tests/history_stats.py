@@ -17,8 +17,22 @@ def quantiles(values):
 def summarize(histories):
     counts = Counter()
     attempts, logical, starts, ends = [], [], [], []
+    success_gaps = {"append": [], "strict_read": []}
+    read_outcomes = Counter()
     acknowledged = 0
     for events in histories:
+        previous = {}
+        # Concurrent emitters can acquire the output lock out of timestamp order.
+        for event in sorted(events, key=lambda event: event["time_ns"]):
+            function = event.get("f")
+            category = "append" if function in ("append", "append-retry") else "strict_read" if function == "read" else None
+            kind = event.get("type")
+            if category == "strict_read" and kind in ("ok", "fail", "unknown"):
+                read_outcomes[kind] += 1
+            if category is not None and kind == "ok":
+                if category in previous:
+                    success_gaps[category].append((event["time_ns"] - previous[category]) / 1_000_000)
+                previous[category] = event["time_ns"]
         # IDs are local to a history. A retry retains the original invocation.
         invoked, succeeded = {}, set()
         for event in events:
@@ -44,6 +58,9 @@ def summarize(histories):
         "acknowledged_appends_per_s": acknowledged / seconds if seconds and seconds > 0 else None,
         "attempt_latency_ms_including_errors": quantiles(attempts),
         "acknowledged_logical_latency_ms_including_retries": quantiles(logical),
+        "strict_read_attempt_outcomes": {kind: read_outcomes[kind] for kind in ("ok", "fail", "unknown")},
+        "per_stream_success_gap_ms": {kind: quantiles(values) for kind, values in success_gaps.items()},
+        "success_gap_scope": "between successive successful completions, separately per stream; includes client pacing and retries; not a continuous outage bound",
         "scope": "client-observed closed-loop run; not server capacity or a safety verdict",
     }
 

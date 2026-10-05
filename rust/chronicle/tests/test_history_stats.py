@@ -35,3 +35,17 @@ class StatsTest(unittest.TestCase):
         result = summarize([[invoke("a", 0), complete("a", 1000, "unknown", 1000)]])
         self.assertEqual(result["acknowledged_appends_per_s"], 0)
         self.assertIsNone(result["acknowledged_logical_latency_ms_including_retries"]["p99"])
+
+    def test_success_gaps_do_not_cross_streams_or_end_at_errors(self):
+        result = summarize([
+            [complete("r0", 100, "ok", 1, "read"),
+             complete("r1", 200, "unknown", 99, "read"),
+             complete("stale", 400, "ok", 1, "stale-read"),
+             complete("r2", 600, "ok", 1, "read")],
+            [complete("r1", 5010, "ok", 1, "read"),
+             complete("r0", 5000, "ok", 1, "read")],
+        ])
+        self.assertEqual(result["per_stream_success_gap_ms"]["strict_read"],
+                         {"p50": 10, "p95": 500, "p99": 500, "max": 500})
+        self.assertEqual(result["strict_read_attempt_outcomes"], {"ok": 4, "fail": 0, "unknown": 1})
+        self.assertIsNone(result["per_stream_success_gap_ms"]["append"]["max"])

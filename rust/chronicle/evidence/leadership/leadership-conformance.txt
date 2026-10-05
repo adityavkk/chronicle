@@ -1,0 +1,63 @@
+
+> test
+> vitest run --testTimeout=30000 --reporter=default --reporter=json --outputFile=/tmp/leadership-conformance.json
+
+
+ RUN  v4.1.8 /home/user/workspace/chronicle-transfer/rust/chronicle/tests/conformance
+
+stderr | conformance.test.ts > Long-Poll Operations > should wait for new data with long-poll
+conformance transport failure http://172.19.0.5:30644/v1/stream/longpoll-test-1791169102106?offset=0000000000000000_0000000000000008&live=long-poll&cursor=3136855 [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Browser Security Headers > should include X-Content-Type-Options: nosniff on long-poll responses
+conformance transport failure http://172.19.0.5:30644/v1/stream/security-longpoll-nosniff-1791169103300?offset=0000000000000000_0000000000000012&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+stderr | conformance.test.ts > Long-Poll Edge Cases > should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout
+conformance transport failure http://172.19.0.5:30644/v1/stream/longpoll-204-headers-test-1791169115443?offset=0000000000000000_0000000000000000&live=long-poll [DOMException [AbortError]: This operation was aborted]
+
+ ✓ conformance.test.ts (332 tests | 6 skipped) 77725ms
+     ✓ should wait for new data with long-poll  572ms
+     ✓ should include X-Content-Type-Options: nosniff on long-poll responses  600ms
+     ✓ should support offset=now with long-poll mode (waits for data)  5021ms
+     ✓ should support offset=now with long-poll on empty stream  5076ms
+     ✓ should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout  5016ms
+     ✓ should return 404 on HEAD after TTL expires  1035ms
+     ✓ should return 404 on GET after TTL expires (idle)  1050ms
+     ✓ should return 404 on POST append after TTL expires (idle)  1036ms
+     ✓ should return 404 on HEAD after Expires-At passes  3065ms
+     ✓ should return 404 on GET after Expires-At passes  3053ms
+     ✓ should return 404 on POST append after Expires-At passes  3052ms
+     ✓ should allow recreating stream after TTL expires  1096ms
+     ✓ should extend TTL on write (sliding window)  3046ms
+     ✓ should extend TTL on read (sliding window)  3027ms
+     ✓ should NOT extend TTL on HEAD  2029ms
+     ✓ should NOT extend Expires-At on read or write  4034ms
+     ✓ should handle chunk-size pagination correctly  920ms
+       ✓ concurrent readers see consistent data during writes  3487ms
+       ✓ single byte values cover full range (0-255) with concurrent readers during write  5283ms
+       ✓ random operation sequences maintain stream invariants  2858ms
+       ✓ offsets are always monotonically increasing  2207ms
+       ✓ read-your-writes: data is immediately visible after append  2096ms
+       ✓ data at offset never changes after additional appends  2788ms
+       ✓ should reject offsets with invalid characters  466ms
+       ✓ lexicographically ordered seq values are accepted  1417ms
+       ✓ out-of-order seq values are rejected  966ms
+       ✓ concurrent writers racing with incrementing seq values  756ms
+       ✓ replay produces identical content hash  3579ms
+       ✓ deterministic ordering - same data in same order produces same hash  1862ms
+       ✓ sse-live-reader-receives-final-append-on-close: live reader at tail receives data appended atomically with the close  1327ms
+     ✓ should accept JSON sub-offset equal to flattened message count  472ms
+     ✓ should append at each level independently  360ms
+     ✓ should cascade GC when last fork is deleted  499ms
+     ✓ should cascade GC through three levels  825ms
+     ✓ should expire fork based on TTL (releases refcount)  1161ms
+     ✓ should expire source with living forks (source goes 410)  1163ms
+     ✓ should allow fork to outlive source via TTL renewal  2117ms
+     ✓ should handle many forks of same stream (10 forks)  1163ms
+     ✓ should fork at every offset position  427ms
+
+ Test Files  1 passed (1)
+      Tests  326 passed | 6 skipped (332)
+   Start at  02:58:20
+   Duration  77.98s (transform 26ms, setup 0ms, import 115ms, tests 77.73s, environment 0ms)
+
+JSON report written to /tmp/leadership-conformance.json

@@ -1,0 +1,43 @@
+{
+  "acknowledged_appends_per_s": 29.674488099807757,
+  "acknowledged_logical_appends": 14400,
+  "acknowledged_logical_latency_ms_including_retries": {
+    "max": 378.075962,
+    "p50": 16.351317,
+    "p95": 29.370883,
+    "p99": 49.42976
+  },
+  "append_window_s": 485.265321227,
+  "attempt_latency_ms_including_errors": {
+    "max": 378.003,
+    "p50": 16.267,
+    "p95": 29.234,
+    "p99": 47.828
+  },
+  "attempt_outcomes": {
+    "fail": 0,
+    "ok": 14400,
+    "unknown": 0
+  },
+  "per_stream_success_gap_ms": {
+    "append": {
+      "max": 493.387359,
+      "p50": 133.090292,
+      "p95": 255.378805,
+      "p99": 263.555031
+    },
+    "strict_read": {
+      "max": 2008.571482,
+      "p50": 1006.480119,
+      "p95": 1013.655982,
+      "p99": 1030.906893
+    }
+  },
+  "scope": "client-observed closed-loop run; not server capacity or a safety verdict",
+  "strict_read_attempt_outcomes": {
+    "fail": 0,
+    "ok": 1924,
+    "unknown": 1
+  },
+  "success_gap_scope": "between successive successful completions, separately per stream; includes client pacing and retries; not a continuous outage bound"
+}

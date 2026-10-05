@@ -1,0 +1,1582 @@
+[
+  {
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {
+      "creationTimestamp": "2026-10-05T02:53:24Z",
+      "generateName": "chronicle-",
+      "labels": {
+        "app": "chronicle-raft",
+        "apps.kubernetes.io/pod-index": "0",
+        "controller-revision-hash": "chronicle-7ff766ddc5",
+        "statefulset.kubernetes.io/pod-name": "chronicle-0"
+      },
+      "name": "chronicle-0",
+      "namespace": "chronicle",
+      "ownerReferences": [
+        {
+          "apiVersion": "apps/v1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "StatefulSet",
+          "name": "chronicle",
+          "uid": "dfe0a900-2d66-4f08-9131-b6b11f3fb32f"
+        }
+      ],
+      "resourceVersion": "6768",
+      "uid": "e03748df-5f2b-45c0-9aee-56ca96f41055"
+    },
+    "spec": {
+      "affinity": {
+        "nodeAffinity": {
+          "requiredDuringSchedulingIgnoredDuringExecution": {
+            "nodeSelectorTerms": [
+              {
+                "matchExpressions": [
+                  {
+                    "key": "node-role.kubernetes.io/control-plane",
+                    "operator": "DoesNotExist"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "podAntiAffinity": {
+          "requiredDuringSchedulingIgnoredDuringExecution": [
+            {
+              "labelSelector": {
+                "matchLabels": {
+                  "app": "chronicle-raft"
+                }
+              },
+              "topologyKey": "kubernetes.io/hostname"
+            }
+          ]
+        }
+      },
+      "containers": [
+        {
+          "args": [
+            "ordinal=\"${HOSTNAME##*-}\"\nexport NODE_ID=\"$((ordinal + 1))\"\nexport ADVERTISE=\"${HOSTNAME}.chronicle:8080\"\nexec /usr/local/bin/chronicle-raft\n"
+          ],
+          "command": [
+            "/bin/sh",
+            "-ec"
+          ],
+          "env": [
+            {
+              "name": "LISTEN",
+              "value": "0.0.0.0:8080"
+            },
+            {
+              "name": "DATA_DIR",
+              "value": "/data"
+            },
+            {
+              "name": "CLUSTER_ID",
+              "value": "chronicle-k3d-disposable-v1"
+            },
+            {
+              "name": "CLUSTER_NODES",
+              "value": "{\"1\":{\"addr\":\"chronicle-0.chronicle:8080\",\"zone\":\"a\",\"draining\":false},\"2\":{\"addr\":\"chronicle-1.chronicle:8080\",\"zone\":\"b\",\"draining\":false},\"3\":{\"addr\":\"chronicle-2.chronicle:8080\",\"zone\":\"c\",\"draining\":false}}"
+            },
+            {
+              "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+              "value": "http://otel-collector.observability:4317"
+            },
+            {
+              "name": "CHRONICLE_STORAGE_FAULTS",
+              "value": "1"
+            },
+            {
+              "name": "CHRONICLE_FAULT_DIR",
+              "value": "/data/faults"
+            },
+            {
+              "name": "STREAM_TENANT",
+              "value": "conformance-mounted"
+            },
+            {
+              "name": "CHRONICLE_LEADERSHIP_BALANCE",
+              "value": "1"
+            }
+          ],
+          "image": "chronicle-raft:leadership1",
+          "imagePullPolicy": "Never",
+          "livenessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/healthz",
+              "port": "http",
+              "scheme": "HTTP"
+            },
+            "initialDelaySeconds": 10,
+            "periodSeconds": 10,
+            "successThreshold": 1,
+            "timeoutSeconds": 1
+          },
+          "name": "chronicle",
+          "ports": [
+            {
+              "containerPort": 8080,
+              "name": "http",
+              "protocol": "TCP"
+            }
+          ],
+          "readinessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/healthz",
+              "port": "http",
+              "scheme": "HTTP"
+            },
+            "periodSeconds": 5,
+            "successThreshold": 1,
+            "timeoutSeconds": 1
+          },
+          "resources": {
+            "limits": {
+              "cpu": "1",
+              "memory": "512Mi"
+            },
+            "requests": {
+              "cpu": "50m",
+              "memory": "64Mi"
+            }
+          },
+          "terminationMessagePath": "/dev/termination-log",
+          "terminationMessagePolicy": "File",
+          "volumeMounts": [
+            {
+              "mountPath": "/data",
+              "name": "data"
+            },
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-895fg",
+              "readOnly": true
+            }
+          ]
+        }
+      ],
+      "dnsPolicy": "ClusterFirst",
+      "enableServiceLinks": true,
+      "hostname": "chronicle-0",
+      "nodeName": "k3d-chronicle-upgrade-agent-0",
+      "preemptionPolicy": "PreemptLowerPriority",
+      "priority": 0,
+      "restartPolicy": "Always",
+      "schedulerName": "default-scheduler",
+      "securityContext": {
+        "fsGroup": 1000
+      },
+      "serviceAccount": "default",
+      "serviceAccountName": "default",
+      "subdomain": "chronicle",
+      "terminationGracePeriodSeconds": 30,
+      "tolerations": [
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/not-ready",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        },
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/unreachable",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        }
+      ],
+      "volumes": [
+        {
+          "name": "data",
+          "persistentVolumeClaim": {
+            "claimName": "data-chronicle-0"
+          }
+        },
+        {
+          "name": "kube-api-access-895fg",
+          "projected": {
+            "defaultMode": 420,
+            "sources": [
+              {
+                "serviceAccountToken": {
+                  "expirationSeconds": 3607,
+                  "path": "token"
+                }
+              },
+              {
+                "configMap": {
+                  "items": [
+                    {
+                      "key": "ca.crt",
+                      "path": "ca.crt"
+                    }
+                  ],
+                  "name": "kube-root-ca.crt"
+                }
+              },
+              {
+                "downwardAPI": {
+                  "items": [
+                    {
+                      "fieldRef": {
+                        "apiVersion": "v1",
+                        "fieldPath": "metadata.namespace"
+                      },
+                      "path": "namespace"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": {
+      "conditions": [
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:24Z",
+          "status": "True",
+          "type": "PodReadyToStartContainers"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:24Z",
+          "status": "True",
+          "type": "Initialized"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:25Z",
+          "status": "True",
+          "type": "Ready"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:25Z",
+          "status": "True",
+          "type": "ContainersReady"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:24Z",
+          "status": "True",
+          "type": "PodScheduled"
+        }
+      ],
+      "containerStatuses": [
+        {
+          "containerID": "containerd://672e5ff1578c1cd99b6ba79275fc97246d27c81e77317f9cd1940889e5c8bab5",
+          "image": "docker.io/library/chronicle-raft:leadership1",
+          "imageID": "sha256:3407d68c25da20224ea3c0026864ba77345339af1bdc474886574d4c1d0aa7d4",
+          "lastState": {},
+          "name": "chronicle",
+          "ready": true,
+          "restartCount": 0,
+          "started": true,
+          "state": {
+            "running": {
+              "startedAt": "2026-10-05T02:53:24Z"
+            }
+          },
+          "volumeMounts": [
+            {
+              "mountPath": "/data",
+              "name": "data"
+            },
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-895fg",
+              "readOnly": true,
+              "recursiveReadOnly": "Disabled"
+            }
+          ]
+        }
+      ],
+      "hostIP": "172.19.0.5",
+      "hostIPs": [
+        {
+          "ip": "172.19.0.5"
+        }
+      ],
+      "phase": "Running",
+      "podIP": "10.42.3.6",
+      "podIPs": [
+        {
+          "ip": "10.42.3.6"
+        }
+      ],
+      "qosClass": "Burstable",
+      "startTime": "2026-10-05T02:53:24Z"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {
+      "creationTimestamp": "2026-10-05T02:53:24Z",
+      "generateName": "chronicle-",
+      "labels": {
+        "app": "chronicle-raft",
+        "apps.kubernetes.io/pod-index": "1",
+        "controller-revision-hash": "chronicle-7ff766ddc5",
+        "statefulset.kubernetes.io/pod-name": "chronicle-1"
+      },
+      "name": "chronicle-1",
+      "namespace": "chronicle",
+      "ownerReferences": [
+        {
+          "apiVersion": "apps/v1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "StatefulSet",
+          "name": "chronicle",
+          "uid": "dfe0a900-2d66-4f08-9131-b6b11f3fb32f"
+        }
+      ],
+      "resourceVersion": "6794",
+      "uid": "127b246c-921e-4a9a-945e-919efab4e8f8"
+    },
+    "spec": {
+      "affinity": {
+        "nodeAffinity": {
+          "requiredDuringSchedulingIgnoredDuringExecution": {
+            "nodeSelectorTerms": [
+              {
+                "matchExpressions": [
+                  {
+                    "key": "node-role.kubernetes.io/control-plane",
+                    "operator": "DoesNotExist"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "podAntiAffinity": {
+          "requiredDuringSchedulingIgnoredDuringExecution": [
+            {
+              "labelSelector": {
+                "matchLabels": {
+                  "app": "chronicle-raft"
+                }
+              },
+              "topologyKey": "kubernetes.io/hostname"
+            }
+          ]
+        }
+      },
+      "containers": [
+        {
+          "args": [
+            "ordinal=\"${HOSTNAME##*-}\"\nexport NODE_ID=\"$((ordinal + 1))\"\nexport ADVERTISE=\"${HOSTNAME}.chronicle:8080\"\nexec /usr/local/bin/chronicle-raft\n"
+          ],
+          "command": [
+            "/bin/sh",
+            "-ec"
+          ],
+          "env": [
+            {
+              "name": "LISTEN",
+              "value": "0.0.0.0:8080"
+            },
+            {
+              "name": "DATA_DIR",
+              "value": "/data"
+            },
+            {
+              "name": "CLUSTER_ID",
+              "value": "chronicle-k3d-disposable-v1"
+            },
+            {
+              "name": "CLUSTER_NODES",
+              "value": "{\"1\":{\"addr\":\"chronicle-0.chronicle:8080\",\"zone\":\"a\",\"draining\":false},\"2\":{\"addr\":\"chronicle-1.chronicle:8080\",\"zone\":\"b\",\"draining\":false},\"3\":{\"addr\":\"chronicle-2.chronicle:8080\",\"zone\":\"c\",\"draining\":false}}"
+            },
+            {
+              "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+              "value": "http://otel-collector.observability:4317"
+            },
+            {
+              "name": "CHRONICLE_STORAGE_FAULTS",
+              "value": "1"
+            },
+            {
+              "name": "CHRONICLE_FAULT_DIR",
+              "value": "/data/faults"
+            },
+            {
+              "name": "STREAM_TENANT",
+              "value": "conformance-mounted"
+            },
+            {
+              "name": "CHRONICLE_LEADERSHIP_BALANCE",
+              "value": "1"
+            }
+          ],
+          "image": "chronicle-raft:leadership1",
+          "imagePullPolicy": "Never",
+          "livenessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/healthz",
+              "port": "http",
+              "scheme": "HTTP"
+            },
+            "initialDelaySeconds": 10,
+            "periodSeconds": 10,
+            "successThreshold": 1,
+            "timeoutSeconds": 1
+          },
+          "name": "chronicle",
+          "ports": [
+            {
+              "containerPort": 8080,
+              "name": "http",
+              "protocol": "TCP"
+            }
+          ],
+          "readinessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/healthz",
+              "port": "http",
+              "scheme": "HTTP"
+            },
+            "periodSeconds": 5,
+            "successThreshold": 1,
+            "timeoutSeconds": 1
+          },
+          "resources": {
+            "limits": {
+              "cpu": "1",
+              "memory": "512Mi"
+            },
+            "requests": {
+              "cpu": "50m",
+              "memory": "64Mi"
+            }
+          },
+          "terminationMessagePath": "/dev/termination-log",
+          "terminationMessagePolicy": "File",
+          "volumeMounts": [
+            {
+              "mountPath": "/data",
+              "name": "data"
+            },
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-cbpmm",
+              "readOnly": true
+            }
+          ]
+        }
+      ],
+      "dnsPolicy": "ClusterFirst",
+      "enableServiceLinks": true,
+      "hostname": "chronicle-1",
+      "nodeName": "k3d-chronicle-upgrade-agent-1",
+      "preemptionPolicy": "PreemptLowerPriority",
+      "priority": 0,
+      "restartPolicy": "Always",
+      "schedulerName": "default-scheduler",
+      "securityContext": {
+        "fsGroup": 1000
+      },
+      "serviceAccount": "default",
+      "serviceAccountName": "default",
+      "subdomain": "chronicle",
+      "terminationGracePeriodSeconds": 30,
+      "tolerations": [
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/not-ready",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        },
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/unreachable",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        }
+      ],
+      "volumes": [
+        {
+          "name": "data",
+          "persistentVolumeClaim": {
+            "claimName": "data-chronicle-1"
+          }
+        },
+        {
+          "name": "kube-api-access-cbpmm",
+          "projected": {
+            "defaultMode": 420,
+            "sources": [
+              {
+                "serviceAccountToken": {
+                  "expirationSeconds": 3607,
+                  "path": "token"
+                }
+              },
+              {
+                "configMap": {
+                  "items": [
+                    {
+                      "key": "ca.crt",
+                      "path": "ca.crt"
+                    }
+                  ],
+                  "name": "kube-root-ca.crt"
+                }
+              },
+              {
+                "downwardAPI": {
+                  "items": [
+                    {
+                      "fieldRef": {
+                        "apiVersion": "v1",
+                        "fieldPath": "metadata.namespace"
+                      },
+                      "path": "namespace"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": {
+      "conditions": [
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:26Z",
+          "status": "True",
+          "type": "PodReadyToStartContainers"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:24Z",
+          "status": "True",
+          "type": "Initialized"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:26Z",
+          "status": "True",
+          "type": "Ready"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:26Z",
+          "status": "True",
+          "type": "ContainersReady"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:24Z",
+          "status": "True",
+          "type": "PodScheduled"
+        }
+      ],
+      "containerStatuses": [
+        {
+          "containerID": "containerd://3370c6fa1c9b13169eaef1af6ad982d6056f16c216aac44b451cfa989bc78ae1",
+          "image": "docker.io/library/chronicle-raft:leadership1",
+          "imageID": "sha256:3407d68c25da20224ea3c0026864ba77345339af1bdc474886574d4c1d0aa7d4",
+          "lastState": {},
+          "name": "chronicle",
+          "ready": true,
+          "restartCount": 0,
+          "started": true,
+          "state": {
+            "running": {
+              "startedAt": "2026-10-05T02:53:26Z"
+            }
+          },
+          "volumeMounts": [
+            {
+              "mountPath": "/data",
+              "name": "data"
+            },
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-cbpmm",
+              "readOnly": true,
+              "recursiveReadOnly": "Disabled"
+            }
+          ]
+        }
+      ],
+      "hostIP": "172.19.0.3",
+      "hostIPs": [
+        {
+          "ip": "172.19.0.3"
+        }
+      ],
+      "phase": "Running",
+      "podIP": "10.42.5.7",
+      "podIPs": [
+        {
+          "ip": "10.42.5.7"
+        }
+      ],
+      "qosClass": "Burstable",
+      "startTime": "2026-10-05T02:53:24Z"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {
+      "creationTimestamp": "2026-10-05T02:53:24Z",
+      "generateName": "chronicle-",
+      "labels": {
+        "app": "chronicle-raft",
+        "apps.kubernetes.io/pod-index": "2",
+        "controller-revision-hash": "chronicle-7ff766ddc5",
+        "statefulset.kubernetes.io/pod-name": "chronicle-2"
+      },
+      "name": "chronicle-2",
+      "namespace": "chronicle",
+      "ownerReferences": [
+        {
+          "apiVersion": "apps/v1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "StatefulSet",
+          "name": "chronicle",
+          "uid": "dfe0a900-2d66-4f08-9131-b6b11f3fb32f"
+        }
+      ],
+      "resourceVersion": "6780",
+      "uid": "7d7acd0f-ddbc-4263-814d-1f8de4ca8533"
+    },
+    "spec": {
+      "affinity": {
+        "nodeAffinity": {
+          "requiredDuringSchedulingIgnoredDuringExecution": {
+            "nodeSelectorTerms": [
+              {
+                "matchExpressions": [
+                  {
+                    "key": "node-role.kubernetes.io/control-plane",
+                    "operator": "DoesNotExist"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "podAntiAffinity": {
+          "requiredDuringSchedulingIgnoredDuringExecution": [
+            {
+              "labelSelector": {
+                "matchLabels": {
+                  "app": "chronicle-raft"
+                }
+              },
+              "topologyKey": "kubernetes.io/hostname"
+            }
+          ]
+        }
+      },
+      "containers": [
+        {
+          "args": [
+            "ordinal=\"${HOSTNAME##*-}\"\nexport NODE_ID=\"$((ordinal + 1))\"\nexport ADVERTISE=\"${HOSTNAME}.chronicle:8080\"\nexec /usr/local/bin/chronicle-raft\n"
+          ],
+          "command": [
+            "/bin/sh",
+            "-ec"
+          ],
+          "env": [
+            {
+              "name": "LISTEN",
+              "value": "0.0.0.0:8080"
+            },
+            {
+              "name": "DATA_DIR",
+              "value": "/data"
+            },
+            {
+              "name": "CLUSTER_ID",
+              "value": "chronicle-k3d-disposable-v1"
+            },
+            {
+              "name": "CLUSTER_NODES",
+              "value": "{\"1\":{\"addr\":\"chronicle-0.chronicle:8080\",\"zone\":\"a\",\"draining\":false},\"2\":{\"addr\":\"chronicle-1.chronicle:8080\",\"zone\":\"b\",\"draining\":false},\"3\":{\"addr\":\"chronicle-2.chronicle:8080\",\"zone\":\"c\",\"draining\":false}}"
+            },
+            {
+              "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+              "value": "http://otel-collector.observability:4317"
+            },
+            {
+              "name": "CHRONICLE_STORAGE_FAULTS",
+              "value": "1"
+            },
+            {
+              "name": "CHRONICLE_FAULT_DIR",
+              "value": "/data/faults"
+            },
+            {
+              "name": "STREAM_TENANT",
+              "value": "conformance-mounted"
+            },
+            {
+              "name": "CHRONICLE_LEADERSHIP_BALANCE",
+              "value": "1"
+            }
+          ],
+          "image": "chronicle-raft:leadership1",
+          "imagePullPolicy": "Never",
+          "livenessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/healthz",
+              "port": "http",
+              "scheme": "HTTP"
+            },
+            "initialDelaySeconds": 10,
+            "periodSeconds": 10,
+            "successThreshold": 1,
+            "timeoutSeconds": 1
+          },
+          "name": "chronicle",
+          "ports": [
+            {
+              "containerPort": 8080,
+              "name": "http",
+              "protocol": "TCP"
+            }
+          ],
+          "readinessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/healthz",
+              "port": "http",
+              "scheme": "HTTP"
+            },
+            "periodSeconds": 5,
+            "successThreshold": 1,
+            "timeoutSeconds": 1
+          },
+          "resources": {
+            "limits": {
+              "cpu": "1",
+              "memory": "512Mi"
+            },
+            "requests": {
+              "cpu": "50m",
+              "memory": "64Mi"
+            }
+          },
+          "terminationMessagePath": "/dev/termination-log",
+          "terminationMessagePolicy": "File",
+          "volumeMounts": [
+            {
+              "mountPath": "/data",
+              "name": "data"
+            },
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-9ff54",
+              "readOnly": true
+            }
+          ]
+        }
+      ],
+      "dnsPolicy": "ClusterFirst",
+      "enableServiceLinks": true,
+      "hostname": "chronicle-2",
+      "nodeName": "k3d-chronicle-upgrade-agent-2",
+      "preemptionPolicy": "PreemptLowerPriority",
+      "priority": 0,
+      "restartPolicy": "Always",
+      "schedulerName": "default-scheduler",
+      "securityContext": {
+        "fsGroup": 1000
+      },
+      "serviceAccount": "default",
+      "serviceAccountName": "default",
+      "subdomain": "chronicle",
+      "terminationGracePeriodSeconds": 30,
+      "tolerations": [
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/not-ready",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        },
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/unreachable",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        }
+      ],
+      "volumes": [
+        {
+          "name": "data",
+          "persistentVolumeClaim": {
+            "claimName": "data-chronicle-2"
+          }
+        },
+        {
+          "name": "kube-api-access-9ff54",
+          "projected": {
+            "defaultMode": 420,
+            "sources": [
+              {
+                "serviceAccountToken": {
+                  "expirationSeconds": 3607,
+                  "path": "token"
+                }
+              },
+              {
+                "configMap": {
+                  "items": [
+                    {
+                      "key": "ca.crt",
+                      "path": "ca.crt"
+                    }
+                  ],
+                  "name": "kube-root-ca.crt"
+                }
+              },
+              {
+                "downwardAPI": {
+                  "items": [
+                    {
+                      "fieldRef": {
+                        "apiVersion": "v1",
+                        "fieldPath": "metadata.namespace"
+                      },
+                      "path": "namespace"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": {
+      "conditions": [
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:25Z",
+          "status": "True",
+          "type": "PodReadyToStartContainers"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:24Z",
+          "status": "True",
+          "type": "Initialized"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:26Z",
+          "status": "True",
+          "type": "Ready"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:26Z",
+          "status": "True",
+          "type": "ContainersReady"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:24Z",
+          "status": "True",
+          "type": "PodScheduled"
+        }
+      ],
+      "containerStatuses": [
+        {
+          "containerID": "containerd://218dce3cb83a9652e0d581cf3d61245d898098fc3a9f1d247eaafa1128327931",
+          "image": "docker.io/library/chronicle-raft:leadership1",
+          "imageID": "sha256:3407d68c25da20224ea3c0026864ba77345339af1bdc474886574d4c1d0aa7d4",
+          "lastState": {},
+          "name": "chronicle",
+          "ready": true,
+          "restartCount": 0,
+          "started": true,
+          "state": {
+            "running": {
+              "startedAt": "2026-10-05T02:53:25Z"
+            }
+          },
+          "volumeMounts": [
+            {
+              "mountPath": "/data",
+              "name": "data"
+            },
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-9ff54",
+              "readOnly": true,
+              "recursiveReadOnly": "Disabled"
+            }
+          ]
+        }
+      ],
+      "hostIP": "172.19.0.6",
+      "hostIPs": [
+        {
+          "ip": "172.19.0.6"
+        }
+      ],
+      "phase": "Running",
+      "podIP": "10.42.2.6",
+      "podIPs": [
+        {
+          "ip": "10.42.2.6"
+        }
+      ],
+      "qosClass": "Burstable",
+      "startTime": "2026-10-05T02:53:24Z"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {
+      "creationTimestamp": "2026-10-05T02:53:24Z",
+      "generateName": "chronicle-",
+      "labels": {
+        "app": "chronicle-raft",
+        "apps.kubernetes.io/pod-index": "3",
+        "controller-revision-hash": "chronicle-7ff766ddc5",
+        "statefulset.kubernetes.io/pod-name": "chronicle-3"
+      },
+      "name": "chronicle-3",
+      "namespace": "chronicle",
+      "ownerReferences": [
+        {
+          "apiVersion": "apps/v1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "StatefulSet",
+          "name": "chronicle",
+          "uid": "dfe0a900-2d66-4f08-9131-b6b11f3fb32f"
+        }
+      ],
+      "resourceVersion": "6735",
+      "uid": "60894b7f-1b7b-493c-ae61-e646f5629387"
+    },
+    "spec": {
+      "affinity": {
+        "nodeAffinity": {
+          "requiredDuringSchedulingIgnoredDuringExecution": {
+            "nodeSelectorTerms": [
+              {
+                "matchExpressions": [
+                  {
+                    "key": "node-role.kubernetes.io/control-plane",
+                    "operator": "DoesNotExist"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "podAntiAffinity": {
+          "requiredDuringSchedulingIgnoredDuringExecution": [
+            {
+              "labelSelector": {
+                "matchLabels": {
+                  "app": "chronicle-raft"
+                }
+              },
+              "topologyKey": "kubernetes.io/hostname"
+            }
+          ]
+        }
+      },
+      "containers": [
+        {
+          "args": [
+            "ordinal=\"${HOSTNAME##*-}\"\nexport NODE_ID=\"$((ordinal + 1))\"\nexport ADVERTISE=\"${HOSTNAME}.chronicle:8080\"\nexec /usr/local/bin/chronicle-raft\n"
+          ],
+          "command": [
+            "/bin/sh",
+            "-ec"
+          ],
+          "env": [
+            {
+              "name": "LISTEN",
+              "value": "0.0.0.0:8080"
+            },
+            {
+              "name": "DATA_DIR",
+              "value": "/data"
+            },
+            {
+              "name": "CLUSTER_ID",
+              "value": "chronicle-k3d-disposable-v1"
+            },
+            {
+              "name": "CLUSTER_NODES",
+              "value": "{\"1\":{\"addr\":\"chronicle-0.chronicle:8080\",\"zone\":\"a\",\"draining\":false},\"2\":{\"addr\":\"chronicle-1.chronicle:8080\",\"zone\":\"b\",\"draining\":false},\"3\":{\"addr\":\"chronicle-2.chronicle:8080\",\"zone\":\"c\",\"draining\":false}}"
+            },
+            {
+              "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+              "value": "http://otel-collector.observability:4317"
+            },
+            {
+              "name": "CHRONICLE_STORAGE_FAULTS",
+              "value": "1"
+            },
+            {
+              "name": "CHRONICLE_FAULT_DIR",
+              "value": "/data/faults"
+            },
+            {
+              "name": "STREAM_TENANT",
+              "value": "conformance-mounted"
+            },
+            {
+              "name": "CHRONICLE_LEADERSHIP_BALANCE",
+              "value": "1"
+            }
+          ],
+          "image": "chronicle-raft:leadership1",
+          "imagePullPolicy": "Never",
+          "livenessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/healthz",
+              "port": "http",
+              "scheme": "HTTP"
+            },
+            "initialDelaySeconds": 10,
+            "periodSeconds": 10,
+            "successThreshold": 1,
+            "timeoutSeconds": 1
+          },
+          "name": "chronicle",
+          "ports": [
+            {
+              "containerPort": 8080,
+              "name": "http",
+              "protocol": "TCP"
+            }
+          ],
+          "readinessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/healthz",
+              "port": "http",
+              "scheme": "HTTP"
+            },
+            "periodSeconds": 5,
+            "successThreshold": 1,
+            "timeoutSeconds": 1
+          },
+          "resources": {
+            "limits": {
+              "cpu": "1",
+              "memory": "512Mi"
+            },
+            "requests": {
+              "cpu": "50m",
+              "memory": "64Mi"
+            }
+          },
+          "terminationMessagePath": "/dev/termination-log",
+          "terminationMessagePolicy": "File",
+          "volumeMounts": [
+            {
+              "mountPath": "/data",
+              "name": "data"
+            },
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-nnc47",
+              "readOnly": true
+            }
+          ]
+        }
+      ],
+      "dnsPolicy": "ClusterFirst",
+      "enableServiceLinks": true,
+      "hostname": "chronicle-3",
+      "nodeName": "k3d-chronicle-upgrade-agent-3",
+      "preemptionPolicy": "PreemptLowerPriority",
+      "priority": 0,
+      "restartPolicy": "Always",
+      "schedulerName": "default-scheduler",
+      "securityContext": {
+        "fsGroup": 1000
+      },
+      "serviceAccount": "default",
+      "serviceAccountName": "default",
+      "subdomain": "chronicle",
+      "terminationGracePeriodSeconds": 30,
+      "tolerations": [
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/not-ready",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        },
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/unreachable",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        }
+      ],
+      "volumes": [
+        {
+          "name": "data",
+          "persistentVolumeClaim": {
+            "claimName": "data-chronicle-3"
+          }
+        },
+        {
+          "name": "kube-api-access-nnc47",
+          "projected": {
+            "defaultMode": 420,
+            "sources": [
+              {
+                "serviceAccountToken": {
+                  "expirationSeconds": 3607,
+                  "path": "token"
+                }
+              },
+              {
+                "configMap": {
+                  "items": [
+                    {
+                      "key": "ca.crt",
+                      "path": "ca.crt"
+                    }
+                  ],
+                  "name": "kube-root-ca.crt"
+                }
+              },
+              {
+                "downwardAPI": {
+                  "items": [
+                    {
+                      "fieldRef": {
+                        "apiVersion": "v1",
+                        "fieldPath": "metadata.namespace"
+                      },
+                      "path": "namespace"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": {
+      "conditions": [
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:25Z",
+          "status": "True",
+          "type": "PodReadyToStartContainers"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:24Z",
+          "status": "True",
+          "type": "Initialized"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:25Z",
+          "status": "True",
+          "type": "Ready"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:25Z",
+          "status": "True",
+          "type": "ContainersReady"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:24Z",
+          "status": "True",
+          "type": "PodScheduled"
+        }
+      ],
+      "containerStatuses": [
+        {
+          "containerID": "containerd://51d7ff5e80369ce782908c1969ebe968da9184b8576b1ad392b56496d73da1cb",
+          "image": "docker.io/library/chronicle-raft:leadership1",
+          "imageID": "sha256:3407d68c25da20224ea3c0026864ba77345339af1bdc474886574d4c1d0aa7d4",
+          "lastState": {},
+          "name": "chronicle",
+          "ready": true,
+          "restartCount": 0,
+          "started": true,
+          "state": {
+            "running": {
+              "startedAt": "2026-10-05T02:53:24Z"
+            }
+          },
+          "volumeMounts": [
+            {
+              "mountPath": "/data",
+              "name": "data"
+            },
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-nnc47",
+              "readOnly": true,
+              "recursiveReadOnly": "Disabled"
+            }
+          ]
+        }
+      ],
+      "hostIP": "172.19.0.4",
+      "hostIPs": [
+        {
+          "ip": "172.19.0.4"
+        }
+      ],
+      "phase": "Running",
+      "podIP": "10.42.7.6",
+      "podIPs": [
+        {
+          "ip": "10.42.7.6"
+        }
+      ],
+      "qosClass": "Burstable",
+      "startTime": "2026-10-05T02:53:24Z"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {
+      "creationTimestamp": "2026-10-05T02:53:24Z",
+      "generateName": "chronicle-",
+      "labels": {
+        "app": "chronicle-raft",
+        "apps.kubernetes.io/pod-index": "4",
+        "controller-revision-hash": "chronicle-7ff766ddc5",
+        "statefulset.kubernetes.io/pod-name": "chronicle-4"
+      },
+      "name": "chronicle-4",
+      "namespace": "chronicle",
+      "ownerReferences": [
+        {
+          "apiVersion": "apps/v1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "StatefulSet",
+          "name": "chronicle",
+          "uid": "dfe0a900-2d66-4f08-9131-b6b11f3fb32f"
+        }
+      ],
+      "resourceVersion": "6761",
+      "uid": "6c4e7748-a28d-4303-ba0a-589a10a1f5f6"
+    },
+    "spec": {
+      "affinity": {
+        "nodeAffinity": {
+          "requiredDuringSchedulingIgnoredDuringExecution": {
+            "nodeSelectorTerms": [
+              {
+                "matchExpressions": [
+                  {
+                    "key": "node-role.kubernetes.io/control-plane",
+                    "operator": "DoesNotExist"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "podAntiAffinity": {
+          "requiredDuringSchedulingIgnoredDuringExecution": [
+            {
+              "labelSelector": {
+                "matchLabels": {
+                  "app": "chronicle-raft"
+                }
+              },
+              "topologyKey": "kubernetes.io/hostname"
+            }
+          ]
+        }
+      },
+      "containers": [
+        {
+          "args": [
+            "ordinal=\"${HOSTNAME##*-}\"\nexport NODE_ID=\"$((ordinal + 1))\"\nexport ADVERTISE=\"${HOSTNAME}.chronicle:8080\"\nexec /usr/local/bin/chronicle-raft\n"
+          ],
+          "command": [
+            "/bin/sh",
+            "-ec"
+          ],
+          "env": [
+            {
+              "name": "LISTEN",
+              "value": "0.0.0.0:8080"
+            },
+            {
+              "name": "DATA_DIR",
+              "value": "/data"
+            },
+            {
+              "name": "CLUSTER_ID",
+              "value": "chronicle-k3d-disposable-v1"
+            },
+            {
+              "name": "CLUSTER_NODES",
+              "value": "{\"1\":{\"addr\":\"chronicle-0.chronicle:8080\",\"zone\":\"a\",\"draining\":false},\"2\":{\"addr\":\"chronicle-1.chronicle:8080\",\"zone\":\"b\",\"draining\":false},\"3\":{\"addr\":\"chronicle-2.chronicle:8080\",\"zone\":\"c\",\"draining\":false}}"
+            },
+            {
+              "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+              "value": "http://otel-collector.observability:4317"
+            },
+            {
+              "name": "CHRONICLE_STORAGE_FAULTS",
+              "value": "1"
+            },
+            {
+              "name": "CHRONICLE_FAULT_DIR",
+              "value": "/data/faults"
+            },
+            {
+              "name": "STREAM_TENANT",
+              "value": "conformance-mounted"
+            },
+            {
+              "name": "CHRONICLE_LEADERSHIP_BALANCE",
+              "value": "1"
+            }
+          ],
+          "image": "chronicle-raft:leadership1",
+          "imagePullPolicy": "Never",
+          "livenessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/healthz",
+              "port": "http",
+              "scheme": "HTTP"
+            },
+            "initialDelaySeconds": 10,
+            "periodSeconds": 10,
+            "successThreshold": 1,
+            "timeoutSeconds": 1
+          },
+          "name": "chronicle",
+          "ports": [
+            {
+              "containerPort": 8080,
+              "name": "http",
+              "protocol": "TCP"
+            }
+          ],
+          "readinessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/healthz",
+              "port": "http",
+              "scheme": "HTTP"
+            },
+            "periodSeconds": 5,
+            "successThreshold": 1,
+            "timeoutSeconds": 1
+          },
+          "resources": {
+            "limits": {
+              "cpu": "1",
+              "memory": "512Mi"
+            },
+            "requests": {
+              "cpu": "50m",
+              "memory": "64Mi"
+            }
+          },
+          "terminationMessagePath": "/dev/termination-log",
+          "terminationMessagePolicy": "File",
+          "volumeMounts": [
+            {
+              "mountPath": "/data",
+              "name": "data"
+            },
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-cdz9q",
+              "readOnly": true
+            }
+          ]
+        }
+      ],
+      "dnsPolicy": "ClusterFirst",
+      "enableServiceLinks": true,
+      "hostname": "chronicle-4",
+      "nodeName": "k3d-chronicle-upgrade-agent-4",
+      "preemptionPolicy": "PreemptLowerPriority",
+      "priority": 0,
+      "restartPolicy": "Always",
+      "schedulerName": "default-scheduler",
+      "securityContext": {
+        "fsGroup": 1000
+      },
+      "serviceAccount": "default",
+      "serviceAccountName": "default",
+      "subdomain": "chronicle",
+      "terminationGracePeriodSeconds": 30,
+      "tolerations": [
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/not-ready",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        },
+        {
+          "effect": "NoExecute",
+          "key": "node.kubernetes.io/unreachable",
+          "operator": "Exists",
+          "tolerationSeconds": 300
+        }
+      ],
+      "volumes": [
+        {
+          "name": "data",
+          "persistentVolumeClaim": {
+            "claimName": "data-chronicle-4"
+          }
+        },
+        {
+          "name": "kube-api-access-cdz9q",
+          "projected": {
+            "defaultMode": 420,
+            "sources": [
+              {
+                "serviceAccountToken": {
+                  "expirationSeconds": 3607,
+                  "path": "token"
+                }
+              },
+              {
+                "configMap": {
+                  "items": [
+                    {
+                      "key": "ca.crt",
+                      "path": "ca.crt"
+                    }
+                  ],
+                  "name": "kube-root-ca.crt"
+                }
+              },
+              {
+                "downwardAPI": {
+                  "items": [
+                    {
+                      "fieldRef": {
+                        "apiVersion": "v1",
+                        "fieldPath": "metadata.namespace"
+                      },
+                      "path": "namespace"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "status": {
+      "conditions": [
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:25Z",
+          "status": "True",
+          "type": "PodReadyToStartContainers"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:24Z",
+          "status": "True",
+          "type": "Initialized"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:25Z",
+          "status": "True",
+          "type": "Ready"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:25Z",
+          "status": "True",
+          "type": "ContainersReady"
+        },
+        {
+          "lastProbeTime": null,
+          "lastTransitionTime": "2026-10-05T02:53:24Z",
+          "status": "True",
+          "type": "PodScheduled"
+        }
+      ],
+      "containerStatuses": [
+        {
+          "containerID": "containerd://fcaa3ed04c77a4188a1a028ba1e750efdd5759365b1ee56235ac163ca550d3e0",
+          "image": "docker.io/library/chronicle-raft:leadership1",
+          "imageID": "sha256:3407d68c25da20224ea3c0026864ba77345339af1bdc474886574d4c1d0aa7d4",
+          "lastState": {},
+          "name": "chronicle",
+          "ready": true,
+          "restartCount": 0,
+          "started": true,
+          "state": {
+            "running": {
+              "startedAt": "2026-10-05T02:53:24Z"
+            }
+          },
+          "volumeMounts": [
+            {
+              "mountPath": "/data",
+              "name": "data"
+            },
+            {
+              "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+              "name": "kube-api-access-cdz9q",
+              "readOnly": true,
+              "recursiveReadOnly": "Disabled"
+            }
+          ]
+        }
+      ],
+      "hostIP": "172.19.0.7",
+      "hostIPs": [
+        {
+          "ip": "172.19.0.7"
+        }
+      ],
+      "phase": "Running",
+      "podIP": "10.42.1.6",
+      "podIPs": [
+        {
+          "ip": "10.42.1.6"
+        }
+      ],
+      "qosClass": "Burstable",
+      "startTime": "2026-10-05T02:53:24Z"
+    }
+  }
+]
