@@ -13,22 +13,57 @@
 (* owner (no zero-owner coverage gap, no >1 split-brain), and STAYS there.  *)
 (*                                                                         *)
 (* Mirrors byte-for-byte:                                                   *)
-(*   - Heartbeat (redis_store.go:793): ZADD members me -> now+memberTTL,    *)
-(*     then ZREMRANGEBYSCORE members -inf "(now"  (evict expired).          *)
-(*   - LiveMembers (redis_store.go:806): ZRANGEBYSCORE "(now" +inf -- a     *)
+(*   - Heartbeat (webhook/redis_store.go RedisStore.Heartbeat): ZADD        *)
+(*     members me -> now+memberTTL, then ZREMRANGEBYSCORE members -inf      *)
+(*     "(now" (evict expired).                                              *)
+(*   - LiveMembers (RedisStore.LiveMembers): ZRANGEBYSCORE "(now" +inf -- a *)
 (*     member is live iff its lease score is STRICTLY GREATER than now.     *)
-(*   - slotReconcileOnce (manager.go:1049): read live members, compute      *)
+(*   - slotReconcileOnce (webhook/manager.go): read live members, compute   *)
 (*     TargetedSlots(me, members) = { h : HRWOwner(members,h) = me }, and    *)
-(*     ClaimSlot each targeted slot. held = HRW-targeted INTERSECT granted   *)
-(*     (CAS authority: ownership.go OwnedSlots).                            *)
-(*   - HRWOwner (ownership.go:278): argmax over live members of a per-      *)
-(*     (replica,slot) score, tie-broken by greatest replica id. The score   *)
-(*     is a deterministic, language-stable hash every replica agrees on; we  *)
-(*     model it as a CONSTANT total preference Score[r][h] (TLC enumerates   *)
-(*     all assignments via a symmetric instantiation, or pins one).         *)
+(*     claim every targeted slot (RedisStore.ClaimSlots: one claim_shard    *)
+(*     EVALSHA per slot, issued batched per node). held = HRW-targeted      *)
+(*     INTERSECT granted (CAS authority: ownership.go OwnedSlots).          *)
+(*   - HRWOwner (webhook/ownership.go HRWOwner / TargetedSlots): argmax     *)
+(*     over live members of a per-(replica,slot) score, tie-broken by       *)
+(*     greatest replica id. The score is a deterministic, language-stable   *)
+(*     hash every replica agrees on; we model it as a CONSTANT total        *)
+(*     preference Score[r][h] (TLC enumerates all assignments via a         *)
+(*     symmetric instantiation, or pins one).                               *)
+(*                                                                         *)
+(* PASS DURATION vs THE SLOT-LEASE GATE. ReconcileClaim(me,h) is ONE slot's  *)
+(* claim_shard; a reconcile pass is a finite sequence of such steps, and     *)
+(* Next already interleaves them arbitrarily with every other replica's      *)
+(* steps (a pipeline is not a transaction), so batching changes nothing     *)
+(* here. What the model ASSUMES is the Tick slot gate: an alive, still-       *)
+(* targeted owner renews a slot before its lease lapses. Note the grain: the *)
+(* model's renew resets the FULL SlotTTL, while the code anchors every lease *)
+(* of a pass at the pass start (lease_expiry_ns = pass now + slotLeaseTTL),  *)
+(* so a claim that lands late -- a slow pass -- leaves LESS than the TTL      *)
+(* (passes run one at a time, so no older pass lands after a newer one). The  *)
+(* gate thus stands for the runtime precondition that pass k+1's claim lands  *)
+(* within slotLeaseTTL of pass k's start:                                    *)
+(*     max(slotReconcileInterval, D_k) + c_(k+1) < slotLeaseTTL              *)
+(* with D the pass duration and c <= D the time from pass start to the claim *)
+(* step (a time.Ticker fires the next pass at once when one overruns the     *)
+(* interval). For passes that fit inside the interval this is the familiar   *)
+(* slotReconcileInterval + D < slotLeaseTTL. It is a precondition, not a     *)
+(* theorem: CheckOwnershipConfig's slotReconcileInterval < slotLeaseTTL is   *)
+(* necessary for it but says nothing about D; ClaimSlots keeps D at a fixed  *)
+(* few round trips independent of the owned-slot count; and                  *)
+(* slotReconcileOnce remembers, per slot, the start of the pass that last    *)
+(* wrote its lease and warns (once per pass, with the count) when a slot's   *)
+(* next claim lands more than slotLeaseTTL after it -- the condition itself, *)
+(* per slot, not a per-pass duration proxy. A pipeline that stalls past the  *)
+(* lease still breaks it (INVARIANTS, coverage gaps). The SLOW-PASS          *)
+(* twin below (TickUngated / SpecSlowPass) removes the gate to show what a   *)
+(* violated precondition costs (convergence: the owner's own lease lapses   *)
+(* and oscillates) and what it cannot cost (safety: Inv and the epoch       *)
+(* action-properties never read the gate). This block is the one full       *)
+(* statement of the condition; manager.go, the README, INVARIANTS            *)
+(* (INV-MEMBER-01), the Makefile and the slow-pass cfgs point here.         *)
 (*                                                                         *)
 (* L3 lease-tail-drop refinement (INV-LR-01 / INV-JEP-L3-01) is modeled in  *)
-(* MembershipLeaseTail.tla, which EXTENDS the per-slot lease ZSET with a     *)
+(* LeaseTail.tla, which EXTENDS the per-slot lease ZSET with a               *)
 (* DropLeaseTail action (ZREM the schedule entry, durable owner hash intact) *)
 (* and a Reconcile that RE-DERIVES the entry from the durable hash.          *)
 (*                                                                         *)
@@ -112,7 +147,7 @@ TypeOK ==
 \* A replica is a LIVE member iff it has lease ticks remaining -- the relative
 \* form of LiveMembers' "(now" exclusive lower bound (score - now > 0), so a
 \* score that has fallen to/below now (ttl 0) is "not live", exactly what
-\* ZREMRANGEBYSCORE evicts (redis_store.go:808).
+\* ZREMRANGEBYSCORE evicts (RedisStore.Heartbeat).
 IsLiveMember(r) == memberTTL[r] > 0
 LiveMembers == { r \in Replicas : IsLiveMember(r) }
 
@@ -123,7 +158,7 @@ SlotLeaseLive(h) == slotTTL[h] > 0
 ----------------------------------------------------------------------------
 (***************************************************************************)
 (* HRW -- HRWOwner(members, h) = argmax_{r in members} Score[r][h]          *)
-(* (ownership.go:278). With distinct scores (ASSUMEd), the argmax is a       *)
+(* (ownership.go HRWOwner). With distinct scores (ASSUMEd), the argmax is a  *)
 (* single replica.  ok=FALSE (no target) iff there are no live members.     *)
 (***************************************************************************)
 HRWTargetExists(h) == LiveMembers # {}
@@ -131,7 +166,7 @@ HRWOwner(h) ==
     CHOOSE r \in LiveMembers :
         \A r2 \in LiveMembers : Score[r][h] >= Score[r2][h]
 
-\* The slots HRW assigns to `me` (TargetedSlots, ownership.go:291).
+\* The slots HRW assigns to `me` (TargetedSlots, ownership.go).
 TargetedBy(me) == { h \in Slots : HRWTargetExists(h) /\ HRWOwner(h) = me }
 
 ----------------------------------------------------------------------------
@@ -246,20 +281,26 @@ ReconcileClaim(me, h) ==
 (* SOME counter is still positive (else it would be a pure no-op).            *)
 (***************************************************************************)
 Decr(x) == IF x > 0 THEN x - 1 ELSE 0
+
+\* slot gate: never lapse an ALIVE owner's SLOT lease while that owner is still
+\* the HRW target. Unlike the member gate this is not a config relation: it
+\* stands for the RUNTIME precondition that pass k+1's claim of a slot lands
+\* within slotLeaseTTL of pass k's start (PASS DURATION vs THE SLOT-LEASE GATE
+\* in the header, the one full statement; INV-MEMBER-01 catalogs it). A slot
+\* whose owner is DEAD or NO LONGER targeted is free to lapse -- that is exactly
+\* how a crashed/deposed owner's slot becomes claimable by the survivor. Named
+\* so the slow-pass twin below can name the one step that breaks it.
+SlotGateHolds ==
+    \A h \in Slots :
+        ( slotOwner[h] # NoOwner /\ alive[slotOwner[h]]
+          /\ HRWTargetExists(h) /\ HRWOwner(h) = slotOwner[h] )
+        => slotTTL[h] > 1
+
 Tick ==
     \* member gate: never lapse an ALIVE replica's MEMBER lease -- it heartbeats
     \* faster than the member TTL (heartbeatInterval < memberLeaseTTL/2).
     /\ \A r \in Replicas : alive[r] => memberTTL[r] > 1
-    \* slot gate: never lapse an ALIVE owner's SLOT lease when that owner is still
-    \* the HRW target -- the slotReconcileLoop re-claims (renews) an owned slot at
-    \* least as often as the heartbeat (slotReconcileInterval <= heartbeatInterval,
-    \* INV-MEMBER-01), so an owned-and-still-targeted slot lease never lapses. A slot
-    \* whose owner is DEAD or NO LONGER targeted is free to lapse -- that is exactly
-    \* how a crashed/deposed owner's slot becomes claimable by the survivor.
-    /\ \A h \in Slots :
-            ( slotOwner[h] # NoOwner /\ alive[slotOwner[h]]
-              /\ HRWTargetExists(h) /\ HRWOwner(h) = slotOwner[h] )
-            => slotTTL[h] > 1
+    /\ SlotGateHolds
     /\ \/ \E r \in Replicas : memberTTL[r] > 0
        \/ \E h \in Slots : slotTTL[h] > 0
     /\ memberTTL' = [r \in Replicas |-> Decr(memberTTL[r])]
@@ -330,6 +371,66 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 \* No-fairness spec: used by the negative test -- WITHOUT fairness the
 \* convergence leads-to MUST FAIL (a run where the reconcile loop never fires).
 SpecNoFair == Init /\ [][Next]_vars
+
+----------------------------------------------------------------------------
+(***************************************************************************)
+(* SLOW-PASS TWIN -- the Tick slot gate removed (member gate kept).          *)
+(*                                                                         *)
+(* TickUngated is Tick without the slot-lease headroom conjunct: time may    *)
+(* lapse an ALIVE, still-HRW-targeted owner's slot lease between two of its  *)
+(* own renewals. That is an implementation whose next claim lands more than  *)
+(* slotLeaseTTL after the previous pass's start (a serial pass of N slots x  *)
+(* 3 round trips did, at a remote region's RTT). Two runs pin what the gate  *)
+(* is and is not responsible for:                                           *)
+(*   - Membership_SlowPass_Safety.cfg: Inv, EpochMonotoneProp and             *)
+(*     TransferBumpsEpochProp still HOLD -- none of them reads the gate, so  *)
+(*     a slow pass can only churn (lapse -> self-RENEW, or a rival's          *)
+(*     TRANSFER with an epoch bump that fences us), never break single-      *)
+(*     owner or epoch safety.                                               *)
+(*   - Membership_SlowPass_Convergence.cfg: EventualConvergence MUST FAIL     *)
+(*     under the same fairness (WF on TickUngated in place of Tick): the      *)
+(*     counterexample is an alive HRW owner whose slotTTL reaches 0 and is   *)
+(*     renewed again, forever -- the lapse/renew oscillation. That is the    *)
+(*     negative control proving the gate is exactly what []Converged needs,  *)
+(*     and it doubles as the non-vacuity witness for the gate.              *)
+(*                                                                         *)
+(* TickUngated = Tick \/ SlowPassLapse, and NextSlowPass lists the two       *)
+(* disjuncts rather than the union so that TLC NAMES the forbidden step in a *)
+(* counterexample: a SlowPassLapse step is a tick that drives an alive,       *)
+(* still-targeted owner's slot lease to 0 -- the one step Tick rules out and  *)
+(* the one step every SpecSlowPass counterexample must contain (a behaviour  *)
+(* without one is a Spec behaviour, and Spec converges). The Makefile's      *)
+(* negative control greps for it, so the control cannot be satisfied by a    *)
+(* trace in which time merely passes.                                       *)
+(***************************************************************************)
+TickUngated ==
+    /\ \A r \in Replicas : alive[r] => memberTTL[r] > 1
+    /\ \/ \E r \in Replicas : memberTTL[r] > 0
+       \/ \E h \in Slots : slotTTL[h] > 0
+    /\ memberTTL' = [r \in Replicas |-> Decr(memberTTL[r])]
+    /\ slotTTL'   = [h \in Slots |-> Decr(slotTTL[h])]
+    /\ UNCHANGED <<alive, slotOwner, slotEpoch, churnStopped, churnLeft>>
+
+\* The step Tick forbids: an ungated tick taken while the slot gate does not hold.
+SlowPassLapse == TickUngated /\ ~SlotGateHolds
+
+NextSlowPass ==
+    \/ \E r \in Replicas : Heartbeat(r)
+    \/ \E r \in Replicas : Join(r)
+    \/ \E r \in Replicas : Crash(r)
+    \/ StopChurn
+    \/ \E me \in Replicas, h \in Slots : ReconcileClaim(me, h)
+    \/ Tick
+    \/ SlowPassLapse
+
+FairnessSlowPass ==
+    /\ \A r \in Replicas : SF_vars(Heartbeat(r))
+    /\ \A me \in Replicas, h \in Slots : WF_vars(ReconcileClaim(me, h))
+    /\ WF_vars(TickUngated)
+    /\ WF_vars(StopChurn)
+
+SpecSlowPass == Init /\ [][NextSlowPass]_vars /\ FairnessSlowPass
+SpecSlowPassNoFair == Init /\ [][NextSlowPass]_vars
 
 ----------------------------------------------------------------------------
 (***************************************************************************)

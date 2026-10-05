@@ -368,9 +368,9 @@ func scopedOwnerArgs(scope OwnerScope) (ownerScriptArgs, error) {
 // often as we prove liveness), plus slotReconcileInterval < slotLeaseTTL (a slot
 // lease must outlive the interval between the passes that renew it). The last is
 // necessary for, not sufficient for, the runtime precondition on pass timing
-// behind Membership.tla's Tick slot gate: the pass duration enters too, which
-// only slotReconcileOnce can observe. Pure, so it is unit-tested without a
-// Manager and reused to validate operator-supplied config.
+// stated in Membership.tla's header: the pass duration enters too, which only
+// slotReconcileOnce can observe. Pure, so it is unit-tested without a Manager and
+// reused to validate operator-supplied config.
 func CheckOwnershipConfig(memberLeaseTTL, heartbeatInterval, slotLeaseTTL, slotReconcileInterval time.Duration) error {
 	if memberLeaseTTL <= 0 || heartbeatInterval <= 0 || slotLeaseTTL <= 0 || slotReconcileInterval <= 0 {
 		return fmt.Errorf("webhook: ownership TTLs must be positive (member=%s heartbeat=%s slot=%s reconcile=%s)",

@@ -2383,10 +2383,10 @@ func (m *Manager) slotReconcileOnce() {
 		}
 		// This slot's claim had to land within slotLeaseTTL of the pass that last
 		// wrote its lease — the runtime precondition behind Membership.tla's Tick
-		// slot gate. It landed no later than ClaimSlots returned, so a later
-		// landing means a rival could have taken a slot we still listed as held,
-		// whether this claim renewed it, took it back or found it BUSY.
-		// Observational only.
+		// slot gate, stated in full in that module's header. It landed no later
+		// than ClaimSlots returned, so a later landing means a rival could have
+		// taken a slot we still listed as held, whether this claim renewed it,
+		// took it back or found it BUSY. Observational only.
 		if at, ok := m.leaseAnchor[h]; ok && landed.Sub(at) > m.slotLeaseTTL {
 			lapsed++
 			oldest = max(oldest, landed.Sub(at))

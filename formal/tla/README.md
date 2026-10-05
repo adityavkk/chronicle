@@ -292,7 +292,8 @@ transitions into it — so the layering proof compares like with like.
 
 | Spec action | Source mirror | Guard transcribed |
 |---|---|---|
-| `ClaimShard(me,h)` | `webhook/scripts/claim_shard.lua` (`webhook/ownership.go SlotClaim`) | BUSY iff a live foreign owner; else grant — `owner=me` RENEW (epoch kept), `owner≠me` TRANSFER (`HINCRBY owner_epoch +1`, strictly up). |
+| `ClaimShard(me,h)` | `webhook/scripts/claim_shard.lua` (`webhook/ownership.go SlotClaim`), issued by `RedisStore.ClaimSlots` as one EVALSHA per slot inside a per-node pipeline | BUSY iff a live foreign owner; else grant — `owner=me` RENEW (epoch kept), `owner≠me` TRANSFER (`HINCRBY owner_epoch +1`, strictly up). Each EVALSHA is still exactly one atomic action; a pipeline is not a transaction, so other replicas' steps may interleave between them — the arbitrary interleaving `ONext` already allows. A pass is a finite sequence of model steps (in slot order within each node's pipeline; steps on different keys commute, so the order across nodes is immaterial), not a new action, and `slotReconcileOnce` runs passes one at a time. One grain difference: the model's RENEW resets the full `SlotTTL`, while the Lua writes `lease_expiry_ns = pass now + slotLeaseTTL`, anchored at that pass's start, so a claim that lands late leaves less than the TTL — the `Tick` slot gate's runtime precondition, stated in full in `Membership.tla`'s header (and below). |
+| Lease / Retry / Due drains (`claim_due`) | `webhook/scripts/claim_due.lua`, issued by `RedisStore.ClaimDueSlots` as one EVALSHA per owned slot inside one pipeline per worker tick | Re-score forward to `now + visibility`, never ZREM (INV-LEASE-02); one key per call, so the batch is single-slot per command and the per-slot semantics Liveness.tla's drain fairness abstracts are unchanged. |
 | `OwnerVerdict` / `OwnerFenced` | `webhook/scripts/check_owner.lua` / `common.lua owner_fenced` | UNOWNED / FENCED (owner≠me ∨ epoch mismatch) / OWNER; `epoch=''`(=0) short-circuits to pass (external/hot path). |
 | `Depose(h)` | membership drop | the slot lease lapses; `owner_id`/`owner_epoch` persist (fenced only by a later TRANSFER bump). |
 | `Arm`/`Ack`/`Release`/`ExpireLease` owner guard | inlined `owner_fenced(...)` at the top of each mutating Lua | a FENCED owner check is a no-op (`return {'FENCED'}`), exactly the inlined-Lua set; `Claim` is intentionally un-guarded (load-balanced external path). |
@@ -335,6 +336,8 @@ make membership-safety      # AtMostOneOwner / NoLiveSplitBrain / Epoch* over fu
 make membership-convergence # <>[]Converged after churn stops (under WF/SF fairness)
 make membership-nofair      # negative control: WITHOUT fairness convergence MUST FAIL
 make membership-witness     # non-vacuity: a real TRANSFER and a real zero-owner GAP
+make membership-slowpass-safety      # Tick slot gate REMOVED: safety + epoch props MUST still hold
+make membership-slowpass-convergence # Tick slot gate REMOVED: convergence MUST FAIL (lapse/renew oscillation)
 make leasetail              # L3: NoSpuriousLease + a stranded lease is restored
 make leasetail-witness      # non-vacuity: the stranded-lease state is reachable
 make alloy                  # the two Alloy relational models (one dir up, formal/alloy)
@@ -355,19 +358,63 @@ Two modeling decisions are load-bearing and documented in the spec header:
   makes "a renewed lease stays live forever" inexpressible in a bounded model,
   and it is faithful (the store only ever uses `score − now`, the difference).
 - **The heartbeat-headroom gate on `Tick`** is the model-level encoding of
-  `CheckOwnershipConfig`'s `heartbeatInterval < memberLeaseTTL/2` and
-  `slotReconcileInterval ≤ heartbeatInterval` (INV-MEMBER-01): `Tick` is disabled
-  if it would lapse an *alive* replica's member lease, or an *alive HRW-target*
-  owner's slot lease — so time can never starve a survivor. SF(Heartbeat) then
-  forces the renew while `Tick` is blocked. A **bounded churn budget** (`MaxChurn`)
-  caps pre-stop transfers so the epoch ceiling can never block the post-churn
-  convergence transfers (the state-constraint-during-liveness hazard).
+  `CheckOwnershipConfig`'s `heartbeatInterval < memberLeaseTTL/2` (INV-MEMBER-01):
+  `Tick` is disabled if it would lapse an *alive* replica's member lease, so time
+  can never starve a survivor. SF(Heartbeat) then forces the renew while `Tick`
+  is blocked. The **slot gate** on the same `Tick` (an *alive HRW-target* owner's
+  slot lease never lapses) is not a config relation: `CheckOwnershipConfig`'s
+  `slotReconcileInterval < slotLeaseTTL` is necessary for it but says nothing
+  about how long a pass takes; it stands for the runtime precondition that pass
+  *k+1*'s claim of a slot lands within `slotLeaseTTL` of pass *k*'s start
+  (stated in full in `Membership.tla`'s header, PASS DURATION vs THE SLOT-LEASE
+  GATE; see below). A **bounded churn budget** (`MaxChurn`) caps pre-stop
+  transfers so the epoch ceiling can never block the post-churn convergence
+  transfers (the state-constraint-during-liveness hazard).
 
 `membership-nofair` removes the fairness and TLC finds a counterexample, proving
 the leads-to is non-trivial. `membership-witness` proves a genuine TRANSFER
 (epoch ≥ 2) and a genuine zero-owner coverage gap (a previously-claimed slot
 whose owner crashed and whose lease lapsed) are each really reached — so the
 convergence run is not vacuous.
+
+**The slot gate's runtime precondition, and the slow-pass twin.** The Tick slot
+gate assumes an alive, still-targeted owner renews a slot before its lease
+lapses. A pass is a finite sequence of `ReconcileClaim(me,h)` steps — each
+`claim_shard` EVALSHA is one atomic action, and `Next` already interleaves such
+steps arbitrarily with every other replica's, so *how* a pass issues them (one
+round trip per slot, or batched per node in one pipeline by
+`RedisStore.ClaimSlots`) adds no behaviour to the model; a pipeline is not a
+transaction, and `slotReconcileOnce` runs passes one at a time, so a `Promote`
+pass is simply the next pass. What the model abstracts is the lease anchor: its
+RENEW resets the full TTL, whereas the code anchors every lease of a pass at the
+pass start, so the gate stands for a runtime precondition on pass timing — pass
+*k+1*'s claim of a slot must land within `slotLeaseTTL` of pass *k*'s start.
+The condition is stated in full, once, in `Membership.tla`'s header (PASS
+DURATION vs THE SLOT-LEASE GATE); INV-MEMBER-01 catalogs it. What batching
+changes is the pass duration: a serial pass of N slots × 3 round trips could
+exceed the lease at a remote region's RTT, whereas `ClaimSlots` makes the pass a
+fixed few round trips independent of the owned-slot count, and
+`slotReconcileOnce` checks, per slot, whether the claim landed more than
+`slotLeaseTTL` after the pass that last wrote that slot's lease, and warns once
+per pass with the count. The twin `SpecSlowPass` /
+`SpecSlowPassNoFair` (`TickUngated`: the slot conjunct removed, the member gate
+kept) shows what the gate buys: `membership-slowpass-safety` keeps `Inv` and
+both epoch action-properties (none reads the gate — pass timing can only churn,
+never break single-owner or epoch safety, which is why INV-OWNER-01/02 are
+time-free), and `membership-slowpass-convergence` **must fail**, its
+counterexample an alive HRW owner whose `slotTTL` reaches 0 and is renewed again
+forever — the lapse/renew oscillation, which doubles as the gate's non-vacuity
+witness. The control is sharp: the target requires a *temporal* violation whose
+trace contains a `SlowPassLapse` step — `TickUngated` is `Tick \/ SlowPassLapse`,
+and `NextSlowPass` lists the two apart so TLC names the step `Tick` forbids (a
+tick that lapses an alive, still-targeted owner's lease) rather than every tick.
+Every counterexample must contain one, because a `SpecSlowPass` behaviour
+without one is a `Spec` behaviour, and `Spec` converges; a trace in which time
+merely passes cannot satisfy the grep. That step, not reach-versus-stay, is the
+criterion: the weaker `EventuallyConverges` (`churnStopped ~> Converged`) also
+fails on the twin, by a lasso in which the sole survivor's two slot leases lapse
+and are renewed alternately so `Converged` never holds for both at once, and
+which counterexample TLC prints first is not stable across runs.
 
 ## The L3 lease-tail-drop refinement (INV-LR-01 / INV-JEP-L3-01)
 
@@ -388,6 +435,8 @@ reconcile loop.
 | `membership-convergence` (`<>[]Converged` under fairness) | No error — both leads-to branches hold |
 | `membership-nofair` (negative control) | Temporal property violated (as required) |
 | `membership-witness` (NotTransferReachable / NotZeroOwnerGapReachable) | both violated (as required — non-vacuous) |
+| `membership-slowpass-safety` (Tick slot gate removed: Inv + Epoch action-props) | No error — 30071 distinct states (more than the gated 21038: the extra states are the lapsed-while-alive slot leases the gate forbade) |
+| `membership-slowpass-convergence` (gate removed, same fairness: `<>[]Converged`, TypeOK) | Temporal property violated (as required): the trace reaches `Converged` (the sole survivor owning both slots with live leases), then a `SlowPassLapse` tick drives its `slotTTL` to 0 and `ReconcileClaim` renews it, looping — the lapse/renew lasso of an alive HRW owner (one of several such lassos; the target checks for the `SlowPassLapse` step, not for this particular trace). No stable state count: TLC stops at whichever periodic liveness check first finds the lasso, so the figure it prints varies from run to run (the full space is the safety twin's 30071) |
 | `leasetail` (Inv + `LeaseRecoverable`) | No error |
 | `leasetail-witness` (NoStranded) | violated (as required — stranded state reachable) |
 
@@ -399,7 +448,8 @@ reconcile loop.
   TRANSFER / zero-owner-gap reachability witnesses.
 - `MC_Membership.tla` — pins a concrete distinct-per-(replica,slot) HRW `Score`.
 - `Membership_Safety.cfg`, `Membership_Convergence.cfg`, `Membership_NoFair.cfg`,
-  `Membership_Witness.cfg`, `Membership_WitnessGap.cfg`.
+  `Membership_Witness.cfg`, `Membership_WitnessGap.cfg`, and the slow-pass twin
+  `Membership_SlowPass_Safety.cfg` / `Membership_SlowPass_Convergence.cfg`.
 - `LeaseTail.tla` + `LeaseTail.cfg` — the L3 lease-tail-drop refinement.
 - Alloy relational models live in [`../alloy/`](../alloy/) (INV-RECOVER-04 +
   INV-JEP-T5-01); see that directory's `README.md`.
