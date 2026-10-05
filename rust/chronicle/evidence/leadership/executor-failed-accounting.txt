@@ -1,0 +1,36 @@
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/chronicle-transfer/rust/chronicle)
+    Finished `test` profile [unoptimized] target(s) in 8.06s
+     Running unittests src/main.rs (target/debug/deps/chronicle_raft-875b5c54ece29af4)
+
+running 4 tests
+
+thread 'controller::retirement_tests::removed_control_replica_discovers_claim_owner_and_transfers_once' panicked at src/controller_retirement_tests.rs:319:17:
+assertion `left == right` failed
+  left: 5
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test controller::retirement_tests::removed_control_replica_discovers_claim_owner_and_transfers_once ... FAILED
+
+thread 'controller::retirement_tests::changed_admission_after_claim_spends_permission_without_submission' panicked at src/controller_retirement_tests.rs:322:17:
+assertion `left == right` failed
+  left: 3
+ right: 0
+test controller::retirement_tests::changed_admission_after_claim_spends_permission_without_submission ... FAILED
+
+thread 'controller::retirement_tests::lost_claim_reply_never_reconstructs_permission' panicked at src/controller_retirement_tests.rs:322:17:
+assertion `left == right` failed
+  left: 3
+ right: 0
+test controller::retirement_tests::lost_claim_reply_never_reconstructs_permission ... FAILED
+test controller::retirement_tests::removed_control_leader_completes_data_placement_and_retires ... ok
+
+failures:
+
+failures:
+    controller::retirement_tests::changed_admission_after_claim_spends_permission_without_submission
+    controller::retirement_tests::lost_claim_reply_never_reconstructs_permission
+    controller::retirement_tests::removed_control_replica_discovers_claim_owner_and_transfers_once
+
+test result: FAILED. 1 passed; 3 failed; 0 ignored; 0 measured; 35 filtered out; finished in 2.47s
+
+error: test failed, to rerun pass `--bin chronicle-raft`

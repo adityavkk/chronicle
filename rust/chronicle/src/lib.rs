@@ -4,6 +4,7 @@ pub mod expiry;
 #[cfg(feature = "storage-faults")]
 pub mod faults;
 pub mod fork;
+pub mod leadership;
 pub mod metrics;
 pub mod model;
 pub mod network;

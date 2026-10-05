@@ -104,3 +104,10 @@ completion; it does not verify completion probes, weighted convergence or Raft
 itself. Those remain separate implementation-test and live-qualification gates.
 Lean's natural-number vote rank abstracts the order of committed `(term, node)`
 identities; the Rust representation/refinement is not mechanized.
+
+The submission budget covers application-triggered optimization only. The pinned
+Raft step-down watcher can separately initiate transfers when a leader is fully
+removed from effective/committed membership. A single trigger broadcasts to all
+other effective voters. `chronicle_leadership_submissions_total` counts calls at
+the application boundary, not those autonomous removal transfers or RPC fanout.
+See `UPGRADE.md`; the HTTP regression retains per-group/recipient deliveries.

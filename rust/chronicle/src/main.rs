@@ -4,6 +4,7 @@ mod failure;
 mod fork_http;
 mod forks;
 mod identity;
+mod leader_balance;
 mod sse;
 mod telemetry;
 
@@ -249,6 +250,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/admit", post(admit))
         .route("/admin/placed", post(placed))
         .route("/admin/control", get(control))
+        .route("/admin/leadership/{group}", get(leader_balance::observe))
+        .route("/admin/leadership/claim", post(leader_balance::claim))
         .route("/admin/retirement/{id}", get(retirement))
         .route("/admin/retirement-state", get(retirement_state))
         .route("/admin/snapshot/{group}", post(snapshot))
@@ -403,7 +406,9 @@ async fn resources(State(a): State<Shared>, headers: HeaderMap) -> ApiResult {
     rpc_recipient(&a.identity, &headers)?;
     let mut loads = BTreeMap::new();
     for (id, group) in &a.groups {
-        loads.insert(*id, group.store.load().await.map_err(unavailable)?);
+        let mut load = group.store.load().await.map_err(unavailable)?;
+        load.view = leader_balance::view(group).await.map_err(unavailable)?;
+        loads.insert(*id, load);
     }
     Ok(Json(loads).into_response())
 }
@@ -493,11 +498,6 @@ pub async fn proxy(
     if headers.contains_key("x-chronicle-forwarded") {
         return Err(unavailable("leadership changed; retry"));
     }
-    let hint = a.groups[&group]
-        .raft
-        .metrics()
-        .borrow_watched()
-        .current_leader;
     let mut nodes = a.groups[&0]
         .store
         .read_state()
@@ -507,34 +507,8 @@ pub async fn proxy(
     for (id, node) in &a.nodes {
         nodes.entry(*id).or_insert_with(|| node.clone());
     }
-    let mut candidates: Vec<_> = nodes.into_iter().filter(|(id, _)| *id != a.id).collect();
-    candidates.sort_by_key(|(id, _)| Some(*id) != hint);
-    // Removed replicas stop receiving heartbeats, so their local leader hint can stay
-    // absent/stale forever. Probe bounded routing hints; only the destination's read
-    // barrier and client_write authorize the operation. Never retry the mutation here.
-    let address = tokio::time::timeout(Duration::from_secs(3), async {
-        for (id, node) in candidates {
-            let response = a
-                .client
-                .get(format!("http://{}/admin/status", node.addr))
-                .timeout(Duration::from_millis(500))
-                .send()
-                .await;
-            if let Ok(response) = response
-                && response.status().is_success()
-                && let Ok(status) = response.json::<serde_json::Value>().await
-                && status[group.to_string()]["id"].as_u64() == Some(id)
-                && status[group.to_string()]["current_leader"].as_u64() == Some(id)
-                && status[group.to_string()]["state"].as_str() == Some("Leader")
-            {
-                return Some(node.addr);
-            }
-        }
-        None
-    })
-    .await
-    .map_err(unavailable)?
-    .ok_or_else(|| unavailable("no leader; retry"))?;
+    let candidates = nodes.into_iter().filter(|(id, _)| *id != a.id).collect();
+    let (_, address) = discover_leader(a, group, candidates).await?;
     headers.insert("x-chronicle-forwarded", "1".parse().map_err(bad)?);
     // Keep the caller's authority for Location; routing uses the explicit URL.
     // Admin handlers reserialize JSON before forwarding. The original framing
@@ -560,6 +534,45 @@ pub async fn proxy(
     });
     Ok((status, headers, Body::from_stream(chunks)).into_response())
 }
+/// Bounded read-only routing discovery. A result is only a hint; the receiver
+/// must still perform its barrier/client_write. Never retry mutations here.
+pub async fn discover_leader(
+    a: &App,
+    group: u64,
+    mut candidates: Vec<(u64, Node)>,
+) -> Result<(u64, String), (StatusCode, String)> {
+    let hint = a.groups[&group]
+        .raft
+        .metrics()
+        .borrow_watched()
+        .current_leader;
+    candidates.sort_by_key(|(id, _)| Some(*id) != hint);
+    // Removed replicas can retain an absent/stale local hint indefinitely.
+    tokio::time::timeout(Duration::from_secs(3), async {
+        for (id, node) in candidates {
+            let response = a
+                .client
+                .get(format!("http://{}/admin/status", node.addr))
+                .timeout(Duration::from_millis(500))
+                .send()
+                .await;
+            if let Ok(response) = response
+                && response.status().is_success()
+                && let Ok(status) = response.json::<serde_json::Value>().await
+                && status[group.to_string()]["id"].as_u64() == Some(id)
+                && status[group.to_string()]["current_leader"].as_u64() == Some(id)
+                && status[group.to_string()]["state"].as_str() == Some("Leader")
+            {
+                return Some((id, node.addr));
+            }
+        }
+        None
+    })
+    .await
+    .map_err(unavailable)?
+    .ok_or_else(|| unavailable("no leader; retry"))
+}
+
 async fn control(State(a): State<Shared>, headers: HeaderMap) -> ApiResult {
     let g = &a.groups[&0];
     if g.raft.metrics().borrow_watched().state != openraft::ServerState::Leader {

@@ -48,8 +48,10 @@ This is a prerelease; no mixed-version, rolling-upgrade or downgrade claim is ma
   skips**, 68.24 seconds, on that recovered candidate.
   [Full output](upgrade-alpha36/conformance.txt), [JSON](upgrade-alpha36/conformance.json).
 * Real SQLite/HTTP Raft tests establish directed successor election followed by
-  quorum readiness, strict read and replicated write, with exactly one delivered
-  transfer. Actual recipients reject stale votes and unavailable flush boundaries.
+  quorum readiness, strict read and replicated write, with exactly one
+  delivery to the designated target. One trigger also broadcasts to the other
+  effective voters; this is not a claim of one total RPC. Actual recipients reject
+  stale votes and unavailable flush boundaries.
   Heartbeat-enabled failure tests separately measure aggregate traffic and
   in-flight requests; the 500 ms replication-retry floor does not apply to
   independent heartbeats. [Network output](upgrade-alpha36/network.txt).

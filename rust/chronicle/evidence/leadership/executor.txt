@@ -1,0 +1,38 @@
+   Compiling chronicle-raft v0.1.0 (/home/user/workspace/chronicle-transfer/rust/chronicle)
+    Finished `test` profile [unoptimized] target(s) in 8.06s
+     Running unittests src/main.rs (target/debug/deps/chronicle_raft-875b5c54ece29af4)
+
+running 4 tests
+transfer delivery: group=0, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=0, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 27 })
+transfer delivery: group=1, recipient=2, source=<T1-N1:Q>, target=2, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 7 })
+transfer delivery: group=1, recipient=3, source=<T1-N1:Q>, target=2, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 7 })
+test controller::retirement_tests::removed_control_replica_discovers_claim_owner_and_transfers_once ... ok
+test controller::retirement_tests::lost_claim_reply_never_reconstructs_permission ... ok
+transfer delivery: group=1, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=1, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=1, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+test controller::retirement_tests::changed_admission_after_claim_spends_permission_without_submission ... ok
+transfer delivery: group=2, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=2, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=2, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=3, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=3, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=3, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=4, recipient=2, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=4, recipient=3, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+transfer delivery: group=4, recipient=4, source=<T1-N1:Q>, target=4, boundary=Some(LogId { leader_id: LeaderId { term: 1, node_id: 1 }, index: 13 })
+test controller::retirement_tests::removed_control_leader_completes_data_placement_and_retires ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 35 filtered out; finished in 2.30s
+

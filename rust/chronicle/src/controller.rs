@@ -76,6 +76,9 @@ pub async fn run(a: Shared) {
     // Native campaigns are disruptive experiments, never default balancing.
     let campaigns_enabled =
         std::env::var("CHRONICLE_EXPERIMENTAL_CAMPAIGNS").is_ok_and(|value| value == "1");
+    // Opt-in until live disruption/convergence qualification is complete.
+    let leadership_enabled =
+        std::env::var("CHRONICLE_LEADERSHIP_BALANCE").is_ok_and(|value| value == "1");
     let mut campaigns = BTreeMap::new();
     let mut retirement = Retirement::default();
     let mut balance = chronicle_raft::balance::Window::default();
@@ -88,6 +91,7 @@ pub async fn run(a: Shared) {
                 campaigns_enabled,
                 &mut retirement,
                 &mut balance,
+                leadership_enabled,
             ),
         )
         .await
@@ -103,7 +107,7 @@ pub async fn run(a: Shared) {
     }
 }
 
-async fn control(a: &Shared) -> anyhow::Result<State> {
+pub(crate) async fn control(a: &Shared) -> anyhow::Result<State> {
     let g = &a.groups[&0];
     // A removed leader can retain a self leader hint after becoming Learner.
     if g.raft.metrics().borrow_watched().state == openraft::ServerState::Leader {
@@ -140,6 +144,7 @@ async fn tick(
     campaigns_enabled: bool,
     retirement: &mut Retirement,
     balance: &mut chronicle_raft::balance::Window,
+    leadership_enabled: bool,
 ) -> anyhow::Result<()> {
     let mut state = control(a).await?;
     let control_group = &a.groups[&0];
@@ -164,8 +169,15 @@ async fn tick(
             balance.reset();
             let response = control_group.raft.client_write(command).await?;
             anyhow::ensure!(response.data.error.is_none(), "placement intent rejected");
-        } else if let Some(command) =
-            resource_balance(a, &state, &healthy, authority.current_term, balance).await
+        } else if let Some(command) = resource_balance(
+            a,
+            &state,
+            &healthy,
+            authority.current_term,
+            balance,
+            leadership_enabled,
+        )
+        .await
         {
             tracing::info!(intent = ?command, "resource placement proposed");
             let response = control_group.raft.client_write(command).await?;
@@ -179,6 +191,16 @@ async fn tick(
         balance.reset();
     }
     state = control(a).await?;
+    // A failed optional transfer must not prevent replica repair/retirement.
+    let leadership = tokio::time::timeout(
+        Duration::from_secs(4),
+        crate::leader_balance::reconcile(a, &state, leadership_enabled),
+    )
+    .await;
+    if !matches!(leadership, Ok(Ok(()))) {
+        balance.reset();
+        tracing::warn!(result = ?leadership, "leadership reconciliation failed; outcome may be unknown");
+    }
     if campaigns_enabled {
         balance_leaders(a.id, &a.groups, &state, campaigns).await?;
     }
@@ -629,6 +651,7 @@ async fn resource_balance(
     healthy: &BTreeMap<u64, chronicle_raft::model::Node>,
     term: u64,
     window: &mut chronicle_raft::balance::Window,
+    leadership_enabled: bool,
 ) -> Option<Command> {
     if !can_sample(state, healthy) {
         window.reset();
@@ -640,7 +663,14 @@ async fn resource_balance(
         window.reset();
         return None;
     }
-    window.observe(state, loads, term, Instant::now(), now_ms())
+    window.observe(
+        state,
+        loads,
+        term,
+        Instant::now(),
+        now_ms(),
+        leadership_enabled,
+    )
 }
 
 async fn resource_loads(

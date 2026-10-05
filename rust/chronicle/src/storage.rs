@@ -156,6 +156,7 @@ impl SqliteStore {
             busy_us: self.busy_us.load(Ordering::Relaxed),
             queued,
             charged_bytes,
+            view: None,
         })
     }
 
@@ -394,6 +395,7 @@ impl Worker {
         state.nodes = read_meta(&db, "nodes")?.unwrap_or_default();
         state.placements = read_meta(&db, "placements")?.unwrap_or_default();
         state.fork_targets = read_meta(&db, "fork_targets")?.unwrap_or_default();
+        state.leadership = read_meta(&db, "leadership")?.unwrap_or_default();
         Ok(Self {
             db,
             state,
@@ -767,6 +769,7 @@ impl SqliteStore {
                             } else {
                                 put_meta(t, "nodes", &s.nodes)?;
                                 put_meta(t, "placements", &s.placements)?;
+                                put_meta(t, "leadership", &s.leadership)?;
                             }
                         }
                         EntryPayload::Membership(m) => {
@@ -854,6 +857,7 @@ impl SqliteStore {
                 put_meta(t, "nodes", &body.state.nodes)?;
                 put_meta(t, "placements", &body.state.placements)?;
                 put_meta(t, "fork_targets", &body.state.fork_targets)?;
+                put_meta(t, "leadership", &body.state.leadership)?;
                 put_meta(t, "applied", &body.last_applied)?;
                 put_meta(t, "membership", &body.membership)?;
                 put_meta_raw(t, "snapshot_bytes", &bytes)?;

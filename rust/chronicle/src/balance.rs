@@ -21,9 +21,12 @@ pub struct Load {
     pub busy_us: u64,
     pub queued: usize,
     pub charged_bytes: usize,
+    #[serde(default)]
+    pub view: Option<crate::leadership::View>,
 }
 
 pub type Loads = BTreeMap<u64, BTreeMap<u64, Load>>;
+type Leaders = BTreeMap<u64, (crate::Vote, crate::LogId)>;
 
 fn zones(state: &State, voters: &BTreeSet<u64>) -> usize {
     voters
@@ -39,6 +42,8 @@ pub fn admissible(state: &State, shard: u64, voters: &BTreeSet<u64>, now: u64) -
         return false;
     };
     state.placements.len() == (SHARDS + 1) as usize
+        && !state.leadership.pending()
+        && state.leadership.cooled(now)
         && state.placements.values().all(|p| p.complete)
         && state
             .placements
@@ -61,6 +66,8 @@ struct Sample {
     term: u64,
     nodes: BTreeMap<u64, Node>,
     generations: Vec<(u64, u64)>,
+    leaders: Option<Leaders>,
+    attempt: u64,
     start: Instant,
     last: Instant,
     initial: Loads,
@@ -79,9 +86,11 @@ impl Window {
         term: u64,
         now: Instant,
         wall_ms: u64,
+        leadership_enabled: bool,
     ) -> Option<Command> {
         let complete = state.placements.len() == (SHARDS + 1) as usize
             && state.placements.values().all(|p| p.complete)
+            && !state.leadership.pending()
             && state
                 .nodes
                 .iter()
@@ -100,10 +109,15 @@ impl Window {
             .iter()
             .map(|(id, p)| (*id, p.generation))
             .collect();
+        let leaders = leadership_enabled
+            .then(|| current_leaders(state, &loads))
+            .flatten();
         let continuous = self.sample.as_ref().is_some_and(|s| {
             s.term == term
                 && s.nodes == state.nodes
                 && s.generations == generations
+                && s.leaders == leaders
+                && s.attempt == state.leadership.last_id
                 && now.duration_since(s.last) <= MAX_GAP
                 && s.previous.iter().all(|(id, groups)| {
                     groups.iter().all(|(g, old)| {
@@ -118,6 +132,8 @@ impl Window {
                 term,
                 nodes: state.nodes.clone(),
                 generations,
+                leaders,
+                attempt: state.leadership.last_id,
                 start: now,
                 last: now,
                 initial: loads.clone(),
@@ -153,10 +169,18 @@ impl Window {
                 (g, weight)
             })
             .collect();
-        let command = choose(state, &sample.previous, &weights, wall_ms);
+        let command = choose(state, &sample.previous, &weights, wall_ms).or_else(|| {
+            choose_leader(
+                state,
+                &sample.previous,
+                &weights,
+                sample.leaders.as_ref()?,
+                wall_ms,
+            )
+        });
         if let Some(intent) = &command {
             tracing::info!(control_term = term, observation_ms = %elapsed.as_millis(),
-                group_weights = ?weights, intent = ?intent, "resource placement observed");
+                group_weights = ?weights, intent = ?intent, "resource movement observed");
         }
         // Non-overlapping windows adapt to workload changes instead of averaging
         // an arbitrarily long actor lifetime. A missed proposal is retried later.
@@ -209,6 +233,82 @@ fn choose(state: &State, loads: &Loads, weights: &BTreeMap<u64, u64>, now: u64) 
                         now_ms: now,
                     });
                 }
+            }
+        }
+    }
+    best
+}
+
+fn current_leaders(state: &State, loads: &Loads) -> Option<Leaders> {
+    let mut leaders = BTreeMap::new();
+    for (id, groups) in loads {
+        for (g, load) in groups {
+            let Some(view) = load.view.filter(|v| v.leader) else {
+                continue;
+            };
+            let p = state.placements.get(g)?;
+            if !view.vote.committed
+                || view.vote.leader_id.node_id != *id
+                || view.voters.into_iter().collect::<BTreeSet<_>>() != p.voters
+                || leaders.insert(*g, (view.vote, view.membership)).is_some()
+            {
+                return None;
+            }
+        }
+    }
+    (leaders.len() == (SHARDS + 1) as usize).then_some(leaders)
+}
+
+fn choose_leader(
+    state: &State,
+    loads: &Loads,
+    weights: &BTreeMap<u64, u64>,
+    leaders: &Leaders,
+    now: u64,
+) -> Option<Command> {
+    use crate::leadership::{Operation, Proposal};
+    let mut assigned: BTreeMap<_, u128> = state
+        .nodes
+        .iter()
+        .filter(|(_, n)| !n.draining)
+        .map(|(id, _)| (*id, 0))
+        .collect();
+    for (g, (vote, _)) in leaders {
+        *assigned.get_mut(&vote.leader_id.node_id)? += u128::from(*weights.get(g)?);
+    }
+    let mut best = None;
+    let mut best_gain = 0;
+    for (g, (vote, membership)) in leaders {
+        let p = state.placements.get(g)?;
+        let from = assigned[&vote.leader_id.node_id];
+        let weight = u128::from(weights[g]);
+        for target in &p.voters {
+            let Some(to) = assigned.get(target) else {
+                continue;
+            };
+            let proposal = Proposal {
+                shard: *g,
+                generation: p.generation,
+                source_vote: *vote,
+                membership: *membership,
+                target: *target,
+                created_ms: now,
+            };
+            if !crate::leadership::admissible(state, &proposal)
+                || loads
+                    .get(target)
+                    .is_none_or(|groups| groups.values().any(|l| l.queued >= 32))
+            {
+                continue;
+            }
+            let before = from * from + to * to;
+            let after = (from - weight).pow(2) + (to + weight).pow(2);
+            if after * 10 <= before * 9 && before - after > best_gain {
+                best_gain = before - after;
+                best = Some(Command::Leadership(Operation::Plan {
+                    expected_id: state.leadership.last_id,
+                    proposal,
+                }));
             }
         }
     }

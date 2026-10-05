@@ -135,6 +135,7 @@ impl Placement {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Command {
     Fork(Box<crate::fork::Operation>),
+    Leadership(crate::leadership::Operation),
     Create {
         key: String,
         expected_incarnation: Option<u64>,
@@ -214,6 +215,7 @@ impl std::fmt::Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Fork(_) => "Fork",
+            Self::Leadership(_) => "Leadership",
             Self::Create { .. } => "Create",
             Self::Append { .. } => "Append",
             Self::Touch { .. } => "Touch",
@@ -311,6 +313,8 @@ pub struct State {
     pub placements: BTreeMap<u64, Placement>,
     #[serde(default)]
     pub fork_targets: BTreeMap<String, crate::fork::Prepared>,
+    #[serde(default)]
+    pub leadership: crate::leadership::Ledger,
 }
 
 impl State {
@@ -347,6 +351,7 @@ impl State {
             }
         }
         match command {
+            Command::Leadership(operation) => crate::leadership::apply(self, operation),
             Command::Fork(operation) => {
                 crate::fork::apply(self, operation).unwrap_or_else(Outcome::err)
             }

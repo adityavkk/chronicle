@@ -146,7 +146,8 @@ fn observations_require_continuity_and_detect_actor_restart() {
                         loads.clone(),
                         1,
                         start + Duration::from_secs(seconds),
-                        60_000
+                        60_000,
+                        false,
                     )
                     .is_none()
             );
@@ -164,7 +165,14 @@ fn observations_require_continuity_and_detect_actor_restart() {
             3 => {
                 assert!(
                     window
-                        .observe(&state, loads, 1, start + Duration::from_secs(36), 60_000)
+                        .observe(
+                            &state,
+                            loads,
+                            1,
+                            start + Duration::from_secs(36),
+                            60_000,
+                            false
+                        )
                         .is_none()
                 );
                 continue;
@@ -181,7 +189,14 @@ fn observations_require_continuity_and_detect_actor_restart() {
             _ => (),
         }
         let term = if interruption == 8 { 2 } else { 1 };
-        let command = window.observe(&state, loads, term, start + Duration::from_secs(30), 60_000);
+        let command = window.observe(
+            &state,
+            loads,
+            term,
+            start + Duration::from_secs(30),
+            60_000,
+            false,
+        );
         assert_eq!(command.is_some(), interruption == 4);
     }
 }
@@ -208,6 +223,7 @@ fn actual_service_and_byte_samples_inform_selection() {
                 1,
                 start + Duration::from_secs(seconds),
                 60_000,
+                false,
             );
         }
         let Some(Command::Balance { shard, .. }) = command else {
@@ -245,4 +261,138 @@ fn competing_commands_cannot_bypass_global_budget_or_generation() {
         Some(Error::InvalidPlacement)
     );
     assert!(state.apply(&command(1, 1, 120_000)).error.is_none());
+}
+
+fn leader_samples() -> (State, Loads) {
+    let (mut state, mut loads) = fixture();
+    state.nodes.retain(|id, _| *id <= 3);
+    loads.retain(|id, _| *id <= 3);
+    let vote = crate::Vote::new_committed(4, 1);
+    for g in 0..=SHARDS {
+        loads.get_mut(&1).unwrap().get_mut(&g).unwrap().view = Some(crate::leadership::View {
+            vote,
+            membership: crate::LogId::new(vote.leader_id, 10 + g),
+            voters: [1, 2, 3],
+            leader: true,
+            applied: Some(crate::LogId::new(vote.leader_id, 100)),
+        });
+    }
+    (state, loads)
+}
+
+#[test]
+fn leader_weighted_choice_reaches_a_stable_local_target_without_campaigns() {
+    use crate::leadership::{Observation, Operation};
+    let (mut state, loads) = leader_samples();
+    let mut leaders = current_leaders(&state, &loads).unwrap();
+    for (step, (shard, target)) in [(1, 2), (0, 3), (2, 3)].into_iter().enumerate() {
+        let now = 60_000 + step as u64 * 60_000;
+        let command = choose_leader(&state, &loads, &weights(), &leaders, now).unwrap();
+        let Command::Leadership(Operation::Plan { proposal, .. }) = &command else {
+            panic!()
+        };
+        assert_eq!((proposal.shard, proposal.target), (shard, target));
+        let membership = proposal.membership;
+        let source_vote = proposal.source_vote;
+        assert_eq!(state.apply(&command).error, None);
+        let id = state.leadership.last_id;
+        assert_eq!(
+            state
+                .apply(&Command::Leadership(Operation::Claim {
+                    id,
+                    executor: source_vote.leader_id.node_id,
+                    now_ms: now,
+                }))
+                .error,
+            None
+        );
+        let vote = crate::Vote::new_committed(source_vote.leader_id.term + 1, target);
+        assert_eq!(
+            state
+                .apply(&Command::Leadership(Operation::Close {
+                    id,
+                    now_ms: now + 1,
+                    observed: Some(Observation { vote, membership }),
+                }))
+                .error,
+            None
+        );
+        leaders.insert(shard, (vote, membership));
+    }
+    // One heavy group cannot be subdivided: the weighted stable assignment is
+    // 32/144/32, rather than equal shard counts. This is not live convergence.
+    assert!(choose_leader(&state, &loads, &weights(), &leaders, 240_000).is_none());
+}
+
+#[test]
+fn leader_window_tracks_every_vote_and_membership_but_not_advancing_apply_indices() {
+    for interruption in 0..7 {
+        let (mut state, mut loads) = leader_samples();
+        let mut window = Window::default();
+        let start = Instant::now();
+        for seconds in (0..30).step_by(5) {
+            assert!(
+                window
+                    .observe(
+                        &state,
+                        loads.clone(),
+                        4,
+                        start + Duration::from_secs(seconds),
+                        60_000,
+                        true
+                    )
+                    .is_none()
+            );
+        }
+        let view = loads
+            .get_mut(&1)
+            .unwrap()
+            .get_mut(&4)
+            .unwrap()
+            .view
+            .as_mut()
+            .unwrap();
+        match interruption {
+            1 => view.vote = crate::Vote::new_committed(5, 1),
+            2 => view.membership.index += 1,
+            3 => view.leader = false,
+            4 => {
+                let mut duplicate = *view;
+                duplicate.vote = crate::Vote::new_committed(4, 2);
+                loads.get_mut(&2).unwrap().get_mut(&4).unwrap().view = Some(duplicate);
+            }
+            5 => state.leadership.last_id += 1,
+            6 => view.applied.as_mut().unwrap().index += 1,
+            _ => (),
+        }
+        let result = window.observe(
+            &state,
+            loads,
+            4,
+            start + Duration::from_secs(30),
+            60_000,
+            true,
+        );
+        assert_eq!(
+            matches!(result, Some(Command::Leadership(_))),
+            matches!(interruption, 0 | 6)
+        );
+    }
+    let (state, loads) = leader_samples();
+    let mut window = Window::default();
+    let start = Instant::now();
+    for seconds in (0..=60).step_by(5) {
+        assert!(
+            window
+                .observe(
+                    &state,
+                    loads.clone(),
+                    4,
+                    start + Duration::from_secs(seconds),
+                    60_000,
+                    false
+                )
+                .is_none()
+        );
+    }
 }

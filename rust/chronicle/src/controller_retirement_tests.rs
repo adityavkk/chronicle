@@ -5,7 +5,10 @@ use axum::{
     routing::{get, post},
 };
 use chronicle_raft::{model::Node, storage::SqliteStore};
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use tokio::sync::{Mutex, Semaphore};
 
 async fn write(app: &Shared, command: Command) {
@@ -20,7 +23,9 @@ async fn place(app: &Shared, shard: u64, generation: u64, voters: BTreeSet<u64>)
             shard,
             expected_generation: generation,
             voters,
-            now_ms: now_ms(),
+            // Fixture placements have already cooled; exercise real elections
+            // without spending a wall-clock minute on advisory policy timing.
+            now_ms: now_ms().saturating_sub(60_001),
             eligible_only: false,
             repair_pending: false,
         },
@@ -30,6 +35,33 @@ async fn place(app: &Shared, shard: u64, generation: u64, voters: BTreeSet<u64>)
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn removed_control_leader_completes_data_placement_and_retires() {
+    regression(Scenario::Retirement).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn removed_control_replica_discovers_claim_owner_and_transfers_once() {
+    regression(Scenario::Transfer).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lost_claim_reply_never_reconstructs_permission() {
+    regression(Scenario::LostReply).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn changed_admission_after_claim_spends_permission_without_submission() {
+    regression(Scenario::AfterClaimDrain).await;
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Scenario {
+    Retirement,
+    Transfer,
+    LostReply,
+    AfterClaimDrain,
+}
+
+async fn regression(scenario: Scenario) {
     tokio::time::timeout(Duration::from_secs(60), async {
         let dir = tempfile::tempdir().unwrap();
         let client = reqwest::Client::new();
@@ -50,6 +82,7 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
         let (logs, _guard) = tracing_appender::non_blocking(std::io::sink());
         let mut apps = BTreeMap::new();
         let mut servers = tokio::task::JoinSet::new();
+        let transfers: Arc<[AtomicUsize; 4]> = Arc::new(std::array::from_fn(|_| AtomicUsize::new(0)));
         for (id, listener) in listeners {
             let mut groups = BTreeMap::new();
             for shard in 0..=SHARDS {
@@ -93,13 +126,40 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
                 live_admission: Arc::new(Semaphore::new(16)),
                 telemetry: Arc::new(Telemetry::new(id, logs.error_counter(), String::new())),
             });
+            let count = transfers.clone();
             let router = Router::new()
                 .route("/raft/{group}/append", post(crate::append_rpc))
                 .route("/raft/{group}/vote", post(crate::vote_rpc))
                 .route("/raft/{group}/snapshot", post(crate::snapshot_rpc))
-                .route("/raft/{group}/transfer", post(crate::transfer_rpc))
+                .route("/raft/{group}/transfer", post(move |
+                    axum::extract::State(a): axum::extract::State<Shared>,
+                    axum::extract::Path(group): axum::extract::Path<u64>,
+                    headers: axum::http::HeaderMap,
+                    axum::Json(request): axum::Json<openraft::raft::TransferLeaderRequest<TypeConfig>>,
+                | {
+                    if group == 1 { count[id as usize - 1].fetch_add(1, Ordering::SeqCst); }
+                    eprintln!("transfer delivery: group={group}, recipient={id}, source={}, target={}, boundary={:?}",
+                        request.from_leader(), request.to_node_id(), request.last_log_id());
+                    async move { crate::transfer_rpc(axum::extract::State(a), axum::extract::Path(group), headers, axum::Json(request)).await }
+                }))
                 .route("/admin/status", get(crate::status))
                 .route("/admin/control", get(crate::control))
+                .route("/admin/resources", get(crate::resources))
+                .route("/admin/leadership/{group}", get(crate::leader_balance::observe))
+                .route("/admin/leadership/claim", post(move |
+                    axum::extract::State(a): axum::extract::State<Shared>,
+                    headers: axum::http::HeaderMap,
+                    axum::Json(request): axum::Json<crate::leader_balance::Claim>,
+                | async move {
+                    let response = crate::leader_balance::claim(axum::extract::State(a.clone()), headers, axum::Json(request)).await?;
+                    if scenario == Scenario::LostReply { return Err(crate::unavailable("claim committed; reply discarded")) }
+                    if scenario == Scenario::AfterClaimDrain {
+                        let mut node = a.nodes[&2].clone();
+                        node.draining = true;
+                        write(&a, Command::Register { id: 2, node }).await;
+                    }
+                    Ok(response)
+                }))
                 .route("/admin/placed", post(crate::placed))
                 .route("/admin/retirement-state", get(crate::retirement_state))
                 .with_state(app.clone());
@@ -209,8 +269,9 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
             openraft::ServerState::Leader
         );
 
-        // Let the surviving control voters elect naturally; node 1 no longer
-        // receives their log and must discover this leader through HTTP status.
+        // The pinned upstream step-down watcher may broadcast a transfer when
+        // node 1 leaves the effective membership. No application campaign is
+        // requested. Node 1 must discover the successor through HTTP status.
         let leader = loop {
             if let Some(app) = apps.values().find(|a| {
                 a.id != 1
@@ -226,6 +287,50 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
             .ensure_linearizable(openraft::ReadPolicy::ReadIndex)
             .await
             .unwrap();
+        if scenario != Scenario::Retirement {
+            use chronicle_raft::leadership::{Operation, Phase, Proposal};
+            write(leader, Command::Register { id: 1, node: nodes[&1].clone() }).await;
+            let view = crate::leader_balance::view(&old.groups[&1]).await.unwrap().unwrap();
+            apps[&2].groups[&1].raft.wait(Some(Duration::from_secs(3))).metrics(
+                |m| m.last_applied >= view.applied, "target caught up",
+            ).await.unwrap();
+            write(leader, Command::Leadership(Operation::Plan { expected_id: 0,
+                proposal: Proposal { shard: 1, generation: 1, source_vote: view.vote,
+                    membership: view.membership, target: 2, created_ms: now_ms() },
+            })).await;
+            let state = control(old).await.unwrap();
+            let result = crate::leader_balance::reconcile(old, &state, true).await;
+            assert_eq!(result.is_err(), scenario == Scenario::LostReply, "{result:?}");
+            let state = control(old).await.unwrap();
+            assert_eq!(state.leadership.attempt.as_ref().unwrap().phase, Phase::Claimed);
+            assert_eq!(state.leadership.consumed[&1], view.vote);
+            // Fresh invocations hold no executor-local permission, including
+            // concurrent reconciliation after an ambiguous response.
+            let (one, two) = tokio::join!(
+                crate::leader_balance::reconcile(old, &state, true),
+                crate::leader_balance::reconcile(old, &state, true),
+            );
+            one.unwrap(); two.unwrap();
+            if scenario == Scenario::Transfer {
+                let target = &apps[&2].groups[&1].raft;
+                target.wait(Some(Duration::from_secs(5))).metrics(
+                    |m| m.state == openraft::ServerState::Leader && m.last_quorum_acked.is_some(),
+                    "directed target quorum ready",
+                ).await.unwrap();
+                target.ensure_linearizable(openraft::ReadPolicy::ReadIndex).await.unwrap();
+                let state = control(leader).await.unwrap();
+                crate::leader_balance::reconcile(leader, &state, true).await.unwrap();
+                let state = control(leader).await.unwrap();
+                assert_eq!(state.leadership.attempt.unwrap().phase, Phase::ObservedTarget);
+                assert_eq!(old.telemetry.leadership_submissions[1].load(Ordering::Relaxed), 1);
+                assert_eq!(transfers.each_ref().map(|n| n.load(Ordering::SeqCst)), [0, 1, 1, 0]);
+            } else {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                assert_eq!(old.telemetry.leadership_submissions[1].load(Ordering::Relaxed), 0);
+                assert_eq!(transfers.each_ref().map(|n| n.load(Ordering::SeqCst)), [0; 4]);
+                assert_eq!(old.groups[&1].raft.metrics().borrow_watched().state, openraft::ServerState::Leader);
+            }
+        } else {
         let mut campaigns = BTreeMap::new();
         let mut retirement = Retirement::default();
         for shard in 1..=SHARDS {
@@ -236,6 +341,7 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
                 false,
                 &mut retirement,
                 &mut chronicle_raft::balance::Window::default(),
+                false,
             )
             .await
             .unwrap();
@@ -263,6 +369,7 @@ async fn removed_control_leader_completes_data_placement_and_retires() {
                 .unwrap();
         }
         assert!(retired(leader, 1).await.unwrap());
+        }
         let mut stores = Vec::new();
         for app in apps.values() {
             for group in app.groups.values() {

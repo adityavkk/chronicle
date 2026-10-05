@@ -52,6 +52,15 @@ campaign balancing default-off. Do not enable a replacement policy until its
 staleness, membership overlap, unavailable-target, repeated-attempt and outage
 tests pass. The initiating trigger itself has no expected-vote CAS.
 
+One trigger broadcasts to **every other effective voter**, not only its target.
+The pinned `StepDownWatcher` also initiates a transfer after a leader has been
+fully removed from committed/effective membership (default 150 ms), then refreshes
+its role after a heartbeat interval. Retaining the old leader as a learner does
+not meet that condition. This removal path is distinct from elective balancing
+and its application claim budget. A three-voter data-group submission yields two
+RPC calls; a removed control leader can send three calls to the surviving voters.
+Count application submissions and per-group/recipient deliveries separately.
+
 ## Promotion gates
 
 Keep the immutable stopped-process 0.9 PVC/WAL captures and original binary.

@@ -273,6 +273,8 @@ pub struct Telemetry {
     errors: AtomicU64,
     body_errors: AtomicU64,
     cancellations: AtomicU64,
+    /// Application trigger calls, distinct from upstream broadcast deliveries.
+    pub leadership_submissions: [AtomicU64; (chronicle_raft::model::SHARDS + 1) as usize],
 }
 
 impl Telemetry {
@@ -333,6 +335,7 @@ impl Telemetry {
             errors: AtomicU64::new(0),
             body_errors: AtomicU64::new(0),
             cancellations: AtomicU64::new(0),
+            leadership_submissions: std::array::from_fn(|_| AtomicU64::new(0)),
         }
     }
 
@@ -440,6 +443,12 @@ impl Telemetry {
             self.export_errors.load(Ordering::Relaxed),
             self.log_errors.dropped_lines()
         );
+        for (group, count) in self.leadership_submissions.iter().enumerate() {
+            text.push_str(&format!(
+                "chronicle_leadership_submissions_total{{group=\"{group}\"}} {}\n",
+                count.load(Ordering::Relaxed)
+            ));
+        }
         self.requests
             .render("chronicle_request_duration_seconds", &mut text);
         COMMIT_APPLY.render("chronicle_commit_apply_duration_seconds", &mut text);
