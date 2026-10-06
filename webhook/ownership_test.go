@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -280,7 +281,8 @@ func TestNewSlotIDBounds(t *testing.T) {
 }
 
 func TestCheckOwnershipConfigInvariants(t *testing.T) {
-	// The documented defaults (05:502-505) satisfy both invariants.
+	// The documented defaults (05:502-505, 3 s passes under 9 s leases) satisfy
+	// every relation.
 	if err := CheckOwnershipConfig(9*time.Second, 3*time.Second, 9*time.Second, 3*time.Second); err != nil {
 		t.Fatalf("defaults must be valid: %v", err)
 	}
@@ -294,6 +296,9 @@ func TestCheckOwnershipConfigInvariants(t *testing.T) {
 		{"heartbeat > ttl/2", 9 * time.Second, 5 * time.Second, 9 * time.Second, 3 * time.Second, true},
 		{"reconcile > heartbeat", 9 * time.Second, 3 * time.Second, 9 * time.Second, 4 * time.Second, true},
 		{"reconcile == heartbeat ok", 9 * time.Second, 3 * time.Second, 9 * time.Second, 3 * time.Second, false},
+		{"slot lease shorter than the reconcile interval", 9 * time.Second, 3 * time.Second, 2 * time.Second, 3 * time.Second, true},
+		{"slot lease == reconcile interval (no headroom)", 9 * time.Second, 3 * time.Second, 3 * time.Second, 3 * time.Second, true},
+		{"slot lease just longer than the reconcile interval ok", 9 * time.Second, 3 * time.Second, 3*time.Second + time.Millisecond, 3 * time.Second, false},
 		{"non-positive member", 0, 3 * time.Second, 9 * time.Second, 3 * time.Second, true},
 		{"non-positive slot", 9 * time.Second, 3 * time.Second, 0, 3 * time.Second, true},
 	}
@@ -302,6 +307,13 @@ func TestCheckOwnershipConfigInvariants(t *testing.T) {
 		if (err != nil) != c.wantErr {
 			t.Fatalf("%s: err=%v, wantErr=%v", c.name, err, c.wantErr)
 		}
+	}
+	// A slot lease that cannot outlive the passes renewing it (every lease would
+	// lapse between passes) is rejected with both timers named, so the operator
+	// knows which to move.
+	err := CheckOwnershipConfig(9*time.Second, 3*time.Second, 2*time.Second, 3*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "slotReconcileInterval (3s) must be < slotLeaseTTL (2s)") {
+		t.Fatalf("2s slot lease under 3s passes: err=%v, want the slotReconcileInterval < slotLeaseTTL error", err)
 	}
 }
 

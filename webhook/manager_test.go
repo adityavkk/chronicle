@@ -1471,7 +1471,7 @@ func TestPromoteDrivesEagerReconcile(t *testing.T) {
 	// Promote drives the reconcile itself.) Discard the reconcile the first claim
 	// queued: there is nothing to recover yet.
 	mgr.RunSlotReconcile()
-	if owned := len(mgr.ownedSlots()); owned != subSlots {
+	if owned := len(ownedSlots(mgr)); owned != subSlots {
 		t.Fatalf("precondition: the sole replica must own all %d slots before the failover, owns %d", subSlots, owned)
 	}
 	select {

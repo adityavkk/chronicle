@@ -19,12 +19,14 @@ import (
 // extra round trip (EVALSHA, then EVAL), logged as "eval:..." so a cold
 // script cache is diagnosed as such rather than as a regression. It also
 // counts append.lua RETRY replies and can run a callback once, just before
-// the next append-slot script, to move the tail under an append.
+// the next append-slot script (to move the tail under an append) or the next
+// pipeline Exec (to stall one round trip).
 type TripLog struct {
-	mu           sync.Mutex
-	trips        []string
-	retries      int
-	beforeAppend func()
+	mu             sync.Mutex
+	trips          []string
+	retries        int
+	beforeAppend   func()
+	beforePipeline func()
 }
 
 // DialHook implements goredis.Hook; dials are not round trips of the request.
@@ -65,9 +67,14 @@ func (l *TripLog) ProcessPipelineHook(next goredis.ProcessPipelineHook) goredis.
 		for i, cmd := range cmds {
 			names[i] = cmd.Name()
 		}
+		var before func()
 		l.mu.Lock()
 		l.trips = append(l.trips, "pipe("+strings.Join(names, "+")+")")
+		before, l.beforePipeline = l.beforePipeline, nil
 		l.mu.Unlock()
+		if before != nil {
+			before()
+		}
 		return next(ctx, cmds)
 	}
 }
@@ -94,6 +101,14 @@ func (l *TripLog) BeforeAppendScript(fn func()) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.beforeAppend = fn
+}
+
+// BeforePipeline schedules fn to run once, just before the next pipeline Exec
+// is sent: a stall injected on exactly one round trip.
+func (l *TripLog) BeforePipeline(fn func()) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.beforePipeline = fn
 }
 
 // scriptSlot classifies a script call by KEYS[1]: a stream's meta hash means

@@ -139,7 +139,9 @@ its own built copy).
   in-process `MemoryStore` backend); `store/redis/differential_test.go` runs the
   same table through both and asserts they agree. A differential failure means the
   two drifted — fix the logic, never silence one side. Invoke scripts only via
-  `Script.Run`/`RunRO` (a `forbidigo` rule blocks bare `EVAL`/`EVALSHA`).
+  `Script.Run`/`RunRO`, or batch them through `webhook`'s `typedScript.runBatch`,
+  the one seam that heals `NOSCRIPT` inside a pipeline (a `forbidigo` rule blocks
+  bare `EVAL`/`EVALSHA` everywhere else).
 - **No AI attribution in commits, ever.** This overrides any global or tool
   default. Concretely: no `Co-Authored-By: …` trailers for Claude or any other
   agent, no agent session links (`Claude-Session:` etc.), and commits must not

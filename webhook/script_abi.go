@@ -117,6 +117,12 @@ func (s typedScript[K, R]) run(ctx context.Context, c redis.Scripter, keys K, ar
 	if err != nil {
 		return zero, err
 	}
+	return s.decode(raw)
+}
+
+// decode is the one path from a raw Lua reply to the typed reply.
+func (s typedScript[K, R]) decode(raw any) (R, error) {
+	var zero R
 	reply, err := decodeScriptReply(s.abi.Name, raw)
 	if err != nil {
 		return zero, err
@@ -126,6 +132,76 @@ func (s typedScript[K, R]) run(ctx context.Context, c redis.Scripter, keys K, ar
 		return zero, fmt.Errorf("%s: %w", s.abi.Name, err)
 	}
 	return out, nil
+}
+
+// runBatch runs the script once per key vector, all in one pipeline, with the
+// same ARGV for every call (every batch in the ownership and worker passes
+// renews or drains many slots under one replica/now/ttl). Result i and error i
+// belong to keys[i]; a failed call never disturbs its neighbours.
+//
+// Each queued EVALSHA is still exactly one atomic Lua step on one hash slot — a
+// pipeline is not a transaction, it only removes the client-side wait between
+// steps — so a batch is one of the per-slot interleavings the formal models
+// (Ownership.tla ClaimShard, Membership.tla ReconcileClaim, the claim_due drain)
+// already permit: batching changes WHEN steps are sent, never WHAT a step does.
+// A ClusterClient splits the pipeline per master and runs the parts in parallel,
+// so a pass costs about one round trip regardless of the slot count.
+//
+// This is the one sanctioned place for a bare EVALSHA/EVAL (the forbidigo rule in
+// .golangci.yml). Script.Run's NOSCRIPT->EVAL self-heal does not fire inside a
+// pipeline (go-redis #3228: Script.Run(ctx, pipe, ...) compiles but the queued
+// command's error is read before Exec and is always nil), so the heal is lifted
+// to the batch: a command rejected with NOSCRIPT did not execute, and EVAL both
+// executes it and caches the script on that node, so re-issuing exactly the
+// rejected commands as EVAL in a second pipeline is Script.Run's semantics at
+// +1 round trip per flushed node instead of +1 per rejected call. The error is
+// matched by prefix (redis.HasErrorPrefix) rather than errors.Is(ErrNoScript),
+// because the latter compares the full message, which server variants word
+// differently.
+func (s typedScript[K, R]) runBatch(ctx context.Context, c redis.UniversalClient, keys []K, args ...any) ([]R, []error) {
+	out := make([]R, len(keys))
+	errs := make([]error, len(keys))
+	if len(keys) == 0 {
+		return out, errs
+	}
+	cmds := make([]*redis.Cmd, len(keys))
+	pipe := c.Pipeline()
+	for i, k := range keys {
+		if err := s.abi.validateCall(k, args); err != nil {
+			errs[i] = err
+			continue
+		}
+		cmds[i] = s.script.EvalSha(ctx, pipe, k.redisKeys(), args...) //nolint:forbidigo // the one sanctioned batched EVALSHA; NOSCRIPT is healed below (go-redis #3228)
+	}
+	// Exec's aggregate is only the first per-command error; each cmd carries its own.
+	_, _ = pipe.Exec(ctx)
+
+	var flushed []int
+	for i, cmd := range cmds {
+		if cmd != nil && redis.HasErrorPrefix(cmd.Err(), "NOSCRIPT") {
+			flushed = append(flushed, i)
+		}
+	}
+	if len(flushed) > 0 {
+		heal := c.Pipeline()
+		for _, i := range flushed {
+			cmds[i] = s.script.Eval(ctx, heal, keys[i].redisKeys(), args...) //nolint:forbidigo // re-issues only the NOSCRIPT-rejected commands, which did not execute; EVAL also primes the node's cache
+		}
+		_, _ = heal.Exec(ctx)
+	}
+
+	for i, cmd := range cmds {
+		if cmd == nil {
+			continue
+		}
+		raw, err := cmd.Result()
+		if err != nil {
+			errs[i] = err
+			continue
+		}
+		out[i], errs[i] = s.decode(raw)
+	}
+	return out, errs
 }
 
 func (a scriptABI) validateCall(keys scriptKeyVector, args []any) error {
