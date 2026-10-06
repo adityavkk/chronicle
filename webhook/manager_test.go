@@ -1428,18 +1428,46 @@ func TestLeaseTailDropRecoveredByEagerReconcile(t *testing.T) {
 // window — is re-derived from the durable `sub` hash and re-ZADDed, recovering the
 // stranded-webhook-wake case. It mirrors TestLeaseTailDropRecoveredByEagerReconcile
 // but the trigger is Promote(), the DR seam, not a bare reconnect.
+//
+// Every instant is fixed relative to t0 instead of read off the wall clock as
+// the test runs: the lease is armed at t0, the promotion's reconcile judges at
+// a pinned instant inside the lease, and the lease worker looks at t0+2s, past
+// the deadline. A reconcile judging after the deadline would rightly expire the
+// lease and re-arm a fresh wake instead, so how long the Redis round trips take
+// must not decide which case the test exercises. t0 lies ten seconds in the
+// past, so a reconcile that read the wall clock rather than the manager's clock
+// would always take that expire-and-re-arm path, on a fast host as on a slow
+// one, and the closing read-back of the wake's generation and id catches it.
 func TestPromoteDrivesEagerReconcile(t *testing.T) {
 	mgr, store, fs, _, client := newDueManager(t)
-	now := time.Now()
+	t0 := time.Now().Add(-10 * time.Second)
 	const leaseTTLMs = 1000
+	promotedAt := t0.Add(leaseTTLMs * time.Millisecond / 2) // mid-lease
+	mgr.now = func() time.Time { return promotedAt }
 	begin := "0000000000000000_0000000000000000"
+
+	// This replica owned its slots before the failover and the promoted primary
+	// carries that ownership, so the promotion's slot reconcile is a same-owner
+	// renew, which queues no reconcile of its own. (A first claim does queue one,
+	// scopeNewOwnerCAS; it would fill the depth-1 channel and hide whether
+	// Promote drives the reconcile itself.) Discard the reconcile the first claim
+	// queued: there is nothing to recover yet.
+	mgr.RunSlotReconcile()
+	if owned := len(mgr.ownedSlots()); owned != subSlots {
+		t.Fatalf("precondition: the sole replica must own all %d slots before the failover, owns %d", subSlots, owned)
+	}
+	select {
+	case <-mgr.reconcileC:
+	default:
+	}
+
 	// A webhook sub armed to waking with the lease ZADDed (it holds a lease).
-	_, _ = store.CreateOrConfirm("present", webhookCfg("https://w.example/h"), nil, now)
+	_, _ = store.CreateOrConfirm("present", webhookCfg("https://w.example/h"), nil, t0)
 	_ = store.Link("present", "events/p", LinkGlob, begin)
 	fs.mu.Lock()
 	fs.tails["events/p"] = "0000000000000001_0000000000000000" // pending work
 	fs.mu.Unlock()
-	armed, err := store.ArmWakeUnscoped("present", now, leaseTTLMs, true, "w_p")
+	armed, err := store.ArmWakeUnscoped("present", t0, leaseTTLMs, true, "w_p")
 	if err != nil || !armed.Armed {
 		t.Fatalf("arm present = %+v err=%v", armed, err)
 	}
@@ -1455,24 +1483,18 @@ func TestPromoteDrivesEagerReconcile(t *testing.T) {
 	}
 
 	// The DR promotion. slotReconcileOnce re-establishes ownership on the (here
-	// single-member) promoted primary; the eager reconcile is enqueued onto the
-	// coalescing recovery channel. The recovery loop is not running, so drain the
-	// queue deterministically and run each reconcile inline — the same code path the
-	// loop would, without the timing nondeterminism.
+	// single-member) promoted primary, and Promote enqueues the eager reconcile
+	// onto the coalescing recovery channel. The recovery loop is not running, so
+	// take the queued reconcile and run it inline: the code path the loop would run.
 	mgr.Promote()
-	drained := 0
-	for drained < cap(mgr.reconcileC)+2 {
-		select {
-		case s := <-mgr.reconcileC:
-			mgr.reconcile(s)
-			drained++
-			continue
-		default:
+	select {
+	case s := <-mgr.reconcileC:
+		if s != scopeEpochBump {
+			t.Fatalf("the queued reconcile must be Promote's own (scopeEpochBump), got %v", s)
 		}
-		break
-	}
-	if drained == 0 {
-		t.Fatal("Promote must enqueue at least one eager reconcile")
+		mgr.reconcile(s)
+	default:
+		t.Fatal("Promote must enqueue the eager reconcile")
 	}
 
 	// The eager reconcile re-derived the lease entry from the durable hash, so the
@@ -1481,10 +1503,23 @@ func TestPromoteDrivesEagerReconcile(t *testing.T) {
 	if _, in := mgr.leasedSet()["present"]; !in {
 		t.Fatal("promotion must re-ZADD the stranded sub's lease entry from the durable hash")
 	}
-	future := now.Add(2 * time.Second) // past the lease deadline
+	future := t0.Add(2 * time.Second) // past the lease deadline
 	due, _ := store.DueLeases(slotOf("present"), future, dueClaimLimit, time.Second)
 	if len(due) != 1 || due[0] != "present" {
 		t.Fatalf("the restored lease entry must be visible to the lease worker, got due=%v", due)
+	}
+
+	// Restored, not replaced: the in-flight wake keeps the generation and wake id
+	// it was armed with. A reconcile that judged the lease lapsed would have
+	// expired it and re-armed a fresh wake, whose lease can also land before
+	// t0+2s, so only this read-back tells the two apart.
+	sub, ok, err := store.Get("present")
+	if err != nil || !ok {
+		t.Fatalf("read back present: ok=%v err=%v", ok, err)
+	}
+	if sub.Generation != armed.Generation || sub.WakeID != armed.WakeID {
+		t.Fatalf("the reconcile must restore the stranded wake, not expire and re-arm it: generation %d wake %q, want %d %q",
+			sub.Generation, sub.WakeID, armed.Generation, armed.WakeID)
 	}
 }
 
