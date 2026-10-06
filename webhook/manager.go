@@ -2342,7 +2342,12 @@ func (m *Manager) sweepOnce() bool {
 		return true
 	}
 	ids = m.sweepWindow(ids)
-	now := time.Now()
+	// The instant every recovery phase judges deadlines against, read from the
+	// manager's clock (time.Now outside tests) so a test can pin where a
+	// reconcile lands relative to a lease deadline. start stays on the wall
+	// clock: it only measures elapsed time, for the SweepTick duration and the
+	// CoverageGap metric.
+	now := m.now()
 	// Batch the per-tick reads. The sweep is O(subscriptions x links) and the
 	// naive form was one round trip per subscription (Get) plus one per link
 	// (tail) — the poll backstop's scaling ceiling. GetMany pipelines the
