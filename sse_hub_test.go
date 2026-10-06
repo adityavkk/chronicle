@@ -755,6 +755,14 @@ func TestSSEHubExpiryTerminatesCapturedIncarnation(t *testing.T) {
 	}
 	defer response.Body.Close() //nolint:errcheck // test cleanup
 	waitForCount(t, &st.subscriptions, 1)
+	// Expire the stream only after the client's live attach. Before it, the
+	// handler's final pre-attach confirmation read can observe the expiry
+	// itself and abort the committed response without the hub; releasing the
+	// last lease can then cancel the hub before it consumes the hint, so no
+	// terminal reason is recorded at all. Once attached, the client learns of
+	// the expiry only through the hub, which records the reason before fail
+	// wakes the watcher, so it is recorded before the response is aborted.
+	waitForCount(t, &metrics.watcherLookups, 1)
 	clock.Advance(2 * time.Second)
 	st.signal(store.NotificationAppend)
 	body, err := io.ReadAll(response.Body)

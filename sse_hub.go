@@ -934,6 +934,10 @@ func (h *sseHub) markRegistered(err error) {
 	})
 }
 
+// handleReadError fails the hub on a terminal read error. It records the
+// reason before calling fail: fail wakes the attached watchers, which then
+// abort their committed responses, so the reason is already recorded by the
+// time any attached client's response is aborted.
 func (h *sseHub) handleReadError(err error) bool {
 	if errors.Is(err, store.ErrStreamNotFound) ||
 		errors.Is(err, store.ErrStreamExpired) ||
