@@ -88,6 +88,14 @@ type Store interface {
 	// mirrors links and never invents membership.
 	ReconcileIndexes() error
 
+	// DeindexStale removes id from path's fan-out shard unless id's subscription
+	// exists and its links still name path, in one atomic step in id's slot, and
+	// reports whether a member was removed. It is the stale-entry cleanup
+	// ReconcileIndexes defers, run by the fan-out worker on a member it could
+	// hydrate no subscription for; a subscription re-created and re-linked since
+	// that read keeps its member.
+	DeindexStale(id, path string) (removed bool, err error)
+
 	// ArmWakeUnscoped issues a new wake generation if the subscription is idle;
 	// armLease arms the lease at issue (webhook) versus deferring it to claim
 	// (pull-wake). This is the external/hot-path API: owner_fenced is deliberately

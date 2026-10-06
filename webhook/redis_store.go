@@ -737,20 +737,21 @@ func (s *RedisStore) StreamSubscribers(path string) (ids []string, slotsProbed i
 // and is maintained from Go after the Lua link write, so a crash between them can
 // drop an index entry while the canonical link survives — degrading that stream
 // to sweep latency until repaired. This re-adds any missing SADD; it never
-// invents membership (it only mirrors links). Stale-entry cleanup is deferred:
-// re-adding the missing entry is the correctness-critical part, and nothing in
-// the service removes a member whose subscription is gone. Such a member is
-// left by a Delete that lands between a chunk's links read and the
-// write pipeline that carries its entry (one round trip of exposure for a
-// chunk's first pipelineChunk entries, one more per further pipelineChunk; the
-// serial pass exposed a subscription's j-th link for 2j-1 trips, its SADD and
-// SETBIT being separate trips, so per entry the window is the same or narrower
-// except for a subscription with fewer links than its chunk-mates late in a
-// chunk), or by a delete torn before its de-index. Until the member is
-// removed, every append to that stream hydrates it for nothing: one serial
-// legacy-keyspace probe, counted as an "absent" ReadFallback. An Unlink in
-// that window leaves a member too, but its subscription is live, so it is
-// hydrated with no probe.
+// invents membership (it only mirrors links). Stale-entry cleanup is left to
+// the fan-out worker: re-adding the missing entry is the correctness-critical
+// part, and a member whose subscription is gone is removed by DeindexStale when
+// the worker next hydrates nothing for it. Such a member is left by a Delete
+// that lands between a chunk's links read and the write pipeline that
+// carries its entry (one round trip of exposure for a chunk's first
+// pipelineChunk entries, one more per further pipelineChunk; the serial pass
+// exposed a subscription's j-th link for 2j-1 trips, its SADD and SETBIT being
+// separate trips, so per entry the window is the same or narrower except for a
+// subscription with fewer links than its chunk-mates late in a chunk), or by a
+// delete torn before its de-index. The append that finds it pays one serial
+// legacy-keyspace probe, counted as an "absent" ReadFallback, and the removal.
+// An Unlink in that window leaves a member too, but its subscription is live,
+// so the worker hydrates it with no probe and keeps the member until the
+// subscription is deleted.
 //
 // Cost: 1 + ceil(N/pipelineChunk) read trips + about ceil(L/pipelineChunk) write
 // trips for N subscriptions and L links (it was 1 + N + 2L serial trips, growing
@@ -864,6 +865,19 @@ func (s *RedisStore) indexStream(path, id string) error {
 // loop repairs the bitmap; it is never narrowed here.
 func (s *RedisStore) deindexStream(path, id string) error {
 	return s.client.SRem(s.ctx(), streamSubsKey(slotOf(id), path), id).Err()
+}
+
+// DeindexStale implements Store.DeindexStale: deindexStream guarded, inside the
+// script, by the member's own sub hash and link, so it can act on a member read
+// a round trip ago without dropping a subscription re-created and re-linked
+// since. Like deindexStream it leaves the occupied-slots bit alone.
+func (s *RedisStore) DeindexStale(id, path string) (bool, error) {
+	reply, err := deindexStaleScript.run(s.ctx(), s.client, newDeindexStaleKeys(id, path), id, path)
+	if err != nil {
+		return false, err
+	}
+	_, removed := reply.(deindexStaleRemoved)
+	return removed, nil
 }
 
 // ArmWakeUnscoped issues a wake if idle on the external/hot path.
