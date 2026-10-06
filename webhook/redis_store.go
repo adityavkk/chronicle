@@ -394,22 +394,38 @@ const pipelineChunk = 512
 // GetMany hydrates many subscriptions in pipelined batches of pipelineChunk.
 // Missing subscriptions are skipped. It is the batched form of Get for the loops
 // that read every subscription (the recovery sweep and the reconcile loop): a
-// handful of round trips instead of one per subscription.
+// handful of round trips instead of one per subscription. The per-command
+// replies are the authority, not Exec's error, which is only the first of them:
+// a sub or links hash of the wrong type fails its own HGETALL and costs that
+// subscription, which is left out and reported, so one bad key never costs the
+// whole read (a caller that fell back to one Get per id would pay the N serial
+// trips this batch exists to remove, every time, for as long as the key stayed
+// bad). When no command or every command carries an error the connection
+// failed and the read ends at that chunk, as it did on the first error before.
+// Either way the returned slice holds every subscription that was read.
 func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 	out := make([]Subscription, 0, len(ids))
+	var firstErr error
+	unreadable := 0
 	for batch := range slices.Chunk(ids, pipelineChunk) {
 		pipe := s.client.Pipeline()
-		subCmds := make([]*redis.MapStringStringCmd, len(batch))
-		linkCmds := make([]*redis.MapStringStringCmd, len(batch))
-		for i, id := range batch {
-			subCmds[i] = pipe.HGetAll(s.ctx(), subKey(id))
-			linkCmds[i] = pipe.HGetAll(s.ctx(), linksKey(id))
+		cmds := make([]*redis.MapStringStringCmd, 0, 2*len(batch))
+		for _, id := range batch {
+			cmds = append(cmds, pipe.HGetAll(s.ctx(), subKey(id)), pipe.HGetAll(s.ctx(), linksKey(id)))
 		}
-		if _, err := pipe.Exec(s.ctx()); err != nil {
-			return nil, err
+		_, execErr := pipe.Exec(s.ctx())
+		if n, first := failedCmds(cmds); execErr != nil && (n == 0 || n == len(cmds)) {
+			return out, execErr
+		} else if firstErr == nil {
+			firstErr = first
 		}
 		for i, id := range batch {
-			fields := subCmds[i].Val()
+			subCmd, linkCmd := cmds[2*i], cmds[2*i+1]
+			if subCmd.Err() != nil || linkCmd.Err() != nil {
+				unreadable++
+				continue
+			}
+			fields := subCmd.Val()
 			if len(fields) == 0 {
 				// A slot-homed miss: lazily migrate a legacy copy and re-read it. Rare
 				// (only during the migration window); the common batch is all hits.
@@ -418,8 +434,11 @@ func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 				}
 				continue
 			}
-			out = append(out, subscriptionFromHash(id, fields, linkCmds[i].Val()))
+			out = append(out, subscriptionFromHash(id, fields, linkCmd.Val()))
 		}
+	}
+	if firstErr != nil {
+		return out, fmt.Errorf("get many: %d of %d subscriptions unreadable: %w", unreadable, len(ids), firstErr)
 	}
 	return out, nil
 }

@@ -370,3 +370,40 @@ func TestReconcileIndexPassSurvivesAnUnreadableLinksHash(t *testing.T) {
 		t.Fatal("the unreadable links hash must stay reported until it is fixed")
 	}
 }
+
+// TestReconcilePatternPassCostSurvivesAnUnreadableSubscription pins that a sub
+// hash of the wrong type costs the pattern pass nothing but a log line: the pass
+// is the same five pipeline Execs as the healthy one, with no read per listed
+// subscription. When the pass fell back to one Get per id on a failed batch
+// read, a bad key that stayed bad put the N serial trips the batch removed back
+// into every tick: measured on these fixtures, 88 trips here and 1,008 at 1,000
+// subscriptions, about 7 s and 80 s at 80 ms a trip against a 30 s interval.
+func TestReconcilePatternPassCostSurvivesAnUnreadableSubscription(t *testing.T) {
+	s, rec := newRecordedStore(t)
+	const n = 83
+	streams, tails := seedPatternSubs(t, s, n, 1)
+	ctx := context.Background()
+	const broken = "sub-0035"
+	if err := s.client.Del(ctx, subKey(broken)).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.client.Set(ctx, subKey(broken), "not-a-hash", 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	mgr := newReconcileManager(t, s, streams, tails)
+
+	for pass := 1; pass <= 2; pass++ {
+		rec.Take()
+		mgr.RunReconcile()
+		trips := rec.Take()
+		if got := len(trips); got != 5 {
+			t.Fatalf("pass %d with one unreadable sub hash = %d trips, want the healthy pass's 5: %s", pass, got, summarize(trips))
+		}
+		if got := pipelinesLedBy(trips, "hgetall"); got != 1 {
+			t.Fatalf("pass %d read subscriptions in %d pipelines, want the one batch and no per-subscription reads: %s", pass, got, summarize(trips))
+		}
+		if got := len(singleCommands(trips)); got != 0 {
+			t.Fatalf("pass %d issued %d single commands, want none: %s", pass, got, summarize(trips))
+		}
+	}
+}

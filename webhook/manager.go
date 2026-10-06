@@ -2538,12 +2538,14 @@ func (m *Manager) backfill(id string, cfg Config) {
 // which is none in steady state. Each of those is then repaired from its own
 // fresh read, immediately before its writes, exactly as the per-subscription
 // loop did: a subscription deleted or re-created while the pass repaired earlier
-// ones is never linked from the batched snapshot. If the batch read fails (one
-// unreadable hash fails its whole chunk) every subscription is a candidate and
-// the repair's per-subscription reads carry the pass at the old cost of one
-// round trip each, so one bad key costs one subscription, not glob-link
-// recovery for all of them. Matching is O(pattern subs × streams) of CPU; it
-// runs on the slow reconcile loop, not the 2s sweep.
+// ones is never linked from the batched snapshot. The batch read keeps what it
+// could read: a hash of the wrong type costs that subscription this tick (its
+// own Get would fail the same way) and a connection failure ends the screen at
+// that chunk; both are logged and the next tick re-reads. The pass never falls
+// back to one read per listed subscription, which under a bad key that stays
+// bad would put the N serial round trips the batch removed back into every
+// tick. Matching is O(pattern subs × streams) of CPU; it runs on the slow
+// reconcile loop, not the 2s sweep.
 func (m *Manager) reconcilePatternLinks() {
 	if m.lister == nil {
 		return
@@ -2556,19 +2558,14 @@ func (m *Manager) reconcilePatternLinks() {
 	if err != nil || len(streams) == 0 {
 		return
 	}
-	candidates := ids
-	if subs, err := m.store.GetMany(ids); err == nil {
-		candidates = nil
-		for _, sub := range subs {
-			if len(missingGlobLinks(sub, streams)) > 0 {
-				candidates = append(candidates, sub.ID)
-			}
-		}
-	} else {
-		m.log.Warn("webhook: reconcile pattern links: batch read failed, reading each subscription", "error", err)
+	subs, err := m.store.GetMany(ids)
+	if err != nil {
+		m.log.Warn("webhook: reconcile pattern links: read subscriptions", "listed", len(ids), "read", len(subs), "error", err)
 	}
-	for _, id := range candidates {
-		m.relinkPatternSub(id, streams)
+	for _, sub := range subs {
+		if len(missingGlobLinks(sub, streams)) > 0 {
+			m.relinkPatternSub(sub.ID, streams)
+		}
 	}
 }
 
