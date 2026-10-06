@@ -25,7 +25,9 @@ import (
 // trips either way, and what the read-then-script loop had before the hint.
 // With 16 back-to-back writers on one stream at 80 ms per round trip the
 // longest measured one-trip RETRY streaks ran past 64; 128 keeps them inside
-// the budget.
+// the budget. An append that spends half of its attempts on RETRY logs a
+// warning once, so a stream approaching the budget is visible before its
+// appends fail.
 const maxAppendRetries = 128
 
 // Options configures a Store.
@@ -665,6 +667,13 @@ func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (stor
 					return store.AppendResult{}, err
 				}
 				hint = &live
+			}
+			if attempt+1 == attempts/2 {
+				// Once per append, well before it can fail: a stream whose
+				// writers run this deep into the budget is the signal that
+				// precedes "too much contention".
+				s.log.Warn("append has spent half its contention budget on RETRY",
+					"path", path, "attempts", attempt+1, "budget", attempts)
 			}
 			continue
 		}
