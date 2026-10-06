@@ -116,6 +116,61 @@ func TestAppendTailHintRoundTrips(t *testing.T) {
 	}
 }
 
+// TestAppendContentionBudgetIsRoundTrips exhausts the re-frame loop on each
+// framing path by moving the tail just before every script run. The budget
+// is round trips: a request naming no content type reads tail and type
+// before every script run, so it gets half the attempts of one that names a
+// type, and each path gives up after the same number of trips (one more when
+// a typed request's first attempt has no hint).
+func TestAppendContentionBudgetIsRoundTrips(t *testing.T) {
+	side := newTestStore(t) // moves tails behind the logged store's back; not logged
+	s, rec := recordedStore(t)
+	plain := store.AppendOptions{ContentType: "text/plain"}
+	cases := []struct {
+		name            string
+		opts            store.AppendOptions
+		hint            bool
+		attempts, trips int
+	}{
+		{name: "no content type", attempts: maxAppendRetries / 2, trips: maxAppendRetries},
+		{name: "content type without a hint", opts: plain, attempts: maxAppendRetries, trips: maxAppendRetries + 1},
+		{name: "content type with a hint", opts: plain, hint: true, attempts: maxAppendRetries, trips: maxAppendRetries},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := testPath("budget")
+			mustCreate(t, s, path, store.CreateOptions{ContentType: "text/plain"})
+			opts := tc.opts
+			if tc.hint {
+				meta, err := s.Get(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				opts.TailHint = &meta.CurrentOffset
+			}
+			rec.Take()
+			retries := rec.Retries()
+			var lose func()
+			lose = func() {
+				mustAppend(t, side, path, []byte("moved"), plain)
+				rec.BeforeAppendScript(lose)
+			}
+			rec.BeforeAppendScript(lose)
+			_, err := s.Append(path, []byte("x"), opts)
+			rec.BeforeAppendScript(nil)
+			if err == nil || !strings.Contains(err.Error(), "too much contention") {
+				t.Fatalf("Append = %v, want too much contention", err)
+			}
+			if got := len(rec.Take()); got != tc.trips {
+				t.Errorf("round trips %d, want %d", got, tc.trips)
+			}
+			if got := rec.Retries() - retries; got != tc.attempts {
+				t.Errorf("RETRY replies %d, want %d", got, tc.attempts)
+			}
+		})
+	}
+}
+
 // streamState is everything observable about a stream after an append: the
 // Get metadata that does not name the stream, the messages read back and the
 // outcomes of both calls, plus whether any key exists at all (a vanished

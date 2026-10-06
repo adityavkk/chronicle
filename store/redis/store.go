@@ -15,15 +15,17 @@ import (
 	"gecgithub01.walmart.com/auk000v/chronicle/store"
 )
 
-// maxAppendRetries bounds the optimistic re-frame loop. Each retry means
-// another writer advanced the tail between our snapshot and the script run;
-// the script itself is atomic, so this is a contention budget, not
-// correctness. A retry is one round trip when the request names a content
-// type (the RETRY reply carries the live tail): half of what a
-// read-then-script attempt cost, so the same stretch of contention is twice
-// as many attempts. With 16 back-to-back writers on one stream at 80 ms per
-// round trip the longest measured RETRY streaks ran past 64; 128 keeps them
-// inside the budget.
+// maxAppendRetries bounds the optimistic re-frame loop, in Redis round trips.
+// Each retry means another writer advanced the tail between our snapshot and
+// the script run; the script itself is atomic, so this is a contention
+// budget, not correctness. An attempt is one round trip when the request
+// names a content type (the RETRY reply carries the live tail) and two when
+// it names none (tail and content type are read together before every script
+// run), so a typed request gets 128 attempts and an untyped one 64: the same
+// trips either way, and what the read-then-script loop had before the hint.
+// With 16 back-to-back writers on one stream at 80 ms per round trip the
+// longest measured one-trip RETRY streaks ran past 64; 128 keeps them inside
+// the budget.
 const maxAppendRetries = 128
 
 // Options configures a Store.
@@ -606,10 +608,14 @@ func (s *Store) Append(path string, data []byte, opts store.AppendOptions) (stor
 	// The tail is pinned by step 11 (RETRY) whatever its source.
 	frameCT := opts.ContentType
 	var hint *store.Offset
+	// The budget is round trips: an untyped request's attempts cost two each,
+	// so it gets half as many.
+	attempts := maxAppendRetries / 2
 	if reqCT != "" {
 		hint = opts.TailHint
+		attempts = maxAppendRetries
 	}
-	for attempt := 0; attempt < maxAppendRetries; attempt++ {
+	for attempt := 0; attempt < attempts; attempt++ {
 		var base store.Offset
 		if hint != nil {
 			base, hint = *hint, nil
