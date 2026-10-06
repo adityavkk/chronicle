@@ -407,3 +407,89 @@ func TestReconcilePatternPassCostSurvivesAnUnreadableSubscription(t *testing.T) 
 		}
 	}
 }
+
+// TestGetManyFallbackIsCountedAndPaidOnce pins the one place a batched read
+// still goes serial: a subscription its pipelined HGETALLs did not find. A
+// legacy ({__ds}) record costs its migration, the 14 commands and the index
+// pipeline of migrateSub plus one re-read, exactly once, because the copy is
+// flipped; a listed id with no record under either tag costs one serial HGETALL
+// on every call. Neither re-reads what the pipeline already read, and both are
+// counted on the Metrics seam by outcome, since the trip count is the only
+// other sign that a pass went serial.
+func TestGetManyFallbackIsCountedAndPaidOnce(t *testing.T) {
+	s, rec := newRecordedStore(t)
+	fm := &fakeMetrics{}
+	s.WithMetrics(fm)
+	ctx := context.Background()
+	const n, legacy = 8, 3
+	const migrationTrips = 16 // 14 single commands + the index pipeline + the re-read
+	seedPatternSubs(t, s, n, 1)
+	now := time.Now()
+	for i := 0; i < legacy; i++ {
+		id := fmt.Sprintf("legacy-%d", i)
+		if err := s.client.HSet(ctx, subKeyLegacy(id), map[string]any{
+			"id": id, "type": string(DispatchPullWake), "pattern": "events/*", "wake_stream": "wake/pool",
+			"lease_ttl_ms": "1000", "status": "active", "phase": "idle", "generation": "0",
+			"wake_id": "", "holder": "0", "lease_until_ns": "0", "created_ns": nsArg(now),
+		}).Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.client.HSet(ctx, linksKeyLegacy(id), "events/a", "glob:0000000000000000_0000000000000000").Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.client.SAdd(ctx, subsKeyLegacy, id).Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A listed id with no record anywhere: its hashes removed out of band, its
+	// id-set membership left behind.
+	if err := s.client.Del(ctx, subKey("sub-0000"), linksKey("sub-0000")).Err(); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != n+legacy {
+		t.Fatalf("List = %d ids, want %d", len(ids), n+legacy)
+	}
+
+	rec.Take()
+	subs, err := s.GetMany(ids)
+	trips := rec.Take()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subs) != n-1+legacy {
+		t.Fatalf("GetMany returned %d subscriptions, want %d (the migrated ones, not the absent one)", len(subs), n-1+legacy)
+	}
+	if got, want := len(trips), 1+migrationTrips*legacy+1; got != want {
+		t.Fatalf("first GetMany = %d trips, want the batch + %d per legacy record + 1 for the absent id = %d: %s", got, migrationTrips, want, summarize(trips))
+	}
+	if got := countNamed(trips, "pipe(hgetall+hgetall)"); got != legacy {
+		t.Fatalf("re-reads = %d, want one per migrated record (%d), none for the miss the batch already saw: %s", got, legacy, summarize(trips))
+	}
+	if got := fm.readFallbacks(); got["migrated"] != legacy || got["absent"] != 1 || got["error"] != 0 {
+		t.Fatalf("fallbacks after the first call = %v, want migrated=%d absent=1", got, legacy)
+	}
+	if left, _ := s.client.SCard(ctx, subsKeyLegacy).Result(); left != 0 {
+		t.Fatalf("legacy id-set still holds %d ids after the batched read migrated them", left)
+	}
+
+	// The next call pays only for the absent id, and says so.
+	rec.Take()
+	subs, err = s.GetMany(ids)
+	trips = rec.Take()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subs) != n-1+legacy {
+		t.Fatalf("second GetMany returned %d subscriptions, want %d", len(subs), n-1+legacy)
+	}
+	if len(trips) != 2 || countNamed(trips, "hgetall") != 1 {
+		t.Fatalf("second GetMany = %d trips, want the batch + one HGETALL for the absent id: %s", len(trips), summarize(trips))
+	}
+	if got := fm.readFallbacks(); got["migrated"] != legacy || got["absent"] != 2 {
+		t.Fatalf("fallbacks after the second call = %v, want migrated=%d absent=2", got, legacy)
+	}
+}

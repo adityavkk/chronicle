@@ -407,6 +407,23 @@ type fakeMetrics struct {
 	grantFails  map[string]int // AppendFenceGrantFailed by site, #183
 	claimVerify map[string]int // ClaimVerify by outcome, #192
 	deliveries  map[string]int // WakeDelivery attempts by outcome
+	fallbacks   map[string]int // ReadFallback by outcome (migrated|absent|error)
+}
+
+func (f *fakeMetrics) ReadFallback(outcome string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fallbacks == nil {
+		f.fallbacks = map[string]int{}
+	}
+	f.fallbacks[outcome]++
+}
+
+// readFallbacks snapshots the ReadFallback outcome counts.
+func (f *fakeMetrics) readFallbacks() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return maps.Clone(f.fallbacks)
 }
 
 func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {

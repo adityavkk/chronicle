@@ -75,6 +75,7 @@ type Prometheus struct {
 	ownerFenced              *prometheus.CounterVec
 	claimContention          *prometheus.CounterVec
 	durabilityShort          *prometheus.CounterVec
+	readFallbacks            *prometheus.CounterVec
 	serviceAccess            *prometheus.CounterVec
 	appendFenceRejections    *prometheus.CounterVec
 	appendFenceSeals         *prometheus.CounterVec
@@ -325,6 +326,10 @@ func New() *Prometheus {
 			Name: "chronicle_durability_short_total",
 			Help: "Tier B fence-minting writes that reached the primary but could not prove durability within the WAIT/WAITAOF timeout, by command (WAITAOF|WAIT) — the RPO-exposure signal (issue #43, INV-DUR-01). Durability only: carries no holder/generation/exclusivity.",
 		}, []string{"cmd"}),
+		readFallbacks: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "chronicle_subscription_read_fallbacks_total",
+			Help: "Subscriptions a batched read (the recovery sweep, the pattern reconcile, the append fan-out) did not find under their slot-homed tag and read again one at a time, by outcome: migrated (a legacy copy was moved into place, once per subscription), absent (a listed id with no record under either tag: a serial round trip on every pass until it is removed) or error.",
+		}, []string{"outcome"}),
 		serviceAccess: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "chronicle_service_access_total",
 			Help: "Service authentication and authorization events by result: spiffe_authenticated, bearer_authenticated, authentication_failure, authorization_failure, or delegated_gateway.",
@@ -450,7 +455,7 @@ func New() *Prometheus {
 		p.dirtyRecovery,
 		p.dueSetMutations, p.dueWorkerSeconds, p.dueWorkerFired,
 		p.slotOwnership, p.coverageGap, p.ownerFenced, p.claimContention,
-		p.durabilityShort, p.serviceAccess,
+		p.durabilityShort, p.readFallbacks, p.serviceAccess,
 		p.appendFenceRejections, p.appendFenceSeals, p.appendFenceGrantFailures,
 		p.claimVerify,
 		p.sseHubs, p.sseClients, p.sseHubReads, p.sseHubMessages,
@@ -694,6 +699,12 @@ func (p *Prometheus) ClaimContention(status, _ string) {
 // holder/generation/ack count — correction #3.
 func (p *Prometheus) DurabilityShort(cmd string) {
 	p.durabilityShort.WithLabelValues(cmd).Inc()
+}
+
+// ReadFallback implements webhook.Metrics: one subscription a batched read fell
+// back to a serial read for, by outcome (migrated|absent|error).
+func (p *Prometheus) ReadFallback(outcome string) {
+	p.readFallbacks.WithLabelValues(outcome).Inc()
 }
 
 // ServiceSPIFFEAuthentication implements webhook.Metrics and

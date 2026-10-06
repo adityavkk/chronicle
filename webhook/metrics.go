@@ -146,6 +146,17 @@ type Metrics interface {
 	// not answer, a 500). The negative outcomes are a consumer's fallback
 	// rate; unavailable is the one a consumer must not cache.
 	ClaimVerify(outcome string)
+
+	// ReadFallback records one subscription a batched read (Store.GetMany: the
+	// recovery sweep, the pattern reconcile and the append fan-out) did not
+	// find under its slot-homed tag and read again on its own, serially, by
+	// outcome: "migrated" (a legacy copy was moved into place and read; once
+	// per subscription, so its rate is the migration window draining),
+	// "absent" (a listed id with no record under either tag, which costs the
+	// serial round trip on every pass until it is removed) or "error". The
+	// batch is one round trip per 512 ids and each fallback adds at least one,
+	// so this is the only sign a pass went serial. Wired at RedisStore.GetMany.
+	ReadFallback(outcome string)
 }
 
 // NopMetrics is the no-op Metrics used when none is configured. The Manager
@@ -238,3 +249,6 @@ func (NopMetrics) AppendFenceGrantFailed(string) {}
 
 // ClaimVerify implements Metrics.
 func (NopMetrics) ClaimVerify(string) {}
+
+// ReadFallback implements Metrics.
+func (NopMetrics) ReadFallback(string) {}

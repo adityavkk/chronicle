@@ -427,10 +427,24 @@ func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 			}
 			fields := subCmd.Val()
 			if len(fields) == 0 {
-				// A slot-homed miss: lazily migrate a legacy copy and re-read it. Rare
-				// (only during the migration window); the common batch is all hits.
-				if sub, ok, err := s.Get(id); err == nil && ok {
-					out = append(out, sub)
+				// A slot-homed miss. The pipelined read was the first read Get makes,
+				// so this is its second step: migrate a legacy ({__ds}) copy into
+				// place and re-read it. Rare (only during the migration window, and
+				// once per subscription, since the copy is flipped) but serial: a
+				// legacy record costs its migration here, and a listed id with no
+				// record under either tag costs one round trip on every pass, so
+				// each fallback is counted by outcome.
+				migrated, err := s.migrateSub(id)
+				switch {
+				case err != nil:
+					s.metrics.ReadFallback("error")
+				case !migrated:
+					s.metrics.ReadFallback("absent")
+				default:
+					s.metrics.ReadFallback("migrated")
+					if sub, ok, err := s.getSlotHomed(id); err == nil && ok {
+						out = append(out, sub)
+					}
 				}
 				continue
 			}
