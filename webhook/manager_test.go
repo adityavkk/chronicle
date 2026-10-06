@@ -407,6 +407,23 @@ type fakeMetrics struct {
 	grantFails  map[string]int // AppendFenceGrantFailed by site, #183
 	claimVerify map[string]int // ClaimVerify by outcome, #192
 	deliveries  map[string]int // WakeDelivery attempts by outcome
+	fallbacks   map[string]int // ReadFallback by outcome (migrated|absent|error)
+}
+
+func (f *fakeMetrics) ReadFallback(outcome string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fallbacks == nil {
+		f.fallbacks = map[string]int{}
+	}
+	f.fallbacks[outcome]++
+}
+
+// readFallbacks snapshots the ReadFallback outcome counts.
+func (f *fakeMetrics) readFallbacks() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return maps.Clone(f.fallbacks)
 }
 
 func (f *fakeMetrics) SweepTick(_ time.Duration, subs, tails, wakes int) {
@@ -1189,9 +1206,9 @@ func TestReconcileRelinksFromAFreshRead(t *testing.T) {
 }
 
 // TestReconcilePatternPassSurvivesAnUnreadableSubscription pins that one
-// unreadable hash costs one subscription, not the pass: when the batched read
-// fails on it, every other pattern subscription is still repaired from its own
-// read, on this pass and the next.
+// unreadable hash costs one subscription, not the pass: the batched read keeps
+// every other pattern subscription, and each one that owes a link is repaired
+// from its own read, on this pass and the next.
 func TestReconcilePatternPassSurvivesAnUnreadableSubscription(t *testing.T) {
 	store, client := newTestStore(t)
 	ctx := context.Background()
@@ -1203,16 +1220,17 @@ func TestReconcilePatternPassSurvivesAnUnreadableSubscription(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// s3's sub hash is a STRING: WRONGTYPE for any HGETALL, so the chunk's Exec
-	// and GetMany fail; the index pass does not read sub hashes and is unaffected.
+	// s3's sub hash is a STRING: WRONGTYPE for its HGETALL, so the chunk's Exec
+	// fails and GetMany reports it while keeping every other subscription; the
+	// index pass does not read sub hashes and is unaffected.
 	if err := client.Del(ctx, subKey("s3")).Err(); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.Set(ctx, subKey("s3"), "not-a-hash", 0).Err(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.GetMany([]string{"s0", "s3"}); err == nil {
-		t.Fatal("precondition: the batched read must fail on the unreadable hash")
+	if subs, err := store.GetMany([]string{"s0", "s3"}); err == nil || len(subs) != 1 || subs[0].ID != "s0" {
+		t.Fatalf("precondition: the batched read must report the unreadable hash and keep s0, got %d subs, err %v", len(subs), err)
 	}
 	fs := &fakeStreams{tails: map[string]string{stream.Path: stream.Tail}}
 	mgr, err := NewManager(store, fs, ManagerOptions{

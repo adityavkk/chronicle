@@ -807,6 +807,9 @@ func (m *Manager) processDirtyStream(path string, origin appendOrigin) (dirtyPro
 		return dirtyProcessResult{}, dirtyStageHydrate, err
 	}
 	result := dirtyProcessResult{subs: len(subs), duplicates: len(ids) - len(subs)}
+	if len(subs) < len(ids) {
+		m.deindexStaleMembers(path, ids, subs)
+	}
 	idle := make([]Subscription, 0, len(subs))
 	for _, sub := range subs {
 		if sub.Phase != PhaseIdle {
@@ -842,6 +845,35 @@ func (m *Manager) processDirtyStream(path string, origin appendOrigin) (dirtyPro
 		return result, dirtyStageArm, fmt.Errorf("one or more subscription wakes failed to arm")
 	}
 	return result, dirtyStageNone, nil
+}
+
+// deindexStaleMembers removes from path's fan-out shards the members the
+// hydration returned no subscription for. Such a member is a deleted
+// subscription's: left by a Delete that raced a reconcile pass or that was torn
+// before its de-index, or by a glob link written for a subscription deleted
+// after the stream-create read. Nothing else removes it, and until something
+// does every append to path hydrates it for nothing: one more serial round
+// trip (the legacy-keyspace probe, counted as an absent read fallback) on
+// every tick. The store checks the member's sub hash and link in the same step
+// as the SREM, so an id re-created and re-linked since the lookup keeps its
+// member; a failed removal is logged and the next append to path retries it.
+func (m *Manager) deindexStaleMembers(path string, ids []string, subs []Subscription) {
+	live := make(map[string]struct{}, len(subs))
+	for _, sub := range subs {
+		live[sub.ID] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := live[id]; ok {
+			continue
+		}
+		removed, err := m.store.DeindexStale(id, path)
+		switch {
+		case err != nil:
+			m.log.Warn("webhook: remove stale fan-out member", "sub", id, "stream_path", path, "error", err)
+		case removed:
+			m.log.Info("webhook: removed stale fan-out member", "sub", id, "stream_path", path)
+		}
+	}
 }
 
 // processDirtyBatch runs at most dirtyBatchSize streams. A failed stream returns
@@ -2543,12 +2575,14 @@ func (m *Manager) backfill(id string, cfg Config) {
 // which is none in steady state. Each of those is then repaired from its own
 // fresh read, immediately before its writes, exactly as the per-subscription
 // loop did: a subscription deleted or re-created while the pass repaired earlier
-// ones is never linked from the batched snapshot. If the batch read fails (one
-// unreadable hash fails its whole chunk) every subscription is a candidate and
-// the repair's per-subscription reads carry the pass at the old cost of one
-// round trip each, so one bad key costs one subscription, not glob-link
-// recovery for all of them. Matching is O(pattern subs × streams) of CPU; it
-// runs on the slow reconcile loop, not the 2s sweep.
+// ones is never linked from the batched snapshot. The batch read keeps what it
+// could read: a hash of the wrong type costs that subscription this tick (its
+// own Get would fail the same way) and a connection failure ends the screen at
+// that chunk; both are logged and the next tick re-reads. The pass never falls
+// back to one read per listed subscription, which under a bad key that stays
+// bad would put the N serial round trips the batch removed back into every
+// tick. Matching is O(pattern subs × streams) of CPU; it runs on the slow
+// reconcile loop, not the 2s sweep.
 func (m *Manager) reconcilePatternLinks() {
 	if m.lister == nil {
 		return
@@ -2561,19 +2595,14 @@ func (m *Manager) reconcilePatternLinks() {
 	if err != nil || len(streams) == 0 {
 		return
 	}
-	candidates := ids
-	if subs, err := m.store.GetMany(ids); err == nil {
-		candidates = nil
-		for _, sub := range subs {
-			if len(missingGlobLinks(sub, streams)) > 0 {
-				candidates = append(candidates, sub.ID)
-			}
-		}
-	} else {
-		m.log.Warn("webhook: reconcile pattern links: batch read failed, reading each subscription", "error", err)
+	subs, err := m.store.GetMany(ids)
+	if err != nil {
+		m.log.Warn("webhook: reconcile pattern links: read subscriptions", "listed", len(ids), "read", len(subs), "error", err)
 	}
-	for _, id := range candidates {
-		m.relinkPatternSub(id, streams)
+	for _, sub := range subs {
+		if len(missingGlobLinks(sub, streams)) > 0 {
+			m.relinkPatternSub(sub.ID, streams)
+		}
 	}
 }
 

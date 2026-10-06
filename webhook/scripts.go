@@ -55,6 +55,11 @@ var (
 			[]scriptArg{arg("expected_path", argString)}, nil,
 		),
 	}, unlinkStreamDecoder)
+	deindexStaleScript = newTypedScript[deindexStaleKeys, deindexStaleReply](scriptABI{
+		Name: "deindex_stale", File: "deindex_stale.lua",
+		Keys: []scriptKeySchema{keys("sub", "links", "stream_subs")},
+		Args: exactArgs(arg("id", argString), arg("path", argString)),
+	}, deindexStaleDecoder)
 	armWakeScript = newTypedScript[armWakeKeyVec, armWakeReply](scriptABI{
 		Name: "arm_wake", File: "arm_wake.lua",
 		Keys: []scriptKeySchema{keys("sub", "lease_zset", "due_zset"), keys("sub", "lease_zset", "due_zset", "slot")},
@@ -165,7 +170,7 @@ var (
 )
 
 var registeredScripts = []registeredScript{
-	createSubScript.registration(), linkStreamScript.registration(), unlinkStreamScript.registration(), armWakeScript.registration(),
+	createSubScript.registration(), linkStreamScript.registration(), unlinkStreamScript.registration(), deindexStaleScript.registration(), armWakeScript.registration(),
 	claimScript.registration(), writeFenceScript.registration(), ackScript.registration(), releaseScript.registration(), expireLeaseScript.registration(),
 	restoreLeaseScript.registration(), claimDueScript.registration(), scheduleRetryScript.registration(),
 	recordSuccessScript.registration(), recordWakeSentScript.registration(), deleteSubScript.registration(),

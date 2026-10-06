@@ -62,6 +62,24 @@ func newUnlinkStreamKeys(id string) unlinkStreamKeys {
 	return unlinkStreamKeys{Sub: subKey(id), Links: linksKey(id)}
 }
 
+type deindexStaleKeys struct {
+	Sub        string
+	Links      string
+	StreamSubs string
+}
+
+func (k deindexStaleKeys) redisKeys() []string { return []string{k.Sub, k.Links, k.StreamSubs} }
+func (k deindexStaleKeys) keyRoles() []scriptKeyRole {
+	return []scriptKeyRole{"sub", "links", "stream_subs"}
+}
+
+// newDeindexStaleKeys names the subscriber's record, its links and the fan-out
+// shard of path in the subscriber's slot: all three under {__ds:h}, so the link
+// check and the SREM are one atomic step.
+func newDeindexStaleKeys(id, path string) deindexStaleKeys {
+	return deindexStaleKeys{Sub: subKey(id), Links: linksKey(id), StreamSubs: streamSubsKey(slotOf(id), path)}
+}
+
 type armWakeKeyVec struct {
 	Sub       string
 	LeaseZSet string

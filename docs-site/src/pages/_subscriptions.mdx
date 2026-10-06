@@ -594,23 +594,25 @@ import Step from "../components/Step.astro";
 
   Every durable write here is followed by a non-atomic step in Go, e.g. arm then
   emit, link then index, or commit then hook. A crash in that gap is the recurring
-  source of a subscription bug. Four such windows are closed, each by the same
-  idea. The durable record is the source of truth, and a background pass
-  re-derives whatever the crash dropped. None of these changes the at-least-once
-  guarantee or the fence.
+  source of a subscription bug. Five such windows are closed, each by the same
+  idea. The durable record is the source of truth: a background pass re-derives
+  whatever the crash dropped, and the fan-out worker removes an index entry left
+  for a deleted subscription. None of these changes the at-least-once guarantee
+  or the fence.
 
   <Table wide>
-    | Window | Symptom after a crash | Fix |
+    | Window | Symptom | Fix |
     | --- | --- | --- |
     | **Expired-lease takeover** | a second worker claimed a lease whose deadline had passed and *reused* the old `generation`/`wake_id`, so the deposed worker could still ack. Two holders shared one fence | the claim now rotates the fence on takeover, minting a fresh `generation` and `wake_id`, so the deposed worker's late ack is `FENCED` |
     | **Pull-wake arm-then-emit** | a pull-wake armed (`phase=waking`) but crashed before writing its wake event, then stayed stranded forever. The sweep only re-woke idle subs and a later append coalesced | `arm_wake` marks the wake unsent, and the recovery sweep re-emits any pull-wake still `waking` and unsent. Duplicate wake events are fence-safe |
     | **Missed glob link** | a stream created during an outage never ran `OnStreamCreated`, so a matching pattern subscription never linked it, and it does not recover on its own | a separate slow reconcile loop lists streams and re-links missing glob matches, at the beginning offset if the stream is newer than the subscription, at the tail if older |
     | **Dropped fan-out index** | the canonical link survived but its fan-out index entry did not, so appends fell back to sweep latency | the reconcile loop rebuilds the index from the canonical links. It mirrors links and never invents membership |
+    | **Stale fan-out member** | a subscription was deleted but its fan-out index entry survived (a delete torn before its de-index, or a reconcile pass re-adding an entry it had read just before the delete), so every append to the stream hydrated it for nothing: one extra serial round trip, forever | the fan-out worker removes a member it can hydrate no subscription for. The removal is guarded in Redis by the member's own subscription and link, so a subscription re-created and re-linked in between keeps its entry |
   </Table>
 
-  Only the first window touched correctness. The other three are liveness
-  problems, a stranded wake, a missing link, and a slow trigger, all recovered by
-  the durable record plus a sweep.
+  Only the first window touched correctness. The other four are liveness or cost
+  problems, a stranded wake, a missing link, a slow trigger and a wasted lookup,
+  all recovered by the durable record plus a sweep or the next append.
 
   <Callout icon="info" label="Sweep, not outbox">
     The pull-wake recovery re-emits from the existing recovery sweep rather than a

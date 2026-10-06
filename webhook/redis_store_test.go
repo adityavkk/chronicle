@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,6 +62,36 @@ func TestStoreCreateConfirmConflict(t *testing.T) {
 	other.WebhookURL = "https://w.example/other"
 	if st, _ := s.CreateOrConfirm("s1", other, nil, now); st != CreateConflict {
 		t.Fatalf("different config = %v, want CreateConflict", st)
+	}
+}
+
+// TestGetManyKeepsWhatItCouldRead pins the batched read's fault isolation: a
+// sub hash or a links hash of the wrong type fails its own HGETALL, and GetMany
+// leaves that subscription out, keeps the rest in id order and reports the
+// failure, instead of failing the whole read on the chunk's first error.
+func TestGetManyKeepsWhatItCouldRead(t *testing.T) {
+	s, client := newTestStore(t)
+	ctx := context.Background()
+	ids := []string{"a", "b", "c", "d"}
+	for _, id := range ids {
+		if _, err := s.CreateOrConfirm(id, webhookCfg("https://w.example/h"), nil, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, key := range []string{subKey("b"), linksKey("c")} {
+		if err := client.Del(ctx, key).Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := client.Set(ctx, key, "not-a-hash", 0).Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	subs, err := s.GetMany(ids)
+	if err == nil || !strings.Contains(err.Error(), "WRONGTYPE") {
+		t.Fatalf("GetMany should report the unreadable hashes, got %v", err)
+	}
+	if len(subs) != 2 || subs[0].ID != "a" || subs[1].ID != "d" {
+		t.Fatalf("GetMany should keep the readable subscriptions in id order, got %d: %+v", len(subs), subs)
 	}
 }
 

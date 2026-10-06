@@ -65,6 +65,7 @@ func TestMuxEndpoints(t *testing.T) {
 	p.OwnerFenced("check_owner")
 	p.ClaimContention("already_claimed", "agent-handler")
 	p.DurabilityShort("WAITAOF")
+	p.ReadFallback("absent")
 	p.ServiceSPIFFEAuthentication()
 	p.ServiceBearerAuthentication()
 	p.ServiceAuthenticationFailure()
@@ -152,6 +153,7 @@ func TestMuxEndpoints(t *testing.T) {
 		"chronicle_owner_fenced_total",
 		"chronicle_claim_contention_total",
 		"chronicle_durability_short_total",
+		"chronicle_subscription_read_fallbacks_total",
 		"chronicle_service_access_total",
 		"chronicle_append_fence_rejections_total",
 		"chronicle_append_fence_seals_total",

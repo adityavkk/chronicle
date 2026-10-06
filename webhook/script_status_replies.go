@@ -111,6 +111,45 @@ func decodeUnlinkStreamReply(r scriptReply) (unlinkStreamReply, error) {
 	}
 }
 
+type deindexStaleReply interface {
+	deindexStaleReply()
+	status() string
+}
+type (
+	deindexStaleRemoved struct{}
+	deindexStaleLinked  struct{}
+	deindexStaleAbsent  struct{}
+)
+
+func (deindexStaleRemoved) deindexStaleReply() {}
+func (deindexStaleLinked) deindexStaleReply()  {}
+func (deindexStaleAbsent) deindexStaleReply()  {}
+func (deindexStaleRemoved) status() string     { return "REMOVED" }
+func (deindexStaleLinked) status() string      { return "LINKED" }
+func (deindexStaleAbsent) status() string      { return "ABSENT" }
+
+var (
+	deindexStaleReplyVariants = []replyVariant{{Status: "REMOVED"}, {Status: "LINKED"}, {Status: "ABSENT"}}
+	deindexStaleDecoder       = scriptDecoder[deindexStaleReply]{Variants: deindexStaleReplyVariants, Decode: decodeDeindexStaleReply}
+)
+
+func decodeDeindexStaleReply(r scriptReply) (deindexStaleReply, error) {
+	st, err := decodeUnitStatus(r, deindexStaleReplyVariants)
+	if err != nil {
+		return nil, err
+	}
+	switch st {
+	case "REMOVED":
+		return deindexStaleRemoved{}, nil
+	case "LINKED":
+		return deindexStaleLinked{}, nil
+	case "ABSENT":
+		return deindexStaleAbsent{}, nil
+	default:
+		return nil, fmt.Errorf("unhandled deindex_stale status %q", st)
+	}
+}
+
 type writeFenceReply interface {
 	writeFenceReply()
 	status() string

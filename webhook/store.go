@@ -31,7 +31,12 @@ type Store interface {
 	// GetMany hydrates many subscriptions in one pipelined batch, in the order
 	// of ids, omitting any that no longer exist. It is the batched form of Get
 	// for the loops that read every subscription (the recovery sweep and the
-	// reconcile loop).
+	// reconcile loop). Like PatternSubscriptions it keeps what it did read: a
+	// subscription whose hash could not be read is omitted and the error, non-nil
+	// iff a read in the batch failed, wraps the first failure, so a caller that
+	// can act on a partial read (the pattern reconcile) does, and one that needs
+	// the whole keyspace (the recovery sweep) checks the error. A legacy record
+	// whose migration or re-read fails is omitted without an error.
 	GetMany(ids []string) ([]Subscription, error)
 
 	// PatternSubscriptions reads the glob pattern of each subscription in ids
@@ -82,6 +87,14 @@ type Store interface {
 	// the index update, in about one pipelined round trip per 512 subscriptions plus one per 512 links. It only
 	// mirrors links and never invents membership.
 	ReconcileIndexes() error
+
+	// DeindexStale removes id from path's fan-out shard unless id's subscription
+	// exists and its links still name path, in one atomic step in id's slot, and
+	// reports whether a member was removed. It is the stale-entry cleanup
+	// ReconcileIndexes defers, run by the fan-out worker on a member it could
+	// hydrate no subscription for; a subscription re-created and re-linked since
+	// that read keeps its member.
+	DeindexStale(id, path string) (removed bool, err error)
 
 	// ArmWakeUnscoped issues a new wake generation if the subscription is idle;
 	// armLease arms the lease at issue (webhook) versus deferring it to claim

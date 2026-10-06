@@ -394,32 +394,65 @@ const pipelineChunk = 512
 // GetMany hydrates many subscriptions in pipelined batches of pipelineChunk.
 // Missing subscriptions are skipped. It is the batched form of Get for the loops
 // that read every subscription (the recovery sweep and the reconcile loop): a
-// handful of round trips instead of one per subscription.
+// handful of round trips instead of one per subscription. The per-command
+// replies are the authority, not Exec's error, which is only the first of them:
+// a sub or links hash of the wrong type fails its own HGETALL and costs that
+// subscription, which is left out and reported, so one bad key never costs the
+// whole read (a caller that fell back to one Get per id would pay the N serial
+// trips this batch exists to remove, every time, for as long as the key stayed
+// bad). When no command or every command carries an error the connection
+// failed and the read ends at that chunk, as it did on the first error before.
+// Either way the returned slice holds every subscription that was read.
 func (s *RedisStore) GetMany(ids []string) ([]Subscription, error) {
 	out := make([]Subscription, 0, len(ids))
+	var firstErr error
+	unreadable := 0
 	for batch := range slices.Chunk(ids, pipelineChunk) {
 		pipe := s.client.Pipeline()
-		subCmds := make([]*redis.MapStringStringCmd, len(batch))
-		linkCmds := make([]*redis.MapStringStringCmd, len(batch))
-		for i, id := range batch {
-			subCmds[i] = pipe.HGetAll(s.ctx(), subKey(id))
-			linkCmds[i] = pipe.HGetAll(s.ctx(), linksKey(id))
+		cmds := make([]*redis.MapStringStringCmd, 0, 2*len(batch))
+		for _, id := range batch {
+			cmds = append(cmds, pipe.HGetAll(s.ctx(), subKey(id)), pipe.HGetAll(s.ctx(), linksKey(id)))
 		}
-		if _, err := pipe.Exec(s.ctx()); err != nil {
-			return nil, err
+		_, execErr := pipe.Exec(s.ctx())
+		if n, first := failedCmds(cmds); execErr != nil && (n == 0 || n == len(cmds)) {
+			return out, execErr
+		} else if firstErr == nil {
+			firstErr = first
 		}
 		for i, id := range batch {
-			fields := subCmds[i].Val()
+			subCmd, linkCmd := cmds[2*i], cmds[2*i+1]
+			if subCmd.Err() != nil || linkCmd.Err() != nil {
+				unreadable++
+				continue
+			}
+			fields := subCmd.Val()
 			if len(fields) == 0 {
-				// A slot-homed miss: lazily migrate a legacy copy and re-read it. Rare
-				// (only during the migration window); the common batch is all hits.
-				if sub, ok, err := s.Get(id); err == nil && ok {
-					out = append(out, sub)
+				// A slot-homed miss. The pipelined read was the first read Get makes,
+				// so this is its second step: migrate a legacy ({__ds}) copy into
+				// place and re-read it. Rare (only during the migration window, and
+				// once per subscription, since the copy is flipped) but serial: a
+				// legacy record costs its migration here, and a listed id with no
+				// record under either tag costs one round trip on every pass, so
+				// each fallback is counted by outcome.
+				migrated, err := s.migrateSub(id)
+				switch {
+				case err != nil:
+					s.metrics.ReadFallback("error")
+				case !migrated:
+					s.metrics.ReadFallback("absent")
+				default:
+					s.metrics.ReadFallback("migrated")
+					if sub, ok, err := s.getSlotHomed(id); err == nil && ok {
+						out = append(out, sub)
+					}
 				}
 				continue
 			}
-			out = append(out, subscriptionFromHash(id, fields, linkCmds[i].Val()))
+			out = append(out, subscriptionFromHash(id, fields, linkCmd.Val()))
 		}
+	}
+	if firstErr != nil {
+		return out, fmt.Errorf("get many: %d of %d subscriptions unreadable: %w", unreadable, len(ids), firstErr)
 	}
 	return out, nil
 }
@@ -704,8 +737,21 @@ func (s *RedisStore) StreamSubscribers(path string) (ids []string, slotsProbed i
 // and is maintained from Go after the Lua link write, so a crash between them can
 // drop an index entry while the canonical link survives — degrading that stream
 // to sweep latency until repaired. This re-adds any missing SADD; it never
-// invents membership (it only mirrors links). Stale-entry cleanup is deferred:
-// re-adding the missing entry is the correctness-critical part.
+// invents membership (it only mirrors links). Stale-entry cleanup is left to
+// the fan-out worker: re-adding the missing entry is the correctness-critical
+// part, and a member whose subscription is gone is removed by DeindexStale when
+// the worker next hydrates nothing for it. Such a member is left by a Delete
+// that lands between a chunk's links read and the write pipeline that
+// carries its entry (one round trip of exposure for a chunk's first
+// pipelineChunk entries, one more per further pipelineChunk; the serial pass
+// exposed a subscription's j-th link for 2j-1 trips, its SADD and SETBIT being
+// separate trips, so per entry the window is the same or narrower except for a
+// subscription with fewer links than its chunk-mates late in a chunk), or by a
+// delete torn before its de-index. The append that finds it pays one serial
+// legacy-keyspace probe, counted as an "absent" ReadFallback, and the removal.
+// An Unlink in that window leaves a member too, but its subscription is live,
+// so the worker hydrates it with no probe and keeps the member until the
+// subscription is deleted.
 //
 // Cost: 1 + ceil(N/pipelineChunk) read trips + about ceil(L/pipelineChunk) write
 // trips for N subscriptions and L links (it was 1 + N + 2L serial trips, growing
@@ -819,6 +865,19 @@ func (s *RedisStore) indexStream(path, id string) error {
 // loop repairs the bitmap; it is never narrowed here.
 func (s *RedisStore) deindexStream(path, id string) error {
 	return s.client.SRem(s.ctx(), streamSubsKey(slotOf(id), path), id).Err()
+}
+
+// DeindexStale implements Store.DeindexStale: deindexStream guarded, inside the
+// script, by the member's own sub hash and link, so it can act on a member read
+// a round trip ago without dropping a subscription re-created and re-linked
+// since. Like deindexStream it leaves the occupied-slots bit alone.
+func (s *RedisStore) DeindexStale(id, path string) (bool, error) {
+	reply, err := deindexStaleScript.run(s.ctx(), s.client, newDeindexStaleKeys(id, path), id, path)
+	if err != nil {
+		return false, err
+	}
+	_, removed := reply.(deindexStaleRemoved)
+	return removed, nil
 }
 
 // ArmWakeUnscoped issues a wake if idle on the external/hot path.
