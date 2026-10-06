@@ -148,12 +148,20 @@ func monitorLiveReadRedis(
 	action func(),
 ) []string {
 	t.Helper()
+	// go-redis streams MONITOR output from a goroutine that owns the
+	// connection's buffered reader as soon as MONITOR is written. On the pooled
+	// client the connection then goes straight back to the pool, whose Put
+	// inspects that reader concurrently (a data race under -race). A sticky
+	// Conn keeps the connection checked out for the whole session, and RESP2
+	// keeps go-redis from draining push notifications off that reader when it
+	// releases the connection after MONITOR.
 	monitorOptions := *options
 	monitorOptions.Protocol = 2
 	monitorClient := goredis.NewClient(&monitorOptions)
+	monitorConn := monitorClient.Conn()
 	ctx, cancel := context.WithCancel(context.Background())
 	events := make(chan string, 4096)
-	monitor := monitorClient.Monitor(ctx, events)
+	monitor := monitorConn.Monitor(ctx, events)
 	monitor.Start()
 	defer func() {
 		stopLiveReadMonitor(t, ctx, control, monitorClient, monitor)
@@ -212,6 +220,15 @@ func waitForLiveReadMonitor(
 	}
 }
 
+// stopLiveReadMonitor stops the MONITOR reader before closing its connection.
+// Stop takes the mutex go-redis's reader goroutine holds while it blocks for
+// the next MONITOR line, so MONITOR traffic keeps flowing until Stop lands.
+// The connection is then closed through monitorClient, never the sticky Conn:
+// Conn.Close returns the connection to the pool, whose Put reads the buffered
+// reader with no ordering against the goroutine's last read. Closing the
+// client closes the checked-out socket directly (in-use connections are not
+// health-checked or pooled), which wakes that last read so the goroutine can
+// observe Stop and exit.
 func stopLiveReadMonitor(
 	t *testing.T,
 	ctx context.Context,
@@ -231,8 +248,6 @@ func stopLiveReadMonitor(
 	for {
 		select {
 		case <-stopped:
-			_ = control.Echo(ctx, "chronicle-live-read-monitor-stopped").Err()
-			time.Sleep(10 * time.Millisecond)
 			if err := monitorClient.Close(); err != nil {
 				t.Errorf("close Redis MONITOR client: %v", err)
 			}
