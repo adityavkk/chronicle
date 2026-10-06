@@ -738,7 +738,19 @@ func (s *RedisStore) StreamSubscribers(path string) (ids []string, slotsProbed i
 // drop an index entry while the canonical link survives — degrading that stream
 // to sweep latency until repaired. This re-adds any missing SADD; it never
 // invents membership (it only mirrors links). Stale-entry cleanup is deferred:
-// re-adding the missing entry is the correctness-critical part.
+// re-adding the missing entry is the correctness-critical part, and nothing in
+// the service removes a member whose subscription is gone. Such a member is
+// left by a Delete that lands between a chunk's links read and the
+// write pipeline that carries its entry (one round trip of exposure for a
+// chunk's first pipelineChunk entries, one more per further pipelineChunk; the
+// serial pass exposed a subscription's j-th link for 2j-1 trips, its SADD and
+// SETBIT being separate trips, so per entry the window is the same or narrower
+// except for a subscription with fewer links than its chunk-mates late in a
+// chunk), or by a delete torn before its de-index. Until the member is
+// removed, every append to that stream hydrates it for nothing: one serial
+// legacy-keyspace probe, counted as an "absent" ReadFallback. An Unlink in
+// that window leaves a member too, but its subscription is live, so it is
+// hydrated with no probe.
 //
 // Cost: 1 + ceil(N/pipelineChunk) read trips + about ceil(L/pipelineChunk) write
 // trips for N subscriptions and L links (it was 1 + N + 2L serial trips, growing

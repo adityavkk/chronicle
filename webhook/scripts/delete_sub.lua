@@ -2,7 +2,10 @@
 -- links, id-set membership, shard fence records, and schedule entries. In-flight
 -- callback/ack/release requests then fence (the record is gone) and cannot
 -- advance cursors. The Go caller removes the per-stream fan-out index entries
--- (read before deletion) separately, since those keys are reconciled by the sweep.
+-- (read before deletion) separately. A member it leaves behind (a crash before
+-- that step, or a reconcile pass re-adding one it read before this script ran)
+-- is not removed by the sweep or the reconcile, which only add: it costs the
+-- fan-out worker one serial probe per append to that stream until removed.
 local k_sub = KEYS[1]
 local k_subs_set = KEYS[2]
 local k_links = KEYS[3]
