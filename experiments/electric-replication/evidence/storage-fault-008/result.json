@@ -1,0 +1,75 @@
+{
+  "verdict": "PASS",
+  "checker": {
+    "verdict": "PASS",
+    "operations": 28,
+    "streams": 1,
+    "scope": "append-only prefix/dedup, exact per-append/read byte offsets, strict real-time graph, explicit session minimum"
+  },
+  "storage_checks": [
+    {
+      "kind": "failed-snapshot-not-published",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-008/1/0/state/snapshot-1791384347311085928",
+      "recovered_snapshot": {
+        "leader_id": {
+          "term": 5,
+          "node_id": 1
+        },
+        "index": 15
+      }
+    },
+    {
+      "kind": "wal-header-crc",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-008/1/0/wal/1.wal",
+      "original_sha256": "fff725f80332f8e31a0564725f01745dc9024a88662b71e7558259bddc65dab6",
+      "mutated_sha256": "6ae425637971c88268d2cc1f357b298d288b939a3326388878379eca7578a7f0",
+      "expected_error": "corrupt or non-consensus journal frame",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "wal-payload-crc",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-008/1/0/wal/1.wal",
+      "original_sha256": "fff725f80332f8e31a0564725f01745dc9024a88662b71e7558259bddc65dab6",
+      "mutated_sha256": "49779d25b5184ffc0abd1a5bef6c019e0e912704dcf28e514372fe15fee688d1",
+      "expected_error": "corrupt or non-consensus journal frame",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "wal-zero-hole",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-008/1/0/wal/1.wal",
+      "original_sha256": "fff725f80332f8e31a0564725f01745dc9024a88662b71e7558259bddc65dab6",
+      "mutated_sha256": "4cd448cee0ace4e0215d01d144e5f80a9cb0f97148a429ed61cd4228f5724671",
+      "expected_error": "nonzero suffix behind journal hole",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "wal-torn-tail",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-008/1/0/wal/1.wal",
+      "original_sha256": "fff725f80332f8e31a0564725f01745dc9024a88662b71e7558259bddc65dab6",
+      "mutated_sha256": "dcd6ba1868528a517b75f69b524d9f0f92c1203d49054820c663d364af087ec9",
+      "expected_error": "truncated/oversize journal record",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "snapshot-digest",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-008/1/0/state/snapshot-1791384347206574027",
+      "original_sha256": "67c073686d9f1b3f978d25d06a20ff0601c203982218ffc6b42db80e69c9bb7c",
+      "mutated_sha256": "24f86d353013ec3c8cf2e47cad2e56051257c666490889323643f3cd029e0da0",
+      "expected_error": "snapshot digest mismatch",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "hot-rebuilt",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-008/1/0/state/hot/streams/+storage+0~2",
+      "bytes": 148
+    }
+  ],
+  "intercepted_syscalls": 7,
+  "unknown_outcomes": 3,
+  "scope": "single-host actual native storage syscall faults and offline corruption; not power-loss durability"
+}

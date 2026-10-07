@@ -45,6 +45,9 @@ disks/AZs, arbitrary power loss, production availability or cloud performance.
 | `fork-fault-006`, `subscription-fault-005`, `storage-fault-007`, `reclaim-fault-003` | Independent checkers PASS: 749 / 193 / 28 / 20 operations | Post-batching reruns; subscription/storage retain 1 / 3 unknown outcomes; nine verified webhook signatures |
 | `write-diagnostics-002` | Six matched write cells PASS | Native 91–102k/s versus one member 48–51k/s, about 2×; all exact byte/offset probes pass, no client errors; one closing client `/proc` sampling gap retained |
 | `write-profiles-001` | All three traced write cells PASS | Separate syscall profiles; tracing collapses native group-commit amortization, so traced throughput is not an unperturbed capacity comparison |
+| `conformance-012`, `fault-012`, `properties/rust-132-pipeline.txt` | 332/332, zero failures/skips; 193 operations; 132 Rust tests | Two outstanding FIFO-enqueued consensus batches, same charged admission and durability barriers |
+| `fork-fault-007`, `subscription-fault-006`, `storage-fault-008`, `reclaim-fault-004` | Independent checkers PASS: 747 / 195 / 28 / 20 operations | Post-pipelining reruns; same 1 / 3 subscription/storage unknowns, nine verified webhook signatures |
+| `write-diagnostics-003` | Six matched write cells PASS | Native 99–104k/s versus one member 53–58k/s, 1.72–1.89×; no client errors, exact byte/offset checks; closing native client `/proc` sampling gap retained |
 
 The upstream suite is **unchanged `@durable-streams/server-conformance-tests@0.3.5`**,
 with `subscriptions:true`. All 332 tests are discovered and executed in each full

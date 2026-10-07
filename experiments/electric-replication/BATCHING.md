@@ -27,7 +27,7 @@ the next request. Returning early from our storage future cannot fix this.
 [core implementation](https://github.com/databendlabs/openraft/blob/8815cdba2826f74e848acef361ad03f93bb1c3f8/openraft/src/core/raft_core.rs#L707-L730)
 and [client-message loop](https://github.com/databendlabs/openraft/blob/8815cdba2826f74e848acef361ad03f93bb1c3f8/openraft/src/core/raft_core.rs#L986-L1014).
 
-The adapter currently spends approximately two WAL fsyncs per command: its entry
+Before batching, the adapter spends approximately two WAL fsyncs per command: its entry
 and the covering apply marker. It also rereads each entry from its indexed native
 WAL for apply. Native amortizes its fsync across dozens of concurrent appends.
 This is the measured first bottleneck. Remaining serialization, copying,
@@ -135,3 +135,13 @@ spawning the receiver waiter; spawning unordered `client_write` tasks would not
 preserve ingress order. This may overlap entry persistence with the preceding
 apply marker/materialization. It is a measured-next hypothesis, not an achieved
 speedup. See the pinned [API](https://github.com/databendlabs/openraft/blob/8815cdba2826f74e848acef361ad03f93bb1c3f8/openraft/src/raft/mod.rs#L667-L680).
+
+The two-entry implementation now passes `conformance-012` (332/332, zero skips),
+`fault-012` (193 operations), and fork/subscription/storage/reclamation reruns
+(747/195/28/20 operations). `write-diagnostics-003` passes all six cells. Its
+one-member rates are 58,043 / 57,813 / 52,743 writes/s versus native
+104,161 / 99,371 / 99,705: 1.72–1.89× slower. One-member p99 is
+6.015 / 6.403 / 9.703 ms; native p99 is 4.511 / 4.639 / 6.723 ms. WAL fsyncs per
+ack remain 0.0312–0.0321: scheduling overlap, not reduced durability work, changes
+the rate. The median is about 18% above the preceding serial-batch runs, with
+material run-to-run variation. This is not yet broad workload or async parity.

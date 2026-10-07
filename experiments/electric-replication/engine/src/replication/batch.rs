@@ -1,10 +1,12 @@
 //! Ordered admission and native-fsync amortization; see BATCHING.md.
 use super::{Command, LogId, Raft, Reply};
-use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit};
+use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 
 pub(super) const CAPACITY: usize = 256;
 const MAX_COMMANDS: usize = 64;
 const MAX_BYTES: usize = 2 * 1024 * 1024;
+const MAX_INFLIGHT_BATCHES: usize = 2;
 
 pub(super) struct Committed {
     pub log_id: LogId<u64>,
@@ -60,7 +62,11 @@ pub(super) fn start(raft: Raft) -> mpsc::Sender<Pending> {
     let (send, mut receive) = mpsc::channel(CAPACITY);
     tokio::spawn(async move {
         let mut carry = None;
+        let pipeline = Arc::new(Semaphore::new(MAX_INFLIGHT_BATCHES));
         loop {
+            // Bound outstanding consensus entries as well as admitted commands.
+            // Waiting before draining lets arrivals coalesce without a timer.
+            let flight = pipeline.clone().acquire_owned().await.unwrap();
             let first = match carry.take() {
                 Some(pending) => pending,
                 None => match receive.recv().await {
@@ -69,19 +75,29 @@ pub(super) fn start(raft: Raft) -> mpsc::Sender<Pending> {
                 },
             };
             let (commands, completions) = take_ready(first, &mut receive, &mut carry);
-            match raft.client_write(commands).await {
-                Ok(committed) => {
-                    assert_eq!(committed.data.len(), completions.len(), "per-command apply replies");
-                    for (data, (result, _permit)) in committed.data.into_iter().zip(completions) {
-                        let _ = result.send(Ok(Committed { log_id: committed.log_id, data }));
+            // Enqueue from this single dispatcher BEFORE spawning a waiter.
+            // Concurrent client_write tasks would reorder FIFO submissions.
+            let receive_commit = raft.client_write_ff(commands).await;
+            tokio::spawn(async move {
+                let _flight = flight;
+                let committed = match receive_commit {
+                    Ok(receive) => receive.await.ok().and_then(Result::ok),
+                    Err(_) => None,
+                };
+                match committed {
+                    Some(committed) => {
+                        assert_eq!(committed.data.len(), completions.len(), "per-command apply replies");
+                        for (data, (result, _permit)) in committed.data.into_iter().zip(completions) {
+                            let _ = result.send(Ok(Committed { log_id: committed.log_id, data }));
+                        }
+                    }
+                    None => {
+                        for (result, _permit) in completions {
+                            let _ = result.send(Err(503));
+                        }
                     }
                 }
-                Err(_) => {
-                    for (result, _permit) in completions {
-                        let _ = result.send(Err(503));
-                    }
-                }
-            }
+            });
         }
     });
     send

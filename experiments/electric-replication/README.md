@@ -77,9 +77,9 @@ Conformance and the existing fault/property tests are necessary, not sufficient.
 The latest full suite executes **332/332 passing, zero failures/skips**, with
 subscriptions enabled. Subscription and storage-error process histories also
 pass within their documented models; they are not independent-disk or power-loss
-qualification. Bounded append batching now passes `conformance-011`, 132 Rust
-tests and five real-process campaigns. Three fresh `write-diagnostics-002` runs
-measure **48–51k one-member writes/s versus 91–102k native**, about a 2× gap with
+qualification. Bounded pipelined batching now passes `conformance-012`, 132 Rust
+tests and five real-process campaigns. Three fresh `write-diagnostics-003` runs
+measure **53–58k one-member writes/s versus 99–104k native**, a 1.72–1.89× gap with
 unchanged local-fsync guarantees. See [BATCHING.md](BATCHING.md) for the causal
 diagnosis, exact runs and remaining profiling work. Async local acceptance is
 approved but not yet implemented; no uncommitted read mode will be offered.

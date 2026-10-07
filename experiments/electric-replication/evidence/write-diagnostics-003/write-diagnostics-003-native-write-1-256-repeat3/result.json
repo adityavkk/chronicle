@@ -1,0 +1,40 @@
+{
+  "arm": "native",
+  "workload": [
+    "write",
+    1,
+    256
+  ],
+  "profile": false,
+  "diagnostics": true,
+  "verdict": "PASS",
+  "node_pids": [
+    3817385
+  ],
+  "affinity": {
+    "3817385": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 3822315,
+  "process_sample_gaps": [
+    {
+      "pid": 3822315,
+      "error": "PermissionError(13, 'Permission denied')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791384121253,
+    "end_unix_ms": 1791384133286,
+    "exit_code": 0
+  },
+  "verify_pid": 3860658,
+  "verify_window": {
+    "start_unix_ms": 1791384133288,
+    "end_unix_ms": 1791384133292,
+    "exit_code": 0
+  }
+}
