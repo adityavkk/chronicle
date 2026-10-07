@@ -280,3 +280,21 @@ bound on this evidence. Its 137 Rust tests, `conformance-017` (332/332, zero
 failures/skips), and all six fault campaigns pass; correctness does not establish
 the performance benefit. These candidate results remain separate from the
 retained default and from the next scheduling experiment.
+
+The next candidate restores the 64-command ceiling and moves the existing single
+scheduler yield to the first empty queue **after** collecting a partial append
+prefix. A full batch or a metadata singleton seals without yielding. The held
+commands/reply owners/credits stay intact while arriving requests join the queue;
+after one yield the collector drains again, then seals if still empty. There is
+no linger timer, quorum wait, unbounded yield loop or changed local-flush pipeline.
+An encountered metadata command or byte boundary still ends the append batch.
+
+Before this change, `Batches.tla` now separates `forming` from the remaining
+queue, preserving `Flat(log) ∘ forming ∘ queue = Serial(admitted)` and the original
+credit/publication/metadata invariants. The `DropForming` negative mutation loses
+the first collected prefix when gathering more arrivals; it must fail safety.
+Fair scheduling/gather/seal are still liveness assumptions. The existing Lean
+length-generic fold composition theorem covers concatenated batches, not the Rust
+future or Tokio scheduler. A directly polled Rust collector test must establish
+arrival during the yield, not rely on sleeps to guess that interleaving. Matched
+measurements must decide whether this relocation improves actual batch size.

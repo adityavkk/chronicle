@@ -35,7 +35,7 @@ for mode in subscriptions subscriptions-live timed forks forks-live links links-
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
   grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
 done
-for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue; do
+for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout DropForming EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue; do
   model=Subscriptions
   config=subscriptions
   invariant=Safe
@@ -48,7 +48,7 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
     EarlyApply|ForgetMarker|EarlyServe) model=ApplyRecovery; config=apply ;;
     EarlyUnlink|MissingDirSync|DropRetained|DropVote) model=JournalReclaim; config=reclaim ;;
     UseCompletedTicket|ReuseEqual) model=ReadCohorts; config=reads ;;
-    Reorder|BatchMetadata|EarlyReply|WrongReply|ReleaseOnTimeout) model=Batches; config=batches ;;
+    Reorder|BatchMetadata|EarlyReply|WrongReply|ReleaseOnTimeout|DropForming) model=Batches; config=batches ;;
     EarlyReceipt|PublishAccepted|IndexOnly|InvalidateAbsent|AcceptMeansSuccess|ReceiptSession) model=Receipts; config=receipts ;;
     ReleaseOnAccepted|AllowRecoveredAdmission) model=AsyncBacklog; config=backlog ;;
     CacheAcrossTerm|UnguardedEnqueue) model=AdmissionEpoch; config=epochs ;;
@@ -70,4 +70,4 @@ result=$?
 set -e
 test "$result" -ne 0
 grep -q 'transportHeader "host" = false' "$here/evidence/formal/DiscardHost.txt"
-printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads/batches/receipts/backlog/epochs safety, stable-period liveness, 38 negative mutations; Lean and one header-projection negative mutation: PASS\n'
+printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads/batches/receipts/backlog/epochs safety, stable-period liveness, 39 negative mutations; Lean and one header-projection negative mutation: PASS\n'
