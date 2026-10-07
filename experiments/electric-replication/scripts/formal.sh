@@ -35,7 +35,7 @@ for mode in subscriptions subscriptions-live timed forks forks-live links links-
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
   grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
 done
-for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm; do
+for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm UnguardedEnqueue; do
   model=Subscriptions
   config=subscriptions
   invariant=Safe
@@ -51,7 +51,7 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
     Reorder|BatchMetadata|EarlyReply|WrongReply|ReleaseOnTimeout) model=Batches; config=batches ;;
     EarlyReceipt|PublishAccepted|IndexOnly|InvalidateAbsent|AcceptMeansSuccess|ReceiptSession) model=Receipts; config=receipts ;;
     ReleaseOnAccepted|AllowRecoveredAdmission) model=AsyncBacklog; config=backlog ;;
-    CacheAcrossTerm) model=AdmissionEpoch; config=epochs ;;
+    CacheAcrossTerm|UnguardedEnqueue) model=AdmissionEpoch; config=epochs ;;
   esac
   sed "s/$mutation = FALSE/$mutation = TRUE/" "$config.cfg" > "$tools/$mutation.cfg"
   set +e
@@ -63,4 +63,4 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
 done
 "$HOME/.elan/bin/lean" -DwarningAsError=true Contracts.lean > "$here/evidence/formal/lean.txt" 2>&1
 ! grep -E 'sorryAx|warning:|error:' "$here/evidence/formal/lean.txt"
-printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads/batches/receipts/backlog/epochs safety, stable-period liveness, 37 negative mutations; Lean: PASS\n'
+printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads/batches/receipts/backlog/epochs safety, stable-period liveness, 38 negative mutations; Lean: PASS\n'

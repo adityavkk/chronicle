@@ -245,6 +245,22 @@ theorem recovered_suffix_fences_new_admission (orphaned bytes available : Nat)
   unfold asyncAdmission
   omega
 
+/- Checked atomically at assignment, not merely at application enqueue time.
+   Leader identity equality includes both term and node in Rust; this arithmetic
+   projection proves only the term predicate, not the concurrency implementation. -/
+def preparedProposal (ticket prepared current : Nat) : Prop :=
+  ticket = prepared ∧ ticket = current
+
+theorem stale_proposal_rejected (ticket prepared current : Nat)
+    (stale : ticket ≠ current) : ¬ preparedProposal ticket prepared current := by
+  intro h
+  exact stale h.2
+
+theorem assignment_requires_preparation (ticket prepared current : Nat)
+    (h : preparedProposal ticket prepared current) : prepared = current := by
+  unfold preparedProposal at h
+  omega
+
 #print axioms publication_committed
 #print axioms session_no_rollback
 #print axioms session_monotone
@@ -278,4 +294,6 @@ theorem recovered_suffix_fences_new_admission (orphaned bytes available : Nat)
 #print axioms missing_result_is_not_invalidation
 #print axioms uncommitted_replacement_is_not_invalidation
 #print axioms recovered_suffix_fences_new_admission
+#print axioms stale_proposal_rejected
+#print axioms assignment_requires_preparation
 end ElectricReplication

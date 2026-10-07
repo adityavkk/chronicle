@@ -77,7 +77,7 @@ backlog returns 429. Followers that cannot keep up eventually stop admission;
 an ever-growing backlog is not a successful throughput measurement.
 
 Restart does not mint a fresh backlog allowance on top of orphaned accepted
-entries. New admission remains fenced until the recovered uncommitted suffix is
+entries. New WAL proposals remain fenced until the recovered uncommitted suffix is
 applied or definitively replaced. A recovered entry's full identity matters: a
 shorter replacement log need not grow back to the old numeric high-water index
 to clear this fence. The fence is checked only until resolved, not by rescanning
@@ -86,14 +86,25 @@ the log on every steady-state append.
 The same fence applies at **each new leadership term**, not only at startup. A
 follower may inherit an uncommitted suffix without the previous leader's in-memory
 credits. The new owner first applies or replaces the inherited suffix, including
-the election entry, before admitting new requests. Readiness is cached per term.
+the election entry, before proposing new entries. The single FIFO dispatcher owns
+this preparation; readiness is cached per term. Locally bounded HTTP requests can
+wait in its queue during recovery, but cannot get durable acceptance before it.
 This may delay a new leader's first local acceptance until quorum recovery
 completes; a previously prepared, isolated leader can still accept up to its bound.
-Ownership changes must not mint another allowance over retained work.
-`AdmissionEpoch.tla` checks this credit handoff and rejects a mutation that reuses
-readiness across terms. Like the other models, it assumes consensus's log
-ownership rules rather than proving them. This extends the initial restart-only
-implementation before qualification as a bounded async service.
+The bound covers the **prepared owner's locally queued and unresolved work**, not
+the physical WAL or a follower's received suffix. During recovery inherited debt
+can coexist with locally charged work; it must resolve before new proposals. It
+is reported as recovering, not disguised as a fresh available WAL allowance.
+
+Preparation at HTTP ingress alone is insufficient: a write can already be queued
+inside OpenRaft when the leadership term changes. Each dispatched proposal carries
+the prepared full leader ID (term and node). RaftCore checks that precondition
+atomically before assigning an index; mismatch rejects without a WAL entry. This
+uses a narrow backport of upstream's expected-leader admission check to pinned
+0.9.25, not a custom election or commit rule. `AdmissionEpoch.tla` separates local
+reservation, application queue, Raft API queue and log assignment. It rejects both
+reusing preparation across terms and omitting the assignment-time check. Like the
+other models, it assumes consensus's log ownership rules rather than proving them.
 
 Apply first fsyncs its covering Commit marker, then invokes the native handlers.
 For local-acceptance commands it also retains their deterministic replies in
