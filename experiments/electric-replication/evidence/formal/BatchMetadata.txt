@@ -1,0 +1,88 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 105 and seed 4297577792749554612 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 2233102] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/Batches.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Batches
+Starting... (2026-10-07 13:40:02)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-07 13:40:02.
+Error: Invariant Safe is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ durable = 0
+/\ log = <<>>
+/\ replyOwner = <<0, 0, 0, 0>>
+/\ applied = 0
+/\ marker = 0
+/\ timedout = {}
+/\ queue = <<>>
+/\ committed = 0
+/\ resolved = {}
+/\ credits = 0
+/\ admitted = 0
+
+State 2: <Admit line 23, col 10 to line 26, col 91 of module Batches>
+/\ durable = 0
+/\ log = <<>>
+/\ replyOwner = <<0, 0, 0, 0>>
+/\ applied = 0
+/\ marker = 0
+/\ timedout = {}
+/\ queue = <<1>>
+/\ committed = 0
+/\ resolved = {}
+/\ credits = 1
+/\ admitted = 1
+
+State 3: <Admit line 23, col 10 to line 26, col 91 of module Batches>
+/\ durable = 0
+/\ log = <<>>
+/\ replyOwner = <<0, 0, 0, 0>>
+/\ applied = 0
+/\ marker = 0
+/\ timedout = {}
+/\ queue = <<1, 2>>
+/\ committed = 0
+/\ resolved = {}
+/\ credits = 2
+/\ admitted = 2
+
+State 4: <Admit line 23, col 10 to line 26, col 91 of module Batches>
+/\ durable = 0
+/\ log = <<>>
+/\ replyOwner = <<0, 0, 0, 0>>
+/\ applied = 0
+/\ marker = 0
+/\ timedout = {}
+/\ queue = <<1, 2, 3>>
+/\ committed = 0
+/\ resolved = {}
+/\ credits = 3
+/\ admitted = 3
+
+State 5: <Seal line 27, col 9 to line 33, col 103 of module Batches>
+/\ durable = 0
+/\ log = <<<<1, 2, 3>>>>
+/\ replyOwner = <<0, 0, 0, 0>>
+/\ applied = 0
+/\ marker = 0
+/\ timedout = {}
+/\ queue = <<>>
+/\ committed = 0
+/\ resolved = {}
+/\ credits = 3
+/\ admitted = 3
+
+62 states generated, 29 distinct states found, 14 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 5 and the 95th percentile is 5).
+Finished in 00s at (2026-10-07 13:40:02)

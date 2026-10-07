@@ -426,7 +426,7 @@ fn main() {
             if let Some(secs) = wal_stats_secs {
                 wal::telemetry::set_stats_enabled(true);
                 wal::telemetry::spawn_stats_emitter(
-                    Arc::clone(&walset),
+                    walset.shards().to_vec(),
                     std::time::Duration::from_secs(secs),
                 );
             }

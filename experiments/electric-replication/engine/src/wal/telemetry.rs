@@ -484,19 +484,19 @@ mod stats_emitter {
     use std::time::Duration;
 
     use super::StatsSnapshot;
-    use crate::wal::walset::WalSet;
+    use crate::wal::shard::Shard;
 
     /// Spawn the contention emitter, printing aggregate `WAL_CONT` lines every
     /// `interval`. Deltas are taken against the previous tick so the numbers
     /// reflect the live window, not a warmup-diluted cumulative average.
-    pub fn spawn_stats_emitter(walset: Arc<WalSet>, interval: Duration) {
+    pub fn spawn_stats_emitter(shards: Vec<Arc<Shard>>, interval: Duration) {
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(interval);
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             ticker.tick().await; // skip the immediate boot tick
 
             // Per-shard previous snapshots for delta computation.
-            let n = walset.shards().len();
+            let n = shards.len();
             let mut prev: Vec<StatsSnapshot> = vec![StatsSnapshot::default(); n];
 
             loop {
@@ -504,7 +504,7 @@ mod stats_emitter {
                 let dt = interval.as_secs_f64();
                 let mut cur_agg = StatsSnapshot::default();
                 let mut prev_agg = StatsSnapshot::default();
-                for (i, shard) in walset.shards().iter().enumerate() {
+                for (i, shard) in shards.iter().enumerate() {
                     let cur = shard.stats_snapshot();
                     cur_agg.merge(&cur);
                     prev_agg.merge(&prev[i]);

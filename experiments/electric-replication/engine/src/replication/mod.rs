@@ -129,6 +129,9 @@ struct Config {
     long_poll_ms: u64,
     #[serde(default)]
     fault_testing: bool,
+    /// Native WAL/appender diagnostics; zero keeps clock probes disabled.
+    #[serde(default)]
+    stats_secs: u64,
 }
 fn long_poll_ms() -> u64 {
     30_000
@@ -677,6 +680,14 @@ pub fn run() {
                 slots: Arc::new(Semaphore::new(256)),
                 reads: ReadBarrier::default(),
             });
+        }
+        if config.stats_secs > 0 {
+            crate::wal::telemetry::set_stats_enabled(true);
+            crate::wal::telemetry::spawn_stats_emitter(
+                groups.iter().map(|g| g.machine.journal.shard.clone()).collect(),
+                Duration::from_secs(config.stats_secs),
+            );
+            crate::srvstats::spawn(config.stats_secs);
         }
         let listener = tokio::net::TcpListener::bind(config.listen)
             .await

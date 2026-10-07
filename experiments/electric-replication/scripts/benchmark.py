@@ -55,7 +55,7 @@ def sample(pids, ports, node_pids):
     return dict(unix_ms=time.time_ns()//1_000_000, monotonic_ns=time.monotonic_ns(), processes=processes, sockets=sockets, process_gaps=gaps)
 
 
-def cell(output, arm, workload, profile=False):
+def cell(output, arm, workload, profile=False, diagnostics=False):
     replicas = 3 if arm == "raft3" else 1
     lab = Lab(output, replicas=replicas, partitions=2, port=19800)
     lab.cluster = "bench-"+hashlib.sha256(str(lab.output).encode()).hexdigest()[:16]
@@ -64,7 +64,7 @@ def cell(output, arm, workload, profile=False):
     trace = None
     sampler = None
     stop = threading.Event()
-    result = dict(arm=arm, workload=workload, profile=profile, verdict="FAIL")
+    result = dict(arm=arm, workload=workload, profile=profile, diagnostics=diagnostics, verdict="FAIL")
     env = {k:v for k,v in os.environ.items() if not k.startswith("DS_BENCH_") and k != "LD_PRELOAD"}
     env["DS_BENCH_HDR_OUT"] = str(lab.output / "hdr")
     (lab.output / "hdr").mkdir()
@@ -110,6 +110,8 @@ def cell(output, arm, workload, profile=False):
                        "--data-dir", str(lab.data / "1"), "--durability", "wal", "--worker-threads", "2",
                        "--wal-shards", "2", "--wal-segment-bytes", str(8*1024*1024), "--stream-lanes", "1",
                        "--tier", "off", "--tail-cache-bytes", "0", "--read-offload", "tail"]
+            if diagnostics:
+                command += ["--wal-stats", "1", "--server-stats", "1"]
             (lab.output / "native-argv.json").write_text(json.dumps(command, indent=2)+"\n")
             subprocess.run(["amp", "orb", "service", "start", lab.cluster+"-1", "--cwd", str(ROOT),
                             "--command", "ulimit -c 0; exec "+shlex.join(command)+" > "+shlex.quote(str(lab.output / "node-1.log"))+" 2>&1",
@@ -125,7 +127,7 @@ def cell(output, arm, workload, profile=False):
             assert len(node_pids) == 1
         else:
             for node in range(1,replicas+1):
-                lab.start(node, cpus="0-3", fault_testing=False)
+                lab.start(node, cpus="0-3", fault_testing=False, stats_secs=int(diagnostics))
                 node_pids.append(int((lab.output / f"node-{node}.pid").read_text()))
             for group in range(2):
                 assert lab.admin(1, group, "init", lab.genesis) == {"Ok":None}
@@ -195,6 +197,10 @@ def cell(output, arm, workload, profile=False):
         else:
             for kind in ("write_counts", "read_counts"):
                 assert raw[kind]["other_err"] == raw[kind]["backpressure"] == 0
+        if diagnostics:
+            # Capture the final partial 1 Hz counter interval after writes stop.
+            # This is outside the client measurement and sample windows.
+            time.sleep(2)
         result["verdict"] = "PASS"
     except BaseException as error:
         result["error"] = repr(error)
@@ -235,7 +241,7 @@ def cell(output, arm, workload, profile=False):
     return result
 
 
-def run(output, smoke=False, reads_only=False):
+def run(output, smoke=False, reads_only=False, write_diagnostics=False):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     sources = {str(p.relative_to(EXPERIMENT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (EXPERIMENT / "engine/src").rglob("*.rs")}
@@ -258,15 +264,17 @@ def run(output, smoke=False, reads_only=False):
         workloads = [("write",1,4)]
     if reads_only:
         workloads = [("reads",), ("mixed",)]
+    if write_diagnostics:
+        workloads = [("write",1,256)] * 3
     results = []
     for i, workload in enumerate(workloads):
         # Rotate arm order to reduce a systematic page-cache/time-order bias.
-        arms = ["native","raft1","raft3"]
-        arms = arms[i%3:]+arms[:i%3]
+        arms = ["native","raft1"] if write_diagnostics else ["native","raft1","raft3"]
+        arms = arms[i%len(arms):]+arms[:i%len(arms)]
         for arm in arms:
-            name = f"{output.name}-{arm}-"+"-".join(map(str,workload))
-            results.append(cell(output / name, arm, workload))
-    if not smoke:
+            name = f"{output.name}-{arm}-"+"-".join(map(str,workload))+(f"-repeat{i+1}" if write_diagnostics else "")
+            results.append(cell(output / name, arm, workload, diagnostics=write_diagnostics))
+    if not smoke and not write_diagnostics:
         for arm in ("native","raft1","raft3"):
             for workload in (("reads",),) if reads_only else (("write",1024,64),("reads",)):
                 name = f"{output.name}-{arm}-profile-"+"-".join(map(str,workload))
@@ -276,4 +284,5 @@ def run(output, smoke=False, reads_only=False):
 
 
 if __name__ == "__main__":
-    sys.exit(0 if run(sys.argv[1], "--smoke" in sys.argv[2:], "--reads-only" in sys.argv[2:]) else 1)
+    sys.exit(0 if run(sys.argv[1], "--smoke" in sys.argv[2:], "--reads-only" in sys.argv[2:],
+                     "--write-diagnostics" in sys.argv[2:]) else 1)

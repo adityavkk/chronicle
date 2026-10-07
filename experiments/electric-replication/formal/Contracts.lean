@@ -176,6 +176,27 @@ theorem in_flight_round_not_reusable (started completed observed : Nat)
     (atInvocation : observed = started) (notNewer : completed ≤ started) :
     ¬ observed < completed := by omega
 
+/- Immutable ordered command batches preserve the sequential state transition.
+   The Rust serializer, queue, dispatcher and native effects are separate
+   refinement obligations; no command permutation is allowed by this lemma. -/
+theorem batch_fold_equivalent {S C : Type} (step : S → C → S)
+    (initial : S) (batches : List (List C)) :
+    batches.foldl (fun state batch => batch.foldl step state) initial =
+      batches.flatten.foldl step initial := by
+  induction batches generalizing initial with
+  | nil => rfl
+  | cons batch rest ih =>
+    simp only [List.foldl_cons, List.flatten_cons, List.foldl_append]
+    exact ih (batch.foldl step initial)
+
+theorem singleton_metadata_identity {C : Type} (command a b : C)
+    (ha : a ∈ [command]) (hb : b ∈ [command]) : a = b := by
+  simp_all
+
+theorem moving_to_consensus_keeps_charge (queued inflight moved : Nat)
+    (h : moved ≤ queued) : queued - moved + (inflight + moved) = queued + inflight := by
+  omega
+
 #print axioms publication_committed
 #print axioms session_no_rollback
 #print axioms session_monotone
@@ -202,4 +223,7 @@ theorem in_flight_round_not_reusable (started completed observed : Nat)
 #print axioms suffix_survives_checkpoint
 #print axioms before_cut_replay_not_needed
 #print axioms in_flight_round_not_reusable
+#print axioms batch_fold_equivalent
+#print axioms singleton_metadata_identity
+#print axioms moving_to_consensus_keeps_charge
 end ElectricReplication

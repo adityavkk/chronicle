@@ -1,0 +1,46 @@
+{
+  "verdict": "PASS",
+  "published_commit": "8c46c9e293b4a5357ba0b55837ef43f17aaa868e",
+  "runs": [
+    {
+      "run": "subscription-fault-001",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-002",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-003",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    },
+    {
+      "run": "subscription-fault-004",
+      "authorization_matches": 15,
+      "verified_issued": 14,
+      "intentionally_tampered_401": 1,
+      "owner_groups_with_distinct_keys": 2
+    }
+  ],
+  "validator_sha256": "da0345a5e905d32153125beeda317dd7970d97fa1c56335008421f98a8bc4b20",
+  "authorization_matches": 60,
+  "unique_token_values": 36,
+  "retired_recorded_pids_absent": 12,
+  "distinct_private_lab_keys_checked": 16,
+  "historical_blobs_scanned": 2839,
+  "gzip_blobs_decompressed": 599,
+  "private_lab_key_matches": 0,
+  "token_format": "base64url(JSON claims).base64url(HMAC-SHA256)",
+  "issuer": "per-group getrandom-generated Keys; replicated Action::Keys; persisted only in local lab WAL/snapshots",
+  "consumer": "loopback lab subscription ack/release/callback; signature plus path/incarnation/generation/wake/lease fencing",
+  "limitations": "Specific 60-match audit plus finite key-encoding scan; not proof against arbitrary encodings. Retired untracked lab data remains local, not for deployment reuse."
+}
