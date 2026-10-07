@@ -477,3 +477,35 @@ precede a corrected independent frame decoder. Corrected candidate tests pass
 remain ignored). All 42 TLC negative mutations and one Lean mutation are
 detected. These are not full protocol/fault qualification of the rejected
 candidate; `conformance-021` still names the restored engine, not that candidate.
+
+## Upstream pipelining has an admission-contract tradeoff
+
+Authoritative source inspection pins the available 0.10 release to
+[`v0.10.0-alpha.36`](https://github.com/databendlabs/openraft/tree/0acd6b8d547ad4468f66708b05bc03baaf04c7c8),
+not a stable release. Its
+[`run_append_entries`](https://github.com/databendlabs/openraft/blob/0acd6b8d547ad4468f66708b05bc03baaf04c7c8/openraft/src/core/raft_core.rs#L2378-L2399)
+returns after staging readable entries and does not await `IOFlushed`. This
+would permit multiple entries to share native group fsync without falsely
+acknowledging any of them early. The initial upstream implementation is
+[`c55a58d`](https://github.com/databendlabs/openraft/commit/c55a58d4c66d2cfac6103a3417ac9c0ba6ff61d3);
+it changes IO tracking and callbacks across the core and storage layer, not just
+one await. A private one-line removal of the 0.9 wait is not a sound backport.
+
+However, the current 0.10
+[`ensure_writable_leader_handler`](https://github.com/databendlabs/openraft/blob/0acd6b8d547ad4468f66708b05bc03baaf04c7c8/openraft/src/core/raft_core.rs#L609-L617)
+unconditionally rejects new proposals when the quorum lease expires, even if
+the node still reports Leader and has backlog capacity. The
+[CheckQuorum contract](https://github.com/databendlabs/openraft/blob/0acd6b8d547ad4468f66708b05bc03baaf04c7c8/openraft/src/docs/protocol/check_quorum.md)
+sets that lease to `election_timeout_max` (700 ms with this adapter's current
+configuration). `quorum_loss_probe_interval` changes heartbeat suppression, not
+the admission predicate; `WriteRequest::with_leader` does not bypass it. A true
+single-voter group is its own quorum and is unaffected by this partition case.
+
+That changes the existing async contract: the prepared isolated owner currently
+can issue local-fsync receipts until its count/byte allowance is full. With 0.10,
+it would stop earlier on lease expiry and resume only after quorum contact is
+renewed. Already accepted receipts could still be pending, committed or lost;
+committed-only reads and local durability need not change. No upgrade or lease
+bypass has been implemented. Whether this narrower minority admission behavior
+is acceptable is a product decision before formalizing and qualifying an
+upgrade. Source-level pipelining is an opportunity, not measured performance.
