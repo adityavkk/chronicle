@@ -39,10 +39,121 @@ acknowledgements must not be treated as equivalent persistence guarantees.
 
 | Backend | Write and read architecture | Principal tradeoff |
 | --- | --- | --- |
-| **Redis** | Go HTTP server → atomic per-stream, single-slot Lua validation/append/head/producer update. Pub/sub wakes readers; durable reads remain authoritative. Stream hash tags distribute independent streams across Cluster masters. | Short in-memory path and existing operational tooling. Memory cost, hot keys, the subscription control slot and cross-slot fork coordination remain constraints. AOF persistence does not make asynchronous failover lossless. |
+| **Redis** | Go HTTP server → atomic per-stream, single-slot Lua validation/append/head/producer update. Pub/sub wakes readers; durable reads remain authoritative. Stream hash tags distribute independent streams across Cluster masters. | Short in-memory path and existing operational tooling. Memory cost, hot keys, shared control-plane metadata and cross-slot fork coordination remain constraints. Subscriptions have 256 home tags, not one global control slot. AOF persistence does not make asynchronous failover lossless. |
 | **PostgreSQL** | Same Go storage interface → per-path advisory lock → one transaction for payload, head, producer state and outbox → WAL-flushed COMMIT (`synchronous_commit=on`). Polling drives live reads; forks copy their inherited prefix. | Familiar transactions and a durable outbox. Lock contention, polling, fork-copy/WAL cost and primary/shard capacity need qualification. The measured setup had no synchronous standby. |
 | **GCS via celld** | TypeScript stream/subscription/catalog actors → actor-local SQLite → LTX object PUT → ownership-record GET → release response. Generation preconditions and durable output/alarm gates protect ownership and persistence. | Object-backed durability and actor isolation, but remote persistence/ownership gates are on the acknowledgement path. This custom runtime also needs lease, catalog and wake coordination. Not a direct GCS append API. |
 | **Spanner** | Go adapter → serializable transactions over stream head, immutable payload/history, producer state and transactional outbox; background subscription/fanout workers. Database time controls expiry. | Managed distributed transactions, but per-stream ordering still serializes a hot head. Transaction RPCs, retries and background contention can consume latency budget. Tested regional Standard/100-PU deployment, not the proposed multi-region design. |
+
+## Architectural considerations: horizontal scaling
+
+**Redis Cluster already supplies distribution machinery; the experimental PG
+adapter would need an additional sharding layer.** Adding Redis primaries and
+redistributing hash slots can increase aggregate write and storage capacity
+across independent streams. Adding replicas alone does not increase independent
+append capacity in either system. Neither approach automatically splits one hot
+stream's ordered writes across machines.
+
+Chronicle's [stream key schema](../../store/redis/keys.go) co-locates payload,
+head, producer state and append fences under a stream-path hash tag. A stream's
+Lua transitions remain atomic on one slot while other streams can use other
+primaries. The [subscription key schema](../../webhook/keys.go) separately
+homes each subscription and its schedules under one of 256 `{__ds:h}` tags;
+these are logical placement buckets, not 256 machines. Some metadata remains
+shared: occupied-slot bitmaps use `{__ds-occ}`, and signing keys use `{__ds}`.
+Cross-slot forks and subscription coordination still require application-level
+protocols rather than a cluster-wide atomic transaction.
+
+**A sharded PostgreSQL design is a proposal, not the tested adapter.** Chronicle
+could route `stream → logical bucket → PG primary`, keeping payload, head,
+producer deduplication and outbox in one local transaction. Each primary would
+own a subset of streams and have its own HA replicas. Adding primaries and moving
+buckets would expand aggregate capacity, but require routing, migration,
+ownership fencing and per-shard failover machinery, built in Chronicle or
+provided by an adopted sharding system.
+
+| Concern | Current Redis architecture | Proposed sharded PostgreSQL |
+| --- | --- | --- |
+| Routing and redistribution | Redis Cluster slots and cluster-aware client | Additional sharding system or application router and bucket migration |
+| Single-stream atomicity | Same-slot Lua | Same-shard transaction |
+| Hot-stream limit | One primary's capacity | One primary's capacity |
+| Cross-shard forks and subscriptions | Application coordination across slots | Application coordination; ordinary local PG transactions no longer cover all participants |
+| Failover durability | AOF policy does not eliminate asynchronous promotion loss | Per-shard replication policy; synchronous replicas change latency and availability |
+
+Native PG table partitioning does **not** distribute writes across machines.
+Read replicas can offload eligible replay reads, but do not scale appends and
+need lag-aware routing or waiting to meet read-consistency requirements.
+Sharding by tenant could keep more forks and subscriptions local, at the cost
+of concentrating a large tenant's load. Sharding by stream spreads that load
+but makes cross-stream coordination more frequent. In either design, durable
+subscription recovery, lease fencing and retaining fork-referenced prefixes
+after source expiry remain required behavior, not optional follow-up work.
+
+Redis's distribution advantage is architectural, **not proof that every cluster
+path is qualified**. For example, current
+[`ListStreamMeta`](../../store/redis/list.go) uses a single `SCAN` iterator
+without explicit per-master fan-out, so cluster-wide pattern backfill/recovery
+enumeration still needs attention. The historical topology screen shared one
+host and disk; it did not establish multi-host HA or linear scale-out.
+
+PG's low-load latency win therefore does not establish a horizontally scalable
+replacement, while Redis's existing sharding does not establish superior
+per-node performance or lossless failover. A fair scale-out comparison would
+match acknowledgement/failure guarantees and aggregate application, database
+and replica resources; measure hot-stream and many-stream workloads separately;
+and include redistribution, failover, replay/fanout and subscription recovery
+under sustained load. No sharded PG capacity result is available here.
+
+### Complexity: matching Redis scale-out with PostgreSQL
+
+**Architectural assessment: matching Chronicle's current scale-out design with
+plain PostgreSQL would add complexity overall.** PG can simplify transactions
+inside a shard, but Chronicle would need to build or adopt the distribution
+machinery that Redis Cluster already supplies. This is an engineering judgment,
+not a measured performance result or a claim that every Redis cluster path is
+qualified.
+
+| Responsibility | Current Chronicle / Redis Cluster | What sharded PG would require | Relative complexity |
+| --- | --- | --- | --- |
+| Atomic append, head and producer deduplication | Co-located keys updated by single-slot Lua | One local transaction, also able to include a durable outbox | Potentially simpler within a shard |
+| Route streams to writable nodes | Stream hash tags and cluster-aware client routing | Shard map, request routing and per-shard connection management | Additional machinery to build or adopt |
+| Add write capacity and redistribute data | Add primaries and migrate slots; cluster client handles redirection | Add primaries, copy buckets, catch up writes, fence old owners, switch routes and recover interrupted moves | Substantial additional migration machinery |
+| Failover and ownership fencing | Redis Cluster failover machinery; asynchronous promotion can lose acknowledged writes | Integrate HA and old-primary fencing for every shard; choose synchronous replication when required by the failure contract | Additional operational integration; not equivalent durability by default |
+| Cross-shard forks and shared-prefix lifecycle | Application coordination across stream slots | Cross-shard coordination or prefix copying, with recoverable creation and cleanup | Remains complex; local SQL transactions do not span independent primaries |
+| Durable subscription scheduling and recovery | Subscription home tags, Lua claims/fences and distributed worker ownership; cluster-wide enumeration still needs qualification | Place subscriptions, query due work, update claims transactionally, and recover work across shards | Local SQL may simplify scheduling; distributed ownership and recovery remain |
+| Connect payload commits to subscription wakes | Cross-slot fanout and recovery reconciliation | Durable outbox delivery or equivalent recoverable bridge between payload and subscription shards | No automatic simplification from using PG |
+| Scale replay and live fanout | Redis capacity plus Chronicle application/network capacity | PG read capacity plus Chronicle application/network capacity; lag-aware routing if using read replicas | Workload-dependent; adding database nodes alone is insufficient |
+
+The largest additional responsibility is online shard migration: copying data,
+catching up concurrent writes, fencing the old owner, switching routing and
+recovering interrupted moves. Redis provides slot migration and client
+redirection machinery; an application-sharded PG design needs equivalents.
+Each PG shard also needs integrated HA and old-primary fencing. Cross-shard
+forks and subscription coordination remain application concerns rather than
+becoming ordinary local SQL transactions.
+
+PG's potential simplification is local transactional state: append, head,
+producer deduplication and outbox can commit together, while SQL can make due-work
+queries and claim updates easier to express. These benefits do not remove
+cross-shard wake delivery, lease fencing or recovery requirements.
+
+Keeping all subscription metadata in one PG database while sharding payloads
+could be a reasonable initial design, but leaves a central capacity and failure
+dependency. It also needs a durable bridge from payload commits to subscription
+work; independent writes to the two databases are not sufficient. Sharding
+subscriptions later reintroduces the locality-versus-distribution tradeoff.
+
+| PG option | Complexity and scope |
+| --- | --- |
+| **Single primary** | Can simplify transactional logic if one primary meets capacity needs; does not match Redis Cluster's write scale-out. |
+| **Application-sharded PG** | Could match many-stream scale-out, but adds substantial routing, migration, fencing and operational work. |
+| **Adopted PG sharding/distributed system** | Delegates some machinery, but needs separate evaluation of transaction, migration and failure contracts; it is not the adapter benchmarked here. |
+
+The low-load PG latency win alone does not justify building a new sharding
+architecture. PG becomes more compelling if a single primary meets the workload,
+or if relational transactions and metadata queries remove enough product
+complexity to justify the distribution work. Redis retains an architectural
+head start for many-stream horizontal writes, not a predetermined win on
+performance, durability or total cost.
 
 ## GCP test rigs: three different experiments
 
