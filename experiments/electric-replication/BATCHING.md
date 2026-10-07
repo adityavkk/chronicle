@@ -415,3 +415,42 @@ versus 5.47–5.77 µs/quorum acknowledgement. Followers are 5.85–6.16 versus
 CPU costs. The difference needs profiling rather than assuming receipt-cache
 insertion alone causes it. The async logs contain two snapshots per replica,
 not a complete explanation of 81–94k backpressure responses.
+
+`cpu-profiles-002` retains new 30-second profiles of all four arms. All four
+symbolized exports succeed; the async workload still fails backpressure while
+the other workload checks pass. Deserialization, allocation, native apply and
+scheduling appear in both replicated modes. `SeqAccess::next_element` accounts
+for 2.72% of one-member and 6.33% of aggregate async user-space samples; this
+does not count blocked or kernel time or identify every decoded field. There is
+no evidence here that receipt-cache insertion alone explains the wall-time gap.
+
+## Bounded native-fsync coalescing candidate
+
+Pinned OpenRaft queues ordered apply without awaiting its completion, then may
+stage the following entry (see [apply dispatch](https://github.com/databendlabs/openraft/blob/8815cdba2826f74e848acef361ad03f93bb1c3f8/openraft/src/core/raft_core.rs#L734-L766)).
+The prior publication marker and following entry can therefore share a native
+WAL fsync. This is an opportunity, not a scheduler guarantee. Entry B's callback
+must still wait for a captured prefix that includes B; durability beside marker
+A does not make B committed or visible. Separate client entries cannot share a
+log-append fsync because the core awaits each preceding `LogFlushed`.
+
+The next candidate adds one 100 µs collection interval on the existing dedicated
+native committer thread before capturing a dirty prefix for fsync. The interval
+is shorter than the measured 307–346 µs mean sync loop and aims to group the
+marker/entry scheduling race. It is a measured-next experiment, not a promised
+speedup or latency bound. OS scheduling can exceed the requested sleep. New
+arrivals do not reset the interval; a single request must progress without a
+second record. The already existing shutdown drain remains immediate. Standalone
+native mode keeps zero added collection delay. All replicated group sizes and
+both acknowledgement modes use the same candidate policy.
+
+`FsyncGroups.tla` models this physical-prefix bridge before implementation:
+collection, a pre-fsync cut, racing later writes, completed fsync, notification,
+crash and recovery. Safety rejects notification before sync and resampling the
+cut after sync; the stuck-timer mutation must violate stable-period liveness.
+The model assumes an honest covering fsync and native contiguous-written/segment
+selection. Existing Publication/ApplyRecovery/Receipts models and Lean prefix
+lemmas still supply the separate logical contracts; none proves the Rust timer,
+OS scheduler or storage hardware. Real-WAL tests must exercise a lone request,
+segment rolls and shutdown; unchanged conformance and storage/process faults
+remain acceptance gates if measurements justify retaining the candidate.
