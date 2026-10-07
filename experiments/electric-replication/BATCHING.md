@@ -267,3 +267,16 @@ snapshot trigger still counts entries, so larger batches can increase snapshot
 bytes and pauses. Bounded receipt history can hold at most 131,072 replies rather
 than 65,536; retention remains count-based, not a time guarantee. This candidate
 has no claimed performance benefit until new matched measurements complete.
+
+The completed `async-writes-004` run rejects the simple ceiling hypothesis.
+One-member batches still average 42.1–45.1 appends and WAL fsyncs/ack are
+0.0436–0.0466. Native varies from 75–97k/s, one member 41–48k/s and quorum-three
+26–28k/s. The per-repetition ratios (1.95 / 2.31 / 1.56×) do not isolate a gain:
+native slowed markedly in repetitions 1 and 3, while batch formation scarcely
+changed. All three async cells still fail with 39–42k backpressure responses per
+window, despite exact accepted-byte drain. Aggregate async RSS rises to
+103–105 MiB from 86–92 MiB in 003. There is no reason to retain a larger memory
+bound on this evidence. Its 137 Rust tests, `conformance-017` (332/332, zero
+failures/skips), and all six fault campaigns pass; correctness does not establish
+the performance benefit. These candidate results remain separate from the
+retained default and from the next scheduling experiment.

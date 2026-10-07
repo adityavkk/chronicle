@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 
 pub(super) const CAPACITY: usize = 256;
-pub(super) const MAX_COMMANDS: usize = 64;
+pub(super) const MAX_COMMANDS: usize = 128;
 const MAX_BYTES: usize = 2 * 1024 * 1024;
 const MAX_INFLIGHT_BATCHES: usize = 2;
 
@@ -306,7 +306,7 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(48))]
         #[test]
         fn fifo_bounds_singletons_and_canceled_receivers_keep_permits(
-            count in 70usize..160, body_bytes in 1000usize..80000,
+            count in 130usize..256, body_bytes in prop_oneof![0usize..512, 17000usize..80000],
             metadata_at in 1usize..69, cancel_every in 1usize..9,
             metadata_kind in 0usize..5,
         ) {
@@ -352,6 +352,11 @@ mod tests {
                     assert_eq!(bytes.available_permits(),64 * 1024 * 1024-admitted_bytes);
                     assert!(commands.len()<=MAX_COMMANDS);
                     assert!(bincode::serialized_size(&commands).unwrap()<=MAX_BYTES as u64);
+                    if body_bytes < 512 && offset > metadata_at+1 {
+                        // Remaining small appends hit the count ceiling, not
+                        // metadata or bytes. An old 64-cap or off-by-one fails.
+                        assert_eq!(commands.len(),(count-offset).min(128));
+                    }
                     let (durable, _receiver) = oneshot::channel();
                     let batch = Batch {commands:commands.clone(),durable:Some(Arc::new(Mutex::new(Some(durable))))};
                     let encoded=bincode::serialize(&batch).unwrap();

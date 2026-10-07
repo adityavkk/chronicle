@@ -13,6 +13,31 @@ import re
 import sys
 
 
+def summarize_phase_timings(observations, begin, end):
+    """Difference cumulative counters; never sum successive cumulative samples."""
+    phases = {}
+    for observation in observations:
+        stats = observation["cumulative"]
+        assert sum(stats["buckets"]) == stats["count"], "inconsistent timing histogram"
+        phases.setdefault(observation["phase"], []).append(observation)
+    result = {}
+    for phase, values in phases.items():
+        reset = any(any(b["cumulative"][k] < a["cumulative"][k] for k in ("count", "total_ns", "bytes"))
+                    for a, b in zip(values, values[1:]))
+        row = dict(counter_reset_detected=reset, observations=len(values),
+                   whole_invocation=None if reset else values[-1]["cumulative"], sampled_window=None)
+        inside = [v for v in values if begin <= v["unix_ms"] <= end]
+        if not reset and len(inside) >= 2:
+            first, last = inside[0], inside[-1]
+            delta = {k:last["cumulative"][k]-first["cumulative"][k] for k in ("count", "total_ns", "bytes")}
+            delta["buckets"] = [b-a for a,b in zip(first["cumulative"]["buckets"], last["cumulative"]["buckets"])]
+            assert sum(delta["buckets"]) == delta["count"] and all(n >= 0 for n in delta["buckets"])
+            # A lifetime maximum cannot be differenced into a window maximum.
+            row["sampled_window"] = dict(start_unix_ms=first["unix_ms"], end_unix_ms=last["unix_ms"], **delta)
+        result[phase] = row
+    return result
+
+
 def summarize_progress(samples, begin, end):
     nodes, groups = {}, {}
     for sample in samples:
@@ -126,13 +151,24 @@ def summarize(directory):
             # SRV_STATS uses actual elapsed time instead: do not sum its rates
             # and call them append counts. Use the client's all-phase acks.
             staged, syncs = 0, 0
+            phase_timings = {}
             for log in cell.glob("node-*.log.gz"):
+                observations = []
                 with gzip.open(log, "rt") as file:
                     for line in file:
                         match = re.search(r"WAL_CONT staged/s=(\d+) fsync/s=(\d+)", line)
                         if match:
                             staged += int(match[1])
                             syncs += int(match[2])
+                        if line.startswith("RAFT_TIMING "):
+                            observations.append(json.loads(line.removeprefix("RAFT_TIMING ")))
+                if observations:
+                    phase_timings[log.name] = summarize_phase_timings(observations, begin, end)
+            if phase_timings:
+                row["phase_timings"] = dict(nodes=phase_timings,
+                    scope="Cumulative completed-attempt wall times, including setup/warmup for whole_invocation. "
+                          "Sampled windows use first/last observations INSIDE the client window, not exact client boundaries. "
+                          "Nested/overlapping phases are NOT additive CPU or pure fsync syscall time.")
             acknowledgements = raw["ok_total_all_phases"]
             row["wal_diagnostics"] = dict(staged_records=staged, fsyncs=syncs,
                 client_acks_all_phases=acknowledgements,

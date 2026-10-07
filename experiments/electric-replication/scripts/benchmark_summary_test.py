@@ -1,6 +1,6 @@
 import unittest
 
-from benchmark_summary import summarize_progress
+from benchmark_summary import summarize_phase_timings, summarize_progress
 
 
 class ProgressSummary(unittest.TestCase):
@@ -32,6 +32,29 @@ class ProgressSummary(unittest.TestCase):
         self.assertEqual(result["nodes"]["4"]["samples"], 1)
         self.assertNotIn("committed_bytes_per_second", result["nodes"]["4"])
         self.assertEqual(result["groups"], {})
+
+
+class PhaseTimingSummary(unittest.TestCase):
+    def observation(self, when, count, ns, first_bucket):
+        return dict(unix_ms=when, phase="read", cumulative=dict(count=count, total_ns=ns,
+            max_ns=2000, bytes=count*11, buckets=[first_bucket, count-first_bucket]))
+
+    def test_cumulative_samples_are_differenced_only_inside_the_window(self):
+        values = [self.observation(50, 3, 3000, 2), self.observation(125, 5, 5000, 3),
+                  self.observation(175, 9, 12000, 4), self.observation(225, 20, 28000, 7)]
+        row = summarize_phase_timings(values, 100, 200)["read"]
+        self.assertEqual(row["whole_invocation"], values[-1]["cumulative"])
+        self.assertEqual(row["sampled_window"], dict(start_unix_ms=125, end_unix_ms=175,
+            count=4, total_ns=7000, bytes=44, buckets=[1, 3]))
+        self.assertFalse(row["counter_reset_detected"])
+        self.assertIsNone(summarize_phase_timings(values, 126, 200)["read"]["sampled_window"])
+
+    def test_a_process_counter_reset_is_not_a_negative_duration_or_whole_run_total(self):
+        values = [self.observation(125, 50, 50000, 30), self.observation(175, 2, 2500, 1)]
+        row = summarize_phase_timings(values, 100, 200)["read"]
+        self.assertTrue(row["counter_reset_detected"])
+        self.assertIsNone(row["whole_invocation"])
+        self.assertIsNone(row["sampled_window"])
 
 
 if __name__ == "__main__":

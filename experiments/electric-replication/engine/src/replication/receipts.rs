@@ -200,7 +200,7 @@ mod tests {
         #[test]
         fn full_identity_ordinal_retention_and_semantic_result(
             term in 1u64..99, leader in 1u64..99, index in 2u64..999,
-            ordinal in 0usize..63, rejected in any::<bool>(),
+            ordinal in 0usize..128, rejected in any::<bool>(),
         ) {
             let id = |term, leader| LogId::new(openraft::CommittedLeaderId::new(term,leader),index);
             let pos = Position { log_id:id(term,leader), ordinal };
@@ -208,6 +208,8 @@ mod tests {
             assert_eq!(Receipt::decode(&receipt.encode(),"test-cluster",2).unwrap().position,pos);
             assert!(Receipt::decode(&receipt.encode(),"other",2).is_none());
             assert!(Receipt::decode(&receipt.encode(),"test-cluster",1).is_none());
+            let outside = Receipt {position:Position {ordinal:128,..pos},..receipt};
+            assert!(Receipt::decode(&outside.encode(),"test-cluster",2).is_none());
             let mut state = State::default();
             let prior = Some(LogId::new(openraft::CommittedLeaderId::new(term,leader),index-1));
             assert_eq!(state.lookup(pos,prior,Some(pos.log_id)).0,"pending");

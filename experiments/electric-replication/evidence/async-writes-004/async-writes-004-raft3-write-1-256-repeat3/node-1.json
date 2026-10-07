@@ -1,0 +1,25 @@
+{
+  "cluster": "bench-2d3b99d806eda3a2",
+  "node": 1,
+  "listen": "127.0.0.1:19801",
+  "dir": "/home/user/workspace/repo/.tmp/electric-labs/async-writes-004-raft3-write-1-256-repeat3/1",
+  "partitions": 2,
+  "workers": 2,
+  "long_poll_ms": 1000,
+  "fault_testing": false,
+  "genesis": {
+    "1": {
+      "addr": "127.0.0.1:19801"
+    },
+    "2": {
+      "addr": "127.0.0.1:19802"
+    },
+    "3": {
+      "addr": "127.0.0.1:19803"
+    }
+  },
+  "stats_secs": 1,
+  "pending_commands": 1024,
+  "pending_bytes": 16777216,
+  "append_durability": "quorum-fsync"
+}
