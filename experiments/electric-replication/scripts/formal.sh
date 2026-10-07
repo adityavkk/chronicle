@@ -20,7 +20,7 @@ for mutation in EarlyFlush EarlyPublish LocalAck; do
   test "$result" -ne 0
   grep -q 'Invariant Safe is violated' "$here/evidence/formal/$mutation.txt"
 done
-for mode in subscriptions subscriptions-live timed forks forks-live links links-live apply apply-live reclaim reclaim-live reads reads-live batches batches-live receipts receipts-live backlog backlog-live; do
+for mode in subscriptions subscriptions-live timed forks forks-live links links-live apply apply-live reclaim reclaim-live reads reads-live batches batches-live receipts receipts-live backlog backlog-live epochs epochs-live; do
   model=Subscriptions
   test "$mode" != timed || model=TimedApply
   [[ "$mode" != forks* ]] || model=Forks
@@ -31,10 +31,11 @@ for mode in subscriptions subscriptions-live timed forks forks-live links links-
   [[ "$mode" != batches* ]] || model=Batches
   [[ "$mode" != receipts* ]] || model=Receipts
   [[ "$mode" != backlog* ]] || model=AsyncBacklog
+  [[ "$mode" != epochs* ]] || model=AdmissionEpoch
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
   grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
 done
-for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission; do
+for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual Reorder BatchMetadata EarlyReply WrongReply ReleaseOnTimeout EarlyReceipt PublishAccepted IndexOnly InvalidateAbsent AcceptMeansSuccess ReceiptSession ReleaseOnAccepted AllowRecoveredAdmission CacheAcrossTerm; do
   model=Subscriptions
   config=subscriptions
   invariant=Safe
@@ -50,6 +51,7 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
     Reorder|BatchMetadata|EarlyReply|WrongReply|ReleaseOnTimeout) model=Batches; config=batches ;;
     EarlyReceipt|PublishAccepted|IndexOnly|InvalidateAbsent|AcceptMeansSuccess|ReceiptSession) model=Receipts; config=receipts ;;
     ReleaseOnAccepted|AllowRecoveredAdmission) model=AsyncBacklog; config=backlog ;;
+    CacheAcrossTerm) model=AdmissionEpoch; config=epochs ;;
   esac
   sed "s/$mutation = FALSE/$mutation = TRUE/" "$config.cfg" > "$tools/$mutation.cfg"
   set +e
@@ -61,4 +63,4 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
 done
 "$HOME/.elan/bin/lean" -DwarningAsError=true Contracts.lean > "$here/evidence/formal/lean.txt" 2>&1
 ! grep -E 'sorryAx|warning:|error:' "$here/evidence/formal/lean.txt"
-printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads/batches/receipts/backlog safety, stable-period liveness, 36 negative mutations; Lean: PASS\n'
+printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads/batches/receipts/backlog/epochs safety, stable-period liveness, 37 negative mutations; Lean: PASS\n'

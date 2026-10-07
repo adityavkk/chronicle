@@ -12,6 +12,15 @@ fork coordination and subscription cursor/lease mutations remain quorum-fsync;
 they reject this mode rather than silently changing their guarantees. The default
 and explicit `quorum-fsync` append keep their existing synchronous semantics.
 
+An operator may explicitly configure `append_durability: "local-fsync"` as the
+default for headerless POST appends. The shipped default remains `quorum-fsync`;
+an explicit request header overrides the append default. Lifecycle/subscription
+operations stay quorum-fsync in either configuration. The effective mode is
+recorded in the replicated command, so replay never consults current config.
+This is useful for clients that cannot send extension headers, including the
+pinned unchanged ds-bench. Its 2xx counter measures **acceptance**, not commitment,
+in this opt-in configuration; committed progress/drain needs separate evidence.
+
 After the actual native WAL group-fsync covers its consensus entry, the leader
 returns HTTP **202**, `Stream-Durability: local-fsync`, an opaque `Stream-Receipt`,
 and a relative `Location` for awaiting that receipt. The JSON response says
@@ -73,6 +82,18 @@ applied or definitively replaced. A recovered entry's full identity matters: a
 shorter replacement log need not grow back to the old numeric high-water index
 to clear this fence. The fence is checked only until resolved, not by rescanning
 the log on every steady-state append.
+
+The same fence applies at **each new leadership term**, not only at startup. A
+follower may inherit an uncommitted suffix without the previous leader's in-memory
+credits. The new owner first applies or replaces the inherited suffix, including
+the election entry, before admitting new requests. Readiness is cached per term.
+This may delay a new leader's first local acceptance until quorum recovery
+completes; a previously prepared, isolated leader can still accept up to its bound.
+Ownership changes must not mint another allowance over retained work.
+`AdmissionEpoch.tla` checks this credit handoff and rejects a mutation that reuses
+readiness across terms. Like the other models, it assumes consensus's log
+ownership rules rather than proving them. This extends the initial restart-only
+implementation before qualification as a bounded async service.
 
 Apply first fsyncs its covering Commit marker, then invokes the native handlers.
 For local-acceptance commands it also retains their deterministic replies in

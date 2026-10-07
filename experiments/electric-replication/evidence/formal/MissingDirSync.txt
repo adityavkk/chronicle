@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 42 and seed 7384484800294777270 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 492380] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 4 and seed -6364495877222979257 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 1908254] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/JournalReclaim.tla
 Parsing file /tmp/Naturals.tla
 Parsing file /tmp/FiniteSets.tla
@@ -12,9 +12,9 @@ Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module TLC
 Semantic processing of module JournalReclaim
-Starting... (2026-10-07 15:17:43)
+Starting... (2026-10-07 16:02:57)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-07 15:17:43.
+Finished computing initial states: 1 distinct state generated at 2026-10-07 16:02:57.
 Error: Invariant Safe is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -73,7 +73,7 @@ State 7: <Reclaim line 33, col 12 to line 36, col 66 of module JournalReclaim>
 /\ disk = {2}
 /\ candidate = 2
 
-92 states generated, 51 distinct states found, 19 states left on queue.
+104 states generated, 58 distinct states found, 22 states left on queue.
 The depth of the complete state graph search is 8.
 The average outdegree of the complete state graph is 2 (minimum is 1, the maximum 2 and the 95th percentile is 2).
-Finished in 00s at (2026-10-07 15:17:43)
+Finished in 00s at (2026-10-07 16:02:57)
