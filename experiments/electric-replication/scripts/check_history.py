@@ -12,6 +12,15 @@ import sys
 from collections import defaultdict, deque
 
 
+def offset(event):
+    # This fixture creates empty binary streams and appends UTF-8 value + LF.
+    # Offsets are exact byte positions, not record counts or Python characters.
+    raw = event["headers"]["stream-next-offset"]
+    generation, position = raw.split("_")
+    assert generation == "0000000000000000" and len(position) == 16 and position.isdecimal()
+    return int(position)
+
+
 def check(history):
     streams = defaultdict(list)
     for event in history:
@@ -24,12 +33,25 @@ def check(history):
         canonical = max((e["records"] for e in reads), key=len)
         assert len(canonical) == len(set(canonical)), f"{stream}: duplicate effect"
         positions = {record: i for i, record in enumerate(canonical)}
+        ends = {}
+        byte_prefixes = {0}
+        tail = 0
+        for record in canonical:
+            tail += len(record.encode("utf-8")) + 1
+            ends[record] = tail
+            byte_prefixes.add(tail)
         writes = defaultdict(list)
         for e in events:
             if e["op"] == "append":
                 writes[e["value"]].append(e)
                 if 200 <= e["status"] < 300:
                     assert e["value"] in positions, f"lost acknowledged record: {e}"
+                    returned = offset(e)
+                    if e["status"] == 200:  # New producer append, not a retry.
+                        assert returned == ends[e["value"]], "append reply belongs to a different payload"
+                    else:  # Duplicate retry reports the then-current durable tail.
+                        assert e["status"] == 204
+                        assert returned in byte_prefixes and returned >= ends[e["value"]], "invalid duplicate tail"
         vertices = {}
         for value, i in positions.items():
             attempts = writes[value]
@@ -45,6 +67,7 @@ def check(history):
         for r, read in enumerate(reads):
             content = read["records"]
             assert content == canonical[:len(content)], f"incompatible prefix: {read}"
+            assert offset(read) == (ends[content[-1]] if content else 0), "read offset differs from returned bytes"
             assert set(read.get("required", [])) <= set(content), f"session rollback: {read}"
             for record in content:
                 assert any(e["start"] <= read["end"] for e in writes[record]), "read before invocation"
@@ -77,7 +100,7 @@ def check(history):
         checked += len(events)
     assert checked > 0, "empty history is not evidence"
     return dict(verdict="PASS", operations=checked, streams=len(streams),
-                scope="append-only prefix/dedup, strict real-time graph, explicit session minimum")
+                scope="append-only prefix/dedup, exact per-append/read byte offsets, strict real-time graph, explicit session minimum")
 
 
 if __name__ == "__main__":

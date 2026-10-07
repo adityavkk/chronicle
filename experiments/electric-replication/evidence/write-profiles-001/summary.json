@@ -1,0 +1,238 @@
+{
+  "provenance_sha256": "2b9d9bcdab843028f891817bfa7e16e4cecf74cf8d86bfb6cd089b74ae68d75b",
+  "analyzer_sha256": "01346594439e83530dbe25f6df946937c3bf31053b84cf2f3a95b209cb048bfb",
+  "rows": [
+    {
+      "cell": "write-profiles-001-native-write-1-256",
+      "arm": "native",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": true,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 29470,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3683.75,
+        "per_stream_ops_per_sec_mean": 3683.75,
+        "latency_ms": {
+          "count": 29470,
+          "mean_ms": 69.81456898540894,
+          "p50_ms": 68.799,
+          "p90_ms": 81.471,
+          "p99_ms": 92.991,
+          "p999_ms": 96.255,
+          "max_ms": 97.663
+        },
+        "measure_start_unix_ms": 1791383230822,
+        "measure_end_unix_ms": 1791383238822,
+        "ok_total_all_phases": 39423,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791383230822,
+        "end_unix_ms": 1791383238822,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 5783552,
+          "client_rss_bytes": 64368640
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.709,
+        "average_sut_cpu_cores": 0.7990660267220133,
+        "sut_write_bytes": 113594368,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 26870026,
+        "wal": 16777216,
+        "snapshots": 0
+      },
+      "wal_diagnostics": {
+        "staged_records": 39423,
+        "fsyncs": 34242,
+        "client_acks_all_phases": 39423,
+        "fsyncs_per_ack": 0.8685792557644015,
+        "records_per_ack": 1.0,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs"
+      }
+    },
+    {
+      "cell": "write-profiles-001-raft1-write-1-256",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": true,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 54808,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 6851.0,
+        "per_stream_ops_per_sec_mean": 6851.0,
+        "latency_ms": {
+          "count": 54808,
+          "mean_ms": 37.44620369289153,
+          "p50_ms": 37.343,
+          "p90_ms": 42.879,
+          "p99_ms": 46.847,
+          "p999_ms": 49.183,
+          "max_ms": 54.367
+        },
+        "measure_start_unix_ms": 1791383246093,
+        "measure_end_unix_ms": 1791383254093,
+        "ok_total_all_phases": 73894,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791383246093,
+        "end_unix_ms": 1791383254093,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 12668928,
+          "client_rss_bytes": 60116992
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.704,
+        "average_sut_cpu_cores": 0.5802180685358256,
+        "sut_write_bytes": 44781568,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 69208140,
+        "wal": 50290674,
+        "snapshots": 0
+      },
+      "wal_diagnostics": {
+        "staged_records": 2334,
+        "fsyncs": 2334,
+        "client_acks_all_phases": 73894,
+        "fsyncs_per_ack": 0.0315857850434406,
+        "records_per_ack": 0.0315857850434406,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs"
+      }
+    },
+    {
+      "cell": "write-profiles-001-raft3-write-1-256",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": true,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 39354,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 4919.25,
+        "per_stream_ops_per_sec_mean": 4919.25,
+        "latency_ms": {
+          "count": 39354,
+          "mean_ms": 52.13471677593125,
+          "p50_ms": 51.615,
+          "p90_ms": 57.983,
+          "p99_ms": 68.351,
+          "p999_ms": 73.663,
+          "max_ms": 75.519
+        },
+        "measure_start_unix_ms": 1791383262306,
+        "measure_end_unix_ms": 1791383270306,
+        "ok_total_all_phases": 54053,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791383262306,
+        "end_unix_ms": 1791383270306,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 27897856,
+          "client_rss_bytes": 59215872
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 35921004,
+        "sampled_seconds": 7.735,
+        "average_sut_cpu_cores": 0.7343244990303813,
+        "sut_write_bytes": 97107968,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 167172942,
+        "wal": 125658246,
+        "snapshots": 0
+      },
+      "wal_diagnostics": {
+        "staged_records": 5124,
+        "fsyncs": 5122,
+        "client_acks_all_phases": 54053,
+        "fsyncs_per_ack": 0.09475884779753205,
+        "records_per_ack": 0.09479584851904613,
+        "scope": "aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs"
+      }
+    }
+  ],
+  "scope": "single-host resource qualification; profile cells are perturbed and never capacity rows"
+}

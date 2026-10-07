@@ -241,7 +241,7 @@ def cell(output, arm, workload, profile=False, diagnostics=False):
     return result
 
 
-def run(output, smoke=False, reads_only=False, write_diagnostics=False):
+def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_profiles=False):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     sources = {str(p.relative_to(EXPERIMENT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (EXPERIMENT / "engine/src").rglob("*.rs")}
@@ -266,6 +266,8 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False):
         workloads = [("reads",), ("mixed",)]
     if write_diagnostics:
         workloads = [("write",1,256)] * 3
+    if write_profiles:
+        workloads = [("write",1,256)]
     results = []
     for i, workload in enumerate(workloads):
         # Rotate arm order to reduce a systematic page-cache/time-order bias.
@@ -273,8 +275,9 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False):
         arms = arms[i%len(arms):]+arms[:i%len(arms)]
         for arm in arms:
             name = f"{output.name}-{arm}-"+"-".join(map(str,workload))+(f"-repeat{i+1}" if write_diagnostics else "")
-            results.append(cell(output / name, arm, workload, diagnostics=write_diagnostics))
-    if not smoke and not write_diagnostics:
+            results.append(cell(output / name, arm, workload, profile=write_profiles,
+                                diagnostics=write_diagnostics or write_profiles))
+    if not smoke and not write_diagnostics and not write_profiles:
         for arm in ("native","raft1","raft3"):
             for workload in (("reads",),) if reads_only else (("write",1024,64),("reads",)):
                 name = f"{output.name}-{arm}-profile-"+"-".join(map(str,workload))
@@ -285,4 +288,4 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False):
 
 if __name__ == "__main__":
     sys.exit(0 if run(sys.argv[1], "--smoke" in sys.argv[2:], "--reads-only" in sys.argv[2:],
-                     "--write-diagnostics" in sys.argv[2:]) else 1)
+                     "--write-diagnostics" in sys.argv[2:], "--write-profiles" in sys.argv[2:]) else 1)

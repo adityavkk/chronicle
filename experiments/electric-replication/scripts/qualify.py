@@ -25,7 +25,8 @@ def run(output):
         event = dict(op="append", node=node, stream=paths[group], value=value, start=time.monotonic_ns())
         try:
             status, headers, body = lab.request(node, "POST", paths[group], (value+"\n").encode(),
-                {"content-type": "application/octet-stream", "producer-id": value, "producer-epoch": "0", "producer-seq": "0"})
+                {"content-type": "application/octet-stream", "producer-id": hashlib.sha256(value.encode()).hexdigest(),
+                 "producer-epoch": "0", "producer-seq": "0"})
             event.update(status=status, headers=headers, error=body.decode(errors="replace"))
         except OSError as exc:
             event.update(status=0, headers={}, error=str(exc))
@@ -56,6 +57,26 @@ def run(output):
         for group in range(2):
             leader = lab.leader(group)
             assert lab.request(leader, "PUT", paths[group])[0] == 201
+        # A synchronized burst with asymmetric multibyte payloads must actually
+        # share consensus entries. Exact per-command replies are checked later
+        # from the observed bytes, independently of their session/log positions.
+        leaders = [lab.leader(group) for group in range(2)]
+        barrier = threading.Barrier(64)
+
+        def burst(i):
+            barrier.wait(timeout=20)
+            return append(leaders[i % 2], i % 2, f"batch-{i:03d}-"+"λ"*(i % 11+1))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
+            results = list(executor.map(burst, range(64)))
+        assert all(e["status"] == 200 for e in results), results
+        batches = []
+        for group in range(2):
+            sessions = [e["headers"]["stream-session"] for e in results if e["stream"] == paths[group]]
+            batches.append(dict(group=group, commands=len(sessions), entries=len(set(sessions)),
+                                commands_per_entry=sorted(sessions.count(s) for s in set(sessions))))
+        (lab.output / "batch-evidence.json").write_text(json.dumps(batches, indent=2)+"\n")
+        assert all(b["entries"] < b["commands"] for b in batches), "burst did not exercise batching"
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             futures = [executor.submit(append, lab.leader(i % 2), i % 2, f"base-{i:03d}") for i in range(24)]
             assert all(200 <= f.result()["status"] < 300 for f in futures)

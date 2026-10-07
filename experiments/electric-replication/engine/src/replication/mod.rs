@@ -1,4 +1,5 @@
 //! Experimental source-integrated partition replication; see ../../CONTRACT.md.
+mod batch;
 pub(crate) mod clock;
 mod fork_io;
 mod forks;
@@ -23,7 +24,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
-openraft::declare_raft_types!(pub Types: D = Command, R = Reply, SnapshotData = tokio::fs::File);
+openraft::declare_raft_types!(pub Types: D = Vec<Command>, R = Vec<Reply>, SnapshotData = tokio::fs::File);
 type Entry = openraft::Entry<Types>;
 type Raft = openraft::Raft<Types>;
 pub static CLUSTER: OnceLock<Cluster> = OnceLock::new();
@@ -144,6 +145,7 @@ struct Group {
     raft: Raft,
     machine: Arc<machine::Machine>,
     slots: Arc<Semaphore>,
+    proposals: tokio::sync::mpsc::Sender<batch::Pending>,
     reads: ReadBarrier,
 }
 
@@ -172,16 +174,13 @@ impl Group {
     async fn propose(
         &self,
         command: Command,
-    ) -> Result<openraft::raft::ClientWriteResponse<Types>, u16> {
+    ) -> Result<batch::Committed, u16> {
         let permit = self.slots.clone().try_acquire_owned().map_err(|_| 429u16)?;
-        let raft = self.raft.clone();
-        // Charge admission until consensus resolves, even after HTTP timeout.
-        let proposal = tokio::spawn(async move {
-            let _permit = permit;
-            raft.client_write(command).await
-        });
-        match tokio::time::timeout(Duration::from_secs(3), proposal).await {
-            Ok(Ok(Ok(result))) => Ok(result),
+        let (result, receive) = tokio::sync::oneshot::channel();
+        // The queue/consensus worker, not the HTTP future, owns this permit.
+        self.proposals.try_send(batch::Pending { command, result, permit }).map_err(|_| 503u16)?;
+        match tokio::time::timeout(Duration::from_secs(3), receive).await {
+            Ok(Ok(result)) => result,
             _ => Err(503),
         }
     }
@@ -604,7 +603,7 @@ pub fn run() {
             "data directory already owned"
         );
         let identity = serde_json::to_vec(&(
-            4u32,
+            5u32,
             &config.cluster,
             config.node,
             config.partitions,
@@ -675,9 +674,10 @@ pub fn run() {
             .await
             .expect("start Raft");
             groups.push(Group {
+                proposals: batch::start(raft.clone()),
                 raft,
                 machine,
-                slots: Arc::new(Semaphore::new(256)),
+                slots: Arc::new(Semaphore::new(batch::CAPACITY)),
                 reads: ReadBarrier::default(),
             });
         }

@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 
 
@@ -67,6 +68,24 @@ def summarize(directory):
             row["final_storage_bytes"] = dict(total=sum(storage.values()),
                 wal=sum(v for k,v in storage.items() if k.endswith(".wal")),
                 snapshots=sum(v for k,v in storage.items() if Path(k).name.startswith("snapshot-")))
+        if result.get("diagnostics") and raw.get("ok_total_all_phases"):
+            # Both pinned engines print WAL deltas divided by the CONFIGURED
+            # interval (exactly 1s here), so these sums recover counter totals.
+            # SRV_STATS uses actual elapsed time instead: do not sum its rates
+            # and call them append counts. Use the client's all-phase acks.
+            staged, syncs = 0, 0
+            for log in cell.glob("node-*.log.gz"):
+                with gzip.open(log, "rt") as file:
+                    for line in file:
+                        match = re.search(r"WAL_CONT staged/s=(\d+) fsync/s=(\d+)", line)
+                        if match:
+                            staged += int(match[1])
+                            syncs += int(match[2])
+            acknowledgements = raw["ok_total_all_phases"]
+            row["wal_diagnostics"] = dict(staged_records=staged, fsyncs=syncs,
+                client_acks_all_phases=acknowledgements,
+                fsyncs_per_ack=syncs/acknowledgements, records_per_ack=staged/acknowledgements,
+                scope="aggregate native WAL counters over whole invocation, including setup/warmup; not measure-window or all filesystem fsyncs")
         rows.append(row)
     output = dict(provenance_sha256=hashlib.sha256((root/"provenance.json").read_bytes()).hexdigest(),
                   analyzer_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), rows=rows,

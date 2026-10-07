@@ -1,0 +1,40 @@
+{
+  "arm": "raft1",
+  "workload": [
+    "write",
+    1,
+    256
+  ],
+  "profile": false,
+  "diagnostics": true,
+  "verdict": "PASS",
+  "node_pids": [
+    3035644
+  ],
+  "affinity": {
+    "3035644": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 3035652,
+  "process_sample_gaps": [
+    {
+      "pid": 3035652,
+      "error": "PermissionError(13, 'Permission denied')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791382310870,
+    "end_unix_ms": 1791382322938,
+    "exit_code": 0
+  },
+  "verify_pid": 3035730,
+  "verify_window": {
+    "start_unix_ms": 1791382322939,
+    "end_unix_ms": 1791382322946,
+    "exit_code": 0
+  }
+}

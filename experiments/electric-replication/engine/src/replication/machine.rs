@@ -122,7 +122,7 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         let view = self.view.read().await;
         Ok((view.applied, view.membership.clone()))
     }
-    async fn apply<I>(&mut self, entries: I) -> Result<Vec<Reply>, StorageError<u64>>
+    async fn apply<I>(&mut self, entries: I) -> Result<Vec<Vec<Reply>>, StorageError<u64>>
     where
         I: IntoIterator<Item = Entry> + Send,
         I::IntoIter: Send,
@@ -147,64 +147,68 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         }
         for entry in entries {
             let reply = match entry.payload {
-                EntryPayload::Normal(command) => {
+                EntryPayload::Normal(commands) => {
                     view.store.set_create_id(entry.log_id.index);
-                    view.store.clock.advance(command.time);
-                    let resp = if command.method == "SUB" {
-                        let action = serde_json::from_slice(&command.body)
-                            .map_err(|e| storage_error(io::Error::other(e)))?;
-                        let now = clock::millis(view.store.clock.now());
-                        view.subscriptions
-                            .apply(&command.path, action, entry.log_id.index, now)
-                    } else if command.method == "FORK" {
-                        let action = bincode::deserialize(&command.body)
-                            .map_err(|e| storage_error(io::Error::other(e)))?;
-                        let store = view.store.clone();
-                        view.forks
-                            .apply(&store, &command.path, action, entry.log_id.index)
-                            .await
-                            .map_err(storage_error)?
-                    } else if view.forks.pending(&command.path)
-                        || command
-                            .headers
-                            .iter()
-                            .any(|(k, p)| k == "stream-forked-from" && view.forks.pending(p))
-                    {
-                        response(409, "fork name reserved; materialization pending")
-                    } else if command.method == "TOUCH" || command.method == "TICK" {
-                        if let Some(stream) = view.store.get(&command.path) {
-                            if command.method == "TOUCH"
-                                && !stream.shared.read().unwrap().soft_deleted
-                            {
-                                stream.touch();
+                    let mut output = Vec::with_capacity(commands.len());
+                    for command in commands {
+                        view.store.clock.advance(command.time);
+                        let resp = if command.method == "SUB" {
+                            let action = serde_json::from_slice(&command.body)
+                                .map_err(|e| storage_error(io::Error::other(e)))?;
+                            let now = clock::millis(view.store.clock.now());
+                            view.subscriptions
+                                .apply(&command.path, action, entry.log_id.index, now)
+                        } else if command.method == "FORK" {
+                            let action = bincode::deserialize(&command.body)
+                                .map_err(|e| storage_error(io::Error::other(e)))?;
+                            let store = view.store.clone();
+                            view.forks
+                                .apply(&store, &command.path, action, entry.log_id.index)
+                                .await
+                                .map_err(storage_error)?
+                        } else if view.forks.pending(&command.path)
+                            || command
+                                .headers
+                                .iter()
+                                .any(|(k, p)| k == "stream-forked-from" && view.forks.pending(p))
+                        {
+                            response(409, "fork name reserved; materialization pending")
+                        } else if command.method == "TOUCH" || command.method == "TICK" {
+                            if let Some(stream) = view.store.get(&command.path) {
+                                if command.method == "TOUCH"
+                                    && !stream.shared.read().unwrap().soft_deleted
+                                {
+                                    stream.touch();
+                                }
                             }
+                            Resp::new(204)
+                        } else {
+                            crate::handlers::handle(
+                                view.store.clone(),
+                                Req {
+                                    method: Method::parse(&command.method),
+                                    path: command.path,
+                                    query: None,
+                                    headers: command.headers,
+                                    body: command.body.into(),
+                                },
+                            )
+                            .await
+                        };
+                        if resp.status >= 500 {
+                            return Err(storage_error(io::Error::other(
+                                "native committed apply failed",
+                            )));
                         }
-                        Resp::new(204)
-                    } else {
-                        crate::handlers::handle(
-                            view.store.clone(),
-                            Req {
-                                method: Method::parse(&command.method),
-                                path: command.path,
-                                query: None,
-                                headers: command.headers,
-                                body: command.body.into(),
-                            },
-                        )
-                        .await
-                    };
-                    if resp.status >= 500 {
-                        return Err(storage_error(io::Error::other(
-                            "native committed apply failed",
-                        )));
+                        output.push(Reply::from_resp(resp));
                     }
-                    Reply::from_resp(resp)
+                    output
                 }
                 EntryPayload::Membership(membership) => {
                     view.membership = StoredMembership::new(Some(entry.log_id), membership);
-                    Reply::default()
+                    vec![]
                 }
-                EntryPayload::Blank => Reply::default(),
+                EntryPayload::Blank => vec![],
             };
             view.applied = Some(entry.log_id);
             replies.push(reply);

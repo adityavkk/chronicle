@@ -53,7 +53,7 @@ impl Cluster {
         group: usize,
         path: &str,
         action: Action,
-    ) -> Result<openraft::raft::ClientWriteResponse<Types>, u16> {
+    ) -> Result<batch::Committed, u16> {
         let body = serde_json::to_vec(&action).unwrap();
         if body.len() > 1024 * 1024 {
             return Err(413);

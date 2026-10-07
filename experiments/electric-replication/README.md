@@ -77,13 +77,20 @@ Conformance and the existing fault/property tests are necessary, not sufficient.
 The latest full suite executes **332/332 passing, zero failures/skips**, with
 subscriptions enabled. Subscription and storage-error process histories also
 pass within their documented models; they are not independent-disk or power-loss
-qualification. `bench-local-004` completes all **45/45** matched ds-bench cells
+qualification. Bounded append batching now passes `conformance-011`, 132 Rust
+tests and five real-process campaigns. Three fresh `write-diagnostics-002` runs
+measure **48–51k one-member writes/s versus 91–102k native**, about a 2× gap with
+unchanged local-fsync guarantees. See [BATCHING.md](BATCHING.md) for the causal
+diagnosis, exact runs and remaining profiling work. Async local acceptance is
+approved but not yet implemented; no uncommitted read mode will be offered.
+
+The broader **pre-batching** `bench-local-004` completes all **45/45** matched ds-bench cells
 after arrival-fenced read coalescing. The prior `bench-local-003` three-replica,
 1,000-subscriber failure (503s and a 240-second timeout) is retained. One 004
 write cell lost its closing resource sample to a `/proc` permission race; the
 driver traceback is retained and resource coverage is explicitly partial.
 
-| Local qualification cell | Unmodified Electric | One-member adapter | Three replicas |
+| Pre-batching local qualification cell | Unmodified Electric | One-member adapter | Three replicas |
 | --- | ---: | ---: | ---: |
 | One stream, concurrency 256 (writes/s) | 105,877 | 3,242 | 4,200 |
 | 1,024 streams, concurrency 256 (writes/s) | 59,638 | 3,579 | 4,242 |
