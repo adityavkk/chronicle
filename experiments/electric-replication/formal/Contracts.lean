@@ -197,6 +197,54 @@ theorem moving_to_consensus_keeps_charge (queued inflight moved : Nat)
     (h : moved ≤ queued) : queued - moved + (inflight + moved) = queued + inflight := by
   omega
 
+/- A receipt is an attempt identity, not a committed-prefix session position.
+   The Rust wire codec, durable notification, consensus proof and bounded
+   snapshot metadata are separate refinement obligations. -/
+structure ReceiptLog where
+  term : Nat
+  leader : Nat
+  index : Nat
+  deriving DecidableEq
+
+structure ReceiptKey where
+  log : ReceiptLog
+  ordinal : Nat
+  deriving DecidableEq
+
+def receiptResult (wanted stored : ReceiptKey) (semanticSuccess : Bool) : Option Bool :=
+  if wanted = stored then some semanticSuccess else none
+
+theorem receipt_result_binds_identity_and_semantics (wanted stored : ReceiptKey)
+    (semanticSuccess outcome : Bool)
+    (h : receiptResult wanted stored semanticSuccess = some outcome) :
+    wanted = stored ∧ semanticSuccess = outcome := by
+  unfold receiptResult at h
+  split at h <;> simp_all
+
+def invalidationProof (wanted : ReceiptLog) (retained : Option ReceiptLog)
+    (applied : Nat) : Prop :=
+  match retained with
+  | none => False
+  | some current => wanted.index = current.index ∧ current.index ≤ applied ∧ wanted ≠ current
+
+theorem missing_result_is_not_invalidation (wanted : ReceiptLog) (applied : Nat) :
+    ¬ invalidationProof wanted none applied := by
+  simp [invalidationProof]
+
+theorem uncommitted_replacement_is_not_invalidation (wanted current : ReceiptLog)
+    (applied : Nat) (h : applied < current.index) :
+    ¬ invalidationProof wanted (some current) applied := by
+  unfold invalidationProof
+  omega
+
+def asyncAdmission (orphaned bytes available : Nat) : Prop :=
+  orphaned = 0 ∧ bytes ≤ available
+
+theorem recovered_suffix_fences_new_admission (orphaned bytes available : Nat)
+    (h : 0 < orphaned) : ¬ asyncAdmission orphaned bytes available := by
+  unfold asyncAdmission
+  omega
+
 #print axioms publication_committed
 #print axioms session_no_rollback
 #print axioms session_monotone
@@ -226,4 +274,8 @@ theorem moving_to_consensus_keeps_charge (queued inflight moved : Nat)
 #print axioms batch_fold_equivalent
 #print axioms singleton_metadata_identity
 #print axioms moving_to_consensus_keeps_charge
+#print axioms receipt_result_binds_identity_and_semantics
+#print axioms missing_result_is_not_invalidation
+#print axioms uncommitted_replacement_is_not_invalidation
+#print axioms recovered_suffix_fences_new_admission
 end ElectricReplication

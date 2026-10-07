@@ -1,0 +1,68 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 10 and seed -6858136485835893620 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 492780] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/Receipts.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Receipts
+Starting... (2026-10-07 15:17:51)
+Computing initial states...
+Finished computing initial states: 2 distinct states generated at 2026-10-07 15:17:51.
+Error: Invariant Safe is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ offered = FALSE
+/\ session = FALSE
+/\ answer = "none"
+/\ committedID = 0
+/\ retained = TRUE
+/\ accepted = FALSE
+/\ originalOK = TRUE
+/\ visible = {}
+/\ durableID = 0
+/\ originalFlushed = FALSE
+/\ cacheID = 0
+/\ logID = 0
+/\ appliedID = 0
+
+State 2: <Offer line 19, col 10 to line 21, col 84 of module Receipts>
+/\ offered = TRUE
+/\ session = FALSE
+/\ answer = "none"
+/\ committedID = 0
+/\ retained = TRUE
+/\ accepted = FALSE
+/\ originalOK = TRUE
+/\ visible = {}
+/\ durableID = 0
+/\ originalFlushed = FALSE
+/\ cacheID = 0
+/\ logID = 1
+/\ appliedID = 0
+
+State 3: <Accept line 26, col 11 to line 31, col 72 of module Receipts>
+/\ offered = TRUE
+/\ session = FALSE
+/\ answer = "none"
+/\ committedID = 0
+/\ retained = TRUE
+/\ accepted = TRUE
+/\ originalOK = TRUE
+/\ visible = {}
+/\ durableID = 0
+/\ originalFlushed = FALSE
+/\ cacheID = 0
+/\ logID = 1
+/\ appliedID = 0
+
+8 states generated, 8 distinct states found, 2 states left on queue.
+The depth of the complete state graph search is 3.
+The average outdegree of the complete state graph is 1 (minimum is 1, the maximum 1 and the 95th percentile is 1).
+Finished in 00s at (2026-10-07 15:17:51)

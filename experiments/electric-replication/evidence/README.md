@@ -48,6 +48,8 @@ disks/AZs, arbitrary power loss, production availability or cloud performance.
 | `conformance-012`, `fault-012`, `properties/rust-132-pipeline.txt` | 332/332, zero failures/skips; 193 operations; 132 Rust tests | Two outstanding FIFO-enqueued consensus batches, same charged admission and durability barriers |
 | `fork-fault-007`, `subscription-fault-006`, `storage-fault-008`, `reclaim-fault-004` | Independent checkers PASS: 747 / 195 / 28 / 20 operations | Post-pipelining reruns; same 1 / 3 subscription/storage unknowns, nine verified webhook signatures |
 | `write-diagnostics-003` | Six matched write cells PASS | Native 99–104k/s versus one member 53–58k/s, 1.72–1.89×; no client errors, exact byte/offset checks; closing native client `/proc` sampling gap retained |
+| `formal/async-qualification.txt` | Receipt/backlog safety and conditional liveness pass; 36 total negative mutations detected; Lean without `sorry` | Before async implementation: 89 receipt states and 295 backlog states; full identity, semantic rejection, expiration, local-fsync versus acceptance, restart/cancellation credit boundaries; not Rust refinement |
+| `formal/receipts-001-unspecified-assignment.txt` | Failed model run retained | Missing parentheses made a disjunctive assignment underspecified; corrected before the passing safety/liveness and mutation runs |
 
 The upstream suite is **unchanged `@durable-streams/server-conformance-tests@0.3.5`**,
 with `subscriptions:true`. All 332 tests are discovered and executed in each full
