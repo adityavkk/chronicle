@@ -1,0 +1,21 @@
+{
+  "arm": "raft1",
+  "workload": [
+    "write",
+    1,
+    256
+  ],
+  "profile": false,
+  "profiler": null,
+  "diagnostics": true,
+  "verdict": "FAIL",
+  "ack_contract": "applied after durable quorum",
+  "pending_commands": 256,
+  "progress_sampling": false,
+  "disk_preflight": {
+    "free_bytes": 7680495616,
+    "minimum_free_bytes": 8589934592
+  },
+  "error": "RuntimeError('benchmark requires 8 GiB free before starting a cell; no SUT started')",
+  "diagnostic_tail_captured": false
+}

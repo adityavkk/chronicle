@@ -1,0 +1,79 @@
+{
+  "reason": "Benchmark preflight refused startup after native unit tests left preallocated disposable WAL fixtures.",
+  "scope": "Only known native-shard fixtures from the two just-passed Rust test processes. Evidence, failing-property seed/log, and subscription-key lab fixtures remain intact.",
+  "allocated_bytes_removed": 1610653696,
+  "removed": [
+    {
+      "path": "/tmp/ds-wal-shard-test-wd-fast-1026876-1791410532936145407",
+      "retired_pid": 1026876,
+      "passing_suite": "experiments/electric-replication/evidence/properties/rust-140-coalescing-fixed.txt",
+      "allocated_bytes": 134217728
+    },
+    {
+      "path": "/tmp/ds-wal-shard-test-wd-exact-1026876-1791410533692740477",
+      "retired_pid": 1026876,
+      "passing_suite": "experiments/electric-replication/evidence/properties/rust-140-coalescing-fixed.txt",
+      "allocated_bytes": 134221824
+    },
+    {
+      "path": "/tmp/ds-wal-shard-test-shard-pos-1026876-1791410533229520639",
+      "retired_pid": 1026876,
+      "passing_suite": "experiments/electric-replication/evidence/properties/rust-140-coalescing-fixed.txt",
+      "allocated_bytes": 134221824
+    },
+    {
+      "path": "/tmp/ds-wal-shard-test-write-err-1026876-1791410533708703171",
+      "retired_pid": 1026876,
+      "passing_suite": "experiments/electric-replication/evidence/properties/rust-140-coalescing-fixed.txt",
+      "allocated_bytes": 134221824
+    },
+    {
+      "path": "/tmp/ds-wal-shard-test-wd-coalesce-1026876-1791410533164558427",
+      "retired_pid": 1026876,
+      "passing_suite": "experiments/electric-replication/evidence/properties/rust-140-coalescing-fixed.txt",
+      "allocated_bytes": 134221824
+    },
+    {
+      "path": "/tmp/ds-wal-shard-test-shard-1026876-1791410533361553472",
+      "retired_pid": 1026876,
+      "passing_suite": "experiments/electric-replication/evidence/properties/rust-140-coalescing-fixed.txt",
+      "allocated_bytes": 134221824
+    },
+    {
+      "path": "/tmp/ds-wal-shard-test-shard-1194495-1791410574892696936",
+      "retired_pid": 1194495,
+      "passing_suite": "experiments/electric-replication/evidence/properties/standalone-114-coalescing.txt",
+      "allocated_bytes": 134221824
+    },
+    {
+      "path": "/tmp/ds-wal-shard-test-wd-fast-1194495-1791410574477549304",
+      "retired_pid": 1194495,
+      "passing_suite": "experiments/electric-replication/evidence/properties/standalone-114-coalescing.txt",
+      "allocated_bytes": 134221824
+    },
+    {
+      "path": "/tmp/ds-wal-shard-test-shard-pos-1194495-1791410574767565548",
+      "retired_pid": 1194495,
+      "passing_suite": "experiments/electric-replication/evidence/properties/standalone-114-coalescing.txt",
+      "allocated_bytes": 134217728
+    },
+    {
+      "path": "/tmp/ds-wal-shard-test-wd-coalesce-1194495-1791410574703606773",
+      "retired_pid": 1194495,
+      "passing_suite": "experiments/electric-replication/evidence/properties/standalone-114-coalescing.txt",
+      "allocated_bytes": 134221824
+    },
+    {
+      "path": "/tmp/ds-wal-shard-test-write-err-1194495-1791410575248871413",
+      "retired_pid": 1194495,
+      "passing_suite": "experiments/electric-replication/evidence/properties/standalone-114-coalescing.txt",
+      "allocated_bytes": 134221824
+    },
+    {
+      "path": "/tmp/ds-wal-shard-test-wd-exact-1194495-1791410575179499223",
+      "retired_pid": 1194495,
+      "passing_suite": "experiments/electric-replication/evidence/properties/standalone-114-coalescing.txt",
+      "allocated_bytes": 134221824
+    }
+  ]
+}

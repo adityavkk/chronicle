@@ -119,7 +119,10 @@ impl Journal {
             let event: Event = bincode::deserialize(data).map_err(io::Error::other)?;
             index.apply(&event, location)
         })?;
-        let committer = shard.spawn_committer();
+        // Bounded coalescing candidate: let the prior apply marker and next
+        // consensus entry share a native covering sync. Neither is acknowledged
+        // before its own durability watermark. See BATCHING.md / FsyncGroups.
+        let committer = shard.spawn_committer_with_delay(Duration::from_micros(100));
         Ok(Arc::new(Self {
             shard,
             index: Mutex::new(index),
