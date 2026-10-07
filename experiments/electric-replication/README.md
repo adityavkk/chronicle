@@ -79,7 +79,7 @@ disks; filesystem locking only fences one local directory.
 ## Remaining gates
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-The latest `conformance-021` executes **332/332 passing, zero failures/skips/todo**,
+The latest `conformance-022` executes **332/332 passing, zero failures/skips/todo**,
 with subscriptions enabled, three processes and two partitions. All 139 Rust
 tests pass; two unchanged upstream forensic helpers remain ignored, not
 conformance exclusions. `storage-fault-014` checks seven real failing/short
@@ -104,7 +104,10 @@ the original roughly 30× gap, its batching fix, and later profiling experiments
 One-member WAL fsyncs/ack remain about twice native; snapshots also pause apply.
 Allocation projection saves measured allocations but does not establish a
 throughput gain. Raising the command ceiling and inlining the durability waiter
-likewise showed no established benefit and were reverted. Raw CPU memory captures
+likewise showed no established benefit and were reverted. A 100 µs fsync
+collection interval improved grouping but measured only 32–33k/s one-member;
+it too was rejected. The restored engine/vendor source hashes and release binary
+match `conformance-021` exactly, and the full suite was rerun as 022. Raw CPU memory captures
 stay local-only; symbolized profiles, allocation traces, failed histories and
 exact source/binary/config hashes remain in the evidence ledger.
 

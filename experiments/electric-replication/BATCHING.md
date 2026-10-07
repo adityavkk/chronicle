@@ -434,7 +434,7 @@ must still wait for a captured prefix that includes B; durability beside marker
 A does not make B committed or visible. Separate client entries cannot share a
 log-append fsync because the core awaits each preceding `LogFlushed`.
 
-The next candidate adds one 100 µs collection interval on the existing dedicated
+The candidate adds one 100 µs collection interval on the existing dedicated
 native committer thread before capturing a dirty prefix for fsync. The interval
 is shorter than the measured 307–346 µs mean sync loop and aims to group the
 marker/entry scheduling race. It is a measured-next experiment, not a promised
@@ -454,3 +454,26 @@ lemmas still supply the separate logical contracts; none proves the Rust timer,
 OS scheduler or storage hardware. Real-WAL tests must exercise a lone request,
 segment rolls and shutdown; unchanged conformance and storage/process faults
 remain acceptance gates if measurements justify retaining the candidate.
+
+`write-coalescing-002` completes all six short diagnostic cells with no client
+errors and exact byte checks. One-member throughput is **32,058 / 32,955 / 31,796
+writes/s**, versus native **47,669 / 90,475 / 83,743**. The first native result
+shows substantial host/run variance. WAL records/fsync rise to 1.516–1.563 and
+fsyncs/ack fall to about 0.030, but entry/marker waits rise to 840–902 µs and p99
+to 14.3–14.9 ms. The measured synchronous fsync loops themselves average
+527–563 µs, versus 307–346 µs in `async-writes-006`; these runs do not isolate
+every source of that difference. Fewer fsyncs did **not** establish a throughput
+benefit. The candidate is rejected, with its source and measurements retained
+in local history; the qualified immediate-commit implementation is restored.
+
+The preceding `write-coalescing-001` refused all six cells before server startup
+because available disk was below the unchanged 8 GiB harness headroom guard.
+Its disposal manifest records twelve temporary native-test WAL fixtures removed
+after their test processes exited, not result data or subscription signing keys.
+The first new property test also failed: its oracle used the consensus-only
+record reader on native Append frames. The retained failure and regression seed
+precede a corrected independent frame decoder. Corrected candidate tests pass
+140 replicated / 114 standalone cases (the same two upstream forensic helpers
+remain ignored). All 42 TLC negative mutations and one Lean mutation are
+detected. These are not full protocol/fault qualification of the rejected
+candidate; `conformance-021` still names the restored engine, not that candidate.

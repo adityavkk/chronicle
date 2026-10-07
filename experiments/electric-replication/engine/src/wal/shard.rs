@@ -1529,20 +1529,12 @@ impl Shard {
     /// not dropped) and then returns so the thread can be joined. A drain-time
     /// fsync error gives up WITHOUT acking (no-loss holds; the process is
     /// exiting anyway, so no abort is needed to prevent a later false ack).
-    fn run_committer(&self, coalesce: std::time::Duration) {
+    pub fn run_committer(&self) {
         loop {
-            if !coalesce.is_zero()
-                && self.snapshot_watermark() > self.durable_lsn.load(Ordering::Acquire)
-            {
-                // A single fixed collection interval, never reset by arrivals.
-                // Capture the actual covering cut only AFTER this delay and
-                // BEFORE fsync in commit_once; sleeping proves no durability.
-                std::thread::sleep(coalesce);
-            }
             match self.commit_once() {
                 Ok(Some(_)) => {
-                    // More may have arrived while fsync ran. Any configured
-                    // collection interval applies to this next dirty prefix.
+                    // Advanced — re-snapshot immediately; more may have arrived
+                    // while we were fsyncing (group commit naturally batches them).
                     continue;
                 }
                 Ok(None) => {
@@ -1586,12 +1578,6 @@ impl Shard {
     /// [`CommitterHandle`] for clean shutdown. The thread holds an `Arc<Shard>`
     /// clone so it stays alive until stopped + joined.
     pub fn spawn_committer(self: &Arc<Self>) -> CommitterHandle {
-        self.spawn_committer_with_delay(std::time::Duration::ZERO)
-    }
-
-    /// Collect arrivals once before each dirty-prefix fsync. Zero preserves
-    /// native immediate group commit; this is not a delayed durability promise.
-    pub fn spawn_committer_with_delay(self: &Arc<Self>, coalesce: std::time::Duration) -> CommitterHandle {
         let me = Arc::clone(self);
         let join = std::thread::Builder::new()
             .name("wal-committer".to_string())
@@ -1607,7 +1593,7 @@ impl Shard {
                 // (stop-signal shutdown drain) is NOT a failure.
                 let dir = me.dir.clone();
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    me.run_committer(coalesce)
+                    me.run_committer()
                 }));
                 if r.is_err() {
                     eprintln!(
@@ -2263,49 +2249,6 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    proptest::proptest! {
-        #[test]
-        fn coalesced_lone_and_shutdown_prefixes(
-            payloads in proptest::collection::vec(
-                proptest::collection::vec(proptest::prelude::any::<u8>(), 500..900), 4..12),
-        ) {
-            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-            runtime.block_on(async {
-                let dir = tempfile::tempdir().unwrap();
-                let sh = Shard::open_with_segment_size(dir.path().into(), 1024).unwrap();
-                let committer = sh.spawn_committer_with_delay(std::time::Duration::from_micros(100));
-                let first = sh.reserve_and_stage_indexed(RecordKind::Append, 23, 0, &payloads[0]).unwrap();
-                // No second arrival can trigger progress for this first waiter.
-                tokio::time::timeout(std::time::Duration::from_secs(5), sh.wait_durable(first.lsn))
-                    .await.expect("a lone record must not wait for another arrival");
-                assert_eq!(sh.durable_lsn(), first.lsn);
-                let mut locations = vec![first];
-                for (ordinal, payload) in payloads.iter().enumerate().skip(1) {
-                    locations.push(sh.reserve_and_stage_indexed(
-                        RecordKind::Append, 23, ordinal as u64 * 37, payload).unwrap());
-                }
-                // Stop without awaiting the burst. It spans several real files;
-                // shutdown must cover every sealed segment as well as the tail.
-                committer.stop();
-                assert_eq!(sh.durable_lsn(), locations.last().unwrap().lsn);
-                assert!(locations.last().unwrap().segment > first.segment);
-                for (ordinal, (position, expected)) in locations.into_iter().zip(payloads).enumerate() {
-                    let raw = std::fs::read(seg_path(dir.path(), position.segment)).unwrap();
-                    match decode_at(&raw, position.offset as usize) {
-                        Decoded::Record { lsn, kind, stream_id, stream_offset, payload_off, len, .. } => {
-                            assert_eq!(lsn, position.lsn);
-                            assert_eq!(kind, RecordKind::Append);
-                            assert_eq!(stream_id, 23);
-                            assert_eq!(stream_offset, ordinal as u64 * 37);
-                            assert_eq!(&raw[payload_off..payload_off + len], expected.as_slice());
-                        }
-                        other => panic!("record {ordinal} did not decode: {other:?}"),
-                    }
-                }
-            });
-        }
     }
 
     /// CQ-1 invariant: `register_dirty` must happen-before `reserve_and_stage`.
