@@ -32,7 +32,7 @@ pub struct ProducerState {
     pub last_seq: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StreamConfig {
     pub content_type: String,
     pub ttl_seconds: Option<u64>,
@@ -273,6 +273,8 @@ pub struct StreamState {
     pub id: u64,
     pub path: String,
     pub config: StreamConfig,
+    #[cfg(feature = "replication")]
+    pub clock: Arc<crate::replication::clock::Clock>,
     pub is_json: bool,
     pub file_path: PathBuf,
     /// Logical offset where this stream's own file starts (fork point; 0 for roots).
@@ -445,11 +447,18 @@ impl StreamState {
 
     pub fn touch(&self) {
         let mut s = self.shared.write().unwrap();
-        s.last_access = SystemTime::now();
+        s.last_access = self.now();
+    }
+
+    pub fn now(&self) -> SystemTime {
+        #[cfg(feature = "replication")]
+        { self.clock.now() }
+        #[cfg(not(feature = "replication"))]
+        { SystemTime::now() }
     }
 
     pub fn is_expired(&self) -> bool {
-        let now = SystemTime::now();
+        let now = self.now();
         if let Some(exp) = self.config.expires_at {
             if now > exp {
                 return true;
@@ -477,6 +486,8 @@ pub struct Store {
     pub streams: DashMap<String, Arc<StreamState>>,
     pub data_dir: PathBuf,
     next_id: AtomicU64,
+    #[cfg(feature = "replication")]
+    pub clock: Arc<crate::replication::clock::Clock>,
     /// Hot/cold tiering config (Off by default → fully inert).
     pub tier_config: crate::tier::TierConfig,
     /// Remote object-storage backend, present only when tiering is enabled.
@@ -504,6 +515,13 @@ pub enum CreateResult {
 }
 
 impl Store {
+    /// The replicated command index supplies deterministic stream incarnation IDs.
+    /// Only the owning group's serialized apply worker may call this.
+    #[cfg(feature = "replication")]
+    pub fn set_create_id(&self, index: u64) {
+        self.next_id.store(index, Ordering::Relaxed);
+    }
+
     /// Build a Store with an explicit tiering configuration. When
     /// `tier.kind == Off` (the default) this is identical to `new`: no
     /// blobstore, no sealing, single contiguous file per stream.
@@ -638,6 +656,8 @@ impl Store {
             streams: DashMap::new(),
             data_dir,
             next_id: AtomicU64::new(seed & MAX_SAFE_INT),
+            #[cfg(feature = "replication")]
+            clock: Arc::new(crate::replication::clock::Clock::default()),
             tier_config,
             blobstore,
             wal: std::sync::OnceLock::new(),
@@ -876,6 +896,8 @@ impl Store {
         let state = Arc::new(StreamState {
             id: meta.id,
             path: path.to_string(),
+            #[cfg(feature = "replication")]
+            clock: self.clock.clone(),
             is_json: is_json_content_type(&meta.content_type),
             file_path: data_path.clone(),
             base_offset: meta.base_offset,
@@ -893,7 +915,11 @@ impl Store {
                 closed_by: meta.closed_by.clone(),
                 producers: meta.producers.clone(),
                 last_seq_header: meta.last_seq_header.clone(),
+                #[cfg(not(feature = "replication"))]
                 last_access: UNIX_EPOCH + Duration::from_secs(meta.last_access_unix),
+                #[cfg(feature = "replication")]
+                last_access: UNIX_EPOCH + Duration::from_millis(meta.last_access_millis
+                    .unwrap_or(meta.last_access_unix.saturating_mul(1000))),
                 ref_count: meta.ref_count,
                 soft_deleted: meta.soft_deleted,
             }),
@@ -919,9 +945,14 @@ impl Store {
             config: StreamConfig {
                 content_type: meta.content_type.clone(),
                 ttl_seconds: meta.ttl_seconds,
+                #[cfg(not(feature = "replication"))]
                 expires_at: meta
                     .expires_at_unix
                     .map(|s| UNIX_EPOCH + Duration::from_secs(s)),
+                #[cfg(feature = "replication")]
+                expires_at: meta.expires_at_millis
+                    .or_else(|| meta.expires_at_unix.map(|s| s.saturating_mul(1000)))
+                    .map(|ms| UNIX_EPOCH + Duration::from_millis(ms)),
                 expires_at_raw: meta.expires_at_raw.clone(),
                 create_closed: meta.create_closed,
                 forked_from: meta.forked_from.clone(),
@@ -977,6 +1008,14 @@ impl Store {
     /// DELETE undone by a crash resurrects the stream with all its data — use
     /// [`Store::delete_or_soft_delete_durable`] there.
     pub fn delete_or_soft_delete(&self, st: &Arc<StreamState>) {
+        #[cfg(feature = "replication")]
+        if self.clock.replicated() {
+            if let Err(error) = self.delete_impl(st, true) {
+                eprintln!("FATAL committed expiry materialization: {error}");
+                std::process::abort();
+            }
+            return;
+        }
         let _ = self.delete_impl(st, false);
     }
 
@@ -1036,6 +1075,16 @@ impl Store {
     /// Decrement the parent's fork refcount; cascade-collect soft-deleted parents
     /// whose last fork just went away.
     pub fn release_parent(&self, st: &Arc<StreamState>) {
+        #[cfg(feature = "replication")]
+        if self.clock.replicated() {
+            if let Some(parent) = &st.parent {
+                if let Err(error) = self.release_reference(parent) {
+                    eprintln!("FATAL committed fork collection: {error}");
+                    std::process::abort();
+                }
+            }
+            return;
+        }
         let mut cur = st.parent.clone();
         while let Some(parent) = cur {
             let gone = {
@@ -1061,6 +1110,29 @@ impl Store {
             });
             cur = parent.parent.clone();
         }
+    }
+
+    /// Replicated cross-group grants participate in the native reference graph.
+    /// Call only while the owning committed state-machine apply lock is held.
+    #[cfg(feature = "replication")]
+    pub fn retain_reference(&self, st: &Arc<StreamState>) -> std::io::Result<()> {
+        {
+            let mut shared = st.shared.write().unwrap();
+            shared.ref_count = shared.ref_count.checked_add(1)
+                .ok_or_else(|| std::io::Error::other("fork reference overflow"))?;
+        }
+        write_meta_sync(st, true)
+    }
+
+    #[cfg(feature = "replication")]
+    pub fn release_reference(&self, st: &Arc<StreamState>) -> std::io::Result<()> {
+        let collect = {
+            let mut shared = st.shared.write().unwrap();
+            shared.ref_count = shared.ref_count.checked_sub(1)
+                .ok_or_else(|| std::io::Error::other("fork reference underflow"))?;
+            shared.ref_count == 0 && shared.soft_deleted
+        };
+        if collect { self.delete_impl(st, true) } else { write_meta_sync(st, true) }
     }
 
     pub fn create(
@@ -1101,6 +1173,8 @@ impl Store {
         let state = Arc::new(StreamState {
             id,
             path: path.to_string(),
+            #[cfg(feature = "replication")]
+            clock: self.clock.clone(),
             is_json,
             file_path,
             base_offset,
@@ -1119,7 +1193,10 @@ impl Store {
                 closed_by: None,
                 producers: HashMap::new(),
                 last_seq_header: None,
+                #[cfg(not(feature = "replication"))]
                 last_access: SystemTime::now(),
+                #[cfg(feature = "replication")]
+                last_access: self.clock.now(),
                 ref_count: 0,
                 soft_deleted: false,
             }),
@@ -1326,6 +1403,12 @@ pub struct Meta {
     pub producers: HashMap<String, ProducerState>,
     pub last_seq_header: Option<String>,
     pub last_access_unix: u64,
+    #[cfg(feature = "replication")]
+    #[serde(default)]
+    pub last_access_millis: Option<u64>,
+    #[cfg(feature = "replication")]
+    #[serde(default)]
+    pub expires_at_millis: Option<u64>,
     pub ref_count: u32,
     pub soft_deleted: bool,
     /// Hot/cold tiering manifest. Empty for streams that never sealed (the
@@ -1420,6 +1503,10 @@ impl Meta {
             producers: s.producers.clone(),
             last_seq_header: s.last_seq_header.clone(),
             last_access_unix: unix_secs(s.last_access),
+            #[cfg(feature = "replication")]
+            last_access_millis: Some(crate::replication::clock::millis(s.last_access)),
+            #[cfg(feature = "replication")]
+            expires_at_millis: st.config.expires_at.map(crate::replication::clock::millis),
             ref_count: s.ref_count,
             soft_deleted: s.soft_deleted,
             // segments + sealed_offset MUST come from ONE lock acquisition: a
@@ -1498,6 +1585,12 @@ impl Store {
     /// the checkpoint owns the flush and the CAS failing here avoids a
     /// duplicate write.
     pub fn mark_meta_dirty(&self, st: &Arc<StreamState>) {
+        #[cfg(feature = "replication")]
+        if self.clock.replicated() {
+            // Consensus replay owns recovery; snapshots explicitly capture all
+            // live metadata. Do not retain deleted streams in a dormant sweep.
+            return;
+        }
         if st
             .meta_dirty
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)

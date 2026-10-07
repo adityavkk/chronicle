@@ -90,7 +90,10 @@ Mutations accept only `Stream-Durability: quorum-fsync` (the default), never
 silently downgrade unknown values. Successful writes return `Stream-Session`.
 Tokens fence the history, not a stream incarnation: a subsequent committed
 delete can legitimately return 404. Clients maintain a token per partition.
-No cross-group transaction or globally consistent snapshot is implied.
+There is no general cross-group transaction or globally consistent snapshot.
+Cross-group forks use the specific retained-prefix ownership protocol in
+`FORKS.md`; subscription creation uses per-group observation cuts in
+`SUBSCRIPTIONS.md`.
 
 For live reads the selected barrier governs the initial observation. Later SSE
 and long-poll delivery is committed-prefix streaming, NOT a new quorum round for
@@ -128,9 +131,12 @@ Cold-tier support is retained in the upstream source but **disabled in replicate
 mode** until object identities include cluster/group/incarnation/range/checksum,
 manifest publication crosses consensus, and reference-safe GC is implemented.
 Otherwise a follower or old leader could delete another replica's objects.
-Cross-group forks and local-clock TTL expiry are likewise rejected rather than
-silently diverging. These are explicit remaining feature gates, not claimed
-protocol conformance. No auth/TLS or Internet exposure is qualified here.
+TTL uses the committed clock in `TIMED-STATE.md`, never local-clock expiration.
+Cross-group forks and subscriptions retain durable control state in the same
+journal and snapshot as stream data. Experimental identity/snapshot format 4
+rejects data from earlier development formats; no migration is supplied.
+Physical WAL reclamation, obsolete-snapshot cleanup, cold-tier ownership and
+production auth/TLS remain gates. No Internet exposure is qualified here.
 
 ## Formal and empirical boundaries
 

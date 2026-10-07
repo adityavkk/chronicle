@@ -43,6 +43,19 @@ use super::segment::{seg_path, FileSegment, SegmentWriter, SEGMENT_BYTES};
 use super::telemetry::{ShardStats, StatsSnapshot};
 use crate::store::StreamState;
 
+#[cfg(feature = "replication")]
+#[path = "journal.rs"]
+mod journal;
+
+/// Location of one native WAL frame. No payload stays resident in this index.
+#[derive(Clone, Copy, Debug)]
+pub struct RecordLocation {
+    pub lsn: u64,
+    pub segment: u64,
+    pub offset: u64,
+    pub len: usize,
+}
+
 /// Mutable, lock-guarded shard state.
 ///
 /// **No-panic-under-lock invariant:** every critical section holding `inner`
@@ -612,6 +625,17 @@ impl Shard {
         stream_offset: u64,
         payload: &[u8],
     ) -> io::Result<u64> {
+        self.reserve_and_stage_indexed(kind, stream_id, stream_offset, payload)
+            .map(|location| location.lsn)
+    }
+
+    pub fn reserve_and_stage_indexed(
+        &self,
+        kind: RecordKind,
+        stream_id: u64,
+        stream_offset: u64,
+        payload: &[u8],
+    ) -> io::Result<RecordLocation> {
         // Test-only fault injection: simulate a stage failure. Fires BEFORE the
         // lsn reservation: production write failures retry-then-abort (see
         // below), so a reserved-but-unwritten gap is unreachable in production —
@@ -648,7 +672,7 @@ impl Shard {
         }
 
         // --- Phase 1: (maybe roll, then) reserve under the short lock. ---
-        let (lsn, off, seg) = {
+        let (lsn, off, seg, segment) = {
             // Time the contended `inner` acquisition (--wal-stats only). This is
             // the headline per-shard write-serialization signal: every stream on
             // this shard funnels through this one lock.
@@ -718,7 +742,7 @@ impl Shard {
             // Clone the segment handle so the write runs off-lock; concurrent
             // appenders write disjoint, just-reserved ranges with no lock held.
             let seg = Arc::clone(&g.active);
-            (lsn, off, seg)
+            (lsn, off, seg, g.seg_start_lsn)
         };
 
         // --- Phase 2: encode and write the framed record inline (off-lock). ---
@@ -766,7 +790,7 @@ impl Shard {
         // signal mutex (after `mark_written` above), so this can never be lost
         // against the committer's park (see `CommitSignal` docs).
         self.commit_signal.signal_work();
-        Ok(lsn)
+        Ok(RecordLocation { lsn, segment, offset: off, len: total as usize })
     }
 
     /// Register a touched stream's `Arc<StreamState>` into this shard's dirty set

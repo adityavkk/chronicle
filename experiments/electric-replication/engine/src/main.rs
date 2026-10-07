@@ -10,6 +10,8 @@ mod store;
 mod telemetry;
 mod tier;
 mod wal;
+#[cfg(feature = "replication")]
+mod replication;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -113,6 +115,11 @@ fn raise_nofile_limit() {
 fn main() {
     #[cfg(unix)]
     raise_nofile_limit();
+    #[cfg(feature = "replication")]
+    if std::env::args().nth(1).as_deref() == Some("--cluster-config") {
+        replication::run();
+        return;
+    }
     let mut port: u16 = 4437; // protocol default (PROTOCOL.md §13.1)
     let mut host: std::net::IpAddr = [127, 0, 0, 1].into();
     let mut data_dir = std::env::temp_dir().join("durable-streams-rust");

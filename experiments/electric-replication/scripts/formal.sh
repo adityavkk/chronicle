@@ -20,6 +20,31 @@ for mutation in EarlyFlush EarlyPublish LocalAck; do
   test "$result" -ne 0
   grep -q 'Invariant Safe is violated' "$here/evidence/formal/$mutation.txt"
 done
+for mode in subscriptions subscriptions-live timed forks forks-live; do
+  model=Subscriptions
+  test "$mode" != timed || model=TimedApply
+  [[ "$mode" != forks* ]] || model=Forks
+  java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
+  grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
+done
+for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant; do
+  model=Subscriptions
+  config=subscriptions
+  invariant=Safe
+  if test "$mutation" = LocalClock; then
+    model=TimedApply; config=timed; invariant=SamePrefix
+  fi
+  case "$mutation" in
+    PartialPublish|EarlyRelease|FalseAbsence|ForgetGrant) model=Forks; config=forks ;;
+  esac
+  sed "s/$mutation = FALSE/$mutation = TRUE/" "$config.cfg" > "$tools/$mutation.cfg"
+  set +e
+  java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$tools/$mutation.cfg" "$model.tla" > "$here/evidence/formal/$mutation.txt" 2>&1
+  result=$?
+  set -e
+  test "$result" -ne 0
+  grep -q "Invariant $invariant is violated" "$here/evidence/formal/$mutation.txt"
+done
 "$HOME/.elan/bin/lean" -DwarningAsError=true Contracts.lean > "$here/evidence/formal/lean.txt" 2>&1
 ! grep -E 'sorryAx|warning:|error:' "$here/evidence/formal/lean.txt"
-printf 'TLC safety/liveness and all 3 negative mutations; Lean: PASS\n'
+printf 'TLC publication/timing/subscriptions/forks safety, stable-period liveness, 11 negative mutations; Lean: PASS\n'

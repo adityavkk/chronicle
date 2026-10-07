@@ -54,8 +54,49 @@ tracing-opentelemetry = { version = "0.33", optional = true }
 # `--tier` is passed); only the S3 BlobStore adapter is behind this feature.
 object_store = { version = "0.11", optional = true, features = ["aws"] }
 
+[dependencies.openraft]
+version = "=0.9.25"
+features = ["serde", "storage-v2"]
+optional = true
+
+[dependencies.reqwest]
+version = "0.12"
+default-features = false
+features = ["json", "rustls-tls"]
+optional = true
+
+[dependencies.bincode]
+version = "=1.3.3"
+optional = true
+
+[dependencies.sha2]
+version = "0.10"
+optional = true
+
+[dependencies.ed25519-dalek]
+version = "2"
+optional = true
+
+[dependencies.hmac]
+version = "0.12"
+optional = true
+
+[dependencies.base64]
+version = "0.22"
+optional = true
+
+[dependencies.getrandom]
+version = "0.3"
+optional = true
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
+
 [features]
 default = []
+replication = ["dep:openraft", "dep:reqwest", "dep:bincode", "dep:sha2",
+    "dep:ed25519-dalek", "dep:hmac", "dep:base64", "dep:getrandom"]
 # Enable OTLP span + metric export over gRPC (tonic). Endpoint/protocol/timeout
 # and sampling are configured entirely via the standard OTEL_* env vars.
 telemetry = [
@@ -77,4 +118,3 @@ codegen-units = 1
 # process and killing every other in-flight request. For a network-facing
 # server the per-connection isolation is worth more than abort's small
 # binary-size / codegen win.
-

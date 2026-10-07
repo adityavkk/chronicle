@@ -364,7 +364,22 @@ fn parse_rfc3339(s: &str) -> Result<SystemTime, ()> {
     Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(secs as u64))
 }
 
+pub(crate) struct PreparedCreate {
+    pub config: StreamConfig,
+    pub parent: Option<Arc<StreamState>>,
+    pub base_offset: u64,
+    pub wire: Option<Bytes>,
+    pub host: Option<String>,
+}
+
 async fn handle_create(store: Arc<Store>, req: Req, path: String) -> Resp {
+    match prepare_create(&store, &req).await {
+        Ok(prepared) => create_prepared(store, path, prepared).await,
+        Err(response) => response,
+    }
+}
+
+pub(crate) async fn prepare_create(store: &Arc<Store>, req: &Req) -> Result<PreparedCreate, Resp> {
     // Read Content-Type ONCE: `content_type_hdr` carries presence (used for fork
     // inheritance / match below); `content_type` is the resolved value with the
     // octet-stream default.
@@ -376,19 +391,19 @@ async fn handle_create(store: Arc<Store>, req: Req, path: String) -> Resp {
     let ttl_raw = header_str(&req, H_TTL).map(|s| s.to_string());
     let exp_raw = header_str(&req, H_EXPIRES_AT).map(|s| s.to_string());
     if ttl_raw.is_some() && exp_raw.is_some() {
-        return text_response(400, "Stream-TTL conflicts with Stream-Expires-At");
+        return Err(text_response(400, "Stream-TTL conflicts with Stream-Expires-At"));
     }
     let ttl_seconds = match &ttl_raw {
         Some(v) => match parse_ttl(v) {
             Ok(t) => Some(t),
-            Err(_) => return text_response(400, "invalid Stream-TTL"),
+            Err(_) => return Err(text_response(400, "invalid Stream-TTL")),
         },
         None => None,
     };
     let expires_at = match &exp_raw {
         Some(v) => match parse_rfc3339(v) {
             Ok(t) => Some(t),
-            Err(_) => return text_response(400, "invalid Stream-Expires-At"),
+            Err(_) => return Err(text_response(400, "invalid Stream-Expires-At")),
         },
         None => None,
     };
@@ -400,33 +415,33 @@ async fn handle_create(store: Arc<Store>, req: Req, path: String) -> Resp {
     let fork_offset_raw = header_str(&req, H_FORK_OFFSET).map(|s| s.to_string());
     let sub_offset_raw = header_str(&req, H_FORK_SUB_OFFSET).map(|s| s.to_string());
     if forked_from.is_none() && (fork_offset_raw.is_some() || sub_offset_raw.is_some()) {
-        return text_response(
+        return Err(text_response(
             400,
             "fork headers require Stream-Forked-From",
-        );
+        ));
     }
     let sub_offset: Option<u64> = match &sub_offset_raw {
         None => None,
         Some(v) => {
             if v.is_empty() || !v.bytes().all(|c| c.is_ascii_digit()) {
-                return text_response(400, "malformed Stream-Fork-Sub-Offset");
+                return Err(text_response(400, "malformed Stream-Fork-Sub-Offset"));
             }
             match v.parse() {
                 Ok(n) => Some(n),
                 Err(_) => {
-                    return text_response(
+                    return Err(text_response(
                         400,
                         "malformed Stream-Fork-Sub-Offset",
-                    )
+                    ))
                 }
             }
         }
     };
     if sub_offset.unwrap_or(0) > 0 && fork_offset_raw.is_none() {
-        return text_response(
+        return Err(text_response(
             400,
             "Stream-Fork-Sub-Offset requires Stream-Fork-Offset",
-        );
+        ));
     }
 
     // Resolve the fork source and the fork point (logical byte offset).
@@ -439,25 +454,25 @@ async fn handle_create(store: Arc<Store>, req: Req, path: String) -> Resp {
     if let Some(src_path) = &forked_from {
         let src = match store.get(src_path) {
             Some(s) => s,
-            None => return text_response(404, "fork source not found"),
+            None => return Err(text_response(404, "fork source not found")),
         };
         if src.shared.read().unwrap().soft_deleted {
-            return text_response(409, "fork source is deleted");
+            return Err(text_response(409, "fork source is deleted"));
         }
         match &content_type_hdr {
             None => content_type = src.config.content_type.clone(),
             Some(ct) => {
                 if media_type(ct) != media_type(&src.config.content_type) {
-                    return text_response(409, "fork content-type mismatch");
+                    return Err(text_response(409, "fork content-type mismatch"));
                 }
             }
         }
         let src_tail = src.tail().bytes;
         if sub_offset_raw.is_some() && src_tail == 0 {
-            return text_response(
+            return Err(text_response(
                 400,
                 "sub-offset on empty source stream",
-            );
+            ));
         }
         // Fork-Offset omitted → divergence at the source's current tail.
         let anchor = match parse_offset(fork_offset_raw.as_deref()) {
@@ -466,14 +481,14 @@ async fn handle_create(store: Arc<Store>, req: Req, path: String) -> Resp {
             Ok(ParsedOffset::Now) => src_tail,
             Ok(ParsedOffset::At(b)) => {
                 if b > src_tail {
-                    return text_response(
+                    return Err(text_response(
                         400,
                         "fork offset beyond stream length",
-                    );
+                    ));
                 }
                 b
             }
-            Err(_) => return text_response(400, "malformed fork offset"),
+            Err(_) => return Err(text_response(400, "malformed fork offset")),
         };
         let fork_point = match sub_offset.unwrap_or(0) {
             0 => anchor,
@@ -486,7 +501,7 @@ async fn handle_create(store: Arc<Store>, req: Req, path: String) -> Resp {
                 let data = match read_range_bytes(&src, anchor, src_tail).await {
                     Ok(d) => d,
                     // A short/cold read must not be miscounted as a value boundary.
-                    Err(_) => return text_response(503, "fork source read failed"),
+                    Err(_) => return Err(text_response(503, "fork source read failed")),
                 };
                 let mut remaining = sub;
                 let mut adv = 0u64;
@@ -500,19 +515,19 @@ async fn handle_create(store: Arc<Store>, req: Req, path: String) -> Resp {
                     }
                 }
                 if remaining > 0 {
-                    return text_response(
+                    return Err(text_response(
                         400,
                         "sub-offset overshoots message count",
-                    );
+                    ));
                 }
                 anchor + adv
             }
             sub => {
                 if anchor + sub > src_tail {
-                    return text_response(
+                    return Err(text_response(
                         400,
                         "sub-offset overshoots message length",
-                    );
+                    ));
                 }
                 anchor + sub
             }
@@ -547,10 +562,15 @@ async fn handle_create(store: Arc<Store>, req: Req, path: String) -> Resp {
     } else {
         match encode_wire(&body, is_json, true) {
             Ok(w) => Some(w),
-            Err(msg) => return text_response(400, msg),
+            Err(msg) => return Err(text_response(400, msg)),
         }
     };
 
+    Ok(PreparedCreate { config, parent, base_offset, wire, host })
+}
+
+pub(crate) async fn create_prepared(store: Arc<Store>, path: String, prepared: PreparedCreate) -> Resp {
+    let PreparedCreate { config, parent, base_offset, wire, host } = prepared;
     // Run create on the blocking pool: it opens the data file and does a durable
     // (fsync) `.meta` write, which would otherwise block an async worker for the
     // whole fsync. Under concurrent stream creation that throttles creates to
@@ -638,7 +658,7 @@ async fn handle_create(store: Arc<Store>, req: Req, path: String) -> Resp {
 
 /// Convert a request body into the contiguous wire-byte representation.
 /// JSON: each message is the raw value followed by a `,`; arrays flatten one level.
-fn encode_wire(body: &Bytes, is_json: bool, allow_empty_array: bool) -> Result<Bytes, &'static str> {
+pub(crate) fn encode_wire(body: &Bytes, is_json: bool, allow_empty_array: bool) -> Result<Bytes, &'static str> {
     if !is_json {
         return Ok(body.clone());
     }
@@ -746,7 +766,7 @@ async fn wait_durable_lsn(store: &Arc<Store>, st: &Arc<StreamState>, lsn: u64) {
 /// ordering — PROTOCOL.md §4.1). Adds no fsync: the per-stream file stays
 /// async/WAL-recoverable; the only durability barrier is the WAL `fdatasync`
 /// awaited in `wait_durable_lsn`.
-fn write_wire(st: &StreamState, ap: &mut Appender, wire: &Bytes) -> std::io::Result<u64> {
+pub(crate) fn write_wire(st: &StreamState, ap: &mut Appender, wire: &Bytes) -> std::io::Result<u64> {
     use std::io::Write;
     if let Err(e) = (&*ap.file).write_all(wire) {
         // A partial write (ENOSPC mid-slice) leaves garbage bytes in the file
@@ -763,7 +783,7 @@ fn write_wire(st: &StreamState, ap: &mut Appender, wire: &Bytes) -> std::io::Res
         let mut s = st.shared.write().unwrap();
         let tail = s.file_base + ap.written;
         s.tail = tail;
-        s.last_access = SystemTime::now();
+        s.last_access = st.now();
         tail
     };
     Ok(tail)
@@ -778,7 +798,7 @@ fn write_wire(st: &StreamState, ap: &mut Appender, wire: &Bytes) -> std::io::Res
 /// concurrent appenders (whose group-commit fsyncs may resolve out of order)
 /// safe: a later appender publishing the higher frontier first is fine (all
 /// lower bytes are durable too), and the earlier appender then no-ops.
-fn publish_durable_tail(st: &StreamState, tail: u64, wire: &Bytes) {
+pub(crate) fn publish_durable_tail(st: &StreamState, tail: u64, wire: &Bytes) {
     let closed;
     {
         let mut s = st.shared.write().unwrap();
@@ -1536,7 +1556,10 @@ async fn handle_read(store: Arc<Store>, req: Req, path: String) -> Resp {
     }
     // Only TTL is reset by a read, and touch() takes the write lock — skip it for
     // non-TTL streams to keep their read path lock-free.
-    if st.config.ttl_seconds.is_some() {
+    let renew = st.config.ttl_seconds.is_some();
+    #[cfg(feature = "replication")]
+    let renew = renew && !store.clock.replicated(); // replicated TOUCH owns renewal
+    if renew {
         st.touch();
         store.mark_meta_dirty(&st); // sliding TTL must survive restarts
     }
@@ -2045,7 +2068,7 @@ fn handle_sse(st: Arc<StreamState>, offset: ParsedOffset, client_cursor: Option<
 /// Read a logical byte range fully into memory (SSE batches are small).
 /// Returns `Err` if the range could not be fully materialized (a short local
 /// read or a cold-storage error/truncation) so callers never advance past a gap.
-async fn read_range_bytes(
+pub(crate) async fn read_range_bytes(
     st: &Arc<StreamState>,
     start: u64,
     end: u64,
@@ -2554,4 +2577,3 @@ mod memory_mode_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-

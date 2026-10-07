@@ -51,6 +51,9 @@ pub enum RecordKind {
     StreamCreate = 2,
     StreamClose = 3,
     StreamDelete = 4,
+    /// Experimental consensus journal, never fed to single-node recovery.
+    #[cfg(feature = "replication")]
+    Raft = 128,
 }
 
 impl RecordKind {
@@ -63,6 +66,8 @@ impl RecordKind {
             2 => Some(RecordKind::StreamCreate),
             3 => Some(RecordKind::StreamClose),
             4 => Some(RecordKind::StreamDelete),
+            #[cfg(feature = "replication")]
+            128 => Some(RecordKind::Raft),
             _ => None,
         }
     }

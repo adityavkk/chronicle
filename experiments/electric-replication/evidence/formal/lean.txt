@@ -3,3 +3,14 @@
 'ElectricReplication.session_monotone' depends on axioms: [propext, Quot.sound]
 'ElectricReplication.majority_overlap_slots' depends on axioms: [propext, Quot.sound]
 'ElectricReplication.restore_bound' does not depend on any axioms
+'ElectricReplication.recreated_fences' does not depend on any axioms
+'ElectricReplication.generation_fences' does not depend on any axioms
+'ElectricReplication.expired_fences' does not depend on any axioms
+'ElectricReplication.snapshot_ack_keeps_suffix' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.grant_irrevocable' depends on axioms: [propext]
+'ElectricReplication.abort_fences_delayed_grant' depends on axioms: [propext]
+'ElectricReplication.release_fences_delayed_grant' depends on axioms: [propext]
+'ElectricReplication.import_bounds' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ElectricReplication.import_progress' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.publication_exact_prefix' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.descendant_prevents_release' depends on axioms: [propext, Quot.sound]

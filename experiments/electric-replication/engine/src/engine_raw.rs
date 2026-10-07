@@ -230,6 +230,13 @@ async fn conn_loop(
             headers: head.headers,
             body,
         };
+        #[cfg(feature = "replication")]
+        let resp = if let Some(cluster) = crate::replication::CLUSTER.get() {
+            cluster.handle(req).await
+        } else {
+            handlers::handle(store.clone(), req).await
+        };
+        #[cfg(not(feature = "replication"))]
         let resp = handlers::handle(store.clone(), req).await;
         // SSE: hand the connection off to a DETACHED, minimal streaming task and
         // return. An SSE subscriber parks for up to SSE_MAX_DURATION; driving it

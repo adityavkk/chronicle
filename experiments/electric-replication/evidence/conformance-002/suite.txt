@@ -1,0 +1,391 @@
+
+ RUN  v4.1.11 /home/user/workspace/repo
+
+ ❯ experiments/electric-replication/conformance.test.ts (332 tests | 6 failed) 30013ms
+     ✓ should create a stream 27ms
+     ✓ should allow idempotent create with same config 19ms
+     ✓ should reject create with different config (409) 7ms
+     ✓ should delete a stream 9ms
+     ✓ should properly isolate recreated stream after delete 22ms
+     ✓ should append string data 12ms
+     ✓ should append multiple chunks 11ms
+     ✓ should enforce sequence ordering with seq 10ms
+     ✓ should read empty stream 8ms
+     ✓ should read stream with data 7ms
+     ✓ should read from offset 11ms
+     ✓ should wait for new data with long-poll  515ms
+     ✓ should return immediately if data already exists 19ms
+     ✓ should return correct headers on PUT 4ms
+     ✓ should return 200 on idempotent PUT with same config 6ms
+     ✓ should return 409 on PUT with different config 6ms
+     ✓ should return correct headers on POST 7ms
+     ✓ should return 404 on POST to non-existent stream 3ms
+     ✓ should return 409 on content-type mismatch 6ms
+     ✓ should return correct headers on GET 13ms
+     ✓ should return empty body with up-to-date for empty stream 4ms
+     ✓ should read from offset 25ms
+     ✓ should return 404 on DELETE non-existent stream 17ms
+     ✓ should return 204 on successful DELETE 7ms
+     ✓ should enforce sequence ordering 10ms
+     ✓ should enforce lexicographic seq ordering ("2" then "10" rejects) 7ms
+     ✓ should allow lexicographic seq ordering ("09" then "10" succeeds) 8ms
+     ✓ should reject duplicate seq values 11ms
+     ✓ should include X-Content-Type-Options: nosniff on GET responses 10ms
+     ✓ should include X-Content-Type-Options: nosniff on PUT responses 4ms
+     ✓ should include X-Content-Type-Options: nosniff on POST responses 7ms
+     ✓ should include X-Content-Type-Options: nosniff on HEAD responses 14ms
+     ✓ should include Cross-Origin-Resource-Policy header on GET responses 6ms
+     ✓ should include Cache-Control: no-store on HEAD responses 6ms
+     ✓ should include X-Content-Type-Options: nosniff on SSE responses 13ms
+     ✓ should include X-Content-Type-Options: nosniff on long-poll responses  539ms
+     ✓ should include security headers on error responses 2ms
+     ✓ should reject both TTL and Expires-At (400) 2ms
+     ✓ should reject invalid TTL (non-integer) 2ms
+     ✓ should reject negative TTL 3ms
+     ✓ should accept valid TTL 3ms
+     ✓ should accept valid Expires-At 4ms
+     ✓ should treat content-type case-insensitively 5ms
+     ✓ should allow idempotent create with different case content-type 5ms
+     ✓ should accept headers with different casing 6ms
+     ✓ should enforce content-type match on append 6ms
+     ✓ should allow append with matching content-type 5ms
+     ✓ should return stream content-type on GET 5ms
+     ✓ should return metadata without body 5ms
+     ✓ should return 404 for non-existent stream 1ms
+     ✓ should return tail offset 9ms
+     ✓ should accept -1 as sentinel for stream beginning 14ms
+     ✓ should return same data for offset=-1 and no offset 6ms
+     ✓ should accept offset=now as sentinel for current tail position 5ms
+     ✓ should return correct tail offset for offset=now 6ms
+     ✓ should be able to resume from offset=now result 7ms
+     ✓ should work with offset=now on empty stream 6ms
+     ✓ should return empty JSON array for offset=now on JSON streams 4ms
+     ✓ should return empty body for offset=now on non-JSON streams 16ms
+     ✓ should support offset=now with long-poll mode (waits for data)  1007ms
+     ✓ should receive data with offset=now long-poll when appended 59ms
+     ✓ should support offset=now with SSE mode 7ms
+     ✓ should return 404 for offset=now on non-existent stream 1ms
+     ✓ should return 404 for offset=now with long-poll on non-existent stream 2ms
+     ✓ should return 404 for offset=now with SSE on non-existent stream 1ms
+     ✓ should support offset=now with long-poll on empty stream  1010ms
+     ✓ should support offset=now with SSE on empty stream 12ms
+     ✓ should reject malformed offset (contains comma) 5ms
+     ✓ should reject offset with spaces 4ms
+     ✓ should support resumable reads (no duplicate data) 10ms
+     ✓ should return empty response when reading from tail offset 7ms
+     ✓ should reject empty POST body with 400 6ms
+     ✓ should handle PUT with initial body correctly 5ms
+     ✓ should preserve data immutability by position 9ms
+     ✓ should generate unique, monotonically increasing offsets 25ms
+     ✓ should reject empty offset parameter 6ms
+     ✓ should reject multiple offset parameters 5ms
+     ✓ should enforce case-sensitive seq ordering 7ms
+     ✓ should handle binary data with integrity 5ms
+     ✓ should return Location header on 201 3ms
+     ✓ should reject missing Content-Type on POST 5ms
+     ✓ should accept PUT without Content-Type (use default) 4ms
+     ✓ should ignore unknown query parameters 6ms
+     ✓ should require offset parameter for long-poll 4ms
+     ✓ should generate Stream-Cursor header on long-poll responses 4ms
+     ✓ should return immediately with Stream-Up-To-Date when data exists at offset 4ms
+     ✓ should echo cursor and handle collision with jitter 5ms
+     ✓ should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout  1007ms
+     ✓ should reject TTL with leading zeros 3ms
+     ✓ should reject TTL with plus sign 2ms
+     ✓ should reject TTL with float value 2ms
+     ✓ should reject TTL with scientific notation 2ms
+     ✓ should reject invalid Expires-At timestamp 2ms
+     ✓ should accept Expires-At with Z timezone 3ms
+     ✓ should accept Expires-At with timezone offset 3ms
+     ✓ should handle idempotent PUT with same TTL 4ms
+     ✓ should reject idempotent PUT with different TTL 5ms
+     ✓ should return TTL metadata if configured 5ms
+     ✓ should return Expires-At metadata if configured 6ms
+     ✓ should return 404 on HEAD after TTL expires  1041ms
+     ✓ should return 404 on GET after TTL expires (idle)  1044ms
+     ✓ should return 404 on POST append after TTL expires (idle)  1043ms
+     ✓ should return 404 on HEAD after Expires-At passes  3024ms
+     ✓ should return 404 on GET after Expires-At passes  3023ms
+     ✓ should return 404 on POST append after Expires-At passes  3017ms
+     ✓ should allow recreating stream after TTL expires  1026ms
+     ✓ should extend TTL on write (sliding window)  3016ms
+     ✓ should extend TTL on read (sliding window)  3046ms
+     ✓ should NOT extend TTL on HEAD  2018ms
+     ✓ should NOT extend Expires-At on read or write  4016ms
+     ✓ should generate ETag on GET responses 5ms
+     ✓ should return 304 Not Modified for matching If-None-Match 6ms
+     ✓ should return 200 for non-matching If-None-Match 4ms
+     ✓ should return new ETag after data changes 6ms
+     ✓ should handle chunk-size pagination correctly  784ms
+     ✓ should handle large payload appropriately 40ms
+     ✓ should immediately read message after append 7ms
+     ✓ should immediately read multiple appends 16ms
+     ✓ should serve offset-based reads immediately after append 10ms
+     ✓ should return text/event-stream content-type for SSE requests 6ms
+     ✓ should accept live=sse query parameter for application/json 5ms
+     ✓ should require offset parameter for SSE mode 4ms
+     ✓ should stream data events via SSE 6ms
+     ✓ should send control events with offset 5ms
+     ✓ should generate streamCursor in SSE control events 5ms
+     ✓ should handle cursor collision with jitter in SSE mode 6ms
+     ✓ should wrap JSON data in arrays for SSE and produce valid JSON 6ms
+     ✓ should handle SSE for empty stream with correct offset 6ms
+     ✓ should send upToDate flag in SSE control events when caught up 5ms
+     ✓ should have correct SSE headers (no Content-Length, proper Cache-Control) 4ms
+     ✓ should handle newlines in text/plain payloads 5ms
+     ✓ should prevent CRLF injection in payloads - embedded event boundaries become literal data 4ms
+     ✓ should prevent CRLF injection - LF-only attack vectors 5ms
+     ✓ should prevent CRLF injection - carriage return only attack vectors 6ms
+     ✓ should handle JSON payloads with embedded newlines safely 5ms
+     ✓ should generate unique, monotonically increasing offsets in SSE mode 34ms
+     ✓ should support reconnection with last known offset 18ms
+     ✓ should auto-detect binary streams and return base64 encoded data in SSE mode 6ms
+     ✓ should include Stream-SSE-Data-Encoding header for binary streams 7ms
+     ✓ should NOT include Stream-SSE-Data-Encoding header for text/plain streams 8ms
+     ✓ should NOT include Stream-SSE-Data-Encoding header for application/json streams 5ms
+     ✓ should base64 encode data events only, control events remain JSON 10ms
+     ✓ should handle empty binary payload with auto-detected base64 encoding 7ms
+     ✓ should handle large binary payload with auto-detected base64 encoding 18ms
+     ✓ should handle binary data with special bytes using auto-detected base64 encoding 10ms
+     ✓ should auto-detect base64 encoding for application/x-protobuf streams 6ms
+     ✓ should auto-detect base64 encoding for image/png streams 5ms
+     ✓ should handle offset=now with auto-detected base64 encoding for binary streams 6ms
+     ✓ should allow PUT with empty array body (creates empty stream) 4ms
+     ✓ should reject POST with empty array body 6ms
+     ✓ should handle content-type with charset parameter 7ms
+     ✓ should wrap single JSON value in array 7ms
+     ✓ should store arrays as single messages 7ms
+     ✓ should concatenate multiple appends into single array 9ms
+     ✓ should handle mixed single values and arrays 12ms
+     ✓ should reject invalid JSON with 400 4ms
+     ✓ should handle various JSON value types 21ms
+     ✓ should preserve JSON structure and nesting 5ms
+     ✓ should work with client json() iterator 13ms
+     ✓ should reject empty JSON arrays with 400 5ms
+     ✓ should store nested arrays as single messages 7ms
+     ✓ should store arrays as values when double-wrapped 7ms
+     ✓ should store primitive arrays as single messages 7ms
+     ✓ should handle mixed batching - single values, arrays, and nested arrays 10ms
+       ✓ concurrent readers see consistent data during writes  824ms
+       ✓ single byte values cover full range (0-255) with concurrent readers during write  467ms
+       ✓ random operation sequences maintain stream invariants 234ms
+       ✓ offsets are always monotonically increasing  364ms
+       ✓ read-your-writes: data is immediately visible after append 143ms
+       ✓ data at offset never changes after additional appends 207ms
+       ✓ should reject offsets with invalid characters 118ms
+       ✓ lexicographically ordered seq values are accepted 254ms
+       ✓ out-of-order seq values are rejected 158ms
+       ✓ concurrent writers with sequence numbers - server handles gracefully 7ms
+       ✓ concurrent writers racing with incrementing seq values 68ms
+       ✓ concurrent appends without seq - all data is persisted 9ms
+       ✓ mixed readers and writers - readers see consistent state 15ms
+       ✓ replay produces identical content hash  326ms
+       ✓ content hash changes with each append 12ms
+       ✓ empty stream has consistent hash 6ms
+       ✓ deterministic ordering - same data in same order produces same hash 182ms
+     ✓ should accept first append with producer headers (epoch=0, seq=0) 4ms
+     ✓ should accept sequential producer sequences 18ms
+     ✓ should return 204 for duplicate sequence (idempotent success) 6ms
+     ✓ should accept epoch upgrade (new epoch starts at seq=0) 6ms
+     ✓ should reject stale epoch with 403 (zombie fencing) 5ms
+     ✓ should reject sequence gap with 409 5ms
+     ✓ should reject epoch increase with seq != 0 6ms
+     ✓ should require all producer headers together 6ms
+     ✓ should reject invalid integer formats in producer headers 10ms
+     ✓ multiple producers should have independent state 8ms
+     ✓ duplicate of seq=0 should not corrupt state 7ms
+     ✓ duplicate response should return highest accepted seq, not request seq 9ms
+     ✓ split-brain fencing scenario 8ms
+     ✓ epoch rollback should be rejected 6ms
+     ✓ producer headers work with Stream-Seq header 7ms
+     ✓ producer duplicate should return 204 even with Stream-Seq header 10ms
+     ✓ should store and read back data correctly 5ms
+     ✓ should preserve order of sequential producer writes 13ms
+     ✓ duplicate should not corrupt or duplicate data 8ms
+     ✓ multiple producers should interleave correctly 11ms
+     ✓ should store and read back JSON object correctly 5ms
+     ✓ should preserve order of JSON appends with producer 11ms
+     ✓ JSON duplicate should not corrupt data 8ms
+     ✓ should reject invalid JSON with producer headers 5ms
+     ✓ should reject empty JSON array with producer headers 4ms
+     ✓ should return 404 for non-existent stream 1ms
+     ✓ should return 409 for content-type mismatch 4ms
+     ✓ should return 400 for empty body 4ms
+     ✓ should reject empty Producer-Id 4ms
+       ✓ create-closed-stream: PUT with Stream-Closed: true creates closed stream 2ms
+       ✓ create-closed-stream-with-body: PUT with body + Stream-Closed: true 3ms
+       ✓ create-closed-returns-header: Response includes Stream-Closed: true 3ms
+       ✓ close-stream-empty-post: POST with Stream-Closed: true, empty body closes stream 7ms
+       ✓ close-with-final-append: POST with body + Stream-Closed: true 11ms
+       ✓ close-returns-offset-and-header: Response includes Stream-Next-Offset and Stream-Closed: true 7ms
+       ✓ close-idempotent: Closing already-closed stream (empty body) returns 204 11ms
+       ✓ close-only-ignores-content-type: Close-only with mismatched Content-Type still succeeds 5ms
+       ✓ append-to-closed-stream-409: Append to closed stream returns 409 with Stream-Closed: true header 7ms
+       ✓ append-and-close-to-closed-stream-409: POST with body + Stream-Closed: true to already-closed stream returns 409 8ms
+       ✓ head-closed-stream: HEAD returns Stream-Closed: true header 7ms
+       ✓ head-open-stream-no-closed-header: HEAD on open stream does NOT have Stream-Closed header 5ms
+       ✓ read-closed-stream-at-tail: Returns Stream-Closed: true at tail of closed stream 9ms
+       ✓ read-closed-stream-partial-no-closed: Partial read of closed stream does NOT include Stream-Closed 10ms
+       ✓ read-closed-stream-empty-body-eof: At tail of closed stream: 200 OK, empty body, Stream-Closed: true 8ms
+       ✓ longpoll-closed-stream-immediate: No wait when closed stream at tail, returns immediately 6ms
+       ✓ longpoll-closed-returns-204-with-header: Returns 204 with Stream-Closed: true 7ms
+       ✓ sse-closed-stream-control-event: Final control event has streamClosed: true 7ms
+       ✓ sse-closed-stream-no-cursor: streamCursor omitted when streamClosed is true 6ms
+       ✓ sse-closed-stream-connection-closes: Connection closes after final event 6ms
+       ✓ sse-live-reader-receives-final-append-on-close: live reader at tail receives data appended atomically with the close  1077ms
+       ✓ idempotent-close-with-append: Close with final append using producer headers 7ms
+       ✓ idempotent-close-only-with-producer-headers: Close-only with producer headers updates state 6ms
+       ✓ idempotent-close-duplicate-returns-204: Duplicate close (same tuple) returns 204 7ms
+       ✓ idempotent-close-different-tuple-returns-409: Different producer/seq gets 409 6ms
+       ✓ idempotent-close-different-seq-returns-409: Same producer, different seq gets 409 7ms
+       ✓ idempotent-close-only-duplicate-returns-204: Duplicate close-only (no body) returns 204 6ms
+       ✓ 409-includes-stream-offset: 409 for closed stream includes Stream-Next-Offset header 7ms
+       ✓ close-nonexistent-stream-404: POST with Stream-Closed to nonexistent stream returns 404 2ms
+       ✓ offset-now-on-closed-stream: offset=now on closed stream returns Stream-Closed: true 5ms
+       ✓ producer-state-survives-close: Stale-epoch producer gets 403, not 409 STREAM_CLOSED 9ms
+       ✓ close-with-different-body-dedup: Retry close with different body deduplicates to original 8ms
+       ✓ empty-post-without-stream-closed-400: POST with empty body but no Stream-Closed returns 400 4ms
+       ✓ delete-closed-stream: Deleting a closed stream removes it (returns 404 after) 9ms
+     ✓ should fork at current head (default) 8ms
+     ✓ should fork at a specific offset 8ms
+     ✓ should fork at zero offset (empty inherited data) 9ms
+     ✓ should fork at head offset (all source data inherited) 17ms
+     ✓ should return 404 when forking a nonexistent stream 8ms
+     ✓ should return 400 when forking at offset beyond stream length 6ms
+     ✓ should return 409 when forking to path already in use with different config 8ms
+     ✓ should fork a closed stream — fork starts open 13ms
+     ✓ should fork an empty stream 8ms
+     ✓ should fork preserving content-type when specified 19ms
+     ✓ should fork inheriting content-type when header omitted 11ms
+     ✓ should fork at a binary sub-offset within an append 9ms
+     ✓ should fork at a JSON sub-offset within a flattened batch 7ms
+     ✓ should treat sub-offset 0 as equivalent to absent header 9ms
+     ✓ should return 400 when binary sub-offset overshoots message length 4ms
+     ✓ should return 400 when JSON sub-offset overshoots message count 5ms
+     ✓ should return 400 for malformed sub-offset values 10ms
+     ✓ should be idempotent when re-creating with matching sub-offset 10ms
+     ✓ should return 409 when re-creating with mismatched sub-offset 13ms
+     ✓ should be idempotent when re-creating a JSON fork with matching sub-offset 10ms
+     ✓ should return 409 when re-creating a JSON fork with mismatched sub-offset 8ms
+     ✓ should support appending to fork after sub-offset boundary 9ms
+     ✓ should inherit content-type when sub-offset is supplied without explicit Content-Type 7ms
+     ✓ should not inherit producer state across sub-offset fork boundary 10ms
+     ✓ should not inherit producer state across binary sub-offset fork boundary 9ms
+     ✓ should fork at a binary sub-offset anchored mid-stream 10ms
+     ✓ should return 400 when sub-offset > 0 is supplied without Stream-Fork-Offset 4ms
+     ✓ should return 400 when Stream-Fork-Sub-Offset is supplied without Stream-Forked-From (even when value is 0) 1ms
+     ✓ should return a Stream-Next-Offset on sub-offset fork creation that is consumable by reads 9ms
+     ✓ should return 400 when sub-offset is supplied on an empty source stream 4ms
+     ✓ should accept binary sub-offset equal to message length 7ms
+     ✓ should accept JSON sub-offset equal to flattened message count 12ms
+     ✓ should append initial body after the materialized sub-offset prefix 15ms
+     ✓ should allow sub-offset fork creation from a closed source stream 8ms
+     ✓ should read entire fork (source + fork data) 9ms
+     ✓ should read only inherited portion 7ms
+     ✓ should read only fork's own data (starting past fork offset) 10ms
+     ✓ should read across fork boundary 10ms
+     ✓ should not show source appends after fork 8ms
+     ✓ should NOT include fork headers on HEAD/GET/PUT responses (forks are transparent) 10ms
+     ✓ should append to a fork 9ms
+     ✓ should support idempotent producer on fork 10ms
+     ✓ should close forked stream independently 10ms
+     ✓ should not affect fork when source is closed 12ms
+     ✓ should append to source after fork — source independent 8ms
+     ✓ should create a three-level fork chain 12ms
+     ✓ should fork at mid-point of inherited data 15ms
+     ✓ should read correctly across three levels 17ms
+     ✓ should append at each level independently 18ms
+     ✓ should compose sub-offsets across chained forks 14ms
+     ✓ should return inherited data immediately on long-poll 7ms
+     ✓ should wait for fork appends, not source appends, on long-poll at tail 62ms
+     ✓ should stream fork data via SSE 14ms
+     ✓ should handle long-poll handover at fork offset 9ms
+     ✓ should delete fork without affecting source 12ms
+     ✓ should soft-delete source while fork exists — fork still reads 10ms
+     ✓ should block re-creation of soft-deleted source (PUT returns 409) 11ms
+     ✓ should return 410 for GET on soft-deleted source 9ms
+     ✓ should return 410 for POST on soft-deleted source 11ms
+     ✓ should return 410 for DELETE on soft-deleted source 11ms
+     ✓ should return 409 for fork from soft-deleted source 11ms
+     ✓ should return 409 for fork with content-type mismatch 4ms
+     ✓ rejected fork (content-type mismatch) does not leak a source reference 9ms
+     ✓ should cascade GC when last fork is deleted 14ms
+     ✓ should cascade GC through three levels 22ms
+     ✓ should preserve data when deleting middle of chain 19ms
+     ✓ should keep source alive when all forks are deleted 18ms
+     ✓ should inherit source expiry when none specified 8ms
+     ✓ should allow fork with shorter TTL 8ms
+     ✓ should expire fork based on TTL (releases refcount)  1017ms
+     ✓ should expire source with living forks (source goes 410)  1023ms
+     ✓ should inherit source TTL value when none specified 8ms
+     ✓ should use fork's own TTL when specified 9ms
+     ✓ should allow fork to outlive source via TTL renewal  2022ms
+     ✓ should allow fork Expires-At beyond source TTL expiry 11ms
+     ✓ should allow fork TTL longer than source TTL (no capping) 11ms
+     ✓ should fork a JSON stream 10ms
+     ✓ should read forked JSON across boundary 10ms
+     ✓ should handle fork then immediately delete source 11ms
+     ✓ should handle many forks of same stream (10 forks) 74ms
+     ✓ should fork at every offset position 23ms
+     ✓ should handle idempotent fork creation (PUT twice) 9ms
+     × creates and idempotently re-confirms a webhook subscription 14ms
+     × rejects unsafe webhook URLs 6ms
+     × webhook synchronous done auto-acks the wake snapshot 8ms
+     × webhook callback acks and fences stale wake generations 5001ms
+     × adds and removes explicit subscription streams 9ms
+     × pull-wake claim, ack, and release use subscription-scoped leases 3010ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  experiments/electric-replication/conformance.test.ts > Reserved subscription APIs > creates and idempotently re-confirms a webhook subscription
+ FAIL  experiments/electric-replication/conformance.test.ts > Reserved subscription APIs > webhook synchronous done auto-acks the wake snapshot
+SyntaxError: Unexpected end of JSON input
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  experiments/electric-replication/conformance.test.ts > Reserved subscription APIs > rejects unsafe webhook URLs
+AssertionError: expected 201 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 201
+
+ ❯ .tmp/electric-conformance/node_modules/.pnpm/@durable-streams+server-conformance-tests@0.3.5_vite@8.3.3/node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7637:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  experiments/electric-replication/conformance.test.ts > Reserved subscription APIs > webhook callback acks and fences stale wake generations
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ .tmp/electric-conformance/node_modules/.pnpm/@durable-streams+server-conformance-tests@0.3.5_vite@8.3.3/node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7682:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  experiments/electric-replication/conformance.test.ts > Reserved subscription APIs > adds and removes explicit subscription streams
+AssertionError: expected 404 to be 204 // Object.is equality
+
+- Expected
++ Received
+
+- 204
++ 404
+
+ ❯ .tmp/electric-conformance/node_modules/.pnpm/@durable-streams+server-conformance-tests@0.3.5_vite@8.3.3/node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7762:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  experiments/electric-replication/conformance.test.ts > Reserved subscription APIs > pull-wake claim, ack, and release use subscription-scoped leases
+Error: Timed out waiting for condition
+ ❯ waitForCondition .tmp/electric-conformance/node_modules/.pnpm/@durable-streams+server-conformance-tests@0.3.5_vite@8.3.3/node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:155:8
+ ❯ .tmp/electric-conformance/node_modules/.pnpm/@durable-streams+server-conformance-tests@0.3.5_vite@8.3.3/node_modules/@durable-streams/server-conformance-tests/dist/src-9rWVhzOp.js:7802:4
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 326 passed (332)
+   Start at  07:04:45
+   Duration  30.31s (transform 30ms, setup 0ms, import 118ms, tests 30.01s, environment 0ms)
+
+JSON report written to /home/user/workspace/repo/experiments/electric-replication/evidence/conformance-002/suite.json
