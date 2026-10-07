@@ -100,17 +100,25 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         I: IntoIterator<Item = Entry> + Send,
         I::IntoIter: Send,
     {
+        let entries: Vec<_> = entries.into_iter().collect();
         let mut replies = Vec::new();
         let mut view = self.view.write().await;
-        for entry in entries {
-            if view
-                .applied
-                .is_some_and(|id| entry.log_id.index <= id.index)
-            {
+        let mut previous = view.applied;
+        for entry in &entries {
+            if previous.is_some_and(|id| entry.log_id.index <= id.index) {
                 return Err(storage_error(io::Error::other(
                     "duplicate/out-of-order apply",
                 )));
             }
+            previous = Some(entry.log_id);
+        }
+        if let Some(last) = entries.last() {
+            // This same native-WAL barrier used to block the Raft core's
+            // save_committed. Keep it BEFORE any handler (including wakeups),
+            // clock or membership mutation, but run it on the ordered SM worker.
+            self.journal.cover_apply(last.log_id).await.map_err(storage_error)?;
+        }
+        for entry in entries {
             let reply = match entry.payload {
                 EntryPayload::Normal(command) => {
                     view.store.set_create_id(entry.log_id.index);

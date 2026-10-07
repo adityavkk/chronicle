@@ -49,6 +49,13 @@ python3 experiments/electric-replication/scripts/subscription_faults.py experime
 python3 experiments/electric-replication/scripts/storage_faults.py experiments/electric-replication/evidence/storage-fault-new
 ```
 
+`scripts/benchmark.py` uses the pinned unmodified native server and ds-bench
+binaries at `.tmp/electric-tools/{upstream,bench}-target/release/`; their SHA-256
+values and exact source pins are in each run's `provenance.json`. It records fresh
+per-cell configurations, command lines, exact seed/offset probes, raw client/HDR
+results, syscall profiles, process/socket samples (`samples.jsonl.gz`), storage
+sizes and errors. Run it sequentially with other builds/tests stopped.
+
 Use a fresh output directory name each time. Drivers start/stop supervised orb
 services; data directories are disposable under `.tmp/electric-labs/`. They keep
 per-node JSON configuration, source/binary hashes, logs and raw histories. None
@@ -69,7 +76,29 @@ Conformance and the existing fault/property tests are necessary, not sufficient.
 The latest full suite executes **332/332 passing, zero failures/skips**, with
 subscriptions enabled. Subscription and storage-error process histories also
 pass within their documented models; they are not independent-disk or power-loss
-qualification. Matched pinned ds-bench measurements and profiles remain required.
+qualification. `bench-local-003` ran 45 matched ds-bench cells: 44 completed;
+three-replica fanout with 1,000 subscribers failed with linearizable-read 503s
+and a 240-second client timeout. It is retained, not excluded from the matrix.
+
+| Local qualification cell | Unmodified Electric | One-member adapter | Three replicas |
+| --- | ---: | ---: | ---: |
+| One stream, concurrency 256 (writes/s) | 105,103 | 3,471 | 4,352 |
+| 1,024 streams, concurrency 256 (writes/s) | 58,861 | 3,501 | 3,949 |
+| Seeded 4 MiB replay (GiB/s) | 13.87 | 9.71 | 15.80 |
+| Mixed, unpaced writes and fixed-rate reads (writes/s) | 26,982 | 6,843 | 4,793 |
+
+These short single runs share a disk/page cache and 16 GiB host memory. Each arm
+gets four aggregate SUT CPU affinities, the client another four; the three-node
+arm does not get three times the CPU budget. Native and one-member writes are
+local-fsync; three-node writes are quorum-fsync on this **shared host**. The client
+is not independently calibrated and the native write ladder has not plateaued.
+Replay is page-cache/loopback throughput, not disk bandwidth; different runs vary
+substantially. Paced fanout is not saturation capacity. Profiles are separate,
+perturbed executions: all read arms call real `sendfile`; write profiles show
+substantial fsync and scheduling costs. The adapter has a large measured write
+gap, not Electric performance parity. Independent-host capacity, sustained memory
+and disk growth, tail latency, and overload behavior remain evaluation gates.
+
 No throughput or availability promise is made from blog numbers or single-orb
 runs. Paid evaluation needs separate authorization; no cloud budget or publication
 permission is implied.

@@ -17,11 +17,19 @@ disks/AZs, arbitrary power loss, production availability or cloud performance.
 | `subscription-fault-001` | Independent checker PASS, 187 operations, 1 unknown outcome | Claim races, stale workers, failover during delivery/ack, durable retries, dropped wake, invalid-batch atomicity, recreation, explicit/glob links, full restart, SSRF/redirect rejection; 9 independently verified Ed25519 deliveries |
 | `storage-fault-001`, `storage-fault-002` | Harness failures retained | First omitted the hot-file `write` hook; second lost its disposable hot fixture during rejected snapshot startup. Neither established a false server acknowledgement |
 | `storage-fault-003` | Independent checker PASS, 28 operations, 3 unknown outcomes | Real short writes, WAL fsync EIO/ENOSPC, hot-file ENOSPC, snapshot fsync EIO, corrupt authoritative frames/snapshot, hot-file rebuild; seven intercepted failing/short syscalls |
-| `formal/` | Safety and stable-period liveness pass; 14 negative mutations detected; Lean without `sorry` | Includes delayed catalog/incarnation/link observations; assumes Raft and honest storage; not Rust refinement proofs |
+| `formal/` | Safety and stable-period liveness pass; 21 negative mutations detected; Lean without `sorry` | Includes delayed catalog/incarnation/link observations, private apply recovery and proposed journal reclamation; assumes Raft and honest storage; not Rust refinement proofs |
 | `properties/forks-001-fixture-too-small.txt` | Failed and preserved | New larger test records exceeded the test's 4 KiB segment; fixture corrected to 256 KiB, not reduced payload coverage |
 | `properties/rust-125.txt` | 125 passed, zero failed, 2 ignored | Ignored helpers are unchanged upstream forensic dump/replay entry points, not skipped conformance tests |
 | `properties/json-boundary-001` through `004` | PATH/import errors, then real malformed JSON fork reproduction, then passing regression properties | The original comma counter split nested/quoted JSON and materialized the whole suffix; bounded lexical scanning fixes both |
 | `properties/rust-127.txt`, `properties/standalone-112-json-fix.txt` | 127 / 112 passed, zero failed, same 2 upstream forensic helpers ignored | Replicated and standalone modes after the JSON boundary correction |
+| `formal/apply-qualification.txt`, `properties/rust-128-apply.txt` | 17 negative mutations detected; 128 Rust tests passed, same 2 forensic helpers ignored | The same native commit-marker fsync moves before publication on the ordered apply worker; paired OpenRaft committed methods remain no-op/None |
+| `conformance-008` | 332 passed, zero failed/skipped/todo | Full replicated suite after the apply barrier scheduling change |
+| `fault-007` | Harness failure retained | Leader lookup briefly returned no leader during election; fixed the wait predicate, not server assertions |
+| `fault-008`, `fork-fault-003`, `subscription-fault-002`, `storage-fault-004` | Independent checkers PASS: 129 / 748 / 192 / 28 operations | Same real-process campaigns after the apply change; subscription/storage runs retain 1 / 3 unknown outcomes; nine webhook signatures verified |
+| `bench-smoke-001`, `bench-smoke-002` | 0/3 then 3/3 cells completed | Initial supervised-service names exceeded the platform length bound; hashed lab identifiers fixed startup |
+| `bench-local-001` | 36/45 cells completed | Read/mixed seeder incorrectly required HTTP 200 instead of accepting successful 204; all nine failed cells stopped before measurement |
+| `bench-local-002` | 9/9 read/mixed/profile cells completed | Corrected exact-byte seeding, still pinned unmodified ds-bench and native server |
+| `bench-local-003` | 44/45 cells completed | Three-replica 1,000-subscriber fanout received linearizable-read 503s and timed out at 240 s; client output/logs and failed outcome retained, no throughput inferred |
 
 The upstream suite is **unchanged `@durable-streams/server-conformance-tests@0.3.5`**,
 with `subscriptions:true`. All 332 tests are discovered and executed in each full

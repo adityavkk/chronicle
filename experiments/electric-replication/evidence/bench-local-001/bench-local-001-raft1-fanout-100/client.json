@@ -1,0 +1,30 @@
+{
+  "scenario": "fanout",
+  "api_style": "Durable",
+  "target": "http://127.0.0.1:19801",
+  "bucket": "bench-fanout",
+  "basin": "benchmark",
+  "stream": "fanout",
+  "subscribers": 100,
+  "writer_rate": 50,
+  "duration_secs": 10,
+  "payload_bytes": 256,
+  "elapsed_secs": 10.026789794,
+  "events_sent": 501,
+  "events_received": 50100,
+  "subscriber_errors": 0,
+  "append_counts": {
+    "ok": 501,
+    "backpressure": 0,
+    "other_err": 0
+  },
+  "fan_out_latency_ms": {
+    "count": 50100,
+    "mean_ms": 1.3629223353293398,
+    "p50_ms": 1.293,
+    "p90_ms": 1.801,
+    "p99_ms": 2.469,
+    "p999_ms": 4.747,
+    "max_ms": 4.919
+  }
+}

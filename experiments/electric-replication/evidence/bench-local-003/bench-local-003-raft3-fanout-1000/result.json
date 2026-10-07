@@ -1,0 +1,41 @@
+{
+  "arm": "raft3",
+  "workload": [
+    "fanout",
+    1000
+  ],
+  "profile": false,
+  "verdict": "FAIL",
+  "node_pids": [
+    426761,
+    426789,
+    426826
+  ],
+  "affinity": {
+    "426761": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "426789": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "426826": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 426874,
+  "client_window": {
+    "start_unix_ms": 1791372505942,
+    "end_unix_ms": 1791372745950,
+    "exit_code": -9
+  },
+  "error": "TimeoutExpired(['taskset', '-c', '4-7', '/home/user/workspace/repo/.tmp/electric-tools/bench-target/release/ds-bench', 'fan-out', '--stream', 'fanout', '--subscribers', '1000', '--writer-rate', '50', '--duration-secs', '10', '--payload-bytes', '256', '--subscriber-idle-timeout-secs', '10', '--request-timeout-secs', '30', '--target', 'http://127.0.0.1:19801', '--api-style', 'durable'], 240)"
+}

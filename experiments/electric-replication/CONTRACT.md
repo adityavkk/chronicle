@@ -40,6 +40,20 @@ The alternatives are raft-rs plus manual Ready/HardState/read-index orchestratio
 or an OpenRaft prerelease. Neither is needed for this initial integration. We do
 not implement private consensus or assume the previous experiment's proofs apply.
 
+The apply worker persists a covering `Commit` marker in that same journal and
+waits for fsync **before the first native handler in a committed batch**. This
+barrier is not removed; it moves out of the consensus core's serialized command
+loop so that core may queue work while apply waits. Both optional OpenRaft
+`save_committed`/`read_committed` methods use their default no-op/None pairing.
+The marker is private state-machine recovery metadata: startup rebuilds through
+it before `Raft::new`, whose `applied_state()` supplies the recovered boundary.
+Returning a private marker from `read_committed` while ignoring `save_committed`
+would violate their paired API contract. A snapshot newer than the marker is
+also authoritative; marker-covered replay chunks must not append older markers.
+`ApplyRecovery.tla` precedes this change and checks private replay, partial apply,
+newer snapshot installation, and crash boundaries, with three negative mutations.
+This is a scheduling change, not a weaker durability mode or a parity claim.
+
 ## Ordering, durability and visibility
 
 Fixed stream partitions are independent Raft groups. Partition identity hashes
@@ -130,6 +144,27 @@ Install into a new materialization generation before atomically changing the
 in-memory view. Raft purge may follow only a durable snapshot. Physical segment
 reclamation additionally requires a journal checkpoint covering vote, membership,
 commit and retained locations; a logical purge alone does not authorize unlink.
+
+The reclamation contract (`JournalReclaim.tla`, specified before implementation)
+captures the full location-only index and final physical frame under the journal
+lock, waits for that frame's native durability barrier, then writes a checksummed
+checkpoint, fsyncs it, atomically renames it and fsyncs the directory. Only then
+may segments older than both the replay cut's segment and every retained entry's
+segment be unlinked. Appends after the cut remain in the original WAL, not a
+second payload log. Readers pin retained locations against unlink while reading.
+Recovery validates retained frames, then resumes strictly after the recorded
+physical cut; it never substitutes a stale checkpoint for corruption. A crash
+before checkpoint publication retains the old replay path. A crash after it can
+leave extra old segments but cannot lose needed ones. Directory fsync failures
+are terminal; successful rename alone does not authorize reclamation.
+
+Snapshot cleanup serializes with snapshot construction/installation. A durable
+new journal reference is required before unlinking old files. Snapshot readers
+open their file under the journal lock before cleanup; open file descriptors
+survive unlink on Linux. In-progress/unreferenced snapshot files are cleaned only
+after a successful replacement or recovery, not while another builder is active.
+Disposable old hot generations can be removed on restart, before serving; live
+readers may still own an old generation, so it is not deleted speculatively.
 
 Cold-tier support is retained in the upstream source but **disabled in replicated
 mode** until object identities include cluster/group/incarnation/range/checksum,

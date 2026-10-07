@@ -1,0 +1,102 @@
+{"arm": "native", "workload": ["write", 1, 4], "profile": false, "verdict": "PASS", "node_pids": [246786], "affinity": {"246786": [0, 1, 2, 3]}, "client_pid": 246796, "client_window": {"start_unix_ms": 1791369543930, "end_unix_ms": 1791369555980, "exit_code": 0}, "verify_pid": 246835, "verify_window": {"start_unix_ms": 1791369555981, "end_unix_ms": 1791369555988, "exit_code": 0}}
+{"arm": "raft1", "workload": ["write", 1, 4], "profile": false, "verdict": "PASS", "node_pids": [246881], "affinity": {"246881": [0, 1, 2, 3]}, "client_pid": 246891, "client_window": {"start_unix_ms": 1791369556822, "end_unix_ms": 1791369568878, "exit_code": 0}, "verify_pid": 246920, "verify_window": {"start_unix_ms": 1791369568879, "end_unix_ms": 1791369568887, "exit_code": 0}}
+{"arm": "raft3", "workload": ["write", 1, 4], "profile": false, "verdict": "PASS", "node_pids": [246965, 246993, 247020], "affinity": {"246965": [0, 1, 2, 3], "246993": [0, 1, 2, 3], "247020": [0, 1, 2, 3]}, "client_pid": 247028, "client_window": {"start_unix_ms": 1791369570513, "end_unix_ms": 1791369582560, "exit_code": 0}, "verify_pid": 247070, "verify_window": {"start_unix_ms": 1791369582560, "end_unix_ms": 1791369582568, "exit_code": 0}}
+{"arm": "raft1", "workload": ["write", 1, 16], "profile": false, "verdict": "PASS", "node_pids": [247155], "affinity": {"247155": [0, 1, 2, 3]}, "client_pid": 247165, "client_window": {"start_unix_ms": 1791369583838, "end_unix_ms": 1791369595880, "exit_code": 0}, "verify_pid": 247194, "verify_window": {"start_unix_ms": 1791369595881, "end_unix_ms": 1791369595888, "exit_code": 0}}
+{"arm": "raft3", "workload": ["write", 1, 16], "profile": false, "verdict": "PASS", "node_pids": [247239, 247267, 247294], "affinity": {"247239": [0, 1, 2, 3], "247267": [0, 1, 2, 3], "247294": [0, 1, 2, 3]}, "client_pid": 247302, "client_window": {"start_unix_ms": 1791369597465, "end_unix_ms": 1791369609504, "exit_code": 0}, "verify_pid": 250198, "verify_window": {"start_unix_ms": 1791369609504, "end_unix_ms": 1791369609513, "exit_code": 0}}
+{"arm": "native", "workload": ["write", 1, 16], "profile": false, "verdict": "PASS", "node_pids": [250284], "affinity": {"250284": [0, 1, 2, 3]}, "client_pid": 250294, "client_window": {"start_unix_ms": 1791369610740, "end_unix_ms": 1791369622795, "exit_code": 0}, "verify_pid": 250367, "verify_window": {"start_unix_ms": 1791369622796, "end_unix_ms": 1791369622803, "exit_code": 0}}
+{"arm": "raft3", "workload": ["write", 1, 64], "profile": false, "verdict": "PASS", "node_pids": [250413, 250440, 250469], "affinity": {"250413": [0, 1, 2, 3], "250440": [0, 1, 2, 3], "250469": [0, 1, 2, 3]}, "client_pid": 250477, "client_window": {"start_unix_ms": 1791369624439, "end_unix_ms": 1791369636484, "exit_code": 0}, "verify_pid": 250511, "verify_window": {"start_unix_ms": 1791369636485, "end_unix_ms": 1791369636493, "exit_code": 0}}
+{"arm": "native", "workload": ["write", 1, 64], "profile": false, "verdict": "PASS", "node_pids": [250597], "affinity": {"250597": [0, 1, 2, 3]}, "client_pid": 250608, "client_window": {"start_unix_ms": 1791369637660, "end_unix_ms": 1791369649713, "exit_code": 0}, "verify_pid": 250649, "verify_window": {"start_unix_ms": 1791369649714, "end_unix_ms": 1791369649722, "exit_code": 0}}
+{"arm": "raft1", "workload": ["write", 1, 64], "profile": false, "verdict": "PASS", "node_pids": [250694], "affinity": {"250694": [0, 1, 2, 3]}, "client_pid": 250703, "client_window": {"start_unix_ms": 1791369650559, "end_unix_ms": 1791369662630, "exit_code": 0}, "verify_pid": 253833, "verify_window": {"start_unix_ms": 1791369662631, "end_unix_ms": 1791369662639, "exit_code": 0}}
+Exception in thread Thread-10 (collect):
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "/usr/local/lib/python3.11/threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark.py", line 160, in collect
+    out.write(json.dumps(sample(pids, {str(lab.port+n) for n in lab.nodes}, node_pids))+"\n")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark.py", line 35, in sample
+    io = {k:int(v) for k,v in (line.split(":") for line in (proc / "io").read_text().splitlines())}
+                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/pathlib.py", line 1058, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/pathlib.py", line 1044, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/proc/253891/io'
+{"arm": "native", "workload": ["write", 1, 256], "profile": false, "verdict": "PASS", "node_pids": [253878], "affinity": {"253878": [0, 1, 2, 3]}, "client_pid": 253891, "client_window": {"start_unix_ms": 1791369663348, "end_unix_ms": 1791369675414, "exit_code": 0}, "verify_pid": 254451, "verify_window": {"start_unix_ms": 1791369675415, "end_unix_ms": 1791369675424, "exit_code": 0}}
+{"arm": "raft1", "workload": ["write", 1, 256], "profile": false, "verdict": "PASS", "node_pids": [256456], "affinity": {"256456": [0, 1, 2, 3]}, "client_pid": 256617, "client_window": {"start_unix_ms": 1791369676371, "end_unix_ms": 1791369688470, "exit_code": 0}, "verify_pid": 257159, "verify_window": {"start_unix_ms": 1791369688471, "end_unix_ms": 1791369688479, "exit_code": 0}}
+{"arm": "raft3", "workload": ["write", 1, 256], "profile": false, "verdict": "PASS", "node_pids": [257204, 257231, 257260], "affinity": {"257204": [0, 1, 2, 3], "257231": [0, 1, 2, 3], "257260": [0, 1, 2, 3]}, "client_pid": 257268, "client_window": {"start_unix_ms": 1791369690195, "end_unix_ms": 1791369702233, "exit_code": 0}, "verify_pid": 257309, "verify_window": {"start_unix_ms": 1791369702233, "end_unix_ms": 1791369702241, "exit_code": 0}}
+{"arm": "raft1", "workload": ["write", 1024, 4], "profile": false, "verdict": "PASS", "node_pids": [257395], "affinity": {"257395": [0, 1, 2, 3]}, "client_pid": 257406, "client_window": {"start_unix_ms": 1791369703647, "end_unix_ms": 1791369716409, "exit_code": 0}, "verify_pid": 260762, "verify_window": {"start_unix_ms": 1791369716410, "end_unix_ms": 1791369716442, "exit_code": 0}}
+{"arm": "raft3", "workload": ["write", 1024, 4], "profile": false, "verdict": "PASS", "node_pids": [260809, 260836, 260863], "affinity": {"260809": [0, 1, 2, 3], "260836": [0, 1, 2, 3], "260863": [0, 1, 2, 3]}, "client_pid": 260873, "client_window": {"start_unix_ms": 1791369718081, "end_unix_ms": 1791369731080, "exit_code": 0}, "verify_pid": 264326, "verify_window": {"start_unix_ms": 1791369731081, "end_unix_ms": 1791369731196, "exit_code": 0}}
+{"arm": "native", "workload": ["write", 1024, 4], "profile": false, "verdict": "PASS", "node_pids": [264411], "affinity": {"264411": [0, 1, 2, 3]}, "client_pid": 264421, "client_window": {"start_unix_ms": 1791369732639, "end_unix_ms": 1791369744889, "exit_code": 0}, "verify_pid": 264486, "verify_window": {"start_unix_ms": 1791369744889, "end_unix_ms": 1791369744922, "exit_code": 0}}
+{"arm": "raft3", "workload": ["write", 1024, 16], "profile": false, "verdict": "PASS", "node_pids": [264531, 264559, 264586], "affinity": {"264531": [0, 1, 2, 3], "264559": [0, 1, 2, 3], "264586": [0, 1, 2, 3]}, "client_pid": 264594, "client_window": {"start_unix_ms": 1791369746652, "end_unix_ms": 1791369759697, "exit_code": 0}, "verify_pid": 268424, "verify_window": {"start_unix_ms": 1791369759697, "end_unix_ms": 1791369759812, "exit_code": 0}}
+{"arm": "native", "workload": ["write", 1024, 16], "profile": false, "verdict": "PASS", "node_pids": [268516], "affinity": {"268516": [0, 1, 2, 3]}, "client_pid": 268526, "client_window": {"start_unix_ms": 1791369761202, "end_unix_ms": 1791369773511, "exit_code": 0}, "verify_pid": 272164, "verify_window": {"start_unix_ms": 1791369773511, "end_unix_ms": 1791369773545, "exit_code": 0}}
+Exception in thread Thread-18 (collect):
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "/usr/local/lib/python3.11/threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark.py", line 160, in collect
+    out.write(json.dumps(sample(pids, {str(lab.port+n) for n in lab.nodes}, node_pids))+"\n")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark.py", line 35, in sample
+    io = {k:int(v) for k,v in (line.split(":") for line in (proc / "io").read_text().splitlines())}
+                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/pathlib.py", line 1058, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/pathlib.py", line 1044, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/proc/272483/io'
+{"arm": "raft1", "workload": ["write", 1024, 16], "profile": false, "verdict": "PASS", "node_pids": [272463], "affinity": {"272463": [0, 1, 2, 3]}, "client_pid": 272483, "client_window": {"start_unix_ms": 1791369774640, "end_unix_ms": 1791369787387, "exit_code": 0}, "verify_pid": 272551, "verify_window": {"start_unix_ms": 1791369787387, "end_unix_ms": 1791369787420, "exit_code": 0}}
+{"arm": "native", "workload": ["write", 1024, 64], "profile": false, "verdict": "PASS", "node_pids": [272596], "affinity": {"272596": [0, 1, 2, 3]}, "client_pid": 272607, "client_window": {"start_unix_ms": 1791369788187, "end_unix_ms": 1791369800447, "exit_code": 0}, "verify_pid": 272676, "verify_window": {"start_unix_ms": 1791369800447, "end_unix_ms": 1791369800480, "exit_code": 0}}
+{"arm": "raft1", "workload": ["write", 1024, 64], "profile": false, "verdict": "PASS", "node_pids": [272721], "affinity": {"272721": [0, 1, 2, 3]}, "client_pid": 272730, "client_window": {"start_unix_ms": 1791369801445, "end_unix_ms": 1791369814229, "exit_code": 0}, "verify_pid": 272763, "verify_window": {"start_unix_ms": 1791369814230, "end_unix_ms": 1791369814262, "exit_code": 0}}
+{"arm": "raft3", "workload": ["write", 1024, 64], "profile": false, "verdict": "PASS", "node_pids": [272810, 272837, 272864], "affinity": {"272810": [0, 1, 2, 3], "272837": [0, 1, 2, 3], "272864": [0, 1, 2, 3]}, "client_pid": 272875, "client_window": {"start_unix_ms": 1791369816045, "end_unix_ms": 1791369829170, "exit_code": 0}, "verify_pid": 272926, "verify_window": {"start_unix_ms": 1791369829171, "end_unix_ms": 1791369829288, "exit_code": 0}}
+{"arm": "raft1", "workload": ["write", 1024, 256], "profile": false, "verdict": "PASS", "node_pids": [273012], "affinity": {"273012": [0, 1, 2, 3]}, "client_pid": 273020, "client_window": {"start_unix_ms": 1791369831055, "end_unix_ms": 1791369843820, "exit_code": 0}, "verify_pid": 273056, "verify_window": {"start_unix_ms": 1791369843821, "end_unix_ms": 1791369843855, "exit_code": 0}}
+Exception in thread Thread-23 (collect):
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "/usr/local/lib/python3.11/threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark.py", line 160, in collect
+    out.write(json.dumps(sample(pids, {str(lab.port+n) for n in lab.nodes}, node_pids))+"\n")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark.py", line 35, in sample
+    io = {k:int(v) for k,v in (line.split(":") for line in (proc / "io").read_text().splitlines())}
+                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/pathlib.py", line 1058, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/pathlib.py", line 1044, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/proc/273164/io'
+{"arm": "raft3", "workload": ["write", 1024, 256], "profile": false, "verdict": "PASS", "node_pids": [273101, 273129, 273156], "affinity": {"273101": [0, 1, 2, 3], "273129": [0, 1, 2, 3], "273156": [0, 1, 2, 3]}, "client_pid": 273164, "client_window": {"start_unix_ms": 1791369845480, "end_unix_ms": 1791369858570, "exit_code": 0}, "verify_pid": 273216, "verify_window": {"start_unix_ms": 1791369858570, "end_unix_ms": 1791369858636, "exit_code": 0}}
+{"arm": "native", "workload": ["write", 1024, 256], "profile": false, "verdict": "PASS", "node_pids": [273301], "affinity": {"273301": [0, 1, 2, 3]}, "client_pid": 273311, "client_window": {"start_unix_ms": 1791369860125, "end_unix_ms": 1791369872460, "exit_code": 0}, "verify_pid": 273374, "verify_window": {"start_unix_ms": 1791369872460, "end_unix_ms": 1791369872493, "exit_code": 0}}
+{"arm": "raft3", "workload": ["fanout", 1], "profile": false, "verdict": "PASS", "node_pids": [273419, 273446, 273475], "affinity": {"273419": [0, 1, 2, 3], "273446": [0, 1, 2, 3], "273475": [0, 1, 2, 3]}, "client_pid": 273483, "client_window": {"start_unix_ms": 1791369874290, "end_unix_ms": 1791369886325, "exit_code": 0}, "delivery_fraction": 1.0}
+{"arm": "native", "workload": ["fanout", 1], "profile": false, "verdict": "PASS", "node_pids": [273613], "affinity": {"273613": [0, 1, 2, 3]}, "client_pid": 273623, "client_window": {"start_unix_ms": 1791369887417, "end_unix_ms": 1791369899482, "exit_code": 0}, "delivery_fraction": 1.0}
+{"arm": "raft1", "workload": ["fanout", 1], "profile": false, "verdict": "PASS", "node_pids": [273703], "affinity": {"273703": [0, 1, 2, 3]}, "client_pid": 273712, "client_window": {"start_unix_ms": 1791369900365, "end_unix_ms": 1791369912420, "exit_code": 0}, "delivery_fraction": 1.0}
+{"arm": "native", "workload": ["fanout", 100], "profile": false, "verdict": "PASS", "node_pids": [273793], "affinity": {"273793": [0, 1, 2, 3]}, "client_pid": 273803, "client_window": {"start_unix_ms": 1791369913061, "end_unix_ms": 1791369925131, "exit_code": 0}, "delivery_fraction": 1.0}
+{"arm": "raft1", "workload": ["fanout", 100], "profile": false, "verdict": "PASS", "node_pids": [273879], "affinity": {"273879": [0, 1, 2, 3]}, "client_pid": 273888, "client_window": {"start_unix_ms": 1791369926022, "end_unix_ms": 1791369938088, "exit_code": 0}, "delivery_fraction": 1.0}
+{"arm": "raft3", "workload": ["fanout", 100], "profile": false, "verdict": "PASS", "node_pids": [273962, 273990, 274017], "affinity": {"273962": [0, 1, 2, 3], "273990": [0, 1, 2, 3], "274017": [0, 1, 2, 3]}, "client_pid": 274025, "client_window": {"start_unix_ms": 1791369939722, "end_unix_ms": 1791369951854, "exit_code": 0}, "delivery_fraction": 1.0}
+{"arm": "raft1", "workload": ["fanout", 1000], "profile": false, "verdict": "PASS", "node_pids": [274154], "affinity": {"274154": [0, 1, 2, 3]}, "client_pid": 274162, "client_window": {"start_unix_ms": 1791369953272, "end_unix_ms": 1791369965560, "exit_code": 0}, "delivery_fraction": 1.0}
+{"arm": "raft3", "workload": ["fanout", 1000], "profile": false, "verdict": "PASS", "node_pids": [274238, 274265, 274294], "affinity": {"274238": [0, 1, 2, 3], "274265": [0, 1, 2, 3], "274294": [0, 1, 2, 3]}, "client_pid": 274302, "client_window": {"start_unix_ms": 1791369967171, "end_unix_ms": 1791369979601, "exit_code": 0}, "delivery_fraction": 1.0}
+{"arm": "native", "workload": ["fanout", 1000], "profile": false, "verdict": "PASS", "node_pids": [274424], "affinity": {"274424": [0, 1, 2, 3]}, "client_pid": 274434, "client_window": {"start_unix_ms": 1791369980607, "end_unix_ms": 1791369992904, "exit_code": 0}, "delivery_fraction": 1.0}
+{"arm": "raft3", "workload": ["reads"], "profile": false, "verdict": "FAIL", "node_pids": [274510, 274539, 274566], "affinity": {"274510": [0, 1, 2, 3], "274539": [0, 1, 2, 3], "274566": [0, 1, 2, 3]}, "error": "AssertionError()"}
+{"arm": "native", "workload": ["reads"], "profile": false, "verdict": "FAIL", "node_pids": [274670], "affinity": {"274670": [0, 1, 2, 3]}, "error": "AssertionError()"}
+{"arm": "raft1", "workload": ["reads"], "profile": false, "verdict": "FAIL", "node_pids": [274730], "affinity": {"274730": [0, 1, 2, 3]}, "error": "AssertionError()"}
+{"arm": "native", "workload": ["mixed"], "profile": false, "verdict": "FAIL", "node_pids": [274783], "affinity": {"274783": [0, 1, 2, 3]}, "error": "AssertionError()"}
+{"arm": "raft1", "workload": ["mixed"], "profile": false, "verdict": "FAIL", "node_pids": [274846], "affinity": {"274846": [0, 1, 2, 3]}, "error": "AssertionError()"}
+{"arm": "raft3", "workload": ["mixed"], "profile": false, "verdict": "FAIL", "node_pids": [274905, 274933, 274960], "affinity": {"274905": [0, 1, 2, 3], "274933": [0, 1, 2, 3], "274960": [0, 1, 2, 3]}, "error": "AssertionError()"}
+{"arm": "native", "workload": ["write", 1024, 64], "profile": true, "verdict": "PASS", "node_pids": [275064], "affinity": {"275064": [0, 1, 2, 3]}, "client_pid": 275085, "client_window": {"start_unix_ms": 1791370001269, "end_unix_ms": 1791370013781, "exit_code": 0}, "verify_pid": 275148, "verify_window": {"start_unix_ms": 1791370013784, "end_unix_ms": 1791370013817, "exit_code": 0}}
+{"arm": "native", "workload": ["reads"], "profile": true, "verdict": "FAIL", "node_pids": [275193], "affinity": {"275193": [0, 1, 2, 3]}, "error": "AssertionError()"}
+{"arm": "raft1", "workload": ["write", 1024, 64], "profile": true, "verdict": "PASS", "node_pids": [275251], "affinity": {"275251": [0, 1, 2, 3]}, "client_pid": 275264, "client_window": {"start_unix_ms": 1791370015875, "end_unix_ms": 1791370029139, "exit_code": 0}, "verify_pid": 275298, "verify_window": {"start_unix_ms": 1791370029141, "end_unix_ms": 1791370029174, "exit_code": 0}}
+{"arm": "raft1", "workload": ["reads"], "profile": true, "verdict": "FAIL", "node_pids": [275343], "affinity": {"275343": [0, 1, 2, 3]}, "error": "AssertionError()"}
+{"arm": "raft3", "workload": ["write", 1024, 64], "profile": true, "verdict": "PASS", "node_pids": [275396, 275424, 275458], "affinity": {"275396": [0, 1, 2, 3], "275424": [0, 1, 2, 3], "275458": [0, 1, 2, 3]}, "client_pid": 275472, "client_window": {"start_unix_ms": 1791370032213, "end_unix_ms": 1791370046346, "exit_code": 0}, "verify_pid": 275517, "verify_window": {"start_unix_ms": 1791370046350, "end_unix_ms": 1791370046465, "exit_code": 0}}
+{"arm": "raft3", "workload": ["reads"], "profile": true, "verdict": "FAIL", "node_pids": [275602, 275630, 275657], "affinity": {"275602": [0, 1, 2, 3], "275630": [0, 1, 2, 3], "275657": [0, 1, 2, 3]}, "error": "AssertionError()"}

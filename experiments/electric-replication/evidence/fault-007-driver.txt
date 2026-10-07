@@ -1,0 +1,18 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/qualify.py", line 153, in <module>
+    run(sys.argv[1])
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/qualify.py", line 96, in run
+    lab.wait(lambda: 200 <= append(lab.leader(0), 0, "delayed-links")["status"] < 300,
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/lab.py", line 119, in wait
+    value = predicate()
+            ^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/qualify.py", line 96, in <lambda>
+    lab.wait(lambda: 200 <= append(lab.leader(0), 0, "delayed-links")["status"] < 300,
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/qualify.py", line 27, in append
+    status, headers, body = lab.request(node, "POST", paths[group], (value+"\n").encode(),
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/lab.py", line 84, in request
+    connection = http.client.HTTPConnection("127.0.0.1", self.port+node, timeout=timeout)
+                                                         ~~~~~~~~~^~~~~
+TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'

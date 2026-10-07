@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark.py", line 167, in cell
+    raw = run_client(args,"client")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/benchmark.py", line 77, in run_client
+    proc.wait(timeout=240)
+  File "/usr/local/lib/python3.11/subprocess.py", line 1264, in wait
+    return self._wait(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/subprocess.py", line 2038, in _wait
+    raise TimeoutExpired(self.args, timeout)
+subprocess.TimeoutExpired: Command '['taskset', '-c', '4-7', '/home/user/workspace/repo/.tmp/electric-tools/bench-target/release/ds-bench', 'fan-out', '--stream', 'fanout', '--subscribers', '1000', '--writer-rate', '50', '--duration-secs', '10', '--payload-bytes', '256', '--subscriber-idle-timeout-secs', '10', '--request-timeout-secs', '30', '--target', 'http://127.0.0.1:19801', '--api-style', 'durable']' timed out after 240 seconds

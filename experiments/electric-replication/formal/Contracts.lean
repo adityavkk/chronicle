@@ -144,6 +144,32 @@ theorem scan_chunk_independent (s : JsonScan) (a b : List Char) :
     (a ++ b).foldl scanByte s = b.foldl scanByte (a.foldl scanByte s) :=
   List.foldl_append
 
+/- An installed snapshot may be newer than the journal's apply marker.
+   Every previously published local prefix must be covered by one authority.
+   Recovery stays private until its target, independent of replay chunk size. -/
+def restoreTarget (snapshot marker : Nat) : Nat := max snapshot marker
+
+theorem restore_no_published_rollback (s m published : Nat)
+    (covered : published ≤ s ∨ published ≤ m) : published ≤ restoreTarget s m := by
+  unfold restoreTarget
+  omega
+
+theorem replay_chunks_do_not_regress_marker (marker chunkEnd : Nat)
+    (covered : chunkEnd ≤ marker) : max marker chunkEnd = marker := by
+  omega
+
+/- A checkpoint retains the segment containing its final physical frame and
+   every indexed entry. New frames never refer to earlier physical segments.
+   These are floor arithmetic contracts, not proofs of filesystem persistence. -/
+theorem retained_location_survives (floor location : Nat) (h : floor ≤ location) :
+    ¬ location < floor := by omega
+
+theorem suffix_survives_checkpoint (floor cut later : Nat)
+    (h : floor ≤ cut) (ordered : cut ≤ later) : ¬ later < floor := by omega
+
+theorem before_cut_replay_not_needed (cut frame : Nat) (covered : frame ≤ cut) :
+    ¬ cut < frame := by omega
+
 #print axioms publication_committed
 #print axioms session_no_rollback
 #print axioms session_monotone
@@ -164,4 +190,9 @@ theorem scan_chunk_independent (s : JsonScan) (a b : List Char) :
 #print axioms quoted_comma_is_not_boundary
 #print axioms nested_comma_is_not_boundary
 #print axioms scan_chunk_independent
+#print axioms restore_no_published_rollback
+#print axioms replay_chunks_do_not_regress_marker
+#print axioms retained_location_survives
+#print axioms suffix_survives_checkpoint
+#print axioms before_cut_replay_not_needed
 end ElectricReplication

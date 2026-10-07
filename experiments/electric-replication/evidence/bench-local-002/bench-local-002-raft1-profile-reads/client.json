@@ -1,0 +1,37 @@
+{
+  "scenario": "reads",
+  "mode": "catchup",
+  "api_style": "Durable",
+  "target": "http://127.0.0.1:19801",
+  "stream": "bench-reads-stream",
+  "streams": 4,
+  "read_size_bytes": 4096,
+  "connections": 16,
+  "duration_secs": 8,
+  "warmup_secs": 3,
+  "settle_secs": 1,
+  "seed_bytes": 0,
+  "append_rate_per_sec": 50.0,
+  "elapsed_secs": 8.0,
+  "counts": {
+    "ok": 17234,
+    "backpressure": 0,
+    "other_err": 0
+  },
+  "bytes_read_total": 72284635136,
+  "aggregate_ops_per_sec": 2154.25,
+  "bytes_per_sec": 9035579392.0,
+  "p50_ms": 7.275,
+  "p90_ms": 8.751,
+  "p99_ms": 11.791,
+  "p999_ms": 17.775,
+  "latency_ms": {
+    "count": 17234,
+    "mean_ms": 7.4330677730068535,
+    "p50_ms": 7.275,
+    "p90_ms": 8.751,
+    "p99_ms": 11.791,
+    "p999_ms": 17.775,
+    "max_ms": 22.591
+  }
+}

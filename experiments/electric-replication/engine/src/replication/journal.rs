@@ -122,6 +122,17 @@ impl Journal {
         Ok(())
     }
 
+    /// Called only by the serialized apply worker before native publication.
+    /// Private startup replay can cover this batch with an already durable
+    /// marker; never regress it when replaying in smaller chunks.
+    pub async fn cover_apply(&self, id: LogId<u64>) -> io::Result<()> {
+        let covered = self.index.lock().unwrap().committed.is_some_and(|old| old >= id);
+        if !covered {
+            self.persist(Event::Commit(Some(id))).await?;
+        }
+        Ok(())
+    }
+
     pub async fn save_snapshot(&self, snapshot: SnapshotRef) -> io::Result<()> {
         self.persist(Event::Snapshot(snapshot)).await?;
         self.snapshot_ready.notify_waiters();
@@ -181,17 +192,8 @@ impl RaftLogStorage<Types> for Arc<Journal> {
             .await
             .map_err(storage_error)
     }
-    async fn read_committed(&mut self) -> Result<Option<LogId<u64>>, StorageError<u64>> {
-        Ok(self.index.lock().unwrap().committed)
-    }
-    async fn save_committed(
-        &mut self,
-        committed: Option<LogId<u64>>,
-    ) -> Result<(), StorageError<u64>> {
-        self.persist(Event::Commit(committed))
-            .await
-            .map_err(storage_error)
-    }
+    // Both optional committed methods retain their default no-op/None contract.
+    // The SM's pre-publication barrier and private startup replay own our marker.
     async fn append<I>(
         &mut self,
         entries: I,
@@ -283,11 +285,6 @@ mod tests {
             .persist(Event::Entry(entry.clone()))
             .await
             .unwrap();
-        machine
-            .journal
-            .persist(Event::Commit(Some(entry.log_id)))
-            .await
-            .unwrap();
         machine.apply([entry]).await.unwrap().pop().unwrap()
     }
 
@@ -375,6 +372,60 @@ mod tests {
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(48))]
+        #[test]
+        fn apply_barrier_precedes_visibility_and_chunked_replay_never_regresses(
+            count in 65usize..145, split_seed in 0usize..145, snapshot in any::<bool>(),
+        ) {
+            let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let dir = tempfile::tempdir().unwrap();
+                let mut machine = machine::Machine::open(dir.path().join("state"),
+                    Journal::open(dir.path().join("wal"),256*1024).unwrap()).await.unwrap();
+                assert_eq!(issue(&mut machine,"PUT","/batch",1000,vec![],b"base".to_vec()).await.status,201);
+                let original = machine.view.read().await.applied;
+                let mut expected = b"base".to_vec();
+                let mut entries = Vec::new();
+                for index in 1..=count {
+                    let payload = if index % 7 == 0 {
+                        EntryPayload::Blank
+                    } else {
+                        let data = vec![index as u8, 0xDA];
+                        expected.extend_from_slice(&data);
+                        EntryPayload::Normal(Command {method:"POST".into(),path:"/batch".into(),
+                            headers:vec![("content-type".into(),"application/octet-stream".into())],body:data,time:1001})
+                    };
+                    let entry = Entry {log_id:LogId::new(openraft::CommittedLeaderId::new(1,1),index as u64),payload};
+                    machine.journal.persist(Event::Entry(entry.clone())).await.unwrap();
+                    entries.push(entry);
+                }
+                let last = entries.last().unwrap().log_id;
+                let mut log_store = machine.journal.clone();
+                log_store.save_committed(Some(last)).await.unwrap();
+                assert_eq!(log_store.read_committed().await.unwrap(),None);
+                assert_eq!(log_store.index.lock().unwrap().committed,original);
+                drop(log_store);
+                // The actual native WAL stage fails. If the barrier moves after
+                // handlers, bytes/clock/wakes would already have been published.
+                machine.journal.shard.fail_next_write();
+                assert!(machine.apply(entries.clone()).await.is_err());
+                assert_eq!(bytes(&machine,"/batch").await,(200,b"base".to_vec()));
+                assert_eq!(machine.view.read().await.applied,original);
+                let split = 1 + split_seed % count;
+                for batch in [&entries[..split], &entries[split..]] {
+                    assert_eq!(machine.apply(batch.to_vec()).await.unwrap().len(),batch.len());
+                }
+                assert_eq!(machine.journal.index.lock().unwrap().committed,Some(last));
+                assert_eq!(bytes(&machine,"/batch").await,(200,expected.clone()));
+                if snapshot { machine.build_snapshot().await.unwrap(); }
+                let end = machine.journal.shard.tail_lsn();
+                machine = reopen(machine,false).await;
+                assert_eq!(machine.journal.shard.tail_lsn(),end,"replay must not append regressing markers");
+                assert_eq!(machine.view.read().await.applied,Some(last));
+                assert_eq!(bytes(&machine,"/batch").await,(200,expected));
+            });
+        }
+
         #[test]
         fn remote_fork_native_import_retries_and_descendant_retention_survive_restart(
             len in 1usize..150000, cut_seed in 0usize..150001,

@@ -1,0 +1,11 @@
+{
+  "arm": "raft1",
+  "workload": [
+    "write",
+    1,
+    4
+  ],
+  "profile": false,
+  "verdict": "FAIL",
+  "error": "CalledProcessError(1, ['amp', 'orb', 'service', 'start', 'bench-smoke-001-raft1-write-1-4-1', '--command', 'ulimit -c 0; exec taskset -c 0-3 /home/user/workspace/repo/experiments/electric-replication/engine/target/release/durable-streams-server --cluster-config /home/user/workspace/repo/experiments/electric-replication/evidence/bench-smoke-001/bench-smoke-001-raft1-write-1-4/node-1.json >> /home/user/workspace/repo/experiments/electric-replication/evidence/bench-smoke-001/bench-smoke-001-raft1-write-1-4/node-1.log 2>&1', '--cwd', '/home/user/workspace/repo', '--port', '19801'])"
+}

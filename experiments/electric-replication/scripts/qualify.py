@@ -93,7 +93,8 @@ def run(output):
         for node in lab.nodes:
             lab.faults(node)
         lab.wait(lambda: lab.leader(0), "election after delayed links")
-        lab.wait(lambda: 200 <= append(lab.leader(0), 0, "delayed-links")["status"] < 300,
+        lab.wait(lambda: (owner := lab.leader(0)) is not None
+                 and 200 <= append(owner, 0, "delayed-links")["status"] < 300,
                  "delayed proposal resolves after heal")
 
         leader = lab.leader(0)

@@ -1,0 +1,17 @@
+[
+  "taskset",
+  "-c",
+  "4-7",
+  "/home/user/workspace/repo/.tmp/electric-tools/bench-target/release/ds-bench",
+  "verify-offsets",
+  "--streams",
+  "1024",
+  "--payload-bytes",
+  "256",
+  "--concurrency",
+  "32",
+  "--target",
+  "http://127.0.0.1:19801",
+  "--api-style",
+  "durable"
+]

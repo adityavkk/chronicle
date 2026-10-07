@@ -18,3 +18,8 @@
 'ElectricReplication.quoted_comma_is_not_boundary' depends on axioms: [propext]
 'ElectricReplication.nested_comma_is_not_boundary' depends on axioms: [propext]
 'ElectricReplication.scan_chunk_independent' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.restore_no_published_rollback' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.replay_chunks_do_not_regress_marker' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.retained_location_survives' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.suffix_survives_checkpoint' depends on axioms: [propext, Quot.sound]
+'ElectricReplication.before_cut_replay_not_needed' depends on axioms: [propext, Quot.sound]

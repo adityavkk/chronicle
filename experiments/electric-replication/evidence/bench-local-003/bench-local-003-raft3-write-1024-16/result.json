@@ -1,0 +1,47 @@
+{
+  "arm": "raft3",
+  "workload": [
+    "write",
+    1024,
+    16
+  ],
+  "profile": false,
+  "verdict": "PASS",
+  "node_pids": [
+    403528,
+    403556,
+    403585
+  ],
+  "affinity": {
+    "403528": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "403556": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "403585": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 403593,
+  "client_window": {
+    "start_unix_ms": 1791372285643,
+    "end_unix_ms": 1791372298690,
+    "exit_code": 0
+  },
+  "verify_pid": 403641,
+  "verify_window": {
+    "start_unix_ms": 1791372298690,
+    "end_unix_ms": 1791372298806,
+    "exit_code": 0
+  }
+}
