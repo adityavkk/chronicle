@@ -43,6 +43,45 @@ func TestParseServicePoliciesAndAuthorize(t *testing.T) {
 	}
 }
 
+func TestSnapshotPublishIsDistinctSourceScopedGrant(t *testing.T) {
+	policies, err := ParseServicePolicies([]byte(`{"services":[
+		{"identity":"publisher","actions":["snapshot-publish"],"namespaces":["tenant-a"]},
+		{"identity":"writer","actions":["read","append","create","link","claim"],"namespaces":["tenant-a"]},
+		{"identity":"gateway","trusted_gateway":true}
+	]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantA, _ := NormalizeStreamPath("tenant-a/events")
+	tenantB, _ := NormalizeStreamPath("tenant-b/events")
+	credentials, err := ParseServiceBearerConfig("publisher:p,writer:w,gateway:g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := ServiceAccess{Credentials: credentials, Policies: policies}
+	service := func(token string) Principal {
+		principal, status := access.Authenticate(token, "", "")
+		if status != ServiceAuthenticated {
+			t.Fatalf("token %q did not authenticate", token)
+		}
+		return principal
+	}
+	if d, delegated := policies.Authorize(service("p"), ActionSnapshotPublish, tenantA); !d.Allowed() || delegated {
+		t.Fatalf("publisher = allowed %v delegated %v", d.Allowed(), delegated)
+	}
+	if d, _ := policies.Authorize(service("p"), ActionSnapshotPublish, tenantB); d.Allowed() || d.Reason() != ReasonForbidden {
+		t.Fatalf("cross-namespace publisher = allowed %v reason %v", d.Allowed(), d.Reason())
+	}
+	if d, _ := policies.Authorize(service("w"), ActionSnapshotPublish, tenantA); d.Allowed() || d.Reason() != ReasonForbidden {
+		t.Fatalf("ordinary grants authorized publication: allowed %v reason %v", d.Allowed(), d.Reason())
+	}
+	// trusted_gateway intentionally delegates every action, including future
+	// extension actions; this broad grant is explicit in the policy document.
+	if d, delegated := policies.Authorize(service("g"), ActionSnapshotPublish, tenantB); !d.Allowed() || !delegated {
+		t.Fatalf("gateway = allowed %v delegated %v", d.Allowed(), delegated)
+	}
+}
+
 func TestParseServicePoliciesStrictFailures(t *testing.T) {
 	tests := []struct {
 		name string
@@ -54,6 +93,7 @@ func TestParseServicePoliciesStrictFailures(t *testing.T) {
 		{"missing identity", `{"services":[{"actions":["read"],"namespaces":["tenant-a"]}]}`, "identity is required"},
 		{"duplicate identity", `{"services":[{"identity":"svc","trusted_gateway":true},{"identity":"svc","trusted_gateway":true}]}`, "duplicate identity"},
 		{"unknown action", `{"services":[{"identity":"svc","actions":["admin"],"namespaces":["tenant-a"]}]}`, "unknown action"},
+		{"non-canonical snapshot action", `{"services":[{"identity":"svc","actions":["snapshot_publish"],"namespaces":["tenant-a"]}]}`, "unknown action"},
 		{"malformed namespace", `{"services":[{"identity":"svc","actions":["read"],"namespaces":["tenant-a//events"]}]}`, "invalid namespace"},
 		{"empty non-gateway", `{"services":[{"identity":"svc","actions":["read"]}]}`, "requires actions and namespaces"},
 		{"ambiguous gateway restrictions", `{"services":[{"identity":"svc","trusted_gateway":true,"actions":["read"],"namespaces":["tenant-a"]}]}`, "must not set actions or namespaces"},

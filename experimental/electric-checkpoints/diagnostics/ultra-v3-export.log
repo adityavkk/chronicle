@@ -1,0 +1,85 @@
+
+ RUN  v4.0.16 /tmp/durable-streams-checkpoint-v3-review
+
+stdout | packages/state/test/review-v3-export.test.ts > exports exact rows/cut inside persisting mutationFn (onCommittedBatch=false)
+PUBLIC_EXPORT_ECHO {"captureEnabled":false,"captured":{"offset":"0000000000000000_0000000000000120","nextSeq":1,"rowsByCollection":{"items":[]}},"visibleAtCapture":"Optimistic A","restored":[]}
+
+stdout | packages/state/test/review-v3-export.test.ts > exports exact rows/cut inside persisting mutationFn (onCommittedBatch=true)
+PUBLIC_EXPORT_ECHO {"captureEnabled":true,"captured":{"offset":"0000000000000000_0000000000000120","nextSeq":1,"rowsByCollection":{"items":[{"id":"a","name":"Canonical A","_seq":0}]}},"visibleAtCapture":"Optimistic A","restored":[{"id":"a","name":"Canonical A","_seq":0}]}
+
+stdout | packages/state/test/review-v3-export.test.ts > exports B at its source cut while unrelated A persists (onCommittedBatch=false)
+PUBLIC_EXPORT_B_BEFORE_A {"captureEnabled":false,"captured":{"offset":"0000000000000000_0000000000000121","nextSeq":1,"rowsByCollection":{"items":[]}},"visible":[{"id":"a","name":"Optimistic A","$synced":false,"$origin":"local","$key":"a","$collectionId":"stream-db:http://127.0.0.1:44541/review/export:items"}]}
+
+stdout | packages/state/test/review-v3-export.test.ts > exports B at its source cut while unrelated A persists (onCommittedBatch=false)
+PUBLIC_EXPORT_ORDER {"captureEnabled":false,"finalImage":{"offset":"0000000000000000_0000000000000242","nextSeq":2,"rowsByCollection":{"items":[{"id":"a","name":"Canonical A","_seq":1},{"id":"b","name":"Canonical B","_seq":0}]}},"replayImage":{"offset":"0000000000000000_0000000000000242","nextSeq":2,"rowsByCollection":{"items":[{"id":"a","name":"Canonical A","_seq":1},{"id":"b","name":"Canonical B","_seq":0}]}}}
+
+stdout | packages/state/test/review-v3-export.test.ts > exports B at its source cut while unrelated A persists (onCommittedBatch=true)
+PUBLIC_EXPORT_B_BEFORE_A {"captureEnabled":true,"captured":{"offset":"0000000000000000_0000000000000121","nextSeq":1,"rowsByCollection":{"items":[{"id":"b","name":"Canonical B","_seq":0}]}},"visible":[{"id":"b","name":"Canonical B","_seq":0,"$synced":true,"$origin":"remote","$key":"b","$collectionId":"stream-db:http://127.0.0.1:34743/review/export:items"},{"id":"a","name":"Optimistic A","$synced":false,"$origin":"local","$key":"a","$collectionId":"stream-db:http://127.0.0.1:34743/review/export:items"}]}
+
+stdout | packages/state/test/review-v3-export.test.ts > exports B at its source cut while unrelated A persists (onCommittedBatch=true)
+PUBLIC_EXPORT_ORDER {"captureEnabled":true,"finalImage":{"offset":"0000000000000000_0000000000000242","nextSeq":2,"rowsByCollection":{"items":[{"id":"a","name":"Canonical A","_seq":1},{"id":"b","name":"Canonical B","_seq":0}]}},"replayImage":{"offset":"0000000000000000_0000000000000242","nextSeq":2,"rowsByCollection":{"items":[{"id":"a","name":"Canonical A","_seq":1},{"id":"b","name":"Canonical B","_seq":0}]}}}
+
+ ❯ |state| packages/state/test/review-v3-export.test.ts (4 tests | 2 failed) 135ms
+   × exports exact rows/cut inside persisting mutationFn (onCommittedBatch=false) 80ms
+   ✓ exports exact rows/cut inside persisting mutationFn (onCommittedBatch=true) 23ms
+   × exports B at its source cut while unrelated A persists (onCommittedBatch=false) 16ms
+   ✓ exports B at its source cut while unrelated A persists (onCommittedBatch=true) 14ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |state| packages/state/test/review-v3-export.test.ts > exports exact rows/cut inside persisting mutationFn (onCommittedBatch=false)
+AssertionError: expected [] to deeply equal [ { id: 'a', …(2) } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "_seq": 0,
+-     "id": "a",
+-     "name": "Canonical A",
+-   },
+- ]
++ []
+
+ ❯ packages/state/test/review-v3-export.test.ts:79:45
+     77|     expect(captured.offset).toBe(head.offset)
+     78|     expect(captured.nextSeq).toBe(1)
+     79|     expect(captured.rowsByCollection.items).toEqual([{ id: `a`, name: …
+       |                                             ^
+     80|     expect(restored).toEqual([{ id: `a`, name: `Canonical A`, _seq: 0 …
+     81|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |state| packages/state/test/review-v3-export.test.ts > exports B at its source cut while unrelated A persists (onCommittedBatch=false)
+AssertionError: expected [] to deeply equal [ { id: 'b', …(2) } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "_seq": 0,
+-     "id": "b",
+-     "name": "Canonical B",
+-   },
+- ]
++ []
+
+ ❯ packages/state/test/review-v3-export.test.ts:141:45
+    139|     expect(captured.offset).toBe(bOffset)
+    140|     expect(captured.nextSeq).toBe(1)
+    141|     expect(captured.rowsByCollection.items).toEqual([{ id: `b`, name: …
+       |                                             ^
+    142|     expect(finalImage.offset).toBe(replayImage.offset)
+    143|     expect(JSON.stringify(finalImage)).toBe(JSON.stringify(replayImage…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  17:49:22
+   Duration  754ms (transform 341ms, setup 0ms, import 500ms, tests 135ms, environment 0ms)
+

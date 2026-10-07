@@ -1,0 +1,22 @@
+
+ RUN  v4.0.16 /tmp/durable-streams-checkpoint-v5-review
+
+stdout | packages/state/test/review-v5-export.test.ts > exports exact rows/cut inside persisting mutationFn (onCommittedBatch=true)
+PUBLIC_EXPORT_ECHO {"captureEnabled":true,"captured":{"offset":"0000000000000000_0000000000000120","nextSeq":1,"rowsByCollection":{"items":[{"id":"a","name":"Canonical A","_seq":0}]}},"visibleAtCapture":"Optimistic A","restored":[{"id":"a","name":"Canonical A","_seq":0}]}
+
+stdout | packages/state/test/review-v5-export.test.ts > exports B at its source cut while unrelated A persists (onCommittedBatch=false)
+PUBLIC_EXPORT_B_BEFORE_A {"captureEnabled":false,"visible":[{"id":"a","name":"Optimistic A","$synced":false,"$origin":"local","$key":"a","$collectionId":"stream-db:http://127.0.0.1:36101/review/export:items"}]}
+
+stdout | packages/state/test/review-v5-export.test.ts > exports B at its source cut while unrelated A persists (onCommittedBatch=true)
+PUBLIC_EXPORT_B_BEFORE_A {"captureEnabled":true,"captured":{"offset":"0000000000000000_0000000000000121","nextSeq":1,"rowsByCollection":{"items":[{"id":"b","name":"Canonical B","_seq":0}]}},"visible":[{"id":"b","name":"Canonical B","_seq":0,"$synced":true,"$origin":"remote","$key":"b","$collectionId":"stream-db:http://127.0.0.1:35069/review/export:items"},{"id":"a","name":"Optimistic A","$synced":false,"$origin":"local","$key":"a","$collectionId":"stream-db:http://127.0.0.1:35069/review/export:items"}]}
+
+stdout | packages/state/test/review-v5-export.test.ts > exports B at its source cut while unrelated A persists (onCommittedBatch=true)
+PUBLIC_EXPORT_ORDER {"captureEnabled":true,"finalImage":{"offset":"0000000000000000_0000000000000242","nextSeq":2,"rowsByCollection":{"items":[{"id":"a","name":"Canonical A","_seq":1},{"id":"b","name":"Canonical B","_seq":0}]}},"replayImage":{"offset":"0000000000000000_0000000000000242","nextSeq":2,"rowsByCollection":{"items":[{"id":"a","name":"Canonical A","_seq":1},{"id":"b","name":"Canonical B","_seq":0}]}}}
+
+ ✓ |state| packages/state/test/review-v5-export.test.ts (4 tests) 151ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  18:30:16
+   Duration  862ms (transform 382ms, setup 0ms, import 562ms, tests 151ms, environment 0ms)
+

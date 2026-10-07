@@ -1,0 +1,35 @@
+
+ RUN  v3.2.4 /tmp/electric-checkpoint-v3-review/packages/agents-runtime
+
+stdout | test/review-v3-onbatch-export.test.ts > exports a whole committed image or rejects inside the next synchronous onBatch callback
+SYNCHRONOUS_ONBATCH_EXPORT {"beforeB":{"offset":"0000000000000000_0000000000000092","nextSeq":1,"nextEventPosition":1,"rows":[{"text":"A","_timeline_order":"stream:000000000000000000000000:0000000000000001","key":"a","_seq":0}],"rowPointers":[["a",{"offset":null,"subOffset":1}]],"timelineOrders":[["a","stream:000000000000000000000000:0000000000000001"]],"previousBatchOffset":"0000000000000000_0000000000000092"},"insideB":{"offset":"0000000000000000_0000000000000092","nextSeq":1,"nextEventPosition":2,"rows":[{"text":"A","_timeline_order":"stream:000000000000000000000000:0000000000000001","key":"a","_seq":0}],"rowPointers":[["a",{"offset":null,"subOffset":1}],["b",{"offset":null,"subOffset":2}]],"timelineOrders":[["a","stream:000000000000000000000000:0000000000000001"],["b","stream:000000000000000000000000:0000000000000002"]],"previousBatchOffset":"0000000000000000_0000000000000200"},"afterB":{"offset":"0000000000000000_0000000000000200","nextSeq":2,"nextEventPosition":2,"rows":[{"text":"A","_timeline_order":"stream:000000000000000000000000:0000000000000001","key":"a","_seq":0},{"text":"B","_timeline_order":"stream:000000000000000000000000:0000000000000002","key":"b","_seq":1}],"rowPointers":[["a",{"offset":null,"subOffset":1}],["b",{"offset":null,"subOffset":2}]],"timelineOrders":[["a","stream:000000000000000000000000:0000000000000001"],["b","stream:000000000000000000000000:0000000000000002"]],"previousBatchOffset":"0000000000000000_0000000000000200"},"committedImageCount":2}
+
+ ❯ test/review-v3-onbatch-export.test.ts (1 test | 1 failed) 76ms
+   × exports a whole committed image or rejects inside the next synchronous onBatch callback 75ms
+     → expected '{"codec":"electric-entity-image/v3","…' to be '{"codec":"electric-entity-image/v3","…' // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/review-v3-onbatch-export.test.ts > exports a whole committed image or rejects inside the next synchronous onBatch callback
+AssertionError: expected '{"codec":"electric-entity-image/v3","…' to be '{"codec":"electric-entity-image/v3","…' // Object.is equality
+
+Expected: "{"codec":"electric-entity-image/v3","projectionVersion":"onbatch-review","offset":"0000000000000000_0000000000000092","nextSeq":1,"nextEventPosition":1,"rowsByCollection":{"runs":[],"steps":[],"texts":[],"textDeltas":[],"toolCalls":[],"reasoning":[],"reasoningDeltas":[],"errors":[],"inbox":[],"wakes":[],"entityCreated":[],"entityStopped":[],"signals":[],"childStatus":[],"tags":[],"slashCommands":[],"manifests":[],"contextInserted":[],"contextRemoved":[],"replayWatermarks":[],"runtimeCheckpoints":[],"notes":[{"text":"A","_timeline_order":"stream:000000000000000000000000:0000000000000001","key":"a","_seq":0}]},"rowPointers":{"runs":[],"steps":[],"texts":[],"textDeltas":[],"toolCalls":[],"reasoning":[],"reasoningDeltas":[],"errors":[],"inbox":[],"wakes":[],"entityCreated":[],"entityStopped":[],"signals":[],"childStatus":[],"tags":[],"slashCommands":[],"manifests":[],"contextInserted":[],"contextRemoved":[],"replayWatermarks":[],"runtimeCheckpoints":[],"notes":[["a",{"offset":null,"subOffset":1}]]},"timelineOrders":{"runs":[],"steps":[],"texts":[],"textDeltas":[],"toolCalls":[],"reasoning":[],"reasoningDeltas":[],"errors":[],"inbox":[],"wakes":[],"entityCreated":[],"entityStopped":[],"signals":[],"childStatus":[],"tags":[],"slashCommands":[],"manifests":[],"contextInserted":[],"contextRemoved":[],"replayWatermarks":[],"runtimeCheckpoints":[],"notes":[["a","stream:000000000000000000000000:0000000000000001"]]},"previousBatchOffset":"0000000000000000_0000000000000092"}"
+Received: "{"codec":"electric-entity-image/v3","projectionVersion":"onbatch-review","offset":"0000000000000000_0000000000000092","nextSeq":1,"nextEventPosition":2,"rowsByCollection":{"runs":[],"steps":[],"texts":[],"textDeltas":[],"toolCalls":[],"reasoning":[],"reasoningDeltas":[],"errors":[],"inbox":[],"wakes":[],"entityCreated":[],"entityStopped":[],"signals":[],"childStatus":[],"tags":[],"slashCommands":[],"manifests":[],"contextInserted":[],"contextRemoved":[],"replayWatermarks":[],"runtimeCheckpoints":[],"notes":[{"text":"A","_timeline_order":"stream:000000000000000000000000:0000000000000001","key":"a","_seq":0}]},"rowPointers":{"runs":[],"steps":[],"texts":[],"textDeltas":[],"toolCalls":[],"reasoning":[],"reasoningDeltas":[],"errors":[],"inbox":[],"wakes":[],"entityCreated":[],"entityStopped":[],"signals":[],"childStatus":[],"tags":[],"slashCommands":[],"manifests":[],"contextInserted":[],"contextRemoved":[],"replayWatermarks":[],"runtimeCheckpoints":[],"notes":[["a",{"offset":null,"subOffset":1}],["b",{"offset":null,"subOffset":2}]]},"timelineOrders":{"runs":[],"steps":[],"texts":[],"textDeltas":[],"toolCalls":[],"reasoning":[],"reasoningDeltas":[],"errors":[],"inbox":[],"wakes":[],"entityCreated":[],"entityStopped":[],"signals":[],"childStatus":[],"tags":[],"slashCommands":[],"manifests":[],"contextInserted":[],"contextRemoved":[],"replayWatermarks":[],"runtimeCheckpoints":[],"notes":[["a","stream:000000000000000000000000:0000000000000001"],["b","stream:000000000000000000000000:0000000000000002"]]},"previousBatchOffset":"0000000000000000_0000000000000200"}"
+
+ ❯ test/review-v3-onbatch-export.test.ts:83:10
+     81|       expect(captured).toBeDefined()
+     82|       expect(new TextDecoder().decode(encodeEntityProjectionImage(capt…
+     83|         .toBe(new TextDecoder().decode(encodeEntityProjectionImage(bef…
+       |          ^
+     84|     }
+     85|   } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  17:57:42
+   Duration  703ms (transform 215ms, setup 0ms, collect 404ms, tests 76ms, environment 0ms, prepare 65ms)
+
+JUNIT report written to /tmp/electric-checkpoint-v3-review/packages/agents-runtime/junit/test-report.junit.xml

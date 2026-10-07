@@ -133,6 +133,31 @@ func TestLoadEnvMetricsPprof(t *testing.T) {
 	}
 }
 
+func TestLoadEnvEnableSnapshots(t *testing.T) {
+	lookup := func(value string) func(string) (string, bool) {
+		return func(key string) (string, bool) {
+			if key == EnvEnableSnapshots {
+				return value, true
+			}
+			return "", false
+		}
+	}
+	cfg := DefaultConfig()
+	if cfg.EnableSnapshots {
+		t.Fatal("snapshots must be disabled by default")
+	}
+	if err := cfg.LoadEnv(lookup("true")); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.EnableSnapshots {
+		t.Fatal("CHRONICLE_ENABLE_SNAPSHOTS=true did not enable snapshots")
+	}
+	cfg = DefaultConfig()
+	if err := cfg.LoadEnv(lookup("not-a-bool")); err == nil {
+		t.Fatal("invalid snapshot boolean was accepted")
+	}
+}
+
 // TestLoadEnvAuthMode pins the enforcement toggle's env boundary: unset stays
 // insecure (telemetry default — a deploy sync can never auto-enforce),
 // "enforce" opts in, and garbage refuses to start rather than guessing.

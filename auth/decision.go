@@ -3,7 +3,7 @@ package auth
 // Action is a protocol operation subject to an authorization decision
 // (issue #126: Authorize(principal, path, action)). The data plane uses
 // Read/Append/Create/Delete; the subscription control plane uses
-// Subscribe/Link/Claim.
+// Subscribe/Link/Claim; snapshot publication has its own source-scoped grant.
 type Action int
 
 const (
@@ -22,6 +22,8 @@ const (
 	ActionLink
 	// ActionClaim is claiming a pull-wake, which mints the write token.
 	ActionClaim
+	// ActionSnapshotPublish is publishing a projection snapshot for a source.
+	ActionSnapshotPublish
 )
 
 // AppendFence is the claim identity a stream mutation must compare with the
@@ -63,6 +65,8 @@ func (a Action) String() string {
 		return "link"
 	case ActionClaim:
 		return "claim"
+	case ActionSnapshotPublish:
+		return "snapshot-publish"
 	default:
 		return "unknown"
 	}

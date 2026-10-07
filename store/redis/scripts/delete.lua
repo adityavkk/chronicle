@@ -24,9 +24,10 @@ if tonumber(m.refCount or '0') > 0 then
   redis.call('PERSIST', KEYS[2])
   redis.call('PERSIST', KEYS[3])
   redis.call('PERSIST', KEYS[4])
+  redis.call('DEL', KEYS[5])
   return { 'SOFTDELETED' }
 end
 
-redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
+redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5])
 redis.call('PUBLISH', ARGV[1], 'd')
 return { 'DELETED', m.forkedFrom or '' }

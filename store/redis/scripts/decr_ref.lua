@@ -27,7 +27,7 @@ end
 if rc == 0 and m.softDel == '1' then
   -- Last fork detached from a soft-deleted source: cascade hard delete.
   local parent = m.forkedFrom or ''
-  redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
+  redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5])
   redis.call('PUBLISH', ARGV[2], 'd')
   return { 'CASCADE', parent }
 end

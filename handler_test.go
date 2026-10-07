@@ -1682,18 +1682,28 @@ func TestCORSListsRequestIDHeader(t *testing.T) {
 		name       string
 		configured string
 		want       string
+		snapshots  bool
 	}{
-		{"default", "", correlation.DefaultHeader},
-		{"configured", "My-Platform-Request-ID", "My-Platform-Request-ID"},
+		{"default", "", correlation.DefaultHeader, false},
+		{"configured", "My-Platform-Request-ID", "My-Platform-Request-ID", false},
+		{"snapshots-default", "", correlation.DefaultHeader, true},
+		{"snapshots-configured", "My-Platform-Request-ID", "My-Platform-Request-ID", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := testHandler(time.Second, time.Second)
 			h.RequestIDHeader = tc.configured
+			h.EnableSnapshots = tc.snapshots
 			rec := do(h, http.MethodOptions, "/agents/e1/session", nil, nil)
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("preflight status = %d, want 204", rec.Code)
+			}
 			for _, list := range []string{"Access-Control-Allow-Headers", "Access-Control-Expose-Headers"} {
 				if got := rec.Header().Get(list); !strings.Contains(got, tc.want) {
 					t.Errorf("%s = %q, missing %s", list, got, tc.want)
+				}
+				if got := rec.Header().Get(list); strings.Contains(got, protocol.HeaderStreamSnapshot) != tc.snapshots {
+					t.Errorf("%s = %q, want snapshot headers enabled=%v", list, got, tc.snapshots)
 				}
 			}
 		})

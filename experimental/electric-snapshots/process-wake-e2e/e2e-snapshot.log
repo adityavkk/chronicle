@@ -1,0 +1,67 @@
+
+> @electric-ax/agents-runtime@0.6.3 test /home/user/workspace/electric-snapshot-upstream/packages/agents-runtime
+> vitest run --run test/chronicle-process-wake-e2e.test.ts
+
+
+ RUN  v3.2.4 /home/user/workspace/electric-snapshot-upstream/packages/agents-runtime
+
+(node:257127) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"level":30,"time":1791011802479,"msg":"[agent-runtime] Registered entity type: e2e"}
+{"level":30,"time":1791011802480,"msg":"[agent-runtime] 1 entity types ready: e2e"}
+{"level":30,"time":1791011802608,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake received (epoch=1)"}
+{"level":30,"time":1791011802634,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] [sandbox] entity=/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791011802640,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000000484 ackOffset=0000000000000000_0000000000000484 events=2 payloadType=string firstWake=false"}
+{"level":30,"time":1791011802644,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] handler returned"}
+{"level":30,"time":1791011802682,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] done acking /e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24/main at 0000000000000000_0000000000001341"}
+{"level":30,"time":1791011802702,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake done claimMs=11.76 preloadMs=15.64 handlerMs=4.16 httpMs=0 httpCount=0 totalMs=93.22"}
+{"level":30,"time":1791011802736,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake received (epoch=2)"}
+{"level":30,"time":1791011802754,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] [sandbox] entity=/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791011802754,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000001721 ackOffset=0000000000000000_0000000000001721 events=9 payloadType=string firstWake=false"}
+{"level":30,"time":1791011802756,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] handler returned"}
+{"level":30,"time":1791011802778,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] done acking /e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24/main at 0000000000000000_0000000000002779"}
+{"level":30,"time":1791011802794,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake done claimMs=9.06 preloadMs=10.63 handlerMs=1.61 httpMs=0 httpCount=0 totalMs=57.37"}
+{"level":30,"time":1791011802821,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake received (epoch=3)"}
+{"level":30,"time":1791011802841,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] [sandbox] entity=/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791011802842,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000003173 ackOffset=0000000000000000_0000000000003173 events=16 payloadType=object firstWake=false"}
+{"level":30,"time":1791011802857,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] SIGINT received, aborting active handler invocation"}
+{"level":30,"time":1791011802858,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] handler returned"}
+{"level":30,"time":1791011802868,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] shutdown requested, closing wake"}
+{"level":30,"time":1791011802869,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] done acking /e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24/main at 0000000000000000_0000000000003474"}
+{"level":30,"time":1791011802869,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] shutdown requested, sending done callback at checkpoint"}
+{"level":30,"time":1791011802887,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake done claimMs=12.38 preloadMs=14.44 handlerMs=15.41 httpMs=0 httpCount=0 totalMs=65.9"}
+{"level":30,"time":1791011802889,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake received (epoch=4)"}
+{"level":30,"time":1791011802905,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] [sandbox] entity=/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791011802906,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000003960 ackOffset=0000000000000000_0000000000003960 events=18 payloadType=object firstWake=false"}
+{"level":30,"time":1791011802906,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] handler returned"}
+{"level":30,"time":1791011802907,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] done acking /e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24/main at 0000000000000000_0000000000003960"}
+{"level":30,"time":1791011802921,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake done claimMs=6.56 preloadMs=9.05 handlerMs=0.01 httpMs=0 httpCount=0 totalMs=32.44"}
+{"level":30,"time":1791011802945,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake received (epoch=5)"}
+{"level":30,"time":1791011802962,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] [sandbox] entity=/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791011802962,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000004354 ackOffset=0000000000000000_0000000000004354 events=19 payloadType=object firstWake=false"}
+{"level":30,"time":1791011802962,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] handler returned"}
+{"level":30,"time":1791011802963,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] done acking /e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24/main at 0000000000000000_0000000000004354"}
+{"level":30,"time":1791011802970,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake done claimMs=7.87 preloadMs=10.65 handlerMs=0.01 httpMs=0 httpCount=0 totalMs=24.48"}
+{"level":50,"time":1791011802970,"err":{"type":"Error","message":"Done callback failed (503): injected callback failure","stack":"Error: Done callback failed (503): injected callback failure\n    at sendDone (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/process-wake.ts:3034:11)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at Module.processWake (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/process-wake.ts:2934:9)"},"msg":"[agent-runtime] Error processing wake for /e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24:"}
+{"level":30,"time":1791011833266,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake received (epoch=6)"}
+{"level":30,"time":1791011833278,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] [sandbox] entity=/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791011833279,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000004354 ackOffset=0000000000000000_0000000000004354 events=19 payloadType=object firstWake=false"}
+{"level":30,"time":1791011833279,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] handler returned"}
+{"level":30,"time":1791011833293,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] done acking /e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24/main at 0000000000000000_0000000000004354"}
+{"level":30,"time":1791011833310,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake done claimMs=5.89 preloadMs=7.64 handlerMs=0.19 httpMs=0 httpCount=0 totalMs=44.65"}
+{"level":30,"time":1791011833312,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake received (epoch=7)"}
+{"level":30,"time":1791011833325,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] [sandbox] entity=/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24 requested=(none) resolved=unrestricted cwd=/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime"}
+{"level":30,"time":1791011833326,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] invoking handler wakeType=inbox wakeOffset=0000000000000000_0000000000004932 ackOffset=0000000000000000_0000000000004932 events=24 payloadType=object firstWake=false"}
+{"level":30,"time":1791011833326,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] handler returned"}
+{"level":30,"time":1791011833326,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] done acking /e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24/main at 0000000000000000_0000000000004932"}
+{"level":30,"time":1791011833340,"msg":"[/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24] wake done claimMs=6.99 preloadMs=8.05 handlerMs=0.01 httpMs=0 httpCount=0 totalMs=27.81"}
+{"kind":"chronicle-process-wake-smoke","mode":"snapshot-full-raw-replay","entityUrl":"/e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24","streamPath":"e2e/activation-1f5de2ee-9bac-4772-8aac-89bcdb564e24/main","subscriptionId":"webhook:e2e:72e8e39d96f97cb2","headOffset":"0000000000000000_0000000000004932","ackedOffset":"0000000000000000_0000000000004932","snapshot":{"hit":true,"bytes":3065,"cut":"0000000000000000_0000000000001341"},"assertions":{"state":true,"rawInputs":true,"persistedOutput":true,"ack":true,"signal":true,"cancellation":true,"ackFailureRedelivery":true,"exactlyOnceExternalEffectsClaimed":false,"recoverySnapshotGet200":true}}
+ ✓ test/chronicle-process-wake-e2e.test.ts (1 test) 34373ms
+   ✓ processWake against Chronicle > recovers a second real webhook activation from an image and acks it  34355ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  07:16:37
+   Duration  35.66s (transform 1.06s, setup 0ms, collect 1.09s, tests 34.37s, environment 0ms, prepare 55ms)
+
+JUNIT report written to /home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/junit/test-report.junit.xml

@@ -1,0 +1,3310 @@
+{
+  "schemaVersion": 1,
+  "kind": "chronicle-process-wake-benchmark-campaign",
+  "generatedAt": "2026-10-03T18:28:35.754Z",
+  "labels": {
+    "processStartup": "one fresh Node/Vitest/runtime/agents-server process per scenario/mode/phase run",
+    "activationRecovery": "fresh in-process EntityStreamDB per webhook activation",
+    "memoryScope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+    "rawInputRecovery": "bounded-checkpoint-v1"
+  },
+  "pins": {
+    "electric": "bb397424db0e1c153dc356713fd3dfd40315470c",
+    "durableStreams": "461b40267aabd644558f9b19dbb9507dd5f691cf"
+  },
+  "hashes": {
+    "electricPatchSha256": "1baa8342ce59d2941e4a5308149b2aa8e9ff2e1d8aaa236e011ab720435f6f3d",
+    "durablePatchSha256": "1a6bf2b17d7adb7378fb5ed30e9454f754e2364cbc3085a5c3bb7da342bb0548",
+    "harnessSha256": "b3b75eb9c4492e8202d1869f169b7676ff8773bece7e4e79fcbc5cc196466f7b",
+    "chronicleBinarySha256": "5e1e8910a3dc8ae024e4061b618d1f78e3579240774fa712e721f18c6f0037e7",
+    "electricImageRepoDigest": null,
+    "electricImageManifest": null,
+    "electricImageConfig": "sha256:d461daaa4ed138126812e228ed8eecc3443cd9331e48cd0b8a123f40cfb8dbc6",
+    "before": {
+      "electricPatchSha256": "1baa8342ce59d2941e4a5308149b2aa8e9ff2e1d8aaa236e011ab720435f6f3d",
+      "durablePatchSha256": "1a6bf2b17d7adb7378fb5ed30e9454f754e2364cbc3085a5c3bb7da342bb0548",
+      "harnessSha256": "b3b75eb9c4492e8202d1869f169b7676ff8773bece7e4e79fcbc5cc196466f7b",
+      "chronicleBinarySha256": "5e1e8910a3dc8ae024e4061b618d1f78e3579240774fa712e721f18c6f0037e7"
+    },
+    "after": {
+      "electricPatchSha256": "1baa8342ce59d2941e4a5308149b2aa8e9ff2e1d8aaa236e011ab720435f6f3d",
+      "durablePatchSha256": "1a6bf2b17d7adb7378fb5ed30e9454f754e2364cbc3085a5c3bb7da342bb0548",
+      "harnessSha256": "b3b75eb9c4492e8202d1869f169b7676ff8773bece7e4e79fcbc5cc196466f7b",
+      "chronicleBinarySha256": "5e1e8910a3dc8ae024e4061b618d1f78e3579240774fa712e721f18c6f0037e7"
+    },
+    "drift": []
+  },
+  "campaign": {
+    "scenarios": [
+      "update-heavy",
+      "append-only",
+      "large-inbox"
+    ],
+    "modes": [
+      "replay",
+      "snapshot-checkpointed-inputs"
+    ],
+    "measuredSamplesPerModeScenario": 2,
+    "warmupsPerRun": 1,
+    "phaseOrders": [
+      [
+        "replay",
+        "snapshot-checkpointed-inputs"
+      ],
+      [
+        "snapshot-checkpointed-inputs",
+        "replay"
+      ]
+    ],
+    "validationTimed": false
+  },
+  "commands": [
+    "CHRONICLE_BENCH_SCENARIO=update-heavy CHRONICLE_BENCH_MODE=replay CHRONICLE_BENCH_PHASE=replay-first CHRONICLE_BENCH_INDEX_BASE=0 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts",
+    "CHRONICLE_BENCH_SCENARIO=update-heavy CHRONICLE_BENCH_MODE=snapshot-checkpointed-inputs CHRONICLE_BENCH_PHASE=replay-first CHRONICLE_BENCH_INDEX_BASE=0 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts",
+    "CHRONICLE_BENCH_SCENARIO=update-heavy CHRONICLE_BENCH_MODE=snapshot-checkpointed-inputs CHRONICLE_BENCH_PHASE=snapshot-first CHRONICLE_BENCH_INDEX_BASE=1 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts",
+    "CHRONICLE_BENCH_SCENARIO=update-heavy CHRONICLE_BENCH_MODE=replay CHRONICLE_BENCH_PHASE=snapshot-first CHRONICLE_BENCH_INDEX_BASE=1 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts",
+    "CHRONICLE_BENCH_SCENARIO=append-only CHRONICLE_BENCH_MODE=replay CHRONICLE_BENCH_PHASE=replay-first CHRONICLE_BENCH_INDEX_BASE=0 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts",
+    "CHRONICLE_BENCH_SCENARIO=append-only CHRONICLE_BENCH_MODE=snapshot-checkpointed-inputs CHRONICLE_BENCH_PHASE=replay-first CHRONICLE_BENCH_INDEX_BASE=0 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts",
+    "CHRONICLE_BENCH_SCENARIO=append-only CHRONICLE_BENCH_MODE=snapshot-checkpointed-inputs CHRONICLE_BENCH_PHASE=snapshot-first CHRONICLE_BENCH_INDEX_BASE=1 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts",
+    "CHRONICLE_BENCH_SCENARIO=append-only CHRONICLE_BENCH_MODE=replay CHRONICLE_BENCH_PHASE=snapshot-first CHRONICLE_BENCH_INDEX_BASE=1 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts",
+    "CHRONICLE_BENCH_SCENARIO=large-inbox CHRONICLE_BENCH_MODE=replay CHRONICLE_BENCH_PHASE=replay-first CHRONICLE_BENCH_INDEX_BASE=0 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts",
+    "CHRONICLE_BENCH_SCENARIO=large-inbox CHRONICLE_BENCH_MODE=snapshot-checkpointed-inputs CHRONICLE_BENCH_PHASE=replay-first CHRONICLE_BENCH_INDEX_BASE=0 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts",
+    "CHRONICLE_BENCH_SCENARIO=large-inbox CHRONICLE_BENCH_MODE=snapshot-checkpointed-inputs CHRONICLE_BENCH_PHASE=snapshot-first CHRONICLE_BENCH_INDEX_BASE=1 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts",
+    "CHRONICLE_BENCH_SCENARIO=large-inbox CHRONICLE_BENCH_MODE=replay CHRONICLE_BENCH_PHASE=snapshot-first CHRONICLE_BENCH_INDEX_BASE=1 CHRONICLE_BENCH_SAMPLES=1 CHRONICLE_BENCH_WARMUPS=1 pnpm test --run test/chronicle-process-wake-benchmark.test.ts"
+  ],
+  "samples": [
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "update-heavy",
+      "mode": "replay",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-update-heavy-ec4596be-e1c2-42fe-8a94-55ae136f1cb5",
+      "sourceHash": "c3f0251279651a347c7d6544421bcc58caa7ab13b07956188b163e7d490f6392",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 502,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051655913,
+        "totalMs": 81.88,
+        "claimMs": 12.35,
+        "preloadMs": 11.93,
+        "handlerMs": 2.64
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000080865",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000080865",
+            "nextOffset": "0000000000000000_0000000000081805",
+            "incarnation": "d1baddc7312501597b18bb7113bfef13"
+          },
+          {
+            "offset": "0000000000000000_0000000000081805",
+            "nextOffset": "0000000000000000_0000000000082016",
+            "incarnation": "d1baddc7312501597b18bb7113bfef13"
+          },
+          {
+            "offset": "0000000000000000_0000000000082016",
+            "nextOffset": null,
+            "incarnation": "d1baddc7312501597b18bb7113bfef13"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 8,
+          "requestBytes": 1563,
+          "responseBytes": 82532
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 81372
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 7,
+          "requestBytes": 1563,
+          "responseBytes": 1160
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 52436,
+        "cpuSystemMicros": 15825,
+        "heapBeforeBytes": 115631208,
+        "heapAfterBytes": 123073848,
+        "peakHeapBytes": 123073848,
+        "rssBeforeBytes": 418979840,
+        "rssAfterBytes": 419520512,
+        "peakRssBytes": 419520512,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000082016",
+        "finalHead": "0000000000000000_0000000000082016",
+        "acked": "0000000000000000_0000000000082016"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "update-heavy",
+      "mode": "replay",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": 0,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-update-heavy-2d7a6c2f-f2bc-4542-972d-4481ca3cd4d6",
+      "sourceHash": "c3f0251279651a347c7d6544421bcc58caa7ab13b07956188b163e7d490f6392",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 502,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051656268,
+        "totalMs": 65.61,
+        "claimMs": 6.93,
+        "preloadMs": 11.23,
+        "handlerMs": 0.76
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000080865",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000080865",
+            "nextOffset": "0000000000000000_0000000000081805",
+            "incarnation": "258442b1e54604ab969371abfcc5ac30"
+          },
+          {
+            "offset": "0000000000000000_0000000000081805",
+            "nextOffset": "0000000000000000_0000000000082016",
+            "incarnation": "258442b1e54604ab969371abfcc5ac30"
+          },
+          {
+            "offset": "0000000000000000_0000000000082016",
+            "nextOffset": null,
+            "incarnation": "258442b1e54604ab969371abfcc5ac30"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 8,
+          "requestBytes": 1563,
+          "responseBytes": 82532
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 81372
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 7,
+          "requestBytes": 1563,
+          "responseBytes": 1160
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 48992,
+        "cpuSystemMicros": 5910,
+        "heapBeforeBytes": 121794224,
+        "heapAfterBytes": 128869200,
+        "peakHeapBytes": 128869200,
+        "rssBeforeBytes": 419790848,
+        "rssAfterBytes": 420061184,
+        "peakRssBytes": 420061184,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000082016",
+        "finalHead": "0000000000000000_0000000000082016",
+        "acked": "0000000000000000_0000000000082016"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "update-heavy",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-update-heavy-1dead5b6-68f4-45f6-bb5f-b0ce2e5c66ed",
+      "sourceHash": "c3f0251279651a347c7d6544421bcc58caa7ab13b07956188b163e7d490f6392",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 502,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051693630,
+        "totalMs": 77.63,
+        "claimMs": 6.11,
+        "preloadMs": 7.8,
+        "handlerMs": 2.13
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 6932,
+        "cut": "0000000000000000_0000000000080464",
+        "publication": {
+          "status": 200,
+          "durationMs": 3.7,
+          "requestBytes": 8229
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "488a513ee8974e4c2f58c7e9676903a9",
+        "checkpointSourceCut": "0000000000000000_0000000000080464",
+        "stateCut": "0000000000000000_0000000000080464",
+        "processedThrough": "0000000000000000_0000000000080253",
+        "processedSeq": 504,
+        "suffixStartOffset": "0000000000000000_0000000000080464",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000080464",
+            "nextOffset": "0000000000000000_0000000000080865",
+            "incarnation": "488a513ee8974e4c2f58c7e9676903a9"
+          },
+          {
+            "offset": "0000000000000000_0000000000080865",
+            "nextOffset": "0000000000000000_0000000000081805",
+            "incarnation": "488a513ee8974e4c2f58c7e9676903a9"
+          },
+          {
+            "offset": "0000000000000000_0000000000081805",
+            "nextOffset": "0000000000000000_0000000000082016",
+            "incarnation": "488a513ee8974e4c2f58c7e9676903a9"
+          },
+          {
+            "offset": "0000000000000000_0000000000082016",
+            "nextOffset": null,
+            "incarnation": "488a513ee8974e4c2f58c7e9676903a9"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 10,
+          "requestBytes": 9792,
+          "responseBytes": 8495
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 6932
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 8229,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 403
+        },
+        "other": {
+          "requests": 7,
+          "requestBytes": 1563,
+          "responseBytes": 1160
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 68750,
+        "cpuSystemMicros": 5,
+        "heapBeforeBytes": 111607440,
+        "heapAfterBytes": 119481416,
+        "peakHeapBytes": 119481416,
+        "rssBeforeBytes": 423714816,
+        "rssAfterBytes": 423985152,
+        "peakRssBytes": 423985152,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000082016",
+        "finalHead": "0000000000000000_0000000000082016",
+        "acked": "0000000000000000_0000000000082016"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "update-heavy",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": 0,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-update-heavy-4ac397db-1711-48c3-86cb-85d6fff626c5",
+      "sourceHash": "c3f0251279651a347c7d6544421bcc58caa7ab13b07956188b163e7d490f6392",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 502,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051693966,
+        "totalMs": 69.45,
+        "claimMs": 6.79,
+        "preloadMs": 8.56,
+        "handlerMs": 0.83
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 6932,
+        "cut": "0000000000000000_0000000000080464",
+        "publication": {
+          "status": 200,
+          "durationMs": 2.31,
+          "requestBytes": 8229
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "ae7ca5bbb2060d701a6ec60095248233",
+        "checkpointSourceCut": "0000000000000000_0000000000080464",
+        "stateCut": "0000000000000000_0000000000080464",
+        "processedThrough": "0000000000000000_0000000000080253",
+        "processedSeq": 504,
+        "suffixStartOffset": "0000000000000000_0000000000080464",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000080464",
+            "nextOffset": "0000000000000000_0000000000080865",
+            "incarnation": "ae7ca5bbb2060d701a6ec60095248233"
+          },
+          {
+            "offset": "0000000000000000_0000000000080865",
+            "nextOffset": "0000000000000000_0000000000081805",
+            "incarnation": "ae7ca5bbb2060d701a6ec60095248233"
+          },
+          {
+            "offset": "0000000000000000_0000000000081805",
+            "nextOffset": "0000000000000000_0000000000082016",
+            "incarnation": "ae7ca5bbb2060d701a6ec60095248233"
+          },
+          {
+            "offset": "0000000000000000_0000000000082016",
+            "nextOffset": null,
+            "incarnation": "ae7ca5bbb2060d701a6ec60095248233"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 10,
+          "requestBytes": 9792,
+          "responseBytes": 8495
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 6932
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 8229,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 403
+        },
+        "other": {
+          "requests": 7,
+          "requestBytes": 1563,
+          "responseBytes": 1160
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 58025,
+        "cpuSystemMicros": 2494,
+        "heapBeforeBytes": 120648296,
+        "heapAfterBytes": 128119760,
+        "peakHeapBytes": 128119760,
+        "rssBeforeBytes": 424796160,
+        "rssAfterBytes": 425066496,
+        "peakRssBytes": 425066496,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000082016",
+        "finalHead": "0000000000000000_0000000000082016",
+        "acked": "0000000000000000_0000000000082016"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "update-heavy",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-update-heavy-266c3381-7498-40e2-848f-16386b78d323",
+      "sourceHash": "c3f0251279651a347c7d6544421bcc58caa7ab13b07956188b163e7d490f6392",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 502,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051731680,
+        "totalMs": 81.41,
+        "claimMs": 5.55,
+        "preloadMs": 7.15,
+        "handlerMs": 2.34
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 6932,
+        "cut": "0000000000000000_0000000000080464",
+        "publication": {
+          "status": 200,
+          "durationMs": 2.83,
+          "requestBytes": 8229
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "08d297300ed24e770e5fd74dabe4eae4",
+        "checkpointSourceCut": "0000000000000000_0000000000080464",
+        "stateCut": "0000000000000000_0000000000080464",
+        "processedThrough": "0000000000000000_0000000000080253",
+        "processedSeq": 504,
+        "suffixStartOffset": "0000000000000000_0000000000080464",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000080464",
+            "nextOffset": "0000000000000000_0000000000080865",
+            "incarnation": "08d297300ed24e770e5fd74dabe4eae4"
+          },
+          {
+            "offset": "0000000000000000_0000000000080865",
+            "nextOffset": "0000000000000000_0000000000081805",
+            "incarnation": "08d297300ed24e770e5fd74dabe4eae4"
+          },
+          {
+            "offset": "0000000000000000_0000000000081805",
+            "nextOffset": "0000000000000000_0000000000082016",
+            "incarnation": "08d297300ed24e770e5fd74dabe4eae4"
+          },
+          {
+            "offset": "0000000000000000_0000000000082016",
+            "nextOffset": null,
+            "incarnation": "08d297300ed24e770e5fd74dabe4eae4"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 10,
+          "requestBytes": 9792,
+          "responseBytes": 8495
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 6932
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 8229,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 403
+        },
+        "other": {
+          "requests": 7,
+          "requestBytes": 1563,
+          "responseBytes": 1160
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 58522,
+        "cpuSystemMicros": 9148,
+        "heapBeforeBytes": 103613464,
+        "heapAfterBytes": 111492760,
+        "peakHeapBytes": 111492760,
+        "rssBeforeBytes": 424951808,
+        "rssAfterBytes": 424951808,
+        "peakRssBytes": 424951808,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000082016",
+        "finalHead": "0000000000000000_0000000000082016",
+        "acked": "0000000000000000_0000000000082016"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "update-heavy",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": 1,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-update-heavy-e2e53e4a-a5c3-4666-8a26-6d7b7a7f48ee",
+      "sourceHash": "c3f0251279651a347c7d6544421bcc58caa7ab13b07956188b163e7d490f6392",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 502,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051732012,
+        "totalMs": 69.25,
+        "claimMs": 7.08,
+        "preloadMs": 9.2,
+        "handlerMs": 0.89
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 6932,
+        "cut": "0000000000000000_0000000000080464",
+        "publication": {
+          "status": 200,
+          "durationMs": 1.79,
+          "requestBytes": 8229
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "f906f63440f76934f0b4e4dd4d7a104c",
+        "checkpointSourceCut": "0000000000000000_0000000000080464",
+        "stateCut": "0000000000000000_0000000000080464",
+        "processedThrough": "0000000000000000_0000000000080253",
+        "processedSeq": 504,
+        "suffixStartOffset": "0000000000000000_0000000000080464",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000080464",
+            "nextOffset": "0000000000000000_0000000000080865",
+            "incarnation": "f906f63440f76934f0b4e4dd4d7a104c"
+          },
+          {
+            "offset": "0000000000000000_0000000000080865",
+            "nextOffset": "0000000000000000_0000000000081805",
+            "incarnation": "f906f63440f76934f0b4e4dd4d7a104c"
+          },
+          {
+            "offset": "0000000000000000_0000000000081805",
+            "nextOffset": "0000000000000000_0000000000082016",
+            "incarnation": "f906f63440f76934f0b4e4dd4d7a104c"
+          },
+          {
+            "offset": "0000000000000000_0000000000082016",
+            "nextOffset": null,
+            "incarnation": "f906f63440f76934f0b4e4dd4d7a104c"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 10,
+          "requestBytes": 9792,
+          "responseBytes": 8495
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 6932
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 8229,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 403
+        },
+        "other": {
+          "requests": 7,
+          "requestBytes": 1563,
+          "responseBytes": 1160
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 57677,
+        "cpuSystemMicros": 2395,
+        "heapBeforeBytes": 111002072,
+        "heapAfterBytes": 118434800,
+        "peakHeapBytes": 118434800,
+        "rssBeforeBytes": 425218048,
+        "rssAfterBytes": 425488384,
+        "peakRssBytes": 425488384,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000082016",
+        "finalHead": "0000000000000000_0000000000082016",
+        "acked": "0000000000000000_0000000000082016"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "update-heavy",
+      "mode": "replay",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-update-heavy-c319701e-ca8e-42a4-8436-388b04c9bd9a",
+      "sourceHash": "c3f0251279651a347c7d6544421bcc58caa7ab13b07956188b163e7d490f6392",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 502,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051770351,
+        "totalMs": 72.46,
+        "claimMs": 5.93,
+        "preloadMs": 11.54,
+        "handlerMs": 2.67
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000080865",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000080865",
+            "nextOffset": "0000000000000000_0000000000081805",
+            "incarnation": "fc13ec454365f667795a68b1c52790f6"
+          },
+          {
+            "offset": "0000000000000000_0000000000081805",
+            "nextOffset": "0000000000000000_0000000000082016",
+            "incarnation": "fc13ec454365f667795a68b1c52790f6"
+          },
+          {
+            "offset": "0000000000000000_0000000000082016",
+            "nextOffset": null,
+            "incarnation": "fc13ec454365f667795a68b1c52790f6"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 8,
+          "requestBytes": 1563,
+          "responseBytes": 82532
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 81372
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 7,
+          "requestBytes": 1563,
+          "responseBytes": 1160
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 55498,
+        "cpuSystemMicros": 7635,
+        "heapBeforeBytes": 105477424,
+        "heapAfterBytes": 112897840,
+        "peakHeapBytes": 112897840,
+        "rssBeforeBytes": 427048960,
+        "rssAfterBytes": 427048960,
+        "peakRssBytes": 427048960,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000082016",
+        "finalHead": "0000000000000000_0000000000082016",
+        "acked": "0000000000000000_0000000000082016"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "update-heavy",
+      "mode": "replay",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": 1,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-update-heavy-86717f64-d001-4c18-95d1-adae59691f18",
+      "sourceHash": "c3f0251279651a347c7d6544421bcc58caa7ab13b07956188b163e7d490f6392",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 502,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051770736,
+        "totalMs": 61.57,
+        "claimMs": 6.87,
+        "preloadMs": 13.52,
+        "handlerMs": 0.84
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000080865",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000080865",
+            "nextOffset": "0000000000000000_0000000000081805",
+            "incarnation": "ae98a1e04dcd0eda45a0e66d521168cb"
+          },
+          {
+            "offset": "0000000000000000_0000000000081805",
+            "nextOffset": "0000000000000000_0000000000082016",
+            "incarnation": "ae98a1e04dcd0eda45a0e66d521168cb"
+          },
+          {
+            "offset": "0000000000000000_0000000000082016",
+            "nextOffset": null,
+            "incarnation": "ae98a1e04dcd0eda45a0e66d521168cb"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 8,
+          "requestBytes": 1563,
+          "responseBytes": 82532
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 81372
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 7,
+          "requestBytes": 1563,
+          "responseBytes": 1160
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 45032,
+        "cpuSystemMicros": 6764,
+        "heapBeforeBytes": 112218304,
+        "heapAfterBytes": 119303480,
+        "peakHeapBytes": 119303480,
+        "rssBeforeBytes": 427859968,
+        "rssAfterBytes": 428130304,
+        "peakRssBytes": 428130304,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000082016",
+        "finalHead": "0000000000000000_0000000000082016",
+        "acked": "0000000000000000_0000000000082016"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "append-only",
+      "mode": "replay",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-append-only-c70bf0b7-4064-4a6c-b593-efecd5804e55",
+      "sourceHash": "0e392bec990d12aa7451fa4fdec4661fcc7582dfa7a8af5a046c6c695bf0b0b3",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 302,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051808969,
+        "totalMs": 122.58,
+        "claimMs": 7.43,
+        "preloadMs": 14.55,
+        "handlerMs": 4.52
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000038989",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000038989",
+            "nextOffset": "0000000000000000_0000000000039928",
+            "incarnation": "6bfb6f8e8587d98b1098632f7acf60f3"
+          },
+          {
+            "offset": "0000000000000000_0000000000039928",
+            "nextOffset": "0000000000000000_0000000000040152",
+            "incarnation": "6bfb6f8e8587d98b1098632f7acf60f3"
+          },
+          {
+            "offset": "0000000000000000_0000000000040152",
+            "nextOffset": "0000000000000000_0000000000040363",
+            "incarnation": "6bfb6f8e8587d98b1098632f7acf60f3"
+          },
+          {
+            "offset": "0000000000000000_0000000000040363",
+            "nextOffset": null,
+            "incarnation": "6bfb6f8e8587d98b1098632f7acf60f3"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 10,
+          "requestBytes": 1788,
+          "responseBytes": 40682
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 39297
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 9,
+          "requestBytes": 1788,
+          "responseBytes": 1385
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 107036,
+        "cpuSystemMicros": 6308,
+        "heapBeforeBytes": 291042408,
+        "heapAfterBytes": 282622264,
+        "peakHeapBytes": 300847912,
+        "rssBeforeBytes": 456531968,
+        "rssAfterBytes": 459776000,
+        "peakRssBytes": 459776000,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000040363",
+        "finalHead": "0000000000000000_0000000000040363",
+        "acked": "0000000000000000_0000000000040363"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "append-only",
+      "mode": "replay",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": 0,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-append-only-3ad5f83f-f37d-49d3-a846-7f4eb3d09c19",
+      "sourceHash": "0e392bec990d12aa7451fa4fdec4661fcc7582dfa7a8af5a046c6c695bf0b0b3",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 302,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051809415,
+        "totalMs": 93.56,
+        "claimMs": 5.93,
+        "preloadMs": 11.31,
+        "handlerMs": 0.88
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000038989",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000038989",
+            "nextOffset": "0000000000000000_0000000000039928",
+            "incarnation": "0b451b5128ced619c21ab93a13a67ebe"
+          },
+          {
+            "offset": "0000000000000000_0000000000039928",
+            "nextOffset": "0000000000000000_0000000000040152",
+            "incarnation": "0b451b5128ced619c21ab93a13a67ebe"
+          },
+          {
+            "offset": "0000000000000000_0000000000040152",
+            "nextOffset": "0000000000000000_0000000000040363",
+            "incarnation": "0b451b5128ced619c21ab93a13a67ebe"
+          },
+          {
+            "offset": "0000000000000000_0000000000040363",
+            "nextOffset": null,
+            "incarnation": "0b451b5128ced619c21ab93a13a67ebe"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 10,
+          "requestBytes": 1788,
+          "responseBytes": 40682
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 39297
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 9,
+          "requestBytes": 1788,
+          "responseBytes": 1385
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 73235,
+        "cpuSystemMicros": 3725,
+        "heapBeforeBytes": 284878976,
+        "heapAfterBytes": 297625488,
+        "peakHeapBytes": 297625488,
+        "rssBeforeBytes": 463560704,
+        "rssAfterBytes": 463831040,
+        "peakRssBytes": 463831040,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000040363",
+        "finalHead": "0000000000000000_0000000000040363",
+        "acked": "0000000000000000_0000000000040363"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "append-only",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-append-only-305b95fb-4689-4053-a133-a0b05aede322",
+      "sourceHash": "0e392bec990d12aa7451fa4fdec4661fcc7582dfa7a8af5a046c6c695bf0b0b3",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 302,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051847704,
+        "totalMs": 124.16,
+        "claimMs": 15.53,
+        "preloadMs": 18.56,
+        "handlerMs": 2.88
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 74886,
+        "cut": "0000000000000000_0000000000038588",
+        "publication": {
+          "status": 200,
+          "durationMs": 4.37,
+          "requestBytes": 76401
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "0c9d972bcf12f040e07375787fd18695",
+        "checkpointSourceCut": "0000000000000000_0000000000038588",
+        "stateCut": "0000000000000000_0000000000038588",
+        "processedThrough": "0000000000000000_0000000000038377",
+        "processedSeq": 305,
+        "suffixStartOffset": "0000000000000000_0000000000038588",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000038588",
+            "nextOffset": "0000000000000000_0000000000038989",
+            "incarnation": "0c9d972bcf12f040e07375787fd18695"
+          },
+          {
+            "offset": "0000000000000000_0000000000038989",
+            "nextOffset": "0000000000000000_0000000000039928",
+            "incarnation": "0c9d972bcf12f040e07375787fd18695"
+          },
+          {
+            "offset": "0000000000000000_0000000000039928",
+            "nextOffset": "0000000000000000_0000000000040152",
+            "incarnation": "0c9d972bcf12f040e07375787fd18695"
+          },
+          {
+            "offset": "0000000000000000_0000000000040152",
+            "nextOffset": "0000000000000000_0000000000040363",
+            "incarnation": "0c9d972bcf12f040e07375787fd18695"
+          },
+          {
+            "offset": "0000000000000000_0000000000040363",
+            "nextOffset": null,
+            "incarnation": "0c9d972bcf12f040e07375787fd18695"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 12,
+          "requestBytes": 78189,
+          "responseBytes": 76674
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 74886
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 76401,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 403
+        },
+        "other": {
+          "requests": 9,
+          "requestBytes": 1788,
+          "responseBytes": 1385
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 188952,
+        "cpuSystemMicros": 19557,
+        "heapBeforeBytes": 295002944,
+        "heapAfterBytes": 103522144,
+        "peakHeapBytes": 301101240,
+        "rssBeforeBytes": 457981952,
+        "rssAfterBytes": 427646976,
+        "peakRssBytes": 458780672,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000040363",
+        "finalHead": "0000000000000000_0000000000040363",
+        "acked": "0000000000000000_0000000000040363"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "append-only",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": 0,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-append-only-15cfbf3a-de62-43ba-b5ef-549e52009d91",
+      "sourceHash": "0e392bec990d12aa7451fa4fdec4661fcc7582dfa7a8af5a046c6c695bf0b0b3",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 302,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051848140,
+        "totalMs": 146.8,
+        "claimMs": 17.89,
+        "preloadMs": 14.54,
+        "handlerMs": 1.43
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 74886,
+        "cut": "0000000000000000_0000000000038588",
+        "publication": {
+          "status": 200,
+          "durationMs": 4.65,
+          "requestBytes": 76401
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "dc609d7fcd1faf40f7707caa04b525b7",
+        "checkpointSourceCut": "0000000000000000_0000000000038588",
+        "stateCut": "0000000000000000_0000000000038588",
+        "processedThrough": "0000000000000000_0000000000038377",
+        "processedSeq": 305,
+        "suffixStartOffset": "0000000000000000_0000000000038588",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000038588",
+            "nextOffset": "0000000000000000_0000000000038989",
+            "incarnation": "dc609d7fcd1faf40f7707caa04b525b7"
+          },
+          {
+            "offset": "0000000000000000_0000000000038989",
+            "nextOffset": "0000000000000000_0000000000039928",
+            "incarnation": "dc609d7fcd1faf40f7707caa04b525b7"
+          },
+          {
+            "offset": "0000000000000000_0000000000039928",
+            "nextOffset": "0000000000000000_0000000000040152",
+            "incarnation": "dc609d7fcd1faf40f7707caa04b525b7"
+          },
+          {
+            "offset": "0000000000000000_0000000000040152",
+            "nextOffset": "0000000000000000_0000000000040363",
+            "incarnation": "dc609d7fcd1faf40f7707caa04b525b7"
+          },
+          {
+            "offset": "0000000000000000_0000000000040363",
+            "nextOffset": null,
+            "incarnation": "dc609d7fcd1faf40f7707caa04b525b7"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 12,
+          "requestBytes": 78189,
+          "responseBytes": 76674
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 74886
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 76401,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 403
+        },
+        "other": {
+          "requests": 9,
+          "requestBytes": 1788,
+          "responseBytes": 1385
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 75814,
+        "cpuSystemMicros": 22866,
+        "heapBeforeBytes": 105365904,
+        "heapAfterBytes": 120602504,
+        "peakHeapBytes": 120602504,
+        "rssBeforeBytes": 427646976,
+        "rssAfterBytes": 427913216,
+        "peakRssBytes": 427913216,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000040363",
+        "finalHead": "0000000000000000_0000000000040363",
+        "acked": "0000000000000000_0000000000040363"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "append-only",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-append-only-0666697c-8960-461d-b7aa-ee5040e42984",
+      "sourceHash": "0e392bec990d12aa7451fa4fdec4661fcc7582dfa7a8af5a046c6c695bf0b0b3",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 302,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051885989,
+        "totalMs": 100.61,
+        "claimMs": 14.58,
+        "preloadMs": 17.34,
+        "handlerMs": 2.74
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 74886,
+        "cut": "0000000000000000_0000000000038588",
+        "publication": {
+          "status": 200,
+          "durationMs": 2.67,
+          "requestBytes": 76401
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "4200526fae720a491f6dc8e5b2bc04ea",
+        "checkpointSourceCut": "0000000000000000_0000000000038588",
+        "stateCut": "0000000000000000_0000000000038588",
+        "processedThrough": "0000000000000000_0000000000038377",
+        "processedSeq": 305,
+        "suffixStartOffset": "0000000000000000_0000000000038588",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000038588",
+            "nextOffset": "0000000000000000_0000000000038989",
+            "incarnation": "4200526fae720a491f6dc8e5b2bc04ea"
+          },
+          {
+            "offset": "0000000000000000_0000000000038989",
+            "nextOffset": "0000000000000000_0000000000039928",
+            "incarnation": "4200526fae720a491f6dc8e5b2bc04ea"
+          },
+          {
+            "offset": "0000000000000000_0000000000039928",
+            "nextOffset": "0000000000000000_0000000000040152",
+            "incarnation": "4200526fae720a491f6dc8e5b2bc04ea"
+          },
+          {
+            "offset": "0000000000000000_0000000000040152",
+            "nextOffset": "0000000000000000_0000000000040363",
+            "incarnation": "4200526fae720a491f6dc8e5b2bc04ea"
+          },
+          {
+            "offset": "0000000000000000_0000000000040363",
+            "nextOffset": null,
+            "incarnation": "4200526fae720a491f6dc8e5b2bc04ea"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 12,
+          "requestBytes": 78189,
+          "responseBytes": 76674
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 74886
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 76401,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 403
+        },
+        "other": {
+          "requests": 9,
+          "requestBytes": 1788,
+          "responseBytes": 1385
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 84792,
+        "cpuSystemMicros": 18333,
+        "heapBeforeBytes": 297897552,
+        "heapAfterBytes": 292179168,
+        "peakHeapBytes": 298414448,
+        "rssBeforeBytes": 451907584,
+        "rssAfterBytes": 455417856,
+        "peakRssBytes": 455417856,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000040363",
+        "finalHead": "0000000000000000_0000000000040363",
+        "acked": "0000000000000000_0000000000040363"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "append-only",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": 1,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-append-only-dcda4601-e1b6-4eea-b591-70bcdd1bdc39",
+      "sourceHash": "0e392bec990d12aa7451fa4fdec4661fcc7582dfa7a8af5a046c6c695bf0b0b3",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 302,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051886340,
+        "totalMs": 108.81,
+        "claimMs": 13.72,
+        "preloadMs": 13.16,
+        "handlerMs": 0.99
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 74886,
+        "cut": "0000000000000000_0000000000038588",
+        "publication": {
+          "status": 200,
+          "durationMs": 2.47,
+          "requestBytes": 76401
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "e2a459e98ffcffe35fbdbc352a0e59fa",
+        "checkpointSourceCut": "0000000000000000_0000000000038588",
+        "stateCut": "0000000000000000_0000000000038588",
+        "processedThrough": "0000000000000000_0000000000038377",
+        "processedSeq": 305,
+        "suffixStartOffset": "0000000000000000_0000000000038588",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000038588",
+            "nextOffset": "0000000000000000_0000000000038989",
+            "incarnation": "e2a459e98ffcffe35fbdbc352a0e59fa"
+          },
+          {
+            "offset": "0000000000000000_0000000000038989",
+            "nextOffset": "0000000000000000_0000000000039928",
+            "incarnation": "e2a459e98ffcffe35fbdbc352a0e59fa"
+          },
+          {
+            "offset": "0000000000000000_0000000000039928",
+            "nextOffset": "0000000000000000_0000000000040152",
+            "incarnation": "e2a459e98ffcffe35fbdbc352a0e59fa"
+          },
+          {
+            "offset": "0000000000000000_0000000000040152",
+            "nextOffset": "0000000000000000_0000000000040363",
+            "incarnation": "e2a459e98ffcffe35fbdbc352a0e59fa"
+          },
+          {
+            "offset": "0000000000000000_0000000000040363",
+            "nextOffset": null,
+            "incarnation": "e2a459e98ffcffe35fbdbc352a0e59fa"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 12,
+          "requestBytes": 78189,
+          "responseBytes": 76674
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 74886
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 76401,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 403
+        },
+        "other": {
+          "requests": 9,
+          "requestBytes": 1788,
+          "responseBytes": 1385
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 217250,
+        "cpuSystemMicros": 4743,
+        "heapBeforeBytes": 296909808,
+        "heapAfterBytes": 104688640,
+        "peakHeapBytes": 303516320,
+        "rssBeforeBytes": 460283904,
+        "rssAfterBytes": 430972928,
+        "peakRssBytes": 461635584,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000040363",
+        "finalHead": "0000000000000000_0000000000040363",
+        "acked": "0000000000000000_0000000000040363"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "append-only",
+      "mode": "replay",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-append-only-b962401f-dfc3-4a4c-9eab-4241072ce593",
+      "sourceHash": "0e392bec990d12aa7451fa4fdec4661fcc7582dfa7a8af5a046c6c695bf0b0b3",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 302,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051924254,
+        "totalMs": 91.79,
+        "claimMs": 5.26,
+        "preloadMs": 11.45,
+        "handlerMs": 4.15
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000038989",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000038989",
+            "nextOffset": "0000000000000000_0000000000039928",
+            "incarnation": "05b1954993be073b56492303f8a01687"
+          },
+          {
+            "offset": "0000000000000000_0000000000039928",
+            "nextOffset": "0000000000000000_0000000000040152",
+            "incarnation": "05b1954993be073b56492303f8a01687"
+          },
+          {
+            "offset": "0000000000000000_0000000000040152",
+            "nextOffset": "0000000000000000_0000000000040363",
+            "incarnation": "05b1954993be073b56492303f8a01687"
+          },
+          {
+            "offset": "0000000000000000_0000000000040363",
+            "nextOffset": null,
+            "incarnation": "05b1954993be073b56492303f8a01687"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 10,
+          "requestBytes": 1788,
+          "responseBytes": 40682
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 39297
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 9,
+          "requestBytes": 1788,
+          "responseBytes": 1385
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 83349,
+        "cpuSystemMicros": 1167,
+        "heapBeforeBytes": 96922320,
+        "heapAfterBytes": 110135944,
+        "peakHeapBytes": 110135944,
+        "rssBeforeBytes": 424882176,
+        "rssAfterBytes": 425152512,
+        "peakRssBytes": 425152512,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000040363",
+        "finalHead": "0000000000000000_0000000000040363",
+        "acked": "0000000000000000_0000000000040363"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "append-only",
+      "mode": "replay",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": 1,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-append-only-493aaa68-8c13-4208-8f0d-3ee21637cbb6",
+      "sourceHash": "0e392bec990d12aa7451fa4fdec4661fcc7582dfa7a8af5a046c6c695bf0b0b3",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 302,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051924591,
+        "totalMs": 76.84,
+        "claimMs": 7.06,
+        "preloadMs": 11.76,
+        "handlerMs": 1.02
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000038989",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000038989",
+            "nextOffset": "0000000000000000_0000000000039928",
+            "incarnation": "3625f758dc1249f708718336735128a4"
+          },
+          {
+            "offset": "0000000000000000_0000000000039928",
+            "nextOffset": "0000000000000000_0000000000040152",
+            "incarnation": "3625f758dc1249f708718336735128a4"
+          },
+          {
+            "offset": "0000000000000000_0000000000040152",
+            "nextOffset": "0000000000000000_0000000000040363",
+            "incarnation": "3625f758dc1249f708718336735128a4"
+          },
+          {
+            "offset": "0000000000000000_0000000000040363",
+            "nextOffset": null,
+            "incarnation": "3625f758dc1249f708718336735128a4"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 10,
+          "requestBytes": 1788,
+          "responseBytes": 40682
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 39297
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 9,
+          "requestBytes": 1788,
+          "responseBytes": 1385
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 72320,
+        "cpuSystemMicros": 4982,
+        "heapBeforeBytes": 112743992,
+        "heapAfterBytes": 103741584,
+        "peakHeapBytes": 123891040,
+        "rssBeforeBytes": 425963520,
+        "rssAfterBytes": 425963520,
+        "peakRssBytes": 425963520,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000040363",
+        "finalHead": "0000000000000000_0000000000040363",
+        "acked": "0000000000000000_0000000000040363"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "large-inbox",
+      "mode": "replay",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-large-inbox-dd76963b-2774-4e03-a8ba-9b57b6600bc1",
+      "sourceHash": "5929ff4871c76c0ec729ff5088df0a66ac0b0618cdb3bc1b741b85e3711b7666",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 101,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051963271,
+        "totalMs": 84.99,
+        "claimMs": 6.46,
+        "preloadMs": 23.56,
+        "handlerMs": 2.59
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000869466",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000869466",
+            "nextOffset": "0000000000000000_0000000000870696",
+            "incarnation": "13b2c3e64590e668e9014b040f7512ba"
+          },
+          {
+            "offset": "0000000000000000_0000000000870696",
+            "nextOffset": "0000000000000000_0000000000870907",
+            "incarnation": "13b2c3e64590e668e9014b040f7512ba"
+          },
+          {
+            "offset": "0000000000000000_0000000000870907",
+            "nextOffset": null,
+            "incarnation": "13b2c3e64590e668e9014b040f7512ba"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 6,
+          "requestBytes": 1450,
+          "responseBytes": 871021
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 869571
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 5,
+          "requestBytes": 1450,
+          "responseBytes": 1450
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 78420,
+        "cpuSystemMicros": 5219,
+        "heapBeforeBytes": 157351536,
+        "heapAfterBytes": 161063768,
+        "peakHeapBytes": 171928928,
+        "rssBeforeBytes": 395649024,
+        "rssAfterBytes": 401055744,
+        "peakRssBytes": 401055744,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000870907",
+        "finalHead": "0000000000000000_0000000000870907",
+        "acked": "0000000000000000_0000000000870907"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "large-inbox",
+      "mode": "replay",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": 0,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-large-inbox-7400a949-aa77-4b01-b909-bf0258f567d3",
+      "sourceHash": "5929ff4871c76c0ec729ff5088df0a66ac0b0618cdb3bc1b741b85e3711b7666",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 101,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791051964658,
+        "totalMs": 93.08,
+        "claimMs": 6.14,
+        "preloadMs": 25.18,
+        "handlerMs": 1.17
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000869466",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000869466",
+            "nextOffset": "0000000000000000_0000000000870696",
+            "incarnation": "0584e6700f97f07443259b97a0146a6a"
+          },
+          {
+            "offset": "0000000000000000_0000000000870696",
+            "nextOffset": "0000000000000000_0000000000870907",
+            "incarnation": "0584e6700f97f07443259b97a0146a6a"
+          },
+          {
+            "offset": "0000000000000000_0000000000870907",
+            "nextOffset": null,
+            "incarnation": "0584e6700f97f07443259b97a0146a6a"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 6,
+          "requestBytes": 1450,
+          "responseBytes": 871021
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 869571
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 5,
+          "requestBytes": 1450,
+          "responseBytes": 1450
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 66090,
+        "cpuSystemMicros": 20276,
+        "heapBeforeBytes": 184702320,
+        "heapAfterBytes": 185535712,
+        "peakHeapBytes": 198876536,
+        "rssBeforeBytes": 402407424,
+        "rssAfterBytes": 405381120,
+        "peakRssBytes": 405381120,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000870907",
+        "finalHead": "0000000000000000_0000000000870907",
+        "acked": "0000000000000000_0000000000870907"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "large-inbox",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-large-inbox-f271260c-80fe-4372-84c7-cc5f075d87f3",
+      "sourceHash": "5929ff4871c76c0ec729ff5088df0a66ac0b0618cdb3bc1b741b85e3711b7666",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 101,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791052003336,
+        "totalMs": 111.57,
+        "claimMs": 5.56,
+        "preloadMs": 23.8,
+        "handlerMs": 2.79
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 10913,
+        "cut": "0000000000000000_0000000000009191",
+        "publication": {
+          "status": 200,
+          "durationMs": 11.93,
+          "requestBytes": 884459
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "843f6e66be113c8b2e5a633cf407b4fd",
+        "checkpointSourceCut": "0000000000000000_0000000000009191",
+        "stateCut": "0000000000000000_0000000000009191",
+        "processedThrough": "0000000000000000_0000000000008982",
+        "processedSeq": 3,
+        "suffixStartOffset": "0000000000000000_0000000000009191",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000009191",
+            "nextOffset": "0000000000000000_0000000000869466",
+            "incarnation": "843f6e66be113c8b2e5a633cf407b4fd"
+          },
+          {
+            "offset": "0000000000000000_0000000000869466",
+            "nextOffset": "0000000000000000_0000000000870696",
+            "incarnation": "843f6e66be113c8b2e5a633cf407b4fd"
+          },
+          {
+            "offset": "0000000000000000_0000000000870696",
+            "nextOffset": "0000000000000000_0000000000870907",
+            "incarnation": "843f6e66be113c8b2e5a633cf407b4fd"
+          },
+          {
+            "offset": "0000000000000000_0000000000870907",
+            "nextOffset": null,
+            "incarnation": "843f6e66be113c8b2e5a633cf407b4fd"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 8,
+          "requestBytes": 885909,
+          "responseBytes": 872739
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 10913
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 884459,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 860376
+        },
+        "other": {
+          "requests": 5,
+          "requestBytes": 1450,
+          "responseBytes": 1450
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 84077,
+        "cpuSystemMicros": 20473,
+        "heapBeforeBytes": 113424808,
+        "heapAfterBytes": 118242184,
+        "peakHeapBytes": 132525736,
+        "rssBeforeBytes": 420036608,
+        "rssAfterBytes": 430780416,
+        "peakRssBytes": 430780416,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000870907",
+        "finalHead": "0000000000000000_0000000000870907",
+        "acked": "0000000000000000_0000000000870907"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "large-inbox",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "replay-first",
+      "phaseOrder": "replay,snapshot-checkpointed-inputs",
+      "sampleIndex": 0,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-large-inbox-bf011b13-2cb7-4ed5-9e9d-889576c831d2",
+      "sourceHash": "5929ff4871c76c0ec729ff5088df0a66ac0b0618cdb3bc1b741b85e3711b7666",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 101,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791052004780,
+        "totalMs": 94.34,
+        "claimMs": 5.14,
+        "preloadMs": 19.21,
+        "handlerMs": 0.88
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 10913,
+        "cut": "0000000000000000_0000000000009191",
+        "publication": {
+          "status": 200,
+          "durationMs": 10.38,
+          "requestBytes": 884459
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "56a4bf588f3ee8165657ea85831ff7b8",
+        "checkpointSourceCut": "0000000000000000_0000000000009191",
+        "stateCut": "0000000000000000_0000000000009191",
+        "processedThrough": "0000000000000000_0000000000008982",
+        "processedSeq": 3,
+        "suffixStartOffset": "0000000000000000_0000000000009191",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000009191",
+            "nextOffset": "0000000000000000_0000000000869466",
+            "incarnation": "56a4bf588f3ee8165657ea85831ff7b8"
+          },
+          {
+            "offset": "0000000000000000_0000000000869466",
+            "nextOffset": "0000000000000000_0000000000870696",
+            "incarnation": "56a4bf588f3ee8165657ea85831ff7b8"
+          },
+          {
+            "offset": "0000000000000000_0000000000870696",
+            "nextOffset": "0000000000000000_0000000000870907",
+            "incarnation": "56a4bf588f3ee8165657ea85831ff7b8"
+          },
+          {
+            "offset": "0000000000000000_0000000000870907",
+            "nextOffset": null,
+            "incarnation": "56a4bf588f3ee8165657ea85831ff7b8"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 8,
+          "requestBytes": 885909,
+          "responseBytes": 872739
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 10913
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 884459,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 860376
+        },
+        "other": {
+          "requests": 5,
+          "requestBytes": 1450,
+          "responseBytes": 1450
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 76131,
+        "cpuSystemMicros": 8879,
+        "heapBeforeBytes": 142774112,
+        "heapAfterBytes": 150059888,
+        "peakHeapBytes": 157457048,
+        "rssBeforeBytes": 438349824,
+        "rssAfterBytes": 439431168,
+        "peakRssBytes": 439431168,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000870907",
+        "finalHead": "0000000000000000_0000000000870907",
+        "acked": "0000000000000000_0000000000870907"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "large-inbox",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-large-inbox-fbd36870-2911-40a0-b24f-0778301695bb",
+      "sourceHash": "5929ff4871c76c0ec729ff5088df0a66ac0b0618cdb3bc1b741b85e3711b7666",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 101,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791052043837,
+        "totalMs": 109.71,
+        "claimMs": 5.37,
+        "preloadMs": 22.53,
+        "handlerMs": 2.47
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 10913,
+        "cut": "0000000000000000_0000000000009191",
+        "publication": {
+          "status": 200,
+          "durationMs": 12.21,
+          "requestBytes": 884459
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "d42a7ec3668584611623ebd299f703c6",
+        "checkpointSourceCut": "0000000000000000_0000000000009191",
+        "stateCut": "0000000000000000_0000000000009191",
+        "processedThrough": "0000000000000000_0000000000008982",
+        "processedSeq": 3,
+        "suffixStartOffset": "0000000000000000_0000000000009191",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000009191",
+            "nextOffset": "0000000000000000_0000000000869466",
+            "incarnation": "d42a7ec3668584611623ebd299f703c6"
+          },
+          {
+            "offset": "0000000000000000_0000000000869466",
+            "nextOffset": "0000000000000000_0000000000870696",
+            "incarnation": "d42a7ec3668584611623ebd299f703c6"
+          },
+          {
+            "offset": "0000000000000000_0000000000870696",
+            "nextOffset": "0000000000000000_0000000000870907",
+            "incarnation": "d42a7ec3668584611623ebd299f703c6"
+          },
+          {
+            "offset": "0000000000000000_0000000000870907",
+            "nextOffset": null,
+            "incarnation": "d42a7ec3668584611623ebd299f703c6"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 8,
+          "requestBytes": 885909,
+          "responseBytes": 872739
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 10913
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 884459,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 860376
+        },
+        "other": {
+          "requests": 5,
+          "requestBytes": 1450,
+          "responseBytes": 1450
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 84485,
+        "cpuSystemMicros": 17849,
+        "heapBeforeBytes": 153374752,
+        "heapAfterBytes": 161310808,
+        "peakHeapBytes": 161686408,
+        "rssBeforeBytes": 401543168,
+        "rssAfterBytes": 412626944,
+        "peakRssBytes": 412626944,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000870907",
+        "finalHead": "0000000000000000_0000000000870907",
+        "acked": "0000000000000000_0000000000870907"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "large-inbox",
+      "mode": "snapshot-checkpointed-inputs",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": 1,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-large-inbox-ef1473c1-3b65-4e44-a8c9-9295cc1c633f",
+      "sourceHash": "5929ff4871c76c0ec729ff5088df0a66ac0b0618cdb3bc1b741b85e3711b7666",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 101,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791052045222,
+        "totalMs": 91.66,
+        "claimMs": 4.8,
+        "preloadMs": 19.4,
+        "handlerMs": 0.88
+      },
+      "snapshot": {
+        "lookup": "hit",
+        "imageBytes": 10913,
+        "cut": "0000000000000000_0000000000009191",
+        "publication": {
+          "status": 200,
+          "durationMs": 10.4,
+          "requestBytes": 884459
+        }
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": true,
+        "incarnation": "b61a68de3bfd346e97e919dda2d88e87",
+        "checkpointSourceCut": "0000000000000000_0000000000009191",
+        "stateCut": "0000000000000000_0000000000009191",
+        "processedThrough": "0000000000000000_0000000000008982",
+        "processedSeq": 3,
+        "suffixStartOffset": "0000000000000000_0000000000009191",
+        "sourceReads": [
+          {
+            "offset": "0000000000000000_0000000000009191",
+            "nextOffset": "0000000000000000_0000000000869466",
+            "incarnation": "b61a68de3bfd346e97e919dda2d88e87"
+          },
+          {
+            "offset": "0000000000000000_0000000000869466",
+            "nextOffset": "0000000000000000_0000000000870696",
+            "incarnation": "b61a68de3bfd346e97e919dda2d88e87"
+          },
+          {
+            "offset": "0000000000000000_0000000000870696",
+            "nextOffset": "0000000000000000_0000000000870907",
+            "incarnation": "b61a68de3bfd346e97e919dda2d88e87"
+          },
+          {
+            "offset": "0000000000000000_0000000000870907",
+            "nextOffset": null,
+            "incarnation": "b61a68de3bfd346e97e919dda2d88e87"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 8,
+          "requestBytes": 885909,
+          "responseBytes": 872739
+        },
+        "snapshotLookup": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 10913
+        },
+        "snapshotPublication": {
+          "requests": 1,
+          "requestBytes": 884459,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "suffix": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 860376
+        },
+        "other": {
+          "requests": 5,
+          "requestBytes": 1450,
+          "responseBytes": 1450
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 80856,
+        "cpuSystemMicros": 1821,
+        "heapBeforeBytes": 166022992,
+        "heapAfterBytes": 173951704,
+        "peakHeapBytes": 190152856,
+        "rssBeforeBytes": 419115008,
+        "rssAfterBytes": 425062400,
+        "peakRssBytes": 425062400,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000870907",
+        "finalHead": "0000000000000000_0000000000870907",
+        "acked": "0000000000000000_0000000000870907"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": true
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "large-inbox",
+      "mode": "replay",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": -1,
+      "warmup": true,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-large-inbox-8bb3547a-d5ec-4dc2-b3f9-4aa85cb18756",
+      "sourceHash": "5929ff4871c76c0ec729ff5088df0a66ac0b0618cdb3bc1b741b85e3711b7666",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 101,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791052083926,
+        "totalMs": 88.9,
+        "claimMs": 6.69,
+        "preloadMs": 25.07,
+        "handlerMs": 2.98
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000869466",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000869466",
+            "nextOffset": "0000000000000000_0000000000870696",
+            "incarnation": "cc365d74a37d305fd7cf62899aa55647"
+          },
+          {
+            "offset": "0000000000000000_0000000000870696",
+            "nextOffset": "0000000000000000_0000000000870907",
+            "incarnation": "cc365d74a37d305fd7cf62899aa55647"
+          },
+          {
+            "offset": "0000000000000000_0000000000870907",
+            "nextOffset": null,
+            "incarnation": "cc365d74a37d305fd7cf62899aa55647"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 6,
+          "requestBytes": 1450,
+          "responseBytes": 871021
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 869571
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 5,
+          "requestBytes": 1450,
+          "responseBytes": 1450
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 79551,
+        "cpuSystemMicros": 5977,
+        "heapBeforeBytes": 114171072,
+        "heapAfterBytes": 117535816,
+        "peakHeapBytes": 135070496,
+        "rssBeforeBytes": 434266112,
+        "rssAfterBytes": 439939072,
+        "peakRssBytes": 439939072,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000870907",
+        "finalHead": "0000000000000000_0000000000870907",
+        "acked": "0000000000000000_0000000000870907"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    },
+    {
+      "kind": "chronicle-process-wake-benchmark-sample",
+      "schemaVersion": 1,
+      "scenario": "large-inbox",
+      "mode": "replay",
+      "phase": "snapshot-first",
+      "phaseOrder": "snapshot-checkpointed-inputs,replay",
+      "sampleIndex": 1,
+      "warmup": false,
+      "status": "passed",
+      "entityUrl": "/e2e/bench-large-inbox-840d1897-b3f1-4093-aebe-ad6bf78fd21a",
+      "sourceHash": "5929ff4871c76c0ec729ff5088df0a66ac0b0618cdb3bc1b741b85e3711b7666",
+      "sourceHashScope": "normalized deterministic semantic input and state-update events; excludes server-added envelope fields, offsets, and timestamps and is not an exact wire-history hash",
+      "sourceEventCount": 101,
+      "activation": {
+        "scope": "after claimHeaders resolution at wake-received logging through successful done:true callback completion; includes snapshot lookup, recovery, handler writes, and ack; excludes trigger append and semantic validation",
+        "startedAtUnixMs": 1791052085356,
+        "totalMs": 100.55,
+        "claimMs": 5.89,
+        "preloadMs": 26.09,
+        "handlerMs": 1.23
+      },
+      "snapshot": {
+        "lookup": "not-requested",
+        "imageBytes": null,
+        "cut": null,
+        "publication": null
+      },
+      "recovery": {
+        "contract": "bounded-checkpoint-v1",
+        "checkpointHit": false,
+        "incarnation": null,
+        "checkpointSourceCut": null,
+        "stateCut": null,
+        "processedThrough": null,
+        "processedSeq": null,
+        "suffixStartOffset": null,
+        "sourceReads": [
+          {
+            "offset": "-1",
+            "nextOffset": "0000000000000000_0000000000869466",
+            "incarnation": null
+          },
+          {
+            "offset": "0000000000000000_0000000000869466",
+            "nextOffset": "0000000000000000_0000000000870696",
+            "incarnation": "5e75263364b7ec14e9df2d62ba564f0e"
+          },
+          {
+            "offset": "0000000000000000_0000000000870696",
+            "nextOffset": "0000000000000000_0000000000870907",
+            "incarnation": "5e75263364b7ec14e9df2d62ba564f0e"
+          },
+          {
+            "offset": "0000000000000000_0000000000870907",
+            "nextOffset": null,
+            "incarnation": "5e75263364b7ec14e9df2d62ba564f0e"
+          }
+        ],
+        "fallbackReason": null
+      },
+      "traffic": {
+        "scope": "single-counted source-gate request/response bodies admitted from before trigger append or held-webhook release through wake metrics; excludes callback-gate traffic and direct validation reads",
+        "total": {
+          "requests": 6,
+          "requestBytes": 1450,
+          "responseBytes": 871021
+        },
+        "snapshotLookup": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "snapshotPublication": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "fullReplay": {
+          "requests": 1,
+          "requestBytes": 0,
+          "responseBytes": 869571
+        },
+        "suffix": {
+          "requests": 0,
+          "requestBytes": 0,
+          "responseBytes": 0
+        },
+        "other": {
+          "requests": 5,
+          "requestBytes": 1450,
+          "responseBytes": 1450
+        }
+      },
+      "resources": {
+        "scope": "combined runtime handler, embedded agents-server, test and source-gate instrumentation Node process",
+        "cpuUserMicros": 73300,
+        "cpuSystemMicros": 11054,
+        "heapBeforeBytes": 140381616,
+        "heapAfterBytes": 142244072,
+        "peakHeapBytes": 158436488,
+        "rssBeforeBytes": 440750080,
+        "rssAfterBytes": 443179008,
+        "peakRssBytes": 443179008,
+        "samplingIntervalMs": 2
+      },
+      "offsets": {
+        "inputHead": "0000000000000000_0000000000870907",
+        "finalHead": "0000000000000000_0000000000870907",
+        "acked": "0000000000000000_0000000000870907"
+      },
+      "leaseState": {
+        "phase": "idle",
+        "holder": "0",
+        "leaseUntilNs": "0"
+      },
+      "assertions": {
+        "state": true,
+        "hydratedState": true,
+        "rawInputs": true,
+        "persistedOutput": true,
+        "exactPersistedOutputs": true,
+        "activationCount": true,
+        "ack": true,
+        "release": true,
+        "signal": null,
+        "cancellation": null,
+        "noPrefixReads": null
+      },
+      "validationTimed": false
+    }
+  ],
+  "failures": []
+}

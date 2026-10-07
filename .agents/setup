@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Minimal Go/Redis prerequisites for Chronicle's non-UI tests in an orb.
+version=$(awk '/^go / {print $2; exit}' go.mod)
+if ! command -v go >/dev/null || [[ $(go env GOVERSION) != "go$version" ]]; then
+  archive="go${version}.linux-amd64.tar.gz"
+  scratch=$(mktemp -d)
+  trap 'rm -rf "$scratch"' EXIT
+  curl -fsSL "https://go.dev/dl/$archive" -o "$scratch/$archive"
+  checksum=$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' |
+    jq -er --arg name "$archive" '.[] | .files[] | select(.filename == $name) | .sha256')
+  printf '%s  %s\n' "$checksum" "$scratch/$archive" | sha256sum -c -
+  sudo mkdir -p "/opt/go-$version"
+  sudo tar -xzf "$scratch/$archive" -C "/opt/go-$version" --strip-components=1
+  sudo ln -sf "/opt/go-$version/bin/go" /usr/local/bin/go
+  sudo ln -sf "/opt/go-$version/bin/gofmt" /usr/local/bin/gofmt
+fi
+if ! command -v redis-server >/dev/null; then
+  sudo apt-get update -qq
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server
+fi
+go mod download
+# Services are started explicitly with `amp orb service start`, not from setup.

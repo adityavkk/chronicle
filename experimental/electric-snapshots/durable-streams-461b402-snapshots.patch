@@ -1,0 +1,1465 @@
+diff --git a/.changeset/calm-streams-snapshot.md b/.changeset/calm-streams-snapshot.md
+new file mode 100644
+index 00000000..995ff2cd
+--- /dev/null
++++ b/.changeset/calm-streams-snapshot.md
+@@ -0,0 +1,6 @@
++---
++"@durable-streams/client": patch
++"@durable-streams/state": patch
++---
++
++Add guarded projection snapshot loading, publication, and committed StreamDB bootstrap/export support.
+diff --git a/packages/client/src/constants.ts b/packages/client/src/constants.ts
+index ee55f41a..4349ac98 100644
+--- a/packages/client/src/constants.ts
++++ b/packages/client/src/constants.ts
+@@ -32,6 +32,14 @@ export const STREAM_UP_TO_DATE_HEADER = `Stream-Up-To-Date`
+  */
+ export const STREAM_CLOSED_HEADER = `Stream-Closed`
+ 
++/** Projection snapshot extension capability and source identity headers. */
++export const STREAM_SNAPSHOT_HEADER = `Stream-Snapshot`
++export const STREAM_INCARNATION_HEADER = `Stream-Incarnation`
++export const STREAM_SNAPSHOT_OFFSET_HEADER = `Stream-Snapshot-Offset`
++export const STREAM_SNAPSHOT_MAX_BYTES_HEADER = `Stream-Snapshot-Max-Bytes`
++export const IF_STREAM_INCARNATION_HEADER = `If-Stream-Incarnation`
++export const CONTENT_DIGEST_HEADER = `Content-Digest`
++
+ // ============================================================================
+ // Request Headers
+ // ============================================================================
+@@ -103,6 +111,9 @@ export const LIVE_QUERY_PARAM = `live`
+  */
+ export const CURSOR_QUERY_PARAM = `cursor`
+ 
++/** Opt-in projection snapshot subresource query parameter. */
++export const SNAPSHOT_QUERY_PARAM = `snapshot`
++
+ /**
+  * Response header indicating SSE data encoding (e.g., base64 for binary streams).
+  */
+diff --git a/packages/client/src/index.ts b/packages/client/src/index.ts
+index 06c40461..23541440 100644
+--- a/packages/client/src/index.ts
++++ b/packages/client/src/index.ts
+@@ -63,6 +63,10 @@ export type {
+   AppendOptions,
+   ReadOptions,
+   HeadResult,
++  ProjectionSnapshot,
++  LoadSnapshotOptions,
++  PublishSnapshotOptions,
++  PublishedSnapshot,
+   LegacyLiveMode,
+ 
+   // Close types
+@@ -116,12 +120,19 @@ export {
+   STREAM_CURSOR_HEADER,
+   STREAM_UP_TO_DATE_HEADER,
+   STREAM_CLOSED_HEADER,
++  STREAM_SNAPSHOT_HEADER,
++  STREAM_INCARNATION_HEADER,
++  STREAM_SNAPSHOT_OFFSET_HEADER,
++  STREAM_SNAPSHOT_MAX_BYTES_HEADER,
++  IF_STREAM_INCARNATION_HEADER,
++  CONTENT_DIGEST_HEADER,
+   STREAM_SEQ_HEADER,
+   STREAM_TTL_HEADER,
+   STREAM_EXPIRES_AT_HEADER,
+   OFFSET_QUERY_PARAM,
+   LIVE_QUERY_PARAM,
+   CURSOR_QUERY_PARAM,
++  SNAPSHOT_QUERY_PARAM,
+   SSE_OFFSET_FIELD,
+   SSE_CURSOR_FIELD,
+   SSE_COMPATIBLE_CONTENT_TYPES,
+diff --git a/packages/client/src/response.ts b/packages/client/src/response.ts
+index e751a3d6..5386c1ea 100644
+--- a/packages/client/src/response.ts
++++ b/packages/client/src/response.ts
+@@ -51,6 +51,8 @@ export interface StreamResponseConfig {
+   live: LiveMode
+   /** Starting offset */
+   startOffset: Offset
++  /** Source incarnation established by the first response */
++  incarnation?: string
+   /** Whether to treat as JSON (hint or content-type) */
+   isJsonMode: boolean
+   /** Initial offset from first response headers */
+@@ -96,6 +98,7 @@ export class StreamResponseImpl<
+   readonly contentType?: string
+   readonly live: LiveMode
+   readonly startOffset: Offset
++  readonly incarnation?: string
+ 
+   // --- Response metadata (updated on each response) ---
+   #headers: Headers
+@@ -139,6 +142,7 @@ export class StreamResponseImpl<
+     this.contentType = config.contentType
+     this.live = config.live
+     this.startOffset = config.startOffset
++    this.incarnation = config.incarnation
+ 
+     // Initialize immutable state machine — SSEState if SSE is available,
+     // LongPollState otherwise. The type encodes whether SSE has fallen back.
+diff --git a/packages/client/src/stream-api.ts b/packages/client/src/stream-api.ts
+index 430957ae..545c1c2a 100644
+--- a/packages/client/src/stream-api.ts
++++ b/packages/client/src/stream-api.ts
+@@ -12,6 +12,9 @@ import {
+   STREAM_OFFSET_HEADER,
+   STREAM_SSE_DATA_ENCODING_HEADER,
+   STREAM_UP_TO_DATE_HEADER,
++  STREAM_SNAPSHOT_HEADER,
++  STREAM_INCARNATION_HEADER,
++  IF_STREAM_INCARNATION_HEADER,
+ } from "./constants"
+ import { DurableStreamError, FetchBackoffAbortError } from "./error"
+ import { BackoffDefaults, createFetchWithBackoff } from "./fetch"
+@@ -148,6 +151,23 @@ async function streamInternal<TJson = unknown>(
+ 
+   // Build headers
+   const headers = await resolveHeaders(options.headers)
++  let incarnation = options.incarnation
++  if (incarnation) {
++    headers[IF_STREAM_INCARNATION_HEADER] = incarnation
++  }
++
++  const validateGuardedResponse = (response: Response): void => {
++    if (!incarnation) return
++    if (
++      response.headers.get(STREAM_SNAPSHOT_HEADER) !== `v1` ||
++      response.headers.get(STREAM_INCARNATION_HEADER) !== incarnation
++    ) {
++      throw new DurableStreamError(
++        `Guarded stream response did not confirm the requested source incarnation`,
++        `BAD_REQUEST`
++      )
++    }
++  }
+ 
+   // Create abort controller
+   const abortController = new AbortController()
+@@ -174,6 +194,14 @@ async function streamInternal<TJson = unknown>(
+       headers,
+       signal: abortController.signal,
+     })
++    validateGuardedResponse(firstResponse)
++    if (
++      !incarnation &&
++      firstResponse.headers.get(STREAM_SNAPSHOT_HEADER) === `v1`
++    ) {
++      incarnation =
++        firstResponse.headers.get(STREAM_INCARNATION_HEADER) ?? undefined
++    }
+   } catch (err) {
+     if (err instanceof FetchBackoffAbortError) {
+       throw new DurableStreamError(`Stream request was aborted`, `UNKNOWN`)
+@@ -235,6 +263,9 @@ async function streamInternal<TJson = unknown>(
+     }
+ 
+     const nextHeaders = await resolveHeaders(options.headers)
++    if (incarnation) {
++      nextHeaders[IF_STREAM_INCARNATION_HEADER] = incarnation
++    }
+ 
+     const response = await fetchClient(nextUrl.toString(), {
+       method: `GET`,
+@@ -245,6 +276,7 @@ async function streamInternal<TJson = unknown>(
+     if (!response.ok) {
+       await handleErrorResponse(response, url)
+     }
++    validateGuardedResponse(response)
+ 
+     return response
+   }
+@@ -271,6 +303,9 @@ async function streamInternal<TJson = unknown>(
+           }
+ 
+           const sseHeaders = await resolveHeaders(options.headers)
++          if (incarnation) {
++            sseHeaders[IF_STREAM_INCARNATION_HEADER] = incarnation
++          }
+ 
+           const response = await fetchClient(sseUrl.toString(), {
+             method: `GET`,
+@@ -281,6 +316,7 @@ async function streamInternal<TJson = unknown>(
+           if (!response.ok) {
+             await handleErrorResponse(response, url)
+           }
++          validateGuardedResponse(response)
+ 
+           return response
+         }
+@@ -292,6 +328,7 @@ async function streamInternal<TJson = unknown>(
+     contentType,
+     live,
+     startOffset,
++    incarnation,
+     isJsonMode,
+     initialOffset,
+     initialCursor,
+diff --git a/packages/client/src/stream.ts b/packages/client/src/stream.ts
+index ec0fad6b..49660228 100644
+--- a/packages/client/src/stream.ts
++++ b/packages/client/src/stream.ts
+@@ -17,6 +17,13 @@ import {
+   STREAM_OFFSET_HEADER,
+   STREAM_SEQ_HEADER,
+   STREAM_TTL_HEADER,
++  STREAM_SNAPSHOT_HEADER,
++  STREAM_INCARNATION_HEADER,
++  STREAM_SNAPSHOT_OFFSET_HEADER,
++  STREAM_SNAPSHOT_MAX_BYTES_HEADER,
++  IF_STREAM_INCARNATION_HEADER,
++  CONTENT_DIGEST_HEADER,
++  SNAPSHOT_QUERY_PARAM,
+ } from "./constants"
+ import {
+   BackoffDefaults,
+@@ -45,8 +52,36 @@ import type {
+   StreamHandleOptions,
+   StreamOptions,
+   StreamResponse,
++  ProjectionSnapshot,
++  LoadSnapshotOptions,
++  PublishSnapshotOptions,
++  PublishedSnapshot,
+ } from "./types"
+ 
++function validateProjection(projection: string): void {
++  const length = new TextEncoder().encode(projection).byteLength
++  if (length < 1 || length > 128 || /[\u0000-\u001f\u007f]/u.test(projection)) {
++    throw new Error(
++      `Snapshot projection must be 1-128 UTF-8 bytes without controls`
++    )
++  }
++}
++
++function requireStrongETag(value: string | null): string {
++  if (!value || value.startsWith(`W/`) || !/^"[^"\r\n]+"$/u.test(value)) {
++    throw new Error(`Snapshot response requires a strong ETag`)
++  }
++  return value
++}
++
++async function sha256Digest(body: Uint8Array): Promise<string> {
++  const hash = await crypto.subtle.digest(`SHA-256`, body as BufferSource)
++  const bytes = new Uint8Array(hash)
++  let binary = ``
++  for (const byte of bytes) binary += String.fromCharCode(byte)
++  return `sha-256=:${btoa(binary)}:`
++}
++
+ /**
+  * Queued message for batching.
+  */
+@@ -279,6 +314,16 @@ export class DurableStream {
+     const cacheControl = response.headers.get(`cache-control`) ?? undefined
+     const streamClosed =
+       response.headers.get(STREAM_CLOSED_HEADER)?.toLowerCase() === `true`
++    const snapshotVersion =
++      response.headers.get(STREAM_SNAPSHOT_HEADER) ?? undefined
++    const incarnation =
++      response.headers.get(STREAM_INCARNATION_HEADER) ?? undefined
++    const snapshotMaxBytesValue = response.headers.get(
++      STREAM_SNAPSHOT_MAX_BYTES_HEADER
++    )
++    const snapshotMaxBytes = snapshotMaxBytesValue
++      ? Number(snapshotMaxBytesValue)
++      : undefined
+ 
+     // Update instance contentType
+     if (contentType) {
+@@ -292,6 +337,98 @@ export class DurableStream {
+       etag,
+       cacheControl,
+       streamClosed,
++      snapshotVersion,
++      incarnation,
++      ...(Number.isSafeInteger(snapshotMaxBytes) && snapshotMaxBytes! >= 0
++        ? { snapshotMaxBytes }
++        : {}),
++    }
++  }
++
++  /** Load and integrity-check the latest complete image for a projection. */
++  async loadSnapshot(
++    projection: string,
++    opts?: LoadSnapshotOptions
++  ): Promise<ProjectionSnapshot | null> {
++    validateProjection(projection)
++    const { requestHeaders, fetchUrl } = await this.#buildRequest()
++    Object.assign(requestHeaders, await resolveHeaders(opts?.headers))
++    fetchUrl.searchParams.set(SNAPSHOT_QUERY_PARAM, projection)
++    const response = await this.#baseFetchClient(fetchUrl, {
++      method: `GET`,
++      headers: requestHeaders,
++      signal: opts?.signal ?? this.#options.signal,
++    })
++    if (response.status === 404) return null
++    if (!response.ok) await handleErrorResponse(response, this.url)
++    if (response.headers.get(STREAM_SNAPSHOT_HEADER) !== `v1`) return null
++
++    const incarnation = response.headers.get(STREAM_INCARNATION_HEADER)
++    const offset = response.headers.get(STREAM_SNAPSHOT_OFFSET_HEADER)
++    const digest = response.headers.get(CONTENT_DIGEST_HEADER)
++    const contentType = normalizeContentType(
++      response.headers.get(`content-type`) ?? undefined
++    )
++    const expectedType = opts?.expectedContentType
++    const etag = requireStrongETag(response.headers.get(`etag`))
++    if (
++      !incarnation ||
++      !offset ||
++      !digest ||
++      !contentType ||
++      (expectedType !== undefined && contentType !== expectedType)
++    ) {
++      throw new Error(`Malformed projection snapshot metadata`)
++    }
++    if (response.headers.get(`content-encoding`)) {
++      throw new Error(`Projection snapshots require identity content encoding`)
++    }
++    const body = new Uint8Array(await response.arrayBuffer())
++    if ((await sha256Digest(body)) !== digest) {
++      throw new Error(`Projection snapshot Content-Digest mismatch`)
++    }
++    return { body, contentType, offset, incarnation, etag, digest }
++  }
++
++  /** Conditionally publish a complete immutable projection image. */
++  async publishSnapshot(
++    projection: string,
++    opts: PublishSnapshotOptions
++  ): Promise<PublishedSnapshot> {
++    validateProjection(projection)
++    if (opts.etag !== null) requireStrongETag(opts.etag)
++    const { requestHeaders, fetchUrl } = await this.#buildRequest()
++    Object.assign(requestHeaders, await resolveHeaders(opts.headers))
++    fetchUrl.searchParams.set(SNAPSHOT_QUERY_PARAM, projection)
++    requestHeaders[STREAM_SNAPSHOT_HEADER] = `v1`
++    requestHeaders[IF_STREAM_INCARNATION_HEADER] = opts.incarnation
++    requestHeaders[STREAM_SNAPSHOT_OFFSET_HEADER] = opts.offset
++    requestHeaders[`content-type`] = opts.contentType
++    requestHeaders[CONTENT_DIGEST_HEADER] = await sha256Digest(opts.body)
++    if (opts.etag === null) requestHeaders[`if-none-match`] = `*`
++    else requestHeaders[`if-match`] = opts.etag
++
++    const response = await this.#baseFetchClient(fetchUrl, {
++      method: `PUT`,
++      headers: requestHeaders,
++      body: opts.body as BodyInit,
++      signal: opts.signal ?? this.#options.signal,
++    })
++    if (!response.ok) await handleErrorResponse(response, this.url)
++    const incarnation = response.headers.get(STREAM_INCARNATION_HEADER)
++    const offset = response.headers.get(STREAM_SNAPSHOT_OFFSET_HEADER)
++    if (
++      response.headers.get(STREAM_SNAPSHOT_HEADER) !== `v1` ||
++      incarnation !== opts.incarnation ||
++      offset !== opts.offset
++    ) {
++      throw new Error(`Snapshot publication response did not confirm the cut`)
++    }
++    return {
++      created: response.status === 201,
++      incarnation,
++      offset,
++      etag: requireStrongETag(response.headers.get(`etag`)),
+     }
+   }
+ 
+@@ -910,6 +1047,7 @@ export class DurableStream {
+       fetch: this.#options.fetch,
+       backoffOptions: this.#options.backoffOptions,
+       offset: options?.offset,
++      incarnation: options?.incarnation,
+       live: options?.live,
+       json: options?.json,
+       onError: options?.onError ?? this.#onError,
+diff --git a/packages/client/src/types.ts b/packages/client/src/types.ts
+index cbc9a91c..e32b80e0 100644
+--- a/packages/client/src/types.ts
++++ b/packages/client/src/types.ts
+@@ -133,6 +133,9 @@ export interface StreamOptions {
+    */
+   offset?: Offset
+ 
++  /** Guard all source reads and reconnects against this source incarnation. */
++  incarnation?: string
++
+   /**
+    * Live mode behavior:
+    * - false: Catch-up only, stop at first `upToDate`
+@@ -529,6 +532,10 @@ export interface HeadResultExists {
+    * When true, no further appends are permitted.
+    */
+   streamClosed: boolean
++
++  snapshotVersion?: string
++  incarnation?: string
++  snapshotMaxBytes?: number
+ }
+ 
+ /**
+@@ -543,6 +550,39 @@ export interface HeadResultNotFound {
+  */
+ export type HeadResult = HeadResultExists | HeadResultNotFound
+ 
++export interface ProjectionSnapshot {
++  body: Uint8Array
++  contentType: string
++  offset: Offset
++  incarnation: string
++  etag: string
++  digest: string
++}
++
++export interface LoadSnapshotOptions {
++  headers?: HeadersRecord
++  signal?: AbortSignal
++  expectedContentType?: string
++}
++
++export interface PublishSnapshotOptions {
++  body: Uint8Array
++  contentType: string
++  offset: Offset
++  incarnation: string
++  /** Strong ETag of the previous image, or null for first publication. */
++  etag: string | null
++  headers?: HeadersRecord
++  signal?: AbortSignal
++}
++
++export interface PublishedSnapshot {
++  created: boolean
++  offset: Offset
++  incarnation: string
++  etag: string
++}
++
+ /**
+  * Metadata extracted from a stream response.
+  * Contains headers and control information from the stream server.
+@@ -685,6 +725,12 @@ export interface StreamResponse<TJson = unknown> {
+    */
+   readonly startOffset: Offset
+ 
++  /**
++   * Source incarnation established by the first response. When present, every
++   * continuation and reconnect in this session is guarded against this value.
++   */
++  readonly incarnation?: string
++
+   // --- Response metadata (updated on each response) ---
+ 
+   /**
+diff --git a/packages/client/test/stream.test.ts b/packages/client/test/stream.test.ts
+index ebed2bc5..04d2f269 100644
+--- a/packages/client/test/stream.test.ts
++++ b/packages/client/test/stream.test.ts
+@@ -161,6 +161,185 @@ describe(`DurableStream`, () => {
+     })
+   })
+ 
++  describe(`projection snapshots`, () => {
++    it(`loads an opaque digest-verified image and publishes with strong CAS`, async () => {
++      const body = new TextEncoder().encode(`{"codec":"test"}`)
++      const hash = new Uint8Array(await crypto.subtle.digest(`SHA-256`, body))
++      const digest = `sha-256=:${Buffer.from(hash).toString(`base64`)}:`
++      const mockFetch = vi
++        .fn<typeof fetch>()
++        .mockResolvedValueOnce(
++          new Response(body, {
++            status: 200,
++            headers: {
++              "Stream-Snapshot": `v1`,
++              "Stream-Incarnation": `inc-1`,
++              "Stream-Snapshot-Offset": `cut-4`,
++              ETag: `"image-1"`,
++              "Content-Type": `application/octet-stream`,
++              "Content-Digest": digest,
++            },
++          })
++        )
++        .mockResolvedValueOnce(
++          new Response(null, {
++            status: 200,
++            headers: {
++              "Stream-Snapshot": `v1`,
++              "Stream-Incarnation": `inc-1`,
++              "Stream-Snapshot-Offset": `cut-5`,
++              ETag: `"image-2"`,
++            },
++          })
++        )
++      const handle = new DurableStream({
++        url: `https://example.com/source`,
++        fetch: mockFetch,
++      })
++
++      const loaded = await handle.loadSnapshot(`entity-v1`)
++      expect(loaded).toMatchObject({
++        offset: `cut-4`,
++        incarnation: `inc-1`,
++        etag: `"image-1"`,
++        contentType: `application/octet-stream`,
++      })
++      expect(loaded?.body).toEqual(body)
++
++      await handle.publishSnapshot(`entity-v1`, {
++        body,
++        contentType: `application/vnd.electric.entity-image+json`,
++        offset: `cut-5`,
++        incarnation: `inc-1`,
++        etag: `"image-1"`,
++        headers: { Authorization: `Bearer publisher` },
++      })
++      const [url, init] = mockFetch.mock.calls[1]!
++      expect(new URL(String(url)).searchParams.get(`snapshot`)).toBe(
++        `entity-v1`
++      )
++      const headers = new Headers(init?.headers)
++      expect(headers.get(`if-match`)).toBe(`"image-1"`)
++      expect(headers.get(`if-stream-incarnation`)).toBe(`inc-1`)
++      expect(headers.get(`authorization`)).toBe(`Bearer publisher`)
++      expect(headers.get(`content-digest`)).toBe(digest)
++    })
++
++    it(`rejects a corrupt image and does not treat an unmarked response as one`, async () => {
++      const corrupt = new DurableStream({
++        url: `https://example.com/source`,
++        fetch: vi.fn<typeof fetch>().mockResolvedValue(
++          new Response(`bad`, {
++            headers: {
++              "Stream-Snapshot": `v1`,
++              "Stream-Incarnation": `inc-1`,
++              "Stream-Snapshot-Offset": `cut-4`,
++              ETag: `"image-1"`,
++              "Content-Type": `application/vnd.electric.entity-image+json`,
++              "Content-Digest": `sha-256=:AAAA:`,
++            },
++          })
++        ),
++      })
++      await expect(corrupt.loadSnapshot(`entity-v1`)).rejects.toThrow(
++        `Content-Digest mismatch`
++      )
++
++      const oldServer = new DurableStream({
++        url: `https://example.com/source`,
++        fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response(`[]`)),
++      })
++      await expect(oldServer.loadSnapshot(`entity-v1`)).resolves.toBeNull()
++    })
++
++    it(`guards initial and subsequent source reads with the incarnation`, async () => {
++      const mockFetch = vi
++        .fn<typeof fetch>()
++        .mockResolvedValueOnce(
++          new Response(`[]`, {
++            headers: {
++              "content-type": `application/json`,
++              "Stream-Next-Offset": `cut-1`,
++              "Stream-Up-To-Date": `true`,
++              "Stream-Snapshot": `v1`,
++              "Stream-Incarnation": `inc-1`,
++            },
++          })
++        )
++        .mockResolvedValueOnce(
++          new Response(`[]`, {
++            headers: {
++              "content-type": `application/json`,
++              "Stream-Next-Offset": `cut-1`,
++              "Stream-Up-To-Date": `true`,
++              "Stream-Snapshot": `v1`,
++              "Stream-Incarnation": `inc-2`,
++            },
++          })
++        )
++      const handle = new DurableStream({
++        url: `https://example.com/source`,
++        fetch: mockFetch,
++      })
++      const response = await handle.stream({
++        offset: `cut-0`,
++        incarnation: `inc-1`,
++        live: `long-poll`,
++        json: true,
++      })
++      response.subscribeJson(() => undefined)
++      await expect(response.closed).rejects.toThrow(
++        `requested source incarnation`
++      )
++      for (const [, init] of mockFetch.mock.calls) {
++        expect(new Headers(init?.headers).get(`if-stream-incarnation`)).toBe(
++          `inc-1`
++        )
++      }
++    })
++
++    it(`pins an advertised incarnation for continuations of an unguarded replay`, async () => {
++      const mockFetch = vi
++        .fn<typeof fetch>()
++        .mockResolvedValueOnce(
++          new Response(`[]`, {
++            headers: {
++              "content-type": `application/json`,
++              "Stream-Next-Offset": `cut-1`,
++              "Stream-Snapshot": `v1`,
++              "Stream-Incarnation": `inc-1`,
++            },
++          })
++        )
++        .mockResolvedValueOnce(
++          new Response(`[]`, {
++            headers: {
++              "content-type": `application/json`,
++              "Stream-Next-Offset": `cut-1`,
++              "Stream-Up-To-Date": `true`,
++              "Stream-Snapshot": `v1`,
++              "Stream-Incarnation": `inc-2`,
++            },
++          })
++        )
++      const response = await new DurableStream({
++        url: `https://example.com/source`,
++        fetch: mockFetch,
++      }).stream({ live: `long-poll`, json: true })
++
++      expect(response.incarnation).toBe(`inc-1`)
++      response.subscribeJson(() => undefined)
++      await expect(response.closed).rejects.toThrow(
++        `requested source incarnation`
++      )
++      expect(
++        new Headers(mockFetch.mock.calls[1]![1]?.headers).get(
++          `if-stream-incarnation`
++        )
++      ).toBe(`inc-1`)
++    })
++  })
++
+   describe(`stream`, () => {
+     let mockFetch: Mock<typeof fetch>
+ 
+diff --git a/packages/state/src/db.ts b/packages/state/src/db.ts
+index 9f9a4dfa..f531d2ae 100644
+--- a/packages/state/src/db.ts
++++ b/packages/state/src/db.ts
+@@ -16,6 +16,8 @@ export type {
+   StreamDBMethods,
+   StreamDBUtils,
+   StreamDBWithActions,
++  StreamDBBootstrap,
++  StreamDBCommittedCut,
+   ActionFactory,
+   ActionMap,
+   ActionDefinition,
+diff --git a/packages/state/src/stream-db.ts b/packages/state/src/stream-db.ts
+index c4c8e468..5035c994 100644
+--- a/packages/state/src/stream-db.ts
++++ b/packages/state/src/stream-db.ts
+@@ -1,8 +1,4 @@
+-import {
+-  createCollection,
+-  createOptimisticAction,
+-  deepEquals,
+-} from "@tanstack/db"
++import { createCollection, createOptimisticAction } from "@tanstack/db"
+ import { DurableStream as DurableStreamClass } from "@durable-streams/client"
+ import { isChangeEvent, isControlEvent } from "./types"
+ import type { Collection, SyncConfig } from "@tanstack/db"
+@@ -90,6 +86,26 @@ export interface CreateStreamDBOptions<
+    * Useful for tracking safe offsets for external ack/lease protocols.
+    */
+   onBatch?: (batch: JsonBatch<StateEvent>) => void
++  /** Reports terminal stream or batch failures after the consumer starts. */
++  onError?: (error: Error) => void
++  /** Validated committed state to install before opening the source stream. */
++  bootstrap?: StreamDBBootstrap
++  /** Source incarnation guard to retain even when no bootstrap is installed. */
++  incarnation?: string
++  /** Runs only after collection writes and the corresponding offset commit. */
++  onCommittedBatch?: (cut: StreamDBCommittedCut) => void
++}
++
++export interface StreamDBBootstrap {
++  offset: string
++  incarnation?: string
++  nextSeq: number
++  rowsByCollection: Record<string, Array<Record<string, unknown>>>
++}
++
++export interface StreamDBCommittedCut {
++  batch: JsonBatch<StateEvent>
++  image: StreamDBBootstrap
+ }
+ 
+ /**
+@@ -149,6 +165,9 @@ export interface StreamDBMethods {
+    */
+   readonly offset: string
+ 
++  /** Freeze the current committed rows and exact next-read offset together. */
++  exportState: () => StreamDBBootstrap
++
+   /**
+    * Preload all collections by consuming the stream until up-to-date
+    */
+@@ -193,7 +212,6 @@ interface CollectionSyncHandler {
+     type: `insert` | `update` | `delete`,
+     cursor?: string
+   ) => void
+-  read: (key: string) => object | undefined
+   commit: () => void
+   markReady: () => void
+   truncate: () => void
+@@ -239,12 +257,6 @@ class EventDispatcher {
+   /** Global sequence counter for insertion ordering */
+   private seq = 0
+ 
+-  private comparableRow(row: object): Record<string, unknown> {
+-    const clone = { ...(row as Record<string, unknown>) }
+-    delete clone._seq
+-    return clone
+-  }
+-
+   /**
+    * Register a handler for a specific event type
+    */
+@@ -256,6 +268,30 @@ class EventDispatcher {
+     }
+   }
+ 
++  hydrate(
++    definitions: StreamStateDefinition,
++    rowsByCollection: Record<string, Array<Record<string, unknown>>>,
++    nextSeq: number
++  ): void {
++    for (const [collectionName, definition] of Object.entries(definitions)) {
++      const handler = this.handlers.get(definition.type)
++      if (!handler) throw new Error(`Missing handler for ${collectionName}`)
++      const rows = rowsByCollection[collectionName] ?? []
++      if (rows.length === 0) continue
++      handler.begin()
++      for (const row of rows) {
++        const key = row[definition.primaryKey]
++        if (typeof key !== `string` && typeof key !== `number`) {
++          throw new Error(`Invalid bootstrap key for ${collectionName}`)
++        }
++        handler.write(structuredClone(row), `insert`)
++        this.existingKeys.get(definition.type)?.add(String(key))
++      }
++      handler.commit()
++    }
++    this.seq = nextSeq
++  }
++
+   /**
+    * Dispatch a change event to the appropriate collection.
+    * Writes are buffered until commit() is called via markUpToDate().
+@@ -315,18 +351,14 @@ class EventDispatcher {
+     const keys = this.existingKeys.get(event.type)
+ 
+     // Live stream reconnects can replay an already-synced insert for the same
+-    // row. Normalize that case to update so observation replays remain
+-    // idempotent instead of tripping TanStack DB's duplicate-key path.
++    // canonical row. Normalize that case to update so observation replays
++    // remain idempotent instead of tripping TanStack DB's duplicate-key path.
++    // Do not consult the collection's visible state here: it includes pending
++    // optimistic inserts. Treating the authoritative echo of such an insert as
++    // an update leaves the canonical synced base empty, so a committed snapshot
++    // silently omits the row.
+     if (operation === `insert` && keys?.has(event.key)) {
+       operation = `update`
+-    } else if (operation === `insert` && typeof event.key === `string`) {
+-      const existingValue = handler.read(event.key)
+-      if (
+-        existingValue &&
+-        deepEquals(this.comparableRow(existingValue), this.comparableRow(value))
+-      ) {
+-        operation = `update`
+-      }
+     }
+ 
+     // Track key existence for upsert logic
+@@ -380,7 +412,7 @@ class EventDispatcher {
+   /**
+    * Commit all pending writes and handle up-to-date signal
+    */
+-  markUpToDate(): void {
++  commit(markReady: boolean, strict = false): void {
+     // Commit all handlers that have pending writes
+     for (const handler of this.pendingHandlers) {
+       try {
+@@ -391,6 +423,7 @@ class EventDispatcher {
+         // WORKAROUND for TanStack DB groupBy bug
+         // If it's the known "already exists in collection live-query" error, log and continue
+         if (
++          !strict &&
+           error instanceof Error &&
+           error.message.includes(`already exists in the collection`) &&
+           error.message.includes(`live-query`)
+@@ -425,7 +458,7 @@ class EventDispatcher {
+     }
+     this.pendingTxids.clear()
+ 
+-    if (!this.isUpToDate) {
++    if (markReady && !this.isUpToDate) {
+       this.isUpToDate = true
+       // Mark all collections as ready
+       for (const handler of this.handlers.values()) {
+@@ -479,6 +512,10 @@ class EventDispatcher {
+     return this.isUpToDate
+   }
+ 
++  get nextSequence(): number {
++    return this.seq
++  }
++
+   /**
+    * Wait for a specific txid to be seen in the stream
+    */
+@@ -523,10 +560,13 @@ class EventDispatcher {
+ function createStreamSyncConfig<T extends object>(
+   eventType: string,
+   dispatcher: EventDispatcher,
+-  primaryKey: string,
+-  read: (key: string) => T | undefined
++  primaryKey: string
+ ): SyncConfig<T, string> {
+   return {
++    // Durable State update events carry complete replacement rows. Without
++    // this, TanStack DB's default partial mode retains fields omitted by a
++    // later event and a snapshot diverges from canonical replay state.
++    rowUpdateMode: `full`,
+     sync: ({ begin, write, commit, markReady, truncate }) => {
+       // Register this collection's handler with the dispatcher
+       dispatcher.registerHandler(eventType, {
+@@ -537,7 +577,6 @@ function createStreamSyncConfig<T extends object>(
+             type,
+           })
+         },
+-        read: (key) => read(key),
+         commit,
+         markReady,
+         truncate,
+@@ -608,6 +647,10 @@ export function createStreamDB<
+     onEvent,
+     onBeforeBatch,
+     onBatch,
++    onError,
++    bootstrap,
++    incarnation,
++    onCommittedBatch,
+   } = options
+ 
+   // Reuse provided stream or create a new one
+@@ -629,16 +672,14 @@ export function createStreamDB<
+   const collectionInstances: Record<string, Collection<object, string>> = {}
+ 
+   for (const [name, definition] of Object.entries(state)) {
+-    // eslint-disable-next-line prefer-const -- self-referential: collection.get() used in its own sync config
+-    let collection: Collection<object, string> = createCollection({
++    const collection: Collection<object, string> = createCollection({
+       id: getStreamDBCollectionId(streamIdentity, name),
+       schema: definition.schema as StandardSchemaV1<object>,
+       getKey: (item: any) => String(item[definition.primaryKey]),
+       sync: createStreamSyncConfig(
+         definition.type,
+         dispatcher,
+-        definition.primaryKey,
+-        (key) => collection.get(key) as object | undefined
++        definition.primaryKey
+       ),
+       startSync: true, // Start syncing immediately
+       // Disable GC - we manage lifecycle via db.close()
+@@ -654,7 +695,43 @@ export function createStreamDB<
+   let streamResponse: StreamResponse<StateEvent> | null = null
+   const abortController = new AbortController()
+   let consumerStarted = false
+-  let lastConsumedOffset = `-1`
++  let lastConsumedOffset = bootstrap?.offset ?? `-1`
++  let hydrated = false
++  let failedBatchError: Error | null = null
++  let lastCommittedImage: StreamDBBootstrap | null =
++    onCommittedBatch && bootstrap ? structuredClone(bootstrap) : null
++
++  const captureCommittedState = (): StreamDBBootstrap => ({
++    offset: lastConsumedOffset,
++    ...(streamResponse?.incarnation
++      ? { incarnation: streamResponse.incarnation }
++      : bootstrap?.incarnation
++        ? { incarnation: bootstrap.incarnation }
++        : incarnation
++          ? { incarnation }
++          : {}),
++    nextSeq: dispatcher.nextSequence,
++    rowsByCollection: Object.fromEntries(
++      Object.entries(collectionInstances).map(([name, collection]) => [
++        name,
++        [...collection._state.syncedData.values()].map((row) =>
++          structuredClone(row as Record<string, unknown>)
++        ),
++      ])
++    ),
++  })
++  const exportState = (): StreamDBBootstrap => {
++    if (failedBatchError) {
++      throw new Error(`Cannot export state after a failed stream batch`, {
++        cause: failedBatchError,
++      })
++    }
++    return structuredClone(
++      onCommittedBatch
++        ? (lastCommittedImage ?? captureCommittedState())
++        : captureCommittedState()
++    )
++  }
+   const isAbortLikeError = (err: unknown): boolean => {
+     if (abortController.signal.aborted) {
+       return true
+@@ -676,10 +753,36 @@ export function createStreamDB<
+     if (consumerStarted) return
+     consumerStarted = true
+ 
++    if (bootstrap && !hydrated) {
++      const knownCollections = new Set(Object.keys(state))
++      for (const name of Object.keys(bootstrap.rowsByCollection)) {
++        if (!knownCollections.has(name)) {
++          throw new Error(`Unknown bootstrap collection: ${name}`)
++        }
++      }
++      if (!Number.isSafeInteger(bootstrap.nextSeq) || bootstrap.nextSeq < 0) {
++        throw new Error(`Invalid bootstrap nextSeq`)
++      }
++      for (const [name, definition] of Object.entries(state)) {
++        for (const row of bootstrap.rowsByCollection[name] ?? []) {
++          const result = await definition.schema[`~standard`].validate(row)
++          if (`issues` in result && result.issues) {
++            throw new Error(`Invalid bootstrap row for ${name}`)
++          }
++        }
++      }
++      dispatcher.hydrate(state, bootstrap.rowsByCollection, bootstrap.nextSeq)
++      hydrated = true
++    }
++
+     // Start streaming (this is where the connection actually happens)
+     streamResponse = await stream.stream<StateEvent>({
+       live,
+       json: true,
++      ...(bootstrap ? { offset: bootstrap.offset } : {}),
++      ...((bootstrap?.incarnation ?? incarnation)
++        ? { incarnation: bootstrap?.incarnation ?? incarnation }
++        : {}),
+       signal: abortController.signal,
+     })
+     // StreamDB consumes batches via subscribeJson(); it does not await the
+@@ -693,14 +796,12 @@ export function createStreamDB<
+       const error = err instanceof Error ? err : new Error(String(err))
+       console.error(`[StreamDB] Stream consumer closed unexpectedly:`, error)
+       dispatcher.rejectAll(error)
++      onError?.(error)
+       return undefined
+     })
+-    lastConsumedOffset = streamResponse.offset
+-
+     // Process events as they come in
+     streamResponse.subscribeJson((batch) => {
+       try {
+-        lastConsumedOffset = batch.offset
+         onBeforeBatch?.(batch)
+ 
+         for (const event of batch.items) {
+@@ -713,13 +814,21 @@ export function createStreamDB<
+         }
+ 
+         onBatch?.(batch)
+-
+-        if (batch.upToDate || dispatcher.ready) {
+-          dispatcher.markUpToDate()
++        dispatcher.commit(batch.upToDate, onCommittedBatch !== undefined)
++        lastConsumedOffset = batch.offset
++        if (onCommittedBatch) {
++          lastCommittedImage = captureCommittedState()
++          onCommittedBatch({
++            batch,
++            image: structuredClone(lastCommittedImage),
++          })
+         }
+       } catch (error) {
+         console.error(`[StreamDB] Error processing batch:`, error)
+-        dispatcher.rejectAll(error as Error)
++        failedBatchError =
++          error instanceof Error ? error : new Error(String(error))
++        dispatcher.rejectAll(failedBatchError)
++        onError?.(failedBatchError)
+         abortController.abort()
+       }
+       return Promise.resolve()
+@@ -732,6 +841,7 @@ export function createStreamDB<
+     get offset() {
+       return lastConsumedOffset
+     },
++    exportState,
+     preload: async () => {
+       await startConsumer()
+       await dispatcher.waitForUpToDate()
+@@ -764,10 +874,30 @@ export function createStreamDB<
+       ReturnType<typeof createOptimisticAction>
+     > = {}
+     for (const [name, def] of Object.entries(actionDefs)) {
+-      wrappedActions[name] = createOptimisticAction({
++      const action = createOptimisticAction({
+         onMutate: def.onMutate,
+         mutationFn: def.mutationFn,
+       })
++      wrappedActions[name] = ((variables: never) => {
++        const transaction = action(variables)
++        if (onCommittedBatch) {
++          // The authoritative stream echo can commit while its matching
++          // optimistic transaction is still visible. TanStack reconciles the
++          // overlay only after mutationFn settles, so refresh the retained
++          // canonical image at that point. syncedData excludes unrelated
++          // optimistic overlays; a failed stream batch permanently disables
++          // export through failedBatchError.
++          void transaction.isPersisted.promise.then(
++            () => {
++              if (!failedBatchError) {
++                lastCommittedImage = captureCommittedState()
++              }
++            },
++            () => {}
++          )
++        }
++        return transaction
++      }) as typeof action
+     }
+ 
+     Object.defineProperty(db, `actions`, {
+diff --git a/packages/state/test/stream-db.test.ts b/packages/state/test/stream-db.test.ts
+index 7e90b720..89d69235 100644
+--- a/packages/state/test/stream-db.test.ts
++++ b/packages/state/test/stream-db.test.ts
+@@ -59,6 +59,336 @@ describe(`Stream DB`, () => {
+   let server: DurableStreamTestServer
+   let baseUrl: string
+ 
++  it(`exports immutable committed rows without optimistic overlays`, async () => {
++    type Item = { id: string; nested: { value: string } }
++    const itemSchema: StandardSchemaV1<Item> = {
++      "~standard": {
++        version: 1,
++        vendor: `test`,
++        validate: (value) => ({ value: value as Item }),
++      },
++    }
++    const streamState = createStateSchema({
++      items: { schema: itemSchema, type: `item`, primaryKey: `id` },
++    })
++    const fetchClient = vi.fn<typeof fetch>().mockResolvedValue(
++      new Response(
++        JSON.stringify([
++          {
++            type: `item`,
++            key: `a`,
++            value: { id: `a`, nested: { value: `committed` } },
++            headers: { operation: `insert` },
++          },
++        ]),
++        {
++          headers: {
++            "content-type": `application/json`,
++            "Stream-Next-Offset": `cut-1`,
++            "Stream-Up-To-Date": `true`,
++          },
++        }
++      )
++    )
++    let rejectMutation: ((error: Error) => void) | undefined
++    const failLater = () =>
++      new Promise<void>((_resolve, reject) => {
++        rejectMutation = reject
++      })
++    const db = createStreamDB({
++      streamOptions: {
++        url: `https://example.com/canonical`,
++        contentType: `application/json`,
++        fetch: fetchClient,
++      },
++      live: false,
++      state: streamState,
++      onCommittedBatch: () => {},
++      actions: ({ db: actionDb }) => ({
++        insert: {
++          onMutate: () =>
++            actionDb.collections.items.insert({
++              id: `b`,
++              nested: { value: `optimistic insert` },
++            }),
++          mutationFn: failLater,
++        },
++        update: {
++          onMutate: () =>
++            actionDb.collections.items.update(`a`, (draft) => {
++              draft.nested.value = `optimistic update`
++            }),
++          mutationFn: failLater,
++        },
++        delete: {
++          onMutate: () => actionDb.collections.items.delete(`a`),
++          mutationFn: failLater,
++        },
++      }),
++    })
++    await db.preload()
++    const committed = db.exportState()
++
++    for (const action of [
++      db.actions.insert,
++      db.actions.update,
++      db.actions.delete,
++    ]) {
++      const transaction = action(undefined as never)
++      expect(db.exportState()).toEqual(committed)
++      rejectMutation!(new Error(`rollback`))
++      await expect(transaction.isPersisted.promise).rejects.toThrow(`rollback`)
++      expect(db.exportState()).toEqual(committed)
++    }
++
++    ;(committed.rowsByCollection.items![0]!.nested as Item[`nested`]).value =
++      `mutated export`
++    expect(
++      (db.exportState().rowsByCollection.items![0]!.nested as Item[`nested`])
++        .value
++    ).toBe(`committed`)
++    db.close()
++  })
++
++  it(`treats update values as authoritative replacements`, async () => {
++    const schema: StandardSchemaV1<Record<string, unknown>> = {
++      "~standard": {
++        version: 1,
++        vendor: `test`,
++        validate: (value) => ({ value: value as Record<string, unknown> }),
++      },
++    }
++    const fetchClient = vi.fn<typeof fetch>().mockResolvedValue(
++      new Response(
++        JSON.stringify([
++          {
++            type: `item`,
++            key: `a`,
++            value: { id: `a`, keep: `old`, remove: `obsolete` },
++            headers: { operation: `insert` },
++          },
++          {
++            type: `item`,
++            key: `a`,
++            value: { id: `a`, keep: `new` },
++            headers: { operation: `update` },
++          },
++        ]),
++        {
++          headers: {
++            "content-type": `application/json`,
++            "Stream-Next-Offset": `cut-2`,
++            "Stream-Up-To-Date": `true`,
++          },
++        }
++      )
++    )
++    const db = createStreamDB({
++      streamOptions: {
++        url: `https://example.com/replacements`,
++        contentType: `application/json`,
++        fetch: fetchClient,
++      },
++      live: false,
++      state: createStateSchema({
++        items: { schema, type: `item`, primaryKey: `id` },
++      }),
++    })
++
++    await db.preload()
++    expect(db.collections.items.get(`a`)).toMatchObject({
++      id: `a`,
++      keep: `new`,
++    })
++    expect(db.collections.items.get(`a`)).not.toHaveProperty(`remove`)
++    db.close()
++  })
++
++  it(`does not checkpoint a batch when a known live-query commit error occurs`, async () => {
++    const committed = vi.fn()
++    const db = createStreamDB({
++      streamOptions: {
++        url: `https://example.com/strict-checkpoint`,
++        contentType: `application/json`,
++        fetch: vi.fn<typeof fetch>().mockResolvedValue(
++          new Response(
++            JSON.stringify([
++              {
++                type: `user`,
++                key: `a`,
++                value: { name: `A`, email: `a@example.com` },
++                headers: { operation: `insert` },
++              },
++            ]),
++            {
++              headers: {
++                "content-type": `application/json`,
++                "Stream-Next-Offset": `cut-1`,
++                "Stream-Up-To-Date": `true`,
++              },
++            }
++          )
++        ),
++      },
++      live: false,
++      state: createStateSchema({
++        users: { schema: userSchema, type: `user`, primaryKey: `id` },
++      }),
++      onCommittedBatch: committed,
++    })
++    db.collections.users._state.commitPendingTransactions = () => {
++      throw new Error(`row already exists in the collection live-query`)
++    }
++
++    await expect(db.preload()).rejects.toThrow(
++      `already exists in the collection live-query`
++    )
++    expect(committed).not.toHaveBeenCalled()
++    expect(() => db.exportState()).toThrow(
++      `Cannot export state after a failed stream batch`
++    )
++    db.close()
++  })
++
++  it(`hydrates a committed cut before suffix replay and preserves sequence deletes`, async () => {
++    const streamState = createStateSchema({
++      users: { schema: userSchema, type: `user`, primaryKey: `id` },
++    })
++    const replayFetch = vi.fn<typeof fetch>().mockResolvedValue(
++      new Response(
++        JSON.stringify([
++          {
++            type: `user`,
++            key: `a`,
++            value: { name: `A`, email: `a@example.com` },
++            headers: { operation: `insert` },
++          },
++          {
++            type: `user`,
++            key: `b`,
++            value: { name: `B`, email: `b@example.com` },
++            headers: { operation: `insert` },
++          },
++          {
++            type: `user`,
++            key: `b`,
++            headers: { operation: `delete` },
++          },
++        ]),
++        {
++          headers: {
++            "content-type": `application/json`,
++            "Stream-Next-Offset": `cut-3`,
++            "Stream-Up-To-Date": `true`,
++          },
++        }
++      )
++    )
++    const replay = createStreamDB({
++      streamOptions: {
++        url: `https://example.com/source`,
++        contentType: `application/json`,
++        fetch: replayFetch,
++      },
++      live: false,
++      state: streamState,
++    })
++    await replay.preload()
++    const image = replay.exportState()
++    expect(image.nextSeq).toBe(3)
++    expect(image.rowsByCollection.users).toHaveLength(1)
++    replay.close()
++
++    const committedCuts: Array<string> = []
++    const suffixFetch = vi.fn<typeof fetch>().mockResolvedValue(
++      new Response(
++        JSON.stringify([
++          {
++            type: `user`,
++            key: `c`,
++            value: { name: `C`, email: `c@example.com` },
++            headers: { operation: `insert` },
++          },
++        ]),
++        {
++          headers: {
++            "content-type": `application/json`,
++            "Stream-Next-Offset": `cut-4`,
++            "Stream-Up-To-Date": `true`,
++            "Stream-Snapshot": `v1`,
++            "Stream-Incarnation": `inc-1`,
++          },
++        }
++      )
++    )
++    const hydrated = createStreamDB({
++      streamOptions: {
++        url: `https://example.com/source`,
++        contentType: `application/json`,
++        fetch: suffixFetch,
++      },
++      live: false,
++      state: streamState,
++      bootstrap: { ...image, incarnation: `inc-1` },
++      onCommittedBatch: ({ image: cut }) => committedCuts.push(cut.offset),
++    })
++    await hydrated.preload()
++    expect(
++      (hydrated.collections.users.get(`a`) as Record<string, unknown>)._seq
++    ).toBe(0)
++    expect(
++      (hydrated.collections.users.get(`c`) as Record<string, unknown>)._seq
++    ).toBe(3)
++    expect(hydrated.offset).toBe(`cut-4`)
++    expect(committedCuts).toEqual([`cut-4`])
++    expect(hydrated.exportState().incarnation).toBe(`inc-1`)
++    const [requestUrl, requestInit] = suffixFetch.mock.calls[0]!
++    expect(new URL(String(requestUrl)).searchParams.get(`offset`)).toBe(`cut-3`)
++    expect(new Headers(requestInit?.headers).get(`if-stream-incarnation`)).toBe(
++      `inc-1`
++    )
++    hydrated.close()
++
++    const noCallback = createStreamDB({
++      streamOptions: {
++        url: `https://example.com/source`,
++        contentType: `application/json`,
++        fetch: vi.fn<typeof fetch>().mockResolvedValue(
++          new Response(
++            JSON.stringify([
++              {
++                type: `user`,
++                key: `d`,
++                value: { name: `D`, email: `d@example.com` },
++                headers: { operation: `insert` },
++              },
++            ]),
++            {
++              headers: {
++                "content-type": `application/json`,
++                "Stream-Next-Offset": `cut-5`,
++                "Stream-Up-To-Date": `true`,
++                "Stream-Snapshot": `v1`,
++                "Stream-Incarnation": `inc-1`,
++              },
++            }
++          )
++        ),
++      },
++      live: false,
++      state: streamState,
++      bootstrap: { ...image, incarnation: `inc-1` },
++    })
++    await noCallback.preload()
++    const exportedSuffix = noCallback.exportState()
++    expect(exportedSuffix.offset).toBe(`cut-5`)
++    expect(exportedSuffix.rowsByCollection.users).toEqual([
++      expect.objectContaining({ name: `A` }),
++      expect.objectContaining({ name: `D` }),
++    ])
++    noCallback.close()
++  })
++
+   beforeAll(async () => {
+     server = new DurableStreamTestServer({ port: 0 })
+     await server.start()
+@@ -1013,6 +1343,9 @@ describe(`Stream DB`, () => {
+     await expect(db.preload()).rejects.toThrow(
+       /StreamDB collections require object values/
+     )
++    expect(() => db.exportState()).toThrow(
++      `Cannot export state after a failed stream batch`
++    )
+ 
+     db.close()
+   })
+@@ -1753,6 +2086,68 @@ describe(`Stream DB Actions`, () => {
+     await server.stop()
+   })
+ 
++  it(`exports the canonical row after an optimistic insert is authoritatively echoed`, async () => {
++    const streamState = createStateSchema({
++      users: {
++        schema: userSchema,
++        type: `user`,
++        primaryKey: `id`,
++      },
++    })
++    const streamUrl = `${baseUrl}/db/optimistic-snapshot-${Date.now()}`
++    await DurableStream.create({
++      url: streamUrl,
++      contentType: `application/json`,
++    })
++
++    const db = createStreamDB({
++      streamOptions: { url: streamUrl, contentType: `application/json` },
++      state: streamState,
++      onCommittedBatch: () => {},
++      actions: ({ db: actionDb, stream }) => ({
++        addUser: {
++          onMutate: (id: string) => {
++            actionDb.collections.users.insert({
++              id,
++              name: `Canonical Alice`,
++              email: `alice@example.com`,
++            })
++          },
++          mutationFn: async (id: string) => {
++            const txid = crypto.randomUUID()
++            await stream.append(
++              JSON.stringify(
++                streamState.users.insert({
++                  key: id,
++                  value: {
++                    id,
++                    name: `Canonical Alice`,
++                    email: `alice@example.com`,
++                  },
++                  headers: { txid },
++                })
++              )
++            )
++            await actionDb.utils.awaitTxId(txid)
++          },
++        },
++      }),
++    })
++    await db.preload()
++
++    const transaction = db.actions.addUser(`alice`)
++    await transaction.isPersisted.promise
++
++    expect(db.exportState().rowsByCollection.users).toEqual([
++      expect.objectContaining({
++        id: `alice`,
++        name: `Canonical Alice`,
++        email: `alice@example.com`,
++      }),
++    ])
++    db.close()
++  })
++
+   it(`should create actions with onMutate and mutationFn`, async () => {
+     const streamState = createStateSchema({
+       users: {

@@ -18,6 +18,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +55,11 @@ type FenceMetrics interface {
 type Handler struct {
 	// Store is the stream storage backend.
 	Store store.Store
+
+	// EnableSnapshots opts into the projection snapshot extension. The backend
+	// must also implement ProjectionSnapshotStore and PageReader. Publication
+	// always requires an explicit service grant, even in insecure auth mode.
+	EnableSnapshots bool
 
 	// LongPollTimeout is the default timeout for long-poll requests.
 	LongPollTimeout time.Duration
@@ -222,6 +228,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, HEAD, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Stream-Seq, Stream-TTL, Stream-Expires-At, Stream-Closed, If-None-Match, Producer-Id, Producer-Epoch, Producer-Seq, Stream-Forked-From, Stream-Fork-Offset, Stream-Fork-Sub-Offset, Authorization, electric-claim-token, Write-Fence, Write-Token, "+h.requestIDHeader())
 	w.Header().Set("Access-Control-Expose-Headers", "Stream-Next-Offset, Stream-Cursor, Stream-Up-To-Date, Stream-Closed, Stream-Envelope, ETag, Location, Producer-Epoch, Producer-Seq, Producer-Expected-Seq, Producer-Received-Seq, Write-Fence, Write-Fence-Sealed-Generation, Write-Fence-Sealed-Offset, "+h.requestIDHeader())
+	if _, enabled := h.snapshotStore(); enabled {
+		w.Header().Set("Access-Control-Allow-Headers", w.Header().Get("Access-Control-Allow-Headers")+", If-Match, Stream-Snapshot, Stream-Snapshot-Offset, If-Stream-Incarnation, Content-Digest, Content-Encoding")
+		w.Header().Set("Access-Control-Expose-Headers", w.Header().Get("Access-Control-Expose-Headers")+", Stream-Snapshot, Stream-Snapshot-Offset, Stream-Snapshot-Max-Bytes, Stream-Snapshot-Max-Total-Bytes, Stream-Snapshot-Max-Versions, Stream-Incarnation, Content-Digest")
+	}
 
 	// Browser security headers (Protocol Section 10.7)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -255,21 +265,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"path", streamPath,
 		"request_id", correlation.RequestID(r.Context()))
 
-	var err error
-	switch r.Method {
-	case http.MethodPut:
-		err = h.handleCreate(w, r, streamPath)
-	case http.MethodHead:
-		err = h.handleHead(w, r, streamPath)
-	case http.MethodGet:
-		err = h.handleRead(w, r, streamPath)
-	case http.MethodPost:
-		err = h.handleAppend(w, r, streamPath)
-	case http.MethodDelete:
-		err = h.handleDelete(w, r, streamPath)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		h.writeError(w, newHTTPError(http.StatusBadRequest, "invalid query parameters"))
 		return
+	}
+	if _, snapshot := query["snapshot"]; snapshot {
+		err = h.handleSnapshot(w, r, streamPath, query)
+	} else {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead &&
+			(len(r.Header.Values(protocol.HeaderStreamSnapshot)) > 0 ||
+				len(r.Header.Values(protocol.HeaderStreamSnapshotOffset)) > 0 ||
+				len(r.Header.Values(protocol.HeaderIfStreamIncarnation)) > 0) {
+			h.writeError(w, newHTTPError(http.StatusBadRequest, "snapshot publication requires the snapshot query parameter"))
+			return
+		}
+		switch r.Method {
+		case http.MethodPut:
+			err = h.handleCreate(w, r, streamPath)
+		case http.MethodHead:
+			err = h.handleHead(w, r, streamPath)
+		case http.MethodGet:
+			err = h.handleRead(w, r, streamPath)
+		case http.MethodPost:
+			err = h.handleAppend(w, r, streamPath)
+		case http.MethodDelete:
+			err = h.handleDelete(w, r, streamPath)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
 	}
 
 	if err != nil {
@@ -284,6 +309,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.Canceled) && errors.Is(r.Context().Err(), context.Canceled) {
 			h.logger().Debug("request canceled", "method", r.Method)
 			return
+		}
+		if r.Header.Get(protocol.HeaderIfStreamIncarnation) != "" &&
+			(errors.Is(err, store.ErrReadSnapshotChanged) || errors.Is(err, errSSEHubRecreated)) {
+			err = newHTTPError(http.StatusPreconditionFailed, "stream incarnation changed")
 		}
 		h.writeError(w, err)
 	}
@@ -505,6 +534,10 @@ func (h *Handler) handleHead(w http.ResponseWriter, r *http.Request, path string
 		return err
 	}
 
+	guard, err := h.snapshotReadGuard(r)
+	if err != nil {
+		return err
+	}
 	snapshot, err := h.captureReadSnapshot(r.Context(), path, true)
 	if err != nil {
 		if errors.Is(err, store.ErrStreamNotFound) {
@@ -516,9 +549,16 @@ func (h *Handler) handleHead(w http.ResponseWriter, r *http.Request, path string
 		return err
 	}
 
+	if guard != "" && guard != snapshot.Incarnation {
+		return store.ErrReadSnapshotChanged
+	}
+	h.snapshotHeaders(w, snapshot.Incarnation)
 	w.Header().Set("Content-Type", snapshot.ContentType)
 	w.Header().Set(protocol.HeaderStreamNextOffset, snapshot.Tail.String())
 	w.Header().Set("Cache-Control", "no-store")
+	if guard != "" {
+		w.Header().Set("Cache-Control", "private, no-store")
+	}
 
 	if snapshot.TTLSeconds != nil {
 		w.Header().Set(protocol.HeaderStreamTTL, strconv.FormatInt(*snapshot.TTLSeconds, 10))
@@ -556,6 +596,10 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	// another; uncredentialed reads (the insecure default for base clients)
 	// keep today's headers byte for byte.
 	authorizedPrivate, err := h.authorizeRead(r, path)
+	if err != nil {
+		return err
+	}
+	guard, err := h.snapshotReadGuard(r)
 	if err != nil {
 		return err
 	}
@@ -690,6 +734,14 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 		}
 	}()
 
+	if guard != "" && guard != firstPage.Snapshot.Incarnation {
+		return store.ErrReadSnapshotChanged
+	}
+	h.snapshotHeaders(w, firstPage.Snapshot.Incarnation)
+	if guard != "" {
+		w.Header().Set("Cache-Control", "private, no-store")
+	}
+
 	if liveMode == "sse" {
 		ct := strings.ToLower(store.ExtractMediaType(firstPage.Snapshot.ContentType))
 		useBase64 := !strings.HasPrefix(ct, "text/") && ct != "application/json"
@@ -729,6 +781,9 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 			w.Header().Set(protocol.HeaderStreamClosed, "true")
 		}
 		w.Header().Set("Cache-Control", "no-store")
+		if guard != "" {
+			w.Header().Set("Cache-Control", "private, no-store")
+		}
 		if store.IsJSONContentType(firstPage.Snapshot.ContentType) {
 			if envelope {
 				w.Header().Set(protocol.HeaderStreamEnvelope, "offsets")
@@ -850,7 +905,9 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request, path string
 	// conditional handling (nothing to revalidate against) — so the §12.7
 	// credential-keying problem cannot arise. Uncredentialed reads keep the
 	// base protocol's caching headers unchanged.
-	if authorizedPrivate {
+	if guard != "" {
+		w.Header().Set("Cache-Control", "private, no-store")
+	} else if authorizedPrivate {
 		w.Header().Set("Cache-Control", "private")
 	} else {
 		// Set ETag for caching

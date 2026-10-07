@@ -1,6 +1,6 @@
 -- common.lua — shared prelude prepended to every chronicle script by
 -- scripts.go. Convention: KEYS[1]=meta HASH, KEYS[2]=msg ZSET,
--- KEYS[3]=prod HASH, KEYS[4]=forks SET (extra script-specific keys follow).
+-- KEYS[3]=prod HASH, KEYS[4]=forks SET, KEYS[5]=snapshot HASH.
 --
 -- Lua numbers are doubles, so producer epoch/seq values are kept as decimal
 -- strings and compared with the helpers below. UnixNano timestamps still use
@@ -52,8 +52,9 @@ local function expire_cleanup(m)
     redis.call('PERSIST', KEYS[2])
     redis.call('PERSIST', KEYS[3])
     redis.call('PERSIST', KEYS[4])
+    redis.call('DEL', KEYS[5])
   else
-    redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
+    redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5])
   end
 end
 
@@ -63,7 +64,7 @@ end
 local max_backstop_ttl_seconds = 9000000000000000
 
 local function refresh_backstop(m, now_ns)
-  local ks = { KEYS[1], KEYS[2], KEYS[3], KEYS[4] }
+  local ks = { KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5] }
   if tonumber(m.refCount or '0') > 0 or m.softDel == '1' then
     for _, k in ipairs(ks) do redis.call('PERSIST', k) end
     return
@@ -296,7 +297,7 @@ end
 
 -- fence_rung is the write-fence rung shared by append.lua and close.lua
 -- (#183): it gathers evaluate_write_fence's inputs from the loaded meta hash m
--- and, for the fenced class, from the request authority's marker at KEYS[5]
+-- and, for the fenced class, from the request authority's marker at KEYS[6]
 -- (the stream's own Redis Cluster slot) and its seal, whose meta field name is
 -- derived from that key (fence_auth) — so KEYS and ARGV need nothing new.
 -- Returns evaluate_write_fence's (reason, gen, holder); reason '' accepts, at
@@ -307,9 +308,9 @@ local function fence_rung(m, has_fence, f_gen, f_wake, f_holder, now,
   if not has_fence and not stream_fenced then return '', '0', '' end
   local fence_row, seal_present, seal_gen = nil, false, '0'
   if has_fence then
-    fence_row = redis.call('HMGET', KEYS[5],
+    fence_row = redis.call('HMGET', KEYS[6],
       'state', 'generation', 'wake_id', 'holder', 'lease_until_ns', 'stream_incarnation')
-    local seal = m['wfseal:' .. fence_auth(KEYS[5])]
+    local seal = m['wfseal:' .. fence_auth(KEYS[6])]
     if seal then seal_present, seal_gen = true, (seal_parts(seal)) end
   end
   local bound_gen = '0'

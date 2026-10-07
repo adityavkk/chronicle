@@ -18,17 +18,18 @@ import (
 // (Redis keys are binary-safe); '{' and '}' in user paths are escaped so a
 // hostile path can't break out of the tag.
 const (
-	keyPrefix     = "ds:"
-	notifyPrefix  = "ds:notify:"
-	metaSuffix    = ":meta"
-	msgSuffix     = ":msg"
-	prodSuffix    = ":prod"
-	forksSuffix   = ":forks"
-	fenceSuffix   = ":append-fence:"
-	frameSep      = "|"
-	frameSepByte  = byte('|')
-	offsetStrLen  = 33 // len("%016d_%016d")
-	framePrefixLn = offsetStrLen + 1
+	keyPrefix      = "ds:"
+	notifyPrefix   = "ds:notify:"
+	metaSuffix     = ":meta"
+	msgSuffix      = ":msg"
+	prodSuffix     = ":prod"
+	forksSuffix    = ":forks"
+	snapshotSuffix = ":snapshots"
+	fenceSuffix    = ":append-fence:"
+	frameSep       = "|"
+	frameSepByte   = byte('|')
+	offsetStrLen   = 33 // len("%016d_%016d")
+	framePrefixLn  = offsetStrLen + 1
 )
 
 // strings.Replacer is safe for concurrent use after construction. Keep one
@@ -59,6 +60,8 @@ func prodKey(path string) string { return keyPrefix + tag(path) + prodSuffix }
 
 // forksKey returns the SET key registering fork paths of this stream.
 func forksKey(path string) string { return keyPrefix + tag(path) + forksSuffix }
+
+func snapshotKey(path string) string { return keyPrefix + tag(path) + snapshotSuffix }
 
 // appendFenceKey is the per-(stream, subscription incarnation, shard) lease
 // marker checked by append.lua and close.lua. The stream tag keeps the marker

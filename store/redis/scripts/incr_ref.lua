@@ -26,4 +26,5 @@ redis.call('PERSIST', KEYS[1])
 redis.call('PERSIST', KEYS[2])
 redis.call('PERSIST', KEYS[3])
 redis.call('PERSIST', KEYS[4])
+redis.call('PERSIST', KEYS[5])
 return { 'OK', tostring(rc) }

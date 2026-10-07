@@ -331,6 +331,203 @@ make -C ~/dev/chronicle redis-down
 
 ---
 
+## Projection snapshots: opt-in upstream patches
+
+The corrected [Electric/SDK bundle](../experimental/electric-checkpoints/README.md)
+implements the explicit
+[bounded-input recovery contract](adr/0013-bounded-electric-runtime-recovery.md)
+and is verified locally. The configuration below requires those patches, not the
+[historical full-raw-replay bundle](../experimental/electric-snapshots/README.md).
+**Do not deploy that historical bundle:** its SDK update mode can discard fields
+from Electric's partial inbox updates, including when snapshots are disabled.
+It remains unchanged as measurement evidence, not a deployment recommendation.
+
+Chronicle now implements the optional [projection snapshot HTTP extension](spec/SNAPSHOTS.md)
+for Redis and MemoryStore, behind `CHRONICLE_ENABLE_SNAPSHOTS=true`. It stores
+opaque full images with source incarnation, consumed offset, integrity metadata
+and conditional publication. **Enabling Chronicle alone does not make an existing
+Electric installation use snapshots.** The SDK/runtime changes are local upstream
+patches, not published npm packages or merged upstream changes.
+
+The [research and source map](research/13-checkpointing-and-agent-recovery.md#proposed-electric-integration)
+pins the upstream source revisions and explains the correctness constraints.
+Apply and build the Durable Streams patch first, then Electric, following the
+bundle's dependency recipe. The changes belong in `durable-streams/durable-streams`
+and `electric-sql/electric`; Chronicle does not vendor those repositories.
+
+The integration spans these layers:
+
+- **Durable Streams client:** discover `Stream-Snapshot: v1`; load/publish
+  `?snapshot=<projection-version>` images; check format, digest, source identity
+  and ETag; preserve `If-Stream-Incarnation` across catch-up pages, long-poll,
+  SSE and reconnects. Keep snapshot responses distinct from event responses.
+  Missing/incompatible images may fall back to replay; source 410/errors must
+  not become an empty database.
+- **`@durable-streams/state` / `createStreamDB`:** bootstrap before subscription
+  and export committed rows with their exact next-read offset. Reading the
+  unpatched `db.offset` separately from visible collections is unsafe: it can
+  advance before commit, and visible rows can contain optimistic edits. Hydration
+  must not produce writes, event callbacks or readiness; catch-up establishes
+  readiness, and failed hydration must never leave a usable partial image.
+  Direct SDK callers must enable `onCommittedBatch` to use `exportState()`;
+  direct EntityStreamDB callers must enable `onCommittedSnapshot` to use
+  `utils.exportSnapshot()`. A no-op callback enables capture. Export during an
+  uncommitted `onBeforeBatch`/`onBatch` hook is rejected; use the committed hook
+  or export afterward. The runtime snapshot/bounded policies enable this capture
+  automatically, without changing default legacy sync visibility.
+- **`EntityStreamDB`:** a versioned codec covering built-in and
+  custom collections, `_seq`, the explicit next sequence counter (including
+  deleted rows), `_timeline_order`, row event/fork pointers, existing-key indexes
+  and source position. Codec `electric-entity-image/v3` uses canonical stream-root
+  pointers plus a count of **all flattened source items**, distinct from the
+  known-schema sequence. Sixteen-digit ordering tokens cover safe-integer counts.
+  HTTP grouping and pending optimistic edits must not change equal-cut image
+  bytes. Do not synthesize inserts to restore this metadata. Root-based late forks
+  can scan more history. The image must fit Chronicle's 1 MiB bound or fall back
+  to retained-history replay; truncation or an LLM summary is not equivalent.
+- **`processWake`:** legacy `full-replay` remains the default. Opt-in
+  `bounded-checkpoint-v1` changes setup, `ctx.events` and self-observation to the
+  post-completion delta. Handlers must consume that entire delta; consumers that
+  require arbitrary historical callbacks must stay on full replay. On an aligned
+  image hit, one guarded state reader also supplies raw inputs; no independent
+  prefix reader runs. A miss replays retained history under the same bounded-input
+  contract. Unknown change-event types fail bounded recovery rather than silently
+  changing sequence counts; retained history must remain schema-readable. No
+  handler or signal effect runs before a valid claim.
+- **Completed work:** a canonical `runtime_checkpoint` records successful
+  handler/tracked-effect completion, not notification, reader or producer progress.
+  Unresolved fresh input, queued/paused inbox work, signals or processing failures
+  prevent certification. Final acknowledgment comes from an aligned drained
+  checkpoint; appending A's output after pending B does not acknowledge B.
+  Source/incarnation failure attempts release without ack and still runs cleanup.
+  Later teardown or callback failure cannot erase an already-durable marker;
+  retry may skip completed work. A lost callback reply can leave its outcome
+  uncertain. External effects still need application idempotency.
+- **Publication policy:** freeze a committed cut, then publish asynchronously
+  under a dedicated source-scoped `snapshot-publish` service grant. Observe the
+  saved ETag, and tolerate a concurrent publisher winning. Saving an image does
+  not establish work completion, renew a lease, or authorize an external effect.
+  A failed save leaves the old image/log usable; completion is checked separately.
+  Bound write frequency by measured replay work and image size, back off misses,
+  and avoid snapshotting when image/hydration cost exceeds the replay work saved. The
+  [HTTP/Redis measurements](../benchmarks/snapshots/README.md) include regressions
+  for short and append-only streams; they are not Electric activation timings.
+- **Agents-server / gateways:** preserve the caller's credential on snapshot
+  PUT and DELETE instead of substituting a broad backend bearer. Chronicle then
+  enforces dedicated publication authority. Forward query parameters,
+  `If-Match`, `If-None-Match`, `If-Stream-Incarnation`, `Stream-Snapshot`,
+  `Stream-Snapshot-Offset`, `Content-Digest` and response headers. A browser read
+  credential must never become a privileged snapshot publisher via the proxy.
+  Finish all-replica/gateway rollout before enabling publication.
+
+**Bounded-mode trust prerequisite:** untrusted inputs must use Electric's
+authenticated write-token gate. Direct Chronicle append principals are trusted
+infrastructure; Chronicle does not classify event types or authenticate a marker's
+semantic claim. Ordinary inbox payloads cannot supply top-level progress events.
+Opaque external `notification.wakeEvent` payloads are rejected without ack in
+bounded mode: the same offset can describe either redelivery or new out-of-log
+work. Standard timers, cron and forks already append canonical source facts.
+
+Add the policy to an application's existing `createRuntimeRouter` configuration
+after applying the corrected patches and accepting the bounded-input contract.
+Handlers keep their existing `ctx.db` interface:
+
+```ts
+import type { ProjectionSnapshotRecoveryPolicy } from '@electric-ax/agents-runtime'
+
+const projectionSnapshots: ProjectionSnapshotRecoveryPolicy = {
+  projectionVersion: 'my-agent-checkpoint-v3',
+  rawInputRecovery: 'bounded-checkpoint-v1',
+  // Load credentials from the runtime's secret provider, never browser code.
+  publisherHeaders: () => publisherHeadersFromSecretProvider(),
+  readerHeaders: () => readerHeadersFromSecretProvider(),
+  maxImageBytes: 1024 * 1024,
+  minReplayEvents: 100,
+  minReplayMs: 25,
+  minPublishIntervalMs: 60_000,
+  missBackoffMs: 5 * 60_000,
+}
+// createRuntimeRouter({ ...existingConfig, projectionSnapshots })
+```
+
+The two secret-provider functions are application placeholders, not SDK exports.
+Use `rawInputRecovery: 'full-replay'` for handlers requiring historical inputs.
+To compare without images under the same bounded contract, omit
+`projectionSnapshots` and set the router's top-level `rawInputRecovery` instead.
+Rotate `projectionVersion` whenever schemas, reducer behavior or serialization
+change. Conditional `DELETE ?snapshot=<old-version>` frees quota after old readers
+are retired; use the old image's ETag and source incarnation. Chronicle permits
+at most eight versions and 4 MiB of image bodies per source.
+
+**Earlier experimental images must be rebuilt.** Older builds could omit a row,
+lose partial-update fields, or retain optimistic/batch-dependent ordering despite
+valid digests and source incarnations. Codec v3 rejects older image codecs; use a
+fresh `projectionVersion` and rebuild from retained history. Updating the reader
+does not repair an incomplete image. Image rotation also does **not** invalidate
+existing `bounded-checkpoint-v1` source markers: discard disposable streams from
+buggy pre-release bounded builds. If those builds processed real input, audit and
+rebuild progress under the application's replay/idempotency policy before reuse.
+
+**Real runtime coverage:** the companion harness runs Chronicle signed webhooks
+through ElectricAgentsServer and the runtime's actual `processWake`, with real
+Postgres and Electric shapes. Tests cover restoration, deletes, inclusive forks
+with control events, pending signals, live cancellation, concurrent inputs,
+pending-B noack, claim/source failures, handler retry, and checkpoint save followed
+by failed `done:true` delivery. Two claim-fault tests use forwarding/stall fetch
+shims at Electric's locally answered claim route; denial is an injected HTTP 401,
+not a demonstrated backend claim decision. A failed callback is not a process
+kill. The benchmark separately checks handler-observed hydrated state, exact
+input/reply multiplicity, final acknowledgment, Redis lease release, complete
+observed fixture history, and every captured source GET's cut/incarnation guard.
+
+The frozen corrected sources pass 199 targeted runtime tests, 110 client/state
+tests, 116 filtered memory/file fork cases, and 10 real integration cases. Runtime
+and state typechecks and SDK declaration builds pass. The
+[independent export-guard follow-up](../experimental/electric-checkpoints/independent-review/README.md)
+passes four real-client SDK export cases and three Entity export cases:
+capture opt-in, bootstrap-only rejection, optimistic persistence, unchanged
+legacy visibility, and exact rows/cuts/indexes after synchronous dispatch.
+This is scoped evidence, not a proof of all races. The wider client typecheck has
+113 diagnostics also reproduced at the untouched pin; those failures remain.
+
+**Corrected bounded-mode performance:** the
+[final-source campaigns](../benchmarks/snapshots/README.md#bounded-electric-recovery-avoids-prefix-reads)
+pass 360 measured activations and independently verify 180 no-prefix checkpoint
+hits. At 10k updates over 16 keys, p50/p95 falls from 107.25/136.66 to
+60.18/72.42 ms; combined Node CPU p50 falls from 89.06 to 48.39 ms. At 3k
+append-only rows, activation p50 rises from 155.12 to 184.13 ms. Default-size
+workloads and the 100-input pending inbox also regress. Both paths use the same
+bounded-input contract, warm processes and forced publication with synthetic
+handlers. These are workload-specific results, not a universal speedup or a
+measurement of the default save cadence.
+
+**Historical performance result:** the
+[real runtime campaigns](../benchmarks/snapshots/README.md#electric-runtime-measurements-use-the-actual-activation-path)
+passed 360 measured activations, but found no end-to-end median win with full
+raw replay and forced publication. At 10k updates over 16 keys, p50 was
+74.26 → 76.08 ms; at 3k append-only rows, 63.56 → 143.90 ms. These are local
+synthetic handlers, not LLM or cold-process-start measurements. Default cadence
+was deliberately disabled to measure publication costs. Do not infer that a
+state image alone removes the runtime's historical-input work.
+
+**Remaining rollout work:**
+
+- Compare full replay with restore at arbitrary committed batch boundaries,
+  including deletes, multiple changes in
+  one batch, pending signals, cancellation, tool results, fork ordering,
+  schema upgrades and crash/retry. Assert handler inputs and effects as well as
+  final rows for the application's own schemas and consumers.
+- Measure cold-activation p50/p95, CPU, transferred bytes, heap and publication
+  cost using the actual application and its intended publication cadence. The
+  synthetic runtime campaigns do not establish that application's performance.
+- Reuse the bootstrap in `observe(entity)` only after specifying
+  whether observers receive historical callbacks. Snapshot hydration itself
+  must not masquerade as replayed historical events.
+
+See the patch bundle for exact test commands, HTTP/Redis evidence and baseline
+typecheck limitations. The options above exist only in the patched sources, not
+the pinned released packages. Upstream acceptance and deployment are separate.
+
 ## Notes / known-good versions
 
 - electric `@electric-ax/agents-*` built from source at the repo state of

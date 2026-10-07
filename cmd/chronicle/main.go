@@ -199,6 +199,7 @@ func run() error {
 	flag.DurationVar(&cfg.SSEClientWriteTimeout, "sse-client-write-timeout", cfg.SSEClientWriteTimeout, "maximum duration of one SSE client event flush")
 	flag.StringVar(&cfg.PublicBaseURL, "public-url", cfg.PublicBaseURL, "externally reachable origin for webhook callback/JWKS URLs")
 	flag.BoolVar(&cfg.Subscriptions, "subscriptions", cfg.Subscriptions, "enable the reserved __ds subscription APIs (redis backend only)")
+	bindSnapshotFlag(flag.CommandLine, &cfg)
 	flag.BoolVar(&cfg.UI, "ui", cfg.UI, "serve the embedded dsui console alongside the API (false = backend API only)")
 	flag.StringVar(&cfg.UIServer, "ui-server", cfg.UIServer, "server URL the served console prefills (empty = same-origin)")
 	flag.BoolVar(&cfg.WebhookAllowPrivate, "webhook-allow-private", cfg.WebhookAllowPrivate, "accept webhook URLs on private/RFC1918 addresses (trusted networks only)")
@@ -257,6 +258,12 @@ func run() error {
 		}
 	}
 
+	if cfg.EnableSnapshots {
+		if _, ok := st.(store.ProjectionSnapshotStore); !ok {
+			return errors.New("projection snapshots require a snapshot-capable backend; experimental segment wrappers are not supported")
+		}
+	}
+
 	handler := &chronicle.Handler{
 		Store:                 st,
 		LongPollTimeout:       cfg.LongPollTimeout,
@@ -268,6 +275,7 @@ func run() error {
 		Logger:                logger,
 		AuthMode:              cfg.AuthMode,
 		RequestIDHeader:       cfg.RequestIDHeader,
+		EnableSnapshots:       cfg.EnableSnapshots,
 	}
 
 	// Service principals (#180): mesh-attested SPIFFE is primary. Static bearer
@@ -487,6 +495,10 @@ func run() error {
 		return srv.Close()
 	}
 	return nil
+}
+
+func bindSnapshotFlag(fs *flag.FlagSet, cfg *chronicle.Config) {
+	fs.BoolVar(&cfg.EnableSnapshots, "enable-snapshots", cfg.EnableSnapshots, "enable the proposed projection snapshot extension")
 }
 
 func validateSegmentConfig(cfg chronicle.Config) error {

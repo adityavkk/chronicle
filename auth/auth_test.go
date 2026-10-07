@@ -82,7 +82,7 @@ func TestEnumStrings(t *testing.T) {
 	actions := map[Action]string{
 		ActionRead: "read", ActionAppend: "append", ActionCreate: "create",
 		ActionDelete: "delete", ActionSubscribe: "subscribe", ActionLink: "link",
-		ActionClaim: "claim",
+		ActionClaim: "claim", ActionSnapshotPublish: "snapshot-publish",
 	}
 	for a, want := range actions {
 		if a.String() != want {

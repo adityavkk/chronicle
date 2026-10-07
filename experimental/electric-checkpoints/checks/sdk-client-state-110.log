@@ -1,0 +1,47 @@
+
+ RUN  v4.0.16 /home/user/workspace/durable-streams-snapshot-upstream
+
+ ✓ |client| packages/client/test/stream.test.ts (49 tests) 99ms
+stderr | packages/state/test/stream-db.test.ts > Stream DB > does not checkpoint a batch when a known live-query commit error occurs
+[StreamDB] Error in handler.commit(): Error: row already exists in the collection live-query
+    at CollectionStateManager.db.collections.users._state.commitPendingTransactions (/home/user/workspace/durable-streams-snapshot-upstream/packages/state/test/stream-db.test.ts:244:13)
+    at Object.commit (file:///home/user/workspace/electric-snapshot-upstream/node_modules/.pnpm/@tanstack+db@0.6.7_typescript@5.9.3/node_modules/@tanstack/db/dist/esm/collection/sync.js:121:24)
+    at EventDispatcher.commit (/home/user/workspace/durable-streams-snapshot-upstream/packages/state/src/stream-db.ts:428:17)
+    at /home/user/workspace/durable-streams-snapshot-upstream/packages/state/src/stream-db.ts:836:20
+    at consumeJsonSubscription (/home/user/workspace/durable-streams-snapshot-upstream/packages/client/src/response.ts:1181:17)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+[StreamDB] Error processing batch: Error: row already exists in the collection live-query
+    at CollectionStateManager.db.collections.users._state.commitPendingTransactions (/home/user/workspace/durable-streams-snapshot-upstream/packages/state/test/stream-db.test.ts:244:13)
+    at Object.commit (file:///home/user/workspace/electric-snapshot-upstream/node_modules/.pnpm/@tanstack+db@0.6.7_typescript@5.9.3/node_modules/@tanstack/db/dist/esm/collection/sync.js:121:24)
+    at EventDispatcher.commit (/home/user/workspace/durable-streams-snapshot-upstream/packages/state/src/stream-db.ts:428:17)
+    at /home/user/workspace/durable-streams-snapshot-upstream/packages/state/src/stream-db.ts:836:20
+    at consumeJsonSubscription (/home/user/workspace/durable-streams-snapshot-upstream/packages/client/src/response.ts:1181:17)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+stdout | packages/state/test/review-coherent-export.test.ts > exports exact rows/cut inside persisting mutationFn (onCommittedBatch=true)
+PUBLIC_EXPORT_ECHO {"captureEnabled":true,"captured":{"offset":"0000000000000000_0000000000000120","nextSeq":1,"rowsByCollection":{"items":[{"id":"a","name":"Canonical A","_seq":0}]}},"visibleAtCapture":"Optimistic A","restored":[{"id":"a","name":"Canonical A","_seq":0}]}
+
+stdout | packages/state/test/review-coherent-export.test.ts > exports B at its source cut while unrelated A persists (onCommittedBatch=false)
+PUBLIC_EXPORT_B_BEFORE_A {"captureEnabled":false,"visible":[{"id":"a","name":"Optimistic A","$synced":false,"$origin":"local","$key":"a","$collectionId":"stream-db:http://127.0.0.1:45979/review/export:items"}]}
+
+stdout | packages/state/test/review-coherent-export.test.ts > exports B at its source cut while unrelated A persists (onCommittedBatch=true)
+PUBLIC_EXPORT_B_BEFORE_A {"captureEnabled":true,"captured":{"offset":"0000000000000000_0000000000000121","nextSeq":1,"rowsByCollection":{"items":[{"id":"b","name":"Canonical B","_seq":0}]}},"visible":[{"id":"b","name":"Canonical B","_seq":0,"$synced":true,"$origin":"remote","$key":"b","$collectionId":"stream-db:http://127.0.0.1:46787/review/export:items"},{"id":"a","name":"Optimistic A","$synced":false,"$origin":"local","$key":"a","$collectionId":"stream-db:http://127.0.0.1:46787/review/export:items"}]}
+
+stdout | packages/state/test/review-coherent-export.test.ts > exports B at its source cut while unrelated A persists (onCommittedBatch=true)
+PUBLIC_EXPORT_ORDER {"captureEnabled":true,"finalImage":{"offset":"0000000000000000_0000000000000242","nextSeq":2,"rowsByCollection":{"items":[{"id":"a","name":"Canonical A","_seq":1},{"id":"b","name":"Canonical B","_seq":0}]}},"replayImage":{"offset":"0000000000000000_0000000000000242","nextSeq":2,"rowsByCollection":{"items":[{"id":"a","name":"Canonical A","_seq":1},{"id":"b","name":"Canonical B","_seq":0}]}}}
+
+ ✓ |state| packages/state/test/review-coherent-export.test.ts (4 tests) 149ms
+stderr | packages/state/test/stream-db.test.ts > Stream DB > should reject primitive values (non-objects)
+[StreamDB] Error processing batch: Error: StreamDB collections require object values; got string for type=config, key=theme
+    at EventDispatcher.dispatchChange (/home/user/workspace/durable-streams-snapshot-upstream/packages/state/src/stream-db.ts:329:15)
+    at /home/user/workspace/durable-streams-snapshot-upstream/packages/state/src/stream-db.ts:828:24
+    at consumeJsonSubscription (/home/user/workspace/durable-streams-snapshot-upstream/packages/client/src/response.ts:1181:17)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+ ✓ |state| packages/state/test/stream-db.test.ts (57 tests) 1119ms
+
+ Test Files  3 passed (3)
+      Tests  110 passed (110)
+   Start at  18:15:06
+   Duration  1.95s (transform 1.22s, setup 0ms, import 1.79s, tests 1.37s, environment 0ms)
+

@@ -1,0 +1,509 @@
+{
+  "schemaVersion": 1,
+  "kind": "chronicle-process-wake-benchmark-summary",
+  "rawResults": "scaled-results.json",
+  "rawResultsSha256": "83a6cf73e15abe866055a77a3a1cacdf215d3f310fd92f61f5fa85d72011d06b",
+  "method": "nearest-rank percentiles over measured non-warmup samples; no failed samples retried into success",
+  "counts": {
+    "allSamples": 192,
+    "warmups": 12,
+    "measured": 180,
+    "passedMeasured": 180,
+    "failedOrIncompleteMeasured": 0,
+    "runFailures": 0
+  },
+  "snapshotEvidence": {
+    "measuredSamples": 90,
+    "hits": 90,
+    "missesOrFallbacks": 0
+  },
+  "assertionFailures": [],
+  "pairs": [
+    {
+      "scenario": "update-heavy",
+      "completePassingPairs": 30,
+      "incompleteOrFailedPairIndices": []
+    },
+    {
+      "scenario": "append-only",
+      "completePassingPairs": 30,
+      "incompleteOrFailedPairIndices": []
+    },
+    {
+      "scenario": "large-inbox",
+      "completePassingPairs": 30,
+      "incompleteOrFailedPairIndices": []
+    }
+  ],
+  "groups": [
+    {
+      "scenario": "update-heavy",
+      "mode": "replay",
+      "samples": 30,
+      "metrics": {
+        "activationTotalMs": {
+          "count": 30,
+          "p50": 74.26,
+          "p95": 94.18
+        },
+        "preloadMs": {
+          "count": 30,
+          "p50": 43.45,
+          "p95": 54.61
+        },
+        "handlerMs": {
+          "count": 30,
+          "p50": 0.69,
+          "p95": 1.08
+        },
+        "cpuUserMicros": {
+          "count": 30,
+          "p50": 50292,
+          "p95": 74763
+        },
+        "cpuSystemMicros": {
+          "count": 30,
+          "p50": 6733,
+          "p95": 16679
+        },
+        "peakHeapBytes": {
+          "count": 30,
+          "p50": 173180328,
+          "p95": 214151280
+        },
+        "peakRssBytes": {
+          "count": 30,
+          "p50": 465698816,
+          "p95": 472559616
+        },
+        "httpRequests": {
+          "count": 30,
+          "p50": 5,
+          "p95": 5
+        },
+        "httpRequestBytes": {
+          "count": 30,
+          "p50": 1362,
+          "p95": 1362
+        },
+        "httpResponseBytes": {
+          "count": 30,
+          "p50": 1608537,
+          "p95": 1608537
+        },
+        "fullReplayResponseBytes": {
+          "count": 30,
+          "p50": 1607580,
+          "p95": 1607580
+        },
+        "suffixResponseBytes": {
+          "count": 30,
+          "p50": 0,
+          "p95": 0
+        },
+        "imageBytes": {
+          "count": 0,
+          "p50": null,
+          "p95": null
+        },
+        "publicationMs": {
+          "count": 0,
+          "p50": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "scenario": "update-heavy",
+      "mode": "snapshot-full-raw-replay",
+      "samples": 30,
+      "metrics": {
+        "activationTotalMs": {
+          "count": 30,
+          "p50": 76.08,
+          "p95": 102.71
+        },
+        "preloadMs": {
+          "count": 30,
+          "p50": 36.6,
+          "p95": 50.01
+        },
+        "handlerMs": {
+          "count": 30,
+          "p50": 0.67,
+          "p95": 1.14
+        },
+        "cpuUserMicros": {
+          "count": 30,
+          "p50": 51890,
+          "p95": 129191
+        },
+        "cpuSystemMicros": {
+          "count": 30,
+          "p50": 7654,
+          "p95": 23993
+        },
+        "peakHeapBytes": {
+          "count": 30,
+          "p50": 166956160,
+          "p95": 213647480
+        },
+        "peakRssBytes": {
+          "count": 30,
+          "p50": 455323648,
+          "p95": 477351936
+        },
+        "httpRequests": {
+          "count": 30,
+          "p50": 8,
+          "p95": 8
+        },
+        "httpRequestBytes": {
+          "count": 30,
+          "p50": 9858,
+          "p95": 9858
+        },
+        "httpResponseBytes": {
+          "count": 30,
+          "p50": 1615997,
+          "p95": 1615997
+        },
+        "fullReplayResponseBytes": {
+          "count": 30,
+          "p50": 1607580,
+          "p95": 1607580
+        },
+        "suffixResponseBytes": {
+          "count": 30,
+          "p50": 405,
+          "p95": 405
+        },
+        "imageBytes": {
+          "count": 30,
+          "p50": 7055,
+          "p95": 7055
+        },
+        "publicationMs": {
+          "count": 30,
+          "p50": 2.11,
+          "p95": 3.13
+        }
+      }
+    },
+    {
+      "scenario": "append-only",
+      "mode": "replay",
+      "samples": 30,
+      "metrics": {
+        "activationTotalMs": {
+          "count": 30,
+          "p50": 63.56,
+          "p95": 76.51
+        },
+        "preloadMs": {
+          "count": 30,
+          "p50": 19.84,
+          "p95": 24.73
+        },
+        "handlerMs": {
+          "count": 30,
+          "p50": 1.73,
+          "p95": 6.18
+        },
+        "cpuUserMicros": {
+          "count": 30,
+          "p50": 50668,
+          "p95": 91746
+        },
+        "cpuSystemMicros": {
+          "count": 30,
+          "p50": 6349,
+          "p95": 22368
+        },
+        "peakHeapBytes": {
+          "count": 30,
+          "p50": 206694464,
+          "p95": 273043752
+        },
+        "peakRssBytes": {
+          "count": 30,
+          "p50": 416059392,
+          "p95": 447250432
+        },
+        "httpRequests": {
+          "count": 30,
+          "p50": 7,
+          "p95": 7
+        },
+        "httpRequestBytes": {
+          "count": 30,
+          "p50": 1585,
+          "p95": 1585
+        },
+        "httpResponseBytes": {
+          "count": 30,
+          "p50": 386257,
+          "p95": 386257
+        },
+        "fullReplayResponseBytes": {
+          "count": 30,
+          "p50": 385076,
+          "p95": 385076
+        },
+        "suffixResponseBytes": {
+          "count": 30,
+          "p50": 0,
+          "p95": 0
+        },
+        "imageBytes": {
+          "count": 0,
+          "p50": null,
+          "p95": null
+        },
+        "publicationMs": {
+          "count": 0,
+          "p50": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "scenario": "append-only",
+      "mode": "snapshot-full-raw-replay",
+      "samples": 30,
+      "metrics": {
+        "activationTotalMs": {
+          "count": 30,
+          "p50": 143.9,
+          "p95": 194.62
+        },
+        "preloadMs": {
+          "count": 30,
+          "p50": 36.82,
+          "p95": 83.55
+        },
+        "handlerMs": {
+          "count": 30,
+          "p50": 1.75,
+          "p95": 2.27
+        },
+        "cpuUserMicros": {
+          "count": 30,
+          "p50": 130053,
+          "p95": 328269
+        },
+        "cpuSystemMicros": {
+          "count": 30,
+          "p50": 16705,
+          "p95": 36996
+        },
+        "peakHeapBytes": {
+          "count": 30,
+          "p50": 231284656,
+          "p95": 317803992
+        },
+        "peakRssBytes": {
+          "count": 30,
+          "p50": 483196928,
+          "p95": 564166656
+        },
+        "httpRequests": {
+          "count": 30,
+          "p50": 10,
+          "p95": 10
+        },
+        "httpRequestBytes": {
+          "count": 30,
+          "p50": 842124,
+          "p95": 842124
+        },
+        "httpResponseBytes": {
+          "count": 30,
+          "p50": 1225515,
+          "p95": 1225515
+        },
+        "fullReplayResponseBytes": {
+          "count": 30,
+          "p50": 385076,
+          "p95": 385076
+        },
+        "suffixResponseBytes": {
+          "count": 30,
+          "p50": 404,
+          "p95": 404
+        },
+        "imageBytes": {
+          "count": 30,
+          "p50": 838854,
+          "p95": 838854
+        },
+        "publicationMs": {
+          "count": 30,
+          "p50": 11.42,
+          "p95": 13.54
+        }
+      }
+    },
+    {
+      "scenario": "large-inbox",
+      "mode": "replay",
+      "samples": 30,
+      "metrics": {
+        "activationTotalMs": {
+          "count": 30,
+          "p50": 49.08,
+          "p95": 64.58
+        },
+        "preloadMs": {
+          "count": 30,
+          "p50": 14.91,
+          "p95": 18.9
+        },
+        "handlerMs": {
+          "count": 30,
+          "p50": 0.46,
+          "p95": 1.05
+        },
+        "cpuUserMicros": {
+          "count": 30,
+          "p50": 33214,
+          "p95": 48517
+        },
+        "cpuSystemMicros": {
+          "count": 30,
+          "p50": 5552,
+          "p95": 18032
+        },
+        "peakHeapBytes": {
+          "count": 30,
+          "p50": 209988776,
+          "p95": 339325272
+        },
+        "peakRssBytes": {
+          "count": 30,
+          "p50": 461836288,
+          "p95": 539373568
+        },
+        "httpRequests": {
+          "count": 30,
+          "p50": 3,
+          "p95": 3
+        },
+        "httpRequestBytes": {
+          "count": 30,
+          "p50": 1239,
+          "p95": 1239
+        },
+        "httpResponseBytes": {
+          "count": 30,
+          "p50": 870600,
+          "p95": 870600
+        },
+        "fullReplayResponseBytes": {
+          "count": 30,
+          "p50": 869361,
+          "p95": 869361
+        },
+        "suffixResponseBytes": {
+          "count": 30,
+          "p50": 0,
+          "p95": 0
+        },
+        "imageBytes": {
+          "count": 0,
+          "p50": null,
+          "p95": null
+        },
+        "publicationMs": {
+          "count": 0,
+          "p50": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "scenario": "large-inbox",
+      "mode": "snapshot-full-raw-replay",
+      "samples": 30,
+      "metrics": {
+        "activationTotalMs": {
+          "count": 30,
+          "p50": 78.58,
+          "p95": 99.41
+        },
+        "preloadMs": {
+          "count": 30,
+          "p50": 24.99,
+          "p95": 30.6
+        },
+        "handlerMs": {
+          "count": 30,
+          "p50": 0.56,
+          "p95": 0.91
+        },
+        "cpuUserMicros": {
+          "count": 30,
+          "p50": 59488,
+          "p95": 99045
+        },
+        "cpuSystemMicros": {
+          "count": 30,
+          "p50": 9702,
+          "p95": 36421
+        },
+        "peakHeapBytes": {
+          "count": 30,
+          "p50": 219031824,
+          "p95": 316197792
+        },
+        "peakRssBytes": {
+          "count": 30,
+          "p50": 487378944,
+          "p95": 552468480
+        },
+        "httpRequests": {
+          "count": 30,
+          "p50": 6,
+          "p95": 6
+        },
+        "httpRequestBytes": {
+          "count": 30,
+          "p50": 888622,
+          "p95": 888622
+        },
+        "httpResponseBytes": {
+          "count": 30,
+          "p50": 1741438,
+          "p95": 1741438
+        },
+        "fullReplayResponseBytes": {
+          "count": 30,
+          "p50": 869361,
+          "p95": 869361
+        },
+        "suffixResponseBytes": {
+          "count": 30,
+          "p50": 860376,
+          "p95": 860376
+        },
+        "imageBytes": {
+          "count": 30,
+          "p50": 10462,
+          "p95": 10462
+        },
+        "publicationMs": {
+          "count": 30,
+          "p50": 10.54,
+          "p95": 13.67
+        }
+      }
+    }
+  ],
+  "scopeNotes": {
+    "activation": "after claimHeaders resolution at wake-received logging through successful done:true; includes lookup/recovery/handler writes/ack; trigger append and semantic validation excluded",
+    "resources": "combined runtime handler, embedded agents-server, test, and source-gate Node process; not runtime-only",
+    "traffic": "source-gate bodies for requests admitted from before entity.send()/pendingDelivery.release() until capture stop; state-workload totals include trigger append; callback-gate claim/done traffic and validation reads excluded",
+    "publication": "gate-observed snapshot publication HTTP duration only; excludes prior export, serialization, and hashing",
+    "sourceHash": "normalized deterministic semantic inputs/state events, not exact wire history"
+  }
+}

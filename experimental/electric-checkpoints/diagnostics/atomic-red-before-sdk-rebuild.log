@@ -1,0 +1,71 @@
+
+ RUN  v3.2.4 /home/user/workspace/electric-snapshot-upstream/packages/agents-runtime
+
+stderr | test/entity-stream-db-snapshot.test.ts > EntityStreamDB projection snapshots > rejects in-batch export and permits aligned committed exports across two cuts
+[StreamDB] Error processing batch: AssertionError: expected [Function] to throw an error
+    at Proxy.<anonymous> (file:///home/user/workspace/electric-snapshot-upstream/node_modules/.pnpm/@vitest+expect@3.2.4/node_modules/@vitest/expect/dist/index.js:1420:16)
+    at Proxy.<anonymous> (file:///home/user/workspace/electric-snapshot-upstream/node_modules/.pnpm/@vitest+expect@3.2.4/node_modules/@vitest/expect/dist/index.js:1029:14)
+    at Proxy.methodWrapper (file:///home/user/workspace/electric-snapshot-upstream/node_modules/.pnpm/chai@5.3.3/node_modules/chai/index.js:1686:25)
+    at Object.onBeforeBatch (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/test/entity-stream-db-snapshot.test.ts:43:60)
+    at onBeforeBatch (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/entity-stream-db.ts:518:13)
+    at /home/user/workspace/durable-streams-snapshot-upstream/packages/state/dist/db.js:340:20
+    at consumeJsonSubscription (/home/user/workspace/durable-streams-snapshot-upstream/packages/client/dist/index.js:1428:12)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  actual: undefined,
+  expected: null,
+  showDiff: true,
+  operator: 'strictEqual'
+}
+
+stderr | test/entity-stream-db-snapshot.test.ts > EntityStreamDB projection snapshots > rejects in-batch export and permits aligned committed exports across two cuts
+[StreamDB] Error processing batch: AssertionError: expected [Function] to throw error including 'uncommitted stream batch' but got 'Cannot export state after a failed st…'
+    at Proxy.<anonymous> (file:///home/user/workspace/electric-snapshot-upstream/node_modules/.pnpm/@vitest+expect@3.2.4/node_modules/@vitest/expect/dist/index.js:1420:16)
+    at Proxy.<anonymous> (file:///home/user/workspace/electric-snapshot-upstream/node_modules/.pnpm/@vitest+expect@3.2.4/node_modules/@vitest/expect/dist/index.js:1029:14)
+    at Proxy.methodWrapper (file:///home/user/workspace/electric-snapshot-upstream/node_modules/.pnpm/chai@5.3.3/node_modules/chai/index.js:1686:25)
+    at Object.onBeforeBatch (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/test/entity-stream-db-snapshot.test.ts:43:60)
+    at onBeforeBatch (/home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/src/entity-stream-db.ts:518:13)
+    at /home/user/workspace/durable-streams-snapshot-upstream/packages/state/dist/db.js:340:20
+    at consumeJsonSubscription (/home/user/workspace/durable-streams-snapshot-upstream/packages/client/dist/index.js:1428:12)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  actual: 'Cannot export state after a failed stream batch',
+  expected: 'uncommitted stream batch',
+  showDiff: true,
+  operator: 'strictEqual'
+}
+
+ ❯ test/entity-stream-db-snapshot.test.ts (4 tests | 1 failed | 3 skipped) 41ms
+   × EntityStreamDB projection snapshots > rejects in-batch export and permits aligned committed exports across two cuts 40ms
+     → expected [Function] to throw an error
+   ↓ EntityStreamDB projection snapshots > rejects export without explicit coherent capture while retaining legacy reads
+   ↓ EntityStreamDB projection snapshots > round-trips rows, deletion sequence, pointers, order indexes and batch anchor
+   ↓ EntityStreamDB projection snapshots > rejects malformed and incompatible images before hydration
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/entity-stream-db-snapshot.test.ts > EntityStreamDB projection snapshots > rejects in-batch export and permits aligned committed exports across two cuts
+AssertionError: expected [Function] to throw an error
+
+- Expected: 
+null
+
++ Received: 
+undefined
+
+ ❯ Object.onBeforeBatch test/entity-stream-db-snapshot.test.ts:43:60
+     41|       streamOptions: { fetch: fetchClient },
+     42|       onBeforeBatch: () => {
+     43|         expect(() => db.utils.exportSnapshot(`atomic-v1`)).toThrow(`un…
+       |                                                            ^
+     44|       },
+     45|       onBatch: () => {
+ ❯ onBeforeBatch src/entity-stream-db.ts:518:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  17:59:19
+   Duration  521ms (transform 132ms, setup 0ms, collect 267ms, tests 41ms, environment 0ms, prepare 62ms)
+
+JUNIT report written to /home/user/workspace/electric-snapshot-upstream/packages/agents-runtime/junit/test-report.junit.xml
