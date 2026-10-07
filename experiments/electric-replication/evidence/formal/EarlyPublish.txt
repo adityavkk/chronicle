@@ -1,0 +1,50 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 129 and seed 3038764723458075429 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 4964] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/Publication.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Publication
+Starting... (2026-10-07 06:02:22)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-07 06:02:22.
+Error: Invariant Safe is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ applied = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ stable = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ snapshots = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ staged = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ up = {n1, n2, n3}
+/\ committed = 0
+/\ acknowledged = 0
+
+State 2: <Stage line 15, col 13 to line 17, col 84 of module Publication>
+/\ applied = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ stable = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ snapshots = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ staged = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 0)
+/\ up = {n1, n2, n3}
+/\ committed = 0
+/\ acknowledged = 0
+
+State 3: <Publish line 27, col 8 to line 29, col 78 of module Publication>
+/\ applied = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 0)
+/\ stable = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ snapshots = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ staged = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 0)
+/\ up = {n1, n2, n3}
+/\ committed = 0
+/\ acknowledged = 0
+
+17 states generated, 16 distinct states found, 10 states left on queue.
+The depth of the complete state graph search is 4.
+The average outdegree of the complete state graph is 5 (minimum is 4, the maximum 6 and the 95th percentile is 6).
+Finished in 00s at (2026-10-07 06:02:22)

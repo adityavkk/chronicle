@@ -1,0 +1,151 @@
+# Electric engine replication experiment
+
+This is a source-integrated extension, not Chronicle's Go/Redis default and not
+the separate SQLite experiment on `rust/distributed-streams`. It is experimental
+and not production-qualified. See the evidence ledger for executed gates; this
+contract describes the intended implementation, not proof of completion.
+
+## Provenance and reuse
+
+The baseline is Electric's Apache-2.0 Rust server at
+https://github.com/electric-sql/electric/commit/88793e76595d69be300731b9b25c58538923a53b
+(2026-07-22, npm release 0.1.5; the Cargo manifest still says 0.1.0).
+`engine/src`, `Cargo.toml`, and `Cargo.lock` were imported verbatim before edits;
+`UPSTREAM-TREE.txt` records original Git blob identities. `engine/LICENSE` is
+the upstream license. The initial import commit separates reuse from changes.
+
+The June 26 article's source-era release is
+https://github.com/electric-sql/electric/commit/c3b73d040eb72e32e97bb05644befce5abf780bc
+(npm 0.1.2). It is NOT byte-identical to this baseline. July fixes address lost
+multi-segment replay, torn tails, acknowledged deletes, fail-stop fsync, sidecar
+recovery, and checkpoint amplification. The existing Chronicle ds-bench campaign
+already uses 0.1.5. Compare matched unmodified 0.1.5 and adapted 0.1.5 builds;
+never import headline blog throughput into a new result.
+
+The engine has no library/storage plugin API. We preserve its real WAL codec,
+positioned writes, segment allocation/roll, dedicated per-shard group-commit
+threads, wire-file handlers, file-range bodies, Linux sendfile, and epoll SSE
+reactor. We extend the source with a Raft journal record kind, non-destructive
+resume, indexed WAL reads, and a request-dispatch hook. This is code reuse, not
+merely compatible file formats. Original local-WAL mode remains separately
+buildable. The replicated apply path uses native buffered wire-file writes
+without a second WAL. There is no SQLite or RocksDB payload engine.
+
+OpenRaft **0.9.25**, MIT OR Apache-2.0, source
+https://github.com/databendlabs/openraft/commit/8815cdba2826f74e848acef361ad03f93bb1c3f8
+owns elections, log matching, leader confirmation, learners and joint consensus.
+Its `RaftLogStorage::append` callback must follow native `wait_durable`, not
+enqueue. `save_vote` must also fsync before returning. Storage writes are ordered.
+The alternatives are raft-rs plus manual Ready/HardState/read-index orchestration
+or an OpenRaft prerelease. Neither is needed for this initial integration. We do
+not implement private consensus or assume the previous experiment's proofs apply.
+
+## Ordering, durability and visibility
+
+Fixed stream partitions are independent Raft groups. Partition identity hashes
+the exact protocol path with fixed FNV-1a and a persisted partition count, not
+node count. Each partition has one ordered log. Placement changes replicas of a
+whole group through learner catch-up and joint consensus; they do not rehash
+streams. Different groups can have different leaders and replica sets. One hot
+stream is still ordered by one group and cannot scale without bound.
+
+The authoritative journal is Electric's sharded WAL containing Raft entries,
+votes, committed positions, suffix truncations, purge markers and snapshot
+references. Entries contain the protocol request, not a second database state.
+The in-memory index holds file locations/log IDs, not historical payloads.
+Native stream files are the read materialization. Only committed commands reach
+native handlers, so neither writer tail, durable tail, producer state, closure,
+SSE notification nor a newly created stream can expose a speculative entry.
+
+All writes use **quorum-fsync**. A 2xx mutation response means the command was
+replicated to a quorum whose WAL durability callbacks completed, committed, and
+applied on the responding leader. A deterministic rejection may also be logged.
+An I/O error applying a committed command is terminal, not a replicated 500 whose
+effects differ across replicas. No successful local-before-quorum mode exists.
+One-member mode is explicitly local-fsync, not replicated durability.
+
+Timeout, connection loss, 503, or lost leadership after submission is **unknown
+outcome**, not proof of abort. No ingress automatically replays a mutation.
+Clients use the protocol producer epoch/sequence for retry deduplication; retries
+go through consensus even when an earlier request appears in local producer
+state. Concurrent duplicate proposals can occupy multiple Raft entries but must
+have one stream effect. Unidentified POST retries can duplicate data. Producer
+state is captured in snapshots and reconstructed from committed replay.
+
+## Usable consistency API
+
+`Stream-Consistency` on GET/HEAD selects:
+
+* `linearizable` (default): leader/quorum confirmation, wait for its confirmed
+  commit position to be applied, then read. No stale fallback. During a minority
+  partition it fails or times out.
+* `prefix`: read only this replica's applied committed state. Freshness is
+  unbounded; without a session token reads on different replicas may go backward.
+* `session`: requires `Stream-Session` from a previous response. Wait until this
+  replica has applied at least that group position, then read, or return 503.
+  A token encodes cluster identity, partition, and committed log index. Reject a
+  different cluster/partition or malformed token; do not treat it as an offset.
+
+Mutations accept only `Stream-Durability: quorum-fsync` (the default), never
+silently downgrade unknown values. Successful writes return `Stream-Session`.
+Tokens fence the history, not a stream incarnation: a subsequent committed
+delete can legitimately return 404. Clients maintain a token per partition.
+No cross-group transaction or globally consistent snapshot is implied.
+
+For live reads the selected barrier governs the initial observation. Later SSE
+and long-poll delivery is committed-prefix streaming, NOT a new quorum round for
+each frame; a disconnected replica may stop delivering. Clients resume with
+offsets and preserve their session token. Responses bypass shared HTTP caches
+when requesting consistency: upstream cache headers must not defeat barriers.
+
+## Recovery, checkpoint, snapshot and ownership
+
+Assume non-Byzantine consensus participants, honest successful fsync, durable
+directory fsync/atomic rename, no rollback of acknowledged disk state, and unique
+node identities. Acquire a lifetime exclusive data-directory lock and persist
+cluster/node/partition identity. A copied identity on another disk is NOT fenced
+by flock: never run it concurrently; replacement uses a fresh node ID/learner.
+Membership addresses are routing hints, never authority to acknowledge writes.
+
+Resume the physical WAL after its last complete CRC-valid frame; never use the
+single-node engine's `reset_after_recovery` on a consensus WAL. A torn trailing
+frame is an unacknowledged suffix only under the stated storage model; checksum
+failure in a sealed/interior segment is fatal. Checksums detect accidental
+corruption, not malicious edits. WAL I/O errors are fail-stop. Recovery rebuilds
+the index and reads vote/commit/snapshot/truncation records in physical order.
+
+On boot, native hot files are rebuilt from the last durable snapshot plus the
+committed journal suffix before serving. Never infer commitment from file size.
+Snapshot files stream payloads in bounded windows, include complete native
+metadata (including producer state), applied position and membership, and are
+checksummed. Persist the file and its directory before journaling its reference.
+Install into a new materialization generation before atomically changing the
+in-memory view. Raft purge may follow only a durable snapshot. Physical segment
+reclamation additionally requires a journal checkpoint covering vote, membership,
+commit and retained locations; a logical purge alone does not authorize unlink.
+
+Cold-tier support is retained in the upstream source but **disabled in replicated
+mode** until object identities include cluster/group/incarnation/range/checksum,
+manifest publication crosses consensus, and reference-safe GC is implemented.
+Otherwise a follower or old leader could delete another replica's objects.
+Cross-group forks and local-clock TTL expiry are likewise rejected rather than
+silently diverging. These are explicit remaining feature gates, not claimed
+protocol conformance. No auth/TLS or Internet exposure is qualified here.
+
+## Formal and empirical boundaries
+
+TLA+ models the storage-to-consensus integration assuming Raft log matching and
+leader completeness; it does not re-prove Raft. Bounded safety, fairness-qualified
+liveness, and deliberately broken durability/publication mutations are required.
+Lean proves deterministic prefix/session/quorum arithmetic contracts without
+`sorry`; it does not prove Rust refinement, syscall correctness or disk behavior.
+Property tests must exercise real WAL restart/truncation boundaries. Multi-process
+histories retain unknown outcomes and use an independent checker. SIGKILL on one
+orb is not independent-disk, power-loss or AZ qualification.
+
+Benchmarks pin ds-bench at `93a1a066a511ad2ce5114dc429afb1fd0f6d99bf` and use
+the existing corrected seeding/window rules. Local matched-source measurements
+are qualification only. Separate unmodified local-fsync, one-node adaptation,
+and three-node quorum-fsync costs; preserve errors, seeds, exact byte probes,
+raw windows, process/disk/network samples and source/config/binary hashes.
+Paid evaluation and publication require separate authorization.
