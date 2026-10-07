@@ -1,0 +1,51 @@
+{
+  "arm": "native",
+  "workload": [
+    "write",
+    1,
+    256
+  ],
+  "profile": false,
+  "profiler": null,
+  "diagnostics": true,
+  "verdict": "PASS",
+  "ack_contract": "native local-fsync",
+  "pending_commands": 1024,
+  "progress_sampling": true,
+  "node_pids": [
+    61065
+  ],
+  "affinity": {
+    "61065": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 61270,
+  "process_sample_gaps": [],
+  "client_window": {
+    "start_unix_ms": 1791399841794,
+    "end_unix_ms": 1791399875851,
+    "exit_code": 0
+  },
+  "drain": {
+    "observed_ms": 0.8352859949809499,
+    "target_bytes": 745033216,
+    "replicas": [
+      {
+        "node": 1,
+        "committed_bytes": 745033216
+      }
+    ],
+    "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+  },
+  "verify_pid": 140844,
+  "verify_window": {
+    "start_unix_ms": 1791399875853,
+    "end_unix_ms": 1791399875861,
+    "exit_code": 0
+  },
+  "diagnostic_tail_captured": true
+}

@@ -171,4 +171,64 @@ publication rules in the checked models. `write-diagnostics-004` has six passing
 short cells, but one-member rates of 49,346 / 35,892 / 47,896 writes/s do **not**
 establish an improvement. Fsyncs per ack fall to 0.0444–0.0507; these shorter
 windows are not an isolated comparison with the prior 30-second run. The matched
-long rerun and CPU/allocation profiles must decide whether to retain this change.
+long rerun `async-writes-002` measures 40–45k one-member writes/s against 88–102k
+native: 2.09–2.45× slower. Its 0.0454–0.0483 fsyncs/ack improves grouping, not an
+established throughput gain. Nine of twelve cells pass; all three async cells
+fail the unchanged zero-error gate (24–44k backpressure responses per window).
+
+## Allocation evidence and durable-header projection
+
+`cpu-profiles-001` contains separate 99 Hz user-space CPU profiles, not blocked or
+kernel time: 728 native / 549 one-member / 916 three-member samples. Raw DWARF
+stack-memory captures stay local-only under `.tmp/electric-profiles/`; retained
+symbolized samples, tool output and hashes do not include those memory dumps.
+Allocation, deserialization and task scheduling appear in the samples, but this
+small perturbed profile does not account for every microsecond of the write gap.
+
+`heap-profiles-001` and `002` preserve harness failures: the installed heaptrack
+emits `.zst`, does not substitute `%p` in a custom path, and supervisor restart
+overwrote unfinished traces. The corrected driver moves the open output to its
+recorded PID's name before stopping that process, lets the interpreter drain,
+and requires a nonempty report from every original SUT PID. No failed trace is
+relabelled a passing profile.
+
+`heap-profiles-003` passes all three profiles. Whole-run allocations divided by
+all-phase client acknowledgements are 25.01 natively, 45.79 for one member and
+146.24 across three replicas. The one-member WAL reread deserializes 10 owned
+Strings/append; the three-member leader deserializes 30 and each follower 20.
+These are allocation counts, not seconds saved or unperturbed throughput.
+
+The next change projects HTTP commands after framing: omit `content-length`,
+`transfer-encoding`, `expect`, `connection`, `accept` and `user-agent`, which have
+no mutation-handler consumer. Keep `Host` (Location/callback semantics), protocol
+and unknown headers, and duplicate order. The Lean stable-filter/first-lookup
+proof and negative Host mutation preceded implementation. The Rust generator
+checks independently labelled retained/discarded fields, duplicates, arbitrary
+values/payloads, and the actual bincode round trip. The serialized schema and both
+durability barriers are unchanged; existing WAL commands still decode.
+
+`conformance-015` passes 332/332 unchanged tests with subscriptions enabled, zero
+failures/skips/todo; 136 Rust tests pass with the same two upstream forensic
+helpers ignored. Six process campaigns pass after the projection, including
+39 async receipts (21 committed, one rejected, 17 invalidated) and five unknown
+HTTP outcomes retained. This remains single-host qualification.
+
+`heap-profiles-004` confirms the expected allocation reduction: 25.01 native,
+41.78 one-member and 118.32 aggregate three-member allocations/ack. String
+deserializations fall to 6 / 18 / 12 (one member / leader / each follower).
+However, `async-writes-003` does **not** establish a throughput improvement:
+
+| Repetition | Native writes/s | One-member writes/s | Native / one-member | Quorum-three writes/s | Async accepts/s | Async backpressure |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 108,169 | 45,299 | 2.39 | 26,061 | 34,302 | 61,973 |
+| 2 | 87,782 | 41,083 | 2.14 | 27,531 | 30,504 | 50,886 |
+| 3 | 90,595 | 39,847 | 2.27 | 26,110 | 32,138 | 56,829 |
+
+Nine of twelve cells pass; all three async cells fail the zero-error gate.
+Every accepted byte drains exactly to each replica. One-member p50 is
+4.759–5.243 ms and p99 12.983–15.319 ms; WAL fsyncs/ack are 0.0480–0.0505.
+The 30-second client windows, all-phase counters, committed-progress samples,
+source/binary/config hashes and failures remain separate in the raw evidence.
+Reducing allocations is not proof of performance parity. Journal-stage, durable
+wait, reread, apply and snapshot timing still need attribution before the next
+storage/scheduling change.

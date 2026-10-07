@@ -1,0 +1,30 @@
+{
+  "verdict": "PASS",
+  "operations": 269,
+  "accepted": 39,
+  "terminal_receipts": {
+    "committed": 21,
+    "rejected": 1,
+    "invalidated": 17
+  },
+  "observations": {
+    "committed": 23,
+    "rejected": 1,
+    "pending": 10,
+    "invalidated": 19,
+    "unknown": 1
+  },
+  "unknown_requests": 5,
+  "append_checker": {
+    "verdict": "PASS",
+    "operations": 233,
+    "streams": 2,
+    "scope": "append-only prefix/dedup, exact per-append/read byte offsets, strict real-time graph, explicit session minimum"
+  },
+  "scope": "directed receipt fixture plus independent byte-prefix/real-time graph; one host",
+  "negative_mutations_rejected": [
+    "202 session",
+    "pending is committed",
+    "SSE speculative publication"
+  ]
+}

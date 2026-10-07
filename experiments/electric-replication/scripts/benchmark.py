@@ -27,6 +27,29 @@ CLIENT = ROOT / ".tmp/electric-tools/bench-target/release/ds-bench"
 NATIVE = ROOT / ".tmp/electric-tools/upstream-target/release/durable-streams-server"
 
 
+def export_cpu_profile(output):
+    """Retain symbolized samples; raw DWARF stack memory stays local-only."""
+    source = output / "perf.data"
+    local = ROOT / ".tmp/electric-profiles" / f"{output.name}.perf.data.gz"
+    local.parent.mkdir(parents=True, exist_ok=True)
+    with open(output / "perf-script.log", "w") as errors, gzip.open(output / "cpu-samples.txt.gz", "wb") as samples:
+        process = subprocess.Popen(["perf", "script", "--no-inline", "-F", "comm,pid,tid,time,event,ip,sym,dso",
+                                    "-i", str(source)], stdout=subprocess.PIPE, stderr=errors)
+        shutil.copyfileobj(process.stdout, samples)
+        process.stdout.close()
+        result = process.wait()
+    with open(source, "rb") as data, open(local, "wb") as compressed:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=compressed, mtime=0) as archive:
+            shutil.copyfileobj(data, archive)
+    (output / "cpu-profile-provenance.json").write_text(json.dumps(dict(
+        raw_local_path=str(local.relative_to(ROOT)), raw_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        archive_sha256=hashlib.sha256(local.read_bytes()).hexdigest(), script_exit_code=result,
+        scope="99 Hz user-space CPU samples, whole client invocation; kernel/blocked time excluded. "
+              "Raw DWARF process-memory captures are deliberately not version-controlled; symbolized samples are retained."), indent=2)+"\n")
+    source.unlink()
+    return result
+
+
 def sample(pids, ports, node_pids):
     processes = {}
     gaps = []
@@ -55,7 +78,8 @@ def sample(pids, ports, node_pids):
     return dict(unix_ms=time.time_ns()//1_000_000, monotonic_ns=time.monotonic_ns(), processes=processes, sockets=sockets, process_gaps=gaps)
 
 
-def cell(output, arm, workload, profile=False, diagnostics=False, pending_commands=256, duration=8, progress=False):
+def cell(output, arm, workload, profile=False, diagnostics=False, pending_commands=256, duration=8, progress=False,
+         profiler="strace"):
     replicas = 3 if arm.startswith("raft3") else 1
     lab = Lab(output, replicas=replicas, partitions=2, port=19800)
     lab.cluster = "bench-"+hashlib.sha256(str(lab.output).encode()).hexdigest()[:16]
@@ -65,12 +89,33 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
     trace = None
     sampler = None
     stop = threading.Event()
-    result = dict(arm=arm, workload=workload, profile=profile, diagnostics=diagnostics, verdict="FAIL",
+    result = dict(arm=arm, workload=workload, profile=profile, profiler=profiler if profile else None,
+                  diagnostics=diagnostics, verdict="FAIL",
                   ack_contract="local-fsync acceptance, not commitment" if local_ack else "applied after durable quorum" if not native else "native local-fsync",
                   pending_commands=pending_commands, progress_sampling=progress)
     env = {k:v for k,v in os.environ.items() if not k.startswith("DS_BENCH_") and k != "LD_PRELOAD"}
     env["DS_BENCH_HDR_OUT"] = str(lab.output / "hdr")
     (lab.output / "hdr").mkdir()
+    heap_profile = profile and profiler == "heaptrack"
+    if profile:
+        result["profiler_version"] = subprocess.check_output([profiler, "--version"], text=True).strip()
+
+    def stop_profile():
+        nonlocal trace
+        if trace is None:
+            return
+        if trace.poll() is None:
+            trace.send_signal(signal.SIGINT)
+        trace.wait(timeout=10)
+        trace_log.close()
+        trace = None
+        if profiler == "perf":
+            with open(lab.output / "cpu-profile.txt", "w") as report:
+                result["profile_report_exit_code"] = subprocess.run(
+                    ["perf", "report", "--stdio", "--no-children", "--percent-limit", "0.2",
+                     "-i", str(lab.output / "perf.data")], stdout=report, stderr=subprocess.STDOUT).returncode
+            if (lab.output / "perf.data").exists():
+                result["profile_script_exit_code"] = export_cpu_profile(lab.output)
 
     def run_client(args, name):
         command = ["taskset", "-c", "4-7", str(CLIENT), *args, "--target", f"http://127.0.0.1:{lab.port+1}", "--api-style", "durable"]
@@ -115,6 +160,8 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
                        "--tier", "off", "--tail-cache-bytes", "0", "--read-offload", "tail"]
             if diagnostics:
                 command += ["--wal-stats", "1", "--server-stats", "1"]
+            if heap_profile:
+                command[3:3] = ["heaptrack", "-o", str(lab.output / "heap-node-1")]
             (lab.output / "native-argv.json").write_text(json.dumps(command, indent=2)+"\n")
             subprocess.run(["amp", "orb", "service", "start", lab.cluster+"-1", "--cwd", str(ROOT),
                             "--command", "ulimit -c 0; exec "+shlex.join(command)+" > "+shlex.quote(str(lab.output / "node-1.log"))+" 2>&1",
@@ -123,7 +170,7 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
             lab.wait(lambda: lab.request(1,"GET","/health")[0] == 200, "native ready")
             for proc in Path("/proc").iterdir():
                 try:
-                    if proc.name.isdecimal() and str(NATIVE).encode() in (proc / "cmdline").read_bytes().split(b"\0"):
+                    if proc.name.isdecimal() and (proc / "cmdline").read_bytes().split(b"\0")[0] == str(NATIVE).encode():
                         node_pids.append(int(proc.name))
                 except FileNotFoundError:
                     pass
@@ -132,7 +179,7 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
             for node in range(1,replicas+1):
                 lab.start(node, cpus="0-3", fault_testing=False, stats_secs=int(diagnostics),
                           pending_commands=pending_commands,
-                          append_durability="local-fsync" if local_ack else "quorum-fsync")
+                          append_durability="local-fsync" if local_ack else "quorum-fsync", heap_profile=heap_profile)
                 node_pids.append(int((lab.output / f"node-{node}.pid").read_text()))
             for group in range(2):
                 assert lab.admin(1, group, "init", lab.genesis) == {"Ok":None}
@@ -156,14 +203,20 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
                     "--rate-per-stream", "0", "--payload-bytes", "256", "--setup-concurrency", "32",
                     "--warmup-secs", "3", "--settle-secs", "1", "--duration-secs", str(duration)]
         args += ["--request-timeout-secs", "30"]
-        if profile:
-            command = ["strace", "-f", "-c", "-w", "-o", str(lab.output / "syscall-profile.txt")]
-            for pid in node_pids:
-                command += ["-p", str(pid)]
-            trace_log = open(lab.output / "strace.log", "w")
+        if profile and not heap_profile:
+            if profiler == "perf":
+                command = ["perf", "record", "-F", "99", "-e", "cpu-clock:u", "--call-graph", "dwarf,16384",
+                           "-o", str(lab.output / "perf.data"), "-p", ",".join(map(str, node_pids))]
+            else:
+                assert profiler == "strace", profiler
+                command = ["strace", "-f", "-c", "-w", "-o", str(lab.output / "syscall-profile.txt")]
+                for pid in node_pids:
+                    command += ["-p", str(pid)]
+            (lab.output / "profile-argv.json").write_text(json.dumps(command, indent=2)+"\n")
+            trace_log = open(lab.output / f"{profiler}.log", "w")
             trace = subprocess.Popen(command, stdout=trace_log, stderr=trace_log)
             time.sleep(0.5)
-            assert trace.poll() is None, "strace attach failed; see retained log"
+            assert trace.poll() is None, "profiler attach failed; see retained log"
 
         def collect():
             try:
@@ -223,11 +276,9 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
         stop.set()
         sampler.join()
         assert "sampling_error" not in result, result.get("sampling_error")
-        if trace:
-            trace.send_signal(signal.SIGINT)
-            trace.wait(timeout=10)
-            trace_log.close()
-            trace = None
+        stop_profile()
+        assert result.get("profile_report_exit_code", 0) == 0, "profiler report failed; raw output retained"
+        assert result.get("profile_script_exit_code", 0) == 0, "profiler sample export failed; raw output retained"
         if workload[0] == "write":
             verify = run_client(["verify-offsets", "--streams", str(workload[1]), "--payload-bytes", "256", "--concurrency", "32"], "verify")
             assert verify["total_records"] == raw["ok_total_all_phases"] and verify["bytes_divide_exactly"]
@@ -250,10 +301,7 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
         stop.set()
         if sampler:
             sampler.join()
-        if trace and trace.poll() is None:
-            trace.send_signal(signal.SIGINT)
-            trace.wait(timeout=10)
-            trace_log.close()
+        stop_profile()
         if diagnostics:
             # Keep the final partial counter interval even when validation
             # failed. This wait is outside the measurement/sample windows.
@@ -268,7 +316,36 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
                         pass
         # Retain sizes, not benchmark payload copies. Data is disposable and
         # per-cell cleanup prevents a long sweep exhausting the shared disk.
+        if heap_profile:
+            # Let the profiler's interpreter drain EOF before stopping its
+            # supervising service/process group. Only our recorded SUT PIDs.
+            for node, pid in enumerate(node_pids, 1):
+                # The installed wrapper leaves custom %p names literal. Move
+                # the still-open trace first so a supervisor restart cannot
+                # overwrite it. The interpreter keeps writing the same inode.
+                for suffix in (".gz", ".zst"):
+                    heap = lab.output / f"heap-node-{node}{suffix}"
+                    if heap.exists():
+                        heap.rename(lab.output / f"heap-node-{node}-{pid}{suffix}")
+                cmdline = Path(f"/proc/{pid}/cmdline")
+                if cmdline.exists() and cmdline.read_bytes().split(b"\0")[0] in (str(NATIVE).encode(), str(BINARY).encode()):
+                    os.kill(pid, signal.SIGTERM)
+            time.sleep(2)
         lab.close()
+        if heap_profile:
+            reports = {}
+            for heap in lab.output.glob("heap-node-*.*"):
+                if heap.suffix not in (".gz", ".zst") or not any(heap.stem.endswith(f"-{pid}") for pid in node_pids):
+                    continue
+                with open(heap.with_suffix(".txt"), "w") as report:
+                    reports[heap.name] = subprocess.run(["heaptrack_print", "-f", str(heap), "-n", "20"],
+                        stdout=report, stderr=subprocess.STDOUT).returncode
+                if not re.search(r"calls to allocation functions: [1-9][0-9]*", heap.with_suffix(".txt").read_text()):
+                    reports[heap.name] = -1
+            result["heap_report_exit_codes"] = reports
+            if len(reports) != replicas or any(reports.values()):
+                result["verdict"] = "FAIL"
+                result["profile_error"] = "Missing or unreadable heap profile; partial outputs retained"
         files = {str(p.relative_to(lab.data)):p.stat().st_size for p in lab.data.rglob("*") if p.is_file()}
         (lab.output / "storage-bytes.json").write_text(json.dumps(files,indent=2)+"\n")
         for path in lab.output.glob("*.log"):
@@ -287,13 +364,15 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
     return result
 
 
-def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_profiles=False, async_writes=False):
+def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_profiles=False, async_writes=False,
+        cpu_profiles=False, heap_profiles=False):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     sources = source_hashes()
     provenance = dict(native_source="88793e76595d69be300731b9b25c58538923a53b", client_source="93a1a066a511ad2ce5114dc429afb1fd0f6d99bf",
         client_unmodified=True, native_unmodified=True, adaptation_sources=sources,
         driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        lab_driver_sha256=hashlib.sha256(Path(__file__).with_name("lab.py").read_bytes()).hexdigest(),
         binaries={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (CLIENT,NATIVE,BINARY)},
         sut_cpus="0-3 aggregate across replicas", client_cpus="4-7", memory="shared 16 GiB host, no separate quota",
         disk="shared orb root filesystem; same 8 MiB WAL segments, no cold tier", workers_per_process=2,
@@ -316,7 +395,7 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
         workloads = [("reads",), ("mixed",)]
     if write_diagnostics or async_writes:
         workloads = [("write",1,256)] * 3
-    if write_profiles:
+    if write_profiles or cpu_profiles or heap_profiles:
         workloads = [("write",1,256)]
     results = []
     for i, workload in enumerate(workloads):
@@ -325,11 +404,12 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
         arms = arms[i%len(arms):]+arms[:i%len(arms)]
         for arm in arms:
             name = f"{output.name}-{arm}-"+"-".join(map(str,workload))+(f"-repeat{i+1}" if write_diagnostics or async_writes else "")
-            results.append(cell(output / name, arm, workload, profile=write_profiles,
-                                diagnostics=write_diagnostics or write_profiles or async_writes,
+            results.append(cell(output / name, arm, workload, profile=write_profiles or cpu_profiles or heap_profiles,
+                                diagnostics=write_diagnostics or write_profiles or async_writes or cpu_profiles or heap_profiles,
                                 pending_commands=1024 if async_writes else 256,
-                                duration=30 if async_writes else 8, progress=async_writes))
-    if not smoke and not write_diagnostics and not write_profiles and not async_writes:
+                                duration=30 if async_writes else 8, progress=async_writes,
+                                profiler="heaptrack" if heap_profiles else "perf" if cpu_profiles else "strace"))
+    if not smoke and not write_diagnostics and not write_profiles and not async_writes and not cpu_profiles and not heap_profiles:
         for arm in ("native","raft1","raft3"):
             for workload in (("reads",),) if reads_only else (("write",1024,64),("reads",)):
                 name = f"{output.name}-{arm}-profile-"+"-".join(map(str,workload))
@@ -341,4 +421,5 @@ def run(output, smoke=False, reads_only=False, write_diagnostics=False, write_pr
 if __name__ == "__main__":
     sys.exit(0 if run(sys.argv[1], "--smoke" in sys.argv[2:], "--reads-only" in sys.argv[2:],
                      "--write-diagnostics" in sys.argv[2:], "--write-profiles" in sys.argv[2:],
-                     "--async-writes" in sys.argv[2:]) else 1)
+                     "--async-writes" in sys.argv[2:], "--cpu-profiles" in sys.argv[2:],
+                     "--heap-profiles" in sys.argv[2:]) else 1)

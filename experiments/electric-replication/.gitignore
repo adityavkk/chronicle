@@ -5,4 +5,7 @@ formal/*_TTrace*
 data/
 # Lossless .log.gz archives are retained with histories; raw logs stay local.
 evidence/**/*.log
+# DWARF profiler captures contain raw process-memory bytes. Keep symbolized
+# samples and hashes here; raw captures stay under .tmp/.
+evidence/**/perf.data*
 scripts/__pycache__/

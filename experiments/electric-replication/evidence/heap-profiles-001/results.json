@@ -1,0 +1,145 @@
+[
+  {
+    "arm": "native",
+    "workload": [
+      "write",
+      1,
+      256
+    ],
+    "profile": true,
+    "profiler": "heaptrack",
+    "diagnostics": true,
+    "verdict": "FAIL",
+    "ack_contract": "native local-fsync",
+    "pending_commands": 256,
+    "progress_sampling": false,
+    "profiler_version": "heaptrack 1.4.0",
+    "node_pids": [
+      2107029
+    ],
+    "affinity": {
+      "2107029": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 2107041,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791397202151,
+      "end_unix_ms": 1791397214183,
+      "exit_code": 0
+    },
+    "verify_pid": 2178502,
+    "verify_window": {
+      "start_unix_ms": 1791397214183,
+      "end_unix_ms": 1791397214191,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true,
+    "heap_report_exit_codes": {},
+    "profile_error": "Missing or unreadable heap profile; partial outputs retained"
+  },
+  {
+    "arm": "raft1",
+    "workload": [
+      "write",
+      1,
+      256
+    ],
+    "profile": true,
+    "profiler": "heaptrack",
+    "diagnostics": true,
+    "verdict": "FAIL",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 256,
+    "progress_sampling": false,
+    "profiler_version": "heaptrack 1.4.0",
+    "node_pids": [
+      2181102
+    ],
+    "affinity": {
+      "2181102": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 2181300,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791397219121,
+      "end_unix_ms": 1791397231167,
+      "exit_code": 0
+    },
+    "verify_pid": 2182214,
+    "verify_window": {
+      "start_unix_ms": 1791397231167,
+      "end_unix_ms": 1791397231175,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true,
+    "heap_report_exit_codes": {},
+    "profile_error": "Missing or unreadable heap profile; partial outputs retained"
+  },
+  {
+    "arm": "raft3",
+    "workload": [
+      "write",
+      1,
+      256
+    ],
+    "profile": true,
+    "profiler": "heaptrack",
+    "diagnostics": true,
+    "verdict": "FAIL",
+    "ack_contract": "applied after durable quorum",
+    "pending_commands": 256,
+    "progress_sampling": false,
+    "profiler_version": "heaptrack 1.4.0",
+    "node_pids": [
+      2182315,
+      2182365,
+      2182417
+    ],
+    "affinity": {
+      "2182315": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "2182365": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "2182417": [
+        0,
+        1,
+        2,
+        3
+      ]
+    },
+    "client_pid": 2182426,
+    "process_sample_gaps": [],
+    "client_window": {
+      "start_unix_ms": 1791397236931,
+      "end_unix_ms": 1791397248992,
+      "exit_code": 0
+    },
+    "verify_pid": 2182464,
+    "verify_window": {
+      "start_unix_ms": 1791397248993,
+      "end_unix_ms": 1791397249001,
+      "exit_code": 0
+    },
+    "diagnostic_tail_captured": true,
+    "heap_report_exit_codes": {},
+    "profile_error": "Missing or unreadable heap profile; partial outputs retained"
+  }
+]

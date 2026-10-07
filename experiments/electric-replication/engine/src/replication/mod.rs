@@ -39,6 +39,29 @@ pub struct Command {
     pub time: u64,
 }
 
+impl Command {
+    fn http(mut req: Req, time: u64) -> Self {
+        // Framing is complete. These fields have no mutation-handler consumer;
+        // do not serialize and reallocate them at every journal read/replica.
+        // Host is deliberately retained: create/fork Location uses its value.
+        req.headers.retain(|(name, _)| !matches!(name.as_str(),
+            "content-length" | "transfer-encoding" | "expect" |
+            "connection" | "accept" | "user-agent"));
+        Self {
+            method: match req.method {
+                Method::Put => "PUT",
+                Method::Post => "POST",
+                Method::Delete => "DELETE",
+                _ => unreachable!("HTTP command requires a mutation"),
+            }.into(),
+            path: req.path,
+            headers: req.headers,
+            body: req.body.to_vec(),
+            time,
+        }
+    }
+}
+
 impl std::fmt::Debug for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Subscription commands can contain keys/tokens. OpenRaft diagnostics
@@ -331,18 +354,7 @@ impl Cluster {
             {
                 return self.remote_fork(group, req).await;
             }
-            let command = Command {
-                method: match req.method {
-                    Method::Put => "PUT",
-                    Method::Post => "POST",
-                    _ => "DELETE",
-                }
-                .into(),
-                path: req.path,
-                headers: req.headers,
-                body: req.body.to_vec(),
-                time: clock::millis(std::time::SystemTime::now()),
-            };
+            let command = Command::http(req, clock::millis(std::time::SystemTime::now()));
             return match g.submit(command).await {
                 Ok(batch::Outcome::Accepted(position)) => self.accepted(group, position),
                 Ok(batch::Outcome::Committed(result)) => {
@@ -757,6 +769,39 @@ mod tests {
     use std::task::Poll;
 
     proptest! {
+        #[test]
+        fn http_projection_keeps_semantics_duplicates_and_unknown_headers(
+            order in prop::collection::vec(0usize..22, 0..80), value in "[a-z0-9]{0,24}",
+            body in prop::collection::vec(any::<u8>(),0..513), time in any::<u64>(), method in 0usize..3,
+        ) {
+            // Classification is fixture data, independent of the implementation.
+            // Include duplicates, unknown headers, Host and every native family.
+            let keep = ["host", "content-type", "stream-ttl", "stream-expires-at",
+                "stream-closed", "stream-forked-from", "stream-fork-offset", "stream-fork-sub-offset",
+                "stream-seq", "producer-id", "producer-epoch", "producer-seq", "stream-durability",
+                "authorization", "x-application", "x-content-length"];
+            let discard = ["content-length", "transfer-encoding", "expect", "connection", "accept", "user-agent"];
+            let mut headers = Vec::new();
+            let mut expected = Vec::new();
+            for (ordinal, index) in (0..22).chain(order).enumerate() {
+                let retained = index < keep.len();
+                let name = if retained {keep[index]} else {discard[index-keep.len()]};
+                let pair = (name.to_string(),format!("{ordinal}-{value}"));
+                if retained {expected.push(pair.clone());}
+                headers.push(pair);
+            }
+            let methods = [Method::Put,Method::Post,Method::Delete];
+            let command = Command::http(Req {method:methods[method],path:"/headers/%CE%BB".into(),
+                query:None,headers,body:body.clone().into()},time);
+            let encoded = bincode::serialize(&command).unwrap();
+            let decoded: Command = bincode::deserialize(&encoded).unwrap();
+            prop_assert_eq!(decoded.method,["PUT","POST","DELETE"][method]);
+            prop_assert_eq!(decoded.path,"/headers/%CE%BB");
+            prop_assert_eq!(decoded.headers,expected);
+            prop_assert_eq!(decoded.body,body);
+            prop_assert_eq!(decoded.time,time);
+        }
+
         #[test]
         fn read_cohorts_exclude_inflight_round_even_after_cancel(
             count in 1usize..64, first_result in any::<bool>(), cancel in any::<bool>(),

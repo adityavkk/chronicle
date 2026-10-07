@@ -100,6 +100,17 @@ parity. The single-member gap in these runs is 2.29–2.34×; window length, sna
 work and changed batch scheduling require further attribution. Raw failures stay
 in the ledger; the earlier short-run result does not supersede them.
 
+The latest header-projection checkpoint passes `conformance-015` (**332/332**,
+zero failures/skips/todo), 136 Rust tests and six new process campaigns. Heap
+profiles independently confirm fewer allocations: 45.79→41.78 per one-member
+acknowledgement and 146.24→118.32 across three replicas. But the matched
+`async-writes-003` runs still measure native 88–108k/s, one member 40–45k/s
+(**2.14–2.39× slower**) and quorum-three 26–28k/s. All three async saturation
+cells fail the zero-error gate with 51–62k backpressure responses per 30-second
+window; every accepted byte drains to each replica. Allocation savings alone
+have not closed the performance gap. Raw CPU memory captures stay local-only;
+symbolized CPU profiles, allocation traces and failed harness runs are retained.
+
 The broader **pre-batching** `bench-local-004` completes all **45/45** matched ds-bench cells
 after arrival-fenced read coalescing. The prior `bench-local-003` three-replica,
 1,000-subscriber failure (503s and a 240-second timeout) is retained. One 004

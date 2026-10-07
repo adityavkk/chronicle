@@ -205,9 +205,9 @@ manifest publication crosses consensus, and reference-safe GC is implemented.
 Otherwise a follower or old leader could delete another replica's objects.
 TTL uses the committed clock in `TIMED-STATE.md`, never local-clock expiration.
 Cross-group forks and subscriptions retain durable control state in the same
-journal and snapshot as stream data. Experimental node identity 5 rejects earlier
-data because commands are now ordered batches; snapshot envelope format remains
-4 (materialized state). No data migration or mixed-version operation is supplied.
+journal and snapshot as stream data. Experimental node identity 6 and snapshot
+envelope format 5 include bounded receipt outcomes (see `ASYNC.md`) and reject
+earlier data. No data migration or mixed-version operation is supplied.
 Physical WAL reclamation and obsolete-snapshot cleanup now have native-file
 property and real-process syscall-fault qualifications. Cold-tier ownership,
 terminal-fence compaction and production auth/TLS remain gates. No Internet

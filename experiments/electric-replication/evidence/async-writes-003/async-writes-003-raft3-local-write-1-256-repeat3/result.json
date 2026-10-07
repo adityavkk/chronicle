@@ -1,0 +1,79 @@
+{
+  "arm": "raft3-local",
+  "workload": [
+    "write",
+    1,
+    256
+  ],
+  "profile": false,
+  "profiler": null,
+  "diagnostics": true,
+  "verdict": "FAIL",
+  "ack_contract": "local-fsync acceptance, not commitment",
+  "pending_commands": 1024,
+  "progress_sampling": true,
+  "node_pids": [
+    147886,
+    153787,
+    159032
+  ],
+  "affinity": {
+    "147886": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "153787": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "159032": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 163941,
+  "process_sample_gaps": [
+    {
+      "pid": 163941,
+      "error": "PermissionError(13, 'Permission denied')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791399880231,
+    "end_unix_ms": 1791399914311,
+    "exit_code": 0
+  },
+  "drain": {
+    "observed_ms": 1.3656409937539138,
+    "target_bytes": 267661568,
+    "replicas": [
+      {
+        "node": 1,
+        "committed_bytes": 267661568
+      },
+      {
+        "node": 2,
+        "committed_bytes": 267661568
+      },
+      {
+        "node": 3,
+        "committed_bytes": 267661568
+      }
+    ],
+    "scope": "post-client-exit observation upper bound; every replica, no per-attempt receipts"
+  },
+  "verify_pid": 291475,
+  "verify_window": {
+    "start_unix_ms": 1791399914317,
+    "end_unix_ms": 1791399914322,
+    "exit_code": 0
+  },
+  "error": "AssertionError()",
+  "diagnostic_tail_captured": true
+}
