@@ -1,6 +1,6 @@
 import unittest
 
-from benchmark_summary import summarize_phase_timings, summarize_progress
+from benchmark_summary import summarize_phase_timings, summarize_progress, summarize_sync_timings
 
 
 class ProgressSummary(unittest.TestCase):
@@ -52,6 +52,25 @@ class PhaseTimingSummary(unittest.TestCase):
     def test_a_process_counter_reset_is_not_a_negative_duration_or_whole_run_total(self):
         values = [self.observation(125, 50, 50000, 30), self.observation(175, 2, 2500, 1)]
         row = summarize_phase_timings(values, 100, 200)["read"]
+        self.assertTrue(row["counter_reset_detected"])
+        self.assertIsNone(row["whole_invocation"])
+        self.assertIsNone(row["sampled_window"])
+
+
+class SyncTimingSummary(unittest.TestCase):
+    def test_loops_and_calls_are_distinct_and_lifetime_max_is_not_a_window_max(self):
+        values = [dict(unix_ms=50, count=4, calls=7, total_ns=1000, max_ns=700),
+                  dict(unix_ms=110, count=8, calls=11, total_ns=2000, max_ns=700),
+                  dict(unix_ms=190, count=13, calls=20, total_ns=3300, max_ns=700),
+                  dict(unix_ms=220, count=17, calls=24, total_ns=5300, max_ns=900)]
+        row = summarize_sync_timings(values, 100, 200)
+        self.assertEqual(row["whole_invocation"], values[-1])
+        self.assertFalse(row["counter_reset_detected"])
+        self.assertEqual(row["sampled_window"], dict(start_unix_ms=110, end_unix_ms=190,
+                                                   count=5, calls=9, total_ns=1300))
+        self.assertIsNone(summarize_sync_timings(values, 120, 200)["sampled_window"])
+        reset = [values[2], values[0]]
+        row = summarize_sync_timings(reset, 0, 200)
         self.assertTrue(row["counter_reset_detected"])
         self.assertIsNone(row["whole_invocation"])
         self.assertIsNone(row["sampled_window"])

@@ -13,6 +13,19 @@ import re
 import sys
 
 
+def summarize_sync_timings(values, begin, end):
+    keys = ("count", "calls", "total_ns")
+    reset = any(any(b[k] < a[k] for k in keys) for a, b in zip(values, values[1:]))
+    result = dict(counter_reset_detected=reset, observations=len(values),
+                  whole_invocation=None if reset else values[-1], sampled_window=None)
+    inside = [v for v in values if begin <= v["unix_ms"] <= end]
+    if not reset and len(inside) >= 2:
+        first, last = inside[0], inside[-1]
+        result["sampled_window"] = dict(start_unix_ms=first["unix_ms"], end_unix_ms=last["unix_ms"],
+                                       **{k:last[k]-first[k] for k in keys})
+    return result
+
+
 def summarize_phase_timings(observations, begin, end):
     """Difference cumulative counters; never sum successive cumulative samples."""
     phases = {}
@@ -152,8 +165,10 @@ def summarize(directory):
             # and call them append counts. Use the client's all-phase acks.
             staged, syncs = 0, 0
             phase_timings = {}
+            sync_timings = {}
             for log in cell.glob("node-*.log.gz"):
                 observations = []
+                sync_observations = []
                 with gzip.open(log, "rt") as file:
                     for line in file:
                         match = re.search(r"WAL_CONT staged/s=(\d+) fsync/s=(\d+)", line)
@@ -162,13 +177,23 @@ def summarize(directory):
                             syncs += int(match[2])
                         if line.startswith("RAFT_TIMING "):
                             observations.append(json.loads(line.removeprefix("RAFT_TIMING ")))
+                        if line.startswith("WAL_SYNC "):
+                            sync_observations.append(json.loads(line.removeprefix("WAL_SYNC ")))
                 if observations:
                     phase_timings[log.name] = summarize_phase_timings(observations, begin, end)
+                if sync_observations:
+                    sync_timings[log.name] = summarize_sync_timings(sync_observations, begin, end)
             if phase_timings:
                 row["phase_timings"] = dict(nodes=phase_timings,
                     scope="Cumulative completed-attempt wall times, including setup/warmup for whole_invocation. "
                           "Sampled windows use first/last observations INSIDE the client window, not exact client boundaries. "
                           "Nested/overlapping phases are NOT additive CPU or pure fsync syscall time.")
+            if sync_timings:
+                row["sync_timings"] = dict(nodes=sync_timings,
+                    scope="Successful synchronous covering WAL-fsync loops only, before durability notification. "
+                          "A loop can sync multiple segments. Wall time includes OS descheduling, not pure disk or CPU time. "
+                          "Cumulative whole-invocation totals include setup/warmup; sampled windows are first/last observations "
+                          "inside client bounds. The unmodified upstream binary has no such probe; missing is not zero.")
             acknowledgements = raw["ok_total_all_phases"]
             row["wal_diagnostics"] = dict(staged_records=staged, fsyncs=syncs,
                 client_acks_all_phases=acknowledgements,

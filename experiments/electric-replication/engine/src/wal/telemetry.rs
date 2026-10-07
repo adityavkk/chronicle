@@ -142,6 +142,14 @@ pub struct ShardStats {
     /// the old `watch`-broadcast thundering herd, where it tracked the parked
     /// subscriber count).
     waiters_woken: AtomicU64,
+    /// Successful covering fsync loops timed with `--wal-stats`. A loop can
+    /// sync multiple segments; this is synchronous wall time, not notification
+    /// latency, CPU time, or a measurement of the disk alone. Failed loops do
+    /// not increment these counters and never publish a durable watermark.
+    sync_loops: AtomicU64,
+    sync_calls: AtomicU64,
+    sync_nanos: AtomicU64,
+    sync_max_nanos: AtomicU64,
 }
 
 impl Default for ShardStats {
@@ -158,6 +166,10 @@ impl Default for ShardStats {
             dirty_lock_acquires: AtomicU64::new(0),
             staged: AtomicU64::new(0),
             waiters_woken: AtomicU64::new(0),
+            sync_loops: AtomicU64::new(0),
+            sync_calls: AtomicU64::new(0),
+            sync_nanos: AtomicU64::new(0),
+            sync_max_nanos: AtomicU64::new(0),
         }
     }
 }
@@ -205,6 +217,13 @@ impl ShardStats {
         self.waiters_woken.fetch_add(n, Ordering::Relaxed);
     }
 
+    pub fn record_sync_loop(&self, calls: u64, nanos: u64) {
+        self.sync_loops.fetch_add(1, Ordering::Relaxed);
+        self.sync_calls.fetch_add(calls, Ordering::Relaxed);
+        self.sync_nanos.fetch_add(nanos, Ordering::Relaxed);
+        self.sync_max_nanos.fetch_max(nanos, Ordering::Relaxed);
+    }
+
     /// The bucket index for a batch size (the first boundary it does not exceed,
     /// else the overflow slot).
     fn bucket_index(batch: u64) -> usize {
@@ -237,6 +256,10 @@ impl ShardStats {
             dirty_lock_acquires: self.dirty_lock_acquires.load(Ordering::Relaxed),
             staged: self.staged.load(Ordering::Relaxed),
             waiters_woken: self.waiters_woken.load(Ordering::Relaxed),
+            sync_loops: self.sync_loops.load(Ordering::Relaxed),
+            sync_calls: self.sync_calls.load(Ordering::Relaxed),
+            sync_nanos: self.sync_nanos.load(Ordering::Relaxed),
+            sync_max_nanos: self.sync_max_nanos.load(Ordering::Relaxed),
         }
     }
 }
@@ -262,6 +285,10 @@ pub struct StatsSnapshot {
     pub dirty_lock_acquires: u64,
     pub staged: u64,
     pub waiters_woken: u64,
+    pub sync_loops: u64,
+    pub sync_calls: u64,
+    pub sync_nanos: u64,
+    pub sync_max_nanos: u64,
 }
 
 /// All derivations are telemetry/test-only (emitter + stats tests); targeted
@@ -365,6 +392,10 @@ impl StatsSnapshot {
         self.dirty_lock_acquires += other.dirty_lock_acquires;
         self.staged += other.staged;
         self.waiters_woken += other.waiters_woken;
+        self.sync_loops += other.sync_loops;
+        self.sync_calls += other.sync_calls;
+        self.sync_nanos += other.sync_nanos;
+        self.sync_max_nanos = self.sync_max_nanos.max(other.sync_max_nanos);
     }
 }
 
@@ -511,6 +542,14 @@ mod stats_emitter {
                     prev[i] = cur;
                 }
                 print_delta(&cur_agg, &prev_agg, dt);
+                // Cumulative counters retain exact totals even when emitter
+                // ticks are delayed; do not sum successive observations.
+                eprintln!("WAL_SYNC {}", serde_json::json!({
+                    "unix_ms": std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),
+                    "count": cur_agg.sync_loops, "calls": cur_agg.sync_calls,
+                    "total_ns": cur_agg.sync_nanos, "max_ns": cur_agg.sync_max_nanos,
+                }));
             }
         });
     }
@@ -645,6 +684,22 @@ mod tests {
         assert!(super::stats_enabled());
         super::set_stats_enabled(false);
         assert!(!super::stats_enabled());
+    }
+
+    #[test]
+    fn sync_loops_count_calls_separately_and_merge_max_not_sum() {
+        let a = ShardStats::default();
+        assert_eq!(a.snapshot().sync_loops, 0);
+        a.record_sync_loop(2, 11);
+        a.record_sync_loop(1, 37);
+        let b = ShardStats::default();
+        b.record_sync_loop(3, 7);
+        let mut agg = a.snapshot();
+        assert_eq!((agg.sync_loops, agg.sync_calls, agg.sync_nanos, agg.sync_max_nanos),
+                   (2, 3, 48, 37));
+        agg.merge(&b.snapshot());
+        assert_eq!((agg.sync_loops, agg.sync_calls, agg.sync_nanos, agg.sync_max_nanos),
+                   (3, 6, 55, 37));
     }
 
     #[test]

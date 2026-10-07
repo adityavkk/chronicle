@@ -316,3 +316,40 @@ closing client `/proc` observation is unavailable and remains in the raw ledger.
 The next diagnostic must separate the synchronous WAL-fsync loop from the
 scheduling/notification time included in these durability waits; neither barrier
 will be removed on the basis of overlapping phase times.
+
+## Synchronous fsync timing and callback scheduling
+
+`write-timings-003` adds opt-in timing directly around the native committer's
+covering `fdatasync` loop, before `publish_durable`. Counters distinguish loops
+from segment calls, count only successful loops and exclude async notification.
+The unchanged upstream baseline lacks this additional probe; missing timing is
+not zero. Its original WAL counters remain available. The new loop timer includes
+OS descheduling and is not pure device latency or CPU time.
+
+All six short cells pass. Native measures 104,354 / 108,322 / 108,369 writes/s;
+one member measures 55,916 / 48,645 / 44,508. Whole-invocation synchronous loops
+average 255 / 295 / 330 µs, entry waits 395 / 462 / 538 µs, and marker waits
+342 / 405 / 472 µs. Actual cohorts average 43.4 / 44.0 / 38.6 appends. These
+different, overlapping populations cannot be subtracted into an exact additive
+cost model, but show both storage and coordination cost. This is diagnosis,
+not a claimed timing-probe speedup. `conformance-019` passes 332/332 with zero
+failures/skips; 139 replicated and 113 standalone Rust tests pass, with the same
+two unchanged forensic helpers ignored in each build.
+
+The next candidate removes the extra task around the Journal's durability wait.
+Pinned OpenRaft [awaits append and then LogFlushed](https://github.com/databendlabs/openraft/blob/8815cdba2826f74e848acef361ad03f93bb1c3f8/openraft/src/core/raft_core.rs#L707-L730)
+before processing another command. Its [trait contract](https://github.com/databendlabs/openraft/blob/8815cdba2826f74e848acef361ad03f93bb1c3f8/openraft/src/storage/v2.rs#L108-L129)
+expressly permits callback-before-return, and both the built-in
+[compatibility adapter](https://github.com/databendlabs/openraft/blob/8815cdba2826f74e848acef361ad03f93bb1c3f8/openraft/src/storage/adapter.rs#L150-L158)
+and [RocksDB store](https://github.com/databendlabs/openraft/blob/8815cdba2826f74e848acef361ad03f93bb1c3f8/stores/rocksstore-v2/src/lib.rs#L352-L377)
+use that ordering. Our fsync still runs on Electric's dedicated OS thread; the
+Raft task asynchronously awaits its oneshot, never executes the syscall itself.
+
+The candidate retains `stage → native durability → local receipt notification →
+LogFlushed → return`. It does not await quorum before local acceptance, move the
+publication marker, or change consensus ordering. Existing Batches/Receipts models
+already order acceptance/callback after Flush; removing a task changes scheduling,
+not their transitions. Canceling a core can still leave an unknown request outcome;
+it cannot justify an early receipt or releasing retained-entry admission debt.
+Model checks do not prove Rust cancellation/refinement. Real storage/process
+tests and new matched measurements remain required before claiming a benefit.

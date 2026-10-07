@@ -1488,10 +1488,14 @@ impl Shard {
             return Ok(None);
         }
         let (seg, sealed) = self.collect_fsync_targets();
+        let started = super::telemetry::stats_enabled().then(std::time::Instant::now);
         for s in &sealed {
             s.fdatasync()?;
         }
         seg.fdatasync()?;
+        if let Some(started) = started {
+            self.stats.record_sync_loop(sealed.len() as u64 + 1, started.elapsed().as_nanos() as u64);
+        }
         // Snapshotted-before-fsync watermark, published exactly.
         self.publish_durable(watermark);
         Ok(Some(watermark))

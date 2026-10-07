@@ -79,6 +79,8 @@ disks/AZs, arbitrary power loss, production availability or cloud performance.
 | `fault-017`, `fork-fault-011`, `subscription-fault-010`, `storage-fault-012`, `reclaim-fault-008` | Independent checkers PASS: 194 / 748 / 192 / 28 / 20 operations | Held-prefix reruns; one / three subscription/storage unknowns, nine signatures, seven storage faults, 38,010,880 exact reclaimed/restarted bytes |
 | `async-fault-005` | Independent checker PASS: 270 operations, 39 receipts | 21 committed, one rejected, 17 invalidated; five unknown HTTP outcomes retained |
 | `write-timings-002` | Six matched short cells PASS, no established performance improvement | One member 46.7–47.6k/s, actual batches still about 43 commands; native 100–103k/s in two repetitions, 54.8k/s in the third. The smaller third gap is native variance, not a replicated gain. One closing client `/proc` sampling gap retained |
+| `properties/rust-139-sync-timings.txt`, `properties/standalone-113-sync-timings.txt`, `conformance-019` | 139 replicated / 113 standalone Rust tests; 332/332 conformance, zero failures/skips | Opt-in native fsync-loop timing only; no changed durability ordering; same two upstream forensic helpers ignored in each Rust build |
+| `write-timings-003` | Six matched short cells PASS | Native 104–108k/s, one member 44.5–55.9k/s; synchronous covering fsync loops average 255–330 µs, entry waits 395–538 µs. Overlapping populations, not an additive cost model or a claimed probe speedup |
 
 The upstream suite is **unchanged `@durable-streams/server-conformance-tests@0.3.5`**,
 with `subscriptions:true`. All 332 tests are discovered and executed in each full
