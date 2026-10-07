@@ -1,3 +1,6 @@
+/home/user/workspace/repo/.tmp/electric-tools/DiscardHost.lean:288:69: error: Tactic `decide` proved that the proposition
+  transportHeader "host" = false
+is false
 'ElectricReplication.publication_committed' depends on axioms: [propext]
 'ElectricReplication.session_no_rollback' depends on axioms: [propext]
 'ElectricReplication.session_monotone' depends on axioms: [propext, Quot.sound]
@@ -34,6 +37,6 @@
 'ElectricReplication.stale_proposal_rejected' does not depend on any axioms
 'ElectricReplication.assignment_requires_preparation' depends on axioms: [propext, Quot.sound]
 'ElectricReplication.projection_keeps_first_value' depends on axioms: [propext]
-'ElectricReplication.host_is_not_transport' does not depend on any axioms
+'ElectricReplication.host_is_not_transport' depends on axioms: [sorryAx]
 'ElectricReplication.durability_is_not_transport' does not depend on any axioms
 'ElectricReplication.content_type_is_not_transport' does not depend on any axioms

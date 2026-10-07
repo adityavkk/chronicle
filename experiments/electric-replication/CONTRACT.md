@@ -74,6 +74,18 @@ Native stream files are the read materialization. Only committed commands reach
 native handlers, so neither writer tail, durable tail, producer state, closure,
 SSE notification nor a newly created stream can expose a speculative entry.
 
+After HTTP parsing and full body collection, durable HTTP commands may omit only
+`content-length`, `transfer-encoding`, `expect`, `connection`, `accept` and
+`user-agent`. No mutation handler consumes these envelope fields. Preserve the
+body, method, path, all other headers and their original relative/duplicate order.
+In particular **Host is semantic**: create/fork Location headers use it, and
+subscription creation captures it into its callback URL. Lean proves that this
+stable filter preserves first-match lookup for every retained name, with a
+negative mutation that wrongly drops Host. The complete native consumed-header
+set and the Rust implementation remain review/property/conformance obligations;
+the proof does not discover that set or prove HTTP parsing. Existing WAL entries
+with additional envelope fields remain readable; this is not a schema change.
+
 By default, writes use **quorum-fsync**. A synchronous 2xx response means the command was
 replicated to a quorum whose WAL durability callbacks completed, committed, and
 applied on the responding leader. A deterministic rejection may also be logged.

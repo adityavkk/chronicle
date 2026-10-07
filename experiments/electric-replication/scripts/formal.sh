@@ -63,4 +63,11 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
 done
 "$HOME/.elan/bin/lean" -DwarningAsError=true Contracts.lean > "$here/evidence/formal/lean.txt" 2>&1
 ! grep -E 'sorryAx|warning:|error:' "$here/evidence/formal/lean.txt"
-printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads/batches/receipts/backlog/epochs safety, stable-period liveness, 38 negative mutations; Lean: PASS\n'
+sed 's/name == "accept"/name == "host"/' Contracts.lean > "$tools/DiscardHost.lean"
+set +e
+"$HOME/.elan/bin/lean" -DwarningAsError=true "$tools/DiscardHost.lean" > "$here/evidence/formal/DiscardHost.txt" 2>&1
+result=$?
+set -e
+test "$result" -ne 0
+grep -q 'transportHeader "host" = false' "$here/evidence/formal/DiscardHost.txt"
+printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads/batches/receipts/backlog/epochs safety, stable-period liveness, 38 negative mutations; Lean and one header-projection negative mutation: PASS\n'

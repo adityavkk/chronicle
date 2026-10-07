@@ -261,6 +261,34 @@ theorem assignment_requires_preparation (ticket prepared current : Nat)
   unfold preparedProposal at h
   omega
 
+/- After HTTP framing, remove only envelope fields that no mutation consumes.
+   Discovering that complete consumed-header set is a code-review obligation,
+   not a consequence of this theorem. In particular Host affects Location. -/
+def transportHeader (name : String) : Bool :=
+  name == "content-length" || name == "transfer-encoding" || name == "expect" ||
+    name == "connection" || name == "accept" || name == "user-agent"
+
+def headerValue (headers : List (String × String)) (key : String) : Option String :=
+  match headers with
+  | [] => none
+  | (name, value) :: rest => if name = key then some value else headerValue rest key
+
+theorem projection_keeps_first_value (headers : List (String × String)) (key : String)
+    (keep : transportHeader key = false) :
+    headerValue (headers.filter (fun entry => !transportHeader entry.1)) key = headerValue headers key := by
+  induction headers with
+  | nil => rfl
+  | cons entry rest ih =>
+    rcases entry with ⟨name, value⟩
+    by_cases same : name = key
+    · subst name
+      simp [headerValue, keep]
+    · cases dropped : transportHeader name <;> simp_all [headerValue]
+
+theorem host_is_not_transport : transportHeader "host" = false := by decide
+theorem durability_is_not_transport : transportHeader "stream-durability" = false := by decide
+theorem content_type_is_not_transport : transportHeader "content-type" = false := by decide
+
 #print axioms publication_committed
 #print axioms session_no_rollback
 #print axioms session_monotone
@@ -296,4 +324,8 @@ theorem assignment_requires_preparation (ticket prepared current : Nat)
 #print axioms recovered_suffix_fences_new_admission
 #print axioms stale_proposal_rejected
 #print axioms assignment_requires_preparation
+#print axioms projection_keeps_first_value
+#print axioms host_is_not_transport
+#print axioms durability_is_not_transport
+#print axioms content_type_is_not_transport
 end ElectricReplication
