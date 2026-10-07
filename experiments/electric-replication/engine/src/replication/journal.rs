@@ -289,19 +289,20 @@ impl RaftLogStorage<Types> for Arc<Journal> {
             }
             last = Some(self.stage(Event::Entry(entry)).map_err(storage_error)?);
         }
-        // Pinned OpenRaft waits for both append and LogFlushed before its next
-        // command. An extra waiter task provides no core pipelining; await the
-        // native committer's oneshot here, without running fsync on this task.
+        let shard = self.shard.clone();
+        let journal = self.clone();
         let probe = timing::ENTRY_WAIT.start();
-        if let Some(lsn) = last {
-            self.shard.wait_durable(lsn).await;
-        }
-        drop(probe);
-        for (id, durable) in accepted {
-            if let Some(send) = durable.lock().unwrap().take() { let _ = send.send(id); }
-        }
-        callback.log_io_completed(Ok(()));
-        self.changed.notify_waiters();
+        tokio::spawn(async move {
+            if let Some(lsn) = last {
+                shard.wait_durable(lsn).await;
+            }
+            drop(probe);
+            for (id, durable) in accepted {
+                if let Some(send) = durable.lock().unwrap().take() { let _ = send.send(id); }
+            }
+            callback.log_io_completed(Ok(()));
+            journal.changed.notify_waiters();
+        });
         Ok(())
     }
     async fn truncate(&mut self, id: LogId<u64>) -> Result<(), StorageError<u64>> {

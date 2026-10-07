@@ -1,0 +1,95 @@
+{
+  "verdict": "PASS",
+  "checker": {
+    "verdict": "PASS",
+    "operations": 28,
+    "streams": 1,
+    "scope": "append-only prefix/dedup, exact per-append/read byte offsets, strict real-time graph, explicit session minimum"
+  },
+  "storage_checks": [
+    {
+      "kind": "failed-snapshot-not-published",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-014/1/0/state/snapshot-1791406741756870760",
+      "recovered_snapshot": {
+        "leader_id": {
+          "term": 5,
+          "node_id": 1
+        },
+        "index": 15
+      }
+    },
+    {
+      "kind": "identity-v6",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-014/1/IDENTITY",
+      "original_sha256": "16f9005ad44b31d2738630d607aa95431f1795fff25563664733c906b4a0d919",
+      "mutated_sha256": "79bfa36b9756a1fe3af6443a682f4b4196aba3cfbbdcb2818b1cc1ee468c46c1",
+      "expected_error": "node/cluster/partition identity mismatch",
+      "exit_code": 101,
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    },
+    {
+      "kind": "identity-batch128",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-014/1/IDENTITY",
+      "original_sha256": "16f9005ad44b31d2738630d607aa95431f1795fff25563664733c906b4a0d919",
+      "mutated_sha256": "227c719b5e62ce2454ea42344e27230d0169e47c0ae1b88c4caeb959e52c589e",
+      "expected_error": "node/cluster/partition identity mismatch",
+      "exit_code": 101,
+      "rejected": true,
+      "all_file_bytes_unchanged_after_restoring_identity": true
+    },
+    {
+      "kind": "wal-header-crc",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-014/1/0/wal/1.wal",
+      "original_sha256": "5488948699f231d25c4953524962a4692763c3e478908191aecf8e211d82cf35",
+      "mutated_sha256": "84d3d4e5a8f3bf4b805b8f96f843832bc849015b49b007abcdbf29c9cd4eaae0",
+      "expected_error": "corrupt or non-consensus journal frame",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "wal-payload-crc",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-014/1/0/wal/1.wal",
+      "original_sha256": "5488948699f231d25c4953524962a4692763c3e478908191aecf8e211d82cf35",
+      "mutated_sha256": "2d49315ef2f0dd0138bea3b52d4f649b1f5b73c890a5bc796de9bd9af0c788a0",
+      "expected_error": "corrupt or non-consensus journal frame",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "wal-zero-hole",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-014/1/0/wal/1.wal",
+      "original_sha256": "5488948699f231d25c4953524962a4692763c3e478908191aecf8e211d82cf35",
+      "mutated_sha256": "45f8016f11b2228013e737e2d7123d1ad3d2bd01075b40a0b11049fc40c2700c",
+      "expected_error": "nonzero suffix behind journal hole",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "wal-torn-tail",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-014/1/0/wal/1.wal",
+      "original_sha256": "5488948699f231d25c4953524962a4692763c3e478908191aecf8e211d82cf35",
+      "mutated_sha256": "a6d0c26efe115e46040d54fb51f8729d2050ff7545ebd33a46dbee74b3e40e25",
+      "expected_error": "truncated/oversize journal record",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "snapshot-digest",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-014/1/0/state/snapshot-1791406741652670868",
+      "original_sha256": "9ab45e2e136ecee67ecd0c02c2cf6611732221b46cc1f035e4adbf9589ea6c7f",
+      "mutated_sha256": "e313cdc9e507985f69f7e5e5106c7b14bdab22fdf0266836e9f972e6d17b367b",
+      "expected_error": "snapshot digest mismatch",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "hot-rebuilt",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-014/1/0/state/hot/streams/+storage+0~2",
+      "bytes": 148
+    }
+  ],
+  "intercepted_syscalls": 7,
+  "unknown_outcomes": 3,
+  "scope": "single-host actual native storage syscall faults and offline corruption; not power-loss durability"
+}

@@ -171,6 +171,13 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
         (lab.output / "seed-probes.json").write_text(json.dumps(probes, indent=2)+"\n")
 
     try:
+        # Local harness headroom, not a server storage requirement or capacity
+        # guarantee. Keep raw failure evidence if the shared disk is too full
+        # to measure this cell without risking another truncated sample file.
+        result["disk_preflight"] = dict(free_bytes=shutil.disk_usage(ROOT).free,
+                                        minimum_free_bytes=8 * 1024**3)
+        if result["disk_preflight"]["free_bytes"] < result["disk_preflight"]["minimum_free_bytes"]:
+            raise RuntimeError("benchmark requires 8 GiB free before starting a cell; no SUT started")
         if native:
             command = ["taskset", "-c", "0-3", str(NATIVE), "--host", "127.0.0.1", "--port", str(lab.port+1),
                        "--data-dir", str(lab.data / "1"), "--durability", "wal", "--worker-threads", "2",

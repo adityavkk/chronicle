@@ -79,37 +79,34 @@ disks; filesystem locking only fences one local directory.
 ## Remaining gates
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-The latest full suite executes **332/332 passing, zero failures/skips**, with
-subscriptions enabled. Subscription and storage-error process histories also
-pass within their documented models; they are not independent-disk or power-loss
-qualification. Bounded pipelined batching now passes `conformance-012`, 132 Rust
-tests and five real-process campaigns. Three fresh `write-diagnostics-003` runs
-measure **53–58k one-member writes/s versus 99–104k native**, a 1.72–1.89× gap with
-unchanged local-fsync guarantees. See [BATCHING.md](BATCHING.md) for the causal
-diagnosis, exact runs and remaining profiling work. Async local acceptance with
-epoch-fenced admission now passes `conformance-014` (332/332), 135 Rust tests,
-190 vendored OpenRaft unit tests and `async-fault-002`: 39 receipts resolve to
-21 committed, one rejected and 17 invalidated outcomes, with five unknown request
-outcomes retained. Two unchanged upstream forensic Rust helpers remain ignored;
-no conformance tests are skipped. Current strong fault reruns also pass (see the
-ledger). The longer `async-writes-001` runs measure 88–99k native, 39–43k one-member
-and 25–28k three-member quorum writes/s. All three async saturation cells fail the
-zero-error gate: 28–30k acceptances/s with substantial bounded-backlog rejection.
-Every accepted byte drains to all replicas, but this is not async performance
-parity. The single-member gap in these runs is 2.29–2.34×; window length, snapshot
-work and changed batch scheduling require further attribution. Raw failures stay
-in the ledger; the earlier short-run result does not supersede them.
+The latest `conformance-021` executes **332/332 passing, zero failures/skips/todo**,
+with subscriptions enabled, three processes and two partitions. All 139 Rust
+tests pass; two unchanged upstream forensic helpers remain ignored, not
+conformance exclusions. `storage-fault-014` checks seven real failing/short
+syscalls and retains three unknown HTTP outcomes. `async-fault-007` checks 271
+operations and 39 receipts: 21 committed, one rejected and 17 invalidated, with
+five unknown requests retained. These are single-host qualifications, not
+independent-disk/AZ or power-loss evidence. Node identity 7 now binds the command
+ceiling and rejects incompatible experimental data before mutating stored bytes.
 
-The latest header-projection checkpoint passes `conformance-015` (**332/332**,
-zero failures/skips/todo), 136 Rust tests and six new process campaigns. Heap
-profiles independently confirm fewer allocations: 45.79→41.78 per one-member
-acknowledgement and 146.24→118.32 across three replicas. But the matched
-`async-writes-003` runs still measure native 88–108k/s, one member 40–45k/s
-(**2.14–2.39× slower**) and quorum-three 26–28k/s. All three async saturation
-cells fail the zero-error gate with 51–62k backpressure responses per 30-second
-window; every accepted byte drains to each replica. Allocation savings alone
-have not closed the performance gap. Raw CPU memory captures stay local-only;
-symbolized CPU profiles, allocation traces and failed harness runs are retained.
+The matched `async-writes-006` matrix has complete resource samples: native
+**77–84k/s**, one member **39–46k/s** (**1.84–1.96× slower**), and quorum-three
+**24–25k/s**. All three async cells fail the unchanged zero-backpressure gate:
+28–29k acceptances/s and 81–94k rejected attempts per 30-second window, despite
+every accepted byte draining exactly to every replica. Neither this nor the
+earlier 53–58k/s short one-member runs establishes performance parity.
+`async-writes-005` remains invalid after ENOSPC truncated a resource sample; its
+failure and the unchanged analyzer's rejection are retained. A harness headroom
+guard now runs before each cell; it is not a product disk-size requirement.
+
+[BATCHING.md](BATCHING.md) records the measured fsync-amortization defect behind
+the original roughly 30× gap, its batching fix, and later profiling experiments.
+One-member WAL fsyncs/ack remain about twice native; snapshots also pause apply.
+Allocation projection saves measured allocations but does not establish a
+throughput gain. Raising the command ceiling and inlining the durability waiter
+likewise showed no established benefit and were reverted. Raw CPU memory captures
+stay local-only; symbolized profiles, allocation traces, failed histories and
+exact source/binary/config hashes remain in the evidence ledger.
 
 The broader **pre-batching** `bench-local-004` completes all **45/45** matched ds-bench cells
 after arrival-fenced read coalescing. The prior `bench-local-003` three-replica,

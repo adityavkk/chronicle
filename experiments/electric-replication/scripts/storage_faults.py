@@ -157,6 +157,22 @@ def run(output):
         hot = next(p for p in (lab.data / str(leader) / "0/state/hot/streams").iterdir()
                    if not p.name.startswith(".") and p.suffix != ".meta")
         original_hot = hot.read_bytes()
+        identity = lab.data / str(leader) / "IDENTITY"
+        stored = json.loads(identity.read_bytes())
+        assert len(stored) == 6 and stored[0] == 7 and stored[-1] == 64
+        # The old 128-command candidate used version 6 without a ceiling field.
+        # Reject it, and a current-version ceiling mismatch, before recovery can
+        # reinterpret persisted receipt ordinals or mutate native storage.
+        before_identity = {str(p):hashlib.sha256(p.read_bytes()).hexdigest()
+                           for p in (lab.data / str(leader)).rglob("*") if p.is_file()}
+        for label, value in [("identity-v6", [6, *stored[1:-1]]),
+                             ("identity-batch128", [*stored[:-1], 128])]:
+            corrupt_probe(leader, identity, json.dumps(value, separators=(",", ":")).encode(),
+                          label, "node/cluster/partition identity mismatch")
+            after_identity = {str(p):hashlib.sha256(p.read_bytes()).hexdigest()
+                              for p in (lab.data / str(leader)).rglob("*") if p.is_file()}
+            assert after_identity == before_identity, "identity rejection mutated storage"
+            faults[-1]["all_file_bytes_unchanged_after_restoring_identity"] = True
         wal = lab.data / str(leader) / "0/wal/1.wal"
         original = wal.read_bytes()
         for label, offset, expected in [("wal-header-crc", 4, "corrupt or non-consensus journal frame"),

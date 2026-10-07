@@ -205,9 +205,14 @@ manifest publication crosses consensus, and reference-safe GC is implemented.
 Otherwise a follower or old leader could delete another replica's objects.
 TTL uses the committed clock in `TIMED-STATE.md`, never local-clock expiration.
 Cross-group forks and subscriptions retain durable control state in the same
-journal and snapshot as stream data. Experimental node identity 6 and snapshot
-envelope format 5 include bounded receipt outcomes (see `ASYNC.md`) and reject
-earlier data. No data migration or mixed-version operation is supplied.
+journal and snapshot as stream data. Experimental node identity 7 binds the
+command-count ceiling as well as node/cluster/partition ownership. It rejects
+earlier data, including the version-6 experiment that allowed 128-command batches:
+restoring the 64-command ceiling must not silently invalidate its receipt
+ordinals. Snapshot envelope format remains 5 with bounded receipt outcomes (see
+`ASYNC.md`). No data migration or mixed-version operation is supplied; editing
+`IDENTITY` by hand is not a migration. Use a fresh experimental cluster or retain
+the matching earlier binary to inspect its existing data.
 Physical WAL reclamation and obsolete-snapshot cleanup now have native-file
 property and real-process syscall-fault qualifications. Cold-tier ownership,
 terminal-fence compaction and production auth/TLS remain gates. No Internet

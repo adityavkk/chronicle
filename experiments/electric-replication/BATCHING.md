@@ -372,3 +372,46 @@ identity and reject earlier experimental directories, under the existing
 no-migration/no-mixed-version policy. Changing the marker by hand is not a
 migration. Storage qualification must test both an old identity and a changed
 ceiling, verifying rejection before any journal or hot-file mutation.
+
+The restored waiter and identity-7 fence pass 139 Rust tests,
+`conformance-021` (332 discovered/executed/passed, zero failures/skips/todo),
+`storage-fault-014` and `async-fault-007`. Both incompatible identity probes
+reject before changing any stored file bytes. The async history checks 271
+operations and 39 receipts: 21 committed, one rejected and 17 invalidated, with
+five unknown HTTP outcomes retained.
+
+`async-writes-005` is an invalid performance qualification: ENOSPC truncated a
+resource sample. Its raw failure and analyzer rejection are retained unchanged.
+After removing only retired disposable lab data and debug build cache, the
+harness now requires 8 GiB free before each cell and records the actual free
+bytes. That is a local measurement guard, not a product storage requirement or
+a guarantee against disk exhaustion. Its below/at-threshold regression is part
+of 11 passing Python checker/analyzer/harness tests.
+
+The fresh `async-writes-006` matrix has complete samples and the same exact-byte
+checks. Nine cells pass; all three async cells fail the zero-backpressure gate:
+
+| Repetition | Native writes/s | One-member writes/s | Native / one-member | Quorum-three writes/s | Async accepts/s | Async backpressure |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 77,145 | 39,414 | 1.96 | 24,429 | 28,199 | 93,542 |
+| 2 | 77,562 | 39,869 | 1.95 | 24,825 | 29,481 | 92,102 |
+| 3 | 84,016 | 45,731 | 1.84 | 24,605 | 28,188 | 81,258 |
+
+Every accepted byte drains to every replica; there are no other client errors.
+This remains shared-host diagnosis, not parity or cloud capacity. One-member
+p50 is 4.995–5.367 ms and p99 9.271–15.311 ms; native p50 is 2.519–2.683 ms and
+p99 10.631–10.847 ms. Mean one-member cohorts are 39.9–43.1 commands and WAL
+fsyncs/ack 0.0457–0.0494, versus native 0.0230–0.0241. Synchronous one-member
+WAL loops average 307–346 µs. Only 1.014–1.015 staged records share each fsync,
+so the entry and publication marker still rarely share a covering sync.
+
+Three one-member snapshots consume 1.89–2.36 seconds total per invocation;
+these pauses matter but cannot alone explain the roughly twofold write gap.
+Async apply handles roughly 195–207 commands per call, versus 89–91 for
+quorum-three, so raw per-call durations are not comparable. Normalized by
+all-phase acknowledgements, leader apply wall time is 13.6–14.2 µs/async accept
+versus 5.47–5.77 µs/quorum acknowledgement. Followers are 5.85–6.16 versus
+4.21–4.64 µs. These wall-time probes include scheduling/descheduling, not pure
+CPU costs. The difference needs profiling rather than assuming receipt-cache
+insertion alone causes it. The async logs contain two snapshots per replica,
+not a complete explanation of 81–94k backpressure responses.

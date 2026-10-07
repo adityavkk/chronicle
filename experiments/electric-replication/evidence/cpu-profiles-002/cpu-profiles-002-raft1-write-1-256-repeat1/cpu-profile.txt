@@ -1,0 +1,1381 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 1K of event 'cpu-clock:u'
+# Event count (approx.): 12989898860
+#
+# Overhead  Command          Shared Object           Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
+# ........  ...............  ......................  ...................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+     5.60%  tokio-rt-worker  libc.so.6               [.] malloc
+            |
+            ---malloc
+               |          
+               |--2.26%--durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+               |--0.86%--serde_core::de::impls::<impl serde_core::de::Deserialize for alloc::string::String>::deserialize
+               |          |          
+               |          |--0.47%--serde_core::de::SeqAccess::next_element
+               |          |          <core::marker::PhantomData<T> as serde_core::de::DeserializeSeed>::deserialize
+               |          |          bincode::internal::deserialize_seed
+               |          |          durable_streams_server::replication::journal::Journal::read
+               |          |          <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+               |          |          durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+               |          |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+               |          |          <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               |          |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               |          |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               |          |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               |          |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               |          |          <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               |          |          0xffffffffffffffff
+               |          |          
+               |           --0.39%--<core::marker::PhantomData<T> as serde_core::de::DeserializeSeed>::deserialize
+               |                     bincode::internal::deserialize_seed
+               |                     durable_streams_server::replication::journal::Journal::read
+               |                     <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+               |                     durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+               |                     openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+               |                     <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               |                     openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               |                     openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               |                     openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               |                     openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               |                     <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               |                     0xffffffffffffffff
+               |          
+               |--0.47%--durable_streams_server::replication::Reply::from_resp
+               |          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               |          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               |          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               |          openraft::core::sm::worker::Worker<C,SM>::do_spawn::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+               |--0.31%--<alloc::raw_vec::RawVecInner>::finish_grow
+               |          <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
+               |          
+                --0.31%--serde_core::de::SeqAccess::next_element
+                          <core::marker::PhantomData<T> as serde_core::de::DeserializeSeed>::deserialize
+                          bincode::internal::deserialize_seed
+                          durable_streams_server::replication::journal::Journal::read
+                          <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+                          durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+                          <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+                          <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+                          0xffffffffffffffff
+
+     4.51%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+            |
+            ---durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               |          
+                --4.43%--0xffffffffffffffff
+
+     3.42%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::replication::Group::submit::{{closure}}
+            |
+            ---durable_streams_server::replication::Group::submit::{{closure}}
+               durable_streams_server::replication::Cluster::handle::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     3.11%  tokio-rt-worker  durable-streams-server  [.] sha2::sha256::x86::digest_blocks
+            |
+            ---sha2::sha256::x86::digest_blocks
+               durable_streams_server::replication::machine::hash_prefix
+               0xffffffffffffffff
+
+     2.72%  tokio-rt-worker  durable-streams-server  [.] serde_core::de::SeqAccess::next_element
+            |
+            ---serde_core::de::SeqAccess::next_element
+               <core::marker::PhantomData<T> as serde_core::de::DeserializeSeed>::deserialize
+               bincode::internal::deserialize_seed
+               durable_streams_server::replication::journal::Journal::read
+               <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+               durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+               <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               0xffffffffffffffff
+
+     2.41%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::task::raw::poll
+            |
+            ---tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     2.41%  tokio-rt-worker  libc.so.6               [.] cfree
+            |
+            ---__libc_free (inlined)
+               |          
+               |--0.47%--durable_streams_server::engine_raw::write_response::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+               |--0.39%--core::ptr::drop_in_place<durable_streams_server::replication::Command>
+               |          core::ptr::drop_in_place<openraft::entry::payload::EntryPayload<durable_streams_server::replication::Types>>
+               |          durable_streams_server::replication::journal::Journal::stage
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::append_to_log::{{closure}}::{{closure}}
+               |          <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               |          <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               |          0xffffffffffffffff
+               |          
+               |--0.31%--core::ptr::drop_in_place<durable_streams_server::api::Req>
+               |          durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          durable_streams_server::handlers::dispatch::{{closure}}
+               |          durable_streams_server::handlers::handle::{{closure}}
+               |          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               |          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               |          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               |          0xffffffffffffffff
+               |          
+                --0.31%--durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::handlers::handle::{{closure}}
+                          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+                          0xffffffffffffffff
+
+     2.18%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::handle_append_inner::{{closure}}
+            |
+            ---durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::handlers::handle::{{closure}}
+               durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     1.87%  tokio-rt-worker  libc.so.6               [.] 0x00000000000963b5
+            |
+            ---0x7f6f4db333b5
+               |          
+               |--1.32%--__libc_free (inlined)
+               |          |          
+               |          |--0.78%--core::ptr::drop_in_place<durable_streams_server::replication::Command>
+               |          |          core::ptr::drop_in_place<openraft::entry::payload::EntryPayload<durable_streams_server::replication::Types>>
+               |          |          durable_streams_server::replication::journal::Journal::stage
+               |          |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::append_to_log::{{closure}}::{{closure}}
+               |          |          <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               |          |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               |          |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               |          |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               |          |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               |          |          <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               |          |          0xffffffffffffffff
+               |          |          
+               |           --0.31%--core::ptr::drop_in_place<durable_streams_server::api::Req>
+               |                     durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |                     durable_streams_server::handlers::dispatch::{{closure}}
+               |                     durable_streams_server::handlers::handle::{{closure}}
+               |                     durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               |                     openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               |                     openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               |                     0xffffffffffffffff
+               |          
+                --0.54%--0x7f6f4db352c1
+                          realloc
+                          |          
+                           --0.39%--<alloc::raw_vec::RawVecInner>::finish_grow
+                                     <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
+                                     <alloc::string::String as core::fmt::Write>::write_str
+                                     <core::fmt::Formatter>::pad_integral
+                                     <u64 as core::fmt::Display>::fmt
+                                     core::fmt::write
+                                     alloc::fmt::format::format_inner
+                                     durable_streams_server::handlers::handle_append_inner::{{closure}}
+                                     durable_streams_server::handlers::dispatch::{{closure}}
+                                     durable_streams_server::handlers::handle::{{closure}}
+                                     durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+                                     openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+                                     openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+                                     0xffffffffffffffff
+
+     1.63%  tokio-rt-worker  [vdso]                  [.] 0x0000000000000a7b
+            |
+            ---0x7ffd6316fa7b
+               clock_gettime
+               <std::sys::pal::unix::time::Timespec>::now
+               |          
+               |--0.47%--durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          durable_streams_server::handlers::dispatch::{{closure}}
+               |          durable_streams_server::handlers::handle::{{closure}}
+               |          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               |          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               |          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               |          0xffffffffffffffff
+               |          
+               |--0.39%--tokio::runtime::task::raw::poll
+               |          std::sys::backtrace::__rust_begin_short_backtrace
+               |          core::ops::function::FnOnce::call_once{{vtable.shim}}
+               |          <std::sys::thread::unix::Thread>::new::thread_start
+               |          0x7f6f4db26043
+               |          0x7f6f4dba661b
+               |          
+                --0.39%--durable_streams_server::replication::Cluster::handle::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          0xffffffffffffffff
+
+     1.40%  tokio-rt-worker  libc.so.6               [.] realloc
+            |
+            ---realloc
+               |          
+               |--0.93%--<alloc::raw_vec::RawVecInner>::finish_grow
+               |          <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
+               |          |          
+               |          |--0.47%--<alloc::string::String as core::fmt::Write>::write_char
+               |          |          <core::fmt::Formatter>::pad_integral
+               |          |          <u64 as core::fmt::Display>::fmt
+               |          |          core::fmt::write
+               |          |          alloc::fmt::format::format_inner
+               |          |          durable_streams_server::handlers::handle_append_inner::{{closure}}
+               |          |          durable_streams_server::handlers::dispatch::{{closure}}
+               |          |          durable_streams_server::handlers::handle::{{closure}}
+               |          |          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               |          |          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               |          |          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               |          |          0xffffffffffffffff
+               |          |          
+               |           --0.47%--<alloc::string::String as core::fmt::Write>::write_str
+               |                     |          
+               |                      --0.31%--core::fmt::write
+               |                                alloc::fmt::format::format_inner
+               |                                |          
+               |                                 --0.23%--durable_streams_server::replication::Cluster::token
+               |                                           durable_streams_server::replication::Cluster::handle::{{closure}}
+               |                                           durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |                                           0xffffffffffffffff
+               |          
+                --0.23%--durable_streams_server::replication::Reply::into_resp
+                          durable_streams_server::replication::Cluster::handle::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          0xffffffffffffffff
+
+     1.40%  tokio-rt-worker  libc.so.6               [.] 0x0000000000094fe6
+            |
+            ---0x7f6f4db31fe6
+               0x7f6f4db34727
+               |          
+               |--0.39%--malloc
+               |          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               |          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               |          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               |          openraft::core::sm::worker::Worker<C,SM>::do_spawn::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+               |--0.39%--0x7f6f4db3543e
+               |          0x7f6f4db35af4
+               |          posix_memalign
+               |          durable_streams_server::replication::batch::start::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+               |--0.31%--__libc_calloc
+               |          durable_streams_server::wal::shard::journal::<impl durable_streams_server::wal::shard::Shard>::read_record
+               |          durable_streams_server::replication::journal::Journal::read
+               |          <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+               |          durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+               |          <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               |          <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               |          0xffffffffffffffff
+               |          
+                --0.31%--0x7f6f4db35271
+                          realloc
+                          alloc::raw_vec::RawVecInner<A>::finish_grow
+                          |          
+                           --0.23%--alloc::raw_vec::RawVec<T,A>::grow_one
+                                     durable_streams_server::replication::batch::start::{{closure}}
+                                     tokio::runtime::task::raw::poll
+                                     0xffffffffffffffff
+
+     1.32%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::replication::Cluster::handle::{{closure}}
+            |
+            ---durable_streams_server::replication::Cluster::handle::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          
+                --1.24%--0xffffffffffffffff
+
+     1.24%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::replication::Reply::into_resp
+            |
+            ---durable_streams_server::replication::Reply::into_resp
+               durable_streams_server::replication::Cluster::handle::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     1.24%  tokio-rt-worker  durable-streams-server  [.] openraft::entry::_::<impl serde_core::ser::Serialize for openraft::entry::Entry<C>>::serialize
+            |
+            ---openraft::entry::_::<impl serde_core::ser::Serialize for openraft::entry::Entry<C>>::serialize
+               durable_streams_server::replication::journal::Journal::stage
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::append_to_log::{{closure}}::{{closure}}
+               <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               0xffffffffffffffff
+
+     1.17%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+            |
+            ---durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::do_spawn::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     1.01%  tokio-rt-worker  durable-streams-server  [.] tokio::sync::batch_semaphore::Semaphore::add_permits_locked
+            |
+            ---tokio::sync::batch_semaphore::Semaphore::add_permits_locked
+               |          
+               |--0.70%--core::ptr::drop_in_place<durable_streams_server::replication::batch::Completion>
+               |          durable_streams_server::replication::batch::start::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               |          tokio::runtime::task::raw::poll
+               |          std::sys::backtrace::__rust_begin_short_backtrace
+               |          core::ops::function::FnOnce::call_once{{vtable.shim}}
+               |          <std::sys::thread::unix::Thread>::new::thread_start
+               |          0x7f6f4db26043
+               |          0x7f6f4dba661b
+               |          
+                --0.23%--durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::handlers::handle::{{closure}}
+                          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+                          0xffffffffffffffff
+
+     1.01%  tokio-rt-worker  libc.so.6               [.] 0x0000000000097462
+            |
+            ---0x7f6f4db34462
+               |          
+               |--0.54%--malloc
+               |          |          
+               |           --0.23%--durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |                     tokio::runtime::task::raw::poll
+               |                     0xffffffffffffffff
+               |          
+                --0.47%--0x7f6f4db35271
+                          realloc
+                          |          
+                          |--0.23%--<alloc::raw_vec::RawVecInner>::finish_grow
+                          |          <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
+                          |          <alloc::string::String as core::fmt::Write>::write_str
+                          |          <core::fmt::Formatter>::pad_integral
+                          |          <u64 as core::fmt::Display>::fmt
+                          |          core::fmt::write
+                          |          alloc::fmt::format::format_inner
+                          |          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          |          durable_streams_server::handlers::dispatch::{{closure}}
+                          |          durable_streams_server::handlers::handle::{{closure}}
+                          |          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+                          |          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+                          |          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+                          |          0xffffffffffffffff
+                          |          
+                           --0.23%--alloc::raw_vec::RawVecInner<A>::finish_grow
+
+     0.86%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::replication::batch::start::{{closure}}::{{closure}}
+            |
+            ---durable_streams_server::replication::batch::start::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     0.86%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+            |
+            ---tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     0.86%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::time::entry::_::<impl core::ops::drop::Drop for tokio::runtime::time::entry::TimerEntry>::drop
+            |
+            ---tokio::runtime::time::entry::_::<impl core::ops::drop::Drop for tokio::runtime::time::entry::TimerEntry>::drop
+               core::ptr::drop_in_place<tokio::time::sleep::Sleep>
+               durable_streams_server::replication::Group::submit::{{closure}}
+               durable_streams_server::replication::Cluster::handle::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.78%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::replication::batch::start::{{closure}}
+            |
+            ---durable_streams_server::replication::batch::start::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.78%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::task::raw::poll
+            |
+            ---tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     0.78%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::time::entry::TimerEntry::reset
+            |
+            ---tokio::runtime::time::entry::TimerEntry::reset
+               <tokio::time::sleep::Sleep as core::future::future::Future>::poll
+               durable_streams_server::replication::Group::submit::{{closure}}
+               durable_streams_server::replication::Cluster::handle::{{closure}}
+               0xffffffffffffffff
+
+     0.78%  tokio-rt-worker  libc.so.6               [.] 0x0000000000085761
+            |
+            ---0x7f6f4db22761
+               |          
+               |--0.23%--send (inlined)
+               |          <tokio::net::tcp::stream::TcpStream as tokio::io::async_write::AsyncWrite>::poll_write
+               |          durable_streams_server::engine_raw::write_response::{{closure}}
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+                --0.23%--recv
+                          <tokio::net::tcp::stream::TcpStream as tokio::io::async_read::AsyncRead>::poll_read
+                          <tokio::io::util::read_buf::ReadBuf<R,B> as core::future::future::Future>::poll
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.78%  tokio-rt-worker  libc.so.6               [.] 0x0000000000097cbd
+            |
+            ---0x7f6f4db34cbd
+               |          
+               |--0.54%--malloc
+               |          
+                --0.23%--0x7f6f4db35271
+                          realloc
+
+     0.70%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::io::driver::Driver::turn
+            |
+            ---tokio::runtime::io::driver::Driver::turn
+               tokio::runtime::time::Driver::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     0.70%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::io::registration::Registration::poll_ready
+            |
+            ---tokio::runtime::io::registration::Registration::poll_ready
+               |          
+               |--0.47%--<tokio::net::tcp::stream::TcpStream as tokio::io::async_read::AsyncRead>::poll_read
+               |          <tokio::io::util::read_buf::ReadBuf<R,B> as core::future::future::Future>::poll
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+                --0.23%--<tokio::net::tcp::stream::TcpStream as tokio::io::async_write::AsyncWrite>::poll_write
+                          durable_streams_server::engine_raw::write_response::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.70%  tokio-rt-worker  durable-streams-server  [.] tokio::sync::notify::NotifyGuard::notify_waiters
+            |
+            ---tokio::sync::notify::NotifyGuard::notify_waiters
+               tokio::sync::watch::big_notify::BigNotify::notify_waiters
+               durable_streams_server::handlers::publish_durable_tail
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::handlers::handle::{{closure}}
+               durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.70%  tokio-rt-worker  libc.so.6               [.] 0x00000000000856d5
+            |
+            ---0x7f6f4db226d5
+               |          
+                --0.54%--recv
+                          <tokio::net::tcp::stream::TcpStream as tokio::io::async_read::AsyncRead>::poll_read
+                          <tokio::io::util::read_buf::ReadBuf<R,B> as core::future::future::Future>::poll
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.70%  tokio-rt-worker  libc.so.6               [.] 0x00000000000964d2
+            |
+            ---0x7f6f4db334d2
+               __libc_free (inlined)
+               |          
+                --0.31%--durable_streams_server::replication::Group::submit::{{closure}}
+                          durable_streams_server::replication::Cluster::handle::{{closure}}
+                          0xffffffffffffffff
+
+     0.70%  tokio-rt-worker  libc.so.6               [.] 0x0000000000097350
+            |
+            ---0x7f6f4db34350
+               |          
+               |--0.39%--malloc
+               |          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+                --0.31%--0x7f6f4db35271
+                          realloc
+                          <alloc::raw_vec::RawVecInner>::finish_grow
+                          <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
+                          <alloc::string::String as core::fmt::Write>::write_str
+                          |          
+                           --0.23%--core::fmt::write
+                                     alloc::fmt::format::format_inner
+                                     durable_streams_server::replication::Cluster::token
+                                     durable_streams_server::replication::Cluster::handle::{{closure}}
+                                     durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                                     0xffffffffffffffff
+
+     0.70%  tokio-rt-worker  libc.so.6               [.] 0x0000000000163a4f
+            |
+            ---0x7f6f4dc00a4f
+               |          
+               |--0.31%--tokio::sync::mpsc::bounded::Receiver<T>::try_recv
+               |          durable_streams_server::replication::batch::start::{{closure}}
+               |          tokio::runtime::task::raw::poll
+               |          0xffffffffffffffff
+               |          
+                --0.23%--durable_streams_server::replication::batch::start::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.62%  tokio-rt-worker  durable-streams-server  [.] crc32c::hw_x86_64::crc_u64_parallel3
+            |
+            ---crc32c::hw_x86_64::crc_u64_parallel3
+               crc32c::hw_x86_64::crc32c
+               |          
+               |--0.39%--durable_streams_server::wal::shard::Shard::reserve_and_stage_indexed
+               |          durable_streams_server::replication::journal::Journal::stage
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::append_to_log::{{closure}}::{{closure}}
+               |          <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               |          <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               |          0xffffffffffffffff
+               |          
+                --0.23%--durable_streams_server::wal::codec::decode_at
+                          durable_streams_server::wal::shard::journal::<impl durable_streams_server::wal::shard::Shard>::read_record
+                          durable_streams_server::replication::journal::Journal::read
+                          <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+                          durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+                          <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+                          <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+                          0xffffffffffffffff
+
+     0.62%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::write_wire
+            |
+            ---durable_streams_server::handlers::write_wire
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::handlers::handle::{{closure}}
+               durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.62%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::io::scheduled_io::ScheduledIo::wake
+            |
+            ---tokio::runtime::io::scheduled_io::ScheduledIo::wake
+               tokio::runtime::io::driver::Driver::turn
+               tokio::runtime::time::Driver::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     0.62%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::task::waker::wake_by_val
+            |
+            ---tokio::runtime::task::waker::wake_by_val
+               |          
+                --0.54%--tokio::runtime::io::scheduled_io::ScheduledIo::wake
+                          tokio::runtime::io::driver::Driver::turn
+                          tokio::runtime::time::Driver::park_internal
+                          tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+                          tokio::runtime::task::raw::poll
+                          std::sys::backtrace::__rust_begin_short_backtrace
+                          core::ops::function::FnOnce::call_once{{vtable.shim}}
+                          <std::sys::thread::unix::Thread>::new::thread_start
+                          0x7f6f4db26043
+                          0x7f6f4dba661b
+
+     0.62%  tokio-rt-worker  libc.so.6               [.] __lll_lock_wait_private
+            |
+            ---__lll_lock_wait_private
+               |          
+               |--0.39%--0x7f6f4db337cc
+               |          __libc_free (inlined)
+               |          
+                --0.23%--realloc
+
+     0.62%  tokio-rt-worker  libc.so.6               [.] 0x0000000000163a40
+            |
+            ---0x7f6f4dc00a40
+               |          
+                --0.23%--durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.62%  tokio-rt-worker  libc.so.6               [.] 0x0000000000163aaa
+            |
+            ---0x7f6f4dc00aaa
+               |          
+                --0.23%--durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::handlers::handle::{{closure}}
+                          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::do_spawn::{{closure}}
+                          0xffffffffffffffff
+
+     0.54%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::dispatch::{{closure}}
+            |
+            ---durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::handlers::handle::{{closure}}
+               durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::do_spawn::{{closure}}
+               0xffffffffffffffff
+
+     0.54%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::handle::{{closure}}
+            |
+            ---durable_streams_server::handlers::handle::{{closure}}
+               durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::do_spawn::{{closure}}
+               0xffffffffffffffff
+
+     0.54%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+            |
+            ---tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     0.54%  tokio-rt-worker  libc.so.6               [.] 0x000000000009618f
+            |
+            ---0x7f6f4db3318f
+               __libc_free (inlined)
+               |          
+                --0.23%--core::ptr::drop_in_place<durable_streams_server::replication::Command>
+                          core::ptr::drop_in_place<openraft::entry::payload::EntryPayload<durable_streams_server::replication::Types>>
+                          durable_streams_server::replication::journal::Journal::stage
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::append_to_log::{{closure}}::{{closure}}
+                          <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+                          <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+                          0xffffffffffffffff
+
+     0.54%  tokio-rt-worker  libc.so.6               [.] 0x00000000000976d0
+            |
+            ---0x7f6f4db346d0
+               malloc
+               |          
+                --0.47%--durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.47%  tokio-rt-worker  durable-streams-server  [.] <alloc::string::String as core::fmt::Write>::write_char
+            |
+            ---<alloc::string::String as core::fmt::Write>::write_char
+               <core::fmt::Formatter>::pad_integral
+               |          
+                --0.39%--<u64 as core::fmt::Display>::fmt
+                          core::fmt::write
+                          alloc::fmt::format::format_inner
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::handlers::handle::{{closure}}
+                          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+                          0xffffffffffffffff
+
+     0.47%  tokio-rt-worker  durable-streams-server  [.] <tokio::io::util::read_buf::ReadBuf<R,B> as core::future::future::Future>::poll
+            |
+            ---<tokio::io::util::read_buf::ReadBuf<R,B> as core::future::future::Future>::poll
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.47%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::handlers::publish_durable_tail
+            |
+            ---durable_streams_server::handlers::publish_durable_tail
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::handlers::handle::{{closure}}
+               durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.47%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::notify_parked_local
+            |
+            ---tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::notify_parked_local
+               |          
+                --0.23%--tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+                          tokio::runtime::task::raw::poll
+                          std::sys::backtrace::__rust_begin_short_backtrace
+                          core::ops::function::FnOnce::call_once{{vtable.shim}}
+                          <std::sys::thread::unix::Thread>::new::thread_start
+                          0x7f6f4db26043
+                          0x7f6f4dba661b
+
+     0.47%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::task::waker::clone_waker
+            |
+            ---tokio::runtime::task::waker::clone_waker
+
+     0.47%  tokio-rt-worker  libc.so.6               [.] __send
+            |
+            ---send (inlined)
+               <tokio::net::tcp::stream::TcpStream as tokio::io::async_write::AsyncWrite>::poll_write
+               durable_streams_server::engine_raw::write_response::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.47%  tokio-rt-worker  libc.so.6               [.] 0x0000000000095043
+            |
+            ---0x7f6f4db32043
+               0x7f6f4db34727
+               |          
+               |--0.23%--__libc_calloc
+               |          durable_streams_server::wal::shard::journal::<impl durable_streams_server::wal::shard::Shard>::read_record
+               |          durable_streams_server::replication::journal::Journal::read
+               |          <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+               |          durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+               |          <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               |          openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               |          <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               |          0xffffffffffffffff
+               |          
+                --0.23%--malloc
+                          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::do_spawn::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.47%  tokio-rt-worker  libc.so.6               [.] 0x0000000000095077
+            |
+            ---0x7f6f4db32077
+               0x7f6f4db34727
+               |          
+                --0.23%--__libc_calloc
+                          durable_streams_server::wal::shard::journal::<impl durable_streams_server::wal::shard::Shard>::read_record
+                          durable_streams_server::replication::journal::Journal::read
+                          <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+                          durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+                          <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+                          <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+                          0xffffffffffffffff
+
+     0.47%  tokio-rt-worker  libc.so.6               [.] 0x00000000000975e9
+            |
+            ---0x7f6f4db345e9
+               |          
+               |--0.23%--malloc
+               |          
+                --0.23%--0x7f6f4db35271
+                          realloc
+
+     0.39%  tokio-rt-worker  durable-streams-server  [.] core::str::converts::from_utf8
+            |
+            ---core::str::converts::from_utf8
+               |          
+                --0.31%--serde_core::de::impls::<impl serde_core::de::Deserialize for alloc::string::String>::deserialize
+                          |          
+                           --0.23%--serde_core::de::SeqAccess::next_element
+                                     <core::marker::PhantomData<T> as serde_core::de::DeserializeSeed>::deserialize
+                                     bincode::internal::deserialize_seed
+                                     durable_streams_server::replication::journal::Journal::read
+                                     <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+                                     durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+                                     openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+                                     <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+                                     openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+                                     openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+                                     openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+                                     openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+                                     <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+                                     0xffffffffffffffff
+
+     0.39%  tokio-rt-worker  durable-streams-server  [.] httparse::parse_headers_iter_uninit
+            |
+            ---httparse::parse_headers_iter_uninit
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.39%  tokio-rt-worker  durable-streams-server  [.] tokio::process::imp::GlobalOrphanQueue::reap_orphans
+            |
+            ---tokio::process::imp::GlobalOrphanQueue::reap_orphans
+               tokio::runtime::time::Driver::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     0.39%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::task::waker::wake_by_ref
+            |
+            ---tokio::runtime::task::waker::wake_by_ref
+               |          
+                --0.23%--tokio::sync::oneshot::Sender<T>::send
+                          durable_streams_server::replication::batch::start::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+                          tokio::runtime::task::raw::poll
+                          std::sys::backtrace::__rust_begin_short_backtrace
+                          core::ops::function::FnOnce::call_once{{vtable.shim}}
+                          <std::sys::thread::unix::Thread>::new::thread_start
+                          0x7f6f4db26043
+                          0x7f6f4dba661b
+
+     0.39%  tokio-rt-worker  libc.so.6               [.] clock_gettime
+            |
+            ---clock_gettime
+               <std::sys::pal::unix::time::Timespec>::now
+               |          
+                --0.23%--tokio::runtime::task::raw::poll
+                          std::sys::backtrace::__rust_begin_short_backtrace
+                          core::ops::function::FnOnce::call_once{{vtable.shim}}
+                          <std::sys::thread::unix::Thread>::new::thread_start
+                          0x7f6f4db26043
+                          0x7f6f4dba661b
+
+     0.39%  tokio-rt-worker  libc.so.6               [.] epoll_wait
+            |
+            ---epoll_wait
+               tokio::runtime::io::driver::Driver::turn
+               tokio::runtime::time::Driver::park_internal
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     0.39%  tokio-rt-worker  libc.so.6               [.] write
+            |
+            ---__write (inlined)
+               |          
+                --0.23%--durable_streams_server::handlers::write_wire
+                          durable_streams_server::handlers::handle_append_inner::{{closure}}
+                          durable_streams_server::handlers::dispatch::{{closure}}
+                          durable_streams_server::handlers::handle::{{closure}}
+                          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+                          0xffffffffffffffff
+
+     0.39%  tokio-rt-worker  libc.so.6               [.] 0x0000000000094ec9
+            |
+            ---0x7f6f4db31ec9
+               0x7f6f4db34cdc
+               |          
+                --0.23%--malloc
+
+     0.39%  tokio-rt-worker  libc.so.6               [.] 0x0000000000094ee3
+            |
+            ---0x7f6f4db31ee3
+               |          
+                --0.23%--0x7f6f4db34cdc
+
+     0.39%  tokio-rt-worker  libc.so.6               [.] 0x0000000000097493
+            |
+            ---0x7f6f4db34493
+               |          
+                --0.23%--malloc
+
+     0.39%  tokio-rt-worker  libc.so.6               [.] 0x000000000009825a
+            |
+            ---0x7f6f4db3525a
+               realloc
+               |          
+                --0.23%--<alloc::raw_vec::RawVecInner>::finish_grow
+                          <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
+                          <alloc::string::String as core::fmt::Write>::write_str
+                          core::fmt::write
+                          alloc::fmt::format::format_inner
+
+     0.39%  tokio-rt-worker  libc.so.6               [.] 0x0000000000163a43
+            |
+            ---0x7f6f4dc00a43
+
+     0.31%  tokio-rt-worker  [vdso]                  [.] 0x0000000000000a62
+            |
+            ---0x7ffd6316fa62
+               clock_gettime
+               <std::sys::pal::unix::time::Timespec>::now
+
+     0.31%  tokio-rt-worker  durable-streams-server  [.] <u64 as core::fmt::Display>::fmt
+            |
+            ---<u64 as core::fmt::Display>::fmt
+               core::fmt::write
+               alloc::fmt::format::format_inner
+               durable_streams_server::replication::Cluster::token
+               durable_streams_server::replication::Cluster::handle::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  durable-streams-server  [.] alloc::vec::Vec<T,A>::retain::{{closure}}
+            |
+            ---alloc::vec::Vec<T,A>::retain::{{closure}}
+               durable_streams_server::replication::Command::http
+               durable_streams_server::replication::Cluster::handle::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  durable-streams-server  [.] crc32c::hw_x86_64::crc_u64_append
+            |
+            ---crc32c::hw_x86_64::crc_u64_append
+               crc32c::hw_x86_64::crc_u64_parallel3
+               crc32c::hw_x86_64::crc32c
+               |          
+                --0.23%--durable_streams_server::wal::codec::decode_at
+                          durable_streams_server::wal::shard::journal::<impl durable_streams_server::wal::shard::Shard>::read_record
+                          durable_streams_server::replication::journal::Journal::read
+                          <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+                          durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+                          <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+                          openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+                          <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+                          0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::engine_raw::write_response::{{closure}}
+            |
+            ---durable_streams_server::engine_raw::write_response::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::http1::write_head
+            |
+            ---durable_streams_server::http1::write_head
+               durable_streams_server::engine_raw::write_response::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::store::Store::get
+            |
+            ---durable_streams_server::store::Store::get
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::handlers::handle::{{closure}}
+               durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::wal::shard::Shard::reserve_and_stage_indexed
+            |
+            ---durable_streams_server::wal::shard::Shard::reserve_and_stage_indexed
+               durable_streams_server::replication::journal::Journal::stage
+               |          
+                --0.23%--durable_streams_server::replication::journal::Journal::persist::{{closure}}
+                          durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+                          openraft::core::sm::worker::Worker<C,SM>::do_spawn::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  durable-streams-server  [.] httparse::simd::avx2::match_header_value_vectored
+            |
+            ---httparse::simd::avx2::match_header_value_vectored
+               httparse::parse_headers_iter_uninit
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::scheduler::Handle::current
+            |
+            ---tokio::runtime::scheduler::Handle::current
+               tokio::time::sleep::Sleep::new_timeout
+               durable_streams_server::replication::Group::submit::{{closure}}
+               durable_streams_server::replication::Cluster::handle::{{closure}}
+               0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  durable-streams-server  [.] tokio::sync::mpsc::list::Rx<T>::pop
+            |
+            ---tokio::sync::mpsc::list::Rx<T>::pop
+               |          
+                --0.23%--tokio::sync::mpsc::bounded::Receiver<T>::try_recv
+                          durable_streams_server::replication::batch::start::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  durable-streams-server  [.] tokio::sync::mpsc::list::Tx<T>::find_block
+            |
+            ---tokio::sync::mpsc::list::Tx<T>::find_block
+               durable_streams_server::replication::Group::submit::{{closure}}
+               durable_streams_server::replication::Cluster::handle::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  libc.so.6               [.] recv
+            |
+            ---recv
+               <tokio::net::tcp::stream::TcpStream as tokio::io::async_read::AsyncRead>::poll_read
+               <tokio::io::util::read_buf::ReadBuf<R,B> as core::future::future::Future>::poll
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  libc.so.6               [.] 0x000000000009604f
+            |
+            ---0x7f6f4db3304f
+               __libc_free (inlined)
+               |          
+                --0.23%--durable_streams_server::engine_raw::write_response::{{closure}}
+                          durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+                          tokio::runtime::task::raw::poll
+                          0xffffffffffffffff
+
+     0.31%  tokio-rt-worker  libc.so.6               [.] 0x00000000000971c8
+            |
+            ---0x7f6f4db341c8
+               |          
+                --0.23%--malloc
+
+     0.31%  tokio-rt-worker  libc.so.6               [.] 0x0000000000097a74
+            |
+            ---0x7f6f4db34a74
+               malloc
+
+     0.23%  tokio-rt-worker  [vdso]                  [.] 0x0000000000000a9f
+            |
+            ---0x7ffd6316fa9f
+               clock_gettime
+               <std::sys::pal::unix::time::Timespec>::now
+
+     0.23%  tokio-rt-worker  [vdso]                  [.] 0x0000000000000aba
+            |
+            ---0x7ffd6316faba
+               clock_gettime
+               <std::sys::pal::unix::time::Timespec>::now
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] <dashmap::DashMap<K,V,S> as dashmap::t::Map<K,V,S>>::_get
+            |
+            ---<dashmap::DashMap<K,V,S> as dashmap::t::Map<K,V,S>>::_get
+               durable_streams_server::store::Store::get
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::handlers::handle::{{closure}}
+               durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+            |
+            ---<openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] <tokio::net::tcp::stream::TcpStream as tokio::io::async_write::AsyncWrite>::poll_write
+            |
+            ---<tokio::net::tcp::stream::TcpStream as tokio::io::async_write::AsyncWrite>::poll_write
+               durable_streams_server::engine_raw::write_response::{{closure}}
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] <tokio::sync::oneshot::Receiver<T> as core::future::future::Future>::poll
+            |
+            ---<tokio::sync::oneshot::Receiver<T> as core::future::future::Future>::poll
+               durable_streams_server::wal::shard::Shard::wait_durable::{{closure}}
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] bytes::bytes::shared_clone
+            |
+            ---bytes::bytes::shared_clone
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] core::fmt::write
+            |
+            ---core::fmt::write
+               alloc::fmt::format::format_inner
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+            |
+            ---durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+               <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] durable_streams_server::store::media_type
+            |
+            ---durable_streams_server::store::media_type
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::handlers::handle::{{closure}}
+               durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+            |
+            ---openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               tokio::runtime::task::raw::poll
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] parking_lot::condvar::Condvar::wait_until_internal
+            |
+            ---parking_lot::condvar::Condvar::wait_until_internal
+               tokio::runtime::scheduler::multi_thread::worker::Context::park_internal
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] serde_core::de::SeqAccess::next_element
+            |
+            ---serde_core::de::SeqAccess::next_element
+               <core::marker::PhantomData<T> as serde_core::de::DeserializeSeed>::deserialize
+               bincode::internal::deserialize_seed
+               durable_streams_server::replication::journal::Journal::read
+               <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+               durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+               <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               0xffffffffffffffff
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] serde_core::de::impls::<impl serde_core::de::Deserialize for alloc::string::String>::deserialize
+            |
+            ---serde_core::de::impls::<impl serde_core::de::Deserialize for alloc::string::String>::deserialize
+               serde_core::de::SeqAccess::next_element
+               <core::marker::PhantomData<T> as serde_core::de::DeserializeSeed>::deserialize
+               bincode::internal::deserialize_seed
+               durable_streams_server::replication::journal::Journal::read
+               <core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next
+               durable_streams_server::replication::journal::<impl openraft::storage::RaftLogReader<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::journal::Journal>>::try_get_log_entries::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::apply_to_state_machine::{{closure}}::{{closure}}
+               <openraft::core::raft_core::RaftCore<C,N,LS,SM> as openraft::runtime::RaftRuntime<C>>::run_command::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::run_engine_commands::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::runtime_loop::{{closure}}::{{closure}}
+               openraft::core::raft_core::RaftCore<C,N,LS,SM>::do_main::{{closure}}::{{closure}}
+               <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+               0xffffffffffffffff
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_task::{{closure}}
+            |
+            ---tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_task::{{closure}}
+               tokio::runtime::scheduler::multi_thread::worker::<impl tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_task
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] tokio::runtime::task::waker::drop_waker
+            |
+            ---tokio::runtime::task::waker::drop_waker
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] tokio::sync::oneshot::Sender<T>::send
+            |
+            ---tokio::sync::oneshot::Sender<T>::send
+               durable_streams_server::replication::batch::start::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+               tokio::runtime::task::raw::poll
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     0.23%  tokio-rt-worker  durable-streams-server  [.] tokio::sync::watch::big_notify::BigNotify::notify_waiters
+            |
+            ---tokio::sync::watch::big_notify::BigNotify::notify_waiters
+               durable_streams_server::handlers::publish_durable_tail
+               durable_streams_server::handlers::handle_append_inner::{{closure}}
+               durable_streams_server::handlers::dispatch::{{closure}}
+               durable_streams_server::handlers::handle::{{closure}}
+               durable_streams_server::replication::machine::<impl openraft::storage::v2::RaftStateMachine<durable_streams_server::replication::Types> for alloc::sync::Arc<durable_streams_server::replication::machine::Machine>>::apply::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::apply::{{closure}}::{{closure}}
+               openraft::core::sm::worker::Worker<C,SM>::worker_loop::{{closure}}::{{closure}}
+               0xffffffffffffffff
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x0000000000094edd
+            |
+            ---0x7f6f4db31edd
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x0000000000094fbb
+            |
+            ---0x7f6f4db31fbb
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x0000000000095f70
+            |
+            ---0x7f6f4db32f70
+               __libc_free (inlined)
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x000000000009601f
+            |
+            ---0x7f6f4db3301f
+               __libc_free (inlined)
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x0000000000096034
+            |
+            ---0x7f6f4db33034
+               __libc_free (inlined)
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x0000000000097333
+            |
+            ---0x7f6f4db34333
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x000000000009743c
+            |
+            ---0x7f6f4db3443c
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x00000000000975ce
+            |
+            ---0x7f6f4db345ce
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x00000000000976b3
+            |
+            ---0x7f6f4db346b3
+               malloc
+               durable_streams_server::engine_raw::serve::{{closure}}::{{closure}}
+               tokio::runtime::task::raw::poll
+               0xffffffffffffffff
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x00000000000978b3
+            |
+            ---0x7f6f4db348b3
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x00000000000981b6
+            |
+            ---0x7f6f4db351b6
+               realloc
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x000000000016349a
+            |
+            ---0x7f6f4dc0049a
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x0000000000163a72
+            |
+            ---0x7f6f4dc00a72
+
+     0.23%  tokio-rt-worker  libc.so.6               [.] 0x0000000000163b2d
+            |
+            ---0x7f6f4dc00b2d
+
+     0.23%  wal-committer    durable-streams-server  [.] durable_streams_server::wal::shard::Shard::commit_once
+            |
+            ---durable_streams_server::wal::shard::Shard::commit_once
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+     0.23%  wal-committer    libc.so.6               [.] fdatasync
+            |
+            ---fdatasync
+               durable_streams_server::wal::shard::Shard::commit_once
+               std::sys::backtrace::__rust_begin_short_backtrace
+               core::ops::function::FnOnce::call_once{{vtable.shim}}
+               <std::sys::thread::unix::Thread>::new::thread_start
+               0x7f6f4db26043
+               0x7f6f4dba661b
+
+
+
+#
+# (Tip: Show current config key-value pairs: perf config --list)
+#

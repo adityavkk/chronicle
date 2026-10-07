@@ -652,11 +652,12 @@ pub fn run() {
             "data directory already owned"
         );
         let identity = serde_json::to_vec(&(
-            6u32,
+            7u32,
             &config.cluster,
             config.node,
             config.partitions,
             &config.genesis,
+            batch::MAX_COMMANDS, // Persisted receipt ordinal grammar and retention bound.
         ))
         .unwrap();
         let marker = config.dir.join("IDENTITY");
