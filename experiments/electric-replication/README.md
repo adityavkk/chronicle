@@ -77,16 +77,18 @@ Conformance and the existing fault/property tests are necessary, not sufficient.
 The latest full suite executes **332/332 passing, zero failures/skips**, with
 subscriptions enabled. Subscription and storage-error process histories also
 pass within their documented models; they are not independent-disk or power-loss
-qualification. `bench-local-003` ran 45 matched ds-bench cells: 44 completed;
-three-replica fanout with 1,000 subscribers failed with linearizable-read 503s
-and a 240-second client timeout. It is retained, not excluded from the matrix.
+qualification. `bench-local-004` completes all **45/45** matched ds-bench cells
+after arrival-fenced read coalescing. The prior `bench-local-003` three-replica,
+1,000-subscriber failure (503s and a 240-second timeout) is retained. One 004
+write cell lost its closing resource sample to a `/proc` permission race; the
+driver traceback is retained and resource coverage is explicitly partial.
 
 | Local qualification cell | Unmodified Electric | One-member adapter | Three replicas |
 | --- | ---: | ---: | ---: |
-| One stream, concurrency 256 (writes/s) | 105,103 | 3,471 | 4,352 |
-| 1,024 streams, concurrency 256 (writes/s) | 58,861 | 3,501 | 3,949 |
-| Seeded 4 MiB replay (GiB/s) | 13.87 | 9.71 | 15.80 |
-| Mixed, unpaced writes and fixed-rate reads (writes/s) | 26,982 | 6,843 | 4,793 |
+| One stream, concurrency 256 (writes/s) | 105,877 | 3,242 | 4,200 |
+| 1,024 streams, concurrency 256 (writes/s) | 59,638 | 3,579 | 4,242 |
+| Seeded 4 MiB replay (GiB/s) | 17.61 | 17.53 | 15.67 |
+| Mixed, unpaced writes and fixed-rate reads (writes/s) | 26,922 | 6,625 | 4,908 |
 
 These short single runs share a disk/page cache and 16 GiB host memory. Each arm
 gets four aggregate SUT CPU affinities, the client another four; the three-node
@@ -100,6 +102,33 @@ substantial fsync and scheduling costs. The adapter has a large measured write
 gap, not Electric performance parity. Independent-host capacity, sustained memory
 and disk growth, tail latency, and overload behavior remain evaluation gates.
 
+For the hot-stream concurrency-256 cells, sampled aggregate SUT CPU is
+1.78 / 0.49 / 0.73 cores and peak sampled RSS is 6.8 / 13.6 / 30.9 MiB
+(native / one-member / three replicas). RSS excludes shared page cache. The
+three-replica outbound socket counter delta is at least 30.8 MiB over its sampled
+write window, not a complete packet capture. `scripts/benchmark_summary.py`
+recomputes `summary.json` from raw samples: writes use exact client measure
+timestamps; other modes lack them and explicitly use the outer client invocation.
+The low write CPU alongside fsync/scheduling profiles points to serialized
+coordination, not exhausted CPU; profiles are evidence, not a complete causal
+decomposition or a claim that tuning one knob will close the gap.
+
+The pinned fanout client does **not** guarantee full drain. All readers obtain
+HTTP headers before writing starts, but begin body polling after that barrier.
+It counts every completed append attempt as sent, and only complete parseable
+data frames as received, without per-reader sequence/dedup accounting. Readers
+stop at the nominal deadline plus two seconds; a boundary append can be issued
+after the deadline check and complete later. Its bounded task join does not
+extend that window. Partial frames are discarded; body EOF/error, join errors
+and join timeout need not increment its subscriber-error count. Thus the 004
+1,000-reader fractions (99.97% / 99.90% / 99.88%) are windowed observations, not
+proof of loss or complete delivery. See the pinned
+[read/write boundaries](https://github.com/electric-sql/ds-bench/blob/93a1a066a511ad2ce5114dc429afb1fd0f6d99bf/ds-bench/src/fanout.rs#L146-L303).
+The separate `fanout-drain-001` correctness probe keeps full sequence ledgers:
+**all 1,000 replicated readers received exactly records 0–99**, with payload
+checks and no accepted EOF, timeout, duplicate or gap. This finite JSON fixture
+is not a throughput measurement or proof about every omitted benchmark frame.
+
 No throughput or availability promise is made from blog numbers or single-orb
 runs. Paid evaluation needs separate authorization; no cloud budget or publication
 permission is implied.
@@ -108,7 +137,7 @@ Physical WAL reclamation now uses a checksummed metadata-only checkpoint; old
 snapshot cleanup preserves open transfer descriptors. The new real-process
 campaign injects checkpoint write/fsync/directory-fsync errors before reclaim,
 then verifies physical deletion and complete restart against 38,010,880 payload bytes.
-The measurements above precede this lifecycle change, not a post-change rerun.
+The 004 measurements above include this lifecycle change.
 
 Cold-tier ownership/GC and terminal transaction-fence compaction remain
 unimplemented. Catalog repair

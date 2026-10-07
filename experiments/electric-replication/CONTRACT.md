@@ -115,6 +115,17 @@ each frame; a disconnected replica may stop delivering. Clients resume with
 offsets and preserve their session token. Responses bypass shared HTTP caches
 when requesting consistency: upstream cache headers must not defeat barriers.
 
+Concurrent reads may share a confirmation only if it **started after each read
+arrived**. Each invocation samples an atomic started-generation before joining a
+serialized confirmation queue. It can reuse only a completed generation strictly
+greater than its sampled generation. A read arriving during a round must wait for
+another round; sampling the completed generation would let it reuse a stale
+confirmation. Failed rounds stay failed and canceled rounds never advance the
+completed generation. There is no time lease or stale fallback. `ReadCohorts.tla`
+precedes implementation and checks arrival/write/completion/cancellation ordering,
+with mutations for the wrong counter and a non-strict comparison. This assumes
+OpenRaft's underlying confirmation is linearizable and waits for local apply.
+
 ## Recovery, checkpoint, snapshot and ownership
 
 Assume non-Byzantine consensus participants, honest successful fsync, durable
@@ -125,8 +136,9 @@ by flock: never run it concurrently; replacement uses a fresh node ID/learner.
 Membership addresses are routing hints, never authority to acknowledge writes.
 
 Resume the physical WAL after its last complete CRC-valid frame; never use the
-single-node engine's `reset_after_recovery` on a consensus WAL. **Any nonzero torn
-or CRC-invalid frame is fatal, including the active segment's tail.** Without
+single-node engine's `reset_after_recovery` on a consensus WAL. For retained entries
+and the post-checkpoint suffix, **any nonzero torn or CRC-invalid frame is fatal,
+including the active segment's tail.** Without
 additional durable boundaries it cannot be distinguished from corrupted
 acknowledged data. Only all-zero final preallocation padding is discarded; a
 nonzero suffix behind a zero header is fatal. Checksums detect accidental

@@ -29,14 +29,17 @@ NATIVE = ROOT / ".tmp/electric-tools/upstream-target/release/durable-streams-ser
 
 def sample(pids, ports, node_pids):
     processes = {}
+    gaps = []
     for pid in pids:
         try:
             proc = Path(f"/proc/{pid}")
             stat = (proc / "stat").read_text().split(") ", 1)[1].split()
             io = {k:int(v) for k,v in (line.split(":") for line in (proc / "io").read_text().splitlines())}
             processes[str(pid)] = dict(cpu_ticks=int(stat[11])+int(stat[12]), rss_pages=int(stat[21]), io=io)
-        except FileNotFoundError:
-            pass
+        except (FileNotFoundError, ProcessLookupError, PermissionError) as error:
+            # /proc can disappear or refuse io access during process exit.
+            # Preserve the missing observation; never invent a zero counter.
+            gaps.append(dict(pid=pid,error=repr(error)))
     # Only record sockets owned by these disposable processes, never unrelated
     # orb traffic. Outbound node-to-node sockets estimate replication traffic;
     # already closed sockets can be missed, so this is an observed lower bound.
@@ -49,7 +52,7 @@ def sample(pids, ports, node_pids):
             counters = {k:int(v) for k,v in re.findall(r"(bytes_sent|bytes_acked|bytes_received):(\d+)", lines[i+1])}
             sockets.append(dict(local=parts[3], peer=parts[4], owners=sorted(owners), counters=counters,
                                 replication=bool(owners.intersection(node_pids)) and parts[4].rsplit(":",1)[-1] in ports))
-    return dict(unix_ms=time.time_ns()//1_000_000, monotonic_ns=time.monotonic_ns(), processes=processes, sockets=sockets)
+    return dict(unix_ms=time.time_ns()//1_000_000, monotonic_ns=time.monotonic_ns(), processes=processes, sockets=sockets, process_gaps=gaps)
 
 
 def cell(output, arm, workload, profile=False):
@@ -156,17 +159,23 @@ def cell(output, arm, workload, profile=False):
             assert trace.poll() is None, "strace attach failed; see retained log"
 
         def collect():
-            with open(lab.output / "samples.jsonl", "w") as out:
-                while not stop.is_set():
-                    pids = node_pids + ([result["client_pid"]] if "client_pid" in result else [])
-                    out.write(json.dumps(sample(pids, {str(lab.port+n) for n in lab.nodes}, node_pids))+"\n")
-                    out.flush()
-                    stop.wait(0.5)
+            try:
+                with open(lab.output / "samples.jsonl", "w") as out:
+                    while not stop.is_set():
+                        pids = node_pids + ([result["client_pid"]] if "client_pid" in result else [])
+                        observation = sample(pids, {str(lab.port+n) for n in lab.nodes}, node_pids)
+                        result.setdefault("process_sample_gaps",[]).extend(observation["process_gaps"])
+                        out.write(json.dumps(observation)+"\n")
+                        out.flush()
+                        stop.wait(0.5)
+            except Exception:
+                result["sampling_error"] = traceback.format_exc()
         sampler = threading.Thread(target=collect)
         sampler.start()
         raw = run_client(args,"client")
         stop.set()
         sampler.join()
+        assert "sampling_error" not in result, result.get("sampling_error")
         if trace:
             trace.send_signal(signal.SIGINT)
             trace.wait(timeout=10)
@@ -232,6 +241,7 @@ def run(output, smoke=False, reads_only=False):
     sources = {str(p.relative_to(EXPERIMENT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (EXPERIMENT / "engine/src").rglob("*.rs")}
     provenance = dict(native_source="88793e76595d69be300731b9b25c58538923a53b", client_source="93a1a066a511ad2ce5114dc429afb1fd0f6d99bf",
         client_unmodified=True, native_unmodified=True, adaptation_sources=sources,
+        driver_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         binaries={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (CLIENT,NATIVE,BINARY)},
         sut_cpus="0-3 aggregate across replicas", client_cpus="4-7", memory="shared 16 GiB host, no separate quota",
         disk="shared orb root filesystem; same 8 MiB WAL segments, no cold tier", workers_per_process=2,

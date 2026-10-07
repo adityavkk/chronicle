@@ -1,0 +1,3124 @@
+{
+  "provenance_sha256": "22e30bc6ca5aacb8a34cc36616d3a2ee9500efc43c373586813a5f64eac60095",
+  "analyzer_sha256": "fbf60ed3d1d72c2a9369f563602afb4d1adaf9a58e41b9a7f2d032564b945e10",
+  "rows": [
+    {
+      "cell": "bench-local-004-native-fanout-1",
+      "arm": "native",
+      "workload": [
+        "fanout",
+        1
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "fanout",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-fanout",
+        "basin": "benchmark",
+        "stream": "fanout",
+        "subscribers": 1,
+        "writer_rate": 50,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.00349341,
+        "events_sent": 501,
+        "events_received": 501,
+        "subscriber_errors": 0,
+        "append_counts": {
+          "ok": 501,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "fan_out_latency_ms": {
+          "count": 501,
+          "mean_ms": 0.7938243512974053,
+          "p50_ms": 0.725,
+          "p90_ms": 1.062,
+          "p99_ms": 1.63,
+          "p999_ms": 2.347,
+          "max_ms": 2.347
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375141549,
+        "end_unix_ms": 1791375153584,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 1478656,
+          "client_rss_bytes": 5292032
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 11.659,
+        "average_sut_cpu_cores": 0.013723303885410413,
+        "sut_write_bytes": 2342912,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 16905973,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-fanout-100",
+      "arm": "native",
+      "workload": [
+        "fanout",
+        100
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "fanout",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-fanout",
+        "basin": "benchmark",
+        "stream": "fanout",
+        "subscribers": 100,
+        "writer_rate": 50,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.034180738,
+        "events_sent": 501,
+        "events_received": 50100,
+        "subscriber_errors": 0,
+        "append_counts": {
+          "ok": 501,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "fan_out_latency_ms": {
+          "count": 50100,
+          "mean_ms": 1.074103353293412,
+          "p50_ms": 1.02,
+          "p90_ms": 1.336,
+          "p99_ms": 2.03,
+          "p999_ms": 7.111,
+          "max_ms": 7.251
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375167186,
+        "end_unix_ms": 1791375179274,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 3629056,
+          "client_rss_bytes": 24113152
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 11.76,
+        "average_sut_cpu_cores": 0.0467687074829932,
+        "sut_write_bytes": 2338816,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 16905973,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-fanout-1000",
+      "arm": "native",
+      "workload": [
+        "fanout",
+        1000
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "fanout",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-fanout",
+        "basin": "benchmark",
+        "stream": "fanout",
+        "subscribers": 1000,
+        "writer_rate": 50,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.19398258,
+        "events_sent": 501,
+        "events_received": 500846,
+        "subscriber_errors": 0,
+        "append_counts": {
+          "ok": 501,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "fan_out_latency_ms": {
+          "count": 500846,
+          "mean_ms": 2.1750006628784058,
+          "p50_ms": 2.089,
+          "p90_ms": 3.041,
+          "p99_ms": 4.025,
+          "p999_ms": 43.935,
+          "max_ms": 51.199
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375234589,
+        "end_unix_ms": 1791375246865,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 8491008,
+          "client_rss_bytes": 181522432
+        },
+        "samples": 23,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 11.885,
+        "average_sut_cpu_cores": 0.3062684055532184,
+        "sut_write_bytes": 2342912,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 16905973,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-mixed",
+      "arm": "native",
+      "workload": [
+        "mixed"
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "mixed",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-mixed",
+        "streams": 16,
+        "writers_per_stream": 1,
+        "readers": 16,
+        "read_rate": 1,
+        "read_interval_ms": 0,
+        "backfill_events": 0,
+        "subscribers": 0,
+        "writer_rate": 0,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.943576847,
+        "drive_secs": 10.0,
+        "write_counts": {
+          "ok": 269217,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "events_received": 0,
+        "control_events_received": 0,
+        "read_bytes_total": 459077376,
+        "read_counts": {
+          "ok": 176,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "aggregate_ops_per_sec": 26921.7,
+        "write_latency_ms": {
+          "count": 269217,
+          "mean_ms": 0.5911052682408612,
+          "p50_ms": 0.595,
+          "p90_ms": 0.883,
+          "p99_ms": 1.145,
+          "p999_ms": 1.964,
+          "max_ms": 4.447
+        },
+        "fan_out_latency_ms": {
+          "count": 0,
+          "mean_ms": 0.0,
+          "p50_ms": 0.0,
+          "p90_ms": 0.0,
+          "p99_ms": 0.0,
+          "p999_ms": 0.0,
+          "max_ms": 0.0
+        },
+        "read_latency_ms": {
+          "count": 176,
+          "mean_ms": 3.478534090909091,
+          "p50_ms": 3.655,
+          "p90_ms": 5.223,
+          "p99_ms": 6.179,
+          "p999_ms": 7.191,
+          "max_ms": 7.191
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375287923,
+        "end_unix_ms": 1791375298906,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 6029312,
+          "client_rss_bytes": 21016576
+        },
+        "samples": 22,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 10.652,
+        "average_sut_cpu_cores": 1.3152459631993993,
+        "sut_write_bytes": 506036224,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 89899958,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-profile-reads",
+      "arm": "native",
+      "workload": [
+        "reads"
+      ],
+      "profile": true,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "reads",
+        "mode": "catchup",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "stream": "bench-reads-stream",
+        "streams": 4,
+        "read_size_bytes": 4096,
+        "connections": 16,
+        "duration_secs": 8,
+        "warmup_secs": 3,
+        "settle_secs": 1,
+        "seed_bytes": 0,
+        "append_rate_per_sec": 50.0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 17692,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "bytes_read_total": 74205626368,
+        "aggregate_ops_per_sec": 2211.5,
+        "bytes_per_sec": 9275703296.0,
+        "p50_ms": 7.103,
+        "p90_ms": 8.575,
+        "p99_ms": 11.759,
+        "p999_ms": 16.167,
+        "latency_ms": {
+          "count": 17692,
+          "mean_ms": 7.239931946642538,
+          "p50_ms": 7.103,
+          "p90_ms": 8.575,
+          "p99_ms": 11.759,
+          "p999_ms": 16.167,
+          "max_ms": 20.111
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375338968,
+        "end_unix_ms": 1791375351030,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 5226496,
+          "client_rss_bytes": 19791872
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 11.641,
+        "average_sut_cpu_cores": 2.4628468344643935,
+        "sut_write_bytes": 0,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 33556530,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-profile-write-1024-64",
+      "arm": "native",
+      "workload": [
+        "write",
+        1024,
+        64
+      ],
+      "profile": true,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 26979,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3372.375,
+        "per_stream_ops_per_sec_mean": 3.2933349609375,
+        "latency_ms": {
+          "count": 26979,
+          "mean_ms": 18.991048926943186,
+          "p50_ms": 19.823,
+          "p90_ms": 26.943,
+          "p99_ms": 31.839,
+          "p999_ms": 35.103,
+          "max_ms": 36.991
+        },
+        "measure_start_unix_ms": 1791375329545,
+        "measure_end_unix_ms": 1791375337545,
+        "ok_total_all_phases": 36700,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375329545,
+        "end_unix_ms": 1791375337545,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 6230016,
+          "client_rss_bytes": 22450176
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.667,
+        "average_sut_cpu_cores": 1.1242989435241946,
+        "sut_write_bytes": 108912640,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 26692622,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-reads",
+      "arm": "native",
+      "workload": [
+        "reads"
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "reads",
+        "mode": "catchup",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "stream": "bench-reads-stream",
+        "streams": 4,
+        "read_size_bytes": 4096,
+        "connections": 16,
+        "duration_secs": 8,
+        "warmup_secs": 3,
+        "settle_secs": 1,
+        "seed_bytes": 0,
+        "append_rate_per_sec": 50.0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 36073,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "bytes_read_total": 151301128192,
+        "aggregate_ops_per_sec": 4509.125,
+        "bytes_per_sec": 18912641024.0,
+        "p50_ms": 3.293,
+        "p90_ms": 4.747,
+        "p99_ms": 7.807,
+        "p999_ms": 11.887,
+        "latency_ms": {
+          "count": 36073,
+          "mean_ms": 3.549270867407755,
+          "p50_ms": 3.293,
+          "p90_ms": 4.747,
+          "p99_ms": 7.807,
+          "p999_ms": 11.887,
+          "max_ms": 17.023
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375262208,
+        "end_unix_ms": 1791375274256,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 5525504,
+          "client_rss_bytes": 21069824
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 11.708,
+        "average_sut_cpu_cores": 3.3190980526135974,
+        "sut_write_bytes": 0,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 33556530,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-write-1-16",
+      "arm": "native",
+      "workload": [
+        "write",
+        1,
+        16
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 153000,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 19125.0,
+        "per_stream_ops_per_sec_mean": 19125.0,
+        "latency_ms": {
+          "count": 153000,
+          "mean_ms": 0.8330229215686282,
+          "p50_ms": 0.804,
+          "p90_ms": 1.263,
+          "p99_ms": 1.758,
+          "p999_ms": 3.001,
+          "max_ms": 14.191
+        },
+        "measure_start_unix_ms": 1791374867397,
+        "measure_end_unix_ms": 1791374875397,
+        "ok_total_all_phases": 212127,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374867397,
+        "end_unix_ms": 1791374875397,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 3678208,
+          "client_rss_bytes": 9904128
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.6,
+        "average_sut_cpu_cores": 0.7881578947368422,
+        "sut_write_bytes": 178933760,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 87859067,
+        "wal": 33554032,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-write-1-256",
+      "arm": "native",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 847015,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 105876.875,
+        "per_stream_ops_per_sec_mean": 105876.875,
+        "latency_ms": {
+          "count": 847015,
+          "mean_ms": 2.4132055630655906,
+          "p50_ms": 2.311,
+          "p90_ms": 2.981,
+          "p99_ms": 4.311,
+          "p999_ms": 17.407,
+          "max_ms": 28.319
+        },
+        "measure_start_unix_ms": 1791374920337,
+        "measure_end_unix_ms": 1791374928337,
+        "ok_total_all_phases": 1130561,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374920337,
+        "end_unix_ms": 1791374928337,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 7139328,
+          "client_rss_bytes": 59318272
+        },
+        "samples": 15,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.318,
+        "average_sut_cpu_cores": 1.7819076250341623,
+        "sut_write_bytes": 490737664,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 373308620,
+        "wal": 83884480,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-write-1-4",
+      "arm": "native",
+      "workload": [
+        "write",
+        1,
+        4
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 69489,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 8686.125,
+        "per_stream_ops_per_sec_mean": 8686.125,
+        "latency_ms": {
+          "count": 69489,
+          "mean_ms": 0.45796402308279005,
+          "p50_ms": 0.369,
+          "p90_ms": 0.795,
+          "p99_ms": 1.202,
+          "p999_ms": 2.491,
+          "max_ms": 8.767
+        },
+        "measure_start_unix_ms": 1791374800953,
+        "measure_end_unix_ms": 1791374808953,
+        "ok_total_all_phases": 87644,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374800953,
+        "end_unix_ms": 1791374808953,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 1540096,
+          "client_rss_bytes": 6152192
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.593,
+        "average_sut_cpu_cores": 0.6545502436454629,
+        "sut_write_bytes": 196046848,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 47603010,
+        "wal": 25165624,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-write-1-64",
+      "arm": "native",
+      "workload": [
+        "write",
+        1,
+        64
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 458913,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 57364.125,
+        "per_stream_ops_per_sec_mean": 57364.125,
+        "latency_ms": {
+          "count": 458913,
+          "mean_ms": 1.1111862989281176,
+          "p50_ms": 1.035,
+          "p90_ms": 1.418,
+          "p99_ms": 2.925,
+          "p999_ms": 7.491,
+          "max_ms": 13.543
+        },
+        "measure_start_unix_ms": 1791374894251,
+        "measure_end_unix_ms": 1791374902251,
+        "ok_total_all_phases": 642795,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374894251,
+        "end_unix_ms": 1791374902251,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 4284416,
+          "client_rss_bytes": 20922368
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.634,
+        "average_sut_cpu_cores": 1.3583966465810844,
+        "sut_write_bytes": 308695040,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 214886892,
+        "wal": 50330848,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-write-1024-16",
+      "arm": "native",
+      "workload": [
+        "write",
+        1024,
+        16
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 185062,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 23132.75,
+        "per_stream_ops_per_sec_mean": 22.590576171875,
+        "latency_ms": {
+          "count": 185062,
+          "mean_ms": 0.6880408727885774,
+          "p50_ms": 0.696,
+          "p90_ms": 1.07,
+          "p99_ms": 1.432,
+          "p999_ms": 2.497,
+          "max_ms": 18.255
+        },
+        "measure_start_unix_ms": 1791375018583,
+        "measure_end_unix_ms": 1791375026583,
+        "ok_total_all_phases": 254408,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375018583,
+        "end_unix_ms": 1791375026583,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 6172672,
+          "client_rss_bytes": 11173888
+        },
+        "samples": 15,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.146,
+        "average_sut_cpu_cores": 1.1726840190316261,
+        "sut_write_bytes": 296321024,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 99203712,
+        "wal": 33554032,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-write-1024-256",
+      "arm": "native",
+      "workload": [
+        "write",
+        1024,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 477102,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 59637.75,
+        "per_stream_ops_per_sec_mean": 58.239990234375,
+        "latency_ms": {
+          "count": 477102,
+          "mean_ms": 4.311503496107756,
+          "p50_ms": 3.725,
+          "p90_ms": 4.971,
+          "p99_ms": 7.675,
+          "p999_ms": 105.855,
+          "max_ms": 109.759
+        },
+        "measure_start_unix_ms": 1791375118241,
+        "measure_end_unix_ms": 1791375126241,
+        "ok_total_all_phases": 676432,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375118241,
+        "end_unix_ms": 1791375126241,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 8417280,
+          "client_rss_bytes": 58920960
+        },
+        "samples": 15,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.298,
+        "average_sut_cpu_cores": 1.274321731981365,
+        "sut_write_bytes": 313630720,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 224019696,
+        "wal": 50330848,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-write-1024-4",
+      "arm": "native",
+      "workload": [
+        "write",
+        1024,
+        4
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 78939,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 9867.375,
+        "per_stream_ops_per_sec_mean": 9.6361083984375,
+        "latency_ms": {
+          "count": 78939,
+          "mean_ms": 0.40285339312633733,
+          "p50_ms": 0.325,
+          "p90_ms": 0.755,
+          "p99_ms": 1.087,
+          "p999_ms": 2.063,
+          "max_ms": 11.199
+        },
+        "measure_start_unix_ms": 1791374989919,
+        "measure_end_unix_ms": 1791374997919,
+        "ok_total_all_phases": 109239,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374989919,
+        "end_unix_ms": 1791374997919,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 6135808,
+          "client_rss_bytes": 8429568
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.63,
+        "average_sut_cpu_cores": 0.9252948885976409,
+        "sut_write_bytes": 286437376,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 45263630,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-native-write-1024-64",
+      "arm": "native",
+      "workload": [
+        "write",
+        1024,
+        64
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 327824,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 40978.0,
+        "per_stream_ops_per_sec_mean": 40.017578125,
+        "latency_ms": {
+          "count": 327824,
+          "mean_ms": 1.5573051850993207,
+          "p50_ms": 1.532,
+          "p90_ms": 2.051,
+          "p99_ms": 2.757,
+          "p999_ms": 5.643,
+          "max_ms": 57.567
+        },
+        "measure_start_unix_ms": 1791375045763,
+        "measure_end_unix_ms": 1791375053763,
+        "ok_total_all_phases": 450642,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375045763,
+        "end_unix_ms": 1791375053763,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 6307840,
+          "client_rss_bytes": 21004288
+        },
+        "samples": 15,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.164,
+        "average_sut_cpu_cores": 1.2311557788944725,
+        "sut_write_bytes": 261701632,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 149439616,
+        "wal": 33554032,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-fanout-1",
+      "arm": "raft1",
+      "workload": [
+        "fanout",
+        1
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "fanout",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-fanout",
+        "basin": "benchmark",
+        "stream": "fanout",
+        "subscribers": 1,
+        "writer_rate": 50,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.002676062,
+        "events_sent": 501,
+        "events_received": 501,
+        "subscriber_errors": 0,
+        "append_counts": {
+          "ok": 501,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "fan_out_latency_ms": {
+          "count": 501,
+          "mean_ms": 1.1710878243512977,
+          "p50_ms": 1.098,
+          "p90_ms": 1.617,
+          "p99_ms": 2.063,
+          "p999_ms": 5.055,
+          "max_ms": 5.055
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375154475,
+        "end_unix_ms": 1791375166502,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 6275072,
+          "client_rss_bytes": 5193728
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 11.62,
+        "average_sut_cpu_cores": 0.02409638554216868,
+        "sut_write_bytes": 4534272,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 16906057,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-fanout-100",
+      "arm": "raft1",
+      "workload": [
+        "fanout",
+        100
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "fanout",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-fanout",
+        "basin": "benchmark",
+        "stream": "fanout",
+        "subscribers": 100,
+        "writer_rate": 50,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.028504662,
+        "events_sent": 501,
+        "events_received": 50100,
+        "subscriber_errors": 0,
+        "append_counts": {
+          "ok": 501,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "fan_out_latency_ms": {
+          "count": 50100,
+          "mean_ms": 1.510746047904192,
+          "p50_ms": 1.409,
+          "p90_ms": 1.977,
+          "p99_ms": 2.621,
+          "p999_ms": 12.695,
+          "max_ms": 12.935
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375180004,
+        "end_unix_ms": 1791375192056,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 9179136,
+          "client_rss_bytes": 24252416
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 11.698,
+        "average_sut_cpu_cores": 0.058984441784920495,
+        "sut_write_bytes": 4534272,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 16906057,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-fanout-1000",
+      "arm": "raft1",
+      "workload": [
+        "fanout",
+        1000
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "fanout",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-fanout",
+        "basin": "benchmark",
+        "stream": "fanout",
+        "subscribers": 1000,
+        "writer_rate": 50,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.182985747,
+        "events_sent": 501,
+        "events_received": 500488,
+        "subscriber_errors": 0,
+        "append_counts": {
+          "ok": 501,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "fan_out_latency_ms": {
+          "count": 500488,
+          "mean_ms": 3.1599390714662494,
+          "p50_ms": 2.891,
+          "p90_ms": 4.659,
+          "p99_ms": 8.139,
+          "p999_ms": 67.839,
+          "max_ms": 78.847
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375207078,
+        "end_unix_ms": 1791375219351,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 14802944,
+          "client_rss_bytes": 182140928
+        },
+        "samples": 23,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 11.948,
+        "average_sut_cpu_cores": 0.30046869768998996,
+        "sut_write_bytes": 4534272,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 16906057,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-mixed",
+      "arm": "raft1",
+      "workload": [
+        "mixed"
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "mixed",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-mixed",
+        "streams": 16,
+        "writers_per_stream": 1,
+        "readers": 16,
+        "read_rate": 1,
+        "read_interval_ms": 0,
+        "backfill_events": 0,
+        "subscribers": 0,
+        "writer_rate": 0,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.943758824,
+        "drive_secs": 10.0,
+        "write_counts": {
+          "ok": 66247,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "events_received": 0,
+        "control_events_received": 0,
+        "read_bytes_total": 148318464,
+        "read_counts": {
+          "ok": 176,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "aggregate_ops_per_sec": 6624.7,
+        "write_latency_ms": {
+          "count": 66247,
+          "mean_ms": 2.4123172068169074,
+          "p50_ms": 2.127,
+          "p90_ms": 3.731,
+          "p99_ms": 4.763,
+          "p999_ms": 10.895,
+          "max_ms": 47.199
+        },
+        "fan_out_latency_ms": {
+          "count": 0,
+          "mean_ms": 0.0,
+          "p50_ms": 0.0,
+          "p90_ms": 0.0,
+          "p99_ms": 0.0,
+          "p999_ms": 0.0,
+          "max_ms": 0.0
+        },
+        "read_latency_ms": {
+          "count": 176,
+          "mean_ms": 3.8921477272727283,
+          "p50_ms": 4.035,
+          "p90_ms": 5.287,
+          "p99_ms": 6.475,
+          "p999_ms": 6.995,
+          "max_ms": 6.995
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375299706,
+        "end_unix_ms": 1791375310676,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 12533760,
+          "client_rss_bytes": 19566592
+        },
+        "samples": 22,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 10.632,
+        "average_sut_cpu_cores": 1.0016930022573365,
+        "sut_write_bytes": 614047744,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 74268511,
+        "wal": 33554286,
+        "snapshots": 19541212
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-profile-reads",
+      "arm": "raft1",
+      "workload": [
+        "reads"
+      ],
+      "profile": true,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "reads",
+        "mode": "catchup",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "stream": "bench-reads-stream",
+        "streams": 4,
+        "read_size_bytes": 4096,
+        "connections": 16,
+        "duration_secs": 8,
+        "warmup_secs": 3,
+        "settle_secs": 1,
+        "seed_bytes": 0,
+        "append_rate_per_sec": 50.0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 17720,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "bytes_read_total": 74323066880,
+        "aggregate_ops_per_sec": 2215.0,
+        "bytes_per_sec": 9290383360.0,
+        "p50_ms": 7.135,
+        "p90_ms": 8.551,
+        "p99_ms": 10.247,
+        "p999_ms": 13.823,
+        "latency_ms": {
+          "count": 17720,
+          "mean_ms": 7.229184706546275,
+          "p50_ms": 7.135,
+          "p90_ms": 8.551,
+          "p99_ms": 10.247,
+          "p999_ms": 13.823,
+          "max_ms": 20.111
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375367350,
+        "end_unix_ms": 1791375379400,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 9601024,
+          "client_rss_bytes": 20013056
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 11.64,
+        "average_sut_cpu_cores": 2.4836769759450172,
+        "sut_write_bytes": 32768,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 50299530,
+        "wal": 33520075,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-profile-write-1024-64",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1024,
+        64
+      ],
+      "profile": true,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 8993,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 1124.125,
+        "per_stream_ops_per_sec_mean": 1.0977783203125,
+        "latency_ms": {
+          "count": 8993,
+          "mean_ms": 56.96064161014126,
+          "p50_ms": 61.727,
+          "p90_ms": 74.751,
+          "p99_ms": 81.791,
+          "p999_ms": 91.071,
+          "max_ms": 92.223
+        },
+        "measure_start_unix_ms": 1791375357806,
+        "measure_end_unix_ms": 1791375365806,
+        "ok_total_all_phases": 12557,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375357806,
+        "end_unix_ms": 1791375365806,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 14000128,
+          "client_rss_bytes": 21975040
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.662,
+        "average_sut_cpu_cores": 0.6068911511354739,
+        "sut_write_bytes": 74403840,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 20537459,
+        "wal": 16777216,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-reads",
+      "arm": "raft1",
+      "workload": [
+        "reads"
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "reads",
+        "mode": "catchup",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "stream": "bench-reads-stream",
+        "streams": 4,
+        "read_size_bytes": 4096,
+        "connections": 16,
+        "duration_secs": 8,
+        "warmup_secs": 3,
+        "settle_secs": 1,
+        "seed_bytes": 0,
+        "append_rate_per_sec": 50.0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 35902,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "bytes_read_total": 150583902208,
+        "aggregate_ops_per_sec": 4487.75,
+        "bytes_per_sec": 18822987776.0,
+        "p50_ms": 3.327,
+        "p90_ms": 4.799,
+        "p99_ms": 7.135,
+        "p999_ms": 10.103,
+        "latency_ms": {
+          "count": 35902,
+          "mean_ms": 3.566301905186339,
+          "p50_ms": 3.327,
+          "p90_ms": 4.799,
+          "p99_ms": 7.135,
+          "p999_ms": 10.103,
+          "max_ms": 14.383
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375275156,
+        "end_unix_ms": 1791375287211,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 8900608,
+          "client_rss_bytes": 23351296
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 11.694,
+        "average_sut_cpu_cores": 3.358132375577219,
+        "sut_write_bytes": 32768,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 50299530,
+        "wal": 33520075,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-write-1-16",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1,
+        16
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 29918,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3739.75,
+        "per_stream_ops_per_sec_mean": 3739.75,
+        "latency_ms": {
+          "count": 29918,
+          "mean_ms": 4.275610234641341,
+          "p50_ms": 4.015,
+          "p90_ms": 5.143,
+          "p99_ms": 8.855,
+          "p999_ms": 33.215,
+          "max_ms": 41.983
+        },
+        "measure_start_unix_ms": 1791374840605,
+        "measure_end_unix_ms": 1791374848605,
+        "ok_total_all_phases": 40960,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374840605,
+        "end_unix_ms": 1791374848605,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 9867264,
+          "client_rss_bytes": 9043968
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.593,
+        "average_sut_cpu_cores": 0.6137231660740156,
+        "sut_write_bytes": 223653888,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 37510538,
+        "wal": 16777216,
+        "snapshots": 10241329
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-write-1-256",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 25937,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3242.125,
+        "per_stream_ops_per_sec_mean": 3242.125,
+        "latency_ms": {
+          "count": 25937,
+          "mean_ms": 78.97546362339502,
+          "p50_ms": 73.279,
+          "p90_ms": 107.839,
+          "p99_ms": 130.623,
+          "p999_ms": 209.535,
+          "max_ms": 237.183
+        },
+        "measure_start_unix_ms": 1791374933180,
+        "measure_end_unix_ms": 1791374941180,
+        "ok_total_all_phases": 35655,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374933180,
+        "end_unix_ms": 1791374941180,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 14249984,
+          "client_rss_bytes": 57257984
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.74,
+        "average_sut_cpu_cores": 0.49224806201550386,
+        "sut_write_bytes": 232427520,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 33606920,
+        "wal": 16777216,
+        "snapshots": 7681328
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-write-1-4",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1,
+        4
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 26361,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3295.125,
+        "per_stream_ops_per_sec_mean": 3295.125,
+        "latency_ms": {
+          "count": 26361,
+          "mean_ms": 1.2111209362315545,
+          "p50_ms": 1.107,
+          "p90_ms": 1.825,
+          "p99_ms": 2.403,
+          "p999_ms": 6.567,
+          "max_ms": 29.151
+        },
+        "measure_start_unix_ms": 1791374813858,
+        "measure_end_unix_ms": 1791374821858,
+        "ok_total_all_phases": 34854,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374813858,
+        "end_unix_ms": 1791374821858,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 8941568,
+          "client_rss_bytes": 6832128
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.583,
+        "average_sut_cpu_cores": 0.626401160490571,
+        "sut_write_bytes": 213118976,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 33386120,
+        "wal": 16777216,
+        "snapshots": 7680816
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-write-1-64",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1,
+        64
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 26603,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3325.375,
+        "per_stream_ops_per_sec_mean": 3325.375,
+        "latency_ms": {
+          "count": 26603,
+          "mean_ms": 19.270687065368605,
+          "p50_ms": 18.495,
+          "p90_ms": 25.135,
+          "p99_ms": 33.311,
+          "p999_ms": 42.431,
+          "max_ms": 56.639
+        },
+        "measure_start_unix_ms": 1791374907579,
+        "measure_end_unix_ms": 1791374915579,
+        "ok_total_all_phases": 35692,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374907579,
+        "end_unix_ms": 1791374915579,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 11059200,
+          "client_rss_bytes": 20566016
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.632,
+        "average_sut_cpu_cores": 0.5778301886792453,
+        "sut_write_bytes": 234270720,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 33604744,
+        "wal": 16777216,
+        "snapshots": 7681072
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-write-1024-16",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1024,
+        16
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 27268,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3408.5,
+        "per_stream_ops_per_sec_mean": 3.32861328125,
+        "latency_ms": {
+          "count": 27268,
+          "mean_ms": 4.898503813994426,
+          "p50_ms": 4.603,
+          "p90_ms": 5.755,
+          "p99_ms": 7.311,
+          "p999_ms": 405.247,
+          "max_ms": 412.671
+        },
+        "measure_start_unix_ms": 1791375032349,
+        "measure_end_unix_ms": 1791375040349,
+        "ok_total_all_phases": 38988,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375032349,
+        "end_unix_ms": 1791375040349,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 14155776,
+          "client_rss_bytes": 11395072
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.641,
+        "average_sut_cpu_cores": 0.6203376521397723,
+        "sut_write_bytes": 227794944,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 37922737,
+        "wal": 16777216,
+        "snapshots": 10605882
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-write-1024-256",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1024,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 28633,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3579.125,
+        "per_stream_ops_per_sec_mean": 3.4952392578125,
+        "latency_ms": {
+          "count": 28633,
+          "mean_ms": 71.83577731987566,
+          "p50_ms": 71.807,
+          "p90_ms": 87.423,
+          "p99_ms": 467.967,
+          "p999_ms": 538.111,
+          "max_ms": 544.767
+        },
+        "measure_start_unix_ms": 1791375089461,
+        "measure_end_unix_ms": 1791375097461,
+        "ok_total_all_phases": 40711,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375089461,
+        "end_unix_ms": 1791375097461,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 19185664,
+          "client_rss_bytes": 58376192
+        },
+        "samples": 15,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.304,
+        "average_sut_cpu_cores": 0.6338992332968236,
+        "sut_write_bytes": 252067840,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 38375777,
+        "wal": 16777216,
+        "snapshots": 10606066
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-write-1024-4",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1024,
+        4
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 24147,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3018.375,
+        "per_stream_ops_per_sec_mean": 2.9476318359375,
+        "latency_ms": {
+          "count": 24147,
+          "mean_ms": 1.322321530624922,
+          "p50_ms": 1.112,
+          "p90_ms": 1.945,
+          "p99_ms": 4.079,
+          "p999_ms": 6.543,
+          "max_ms": 462.591
+        },
+        "measure_start_unix_ms": 1791374960945,
+        "measure_end_unix_ms": 1791374968945,
+        "ok_total_all_phases": 34708,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374960945,
+        "end_unix_ms": 1791374968945,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 13869056,
+          "client_rss_bytes": 9015296
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.643,
+        "average_sut_cpu_cores": 0.5913908151249508,
+        "sut_write_bytes": 205852672,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 48482859,
+        "wal": 33554341,
+        "snapshots": 5485092
+      }
+    },
+    {
+      "cell": "bench-local-004-raft1-write-1024-64",
+      "arm": "raft1",
+      "workload": [
+        "write",
+        1024,
+        64
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 27701,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3462.625,
+        "per_stream_ops_per_sec_mean": 3.3814697265625,
+        "latency_ms": {
+          "count": 27701,
+          "mean_ms": 19.132003537778424,
+          "p50_ms": 18.415,
+          "p90_ms": 22.239,
+          "p99_ms": 29.279,
+          "p999_ms": 484.863,
+          "max_ms": 488.447
+        },
+        "measure_start_unix_ms": 1791375059698,
+        "measure_end_unix_ms": 1791375067698,
+        "ok_total_all_phases": 39015,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375059698,
+        "end_unix_ms": 1791375067698,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 14606336,
+          "client_rss_bytes": 20602880
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 0,
+        "sampled_seconds": 7.678,
+        "average_sut_cpu_cores": 0.6030216202135973,
+        "sut_write_bytes": 242724864,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 37931337,
+        "wal": 16777216,
+        "snapshots": 10605862
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-fanout-1",
+      "arm": "raft3",
+      "workload": [
+        "fanout",
+        1
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "fanout",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-fanout",
+        "basin": "benchmark",
+        "stream": "fanout",
+        "subscribers": 1,
+        "writer_rate": 50,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.002768109,
+        "events_sent": 501,
+        "events_received": 501,
+        "subscriber_errors": 0,
+        "append_counts": {
+          "ok": 501,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "fan_out_latency_ms": {
+          "count": 501,
+          "mean_ms": 1.7844790419161678,
+          "p50_ms": 1.567,
+          "p90_ms": 2.735,
+          "p99_ms": 4.171,
+          "p999_ms": 7.535,
+          "max_ms": 7.535
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375128338,
+        "end_unix_ms": 1791375140394,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 22441984,
+          "client_rss_bytes": 5193728
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 958808,
+        "sampled_seconds": 11.641,
+        "average_sut_cpu_cores": 0.08074907653981617,
+        "sut_write_bytes": 13615104,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 50718357,
+        "wal": 50331648,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-fanout-100",
+      "arm": "raft3",
+      "workload": [
+        "fanout",
+        100
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "fanout",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-fanout",
+        "basin": "benchmark",
+        "stream": "fanout",
+        "subscribers": 100,
+        "writer_rate": 50,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.044604484,
+        "events_sent": 501,
+        "events_received": 50100,
+        "subscriber_errors": 0,
+        "append_counts": {
+          "ok": 501,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "fan_out_latency_ms": {
+          "count": 50100,
+          "mean_ms": 2.073149101796412,
+          "p50_ms": 1.846,
+          "p90_ms": 2.981,
+          "p99_ms": 3.877,
+          "p999_ms": 33.439,
+          "max_ms": 33.503
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375193813,
+        "end_unix_ms": 1791375205891,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 24768512,
+          "client_rss_bytes": 24686592
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 963592,
+        "sampled_seconds": 11.732,
+        "average_sut_cpu_cores": 0.11677463348107742,
+        "sut_write_bytes": 13615104,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 50718357,
+        "wal": 50331648,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-fanout-1000",
+      "arm": "raft3",
+      "workload": [
+        "fanout",
+        1000
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "fanout",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-fanout",
+        "basin": "benchmark",
+        "stream": "fanout",
+        "subscribers": 1000,
+        "writer_rate": 50,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.156071211,
+        "events_sent": 501,
+        "events_received": 500401,
+        "subscriber_errors": 0,
+        "append_counts": {
+          "ok": 501,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "fan_out_latency_ms": {
+          "count": 500401,
+          "mean_ms": 3.083913107687632,
+          "p50_ms": 2.899,
+          "p90_ms": 4.041,
+          "p99_ms": 6.103,
+          "p999_ms": 57.215,
+          "max_ms": 87.615
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375221136,
+        "end_unix_ms": 1791375233412,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 31260672,
+          "client_rss_bytes": 182140928
+        },
+        "samples": 23,
+        "observed_replication_sent_bytes_lower_bound": 941514,
+        "sampled_seconds": 11.929,
+        "average_sut_cpu_cores": 0.36465755721351323,
+        "sut_write_bytes": 13615104,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 50718357,
+        "wal": 50331648,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-mixed",
+      "arm": "raft3",
+      "workload": [
+        "mixed"
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "mixed",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-mixed",
+        "streams": 16,
+        "writers_per_stream": 1,
+        "readers": 16,
+        "read_rate": 1,
+        "read_interval_ms": 0,
+        "backfill_events": 0,
+        "subscribers": 0,
+        "writer_rate": 0,
+        "duration_secs": 10,
+        "payload_bytes": 256,
+        "elapsed_secs": 10.940661789,
+        "drive_secs": 10.0,
+        "write_counts": {
+          "ok": 49083,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "events_received": 0,
+        "control_events_received": 0,
+        "read_bytes_total": 121818880,
+        "read_counts": {
+          "ok": 176,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "aggregate_ops_per_sec": 4908.3,
+        "write_latency_ms": {
+          "count": 49083,
+          "mean_ms": 3.257687916386534,
+          "p50_ms": 3.167,
+          "p90_ms": 3.851,
+          "p99_ms": 4.867,
+          "p999_ms": 19.391,
+          "max_ms": 87.359
+        },
+        "fan_out_latency_ms": {
+          "count": 0,
+          "mean_ms": 0.0,
+          "p50_ms": 0.0,
+          "p90_ms": 0.0,
+          "p99_ms": 0.0,
+          "p999_ms": 0.0,
+          "max_ms": 0.0
+        },
+        "read_latency_ms": {
+          "count": 176,
+          "mean_ms": 2.679164772727272,
+          "p50_ms": 2.311,
+          "p90_ms": 3.269,
+          "p99_ms": 15.207,
+          "p999_ms": 55.935,
+          "max_ms": 55.935
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375312430,
+        "end_unix_ms": 1791375323416,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 37543936,
+          "client_rss_bytes": 19415040
+        },
+        "samples": 22,
+        "observed_replication_sent_bytes_lower_bound": 65255999,
+        "sampled_seconds": 10.648,
+        "average_sut_cpu_cores": 1.9966190833959432,
+        "sut_write_bytes": 728170496,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 194267563,
+        "wal": 100661278,
+        "snapshots": 43268592
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-profile-reads",
+      "arm": "raft3",
+      "workload": [
+        "reads"
+      ],
+      "profile": true,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "reads",
+        "mode": "catchup",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "stream": "bench-reads-stream",
+        "streams": 4,
+        "read_size_bytes": 4096,
+        "connections": 16,
+        "duration_secs": 8,
+        "warmup_secs": 3,
+        "settle_secs": 1,
+        "seed_bytes": 0,
+        "append_rate_per_sec": 50.0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 12380,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "bytes_read_total": 51925483520,
+        "aggregate_ops_per_sec": 1547.5,
+        "bytes_per_sec": 6490685440.0,
+        "p50_ms": 10.191,
+        "p90_ms": 12.367,
+        "p99_ms": 15.807,
+        "p999_ms": 19.631,
+        "latency_ms": {
+          "count": 12380,
+          "mean_ms": 10.35006688206783,
+          "p50_ms": 10.191,
+          "p90_ms": 12.367,
+          "p99_ms": 15.807,
+          "p999_ms": 19.631,
+          "max_ms": 24.463
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375398936,
+        "end_unix_ms": 1791375410988,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 28467200,
+          "client_rss_bytes": 19726336
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 3852424,
+        "sampled_seconds": 11.655,
+        "average_sut_cpu_cores": 2.1544401544401546,
+        "sut_write_bytes": 98304,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 150898842,
+        "wal": 100560291,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-profile-write-1024-64",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1024,
+        64
+      ],
+      "profile": true,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 6696,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 837.0,
+        "per_stream_ops_per_sec_mean": 0.8173828125,
+        "latency_ms": {
+          "count": 6696,
+          "mean_ms": 77.03697700119481,
+          "p50_ms": 84.287,
+          "p90_ms": 98.687,
+          "p99_ms": 109.183,
+          "p999_ms": 115.007,
+          "max_ms": 115.967
+        },
+        "measure_start_unix_ms": 1791375387768,
+        "measure_end_unix_ms": 1791375395768,
+        "ok_total_all_phases": 9209,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375387768,
+        "end_unix_ms": 1791375395768,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 35016704,
+          "client_rss_bytes": 21565440
+        },
+        "samples": 15,
+        "observed_replication_sent_bytes_lower_bound": 6229486,
+        "sampled_seconds": 7.196,
+        "average_sut_cpu_cores": 0.4919399666481379,
+        "sut_write_bytes": 59195392,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 59041299,
+        "wal": 50331648,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-reads",
+      "arm": "raft3",
+      "workload": [
+        "reads"
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "reads",
+        "mode": "catchup",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "stream": "bench-reads-stream",
+        "streams": 4,
+        "read_size_bytes": 4096,
+        "connections": 16,
+        "duration_secs": 8,
+        "warmup_secs": 3,
+        "settle_secs": 1,
+        "seed_bytes": 0,
+        "append_rate_per_sec": 50.0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 32092,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "bytes_read_total": 134603603968,
+        "aggregate_ops_per_sec": 4011.5,
+        "bytes_per_sec": 16825450496.0,
+        "p50_ms": 3.693,
+        "p90_ms": 5.515,
+        "p99_ms": 7.935,
+        "p999_ms": 10.455,
+        "latency_ms": {
+          "count": 32092,
+          "mean_ms": 3.9898111990527276,
+          "p50_ms": 3.693,
+          "p90_ms": 5.515,
+          "p99_ms": 7.935,
+          "p999_ms": 10.455,
+          "max_ms": 14.839
+        }
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375248799,
+        "end_unix_ms": 1791375260851,
+        "scope": "outer client invocation; includes non-measure work"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 30367744,
+          "client_rss_bytes": 20439040
+        },
+        "samples": 24,
+        "observed_replication_sent_bytes_lower_bound": 18269112,
+        "sampled_seconds": 11.683,
+        "average_sut_cpu_cores": 3.4374732517332873,
+        "sut_write_bytes": 98304,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 150898507,
+        "wal": 100559956,
+        "snapshots": 0
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-write-1-16",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1,
+        16
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 29940,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3742.5,
+        "per_stream_ops_per_sec_mean": 3742.5,
+        "latency_ms": {
+          "count": 29940,
+          "mean_ms": 4.2720202738811,
+          "p50_ms": 4.191,
+          "p90_ms": 4.807,
+          "p99_ms": 5.839,
+          "p999_ms": 35.295,
+          "max_ms": 39.999
+        },
+        "measure_start_unix_ms": 1791374854227,
+        "measure_end_unix_ms": 1791374862227,
+        "ok_total_all_phases": 40936,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374854227,
+        "end_unix_ms": 1791374862227,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 28397568,
+          "client_rss_bytes": 9584640
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 30435642,
+        "sampled_seconds": 7.588,
+        "average_sut_cpu_cores": 1.0938323668950976,
+        "sut_write_bytes": 312098816,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 112519176,
+        "wal": 50331648,
+        "snapshots": 30729561
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-write-1-256",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 33602,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 4200.25,
+        "per_stream_ops_per_sec_mean": 4200.25,
+        "latency_ms": {
+          "count": 33602,
+          "mean_ms": 60.980041902267864,
+          "p50_ms": 58.847,
+          "p90_ms": 67.327,
+          "p99_ms": 96.255,
+          "p999_ms": 182.271,
+          "max_ms": 182.655
+        },
+        "measure_start_unix_ms": 1791374946890,
+        "measure_end_unix_ms": 1791374954890,
+        "ok_total_all_phases": 46532,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374946890,
+        "end_unix_ms": 1791374954890,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 32370688,
+          "client_rss_bytes": 56414208
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 32273272,
+        "sampled_seconds": 7.734,
+        "average_sut_cpu_cores": 0.7253685027152832,
+        "sut_write_bytes": 292405248,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 116982792,
+        "wal": 50331648,
+        "snapshots": 30873945
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-write-1-4",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1,
+        4
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 19366,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 2420.75,
+        "per_stream_ops_per_sec_mean": 2420.75,
+        "latency_ms": {
+          "count": 19366,
+          "mean_ms": 1.6499106681813496,
+          "p50_ms": 1.626,
+          "p90_ms": 2.111,
+          "p99_ms": 2.705,
+          "p999_ms": 5.591,
+          "max_ms": 23.663
+        },
+        "measure_start_unix_ms": 1791374827471,
+        "measure_end_unix_ms": 1791374835471,
+        "ok_total_all_phases": 26437,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374827471,
+        "end_unix_ms": 1791374835471,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 26103808,
+          "client_rss_bytes": 6868992
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 24210005,
+        "sampled_seconds": 7.59,
+        "average_sut_cpu_cores": 1.575757575757576,
+        "sut_write_bytes": 353882112,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 86016450,
+        "wal": 50331648,
+        "snapshots": 15364182
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-write-1-64",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1,
+        64
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 35846,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 4480.75,
+        "per_stream_ops_per_sec_mean": 4480.75,
+        "latency_ms": {
+          "count": 35846,
+          "mean_ms": 14.302747391619727,
+          "p50_ms": 14.183,
+          "p90_ms": 16.295,
+          "p99_ms": 21.519,
+          "p999_ms": 35.487,
+          "max_ms": 37.023
+        },
+        "measure_start_unix_ms": 1791374881056,
+        "measure_end_unix_ms": 1791374889056,
+        "ok_total_all_phases": 47374,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374881056,
+        "end_unix_ms": 1791374889056,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 30851072,
+          "client_rss_bytes": 20357120
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 34527639,
+        "sampled_seconds": 7.617,
+        "average_sut_cpu_cores": 0.7575160824471576,
+        "sut_write_bytes": 319401984,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 142765813,
+        "wal": 75496365,
+        "snapshots": 30857817
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-write-1024-16",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1024,
+        16
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 25641,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3205.125,
+        "per_stream_ops_per_sec_mean": 3.1300048828125,
+        "latency_ms": {
+          "count": 25641,
+          "mean_ms": 4.987634881634883,
+          "p50_ms": 5.139,
+          "p90_ms": 6.179,
+          "p99_ms": 7.495,
+          "p999_ms": 17.263,
+          "max_ms": 606.719
+        },
+        "measure_start_unix_ms": 1791375004865,
+        "measure_end_unix_ms": 1791375012865,
+        "ok_total_all_phases": 36033,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375004865,
+        "end_unix_ms": 1791375012865,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 39579648,
+          "client_rss_bytes": 11259904
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 28775623,
+        "sampled_seconds": 7.712,
+        "average_sut_cpu_cores": 1.387448132780083,
+        "sut_write_bytes": 330735616,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 146512740,
+        "wal": 100661103,
+        "snapshots": 16460286
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-write-1024-256",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1024,
+        256
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 33935,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 4241.875,
+        "per_stream_ops_per_sec_mean": 4.1424560546875,
+        "latency_ms": {
+          "count": 33935,
+          "mean_ms": 60.64316180934143,
+          "p50_ms": 59.743,
+          "p90_ms": 70.015,
+          "p99_ms": 576.511,
+          "p999_ms": 659.967,
+          "max_ms": 660.479
+        },
+        "measure_start_unix_ms": 1791375104380,
+        "measure_end_unix_ms": 1791375112380,
+        "ok_total_all_phases": 48067,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375104380,
+        "end_unix_ms": 1791375112380,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 45543424,
+          "client_rss_bytes": 58208256
+        },
+        "samples": 15,
+        "observed_replication_sent_bytes_lower_bound": 30906013,
+        "sampled_seconds": 7.352,
+        "average_sut_cpu_cores": 0.914036996735582,
+        "sut_write_bytes": 296202240,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 120876157,
+        "wal": 50331648,
+        "snapshots": 31861602
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-write-1024-4",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1024,
+        4
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 14909,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 1863.625,
+        "per_stream_ops_per_sec_mean": 1.8199462890625,
+        "latency_ms": {
+          "count": 14909,
+          "mean_ms": 2.1438728955664406,
+          "p50_ms": 1.575,
+          "p90_ms": 2.595,
+          "p99_ms": 9.527,
+          "p999_ms": 37.951,
+          "max_ms": 826.879
+        },
+        "measure_start_unix_ms": 1791374975662,
+        "measure_end_unix_ms": 1791374983662,
+        "ok_total_all_phases": 19897,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791374975662,
+        "end_unix_ms": 1791374983662,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 41189376,
+          "client_rss_bytes": 9117696
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 21508366,
+        "sampled_seconds": 7.754,
+        "average_sut_cpu_cores": 1.7178230590662884,
+        "sut_write_bytes": 351293440,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 83761315,
+        "wal": 50331648,
+        "snapshots": 16454898
+      }
+    },
+    {
+      "cell": "bench-local-004-raft3-write-1024-64",
+      "arm": "raft3",
+      "workload": [
+        "write",
+        1024,
+        64
+      ],
+      "profile": false,
+      "verdict": "PASS",
+      "error": null,
+      "raw_client": {
+        "scenario": "multi-stream-pool-write",
+        "api_style": "Durable",
+        "target": "http://127.0.0.1:19801",
+        "bucket": "bench-multistream",
+        "basin": "benchmark",
+        "streams": 1024,
+        "duration_secs": 8,
+        "payload_bytes": 256,
+        "rate_per_stream": 0,
+        "elapsed_secs": 8.0,
+        "counts": {
+          "ok": 26478,
+          "backpressure": 0,
+          "other_err": 0
+        },
+        "errors": [],
+        "aggregate_ops_per_sec": 3309.75,
+        "per_stream_ops_per_sec_mean": 3.232177734375,
+        "latency_ms": {
+          "count": 26478,
+          "mean_ms": 19.380997922803843,
+          "p50_ms": 17.551,
+          "p90_ms": 21.055,
+          "p99_ms": 33.215,
+          "p999_ms": 830.975,
+          "max_ms": 868.351
+        },
+        "measure_start_unix_ms": 1791375074949,
+        "measure_end_unix_ms": 1791375082949,
+        "ok_total_all_phases": 39287,
+        "lazy_creates": 0,
+        "pod_slice_lo": 0,
+        "pod_slice_hi": 1024
+      },
+      "sample_window": {
+        "start_unix_ms": 1791375074949,
+        "end_unix_ms": 1791375082949,
+        "scope": "exact client measurement"
+      },
+      "resources": {
+        "peak_sampled": {
+          "sut_rss_bytes": 42442752,
+          "client_rss_bytes": 20758528
+        },
+        "samples": 16,
+        "observed_replication_sent_bytes_lower_bound": 27092703,
+        "sampled_seconds": 7.762,
+        "average_sut_cpu_cores": 0.9250193249162587,
+        "sut_write_bytes": 258523136,
+        "sut_read_bytes": 0
+      },
+      "final_storage_bytes": {
+        "total": 114138643,
+        "wal": 50331648,
+        "snapshots": 31952397
+      }
+    }
+  ],
+  "scope": "single-host resource qualification; profile cells are perturbed and never capacity rows"
+}

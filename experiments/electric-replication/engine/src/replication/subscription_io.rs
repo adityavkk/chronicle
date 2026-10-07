@@ -90,13 +90,14 @@ impl Cluster {
     }
 
     pub(super) async fn barrier(&self, group: usize) -> Result<(), u16> {
+        let g = &self.groups[group];
         match tokio::time::timeout(
             Duration::from_secs(3),
-            self.groups[group].raft.ensure_linearizable(),
+            g.reads.confirm(async { g.raft.ensure_linearizable().await.is_ok() }),
         )
         .await
         {
-            Ok(Ok(_)) => Ok(()),
+            Ok(true) => Ok(()),
             _ => Err(503),
         }
     }

@@ -1,0 +1,39 @@
+native ['fanout', 1] PASS cpu 0.01 RSS MiB 1.5 replication MiB lower bound 0.0
+native ['fanout', 100] PASS cpu 0.05 RSS MiB 3.4 replication MiB lower bound 0.0
+native ['fanout', 1000] PASS cpu 0.31 RSS MiB 9.3 replication MiB lower bound 0.0
+native ['mixed'] PASS cpu 1.23 RSS MiB 5.2 replication MiB lower bound 0.0
+native ['reads'] PASS cpu 2.93 RSS MiB 5.2 replication MiB lower bound 0.0
+native ['write', 1, 16] PASS cpu 0.8 RSS MiB 3.6 replication MiB lower bound 0.0
+native ['write', 1, 256] PASS cpu 1.79 RSS MiB 6.6 replication MiB lower bound 0.0
+native ['write', 1, 4] PASS cpu 0.75 RSS MiB 1.3 replication MiB lower bound 0.0
+native ['write', 1, 64] PASS cpu 1.42 RSS MiB 4.2 replication MiB lower bound 0.0
+native ['write', 1024, 16] PASS cpu 1.01 RSS MiB 5.9 replication MiB lower bound 0.0
+native ['write', 1024, 256] PASS cpu 1.24 RSS MiB 8.7 replication MiB lower bound 0.0
+native ['write', 1024, 4] PASS cpu 0.98 RSS MiB 6.0 replication MiB lower bound 0.0
+native ['write', 1024, 64] PASS cpu 1.2 RSS MiB 5.8 replication MiB lower bound 0.0
+raft1 ['fanout', 1] PASS cpu 0.02 RSS MiB 6.4 replication MiB lower bound 0.0
+raft1 ['fanout', 100] PASS cpu 0.05 RSS MiB 8.4 replication MiB lower bound 0.0
+raft1 ['fanout', 1000] PASS cpu 0.31 RSS MiB 13.4 replication MiB lower bound 0.0
+raft1 ['mixed'] PASS cpu 1.0 RSS MiB 11.7 replication MiB lower bound 0.0
+raft1 ['reads'] PASS cpu 2.06 RSS MiB 9.5 replication MiB lower bound 0.0
+raft1 ['write', 1, 16] PASS cpu 0.62 RSS MiB 9.6 replication MiB lower bound 0.0
+raft1 ['write', 1, 256] PASS cpu 0.58 RSS MiB 13.4 replication MiB lower bound 0.0
+raft1 ['write', 1, 4] PASS cpu 0.63 RSS MiB 8.7 replication MiB lower bound 0.0
+raft1 ['write', 1, 64] PASS cpu 0.59 RSS MiB 10.6 replication MiB lower bound 0.0
+raft1 ['write', 1024, 16] PASS cpu 0.56 RSS MiB 13.5 replication MiB lower bound 0.0
+raft1 ['write', 1024, 256] PASS cpu 0.61 RSS MiB 17.8 replication MiB lower bound 0.0
+raft1 ['write', 1024, 4] PASS cpu 0.67 RSS MiB 13.1 replication MiB lower bound 0.0
+raft1 ['write', 1024, 64] PASS cpu 0.58 RSS MiB 13.9 replication MiB lower bound 0.0
+raft3 ['fanout', 1] PASS cpu 0.07 RSS MiB 20.9 replication MiB lower bound 0.9
+raft3 ['fanout', 100] PASS cpu 0.11 RSS MiB 28.7 replication MiB lower bound 0.9
+raft3 ['fanout', 1000] FAIL cpu 0.01 RSS MiB 64.3 replication MiB lower bound 1.3
+raft3 ['mixed'] PASS cpu 1.94 RSS MiB 36.7 replication MiB lower bound 60.8
+raft3 ['reads'] PASS cpu 3.44 RSS MiB 30.1 replication MiB lower bound 18.3
+raft3 ['write', 1, 16] PASS cpu 1.01 RSS MiB 27.6 replication MiB lower bound 25.9
+raft3 ['write', 1, 256] PASS cpu 0.75 RSS MiB 31.3 replication MiB lower bound 32.2
+raft3 ['write', 1, 4] PASS cpu 1.64 RSS MiB 25.6 replication MiB lower bound 24.7
+raft3 ['write', 1, 64] PASS cpu 0.76 RSS MiB 28.4 replication MiB lower bound 31.6
+raft3 ['write', 1024, 16] PASS cpu 1.41 RSS MiB 39.3 replication MiB lower bound 28.0
+raft3 ['write', 1024, 256] PASS cpu 0.92 RSS MiB 41.0 replication MiB lower bound 27.2
+raft3 ['write', 1024, 4] PASS cpu 2.03 RSS MiB 38.5 replication MiB lower bound 26.0
+raft3 ['write', 1024, 64] PASS cpu 0.93 RSS MiB 39.3 replication MiB lower bound 26.2

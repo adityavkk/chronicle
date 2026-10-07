@@ -170,6 +170,12 @@ theorem suffix_survives_checkpoint (floor cut later : Nat)
 theorem before_cut_replay_not_needed (cut frame : Nat) (covered : frame ≤ cut) :
     ¬ cut < frame := by omega
 
+/- Read cohorts sample the STARTED generation, not the completed generation.
+   Linearizable consensus confirmation and atomic start ordering are assumptions. -/
+theorem in_flight_round_not_reusable (started completed observed : Nat)
+    (atInvocation : observed = started) (notNewer : completed ≤ started) :
+    ¬ observed < completed := by omega
+
 #print axioms publication_committed
 #print axioms session_no_rollback
 #print axioms session_monotone
@@ -195,4 +201,5 @@ theorem before_cut_replay_not_needed (cut frame : Nat) (covered : frame ≤ cut)
 #print axioms retained_location_survives
 #print axioms suffix_survives_checkpoint
 #print axioms before_cut_replay_not_needed
+#print axioms in_flight_round_not_reusable
 end ElectricReplication

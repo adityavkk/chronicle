@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::Semaphore;
@@ -140,7 +141,30 @@ struct Group {
     raft: Raft,
     machine: Arc<machine::Machine>,
     slots: Arc<Semaphore>,
+    reads: ReadBarrier,
 }
+
+#[derive(Default)]
+struct ReadBarrier {
+    started: AtomicU64,
+    completed: tokio::sync::Mutex<(u64, bool)>,
+}
+impl ReadBarrier {
+    async fn confirm(&self, round: impl Future<Output = bool>) -> bool {
+        let observed = self.started.load(Ordering::SeqCst);
+        let mut completed = self.completed.lock().await;
+        if completed.0 > observed {
+            return completed.1;
+        }
+        // Publish START before polling the Raft future. New arrivals cannot
+        // reuse this round even if it completes while they wait for the lock.
+        let generation = self.started.fetch_add(1, Ordering::SeqCst) + 1;
+        let result = round.await;
+        *completed = (generation, result);
+        result
+    }
+}
+
 impl Group {
     async fn propose(
         &self,
@@ -317,11 +341,7 @@ impl Cluster {
         };
         match consistency.as_str() {
             "linearizable" => {
-                if !matches!(
-                    tokio::time::timeout(Duration::from_secs(3), g.raft.ensure_linearizable())
-                        .await,
-                    Ok(Ok(_))
-                ) {
+                if self.barrier(group).await.is_err() {
                     return self.unavailable(group, "linearizable barrier unavailable");
                 }
                 let timed = g
@@ -655,6 +675,7 @@ pub fn run() {
                 raft,
                 machine,
                 slots: Arc::new(Semaphore::new(256)),
+                reads: ReadBarrier::default(),
             });
         }
         let listener = tokio::net::TcpListener::bind(config.listen)
@@ -676,4 +697,52 @@ pub fn run() {
         println!("replicated Electric engine ready");
         crate::engine_raw::serve(placeholder, listener).await;
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::future::poll_fn;
+    use std::task::Poll;
+
+    proptest! {
+        #[test]
+        fn read_cohorts_exclude_inflight_round_even_after_cancel(
+            count in 1usize..64, first_result in any::<bool>(), cancel in any::<bool>(),
+        ) {
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let gate = ReadBarrier::default();
+                let calls = AtomicU64::new(0);
+                let (release, wait) = tokio::sync::oneshot::channel();
+                let mut first = Box::pin(gate.confirm(async {
+                    calls.fetch_add(1,Ordering::SeqCst);
+                    wait.await.unwrap()
+                }));
+                assert!(poll_fn(|cx|Poll::Ready(first.as_mut().poll(cx))).await.is_pending());
+                let mut late = Vec::new();
+                for _ in 0..count {
+                    let mut request = Box::pin(gate.confirm(async {
+                        calls.fetch_add(1,Ordering::SeqCst);
+                        !first_result
+                    }));
+                    // Poll explicitly to establish arrival DURING round 1,
+                    // without relying on scheduler sleeps or yield counts.
+                    assert!(poll_fn(|cx|Poll::Ready(request.as_mut().poll(cx))).await.is_pending());
+                    late.push(request);
+                }
+                if cancel { drop(first); } else {
+                    release.send(first_result).unwrap();
+                    assert_eq!(first.await,first_result);
+                }
+                for request in late { assert_eq!(request.await,!first_result); }
+                assert_eq!(calls.load(Ordering::SeqCst),2,"late arrivals share only the NEW round");
+                assert_eq!(gate.confirm(async {
+                    calls.fetch_add(1,Ordering::SeqCst);
+                    first_result
+                }).await,first_result);
+                assert_eq!(calls.load(Ordering::SeqCst),3,"a later invocation needs a fresh confirmation");
+            });
+        }
+    }
 }

@@ -20,17 +20,18 @@ for mutation in EarlyFlush EarlyPublish LocalAck; do
   test "$result" -ne 0
   grep -q 'Invariant Safe is violated' "$here/evidence/formal/$mutation.txt"
 done
-for mode in subscriptions subscriptions-live timed forks forks-live links links-live apply apply-live reclaim reclaim-live; do
+for mode in subscriptions subscriptions-live timed forks forks-live links links-live apply apply-live reclaim reclaim-live reads reads-live; do
   model=Subscriptions
   test "$mode" != timed || model=TimedApply
   [[ "$mode" != forks* ]] || model=Forks
   [[ "$mode" != links* ]] || model=Links
   [[ "$mode" != apply* ]] || model=ApplyRecovery
   [[ "$mode" != reclaim* ]] || model=JournalReclaim
+  [[ "$mode" != reads* ]] || model=ReadCohorts
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
   grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
 done
-for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote; do
+for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail EarlyApply ForgetMarker EarlyServe EarlyUnlink MissingDirSync DropRetained DropVote UseCompletedTicket ReuseEqual; do
   model=Subscriptions
   config=subscriptions
   invariant=Safe
@@ -42,6 +43,7 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
     StaleObservation|OldIncarnationAck|DiscoverAtTail) model=Links; config=links ;;
     EarlyApply|ForgetMarker|EarlyServe) model=ApplyRecovery; config=apply ;;
     EarlyUnlink|MissingDirSync|DropRetained|DropVote) model=JournalReclaim; config=reclaim ;;
+    UseCompletedTicket|ReuseEqual) model=ReadCohorts; config=reads ;;
   esac
   sed "s/$mutation = FALSE/$mutation = TRUE/" "$config.cfg" > "$tools/$mutation.cfg"
   set +e
@@ -53,4 +55,4 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
 done
 "$HOME/.elan/bin/lean" -DwarningAsError=true Contracts.lean > "$here/evidence/formal/lean.txt" 2>&1
 ! grep -E 'sorryAx|warning:|error:' "$here/evidence/formal/lean.txt"
-printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim safety, stable-period liveness, 21 negative mutations; Lean: PASS\n'
+printf 'TLC publication/timing/subscriptions/forks/links/apply/reclaim/reads safety, stable-period liveness, 23 negative mutations; Lean: PASS\n'
