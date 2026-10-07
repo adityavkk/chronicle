@@ -112,7 +112,7 @@ other models, it assumes consensus's log ownership rules rather than proving the
 Apply first fsyncs its covering Commit marker, then invokes the native handlers.
 For local-acceptance commands it also retains their deterministic replies in
 partition-owned metadata. Recent result batches are bounded (the latest 1,024
-batches containing receipts, at most 131,072 results), included in snapshots and
+batches containing receipts, at most 65,536 results), included in snapshots and
 rebuilt by private committed replay. Retention is by count, not a promised time
 interval; at high rates it can be short. Clients should await promptly and save
 terminal results they need later. Expiration does not undo the write or producer

@@ -1,0 +1,45 @@
+{
+  "arm": "native",
+  "workload": [
+    "write",
+    1,
+    256
+  ],
+  "profile": false,
+  "profiler": null,
+  "diagnostics": true,
+  "verdict": "PASS",
+  "ack_contract": "native local-fsync",
+  "pending_commands": 256,
+  "progress_sampling": false,
+  "node_pids": [
+    1807392
+  ],
+  "affinity": {
+    "1807392": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 1807403,
+  "process_sample_gaps": [
+    {
+      "pid": 1807403,
+      "error": "PermissionError(13, 'Permission denied')"
+    }
+  ],
+  "client_window": {
+    "start_unix_ms": 1791403043855,
+    "end_unix_ms": 1791403055928,
+    "exit_code": 0
+  },
+  "verify_pid": 1807441,
+  "verify_window": {
+    "start_unix_ms": 1791403055928,
+    "end_unix_ms": 1791403055936,
+    "exit_code": 0
+  },
+  "diagnostic_tail_captured": true
+}

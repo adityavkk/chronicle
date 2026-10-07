@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 
 pub(super) const CAPACITY: usize = 256;
-pub(super) const MAX_COMMANDS: usize = 128;
+pub(super) const MAX_COMMANDS: usize = 64;
 const MAX_BYTES: usize = 2 * 1024 * 1024;
 const MAX_INFLIGHT_BATCHES: usize = 2;
 
@@ -62,7 +62,7 @@ impl Command {
     }
 }
 
-fn take_ready(
+async fn take_ready(
     first: Pending,
     receive: &mut mpsc::Receiver<Pending>,
     carry: &mut Option<Pending>,
@@ -70,6 +70,7 @@ fn take_ready(
     let mut next = Some(first);
     let mut commands = Vec::new();
     let mut completions = Vec::new();
+    let mut yielded = false;
     let mut bytes = 8; // Vec length; the journal adds its fixed entry/frame header.
     while let Some(pending) = next.take() {
         let size = pending.command.encoded_len();
@@ -90,6 +91,13 @@ fn take_ready(
             break;
         }
         next = receive.try_recv().ok();
+        if next.is_none() && !yielded {
+            // Keep the collected prefix and its credits while ready senders
+            // join. Yield once only, and never delay a full/metadata batch.
+            yielded = true;
+            tokio::task::yield_now().await;
+            next = receive.try_recv().ok();
+        }
     }
     (commands, completions)
 }
@@ -140,15 +148,7 @@ pub(super) fn start(raft: Raft, machine: Arc<Machine>, capacity: usize, admitted
                     None => break,
                 },
             };
-            if first.command.method == "POST" {
-                // Let ready HTTP senders join this cohort before sealing it.
-                // Releasing the pipeline at local flush otherwise races the
-                // preceding batch's response wakeups into singleton entries.
-                // This is one scheduler yield, not a batching timer or a wait
-                // for quorum; admission credits and FIFO ownership stay held.
-                tokio::task::yield_now().await;
-            }
-            let (commands, mut completions) = take_ready(first, &mut receive, &mut carry);
+            let (commands, mut completions) = take_ready(first, &mut receive, &mut carry).await;
             let expected = match prepare_epoch(&raft, &machine, &admitted_term).await {
                 Ok(expected) => expected,
                 Err(status) => {
@@ -228,6 +228,47 @@ mod tests {
     use proptest::prelude::*;
     use std::sync::Arc;
     use tokio::sync::Semaphore;
+
+    #[tokio::test]
+    async fn held_prefix_survives_arrival_during_yield_and_metadata_never_yields() {
+        use std::future::poll_fn;
+        use std::task::Poll;
+        let slots = Arc::new(Semaphore::new(4));
+        let bytes = Arc::new(Semaphore::new(400));
+        let pending = |n: u8, method: &str| {
+            let (result, receiver) = oneshot::channel();
+            drop(receiver); // HTTP cancellation does not drop the held prefix.
+            Pending { command:Command {method:method.into(),path:format!("/held/{n}"),
+                headers:vec![],body:vec![n; n as usize],time:n as u64},result,
+                permit:slots.clone().try_acquire_owned().unwrap(),
+                bytes:bytes.clone().try_acquire_many_owned(100).unwrap() }
+        };
+        let (send, mut receive) = mpsc::channel(4);
+        let first = pending(1,"POST");
+        send.try_send(pending(2,"POST")).unwrap_or_else(|_|panic!("queue full"));
+        let mut carry = None;
+        let mut forming = Box::pin(take_ready(first,&mut receive,&mut carry));
+        assert!(poll_fn(|cx|Poll::Ready(forming.as_mut().poll(cx))).await.is_pending());
+        assert_eq!(send.capacity(),4,"ready prefix was drained BEFORE the yield");
+        assert_eq!(slots.available_permits(),2);
+        send.try_send(pending(3,"POST")).unwrap_or_else(|_|panic!("queue full"));
+        send.try_send(pending(4,"DELETE")).unwrap_or_else(|_|panic!("queue full"));
+        let (commands, completions) = forming.await;
+        assert_eq!(commands.iter().map(|c|c.body.clone()).collect::<Vec<_>>(),vec![vec![1],vec![2,2],vec![3,3,3]]);
+        assert_eq!(slots.available_permits(),0);
+        assert_eq!(bytes.available_permits(),0);
+        let mut metadata = Box::pin(take_ready(carry.take().unwrap(),&mut receive,&mut carry));
+        let Poll::Ready((commands, metadata_completion)) = poll_fn(|cx|Poll::Ready(metadata.as_mut().poll(cx))).await
+            else {panic!("metadata must not yield")};
+        assert_eq!(commands.len(),1);
+        assert_eq!(commands[0].path,"/held/4");
+        assert_eq!(commands[0].method,"DELETE");
+        drop(completions);
+        assert_eq!(slots.available_permits(),3);
+        drop(metadata_completion);
+        assert_eq!(slots.available_permits(),4);
+        assert_eq!(bytes.available_permits(),400);
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
     async fn queued_epoch_fence_rejects_without_native_wal_or_receipt() {
@@ -339,7 +380,7 @@ mod tests {
                 let mut offset = 0;
                 while offset < count {
                     let first = carry.take().unwrap_or_else(||receive.try_recv().unwrap());
-                    let (commands, mut completions) = take_ready(first,&mut receive,&mut carry);
+                    let (commands, mut completions) = take_ready(first,&mut receive,&mut carry).await;
                     for (ordinal, completion) in completions.iter_mut().enumerate() {
                         if completion.local {
                             let _ = completion.result.take().unwrap().send(Ok(Outcome::Accepted(Position {
@@ -354,8 +395,8 @@ mod tests {
                     assert!(bincode::serialized_size(&commands).unwrap()<=MAX_BYTES as u64);
                     if body_bytes < 512 && offset > metadata_at+1 {
                         // Remaining small appends hit the count ceiling, not
-                        // metadata or bytes. An old 64-cap or off-by-one fails.
-                        assert_eq!(commands.len(),(count-offset).min(128));
+                        // metadata or bytes. Premature sealing/off-by-one fails.
+                        assert_eq!(commands.len(),(count-offset).min(64));
                     }
                     let (durable, _receiver) = oneshot::channel();
                     let batch = Batch {commands:commands.clone(),durable:Some(Arc::new(Mutex::new(Some(durable))))};

@@ -1,0 +1,36 @@
+
+ RUN  v4.1.11 /home/user/workspace/repo
+
+ ✓ experiments/electric-replication/conformance.test.ts (332 tests) 22989ms
+     ✓ should wait for new data with long-poll  510ms
+     ✓ should include X-Content-Type-Options: nosniff on long-poll responses  507ms
+     ✓ should support offset=now with long-poll mode (waits for data)  1007ms
+     ✓ should support offset=now with long-poll on empty stream  1009ms
+     ✓ should return Stream-Cursor, Stream-Up-To-Date and Stream-Next-Offset on 204 timeout  1007ms
+     ✓ should return 404 on HEAD after TTL expires  1037ms
+     ✓ should return 404 on GET after TTL expires (idle)  1012ms
+     ✓ should return 404 on POST append after TTL expires (idle)  1035ms
+     ✓ should return 404 on HEAD after Expires-At passes  3041ms
+     ✓ should return 404 on GET after Expires-At passes  3040ms
+     ✓ should return 404 on POST append after Expires-At passes  3064ms
+     ✓ should allow recreating stream after TTL expires  1015ms
+     ✓ should extend TTL on write (sliding window)  3035ms
+     ✓ should extend TTL on read (sliding window)  3009ms
+     ✓ should NOT extend TTL on HEAD  2014ms
+     ✓ should NOT extend Expires-At on read or write  4015ms
+     ✓ should handle chunk-size pagination correctly  674ms
+       ✓ concurrent readers see consistent data during writes  576ms
+       ✓ single byte values cover full range (0-255) with concurrent readers during write  413ms
+       ✓ offsets are always monotonically increasing  387ms
+       ✓ sse-live-reader-receives-final-append-on-close: live reader at tail receives data appended atomically with the close  1092ms
+     ✓ should cascade GC through three levels  1061ms
+     ✓ should expire fork based on TTL (releases refcount)  1017ms
+     ✓ should expire source with living forks (source goes 410)  1023ms
+     ✓ should allow fork to outlive source via TTL renewal  2020ms
+
+ Test Files  1 passed (1)
+      Tests  332 passed (332)
+   Start at  19:55:10
+   Duration  23.20s (transform 17ms, setup 0ms, import 87ms, tests 22.99s, environment 0ms)
+
+JSON report written to /home/user/workspace/repo/experiments/electric-replication/evidence/conformance-018/suite.json

@@ -298,3 +298,21 @@ length-generic fold composition theorem covers concatenated batches, not the Rus
 future or Tokio scheduler. A directly polled Rust collector test must establish
 arrival during the yield, not rely on sleeps to guess that interleaving. Matched
 measurements must decide whether this relocation improves actual batch size.
+
+The held-prefix candidate passes 138 Rust tests, `conformance-018` (332 executed
+and passed, zero failures/skips), and all six process campaigns. The direct-poll
+test observes the drained prefix before yielding, injects later arrivals and a
+metadata boundary, and checks that canceled HTTP receivers retain their credits.
+The full formal run detects 39 TLC mutations plus the Lean header mutation.
+
+`write-timings-002` does **not** establish a performance improvement. One-member
+rates are 46,748 / 47,560 / 46,812 writes/s, versus native 102,911 / 100,474 /
+54,804. The apparent third-repetition narrowing comes from native slowing, not
+from one member accelerating. Actual batches still average 43.0–43.4 commands;
+WAL fsyncs/ack remain 0.0456–0.0458. Mean entry waits are 473–487 µs, marker waits
+414–437 µs and apply calls 224–236 µs. Every cell passes the unchanged exact-byte
+and zero-error checks, but those checks do not make it a performance win. One
+closing client `/proc` observation is unavailable and remains in the raw ledger.
+The next diagnostic must separate the synchronous WAL-fsync loop from the
+scheduling/notification time included in these durability waits; neither barrier
+will be removed on the basis of overlapping phase times.
