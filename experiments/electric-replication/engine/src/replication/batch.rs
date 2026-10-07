@@ -160,12 +160,14 @@ pub(super) fn start(raft: Raft, machine: Arc<Machine>, capacity: usize, admitted
             };
             let (durable, flushed) = oneshot::channel();
             let batch = Batch { commands, durable: Some(Arc::new(Mutex::new(Some(durable)))) };
+            let resolve_probe = super::timing::RESOLVE.start();
             // Enqueue from this single dispatcher BEFORE spawning a waiter.
             // Concurrent client_write tasks would reorder FIFO submissions.
             // The epoch is also checked atomically inside RaftCore at assignment.
             let receive_commit = raft.client_write_ff_with_leader(batch, expected).await;
             let machine = machine.clone();
             tokio::spawn(async move {
+                let _resolve_probe = resolve_probe;
                 let log_id = if receive_commit.is_ok() { flushed.await.ok() } else { None };
                 // Strong requests ahead in FIFO must not block local-fsync
                 // dispatch on quorum. All unresolved request credits stay held.

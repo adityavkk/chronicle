@@ -141,7 +141,9 @@ impl RaftStateMachine<Types> for Arc<Machine> {
     {
         let entries: Vec<_> = entries.into_iter().collect();
         let mut replies = Vec::new();
+        let lock_probe = timing::APPLY_LOCK.start();
         let mut view = self.view.write().await;
+        drop(lock_probe);
         let mut previous = view.applied;
         for entry in &entries {
             if previous.is_some_and(|id| entry.log_id.index <= id.index) {
@@ -157,6 +159,7 @@ impl RaftStateMachine<Types> for Arc<Machine> {
             // clock or membership mutation, but run it on the ordered SM worker.
             self.journal.cover_apply(last.log_id).await.map_err(storage_error)?;
         }
+        let _apply_probe = timing::APPLY.start();
         for entry in entries {
             let reply = match entry.payload {
                 EntryPayload::Normal(batch) => {
@@ -313,6 +316,7 @@ impl RaftSnapshotBuilder<Types> for Arc<Machine> {
         // not collected in an in-memory JSON snapshot. This can stall group
         // writes for disk time: measure it, do not claim zero-copy snapshots.
         let view = self.view.write().await;
+        let _probe = timing::SNAPSHOT.start();
         let meta = SnapshotMeta {
             last_log_id: view.applied,
             last_membership: view.membership.clone(),

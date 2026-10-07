@@ -232,3 +232,38 @@ source/binary/config hashes and failures remain separate in the raw evidence.
 Reducing allocations is not proof of performance parity. Journal-stage, durable
 wait, reread, apply and snapshot timing still need attribution before the next
 storage/scheduling change.
+
+## Phase timing and the next bounded-batch experiment
+
+Optional cumulative `RAFT_TIMING` probes use the existing `stats_secs` switch.
+They count completed attempts, including failures, across both groups in each
+process. Entry staging includes bincode encoding, index locking and native WAL
+framing/write, not durability. The entry wait starts before spawning its flush
+waiter, so it includes scheduling and notification latency; the marker wait spans
+its native durability await. Neither is pure fsync syscall time. Reread includes
+`pread` and decoding. Apply excludes its initial view-lock and marker waits;
+snapshot timing starts after acquiring that view lock. Resolve includes queued
+consensus, waits, apply and completion. These phases overlap and must not be added
+as if they were a CPU profile. Histogram bins end at inclusive 1,2,...,524288 µs
+with a final overflow bucket. Cumulative logs retain count, bytes, total/max ns
+and all buckets; client/resource windows remain separate.
+
+`write-timings-001` has six passing matched short cells. One-member whole-run
+means are 428–548 µs per entry wait, 377–476 µs per marker wait, 46–60 µs per entry
+stage, 75–80 µs per reread and 213–224 µs per apply call. Each run makes one
+259–302 ms snapshot. Only about 35–44 appends share an entry on average. These
+measurements point to durability-wait amortization before another allocation-only
+change. `conformance-016` passes 332/332 with zero skips and 137 Rust tests pass.
+
+The next candidate raises the **count ceiling** from 64 to 128 commands per
+append batch, keeping the 2 MiB byte ceiling, two locally unflushed batches,
+FIFO order, singleton metadata and charged count/byte credits unchanged. No
+linger timer, fsync omission or one-member bypass is introduced. `Batches.tla`
+already permits any nonempty FIFO append prefix at sealing; its bounded check
+has only two append requests, while the Lean fold theorem is length-generic.
+Thus neither checks every 128-command interleaving; generated batch/native-WAL
+tests and real-process qualification remain the code-level obligations. The
+snapshot trigger still counts entries, so larger batches can increase snapshot
+bytes and pauses. Bounded receipt history can hold at most 131,072 replies rather
+than 65,536; retention remains count-based, not a time guarantee. This candidate
+has no claimed performance benefit until new matched measurements complete.

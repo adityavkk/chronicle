@@ -50,6 +50,24 @@ def export_cpu_profile(output):
     return result
 
 
+def preserve_incomplete_heap_profiles(output):
+    """Keep interrupted/supervisor-restarted traces without publishing opaque tails."""
+    rows = []
+    for source in sorted(output.glob("heap-node-*.zst")):
+        check = subprocess.run(["zstd", "-tq", str(source)], capture_output=True)
+        if check.returncode == 0:
+            continue
+        local = ROOT / ".tmp/electric-profiles" / output.name / source.name
+        local.parent.mkdir(parents=True, exist_ok=True)
+        assert not local.exists(), "never replace an earlier partial trace"
+        rows.append(dict(original_file=source.name, raw_local_path=str(local.relative_to(ROOT)),
+                         sha256=hashlib.sha256(source.read_bytes()).hexdigest(), bytes=source.stat().st_size,
+                         decoder_exit_code=check.returncode, decoder_error=check.stderr.decode(errors="replace")))
+        source.rename(local)
+    if rows:
+        (output / "incomplete-heap-profiles.json").write_text(json.dumps(rows, indent=2)+"\n")
+
+
 def sample(pids, ports, node_pids):
     processes = {}
     gaps = []
@@ -346,6 +364,7 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
             if len(reports) != replicas or any(reports.values()):
                 result["verdict"] = "FAIL"
                 result["profile_error"] = "Missing or unreadable heap profile; partial outputs retained"
+            preserve_incomplete_heap_profiles(lab.output)
         files = {str(p.relative_to(lab.data)):p.stat().st_size for p in lab.data.rglob("*") if p.is_file()}
         (lab.output / "storage-bytes.json").write_text(json.dumps(files,indent=2)+"\n")
         for path in lab.output.glob("*.log"):

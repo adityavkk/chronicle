@@ -1,0 +1,40 @@
+{
+  "arm": "raft1",
+  "workload": [
+    "write",
+    1,
+    256
+  ],
+  "profile": false,
+  "profiler": null,
+  "diagnostics": true,
+  "verdict": "PASS",
+  "ack_contract": "applied after durable quorum",
+  "pending_commands": 256,
+  "progress_sampling": false,
+  "node_pids": [
+    2422043
+  ],
+  "affinity": {
+    "2422043": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "client_pid": 2422053,
+  "process_sample_gaps": [],
+  "client_window": {
+    "start_unix_ms": 1791401180315,
+    "end_unix_ms": 1791401192350,
+    "exit_code": 0
+  },
+  "verify_pid": 2422112,
+  "verify_window": {
+    "start_unix_ms": 1791401192350,
+    "end_unix_ms": 1791401192358,
+    "exit_code": 0
+  },
+  "diagnostic_tail_captured": true
+}

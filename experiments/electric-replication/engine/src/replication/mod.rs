@@ -9,6 +9,7 @@ mod network;
 mod receipts;
 mod subscription_io;
 mod subscriptions;
+mod timing;
 
 use crate::api::{Body, Method, Req, Resp};
 use crate::store::Store;
@@ -739,6 +740,7 @@ pub fn run() {
                 Duration::from_secs(config.stats_secs),
             );
             crate::srvstats::spawn(config.stats_secs);
+            timing::spawn(config.stats_secs);
         }
         let listener = tokio::net::TcpListener::bind(config.listen)
             .await

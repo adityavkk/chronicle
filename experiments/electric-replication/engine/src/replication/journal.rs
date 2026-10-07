@@ -166,7 +166,13 @@ impl Journal {
     }
 
     fn stage(&self, event: Event) -> io::Result<u64> {
+        let mut probe = match &event {
+            Event::Entry(_) => timing::ENTRY_STAGE.start(),
+            Event::Commit(_) => timing::MARKER_STAGE.start(),
+            _ => timing::OTHER_STAGE.start(),
+        };
         let data = bincode::serialize(&event).map_err(io::Error::other)?;
+        if let Some(probe) = &mut probe { probe.bytes = data.len() as u64; }
         let mut index = self.index.lock().unwrap();
         let location = self
             .shard
@@ -178,7 +184,9 @@ impl Journal {
     }
 
     async fn persist(&self, event: Event) -> io::Result<()> {
+        let marker = matches!(event, Event::Commit(_));
         let lsn = self.stage(event)?;
+        let _probe = if marker { timing::MARKER_WAIT.start() } else { timing::OTHER_WAIT.start() };
         self.shard.wait_durable(lsn).await;
         self.changed.notify_waiters();
         Ok(())
@@ -212,7 +220,10 @@ impl Journal {
     }
 
     pub fn read(&self, location: RecordLocation) -> io::Result<Entry> {
-        match bincode::deserialize(&self.shard.read_record(location)?).map_err(io::Error::other)? {
+        let mut probe = timing::READ.start();
+        let data = self.shard.read_record(location)?;
+        if let Some(probe) = &mut probe { probe.bytes = data.len() as u64; }
+        match bincode::deserialize(&data).map_err(io::Error::other)? {
             Event::Entry(entry) => Ok(entry),
             _ => Err(io::Error::other("index points at non-entry record")),
         }
@@ -280,10 +291,12 @@ impl RaftLogStorage<Types> for Arc<Journal> {
         }
         let shard = self.shard.clone();
         let journal = self.clone();
+        let probe = timing::ENTRY_WAIT.start();
         tokio::spawn(async move {
             if let Some(lsn) = last {
                 shard.wait_durable(lsn).await;
             }
+            drop(probe);
             for (id, durable) in accepted {
                 if let Some(send) = durable.lock().unwrap().take() { let _ = send.send(id); }
             }
