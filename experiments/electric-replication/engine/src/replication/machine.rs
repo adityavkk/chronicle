@@ -24,6 +24,14 @@ impl Machine {
         std::fs::create_dir_all(&dir)?;
         let snapshot = journal.index.lock().unwrap().snapshot.clone();
         // Old materializations are disposable, unlike WAL and snapshot files.
+        // No live readers exist during boot; only then collect installed old
+        // generations whose path-based native readers might still have used.
+        for entry in std::fs::read_dir(&dir)? {
+            let path = entry?.path();
+            if path.file_name().unwrap().to_str().is_some_and(|n| n.starts_with("hot-")) {
+                std::fs::remove_dir_all(path)?;
+            }
+        }
         let hot = dir.join("hot");
         if hot.exists() {
             std::fs::remove_dir_all(&hot)?;
@@ -83,7 +91,26 @@ impl Machine {
                 from = end;
             }
         }
+        machine.cleanup_snapshots()?;
         Ok(machine)
+    }
+
+    /// Caller is either booting privately or holds the view write lock after a
+    /// successful durable snapshot reference. Never run alongside a builder.
+    fn cleanup_snapshots(&self) -> io::Result<()> {
+        let index = self.journal.index.lock().unwrap();
+        let current = index.snapshot.as_ref().map(|s| s.file.as_str());
+        let mut removed = false;
+        for entry in std::fs::read_dir(&self.dir)? {
+            let path = entry?.path();
+            let name = path.file_name().unwrap().to_str();
+            if name.is_some_and(|n| n.starts_with("snapshot-")) && name != current {
+                std::fs::remove_file(path)?;
+                removed = true;
+            }
+        }
+        if removed { crate::store::fsync_parent_dir(&self.dir.join("snapshot"))?; }
+        Ok(())
     }
 }
 
@@ -229,6 +256,7 @@ impl RaftStateMachine<Types> for Arc<Machine> {
             })
             .await
             .map_err(storage_error)?;
+        self.cleanup_snapshots().map_err(storage_error)?;
         *view = View {
             store,
             applied: meta.last_log_id,
@@ -239,15 +267,14 @@ impl RaftStateMachine<Types> for Arc<Machine> {
         Ok(())
     }
     async fn get_current_snapshot(&mut self) -> Result<Option<Snapshot<Types>>, StorageError<u64>> {
-        let snapshot = self.journal.index.lock().unwrap().snapshot.clone();
-        match snapshot {
+        // Open while pinned against cleanup; Linux descriptors survive unlink.
+        let index = self.journal.index.lock().unwrap();
+        match &index.snapshot {
             Some(snapshot) => Ok(Some(Snapshot {
-                meta: snapshot.meta,
-                snapshot: Box::new(
-                    tokio::fs::File::open(self.dir.join(snapshot.file))
-                        .await
-                        .map_err(storage_error)?,
-                ),
+                meta: snapshot.meta.clone(),
+                snapshot: Box::new(tokio::fs::File::from_std(
+                    std::fs::File::open(self.dir.join(&snapshot.file)).map_err(storage_error)?,
+                )),
             })),
             None => Ok(None),
         }
@@ -287,6 +314,7 @@ impl RaftSnapshotBuilder<Types> for Arc<Machine> {
             })
             .await
             .map_err(storage_error)?;
+        self.cleanup_snapshots().map_err(storage_error)?;
         Ok(Snapshot {
             meta,
             snapshot: Box::new(tokio::fs::File::open(target).await.map_err(storage_error)?),

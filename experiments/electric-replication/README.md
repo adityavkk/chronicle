@@ -47,6 +47,7 @@ python3 experiments/electric-replication/scripts/qualify.py experiments/electric
 python3 experiments/electric-replication/scripts/fork_faults.py experiments/electric-replication/evidence/fork-fault-new
 python3 experiments/electric-replication/scripts/subscription_faults.py experiments/electric-replication/evidence/subscription-fault-new
 python3 experiments/electric-replication/scripts/storage_faults.py experiments/electric-replication/evidence/storage-fault-new
+python3 experiments/electric-replication/scripts/reclaim_faults.py experiments/electric-replication/evidence/reclaim-fault-new
 ```
 
 `scripts/benchmark.py` uses the pinned unmodified native server and ds-bench
@@ -103,8 +104,14 @@ No throughput or availability promise is made from blog numbers or single-orb
 runs. Paid evaluation needs separate authorization; no cloud budget or publication
 permission is implied.
 
-Cold-tier ownership/GC, physical journal reclamation, obsolete-snapshot cleanup,
-and terminal transaction-fence compaction remain unimplemented. Catalog repair
+Physical WAL reclamation now uses a checksummed metadata-only checkpoint; old
+snapshot cleanup preserves open transfer descriptors. The new real-process
+campaign injects checkpoint write/fsync/directory-fsync errors before reclaim,
+then verifies physical deletion and complete restart against 38,010,880 payload bytes.
+The measurements above precede this lifecycle change, not a post-change rerun.
+
+Cold-tier ownership/GC and terminal transaction-fence compaction remain
+unimplemented. Catalog repair
 scans and subscription/fork cardinality need scale qualification. Snapshots pause
 one group's apply while copying its files; the cost must be measured. Native
 JSON sub-offset resolution now scans bounded 64 KiB windows with lexical state

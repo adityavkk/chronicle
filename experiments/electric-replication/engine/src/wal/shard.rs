@@ -48,7 +48,7 @@ use crate::store::StreamState;
 mod journal;
 
 /// Location of one native WAL frame. No payload stays resident in this index.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RecordLocation {
     pub lsn: u64,
     pub segment: u64,

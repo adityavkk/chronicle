@@ -30,6 +30,10 @@ disks/AZs, arbitrary power loss, production availability or cloud performance.
 | `bench-local-001` | 36/45 cells completed | Read/mixed seeder incorrectly required HTTP 200 instead of accepting successful 204; all nine failed cells stopped before measurement |
 | `bench-local-002` | 9/9 read/mixed/profile cells completed | Corrected exact-byte seeding, still pinned unmodified ds-bench and native server |
 | `bench-local-003` | 44/45 cells completed | Three-replica 1,000-subscriber fanout received linearizable-read 503s and timed out at 240 s; client output/logs and failed outcome retained, no throughput inferred |
+| `conformance-009` | 332 passed, zero failed/skipped/todo | Full replicated suite after physical WAL reclamation and snapshot cleanup |
+| `properties/rust-129-reclaim.txt`, `properties/standalone-112-reclaim.txt` | 129 / 112 passed, same 2 forensic helpers ignored | Real files across randomized segment boundaries, retained/post-checkpoint/uncommitted suffixes, corruption, open snapshot descriptors |
+| `fault-009`, `fork-fault-004`, `subscription-fault-003`, `storage-fault-005` | Independent checkers PASS: 129 / 745 / 189 / 28 operations | Post-reclamation reruns; subscription/storage retain 1 / 3 unknown outcomes; nine independently verified signatures |
+| `reclaim-fault-001` | Independent checker PASS: 20 operations; nine exact filler probes | Real checkpoint ENOSPC, file-fsync EIO, directory-fsync EIO: no premature unlink; all replicas reclaim and survive restart with 38,010,880 identical bytes |
 
 The upstream suite is **unchanged `@durable-streams/server-conformance-tests@0.3.5`**,
 with `subscriptions:true`. All 332 tests are discovered and executed in each full

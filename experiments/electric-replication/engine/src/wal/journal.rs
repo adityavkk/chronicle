@@ -2,7 +2,7 @@
 //! The native reset/checkpoint routines must never run on this journal.
 use super::*;
 use crate::wal::codec::{decode_at, Decoded, HEADER_LEN};
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
 
 impl Shard {
@@ -12,8 +12,14 @@ impl Shard {
     /// corrupt frame cannot in general be distinguished from lost acked data.
     pub fn resume_journal(
         &self,
+        cut: Option<RecordLocation>,
         mut visit: impl FnMut(RecordLocation, &[u8]) -> io::Result<()>,
     ) -> io::Result<()> {
+        if let Some(cut) = cut {
+            // The checkpoint's final frame must still exist with the same CRC
+            // and identity. Older non-retained frames are no longer authority.
+            self.read_record(cut)?;
+        }
         let mut files = Vec::new();
         for entry in std::fs::read_dir(&self.dir)? {
             let path = entry?.path();
@@ -25,19 +31,31 @@ impl Shard {
                     .unwrap()
                     .parse::<u64>()
                     .map_err(io::Error::other)?;
-                files.push((start, path));
+                if cut.is_none_or(|cut| start >= cut.segment) {
+                    files.push((start, path));
+                }
             }
         }
         files.sort_by_key(|(start, _)| *start);
-        let mut expected = 1;
+        let mut expected = cut.map(|cut| cut.lsn + 1).unwrap_or(1);
         let mut end = 0;
         for (i, (start, path)) in files.iter().enumerate() {
-            if *start != expected {
+            let required_start = if i == 0 {
+                cut.map(|cut| cut.segment).unwrap_or(expected)
+            } else {
+                expected
+            };
+            if *start != required_start {
                 return Err(io::Error::other("journal segment/LSN gap"));
             }
             let mut file = std::fs::File::open(path)?;
             let size = file.metadata()?.len();
-            let mut offset = 0;
+            let mut offset = if i == 0 {
+                cut.map(|cut| cut.offset + cut.len as u64).unwrap_or(0)
+            } else {
+                0
+            };
+            file.seek(SeekFrom::Start(offset))?;
             while offset < size {
                 let mut header = [0; HEADER_LEN];
                 let remaining = (size - offset).min(HEADER_LEN as u64) as usize;
@@ -138,7 +156,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let size = (HEADER_LEN + 17 + padding) as u64;
             let shard = Shard::open_with_segment_size(dir.path().into(), size).unwrap();
-            shard.resume_journal(|_, _| Ok(())).unwrap();
+            shard.resume_journal(None, |_, _| Ok(())).unwrap();
             let data = [19; 17];
             let location = shard
                 .reserve_and_stage_indexed(RecordKind::Raft, 0, 0, &data)
@@ -148,7 +166,7 @@ mod tests {
             let shard = Shard::open_with_segment_size(dir.path().into(), size).unwrap();
             let mut seen = 0;
             shard
-                .resume_journal(|_, bytes| {
+                .resume_journal(None, |_, bytes| {
                     assert_eq!(bytes, data);
                     seen += 1;
                     Ok(())
@@ -161,7 +179,7 @@ mod tests {
                 .open(seg_path(dir.path(), 1))
                 .unwrap();
             file.write_all_at(&[1], size - 1).unwrap();
-            assert!(shard.resume_journal(|_, _| Ok(())).is_err());
+            assert!(shard.resume_journal(None, |_, _| Ok(())).is_err());
         }
     }
 }

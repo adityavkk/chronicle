@@ -3,6 +3,8 @@ use crate::wal::codec::RecordKind;
 use crate::wal::shard::{CommitterHandle, RecordLocation, Shard};
 use openraft::storage::{LogFlushed, RaftLogStorage};
 use openraft::{LogState, RaftLogReader, Vote};
+use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::ops::RangeBounds;
 use std::sync::Mutex;
 
@@ -23,13 +25,14 @@ enum Event {
     Snapshot(SnapshotRef),
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Index {
     entries: BTreeMap<u64, (LogId<u64>, RecordLocation)>,
     pub vote: Option<Vote<u64>>,
     pub committed: Option<LogId<u64>>,
     pub purged: Option<LogId<u64>>,
     pub snapshot: Option<SnapshotRef>,
+    last_record: Option<RecordLocation>,
 }
 
 impl Index {
@@ -75,6 +78,7 @@ impl Index {
             }
             Event::Snapshot(snapshot) => self.snapshot = Some(snapshot.clone()),
         }
+        self.last_record = Some(location);
         Ok(())
     }
 }
@@ -82,6 +86,8 @@ impl Index {
 pub struct Journal {
     pub shard: Arc<Shard>,
     pub index: Mutex<Index>,
+    dir: PathBuf,
+    maintenance: tokio::sync::Mutex<()>,
     snapshot_ready: tokio::sync::Notify,
     // Dropped last: stop + join the native fsync thread.
     _committer: CommitterHandle,
@@ -89,9 +95,26 @@ pub struct Journal {
 
 impl Journal {
     pub fn open(dir: PathBuf, segment_bytes: u64) -> io::Result<Arc<Self>> {
-        let shard = Shard::open_with_segment_size(dir, segment_bytes)?;
-        let mut index = Index::default();
-        shard.resume_journal(|location, data| {
+        let mut index = match std::fs::read(dir.join("journal-checkpoint")) {
+            Ok(data) => {
+                if data.len() < 40 || &data[..8] != b"ERJC0001"
+                    || Sha256::digest(&data[40..])[..] != data[8..40]
+                {
+                    return Err(io::Error::other("journal checkpoint checksum/version"));
+                }
+                bincode::deserialize::<Index>(&data[40..]).map_err(io::Error::other)?
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Index::default(),
+            Err(e) => return Err(e),
+        };
+        let shard = Shard::open_with_segment_size(dir.clone(), segment_bytes)?;
+        for (id, location) in index.entries.values() {
+            match bincode::deserialize(&shard.read_record(*location)?).map_err(io::Error::other)? {
+                Event::Entry(entry) if entry.log_id == *id => (),
+                _ => return Err(io::Error::other("checkpoint retained entry mismatch")),
+            }
+        }
+        shard.resume_journal(index.last_record, |location, data| {
             let event: Event = bincode::deserialize(data).map_err(io::Error::other)?;
             index.apply(&event, location)
         })?;
@@ -99,9 +122,45 @@ impl Journal {
         Ok(Arc::new(Self {
             shard,
             index: Mutex::new(index),
+            dir,
+            maintenance: tokio::sync::Mutex::new(()),
             snapshot_ready: tokio::sync::Notify::new(),
             _committer: committer,
         }))
+    }
+
+    async fn compact(&self) -> io::Result<()> {
+        // Serialize captures as well as publication; otherwise an older capture
+        // could overwrite a newer checkpoint after its segments were reclaimed.
+        let _maintenance = self.maintenance.lock().await;
+        let captured = self.index.lock().unwrap().clone();
+        let Some(cut) = captured.last_record else { return Ok(()) };
+        self.shard.wait_durable(cut.lsn).await;
+        let data = bincode::serialize(&captured).map_err(io::Error::other)?;
+        let temporary = self.dir.join("journal-checkpoint-next");
+        let mut file = std::fs::File::create(&temporary)?;
+        file.write_all(b"ERJC0001")?;
+        file.write_all(&Sha256::digest(&data))?;
+        file.write_all(&data)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, self.dir.join("journal-checkpoint"))?;
+        crate::store::fsync_parent_dir(&temporary)?;
+
+        let floor = captured.entries.values()
+            .map(|(_, p)| p.segment).min().unwrap_or(cut.segment).min(cut.segment);
+        // Log readers hold this guard through their indexed reads. All entries
+        // staged after the capture refer to the cut's segment or later segments.
+        let _readers = self.index.lock().unwrap();
+        for entry in std::fs::read_dir(&self.dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("wal") {
+                let start = path.file_stem().unwrap().to_str().unwrap()
+                    .parse::<u64>().map_err(io::Error::other)?;
+                if start < floor { std::fs::remove_file(path)?; }
+            }
+        }
+        crate::store::fsync_parent_dir(&temporary)?;
+        Ok(())
     }
 
     fn stage(&self, event: Event) -> io::Result<u64> {
@@ -152,17 +211,10 @@ impl RaftLogReader<Types> for Arc<Journal> {
         &mut self,
         range: R,
     ) -> Result<Vec<Entry>, StorageError<u64>> {
-        let locations: Vec<_> = self
-            .index
-            .lock()
-            .unwrap()
-            .entries
+        let index = self.index.lock().unwrap();
+        index.entries
             .range(range)
-            .map(|(_, (_, p))| *p)
-            .collect();
-        locations
-            .into_iter()
-            .map(|p| self.read(p).map_err(storage_error))
+            .map(|(_, (_, p))| self.read(*p).map_err(storage_error))
             .collect()
     }
 }
@@ -243,9 +295,10 @@ impl RaftLogStorage<Types> for Arc<Journal> {
             }
             ready.await;
         }
-        // Logical reclamation only. Native single-node checkpoint cannot know
-        // about consensus votes/commit/truncation and MUST NOT unlink this WAL.
-        self.persist(Event::Purge(id)).await.map_err(storage_error)
+        // The native single-node checkpoint cannot know about consensus
+        // metadata. Our complete durable index, not Purge alone, permits unlink.
+        self.persist(Event::Purge(id)).await.map_err(storage_error)?;
+        self.compact().await.map_err(storage_error)
     }
 }
 
@@ -372,6 +425,104 @@ mod tests {
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(48))]
+        #[test]
+        fn checkpoint_retains_suffix_votes_and_open_snapshot_descriptors(
+            count in 40u64..80, payload in 211usize..618, before_rename in any::<bool>(),
+        ) {
+            let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                use tokio::io::AsyncReadExt;
+                let dir = tempfile::tempdir().unwrap();
+                let wal = dir.path().join("wal");
+                let state = dir.path().join("state");
+                let mut machine = machine::Machine::open(state.clone(),
+                    Journal::open(wal.clone(),4096).unwrap()).await.unwrap();
+                assert_eq!(issue(&mut machine,"PUT","/compact",1000,vec![],vec![]).await.status,201);
+                let mut expected = Vec::new();
+                for i in 1..=count {
+                    let body = vec![i as u8;payload];
+                    expected.extend_from_slice(&body);
+                    assert_eq!(issue(&mut machine,"POST","/compact",1001,
+                        vec![("content-type","application/octet-stream".into())],body).await.status,204);
+                }
+                let mut old = machine.build_snapshot().await.unwrap();
+                let snapshot_file = state.join(&machine.journal.index.lock().unwrap().snapshot.as_ref().unwrap().file);
+                let snapshot_bytes = std::fs::read(&snapshot_file).unwrap();
+                let retained_from = count-3;
+                let id = |index| LogId::new(openraft::CommittedLeaderId::new(1,1),index);
+                let vote = Vote::new(7,2);
+                machine.journal.persist(Event::Vote(vote)).await.unwrap();
+                // Persist but DO NOT commit this suffix. Recovery must not make
+                // it visible, and compaction must not discard its payload.
+                for index in count+1..=count+3 {
+                    machine.journal.persist(Event::Entry(Entry {log_id:id(index),payload:EntryPayload::Normal(Command {
+                        method:"POST".into(),path:"/compact".into(),headers:vec![],body:vec![0xEE;payload],time:1002,
+                    })})).await.unwrap();
+                }
+                let old_files: Vec<_> = std::fs::read_dir(&wal).unwrap().map(|p|p.unwrap().path())
+                    .filter(|p|p.extension().is_some_and(|e|e=="wal")).collect();
+                let purged = id(retained_from-1);
+                let mut journal = machine.journal.clone();
+                journal.purge(purged).await.unwrap();
+                assert!(old_files.iter().any(|p|!p.exists()),"must physically reclaim segments");
+                journal.persist(Event::Entry(Entry {log_id:id(count+4),payload:EntryPayload::Normal(Command {
+                    method:"POST".into(),path:"/compact".into(),headers:vec![],body:vec![0xCD;payload],time:1002,
+                })})).await.unwrap();
+                let retained = journal.index.lock().unwrap().entries[&retained_from].1;
+                let checkpoint = wal.join("journal-checkpoint");
+                let good = std::fs::read(&checkpoint).unwrap();
+                let mut damaged = good.clone();
+                damaged[40] ^= 1;
+                drop(journal);
+                drop(machine);
+                std::fs::write(&checkpoint,&damaged).unwrap();
+                assert!(Journal::open(wal.clone(),4096).err().unwrap().to_string().contains("checkpoint checksum"));
+                std::fs::write(&checkpoint,&good).unwrap();
+                let retained_file = wal.join(format!("{}.wal",retained.segment));
+                let original = std::fs::read(&retained_file).unwrap();
+                let mut corrupted = original.clone();
+                corrupted[retained.offset as usize + retained.len - 1] ^= 1;
+                std::fs::write(&retained_file,&corrupted).unwrap();
+                assert!(Journal::open(wal.clone(),4096).err().unwrap().to_string().contains("CRC/identity"));
+                std::fs::write(retained_file,original).unwrap();
+                if before_rename {
+                    // An incomplete next checkpoint is not a published one.
+                    std::fs::write(wal.join("journal-checkpoint-next"),&good[..good.len()/2]).unwrap();
+                }
+                let mut journal = Journal::open(wal.clone(),4096).unwrap();
+                assert_eq!(journal.read_vote().await.unwrap(),Some(vote));
+                assert_eq!(journal.get_log_state().await.unwrap().last_purged_log_id,Some(purged));
+                let entries = journal.try_get_log_entries(retained_from..=count+4).await.unwrap();
+                assert_eq!(entries.len(),8);
+                for (index,entry) in (retained_from..=count+4).zip(entries) {
+                    assert_eq!(entry.log_id,id(index));
+                    let EntryPayload::Normal(command) = entry.payload else {panic!("lost command")};
+                    assert_eq!(command.body,vec![if index<=count {index as u8} else if index==count+4 {0xCD} else {0xEE};payload]);
+                }
+                machine = machine::Machine::open(state.clone(),journal.clone()).await.unwrap();
+                assert_eq!(bytes(&machine,"/compact").await,(200,expected.clone()));
+                journal.truncate(id(count+1)).await.unwrap();
+                assert_eq!(issue(&mut machine,"POST","/compact",1003,
+                    vec![("content-type","application/octet-stream".into())],b"replacement".to_vec()).await.status,204);
+                expected.extend_from_slice(b"replacement");
+                let next = machine.build_snapshot().await.unwrap();
+                assert!(!snapshot_file.exists(),"obsolete snapshot should be unlinked");
+                let mut still_readable = Vec::new();
+                old.snapshot.read_to_end(&mut still_readable).await.unwrap();
+                assert_eq!(still_readable,snapshot_bytes,"in-flight snapshot descriptor survives cleanup");
+                journal.purge(next.meta.last_log_id.unwrap()).await.unwrap();
+                assert!(journal.try_get_log_entries(0..).await.unwrap().is_empty());
+                drop(journal);
+                drop(machine);
+                // A second restart covers an empty retained index and a cut
+                // near the active segment's boundary, not only a retained tail.
+                let journal = Journal::open(wal,4096).unwrap();
+                let machine = machine::Machine::open(state,journal).await.unwrap();
+                assert_eq!(bytes(&machine,"/compact").await,(200,expected));
+            });
+        }
+
         #[test]
         fn apply_barrier_precedes_visibility_and_chunked_replay_never_regresses(
             count in 65usize..145, split_seed in 0usize..145, snapshot in any::<bool>(),

@@ -1,5 +1,5 @@
 /* Test-only LD_PRELOAD interposer. Never linked into the server or benchmark.
- * Fault file: '<eio-sync|enospc-write|short-write> <path substring>'.
+ * Fault file: '<eio-sync|eio-dir-sync|enospc-write|short-write> <path substring>'.
  * Only descriptors below DS_TEST_DATA_ROOT are eligible. Short writes fire
  * once; persistent sync/write errors remain armed until the harness disarms.
  */
@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -53,6 +54,10 @@ static int fault(int fd, const char *operation, int writing, size_t count) {
         buffer[n] = 0;
         if (sscanf(buffer, "%31s %159s", mode, pattern) == 2 && strstr(path, pattern)) {
             if (!writing && !strcmp(mode,"eio-sync")) code = EIO;
+            if (!writing && !strcmp(mode,"eio-dir-sync")) {
+                struct stat metadata;
+                if (!fstat(fd,&metadata) && S_ISDIR(metadata.st_mode)) code = EIO;
+            }
             if (writing && !strcmp(mode,"enospc-write")) code = ENOSPC;
             if (writing && count > 1 && !strcmp(mode,"short-write") && unlink(flag) == 0) result = 1;
         }

@@ -174,8 +174,10 @@ TTL uses the committed clock in `TIMED-STATE.md`, never local-clock expiration.
 Cross-group forks and subscriptions retain durable control state in the same
 journal and snapshot as stream data. Experimental identity/snapshot format 4
 rejects data from earlier development formats; no migration is supplied.
-Physical WAL reclamation, obsolete-snapshot cleanup, cold-tier ownership and
-production auth/TLS remain gates. No Internet exposure is qualified here.
+Physical WAL reclamation and obsolete-snapshot cleanup now have native-file
+property and real-process syscall-fault qualifications. Cold-tier ownership,
+terminal-fence compaction and production auth/TLS remain gates. No Internet
+exposure is qualified here.
 
 ## Formal and empirical boundaries
 
