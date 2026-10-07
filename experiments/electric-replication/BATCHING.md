@@ -353,3 +353,22 @@ not their transitions. Canceling a core can still leave an unknown request outco
 it cannot justify an early receipt or releasing retained-entry admission debt.
 Model checks do not prove Rust cancellation/refinement. Real storage/process
 tests and new matched measurements remain required before claiming a benefit.
+
+Inline completion passes 139 Rust tests, `conformance-020` (332/332, zero skips)
+and all six fault campaigns. But `write-timings-004` supplies no reason to keep
+the optimization: one member measures 44,506 / 38,830 / 33,045 writes/s versus
+native 110,107 / 101,214 / 103,449. Synchronous fsync loops also rise to
+315–361 µs and entry waits to 507–592 µs. These sequential runs do not isolate a
+causal regression in the scheduler, but do not establish the intended benefit.
+The candidate and raw qualification stay in history; the retained implementation
+restores its separate waiter task. API permission to inline is not evidence of a
+throughput gain on this runtime.
+
+The 128→64 ceiling experiment also exposed a compatibility obligation: receipt
+decoding uses that ceiling, but the old node identity did not bind it. A directory
+from the 128-command candidate could start while its ordinals 64–127 became
+invalid requests. The retained format must bind the command ceiling in node
+identity and reject earlier experimental directories, under the existing
+no-migration/no-mixed-version policy. Changing the marker by hand is not a
+migration. Storage qualification must test both an old identity and a changed
+ceiling, verifying rejection before any journal or hot-file mutation.
