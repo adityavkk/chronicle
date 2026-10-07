@@ -145,3 +145,30 @@ one-member rates are 58,043 / 57,813 / 52,743 writes/s versus native
 ack remain 0.0312–0.0321: scheduling overlap, not reduced durability work, changes
 the rate. The median is about 18% above the preceding serial-batch runs, with
 material run-to-run variation. This is not yet broad workload or async parity.
+
+## Async dispatch changes the strong-mode batch shape
+
+Local acceptance frees the dispatch window after local fsync while command/byte
+credits stay charged until resolution. The longer `async-writes-001` comparison
+uses 30-second windows and 1,024 pending-command credits on every replicated arm.
+Native measures 98,995 / 99,312 / 88,451 writes/s; one member measures
+42,377 / 42,569 / 38,677: 2.29–2.34× slower. All strong cells pass exact-byte and
+zero-error checks. Async cells fail that same zero-error gate because of bounded
+admission rejection; accepted bytes still drain exactly to all three replicas.
+
+One-member WAL counters rise to 0.0554–0.0578 fsyncs per acknowledgement. Final
+log positions and all-phase acknowledgement counts imply about 34–35 commands
+per entry, rather than almost 64. Apply still averages roughly 4–6 µs per native
+handler in the logged intervals. Each 10,000-entry snapshot now arrives sooner
+in byte terms; all three long one-member runs build three snapshots. A scheduler
+race between local-flush dispatch and the preceding apply's response wakeups can
+seal smaller batches. That is a testable scheduling hypothesis, not a reason to
+remove either durability barrier or suppress snapshot work.
+
+The candidate yields once to ready tasks before sealing POST cohorts. It adds no
+batch timer or quorum wait and changes none of the FIFO, admission, epoch or
+publication rules in the checked models. `write-diagnostics-004` has six passing
+short cells, but one-member rates of 49,346 / 35,892 / 47,896 writes/s do **not**
+establish an improvement. Fsyncs per ack fall to 0.0444–0.0507; these shorter
+windows are not an isolated comparison with the prior 30-second run. The matched
+long rerun and CPU/allocation profiles must decide whether to retain this change.

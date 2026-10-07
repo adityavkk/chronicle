@@ -242,10 +242,6 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
         else:
             for kind in ("write_counts", "read_counts"):
                 assert raw[kind]["other_err"] == raw[kind]["backpressure"] == 0
-        if diagnostics:
-            # Capture the final partial 1 Hz counter interval after writes stop.
-            # This is outside the client measurement and sample windows.
-            time.sleep(2)
         result["verdict"] = "PASS"
     except BaseException as error:
         result["error"] = repr(error)
@@ -258,6 +254,11 @@ def cell(output, arm, workload, profile=False, diagnostics=False, pending_comman
             trace.send_signal(signal.SIGINT)
             trace.wait(timeout=10)
             trace_log.close()
+        if diagnostics:
+            # Keep the final partial counter interval even when validation
+            # failed. This wait is outside the measurement/sample windows.
+            time.sleep(2)
+            result["diagnostic_tail_captured"] = bool(node_pids) and all(Path(f"/proc/{pid}").exists() for pid in node_pids)
         if not native:
             for node in sorted(lab.nodes):
                 for group in range(2):

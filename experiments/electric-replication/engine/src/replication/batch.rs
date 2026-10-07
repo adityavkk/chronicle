@@ -133,13 +133,21 @@ pub(super) fn start(raft: Raft, machine: Arc<Machine>, capacity: usize, admitted
             // Bound not-yet-flushed batches as well as admitted commands.
             // Waiting before draining lets arrivals coalesce without a timer.
             let flight = pipeline.clone().acquire_owned().await.unwrap();
-            let first = match carry.take() {
+            let first: Pending = match carry.take() {
                 Some(pending) => pending,
                 None => match receive.recv().await {
                     Some(pending) => pending,
                     None => break,
                 },
             };
+            if first.command.method == "POST" {
+                // Let ready HTTP senders join this cohort before sealing it.
+                // Releasing the pipeline at local flush otherwise races the
+                // preceding batch's response wakeups into singleton entries.
+                // This is one scheduler yield, not a batching timer or a wait
+                // for quorum; admission credits and FIFO ownership stay held.
+                tokio::task::yield_now().await;
+            }
             let (commands, mut completions) = take_ready(first, &mut receive, &mut carry);
             let expected = match prepare_epoch(&raft, &machine, &admitted_term).await {
                 Ok(expected) => expected,
