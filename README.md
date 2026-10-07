@@ -5,6 +5,9 @@ server backed by **Redis 8**, written in Go.
 
 **Docs:** [adityavkk.github.io/chronicle](https://adityavkk.github.io/chronicle/)
 
+**Backend comparison:** [Redis vs PostgreSQL, GCS and Spanner](docs/benchmarks/backend-comparison.md)
+— architectures, measured results, and why Redis remains the default.
+
 Durable Streams gives you URL-addressable, append-only byte streams over plain
 HTTP: create a stream with `PUT`, append with `POST`, read with `GET` — including
 catch-up reads from any offset, long-polling, and SSE live tailing — with
