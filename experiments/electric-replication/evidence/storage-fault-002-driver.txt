@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/storage_faults.py", line 205, in <module>
+    run(sys.argv[1])
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/storage_faults.py", line 178, in run
+    hot = next(p for p in (lab.data / str(leader) / "0/state/hot/streams").iterdir()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/workspace/repo/experiments/electric-replication/scripts/storage_faults.py", line 178, in <genexpr>
+    hot = next(p for p in (lab.data / str(leader) / "0/state/hot/streams").iterdir()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/pathlib.py", line 931, in iterdir
+    for name in os.listdir(self):
+                ^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/home/user/workspace/repo/.tmp/electric-labs/storage-fault-002/3/0/state/hot/streams'

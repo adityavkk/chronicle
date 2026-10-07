@@ -1,0 +1,636 @@
+   Compiling durable-streams v0.1.0 (/home/user/workspace/repo/experiments/electric-replication/engine)
+warning: type `handlers::SseEncoding` is more private than the item `SseReg::encoding`
+    --> src/api.rs:47:5
+     |
+  47 |     pub encoding: crate::handlers::SseEncoding,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `SseReg::encoding` is reachable at visibility `pub`
+     |
+note: but type `handlers::SseEncoding` is only usable at visibility `pub(crate)`
+    --> src/handlers.rs:1810:1
+     |
+1810 | pub(crate) enum SseEncoding {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: `durable-streams` (bin "durable-streams-server" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.89s
+     Running unittests src/main.rs (experiments/electric-replication/engine/target/debug/deps/durable_streams_server-d410898fa09dfe2a)
+
+running 1 test
+test replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot ... FAILED
+
+failures:
+
+---- replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot stdout ----
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("EOF while parsing an object", line: 1, column: 187)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 84)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 76)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 72)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 70)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 69)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("expected `,` or `]`", line: 1, column: 52)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("expected `,` or `]`", line: 1, column: 49)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:21:
+assertion `left == right` failed
+  left: Array [Object {"ancestor": Array [Bool(false), String("quoted,comma")]}, String("\\\",[],{},雪\\"), Object {"child-only": Array [Number(3), Number(7)]}]
+ right: Array [Object {"ancestor": Array [Bool(false), String("quoted,comma")]}, String("\\\",[],{},雪\\"), Object {"empty": Object {}, "nested": Array [Array [Number(0), String("")], Object {"k,": String("a\\\"b,c")}]}, Object {"empty": Object {}, "nested": Array [Array [Number(0), String("")], Object {"k,": String("a\\\"b,c")}]}, Array [Null, Bool(false), Array [Number(1), Number(2)]], Object {"child-only": Array [Number(3), Number(7)]}]
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("expected `,` or `]`", line: 1, column: 49)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("expected `,` or `]`", line: 1, column: 46)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:21:
+assertion `left == right` failed
+  left: Array [Object {"ancestor": Array [Bool(false), String("quoted,comma")]}, String("\\\",[],{},雪\\"), Object {"child-only": Array [Number(3), Number(7)]}]
+ right: Array [Object {"ancestor": Array [Bool(false), String("quoted,comma")]}, String("\\\",[],{},雪\\"), Object {"empty": Object {}, "nested": Array [Array [Number(0), String("")], Object {"k,": String("a\\\"b,c")}]}, Object {"empty": Object {}, "nested": Array [Array [Number(0), String("")], Object {"k,": String("a\\\"b,c")}]}, Array [Null, Bool(false), Array [Number(1), Number(2)]], Object {"child-only": Array [Number(3), Number(7)]}]
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("expected `,` or `]`", line: 1, column: 49)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("expected `,` or `]`", line: 1, column: 46)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("expected `,` or `]`", line: 1, column: 46)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:21:
+assertion `left == right` failed
+  left: Array [Object {"ancestor": Array [Bool(false), String("quoted,comma")]}, String("\\\",[],{},雪\\"), Object {"child-only": Array [Number(3), Number(7)]}]
+ right: Array [Object {"ancestor": Array [Bool(false), String("quoted,comma")]}, String("\\\",[],{},雪\\"), Object {"empty": Object {}, "nested": Array [Array [Number(0), String("")], Object {"k,": String("a\\\"b,c")}]}, Object {"empty": Object {}, "nested": Array [Array [Number(0), String("")], Object {"k,": String("a\\\"b,c")}]}, Array [Null, Bool(false), Array [Number(1), Number(2)]], Object {"child-only": Array [Number(3), Number(7)]}]
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("key must be a string", line: 1, column: 69)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("EOF while parsing a list", line: 1, column: 102)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("EOF while parsing a list", line: 1, column: 102)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("EOF while parsing a list", line: 1, column: 102)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("EOF while parsing a list", line: 1, column: 102)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("EOF while parsing a list", line: 1, column: 102)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("EOF while parsing a list", line: 1, column: 102)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("EOF while parsing a list", line: 1, column: 102)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("EOF while parsing a list", line: 1, column: 102)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:622:83:
+called `Result::unwrap()` on an `Err` value: Error("EOF while parsing a list", line: 1, column: 102)
+proptest: Aborting shrinking after the PROPTEST_MAX_SHRINK_ITERS environment variable or ProptestConfig.max_shrink_iters iterations (set 192 to a large(r) value to shrink more; current configuration: 192 iterations)
+
+thread 'replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot' (152732) panicked at src/replication/journal.rs:376:5:
+Test failed: called `Result::unwrap()` on an `Err` value: Error("EOF while parsing a list", line: 1, column: 102).
+minimal failing input: values = [
+    (
+        0,
+        "",
+    ),
+    (
+        0,
+        "",
+    ),
+], padding = 0, cut_seed = 10126964251067, snapshot = false
+	successes: 0
+	local rejects: 0
+	global rejects: 0
+
+
+
+failures:
+    replication::journal::tests::json_fork_suboffset_native_wal_and_snapshot
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 127 filtered out; finished in 2.11s
+
+error: test failed, to rerun pass `--bin durable-streams-server`

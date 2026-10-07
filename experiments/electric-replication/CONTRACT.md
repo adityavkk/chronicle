@@ -111,11 +111,15 @@ by flock: never run it concurrently; replacement uses a fresh node ID/learner.
 Membership addresses are routing hints, never authority to acknowledge writes.
 
 Resume the physical WAL after its last complete CRC-valid frame; never use the
-single-node engine's `reset_after_recovery` on a consensus WAL. A torn trailing
-frame is an unacknowledged suffix only under the stated storage model; checksum
-failure in a sealed/interior segment is fatal. Checksums detect accidental
-corruption, not malicious edits. WAL I/O errors are fail-stop. Recovery rebuilds
-the index and reads vote/commit/snapshot/truncation records in physical order.
+single-node engine's `reset_after_recovery` on a consensus WAL. **Any nonzero torn
+or CRC-invalid frame is fatal, including the active segment's tail.** Without
+additional durable boundaries it cannot be distinguished from corrupted
+acknowledged data. Only all-zero final preallocation padding is discarded; a
+nonzero suffix behind a zero header is fatal. Checksums detect accidental
+corruption, not malicious edits. WAL I/O errors are fail-stop, with no in-place
+fsync retry. Recovery rebuilds the index and reads vote/commit/snapshot/truncation
+records in physical order. Replacing a corrupt node requires a fresh identity and
+learner restore from a healthy quorum, not silently trimming its authoritative log.
 
 On boot, native hot files are rebuilt from the last durable snapshot plus the
 committed journal suffix before serving. Never infer commitment from file size.

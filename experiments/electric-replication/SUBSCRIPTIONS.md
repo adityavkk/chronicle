@@ -84,6 +84,14 @@ not imply progress. Raft, DNS, cryptography and cross-group catalog correctness
 are assumptions, not proved by this model. Lean adds deterministic fencing and
 snapshot-ack bounds; neither constitutes a Rust refinement proof.
 
+`Links.tla` additionally models delayed/reordered catalog observations, new pattern
+discovery, source deletion/recreation, snapshot-bound acknowledgements and lost
+notifications. Its three negative mutations regress catalog indices, accept an
+old stream incarnation's ack, or initialize a newly discovered link at its tail
+and silently skip its first data. Stable-period liveness depends on fair catalog
+repair and a cooperating worker, not delivery of transient notifications. This
+finite model does not prove an unbounded distributed directory or Rust refinement.
+
 Required empirical gates include full unchanged 332-test conformance, real native
 WAL snapshot/replay properties, and two-group process histories for dropped wakes,
 stale workers, crash during delivery, retry schedules, explicit/glob races and

@@ -50,6 +50,23 @@ control calls; source decisions, destination chunk offsets and incarnation fence
 are authoritative. Recovery scans durable pending/retirement records. Bounded
 admission is required; no distributed transaction relies on a worker's memory.
 
+## Sub-offset resolution
+
+A JSON sub-offset counts complete flattened values after a server-minted anchor,
+not arbitrary commas. Scan validated native wire bytes in at most 64 KiB windows;
+carry string, escape and nesting state across windows and ancestor file ranges.
+Only a comma outside a string at nesting depth zero ends a message. Stop at the
+requested boundary, including its wire delimiter. Never load the entire suffix
+or a complete large JSON value. Missing bytes fail the read; insufficient messages
+return 400. A binary sub-offset must fit `tail - anchor` before adding to the
+anchor; large unsigned inputs must not wrap. A zero sub-offset does not scan.
+
+Lean proves the arithmetic bound, quoted/nested comma exclusions, and chunk
+composition of the lexical fold before implementing this change. Valid JSON and
+anchor alignment remain input assumptions; generated tests check the actual
+native WAL, range reader, snapshots and parser against independently constructed
+JSON values. These lemmas are not a proof of the Rust implementation.
+
 ## Formal boundary and remaining implementation gates
 
 `Forks.tla` abstracts one transaction and one descendant, quorum-durable decisions,

@@ -582,6 +582,86 @@ mod tests {
         }
 
         #[test]
+        fn json_fork_suboffset_native_wal_and_snapshot(
+            values in prop::collection::vec((any::<i64>(), ".*"), 2..7),
+            padding in prop_oneof![0usize..80, 65520usize..65552, 131056usize..131088],
+            cut_seed in any::<usize>(), snapshot in any::<bool>(),
+        ) {
+            use serde_json::json;
+            let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let dir = tempfile::tempdir().unwrap();
+                let mut machine = machine::Machine::open(dir.path().join("state"),
+                    Journal::open(dir.path().join("wal"), 256*1024).unwrap()).await.unwrap();
+                let ct = || vec![("content-type", "application/json".into())];
+                let anchor_value = json!({"ancestor": [false, "quoted,comma"]});
+                let created = issue(&mut machine,"PUT","/ancestor",1000,ct(),
+                    serde_json::to_vec(&anchor_value).unwrap()).await;
+                assert_eq!(created.status,201);
+                let anchor = created.headers.iter().find(|(k,_)| k == "stream-next-offset").unwrap().1.clone();
+                assert_eq!(issue(&mut machine,"PUT","/source",1000,
+                    vec![("stream-forked-from","/ancestor".into())],vec![]).await.status,201);
+                let mut messages = vec![json!(format!("{}\\\",[],{{}},雪\\", "x".repeat(padding)))];
+                messages.extend(values.iter().map(|(n,s)| json!({"nested": [[n,s], {"k,":"a\\\"b,c"}], "empty": {}})));
+                messages.extend([json!([null, false, [1,2]]), json!(true), json!(-13.25)]);
+                assert_eq!(issue(&mut machine,"POST","/source",1001,ct(),
+                    serde_json::to_vec(&messages).unwrap()).await.status,204);
+                let cut = cut_seed % messages.len() + 1;
+                let headers = |count: u64| vec![("stream-forked-from","/source".into()),
+                    ("stream-fork-offset",anchor.clone()), ("stream-fork-sub-offset",count.to_string())];
+                let child_value = json!({"child-only": [3,7]});
+                assert_eq!(issue(&mut machine,"PUT","/child",1002,headers(cut as u64),
+                    serde_json::to_vec(&child_value).unwrap()).await.status,201);
+                let mut expected = vec![anchor_value];
+                expected.extend_from_slice(&messages[..cut]);
+                expected.push(child_value);
+                for restart in [false,true] {
+                    if restart { machine = reopen(machine,snapshot).await; }
+                    let (status, data) = bytes(&machine,"/child").await;
+                    assert_eq!(status,200);
+                    assert_eq!(serde_json::from_slice::<serde_json::Value>(&data).unwrap(),json!(expected));
+                    assert_eq!(issue(&mut machine,"PUT","/overshoot",1003,
+                        headers(messages.len() as u64 + 1),vec![]).await.status,400);
+                    assert_eq!(issue(&mut machine,"PUT","/overflow",1003,
+                        headers(u64::MAX),vec![]).await.status,400);
+                }
+            });
+        }
+
+        #[test]
+        fn binary_fork_suboffset_cannot_wrap(
+            prefix in prop::collection::vec(any::<u8>(),1..41),
+            suffix in prop::collection::vec(any::<u8>(),1..53),
+            sub in prop_oneof![Just(u64::MAX),0u64..56],
+        ) {
+            let _mode = crate::handlers::test_support::DurabilityGuard::memory();
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                let dir = tempfile::tempdir().unwrap();
+                let mut machine = machine::Machine::open(dir.path().join("state"),
+                    Journal::open(dir.path().join("wal"),256*1024).unwrap()).await.unwrap();
+                let created = issue(&mut machine,"PUT","/source",1000,vec![],prefix.clone()).await;
+                assert_eq!(created.status,201);
+                let anchor = created.headers.iter().find(|(k,_)| k == "stream-next-offset").unwrap().1.clone();
+                assert_eq!(issue(&mut machine,"POST","/source",1001,
+                    vec![("content-type","application/octet-stream".into())],suffix.clone()).await.status,204);
+                let reply = issue(&mut machine,"PUT","/child",1002,
+                    vec![("stream-forked-from","/source".into()),("stream-fork-offset",anchor),
+                        ("stream-fork-sub-offset",sub.to_string())],vec![197,12,91]).await;
+                if sub <= suffix.len() as u64 {
+                    assert_eq!(reply.status,201);
+                    let mut expected = prefix;
+                    expected.extend_from_slice(&suffix[..sub as usize]);
+                    expected.extend_from_slice(&[197,12,91]);
+                    machine = reopen(machine,true).await;
+                    assert_eq!(bytes(&machine,"/child").await,(200,expected));
+                } else {
+                    assert_eq!(reply.status,400);
+                    assert_eq!(bytes(&machine,"/child").await.0,404);
+                }
+            });
+        }
+
+        #[test]
         fn native_wal_suffix_replacement_survives_two_restarts(
             sizes in prop::collection::vec(1usize..500, 2..24), split in 0usize..24,
         ) {

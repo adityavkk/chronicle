@@ -1,0 +1,98 @@
+   Compiling durable-streams v0.1.0 (/home/user/workspace/repo/experiments/electric-replication/engine)
+error: cannot find macro `json` in this scope
+   --> src/replication/journal.rs:621:92
+    |
+621 |                     assert_eq!(serde_json::from_slice::<serde_json::Value>(&data).unwrap(),json!(expected));
+    |                                                                                            ^^^^
+    |
+note: `json` is imported here, but it is a function, not a macro
+   --> src/replication/journal.rs:252:9
+    |
+252 |     use super::*;
+    |         ^^^^^^^^
+
+error: cannot find macro `json` in this scope
+   --> src/replication/journal.rs:611:35
+    |
+611 |                 let child_value = json!({"child-only": [3,7]});
+    |                                   ^^^^
+    |
+note: `json` is imported here, but it is a function, not a macro
+   --> src/replication/journal.rs:252:9
+    |
+252 |     use super::*;
+    |         ^^^^^^^^
+
+error: cannot find macro `json` in this scope
+   --> src/replication/journal.rs:605:76
+    |
+605 |                 messages.extend([json!([null, false, [1,2]]), json!(true), json!(-13.25)]);
+    |                                                                            ^^^^
+    |
+note: `json` is imported here, but it is a function, not a macro
+   --> src/replication/journal.rs:252:9
+    |
+252 |     use super::*;
+    |         ^^^^^^^^
+
+error: cannot find macro `json` in this scope
+   --> src/replication/journal.rs:605:63
+    |
+605 |                 messages.extend([json!([null, false, [1,2]]), json!(true), json!(-13.25)]);
+    |                                                               ^^^^
+    |
+note: `json` is imported here, but it is a function, not a macro
+   --> src/replication/journal.rs:252:9
+    |
+252 |     use super::*;
+    |         ^^^^^^^^
+
+error: cannot find macro `json` in this scope
+   --> src/replication/journal.rs:605:34
+    |
+605 |                 messages.extend([json!([null, false, [1,2]]), json!(true), json!(-13.25)]);
+    |                                  ^^^^
+    |
+note: `json` is imported here, but it is a function, not a macro
+   --> src/replication/journal.rs:252:9
+    |
+252 |     use super::*;
+    |         ^^^^^^^^
+
+error: cannot find macro `json` in this scope
+   --> src/replication/journal.rs:604:59
+    |
+604 |                 messages.extend(values.iter().map(|(n,s)| json!({"nested": [[n,s], {"k,":"a\\\"b,c"}], "empty": {}})));
+    |                                                           ^^^^
+    |
+note: `json` is imported here, but it is a function, not a macro
+   --> src/replication/journal.rs:252:9
+    |
+252 |     use super::*;
+    |         ^^^^^^^^
+
+error: cannot find macro `json` in this scope
+   --> src/replication/journal.rs:603:41
+    |
+603 |                 let mut messages = vec![json!(format!("{}\\\",[],{{}},雪\\", "x".repeat(padding)))];
+    |                                         ^^^^
+    |
+note: `json` is imported here, but it is a function, not a macro
+   --> src/replication/journal.rs:252:9
+    |
+252 |     use super::*;
+    |         ^^^^^^^^
+
+error: cannot find macro `json` in this scope
+   --> src/replication/journal.rs:596:36
+    |
+596 |                 let anchor_value = json!({"ancestor": [false, "quoted,comma"]});
+    |                                    ^^^^
+    |
+note: `json` is imported here, but it is a function, not a macro
+   --> src/replication/journal.rs:252:9
+    |
+252 |     use super::*;
+    |         ^^^^^^^^
+
+error: could not compile `durable-streams` (bin "durable-streams-server" test) due to 8 previous errors

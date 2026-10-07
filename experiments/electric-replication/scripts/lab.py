@@ -29,13 +29,15 @@ class Lab:
         self.nodes = set()
         self.genesis = {str(n): {"addr": f"127.0.0.1:{port+n}"} for n in range(1, replicas+1)}
 
-    def start(self, node):
+    def start(self, node, environment=None, cpus=None, fault_testing=True):
         config = dict(cluster=self.cluster, node=node, listen=f"127.0.0.1:{self.port+node}",
                       dir=str(self.data / str(node)), partitions=self.partitions,
-                      workers=2, long_poll_ms=1000, fault_testing=True, genesis=self.genesis)
+                      workers=2, long_poll_ms=1000, fault_testing=fault_testing, genesis=self.genesis)
         path = self.output / f"node-{node}.json"
         path.write_text(json.dumps(config, indent=2) + "\n")
-        command = (f"exec {shlex.quote(str(self.binary))} --cluster-config {shlex.quote(str(path))} "
+        env = "env " + " ".join(shlex.quote(f"{k}={v}") for k,v in environment.items()) + " " if environment else ""
+        affinity = f"taskset -c {shlex.quote(cpus)} " if cpus else ""
+        command = (f"ulimit -c 0; exec {env}{affinity}{shlex.quote(str(self.binary))} --cluster-config {shlex.quote(str(path))} "
                    f">> {shlex.quote(str(self.output / f'node-{node}.log'))} 2>&1")
         subprocess.run(["amp", "orb", "service", "start", f"{self.cluster}-{node}",
                         "--command", command, "--cwd", str(ROOT), "--port", str(self.port+node)],

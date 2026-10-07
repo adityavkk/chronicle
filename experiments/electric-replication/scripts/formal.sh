@@ -20,14 +20,15 @@ for mutation in EarlyFlush EarlyPublish LocalAck; do
   test "$result" -ne 0
   grep -q 'Invariant Safe is violated' "$here/evidence/formal/$mutation.txt"
 done
-for mode in subscriptions subscriptions-live timed forks forks-live; do
+for mode in subscriptions subscriptions-live timed forks forks-live links links-live; do
   model=Subscriptions
   test "$mode" != timed || model=TimedApply
   [[ "$mode" != forks* ]] || model=Forks
+  [[ "$mode" != links* ]] || model=Links
   java -Xmx2g -cp "$jar" tlc2.TLC -workers 2 -deadlock -config "$mode.cfg" "$model.tla" > "$here/evidence/formal/$mode.txt" 2>&1
   grep -q 'Model checking completed. No error has been found.' "$here/evidence/formal/$mode.txt"
 done
-for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant; do
+for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish EarlyRelease FalseAbsence ForgetGrant StaleObservation OldIncarnationAck DiscoverAtTail; do
   model=Subscriptions
   config=subscriptions
   invariant=Safe
@@ -36,6 +37,7 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
   fi
   case "$mutation" in
     PartialPublish|EarlyRelease|FalseAbsence|ForgetGrant) model=Forks; config=forks ;;
+    StaleObservation|OldIncarnationAck|DiscoverAtTail) model=Links; config=links ;;
   esac
   sed "s/$mutation = FALSE/$mutation = TRUE/" "$config.cfg" > "$tools/$mutation.cfg"
   set +e
@@ -47,4 +49,4 @@ for mutation in StaleWorker LatestTailAck ForgetIntent LocalClock PartialPublish
 done
 "$HOME/.elan/bin/lean" -DwarningAsError=true Contracts.lean > "$here/evidence/formal/lean.txt" 2>&1
 ! grep -E 'sorryAx|warning:|error:' "$here/evidence/formal/lean.txt"
-printf 'TLC publication/timing/subscriptions/forks safety, stable-period liveness, 11 negative mutations; Lean: PASS\n'
+printf 'TLC publication/timing/subscriptions/forks/links safety, stable-period liveness, 14 negative mutations; Lean: PASS\n'

@@ -100,6 +100,50 @@ theorem publication_exact_prefix (copied target : Nat)
 theorem descendant_prevents_release (refs : Nat) (hasDescendant : 0 < refs) : refs ≠ 0 := by
   omega
 
+/- Sub-offset resolution uses only the remaining range, never wrapping addition.
+   JSON wire input is assumed to be validated, comma-terminated values. This
+   lexical model proves chunk independence and separator exclusions, not a
+   refinement of serde_json or of the native range reader. -/
+def boundedAdvance (anchor count tail : Nat) : Option Nat :=
+  if anchor ≤ tail ∧ count ≤ tail - anchor then some (anchor + count) else none
+
+theorem advance_exact_and_bounded (a n t p : Nat) (h : boundedAdvance a n t = some p) :
+    p = a + n ∧ a ≤ p ∧ p ≤ t := by
+  unfold boundedAdvance at h
+  split at h <;> simp_all <;> omega
+
+structure JsonScan where
+  quoted : Bool := false
+  escaped : Bool := false
+  depth : Nat := 0
+  messages : Nat := 0
+
+def scanByte (s : JsonScan) (c : Char) : JsonScan :=
+  if s.quoted then
+    if s.escaped then {s with escaped := false}
+    else if c = '\\' then {s with escaped := true}
+    else if c = '"' then {s with quoted := false}
+    else s
+  else match c with
+    | '"' => {s with quoted := true}
+    | '{' | '[' => {s with depth := s.depth + 1}
+    | '}' | ']' => {s with depth := s.depth - 1}
+    | ',' => if s.depth = 0 then {s with messages := s.messages + 1} else s
+    | _ => s
+
+theorem quoted_comma_is_not_boundary (s : JsonScan) (h : s.quoted = true) :
+    (scanByte s ',').messages = s.messages := by
+  cases he : s.escaped <;> simp [scanByte, h, he]
+
+theorem nested_comma_is_not_boundary (s : JsonScan)
+    (h : s.quoted = false) (hd : 0 < s.depth) :
+    (scanByte s ',').messages = s.messages := by
+  simp [scanByte, h, Nat.ne_of_gt hd]
+
+theorem scan_chunk_independent (s : JsonScan) (a b : List Char) :
+    (a ++ b).foldl scanByte s = b.foldl scanByte (a.foldl scanByte s) :=
+  List.foldl_append
+
 #print axioms publication_committed
 #print axioms session_no_rollback
 #print axioms session_monotone
@@ -116,4 +160,8 @@ theorem descendant_prevents_release (refs : Nat) (hasDescendant : 0 < refs) : re
 #print axioms import_progress
 #print axioms publication_exact_prefix
 #print axioms descendant_prevents_release
+#print axioms advance_exact_and_bounded
+#print axioms quoted_comma_is_not_boundary
+#print axioms nested_comma_is_not_boundary
+#print axioms scan_chunk_independent
 end ElectricReplication

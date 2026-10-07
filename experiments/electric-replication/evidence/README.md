@@ -9,14 +9,19 @@ disks/AZs, arbitrary power loss, production availability or cloud performance.
 | `conformance-001` | 218 passed, 114 failed, zero skips | Initial real replicated failing ledger |
 | `conformance-002` | 326 passed, 6 failed, zero skips | Subscriptions still absent at that revision |
 | `conformance-003` | 332 passed, zero failed/skipped/todo | Three replicas, one partition, subscriptions enabled |
-| `conformance-004` through `conformance-006` | 332 passed, zero failed/skipped/todo each | Three replicas, two partitions, subscriptions enabled; default linearizable/quorum-fsync |
+| `conformance-004` through `conformance-007` | 332 passed, zero failed/skipped/todo each | Three replicas, two partitions, subscriptions enabled; default linearizable/quorum-fsync |
 | `fault-001` through `fault-004` | Failures retained | Includes harness corrections and a real snapshot-install/purge ordering failure in 004 |
 | `fault-005` | Independent checker PASS, 128 operations | Majority/minority, delayed Raft RPCs, leader SIGKILL, learner snapshot/membership, full restart; append-prefix/dedup/session model |
 | `fork-fault-001` | Independent checker PASS, 744 operations | Different group leaders, grant-before-import pause, SIGKILL, confirmed learner snapshot installation, joint membership, full restart, descendant collection/recreation |
 | `fault-006`, `fork-fault-002` | Independent checkers PASS, 129 and 745 operations | Same campaigns after the network-backoff correction |
-| `formal/` | Safety and stable-period liveness pass; 11 negative mutations detected; Lean without `sorry` | Assumes Raft and honest storage; not Rust refinement proofs |
+| `subscription-fault-001` | Independent checker PASS, 187 operations, 1 unknown outcome | Claim races, stale workers, failover during delivery/ack, durable retries, dropped wake, invalid-batch atomicity, recreation, explicit/glob links, full restart, SSRF/redirect rejection; 9 independently verified Ed25519 deliveries |
+| `storage-fault-001`, `storage-fault-002` | Harness failures retained | First omitted the hot-file `write` hook; second lost its disposable hot fixture during rejected snapshot startup. Neither established a false server acknowledgement |
+| `storage-fault-003` | Independent checker PASS, 28 operations, 3 unknown outcomes | Real short writes, WAL fsync EIO/ENOSPC, hot-file ENOSPC, snapshot fsync EIO, corrupt authoritative frames/snapshot, hot-file rebuild; seven intercepted failing/short syscalls |
+| `formal/` | Safety and stable-period liveness pass; 14 negative mutations detected; Lean without `sorry` | Includes delayed catalog/incarnation/link observations; assumes Raft and honest storage; not Rust refinement proofs |
 | `properties/forks-001-fixture-too-small.txt` | Failed and preserved | New larger test records exceeded the test's 4 KiB segment; fixture corrected to 256 KiB, not reduced payload coverage |
 | `properties/rust-125.txt` | 125 passed, zero failed, 2 ignored | Ignored helpers are unchanged upstream forensic dump/replay entry points, not skipped conformance tests |
+| `properties/json-boundary-001` through `004` | PATH/import errors, then real malformed JSON fork reproduction, then passing regression properties | The original comma counter split nested/quoted JSON and materialized the whole suffix; bounded lexical scanning fixes both |
+| `properties/rust-127.txt`, `properties/standalone-112-json-fix.txt` | 127 / 112 passed, zero failed, same 2 upstream forensic helpers ignored | Replicated and standalone modes after the JSON boundary correction |
 
 The upstream suite is **unchanged `@durable-streams/server-conformance-tests@0.3.5`**,
 with `subscriptions:true`. All 332 tests are discovered and executed in each full
@@ -28,6 +33,14 @@ bytes and false absence after a durable grant. Its checker reconstructs bytes
 from client requests. It covers an explicitly ordered binary lifecycle fixture,
 not all concurrent lifecycle histories. Unknown HTTP outcomes remain in the raw
 history rather than being relabeled aborted.
+
+The subscription checker is an independent, ordered-fixture model with concurrent
+claims/external deliveries, not an arbitrary-history linearizability checker. It
+rejects stale accepted acknowledgements, unauthorized cursor advancement and a
+forged webhook. The storage campaign checks actual syscalls and startup rejection;
+it cannot simulate a dishonest disk returning successful fsync or prove survival
+of shared-disk rollback. Failed snapshot files are deliberately corrupted before
+restart to show they were not published as authoritative references.
 
 Logs exposed a further defect even when data checking passed: the adapter mapped
 connection refusals and known partitions to OpenRaft `NetworkError` (immediate

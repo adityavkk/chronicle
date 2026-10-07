@@ -492,38 +492,9 @@ pub(crate) async fn prepare_create(store: &Arc<Store>, req: &Req) -> Result<Prep
         };
         let fork_point = match sub_offset.unwrap_or(0) {
             0 => anchor,
-            sub if src.is_json => {
-                // Sub-offset counts messages past the anchor; each message ends with ','.
-                // NOTE: this materializes the whole `[anchor, src_tail)` range to
-                // scan for the Nth comma, even for a small `sub` over a huge stream
-                // — O(tail) memory. Acceptable here: fork-create is a cold control
-                // op, not a hot path. A bounded-window scan would remove the cost.
-                let data = match read_range_bytes(&src, anchor, src_tail).await {
-                    Ok(d) => d,
-                    // A short/cold read must not be miscounted as a value boundary.
-                    Err(_) => return Err(text_response(503, "fork source read failed")),
-                };
-                let mut remaining = sub;
-                let mut adv = 0u64;
-                for (i, b) in data.iter().enumerate() {
-                    if *b == b',' {
-                        remaining -= 1;
-                        if remaining == 0 {
-                            adv = i as u64 + 1;
-                            break;
-                        }
-                    }
-                }
-                if remaining > 0 {
-                    return Err(text_response(
-                        400,
-                        "sub-offset overshoots message count",
-                    ));
-                }
-                anchor + adv
-            }
+            sub if src.is_json => json_fork_point(&src, anchor, src_tail, sub).await?,
             sub => {
-                if anchor + sub > src_tail {
+                if sub > src_tail - anchor {
                     return Err(text_response(
                         400,
                         "sub-offset overshoots message length",
@@ -567,6 +538,53 @@ pub(crate) async fn prepare_create(store: &Arc<Store>, req: &Req) -> Result<Prep
     };
 
     Ok(PreparedCreate { config, parent, base_offset, wire, host })
+}
+
+/// Native wire input is validated JSON values, each followed by a comma.
+/// Keep lexical state across bounded reads, including inside a large value.
+async fn json_fork_point(
+    src: &Arc<StreamState>,
+    mut pos: u64,
+    tail: u64,
+    mut remaining: u64,
+) -> Result<u64, Resp> {
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut depth = 0usize;
+    while pos < tail {
+        let end = pos + (tail - pos).min(64 * 1024);
+        let data = read_range_bytes(src, pos, end).await
+            .map_err(|_| text_response(503, "fork source read failed"))?;
+        for (i, &byte) in data.iter().enumerate() {
+            if quoted {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    quoted = false;
+                }
+                continue;
+            }
+            match byte {
+                b'"' => quoted = true,
+                b'{' | b'[' => depth += 1,
+                b'}' | b']' => {
+                    depth = depth.checked_sub(1)
+                        .ok_or_else(|| text_response(400, "fork anchor is not a JSON boundary"))?;
+                }
+                b',' if depth == 0 => {
+                    remaining -= 1;
+                    if remaining == 0 {
+                        return Ok(pos + i as u64 + 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        pos = end;
+    }
+    Err(text_response(400, "sub-offset overshoots message count"))
 }
 
 pub(crate) async fn create_prepared(store: Arc<Store>, path: String, prepared: PreparedCreate) -> Resp {

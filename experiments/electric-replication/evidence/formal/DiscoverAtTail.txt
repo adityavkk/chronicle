@@ -1,0 +1,71 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 104 and seed -2202579028072007012 with 2 workers on 8 cores with 2048MB heap and 64MB offheap memory [pid: 188217] (Linux 6.1.158+ amd64, Debian 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/workspace/repo/experiments/electric-replication/formal/Links.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/TLC.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Links
+Starting... (2026-10-07 09:49:11)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-07 09:49:11.
+Error: Invariant Safe is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ seen = [inc |-> 0, tail |-> 0, index |-> 0]
+/\ packets = {}
+/\ alive = TRUE
+/\ authorized = 0
+/\ claim = [inc |-> 0, tail |-> 0, index |-> 0]
+/\ tail = 1
+/\ regressed = FALSE
+/\ inc = 1
+/\ serial = 1
+/\ acked = 0
+
+State 2: <Append line 13, col 11 to line 15, col 89 of module Links>
+/\ seen = [inc |-> 0, tail |-> 0, index |-> 0]
+/\ packets = {}
+/\ alive = TRUE
+/\ authorized = 0
+/\ claim = [inc |-> 0, tail |-> 0, index |-> 0]
+/\ tail = 2
+/\ regressed = FALSE
+/\ inc = 1
+/\ serial = 2
+/\ acked = 0
+
+State 3: <Capture line 22, col 12 to line 23, col 95 of module Links>
+/\ seen = [inc |-> 0, tail |-> 0, index |-> 0]
+/\ packets = {[inc |-> 1, tail |-> 2, index |-> 2]}
+/\ alive = TRUE
+/\ authorized = 0
+/\ claim = [inc |-> 0, tail |-> 0, index |-> 0]
+/\ tail = 2
+/\ regressed = FALSE
+/\ inc = 1
+/\ serial = 2
+/\ acked = 0
+
+State 4: <Next line 39, col 12 to line 39, col 39 of module Links>
+/\ seen = [inc |-> 1, tail |-> 2, index |-> 2]
+/\ packets = {[inc |-> 1, tail |-> 2, index |-> 2]}
+/\ alive = TRUE
+/\ authorized = 0
+/\ claim = [inc |-> 0, tail |-> 0, index |-> 0]
+/\ tail = 2
+/\ regressed = FALSE
+/\ inc = 1
+/\ serial = 2
+/\ acked = 2
+
+23 states generated, 15 distinct states found, 7 states left on queue.
+The depth of the complete state graph search is 4.
+The average outdegree of the complete state graph is 2 (minimum is 2, the maximum 3 and the 95th percentile is 3).
+Finished in 00s at (2026-10-07 09:49:11)

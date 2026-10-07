@@ -45,6 +45,8 @@ pnpm --dir .tmp/electric-conformance add --save-exact @durable-streams/server-co
 python3 experiments/electric-replication/scripts/conformance.py experiments/electric-replication/evidence/conformance-new
 python3 experiments/electric-replication/scripts/qualify.py experiments/electric-replication/evidence/fault-new
 python3 experiments/electric-replication/scripts/fork_faults.py experiments/electric-replication/evidence/fork-fault-new
+python3 experiments/electric-replication/scripts/subscription_faults.py experiments/electric-replication/evidence/subscription-fault-new
+python3 experiments/electric-replication/scripts/storage_faults.py experiments/electric-replication/evidence/storage-fault-new
 ```
 
 Use a fresh output directory name each time. Drivers start/stop supervised orb
@@ -64,14 +66,19 @@ disks; filesystem locking only fences one local directory.
 ## Remaining gates
 
 Conformance and the existing fault/property tests are necessary, not sufficient.
-Subscription process histories, storage-fault campaigns, matched pinned ds-bench
-measurements and profiles remain required. No throughput or availability promise
-is made from blog numbers or single-orb runs. Paid evaluation needs separate
-authorization; no cloud budget or publication permission is implied.
+The latest full suite executes **332/332 passing, zero failures/skips**, with
+subscriptions enabled. Subscription and storage-error process histories also
+pass within their documented models; they are not independent-disk or power-loss
+qualification. Matched pinned ds-bench measurements and profiles remain required.
+No throughput or availability promise is made from blog numbers or single-orb
+runs. Paid evaluation needs separate authorization; no cloud budget or publication
+permission is implied.
 
 Cold-tier ownership/GC, physical journal reclamation, obsolete-snapshot cleanup,
 and terminal transaction-fence compaction remain unimplemented. Catalog repair
 scans and subscription/fork cardinality need scale qualification. Snapshots pause
 one group's apply while copying its files; the cost must be measured. Native
-JSON sub-offset resolution still has upstream's unbounded scan and comma-counting
-limitation and requires follow-up before claiming complete protocol qualification.
+JSON sub-offset resolution now scans bounded 64 KiB windows with lexical state
+across chunk boundaries; generated native-WAL/snapshot/restart cases cover nested
+values, quoted commas, escapes and large values. Pure Lean chunk-composition
+lemmas do not prove the Rust scanner or native file reader correct.

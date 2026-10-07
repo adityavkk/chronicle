@@ -1,0 +1,62 @@
+{
+  "verdict": "FAIL",
+  "error": "FileNotFoundError(2, 'No such file or directory')",
+  "storage_checks": [
+    {
+      "kind": "failed-snapshot-not-published",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-002/3/0/state/snapshot-1791368332959232134",
+      "recovered_snapshot": {
+        "leader_id": {
+          "term": 4,
+          "node_id": 3
+        },
+        "index": 15
+      }
+    },
+    {
+      "kind": "wal-header-crc",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-002/3/0/wal/1.wal",
+      "original_sha256": "b2825173583cdce50073defc9f80efba35ff3577b0af3e4a50d2ade942952c4b",
+      "mutated_sha256": "40313721106130a975a1baec075c05d37a17cba04bacaa94ca9ad033dcfe76c3",
+      "expected_error": "corrupt or non-consensus journal frame",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "wal-payload-crc",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-002/3/0/wal/1.wal",
+      "original_sha256": "b2825173583cdce50073defc9f80efba35ff3577b0af3e4a50d2ade942952c4b",
+      "mutated_sha256": "64ab71d2aaa66fc65a6b67f939c5ecedc907a760fb12bd569a7f9d7b552ed5ed",
+      "expected_error": "corrupt or non-consensus journal frame",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "wal-zero-hole",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-002/3/0/wal/1.wal",
+      "original_sha256": "b2825173583cdce50073defc9f80efba35ff3577b0af3e4a50d2ade942952c4b",
+      "mutated_sha256": "4c066e0a1efcc60244ca141e42355ce54cee26e0e2a278cf824ac69acb3b2cbd",
+      "expected_error": "nonzero suffix behind journal hole",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "wal-torn-tail",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-002/3/0/wal/1.wal",
+      "original_sha256": "b2825173583cdce50073defc9f80efba35ff3577b0af3e4a50d2ade942952c4b",
+      "mutated_sha256": "4da619fa16d9ff17af0aa7e53fb81149cb9f45d13191dc442e66b9602ddcee1b",
+      "expected_error": "truncated/oversize journal record",
+      "exit_code": 101,
+      "rejected": true
+    },
+    {
+      "kind": "snapshot-digest",
+      "path": "/home/user/workspace/repo/.tmp/electric-labs/storage-fault-002/3/0/state/snapshot-1791368332854918420",
+      "original_sha256": "10f2803444b1c46cad5d703fb35d734d81b00b9ffa8a26a509f6405207218689",
+      "mutated_sha256": "22d12c807d482838bd10d85fb6cc3902f02fb4c2446e63f0f442da670c68125a",
+      "expected_error": "snapshot digest mismatch",
+      "exit_code": 101,
+      "rejected": true
+    }
+  ]
+}
